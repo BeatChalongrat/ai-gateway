@@ -43,6 +43,14 @@ _PHONE_FORMATTED_RE = re.compile(
 # window — see ``_PHONE_CONTEXT_RE``.
 _BARE_DIGITS_RE = re.compile(r"(?<!\d)\+?\d{10,15}(?!\d)")
 
+# FIX27 Part 3 — a UUID's digit groups (``…7a86d915-4821-4469-9475-…``) look
+# like a formatted phone number to the branch-1 regex. Attachment envelopes
+# carry file UUIDs on every turn, so the file id was masked as <<PHONE_n>>.
+# Any phone candidate that lies inside a UUID is rejected in both engines.
+_UUID_RE = re.compile(
+    r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])"
+)
+
 # Thai landlines are 9 digits total (0 + 2-digit area + 3-digit exchange
 # + 4-digit subscriber) — one digit shorter than the 10-digit floor in
 # ``_PHONE_FORMATTED_RE``'s downstream filter, so they would otherwise
@@ -92,9 +100,13 @@ class PhoneDetector(BaseDetector):
     def detect(self, text: str, *, from_decoded: bool = False) -> list[DetectionMatch]:
         matches: list[DetectionMatch] = []
         seen_spans: set[tuple[int, int]] = set()
+        uuid_spans = [(u.start(), u.end()) for u in _UUID_RE.finditer(text)]
 
         def _emit(start: int, end: int, matched_text: str) -> None:
             if (start, end) in seen_spans:
+                return
+            # FIX27: inside a UUID → not a phone number.
+            if any(us <= start and end <= ue for us, ue in uuid_spans):
                 return
             # Reject trivial all-same-digit numbers (000-000-0000,
             # 111-111-1111, …). Real phones never have this shape, but

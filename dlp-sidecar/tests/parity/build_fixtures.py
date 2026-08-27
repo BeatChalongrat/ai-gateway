@@ -291,6 +291,9 @@ SPECS = [
             Case("bare_with_thai_context", "เบอร์ 0812345678 ติดต่อ", True),
             Case("bare_without_context", "0812345678 alone is just digits", False),
             Case("plain_prose_no_phone", "no contact info here", False),
+            # FIX27 Part 3 — a file UUID (attachment envelope fileId) is not a phone.
+            Case("fix27_uuid_is_not_a_phone", "fileId 7a86d915-4821-4469-9475-efbb535a5916 uploaded", False),
+            Case("fix27_uuid_next_to_real_phone", "id 7a86d915-4821-4469-9475-efbb535a5916 โทร 081-234-5678", True),
         ],
     ),
     DetectorSpec(
@@ -856,6 +859,14 @@ SPECS = [
             Case("fix26_label_trim_no_label_before_no_mask", "ลูกค้า ปิยะพงศ์ เบอร์ ติดต่อกลับ", False),
             Case("fix26_real_pair_still_masks", "ลูกค้าชื่อ ปิยะพงศ์ วงศ์สุวรรณ ลงทะเบียน", True),
             Case("fix26_real_pair_after_name_label", "name: อรอนงค์ ศรีสุข", True),
+            # FIX27 Part 3 — Pass 2 (gazetteer + sensitive context) and Pass 3 (person
+            # list) were never in the Rust port; these pin them.
+            Case("fix27_gazetteer_with_sensitive_context", "อัญชลี บุญรอด ลาออกแล้ว", True),
+            Case("fix27_gazetteer_with_money_context", "ภาณุ ทรัพย์มาก ผ่อนบ้านอยู่", True),
+            Case("fix27_gazetteer_bare_no_context_no_mask", "อัญชลี มาถึงแล้ว", False),
+            Case("fix27_list_prefixed_items", "รายชื่อผู้เข้าร่วม: คุณสมชาย, คุณสมหญิง", True),
+            Case("fix27_list_gazetteer_item", "รายชื่อพนักงาน: อัญชลี, ภาณุ", True),
+            Case("fix27_list_products_no_mask", "รายชื่อสินค้า: กล้วย, มะม่วง, ส้ม", False),
         ],
     ),
     DetectorSpec(

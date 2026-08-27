@@ -17,6 +17,17 @@ static FORMATTED_RE: Lazy<Regex> = Lazy::new(|| {
     .expect("phone formatted")
 });
 
+// FIX27 Part 3 — a UUID's digit groups look like a formatted phone number;
+// attachment envelopes carry file UUIDs on every turn. Mirrors phone.py _UUID_RE.
+static UUID_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
+        .expect("uuid regex")
+});
+
+fn inside_uuid(spans: &[(usize, usize)], start_b: usize, end_b: usize) -> bool {
+    spans.iter().any(|(s, e)| *s <= start_b && end_b <= *e)
+}
+
 static BARE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?<!\d)\+?\d{10,15}(?!\d)").expect("phone bare"));
 
@@ -61,6 +72,11 @@ impl Detector for PhoneDetector {
         let mut out: Vec<RawMatch> = Vec::new();
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
         let text_chars_count = text.chars().count();
+        let uuid_spans: Vec<(usize, usize)> = UUID_RE
+            .find_iter(text)
+            .flatten()
+            .map(|u| (u.start(), u.end()))
+            .collect();
 
         // Branch 1 — formatted numbers, require ≥10 digits + reject
         // credit-card tail.
@@ -88,6 +104,9 @@ impl Detector for PhoneDetector {
             {
                 continue;
             }
+            if inside_uuid(&uuid_spans, m.start(), m.end()) {
+                continue; // FIX27: inside a UUID
+            }
             let s = byte_to_char(text, m.start());
             let e = byte_to_char(text, m.end());
             if seen.insert((s, e)) {
@@ -111,6 +130,9 @@ impl Detector for PhoneDetector {
                 && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
             {
                 continue;
+            }
+            if inside_uuid(&uuid_spans, m.start(), m.end()) {
+                continue; // FIX27: inside a UUID
             }
             let s = byte_to_char(text, m.start());
             let e = byte_to_char(text, m.end());
@@ -147,6 +169,9 @@ impl Detector for PhoneDetector {
                 let window = &text[lo_b..hi_b];
                 PHONE_CONTEXT_RE.is_match(window).unwrap_or(false)
             };
+            if inside_uuid(&uuid_spans, m.start(), m.end()) {
+                continue; // FIX27: inside a UUID
+            }
             if has_context {
                 let span_text = m.as_str();
                 let digits_only: String =

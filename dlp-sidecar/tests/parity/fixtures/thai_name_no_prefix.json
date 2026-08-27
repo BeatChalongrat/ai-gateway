@@ -126,6 +126,76 @@
           "end": 20
         }
       ]
+    },
+    {
+      "id": "fix27_gazetteer_with_sensitive_context",
+      "input": "อัญชลี บุญรอด ลาออกแล้ว",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 6
+        }
+      ]
+    },
+    {
+      "id": "fix27_gazetteer_with_money_context",
+      "input": "ภาณุ ทรัพย์มาก ผ่อนบ้านอยู่",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 4
+        }
+      ]
+    },
+    {
+      "id": "fix27_gazetteer_bare_no_context_no_mask",
+      "input": "อัญชลี มาถึงแล้ว",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix27_list_prefixed_items",
+      "input": "รายชื่อผู้เข้าร่วม: คุณสมชาย, คุณสมหญิง",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 20,
+          "end": 28
+        },
+        {
+          "start": 30,
+          "end": 39
+        }
+      ]
+    },
+    {
+      "id": "fix27_list_gazetteer_item",
+      "input": "รายชื่อพนักงาน: อัญชลี, ภาณุ",
+      "should_match": true,
+      "expected_count": 2,
+      "expected_spans": [
+        {
+          "start": 16,
+          "end": 22
+        },
+        {
+          "start": 24,
+          "end": 28
+        }
+      ]
+    },
+    {
+      "id": "fix27_list_products_no_mask",
+      "input": "รายชื่อสินค้า: กล้วย, มะม่วง, ส้ม",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
     }
   ]
 }

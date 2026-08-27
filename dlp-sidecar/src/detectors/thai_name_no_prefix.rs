@@ -1,5 +1,6 @@
 //! Fallback Thai-name detector (no title prefix) — port of
-//! ``thai_name_no_prefix.py`` Pass 1 (two-word + context keyword).
+//! ``thai_name_no_prefix.py``: Pass 1 (two-word + context keyword), and since
+//! FIX27 Pass 2 (gazetteer + sensitive context) and Pass 3 (person list).
 //!
 //! Two-word Thai-script run + context keyword within ±25 chars
 //! **outside** the match span. The cursor walk is load-bearing —
@@ -121,6 +122,153 @@ fn is_stop_token(tok: &str) -> bool {
     STOP_SUFFIX.iter().any(|s| tok.ends_with(s))
 }
 
+
+// ── FIX27 Part 3: Pass 2 + Pass 3 (were never ported; the live engine missed
+// every gazetteer/list name Python caught). The three lists below are
+// GENERATED from the Python sources (thai_common_names.json,
+// _SENSITIVE_CONTEXT, _LIST_CONTEXT_KEYWORDS) — a Python test compares them.
+/// Common Thai given names (≥3 codepoints), longest first — Python `_GAZETTEER`.
+pub const GAZETTEER: &[&str] = &[
+    "เกียรติศักดิ์", "เกรียงศักดิ์", "กิตติศักดิ์", "เสาวลักษณ์", "ศิริลักษณ์", "ประสิทธิ์",
+    "กิตติพงศ์", "สมเกียรติ", "ทวีศักดิ์", "สุรศักดิ์", "พิมพ์ลภัส", "อภิสิทธิ์",
+    "พงศ์พัฒน์", "กิตติชัย", "จักรพงษ์", "เสาวนีย์", "ภาณุพงศ์", "ประพันธ์",
+    "ณัฐกานต์", "ประยุทธ์", "สมศักดิ์", "ประเสริฐ", "ดาวเรือง", "ชัยวัฒน์",
+    "รุ่งทิวา", "ปรียานุช", "เสกสรรค์", "จิราภรณ์", "ศิริวรรณ", "วิโรจน์",
+    "วราภรณ์", "สุพัตรา", "สุพรรณี", "ธีรพงศ์", "อนุสรณ์", "ปราณิศา",
+    "บุญเลิศ", "วิเชียร", "ทัศนีย์", "อภิชาติ", "จุฑามาศ", "วีรยุทธ",
+    "ณัฐพงษ์", "ธนวัฒน์", "พิมพ์ใจ", "รุ่งนภา", "วิรัตน์", "บุญช่วย",
+    "มานิตย์", "สมบูรณ์", "ไพโรจน์", "จำเนียร", "ไพบูลย์", "วีรพงษ์",
+    "ผ่องศรี", "ณัฐวุฒิ", "สมหญิง", "ชูชาติ", "ขวัญใจ", "จินตนา",
+    "ศิริพร", "สุรชัย", "อัญชลี", "ฐิตาภา", "มิ้นท์", "ชาญชัย",
+    "บุญยัง", "ศุภกิจ", "เมทินี", "ธนาธิป", "ศุภโชค", "จิราพร",
+    "อัจฉรา", "ทัศนัย", "เฟิร์น", "สุภาพร", "สุชาติ", "กาญจนา",
+    "ฐิติมา", "เมธาวี", "ประยูร", "สมบัติ", "วีรชัย", "ศุภชัย",
+    "อุทัย", "สุภาพ", "กัลยา", "ลำดวน", "ทองคำ", "นิตยา",
+    "ชัยพร", "นภาพร", "ไพศาล", "อดิศร", "อนุชา", "รัตนา",
+    "มนตรี", "จักรี", "เบลล์", "ณัฐพล", "ปรียา", "กิตติ",
+    "ดวงพร", "สมชาย", "อรุณี", "รัชนี", "บุญมี", "บรรพต",
+    "ปัทมา", "พรชัย", "บรรจง", "บุญมา", "สมนึก", "ลัดดา",
+    "จิตรา", "พิชญา", "วิชัย", "ดวงใจ", "พงศกร", "ยุวดี",
+    "วรรณา", "ยุพิน", "ปราณี", "ไพรัช", "วิชิต", "วรรณี",
+    "วราพร", "กานดา", "ทองใบ", "พรเทพ", "สุรพล", "ภูวดล",
+    "ถาวร", "ภาณุ", "ธนพล", "นิภา", "จรัส", "สมใจ",
+    "อุดม", "ยุพา", "วีระ", "ดำรง", "เกษม", "อุบล",
+    "ศิริ", "สมพร", "มานพ", "โอ๊ค", "จรูญ", "สมาน",
+    "ลำไย", "ปิยะ", "ถนอม", "สุภา", "ธนกร", "นฤมล",
+    "มงคล", "เมธี", "อรุณ", "อุไร", "ทวี", "นภา",
+];
+/// Python `_SENSITIVE_CONTEXT` — a gazetteer hit is masked only near one of these.
+pub const SENSITIVE_CONTEXT: &[&str] = &[
+    "เงินเดือน", "เงิน", "โบนัส", "ค่าจ้าง", "รายได้", "รายรับ", "salary", "income",
+    "โอน", "บัญชี", "เครดิต", "หนี้", "กู้", "ผ่อน", "ยอด", "เบอร์",
+    "โทร", "อีเมล", "email", "ที่อยู่", "address", "บัตร", "เลขบัตร", "บัตรประชาชน",
+    "พาสปอร์ต", "passport", "ป่วย", "โรค", "ผลตรวจ", "วินิจฉัย", "อาการ", "HbA1c",
+    "HIV", "เบาหวาน", "ความดัน", "มะเร็ง", "แพ้", "รักษา", "จำเลย", "โจทก์",
+    "ผู้ต้องหา", "ผู้เสียหาย", "ผู้ร้อง", "ข้อหา", "คดี", "ศาล", "พนักงาน", "ตำแหน่ง",
+    "แผนก", "ฝ่าย", "ลาออก", "สมัคร",
+];
+/// Python `_LIST_CONTEXT_KEYWORDS` — presence enables Pass 3 list-item scanning.
+pub const LIST_CONTEXT_KEYWORDS: &[&str] = &[
+    "รายชื่อ", "พนักงาน", "ลูกค้า", "สมาชิก", "ผู้เข้าร่วม", "ผู้ร่วม", "ผู้รับ", "ผู้ส่ง",
+    "เรียน", "CC", "cc", "employee", "customer", "staff", "member",
+];
+const SENSITIVE_WINDOW_CHARS: usize = 100;
+const LIST_PREFIX: &str = r"(?:คุณ|นางสาว|น\.ส\.|นาย|นาง|ดร\.)";
+
+static GAZETTEER_RE: Lazy<Regex> = Lazy::new(|| {
+    let alt = GAZETTEER.iter().map(|n| regex_escape(n)).collect::<Vec<_>>().join("|");
+    Regex::new(&format!(r"(?<!{tc})(?:{alt})(?!{tc})", tc = THAI_CHAR, alt = alt)).expect("gazetteer regex")
+});
+static SENSITIVE_RE: Lazy<Regex> = Lazy::new(|| {
+    let alt = SENSITIVE_CONTEXT.iter().map(|n| regex_escape(n)).collect::<Vec<_>>().join("|");
+    Regex::new(&format!("(?i)(?:{alt})", alt = alt)).expect("sensitive regex")
+});
+static LIST_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
+    let alt = LIST_CONTEXT_KEYWORDS.iter().map(|n| regex_escape(n)).collect::<Vec<_>>().join("|");
+    Regex::new(&format!("(?:{alt})", alt = alt)).expect("list context regex")
+});
+// Python `_LIST_ITEM_RE` (MULTILINE): an item delimited by a list separator /
+// colon / line boundary on both sides, with an optional title prefix.
+static LIST_ITEM_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(&format!(
+        r"(?m)(?:(?<=[,，|;:
+])|^)\s*(?P<pre>{pre}\s*)?(?P<name>{tc}{{2,15}})\s*(?=[,，|;
+]|$)",
+        pre = LIST_PREFIX,
+        tc = THAI_CHAR
+    ))
+    .expect("list item regex")
+});
+
+fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        if "\\.^$|?*+()[]{}".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+fn push_match(out: &mut Vec<RawMatch>, seen: &mut HashSet<(usize, usize)>, text: &str, start_b: usize, end_b: usize) {
+    let s = byte_to_char(text, start_b);
+    let e = byte_to_char(text, end_b);
+    if seen.insert((s, e)) {
+        out.push(RawMatch {
+            start: s,
+            end: e,
+            matched_text: text[start_b..end_b].to_string(),
+            confidence: 1.0,
+            priority: -5,
+            entity_type: None,
+        });
+    }
+}
+
+/// Pass 2 — gazetteer name with a sensitive keyword within ±100 chars.
+fn detect_gazetteer(text: &str, out: &mut Vec<RawMatch>, seen: &mut HashSet<(usize, usize)>) {
+    let total_chars = text.chars().count();
+    let mut pos_b = 0usize;
+    while pos_b < text.len() {
+        let m = match GAZETTEER_RE.find_from_pos(text, pos_b) {
+            Ok(Some(m)) => m,
+            _ => break,
+        };
+        let (sb, eb) = (m.start(), m.end());
+        let sc = byte_to_char(text, sb);
+        let ec = byte_to_char(text, eb);
+        let low = crate::detectors::base::char_to_byte(text, sc.saturating_sub(SENSITIVE_WINDOW_CHARS));
+        let high = crate::detectors::base::char_to_byte(text, (ec + SENSITIVE_WINDOW_CHARS).min(total_chars));
+        if SENSITIVE_RE.is_match(&text[low..high]).unwrap_or(false) {
+            push_match(out, seen, text, sb, eb);
+        }
+        pos_b = if eb > sb { eb } else { sb + 1 };
+    }
+}
+
+/// Pass 3 — person list: items must be title-prefixed or gazetteer names.
+fn detect_list(text: &str, out: &mut Vec<RawMatch>, seen: &mut HashSet<(usize, usize)>) {
+    if !LIST_CONTEXT_RE.is_match(text).unwrap_or(false) {
+        return;
+    }
+    let mut pos_b = 0usize;
+    while pos_b <= text.len() {
+        let caps = match LIST_ITEM_RE.captures_from_pos(text, pos_b) {
+            Ok(Some(c)) => c,
+            _ => break,
+        };
+        let whole = caps.get(0).unwrap();
+        let name = caps.name("name").unwrap();
+        let pre = caps.name("pre");
+        if pre.is_some() || GAZETTEER.contains(&name.as_str()) {
+            let sb = pre.map(|p| p.start()).unwrap_or(name.start());
+            push_match(out, seen, text, sb, name.end());
+        }
+        pos_b = if whole.end() > whole.start() { whole.end() } else { whole.start() + 1 };
+    }
+}
+
 pub struct ThaiNameNoPrefixDetector;
 
 impl Detector for ThaiNameNoPrefixDetector {
@@ -236,6 +384,10 @@ impl Detector for ThaiNameNoPrefixDetector {
                 pos_byte = abs_end_b;
             }
         }
+        // FIX27 Part 3 — Python runs the gazetteer and list passes after Pass 1,
+        // deduplicated on (start, end).
+        detect_gazetteer(text, &mut out, &mut seen);
+        detect_list(text, &mut out, &mut seen);
         out
     }
 }

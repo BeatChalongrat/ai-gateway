@@ -65,6 +65,25 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "fix27_uuid_is_not_a_phone",
+      "input": "fileId 7a86d915-4821-4469-9475-efbb535a5916 uploaded",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix27_uuid_next_to_real_phone",
+      "input": "id 7a86d915-4821-4469-9475-efbb535a5916 โทร 081-234-5678",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 44,
+          "end": 56
+        }
+      ]
     }
   ]
 }

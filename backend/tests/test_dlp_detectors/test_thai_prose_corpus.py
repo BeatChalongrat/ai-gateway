@@ -81,7 +81,9 @@ def _rust_list(name: str) -> set[str]:
 @pytest.mark.skipif(not _RS.exists(), reason="dlp-sidecar source not checked out beside backend/")
 @pytest.mark.parametrize(
     "py_name,rs_name",
-    [("_STOP_EXACT", "STOP_EXACT"), ("_STOP_PREFIX", "STOP_PREFIX"), ("_STOP_SUFFIX", "STOP_SUFFIX"), ("_TRAIL_LABELS", "TRAIL_LABELS")],
+    [("_STOP_EXACT", "STOP_EXACT"), ("_STOP_PREFIX", "STOP_PREFIX"), ("_STOP_SUFFIX", "STOP_SUFFIX"), ("_TRAIL_LABELS", "TRAIL_LABELS"),
+     # FIX27 Part 3: Pass 2/3 lists (the live engine had neither pass before FIX27)
+     ("_SENSITIVE_CONTEXT", "SENSITIVE_CONTEXT"), ("_LIST_CONTEXT_KEYWORDS", "LIST_CONTEXT_KEYWORDS")],
 )
 def test_stop_lists_match_the_rust_port(py_name, rs_name):
     from app.services.dlp.detectors import thai_name_no_prefix as mod
@@ -89,3 +91,14 @@ def test_stop_lists_match_the_rust_port(py_name, rs_name):
     py = set(getattr(mod, py_name))
     rs = _rust_list(rs_name)
     assert py == rs, f"only_py={sorted(py - rs)} only_rust={sorted(rs - py)}"
+
+
+@pytest.mark.skipif(not _RS.exists(), reason="dlp-sidecar source not checked out beside backend/")
+def test_gazetteer_matches_the_rust_port():
+    """FIX27 Part 3: the Rust GAZETTEER const is generated from
+    thai_common_names.json (>=3 codepoints) — the same set Python loads."""
+    from app.services.dlp.detectors import thai_name_no_prefix as mod
+
+    py = set(mod._GAZETTEER)
+    rs = _rust_list("GAZETTEER")
+    assert py and py == rs, f"only_py={sorted(py - rs)[:10]} only_rust={sorted(rs - py)[:10]}"
