@@ -7,17 +7,19 @@ forward up to 200 characters or a newline — whichever comes first.
 
 Severity is MEDIUM; addresses rarely warrant BLOCK action.
 
-Precision/recall stance (current, FIX23/FIX23b): the detector fires only
-when the text after the keyword looks like a postal address — a house
-number close to the keyword AND an address component (road, soi, moo,
-tambon/amphoe/province words or abbreviations, khwaeng/khet, Bangkok, or
-a 5-digit postcode). It no longer prefers over-matching: the earlier
-"anything to end-of-line" body masked ordinary Thai sentences whole and
-broke the product (see below). KNOWN GAPS accepted pending owner review
-(FIX23b §2): addresses written with only a building / condo / village /
-estate name or a bare province name and no postcode, addresses with no
-house number, and a prose gap of more than 30 characters between the
-keyword and the house number are not matched by this detector.
+Precision/recall stance (FIX26 §1.2, the owner's keyword-precision split):
+the leading keyword is graded. HIGH-precision keywords (``บ้านเลขที่``,
+``อยู่บ้านเลขที่``, ``ที่อยู่`` as a phrase-initial noun) fire on a house
+number within 30 characters alone, so building/condo/village-only
+addresses mask again. AMBIGUOUS keywords (``เลขที่`` "the number that…",
+``อยู่ที่`` "is at", ``ส่งที่`` "send to") keep FIX23's strict rule — house
+number AND an address component (road, soi, moo, tambon/amphoe/province
+words or abbreviations, khwaeng/khet, Bangkok, or a 5-digit postcode).
+KNOWN GAPS that remain: addresses with no house number, a prose gap of
+more than 30 characters before the number, and ambiguous-keyword
+addresses written with only a building / estate / bare province name.
+Fixtures exist in BOTH directions (``test_thai_address_recall.py`` must
+mask; ``test_thai_address.py`` prose must not; the FIX26 prose corpus).
 
 FIX23 — the body must (a) carry a digit within 30 characters of the
 keyword (a house number) AND (b) contain an address component on the
@@ -39,14 +41,35 @@ from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
 
 
-_ADDRESS_RE = re.compile(
-    r"(อยู่บ้านเลขที่|บ้านเลขที่|เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
-    r"[\s:：]*"
-    r"(?=[^\n\d]{0,30}\d)"
+# FIX26 §1.2 — keyword-precision split (owner decision after FIX23b §2).
+#   HIGH-precision keywords (บ้านเลขที่ / อยู่บ้านเลขที่ / ที่อยู่): a digit
+#   within 30 chars is enough — the permissive body returns for them, so
+#   ``ที่อยู่ 199/22 คอนโดลุมพินี`` masks again.
+#   AMBIGUOUS keywords (เลขที่ "the number that…", อยู่ที่ "is at", ส่งที่
+#   "send to"): FIX23's strict rule stays — digit AND an address component
+#   or postcode — which is what keeps ``เลขที่ให้จำเมื่อกี้คืออะไร`` unmasked.
+# ``ที่อยู่`` is itself two-faced: the noun "address" starts a phrase, while
+# glued after a Thai letter (สินค้าที่อยู่ในคลัง) or followed by a locative
+# preposition (ที่อยู่ใน / ที่อยู่ตรง …) it is the relative clause "…that is
+# at/in…" — those two shapes are excluded from the HIGH grade.
+_HIGH_KW = (
+    r"(?:อยู่บ้านเลขที่|บ้านเลขที่"
+    r"|(?<![ก-ฺเ-๎])ที่อยู่(?![\s:：]*(?:ใน|ตรง|บน|ใต้|ข้าง|ระหว่าง|ใกล้|แถว|กับ|ไหน)))"
+)
+# A ``ที่อยู่`` that fails the HIGH shape (glued: จำที่อยู่ / ส่งไปที่อยู่) is
+# not thrown away — it drops to the AMBIGUOUS grade and still masks a real
+# address that carries a component or postcode.
+_AMBIG_KW = r"(?:เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
+_DIGIT_NEAR = r"(?=[^\n\d]{0,30}\d)"
+_COMPONENT = (
     r"(?=[^\n]{0,200}?(?:ถนน|ถ\.|ซอย|ซ\.|หมู่|ม\.|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\."
     r"|แขวง|เขต|กรุงเทพ|กทม|\d{5}(?=[\s,]|$)))"
-    r"([^\n]{3,200}?\d{5}(?=[\s,]|$)"
-    r"|[^\n]{3,200}?(?=\n|$|\s{3,}))"
+)
+_BODY = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))"
+_ADDRESS_RE = re.compile(
+    rf"({_HIGH_KW}[\s:：]*{_DIGIT_NEAR}"
+    rf"|{_AMBIG_KW}[\s:：]*{_DIGIT_NEAR}{_COMPONENT})"
+    rf"{_BODY}"
 )
 
 

@@ -101,6 +101,81 @@ _NAME_RE = re.compile(
 # ending in (e.g.) ``ลูกค้า`` cannot self-validate.
 _CONTEXT_WINDOW = 25
 
+# --- FIX26 §1.2: Pass-1 stop rules --------------------------------------
+#
+# Thai has no spaces between words, so a whitespace-separated "word" in
+# prose is usually a PHRASE (``ต้องส่ง``, ``ว่าสินค้า``), not a name. The
+# FIX24 sweep saw ``ชนิด ตอบสั้นๆ`` ("1 kind, answer briefly") and
+# ``เบอร์ เลขบัตร`` ("number, card number") masked as people because a
+# context keyword (``ชื่อ`` / ``ลูกค้า``) stood nearby. Three cheap
+# lexical gates reject a pair when either token is plainly not a name:
+#   * EXACT — whole-token common vocabulary (nouns, pronouns, units);
+#   * PREFIX — the token STARTS with a function word / common verb
+#     (``ต้องส่ง``, ``ควรตั้ง``, ``ไม่ได้``): no Thai given name begins
+#     with these syllables (``มา``/``มี``/``ดี`` DO begin names — มานะ,
+#     มีชัย, ดีพร้อม — so they are EXACT, not PREFIX);
+#   * SUFFIX — the token ENDS with a sentence particle or question word
+#     (``…นะ``, ``…ครับ``, ``…ไหม``, ``…ยังไง``), or contains ``ๆ``.
+# And a SPAN rule: when the second token is a field LABEL that follows a
+# name in forms (``เบอร์`` / ``ที่อยู่`` / ``อีเมล`` / ``อายุ`` …), the
+# label is not a surname — the span is trimmed to the first token, and
+# that lone token is kept only when a name label (``ชื่อ`` / ``name``)
+# immediately precedes it, so ``ชื่อ สมชาย เบอร์ 08…`` masks exactly
+# ``สมชาย`` and restoration is no longer off by a token.
+# The Rust port carries the SAME three lists (``STOP_EXACT`` /
+# ``STOP_PREFIX`` / ``STOP_SUFFIX`` / ``TRAIL_LABELS``) — a test compares
+# them to this file. Change both.
+_STOP_EXACT = frozenset({
+    # pronouns / demonstratives / question words
+    "ผม", "ฉัน", "เรา", "คุณ", "เขา", "เธอ", "มัน", "ใคร", "อะไร", "ไหน", "นี้", "นั้น",
+    "โน้น", "นี่", "นั่น", "ไหม", "มั้ย", "ยังไง", "อย่างไร", "ทำไม", "เมื่อไหร่", "เท่าไหร่",
+    # common nouns that sit beside name keywords in chat
+    "ชนิด", "ประเภท", "แบบ", "เบอร์", "เลขบัตร", "บัตร", "อีเมล", "ที่อยู่", "บัญชี",
+    "รายงาน", "ไฟล์", "ข้อมูล", "ระบบ", "สินค้า", "ราคา", "ยอด", "จำนวน", "จํานวน",
+    "เวลา", "วันนี้", "พรุ่งนี้", "เมื่อวาน", "ตอนนี้", "เดือน", "ปี", "ครั้ง", "อัน", "ชิ้น",
+    "คน", "ทุกคน", "บางคน", "หลายคน", "เรื่อง", "งาน", "ประชุม", "บริษัท", "ทีม", "แผนก",
+    "ตำแหน่ง", "ตําแหน่ง", "อายุ", "วันเกิด", "เงินเดือน", "โบนัส", "โทร", "หน้า", "ข้อ",
+    # single common words that also begin names (kept EXACT on purpose)
+    "มา", "มี", "ดี", "ไป", "ใหม่", "เก่า", "มาก", "น้อย", "ใหญ่", "เล็ก",
+    # adverbs / conjunctions / aspect
+    "แล้ว", "ยัง", "เลย", "ก็", "จึง", "เพราะ", "แต่", "หรือ", "และ", "กับ", "ของ",
+    "ก่อน", "หลัง", "ตอน", "ช่วง", "ระหว่าง", "ด้วย", "เอง", "ทั้งหมด", "บ้าง", "อีก",
+    "สั้นๆ", "ยาวๆ", "เร็วๆ", "ช้าๆ",
+})
+_STOP_PREFIX = (
+    # verbs / auxiliaries / negation that open a phrase
+    "ช่วย", "ต้อง", "ควร", "ถาม", "ตอบ", "บอก", "ว่า", "ไม่", "ให้", "ได้", "ทำ", "ทํา",
+    "ขอ", "อยาก", "จะ", "กำลัง", "กําลัง", "เคย", "ลอง", "ใช้", "เอา", "เขียน", "สร้าง",
+    "แก้", "ส่ง", "รับ", "ดู", "ดึง", "หา", "เช็ก", "เช็ค", "ตรวจ", "สรุป", "แปล", "อธิบาย",
+    "แนะนำ", "แนะนํา", "จัด", "เปิด", "ปิด", "เพิ่ม", "ลบ", "ลด", "คิด", "รู้", "เข้าใจ",
+    "เห็น", "พูด", "คุย", "เล่า", "ฟัง", "อ่าน", "ซื้อ", "ขาย", "จ่าย", "โอน", "จอง",
+    "เริ่ม", "หยุด", "เสร็จ", "ผ่าน", "พัง", "ขึ้น", "ลง", "ออก", "เข้า", "กลับ", "เปลี่ยน",
+    # conjunctions / prepositions / determiners that open a phrase
+    "ที่", "ซึ่ง", "เมื่อ", "ถ้า", "หาก", "เพราะ", "แต่", "และ", "หรือ", "กับ", "ใน",
+    "จาก", "ถึง", "ตาม", "โดย", "เพื่อ", "สำหรับ", "สําหรับ", "เกี่ยว", "ทุก", "บาง",
+    "หลาย", "แต่ละ", "ก่อน", "หลัง", "ยัง", "แล้ว", "ก็", "ตอน", "ช่วง", "เรื่อง",
+    "อย่าง", "แบบ", "เท่า", "เกิน", "ประมาณ", "ราว",
+)
+_STOP_SUFFIX = (
+    "นะ", "ครับ", "ค่ะ", "คะ", "จ้า", "จ๊ะ", "จ้ะ", "สิ", "เถอะ", "ล่ะ", "หรอ", "เหรอ",
+    "ไหม", "มั้ย", "ยังไง", "อย่างไร", "อะไร", "ไหน", "เท่าไหร่", "เมื่อไหร่", "ทำไม", "ทําไม",
+    "ด้วย", "เลย", "บ้าง", "หน่อย", "ที", "ๆ",
+)
+_TRAIL_LABELS = frozenset({
+    "เบอร์", "โทร", "ที่อยู่", "อีเมล", "เลขบัตร", "บัตร", "บัญชี", "เงินเดือน", "โบนัส",
+    "ตำแหน่ง", "ตําแหน่ง", "แผนก", "อายุ", "วันเกิด", "จำนวน", "จํานวน",
+})
+_NAME_LABEL_BEFORE_RE = re.compile(r"(?:ชื่อ|name)\s*[:：]?\s*$", re.IGNORECASE)
+
+
+def _is_stop_token(tok: str) -> bool:
+    """True when a whitespace-delimited Thai token is plainly not a name."""
+    if "ๆ" in tok or tok in _STOP_EXACT:
+        return True
+    if tok.startswith(_STOP_PREFIX):
+        return True
+    return tok.endswith(_STOP_SUFFIX)
+
 
 # --- Pass 2: gazetteer + sensitive context (Fix #4) -------------------
 
@@ -249,8 +324,22 @@ class ThaiNameNoPrefixDetector(BaseDetector):
             before = text[low:start]
             after = text[end:high]
             if _CONTEXT_RE.search(before + after):
-                out.append((start, end, m.group(1)))
-                pos = end
+                w1, w2 = m.group(1).split(None, 1)
+                if w2 in _TRAIL_LABELS:
+                    # FIX26: the second token is a field label, never a
+                    # surname. Keep the lone first token only when a name
+                    # label immediately precedes it.
+                    w1_end = start + len(w1)
+                    if not _is_stop_token(w1) and _NAME_LABEL_BEFORE_RE.search(before):
+                        out.append((start, w1_end, w1))
+                        pos = w1_end
+                    else:
+                        pos = start + 1
+                elif _is_stop_token(w1) or _is_stop_token(w2):
+                    pos = start + 1
+                else:
+                    out.append((start, end, m.group(1)))
+                    pos = end
             else:
                 pos = start + 1
         return out

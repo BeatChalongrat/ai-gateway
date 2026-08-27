@@ -32,14 +32,13 @@ CASES = [
     pytest.param("ที่อยู่ 199/22 คอนโดลุมพินี 10120", id="condo_with_postcode"),
     pytest.param("บ้านเลขที่ 12/3 แขวงบางนา", id="district_only"),
     pytest.param("บ้านเลขที่ 3 หมู่ 5 ตำบลบางรัก", id="moo_tambon"),
-    pytest.param("ที่อยู่ 199/22 คอนโดลุมพินี", id="condo_only",
-                 marks=pytest.mark.xfail(strict=True, reason=GAP + "building/condo name only")),
+    # FIX26 §1.2 — recovered by the keyword-precision split (HIGH keyword ที่อยู่).
+    pytest.param("ที่อยู่ 199/22 คอนโดลุมพินี", id="condo_only"),
     pytest.param("ส่งที่ 12 อาคารเอ ชั้น 5", id="building_floor",
                  marks=pytest.mark.xfail(strict=True, reason=GAP + "building + floor, no road word")),
     pytest.param("อยู่ที่ 77/1 บางใหญ่ นนทบุรี", id="province_bare",
                  marks=pytest.mark.xfail(strict=True, reason=GAP + "bare amphoe/province names")),
-    pytest.param("ที่อยู่ 199/22 Lumpini Condo", id="english_building",
-                 marks=pytest.mark.xfail(strict=True, reason=GAP + "English building name")),
+    pytest.param("ที่อยู่ 199/22 Lumpini Condo", id="english_building"),  # FIX26: recovered (HIGH keyword)
     pytest.param("ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", id="long_prose_gap",
                  marks=pytest.mark.xfail(strict=True, reason=GAP + ">30-char prose gap before house number")),
     pytest.param("ส่งที่ 23 ตึกบี ห้อง 402", id="building_room",

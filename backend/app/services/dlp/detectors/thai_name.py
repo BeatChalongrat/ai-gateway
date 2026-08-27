@@ -76,6 +76,13 @@ _FALSE_POSITIVE_RE = re.compile(
     r"นางแบบ|นางงาม|นางฟ้า|นางเอก|นางพยาบาล|นางรำ|นางสนม|"
     rf"คุณ(?:ภาพ|ค่า|สมบัติ|ธรรม|ประโยชน์|วุฒิ|ลักษณะ){_THAI_CHAR}*|"
     r"คุณ(?:พ่อ|แม่|หมอ|ครู|นาย|ยาย|ตา|ป้า|น้า|อา|ลุง|พี่|น้อง|หนู)|"
+    # FIX26 §1.2 — ``คุณ`` + a particle / adverb / preposition is prose
+    # ("ขอบคุณมากครับ", "ขอบคุณนะ", "คุณที่รัก"): ``คุณ`` sits inside
+    # ``ขอบคุณ`` and the regex has no word boundary to stop it, so the
+    # corpus sweep saw ``คุณมากครับ ช่วยได้เยอะเลย`` masked as a name. None
+    # of these words begins a Thai given name.
+    r"คุณ(?:มาก|นะ|ครับ|ค่ะ|คะ|จ้า|จ๊ะ|จ้ะ|ด้วย|เลย|ก็|ที่|กับ|ของ|และ|หรือ|ใน|"
+    r"จาก|ถึง|เอง|ทั้ง|ทุก|ส(?:ำ|ํา)หรับ|จริง|หลาย|อีก|แล้ว|เท่า|ล่วงหน้า|ๆ)|"
     # ``คุณ`` fused directly to a verb / function word (no space) is a
     # sentence addressed at the listener ("คุณทำอะไรได้บ้าง"), not a
     # name. Only words that never begin a Thai given name are listed
@@ -103,6 +110,9 @@ _NOT_SURNAME = frozenset({
     "แล้ว", "อยู่", "จะ", "ต้อง", "ควร", "อาจ", "น่า", "ยัง",
     "ทั้ง", "ทุก", "บาง", "แต่ละ", "เงินเดือน", "โบนัส", "เบอร์",
     "อีเมล", "ที่อยู่", "บัญชี", "โทร", "ป่วย", "ถูก", "โดน",
+    # SARA AM spellings on NFKC-normalised text (ำ → ํ + า), so the trim
+    # also fires through the real pipeline. Same set in thai_name.rs.
+    "จํานวน", "ตําแหน่ง", "ตำแหน่ง", "แผนก", "อายุ", "วันเกิด", "เลขบัตร",
 })
 
 
