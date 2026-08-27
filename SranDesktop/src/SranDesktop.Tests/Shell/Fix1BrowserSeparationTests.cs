@@ -129,6 +129,19 @@ public class Fix1BrowserSeparationTests
         var refused = await surface.DispatchAsync("settings.set", new JsonObject { ["key"] = "grantedFolders", ["value"] = "x" });
         refused.ok.Should().BeFalse();
         refused.error.Should().Be("refused"); // grants go through folders.* + native picker, never settings.set
+
+        // FIX25 ยง1b/ยง1c: the approval mode is page-settable through the SAME closed
+        // op (no new op), with a closed vocabulary โ€” a fourth mode is 'invalid', not
+        // laundered to auto by the parser โ€” and it round-trips in the snapshot the
+        // host reads per tool call.
+        (await surface.DispatchAsync("settings.set", new JsonObject { ["key"] = "approvalMode", ["value"] = "skip" })).ok.Should().BeTrue();
+        settings.Current.ApprovalMode.Should().Be("skip");
+        var badMode = await surface.DispatchAsync("settings.set", new JsonObject { ["key"] = "approvalMode", ["value"] = "yolo" });
+        badMode.ok.Should().BeFalse();
+        badMode.error.Should().Be("invalid");
+        settings.Current.ApprovalMode.Should().Be("skip"); // the bad write changed nothing
+        var snap = System.Text.Json.JsonSerializer.SerializeToNode((await surface.DispatchAsync("settings.get", null)).data)!.AsObject();
+        snap["approvalMode"]!.GetValue<string>().Should().Be("skip");
     }
 
     // What this test CANNOT see: it builds a representative registry, not the

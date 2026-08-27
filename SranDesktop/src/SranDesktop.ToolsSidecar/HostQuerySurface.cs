@@ -5,6 +5,7 @@ using SranDesktop.Application.Interfaces;
 using SranDesktop.Application.Models;
 using SranDesktop.Application.Services;
 using SranDesktop.Domain.Entities;
+using SranDesktop.Domain.Enums;
 
 namespace SranDesktop.ToolsSidecar;
 
@@ -137,6 +138,11 @@ public sealed class HostQuerySurface
             writingStyleProfile = s.WritingStyleProfile,
             locale = s.Locale,
             grantedFolders = s.GrantedFolders.ToArray(),
+            // FIX25 §1b: the approval mode is a page-settable setting now (the
+            // composer's selector). Normalised through the same parser the
+            // sidecar's own run_command blocklist bypass uses, so page and tool
+            // agree on what "skip" is.
+            approvalMode = ApprovalModeParser.ToSettingsValue(ApprovalModeParser.Parse(s.ApprovalMode)),
             browser = _browserStatus(),
         };
     }
@@ -566,6 +572,7 @@ public sealed class HostQuerySurface
         Theme, MinimizeToTray, StartWithWindows, CrashReportingEnabled,
         SyncAgentConversations, PreferLocalOfficeGeneration, DefaultModel,
         ChatEdgeBaseUrl, GatewayBaseUrl, BrowserExtensionId, WritingStyleProfile, Locale,
+        ApprovalMode, // FIX25 §1b — manual | auto | skip; the host reads it live per tool call
     }
 
     private static Key? ParseSettingKey(string? key) => key switch
@@ -582,6 +589,7 @@ public sealed class HostQuerySurface
         "browserExtensionId" => Key.BrowserExtensionId,
         "writingStyleProfile" => Key.WritingStyleProfile,
         "locale" => Key.Locale,
+        "approvalMode" => Key.ApprovalMode,
         _ => null,
     };
 
@@ -616,6 +624,11 @@ public sealed class HostQuerySurface
             case Key.WritingStyleProfile:
                 if (!v.TryGetValue<string>(out var profile) || profile.Length > 8000) return false;
                 value = profile; return true;
+            case Key.ApprovalMode:
+                // Closed vocabulary — the page cannot invent a fourth mode, and the
+                // parser's "unknown → auto" fallback never gets to launder one.
+                if (!v.TryGetValue<string>(out var mode) || mode is not ("manual" or "auto" or "skip")) return false;
+                value = mode; return true;
             default:
                 return false;
         }
@@ -637,6 +650,7 @@ public sealed class HostQuerySurface
             case Key.BrowserExtensionId: updated.BrowserExtensionId = (string)value!; break;
             case Key.WritingStyleProfile: updated.WritingStyleProfile = (string)value!; break;
             case Key.Locale: updated.Locale = (string)value!; break;
+            case Key.ApprovalMode: updated.ApprovalMode = (string)value!; break; // FIX25 — the store of record; the host reads it per tool call
             case Key.ChatEdgeBaseUrl:
                 restartRequired = updated.ChatEdgeBaseUrl != (string)value!;
                 updated.ChatEdgeBaseUrl = (string)value!;
