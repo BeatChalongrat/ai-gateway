@@ -135,6 +135,48 @@ _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES: tuple[str, ...] = ("gpt-5.6",)
 _RESPONSES_WITH_TOOLS_FAMILIES: tuple[str, ...] = ("gpt-5",)
 
 
+# FIX27 Part 1 — /responses names its content parts differently from
+# /chat/completions: a vision turn's ``{type: text}`` / ``{type: image_url}``
+# blocks must become ``input_text`` / ``input_image`` or the provider 400s
+# ("Invalid value: 'image_url'. Supported values are: 'input_text',
+# 'input_image', …", live 2026-08-27 on gpt-5-mini). Strings pass through.
+def _responses_content(content):
+    if content is None:
+        return ""
+    if not isinstance(content, list):
+        return content
+    parts: list[dict] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text":
+            parts.append({"type": "input_text", "text": block.get("text", "") or ""})
+        elif btype == "image_url":
+            img = block.get("image_url") or {}
+            url = img.get("url", "") if isinstance(img, dict) else str(img)
+            part = {"type": "input_image", "image_url": url}
+            detail = img.get("detail") if isinstance(img, dict) else None
+            if detail:
+                part["detail"] = detail
+            parts.append(part)
+        elif btype in ("input_text", "input_image"):
+            parts.append(dict(block))
+    return parts
+
+
+# FIX27 Part 1 — the Aug-2025 ``gpt-5`` / ``gpt-5-mini`` / ``gpt-5-nano``
+# generation does NOT accept ``reasoning_effort: "none"`` (400 "does not
+# support 'none' with this model. Supported values are: 'minimal', 'low',
+# 'medium', and 'high'", live 2026-08-27). Those models take tools at their
+# default effort, so on the tools fallback the effort field is DROPPED for
+# them instead of pinned to 'none'. The dotted generations (5.1 … 5.6) keep
+# the 'none' pin.
+def _effort_none_supported(model: str) -> bool:
+    m = (model or "").lower()
+    return not (m == "gpt-5" or m.startswith("gpt-5-"))
+
+
 def _model_in_family(model: str, families: tuple[str, ...]) -> bool:
     """Prefix match with a boundary check so ``gpt-5`` matches ``gpt-5``,
     ``gpt-5.4-mini`` and ``gpt-5.6-luna`` but a hypothetical ``gpt-50``
@@ -284,7 +326,12 @@ class OpenAIAdapter(BaseProviderAdapter):
             if "reasoning_effort" in body or _model_in_family(
                 model, _TOOLS_REQUIRE_EFFORT_NONE_FAMILIES
             ):
-                body["reasoning_effort"] = "none"
+                if _effort_none_supported(model):
+                    body["reasoning_effort"] = "none"
+                else:
+                    # FIX27: gpt-5 / gpt-5-mini / gpt-5-nano reject 'none' —
+                    # send no effort at all (their default takes tools).
+                    body.pop("reasoning_effort", None)
 
         return body
 
@@ -372,7 +419,7 @@ class OpenAIAdapter(BaseProviderAdapter):
                 )
                 continue
             items.append(
-                {"role": m.role, "content": (m.content if m.content is not None else "")}
+                {"role": m.role, "content": _responses_content(m.content)}
             )
         return items
 

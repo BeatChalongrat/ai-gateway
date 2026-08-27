@@ -1290,10 +1290,21 @@ class DLPTransformer:
         )
 
         for idx, msg in enumerate(messages):
-            # Vision-format pass-through — same rationale as the
-            # transform_messages branch above: list-typed content
-            # has no scannable spans here.
-            if not isinstance(msg.content, str):
+            # FIX27: vision list-content messages are no longer passed
+            # through unmasked. Both scanners flatten a list to its text
+            # blocks ("\n"-joined — rust_dlp_client._flatten_content and
+            # DetectorRegistry.scan_messages) and bind spans to THAT view,
+            # so the text blocks of an image+text turn are scannable; the
+            # old pass-through let an attachment turn carry PII around the
+            # masking layer on every surface that sends images. Image
+            # blocks are never touched.
+            blocks: list | None = None
+            if isinstance(msg.content, str):
+                text_view = msg.content
+            elif isinstance(msg.content, list):
+                blocks = msg.content
+                text_view = flatten_list_content(blocks)
+            else:
                 new_messages.append(msg)
                 continue
 
@@ -1308,9 +1319,9 @@ class DLPTransformer:
             def _slice_ok(ma):
                 s, e = ma.match.start, ma.match.end
                 return (
-                    0 <= s < len(msg.content)
-                    and e <= len(msg.content)
-                    and msg.content[s:e] == ma.match.matched_text
+                    0 <= s < len(text_view)
+                    and e <= len(text_view)
+                    and text_view[s:e] == ma.match.matched_text
                 )
 
             msg_actions = []
@@ -1369,7 +1380,7 @@ class DLPTransformer:
             # (start, end, replacement, original)
             for ma in resolved:
                 if ma.action == EnforcementAction.MASK:
-                    original = msg.content[ma.match.start:ma.match.end]
+                    original = text_view[ma.match.start:ma.match.end]
                     if token_allocator is not None:
                         # V2: reserved token per span; no value-dedup so
                         # duplicate values bind to distinct tokens/records.
@@ -1407,7 +1418,16 @@ class DLPTransformer:
                     )
 
             # Second pass: apply in reverse offset order.
-            result_text = msg.content
+            if blocks is not None:
+                new_messages.append(
+                    msg.model_copy(
+                        update={
+                            "content": apply_replacements_to_blocks(blocks, replacements)
+                        }
+                    )
+                )
+                continue
+            result_text = text_view
             for start, end, replacement, _orig in sorted(
                 replacements, key=lambda r: r[0], reverse=True
             ):
@@ -1641,6 +1661,56 @@ class DLPTransformer:
                 output_len=len(result),
             )
         return result
+
+
+def flatten_list_content(blocks: list) -> str:
+    """The text view of a vision list-content message: its ``text`` blocks
+    joined with ``"\n"`` — byte-identical to what both scanners hand the
+    detectors (``rust_dlp_client._flatten_content`` and
+    ``DetectorRegistry.scan_messages``), so a finding's offsets index this
+    string. Non-text blocks contribute nothing."""
+    return "\n".join(
+        b.get("text", "")
+        for b in blocks
+        if isinstance(b, dict) and b.get("type") == "text"
+    )
+
+
+def apply_replacements_to_blocks(
+    blocks: list, replacements: list[tuple[int, int, str, str]]
+) -> list:
+    """Apply ``(start, end, replacement, original)`` spans — offsets in the
+    :func:`flatten_list_content` view — to the text blocks of a vision
+    message. Returns a NEW block list (dict copies); image and other
+    non-text blocks are carried over untouched.
+
+    A span is applied to every text block it overlaps, on that block's
+    own slice. A span that straddles the ``"\n"`` joint between two blocks
+    therefore lands as a token in each — a duplicated placeholder is the
+    safe failure; leaving either half in clear would be a leak.
+    """
+    if not replacements:
+        return [dict(b) if isinstance(b, dict) else b for b in blocks]
+    out: list = []
+    offset = 0
+    for b in blocks:
+        if not (isinstance(b, dict) and b.get("type") == "text"):
+            out.append(dict(b) if isinstance(b, dict) else b)
+            continue
+        text = b.get("text", "")
+        lo, hi = offset, offset + len(text)
+        local: list[tuple[int, int, str]] = []
+        for start, end, replacement, _orig in replacements:
+            if end <= lo or start >= hi:
+                continue
+            local.append((max(start, lo) - lo, min(end, hi) - lo, replacement))
+        for s, e, replacement in sorted(local, key=lambda r: r[0], reverse=True):
+            text = text[:s] + replacement + text[e:]
+        nb = dict(b)
+        nb["text"] = text
+        out.append(nb)
+        offset = hi + 1  # the "\n" joint
+    return out
 
 
 def _resolve_overlaps(actions: list[MatchAction]) -> list[MatchAction]:

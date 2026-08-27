@@ -862,3 +862,74 @@ class TestResponsesTierIsProtocolNotData:
             metadata={},
         )
         assert not OpenAIAdapter._responses_eligible(payload, None)
+
+
+# ---------------------------------------------------------------------------
+# FIX27 Part 1 — vision blocks on /responses + the gpt-5 (Aug-2025) tools fallback
+# ---------------------------------------------------------------------------
+from app.services.providers.openai_adapter import _effort_none_supported, _responses_content
+
+
+class TestFix27ResponsesVisionInput:
+    def test_vision_blocks_become_input_text_and_input_image(self):
+        msgs = [
+            Message(
+                role="user",
+                content=[
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA", "detail": "auto"}},
+                    {"type": "text", "text": "ในรูปนี้เขียนว่าอะไร"},
+                ],
+            )
+        ]
+        items = OpenAIAdapter._messages_to_responses_input(msgs)
+        assert items == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA", "detail": "auto"},
+                    {"type": "input_text", "text": "ในรูปนี้เขียนว่าอะไร"},
+                ],
+            }
+        ]
+
+    def test_string_content_is_unchanged(self):
+        items = OpenAIAdapter._messages_to_responses_input([Message(role="user", content="hi")])
+        assert items == [{"role": "user", "content": "hi"}]
+        assert _responses_content(None) == ""
+
+    def test_effort_none_support_by_generation(self):
+        assert not _effort_none_supported("gpt-5")
+        assert not _effort_none_supported("gpt-5-mini")
+        assert not _effort_none_supported("gpt-5-nano")
+        assert _effort_none_supported("gpt-5.4-mini")
+        assert _effort_none_supported("gpt-5.6-terra")
+
+    def test_gpt5_mini_tools_fallback_drops_effort_instead_of_none(self, monkeypatch):
+        from app.services.providers import openai_adapter as mod
+
+        class _Cand:
+            supports_reasoning = True
+
+        monkeypatch.setattr(
+            "app.services.providers.model_registry.get_candidate", lambda m: _Cand()
+        )
+        payload = ChatCompletionsRequest(
+            model="gpt-5-mini",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        body = mod.OpenAIAdapter()._build_body(payload, payload.messages, resolved_model="gpt-5-mini")
+        assert "tools" in body
+        assert "reasoning_effort" not in body
+        # the dotted generation keeps the pin
+        payload56 = ChatCompletionsRequest(
+            model="gpt-5.6-terra",
+            messages=[Message(role="user", content="Hi")],
+            tools=_TOOLS,
+            reasoning={"mode": "auto", "show_summary": True},
+            metadata={},
+        )
+        body56 = mod.OpenAIAdapter()._build_body(payload56, payload56.messages, resolved_model="gpt-5.6-terra")
+        assert body56["reasoning_effort"] == "none"
