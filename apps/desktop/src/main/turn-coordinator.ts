@@ -688,20 +688,25 @@ export class TurnCoordinator {
     // P1: a cancelled turn must be resumable).
     this.saveLocalHistory(conversationId, messages.slice(historyStart));
     await this.importVisible(conversationId, userText, turn, model, messages.slice(chainStart), attached?.fileIds ?? []);
+    // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
+    // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
+    // a real message without leaving and re-entering the conversation.
+    const ids = await this.persistedIds(conversationId, turn);
+    const completeData = { message_id: turn.messageId, ...ids };
 
     if (outcome === "error") return;
     if (outcome === "cancelled") {
-      this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+      this.emit(conversationId, "message_complete", completeData);
       this.log.info(`TURN CANCELLED conv=${conversationId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
       return;
     }
     if (outcome === "paused") {
-      this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+      this.emit(conversationId, "message_complete", completeData);
       this.log.info(`TURN PAUSED conv=${conversationId} after ${elapsed} ms`);
       return;
     }
     if (isFirstTurn && turn.assistantText.length > 0) void this.generateTitle(conversationId, userText, turn.assistantText);
-    this.emit(conversationId, "message_complete", { message_id: turn.messageId });
+    this.emit(conversationId, "message_complete", completeData);
     this.log.info(`TURN DONE conv=${conversationId} in ${elapsed} ms, ${turn.assistantText.length} chars`);
   }
 
@@ -1541,6 +1546,24 @@ export class TurnCoordinator {
     }
     this.promptPartsByConversation.set(conversationId, parts);
     return { messages, userText };
+  }
+
+  /** FIX28 §2: the chat-edge row ids of this turn's user + assistant messages
+   * (matched by the client ids importVisible sent). Best-effort: absent ids
+   * just mean the page keeps its client ids, as before. */
+  private async persistedIds(conversationId: string, turn: RunningTurn): Promise<{ user_message_id?: string; assistant_message_id?: string }> {
+    try {
+      const rows = await this.chatEdge.listMessages(conversationId);
+      const userClient = "u_" + turn.messageId.slice(5);
+      const out: { user_message_id?: string; assistant_message_id?: string } = {};
+      for (const r of rows) {
+        if (r.client_id === userClient) out.user_message_id = r.id;
+        else if (r.client_id === turn.messageId) out.assistant_message_id = r.id;
+      }
+      return out;
+    } catch {
+      return {};
+    }
   }
 
   private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<void> {

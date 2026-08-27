@@ -632,10 +632,17 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	writeSSEEvent(w, flusher, "message_start", map[string]any{
+	// FIX28 §2 (F3): the client renders the user turn under an optimistic
+	// temp id; hand it the persisted row id here (Edit already did) so an
+	// edit → fork can name a real message without a reload.
+	startPayload := map[string]any{
 		"message_id":      stream.AssistantID.String(),
 		"conversation_id": stream.ConversationID.String(),
-	})
+	}
+	if stream.UserMessage != nil {
+		startPayload["user_message_id"] = stream.UserMessage.ID.String()
+	}
+	writeSSEEvent(w, flusher, "message_start", startPayload)
 
 	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
@@ -1036,10 +1043,17 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	writeSSEEvent(w, flusher, "message_start", map[string]any{
+	// FIX28 §2 (F3): the client renders the user turn under an optimistic
+	// temp id; hand it the persisted row id here (Edit already did) so an
+	// edit → fork can name a real message without a reload.
+	startPayload := map[string]any{
 		"message_id":      stream.AssistantID.String(),
 		"conversation_id": stream.ConversationID.String(),
-	})
+	}
+	if stream.UserMessage != nil {
+		startPayload["user_message_id"] = stream.UserMessage.ID.String()
+	}
+	writeSSEEvent(w, flusher, "message_start", startPayload)
 
 	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 

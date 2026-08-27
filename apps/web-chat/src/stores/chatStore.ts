@@ -1241,7 +1241,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
       }
-      await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
+      await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId, tempUserId);
       // Stream completed cleanly. If this was the conversation's
       // first turn, ask the backend to AI-generate a title from the
       // user/assistant pair. Fire-and-forget — failure here falls
@@ -1829,6 +1829,19 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** FIX28 §2 (F3): replace an optimistic message id with the persisted row id
+ *  (user row on message_start / message_complete; assistant row on the host's
+ *  message_complete). Edit / regenerate / feedback then name a real message
+ *  without a reload. */
+function swapMessageId(set: Set, convId: string, fromId: string | undefined, toId: string | undefined) {
+  if (!fromId || !toId || fromId === toId) return;
+  set((s) => {
+    const list = s.messages[convId] ?? [];
+    if (!list.some((m) => m.id === fromId)) return {};
+    return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? { ...m, id: toId } : m)) } };
+  });
+}
+
 async function consumeStream(
   res: Response,
   signal: AbortSignal,
@@ -1836,6 +1849,7 @@ async function consumeStream(
   get: Get,
   convId: string,
   tempAsstId: string,
+  tempUserId?: string,
 ) {
   let realAssistantId: string | null = null;
   // Wall-clock turn duration for the per-message metadata line
@@ -1949,6 +1963,8 @@ async function consumeStream(
       if (evt.event === "message_start") {
         const data = evt.data as SSEMessageStart;
         realAssistantId = data.message_id;
+        // FIX28 §2 (F3): the persisted user row id, when the stream names it.
+        swapMessageId(set, convId, tempUserId, (data as { user_message_id?: string }).user_message_id);
         // Swap the temp id with the real one so feedback / regenerate
         // can act on the persisted row.
         set((s) => {
@@ -2247,6 +2263,9 @@ async function consumeStream(
         flush();
         const data = evt.data as SSEMessageComplete;
         const id = realAssistantId ?? tempAsstId;
+        // FIX28 §2 (F3): the desktop host imports both rows AFTER the turn and
+        // names them here; the browser path named the user row on message_start.
+        swapMessageId(set, convId, tempUserId, (data as { user_message_id?: string }).user_message_id);
         set((s) => {
           const list = s.messages[convId] ?? [];
           return {
@@ -2277,6 +2296,9 @@ async function consumeStream(
             },
           };
         });
+        // FIX28 §2: the host's persisted assistant row id (the page rendered the
+        // turn under the host's client id) — regenerate / feedback need the row.
+        swapMessageId(set, convId, id, (data as { assistant_message_id?: string }).assistant_message_id);
         // Refresh the credit badge — this turn just spent credits.
         bumpUsageVersion();
         // Phase 8 — the turn may have called update_canvas_artifact. If
