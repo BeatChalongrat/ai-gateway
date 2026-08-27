@@ -51,6 +51,7 @@ import { SessionController, type ViewState } from "./session-controller";
 import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
 import { UpdateNotifier } from "./update-check";
+import { ApprovalModeResetter } from "./approval-mode";
 import { buildWebPreferences } from "./web-preferences";
 import { BRIDGE_SURFACE_MEMBERS } from "../shared/bridge-surface";
 
@@ -219,7 +220,7 @@ void app.whenReady().then(async () => {
     const v = grants.add(flags.grant);
     log.info(`PROBE grant ${v.verdict}: ${flags.grant}`);
   }
-  log.info(`grants: [${grants.list().join(", ")}] approvalMode=${config.approvalMode} webSearch=${config.webSearchEnabled}`);
+  log.info(`grants: [${grants.list().join(", ")}] approvalMode(config fallback)=${config.approvalMode} webSearch=${config.webSearchEnabled}`);
   const hostTools = new HostTools(gateway, chatEdge, (req, sig) => coordinator!.runNested(req, sig), log, () => config.webSearchEnabled);
   // FIX22 §1a: the write-time prompt guard — `remember` notes and the
   // writing-style profile are checked against the gateway's guardrail before
@@ -229,6 +230,9 @@ void app.whenReady().then(async () => {
   // URL): compare the gateway's published version with ours; the page shows a
   // dismissible banner. Unconfigured gateway → nothing at all.
   const updateNotifier = new UpdateNotifier(gateway, bridge, app.getVersion(), log);
+  // FIX25 §1c.3: a stored `skip` never survives a restart — it comes back as
+  // `manual` and the page is told once. The sidecar is the store of record.
+  const modeResetter = new ApprovalModeResetter(sidecar, bridge, log);
   coordinator = new TurnCoordinator(
     bridge,
     gateway,
@@ -245,7 +249,10 @@ void app.whenReady().then(async () => {
       ...(flags.model && !isRelease ? { forceModel: flags.model } : {}),
       approvalMode: config.approvalMode,
       promptGuard,
-      onPageReady: () => updateNotifier.onPageReady(),
+      onPageReady: () => {
+        updateNotifier.onPageReady();
+        modeResetter.onPageReady();
+      },
       signOut: () => ctl.signOut("bridge", true),
       pickFolder: async () => {
         const r = await dialog.showOpenDialog(win, { title: "Grant SRAN access to a folder", properties: ["openDirectory", "dontAddToRecent"] });
@@ -298,6 +305,8 @@ void app.whenReady().then(async () => {
   void sidecar
     .ensureStarted()
     .then(async () => {
+      // FIX25 §1c.3: skip → manual at start, before any turn can run.
+      await modeResetter.resetIfSkip().catch((err: Error) => log.warn(`approval-mode reset failed: ${err.message}`));
       // §1.2: reconcile the OS login item to the ONE stored value (no drift).
       try {
         const s = await sidecar!.hostQuery("settings.get", {});

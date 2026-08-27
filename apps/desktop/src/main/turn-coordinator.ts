@@ -33,6 +33,7 @@ import type { GatewayClient, GatewayMessage, GatewayToolCall, GatewayToolDefinit
 import type { GrantStore } from "./grants";
 import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, type NestedRunRequest, type NestedRunResult } from "./host-tools";
 import type { Logger } from "./logger";
+import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
 import {
   applyApprovalMode,
   BROWSER_SITE_PERM,
@@ -163,6 +164,11 @@ export class TurnCoordinator {
   // the app-wide approvalMode for that run. Null outside a task run. Safe as a
   // single field because the scheduler fires tasks one at a time.
   private activeTaskApprovalMode: ReturnType<typeof parseApprovalMode> | null = null;
+  // FIX25 §1b: the interactive mode is read LIVE from the sidecar's settings
+  // (the store of record, written by the composer through settings.set) on
+  // every tool call — not frozen at construction. opts.approvalMode (the
+  // config file) is only the fallback when the sidecar cannot answer.
+  private readonly liveMode: LiveApprovalMode;
   /** FIX8 A1.6: the scheduled task currently firing — lets update_task_schedule
    * reschedule THIS task from inside its own run. Null outside a task run. */
   private activeTaskId: string | null = null;
@@ -187,7 +193,9 @@ export class TurnCoordinator {
     private readonly grants: GrantStore,
     private readonly opts: TurnCoordinatorOptions,
     private readonly log: Logger,
-  ) {}
+  ) {
+    this.liveMode = new LiveApprovalMode(sidecar, parseApprovalMode(opts.approvalMode), log);
+  }
 
   waitForTurn(conversationId: string): Promise<void> {
     return this.turns.get(conversationId)?.done ?? Promise.resolve();
@@ -321,10 +329,16 @@ export class TurnCoordinator {
         this.bridge.postHostResult(payload.requestId, removed, { sites: listApprovedSites(this.permissions) }, removed ? undefined : "not-found");
         return;
       }
-      // ── settings.get — forward straight to the sidecar (single source) ──
+      // ── settings.get — forward to the sidecar (single source for settings) ──
       case "settings.get": {
         const r = await this.sidecar.hostQuery("settings.get", payload.args ?? {});
-        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        // FIX25 §3: `grantedFolders` in the sidecar's snapshot is the WPF-era
+        // list the host never writes; the folder grants live in the host's
+        // GrantStore (the one folders.list / the permission gate read). Overlay
+        // it so every reader of the snapshot sees the real list — this was why
+        // Settings showed "No folders granted yet" beside two live grants.
+        const data = r.ok && r.data && typeof r.data === "object" ? { ...(r.data as Record<string, unknown>), grantedFolders: this.grants.list() } : r.data;
+        this.bridge.postHostResult(payload.requestId, r.ok, data, r.error);
         return;
       }
       // ── settings.set — sidecar persists the value; host applies OS effects ──
@@ -341,11 +355,21 @@ export class TurnCoordinator {
             return;
           }
         }
+        // FIX25 §1c: the approval mode's vocabulary is closed on BOTH sides —
+        // refuse here too so a bad value never reaches the store, and log every
+        // accepted change (the page — never the model — is the only writer:
+        // settings.set is a host.query op, not a tool).
+        if (payload.args?.["key"] === "approvalMode" && parseStoredApprovalMode(payload.args?.["value"]) === null) {
+          this.log.warn(`SETTINGS approvalMode REFUSED: not manual|auto|skip (${String(payload.args?.["value"]).slice(0, 40)})`);
+          this.bridge.postHostResult(payload.requestId, false, undefined, "invalid");
+          return;
+        }
         const r = await this.sidecar.hostQuery("settings.set", payload.args ?? {});
         // §1.2: for host-owned keys, derive the OS effect from the SAME stored
         // value (no second copy). Only after the sidecar accepted+persisted it.
         if (r.ok) {
           const key = payload.args?.["key"];
+          if (key === "approvalMode") this.log.info(`MODE approvalMode → ${String(payload.args?.["value"])} (set by the page; applies from the next tool call)`);
           if ((key === "startWithWindows" || key === "minimizeToTray") && this.opts.applyHostSetting) {
             this.opts.applyHostSetting(String(key), payload.args?.["value"]);
           }
@@ -903,7 +927,10 @@ export class TurnCoordinator {
 
     // Permission (PermissionService + ApprovalMode + SensitiveReadGuard).
     const grants = this.grants.list();
-    const mode = this.activeTaskApprovalMode ?? parseApprovalMode(this.opts.approvalMode); // FIX8 A1.3: task's own mode wins during a task run
+    // FIX8 A1.3: a firing task's own mode wins during its run; otherwise the
+    // interactive mode, read live (FIX25 §1b) so a composer change applies to
+    // THIS call onward — never to a consent already decided (§1c.4).
+    const mode = this.activeTaskApprovalMode ?? (await this.liveMode.current());
     let scope: string;
     let decision: PermissionDecision;
     let decisionLabel: string;
