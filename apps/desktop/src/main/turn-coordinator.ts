@@ -1283,7 +1283,15 @@ export class TurnCoordinator {
       else defs.push(...items);
     };
     insertAfter("search_files", ["read_clipboard", "write_clipboard"]);
-    insertAfter("remember", ["web_search"]);
+    insertAfter("remember", ["web_search", "search_past_conversations"]);
+    // FIX28 §2 (F2): any host tool not placed by name above is STILL offered
+    // (search_past_conversations was registered but never offered, so the
+    // desktop model "could not search"; run_python / run_subagent / the
+    // image-mode tool keep their explicit positions below).
+    const placed = new Set(defs.map((d) => d.function.name));
+    const held = new Set(["run_python", "run_subagent", "generate_image"]);
+    defs.push(...host.filter((h) => !placed.has(h.function.name) && !held.has(h.function.name)));
+    defs.push(...host.filter((h) => h.function.name === "generate_image"));
     defs.push(...host.filter((h) => h.function.name === "run_python"));
     if (!nested) defs.push(...host.filter((h) => h.function.name === "run_subagent"));
     let out = defs.filter((d) => d.function.name !== "run_subagent" || !nested);

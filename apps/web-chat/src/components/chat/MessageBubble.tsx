@@ -1024,13 +1024,29 @@ function tryParseJson(raw: string): unknown {
   }
 }
 
+// FIX28 §2 (stale state): the row hands the bubble ``onEdit`` /
+// ``onSwitchBranch`` only when nothing is streaming. A bubble first rendered
+// DURING the turn got ``undefined``; the later render that carried the
+// handler was skipped by the memo (the message object itself is unchanged
+// after the turn), so "Edit message" never appeared until a remount (leave +
+// re-enter, or reload). Handlers are new closures every render — compare
+// their PRESENCE, not identity, in BOTH branches below.
+function handlersEqual(prev: Props, next: Props): boolean {
+  return (
+    (prev.onEdit === undefined) === (next.onEdit === undefined) &&
+    (prev.onSwitchBranch === undefined) === (next.onSwitchBranch === undefined) &&
+    (prev.onRegenerate === undefined) === (next.onRegenerate === undefined)
+  );
+}
+
 function areEqual(prev: Props, next: Props): boolean {
   const a = prev.message;
   const b = next.message;
   if (a === b) {
     return (
       prev.showFeedback === next.showFeedback &&
-      prev.showRegenerate === next.showRegenerate
+      prev.showRegenerate === next.showRegenerate &&
+      handlersEqual(prev, next)
     );
   }
   return (
@@ -1088,7 +1104,8 @@ function areEqual(prev: Props, next: Props): boolean {
     a.reasoning_notice === b.reasoning_notice &&
     a.image_notice === b.image_notice &&
     prev.showFeedback === next.showFeedback &&
-    prev.showRegenerate === next.showRegenerate
+    prev.showRegenerate === next.showRegenerate &&
+    handlersEqual(prev, next)
   );
 }
 

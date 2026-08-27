@@ -1803,7 +1803,11 @@ export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
 // stream with no BYTES for timeoutMs (≈6 missed beats) is genuinely
 // stalled — a long tool run keeps the clock fresh via heartbeats.
 // Mutable object so tests can shorten it (RESUME_RETRY_DELAYS pattern).
-export const STREAM_IDLE = { timeoutMs: 90_000, checkMs: 5_000 };
+// FIX28 §2 (stale state): ``deadMs`` — a stream with NO bytes at all (not
+// even the server's ": ping" heartbeats) for this long is dead, not slow. It
+// is aborted so the turn finalises (the assistant bubble stops "streaming",
+// Edit / Regenerate come back) instead of the page needing a reload.
+export const STREAM_IDLE = { timeoutMs: 90_000, checkMs: 5_000, deadMs: 180_000 };
 
 // Abortable sleep so a user Stop during the backoff window cancels the
 // resume loop immediately instead of after the timer.
@@ -1930,7 +1934,14 @@ async function consumeStream(
     if (get().stalledStreams[convId]) setStalled(false);
   };
   const watchdog = window.setInterval(() => {
-    if (Date.now() - lastActivityAt > STREAM_IDLE.timeoutMs) setStalled(true);
+    const idle = Date.now() - lastActivityAt;
+    if (idle > STREAM_IDLE.timeoutMs) setStalled(true);
+    if (idle > STREAM_IDLE.deadMs) {
+      // FIX28 §2: a wedged turn ends here — abort → the send path finalises
+      // the assistant row (cancelled) and the composer/bubbles unfreeze.
+      window.clearInterval(watchdog);
+      get().abortControllers[convId]?.abort();
+    }
   }, STREAM_IDLE.checkMs);
 
   try {
