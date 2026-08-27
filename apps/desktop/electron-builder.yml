@@ -35,7 +35,7 @@ extraResources:
   # copied verbatim into <install>\resources\sidecar\. The packaged app
   # resolves it as process.resourcesPath\sidecar\SranDesktop.ToolsSidecar.exe
   # (index.ts, FIX19 two-mode resolution).
-  - from: ../../SranDesktop/publish/sidecar-fix25
+  - from: ../../SranDesktop/publish/sidecar-fix26
     to: sidecar
     filter:
       - "**/*"

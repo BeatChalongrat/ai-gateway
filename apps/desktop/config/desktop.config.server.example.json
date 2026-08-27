@@ -8,7 +8,7 @@
   "gatewayUrl": "https://gateway.sran.example.internal",
   "chatEdgeUrl": "https://chat-edge.sran.example.internal",
   "defaultModel": "auto",
-  "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix25\\SranDesktop.ToolsSidecar.exe",
+  "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix26\\SranDesktop.ToolsSidecar.exe",
   "approvalMode": "auto",
   "webSearchEnabled": false,
   "protocolScheme": "sran-dev",
