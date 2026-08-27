@@ -1,16 +1,19 @@
 // Batch 1 W3 — vision-capability gate for image attachments.
 //
-// The server catalog already ships `capabilities: []string` with
-// "vision" on the rows that accept image input; web just never checked
-// it, so a user could attach an image to a text-only model and get an
-// opaque provider error. This mirrors the desktop's test — see
-// ChatEdgeModels.SupportsVision (vision|image_input|multimodal) and
-// CurrentModelSupportsVision (Auto and unknown catalog entries are
-// optimistic: the gateway rejects politely) — do not widen the match.
+// The server catalog ships `capabilities: []string` with "vision" on the
+// rows that accept image input. Since FIX27 that string comes from ONE
+// source: the gateway's `model_configs.supports_vision` flag (chat-edge
+// /models appends "vision" from it) — the same string decides the attach
+// button's label, the picker's "Reads images" badge and this gate, so a
+// label and a behaviour can no longer disagree. Auto and ids missing from
+// the catalog are optimistic (the gateway routes/rejects politely) — do not
+// widen the match.
 //
-// One gate covers every entry path: the composer's picker + paste run
-// through ChatInput.handleFiles, and both pages' drag-and-drop zones
-// call gateImagesForVision before uploadFiles.
+// FIX27 §2.2 — a file is NEVER dropped silently. When the active model
+// cannot read images the files stay staged, the toast says so and offers
+// the way out as ONE click: "Switch to <a vision model>". The send itself
+// is blocked by ChatInput.submit (visionBlockedSend) until the model
+// changes or the image is removed.
 
 import { toast } from "@/components/ui/Toast";
 import { isImageFile } from "@/lib/fileUtil";
@@ -20,7 +23,7 @@ import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
 const VISION_CAPS = ["vision", "image_input", "multimodal"] as const;
 
-function hasVisionCap(model: ModelEntry): boolean {
+export function hasVisionCap(model: ModelEntry): boolean {
   return VISION_CAPS.some((c) => model.capabilities?.includes(c));
 }
 
@@ -36,26 +39,41 @@ export function modelAcceptsImages(
   return model ? hasVisionCap(model) : true;
 }
 
-/** Filters image files out when the active model can't read them,
- *  toasting once with a concrete fix (a vision-capable model from the
- *  catalog) rather than a bare rejection. Non-image files pass through
- *  untouched. Reads the model list via getState() so stale closures
- *  (e.g. the composer's mount-time paste listener) still gate against
- *  the CURRENT catalog. */
+/** The vision-capable model the switch offer names: the first catalog
+ *  entry (other than the active one) that reads images. Prefers a
+ *  well-known general model when present so the offer is not a codex. */
+export function visionAlternative(activeModelId: string | null, models: ModelEntry[]): ModelEntry | null {
+  const candidates = models.filter((m) => m.id !== activeModelId && hasVisionCap(m) && (!m.model_kind || m.model_kind === "chat"));
+  const preferred = candidates.find((m) => /^gpt-5\.6-terra$|^gpt-4o$/.test(m.id));
+  return preferred ?? candidates[0] ?? null;
+}
+
+/** Shows the "this model can't read images — switch?" toast with the
+ *  one-click switch. Returns true when a toast was shown. */
+export function offerVisionSwitch(activeModelId: string | null, models: ModelEntry[]): boolean {
+  const alt = visionAlternative(activeModelId, models);
+  if (alt) {
+    toast(tOutside("input.visionUnsupported", { model: alt.name ?? alt.id }), {
+      label: tOutside("input.visionSwitchTo", { model: alt.name ?? alt.id }),
+      onClick: () => useModelStore.getState().selectModel(alt.id),
+    });
+  } else {
+    toast(tOutside("input.visionUnsupportedNoAlt"));
+  }
+  return true;
+}
+
+/** FIX27: keeps every file (images included) and, when the active model
+ *  cannot read images, shows the switch offer instead of dropping them.
+ *  Reads the model list via getState() so stale closures (e.g. the
+ *  composer's mount-time paste listener) still gate against the CURRENT
+ *  catalog. Non-image files never trigger the offer. */
 export function gateImagesForVision(
   files: File[],
   activeModelId: string | null,
 ): File[] {
   const models = useModelStore.getState().models;
   if (modelAcceptsImages(activeModelId, models)) return files;
-  const kept = files.filter((f) => !isImageFile(f));
-  if (kept.length !== files.length) {
-    const alt = models.find((m) => m.id !== activeModelId && hasVisionCap(m));
-    toast(
-      alt
-        ? tOutside("input.visionUnsupported", { model: alt.name ?? alt.id })
-        : tOutside("input.visionUnsupportedNoAlt"),
-    );
-  }
-  return kept;
+  if (files.some((f) => isImageFile(f))) offerVisionSwitch(activeModelId, models);
+  return files;
 }

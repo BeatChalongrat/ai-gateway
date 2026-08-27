@@ -14,7 +14,8 @@
 // tokens) is unchanged from the previous flat-list version.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, ImagePlus, Search, Sparkles, X } from "lucide-react";
+import { hasVisionCap } from "@/lib/visionGate";
+import { BrainCircuit, ImagePlus, Search, Sparkles, X, Eye } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
@@ -394,6 +395,7 @@ function ModelPicker({
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                vision={hasVisionCap(m)}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                 description={m.description}
               />
@@ -412,6 +414,7 @@ function ModelPicker({
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
                 imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                vision={hasVisionCap(m)}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                 description={m.description}
               />
@@ -471,6 +474,7 @@ function ModelPicker({
                   onClick={() => onPickModel(m)}
                   reasoning={Boolean(m.reasoning?.supported)}
                   imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                vision={hasVisionCap(m)}
                   mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                   description={m.description}
                 />
@@ -531,6 +535,10 @@ interface RowProps {
   reasoning?: boolean;
   /** Phase C — show an image badge when the model can generate images. */
   imageGen?: boolean;
+  /** FIX27 — "Reads images": the model accepts image input. Derived from the
+   *  same capability string the attach gate reads (visionGate.hasVisionCap),
+   *  so the badge and the gate cannot disagree. */
+  vision?: boolean;
   /** Sprint 2A.5 — media model kind badge (🎬 video / 🎵 audio / 🔊 tts). */
   mediaKind?: "video" | "audio" | "tts";
   /** Sprint 3 — coarse cost-tier badge. Dormant until the catalog serves it. */
@@ -561,7 +569,7 @@ const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high", DictKey> = {
 };
 
 function ModelRow({
-  label, sub, selected, onClick, leading, reasoning, imageGen, mediaKind, tier,
+  label, sub, selected, onClick, leading, reasoning, imageGen, vision, mediaKind, tier,
   description,
 }: RowProps) {
   const t = useT();
@@ -596,6 +604,16 @@ function ModelRow({
         >
           <BrainCircuit className="h-3 w-3" aria-hidden />
           {t("model.reasoningBadge")}
+        </span>
+      ) : null}
+      {vision ? (
+        <span
+          title={t("model.visionBadge")}
+          aria-label={t("model.visionBadge")}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
+        >
+          <Eye className="h-3 w-3" aria-hidden />
+          {t("model.visionBadge")}
         </span>
       ) : null}
       {imageGen ? (

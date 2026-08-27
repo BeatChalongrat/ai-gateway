@@ -22,7 +22,7 @@ import {
   MAX_FILES_PER_MESSAGE,
   validateFile,
 } from "@/lib/fileUtil";
-import { gateImagesForVision, modelAcceptsImages } from "@/lib/visionGate";
+import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch } from "@/lib/visionGate";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
@@ -512,7 +512,8 @@ export function ChatInput({
       !acceptsImages &&
       pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))
     ) {
-      toast(t("input.visionBlockedSend"));
+      // FIX27 §2.2: the same one-click switch offer as attach time.
+      offerVisionSwitch(activeModelId ?? null, models);
       return;
     }
     const t2 = text.trim();

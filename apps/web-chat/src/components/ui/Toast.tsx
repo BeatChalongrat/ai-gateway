@@ -17,31 +17,41 @@ import { useSidebarStore } from "@/stores/sidebarStore";
 // when the sidebar is expanded at desktop sizes.
 const SIDEBAR_DESKTOP_WIDTH = 260;
 
+/** FIX27 §2.2 — an optional one-click action on a toast ("Switch to GPT-4o"),
+ *  so a message that names the way out also offers it. */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastState {
   message: string | null;
+  action: ToastAction | null;
   // Bumped on every push so an identical message still re-triggers
   // the auto-dismiss timer.
   nonce: number;
-  show: (message: string) => void;
+  show: (message: string, action?: ToastAction | null) => void;
   clear: () => void;
 }
 
 export const useToastStore = create<ToastState>((set) => ({
   message: null,
+  action: null,
   nonce: 0,
-  show(message) {
-    set((s) => ({ message, nonce: s.nonce + 1 }));
+  show(message, action = null) {
+    set((s) => ({ message, action, nonce: s.nonce + 1 }));
   },
   clear() {
-    set({ message: null });
+    set({ message: null, action: null });
   },
 }));
 
 // Convenience wrapper so call sites read cleanly.
-export const toast = (message: string) => useToastStore.getState().show(message);
+export const toast = (message: string, action?: ToastAction | null) => useToastStore.getState().show(message, action ?? null);
 
 export function ToastViewport({ duration = 2500 }: { duration?: number }) {
   const message = useToastStore((s) => s.message);
+  const action = useToastStore((s) => s.action);
   const nonce = useToastStore((s) => s.nonce);
   const clear = useToastStore((s) => s.clear);
   // Sidebar collapsed state — read synchronously from the shared
@@ -69,9 +79,10 @@ export function ToastViewport({ duration = 2500 }: { duration?: number }) {
 
   useEffect(() => {
     if (!message) return;
-    const t = window.setTimeout(clear, duration);
+    // A toast that offers an action stays long enough to be clicked.
+    const t = window.setTimeout(clear, action ? Math.max(duration, 8000) : duration);
     return () => window.clearTimeout(t);
-  }, [message, nonce, duration, clear]);
+  }, [message, action, nonce, duration, clear]);
 
   if (!message) return null;
   // ``position: fixed`` is always viewport-anchored. Offset =

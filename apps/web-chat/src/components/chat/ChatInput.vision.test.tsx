@@ -143,13 +143,20 @@ function pasteImage(textarea: HTMLTextAreaElement, file: File) {
 }
 
 describe("vision gating", () => {
-  it("blocks pasted images on a non-vision model, naming a capable model", async () => {
+  it("FIX27: keeps a pasted image on a non-vision model and offers the switch as one click", async () => {
+    mockApi.uploadFile.mockResolvedValue({ id: "f1", extraction_status: "completed" });
     const { textarea } = mount(TEXT_ONLY.id);
 
     await act(async () => pasteImage(textarea, pngFile()));
 
-    expect(mockApi.uploadFile).not.toHaveBeenCalled();
-    expect(useToastStore.getState().message).toContain("GPT Vision");
+    // never dropped silently: the file is staged like any other
+    expect(mockApi.uploadFile).toHaveBeenCalledTimes(1);
+    const st = useToastStore.getState();
+    expect(st.message).toContain("GPT Vision");
+    expect(st.action?.label).toContain("GPT Vision");
+    // the one click switches the model
+    act(() => st.action!.onClick());
+    expect(useModelStore.getState().selectedModelId).toBe(VISION.id);
   });
 
   it("lets pasted images through on a vision model", async () => {
@@ -188,7 +195,8 @@ describe("vision gating", () => {
     expect(onSend).not.toHaveBeenCalled();
     // The attachment survives — nothing is silently dropped.
     expect(useChatStore.getState().pendingFiles["c1"]).toHaveLength(1);
-    expect(useToastStore.getState().message).toContain("remove the image");
+    expect(useToastStore.getState().message).toContain("GPT Vision");
+    expect(useToastStore.getState().action?.label).toContain("GPT Vision");
 
     // Switching back re-enables the send.
     m.switchModel(VISION.id);
@@ -196,12 +204,14 @@ describe("vision gating", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
-  it("gateImagesForVision (the drag-drop pages' gate) filters images and keeps documents", () => {
+  it("gateImagesForVision (the drag-drop pages' gate) keeps every file and offers the switch", () => {
     const pdf = new File(["%PDF"], "doc.pdf", { type: "application/pdf" });
-    const kept = gateImagesForVision([pngFile(), pdf], TEXT_ONLY.id);
+    const png = pngFile();
+    const kept = gateImagesForVision([png, pdf], TEXT_ONLY.id);
 
-    expect(kept).toEqual([pdf]);
+    expect(kept).toEqual([png, pdf]);
     expect(useToastStore.getState().message).toContain("GPT Vision");
+    expect(useToastStore.getState().action?.label).toContain("GPT Vision");
 
     // Auto and unknown ids stay optimistic (desktop parity).
     expect(gateImagesForVision([pngFile()], "auto")).toHaveLength(1);

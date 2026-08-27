@@ -66,6 +66,7 @@ export const en = {
   "input.attachNoImages": "Attach files (this model can't read images)",
   "input.visionUnsupported": "This model can't read images — switch to {model} to attach them.",
   "input.visionUnsupportedNoAlt": "This model can't read images.",
+  "input.visionSwitchTo": "Switch to {model}",
   "input.visionBlockedSend": "This model can't read images — switch models or remove the image to send.",
   "input.voice": "Voice input",
   "input.imageMode": "Generate an image",
@@ -221,7 +222,8 @@ export const en = {
   "model.popular": "Popular",
   "model.recent": "Recently used",
   "model.reasoningBadge": "Thinks",
-  "model.imageBadge": "Image",
+  "model.imageBadge": "Makes images",
+  "model.visionBadge": "Reads images",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -1033,6 +1035,7 @@ const th: Record<DictKey, string> = {
   "input.attachNoImages": "แนบไฟล์ (โมเดลนี้อ่านรูปภาพไม่ได้)",
   "input.visionUnsupported": "โมเดลนี้อ่านรูปภาพไม่ได้ — เปลี่ยนไปใช้ {model} เพื่อแนบรูป",
   "input.visionUnsupportedNoAlt": "โมเดลนี้อ่านรูปภาพไม่ได้",
+  "input.visionSwitchTo": "เปลี่ยนไปใช้ {model}",
   "input.visionBlockedSend": "โมเดลนี้อ่านรูปภาพไม่ได้ — เปลี่ยนโมเดลหรือลบรูปออกก่อนส่ง",
   "input.voice": "ป้อนเสียง",
   "input.imageMode": "สร้างรูปภาพ",
@@ -1187,6 +1190,7 @@ const th: Record<DictKey, string> = {
   "model.recent": "ใช้ล่าสุด",
   "model.reasoningBadge": "คิดวิเคราะห์",
   "model.imageBadge": "สร้างรูป",
+  "model.visionBadge": "อ่านรูปได้",
 
   // Memory page
   "memory.back": "กลับไปแชท",
