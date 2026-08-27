@@ -312,6 +312,18 @@ class Settings(BaseSettings):
     provider_timeout_connect: float = 5.0
     provider_timeout_read: float = 30.0
     provider_max_retries: int = 2
+    # FIX26 §2.2 — armour against a hung request taking the worker down.
+    # A non-streaming chat completion is bounded end to end (DLP, DB, cache,
+    # provider, restore); a streaming one is bounded per-frame (idle) and
+    # in total (hard). Chat admission per worker is capped so one stuck
+    # request cannot consume the worker; /ready reports requests that have
+    # outlived the bound ("stuck") and goes red.
+    request_hard_timeout_seconds: float = 120.0
+    stream_idle_timeout_seconds: float = 60.0
+    stream_hard_timeout_seconds: float = 900.0
+    chat_inflight_limit: int = 64
+    chat_admit_timeout_seconds: float = 5.0
+    readiness_timeout_seconds: float = 3.0
     image_generation_timeout_seconds: float = 180.0
     openai_image_timeout_seconds: float = 180.0
     # Ceiling for /v1/voice/* (transcribe + synthesize). Audio work on a

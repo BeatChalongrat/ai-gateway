@@ -398,6 +398,17 @@ services:
   backend:
     build:
       context: ./backend
+    # FIX26 §2.2 — the backend had NO healthcheck, and /health answered 200
+    # through the whole FIX24 outage. /ready exercises the real request
+    # path (async DB, Redis, a real DLP scan) and reports stuck in-flight
+    # requests; a 503 here is "cannot serve". The probe is bounded server-
+    # side (readiness_timeout_seconds) and client-side (timeout=4).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     environment:
       # Pin UTF-8 everywhere so Thai-language request bodies, mask
       # tokens, and the ฿ symbol travel through Python stdout / SQL

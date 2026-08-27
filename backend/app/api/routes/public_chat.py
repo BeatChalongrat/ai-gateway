@@ -31,6 +31,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, get_resolved_api_key
 from app.core.db import get_async_db
 from app.core.config import settings
+from app.core.bounded_stream import bounded_sse
+from app.core.inflight import AdmissionTimeout, registry as inflight_registry
 from app.core.exceptions import (
     DLPViolationError,
     GuardrailViolationError,
@@ -319,6 +321,98 @@ async def chat_completions(
     response: Response,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
+):
+    """FIX26 §2.2 — the armoured entry point.
+
+    Wraps ``_chat_completions_impl`` (the unchanged pipeline) with:
+    * an admission cap per worker — a full worker answers 503 fast
+      instead of queueing new users behind stuck requests;
+    * an in-flight registry ``/ready`` reads — a request that outlives
+      its bound turns readiness red;
+    * a HARD timeout on the whole non-streaming path, and on the
+      pre-stream phase (DLP, DB, router, provider connect) of a stream —
+      a hung request returns a 504 to THIS user instead of holding the
+      worker forever;
+    * a bounded stream body (idle + hard) that ends with an SSE error
+      frame + ``[DONE]`` and closes the inner generator so billing /
+      log finalizers still run.
+    Every early return or raise inside the pipeline releases the slot.
+    """
+    from fastapi.responses import JSONResponse as _ArmourResponse
+
+    reg = inflight_registry()
+    hard_s = float(settings.request_hard_timeout_seconds)
+    try:
+        key = await reg.admit(timeout_s=float(settings.chat_admit_timeout_seconds), request_id=None)
+    except AdmissionTimeout as exc:
+        logger.error("chat_admission_refused", limit=exc.limit, stream=bool(payload.stream))
+        return _ArmourResponse(
+            status_code=503,
+            headers={"Retry-After": "2"},
+            content={"error": {"type": "server_busy", "message": (
+                f"This gateway worker already has {exc.limit} chat requests in flight; "
+                "please retry in a moment."
+            )}},
+        )
+
+    released = False
+
+    def _release() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            reg.release(key)
+
+    try:
+        result = await asyncio.wait_for(
+            _chat_completions_impl(payload, response, auth, session),
+            timeout=hard_s,
+        )
+    except asyncio.TimeoutError:
+        _release()
+        logger.error("chat_request_hard_timeout", timeout_s=hard_s, model=payload.model, stream=bool(payload.stream))
+        return _ArmourResponse(
+            status_code=504,
+            content={"error": {"type": "upstream_timeout", "message": (
+                f"The request did not complete within {hard_s:.0f}s and was closed. "
+                "Please retry; if this repeats, the gateway is unhealthy."
+            )}},
+        )
+    except BaseException:
+        _release()
+        raise
+
+    if isinstance(result, StreamingResponse):
+        inner = result.body_iterator
+        request_id = result.headers.get("x-request-id") or None
+
+        async def _bounded_body():
+            try:
+                async for _frame in bounded_sse(
+                    inner,
+                    idle_timeout_s=float(settings.stream_idle_timeout_seconds),
+                    hard_timeout_s=float(settings.stream_hard_timeout_seconds),
+                    request_id=request_id,
+                    on_timeout=lambda kind: logger.error(
+                        "chat_stream_timeout", kind=kind, request_id=request_id, model=payload.model
+                    ),
+                ):
+                    yield _frame
+            finally:
+                _release()
+
+        result.body_iterator = _bounded_body()
+        return result
+
+    _release()
+    return result
+
+
+async def _chat_completions_impl(
+    payload: ChatCompletionsRequest,
+    response: Response,
+    auth: ResolvedApiKey,
+    session: AsyncSession,
 ):
     orchestrator = GatewayOrchestrator()
 

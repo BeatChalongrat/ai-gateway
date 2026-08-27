@@ -71,6 +71,131 @@ def _probe_sidecar(kind: str, addr: str, timeout: float = 0.5) -> str:
                 pass
 
 
+# ── FIX26 §2.2 — liveness vs readiness ──────────────────────────────────
+#
+# /health (above/below) is a cached, mostly-sync component check: during
+# the FIX24 wedge it answered 200 for the whole outage because the DB and
+# Redis were fine — the chat PATH was stuck. So:
+#
+#   /live   — the process is up and its event loop turns. Constant.
+#   /ready  — a chat request could complete NOW, in THIS worker: the real
+#             engines on the request path are exercised (async DB checkout,
+#             async Redis round-trip, a REAL DLP scan through the configured
+#             engine that must find the planted PII), plus the in-flight
+#             registry: any chat request that has outlived the hard timeout
+#             is "stuck" and turns readiness red. The whole probe runs under
+#             ``readiness_timeout_seconds`` so it cannot itself hang — a
+#             probe that wedges is worse than none. Worker-local: gunicorn
+#             routes each probe to one of N workers, so a monitor sees a
+#             wedged worker on ~1/N of probes; ``worker_pid`` is reported
+#             so the pattern is legible.
+#
+# Check functions are module attributes so tests can monkeypatch them.
+
+_PLANTED_PII = "probe: call 081-234-5678 or mail probe@example.com"
+
+
+async def _ready_check_db() -> str:
+    from app.core.db import get_async_engine
+
+    engine_async = get_async_engine()
+    async with engine_async.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+    return "ok"
+
+
+async def _ready_check_redis() -> str:
+    from app.services._redis_pool import get_async_redis
+
+    r = get_async_redis()
+    pong = await r.ping()
+    return "ok" if pong else "no-pong"
+
+
+async def _ready_check_dlp() -> str:
+    """A real scan through the engine the request path uses."""
+    engine_name = str(getattr(settings, "dlp_engine", "python")).lower()
+    if engine_name in ("rust", "shadow"):
+        from app.services.dlp.rust_dlp_client import RustDlpClient
+
+        res = await RustDlpClient.instance().scan_text(_PLANTED_PII, ner_enabled=False)
+        if res is None:
+            raise RuntimeError("rust dlp engine unreachable")
+        found = {m.detector_name for m in res.matches}
+    else:
+        from app.services.dlp.detectors.registry import get_default_registry
+
+        found = {m.detector_name for m in get_default_registry(ner_enabled=False).scan_text(_PLANTED_PII)}
+    if not found & {"phone", "email"}:
+        raise RuntimeError(f"dlp engine scanned but found nothing ({engine_name})")
+    return f"ok ({engine_name})"
+
+
+async def _ready_loop_lag_ms() -> float:
+    t0 = time.perf_counter()
+    await asyncio.sleep(0)
+    return round((time.perf_counter() - t0) * 1000, 2)
+
+
+@router.get("/live")
+async def live():
+    """Liveness: the process is alive and its event loop turns."""
+    import os
+
+    return {"status": "alive", "worker_pid": os.getpid()}
+
+
+@router.get("/ready")
+async def ready():
+    """Readiness: a chat request could complete now, in this worker."""
+    import os
+
+    from app.core.inflight import registry
+
+    budget = float(getattr(settings, "readiness_timeout_seconds", 3.0))
+    stuck_after = float(getattr(settings, "request_hard_timeout_seconds", 120.0)) + 30.0
+    checks: dict = {"worker_pid": os.getpid()}
+    failures: list[str] = []
+
+    async def _run(name: str, coro):
+        try:
+            checks[name] = await coro
+        except Exception as exc:  # noqa: BLE001 — every failure is a reason
+            checks[name] = f"error: {type(exc).__name__}: {str(exc)[:120]}"
+            failures.append(name)
+
+    async def _all():
+        checks["event_loop_lag_ms"] = await _ready_loop_lag_ms()
+        await asyncio.gather(
+            _run("database", _ready_check_db()),
+            _run("redis", _ready_check_redis()),
+            _run("dlp_engine", _ready_check_dlp()),
+        )
+
+    t0 = time.perf_counter()
+    try:
+        await asyncio.wait_for(_all(), timeout=budget)
+    except asyncio.TimeoutError:
+        failures.append("probe_timeout")
+        checks["probe"] = f"timed out after {budget:.1f}s"
+    checks["probe_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+
+    snap = registry().snapshot(stuck_after_s=stuck_after)
+    checks["inflight"] = {
+        "count": snap.count,
+        "oldest_age_s": snap.oldest_age_s,
+        "stuck": snap.stuck,
+        "limit": snap.limit,
+        "available": snap.available,
+    }
+    if snap.stuck:
+        failures.append("stuck_requests")
+
+    status = "ready" if not failures else "not-ready"
+    body = {"status": status, "failures": failures, "checks": checks}
+    return JSONResponse(status_code=200 if not failures else 503, content=body)
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health():
     global _health_cache, _health_cache_ts
