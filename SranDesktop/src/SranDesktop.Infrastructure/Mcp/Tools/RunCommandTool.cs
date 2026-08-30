@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SranDesktop.Application.Interfaces;
@@ -44,10 +45,12 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
 
     public string Name => "run_command";
     public string Description =>
-        "Execute a Windows shell command (cmd.exe / PowerShell) and return stdout+stderr and the exit code. " +
-        "Long-running commands (builds, tests, installs) are allowed; the timeout is configurable and defaults " +
-        "high. Set working_directory once and it is remembered for the following commands in this conversation, " +
-        "so a multi-step build stays in the project folder.";
+        "Run a command in Windows PowerShell 5.1 (the default interpreter — use PowerShell syntax: Get-ChildItem, " +
+        "Get-Date, Select-Object, pipelines) and return stdout+stderr and the exit code. For a cmd.exe built-in " +
+        "prefix the command with `cmd /c` (e.g. `cmd /c dir /b`); a `powershell …` or `pwsh …` prefix runs that " +
+        "interpreter with your own flags. Long-running commands (builds, tests, installs) are allowed; the timeout " +
+        "is configurable and defaults high. Set working_directory once and it is remembered for the following " +
+        "commands in this conversation, so a multi-step build stays in the project folder.";
     public ToolCategory Category => ToolCategory.Shell;
     public PermissionLevel DefaultPermission => PermissionLevel.Ask;
 
@@ -69,7 +72,6 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
         if (string.IsNullOrWhiteSpace(command))
             return ToolResult.Fail("'command' is required.");
 
-        var normalized = command.ToLowerInvariant().Trim();
         var threat = DestructiveCommandDetector.Analyze(command);
         if (threat is not null)
         {
@@ -95,7 +97,7 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
             return ToolResult.Fail(wdError);
 
         var timeout = ResolveTimeout(arguments);
-        var (shell, shellArgs) = PickShell(normalized, command);
+        var (shell, shellArgs) = PickShell(command);
         var spec = new ProcessRunSpec(shell, shellArgs, workingDirectory);
 
         // Bounded so a flooding build can't blow memory/context (head+tail kept).
@@ -185,12 +187,71 @@ public sealed class RunCommandTool : IMcpTool, ISupportsOutputStreaming
         return TimeSpan.FromSeconds(Math.Clamp(seconds, MinTimeoutSeconds, MaxTimeoutSeconds));
     }
 
-    private static (string Shell, string Args) PickShell(string normalized, string command)
+    // FIX31 Part 3. Before this round the default interpreter was cmd.exe, and a
+    // `powershell …` prefix was re-wrapped in our own `-Command`, so the model's
+    // `powershell -Command "Get-Date"` became `-NoProfile -NonInteractive -Command
+    // -Command "Get-Date"` and failed on "-Command is not recognized" — while a
+    // bare `Get-Date` failed in cmd. Measured side by side (FIX31 report): only
+    // `powershell "…"` (no flag) worked, which is how one sweep call passed.
+    //
+    // Now: Windows PowerShell 5.1 is the default (every cmdlet the model reached
+    // for in the sweeps is a PowerShell cmdlet; cmd is the legacy shell). The
+    // command text travels as -EncodedCommand so quotes, pipes and non-ASCII
+    // survive the Win32 command-line parser untouched; output is forced to
+    // UTF-8 (the process runner reads UTF-8); the native exit code is
+    // propagated. A named interpreter — `cmd …`, `powershell …`, `pwsh …` —
+    // runs VERBATIM with the model's own flags (only -NoProfile/-NonInteractive
+    // are added when absent, so a stray profile script or Read-Host cannot hang
+    // the call). The prompt states exactly this (prompt-assembler.ts), and the
+    // tests below pin both the statement and the behaviour.
+    private static readonly System.Text.RegularExpressions.Regex NamedInterpreter =
+        new(@"^\s*(?<name>pwsh|powershell|cmd)(?:\.exe)?(?:\s+(?<rest>.*))?$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline);
+
+    internal static (string Shell, string Args) PickShell(string command)
     {
-        if (normalized.StartsWith("pwsh "))
-            return ("pwsh.exe", "-NoProfile -NonInteractive -Command " + command[5..]);
-        if (normalized.StartsWith("powershell "))
-            return ("powershell.exe", "-NoProfile -NonInteractive -Command " + command[11..]);
-        return ("cmd.exe", "/c " + command);
+        var m = NamedInterpreter.Match(command);
+        if (m.Success)
+        {
+            var rest = (m.Groups["rest"].Success ? m.Groups["rest"].Value : "").Trim();
+            switch (m.Groups["name"].Value.ToLowerInvariant())
+            {
+                case "cmd":
+                    // "cmd /c dir /b" → cmd.exe /c dir /b ; "cmd dir /b" → cmd.exe /c dir /b
+                    if (!rest.StartsWith("/c", StringComparison.OrdinalIgnoreCase)
+                        && !rest.StartsWith("/k", StringComparison.OrdinalIgnoreCase))
+                        rest = "/c " + rest;
+                    return ("cmd.exe", rest);
+                case "pwsh":
+                    return ("pwsh.exe", WithQuietFlags(rest));
+                default:
+                    return ("powershell.exe", WithQuietFlags(rest));
+            }
+        }
+
+        // With stdout/stderr redirected, powershell.exe serialises its error and
+        // progress streams to stderr as CLIXML ("#< CLIXML <Objs …"), which is
+        // noise to a model. So: progress silenced, and the command runs inside a
+        // block whose error stream is merged (2>&1) into plain text on stdout.
+        // `$?` is captured INSIDE the block, right after the last statement (the
+        // `$?` seen after `& { }` reports the invocation, not the inner error);
+        // a native exit code wins when there is one.
+        var script =
+            "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $OutputEncoding=[System.Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'\n" +
+            "& {\n" +
+            command + "\n" +
+            "$global:__ok = $?\n" +
+            "} 2>&1 | Out-String -Stream\n" +
+            "if ($null -ne $LASTEXITCODE) { exit $LASTEXITCODE } elseif (-not $global:__ok) { exit 1 }";
+        var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+        return ("powershell.exe", "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + encoded);
+    }
+
+    private static string WithQuietFlags(string rest)
+    {
+        var flags = "";
+        if (!rest.Contains("-noprofile", StringComparison.OrdinalIgnoreCase)) flags += "-NoProfile ";
+        if (!rest.Contains("-noninteractive", StringComparison.OrdinalIgnoreCase)) flags += "-NonInteractive ";
+        return (flags + rest).Trim();
     }
 }

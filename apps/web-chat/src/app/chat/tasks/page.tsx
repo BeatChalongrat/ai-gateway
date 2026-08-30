@@ -368,6 +368,8 @@ function LocalTasksSection({
 
 const OUTCOME_LABEL: Record<string, string> = {
   ok: "Ran", error: "Failed", catchup: "Caught up", skipped: "Skipped",
+  // FIX31 §1.2: the run needed the user's permission and nobody was there.
+  needs_permission: "Needed permission",
 };
 const REASON_LABEL: Record<string, string> = {
   asleep: "the machine was asleep",
@@ -406,7 +408,11 @@ function HistoryModal({ task, onClose }: { task: TaskDto | null; onClose: () => 
                 <span className="font-medium text-text-primary">{OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
                 <span className="text-text-muted">{formatDate(r.ranAt)}</span>
               </div>
-              {r.reason ? (
+              {r.outcome === "needs_permission" ? (
+                <p className="mt-0.5 text-text-secondary" data-testid="task-run-needs-permission">
+                  Needed your permission for {r.reason ? <span className="font-mono">{r.reason}</span> : "a tool"} — nobody was there to answer, so the action was not performed (the app never answers for you). To let this task act unattended, set its permission mode to “Never asks”.
+                </p>
+              ) : r.reason ? (
                 <p className="mt-0.5 text-text-secondary" title={r.reason}>Skipped because {REASON_LABEL[r.reason] ?? r.reason}.</p>
               ) : null}
               {r.result ? <p className="mt-0.5 line-clamp-2 text-text-muted">{r.result}</p> : null}

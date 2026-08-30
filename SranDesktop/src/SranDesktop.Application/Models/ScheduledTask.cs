@@ -45,11 +45,14 @@ public sealed class TaskRun
     public DateTimeOffset RanAt { get; set; } = DateTimeOffset.UtcNow;
     /// <summary>The scheduled occurrence this attempt was for (null for run-now).</summary>
     public DateTimeOffset? ScheduledFor { get; set; }
-    /// <summary>"ok" | "error" | "skipped" | "catchup".</summary>
+    /// <summary>"ok" | "error" | "skipped" | "catchup" | "needs_permission" (FIX31 §1.2:
+    /// the run needed the user's permission for a tool while nobody was there; the
+    /// action was not performed and never answered for the user).</summary>
     public string Outcome { get; set; } = "";
     /// <summary>For a skip: "asleep" (machine was off/asleep at the scheduled time)
     /// | "prev_running" (this task's previous run was still going) | "others_running"
-    /// (other tasks were already running). Null otherwise.</summary>
+    /// (other tasks were already running). For needs_permission: the tool name(s).
+    /// Null otherwise.</summary>
     public string? Reason { get; set; }
     /// <summary>Truncated result or error text.</summary>
     public string? Result { get; set; }

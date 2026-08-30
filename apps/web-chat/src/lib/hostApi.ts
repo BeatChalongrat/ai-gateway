@@ -53,6 +53,17 @@ export interface CatalogConnectorDto {
   status: string;
 }
 
+/** FIX31 Part 2: what the page may know about an oauth2 connector — never a token. */
+export interface ConnectorOAuthStatusDto {
+  connectorId: string;
+  configured: boolean;
+  enabled: boolean;
+  connected: boolean;
+  expiresAt: number | null;
+  scopes: string[];
+  inFlight: boolean;
+}
+
 export interface InstalledConnectorDto {
   id: string;
   isCustom: boolean;
@@ -143,8 +154,12 @@ export const hostApi = {
   installConnector: (connectorId: string) =>
     bridge.hostQuery<{ installed: boolean; cancelled?: boolean }>("connectors.install", { connectorId }, 60_000),
   uninstallConnector: (connectorId: string) => bridge.hostQuery("connectors.uninstall", { connectorId }),
-  oauthConnect: (connectorId: string) => bridge.hostQuery("connectors.oauthConnect", { connectorId }),
-  oauthDisconnect: (connectorId: string) => bridge.hostQuery("connectors.oauthDisconnect", { connectorId }),
+  // The sign-in happens in the SYSTEM browser and can take a while (the user
+  // may read the provider's consent screen): a long timeout, host-bounded at 10 min.
+  oauthConnect: (connectorId: string) => bridge.hostQuery<{ connected: boolean; expiresAt: number | null }>("connectors.oauthConnect", { connectorId }, 11 * 60_000),
+  oauthDisconnect: (connectorId: string) => bridge.hostQuery<{ connected: boolean; revoked: boolean }>("connectors.oauthDisconnect", { connectorId }, 60_000),
+  oauthStatus: async (connectorIds: string[]) =>
+    unwrap<{ statuses: ConnectorOAuthStatusDto[] }>(await bridge.hostQuery("connectors.oauthStatus", { connectorIds })).statuses,
   addCustomConnector: () => bridge.hostQuery<{ added: boolean }>("connectors.addCustomDialog", {}, 300_000),
 
   // settings (local subset)

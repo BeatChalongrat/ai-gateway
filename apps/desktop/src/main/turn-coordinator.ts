@@ -29,6 +29,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { BridgeChannel } from "./bridge";
 import type { ChatEdgeClient, ConversationDto } from "./chat-edge-client";
+import type { ConnectorOAuth } from "./connector-oauth";
+import type { ConnectorTools } from "./connector-mcp";
 import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
 import type { GrantStore } from "./grants";
 import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, SUBAGENT_FAILED_RE, type NestedRunRequest, type NestedRunResult } from "./host-tools";
@@ -80,6 +82,31 @@ interface PendingConsent {
   resolve: (r: ConsentRespondPayload) => void;
 }
 
+/** FIX31 §1.1: who is asking, when it is not the assistant the user is talking
+ *  to. Carried on the consent card so the user approves knowingly: the request
+ *  comes from a sub-agent the assistant started on its own, with THIS task. */
+export interface ConsentRequester {
+  kind: "subagent";
+  subagentId: string;
+  /** The fan-out label ("date"), or "" for a single unlabelled sub-agent. */
+  label: string;
+  /** The task text the parent model wrote for it (truncated) — the model's
+   *  words, not the user's; the card says so. */
+  task: string;
+}
+
+/** FIX31 §1.1/§1.2: per-run wait bookkeeping (consent waits are excluded from a
+ *  run's time budget; a denied tool ends a nested run). */
+interface RunWaitState {
+  /** Total ms spent waiting for the user's consent (excluded from deadlines). */
+  waitedMs?: number;
+  /** Set while a consent card is open for this run; null otherwise. */
+  waitingSince?: number | null;
+  /** Nested runs: the tool the user just refused — the run ends FAILED. */
+  deniedTool?: string | null;
+  requester?: ConsentRequester;
+}
+
 export interface TurnCoordinatorOptions {
   /** FIX30 §3.2: how often the host re-says what a turn is waiting on (a
    *  consent decision, a long local tool) — a `status` turn event the page
@@ -119,6 +146,11 @@ export interface TurnCoordinatorOptions {
    * in index.ts; the pure tests pass a stub). Absent → images are reported as
    * unreadable, never silently dropped. */
   encodeImage?: ImageEncoder;
+  /** FIX31 Part 2: the host-side connector OAuth flow + the host-side MCP
+   * client that carries its Bearer. Absent (tests, probes) → the page's
+   * oauth ops answer oauth-unsupported exactly as before. */
+  connectorOAuth?: ConnectorOAuth;
+  connectorTools?: ConnectorTools;
 }
 
 // FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
@@ -154,6 +186,14 @@ export class TurnCoordinator {
   private readonly logs = new Map<string, ConversationLog>();
   private readonly turns = new Map<string, RunningTurn>();
   private readonly pendingConsents = new Map<string, PendingConsent>();
+  /** FIX31 §1.1: ONE consent card at a time per page conversation. Parallel
+   *  sub-agents can each need permission at once; the page holds a single card
+   *  per row, so a second request would overwrite the first and leave a prompt
+   *  nobody can reach. Requests queue here and are posted one after another. */
+  private readonly consentQueues = new Map<string, Promise<void>>();
+  /** FIX31 §1.2: the tools a firing scheduled task needed permission for and
+   *  could not get (nobody there) — recorded on the task's history line. */
+  private taskNeededPermission: { tool: string; scope: string }[] = [];
   private readonly cwdByConversation = new Map<string, string>();
   readonly lastReply = new Map<string, string>();
   /** FIX22 §1b: the labelled user-data parts of the last assembled prompt per
@@ -413,12 +453,44 @@ export class TurnCoordinator {
         this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
         return;
       }
-      // ── OAuth connectors — §1.3: closed with a legible reason, not silence ──
+      // ── OAuth connectors — FIX31 Part 2: HOST-side (RFC 8252: system
+      //    browser, PKCE, loopback; token in the host's encrypted store; the
+      //    page learns THAT a connector is connected, never the token). With
+      //    no owner registration file every connector answers
+      //    oauth-not-configured; without the module at all, oauth-unsupported. ──
       case "connectors.oauthConnect":
       case "connectors.oauthDisconnect":
-        this.log.info(`HOST QUERY ${payload.op}: oauth unsupported (JWT must not live in the sidecar; a later round wires it host-side)`);
-        this.bridge.postHostResult(payload.requestId, false, undefined, "oauth-unsupported");
+      case "connectors.oauthStatus": {
+        const oauth = this.opts.connectorOAuth;
+        if (!oauth) {
+          this.log.info(`HOST QUERY ${payload.op}: oauth unsupported (no host flow wired in this build)`);
+          this.bridge.postHostResult(payload.requestId, false, undefined, "oauth-unsupported");
+          return;
+        }
+        if (payload.op === "connectors.oauthStatus") {
+          const ids = Array.isArray(payload.args?.["connectorIds"]) ? (payload.args["connectorIds"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
+          this.bridge.postHostResult(payload.requestId, true, { statuses: oauth.statuses(ids) });
+          return;
+        }
+        const connectorId = typeof payload.args?.["connectorId"] === "string" ? (payload.args["connectorId"] as string) : "";
+        if (!connectorId) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "invalid");
+          return;
+        }
+        if (payload.op === "connectors.oauthConnect") {
+          const r = await oauth.connect(connectorId);
+          this.log.info(`HOST QUERY connectors.oauthConnect ${connectorId}: ${r.ok ? "connected" : r.error}`);
+          if (r.ok) this.bridge.postHostResult(payload.requestId, true, { connectorId, connected: true, expiresAt: r.expiresAt });
+          else this.bridge.postHostResult(payload.requestId, false, undefined, r.error);
+          return;
+        }
+        const r = await oauth.disconnect(connectorId);
+        this.opts.connectorTools?.forget(connectorId);
+        this.log.info(`HOST QUERY connectors.oauthDisconnect ${connectorId}: ${r.ok ? `disconnected revoked=${r.revoked}` : r.error}`);
+        if (r.ok) this.bridge.postHostResult(payload.requestId, true, { connectorId, connected: false, revoked: r.revoked });
+        else this.bridge.postHostResult(payload.requestId, false, undefined, r.error);
         return;
+      }
       // ── addCustomDialog — a custom stdio MCP server, added NATIVELY: the user
       //    picks the program (no page-named process), approves the spawn in a
       //    native dialog, and only then is it test-spawned + installed. ──
@@ -542,6 +614,7 @@ export class TurnCoordinator {
     // (the scheduler fires one at a time), so a single active-mode field is safe.
     this.activeTaskApprovalMode = parseApprovalMode(task.permissionMode);
     this.activeTaskId = task.id;
+    this.taskNeededPermission = [];
     try {
       await this.refreshBrowserConnected();
       const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
@@ -581,13 +654,35 @@ export class TurnCoordinator {
     } catch (err) {
       this.log.warn(`TASK ${task.id}: transcript persist failed: ${(err as Error).message}`);
     }
+    // FIX31 §1.2: a run that hit a consent request while nobody was there ends
+    // as "needs_permission" with the tool(s) named — History says so instead of
+    // showing a green "Ran" over an action that never happened.
+    const needed = this.taskNeededPermission;
+    this.taskNeededPermission = [];
+    if (needed.length > 0) this.log.info(`TASK ${task.id} NEEDED PERMISSION (unattended): ${needed.map((n) => `${n.tool}@${n.scope}`).join(", ")}`);
     await this.sidecar.hostQuery("tasks._recordRun", {
       taskId: task.id,
       result: text.slice(0, 500),
       conversationId,
-      outcome: errored ? "error" : (opts?.outcome ?? "ok"),
+      outcome: errored ? "error" : needed.length > 0 ? "needs_permission" : (opts?.outcome ?? "ok"),
+      reason: needed.length > 0 ? [...new Set(needed.map((n) => n.tool))].join(", ") : null,
       scheduledFor: opts?.scheduledFor ?? null,
     });
+  }
+
+  /** FIX31 §1.2: a scheduled task runs unattended. A tool call that would need
+   *  the user's permission is NOT performed and NOT prompted for — a card nobody
+   *  can reach is the FIX30 bug again, and the app never answers for the user.
+   *  The model is told plainly; the run's history line records the tool. To run
+   *  such a task unattended the owner sets its permission mode accordingly
+   *  (see the report — it is the owner's call, not a default). */
+  private refuseUnattended(call: GatewayToolCall, run: { messages: GatewayMessage[]; conversationId: string; parentToolCallId: string | null; consentConversationId?: string }, name: string, scope: string, args: Record<string, unknown>): void {
+    const eventConv = run.consentConversationId ?? run.conversationId;
+    this.taskNeededPermission.push({ tool: name, scope });
+    run.messages.push(toolResult(call, `Error: '${name}' needs the user's permission (scope: ${scope}), and this is a scheduled task running unattended — nobody is there to answer, and the app never answers on the user's behalf. The action was NOT performed. In your final answer say exactly what you needed permission for, then stop; do not look for another route around it.`));
+    this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Needs permission — nobody there to answer (scheduled task)", parentId: run.parentToolCallId, durationMs: 0 });
+    this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "needs-permission-unattended", ok: false, where: "host" });
+    this.log.info(`TOOL ${name} NEEDS PERMISSION — scheduled task ${this.activeTaskId} runs unattended; not performed (scope=${scope})`);
   }
 
   /** FIX8 A1.6: apply an update_task_schedule call to the task currently firing. */
@@ -832,12 +927,16 @@ export class TurnCoordinator {
     onTrace?: (entry: string) => void;
     /** nested: consent prompts are attributed to this conversation on the page */
     consentConversationId?: string;
-  }): Promise<"done" | "cancelled" | "error" | "paused"> {
+  } & RunWaitState): Promise<"done" | "cancelled" | "error" | "paused" | "denied"> {
     const { conversationId, signal } = run;
     const eventConv = run.consentConversationId ?? conversationId;
+    // FIX31: time spent waiting for the user's consent is NOT run time — a
+    // deadline that counted it would end (or, nested, abort) a run for the
+    // crime of asking. The hard-stop timer in runNested applies the same rule.
     const deadline = Date.now() + run.maxMs;
+    const overdue = () => Date.now() >= deadline + (run.waitedMs ?? 0);
     let iteration = 0;
-    while (iteration < run.maxIterations && Date.now() < deadline) {
+    while (iteration < run.maxIterations && !overdue()) {
       if (signal.aborted) return "cancelled";
       iteration++;
       if (!run.parentToolCallId) this.emit(eventConv, "status", { status: iteration === 1 ? "thinking" : `continuing (step ${iteration})`, iteration, max: run.maxIterations });
@@ -915,13 +1014,16 @@ export class TurnCoordinator {
           run.messages.push(toolResult(call, "Not executed: the turn was cancelled."));
           continue;
         }
-        if (Date.now() >= deadline) {
+        if (overdue()) {
           run.messages.push(toolResult(call, "Not executed: the turn was paused at its time limit. It can be resumed to continue."));
           continue;
         }
         await this.executeToolCall(call, run);
+        // FIX31 §1.1: the user refused one of this sub-agent's tools — the run
+        // ends here, FAILED, instead of asking again (or trying another route).
+        if (run.deniedTool && run.parentToolCallId) return "denied";
       }
-      if (Date.now() >= deadline) {
+      if (overdue()) {
         run.onText("\n\nPaused: reached the 20-minute limit. The task can be continued.");
         if (!run.parentToolCallId) this.emit(eventConv, "content_delta", { delta: "\n\nPaused: reached the time limit. The task can be continued." });
         return "paused";
@@ -938,7 +1040,7 @@ export class TurnCoordinator {
   /** ChatOrchestrator.ExecuteToolCallAsync — DLP marker → permission → consent → run → result. */
   private async executeToolCall(
     call: GatewayToolCall,
-    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[] },
+    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[] } & RunWaitState,
   ): Promise<void> {
     const name = call.function.name;
     const eventConv = run.consentConversationId ?? run.conversationId;
@@ -1016,13 +1118,18 @@ export class TurnCoordinator {
       decision = ev.decision;
       decisionLabel = decision === "Auto" ? "auto" : "allowed";
       if (decision === "NeedsConsent") {
+        if (this.activeTaskId !== null) {
+          this.refuseUnattended(call, run, name, resolved.site, args);
+          return;
+        }
         const danger = classifyDanger(name, meta.category);
-        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, resolved.site, danger.reasonKey || "danger.browser", run.signal, { site: resolved.site, alwaysPromptReason: ev.alwaysPrompt });
+        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, resolved.site, danger.reasonKey || "danger.browser", run.signal, { site: resolved.site, alwaysPromptReason: ev.alwaysPrompt }, run.requester, run);
         if (response.decision === "deny") {
           run.messages.push(toolResult(call, "Error: the user declined permission for this action on this site."));
           this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Declined by user", parentId: run.parentToolCallId, durationMs: 0 });
           this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "denied", ok: false, where: "host" });
-          this.log.info(`TOOL ${name} DECLINED by the user (site=${resolved.site})`);
+          this.log.info(`TOOL ${name} DECLINED by the user (site=${resolved.site})${run.requester ? ` [sub-agent ${run.requester.label || run.requester.subagentId}]` : ""}`);
+          if (run.parentToolCallId) run.deniedTool = name;
           return;
         }
         // "always" → persist the SITE grant (covers every browser tool on it);
@@ -1038,13 +1145,18 @@ export class TurnCoordinator {
       }
       decisionLabel = decision === "Auto" ? "auto" : "allowed";
       if (decision === "NeedsConsent") {
+        if (this.activeTaskId !== null) {
+          this.refuseUnattended(call, run, name, scope, args);
+          return;
+        }
         const danger = classifyDanger(name, meta.category);
-        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, scope, danger.reasonKey || "danger.generic", run.signal);
+        const response = await this.requestConsent(eventConv, run.conversationId, call.id, name, meta, args, scope, danger.reasonKey || "danger.generic", run.signal, undefined, run.requester, run);
         if (response.decision === "deny") {
           run.messages.push(toolResult(call, "Error: the user denied permission for this tool call."));
           this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Permission denied by user", parentId: run.parentToolCallId, durationMs: 0 });
           this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "denied", ok: false, where: "host" });
-          this.log.info(`TOOL ${name} DENIED by the user (scope=${scope})`);
+          this.log.info(`TOOL ${name} DENIED by the user (scope=${scope})${run.requester ? ` [sub-agent ${run.requester.label || run.requester.subagentId}]` : ""}`);
+          if (run.parentToolCallId) run.deniedTool = name;
           return;
         }
         // once → run, ask again next time; session → no re-prompt this session.
@@ -1089,7 +1201,8 @@ export class TurnCoordinator {
     let image: string | null = null;
     let where: "host" | "sidecar" = "sidecar";
     let rpcError: string | undefined;
-    this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${this.hostTools.has(name) ? "host" : "sidecar"}`);
+    const connectorTool = this.opts.connectorTools?.has(name) === true;
+    this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${connectorTool ? "host (connector)" : this.hostTools.has(name) ? "host" : "sidecar"}`);
     // FIX30 §3.2: a local tool has NO timeout (legitimate ones run long — a
     // 30-ping took 29 s, a home-wide search 25 s). What it gets instead is a
     // heartbeat: every keepalive tick the page is told which tool is running
@@ -1097,7 +1210,15 @@ export class TurnCoordinator {
     // idle watchdog does not mistake a long tool for a dead stream.
     const heartbeat = setInterval(() => this.emit(eventConv, "status", { status: "tool_running", waiting: "tool", tool: name, toolCallId: call.id, elapsedMs: Date.now() - t0 }), this.opts.waitKeepaliveMs ?? 15_000);
     try {
-      if (this.hostTools.has(name)) {
+      if (connectorTool && this.opts.connectorTools) {
+        // FIX31 Part 2: the connector call is made HERE with the host's Bearer;
+        // the sidecar never sees the tool, the args or the token.
+        where = "host";
+        const r = await this.opts.connectorTools.execute(name, args, run.signal);
+        ok = r.ok;
+        text = r.text;
+        image = r.imageDataUri;
+      } else if (this.hostTools.has(name)) {
         where = "host";
         try {
           const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal });
@@ -1240,6 +1361,31 @@ export class TurnCoordinator {
     dangerClass: string,
     signal: AbortSignal,
     siteInfo?: { site: string; alwaysPromptReason: "download" | "sensitive-info" | "authorization" | null },
+    requester?: ConsentRequester,
+    wait?: RunWaitState,
+  ): Promise<ConsentRespondPayload> {
+    // FIX31 §1.1: one card at a time per page conversation (see consentQueues).
+    // A queued request that is cancelled before its turn is denied without
+    // ever being posted — the cancel is the user's own Stop, not a timer.
+    const prev = this.consentQueues.get(eventConv) ?? Promise.resolve();
+    const mine = prev.then(() => (signal.aborted ? { promptId: "", decision: "deny" as const, scope: "once" as const } : this.requestConsentNow(eventConv, conversationId, toolCallId, tool, meta, args, scope, dangerClass, signal, siteInfo, requester, wait)));
+    this.consentQueues.set(eventConv, mine.then(() => undefined, () => undefined));
+    return mine;
+  }
+
+  private requestConsentNow(
+    eventConv: string,
+    conversationId: string,
+    toolCallId: string,
+    tool: string,
+    meta: ReturnType<typeof toolMeta>,
+    args: Record<string, unknown>,
+    scope: string,
+    dangerClass: string,
+    signal: AbortSignal,
+    siteInfo?: { site: string; alwaysPromptReason: "download" | "sensitive-info" | "authorization" | null },
+    requester?: ConsentRequester,
+    wait?: RunWaitState,
   ): Promise<ConsentRespondPayload> {
     const promptId = `consent-${randomUUID().slice(0, 12)}`;
     const payload = {
@@ -1257,8 +1403,12 @@ export class TurnCoordinator {
       // grants (once + always). alwaysPromptReason explains a forced prompt on an
       // already-approved site (download / sensitive-info / authorization).
       ...(siteInfo ? { site: siteInfo.site, grantOptions: ["once", "always"] as const, alwaysPromptReason: siteInfo.alwaysPromptReason } : {}),
+      // FIX31 §1.1: a sub-agent's request says so — who, and with what task.
+      // Never optional for a nested run: the card must not read like the
+      // assistant's own request when it is not.
+      ...(requester ? { requestedBy: requester } : {}),
     };
-    this.log.info(`CONSENT REQUEST ${promptId}: ${tool} scope=${scope} danger=${dangerClass}${siteInfo ? ` site=${siteInfo.site}${siteInfo.alwaysPromptReason ? ` always-prompt=${siteInfo.alwaysPromptReason}` : ""}` : ""}`);
+    this.log.info(`CONSENT REQUEST ${promptId}: ${tool} scope=${scope} danger=${dangerClass}${siteInfo ? ` site=${siteInfo.site}${siteInfo.alwaysPromptReason ? ` always-prompt=${siteInfo.alwaysPromptReason}` : ""}` : ""}${requester ? ` requested-by=subagent:${requester.label || requester.subagentId}` : ""}`);
     // FIX30 §3.2: the wait is unbounded BY DESIGN (only the user can answer),
     // so the turn must SAY what it is waiting on — once now, and again every
     // keepalive tick. The page renders the text; the ticks are also bytes for
@@ -1267,8 +1417,9 @@ export class TurnCoordinator {
     // Emitted on eventConv unconditionally: a nested run's consent still blocks
     // the PARENT turn the page is looking at.
     const waitStarted = Date.now();
+    if (wait) wait.waitingSince = waitStarted;
     const keepaliveMs = this.opts.waitKeepaliveMs ?? 15_000;
-    const sayWaiting = () => this.emit(eventConv, "status", { status: "waiting_consent", waiting: "consent", tool, promptId, elapsedMs: Date.now() - waitStarted });
+    const sayWaiting = () => this.emit(eventConv, "status", { status: "waiting_consent", waiting: "consent", tool, promptId, elapsedMs: Date.now() - waitStarted, ...(requester ? { requestedBy: requester } : {}) });
     sayWaiting();
     let ticks = 0;
     const logEvery = Math.max(1, Math.round(60_000 / keepaliveMs));
@@ -1284,6 +1435,10 @@ export class TurnCoordinator {
       const settle = (r: ConsentRespondPayload) => {
         clearInterval(keepalive);
         signal.removeEventListener("abort", onAbort);
+        if (wait) {
+          wait.waitedMs = (wait.waitedMs ?? 0) + (Date.now() - waitStarted);
+          wait.waitingSince = null;
+        }
         this.emit(eventConv, "status", { status: "consent_answered", waiting: null, tool, promptId, decision: r.decision, elapsedMs: Date.now() - waitStarted });
         resolve(r);
       };
@@ -1299,53 +1454,81 @@ export class TurnCoordinator {
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     parentSignal.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(), (NESTED_MAX_MINUTES + 0.5) * 60_000);
-    const tools = await this.toolDefinitions(req.tools, req.autoApprovableOnly, true);
+    // FIX31 §1.1: every tool a single sub-agent has (run_subagent excepted —
+    // still no second level). A call that needs permission asks the USER, on
+    // the parent's page, attributed; nothing is auto-approved.
+    const tools = await this.toolDefinitions(req.tools, false, true);
     const messages: GatewayMessage[] = [
       { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory, this.grants.list()) },
       { role: "user", content: req.task },
     ];
     let answer = "";
     const trace: string[] = [];
-    this.log.info(`SUBAGENT START ${conversationId} parent=${req.parentToolCallId} tools=${tools.length}${req.autoApprovableOnly ? " (auto-approvable only)" : ""}`);
+    const requester: ConsentRequester = { kind: "subagent", subagentId: conversationId, label: (req.label ?? "").trim(), task: req.task.slice(0, 400) };
+    const run = {
+      conversationId,
+      consentConversationId: req.conversationId,
+      model: this.opts.forceModel ?? this.opts.defaultModel,
+      messages,
+      signal: controller.signal,
+      maxIterations: NESTED_MAX_ITERATIONS,
+      maxMs: NESTED_MAX_MINUTES * 60_000,
+      tools,
+      parentToolCallId: conversationId,
+      onText: (t: string) => {
+        answer += t;
+      },
+      onTrace: (e: string) => trace.push(e),
+      requester,
+      waitedMs: 0,
+      waitingSince: null as number | null,
+      deniedTool: null as string | null,
+    };
+    // The hard stop (NESTED_MAX_MINUTES + 0.5) never fires while a consent card
+    // is open, and time already spent waiting is added back — a run is stopped
+    // for running too long, never for waiting on the user (FIX30's lesson).
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let accounted = 0;
+    const arm = (ms: number) => {
+      timer = setTimeout(() => {
+        if (run.waitingSince !== null) return arm(30_000);
+        if (run.waitedMs > accounted) {
+          const extra = run.waitedMs - accounted;
+          accounted = run.waitedMs;
+          return arm(extra);
+        }
+        controller.abort();
+      }, ms);
+    };
+    arm((NESTED_MAX_MINUTES + 0.5) * 60_000);
+    this.log.info(`SUBAGENT START ${conversationId} parent=${req.parentToolCallId} tools=${tools.length}${requester.label ? ` label=${requester.label}` : ""}`);
     // FIX29 §2.2: one card per sub-agent. The sub-agent is an activity of its
     // own (id = its conversation id, parent = the run_subagent call); its tool
     // calls hang under IT, not under the run_subagent call — so the page can
     // group the steps instead of showing a flat list.
     const startedAt = Date.now();
     this.activity(req.conversationId, conversationId, "subagent", "started", { argsSummary: req.task.slice(0, 160), parentId: req.parentToolCallId });
-    let outcome: "done" | "cancelled" | "error" | "paused";
+    let outcome: "done" | "cancelled" | "error" | "paused" | "denied";
     try {
-      outcome = await this.runLoop({
-        conversationId,
-        consentConversationId: req.conversationId,
-        model: this.opts.forceModel ?? this.opts.defaultModel,
-        messages,
-        signal: controller.signal,
-        maxIterations: NESTED_MAX_ITERATIONS,
-        maxMs: NESTED_MAX_MINUTES * 60_000,
-        tools,
-        parentToolCallId: conversationId,
-        onText: (t) => {
-          answer += t;
-        },
-        onTrace: (e) => trace.push(e),
-      });
+      outcome = await this.runLoop(run);
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       parentSignal.removeEventListener("abort", onAbort);
     }
+    // FIX31 §1.1: the user refused a tool this sub-agent asked for → the
+    // sub-agent is FAILED, in the same words the parent already understands.
+    if (outcome === "denied") answer = `FAILED: the user declined permission for ${run.deniedTool ?? "a tool"}${requester.label ? ` (sub-agent “${requester.label}”)` : ""}. Do not retry it.`;
     // FIX30 §3.1: a sub-agent that says it could not do the job is a FAILED
     // sub-agent, not a green tick. The prompt asks it to open with `FAILED:`
     // when it cannot complete the task; `ERROR:` (what the model wrote on its
     // own in the owner's run) counts too. Anything else is still trusted as
     // success — a decline in other words is not detected (see the report).
-    const failed = outcome === "done" && SUBAGENT_FAILED_RE.test(answer);
+    const failed = outcome === "denied" || (outcome === "done" && SUBAGENT_FAILED_RE.test(answer));
     const completed = outcome === "done" && !failed;
-    this.log.info(`SUBAGENT ${failed ? "FAILED" : outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
+    this.log.info(`SUBAGENT ${outcome === "denied" ? "DENIED" : failed ? "FAILED" : outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
     this.activity(req.conversationId, conversationId, "subagent", "finished", {
       success: completed,
-      resultPreview: (outcome === "done" ? answer.trim() : `Stopped: ${outcome}`).slice(0, 160),
+      resultPreview: (outcome === "done" || outcome === "denied" ? answer.trim() : `Stopped: ${outcome}`).slice(0, 160),
       durationMs: Date.now() - startedAt,
       parentId: req.parentToolCallId,
     });
@@ -1383,6 +1566,17 @@ export class TurnCoordinator {
     defs.push(...host.filter((h) => h.function.name === "generate_image"));
     defs.push(...host.filter((h) => h.function.name === "run_python"));
     if (!nested) defs.push(...host.filter((h) => h.function.name === "run_subagent"));
+    // FIX31 Part 2: an OAuth connector's tools are HOST tools (the host holds
+    // the token). Listed only for connectors that are enabled in the owner's
+    // file AND connected — with no file, this adds nothing.
+    if (this.opts.connectorTools) {
+      try {
+        const cdefs = await this.opts.connectorTools.definitions();
+        defs.push(...cdefs.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.inputSchema } })));
+      } catch (err) {
+        this.log.warn(`connector tools unavailable this turn: ${(err as Error).message}`);
+      }
+    }
     let out = defs.filter((d) => d.function.name !== "run_subagent" || !nested);
     if (allow) {
       const set = new Set(allow.map((a) => a.toLowerCase()));

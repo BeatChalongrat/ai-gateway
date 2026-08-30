@@ -396,7 +396,16 @@ public sealed class HostQuerySurface
         if (task is null) return NotFound();
         var result = args?["result"]?.GetValue<string>();
         var conversationId = args?["conversationId"]?.GetValue<string>();
-        var outcome = Str(args, "outcome") is "error" ? "error" : (Str(args, "outcome") is "catchup" ? "catchup" : "ok");
+        // FIX31 §1.2: "needs_permission" — the run hit a consent request while
+        // nobody was there; `reason` names the tool(s). Never answered for the user.
+        var outcome = Str(args, "outcome") switch
+        {
+            "error" => "error",
+            "catchup" => "catchup",
+            "needs_permission" => "needs_permission",
+            _ => "ok",
+        };
+        var reason = outcome == "needs_permission" ? Str(args, "reason") : null;
         var scheduledFor = args?["scheduledFor"]?.GetValue<string>();
         if (!string.IsNullOrEmpty(conversationId)) task.ConversationId = conversationId;
         if (result is not null) task.LastResult = Clamp(result, 500);
@@ -407,7 +416,7 @@ public sealed class HostQuerySurface
         {
             TaskId = task.Id, RanAt = DateTimeOffset.Now,
             ScheduledFor = DateTimeOffset.TryParse(scheduledFor, out var sf) ? sf : null,
-            Outcome = outcome, Result = result is null ? null : Clamp(result, 500),
+            Outcome = outcome, Reason = reason, Result = result is null ? null : Clamp(result, 500),
         });
         return (true, TaskDto(task), null);
     }

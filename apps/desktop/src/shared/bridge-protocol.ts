@@ -47,7 +47,9 @@ export const HOST_QUERY_OPS = Object.freeze([
   "tasks.list", "tasks.create", "tasks.update", "tasks.setEnabled", "tasks.delete", "tasks.runNow",
   "tasks.runs", // FIX8 A1.4: a task's run history (reads only; control-plane like the rest)
   "connectors.listCatalog", "connectors.listInstalled", "connectors.install", "connectors.uninstall",
-  "connectors.oauthConnect", "connectors.oauthDisconnect", "connectors.addCustomDialog",
+  "connectors.oauthConnect", "connectors.oauthDisconnect",
+  // FIX31 Part 2: configured/enabled/connected per oauth2 connector — never a token.
+  "connectors.oauthStatus", "connectors.addCustomDialog",
   "settings.get", "settings.set",
   "folders.list", "folders.pickAndGrant", "folders.revoke",
   "globalNotes.list", "globalNotes.delete",

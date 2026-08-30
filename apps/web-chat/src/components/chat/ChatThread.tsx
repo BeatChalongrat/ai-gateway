@@ -386,7 +386,10 @@ export function ChatThread({
       if (prevPhaseRef.current !== phaseKey) {
         prevPhaseRef.current = phaseKey;
         if (phaseKey.startsWith("consent:")) {
-          setAnnouncement(t("thread.waitingConsent", { tool: phaseKey.slice("consent:".length) }));
+          const sub = waitingConsent?.requestedBy?.kind === "subagent" ? waitingConsent.requestedBy : null;
+          setAnnouncement(sub
+            ? t("thread.waitingConsentSub", { tool: phaseKey.slice("consent:".length), label: sub.label || t("consent.subagentUnnamed") })
+            : t("thread.waitingConsent", { tool: phaseKey.slice("consent:".length) }));
         } else if (phaseKey.startsWith("tool:")) {
           const tool = phaseKey.slice("tool:".length);
           const key = toolActivityLabelKey(tool);
@@ -562,7 +565,9 @@ export function ChatThread({
           data-testid="waiting-consent-notice"
           className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-primary shadow-lg backdrop-blur-sm"
         >
-          {t("thread.waitingConsent", { tool: waitingConsent.tool })}
+          {waitingConsent.requestedBy?.kind === "subagent"
+            ? t("thread.waitingConsentSub", { tool: waitingConsent.tool, label: waitingConsent.requestedBy.label || t("consent.subagentUnnamed") })
+            : t("thread.waitingConsent", { tool: waitingConsent.tool })}
           <button
             type="button"
             onClick={jumpToConsent}

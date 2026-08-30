@@ -123,7 +123,7 @@ export function baseSystemPrompt(home: string, toolsAvailable: boolean, grants: 
 
 ## Environment
 ${folderAccessSection(home, grants)}
-- The OS is Windows; shell commands run in PowerShell-compatible cmd.`);
+${SHELL_ENVIRONMENT_LINE}`);
   }
   parts.push(`
 ## Safety Rules
@@ -177,6 +177,15 @@ Emit the code block on its own (a short sentence before it is fine); the
 app turns it into a live, interactive artifact. Keep short snippets in
 ordinary code blocks tagged with their language as usual.`;
 
+/** FIX31 Part 3: the ONE statement about the shell, shared by the main and
+ * sub-agent prompts. It must describe what the sidecar's run_command actually
+ * does (RunCommandTool.PickShell): Windows PowerShell 5.1 by default, `cmd /c`
+ * for cmd built-ins, a named interpreter verbatim. The previous line said
+ * "PowerShell-compatible cmd", which was true of neither — a bare Get-Date
+ * ran in cmd and failed. test/prompt-shell.test.ts pins this line. */
+export const SHELL_ENVIRONMENT_LINE =
+  "- The OS is Windows; run_command runs in Windows PowerShell 5.1 by default — use PowerShell syntax (Get-ChildItem, Get-Date, Select-Object, pipelines). Prefix `cmd /c` for a cmd.exe built-in (e.g. `cmd /c dir /b`).";
+
 /** SpawnAgentTool.BuildSubAgentSystemPrompt, verbatim (E4: sub-agents are a host capability). */
 export function subAgentSystemPrompt(home: string, grants: readonly string[] = []): string {
   return `You are a focused sub-agent spawned by SRAN Assistant to complete one delegated task.
@@ -196,7 +205,7 @@ export function subAgentSystemPrompt(home: string, grants: readonly string[] = [
 
 ## Environment
 ${folderAccessSection(home, grants)}
-- The OS is Windows; shell commands run in PowerShell-compatible cmd.`;
+${SHELL_ENVIRONMENT_LINE}`;
 }
 
 export class PromptAssembler {

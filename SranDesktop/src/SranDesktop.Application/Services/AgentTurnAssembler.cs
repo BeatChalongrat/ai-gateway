@@ -167,7 +167,8 @@ public sealed class AgentTurnAssembler
           profile, the temp folder, and any folders the user has granted in Settings; relative
           paths resolve against the home directory. If a path you need is outside these, tell the
           user they can grant that folder in Settings → Folder access.
-        - The OS is Windows; shell commands run in PowerShell-compatible cmd.
+        - The OS is Windows; run_command runs in Windows PowerShell 5.1 by default — use PowerShell syntax
+          (Get-ChildItem, Get-Date, Select-Object). Prefix `cmd /c` for a cmd.exe built-in.
 
         ## Response Style
         - Be concise and direct

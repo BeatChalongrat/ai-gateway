@@ -21,7 +21,7 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "skills.create", // FIX28 §3 (G3)
     "tasks.list", "tasks.create", "tasks.update", "tasks.setEnabled", "tasks.delete", "tasks.runNow", "tasks.runs",
     "connectors.listCatalog", "connectors.listInstalled", "connectors.install", "connectors.uninstall",
-    "connectors.oauthConnect", "connectors.oauthDisconnect", "connectors.addCustomDialog",
+    "connectors.oauthConnect", "connectors.oauthDisconnect", "connectors.oauthStatus" /* FIX31 Part 2: read-only oauth status; never a tool */, "connectors.addCustomDialog",
     "settings.get", "settings.set",
     "folders.list", "folders.pickAndGrant", "folders.revoke",
     "globalNotes.list", "globalNotes.delete",

@@ -52,6 +52,8 @@ export type HostQueryOp =
   | "tasks.list" | "tasks.create" | "tasks.update" | "tasks.setEnabled" | "tasks.delete" | "tasks.runNow" | "tasks.runs"
   | "connectors.listCatalog" | "connectors.listInstalled" | "connectors.install" | "connectors.uninstall"
   | "connectors.oauthConnect" | "connectors.oauthDisconnect" | "connectors.addCustomDialog"
+  // FIX31 Part 2: configured/enabled/connected per oauth2 connector (never a token).
+  | "connectors.oauthStatus"
   | "settings.get" | "settings.set"
   | "folders.list" | "folders.pickAndGrant" | "folders.revoke"
   | "sites.list" | "sites.revoke"
@@ -81,6 +83,9 @@ export interface ConsentRequest {
   site?: string;
   grantOptions?: ("once" | "session" | "always")[];
   alwaysPromptReason?: "download" | "sensitive-info" | "authorization" | null;
+  /** FIX31 §1.1: set when the request comes from a sub-agent the assistant
+   *  started on its own — the card says who asked and with what task. */
+  requestedBy?: { kind: "subagent"; subagentId: string; label: string; task: string };
 }
 
 type ConsentDecision = "allow" | "deny";

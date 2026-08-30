@@ -807,6 +807,9 @@ export interface PendingConsent {
   site?: string;
   grantOptions?: ("once" | "session" | "always")[];
   alwaysPromptReason?: "download" | "sensitive-info" | "authorization" | null;
+  /** FIX31 §1.1: set when the request comes from a sub-agent the assistant
+   *  started on its own — the card says who asked and with what task. */
+  requestedBy?: { kind: "subagent"; subagentId: string; label: string; task: string };
 }
 
 /** SSE payload — the backend serialises ToolActivityUpdate directly. */

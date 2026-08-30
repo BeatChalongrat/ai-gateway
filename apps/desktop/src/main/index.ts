@@ -34,6 +34,8 @@ import path from "node:path";
 import { BridgeChannel } from "./bridge";
 import { ChatEdgeClient } from "./chat-edge-client";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
+import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
+import { ConnectorTools } from "./connector-mcp";
 import { parseIntent } from "./deep-link";
 import { GatewayClient } from "./gateway-client";
 import { GrantStore, defaultForbiddenRoots } from "./grants";
@@ -234,6 +236,22 @@ void app.whenReady().then(async () => {
   // FIX25 §1c.3: a stored `skip` never survives a restart — it comes back as
   // `manual` and the page is told once. The sidecar is the store of record.
   const modeResetter = new ApprovalModeResetter(sidecar, bridge, log);
+  // FIX31 Part 2: connector OAuth, host-side and switched off. Registrations
+  // come ONLY from <userData>\connector-oauth.json (the owner's file; absent by
+  // default → nothing configured). Tokens: safeStorage-encrypted, per connector,
+  // under <userData>\connector-tokens; the system browser via shell.openExternal.
+  const registrations = new RegistrationFile(path.join(dataDir, CONNECTOR_OAUTH_FILENAME), log);
+  const connectorOAuth = new ConnectorOAuth({
+    registrations: () => registrations.current(),
+    tokens: new ConnectorTokenStore(path.join(dataDir, "connector-tokens"), {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (s) => safeStorage.encryptString(s),
+      decrypt: (b) => safeStorage.decryptString(b),
+    }),
+    openExternal: (url) => shell.openExternal(url),
+    log,
+  });
+  const connectorTools = new ConnectorTools(connectorOAuth, async (id) => connectorOAuth.registration(id)?.serverUrl ?? null, log);
   coordinator = new TurnCoordinator(
     bridge,
     gateway,
@@ -251,6 +269,8 @@ void app.whenReady().then(async () => {
       approvalMode: config.approvalMode,
       promptGuard,
       encodeImage: encodeImageForVision, // FIX27: attached images → vision blocks (nativeImage)
+      connectorOAuth,
+      connectorTools,
       onPageReady: () => {
         updateNotifier.onPageReady();
         modeResetter.onPageReady();

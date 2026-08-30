@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
-import { hostApi, type CatalogConnectorDto } from "@/lib/hostApi";
+import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
   const hosted = useHostedMode();
@@ -46,11 +46,24 @@ function ConnectorMarketplace() {
   // double-tap can't fire two native dialogs.
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [addingCustom, setAddingCustom] = useState(false);
+  // FIX31 Part 2: the host's view of each oauth2 connector (configured /
+  // enabled / connected). The sidecar's `installed` flag is not the truth for
+  // oauth2 — those are never installed in the sidecar; the host holds them.
+  const [oauth, setOauth] = useState<Record<string, ConnectorOAuthStatusDto>>({});
 
   async function reload() {
     try {
       const list = await hostApi.listConnectorCatalog();
       setConnectors(list);
+      const ids = list.filter((c) => c.authType === "oauth2").map((c) => c.id);
+      if (ids.length) {
+        try {
+          const st = await hostApi.oauthStatus(ids);
+          setOauth(Object.fromEntries(st.map((s) => [s.connectorId, s])));
+        } catch {
+          setOauth({}); // an older host: every oauth2 card reads "not available"
+        }
+      }
     } catch {
       toast("Couldn't load the connector catalog.");
     } finally {
@@ -111,19 +124,16 @@ function ConnectorMarketplace() {
     setBusy(c.id, true);
     try {
       if (c.authType === "oauth2") {
-        const res = c.installed
+        const connected = oauth[c.id]?.connected === true;
+        const res = connected
           ? await hostApi.oauthDisconnect(c.id)
           : await hostApi.oauthConnect(c.id);
         if (!res.ok) {
-          toast(
-            res.error === "oauth-unsupported"
-              ? "OAuth connectors aren't available in the desktop app yet — they need your sign-in to reach the provider, which a later round wires up. API-key and no-auth connectors work now."
-              : c.installed
-                ? "Couldn't disconnect this connector."
-                : "Couldn't connect this connector.",
-          );
+          toast(OAUTH_ERROR_TEXT[res.error ?? ""] ?? (connected ? "Couldn't disconnect this connector." : "Couldn't connect this connector."));
+          await reload();
           return;
         }
+        toast(connected ? `${c.name} disconnected.` : `${c.name} connected.`);
         await reload();
         return;
       }
@@ -218,6 +228,7 @@ function ConnectorMarketplace() {
                 <ConnectorCard
                   key={c.id}
                   connector={c}
+                  oauthStatus={oauth[c.id]}
                   busy={busyIds.has(c.id)}
                   onAction={() => void handleAction(c)}
                 />
@@ -234,22 +245,48 @@ function ConnectorMarketplace() {
 // Connector card
 // ---------------------------------------------------------------------------
 
+/** FIX31 Part 2: every way the host's OAuth flow can end, in the user's words. */
+const OAUTH_ERROR_TEXT: Record<string, string> = {
+  "oauth-unsupported": "Sign-in for connectors isn't available in this build.",
+  "oauth-not-configured": "This connector isn't set up yet — it needs an app registration from your administrator.",
+  "oauth-disabled": "This connector is set up but switched off by your administrator.",
+  "oauth-denied": "Not connected — you declined, or the provider refused.",
+  "oauth-timeout": "Not connected — the sign-in wasn't completed in time. Click Connect to try again.",
+  "oauth-cancelled": "The sign-in was cancelled.",
+  "oauth-state-mismatch": "Not connected — the sign-in didn't match this request. Click Connect to try again.",
+  "oauth-exchange-failed": "Not connected — the provider didn't issue a token. Try again, or check the registration.",
+  "oauth-browser-failed": "Couldn't open your browser for the sign-in.",
+  "oauth-storage-unavailable": "Can't store the sign-in securely on this computer.",
+};
+
 function ConnectorCard({
   connector,
+  oauthStatus,
   busy,
   onAction,
 }: {
   connector: CatalogConnectorDto;
+  oauthStatus?: ConnectorOAuthStatusDto;
   busy: boolean;
   onAction: () => void;
 }) {
   const isOAuth = connector.authType === "oauth2";
-  // FIX28 §3 (G5): OAuth sign-in is not wired in the desktop app (the host must
-  // own the provider sign-in; a later round). A button with no working path
-  // behind it must not look clickable — disabled, with the reason on the card.
-  const oauthUnavailable = isOAuth && !connector.installed;
+  // FIX31 Part 2: the host owns the provider sign-in. A card is connectable
+  // only when the owner's registration file names this connector AND enables
+  // it; otherwise the button is disabled with the honest reason on the card.
+  const oauthConnected = isOAuth && oauthStatus?.connected === true;
+  const oauthUnavailable = isOAuth && !oauthConnected && !(oauthStatus?.configured && oauthStatus?.enabled);
+  const oauthReason = !isOAuth || oauthConnected
+    ? null
+    : !oauthStatus
+      ? "Sign-in for connectors isn't available in this build."
+      : !oauthStatus.configured
+        ? "Not set up yet — this connector needs an app registration from your administrator."
+        : !oauthStatus.enabled
+          ? "Set up, but switched off by your administrator."
+          : null;
   const actionLabel = isOAuth
-    ? connector.installed
+    ? oauthConnected
       ? "Disconnect"
       : "Connect"
     : connector.installed
@@ -283,18 +320,23 @@ function ConnectorCard({
 
         <div className="flex shrink-0 flex-col items-end gap-1">
           <Button
-            variant={connector.installed ? "ghost" : "secondary"}
+            variant={connector.installed || oauthConnected ? "ghost" : "secondary"}
             className="shrink-0"
             onClick={onAction}
             loading={busy}
             disabled={oauthUnavailable}
-            title={oauthUnavailable ? "Sign-in for this connector isn't available in the desktop app yet." : undefined}
+            title={oauthReason ?? undefined}
+            data-testid={isOAuth ? "oauth-action" : undefined}
           >
             {actionLabel}
           </Button>
-          {oauthUnavailable ? (
-            <span className="max-w-[220px] text-right text-[11px] leading-snug text-text-muted">
-              Sign-in isn’t available in the desktop app yet. API-key and no-auth connectors work.
+          {oauthReason ? (
+            <span className="max-w-[220px] text-right text-[11px] leading-snug text-text-muted" data-testid="oauth-reason">
+              {oauthReason}
+            </span>
+          ) : oauthConnected ? (
+            <span className="max-w-[220px] text-right text-[11px] leading-snug text-text-muted" data-testid="oauth-connected">
+              Connected in this app{oauthStatus?.expiresAt ? ` · renews automatically` : ""}.
             </span>
           ) : null}
         </div>

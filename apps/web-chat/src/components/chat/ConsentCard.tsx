@@ -13,6 +13,7 @@
 
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { PendingConsent } from "@/lib/types";
 
 const DANGER_TEXT: Record<string, string> = {
@@ -39,7 +40,13 @@ export function ConsentCard({
   consent: PendingConsent;
   onDecision: (decision: "allow" | "deny", scope: "once" | "session" | "always") => void;
 }) {
+  const t = useT();
   const dangerous = consent.dangerClass !== "safe";
+  // FIX31 §1.1: a sub-agent's request is NOT the assistant's own. The user is
+  // approving something they did not directly ask for; the card says so, names
+  // the sub-agent, and shows the task the assistant wrote for it — labelled as
+  // the assistant's words. The command itself (below) cannot lie.
+  const sub = consent.requestedBy?.kind === "subagent" ? consent.requestedBy : null;
   // FIX6: a browser-site prompt is Anthropic's "New permissions required" — it
   // names the site and offers exactly "Allow this action" + "Always allow actions
   // on this site". A forced prompt on an already-approved site says why.
@@ -51,13 +58,27 @@ export function ConsentCard({
       data-testid="consent-card"
       data-tool={consent.tool}
       data-site={site ?? undefined}
+      data-requested-by={sub ? "subagent" : undefined}
     >
       <div className="flex items-center gap-2">
         <ShieldQuestion className="h-5 w-5 shrink-0 text-amber-500" />
         <div className="text-sm font-semibold text-text-primary">
-          {site ? "New permissions required" : "The assistant wants to use a tool"}
+          {sub ? t("consent.subagentTitle") : site ? "New permissions required" : "The assistant wants to use a tool"}
         </div>
       </div>
+      {sub ? (
+        <div className="mt-1 rounded border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-text-secondary" data-testid="consent-requester">
+          <div>
+            {sub.label
+              ? t("consent.subagentFrom", { label: sub.label })
+              : t("consent.subagentFromUnnamed")}
+          </div>
+          <div className="mt-1 text-text-tertiary">{t("consent.subagentTaskLabel")}</div>
+          <blockquote className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap border-l-2 border-amber-500/50 pl-2 text-text-primary">
+            {sub.task}
+          </blockquote>
+        </div>
+      ) : null}
       {site ? (
         <div className="mt-1 text-sm text-text-secondary">
           The assistant wants to act on{" "}

@@ -23,8 +23,9 @@ export interface NestedRunRequest {
   task: string;
   /** Allow-list of tool names, or null = every tool except run_subagent. */
   tools: string[] | null;
-  /** Fan-out subtasks run with auto-approvable tools only. */
-  autoApprovableOnly: boolean;
+  /** FIX31 §1.1: the sub-agent's name on a consent card ("sub-agent “date”").
+   *  Fan-out passes the task label; a single task has none. */
+  label?: string;
   parentToolCallId: string;
   conversationId: string;
 }
@@ -112,7 +113,7 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
         tasks: {
           type: "array",
           items: { type: "object", properties: { task: { type: "string", description: "Self-contained instructions for this subtask." }, label: { type: "string", description: "Short label for this subtask in the combined result." } }, required: ["task"] },
-          description: "2+ INDEPENDENT subtasks to run in PARALLEL. Each runs read-only/research tools only (no edits, no commands, no consent prompts).",
+          description: "2+ INDEPENDENT subtasks to run in PARALLEL. Each has the same tools as a single sub-agent; a subtask's tool call asks the user for permission exactly as yours would, and the prompt names the subtask that asked. A subtask the user refuses fails (its result starts with FAILED:) — do not re-run it.",
         },
       },
     },
@@ -209,7 +210,12 @@ export class HostTools {
               const i = next++;
               const t = tasks[i] as { task?: string; label?: string };
               const label = t.label?.trim() || `Task ${i + 1}`;
-              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, autoApprovableOnly: true, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
+              // FIX31 §1.1: no more "auto-approvable tools only" for fan-out. A
+              // subtask has every tool a single sub-agent has; a call that needs
+              // permission raises the SAME consent card as the parent's would,
+              // attributed to this subtask by label (the FIX8 boundary was a
+              // stand-in for a consent path that did not exist; now it does).
+              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, label, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
               results[i] = `## ${label}\n${r.completed ? r.answer : r.stopReason === "failed" ? `(failed)\n${r.answer}` : `(did not finish: ${r.stopReason ?? "unknown"})\n${r.answer}`}${trace(r.trace)}`;
             }
           });
@@ -221,7 +227,7 @@ export class HostTools {
         // An empty allow-list means "every tool" (SpawnAgentTool.ReadAllowlist), not "no tools".
         const allowRaw = Array.isArray(args["tools"]) ? (args["tools"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
         const allow = allowRaw.length > 0 ? allowRaw : null;
-        const r = await this.runNested({ task, tools: allow, autoApprovableOnly: false, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
+        const r = await this.runNested({ task, tools: allow, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
         if (r.completed) return { ok: true, text: r.answer + trace(r.trace), imageDataUri: null };
         if (r.stopReason === "failed") return { ok: false, text: `Sub-agent failed: ${r.answer}${trace(r.trace)}`, imageDataUri: null };
         return { ok: false, text: `Sub-agent did not finish: ${r.stopReason ?? "the run ended unexpectedly."}${trace(r.trace)}`, imageDataUri: null };

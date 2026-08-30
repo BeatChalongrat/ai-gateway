@@ -154,6 +154,20 @@ describe("FIX30 §1 — the consent card is reachable", () => {
     expect(document.querySelector('.sr-only[role="status"]')?.textContent).toContain("Waiting for your permission — run_command");
   });
 
+  it("FIX31 §1.1: a sub-agent's consent → the notice and the announcement name the sub-agent", () => {
+    const { rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 500;
+    const subConsent = { ...consent, requestedBy: { kind: "subagent" as const, subagentId: "subagent-1", label: "date", task: "get the date with a shell command" } };
+    rerender(sent({ tool_activities: [finished("s", "run_subagent"), started("c", "run_command")], pending_consent: subConsent }));
+    const notice = screen.getByTestId("waiting-consent-notice");
+    expect(notice.textContent).toContain("Waiting for your permission — run_command, asked by sub-agent “date”");
+    expect(document.querySelector('.sr-only[role="status"]')?.textContent).toContain("asked by sub-agent “date”");
+    // answered → gone
+    rerender(sent({ tool_activities: [finished("s", "run_subagent"), started("c", "run_command")], pending_consent: null }));
+    expect(screen.queryByTestId("waiting-consent-notice")).toBeNull();
+  });
+
   it("consent while the user scrolled up on purpose → the view stays, the pill appears, Show reaches the card", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());

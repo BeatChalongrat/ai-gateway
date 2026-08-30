@@ -65,12 +65,19 @@ public class ShellToolTests : IDisposable
     {
         var tool = new RunCommandTool(NullLogger<RunCommandTool>.Instance, new FakeSettings(300));
 
+        // FIX31 Part 3: the default interpreter is PowerShell now; the cmd shape
+        // still works behind the `cmd /c` prefix. Both feed stderr + exit code back.
         var result = await tool.ExecuteAsync(
-            Args(new { command = "echo oops 1>&2 & exit /b 3" }), CancellationToken.None);
+            Args(new { command = "[Console]::Error.WriteLine('oops'); exit 3" }), CancellationToken.None);
 
         result.Success.Should().BeTrue();
         result.Content.Should().Contain("oops");
         result.Content.Should().Contain("[exit code 3]");
+
+        var viaCmd = await tool.ExecuteAsync(
+            Args(new { command = "cmd /c echo oops 1>&2 & exit /b 3" }), CancellationToken.None);
+        viaCmd.Content.Should().Contain("oops");
+        viaCmd.Content.Should().Contain("[exit code 3]");
     }
 
     [Fact]
@@ -84,17 +91,19 @@ public class ShellToolTests : IDisposable
         Directory.CreateDirectory(subB);
 
         // Set the cwd explicitly once...
+        // FIX31 Part 3: PowerShell's cwd (`cd` alone prints nothing there).
+        const string pwd = "(Get-Location).Path";
         var first = await tool.ExecuteAsync(
-            Args(new { command = "cd", working_directory = subA }), CancellationToken.None);
+            Args(new { command = pwd, working_directory = subA }), CancellationToken.None);
         first.Content.Should().Contain(subA);
 
         // ...the next command without a working_directory reuses it.
-        var second = await tool.ExecuteAsync(Args(new { command = "cd" }), CancellationToken.None);
+        var second = await tool.ExecuteAsync(Args(new { command = pwd }), CancellationToken.None);
         second.Content.Should().Contain(subA);
 
         // A new explicit dir updates the retained value.
         var third = await tool.ExecuteAsync(
-            Args(new { command = "cd", working_directory = subB }), CancellationToken.None);
+            Args(new { command = pwd, working_directory = subB }), CancellationToken.None);
         third.Content.Should().Contain(subB);
         session.GetWorkingDirectory("conv-1").Should().Be(subB);
     }
