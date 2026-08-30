@@ -19,6 +19,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
+use crate::detectors::thai_gazetteer;
 
 // Thai character class — matches Python ``[ก-ฺเ-๎]``.
 const THAI_CHAR: &str = r"[\u{0E01}-\u{0E3A}\u{0E40}-\u{0E4E}]";
@@ -47,7 +48,7 @@ const ENGLISH_TITLE_PREFIXES: &str = r"Mr\.|Mrs\.|Ms\.|Miss|Dr\.";
 
 static THAI_NAME_RE: Lazy<Regex> = Lazy::new(|| {
     let pat = format!(
-        r"(?:{})\s*{tc}{{2,}}(?P<surname>\s+{tc}{{2,}})?",
+        r"(?:{})\s*(?P<given>{tc}{{2,}})(?P<surname>\s+{tc}{{2,}})?",
         THAI_TITLE_PREFIXES,
         tc = THAI_CHAR,
     );
@@ -56,7 +57,7 @@ static THAI_NAME_RE: Lazy<Regex> = Lazy::new(|| {
 
 static MIXED_NAME_RE: Lazy<Regex> = Lazy::new(|| {
     let pat = format!(
-        r"(?:{})\s*{tc}{{2,}}(?P<surname>\s+{tc}{{2,}})?",
+        r"(?:{})\s*(?P<given>{tc}{{2,}})(?P<surname>\s+{tc}{{2,}})?",
         ENGLISH_TITLE_PREFIXES,
         tc = THAI_CHAR,
     );
@@ -121,6 +122,7 @@ impl Detector for ThaiNameDetector {
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let chars = thai_gazetteer::Chars::new(text);
 
         for re in [&*THAI_NAME_RE, &*MIXED_NAME_RE] {
             for caps in re.captures_iter(text).flatten() {
@@ -133,9 +135,25 @@ impl Detector for ThaiNameDetector {
 
                 // Trim an over-captured non-surname trailing word
                 // (``คุณสมหญิง จำนวน 10,000`` → ``คุณสมหญิง``).
+                let mut has_surname = false;
                 if let Some(sn) = caps.name("surname") {
                     if NOT_SURNAME.contains(&sn.as_str().trim()) {
                         end_b = sn.start();
+                    } else {
+                        has_surname = true;
+                    }
+                }
+                // FIX29: title + one run that begins with a gazetteer name
+                // glued to a dictionary word → the span ends at the name
+                // (``คุณมีชัยจองห้องประชุมไว้`` → ``คุณมีชัย``). Mirrors Python.
+                if !has_surname {
+                    if let Some(g) = caps.name("given") {
+                        let gs = byte_to_char(text, g.start());
+                        let ge = byte_to_char(text, end_b);
+                        let trimmed = thai_gazetteer::trim_run(&chars, gs, ge);
+                        if trimmed < ge {
+                            end_b = chars.byte_of(trimmed);
+                        }
                     }
                 }
                 let matched = &text[start_b..end_b];

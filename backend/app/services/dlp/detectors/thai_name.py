@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 
+from app.services.dlp.detectors.thai_gazetteer import trim_run
 from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
 
@@ -50,13 +51,13 @@ _ENGLISH_TITLE_PREFIXES = r"Mr\.|Mrs\.|Ms\.|Miss|Dr\."
 # because the old regex forced a second Thai word.
 _THAI_NAME_RE = re.compile(
     rf"(?:{_THAI_TITLE_PREFIXES})\s*"
-    rf"{_THAI_CHAR}{{2,}}"
+    rf"(?P<given>{_THAI_CHAR}{{2,}})"
     rf"(?P<surname>\s+{_THAI_CHAR}{{2,}})?"
 )
 
 _MIXED_NAME_RE = re.compile(
     rf"(?:{_ENGLISH_TITLE_PREFIXES})\s*"
-    rf"{_THAI_CHAR}{{2,}}"
+    rf"(?P<given>{_THAI_CHAR}{{2,}})"
     rf"(?P<surname>\s+{_THAI_CHAR}{{2,}})?"
 )
 
@@ -135,6 +136,13 @@ class ThaiNameDetector(BaseDetector):
                 surname = m.group("surname")
                 if surname is not None and surname.strip() in _NOT_SURNAME:
                     end = m.start("surname")
+                    surname = None
+                # FIX29: a title + one Thai run that is NOT itself a name but
+                # BEGINS with a gazetteer name followed by a dictionary word
+                # is a name glued to its verb (``คุณมีชัยจองห้องประชุมไว้``) —
+                # the span ends at the name, never at the next space.
+                if surname is None:
+                    end = trim_run(text, m.start("given"), end)
 
                 matched = text[start:end]
 

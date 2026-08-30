@@ -25,6 +25,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
+use crate::detectors::thai_gazetteer;
 
 // Same Thai-char class as thai_name.rs / thai_address. Two ranges.
 const THAI_CHAR: &str = r"[\u{0E01}-\u{0E3A}\u{0E40}-\u{0E4E}]";
@@ -388,6 +389,23 @@ impl Detector for ThaiNameNoPrefixDetector {
         // deduplicated on (start, end).
         detect_gazetteer(text, &mut out, &mut seen);
         detect_list(text, &mut out, &mut seen);
+        // FIX29 Pass 4 — the 10k-name lexicon with a segmentation-aware right
+        // boundary (thai_gazetteer.rs), no context gate. Mirrors Python.
+        {
+            let chars = thai_gazetteer::Chars::new(text);
+            for (s, e) in thai_gazetteer::find_names(text) {
+                if seen.insert((s, e)) {
+                    out.push(RawMatch {
+                        start: s,
+                        end: e,
+                        matched_text: chars.slice(s, e).to_string(),
+                        confidence: 1.0,
+                        priority: -5,
+                        entity_type: None,
+                    });
+                }
+            }
+        }
         out
     }
 }

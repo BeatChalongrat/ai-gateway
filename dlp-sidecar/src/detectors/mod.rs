@@ -32,6 +32,7 @@ pub mod religion_belief;
 pub mod ssn;
 pub mod thai_address;
 pub mod thai_bank_account;
+pub mod thai_gazetteer;
 pub mod thai_name;
 pub mod thai_name_no_prefix;
 pub mod thai_national_id;

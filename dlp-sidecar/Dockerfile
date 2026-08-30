@@ -23,6 +23,8 @@ RUN mkdir -p src cmd/healthcheck proto \
 COPY proto/ ./proto/
 COPY build.rs ./
 COPY src/ ./src/
+# FIX29: the Thai name/word lexicons are embedded at build time (include_str!)
+COPY data/ ./data/
 COPY cmd/ ./cmd/
 
 RUN cargo build --release --bin dlp-sidecar --bin healthcheck

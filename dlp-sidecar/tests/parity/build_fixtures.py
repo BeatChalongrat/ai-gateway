@@ -827,6 +827,8 @@ SPECS = [
             Case("fix28_khun_verb_no_mask", "คำตอบแรกที่คุณตอบผมคืออะไร ตอบสั้นๆ", False),
             Case("fix28_khun_think_no_mask", "คุณคิดว่าอันไหนดีกว่ากัน", False),
             Case("fix28_khun_real_name_still_masks", "ลูกค้าชื่อคุณสมชาย ใจดี โทรมา", True),
+            # FIX29 — the titled run is trimmed at the gazetteer name (span never swallows the verb)
+            Case("fix29_titled_glued_verb_trimmed", "คุณมีชัยจองห้องประชุมไว้", True),
         ],
     ),
     DetectorSpec(
@@ -849,7 +851,7 @@ SPECS = [
             Case(
                 "no_context_kw",
                 "สมชาย ใจดี ไปทำงาน",
-                False,
+                True,  # FIX29: a lexicon given name at a word boundary masks without a context keyword (Pass 4)
             ),
             Case("plain_thai_prose", "วันนี้ฝนตกหนัก", False),
             Case("english_prose", "no thai content here", False),
@@ -871,6 +873,12 @@ SPECS = [
             Case("fix27_list_prefixed_items", "รายชื่อผู้เข้าร่วม: คุณสมชาย, คุณสมหญิง", True),
             Case("fix27_list_gazetteer_item", "รายชื่อพนักงาน: อัญชลี, ภาณุ", True),
             Case("fix27_list_products_no_mask", "รายชื่อสินค้า: กล้วย, มะม่วง, ส้ม", False),
+            # FIX29 — Pass 4 lexicon + segmentation-aware right boundary
+            Case("fix29_glued_given_name", "ณัฐพลบอกว่าจะมาสาย", True),
+            Case("fix29_glued_given_name_mid", "ฝากบอกอนุชาด้วยว่าประชุมเลื่อน", False),  # not at a left word boundary
+            Case("fix29_dictionary_word_not_a_name", "ประชุมเลื่อนไปพรุ่งนี้", False),
+            Case("fix29_two_word_no_title", "สุรชัย มั่นคง โทรมาเมื่อเช้า", True),
+            Case("fix29_label_glued_name", "ช่วยเขียนอีเมลแจ้งลูกค้าหน่อย ลูกค้าชื่อสมชาย เบอร์ 081-234-5678", True),
         ],
     ),
     DetectorSpec(

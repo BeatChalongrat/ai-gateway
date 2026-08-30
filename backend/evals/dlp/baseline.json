@@ -45,10 +45,10 @@
    },
    "thai_name": {
     "total": 40,
-    "caught": 12,
-    "by_expected": 12,
-    "swallow": 1,
-    "recall": 0.3
+    "caught": 25,
+    "by_expected": 25,
+    "swallow": 0,
+    "recall": 0.625
    },
    "thai_national_id": {
     "total": 23,
@@ -106,10 +106,10 @@
    },
    "thai_name": {
     "total": 40,
-    "caught": 12,
-    "by_expected": 12,
-    "swallow": 1,
-    "recall": 0.3
+    "caught": 25,
+    "by_expected": 25,
+    "swallow": 0,
+    "recall": 0.625
    },
    "thai_national_id": {
     "total": 23,

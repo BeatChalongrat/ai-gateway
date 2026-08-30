@@ -8,11 +8,15 @@
       "id": "two_word_with_context_kw",
       "input": "ลูกค้า สมชาย ใจดี ลงทะเบียน",
       "should_match": true,
-      "expected_count": 1,
+      "expected_count": 2,
       "expected_spans": [
         {
           "start": 7,
           "end": 17
+        },
+        {
+          "start": 7,
+          "end": 12
         }
       ]
     },
@@ -20,20 +24,29 @@
       "id": "song_word_chue",
       "input": "ชื่อ สมหญิง สมบูรณ์ ครับ",
       "should_match": true,
-      "expected_count": 1,
+      "expected_count": 2,
       "expected_spans": [
         {
           "start": 5,
           "end": 19
+        },
+        {
+          "start": 5,
+          "end": 11
         }
       ]
     },
     {
       "id": "no_context_kw",
       "input": "สมชาย ใจดี ไปทำงาน",
-      "should_match": false,
-      "expected_count": 0,
-      "expected_spans": []
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 5
+        }
+      ]
     },
     {
       "id": "plain_thai_prose",
@@ -119,11 +132,15 @@
       "id": "fix26_real_pair_after_name_label",
       "input": "name: อรอนงค์ ศรีสุข",
       "should_match": true,
-      "expected_count": 1,
+      "expected_count": 2,
       "expected_spans": [
         {
           "start": 6,
           "end": 20
+        },
+        {
+          "start": 6,
+          "end": 13
         }
       ]
     },
@@ -196,6 +213,56 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "fix29_glued_given_name",
+      "input": "ณัฐพลบอกว่าจะมาสาย",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 5
+        }
+      ]
+    },
+    {
+      "id": "fix29_glued_given_name_mid",
+      "input": "ฝากบอกอนุชาด้วยว่าประชุมเลื่อน",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix29_dictionary_word_not_a_name",
+      "input": "ประชุมเลื่อนไปพรุ่งนี้",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "fix29_two_word_no_title",
+      "input": "สุรชัย มั่นคง โทรมาเมื่อเช้า",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 0,
+          "end": 6
+        }
+      ]
+    },
+    {
+      "id": "fix29_label_glued_name",
+      "input": "ช่วยเขียนอีเมลแจ้งลูกค้าหน่อย ลูกค้าชื่อสมชาย เบอร์ 081-234-5678",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 40,
+          "end": 45
+        }
+      ]
     }
   ]
 }

@@ -37,6 +37,7 @@ import json
 import re
 from pathlib import Path
 
+from app.services.dlp.detectors.thai_gazetteer import find_names
 from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
 
@@ -286,6 +287,7 @@ class ThaiNameNoPrefixDetector(BaseDetector):
         spans.extend(self._detect_two_word(text))
         spans.extend(self._detect_gazetteer(text))
         spans.extend(self._detect_list(text))
+        spans.extend(self._detect_lexicon(text))
 
         matches: list[DetectionMatch] = []
         for start, end, matched in spans:
@@ -356,6 +358,15 @@ class ThaiNameNoPrefixDetector(BaseDetector):
             if _SENSITIVE_RE.search(text[low:high]):
                 out.append((start, end, m.group()))
         return out
+
+    # -- Pass 4 (FIX29) ------------------------------------------------
+    def _detect_lexicon(self, text: str) -> list[tuple[int, int, str]]:
+        """A bare given name from the 10k-name lexicon at a left word
+        boundary, ending where a dictionary word begins (``ณัฐพล|บอกว่า``).
+        No context gate: the FIX27 measurement showed the gate cost more
+        than half the recall while the dictionary-word filter already keeps
+        the corpus at zero fires. See thai_gazetteer.py."""
+        return [(s, e, text[s:e]) for s, e in find_names(text)]
 
     # -- Pass 3 --------------------------------------------------------
     def _detect_list(self, text: str) -> list[tuple[int, int, str]]:
