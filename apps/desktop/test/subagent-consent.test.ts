@@ -128,7 +128,7 @@ async function startTurn(h: Awaited<ReturnType<typeof build>>, userText = "count
   ];
   const ctrl = new AbortController();
   let text = "";
-  const tools = await (h.co as unknown as { toolDefinitions: (a: null, b: boolean, c: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false, false);
+  const tools = await (h.co as unknown as { toolDefinitions: (a: null, b: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false);
   const outcome = (h.co as unknown as { runLoop: (r: unknown) => Promise<string> }).runLoop({
     conversationId: "conv-1",
     model: "m",
@@ -178,7 +178,7 @@ describe("FIX31 §1.1 — a sub-agent's tool call asks the user, attributed", ()
     // No second level: the sub-agent's tool list had no run_subagent.
     const subCalls = h.gw.calls.filter((c) => String(c[0]?.content).startsWith("You are a focused sub-agent"));
     expect(subCalls.length).toBeGreaterThanOrEqual(1);
-    const nestedTools = (h.co as unknown as { toolDefinitions: (a: null, b: boolean, c: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false, true);
+    const nestedTools = (h.co as unknown as { toolDefinitions: (a: null, b: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, true);
     expect((await nestedTools).map((d) => d.function.name)).not.toContain("run_subagent");
 
     // Allow the first → it runs once; the SECOND card appears only now.

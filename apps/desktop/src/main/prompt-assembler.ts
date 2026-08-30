@@ -98,15 +98,12 @@ export function baseSystemPrompt(home: string, toolsAvailable: boolean, grants: 
       ? "You are SRAN Assistant, an AI desktop assistant with the ability to use tools to help users."
       : "You are SRAN Assistant, an AI desktop assistant. In this session you have NO tools: you cannot run commands, read or write files, browse, or see the screen — if the user asks for something that needs them, say so briefly and help with what you can.",
   );
+  // FIX32 §3.2: the desktop previously carried ONLY the language-match rule;
+  // the ครับ/ค่ะ-consistency, greet-once and don't-repeat rules existed only on
+  // web. One shared block now (see LANGUAGE_RULES_BLOCK).
   parts.push(`
-## Language — match the user (IMPORTANT)
-- Always respond in the SAME language the user writes in. If the user writes in Thai, respond
-  entirely in Thai; if in English, respond in English. For mixed input, follow the dominant
-  language. Only use a different language if the user explicitly asks.
-- This applies to ALL of your prose: your answers, the sentences you write around tool results,
-  summaries, and explanations. Match the user's language every turn.
-- Code, shell commands, file paths, and identifiers stay verbatim — you translate your own
-  wording, never the literal code or command text.`);
+## Language & tone (IMPORTANT)
+${LANGUAGE_RULES_BLOCK}`);
   if (toolsAvailable) {
     parts.push(`
 ## Tool Use Philosophy
@@ -177,6 +174,19 @@ Emit the code block on its own (a short sentence before it is fine); the
 app turns it into a live, interactive artifact. Keep short snippets in
 ordinary code blocks tagged with their language as usual.`;
 
+/** FIX32 Part 3b: the language/tone rules, byte-identical to chat-edge's
+ * services/chat-edge-api/internal/service/prompt_language_rules.txt (the
+ * canonical asset, embedded there). test/prompt-language.test.ts compares
+ * this constant against that file and FAILS on drift — the rule that exists
+ * in two wordings will drift, and it has, four rounds running. */
+export const LANGUAGE_RULES_BLOCK = `<language_rules>
+- Reply in the user's language (Thai→Thai, English→English; if mixed, follow the dominant one). This applies to ALL of your prose — answers, the sentences around tool results and code, summaries, explanations — every turn, even right after an English document or tool output. Code, shell commands, file paths and identifiers stay verbatim.
+- For Thai: pick ครับ or ค่ะ/คะ and use it consistently — never mix the two. Default to ครับ unless the user indicates otherwise.
+- Warm, professional tone — not too formal, not too casual. Skip filler.
+- Greet the user only once, at the start of the conversation. On follow-up messages, reply directly without re-greeting and without opening with "สวัสดีครับ" or the user's name. Use the user's name sparingly — only when it adds warmth or clarity, not in every response.
+- Don't repeat the user's question back before answering.
+</language_rules>`;
+
 /** FIX31 Part 3: the ONE statement about the shell, shared by the main and
  * sub-agent prompts. It must describe what the sidecar's run_command actually
  * does (RunCommandTool.PickShell): Windows PowerShell 5.1 by default, `cmd /c`
@@ -197,6 +207,9 @@ export function subAgentSystemPrompt(home: string, grants: readonly string[] = [
 - Keep tool use minimal and purposeful — your step budget is smaller than a normal turn's.
 - When the task is done (or impossible), reply with a final, self-contained text answer. That answer is the ONLY thing returned to the caller.
 - If you cannot complete the task — a tool it needs is not attached to this run, access is denied, or it is impossible — begin your final answer with \`FAILED:\` and say why in one or two sentences. Never describe a result you did not obtain.
+
+## Language & tone
+${LANGUAGE_RULES_BLOCK}
 
 ## Safety Rules
 - NEVER enter passwords, API keys, or financial credentials.

@@ -648,6 +648,7 @@ export const en = {
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "Still working — this is taking longer than usual.",
   // FIX30 §3.2 — what the turn is waiting on
+  "thread.compacted": "Long conversation — {n} older messages are no longer sent to the assistant (the first exchange and recent messages are kept).",
   "thread.waitingConsent": "Waiting for your permission — {tool}",
   "thread.waitingConsentSub": "Waiting for your permission — {tool}, asked by sub-agent “{label}”",
   "consent.subagentTitle": "A sub-agent wants to use a tool",
@@ -1617,6 +1618,7 @@ const th: Record<DictKey, string> = {
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
   // FIX30 §3.2 — what the turn is waiting on
+  "thread.compacted": "บทสนทนายาวมาก — ข้อความเก่า {n} รายการจะไม่ถูกส่งให้ผู้ช่วยแล้ว (ยังเก็บข้อความแรกและข้อความล่าสุดไว้)",
   "thread.waitingConsent": "รอการอนุญาตจากคุณ — {tool}",
   "thread.waitingConsentSub": "รอการอนุญาตจากคุณ — {tool} ขอโดย sub-agent “{label}”",
   "consent.subagentTitle": "Sub-agent ต้องการใช้เครื่องมือ",

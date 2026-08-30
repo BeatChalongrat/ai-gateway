@@ -55,6 +55,7 @@ import {
   type PermissionDecision,
   type PermissionStore,
 } from "./permissions";
+import { compileChain } from "./context-compiler";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import type { SidecarClient } from "./sidecar-client";
@@ -620,19 +621,26 @@ export class TurnCoordinator {
       const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
       const built = await this.buildMessages(conversationId, conversation, task.prompt);
       taskMessages = built.messages;
+      // FIX32 §1.2: the task path gets the same token budget as an interactive
+      // turn (an old alarm conversation grows too). The FULL chain persists.
+      const taskTools = await this.toolDefinitions(null, false);
+      const tcc = compileChain(built.messages, model, taskTools.length);
+      if (tcc.compacted) this.log.info(`CONTEXT COMPILED conv=${conversationId} (task ${task.id}) status=compacted total=${tcc.totalMessages} sent=${tcc.sentMessages} dropped=${tcc.dropped}`);
+      const taskChainStart = tcc.messages.length;
       await this.runLoop({
         conversationId,
         model,
-        messages: built.messages,
+        messages: tcc.messages,
         signal: controller.signal,
         maxIterations: this.opts.maxIterations ?? 100,
         maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
-        tools: await this.toolDefinitions(null, false, false),
+        tools: taskTools,
         parentToolCallId: null,
         onText: (t) => {
           text += t;
         },
       });
+      if (tcc.compacted) taskMessages.push(...tcc.messages.slice(taskChainStart));
     } catch (err) {
       text = `Error: ${(err as Error).message}`;
       errored = true;
@@ -774,28 +782,40 @@ export class TurnCoordinator {
 
     const isFirstTurn = messages.length === 2;
     const historyStart = 1; // everything after the system message is persisted
-    const chainStart = messages.length; // where this turn's chain begins
     this.log.info(`TURN START #${turnNo} conv=${conversationId} model=${model} msgId=${turn.messageId} textLen=${payload.text.length} attachments=${payload.attachmentHandles.length}${attached && payload.attachmentHandles.length ? ` (${attached.imageBlocks.length} image, ${attached.attached.length - attached.imageBlocks.length} document, ${attached.failures.length} failed → on the user message)` : ""}`);
     if (attached && attached.failures.length > 0) {
       // Never drop a file silently: the page shows the names (same event web-chat uses).
       this.emit(conversationId, "image_notice", { filenames: attached.failures.map((f) => f.filename) });
     }
-    this.log.info(`TURN OUTBOUND conv=${conversationId}: ${messages.length} msg → [${describe(messages)}]`);
-
+    // FIX32 §1.2 — token-budgeted context (context-compiler.ts, chat-edge's
+    // shape). The FULL chain still persists locally; only what is SENT is
+    // trimmed, the first exchange survives, tool chains stay atomic, and both
+    // the model (context note) and the user (compaction_notice → the page's
+    // marker) are told. Silently forgetting is the failure mode this exists
+    // to prevent.
+    const tools = await this.toolDefinitions(null, false, payload.imageMode);
+    const cc = compileChain(messages, model, tools.length);
+    const sendMessages = cc.messages;
+    if (cc.compacted) {
+      this.emit(conversationId, "compaction_notice", { dropped: cc.dropped, sent: cc.sentMessages, total: cc.totalMessages });
+      this.log.info(`CONTEXT COMPILED conv=${conversationId} status=compacted total=${cc.totalMessages} sent=${cc.sentMessages} dropped=${cc.dropped} hist_tokens=${cc.historyTokens} budget=${cc.budget.messagesRemaining} model=${model}`);
+    }
     // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
     // and offer it this turn. A system hint on the existing message, not a new type.
     if (payload.imageMode) {
-      messages.splice(1, 0, { role: "system", content: "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words." });
+      sendMessages.splice(1, 0, { role: "system", content: "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words." });
     }
+    const chainStart = sendMessages.length; // where this turn's chain begins
+    this.log.info(`TURN OUTBOUND conv=${conversationId}: ${sendMessages.length} msg → [${describe(sendMessages)}]`);
     const startedAt = Date.now();
     const outcome = await this.runLoop({
       conversationId,
       model,
-      messages,
+      messages: sendMessages,
       signal,
       maxIterations: this.opts.maxIterations ?? 100,
       maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
-      tools: await this.toolDefinitions(null, false, false, payload.imageMode),
+      tools,
       parentToolCallId: null,
       onText: (t) => {
         turn.assistantText += t;
@@ -807,13 +827,17 @@ export class TurnCoordinator {
     // FIX28 §5.1: the assistant's final answer joins the chain — this chain is
     // exactly what the next turn sends to the provider, and until now it held
     // only the user's side. Logged so the sent role sequence is visible.
-    appendAssistantReply(messages, turn.assistantText);
-    this.log.info(`TURN CHAIN conv=${conversationId}: roles=[${roleSequence(messages).join(",")}]`);
+    appendAssistantReply(sendMessages, turn.assistantText);
+    this.log.info(`TURN CHAIN conv=${conversationId}: roles=[${roleSequence(sendMessages).join(",")}]`);
     // Persist EVERYTHING after the system message locally (tool chains
     // included), and the visible text to chat-edge. On cancel too (Phase 6a
-    // P1: a cancelled turn must be resumable).
-    this.saveLocalHistory(conversationId, messages.slice(historyStart));
-    await this.importVisible(conversationId, userText, turn, model, messages.slice(chainStart), attached?.fileIds ?? []);
+    // P1: a cancelled turn must be resumable). When the SENT chain was
+    // compacted, what persists is the FULL untrimmed history plus this turn's
+    // new tail — compaction affects one request, never the stored past.
+    const appendedChain = sendMessages.slice(chainStart);
+    const fullChain = cc.compacted ? [...messages, ...appendedChain] : sendMessages;
+    this.saveLocalHistory(conversationId, fullChain.slice(historyStart));
+    await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? []);
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
     // a real message without leaving and re-entering the conversation.
@@ -1457,7 +1481,7 @@ export class TurnCoordinator {
     // FIX31 §1.1: every tool a single sub-agent has (run_subagent excepted —
     // still no second level). A call that needs permission asks the USER, on
     // the parent's page, attributed; nothing is auto-approved.
-    const tools = await this.toolDefinitions(req.tools, false, true);
+    const tools = await this.toolDefinitions(req.tools, true);
     const messages: GatewayMessage[] = [
       { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory, this.grants.list()) },
       { role: "user", content: req.task },
@@ -1535,8 +1559,12 @@ export class TurnCoordinator {
     return { answer: answer.trim(), completed, stopReason: completed ? null : failed ? "failed" : outcome, trace };
   }
 
-  /** Sidecar tools + host tools; nested runs never see run_subagent. */
-  private async toolDefinitions(allow: string[] | null, autoApprovableOnly: boolean, nested: boolean, imageMode = false): Promise<GatewayToolDefinition[]> {
+  /** Sidecar tools + host tools; nested runs never see run_subagent.
+   *  FIX32 Part 4: the FIX8-era `autoApprovableOnly` parameter is GONE — FIX31
+   *  removed the behaviour (a sub-agent asks the user instead of losing the
+   *  tool), and a dead parameter with a security-sounding name invites both
+   *  false confidence and accidental resurrection. */
+  private async toolDefinitions(allow: string[] | null, nested: boolean, imageMode = false): Promise<GatewayToolDefinition[]> {
     let defs: GatewayToolDefinition[] = [];
     try {
       const sidecarTools = await this.sidecar.listTools();
@@ -1582,7 +1610,6 @@ export class TurnCoordinator {
       const set = new Set(allow.map((a) => a.toLowerCase()));
       out = out.filter((d) => set.has(d.function.name.toLowerCase()));
     }
-    if (autoApprovableOnly) out = out.filter((d) => toolMeta(d.function.name).defaultPermission === "AllowAlways");
     // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —
     // the model should have no vocabulary for a tool it cannot use this turn.
     if (!this.browserConnected) {

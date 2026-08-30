@@ -669,6 +669,20 @@ class ApiClient {
    *  side: scope_type / memory_type / status, with paging via
    *  limit + offset. Defaults match the API (active only, pinned
    *  first via the server's ORDER BY). */
+  // ── FIX32 Part 4.3: skills (instruction text on chat-edge) ────────────────
+  listSkills(): Promise<{ skills: WebSkill[]; total: number }> {
+    return this.json("/skills");
+  }
+  createSkill(body: { name: string; description?: string; triggers?: string[]; instructions: string }) {
+    return this.json<WebSkill>("/skills", { method: "POST", body: JSON.stringify(body) });
+  }
+  setSkillEnabled(id: string, enabled: boolean) {
+    return this.json<WebSkill>(`/skills/${id}`, { method: "PATCH", body: JSON.stringify({ enabled }) });
+  }
+  deleteSkill(id: string) {
+    return this.json<void>(`/skills/${id}`, { method: "DELETE" });
+  }
+
   listMemories(params?: {
     scope_type?: string;
     memory_type?: string;
@@ -1224,6 +1238,21 @@ function mimeToExt(mime: string): string {
   if (lc.startsWith("audio/wav") || lc === "audio/x-wav") return "wav";
   if (lc.startsWith("audio/ogg")) return "ogg";
   return "webm";
+}
+
+// ── FIX32 Part 4.3 — user skills (chat-edge /api/v1/skills; FIX12 Item 3).
+// Skills are INSTRUCTION TEXT stored per user and folded into the system
+// prompt by chat-edge (prompt_compiler layer 10b) — no host involvement, so
+// the WEB surface can list/create/toggle/delete them like the desktop does.
+export interface WebSkill {
+  id: string;
+  name: string;
+  description: string;
+  triggers: string[];
+  instructions: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export const api = new ApiClient();

@@ -366,6 +366,12 @@ function MessageBubbleImpl({
           error. */}
       {message.reasoning_notice ? <ReasoningDowngradeNotice /> : null}
 
+      {/* FIX32 §1.2 — compaction marker: the host stopped sending the middle
+          of a long conversation. Quiet information, not an error. */}
+      {message.compaction_notice && message.compaction_notice.dropped > 0 ? (
+        <CompactionNotice dropped={message.compaction_notice.dropped} />
+      ) : null}
+
       {/* Image attach notice — one or more attached images couldn't be
           read into the vision request. Same quiet muted line: the person
           learns their picture didn't attach; not an error. */}
@@ -724,6 +730,20 @@ function ReasoningDowngradeNotice() {
 // user which attached image(s) couldn't be read so the turn's text-only
 // degradation isn't silent. The localized string carries the meaning; only
 // the (user's own) filenames are interpolated, never the server's reason.
+export function CompactionNotice({ dropped }: { dropped: number }) {
+  const t = useT();
+  return (
+    <div
+      className="my-1 flex items-center gap-1.5 text-xs text-text-muted"
+      data-testid="compaction-notice"
+      role="note"
+    >
+      <span aria-hidden>📦</span>
+      <span>{t("thread.compacted", { n: String(dropped) })}</span>
+    </div>
+  );
+}
+
 function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {
   const t = useT();
   return (
@@ -1104,6 +1124,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.fallback_info === b.fallback_info &&
     a.reasoning_notice === b.reasoning_notice &&
     a.image_notice === b.image_notice &&
+    a.compaction_notice === b.compaction_notice &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate &&
     handlersEqual(prev, next)

@@ -465,6 +465,10 @@ export interface Message {
    *  reply naming the files, same quiet styling as reasoning_notice —
    *  this is not an error; the turn still proceeds for any images that
    *  did resolve. */
+  /** FIX32 §1.2 (desktop shell) — the host compacted the SENT context this
+   *  turn: `dropped` older messages were not sent to the model. The user is
+   *  told, the way web-chat's compacted_history source marker tells them. */
+  compaction_notice?: { dropped: number; sent?: number; total?: number } | null;
   image_notice?: {
     filenames: string[];
   };

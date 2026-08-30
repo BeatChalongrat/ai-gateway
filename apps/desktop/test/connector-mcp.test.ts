@@ -167,7 +167,7 @@ async function coordinator(stack: ReturnType<typeof connectorStack> | null, mode
   const messages: GatewayMessage[] = [{ role: "system", content: "sys" }, { role: "user", content: "tell #general the deploy is done" }];
   const ctrl = new AbortController();
   let text = "";
-  const tools = await (co as unknown as { toolDefinitions: (a: null, b: boolean, c: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false, false);
+  const tools = await (co as unknown as { toolDefinitions: (a: null, b: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false);
   const outcome = (co as unknown as { runLoop: (r: unknown) => Promise<string> }).runLoop({ conversationId: "conv-1", model: "m", messages, signal: ctrl.signal, maxIterations: 6, maxMs: 30_000, tools, parentToolCallId: null, onText: (t: string) => { text += t; } });
   return { co, posts, sidecar, tools, outcome, text: () => text, messages };
 }

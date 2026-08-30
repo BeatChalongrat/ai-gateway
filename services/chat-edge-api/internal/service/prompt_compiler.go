@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"strings"
 	"time"
@@ -156,16 +157,16 @@ func (pc *PromptCompiler) Build(ctx context.Context, in CompileContext) (string,
 	}
 
 	// Layers 1–9: static identity/behaviour + per-model + tenant.
-	add(pc.globalIdentity(in))     // 1
-	add(pc.dateTime(in))           // 2
-	add(pc.languageRules(in))      // 3
-	add(pc.actionRules(in))        // 4
-	add(pc.outputFormat(in))       // 4b
-	add(pc.capabilityStatement(in))// 5
-	add(pc.safetyRules(in))        // 6
-	add(pc.toolPolicy(in))         // 7
-	add(pc.modelAdapter(in))       // 8
-	add(pc.tenantSettings(in))     // 9
+	add(pc.globalIdentity(in))      // 1
+	add(pc.dateTime(in))            // 2
+	add(pc.languageRules(in))       // 3
+	add(pc.actionRules(in))         // 4
+	add(pc.outputFormat(in))        // 4b
+	add(pc.capabilityStatement(in)) // 5
+	add(pc.safetyRules(in))         // 6
+	add(pc.toolPolicy(in))          // 7
+	add(pc.modelAdapter(in))        // 8
+	add(pc.tenantSettings(in))      // 9
 
 	// Layer 10: user custom instructions.
 	add(pc.userCustomInstructions(ctx, in))
@@ -244,13 +245,17 @@ func (pc *PromptCompiler) dateTime(in CompileContext) string {
 // Layer 3 — Language / Tone Rules (always)
 // ---------------------------------------------------------------------------
 
-const languageRulesBlock = `<language_rules>
-- Reply in the user's language (Thai→Thai, English→English; if mixed, follow the dominant one).
-- For Thai: pick ครับ or ค่ะ/คะ and use it consistently — never mix the two. Default to ครับ unless the user indicates otherwise.
-- Warm, professional tone — not too formal, not too casual. Skip filler.
-- Greet the user only once, at the start of the conversation. On follow-up messages, reply directly without re-greeting and without opening with "สวัสดีครับ" or the user's name. Use the user's name sparingly — only when it adds warmth or clarity, not in every response.
-- Don't repeat the user's question back before answering.
-</language_rules>`
+// FIX32 Part 3b — the language/tone rules are ONE asset shared with the
+// desktop (prompt_language_rules.txt, embedded here; the desktop holds the
+// same text in prompt-assembler.ts, and its test/prompt-language.test.ts
+// byte-compares the two and FAILS on drift). Four rounds of divergence
+// (Rust detector, DLP passes, model capabilities, the shell line) were each
+// found by running something — this one is pinned by a test instead.
+//
+//go:embed prompt_language_rules.txt
+var languageRulesRaw string
+
+var languageRulesBlock = strings.TrimSpace(languageRulesRaw)
 
 func (pc *PromptCompiler) languageRules(in CompileContext) string {
 	block := languageRulesBlock

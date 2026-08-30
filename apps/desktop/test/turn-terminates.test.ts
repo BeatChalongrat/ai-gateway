@@ -107,7 +107,7 @@ async function build(keepaliveMs = 20) {
   ];
   const ctrl = new AbortController();
   let text = "";
-  const tools = await (co as unknown as { toolDefinitions: (a: null, b: boolean, c: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false, false);
+  const tools = await (co as unknown as { toolDefinitions: (a: null, b: boolean) => Promise<GatewayToolDefinition[]> }).toolDefinitions(null, false);
   const outcome = (co as unknown as { runLoop: (r: unknown) => Promise<string> }).runLoop({
     conversationId: "conv-1",
     model: "m",

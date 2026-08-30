@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { ConnectorIcon } from "@/components/chat/connectorIcons";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
@@ -296,6 +297,8 @@ function ConnectorCard({
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
+        {/* FIX32 Part 4.2 — the provider's mark, bundled locally (never a CDN). */}
+        <ConnectorIcon connectorId={connector.id} name={connector.name} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <HealthDot status={connector.status} />

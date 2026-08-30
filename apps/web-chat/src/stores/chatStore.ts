@@ -2387,6 +2387,27 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "compaction_notice") {
+        // FIX32 §1.2 — the desktop host trimmed the sent context for length.
+        // Stash the numbers on the message so MessageBubble shows the same
+        // kind of quiet marker web-chat's compacted_history source shows —
+        // the user learns the assistant no longer sees the middle of the
+        // conversation, instead of it silently getting worse.
+        const data = evt.data as { dropped?: number; sent?: number; total?: number };
+        if (typeof data?.dropped === "number" && data.dropped > 0) {
+          const id = realAssistantId ?? tempAsstId;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === id ? { ...m, compaction_notice: { dropped: data.dropped!, sent: data.sent, total: data.total } } : m,
+                ),
+              },
+            };
+          });
+        }
       } else if (evt.event === "image_notice") {
         // One or more attached images couldn't be read (unreachable,
         // resize failure, unsupported format). Stash the filenames on

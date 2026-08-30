@@ -1,6 +1,6 @@
 "use client";
 
-// Skills management page — desktop-only.
+// Skills management page.
 //
 // A React port of the WPF SkillsViewModel. Lists every skill the host
 // knows about (built-in + user-installed), lets the user toggle each on
@@ -16,20 +16,189 @@ import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { api, type WebSkill } from "@/lib/api";
 import { hostApi, type SkillDto } from "@/lib/hostApi";
 
 export default function SkillsPage() {
   const hosted = useHostedMode();
-  if (!hosted) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-bg-base px-6 text-center">
-        <p className="max-w-sm text-sm text-text-muted">
-          This screen is available in the SRAN Desktop app.
-        </p>
-      </div>
-    );
-  }
+  // FIX32 Part 4.3 — skills are instruction text chat-edge already stores and
+  // folds into the prompt (FIX12 Item 3, layer 10b). Nothing about them needs
+  // a host, so the web surface manages them through chat-edge directly; the
+  // desktop keeps its host-backed screen (its skills live in the sidecar and
+  // include installable packages, which ARE a host capability).
+  if (!hosted) return <WebSkillsScreen />;
   return <SkillsScreen />;
+}
+
+// ---------------------------------------------------------------------------
+// Web surface — chat-edge-backed (FIX32 Part 4.3)
+// ---------------------------------------------------------------------------
+
+function WebSkillsScreen() {
+  const [skills, setSkills] = useState<WebSkill[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState({ name: "", description: "", triggers: "", instructions: "" });
+
+  async function reload() {
+    try {
+      const r = await api.listSkills();
+      setSkills(r.skills);
+    } catch {
+      toast("Couldn't load skills.");
+    } finally {
+      setLoaded(true);
+    }
+  }
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  async function handleCreate() {
+    const name = draft.name.trim();
+    if (!name || !draft.instructions.trim()) {
+      toast("A skill needs a name and its instructions.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.createSkill({
+        name,
+        description: draft.description.trim(),
+        triggers: draft.triggers.split(",").map((t) => t.trim()).filter(Boolean),
+        instructions: draft.instructions.trim(),
+      });
+      toast(`Skill “${name}” created.`);
+      setDraft({ name: "", description: "", triggers: "", instructions: "" });
+      setCreating(false);
+      await reload();
+    } catch (e) {
+      // FIX22 §1a — chat-edge refuses instructions that would trip the guardrail.
+      toast(e instanceof Error && e.message ? e.message : "Couldn't create the skill.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleToggle(skill: WebSkill) {
+    const next = !skill.enabled;
+    setSkills((prev) => prev.map((s) => (s.id === skill.id ? { ...s, enabled: next } : s)));
+    try {
+      await api.setSkillEnabled(skill.id, next);
+    } catch {
+      setSkills((prev) => prev.map((s) => (s.id === skill.id ? { ...s, enabled: skill.enabled } : s)));
+      toast("Couldn't update skill.");
+    }
+  }
+
+  async function handleDelete(skill: WebSkill) {
+    if (!window.confirm(`Delete "${skill.name}"? This can't be undone.`)) return;
+    try {
+      await api.deleteSkill(skill.id);
+      setSkills((prev) => prev.filter((s) => s.id !== skill.id));
+      toast(`Deleted "${skill.name}".`);
+    } catch {
+      toast("Couldn't delete skill.");
+    }
+  }
+
+  return (
+    <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
+      <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
+        <Link href="/chat" className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary">
+          ← Back to chat
+        </Link>
+        <div className="mt-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">Skills</h1>
+            <p className="mt-1 text-sm text-text-secondary">
+              Instruction sets the assistant follows when they apply. They work in every chat on this account.
+            </p>
+          </div>
+          <Button variant="secondary" onClick={() => setCreating((v) => !v)} aria-expanded={creating}>
+            Create skill
+          </Button>
+        </div>
+
+        {creating ? (
+          <form
+            className="mt-6 flex flex-col gap-3 rounded-xl border border-border bg-bg-surface p-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreate();
+            }}
+            aria-label="Create skill"
+          >
+            <p className="text-sm text-text-secondary">
+              Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
+            </p>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Name</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="สรุปแบบสั้น" required />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Description (optional)</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Trigger words, comma-separated (optional)</span>
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-text-secondary">Instructions</span>
+              <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} required />
+            </label>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button type="submit" loading={saving}>Save skill</Button>
+            </div>
+          </form>
+        ) : null}
+
+        <div className="mt-8">
+          {!loaded ? (
+            <div className="flex items-center justify-center py-10 text-text-secondary">
+              <Spinner size={20} />
+            </div>
+          ) : skills.length === 0 ? (
+            <EmptySkillsState />
+          ) : (
+            <div className="flex flex-col gap-3" data-testid="web-skills-list">
+              {skills.map((skill) => (
+                <section key={skill.id} className="flex items-start justify-between gap-4 rounded-xl border border-border bg-bg-surface p-4" data-testid="web-skill-card">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-base font-medium text-text-primary">{skill.name}</h3>
+                    {skill.description ? <p className="mt-1 text-sm text-text-secondary">{skill.description}</p> : null}
+                    {skill.triggers.length > 0 ? (
+                      <p className="mt-1 truncate text-xs text-text-muted">Triggers: {skill.triggers.join(" · ")}</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-text-muted">Applies to every message</p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button variant="ghost" onClick={() => void handleDelete(skill)} aria-label={`Delete ${skill.name}`}>
+                      Delete
+                    </Button>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={skill.enabled}
+                      aria-label={`${skill.name} ${skill.enabled ? "on" : "off"}`}
+                      onClick={() => void handleToggle(skill)}
+                      className={`relative h-6 w-11 rounded-full transition-colors ${skill.enabled ? "bg-blue-600" : "bg-border"}`}
+                    >
+                      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${skill.enabled ? "translate-x-5" : "translate-x-0.5"}`} />
+                    </button>
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
 }
 
 function SkillsScreen() {
