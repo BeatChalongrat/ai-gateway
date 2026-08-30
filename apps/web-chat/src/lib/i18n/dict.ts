@@ -647,6 +647,11 @@ export const en = {
   "thread.newMessages": "New messages",
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "Still working — this is taking longer than usual.",
+  // FIX30 §3.2 — what the turn is waiting on
+  "thread.waitingConsent": "Waiting for your permission — {tool}",
+  "thread.showConsent": "Show",
+  "thread.permissionNeeded": "Permission needed",
+  "thread.toolRunning": "Running {tool}… {s} s",
   "thread.scrollToLatest": "Scroll to latest",
   "thread.loadEarlier": "Load earlier messages",
   "sidebar.searching": "Searching…",
@@ -1605,6 +1610,11 @@ const th: Record<DictKey, string> = {
   "thread.newMessages": "ข้อความใหม่",
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
+  // FIX30 §3.2 — what the turn is waiting on
+  "thread.waitingConsent": "รอการอนุญาตจากคุณ — {tool}",
+  "thread.showConsent": "แสดง",
+  "thread.permissionNeeded": "ต้องการการอนุญาต",
+  "thread.toolRunning": "กำลังรัน {tool}… {s} วินาที",
   "thread.scrollToLatest": "เลื่อนไปข้อความล่าสุด",
   "thread.loadEarlier": "โหลดข้อความก่อนหน้า",
   "sidebar.searching": "กำลังค้นหา…",

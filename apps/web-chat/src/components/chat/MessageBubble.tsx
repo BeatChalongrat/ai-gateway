@@ -1089,6 +1089,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.paused === b.paused &&
     a.pending_consent === b.pending_consent &&
     a.agent_status === b.agent_status &&
+    a.agent_wait === b.agent_wait &&
     // S7 — re-render when the per-turn context_sources array
     // arrives or changes. The first render after a stream
     // finishes carries no sources (they persist async); the next

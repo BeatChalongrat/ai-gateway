@@ -28,6 +28,10 @@ export interface NestedRunRequest {
   parentToolCallId: string;
   conversationId: string;
 }
+/** FIX30 §3.1: a sub-agent's final answer that opens like this is a failure
+ *  (the prompt asks for `FAILED:`; `ERROR:` is what a model writes unprompted). */
+export const SUBAGENT_FAILED_RE = /^\s*(?:FAILED|ERROR)\s*:/i;
+
 export interface NestedRunResult {
   answer: string;
   completed: boolean;
@@ -206,7 +210,7 @@ export class HostTools {
               const t = tasks[i] as { task?: string; label?: string };
               const label = t.label?.trim() || `Task ${i + 1}`;
               const r = await this.runNested({ task: String(t.task ?? ""), tools: null, autoApprovableOnly: true, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
-              results[i] = `## ${label}\n${r.completed ? r.answer : `(did not finish: ${r.stopReason ?? "unknown"})\n${r.answer}`}${trace(r.trace)}`;
+              results[i] = `## ${label}\n${r.completed ? r.answer : r.stopReason === "failed" ? `(failed)\n${r.answer}` : `(did not finish: ${r.stopReason ?? "unknown"})\n${r.answer}`}${trace(r.trace)}`;
             }
           });
           await Promise.all(workers);
@@ -218,9 +222,9 @@ export class HostTools {
         const allowRaw = Array.isArray(args["tools"]) ? (args["tools"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
         const allow = allowRaw.length > 0 ? allowRaw : null;
         const r = await this.runNested({ task, tools: allow, autoApprovableOnly: false, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
-        return r.completed
-          ? { ok: true, text: r.answer + trace(r.trace), imageDataUri: null }
-          : { ok: false, text: `Sub-agent did not finish: ${r.stopReason ?? "the run ended unexpectedly."}${trace(r.trace)}`, imageDataUri: null };
+        if (r.completed) return { ok: true, text: r.answer + trace(r.trace), imageDataUri: null };
+        if (r.stopReason === "failed") return { ok: false, text: `Sub-agent failed: ${r.answer}${trace(r.trace)}`, imageDataUri: null };
+        return { ok: false, text: `Sub-agent did not finish: ${r.stopReason ?? "the run ended unexpectedly."}${trace(r.trace)}`, imageDataUri: null };
       }
       default:
         return { ok: false, text: `Unknown host tool '${name}'.`, imageDataUri: null };

@@ -100,13 +100,20 @@ function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps:
   }, [running, failed, stepFailed]);
   const done = steps.filter((s) => s.phase === "finished").length;
   return (
-    <div className="my-1 rounded-lg border border-border-subtle bg-bg-surface/60" data-testid="subagent-card">
+    <div
+      className={`my-1 rounded-lg border ${failed || stepFailed ? "border-status-danger/50" : "border-border-subtle"} bg-bg-surface/60`}
+      data-testid="subagent-card"
+      data-status={running ? "running" : failed || stepFailed ? "failed" : "ok"}
+    >
       <button
         type="button"
         className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={`Sub-agent: ${activity.argsSummary ?? ""}`}
+        // FIX30 §3.1: a sub-agent that did not do its job must READ as failed —
+        // in the name (screen readers, the a11y tree) and on the row, not only
+        // by the colour of an icon.
+        aria-label={`Sub-agent: ${activity.argsSummary ?? ""}${failed || stepFailed ? " — failed" : ""}`}
       >
         {running ? (
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary" />
@@ -120,6 +127,9 @@ function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps:
         <span className="min-w-0 flex-1 truncate text-sm text-text-tertiary" title={activity.argsSummary}>
           {activity.argsSummary}
         </span>
+        {!running && (failed || stepFailed) ? (
+          <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span>
+        ) : null}
         <span className="shrink-0 text-xs text-text-muted">
           {running ? `${done}/${steps.length} steps` : `${steps.length} step${steps.length === 1 ? "" : "s"}`}
           {activity.durationMs != null ? ` · ${Math.round(activity.durationMs / 100) / 10}s` : ""}

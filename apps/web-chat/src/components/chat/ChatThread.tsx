@@ -79,6 +79,16 @@ export function ChatThread({
   const lastLen = useRef(0);
   const lastLastContent = useRef("");
   const autoScrolling = useRef(false);
+  // FIX30 §1: structural growth of the last row — tool cards, plan, code
+  // runs, a consent card — is "content" for the scroller too. Until now only
+  // a text delta or a new row woke the auto-scroll, so a tool-only turn
+  // (plan → sub-agent cards → consent) grew below the fold with the view
+  // still parked on the user's message and no pill: the consent card was in
+  // the DOM, off-screen under the composer, and the turn waited on a decision
+  // nobody could see.
+  const lastStructure = useRef("");
+  const lastConsentId = useRef<string | null>(null);
+  const [consentPill, setConsentPill] = useState(false);
 
   // ── P3 — send-time turn anchoring ────────────────────────────
   // On the user's own send, the new turn scrolls near the viewport top
@@ -231,9 +241,12 @@ export function ChatThread({
     const prevLen = lastLen.current;
     const lengthGrew = messages.length !== prevLen;
     const contentGrew = last?.content !== lastLastContent.current;
-    if (!lengthGrew && !contentGrew) return;
+    const structure = structureKeyOf(last);
+    const structureGrew = structure !== lastStructure.current;
+    if (!lengthGrew && !contentGrew && !structureGrew) return;
     lastLen.current = messages.length;
     lastLastContent.current = last?.content ?? "";
+    lastStructure.current = structure;
 
     // P3 — detect the user's OWN send: the last user message carries a
     // new id AND the list grew during this conversation's lifetime.
@@ -277,6 +290,32 @@ export function ChatThread({
       anchorActive.current = false; // row unreachable — old behaviour
     }
 
+    // FIX30 §1: a consent card is the one thing in a turn the USER must act
+    // on, so it must never sit where the user cannot see it. Following, or
+    // still holding the send anchor → drop the hold and bring it into view
+    // (the card sits at the tail of the streaming row). Scrolled up on
+    // purpose → the user always wins: raise the "Permission needed" pill
+    // instead; the waiting notice above the composer offers "Show" either way.
+    const consentId = last?.pending_consent?.promptId ?? null;
+    const consentArrived = consentId !== null && consentId !== lastConsentId.current;
+    lastConsentId.current = consentId;
+    if (consentId === null && consentPill) setConsentPill(false);
+    if (consentArrived) {
+      if (anchorActive.current || autoStick) {
+        anchorActive.current = false;
+        setSpacerPx(0);
+        setAutoStick(true);
+        autoScrolling.current = true;
+        el.scrollTop = el.scrollHeight;
+        requestAnimationFrame(() => {
+          autoScrolling.current = false;
+        });
+      } else {
+        setConsentPill(true);
+      }
+      return;
+    }
+
     if (anchorActive.current) {
       // ── Phase 1: HOLD. The reply streams into the space below the
       // anchor; the view does not move. The spacer shrinks as real
@@ -304,7 +343,7 @@ export function ChatThread({
     } else {
       setPendingNew(true);
     }
-  }, [messages, autoStick]);
+  }, [messages, autoStick, consentPill]);
 
   // After streaming completes: if user is still "near bottom" (within
   // 100px) snap to bottom to show the full response.
@@ -325,12 +364,18 @@ export function ChatThread({
   const runningTool = streamingMsg?.tool_activities?.find(
     (a) => a.phase === "started",
   );
-  const phaseKey = streamingMsg
-    ? runningTool
-      ? (`tool:${runningTool.tool}` as const)
-      : streamingMsg.is_searching
-        ? ("gen.searching" as const)
-        : ("gen.working" as const)
+  // FIX30 §3.2: what the turn is waiting on, if anything — the consent card
+  // (store state, exact) or a long local tool (the host's heartbeat frames).
+  const waitingConsent = streamingMsg?.pending_consent ?? null;
+  const toolWait = streamingMsg?.agent_wait?.kind === "tool" ? streamingMsg.agent_wait : null;
+  const phaseKey: string | null = streamingMsg
+    ? waitingConsent
+      ? `consent:${waitingConsent.tool}`
+      : runningTool
+        ? `tool:${runningTool.tool}`
+        : streamingMsg.is_searching
+          ? "gen.searching"
+          : "gen.working"
     : null;
   const [announcement, setAnnouncement] = useState("");
   const prevPhaseRef = useRef<string | null>(null);
@@ -340,7 +385,9 @@ export function ChatThread({
       wasStreamingRef.current = true;
       if (prevPhaseRef.current !== phaseKey) {
         prevPhaseRef.current = phaseKey;
-        if (phaseKey.startsWith("tool:")) {
+        if (phaseKey.startsWith("consent:")) {
+          setAnnouncement(t("thread.waitingConsent", { tool: phaseKey.slice("consent:".length) }));
+        } else if (phaseKey.startsWith("tool:")) {
           const tool = phaseKey.slice("tool:".length);
           const key = toolActivityLabelKey(tool);
           setAnnouncement(key ? t(key) : t("tool.generic", { tool }));
@@ -390,7 +437,10 @@ export function ChatThread({
     const nearBottom = distance < NEAR_BOTTOM_PX;
     setAutoStick(nearBottom);
     setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
-    if (nearBottom) setPendingNew(false);
+    if (nearBottom) {
+      setPendingNew(false);
+      setConsentPill(false);
+    }
   }
 
   function jumpToBottom() {
@@ -403,6 +453,26 @@ export function ChatThread({
     window.setTimeout(() => {
       autoScrolling.current = false;
     }, 400);
+  }
+
+  /** FIX30 §1: bring the consent card into view (centre it); with no
+   *  scrollIntoView (jsdom) fall back to the tail, where the card lives. */
+  function jumpToConsent() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    setConsentPill(false);
+    const card = el.querySelector<HTMLElement>('[data-testid="consent-card"]');
+    if (card && typeof card.scrollIntoView === "function") {
+      anchorActive.current = false;
+      setAutoStick(true);
+      autoScrolling.current = true;
+      card.scrollIntoView({ block: "center" });
+      window.setTimeout(() => {
+        autoScrolling.current = false;
+      }, 400);
+      return;
+    }
+    jumpToBottom();
   }
 
   async function handleLoadEarlier() {
@@ -482,7 +552,34 @@ export function ChatThread({
         />
       </div>
 
-      {stalled ? (
+      {waitingConsent ? (
+        // FIX30 §3.2: say what the turn is waiting on, where the user is
+        // looking (above the composer, like the stalled notice), with a way
+        // to reach the card. Wins over "stalled": a turn waiting for the
+        // user is not stalled, whatever the byte clock says.
+        <div
+          role="status"
+          data-testid="waiting-consent-notice"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-primary shadow-lg backdrop-blur-sm"
+        >
+          {t("thread.waitingConsent", { tool: waitingConsent.tool })}
+          <button
+            type="button"
+            onClick={jumpToConsent}
+            className="focus-ring rounded-full bg-text-primary px-2.5 py-0.5 font-medium text-bg-base hover:opacity-90"
+          >
+            {t("thread.showConsent")}
+          </button>
+        </div>
+      ) : toolWait ? (
+        <div
+          role="status"
+          data-testid="tool-running-notice"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
+        >
+          {t("thread.toolRunning", { tool: toolWait.tool, s: String(Math.round(toolWait.elapsedMs / 1000)) })}
+        </div>
+      ) : stalled ? (
         <div
           role="status"
           data-testid="stalled-stream-notice"
@@ -499,7 +596,25 @@ export function ChatThread({
         </div>
       ) : null}
 
-      {pendingNew && !autoStick ? (
+      {consentPill && waitingConsent ? (
+        <button
+          type="button"
+          data-testid="consent-pill"
+          onClick={jumpToConsent}
+          className="focus-ring popover-appear absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-text-primary px-3 py-1.5 text-xs font-medium text-bg-base shadow-xl hover:opacity-90"
+        >
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M12 5v14M5 12l7 7 7-7"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          {t("thread.permissionNeeded")}
+        </button>
+      ) : pendingNew && !autoStick ? (
         <button
           type="button"
           onClick={jumpToBottom}
@@ -536,6 +651,15 @@ export function ChatThread({
       ) : null}
     </div>
   );
+}
+
+/** FIX30 §1: the parts of a row that grow WITHOUT a text delta. */
+function structureKeyOf(m: Message | undefined): string {
+  if (!m) return "";
+  const acts = m.tool_activities ?? [];
+  let finished = 0;
+  for (const a of acts) if (a.phase === "finished") finished++;
+  return `${acts.length}/${finished}|${m.plan?.length ?? 0}|${m.code_runs?.length ?? 0}|${m.pending_consent?.promptId ?? ""}`;
 }
 
 // ─── Inner list renderers ──────────────────────────────────────

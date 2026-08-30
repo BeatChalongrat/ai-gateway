@@ -1948,6 +1948,16 @@ async function consumeStream(
     if (get().stalledStreams[convId]) setStalled(false);
   };
   const watchdog = window.setInterval(() => {
+    // FIX30 §3.2: a turn waiting for the user's consent is not idle — the
+    // host re-says so every heartbeat (bytes), and even without one the card
+    // is the user's to answer; the deadman must never answer it for them
+    // (it did: consent + 180 s → abort → turn.cancel → tool DENIED, with the
+    // card still on the page).
+    if ((get().messages[convId] ?? []).some((m) => m.isStreaming && m.pending_consent)) {
+      lastActivityAt = Date.now();
+      if (get().stalledStreams[convId]) setStalled(false);
+      return;
+    }
     const idle = Date.now() - lastActivityAt;
     if (idle > STREAM_IDLE.timeoutMs) setStalled(true);
     if (idle > STREAM_IDLE.deadMs) {
@@ -2162,6 +2172,8 @@ async function consumeStream(
                 const at = acts.findIndex((a) => a.id === data.id);
                 return {
                   ...m,
+                  // FIX30 §3.2: a finished tool ends its "running for N s" notice.
+                  agent_wait: data.phase === "finished" && m.agent_wait?.kind === "tool" ? null : m.agent_wait,
                   tool_activities:
                     at === -1
                       ? [...acts, data]
@@ -2226,15 +2238,24 @@ async function consumeStream(
           };
         });
       } else if (evt.event === "status") {
-        // Desktop shell (Phase 4) — the phase marker ("Working… (step n/max)").
-        const data = evt.data as { text: string };
+        // Desktop shell (Phase 4) — the phase marker. FIX30 §3.2: the host's
+        // payload is `{ status, waiting?, tool?, promptId?, elapsedMs? }`
+        // (`text` was never what it sent — the marker was dead until now).
+        // `waiting` names what the turn is blocked on: "consent" (the card)
+        // or "tool" (a long local tool, re-sent every heartbeat); null or
+        // absent clears it (the next model step, or a consent answered).
+        const data = evt.data as { text?: string; status?: string; waiting?: string | null; tool?: string; promptId?: string; elapsedMs?: number };
         const id = realAssistantId ?? tempAsstId;
+        const wait: Message["agent_wait"] =
+          data.waiting === "consent" || data.waiting === "tool"
+            ? { kind: data.waiting, tool: data.tool ?? "", promptId: data.promptId, elapsedMs: data.elapsedMs ?? 0 }
+            : null;
         set((s) => {
           const list = s.messages[convId] ?? [];
           return {
             messages: {
               ...s.messages,
-              [convId]: list.map((m) => (m.id === id ? { ...m, agent_status: data.text } : m)),
+              [convId]: list.map((m) => (m.id === id ? { ...m, agent_status: data.text ?? data.status ?? null, agent_wait: wait } : m)),
             },
           };
         });
@@ -2288,6 +2309,8 @@ async function consumeStream(
                       // results stay visible after the turn (like the WPF app).
                       tool_activities: HOSTED_MODE ? m.tool_activities : undefined,
                       agent_status: null,
+                      agent_wait: null,
+                      pending_consent: null,
                       token_usage: data.token_usage ?? null,
                       response_time_ms: Date.now() - streamStartedAt,
                     }
@@ -2523,7 +2546,11 @@ function finalizeMessage(
       messages: {
         ...s.messages,
         [convId]: list.map((m) =>
-          m.id === messageId ? { ...m, status, isStreaming: false } : m,
+          // FIX30 §3.2: a turn that ended (completed / cancelled / error) has
+          // nothing left to wait on. A card left behind after Stop was being
+          // answered into a prompt the host had already expired ("consent.respond
+          // for unknown/expired prompt — ignored").
+          m.id === messageId ? { ...m, status, isStreaming: false, pending_consent: null, agent_wait: null } : m,
         ),
       },
     };

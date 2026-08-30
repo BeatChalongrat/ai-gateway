@@ -24,6 +24,10 @@ describe("sub-agent cards", () => {
     expect(screen.queryByText("dir /b")).toBeNull();
     // failed sub-agent auto-opened: its failing step is visible
     expect(screen.getByText("ping")).toBeTruthy();
+    // FIX30 §3.1: it READS as failed — the word on the row, the name, the status.
+    expect(screen.getByText("Failed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Sub-agent: ping google — failed/ })).toBeTruthy();
+    expect(cards.map((c) => c.getAttribute("data-status")).sort()).toEqual(["failed", "ok"]);
     // expand the first
     fireEvent.click(screen.getByRole("button", { name: /Sub-agent: count files/ }));
     expect(screen.getByText("dir /b")).toBeTruthy();

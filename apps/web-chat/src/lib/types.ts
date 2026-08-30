@@ -430,6 +430,11 @@ export interface Message {
   /** local-only (desktop shell, Phase 4) — the phase marker text
    *  ("Working… (step n/max)"); shown while content is still empty. */
   agent_status?: string | null;
+  /** local-only (desktop shell, FIX30 §3.2) — what the turn is WAITING on,
+   *  from the host's ``status`` frames: the consent card ("consent") or a
+   *  long local tool ("tool", re-sent every heartbeat with its elapsed
+   *  time). Null when the model is the one working. */
+  agent_wait?: { kind: "consent" | "tool"; tool: string; promptId?: string; elapsedMs: number } | null;
   /** local-only — wall-clock duration of the streaming turn (send →
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */

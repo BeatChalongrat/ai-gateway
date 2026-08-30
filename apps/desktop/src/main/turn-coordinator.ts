@@ -31,7 +31,7 @@ import type { BridgeChannel } from "./bridge";
 import type { ChatEdgeClient, ConversationDto } from "./chat-edge-client";
 import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
 import type { GrantStore } from "./grants";
-import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, type NestedRunRequest, type NestedRunResult } from "./host-tools";
+import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, SUBAGENT_FAILED_RE, type NestedRunRequest, type NestedRunResult } from "./host-tools";
 import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
 import { composeUserContent, pruneAttachedImages, resolveAttachments, type ImageEncoder, type ResolvedAttachments } from "./attachments";
@@ -81,6 +81,11 @@ interface PendingConsent {
 }
 
 export interface TurnCoordinatorOptions {
+  /** FIX30 §3.2: how often the host re-says what a turn is waiting on (a
+   *  consent decision, a long local tool) — a `status` turn event the page
+   *  shows AND a byte for its idle watchdog, so a legitimate wait is never
+   *  mistaken for a dead stream. Default 15 s. */
+  waitKeepaliveMs?: number;
   homeDirectory: string;
   dataDir: string;
   defaultModel: string;
@@ -1085,39 +1090,49 @@ export class TurnCoordinator {
     let where: "host" | "sidecar" = "sidecar";
     let rpcError: string | undefined;
     this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${this.hostTools.has(name) ? "host" : "sidecar"}`);
-    if (this.hostTools.has(name)) {
-      where = "host";
-      try {
-        const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal });
+    // FIX30 §3.2: a local tool has NO timeout (legitimate ones run long — a
+    // 30-ping took 29 s, a home-wide search 25 s). What it gets instead is a
+    // heartbeat: every keepalive tick the page is told which tool is running
+    // and for how long, so "Working…" never means "unknown", and the page's
+    // idle watchdog does not mistake a long tool for a dead stream.
+    const heartbeat = setInterval(() => this.emit(eventConv, "status", { status: "tool_running", waiting: "tool", tool: name, toolCallId: call.id, elapsedMs: Date.now() - t0 }), this.opts.waitKeepaliveMs ?? 15_000);
+    try {
+      if (this.hostTools.has(name)) {
+        where = "host";
+        try {
+          const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal });
+          ok = r.ok;
+          text = r.text;
+          image = r.imageDataUri;
+        } catch (err) {
+          ok = false;
+          text = `${name} threw: ${(err as Error).message}`;
+        }
+      } else {
+        const r = await this.sidecar.callTool(name, args, {
+          conversationId: run.conversationId,
+          grants,
+          signal: run.signal,
+          authorizedSite: authorizedSite ?? undefined,
+          onProgress: (chunk) => this.emit(eventConv, "tool_output", { id: call.id, chunk: chunk + "\n" }),
+        });
         ok = r.ok;
         text = r.text;
         image = r.imageDataUri;
-      } catch (err) {
-        ok = false;
-        text = `${name} threw: ${(err as Error).message}`;
+        if (r.rpcError) {
+          rpcError = `${r.rpcError.code} ${r.rpcError.message}`;
+          text = `Error: ${r.rpcError.message}`;
+          this.log.warn(`TOOL ${name} REFUSED by the sidecar: ${rpcError}`);
+        } else if (name === "read_document" && ok && text.startsWith(OCR_RELAY_MARKER)) {
+          // FIX3 §4: a scanned PDF the sidecar could not OCR. It handed us the bytes
+          // (PathGuard + SensitiveReadGuard already cleared them sidecar-side); OCR
+          // them HOST-side, which holds the session JWT. The host has NO path — only
+          // these bytes — so it can never read a file the sidecar refused.
+          text = await this.ocrScannedPdf(run.conversationId, text.slice(OCR_RELAY_MARKER.length).trim(), run.signal);
+        }
       }
-    } else {
-      const r = await this.sidecar.callTool(name, args, {
-        conversationId: run.conversationId,
-        grants,
-        signal: run.signal,
-        authorizedSite: authorizedSite ?? undefined,
-        onProgress: (chunk) => this.emit(eventConv, "tool_output", { id: call.id, chunk: chunk + "\n" }),
-      });
-      ok = r.ok;
-      text = r.text;
-      image = r.imageDataUri;
-      if (r.rpcError) {
-        rpcError = `${r.rpcError.code} ${r.rpcError.message}`;
-        text = `Error: ${r.rpcError.message}`;
-        this.log.warn(`TOOL ${name} REFUSED by the sidecar: ${rpcError}`);
-      } else if (name === "read_document" && ok && text.startsWith(OCR_RELAY_MARKER)) {
-        // FIX3 §4: a scanned PDF the sidecar could not OCR. It handed us the bytes
-        // (PathGuard + SensitiveReadGuard already cleared them sidecar-side); OCR
-        // them HOST-side, which holds the session JWT. The host has NO path — only
-        // these bytes — so it can never read a file the sidecar refused.
-        text = await this.ocrScannedPdf(run.conversationId, text.slice(OCR_RELAY_MARKER.length).trim(), run.signal);
-      }
+    } finally {
+      clearInterval(heartbeat);
     }
     const durationMs = Date.now() - t0;
     if (run.signal.aborted) {
@@ -1244,11 +1259,35 @@ export class TurnCoordinator {
       ...(siteInfo ? { site: siteInfo.site, grantOptions: ["once", "always"] as const, alwaysPromptReason: siteInfo.alwaysPromptReason } : {}),
     };
     this.log.info(`CONSENT REQUEST ${promptId}: ${tool} scope=${scope} danger=${dangerClass}${siteInfo ? ` site=${siteInfo.site}${siteInfo.alwaysPromptReason ? ` always-prompt=${siteInfo.alwaysPromptReason}` : ""}` : ""}`);
+    // FIX30 §3.2: the wait is unbounded BY DESIGN (only the user can answer),
+    // so the turn must SAY what it is waiting on — once now, and again every
+    // keepalive tick. The page renders the text; the ticks are also bytes for
+    // its idle watchdog, which otherwise cancelled a turn that was merely
+    // waiting for the user (the owner's hang: consent + 183 s → turn.cancel).
+    // Emitted on eventConv unconditionally: a nested run's consent still blocks
+    // the PARENT turn the page is looking at.
+    const waitStarted = Date.now();
+    const keepaliveMs = this.opts.waitKeepaliveMs ?? 15_000;
+    const sayWaiting = () => this.emit(eventConv, "status", { status: "waiting_consent", waiting: "consent", tool, promptId, elapsedMs: Date.now() - waitStarted });
+    sayWaiting();
+    let ticks = 0;
+    const logEvery = Math.max(1, Math.round(60_000 / keepaliveMs));
+    const keepalive = setInterval(() => {
+      sayWaiting();
+      ticks++;
+      if (ticks % logEvery === 0) this.log.info(`CONSENT WAITING ${promptId}: ${Math.round((Date.now() - waitStarted) / 1000)} s, no answer yet (${tool})`);
+    }, keepaliveMs);
     return new Promise<ConsentRespondPayload>((resolve) => {
-      this.pendingConsents.set(promptId, { conversationId, payload, resolve });
       const onAbort = () => {
-        if (this.pendingConsents.delete(promptId)) resolve({ promptId, decision: "deny", scope: "once" });
+        if (this.pendingConsents.delete(promptId)) settle({ promptId, decision: "deny", scope: "once" });
       };
+      const settle = (r: ConsentRespondPayload) => {
+        clearInterval(keepalive);
+        signal.removeEventListener("abort", onAbort);
+        this.emit(eventConv, "status", { status: "consent_answered", waiting: null, tool, promptId, decision: r.decision, elapsedMs: Date.now() - waitStarted });
+        resolve(r);
+      };
+      this.pendingConsents.set(promptId, { conversationId, payload, resolve: settle });
       signal.addEventListener("abort", onAbort, { once: true });
       this.bridge.post("consent.request", payload);
     });
@@ -1296,14 +1335,21 @@ export class TurnCoordinator {
       clearTimeout(timer);
       parentSignal.removeEventListener("abort", onAbort);
     }
-    this.log.info(`SUBAGENT ${outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
+    // FIX30 §3.1: a sub-agent that says it could not do the job is a FAILED
+    // sub-agent, not a green tick. The prompt asks it to open with `FAILED:`
+    // when it cannot complete the task; `ERROR:` (what the model wrote on its
+    // own in the owner's run) counts too. Anything else is still trusted as
+    // success — a decline in other words is not detected (see the report).
+    const failed = outcome === "done" && SUBAGENT_FAILED_RE.test(answer);
+    const completed = outcome === "done" && !failed;
+    this.log.info(`SUBAGENT ${failed ? "FAILED" : outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
     this.activity(req.conversationId, conversationId, "subagent", "finished", {
-      success: outcome === "done",
+      success: completed,
       resultPreview: (outcome === "done" ? answer.trim() : `Stopped: ${outcome}`).slice(0, 160),
       durationMs: Date.now() - startedAt,
       parentId: req.parentToolCallId,
     });
-    return { answer: answer.trim(), completed: outcome === "done", stopReason: outcome === "done" ? null : outcome, trace };
+    return { answer: answer.trim(), completed, stopReason: completed ? null : failed ? "failed" : outcome, trace };
   }
 
   /** Sidecar tools + host tools; nested runs never see run_subagent. */
