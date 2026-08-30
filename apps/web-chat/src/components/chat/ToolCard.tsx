@@ -42,6 +42,7 @@ function toolIcon(tool: string) {
     case "run_python":
       return Code2;
     case "run_subagent":
+    case "subagent":
       return Cpu;
     case "web_search":
     case "web_fetch":
@@ -84,16 +85,76 @@ function friendlyName(tool: string): string {
     .replace(/^\w/, (c) => c.toUpperCase());
 }
 
+/** FIX29 §2.2 — one collapsible card per sub-agent (activity.tool ===
+ *  "subagent", emitted by the host with the sub-agent id). Collapsed by
+ *  default with a one-line summary; opens itself while running, when it
+ *  failed, or when a step inside needs the user (consent / failure) — a
+ *  collapsed card must never hide something the user has to act on. */
+function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps: ToolActivity[]; all: ToolActivity[] }) {
+  const running = activity.phase === "started";
+  const failed = activity.phase === "finished" && activity.success === false;
+  const stepFailed = steps.some((s) => s.phase === "finished" && s.success === false);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (running || failed || stepFailed) setOpen(true);
+  }, [running, failed, stepFailed]);
+  const done = steps.filter((s) => s.phase === "finished").length;
+  return (
+    <div className="my-1 rounded-lg border border-border-subtle bg-bg-surface/60" data-testid="subagent-card">
+      <button
+        type="button"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-label={`Sub-agent: ${activity.argsSummary ?? ""}`}
+      >
+        {running ? (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary" />
+        ) : failed || stepFailed ? (
+          <X className="h-3.5 w-3.5 shrink-0 text-status-danger" />
+        ) : (
+          <Check className="h-3.5 w-3.5 shrink-0 text-status-success" />
+        )}
+        <Cpu className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden />
+        <span className="shrink-0 text-xs font-medium text-text-secondary">Sub-agent</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-text-tertiary" title={activity.argsSummary}>
+          {activity.argsSummary}
+        </span>
+        <span className="shrink-0 text-xs text-text-muted">
+          {running ? `${done}/${steps.length} steps` : `${steps.length} step${steps.length === 1 ? "" : "s"}`}
+          {activity.durationMs != null ? ` · ${Math.round(activity.durationMs / 100) / 10}s` : ""}
+        </span>
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" />}
+      </button>
+      {open ? (
+        <div className="border-t border-border-subtle px-2 py-1">
+          {steps.map((s) => (
+            <ToolCard key={s.id} activity={s} children={all.filter((a) => a.parentId === s.id)} all={all} />
+          ))}
+          {!running && activity.resultPreview ? (
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-bg-elevated px-2 py-1 text-xs text-text-secondary">{activity.resultPreview}</pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ToolCard({
   activity,
   children,
+  all,
 }: {
   activity: ToolActivity;
   children?: ToolActivity[];
+  all?: ToolActivity[];
 }) {
   const running = activity.phase === "started";
   const failed = activity.phase === "finished" && activity.success === false;
   const [expanded, setExpanded] = useState(false);
+  if (activity.tool === "subagent") {
+    return <SubagentCard activity={activity} steps={children ?? []} all={all ?? []} />;
+  }
 
   // Auto-expand while running if there is live output to watch; fold shortly
   // after finishing (unless failed — keep failures open).
@@ -244,12 +305,12 @@ export function ToolCard({
         </div>
       ) : null}
 
-      {/* nested sub-agent child cards (depth 1) */}
+      {/* nested children — a run_subagent call now carries one "subagent"
+          card per sub-agent (FIX29 §2.2), each holding its own steps */}
       {children && children.length ? (
         <div className="ml-4 border-l-2 border-border-subtle pl-2">
-          <div className="px-1 py-1 text-xs font-medium text-text-tertiary">Sub-agent steps</div>
           {children.map((c) => (
-            <ToolCard key={c.id} activity={c} />
+            <ToolCard key={c.id} activity={c} children={(all ?? []).filter((a) => a.parentId === c.id)} all={all} />
           ))}
         </div>
       ) : null}
@@ -268,7 +329,7 @@ export function ToolActivityList({ activities }: { activities: ToolActivity[] })
   return (
     <div className="flex flex-col" data-testid="tool-activity-list">
       {roots.map((a) => (
-        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} />
+        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} all={activities} />
       ))}
     </div>
   );

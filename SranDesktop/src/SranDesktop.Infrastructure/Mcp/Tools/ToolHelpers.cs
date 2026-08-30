@@ -38,11 +38,42 @@ internal static class ToolHelpers
     /// can filter it out (it is not user content).</summary>
     public const string BackupSuffix = ".sran.bak";
 
+    /// <summary>FIX29 §3.3: backups no longer sit beside the user's file. They
+    /// live in one hidden, bounded folder under the app's local data
+    /// (%LOCALAPPDATA%\SranDesktop\backups), named by a hash of the original
+    /// path plus the file name, and the folder is pruned to the newest
+    /// <see cref="BackupKeep"/> entries on every write. The undo path is still
+    /// returned in the tool result.</summary>
+    public const int BackupKeep = 50;
+
+    public static string BackupRoot => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SranDesktop", "backups");
+
+    public static string BackupPathFor(string fullPath)
+    {
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(
+            System.Text.Encoding.UTF8.GetBytes(fullPath.ToLowerInvariant())))[..12].ToLowerInvariant();
+        return Path.Combine(BackupRoot, hash + "_" + Path.GetFileName(fullPath) + BackupSuffix);
+    }
+
+    private static void PruneBackups()
+    {
+        try
+        {
+            var files = new DirectoryInfo(BackupRoot).GetFiles("*" + BackupSuffix)
+                .OrderByDescending(f => f.LastWriteTimeUtc).Skip(BackupKeep);
+            foreach (var f in files) { try { f.Delete(); } catch (Exception) { /* best-effort */ } }
+        }
+        catch (Exception) { /* best-effort */ }
+    }
+
     public static string? BackupBeforeOverwrite(string fullPath)
     {
         if (!File.Exists(fullPath))
             return null;
-        var backup = fullPath + BackupSuffix;
+        Directory.CreateDirectory(BackupRoot);
+        try { File.SetAttributes(BackupRoot, File.GetAttributes(BackupRoot) | FileAttributes.Hidden); } catch (Exception) { /* best-effort */ }
+        var backup = BackupPathFor(fullPath);
         // FIX26 (found by the Part 3 test run): File.Copy(overwrite: true) onto
         // a HIDDEN file throws UnauthorizedAccessException on Windows, so the
         // SECOND overwrite of the same file failed once the first backup had
@@ -57,6 +88,7 @@ internal static class ToolHelpers
         // stays on disk for one-step undo, and the tool result names the path.
         try { File.SetAttributes(backup, File.GetAttributes(backup) | FileAttributes.Hidden); }
         catch (Exception) { /* attribute set is best-effort — non-fatal */ }
+        PruneBackups();
         return backup;
     }
 

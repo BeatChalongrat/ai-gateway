@@ -6,7 +6,7 @@ using Xunit;
 namespace SranDesktop.Tests.Agent;
 
 /// <summary>FIX-G: overwriting an existing file first snapshots it to
-/// "&lt;file&gt;.sran.bak" so a wrong overwrite is recoverable; brand-new files
+/// a hidden, bounded backup folder (FIX29: %LOCALAPPDATA%\SranDesktopackups, not beside the file) so a wrong overwrite is recoverable; brand-new files
 /// create no backup (nothing to lose).</summary>
 public sealed class OverwriteBackupTests : IDisposable
 {
@@ -36,7 +36,7 @@ public sealed class OverwriteBackupTests : IDisposable
 
         result.Success.Should().BeTrue();
         File.ReadAllText(path).Should().Be("replaced");
-        File.ReadAllText(path + ".sran.bak").Should().Be("original");
+        File.ReadAllText(ToolHelpers.BackupPathFor(path)).Should().Be("original");
         result.Content.Should().Contain(".sran.bak", "the user must learn where the old version went");
     }
 
@@ -49,7 +49,7 @@ public sealed class OverwriteBackupTests : IDisposable
             Args(new { path, content = "hello" }), CancellationToken.None);
 
         result.Success.Should().BeTrue();
-        File.Exists(path + ".sran.bak").Should().BeFalse();
+        File.Exists(ToolHelpers.BackupPathFor(path)).Should().BeFalse();
         result.Content.Should().NotContain(".sran.bak");
     }
 
@@ -64,7 +64,7 @@ public sealed class OverwriteBackupTests : IDisposable
 
         result.Success.Should().BeTrue();
         File.ReadAllText(path).Should().Be("var x = 2;");
-        File.ReadAllText(path + ".sran.bak").Should().Be("var x = 1;");
+        File.ReadAllText(ToolHelpers.BackupPathFor(path)).Should().Be("var x = 1;");
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class OverwriteBackupTests : IDisposable
 
         result.Success.Should().BeTrue();
         File.ReadAllText(destination).Should().Be("incoming");
-        File.ReadAllText(destination + ".sran.bak").Should().Be("about to be replaced");
+        File.ReadAllText(ToolHelpers.BackupPathFor(destination)).Should().Be("about to be replaced");
     }
 
     [Fact]
@@ -93,6 +93,6 @@ public sealed class OverwriteBackupTests : IDisposable
         await new WriteFileTool().ExecuteAsync(Args(new { path, content = "v3" }), CancellationToken.None);
 
         File.ReadAllText(path).Should().Be("v3");
-        File.ReadAllText(path + ".sran.bak").Should().Be("v2", "latest-only backup, not a history");
+        File.ReadAllText(ToolHelpers.BackupPathFor(path)).Should().Be("v2", "latest-only backup, not a history");
     }
 }

@@ -50,6 +50,9 @@ export interface PromptInputs {
    * highest salience of any user-authored text: a skill is an explicit
    * standing instruction, not a preference. */
   skills?: { name: string; instructions: string }[];
+  /** FIX29 §3.2: the browser bridge (Chrome extension) is not connected this
+   * turn — the browser_* tools are withheld and the model must say so. */
+  browserUnavailable?: boolean;
 }
 
 const SERVER_MEMORY_TTL_MS = 60_000;
@@ -241,6 +244,10 @@ export class PromptAssembler {
       parts.push({ ...PROMPT_PART.writingStyle, text: inputs.writingStyleProfile });
     }
 
+    if (inputs.toolsAvailable && inputs.browserUnavailable) {
+      prompt += `\n\n## Browser access is unavailable this turn
+The SRAN browser extension is not connected, so you have NO access to the user's browser: no tabs, pages, URLs, or page content. If the user asks about their browser, open tabs, a web page they have open, or anything "in Chrome", say plainly that browser access is unavailable right now and that they can connect the SRAN extension in Chrome (Settings → Browser) — then stop. Never answer such a question from a screenshot, from memory, or by guessing; an invented tab list is worse than saying you cannot see it.`;
+    }
     if (inputs.toolsAvailable && inputs.webSearchUnavailableReason === "tenant-disabled") {
       prompt += `\n\n## Web search is unavailable
 Web search is turned on in this app but your organisation has NOT enabled it for this account, so you have no web-search tool this turn. If the user asks you to search the web or look something up online, tell them plainly that web search is not enabled for their account and that an administrator can enable it — do not imply you simply lack the ability, and do not pretend to have searched.`;

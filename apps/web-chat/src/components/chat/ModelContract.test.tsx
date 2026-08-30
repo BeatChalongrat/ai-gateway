@@ -96,8 +96,9 @@ describe("models contract: additive-only tolerance", () => {
 
   it("shows the reasoning badge from the block, ignoring unknown sub-fields", () => {
     openPickerWithFutureResponse();
+    // FIX29 §2.1: no pill — the capability rides the row's accessible label / tooltip.
     const badge = dictionaries.en["model.reasoningBadge"];
-    expect(screen.getAllByLabelText(badge).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(new RegExp(badge)).length).toBeGreaterThan(0);
   });
 
   it("treats a missing reasoning block as not-reasoning, not an error", () => {

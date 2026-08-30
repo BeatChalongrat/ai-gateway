@@ -20,7 +20,7 @@ import {
   artifactKeyFor,
   useCanvasSource,
 } from "@/components/canvas/CanvasSourceContext";
-import { canvasTypeForBlock } from "@/components/canvas/canvasUtil";
+import { buildHtmlSrcDoc, buildSvgSrcDoc, canvasTypeForBlock } from "@/components/canvas/canvasUtil";
 import { useT } from "@/lib/i18n";
 import { useCanvasStore } from "@/stores/canvasStore";
 import type { CanvasArtifactType } from "@/stores/canvasStore";
@@ -79,6 +79,22 @@ export function CodeBlock({ children }: PreProps) {
         ) : null}
         <CopyButton text={codeText} />
       </div>
+      {/* FIX29 §2.3 (defect #23): an html / svg artifact RENDERS in the thread.
+          Static posture only (sandbox="" — no scripts, no network, opaque
+          origin): the executable render stays behind "Open in Canvas", which
+          is the expand-to-full-size action, not the price of admission. */}
+      {canvasType === "html" || canvasType === "svg" ? (
+        <div className="code-block-preview border-b border-border-subtle bg-white" data-testid="inline-artifact">
+          <iframe
+            sandbox=""
+            srcDoc={canvasType === "svg" ? buildSvgSrcDoc(codeText) : buildHtmlSrcDoc(codeText)}
+            title={filename ?? `${canvasType} preview`}
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            className="h-72 w-full border-0"
+          />
+        </div>
+      ) : null}
       <div className="code-block-body scrollbar-thin">
         <pre className="code-block-content">
           {codeChild ?? <code>{codeText}</code>}

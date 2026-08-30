@@ -646,6 +646,10 @@ export class TurnCoordinator {
     let messages: GatewayMessage[];
     let userText = payload.text;
     let attached: ResolvedAttachments | null = null;
+    // FIX29 §3.2: know whether the browser bridge is up BEFORE the prompt is
+    // built, so the prompt can say "browser access is unavailable" instead of
+    // the model improvising a tab list from a screenshot.
+    await this.refreshBrowserConnected();
     try {
       // FIX27 Part 1: attachments are content on THIS user message — resolved by
       // opaque chat-edge id (never a path), images as image_url blocks,
@@ -1265,6 +1269,12 @@ export class TurnCoordinator {
     let answer = "";
     const trace: string[] = [];
     this.log.info(`SUBAGENT START ${conversationId} parent=${req.parentToolCallId} tools=${tools.length}${req.autoApprovableOnly ? " (auto-approvable only)" : ""}`);
+    // FIX29 §2.2: one card per sub-agent. The sub-agent is an activity of its
+    // own (id = its conversation id, parent = the run_subagent call); its tool
+    // calls hang under IT, not under the run_subagent call — so the page can
+    // group the steps instead of showing a flat list.
+    const startedAt = Date.now();
+    this.activity(req.conversationId, conversationId, "subagent", "started", { argsSummary: req.task.slice(0, 160), parentId: req.parentToolCallId });
     let outcome: "done" | "cancelled" | "error" | "paused";
     try {
       outcome = await this.runLoop({
@@ -1276,7 +1286,7 @@ export class TurnCoordinator {
         maxIterations: NESTED_MAX_ITERATIONS,
         maxMs: NESTED_MAX_MINUTES * 60_000,
         tools,
-        parentToolCallId: req.parentToolCallId,
+        parentToolCallId: conversationId,
         onText: (t) => {
           answer += t;
         },
@@ -1287,6 +1297,12 @@ export class TurnCoordinator {
       parentSignal.removeEventListener("abort", onAbort);
     }
     this.log.info(`SUBAGENT ${outcome.toUpperCase()} ${conversationId}: ${answer.length} chars, ${trace.length} tool call(s)`);
+    this.activity(req.conversationId, conversationId, "subagent", "finished", {
+      success: outcome === "done",
+      resultPreview: (outcome === "done" ? answer.trim() : `Stopped: ${outcome}`).slice(0, 160),
+      durationMs: Date.now() - startedAt,
+      parentId: req.parentToolCallId,
+    });
     return { answer: answer.trim(), completed: outcome === "done", stopReason: outcome === "done" ? null : outcome, trace };
   }
 
@@ -1541,6 +1557,7 @@ export class TurnCoordinator {
       localConversationNotes,
       webSearchUnavailableReason,
       skills,
+      browserUnavailable: !this.browserConnected,
     });
     const system = assembled.text;
     const messages: GatewayMessage[] = [{ role: "system", content: system }];

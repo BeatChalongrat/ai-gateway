@@ -573,59 +573,45 @@ function ModelRow({
   description,
 }: RowProps) {
   const t = useT();
+  // FIX29 §2.1 — capabilities as a tooltip on the name, not as pills.
+  const caps = [
+    reasoning ? t("model.reasoningBadge") : null,
+    vision ? t("model.visionBadge") : null,
+    imageGen ? t("model.imageBadge") : null,
+  ].filter(Boolean);
+  const capsTitle = caps.length ? caps.join(" · ") : undefined;
   return (
     <div
       role="option"
       aria-selected={selected}
+      aria-label={capsTitle ? `${label} — ${capsTitle}` : label}
       onClick={onClick}
-      className={`flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors ${
+      className={`flex cursor-pointer items-start gap-2 px-3 py-2 transition-colors ${
         selected ? "bg-bg-elevated/60" : "hover:bg-bg-elevated/60"
       }`}
     >
       {leading ? (
         <span className="inline-flex shrink-0 items-center">{leading}</span>
       ) : null}
+      {/* FIX29 §2.1 — the name owns its line (block, wraps by word, never
+          overlapped); everything else sits in a fixed-width trailing column.
+          The "Thinks / Reads images / Makes images" pills were decoration:
+          on the live catalog they sat on 63% / 57% / 85% of chat rows, so
+          they distinguished nothing and squeezed the name to one word per
+          line. They live on as the row tooltip; vision is told at the moment
+          it matters (the attach button + the one-click switch, FIX27). */}
       <div className="min-w-0 flex-1">
-        <div>
-          <span className="text-sm font-medium text-text-primary">{label}</span>
-          {sub ? <span className="ml-1.5 text-[11px] text-text-muted">{sub}</span> : null}
+        <div className="block break-words text-sm font-medium leading-snug text-text-primary" title={capsTitle}>
+          {label}
         </div>
+        {sub ? <div className="text-[11px] text-text-muted">{sub}</div> : null}
         {description ? (
           <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-muted">
             {description}
           </p>
         ) : null}
       </div>
-      {reasoning ? (
-        <span
-          title={t("model.reasoningBadge")}
-          aria-label={t("model.reasoningBadge")}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-blue-500/15 px-1.5 py-0.5 text-[10px] font-medium text-blue-400"
-        >
-          <BrainCircuit className="h-3 w-3" aria-hidden />
-          {t("model.reasoningBadge")}
-        </span>
-      ) : null}
-      {vision ? (
-        <span
-          title={t("model.visionBadge")}
-          aria-label={t("model.visionBadge")}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400"
-        >
-          <Eye className="h-3 w-3" aria-hidden />
-          {t("model.visionBadge")}
-        </span>
-      ) : null}
-      {imageGen ? (
-        <span
-          title={t("model.imageBadge")}
-          aria-label={t("model.imageBadge")}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-400"
-        >
-          <ImagePlus className="h-3 w-3" aria-hidden />
-          {t("model.imageBadge")}
-        </span>
-      ) : null}
+      <div className="flex w-12 shrink-0 flex-col items-end gap-1">
       {mediaKind ? (
         <span
           title={mediaKind}
@@ -643,6 +629,7 @@ function ModelRow({
           {t(TIER_LABEL_KEY[tier])}
         </span>
       ) : null}
+      </div>
       {selected ? (
         <svg
           width={13}
