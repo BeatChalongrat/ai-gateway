@@ -22,11 +22,15 @@ const chain = [
   { role: "assistant", content: "เข้าใจครับ ระบบจองห้องประชุม ส่ง 15 ก.ย." },
 ];
 (async () => {
-  const body = { model: MODEL, stream: false, max_tokens: 800, messages: [
+  // FIX36 Part D — mirror the desktop client: the state extractor now sends
+  // metadata.dlp_response_restore="off" so the summary comes back MASKED.
+  const body = { model: MODEL, stream: false, max_tokens: 800,
+    metadata: { dlp_response_restore: "off" },
+    messages: [
     { role: "system", content: COMPACTION_EXTRACTION_PROMPT },
     { role: "user", content: buildExtractionUserBody(null, chain, "") },
   ] };
-  const res = await fetch("http://localhost:8080/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch((process.env.GATEWAY_URL || "http://localhost:8080") + "/v1/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const j = await res.json();
   const text = j.choices?.[0]?.message?.content ?? "";
   const parsed = parseExtraction(text);
