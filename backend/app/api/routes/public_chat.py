@@ -1575,6 +1575,13 @@ async def _chat_completions_impl(
             any token-text collision, so an outbound token can never be
             replaced with an inbound raw value.
             """
+            # FIX36 Part D — caller-side restore opt-out (see orchestrator
+            # ._restore_opted_out): the desktop state extractor streams its
+            # summary and must receive placeholders, not raw PII.
+            from app.services.orchestrator import _restore_opted_out
+
+            if _restore_opted_out(payload):
+                return text
             if not (span_map or _vault_resolver_stream is not None):
                 return text
             allowed = restore_allowed_tokens

@@ -42,6 +42,12 @@ export interface CompletionRequest {
   tool_choice?: "auto";
   /** Web parity: chat-edge attaches this on every turn; the gateway no-ops for models that cannot reason. */
   reasoning?: { mode: "auto"; show_summary: true };
+  /** FIX36 Part D — caller-side DLP options ride in the request metadata.
+   *  The state extractor sets {dlp_response_restore:"off"} so the gateway
+   *  skips restoring masked values in THAT reply: the summary then carries
+   *  placeholders (like the web extractor's ContentMasked source) instead
+   *  of raw PII. Normal chat turns never set this. */
+  metadata?: Record<string, unknown>;
 }
 /** FIX3 §1: provider-agnostic capability hints for `model="auto"`, mirroring the
  * gateway's RoutingHints (schemas/public.py) and what chat-edge sends. Partial is
@@ -417,6 +423,7 @@ export class GatewayClient {
       // switches the path; the fields refine the pick.
       const body: Record<string, unknown> = { ...request, stream: true };
       if (request.model === "auto") body["routing_hints"] = buildRoutingHints(request);
+      if (request.metadata) body["metadata"] = request.metadata;
       const res = await fetch(`${this.gatewayUrl}/v1/chat/completions`, {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "text/event-stream" },

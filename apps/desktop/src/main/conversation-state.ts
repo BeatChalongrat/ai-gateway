@@ -275,6 +275,12 @@ export class GatewayStateExtractor implements StateExtractor {
       // CompletionRequest carries no temperature; chat-edge pins 0.1 on its
       // side. The gateway default is fine for a JSON envelope.)
       max_tokens: 1500,
+      // FIX36 Part D — the stored summary must never carry raw PII (A-D6):
+      // ask the gateway to SKIP restoring masked values in THIS reply, so
+      // the state keeps placeholders exactly like the web extractor (which
+      // reads ContentMasked). Normal chat turns are separate requests and
+      // still restore for display.
+      metadata: { dlp_response_restore: "off" },
     };
     let text = "";
     try {

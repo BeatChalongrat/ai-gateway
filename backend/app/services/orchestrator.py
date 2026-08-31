@@ -101,6 +101,16 @@ from app.services.cache_service import CacheService
 from app.services.alert_evaluator import AlertEvaluator
 from app.services.guardrail_service import GuardrailService
 from app.domain.observability import is_meta_router_model as _is_meta_router
+
+
+def _restore_opted_out(payload) -> bool:
+    """FIX36 Part D — did the CALLER ask us not to restore masked values in
+    the response? (``metadata.dlp_response_restore == "off"``.) Honouring
+    this is always safe: it can only leave MORE masked, never expose more.
+    Used by the desktop state extractor so its stored summary carries
+    placeholders instead of raw PII."""
+    meta = getattr(payload, "metadata", None) or {}
+    return str(meta.get("dlp_response_restore", "")).lower() == "off"
 from app.services.keyword_router import KeywordRouter
 from app.services.keyword_rule_service import KeywordRuleService
 from app.services.moderation_service import ModerationService
@@ -996,6 +1006,8 @@ class GatewayOrchestrator:
                 restore_allowed_tokens = self._compute_restore_allowed_tokens(
                     profile, span_map, input_enforcement
                 )
+                if _restore_opted_out(payload):  # FIX36 Part D — cache hits too
+                    restore_allowed_tokens = frozenset()
                 if restore_allowed_tokens:
                     cached_text = self.transformer.restore(
                         cached_text,
@@ -1575,6 +1587,14 @@ class GatewayOrchestrator:
         restore_allowed_tokens = self._compute_restore_allowed_tokens(
             profile, span_map, input_enforcement
         )
+        # FIX36 Part D — caller-side opt-out of the restore step. The desktop
+        # state extractor sets metadata.dlp_response_restore="off" so its
+        # summary keeps <<...>> placeholders instead of raw PII (A-D6). This
+        # only ever REMOVES restores (strictly more masking), so honouring a
+        # caller-supplied flag is safe; no DLP code is touched.
+        if _restore_opted_out(payload):
+            log.info("dlp_restore_skipped_by_caller")
+            restore_allowed_tokens = frozenset()
         if restore_allowed_tokens:
             response_content = self.transformer.restore(
                 response_content,
