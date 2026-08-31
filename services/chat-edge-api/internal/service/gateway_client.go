@@ -364,6 +364,12 @@ type StreamEvent struct {
 	Delta        string
 	FinishReason string
 	Usage        *GatewayChatUsage
+	// FIX35 Part B — the model that is actually answering, as the gateway
+	// names it: from a typed ``model_resolved`` frame (a meta-router route
+	// such as auto / openrouter/auto, announced before the first content
+	// frame) or from the ``model`` field every content chunk carries.
+	// Empty on frames that don't name one.
+	ServedModel string
 	// Done is true on the synthetic ``[DONE]`` sentinel event.
 	Done bool
 	// S1 — tool-call deltas. OpenAI ships tool calls in stream as
@@ -563,6 +569,10 @@ type streamChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *GatewayChatUsage `json:"usage"`
+	// FIX35 Part B — every chunk names the model that is actually
+	// answering (the gateway resolves a meta-router id to the provider-
+	// reported model before the first content frame).
+	Model string `json:"model,omitempty"`
 }
 
 // reasoningEnvelope is the minimal shape we need to detect a
@@ -647,6 +657,11 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 				Model:  env.Model,
 				Reason: env.Reason,
 			}}, nil
+		case "model_resolved":
+			// FIX35 Part B — the gateway's router picked ``model`` for
+			// this turn (auto / openrouter/auto routes); announced before
+			// the first content frame.
+			return &StreamEvent{ServedModel: env.Model}, nil
 			// Gateway's final chat.completion.chunk frame ALSO has
 			// ``object: "chat.completion.chunk"`` but no top-level
 			// ``type`` — it falls through to the OpenAI branch below.
@@ -659,7 +674,7 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, err
 	}
-	ev := &StreamEvent{Usage: c.Usage}
+	ev := &StreamEvent{Usage: c.Usage, ServedModel: c.Model}
 	if len(c.Choices) > 0 {
 		choice := c.Choices[0]
 		ev.Delta = choice.Delta.Content

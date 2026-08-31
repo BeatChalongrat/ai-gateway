@@ -108,7 +108,12 @@ async function runWeb(marks) {
       let reply = "";
       try {
         const r = await api(`/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ content: q, stream: false }) });
-        reply = r?.assistant_message?.content ?? r?.assistant?.content ?? r?.content ?? JSON.stringify(r).slice(0, 200);
+        // FIX35 Part E — chat-edge's non-stream POST /messages answers
+        // ``{"message": {role:"assistant", content}}``; the shapes below it
+        // were guesses from FIX33 (never exercised: no key). Without this the
+        // reply became a 200-char JSON slice, which fails P1 structurally
+        // and makes every other probe a coin-flip on truncation.
+        reply = r?.message?.content ?? r?.assistant_message?.content ?? r?.assistant?.content ?? r?.content ?? JSON.stringify(r).slice(0, 200);
       } catch (e) {
         reply = `ERROR ${e.message}`;
       }

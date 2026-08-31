@@ -399,6 +399,18 @@ type streamDrainResult struct {
 	finishReason string
 	usage        *service.GatewayChatUsage
 	err          error
+	// servedModel (FIX35 Part B) — the model that actually answered, as
+	// the gateway named it; "" when the stream never said.
+	servedModel string
+}
+
+// completeWithModel adds the served model to a “message_complete“
+// payload (FIX35 Part B) so the client's per-message meta line can name
+// the model an "auto" turn was answered by without a reload.
+func completeWithModel(completeData map[string]any, servedModel string) {
+	if servedModel != "" {
+		completeData["model_id"] = servedModel
+	}
 }
 
 // drainStreamEvents forwards service stream updates to the browser
@@ -585,6 +597,13 @@ Loop:
 			if ev.FallbackInfo != nil {
 				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
 			}
+			// FIX35 Part B — which model IS answering, as soon as the
+			// gateway names it (before content on an auto /
+			// openrouter/auto route), not only at the end.
+			if ev.ServedModel != "" {
+				res.servedModel = ev.ServedModel
+				writeSSEEvent(w, flusher, "model_resolved", map[string]any{"model": ev.ServedModel})
+			}
 			// Reasoning downgrade notice — informational, never an
 			// error: the answer arrived without the requested thinking.
 			if ev.ReasoningNotice != nil {
@@ -693,6 +712,10 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		persistFinishReason = "error"
 	}
 	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	// FIX35 Part B — attribute the row to the model that answered.
+	if res.servedModel != "" {
+		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
 	h.writeMessageFiles(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
 
@@ -702,6 +725,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	completeData := map[string]any{
 		"message_id": stream.AssistantID.String(),
 	}
+	completeWithModel(completeData, res.servedModel)
 	if res.usage != nil {
 		tokenUsage := map[string]int{
 			"input":  res.usage.PromptTokens,
@@ -959,6 +983,7 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
 		h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
 		completeData := map[string]any{"message_id": msgID.String()}
+		completeWithModel(completeData, att.Snapshot.ServedModel) // FIX35 Part B
 		if res.usage != nil {
 			tokenUsage := map[string]int{
 				"input":  res.usage.PromptTokens,
@@ -984,6 +1009,7 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
 	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
 	completeData := map[string]any{"message_id": msgID.String()}
+	completeWithModel(completeData, att.Snapshot.ServedModel) // FIX35 Part B
 	if t := att.Snapshot.Terminal; t != nil && t.Usage != nil {
 		tokenUsage := map[string]int{
 			"input":  t.Usage.PromptTokens,
@@ -1024,6 +1050,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.FallbackInfo != nil {
 		writeSSEEvent(w, flusher, "fallback_info", snap.FallbackInfo)
+	}
+	if snap.ServedModel != "" { // FIX35 Part B — sticky, like fallback_info
+		writeSSEEvent(w, flusher, "model_resolved", map[string]any{"model": snap.ServedModel})
 	}
 	if snap.ReasoningNotice != nil {
 		writeSSEEvent(w, flusher, "reasoning_notice", snap.ReasoningNotice)
@@ -1119,10 +1148,14 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		persistFinishReason = "error"
 	}
 	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	if res.servedModel != "" { // FIX35 Part B
+		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
 	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
+	completeWithModel(completeData, res.servedModel)
 	if res.usage != nil {
 		tokenUsage := map[string]int{
 			"input":  res.usage.PromptTokens,
@@ -1202,10 +1235,14 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		persistFinishReason = "error"
 	}
 	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	if res.servedModel != "" { // FIX35 Part B
+		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
 	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
 
 	completeData := map[string]any{"message_id": stream.AssistantID.String()}
+	completeWithModel(completeData, res.servedModel)
 	if res.usage != nil {
 		tokenUsage := map[string]int{
 			"input":  res.usage.PromptTokens,

@@ -119,6 +119,9 @@ export type StreamEvent =
   | { kind: "reasoning_delta"; delta: string }
   | { kind: "analysis_status"; status: string }
   | { kind: "fallback_info"; requested_model: string; actual_model: string; reason: string | null }
+  /** FIX35 Part B — the gateway named the model that is answering (before
+   *  content on an auto route). */
+  | { kind: "model_resolved"; model: string }
   | { kind: "reasoning_notice"; model: string | null; reason: string | null }
   | { kind: "error"; code: string; message: string }
   | { kind: "done"; finish_reason: string | null };
@@ -541,6 +544,9 @@ export function parseChunk(data: string): StreamEvent[] {
       out.push({ kind: "analysis_status", status: root["status"] });
     } else if (t === "reasoning_notice") {
       out.push({ kind: "reasoning_notice", model: typeof root["model"] === "string" ? root["model"] : null, reason: typeof root["reason"] === "string" ? root["reason"] : null });
+    } else if (t === "model_resolved" && typeof root["model"] === "string" && root["model"]) {
+      // FIX35 Part B — an auto route resolved; the turn is attributed to it.
+      out.push({ kind: "model_resolved", model: root["model"] });
     }
     return out;
   }

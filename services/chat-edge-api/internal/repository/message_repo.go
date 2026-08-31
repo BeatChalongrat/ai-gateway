@@ -637,6 +637,17 @@ func (r *MessageRepo) GetByID(ctx context.Context, tenantID, msgID uuid.UUID) (*
 // (status=regenerated on the superseded assistant row). The status
 // column is CHECK-constrained at the DB level — invalid values
 // raise a 23514 violation that the caller surfaces as a 500.
+// SetModelID overwrites the model an assistant row is attributed to
+// (FIX35 Part B — the model that actually answered, not the "auto"
+// sentinel the conversation is set to).
+func (r *MessageRepo) SetModelID(ctx context.Context, msgID uuid.UUID, modelID string) error {
+	const q = `UPDATE chat.messages_masked SET model_id = $2 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, modelID); err != nil {
+		return fmt.Errorf("set message model_id: %w", err)
+	}
+	return nil
+}
+
 func (r *MessageRepo) UpdateStatus(ctx context.Context, msgID uuid.UUID, status string) error {
 	const q = `UPDATE chat.messages_masked SET status = $2 WHERE id = $1`
 	if _, err := r.db.Exec(ctx, q, msgID, status); err != nil {

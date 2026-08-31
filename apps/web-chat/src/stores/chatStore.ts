@@ -2350,6 +2350,9 @@ async function consumeStream(
                       agent_wait: null,
                       pending_consent: null,
                       token_usage: data.token_usage ?? null,
+                      // FIX35 Part B — the model that actually answered
+                      // (an Auto turn names the router's pick).
+                      model_id: data.model_id ?? m.model_id,
                       response_time_ms: Date.now() - streamStartedAt,
                     }
                   : m,
@@ -2393,6 +2396,24 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "model_resolved") {
+        // FIX35 Part B — the gateway named the model that is answering
+        // (before content on an Auto route). Attribute the reply to it now
+        // so the meta line under the reply can say which model Auto got.
+        const data = evt.data as { model?: string };
+        const id = realAssistantId ?? tempAsstId;
+        if (data.model) {
+          const served = data.model;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) => (m.id === id ? { ...m, model_id: served } : m)),
+              },
+            };
+          });
+        }
       } else if (evt.event === "provider_stall") {
         // chat-edge holds the upstream connection, so it is the only
         // layer that can tell provider silence from server work. Trust

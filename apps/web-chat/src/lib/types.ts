@@ -704,6 +704,17 @@ export interface SSEImageGenerating {
 export interface SSEMessageComplete {
   message_id: UUID;
   token_usage?: TokenUsage & { reasoning?: number };
+  /** FIX35 Part B — the model that actually answered (an "auto"
+   *  conversation's reply names the model the router picked). */
+  model_id?: string;
+}
+
+/** FIX35 Part B — emitted as soon as the gateway names the model that is
+ *  answering (before content on an auto / openrouter/auto route). The
+ *  message's ``model_id`` is set from it so the meta line under the reply
+ *  can say which model an Auto turn got, without waiting for the end. */
+export interface SSEModelResolved {
+  model: string;
 }
 
 // ── Usage & credits (credit badge + popover) ─────────────────

@@ -2125,8 +2125,14 @@ class GatewayOrchestrator:
         # ``X-Gateway-Fallback: true``. ``out_meta`` stays None on the
         # streaming path so we have to gate.
         if out_meta is not None:
+            from app.domain.observability import served_model_name as _served_hdr
+
             out_meta["provider_used"] = route.provider_name
-            out_meta["model_used"] = route.model_name
+            # FIX35 Part B — X-Gateway-Model names the model that ran, never
+            # a meta-router id.
+            out_meta["model_used"] = _served_hdr(
+                route.model_name, provider_response.model
+            )
             out_meta["fallback_used"] = fallback_result is not None
             out_meta["attempt_number"] = (
                 fallback_result.attempt_number if fallback_result else 1
@@ -2185,9 +2191,16 @@ class GatewayOrchestrator:
                 payload, route.model_name
             )
 
+            # FIX35 Part B — the response names the model that actually ran.
+            # A concrete routed id stays as-is; a meta-router id ("auto"
+            # fallback sentinel / "openrouter/auto") is replaced by the model
+            # the provider reported — OpenRouter's own contract.
+            from app.domain.observability import served_model_name as _served_model
+
+            _served = _served_model(route.model_name, provider_response.model)
             response = ChatCompletionsResponse(
                 id=request_id,
-                model=route.model_name,
+                model=_served,
                 provider=route.provider_name,
                 choices=[
                     ChatCompletionsChoice(

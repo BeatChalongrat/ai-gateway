@@ -1348,7 +1348,11 @@ async def _chat_completions_impl(
         # orchestrator path).
         _stream_outbound_span_map: dict[str, str] = {}
         final_finish_reason: str | None = None
-        final_model: str = route.model_name
+        # FIX35 Part B — until the provider's first chunk names the model,
+        # a meta-router route is reported as the router's public id
+        # (``openrouter/auto``), never as the bare ``"auto"`` sentinel.
+        from app.domain.observability import served_model_name as _served
+        final_model: str = _served(route.model_name, None)
         provider_usage = None
 
         # P0 downgrade notice — first frame on the wire when reasoning was
@@ -1737,6 +1741,31 @@ async def _chat_completions_impl(
             )
 
         _fallback_notice_emitted = False
+        # FIX35 Part B — announced once per stream, only when the route was a
+        # meta-router id and the provider's first chunk named the real model.
+        _model_resolved_emitted = False
+        from app.domain.observability import is_meta_router_model, served_model_name
+
+        def _emit_model_resolved(model: str) -> str:
+            """Typed frame: the router picked ``model`` for this turn.
+
+            Every content chunk already carries ``"model"``, but a client
+            that only reads typed frames (chat-edge / the desktop host) and
+            a caller who asked ``auto`` / ``openrouter/auto`` need it named
+            explicitly, as early as the provider reveals it — never only at
+            the end. OpenRouter's contract: the response's ``model`` field
+            tells you which model was selected.
+            """
+            return "data: {}\n\n".format(
+                _sse_dumps(
+                    {
+                        "type": "model_resolved",
+                        "model": model,
+                        "requested_model": _stream_original_model,
+                    },
+                    ensure_ascii=False,
+                )
+            )
 
         def _emit_fallback_info() -> str:
             """Serialise a ``fallback_info`` metadata SSE frame (B2).
@@ -1759,7 +1788,11 @@ async def _chat_completions_impl(
                         "type": "fallback_info",
                         "fallback_info": {
                             "requested_model": _stream_original_model,
-                            "actual_model": route.model_name,
+                            # FIX35 Part B — never the bare "auto" sentinel:
+                            # the router's public id until the provider's
+                            # first chunk names the real model (then a
+                            # ``model_resolved`` frame follows).
+                            "actual_model": served_model_name(route.model_name, None),
                             "reason": (
                                 f"Primary model unavailable "
                                 f"({last.get('error_code', 'error')})"
@@ -2143,6 +2176,22 @@ async def _chat_completions_impl(
                             api_key=stream_api_key,
                         ),
                     ):
+                        # FIX35 Part B — the provider names the model that is
+                        # actually answering on every chunk. Take it FIRST, so
+                        # the first frame that reaches the wire already carries
+                        # the real name (every chunk builder reads
+                        # ``final_model``), and when the route was a meta-router
+                        # id announce it once as a typed frame for clients that
+                        # only read typed frames (chat-edge, the desktop host).
+                        if chunk.model and chunk.model != final_model:
+                            final_model = chunk.model
+                            if (
+                                is_meta_router_model(route.model_name)
+                                and not is_meta_router_model(final_model)
+                                and not _model_resolved_emitted
+                            ):
+                                _model_resolved_emitted = True
+                                yield _emit_model_resolved(final_model)
                         # Reasoning / thinking branch (T2). Runs before the
                         # content / tool_calls branches because Anthropic
                         # emits thinking blocks BEFORE the visible text;
@@ -2390,8 +2439,8 @@ async def _chat_completions_impl(
                                 first_chunk_yielded = True
                                 yield _emit_tool_calls_chunk(_header_frames)
 
-                        if chunk.model:
-                            final_model = chunk.model
+                        # (``chunk.model`` → ``final_model`` is taken at the
+                        # top of the loop — FIX35 Part B.)
                         if chunk.finish_reason is not None:
                             final_finish_reason = chunk.finish_reason
                         if chunk.usage is not None:

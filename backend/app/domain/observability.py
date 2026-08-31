@@ -155,20 +155,63 @@ class RequestRecord:
         }
 
 
+# FIX35 Part B — ids that name a ROUTER, not a model. A request routed to
+# one of these is answered by whatever model the upstream meta-router
+# picked, and only the provider's response says which. ``"auto"`` is the
+# bare sentinel the cross-provider fallback chain hands OpenRouter
+# (model_tiers.TIERS); ``"openrouter/auto"`` is the same router addressed
+# explicitly by a caller; any other ``<vendor>/auto`` follows the same
+# convention.
+META_ROUTER_MODELS: frozenset[str] = frozenset({"auto", "openrouter/auto"})
+
+
+def is_meta_router_model(model: str | None) -> bool:
+    """True when ``model`` is a router id whose answer comes from a model
+    the response must name (OpenRouter: "the response's ``model`` field
+    tells you which model was selected")."""
+    if not model:
+        return False
+    return model in META_ROUTER_MODELS or model.endswith("/auto")
+
+
+def served_model_name(routed: str, reported: str | None) -> str:
+    """The model name a RESPONSE must carry — the one that actually ran.
+
+    * A concrete routed id stays verbatim. Provider-reported names carry
+      date suffixes (``gpt-4o-mini-2024-07-18``) that would fragment
+      per-model aggregation and confuse a caller who asked for the
+      alias, so the alias the gateway resolved wins.
+    * A meta-router id (``auto`` sentinel, ``openrouter/auto``) is never
+      returned when the provider reported a concrete model: the caller
+      asked a router, the response names the model the router chose.
+    * A meta-router id with NO report yet (before the first chunk, or a
+      provider that omits ``model``) is normalised to the router's own
+      public id (``openrouter/auto``) so the bare fallback sentinel
+      ``"auto"`` — meaningless to a caller — never reaches the wire.
+    """
+    if is_meta_router_model(routed):
+        if reported and not is_meta_router_model(reported):
+            return reported
+        return "openrouter/auto" if routed == "auto" else routed
+    return routed
+
+
 def resolved_log_model(routed: str, reported: str | None) -> str:
     """The model name to persist on ``request_logs.model``.
 
     Routing always resolves the caller's ``auto`` before dispatch —
     EXCEPT the cross-provider fallback chain, whose OpenRouter
     candidate is the literal ``"auto"`` sentinel (OpenRouter's own
-    meta-router decides server-side). Recording that sentinel makes the
-    usage breakdown meaningless ("auto" rows). The provider RESPONSE
-    reports what actually answered, so prefer it for the sentinel case
-    only. Concrete routed ids stay verbatim — provider-reported names
-    carry date suffixes (gpt-4o-mini-2024-07-18) that would fragment
-    per-model aggregation.
+    meta-router decides server-side), and an explicit
+    ``openrouter/auto`` request. Recording a router id makes the usage
+    breakdown meaningless ("auto" rows). The provider RESPONSE reports
+    what actually answered, so prefer it for the router-id case only.
+    Concrete routed ids stay verbatim — provider-reported names carry
+    date suffixes (gpt-4o-mini-2024-07-18) that would fragment
+    per-model aggregation. (FIX35 Part B widened this from the bare
+    ``"auto"`` sentinel to every meta-router id.)
     """
-    if routed == "auto" and reported and reported != "auto":
+    if is_meta_router_model(routed) and reported and not is_meta_router_model(reported):
         return reported
     return routed
 

@@ -52,6 +52,9 @@ type StreamSnapshot struct {
 	VideoStatus    string
 	SearchStatus   string
 	FallbackInfo   map[string]any
+	// ServedModel (FIX35 Part B): the model that answered, sticky so a
+	// reattaching client gets the ``model_resolved`` frame too.
+	ServedModel string
 	// ReasoningNotice: sticky like FallbackInfo — a reattaching client
 	// still learns the answer was produced without reasoning.
 	ReasoningNotice *ReasoningNotice
@@ -94,6 +97,7 @@ type brokerEntry struct {
 	video     string
 	search    string
 	fallback  map[string]any
+	served    string // FIX35 Part B — sticky like fallback: a reattaching client learns the model too
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
 	inotice   *ImageAttachNotice
@@ -131,6 +135,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		VideoStatus:     e.video,
 		SearchStatus:    e.search,
 		FallbackInfo:    e.fallback,
+		ServedModel:     e.served,
 		ReasoningNotice: e.rnotice,
 		ProviderStall:   e.stall,
 		ImageNotice:     e.inotice,
@@ -216,6 +221,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.FallbackInfo != nil {
 		e.fallback = ev.FallbackInfo
+	}
+	if ev.ServedModel != "" {
+		e.served = ev.ServedModel
 	}
 	if ev.ReasoningNotice != nil {
 		e.rnotice = ev.ReasoningNotice

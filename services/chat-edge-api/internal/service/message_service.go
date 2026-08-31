@@ -685,6 +685,19 @@ func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, mod
 // lookup (handler.ModelHandler.ReasoningCapable) backed by the live
 // gateway catalog. Optional — when unset, attachReasoning falls back to
 // the static isReasoningCapableID set (pre-existing behaviour).
+// SetServedModel records, on the assistant row, the model that actually
+// answered (FIX35 Part B). An "auto" conversation's rows used to carry the
+// literal "auto"; now each reply names the model the gateway's router
+// picked, so the per-message meta line and any later audit read the truth.
+// Best-effort: a failure here must not fail the turn.
+func (s *MessageService) SetServedModel(ctx context.Context, msgID uuid.UUID, modelID string) error {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" || msgID == uuid.Nil {
+		return nil
+	}
+	return s.messages.SetModelID(ctx, msgID, modelID)
+}
+
 func (s *MessageService) SetReasoningCapabilityChecker(fn func(ctx context.Context, modelID string) bool) {
 	s.reasoningCapable = fn
 }
@@ -1068,6 +1081,12 @@ type StreamUpdate struct {
 	// B2 — a fallback notice forwarded from the Gateway. The handler
 	// emits it as a ``fallback_info`` SSE event.
 	FallbackInfo map[string]any
+	// FIX35 Part B — the model that actually answered, as the gateway
+	// names it (a router route resolved, or the chunk's own ``model``).
+	// Forwarded once when it becomes known; the handler emits it as a
+	// ``model_resolved`` SSE event, persists it on the assistant row and
+	// repeats it on ``message_complete`` as ``model_id``.
+	ServedModel string
 	// Reasoning downgrade notice forwarded from the Gateway (the
 	// answer was produced without reasoning although it was
 	// requested). The handler emits it as a ``reasoning_notice`` SSE
@@ -4410,6 +4429,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	req := in.initialReq
 	var lastUsage *GatewayChatUsage
 
+	lastServedModel := "" // FIX35 Part B — dedupe the served-model forward
 	for outerIter := 0; outerIter < maxToolIterations; outerIter++ {
 		var acc []GatewayToolCall
 		finishReason := ""
@@ -4482,6 +4502,13 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.FallbackInfo != nil {
 				in.out <- StreamUpdate{FallbackInfo: ev.FallbackInfo}
+			}
+			// FIX35 Part B — forward the served model the first time the
+			// gateway names it (and again only if it changes, e.g. a
+			// mid-turn fallback), never per chunk.
+			if ev.ServedModel != "" && ev.ServedModel != lastServedModel {
+				lastServedModel = ev.ServedModel
+				in.out <- StreamUpdate{ServedModel: ev.ServedModel}
 			}
 			if ev.ReasoningNotice != nil {
 				in.out <- StreamUpdate{ReasoningNotice: ev.ReasoningNotice}

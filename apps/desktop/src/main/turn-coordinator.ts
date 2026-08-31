@@ -77,6 +77,10 @@ interface RunningTurn {
   done: Promise<void>;
   messageId: string;
   assistantText: string;
+  /** FIX35 Part B — the model the gateway said actually answered (an
+   *  "auto" turn names the router's pick). Persisted as the assistant
+   *  row's model_id and repeated on message_complete. */
+  servedModel?: string;
 }
 interface PendingConsent {
   conversationId: string;
@@ -958,6 +962,9 @@ export class TurnCoordinator {
       onText: (t) => {
         turn.assistantText += t;
       },
+      onServedModel: (m) => {
+        turn.servedModel = m;
+      },
     });
     const elapsed = Date.now() - startedAt;
     this.lastReply.set(conversationId, turn.assistantText);
@@ -982,7 +989,9 @@ export class TurnCoordinator {
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
     // a real message without leaving and re-entering the conversation.
     const ids = await this.persistedIds(conversationId, turn);
-    const completeData = { message_id: turn.messageId, ...ids };
+    // FIX35 Part B — message_complete repeats the served model (an auto
+    // turn's page-side meta line names the router's pick).
+    const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}) };
 
     if (outcome === "error") return;
     if (outcome === "cancelled") {
@@ -1088,6 +1097,8 @@ export class TurnCoordinator {
     tools: GatewayToolDefinition[];
     parentToolCallId: string | null;
     onText: (t: string) => void;
+    /** FIX35 Part B — the gateway named the model that is answering. */
+    onServedModel?: (model: string) => void;
     onTrace?: (entry: string) => void;
     /** nested: consent prompts are attributed to this conversation on the page */
     consentConversationId?: string;
@@ -1136,6 +1147,12 @@ export class TurnCoordinator {
             break;
           case "fallback_info":
             if (!run.parentToolCallId) this.emit(eventConv, "fallback_info", { requested_model: ev.requested_model, actual_model: ev.actual_model, reason: ev.reason });
+            break;
+          case "model_resolved":
+            // FIX35 Part B — attribute the turn to the model that answered and
+            // tell the page now, not only at message_complete.
+            run.onServedModel?.(ev.model);
+            if (!run.parentToolCallId) this.emit(eventConv, "model_resolved", { model: ev.model });
             break;
           case "reasoning_notice":
             if (!run.parentToolCallId) this.emit(eventConv, "reasoning_notice", { model: ev.model, reason: ev.reason });
@@ -2034,7 +2051,7 @@ export class TurnCoordinator {
     // FIX27: file_ids link the uploaded rows to this user message on chat-edge
     // (the web view shows the chips; a web continuation replays the images).
     if (userText.length > 0 || fileIds.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now, ...(fileIds.length ? { file_ids: fileIds } : {}) });
-    if (turn.assistantText.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: model, created_at: new Date(Date.now() + 1).toISOString() });
+    if (turn.assistantText.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString() });
     void chain;
     const result = await this.chatEdge.importMessages(conversationId, items);
     if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
