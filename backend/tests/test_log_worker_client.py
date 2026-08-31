@@ -201,6 +201,10 @@ def test_grpc_dispatch_swallows_unavailable_import_error(
     reset_client, monkeypatch
 ):
     """LogWorkerUnavailable at instance() falls through cleanly."""
+    # FIX36 Part 0.2 — this test exercises the REAL _dispatch_to_grpc, which
+    # now refuses to run under pytest unless explicitly allowed (the guard
+    # that stops tests from writing request logs through the Go sidecar).
+    monkeypatch.setenv("SRAN_ALLOW_LOG_SINK_IN_TESTS", "1")
     from app.services.log_worker_client import LogWorkerClient
 
     def _raise(*_a, **_k):
@@ -288,6 +292,7 @@ def test_accepted_false_recovers_row_via_local_path(
 
     (Supersedes the pre-R5 contract, which deliberately dropped the
     row on accepted=false in the name of fire-and-forget.)"""
+    monkeypatch.setenv("SRAN_ALLOW_LOG_SINK_IN_TESTS", "1")  # exercises the real gRPC dispatch (FIX36 guard)
     from app.core.config import settings
     from app.services.log_worker_client import LogWorkerClient
     from app.services.log_worker_client.client import _import_stubs
@@ -340,6 +345,7 @@ def test_grpc_rpc_error_recovers_row_via_local_path(
 ):
     """A transport failure (RPC raises → client.enqueue returns False)
     must also recover the row via the local path. Core R5 case."""
+    monkeypatch.setenv("SRAN_ALLOW_LOG_SINK_IN_TESTS", "1")  # exercises the real gRPC dispatch (FIX36 guard)
     from app.core.config import settings
     from app.services.log_worker_client import LogWorkerClient
     from app.services.log_worker_client.client import _import_stubs
@@ -384,6 +390,7 @@ def test_grpc_failure_routes_to_running_queue_not_sync(
     onto the asyncio queue (non-blocking), NOT via the synchronous
     own-session persist. Pins that the R5 fallback prefers the cheap
     batched path."""
+    monkeypatch.setenv("SRAN_ALLOW_LOG_SINK_IN_TESTS", "1")  # exercises the real gRPC dispatch (FIX36 guard)
     from app.core.config import settings
     from app.services.log_worker_client import LogWorkerClient
     from app.services.log_worker_client.client import _import_stubs

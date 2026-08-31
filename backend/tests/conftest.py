@@ -129,6 +129,29 @@ def _pseudonym_mode_off_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _force_python_log_sink(monkeypatch):
+    """FIX36 Part 0.1 — request logs NEVER leave the process during tests.
+
+    The deployed container runs ``log_worker_engine="go"``: request logs are
+    dispatched over gRPC to the Go log-worker sidecar, which writes to the
+    REAL Postgres — completely outside the SQLAlchemy-level isolation the
+    rest of this conftest builds. That is how pytest polluted
+    ``request_logs`` with 214 test-tenant rows between May and Aug 2026.
+    Pin the in-process python sink for every test; the loud tripwire in
+    ``request_log_queue._dispatch_to_grpc`` (and the engine write guard in
+    ``app.core.db``) stays armed as the backstop for anything this fixture
+    cannot reach. Tests that exercise the gRPC client itself re-enable the
+    path explicitly (SRAN_ALLOW_LOG_SINK_IN_TESTS=1).
+    """
+    try:
+        from app.core.config import settings
+    except Exception:
+        return
+    monkeypatch.setattr(settings, "log_worker_engine", "python", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _email_domain_allowlist_open_by_default(monkeypatch):
     """Open the sign-in domain allowlist for every test that doesn't
     explicitly exercise it.

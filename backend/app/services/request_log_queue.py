@@ -48,6 +48,7 @@ only reads ``tenant_id`` / ``project_id`` from the row (see
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from functools import partial
 from typing import TYPE_CHECKING, Optional
@@ -278,6 +279,24 @@ class _RequestLogQueue:
         to the legacy queue so a slow/erroring sidecar never blocks the
         request handler *and* never loses the audit row.
         """
+        # FIX36 Part 0.2 — the gRPC sink writes to the REAL database through
+        # the Go sidecar, bypassing every SQLAlchemy-level test isolation
+        # (dependency overrides, SessionLocal monkeypatch). That is exactly
+        # how pytest polluted request_logs with 214 test-tenant rows
+        # (May–Aug 2026). Under pytest this path FAILS LOUDLY instead of
+        # writing silently; a test that genuinely exercises the gRPC client
+        # sets SRAN_ALLOW_LOG_SINK_IN_TESTS=1 for itself.
+        if (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and not os.environ.get("SRAN_ALLOW_LOG_SINK_IN_TESTS")
+        ):
+            raise RuntimeError(
+                "request_log_queue: a test attempted to dispatch a request "
+                "log to the Go log-worker sidecar, which writes to the REAL "
+                "database. Tests must run with log_worker_engine='python' "
+                "(conftest pins this) or set SRAN_ALLOW_LOG_SINK_IN_TESTS=1 "
+                "explicitly."
+            )
         try:
             from app.services.log_worker_client import (
                 LogWorkerClient,

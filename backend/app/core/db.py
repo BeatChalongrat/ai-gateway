@@ -96,6 +96,59 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
+# ---------------------------------------------------------------------------
+# FIX36 Part 0.2 — tripwire: a test must NEVER write to the real database.
+#
+# The test suite isolates itself at the SQLAlchemy layer (dependency
+# overrides + a SessionLocal monkeypatch onto a per-run sqlite file), but
+# anything that reaches THESE engines — code that captured `engine` at
+# import, a background thread created before the monkeypatch, or a future
+# refactor — used to write silently. This listener makes such a write FAIL
+# LOUDLY instead: under pytest (PYTEST_CURRENT_TEST is set by pytest for
+# the duration of every test) any INSERT / UPDATE / DELETE / TRUNCATE /
+# COPY on a guarded engine raises. Reads stay allowed. A test that
+# genuinely needs the real database opts in with
+# SRAN_ALLOW_REAL_DB_WRITES_IN_TESTS=1.
+#
+# (The Go log-worker sidecar bypasses SQLAlchemy entirely; its guard lives
+# in request_log_queue._dispatch_to_grpc.)
+# ---------------------------------------------------------------------------
+
+_WRITE_PREFIXES = ("insert", "update", "delete", "truncate", "copy", "merge")
+
+
+class TestWroteToRealDatabaseError(RuntimeError):
+    pass
+
+
+def install_test_write_guard(target_engine) -> None:
+    """Attach the pytest write tripwire to ``target_engine``. Idempotent."""
+    if getattr(target_engine, "_sran_test_write_guard", False):
+        return
+
+    @event.listens_for(target_engine, "before_cursor_execute")
+    def _refuse_test_writes(  # noqa: ANN001 - SQLAlchemy event signature
+        conn, cursor, statement, parameters, context, executemany
+    ):
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            return
+        if os.environ.get("SRAN_ALLOW_REAL_DB_WRITES_IN_TESTS"):
+            return
+        if statement.lstrip()[:8].lower().startswith(_WRITE_PREFIXES):
+            raise TestWroteToRealDatabaseError(
+                "A test attempted to WRITE to the real database "
+                f"({target_engine.url.render_as_string(hide_password=True)}): "
+                f"{statement.lstrip()[:120]!r}. Route the write through the "
+                "test integration engine, or set "
+                "SRAN_ALLOW_REAL_DB_WRITES_IN_TESTS=1 if this is deliberate."
+            )
+
+    target_engine._sran_test_write_guard = True
+
+
+install_test_write_guard(engine)
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -169,6 +222,9 @@ def get_async_engine():
             )
         # SQLite async (tests) uses a NullPool implicitly; no pool args.
         _async_engine = create_async_engine(async_url, **kwargs)
+        # FIX36 Part 0.2 — same pytest write tripwire as the sync engine
+        # (async engines execute through their sync_engine's events).
+        install_test_write_guard(_async_engine.sync_engine)
     return _async_engine
 
 
