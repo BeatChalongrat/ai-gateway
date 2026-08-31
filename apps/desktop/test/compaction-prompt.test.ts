@@ -10,7 +10,36 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { COMPACTION_EXTRACTION_PROMPT } from "../src/main/compaction-prompt";
-import { STATE_HONESTY_NOTE, renderStateBlock, emptyState } from "../src/main/conversation-state";
+import { STATE_HONESTY_NOTE, renderStateBlock, renderStateMessages, emptyState } from "../src/main/conversation-state";
+import { STATE_INJECTION_ASSISTANT_ACK, STATE_INJECTION_USER_PREAMBLE } from "../src/main/state-injection-prompt";
+
+const INJECTION = path.join(path.dirname(CANONICAL_DIR()), "prompt_state_injection.txt");
+function CANONICAL_DIR() {
+  return path.join(__dirname, "..", "..", "..", "services", "chat-edge-api", "internal", "service", "x");
+}
+
+describe("FIX33.1 Part 2 — one source for the state injection wording", () => {
+  it("the desktop constants are byte-identical to chat-edge's prompt_state_injection.txt", () => {
+    const raw = fs.readFileSync(INJECTION, "utf8").replace(/\r\n/g, "\n");
+    const [user, ack] = raw.split("\n---ASSISTANT---\n");
+    expect(STATE_INJECTION_USER_PREAMBLE).toBe(user!.trim());
+    expect(STATE_INJECTION_ASSISTANT_ACK).toBe(ack!.trim());
+  });
+  it("chat-edge embeds that asset and no longer renders the state into the system prompt", () => {
+    const go = fs.readFileSync(path.join(path.dirname(INJECTION), "conversation_state_service.go"), "utf8");
+    expect(go).toContain("//go:embed prompt_state_injection.txt");
+    const pc = fs.readFileSync(path.join(path.dirname(INJECTION), "prompt_compiler.go"), "utf8");
+    expect(pc).not.toContain("add(stateBlock)");
+  });
+  it("the desktop pair is user + assistant, wording from the asset", () => {
+    const s = emptyState("c");
+    s.current_goal = "g";
+    const pair = renderStateMessages(s);
+    expect(pair.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(pair[0]!.content as string).toMatch(new RegExp("^" + STATE_INJECTION_USER_PREAMBLE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    expect(pair[1]!.content).toBe(STATE_INJECTION_ASSISTANT_ACK);
+  });
+});
 
 const CANONICAL = path.join(__dirname, "..", "..", "..", "services", "chat-edge-api", "internal", "service", "prompt_compaction_extraction.txt");
 const GO_SERVICE = path.join(path.dirname(CANONICAL), "conversation_state_service.go");

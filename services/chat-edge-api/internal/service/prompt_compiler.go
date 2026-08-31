@@ -181,10 +181,13 @@ func (pc *PromptCompiler) Build(ctx context.Context, in CompileContext) (string,
 	add(memBlock)
 	sources = append(sources, memSrcs...)
 
-	// Layer 12: conversation state (emits sources).
-	stateBlock, stateSrcs := pc.conversationState(ctx, in)
-	add(stateBlock)
-	sources = append(sources, stateSrcs...)
+	// Layer 12 (FIX33.1 Part 2): the conversation state is NO LONGER part
+	// of the system prompt. It rides as a user/assistant pair at the head
+	// of the history, injected by the ContextCompiler when compaction
+	// happens (CompileInputs.BuildState) — the same shape the desktop uses,
+	// and a shape the DLP scans outbound (the system message is not). The
+	// renderer (conversationState) stays for the compiler to call.
+	_ = ctx
 
 	// Layer 13: RAG / file / artifact context.
 	add(pc.ragAndFileContext(in))

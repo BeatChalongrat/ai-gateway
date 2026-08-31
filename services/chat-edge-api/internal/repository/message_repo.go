@@ -521,6 +521,23 @@ func (r *MessageRepo) SearchUserMessages(
 // trigger to decide whether enough new messages have accumulated
 // since the last summary to warrant another extraction pass.
 // Cheaper than ListByConversation when we only need the number.
+// CountMessagesBefore (FIX33.1) — active messages created strictly before
+// `before`; the regenerate path's OmittedOlder denominator.
+func (r *MessageRepo) CountMessagesBefore(
+	ctx context.Context, tenantID, convID uuid.UUID, before time.Time,
+) (int, error) {
+	const q = `
+		SELECT COUNT(*)::int
+		FROM chat.messages_masked
+		WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true AND created_at < $3
+	`
+	var n int
+	if err := r.db.QueryRow(ctx, q, convID, tenantID, before).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count messages before: %w", err)
+	}
+	return n, nil
+}
+
 func (r *MessageRepo) CountMessages(
 	ctx context.Context, tenantID, convID uuid.UUID,
 ) (int, error) {

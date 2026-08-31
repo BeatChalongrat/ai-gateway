@@ -146,6 +146,13 @@ type CompileInputs struct {
 	// open the SSE response and tell the user the pause is the
 	// conversation being organised, not a hang. Nil = no-op.
 	OnExtractionStart func()
+	// BuildState (FIX33.1 Part 2) renders the <conversation_state> block
+	// + its ContextSource (the prompt compiler's former layer 12). Called
+	// AFTER extraction; when it returns a block and compaction happened,
+	// the block is injected as a user/assistant pair at the head of the
+	// sent history (StateInjectionMessages) — never into the system
+	// message. Nil = no state injection.
+	BuildState func() (string, []ContextSource)
 }
 
 // CompiledContext is what Compile returns. Mirrors the shape the
@@ -179,6 +186,9 @@ type CompiledContext struct {
 	ManualCompact   bool // a manual boundary drove (part of) the drop
 	StatePresent    bool // a <conversation_state> block was available
 	HeadKept        int  // messages kept from the head (0–2)
+	// StateInjected (FIX33.1) — History[0..1] are the synthetic
+	// user/assistant pair carrying the state block.
+	StateInjected bool
 }
 
 // Compile is the single entry point for the message-service send
@@ -233,13 +243,26 @@ func (c *ContextCompiler) Compile(
 		return out, nil
 	}
 
+	// The state pair (FIX33.1) is budgeted like the system message: its
+	// tokens come off the history target so the send never overflows.
+	stateBlock, stateSources := "", []ContextSource(nil)
+	if in.BuildState != nil {
+		stateBlock, stateSources = in.BuildState()
+	}
+	statePairTokens := func() int {
+		if stateBlock == "" {
+			return 0
+		}
+		return estimateHistoryTokens(StateInjectionMessages(stateBlock), nil)
+	}
+
 	// Plan the trim FIRST (pure) so extraction knows how far it must
 	// cover: everything up to the last message that will be dropped.
 	target := budget.MessagesRemaining
 	if historyTokens >= out.ThresholdTokens {
 		target = ratioOf(budget.MessagesRemaining, c.targetRatio)
 	}
-	plan := planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve, boundary)
+	plan := planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
 
 	// Threshold / omitted / boundary — refresh the conversation
 	// state synchronously so the messages we're about to drop end
@@ -273,22 +296,12 @@ func (c *ContextCompiler) Compile(
 						"conv", in.Conv.ID.String())
 				}
 				out.StatePresent = !isStateEmpty(st)
-				// Re-build the prefix so the new state block is
-				// reflected in the system message — AND the source
-				// list (the state row might be brand-new).
-				prefix, sources = in.BuildPrefix()
-				out.SystemPrefix = prefix
-				out.Sources = sources
-				budget = c.budgetFor(in, prefix)
-				out.Budget = budget
-				out.ThresholdTokens = ratioOf(budget.MessagesRemaining, c.triggerRatio)
-				// The state block grew the prefix: re-plan against the
-				// new budget so the send never overflows.
-				target = budget.MessagesRemaining
-				if historyTokens >= out.ThresholdTokens {
-					target = ratioOf(budget.MessagesRemaining, c.targetRatio)
+				// Re-render the state (the row might be brand-new) and
+				// re-plan: the pair's tokens come off the history target.
+				if in.BuildState != nil {
+					stateBlock, stateSources = in.BuildState()
 				}
-				plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve, boundary)
+				plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
 			}
 		}
 	}
@@ -308,6 +321,18 @@ func (c *ContextCompiler) Compile(
 		// threshold; nothing to mark.
 		c.logCompiled(in, out, out.SentTokens, "threshold-nodrop")
 		return out, nil
+	}
+
+	// FIX33.1 Part 2 — the state rides as a user/assistant pair at the
+	// HEAD of the sent history (before the preserved first exchange),
+	// exactly as the desktop does. Never in the system message.
+	if stateBlock != "" {
+		out.History = append(StateInjectionMessages(stateBlock), out.History...)
+		out.MessagesSent = len(out.History)
+		out.SentTokens = estimateHistoryTokens(out.History, in.ImageURLs)
+		out.StatePresent = true
+		out.StateInjected = true
+		out.Sources = append(out.Sources, stateSources...)
 	}
 
 	// A-W5 — tell the model what is missing and to admit a lost
@@ -449,6 +474,7 @@ func (c *ContextCompiler) logCompiled(
 		"head_kept", out.HeadKept,
 		"history_tokens", finalHistoryTokens,
 		"compacted", out.Compacted,
+		"state_injected", out.StateInjected,
 		"manual", out.ManualCompact,
 		"extraction_triggered", out.ExtractionTriggered,
 		"tool_reserve", out.Budget.ToolReserve,

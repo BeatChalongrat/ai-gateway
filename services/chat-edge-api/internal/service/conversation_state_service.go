@@ -492,6 +492,41 @@ var compactionExtractionPromptRaw string
 // byte-compare test and the report).
 func ExtractionSystemPrompt() string { return strings.TrimSpace(compactionExtractionPromptRaw) }
 
+// FIX33.1 Part 2 — the state INJECTION wording is one asset too. Both
+// surfaces now carry <conversation_state> as a user/assistant pair at the
+// head of the history (never inside the system message, which the default
+// DLP profile does not scan outbound — FIX32 §1.3 C3). The user line
+// frames the block as reference material; the assistant line is the
+// acknowledgement. apps/desktop/src/main/state-injection-prompt.ts holds
+// the same bytes; the desktop test byte-compares them.
+//
+//go:embed prompt_state_injection.txt
+var stateInjectionRaw string
+
+const stateInjectionSeparator = "\n---ASSISTANT---\n"
+
+// StateInjectionTexts returns (userPreamble, assistantAck) from the asset.
+func StateInjectionTexts() (string, string) {
+	raw := strings.ReplaceAll(stateInjectionRaw, "\r\n", "\n")
+	parts := strings.SplitN(raw, stateInjectionSeparator, 2)
+	if len(parts) != 2 {
+		return strings.TrimSpace(raw), "Understood."
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+}
+
+// StateInjectionMessages renders the rendered <conversation_state> block
+// as the two synthetic history rows the request carries. IDs are Nil —
+// they are never persisted; every consumer keyed by message id (image
+// map, generated-image notes) simply finds no entry.
+func StateInjectionMessages(block string) []model.Message {
+	userText, ack := StateInjectionTexts()
+	return []model.Message{
+		{Role: "user", ContentMasked: userText + "\n" + block, Status: "completed"},
+		{Role: "assistant", ContentMasked: ack, Status: "completed"},
+	}
+}
+
 // callLLMForExtraction issues the non-streaming gateway call.
 // Returns "" on any failure so the caller falls back to keeping the
 // existing state rather than crashing the extraction trigger. The

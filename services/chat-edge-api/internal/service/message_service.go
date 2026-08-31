@@ -872,7 +872,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, nil)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist)
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
@@ -1230,7 +1230,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		cb := in.OnCompactionStart
 		onExtractionStart = func() { cb(asstID, userID) }
 	}
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, onExtractionStart)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
@@ -1512,7 +1512,11 @@ func (s *MessageService) Regenerate(ctx context.Context, in RegenerateInput) (*S
 		userMsg = &last
 	}
 
-	return s.openAssistantStream(ctx, conv, userMsg, history, in.RequestID, in.UserID)
+	// FIX33.1 Part 6.1 — rows beyond the load window BEFORE the target are
+	// counted so a regenerate in a >1000-message conversation still shows
+	// the compaction marker (A-W1's rule: nothing goes missing silently).
+	omitted := s.omittedBefore(ctx, in.TenantID, conv.ID, target.CreatedAt, len(history))
+	return s.openAssistantStream(ctx, conv, userMsg, history, omitted, in.RequestID, in.UserID)
 }
 
 // openAssistantStream is the shared streaming-open helper used by
@@ -1525,6 +1529,7 @@ func (s *MessageService) openAssistantStream(
 	conv *model.Conversation,
 	userMsg *model.Message,
 	history []model.Message,
+	omittedOlder int,
 	requestID string,
 	userID uuid.UUID,
 ) (*StreamHandle, error) {
@@ -1558,7 +1563,7 @@ func (s *MessageService) openAssistantStream(
 	ragQuery := lastUserContent(history)
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, nil)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1821,7 +1826,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	}
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, nil)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -2866,6 +2871,7 @@ func (s *MessageService) compileAndBuildRequest(
 	history []model.Message,
 	imgs userImageSet,
 	sources *SourcesAccumulator,
+	omittedOlder int,
 	onExtractionStart func(),
 ) GatewayChatRequest {
 	// current-turn images drive routing + the compiler budget; the
@@ -2941,8 +2947,9 @@ func (s *MessageService) compileAndBuildRequest(
 		ImageURLs:         imageURLs,
 		BuildPrefix:       build,
 		NumTools:          numTools,
-		OmittedOlder:      s.omittedOlder(ctx, tenantID, conv.ID, len(history)),
+		OmittedOlder:      omittedOlder,
 		OnExtractionStart: onExtractionStart,
+		BuildState:        s.stateBlockBuilder(ctx, conv, userID, tenantID),
 	})
 	if err != nil || compiled == nil {
 		// Defensive fallback — should never happen since Compile
@@ -3144,7 +3151,40 @@ func (s *MessageService) InspectContext(
 		NumTools:     numTools,
 		OmittedOlder: s.omittedOlder(ctx, tenantID, convID, len(history)),
 		DryRun:       true,
+		BuildState:   s.stateBlockBuilder(ctx, conv, userID, tenantID),
 	})
+}
+
+// stateBlockBuilder (FIX33.1 Part 2) — the compiler's source for the
+// <conversation_state> block, injected as a user/assistant pair at the
+// head of the sent history when compaction happens. nil-safe.
+func (s *MessageService) stateBlockBuilder(ctx context.Context, conv *model.Conversation, userID, tenantID uuid.UUID) func() (string, []ContextSource) {
+	if s.stateSvc == nil || conv == nil || !conv.MemoryEnabled {
+		return nil
+	}
+	return func() (string, []ContextSource) {
+		return s.stateSvc.BuildStateContextWithSources(ctx, conv.ID, userID, tenantID)
+	}
+}
+
+// omittedBefore (FIX33.1 Part 6.1) — the regenerate path loads the
+// history strictly BEFORE the target message; the rows beyond its load
+// window are the ones created before the oldest loaded row, so the count
+// must be bounded by the target's timestamp — CountMessages (whole
+// conversation) would inflate the marker with rows that come after it.
+func (s *MessageService) omittedBefore(ctx context.Context, tenantID, convID uuid.UUID, before time.Time, loaded int) int {
+	if loaded < s.maxContext {
+		return 0
+	}
+	total, err := s.messages.CountMessagesBefore(ctx, tenantID, convID, before)
+	if err != nil {
+		slog.Warn("context: could not count messages before the regenerate target", "conv", convID.String(), "err", err)
+		return 0
+	}
+	if total > loaded {
+		return total - loaded
+	}
+	return 0
 }
 
 // omittedOlder (FIX33 A-W1) — how many active messages exist beyond the

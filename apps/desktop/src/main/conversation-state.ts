@@ -35,6 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { COMPACTION_EXTRACTION_PROMPT } from "./compaction-prompt";
+import { STATE_INJECTION_ASSISTANT_ACK, STATE_INJECTION_USER_PREAMBLE } from "./state-injection-prompt";
 import type { CompletionRequest, GatewayClient, GatewayMessage } from "./gateway-client";
 import type { Logger } from "./logger";
 
@@ -337,11 +338,10 @@ export function renderStateBlock(state: ConversationStateRecord): string {
  * right after the system message and before the preserved first exchange.
  */
 export function renderStateMessages(state: ConversationStateRecord): GatewayMessage[] {
+  // FIX33.1 Part 2 — wording from the shared asset (state-injection-prompt.ts
+  // = chat-edge's prompt_state_injection.txt); web injects the same pair.
   return [
-    {
-      role: "user",
-      content: `[Context from earlier in this conversation — reference only, not a new request]\n${renderStateBlock(state)}`,
-    },
-    { role: "assistant", content: "Understood — I'll keep that summary as background and continue from where we left off." },
+    { role: "user", content: `${STATE_INJECTION_USER_PREAMBLE}\n${renderStateBlock(state)}` },
+    { role: "assistant", content: STATE_INJECTION_ASSISTANT_ACK },
   ];
 }

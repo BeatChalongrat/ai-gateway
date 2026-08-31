@@ -230,6 +230,73 @@ func TestCompile_MemoryOffStillTrimsAndSaysNoSummary(t *testing.T) {
 	}
 }
 
+// FIX33.1 Part 2 — the state rides as a user/assistant pair at the HEAD of
+// the sent history (never in the system message), budgeted, only when
+// compaction happens — the desktop's shape.
+func TestCompile_StateInjectedAsUserAssistantPairAtHead(t *testing.T) {
+	c := NewContextCompiler(nil)
+	block := "<conversation_state>\nGoal: plan the trip\n" + StateHonestyNote + "\n</conversation_state>\n"
+	buildState := func() (string, []ContextSource) {
+		return block, []ContextSource{{SourceType: model.SourceTypeConversationState, DisplayLabel: "Goal: plan the trip"}}
+	}
+	// Fits → no injection, no pair.
+	h := seed(6)
+	fit, _ := c.Compile(context.Background(), CompileInputs{
+		Conv: conv(), History: h, BuildPrefix: func() (string, []ContextSource) { return "S", nil }, BuildState: buildState,
+	})
+	if fit.StateInjected || fit.History[0].Role != "user" || strings.Contains(fit.History[0].ContentMasked, "<conversation_state>") {
+		t.Fatal("no compaction → no injected pair")
+	}
+	// Compacts → pair first, then the preserved head, then the tail.
+	big := seedBig(300, 2000)
+	out, _ := c.Compile(context.Background(), CompileInputs{
+		Conv: conv(), History: big, BuildPrefix: func() (string, []ContextSource) { return "S", nil }, BuildState: buildState,
+	})
+	if !out.Compacted || !out.StateInjected {
+		t.Fatalf("expected compaction + injection: compacted=%v injected=%v", out.Compacted, out.StateInjected)
+	}
+	userText, ack := StateInjectionTexts()
+	if out.History[0].Role != "user" || !strings.HasPrefix(out.History[0].ContentMasked, userText) || !strings.Contains(out.History[0].ContentMasked, "plan the trip") {
+		t.Fatalf("History[0] must be the user preamble + block, got %q", out.History[0].ContentMasked[:60])
+	}
+	if out.History[1].Role != "assistant" || out.History[1].ContentMasked != ack {
+		t.Fatal("History[1] must be the assistant acknowledgement")
+	}
+	if out.History[2].ID != big[0].ID || out.History[3].ID != big[1].ID {
+		t.Fatal("the preserved first exchange must follow the pair")
+	}
+	if strings.Contains(out.SystemPrefix, "plan the trip") {
+		t.Fatal("the summary text must never enter the system message")
+	}
+	if !strings.Contains(out.SystemPrefix, "A summary of the older part is in <conversation_state>") {
+		t.Fatal("the context note must say a summary exists")
+	}
+	// Budgeted: the pair's tokens are inside the sent total, which stays under target.
+	if out.SentTokens > int(float64(out.Budget.MessagesRemaining)*DefaultCompactTargetRatio)+contextNoteReserve {
+		t.Fatalf("sent %d tokens exceeds the target with the pair counted", out.SentTokens)
+	}
+	found := false
+	for _, s := range out.Sources {
+		if s.SourceType == model.SourceTypeConversationState {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the state source must be attributed when the pair is injected")
+	}
+}
+
+func TestStateInjectionTexts_FromAsset(t *testing.T) {
+	u, a := StateInjectionTexts()
+	if !strings.HasPrefix(u, "[Context from earlier in this conversation") || !strings.HasPrefix(a, "Understood") {
+		t.Fatalf("asset not parsed: %q / %q", u, a)
+	}
+	pair := StateInjectionMessages("<conversation_state>x</conversation_state>")
+	if len(pair) != 2 || pair[0].Role != "user" || pair[1].Role != "assistant" || pair[0].ID != uuid.Nil {
+		t.Fatal("pair shape")
+	}
+}
+
 func TestSetRatios_ClampsBadValues(t *testing.T) {
 	c := NewContextCompiler(nil)
 	c.SetRatios(0, 5)

@@ -90,6 +90,11 @@ func buildRouteTable(t *testing.T) map[routeKey]bool {
 		Code:           &handler.CodeHandler{},
 		Project:        &handler.ProjectHandler{},
 		CanvasArtifact: &handler.CanvasArtifactHandler{},
+		// FIX33.1 Part 6.2 — these routes register under `if h.X != nil`
+		// (router.go); the table omitted them, so the test reported the
+		// web-chat's /skills and /cloud-tasks calls as drift since FIX12/13.
+		Skills:     &handler.SkillHandler{},
+		CloudTasks: &handler.CloudTaskHandler{},
 	}
 
 	mux := router.New(&config.Config{}, h, "", nil, nil)
