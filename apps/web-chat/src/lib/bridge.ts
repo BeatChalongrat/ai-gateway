@@ -61,7 +61,9 @@ export type HostQueryOp =
   | "diag.reportRendererError"
   // FIX1 §1.2: the one new op — browser-extension folder escape hatch (no path
   // from the page; the host opens a native picker).
-  | "browser.pickExtensionFolder";
+  | "browser.pickExtensionFolder"
+  // FIX33 A-D5: context meter numbers + "summarise and continue" (page-only).
+  | "context.info" | "context.compact";
 
 export interface HostResult<T = unknown> {
   ok: boolean;

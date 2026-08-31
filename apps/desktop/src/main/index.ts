@@ -52,6 +52,8 @@ import { PromptGuard } from "./prompt-guard";
 import { SessionController, type ViewState } from "./session-controller";
 import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
+import { ContextManager } from "./context-manager";
+import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, GatewayStateExtractor, JsonConversationStateStore } from "./conversation-state";
 import { UpdateNotifier } from "./update-check";
 import { encodeImageForVision } from "./image-encoder";
 import { ApprovalModeResetter } from "./approval-mode";
@@ -252,6 +254,20 @@ void app.whenReady().then(async () => {
     log,
   });
   const connectorTools = new ConnectorTools(connectorOAuth, async (id) => connectorOAuth.registration(id)?.serverUrl ?? null, log);
+  // FIX33 A-D1/A-D2: the desktop conversation state — one JSON file per
+  // conversation under <userData>\conversation-state (chat.conversation_states'
+  // fields), summarised by ONE no-tool gateway call with the shared prompt
+  // asset, injected as a USER-role pair (DLP-scanned on egress; see the note in
+  // conversation-state.ts). ON by default; DESKTOP_COMPACTION_SUMMARY=off
+  // restores FIX32's trim-only behaviour (the honest note + marker stay).
+  const summaryOff = (process.env["DESKTOP_COMPACTION_SUMMARY"] ?? "").toLowerCase() === "off";
+  const contextManager = new ContextManager({
+    store: new JsonConversationStateStore(path.join(dataDir, "conversation-state")),
+    extractor: summaryOff ? null : new GatewayStateExtractor(gateway, log),
+    log,
+    emit: (c, e, d) => coordinator?.emitTurnEvent(c, e, d),
+  });
+  log.info(`CONTEXT MANAGER: summariser ${summaryOff ? "OFF (DESKTOP_COMPACTION_SUMMARY=off)" : "on"} trigger=${COMPACT_TRIGGER_RATIO} target=${COMPACT_TARGET_RATIO} meter=${CONTEXT_METER_SHOW_RATIO}`);
   coordinator = new TurnCoordinator(
     bridge,
     gateway,
@@ -320,6 +336,7 @@ void app.whenReady().then(async () => {
         }
         // minimizeToTray is read from settings at window-close time; no effect to apply now.
       },
+      contextManager,
     },
     log,
   );

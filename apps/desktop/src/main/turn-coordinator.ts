@@ -56,6 +56,7 @@ import {
   type PermissionStore,
 } from "./permissions";
 import { compileChain } from "./context-compiler";
+import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import type { SidecarClient } from "./sidecar-client";
@@ -152,6 +153,10 @@ export interface TurnCoordinatorOptions {
    * oauth ops answer oauth-unsupported exactly as before. */
   connectorOAuth?: ConnectorOAuth;
   connectorTools?: ConnectorTools;
+  /** FIX33 A-D2/A-D5: the context manager (state store + summariser + meter).
+   * Absent (pure tests, probes) → FIX32's compileChain: trim + honest note, no
+   * summary. The summarising logic lives THERE, never in this file (§3.6). */
+  contextManager?: ContextManager;
 }
 
 // FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
@@ -349,6 +354,59 @@ export class TurnCoordinator {
       case "folders.list":
         this.bridge.postHostResult(payload.requestId, true, { folders: this.grants.list() });
         return;
+      // ── FIX33 A-D5: the context meter (read) and "summarise and continue" ──
+      case "context.info": {
+        const conversationId = payload.args?.["conversationId"];
+        if (typeof conversationId !== "string" || !conversationId) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "conversationId-missing");
+          return;
+        }
+        if (!this.opts.contextManager) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "context-unsupported");
+          return;
+        }
+        try {
+          const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
+          const model = this.opts.forceModel ?? conversation?.model_id ?? this.opts.defaultModel;
+          const built = await this.buildMessages(conversationId, conversation, "");
+          // buildMessages appends the (empty) user turn; the meter counts history only.
+          const messages = built.messages.slice(0, -1);
+          const tools = await this.toolDefinitions(null, false);
+          this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, model, tools.length));
+        } catch (err) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, `context-info-failed:${(err as Error).message.slice(0, 80)}`);
+        }
+        return;
+      }
+      case "context.compact": {
+        const conversationId = payload.args?.["conversationId"];
+        const instructionsRaw = payload.args?.["instructions"];
+        const instructions = typeof instructionsRaw === "string" ? instructionsRaw.slice(0, 2000) : "";
+        if (typeof conversationId !== "string" || !conversationId) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "conversationId-missing");
+          return;
+        }
+        if (!this.opts.contextManager) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "context-unsupported");
+          return;
+        }
+        if (this.turns.has(conversationId)) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "turn-in-progress");
+          return;
+        }
+        try {
+          const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
+          const model = this.opts.forceModel ?? conversation?.model_id ?? this.opts.defaultModel;
+          const built = await this.buildMessages(conversationId, conversation, "");
+          const history = built.messages.slice(1, -1); // no system, no empty user turn
+          const res = await this.opts.contextManager.manualCompact(conversationId, history, model, instructions, new AbortController().signal);
+          if (res.ok) this.bridge.postHostResult(payload.requestId, true, { ok: true });
+          else this.bridge.postHostResult(payload.requestId, false, undefined, `compact-${res.error}`);
+        } catch (err) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, `compact-failed:${(err as Error).message.slice(0, 80)}`);
+        }
+        return;
+      }
       case "folders.pickAndGrant": {
         // The page never names a path: the folder comes from a native dialog.
         const picked = await this.opts.pickFolder();
@@ -624,7 +682,9 @@ export class TurnCoordinator {
       // FIX32 §1.2: the task path gets the same token budget as an interactive
       // turn (an old alarm conversation grows too). The FULL chain persists.
       const taskTools = await this.toolDefinitions(null, false);
-      const tcc = compileChain(built.messages, model, taskTools.length);
+      const tcc = this.opts.contextManager
+        ? await this.opts.contextManager.compile(conversationId, built.messages, model, taskTools.length, controller.signal)
+        : compileChain(built.messages, model, taskTools.length);
       if (tcc.compacted) this.log.info(`CONTEXT COMPILED conv=${conversationId} (task ${task.id}) status=compacted total=${tcc.totalMessages} sent=${tcc.sentMessages} dropped=${tcc.dropped}`);
       const taskChainStart = tcc.messages.length;
       await this.runLoop({
@@ -640,7 +700,7 @@ export class TurnCoordinator {
           text += t;
         },
       });
-      if (tcc.compacted) taskMessages.push(...tcc.messages.slice(taskChainStart));
+      if (tcc.altered) taskMessages.push(...tcc.messages.slice(taskChainStart));
     } catch (err) {
       text = `Error: ${(err as Error).message}`;
       errored = true;
@@ -706,6 +766,12 @@ export class TurnCoordinator {
   }
 
   // ── events ─────────────────────────────────────────────────────────────────
+  /** FIX33 — the context manager's events (compaction_status, context_budget)
+   *  travel on the SAME turn-event channel as compaction_notice. */
+  emitTurnEvent(conversationId: string, event: string, data: unknown): void {
+    this.emit(conversationId, event, data);
+  }
+
   private emit(conversationId: string, event: string, data: unknown): number {
     let log = this.logs.get(conversationId);
     if (!log) {
@@ -794,7 +860,12 @@ export class TurnCoordinator {
     // marker) are told. Silently forgetting is the failure mode this exists
     // to prevent.
     const tools = await this.toolDefinitions(null, false, payload.imageMode);
-    const cc = compileChain(messages, model, tools.length);
+    // FIX33 A-D2: with a context manager the middle is SUMMARISED before it
+    // goes (state store + extraction, the state riding as a user-role pair);
+    // without one, FIX32's trim + honest note.
+    const cc = this.opts.contextManager
+      ? await this.opts.contextManager.compile(conversationId, messages, model, tools.length, signal)
+      : compileChain(messages, model, tools.length);
     const sendMessages = cc.messages;
     if (cc.compacted) {
       this.emit(conversationId, "compaction_notice", { dropped: cc.dropped, sent: cc.sentMessages, total: cc.totalMessages });
@@ -835,7 +906,9 @@ export class TurnCoordinator {
     // compacted, what persists is the FULL untrimmed history plus this turn's
     // new tail — compaction affects one request, never the stored past.
     const appendedChain = sendMessages.slice(chainStart);
-    const fullChain = cc.compacted ? [...messages, ...appendedChain] : sendMessages;
+    // `altered` (FIX33) covers both a trim and an injected state pair: neither
+    // may ever enter the stored chain.
+    const fullChain = cc.altered ? [...messages, ...appendedChain] : sendMessages;
     this.saveLocalHistory(conversationId, fullChain.slice(historyStart));
     await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? []);
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the

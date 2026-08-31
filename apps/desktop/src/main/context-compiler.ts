@@ -116,24 +116,55 @@ function toUnits(history: readonly GatewayMessage[]): Unit[] {
 }
 
 export interface CompiledChain {
-  /** system (with the context note when compacted) + kept history. */
+  /** system (with the context note when compacted) [+ state preamble] + kept history. */
   messages: GatewayMessage[];
   compacted: boolean;
+  /** True when `messages` is a NEW array (compacted and/or preamble injected);
+   *  false means the very same array came back — callers persist the chain
+   *  from the ORIGINAL when altered. */
+  altered: boolean;
   /** messages dropped (message count, not units). */
   dropped: number;
   totalMessages: number;
   sentMessages: number;
+  /** tokens of the history actually SENT. */
   historyTokens: number;
+  /** tokens of the history as LOADED (before any trim) — the meter's numerator. */
+  historyTokensLoaded: number;
+  /** triggerRatio × messagesRemaining — the meter's "compaction at" mark. */
+  thresholdTokens: number;
+  /** [dropStart, dropEnd) — history indices (0 = first message after the
+   *  system message) of the dropped middle; both 0 when nothing dropped. */
+  dropStart: number;
+  dropEnd: number;
   budget: { total: number; system: number; toolReserve: number; outputReserve: number; messagesRemaining: number };
 }
 
+/** FIX33 knobs. Absent = FIX32 behaviour (compact only on overflow, no preamble). */
+export interface CompileOptions {
+  /** Compact when loaded history ≥ this × messagesRemaining (default 1.0 = overflow only). */
+  triggerRatio?: number;
+  /** …and trim down to this × messagesRemaining (default = triggerRatio). */
+  targetRatio?: number;
+  /** The <conversation_state> pair (user/assistant), injected right after the
+   *  system message WHEN compaction happens; budgeted like the system. */
+  preamble?: GatewayMessage[];
+  /** Drop every history message at or before this index (head excepted),
+   *  regardless of budget — A-W7's manual compact. */
+  manualBoundaryIndex?: number | null;
+  /** Whether a summary is present (the context note says so). */
+  summaryPresent?: boolean;
+}
+
 /** The context note the MODEL sees, appended to the system message. */
-function contextNote(dropped: number, keptRecent: number): string {
+function contextNote(dropped: number, keptRecent: number, summaryPresent: boolean): string {
   return (
     `\n\n<context_note>\nThis conversation is long: ${dropped} earlier message${dropped === 1 ? "" : "s"} ` +
-    `were omitted for length. The first exchange and the most recent ${keptRecent} messages are included ` +
-    `verbatim. If the user refers to something no longer visible, say you may have lost that detail and ` +
-    `ask them to restate it — do not guess.\n</context_note>`
+    `${dropped === 1 ? "is" : "are"} not included verbatim. The first exchange and the most recent ${keptRecent} ` +
+    `message${keptRecent === 1 ? "" : "s"} are included verbatim. ` +
+    (summaryPresent ? "A summary of the older part is in <conversation_state> above. " : "No summary of the older part is available. ") +
+    `If the user refers to something that is in neither the summary nor the visible messages, say you may have lost ` +
+    `that detail and ask them to restate it — do not guess.\n</context_note>`
   );
 }
 
@@ -142,7 +173,7 @@ function contextNote(dropped: number, keptRecent: number): string {
  * turn (buildMessages' shape). Returns the same array when it fits (no copy),
  * so callers can cheaply detect "untouched".
  */
-export function compileChain(messages: GatewayMessage[], modelId: string, numTools: number): CompiledChain {
+export function compileChain(messages: GatewayMessage[], modelId: string, numTools: number, opts: CompileOptions = {}): CompiledChain {
   const system = messages[0];
   const history = messages.slice(1);
   const sysText = typeof system?.content === "string" ? system.content : "";
@@ -152,14 +183,24 @@ export function compileChain(messages: GatewayMessage[], modelId: string, numToo
   let remaining = total - sysTokens - toolReserve - OUTPUT_RESERVE;
   if (remaining < MESSAGES_FLOOR) remaining = MESSAGES_FLOOR;
 
+  const trigger = ratio(opts.triggerRatio, 1);
+  const target = Math.min(ratio(opts.targetRatio, trigger), trigger);
+  const thresholdTokens = Math.floor(remaining * trigger);
+  const preamble = opts.preamble ?? [];
+  const preambleTokens = preamble.reduce((s, m) => s + messageTokens(m), 0);
+
   const historyTokens = history.reduce((s, m) => s + messageTokens(m), 0);
   const base = {
     totalMessages: history.length,
+    historyTokensLoaded: historyTokens,
+    thresholdTokens,
     budget: { total, system: sysTokens, toolReserve, outputReserve: OUTPUT_RESERVE, messagesRemaining: remaining },
   };
-  if (historyTokens <= remaining) {
-    return { messages, compacted: false, dropped: 0, sentMessages: history.length, historyTokens, ...base };
-  }
+  const boundary = typeof opts.manualBoundaryIndex === "number" && opts.manualBoundaryIndex >= 0 && opts.manualBoundaryIndex < history.length ? opts.manualBoundaryIndex : null;
+  const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, dropStart: 0, dropEnd: 0, ...base });
+
+  const overThreshold = historyTokens >= thresholdTokens;
+  if (!overThreshold && boundary === null) return untouched();
 
   const units = toUnits(history);
   // Head: the first user message and the reply that answered it (units 0..1,
@@ -171,37 +212,59 @@ export function compileChain(messages: GatewayMessage[], modelId: string, numToo
   }
   const head = units.slice(0, headCount);
   const headTokens = head.reduce((s, u) => s + u.tokens, 0);
-  const noteReserve = 120; // the context note joins the system message
+  const headMessages = head.reduce((s, u) => s + u.messages.length, 0);
+  const noteReserve = 160; // the context note joins the system message
 
-  // Tail: newest units first until the budget is spent. The LAST unit (the
-  // new user turn) always ships, even if it alone overflows — a system-only
-  // request dead-ends the loop (chat-edge's rule).
-  let used = headTokens + noteReserve;
-  const tailStart = headCount;
+  // The tail may not start before the boundary's unit (A-W7) or inside the head.
+  let tailFloor = headCount;
+  if (boundary !== null) {
+    let idx = 0;
+    for (let ui = 0; ui < units.length; ui++) {
+      idx += units[ui]!.messages.length;
+      if (idx - 1 >= boundary) {
+        tailFloor = Math.max(tailFloor, ui + 1);
+        break;
+      }
+    }
+    if (tailFloor > units.length - 1) tailFloor = units.length - 1; // the newest unit always ships
+  }
+
+  // Tail: newest units first until the (target) budget is spent. The LAST
+  // unit (the new user turn) always ships, even if it alone overflows — a
+  // system-only request dead-ends the loop (chat-edge's rule).
+  const limit = overThreshold ? Math.floor(remaining * target) : remaining;
+  let used = headTokens + noteReserve + preambleTokens;
   let cut = units.length; // first kept tail unit index
-  for (let i = units.length - 1; i >= tailStart; i--) {
+  for (let i = units.length - 1; i >= tailFloor; i--) {
     const u = units[i]!;
-    if (used + u.tokens > remaining && cut < units.length) break;
-    if (used + u.tokens > remaining && cut === units.length && i < units.length - 1) break;
+    if (used + u.tokens > limit && i < units.length - 1) break;
     used += u.tokens;
     cut = i;
   }
-  const tail = units.slice(Math.max(cut, tailStart));
+  if (cut >= units.length) cut = units.length - 1;
+  if (cut < tailFloor) cut = tailFloor;
+  const tail = units.slice(cut);
   const kept = [...head, ...tail];
   const keptMessages = kept.flatMap((u) => u.messages);
   const dropped = history.length - keptMessages.length;
-  if (dropped <= 0) {
-    return { messages, compacted: false, dropped: 0, sentMessages: history.length, historyTokens, ...base };
-  }
+  if (dropped <= 0) return untouched();
+
   const keptRecent = tail.reduce((s, u) => s + u.messages.length, 0);
-  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent) };
-  const out: GatewayMessage[] = [newSystem, ...keptMessages];
+  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent, opts.summaryPresent === true) };
+  const out: GatewayMessage[] = [newSystem, ...preamble, ...keptMessages];
   return {
     messages: out,
     compacted: true,
+    altered: true,
     dropped,
     sentMessages: keptMessages.length,
     historyTokens: keptMessages.reduce((s, m) => s + messageTokens(m), 0),
+    dropStart: headMessages,
+    dropEnd: headMessages + dropped,
     ...base,
   };
+}
+
+function ratio(v: number | undefined, dflt: number): number {
+  return typeof v === "number" && v > 0 && v <= 1 ? v : dflt;
 }

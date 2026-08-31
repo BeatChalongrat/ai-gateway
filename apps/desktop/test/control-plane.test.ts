@@ -26,6 +26,9 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "folders.list", "folders.pickAndGrant", "folders.revoke",
     "globalNotes.list", "globalNotes.delete",
     "browser.pickExtensionFolder",
+    // FIX33 A-D5 — the context meter (read) and "summarise and continue".
+    // Page-only: the model has no tool that can compact or read the meter.
+    "context.info", "context.compact",
     // FIX6: the approved-site list is control-plane. The page may list and revoke;
     // there is NO sites.add — a site is approved only through the consent prompt.
     "sites.list", "sites.revoke",

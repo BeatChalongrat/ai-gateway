@@ -242,6 +242,17 @@ export class ChatEdgeClient {
     }
   }
 
+  /** FIX33 — the server's structured state for a conversation (web's summary). */
+  async getConversationState(conversationId: string): Promise<Record<string, unknown> | null> {
+    return this.get<Record<string, unknown>>(`/api/v1/conversations/${encodeURIComponent(conversationId)}/state`);
+  }
+
+  /** FIX33 A-W7 on the server: summarise now + set the boundary (web-side state). */
+  async compactConversation(conversationId: string, instructions: string): Promise<boolean> {
+    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`, { instructions });
+    return res !== null;
+  }
+
   private async get<T>(path: string, timeoutMs = this.timeoutMs): Promise<T | null> {
     const token = this.accessToken();
     if (!token) return null;

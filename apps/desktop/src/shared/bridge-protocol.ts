@@ -63,6 +63,10 @@ export const HOST_QUERY_OPS = Object.freeze([
   // forwards the chosen folder to the sidecar. This is the single op §1.2 budgets;
   // the closed set grows by exactly one, deliberately.
   "browser.pickExtensionFolder",
+  // FIX33 A-D5: the context meter's numbers (read) and "summarise and continue"
+  // (the page asks; the host summarises with the user's instructions and sets
+  // the boundary). Page-only ops, never tools — the model cannot compact.
+  "context.info", "context.compact",
 ] as const);
 export type HostQueryOp = (typeof HOST_QUERY_OPS)[number];
 export const E3_SUPPORTED_OPS: readonly HostQueryOp[] = Object.freeze(["session.logout", "diag.reportRendererError"]);

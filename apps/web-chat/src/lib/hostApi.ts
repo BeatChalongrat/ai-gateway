@@ -104,6 +104,23 @@ export type SettingKey =
   | "chatEdgeBaseUrl" | "gatewayBaseUrl" | "browserExtensionId" | "writingStyleProfile" | "locale"
   | "approvalMode"; // FIX25 §1 — the composer's permission-mode selector (same closed op; page-only, never a tool)
 
+/** FIX33 — the context meter's numbers (host event `context_budget` and op `context.info`;
+ *  the web path's GET /context-info maps onto the same fields). */
+export interface ContextBudgetDto {
+  used_ratio: number;
+  history_tokens: number;
+  messages_budget: number;
+  threshold_tokens: number;
+  messages_total: number;
+  messages_sent: number;
+  state_present: boolean;
+  compacted: boolean;
+  dropped: number;
+  est_messages_remaining: number;
+  show_meter: boolean;
+  meter_show_ratio: number;
+}
+
 export interface GlobalNoteDto {
   id: string;
   content: string;
@@ -186,5 +203,10 @@ export const hostApi = {
 
   // local global agent notes
   listGlobalNotes: async () => unwrap<{ notes: GlobalNoteDto[] }>(await bridge.hostQuery("globalNotes.list")).notes,
+  /** FIX33 A-D5 — the context meter's numbers for one conversation (same shape as the host's context_budget event). */
+  contextInfo: async (conversationId: string) => unwrap<ContextBudgetDto>(await bridge.hostQuery("context.info", { conversationId })),
+  /** FIX33 A-D5 — "summarise and continue" with the user's instructions (host summarises, sets the boundary). */
+  compactContext: async (conversationId: string, instructions: string) =>
+    unwrap<{ ok: boolean }>(await bridge.hostQuery("context.compact", { conversationId, instructions }, 120_000)),
   deleteGlobalNote: (noteId: string) => bridge.hostQuery("globalNotes.delete", { noteId }),
 };
