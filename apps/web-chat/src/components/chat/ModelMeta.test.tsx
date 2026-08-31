@@ -262,6 +262,8 @@ describe("isFillerDescription", () => {
       "Google Gemini model.",
       "Meta Llama model.",
       "Mistral model.",
+      "Claude Sonnet 4.5 is available in this workspace.",
+      "Deepseek R1 is available in this workspace.",
       "",
       "   ",
       "Fast model",

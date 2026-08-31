@@ -606,6 +606,9 @@ export function isFillerDescription(description: string | undefined | null): boo
   if (!text) return true;
   const words = text.split(/\s+/);
   if (words.length < 5) return true;
+  // chat-edge's second generated placeholder, for models the gateway
+  // discovered at runtime: "<Name> is available in this workspace."
+  if (/\bis available in this workspace\.?$/i.test(text)) return true;
   return /^\S+(?:\s+\S+){0,2}\s+(?:chat\s+)?model\.?$/i.test(text);
 }
 
