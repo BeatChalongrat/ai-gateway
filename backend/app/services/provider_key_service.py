@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import ConflictError
 from app.core.security import decrypt_provider_key, encrypt_provider_key
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
@@ -406,11 +407,28 @@ class ProviderKeyService:
 
         repo = ProviderKeyRepository(session)
         final_label = label or f"Key {self._next_label_num(session, provider_name)}"
-        row = repo.create(
-            provider_name=provider_name,
-            label=final_label,
-            api_key_encrypted=_encode(api_key),
-        )
+        existing = repo.get_by_provider_and_label(provider_name, final_label)
+        if existing is not None:
+            if existing.is_active:
+                raise ConflictError(
+                    f"An active key with label '{final_label}' already exists "
+                    f"for provider '{provider_name}'.",
+                    code="provider_key_label_conflict",
+                )
+            row = repo.update(
+                existing,
+                api_key_encrypted=_encode(api_key),
+                is_active=True,
+                last_test_status="untested",
+                last_tested_at=None,
+                last_test_latency_ms=None,
+            )
+        else:
+            row = repo.create(
+                provider_name=provider_name,
+                label=final_label,
+                api_key_encrypted=_encode(api_key),
+            )
         # Insert-if-absent, so the seeder's own "env-seed" reason survives
         # when this is called from the seed path.
         mark_provider_owned(session, KIND_KEY, provider_name, "admin-ui")

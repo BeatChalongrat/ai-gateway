@@ -79,6 +79,21 @@ class ProviderKeyRepository(BaseRepository[ProviderKeyORM]):
         rows = self.list_active_by_provider(provider_name)
         return rows[0] if rows else None
 
+    def get_by_provider_and_label(
+        self, provider_name: str, label: str
+    ) -> ProviderKeyORM | None:
+        """Return the row occupying a provider/label slot, if any.
+
+        Labels are unique across active and soft-deleted rows. The add-key
+        flow uses this lookup to reactivate an inactive slot instead of
+        attempting an INSERT that can only fail the unique constraint.
+        """
+        stmt = select(ProviderKeyORM).where(
+            ProviderKeyORM.provider_name == provider_name,
+            ProviderKeyORM.label == label,
+        )
+        return self.session.execute(stmt).scalar_one_or_none()
+
     def count_by_provider(self, provider_name: str) -> int:
         """Total key count (active or not) — used for label generation."""
         stmt = select(func.count()).select_from(ProviderKeyORM).where(
