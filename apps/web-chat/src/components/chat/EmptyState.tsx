@@ -11,11 +11,14 @@
 // mismatch warning. We render the greeting as a generic placeholder
 // during SSR and swap it in on the client.
 
+import { Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useHostedMode } from "@/hooks/useHostedMode";
 import { useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
+import { loadSkillTemplates, type SkillTemplate } from "@/lib/skillTemplates";
 
 interface Props {
   onPrompt: (text: string) => void;
@@ -133,6 +136,19 @@ export function EmptyState({ onPrompt, children }: Props) {
   useEffect(() => {
     setGreetKey(greetingKey(new Date()));
   }, []);
+  // FIX33 B6 — the user's enabled skills as starter cards (web: chat-edge
+  // /skills; desktop: the host's list). None → the row is simply absent.
+  const hosted = useHostedMode();
+  const [skills, setSkills] = useState<SkillTemplate[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void loadSkillTemplates(hosted).then((list) => {
+      if (alive) setSkills(list.slice(0, 8));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [hosted]);
   const greeting = greetKey ? `${t(greetKey)}, ${name}` : `Hello, ${name}`;
 
   return (
@@ -169,6 +185,27 @@ export function EmptyState({ onPrompt, children }: Props) {
             </button>
           ))}
         </div>
+        {skills.length > 0 ? (
+          <div className="mt-4" data-testid="empty-skills">
+            <p className="mb-2 text-[11px] uppercase tracking-wider text-text-tertiary">{t("empty.skills.title")}</p>
+            <div className="scrollbar-thin flex flex-wrap items-center justify-center gap-2 overflow-x-auto pb-1">
+              {skills.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  title={s.description || undefined}
+                  onClick={() => onPrompt(s.insertText)}
+                  className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-all hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
+                >
+                  <span className="text-text-tertiary">
+                    <Sparkles width={15} height={15} aria-hidden />
+                  </span>
+                  <span>{s.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

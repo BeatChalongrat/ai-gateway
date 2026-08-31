@@ -398,6 +398,9 @@ function ModelPicker({
                 vision={hasVisionCap(m)}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                 description={m.description}
+                contextWindow={m.context_window}
+                inputPrice={m.input_price_per_1m}
+                outputPrice={m.output_price_per_1m}
               />
             ))}
           </Section>
@@ -417,6 +420,9 @@ function ModelPicker({
                 vision={hasVisionCap(m)}
                 mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                 description={m.description}
+                contextWindow={m.context_window}
+                inputPrice={m.input_price_per_1m}
+                outputPrice={m.output_price_per_1m}
               />
             ))}
           </Section>
@@ -445,6 +451,9 @@ function ModelPicker({
                     mediaKind={kind}
                     tier={m.cost_tier}
                     description={m.description}
+                contextWindow={m.context_window}
+                inputPrice={m.input_price_per_1m}
+                outputPrice={m.output_price_per_1m}
                   />
                 ))
               ) : (
@@ -477,6 +486,9 @@ function ModelPicker({
                 vision={hasVisionCap(m)}
                   mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
                   description={m.description}
+                contextWindow={m.context_window}
+                inputPrice={m.input_price_per_1m}
+                outputPrice={m.output_price_per_1m}
                 />
               ))}
               {hiddenCount > 0 ? (
@@ -547,11 +559,35 @@ interface RowProps {
    *  rendered it, so users picked models blind. Second line under the name:
    *  what the model is good at.
    *
-   *  Phase 13.1 removed the context/pricing line that used to sit under this
-   *  one. SRAN is an internal tool on a shared account — nobody picking a
-   *  model here is making a purchase decision, so token economics was noise.
-   *  The catalog still serves those fields; we just don't render them. */
+   *  Phase 13.1 removed the context/pricing line under this one ("internal
+   *  tool on a shared account — token economics was noise"). FIX33 B1 puts
+   *  it back, quieter: the header already shows credits (CreditBadge) and the
+   *  usage panel bills per model, so the price per 1M tokens is the same
+   *  economics the user already sees, and the context window is what the
+   *  FIX33 context meter budgets against. Rendered only when the catalog
+   *  serves the numbers; one muted line, never a badge. */
   description?: string;
+  /** FIX33 B1 — tokens of context the model accepts (catalog context_window). */
+  contextWindow?: number;
+  /** FIX33 B1 — USD per 1M input / output tokens (catalog *_price_per_1m). */
+  inputPrice?: number;
+  outputPrice?: number;
+}
+
+/** "128K" / "1M" — the context window in a glance. */
+export function formatContextWindow(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(tokens % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+  return String(tokens);
+}
+
+/** "$2.50 / $10.00" — trims to the precision the number needs. */
+export function formatPricePair(input: number, output: number): string {
+  const f = (n: number) => {
+    const s = n >= 1 ? n.toFixed(2) : n.toFixed(3);
+    return s.includes(".") ? s.replace(/0+$/, "").replace(/\.$/, "") : s;
+  };
+  return `$${f(input)} / $${f(output)}`;
 }
 
 const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
@@ -570,7 +606,7 @@ const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high", DictKey> = {
 
 function ModelRow({
   label, sub, selected, onClick, leading, reasoning, imageGen, vision, mediaKind, tier,
-  description,
+  description, contextWindow, inputPrice, outputPrice,
 }: RowProps) {
   const t = useT();
   // FIX29 §2.1 — capabilities as a tooltip on the name, not as pills.
@@ -608,6 +644,17 @@ function ModelRow({
         {description ? (
           <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-muted">
             {description}
+          </p>
+        ) : null}
+        {/* FIX33 B1 — context window + price per 1M tokens, one muted line,
+            only when the catalog serves the numbers. */}
+        {(contextWindow && contextWindow > 0) || (typeof inputPrice === "number" && typeof outputPrice === "number") ? (
+          <p className="mt-0.5 text-[10px] leading-snug text-text-tertiary" data-testid="model-meta">
+            {contextWindow && contextWindow > 0 ? t("model.contextWindow", { n: formatContextWindow(contextWindow) }) : null}
+            {contextWindow && contextWindow > 0 && typeof inputPrice === "number" && typeof outputPrice === "number" ? " · " : null}
+            {typeof inputPrice === "number" && typeof outputPrice === "number"
+              ? t("model.price", { pair: formatPricePair(inputPrice, outputPrice) })
+              : null}
           </p>
         ) : null}
       </div>

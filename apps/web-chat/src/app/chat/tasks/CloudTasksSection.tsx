@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { CloudTask, CloudTaskRun, Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -63,7 +64,7 @@ export function CloudTasksSection({
         const res = await api.listCloudTasks();
         if (alive) setTasks(res.tasks);
       } catch {
-        toast("Couldn't load cloud tasks.");
+        toast(tOutside("cloud.toast.loadFailed"));
       } finally {
         if (alive) setLoaded(true);
       }
@@ -97,7 +98,7 @@ export function CloudTasksSection({
             : t,
         ),
       );
-      toast("Couldn't update task.");
+      toast(tOutside("tasks.toast.updateFailed"));
     }
   }
 
@@ -107,7 +108,7 @@ export function CloudTasksSection({
       await api.deleteCloudTask(task.id);
       setTasks((list) => list.filter((t) => t.id !== task.id));
     } catch {
-      toast("Couldn't delete task.");
+      toast(tOutside("tasks.toast.deleteFailed"));
     }
   }
 
@@ -344,7 +345,7 @@ function CloudHistoryModal({
       open={task !== null}
       onClose={onClose}
       title={task ? `History — ${task.name}` : "History"}
-      description="Every past run, including refusals and why."
+      description={tOutside("cloud.history.desc")}
     >
       {runs === null ? (
         <p className="text-sm text-text-muted">Loading…</p>
@@ -481,26 +482,26 @@ function CloudTaskFormModal({
     const n = name.trim();
     const p = prompt.trim();
     if (!n || !p) {
-      setError("Name and prompt are both required.");
+      setError(tOutside("cloud.err.required"));
       return;
     }
     if (n.length > 120) {
-      setError("Name must be 120 characters or fewer.");
+      setError(tOutside("cloud.err.nameLen"));
       return;
     }
     if (p.length > 4000) {
-      setError("Prompt must be 4000 characters or fewer.");
+      setError(tOutside("cloud.err.promptLen"));
       return;
     }
     if (!conversationId) {
-      setError("Choose a conversation for this task to run in.");
+      setError(tOutside("cloud.err.conversation"));
       return;
     }
     let parsedMaxRuns: number | null = null;
     if (maxRuns.trim()) {
       const m = Number(maxRuns);
       if (!Number.isInteger(m) || m < 1) {
-        setError("Max runs must be a whole number of 1 or more.");
+        setError(tOutside("cloud.err.maxRuns"));
         return;
       }
       parsedMaxRuns = m;
@@ -517,7 +518,7 @@ function CloudTaskFormModal({
       });
       onCreated(task);
     } catch {
-      setError("Couldn't create task.");
+      setError(tOutside("cloud.err.createFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -527,8 +528,8 @@ function CloudTaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="New cloud task"
-      description="Runs the prompt on our servers, on the schedule below."
+      title={tOutside("cloud.new.title")}
+      description={tOutside("cloud.new.desc")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -547,7 +548,7 @@ function CloudTaskFormModal({
       <div className="flex flex-col gap-3">
         <Input
           label="Name"
-          placeholder="Daily digest"
+          placeholder={tOutside("cloud.field.namePlaceholder")}
           value={name}
           maxLength={120}
           onChange={(e) => setName(e.target.value)}
@@ -564,7 +565,7 @@ function CloudTaskFormModal({
             id="cloud-task-prompt"
             rows={4}
             maxLength={4000}
-            placeholder="Summarize what's new since yesterday…"
+            placeholder={tOutside("cloud.field.promptPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
@@ -594,10 +595,10 @@ function CloudTaskFormModal({
           </p>
         </div>
         <Input
-          label="Max runs (optional)"
+          label={tOutside("cloud.field.maxRuns")}
           type="number"
           min={1}
-          placeholder="Leave blank for no limit"
+          placeholder={tOutside("cloud.field.maxRunsPlaceholder")}
           value={maxRuns}
           onChange={(e) => setMaxRuns(e.target.value)}
         />

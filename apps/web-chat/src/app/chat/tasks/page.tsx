@@ -25,7 +25,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type TaskDto, type TaskRunDto } from "@/lib/hostApi";
-import { useT } from "@/lib/i18n";
+import { useT, tOutside } from "@/lib/i18n";
 
 import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
 
@@ -120,8 +120,8 @@ function KindChooserModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="New task"
-      description="Where should this task run?"
+      title={tOutside("tasks.new")}
+      description={tOutside("tasks.new.where")}
     >
       <div className="flex flex-col gap-3">
         <button
@@ -194,7 +194,7 @@ function LocalTasksSection({
         const rows = await hostApi.listTasks();
         if (alive) setTasks(rows);
       } catch {
-        toast("Couldn't load scheduled tasks.");
+        toast(tOutside("tasks.toast.loadFailed"));
       } finally {
         if (alive) setLoaded(true);
       }
@@ -222,14 +222,14 @@ function LocalTasksSection({
     try {
       const res = await hostApi.runTask(task.id);
       if (!res.ok || !res.data) {
-        toast(res.error ?? "Task run failed.");
+        toast(res.error ?? tOutside("tasks.toast.runFailed"));
         return;
       }
       const updated = res.data;
       setTasks((list) => list.map((t) => (t.id === updated.id ? updated : t)));
-      toast(updated.lastResult ?? "Task finished.");
+      toast(updated.lastResult ?? tOutside("tasks.toast.finished"));
     } catch {
-      toast("Task run failed.");
+      toast(tOutside("tasks.toast.runFailed"));
     } finally {
       setRunning((r) => ({ ...r, [task.id]: false }));
     }
@@ -240,12 +240,12 @@ function LocalTasksSection({
     try {
       const res = await hostApi.deleteTask(task.id);
       if (!res.ok) {
-        toast(res.error ?? "Couldn't delete task.");
+        toast(res.error ?? tOutside("tasks.toast.deleteFailed"));
         return;
       }
       setTasks((list) => list.filter((t) => t.id !== task.id));
     } catch {
-      toast("Couldn't delete task.");
+      toast(tOutside("tasks.toast.deleteFailed"));
     }
   }
 
@@ -262,7 +262,7 @@ function LocalTasksSection({
             t.id === task.id ? { ...t, isEnabled: !enabled } : t,
           ),
         );
-        toast(res.error ?? "Couldn't update task.");
+        toast(res.error ?? tOutside("tasks.toast.updateFailed"));
         return;
       }
       if (res.data) {
@@ -275,7 +275,7 @@ function LocalTasksSection({
       setTasks((list) =>
         list.map((t) => (t.id === task.id ? { ...t, isEnabled: !enabled } : t)),
       );
-      toast("Couldn't update task.");
+      toast(tOutside("tasks.toast.updateFailed"));
     }
   }
 
@@ -395,7 +395,7 @@ function HistoryModal({ task, onClose }: { task: TaskDto | null; onClose: () => 
   }, [task]);
 
   return (
-    <Modal open={task !== null} onClose={onClose} title={task ? `History — ${task.name}` : "History"} description="Every past attempt, including skipped runs and why.">
+    <Modal open={task !== null} onClose={onClose} title={task ? `History — ${task.name}` : "History"} description={tOutside("tasks.history.desc")}>
       {runs === null ? (
         <p className="text-sm text-text-muted">Loading…</p>
       ) : runs.length === 0 ? (
@@ -507,7 +507,7 @@ function TaskRow({
             {" · "}
             Last run: {formatDate(task.lastRunAt)}
             {" · "}
-            <span title="Per-task permission mode">{modeLabel}</span>
+            <span title={tOutside("tasks.modeTitle")}>{modeLabel}</span>
           </p>
           {task.lastResult ? (
             <p className="mt-2 line-clamp-2 text-xs text-text-muted">
@@ -616,7 +616,7 @@ function TaskFormModal({
     const p = prompt.trim();
     const c = cron.trim();
     if (!n || !p || !c) {
-      setError("Name, prompt, and cron are all required.");
+      setError(tOutside("tasks.err.required"));
       return;
     }
     setSubmitting(true);
@@ -628,14 +628,14 @@ function TaskFormModal({
       if (!res.ok || !res.data) {
         setError(
           res.error === "invalid"
-            ? "Invalid cron expression or fields."
-            : (res.error ?? "Couldn't save task."),
+            ? tOutside("tasks.err.cron")
+            : (res.error ?? tOutside("tasks.err.saveFailed")),
         );
         return;
       }
       onSaved(res.data, task !== null);
     } catch {
-      setError("Couldn't save task.");
+      setError(tOutside("tasks.err.saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -645,8 +645,8 @@ function TaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={task ? "Edit on-device task" : "New on-device task"}
-      description="Runs the prompt on the schedule below, while the app is open"
+      title={task ? tOutside("tasks.edit.title") : tOutside("tasks.new.local.title")}
+      description={tOutside("tasks.edit.desc")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -661,7 +661,7 @@ function TaskFormModal({
       <div className="flex flex-col gap-3">
         <Input
           label="Name"
-          placeholder="Morning briefing"
+          placeholder={tOutside("tasks.field.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -676,7 +676,7 @@ function TaskFormModal({
           <textarea
             id="task-prompt"
             rows={4}
-            placeholder="Summarize today's unread alerts…"
+            placeholder={tOutside("tasks.field.promptPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
@@ -684,7 +684,7 @@ function TaskFormModal({
         </div>
         <div className="flex flex-col gap-1.5">
           <Input
-            label="Cron expression"
+            label={tOutside("tasks.field.cron")}
             placeholder="0 6 * * *"
             value={cron}
             onChange={(e) => setCron(e.target.value)}

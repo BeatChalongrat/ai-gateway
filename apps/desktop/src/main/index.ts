@@ -22,6 +22,7 @@ import {
   Notification,
   powerMonitor,
   safeStorage,
+  screen,
   session,
   shell,
   Tray,
@@ -45,6 +46,8 @@ import { PermissionStore } from "./permissions";
 import { runE4Probe } from "./probes-e4";
 import { SidecarClient } from "./sidecar-client";
 import { TaskScheduler } from "./task-scheduler";
+import { buildMenuTemplate } from "./app-menu";
+import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore } from "./window-state";
 import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
 import { PortalAuthClient, fingerprint } from "./portal-auth";
 import { PromptAssembler } from "./prompt-assembler";
@@ -156,6 +159,9 @@ let updateNotifierRef: UpdateNotifier | null = null;
 // ── ready ───────────────────────────────────────────────────────────────────
 void app.whenReady().then(async () => {
   log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
+  // FIX33 B2/B4 — remembered bounds / maximized / always-on-top.
+  windowState = new WindowStateStore(path.join(app.getPath("userData"), "window-state.json"));
+  windowState.load();
   log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
   log.info(`userData=${app.getPath("userData")}`);
 
@@ -461,22 +467,75 @@ class SafeKeyStore {
 }
 
 // ── window ──────────────────────────────────────────────────────────────────
+let windowState: WindowStateStore | null = null;
+
+/** FIX33 B4 — always-on-top: window flag + persisted + tray/menu checkboxes. */
+function setAlwaysOnTop(win: BrowserWindow, on: boolean): void {
+  win.setAlwaysOnTop(on);
+  windowState?.update({ alwaysOnTop: on }, true);
+  log.info(`window alwaysOnTop=${on}`);
+  rebuildTrayMenu();
+  installAppMenu(win);
+}
+
+/** FIX33 B3 — File / Edit / View / Help with accelerators (DevTools never in release). */
+function installAppMenu(win: BrowserWindow): void {
+  const pageOrigin = config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+  const template = buildMenuTemplate(
+    {
+      newChat: () => void win.loadURL(config.pageUrl),
+      openSettings: () => void win.loadURL(`${pageOrigin}/chat/settings`),
+      reload: () => win.webContents.reload(),
+      toggleAlwaysOnTop: () => setAlwaysOnTop(win, !win.isAlwaysOnTop()),
+      isAlwaysOnTop: () => win.isAlwaysOnTop(),
+      openLogs: () => void shell.openPath(log.filePath ? path.dirname(log.filePath) : app.getPath("userData")),
+      about: () => void dialog.showMessageBox(win, { type: "info", title: "About SRAN Desktop", message: `SRAN Desktop ${app.getVersion()}`, detail: `Electron ${process.versions.electron} · config: ${config.sourcePath}` }),
+      quit: () => {
+        isQuitting = true;
+        app.quit();
+      },
+      toggleDevTools: isRelease ? undefined : () => win.webContents.toggleDevTools(),
+    },
+    { isRelease },
+  );
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
+}
+
 function createMainWindow(): BrowserWindow {
+  // FIX33 B2 — the saved bounds are used ONLY when they sit on a display that
+  // exists now (sanitizeBounds); otherwise the defaults. Never off-screen.
+  const saved = windowState?.current() ?? null;
+  const displays = screen.getAllDisplays().map((d) => d.workArea);
+  const bounds = sanitizeBounds(saved?.bounds ?? null, displays);
+  if (saved?.bounds && !bounds) log.info("window bounds ignored (not on a current display) — defaults");
   const win = new BrowserWindow({
-    width: 1200,
-    height: 820,
+    width: bounds?.width ?? DEFAULT_SIZE.width,
+    height: bounds?.height ?? DEFAULT_SIZE.height,
+    ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 640,
     minHeight: 480,
     show: false,
     title: "SRAN Desktop",
     icon: path.join(APP_ROOT, "assets", "app.ico"),
     autoHideMenuBar: true,
+    alwaysOnTop: saved?.alwaysOnTop === true,
     webPreferences: buildWebPreferences({
       preloadPath: path.join(__dirname, "..", "preload", "index.js"),
       isRelease,
     }),
   });
-  Menu.setApplicationMenu(null);
+  if (saved?.maximized) win.maximize();
+  installAppMenu(win);
+  // Persist geometry on change (debounced in the store) and on close.
+  const remember = () => {
+    if (win.isDestroyed()) return;
+    const maximized = win.isMaximized();
+    windowState?.update({ maximized, ...(maximized ? {} : { bounds: win.getNormalBounds() }) });
+  };
+  win.on("resize", remember);
+  win.on("move", remember);
+  win.on("maximize", remember);
+  win.on("unmaximize", remember);
 
   // FIX20 §1: the OS window title is the app's identity (taskbar, Alt-Tab), so
   // it stays "SRAN Desktop". By default Electron overwrites it with each
@@ -492,6 +551,11 @@ function createMainWindow(): BrowserWindow {
     if (flags.devtools && !isRelease) win.webContents.openDevTools({ mode: "detach" });
   });
   win.on("close", (event) => {
+    // FIX33 B2 — flush the remembered geometry before hiding / quitting.
+    if (!win.isDestroyed()) {
+      const maximized = win.isMaximized();
+      windowState?.update({ maximized, ...(maximized ? {} : { bounds: win.getNormalBounds() }) }, true);
+    }
     if (!isQuitting) {
       event.preventDefault();
       win.hide();
@@ -680,9 +744,25 @@ function createTray(): void {
   const icon = nativeImage.createFromPath(path.join(APP_ROOT, "assets", "app.ico"));
   tray = new Tray(icon);
   tray.setToolTip("SRAN Desktop");
+  rebuildTrayMenu();
+  tray.on("click", () => toggleMainWindow());
+  log.info("tray created");
+}
+
+/** FIX33 B4 — the tray menu carries an always-on-top checkbox (persisted with the window state). */
+function rebuildTrayMenu(): void {
+  if (!tray) return;
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Show / Hide", click: () => toggleMainWindow() },
+      {
+        label: "Always on top",
+        type: "checkbox",
+        checked: mainWindow?.isAlwaysOnTop() ?? windowState?.current().alwaysOnTop ?? false,
+        click: (item) => {
+          if (mainWindow && !mainWindow.isDestroyed()) setAlwaysOnTop(mainWindow, item.checked);
+        },
+      },
       { type: "separator" },
       { label: "Sign in", click: () => void sessionController?.signInFromView() },
       { label: "Sign out", click: () => void sessionController?.signOut("tray", true) },
@@ -696,8 +776,6 @@ function createTray(): void {
       },
     ]),
   );
-  tray.on("click", () => toggleMainWindow());
-  log.info("tray created");
 }
 function registerHotkey(): void {
   const ok = globalShortcut.register(config.hotkey, toggleMainWindow);

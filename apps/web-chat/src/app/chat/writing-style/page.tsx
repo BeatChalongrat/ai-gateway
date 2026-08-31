@@ -15,6 +15,9 @@
 // scope for a settings screen. Rather than fake a model call, Analyze surfaces
 // a toast noting the wiring is pending. The user can still hand-write or paste
 // a profile below and save it.
+//
+// FIX33 B7: every visible string comes from lib/i18n/dict.ts (ws.* keys);
+// i18n.hardcoded.test.tsx pins this file so English can't creep back.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -24,17 +27,17 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi } from "@/lib/hostApi";
+import { tOutside, useT } from "@/lib/i18n";
 
 const MIN_SAMPLE_CHARS = 100;
 
 export default function WritingStylePage() {
   const hosted = useHostedMode();
+  const t = useT();
   if (!hosted) {
     return (
       <div className="flex flex-1 items-center justify-center bg-bg-base px-6 text-center">
-        <p className="max-w-sm text-sm text-text-muted">
-          This screen is available in the SRAN Desktop app.
-        </p>
+        <p className="max-w-sm text-sm text-text-muted">{t("desktopOnly.notice")}</p>
       </div>
     );
   }
@@ -42,6 +45,7 @@ export default function WritingStylePage() {
 }
 
 function WritingStyleScreen() {
+  const t = useT();
   const [profile, setProfile] = useState("");
   const [samples, setSamples] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -54,7 +58,7 @@ function WritingStyleScreen() {
         const settings = await hostApi.getSettings();
         if (alive) setProfile(settings.writingStyleProfile ?? "");
       } catch {
-        if (alive) toast("Couldn't load your writing style.");
+        if (alive) toast(tOutside("ws.toast.loadFailed"));
       } finally {
         if (alive) setLoaded(true);
       }
@@ -73,7 +77,7 @@ function WritingStyleScreen() {
   // distillation call is deferred. Until it lands, Analyze only signals intent;
   // the profile field below stays fully editable and save/clear work.
   function handleAnalyze() {
-    toast("Style analysis runs through the host — wiring pending.");
+    toast(tOutside("ws.toast.analyzePending"));
   }
 
   async function persist(value: string, successMsg: string) {
@@ -86,10 +90,10 @@ function WritingStyleScreen() {
       } else {
         // FIX22 §1a: the host refuses a profile that would trip the gateway's
         // content guardrail on every turn, and says WHICH phrase — show it.
-        toast(res.error && res.error.startsWith("Error:") ? res.error : "Couldn't save.");
+        toast(res.error && res.error.startsWith("Error:") ? res.error : tOutside("ws.toast.saveFailed"));
       }
     } catch {
-      toast("Couldn't save.");
+      toast(tOutside("ws.toast.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -105,17 +109,12 @@ function WritingStyleScreen() {
           className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
         >
           <BackIcon />
-          Back to chat
+          {t("ws.back")}
         </Link>
 
         <div className="mt-6">
-          <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-            Writing style
-          </h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            Teach the assistant to draft in your voice. It follows this profile
-            whenever it writes on your behalf.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{t("ws.title")}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{t("ws.subtitle")}</p>
         </div>
 
         {!loaded ? (
@@ -126,25 +125,20 @@ function WritingStyleScreen() {
           <div className="mt-8 flex flex-col gap-8">
             {/* Section 1 — Learn my style (Analyze is a marked TODO) */}
             <section className="rounded-xl border border-border bg-bg-surface p-5">
-              <h2 className="text-base font-medium text-text-primary">
-                Learn my style
-              </h2>
-              <p className="mt-1 text-sm text-text-secondary">
-                Paste a few paragraphs you&apos;ve written. Analyze distills a
-                short style profile the assistant follows when drafting.
-              </p>
+              <h2 className="text-base font-medium text-text-primary">{t("ws.learn.title")}</h2>
+              <p className="mt-1 text-sm text-text-secondary">{t("ws.learn.desc")}</p>
               <textarea
                 value={samples}
                 onChange={(e) => setSamples(e.target.value)}
                 rows={8}
-                placeholder="Paste your writing samples here…"
+                placeholder={t("ws.learn.placeholder")}
                 className="scrollbar-thin mt-4 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none"
               />
               <div className="mt-3 flex items-center justify-between gap-3">
                 <span className="text-xs text-text-muted">
                   {samples.trim().length < MIN_SAMPLE_CHARS
-                    ? `Add at least ${MIN_SAMPLE_CHARS} characters to analyze.`
-                    : "Ready to analyze."}
+                    ? t("ws.learn.need", { n: String(MIN_SAMPLE_CHARS) })
+                    : t("ws.learn.ready")}
                 </span>
                 <Button
                   variant="secondary"
@@ -152,39 +146,35 @@ function WritingStyleScreen() {
                   disabled={!canAnalyze}
                   className="shrink-0"
                 >
-                  Analyze
+                  {t("ws.learn.analyze")}
                 </Button>
               </div>
             </section>
 
             {/* Section 2 — Style profile (fully wired read/save/clear) */}
             <section className="rounded-xl border border-border bg-bg-surface p-5">
-              <h2 className="text-base font-medium text-text-primary">
-                Style profile
-              </h2>
-              <p className="mt-1 text-sm text-text-secondary">
-                A short description of your voice. Edit it directly, then save.
-              </p>
+              <h2 className="text-base font-medium text-text-primary">{t("ws.profile.title")}</h2>
+              <p className="mt-1 text-sm text-text-secondary">{t("ws.profile.desc")}</p>
               <textarea
                 value={profile}
                 onChange={(e) => setProfile(e.target.value)}
                 rows={7}
-                placeholder="e.g. Concise and direct. Prefers plain words over jargon. Short paragraphs, active voice, no exclamation marks."
+                placeholder={t("ws.profile.placeholder")}
                 className="scrollbar-thin mt-4 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none"
               />
               <div className="mt-3 flex items-center justify-end gap-2">
                 <Button
                   variant="ghost"
-                  onClick={() => void persist("", "Cleared.")}
+                  onClick={() => void persist("", tOutside("ws.toast.cleared"))}
                   disabled={saving || profile.trim().length === 0}
                 >
-                  Clear
+                  {t("ws.clear")}
                 </Button>
                 <Button
-                  onClick={() => void persist(profile.trim(), "Saved.")}
+                  onClick={() => void persist(profile.trim(), tOutside("ws.toast.saved"))}
                   loading={saving}
                 >
-                  Save
+                  {t("ws.save")}
                 </Button>
               </div>
             </section>

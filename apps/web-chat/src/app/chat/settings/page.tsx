@@ -7,6 +7,9 @@
 // page NEVER names a grant path; "Add folder" opens a NATIVE picker in the host
 // and the host validates what the USER chose). Server-backed settings — personal
 // instructions, the model list — are NOT here; the page fetches those normally.
+//
+// FIX33 B7: every visible string comes from lib/i18n/dict.ts (settings.* keys);
+// i18n.hardcoded.test.tsx pins this file so English can't creep back.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -17,9 +20,11 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type SettingKey, type SettingsSnapshot } from "@/lib/hostApi";
+import { tOutside, useT } from "@/lib/i18n";
 
 export default function SettingsPage() {
   const hosted = useHostedMode();
+  const t = useT();
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [restartNote, setRestartNote] = useState(false);
@@ -39,7 +44,7 @@ export default function SettingsPage() {
         const [snapshot, folders] = await Promise.all([hostApi.getSettings(), hostApi.listFolders().catch(() => null)]);
         setSettings(folders ? { ...snapshot, grantedFolders: folders } : snapshot);
       } catch {
-        toast("Couldn't load settings.");
+        toast(tOutside("settings.toast.loadFailed"));
       } finally {
         setLoading(false);
       }
@@ -57,7 +62,7 @@ export default function SettingsPage() {
     const r = await hostApi.setSetting(key, value);
     if (!r.ok) {
       setSettings(previous);
-      toast(r.error === "refused" ? "That setting can't be changed here." : "Couldn't save that setting.");
+      toast(r.error === "refused" ? tOutside("settings.toast.refused") : tOutside("settings.toast.saveFailed"));
       return;
     }
     if (r.data?.restartRequired) setRestartNote(true);
@@ -66,12 +71,12 @@ export default function SettingsPage() {
   async function addFolder() {
     const r = await hostApi.pickAndGrantFolder();
     if (!r.ok) {
-      toast("That folder can't be granted.");
+      toast(tOutside("settings.toast.folderRejected"));
       return;
     }
     if (r.data?.cancelled) return;
     if (r.data?.duplicate) {
-      toast("That folder is already granted.");
+      toast(tOutside("settings.toast.folderDuplicate"));
       return;
     }
     if (r.data?.folders && settings) setSettings({ ...settings, grantedFolders: r.data.folders });
@@ -80,7 +85,7 @@ export default function SettingsPage() {
   async function revokeFolder(folder: string) {
     const r = await hostApi.revokeFolder(folder);
     if (r.ok && r.data && settings) setSettings({ ...settings, grantedFolders: r.data.folders });
-    else if (!r.ok) toast("Couldn't remove that folder.");
+    else if (!r.ok) toast(tOutside("settings.toast.folderRemoveFailed"));
   }
 
   // FIX1: re-read settings (browser connection status is a snapshot).
@@ -88,7 +93,7 @@ export default function SettingsPage() {
     try {
       setSettings(await hostApi.getSettings());
     } catch {
-      toast("Couldn't refresh.");
+      toast(tOutside("settings.toast.refreshFailed"));
     }
   }
 
@@ -96,12 +101,12 @@ export default function SettingsPage() {
   async function pickExtensionFolder() {
     const r = await hostApi.pickExtensionFolder();
     if (!r.ok) {
-      if (r.error !== "cancelled") toast("That folder can't be used.");
+      if (r.error !== "cancelled") toast(tOutside("settings.toast.extFolderRejected"));
       return;
     }
     if (r.data?.cancelled) return;
     await refreshBrowser();
-    toast("Extension folder set. Reload the extension in Chrome if it doesn't connect.");
+    toast(tOutside("settings.toast.extFolderSet"));
   }
 
   return (
@@ -111,13 +116,11 @@ export default function SettingsPage() {
           href="/chat"
           className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
         >
-          <BackIcon /> Back
+          <BackIcon /> {t("settings.back")}
         </Link>
 
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight text-text-primary">Settings</h1>
-        <p className="mt-1 text-sm text-text-secondary">
-          Preferences stored on this device. Account-wide settings live in your profile.
-        </p>
+        <h1 className="mt-6 text-2xl font-semibold tracking-tight text-text-primary">{t("settings.title")}</h1>
+        <p className="mt-1 text-sm text-text-secondary">{t("settings.subtitle")}</p>
 
         {loading || !settings ? (
           <div className="flex items-center justify-center py-16 text-text-secondary">
@@ -125,53 +128,53 @@ export default function SettingsPage() {
           </div>
         ) : (
           <div className="mt-8 flex flex-col gap-8">
-            <Section title="Appearance">
-              <Row label="Theme" hint="Applies to the desktop window chrome.">
+            <Section title={t("settings.section.appearance")}>
+              <Row label={t("settings.theme")} hint={t("settings.theme.hint")}>
                 <select
                   value={settings.theme}
                   onChange={(e) => void patch("theme", e.target.value)}
                   className="focus-ring rounded-lg border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary"
                 >
-                  <option value="Dark">Dark</option>
-                  <option value="Light">Light</option>
-                  <option value="System">System</option>
+                  <option value="Dark">{t("settings.theme.dark")}</option>
+                  <option value="Light">{t("settings.theme.light")}</option>
+                  <option value="System">{t("settings.theme.system")}</option>
                 </select>
               </Row>
             </Section>
 
-            <Section title="General">
+            <Section title={t("settings.section.general")}>
               <Toggle
-                label="Minimize to tray"
+                label={t("settings.minimizeToTray")}
                 checked={settings.minimizeToTray}
                 onChange={(v) => void patch("minimizeToTray", v)}
               />
               <Toggle
-                label="Start with Windows"
+                label={t("settings.startWithWindows")}
                 checked={settings.startWithWindows}
                 onChange={(v) => void patch("startWithWindows", v)}
               />
               <Toggle
-                label="Send crash reports"
-                hint="Off by default. Diagnostic reports only, never chat content."
+                label={t("settings.crashReports")}
+                hint={t("settings.crashReports.hint")}
                 checked={settings.crashReportingEnabled}
                 onChange={(v) => void patch("crashReportingEnabled", v)}
               />
               <Toggle
-                label="Back up agent conversations to your account"
+                label={t("settings.backupAgentConvs")}
                 checked={settings.syncAgentConversations}
                 onChange={(v) => void patch("syncAgentConversations", v)}
               />
               <Toggle
-                label="Prefer on-device Office file generation"
-                hint="When supported; the server path stays authoritative otherwise."
+                label={t("settings.localOffice")}
+                hint={t("settings.localOffice.hint")}
                 checked={settings.preferLocalOfficeGeneration}
                 onChange={(v) => void patch("preferLocalOfficeGeneration", v)}
               />
             </Section>
 
-            <Section title="Folder access" hint="Extra folders the agent's file tools may reach. Consent still gates every write.">
+            <Section title={t("settings.section.folders")} hint={t("settings.section.folders.hint")}>
               {settings.grantedFolders.length === 0 ? (
-                <p className="text-sm text-text-muted">No folders granted yet.</p>
+                <p className="text-sm text-text-muted">{t("settings.folders.empty")}</p>
               ) : (
                 <ul className="flex flex-col gap-1.5">
                   {settings.grantedFolders.map((folder) => (
@@ -185,7 +188,7 @@ export default function SettingsPage() {
                         onClick={() => void revokeFolder(folder)}
                         className="rounded px-2 py-1 text-xs text-status-danger hover:bg-status-danger/10"
                       >
-                        Remove
+                        {t("settings.folders.remove")}
                       </button>
                     </li>
                   ))}
@@ -193,7 +196,7 @@ export default function SettingsPage() {
               )}
               <div className="mt-3">
                 <Button variant="ghost" onClick={() => void addFolder()}>
-                  Add folder…
+                  {t("settings.folders.add")}
                 </Button>
                 {/* The page names no path: this opens a NATIVE folder picker in
                     the host, which validates the folder the USER chose (§2.3). */}
@@ -204,30 +207,30 @@ export default function SettingsPage() {
 
             <BrowserSection browser={settings.browser} onRefresh={refreshBrowser} onPick={pickExtensionFolder} />
 
-            <Section title="Endpoints" hint="Where the desktop reaches your gateway. Changing these needs a restart.">
+            <Section title={t("settings.section.endpoints")} hint={t("settings.section.endpoints.hint")}>
               <EndpointField
-                label="Chat edge URL"
+                label={t("settings.chatEdgeUrl")}
                 value={settings.chatEdgeBaseUrl}
                 onCommit={(v) => void patch("chatEdgeBaseUrl", v)}
               />
               <EndpointField
-                label="Gateway URL"
+                label={t("settings.gatewayUrl")}
                 value={settings.gatewayBaseUrl}
                 onCommit={(v) => void patch("gatewayBaseUrl", v)}
               />
               {restartNote ? (
-                <p className="text-xs text-status-warning">Restart the app for endpoint changes to take effect.</p>
+                <p className="text-xs text-status-warning">{t("settings.restartNote")}</p>
               ) : null}
             </Section>
 
-            <Section title="Advanced">
+            <Section title={t("settings.section.advanced")}>
               <EndpointField
-                label="Default model"
+                label={t("settings.defaultModel")}
                 value={settings.defaultModel}
                 onCommit={(v) => void patch("defaultModel", v)}
               />
               <EndpointField
-                label="Browser extension ID (load-unpacked)"
+                label={t("settings.extensionId")}
                 value={settings.browserExtensionId}
                 onCommit={(v) => void patch("browserExtensionId", v)}
               />
@@ -240,9 +243,10 @@ export default function SettingsPage() {
 }
 
 function DesktopOnlyNotice() {
+  const t = useT();
   return (
     <div className="flex flex-1 items-center justify-center bg-bg-base px-6 text-center">
-      <p className="max-w-sm text-sm text-text-muted">This screen is available in the SRAN Desktop app.</p>
+      <p className="max-w-sm text-sm text-text-muted">{t("desktopOnly.notice")}</p>
     </div>
   );
 }
@@ -255,6 +259,7 @@ function DesktopOnlyNotice() {
 // "add" — a site is approved only through the consent prompt, so this section can
 // only ever list and remove. Self-contained (its own fetch), like BrowserSection.
 function SitesSection() {
+  const t = useT();
   const [sites, setSites] = useState<string[] | null>(null);
   useEffect(() => {
     void (async () => {
@@ -268,14 +273,14 @@ function SitesSection() {
   async function revoke(origin: string) {
     const r = await hostApi.revokeSite(origin);
     if (r.ok && r.data) setSites(r.data.sites);
-    else toast("Couldn't revoke that site.");
+    else toast(tOutside("settings.sites.revokeFailed"));
   }
   return (
-    <Section title="Approved sites" hint="Sites you chose 'Always allow actions on this site' for. Every browser action re-checks the live site; revoke to make it ask again.">
+    <Section title={t("settings.section.sites")} hint={t("settings.section.sites.hint")}>
       {sites === null ? (
-        <p className="text-sm text-text-tertiary">Loading…</p>
+        <p className="text-sm text-text-tertiary">{t("common.loading")}</p>
       ) : sites.length === 0 ? (
-        <p className="text-sm text-text-tertiary" data-testid="sites-empty">No approved sites yet — the assistant asks before acting on each new site.</p>
+        <p className="text-sm text-text-tertiary" data-testid="sites-empty">{t("settings.sites.empty")}</p>
       ) : (
         <ul className="space-y-1" data-testid="sites-list">
           {sites.map((origin) => (
@@ -287,7 +292,7 @@ function SitesSection() {
                 className="shrink-0 rounded px-2 py-1 text-xs font-medium text-status-danger hover:bg-status-danger/10 focus-ring"
                 data-testid="site-revoke"
               >
-                Revoke
+                {t("settings.sites.revoke")}
               </button>
             </li>
           ))}
@@ -306,69 +311,73 @@ function BrowserSection({
   onRefresh: () => void;
   onPick: () => void;
 }) {
+  const t = useT();
   if (!browser) return null;
   const connected = browser.connected;
   async function copyFolder() {
     try {
       await navigator.clipboard.writeText(browser!.extensionFolder);
-      toast("Folder path copied.");
+      toast(tOutside("settings.browser.copied"));
     } catch {
-      toast("Couldn't copy.");
+      toast(tOutside("settings.browser.copyFailed"));
     }
   }
   return (
-    <Section title="Browser" hint="Lets the assistant read and act on your Chrome tabs. The extension is loaded by hand, once.">
+    <Section title={t("settings.section.browser")} hint={t("settings.section.browser.hint")}>
       <div className="flex items-center gap-2">
         <span
           className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-status-success" : "bg-status-warning"}`}
           aria-hidden
         />
         <span className="text-sm text-text-primary" data-testid="browser-status">
-          {connected ? "Connected" : "Not connected"}
+          {connected ? t("settings.browser.connected") : t("settings.browser.notConnected")}
         </span>
         <button
           type="button"
           onClick={onRefresh}
           className="ml-auto rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-elevated hover:text-text-secondary"
         >
-          Refresh
+          {t("settings.browser.refresh")}
         </button>
       </div>
 
       {!connected ? (
         <div className="rounded-md border border-border bg-bg-surface p-3">
-          <p className="text-sm text-text-secondary">To connect, load the extension in Chrome:</p>
+          <p className="text-sm text-text-secondary">{t("settings.browser.howto")}</p>
           <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-text-muted">
             <li>
-              Open <span className="font-mono text-text-secondary">chrome://extensions</span>
+              {t("settings.browser.step1")} <span className="font-mono text-text-secondary">chrome://extensions</span>
             </li>
-            <li>Turn on <span className="text-text-secondary">Developer mode</span> (top-right)</li>
             <li>
-              Click <span className="text-text-secondary">Load unpacked</span> and choose the folder below
+              {/* "Developer mode" / "Load unpacked" are Chrome's own labels — kept verbatim. */}
+              {t("settings.browser.step2.pre")} <span className="text-text-secondary">Developer mode</span> {t("settings.browser.step2.post")}
             </li>
-            <li>Come back here and press Refresh</li>
+            <li>
+              {t("settings.browser.step3.pre")} <span className="text-text-secondary">Load unpacked</span> {t("settings.browser.step3.post")}
+            </li>
+            <li>{t("settings.browser.step4")}</li>
           </ol>
         </div>
       ) : null}
 
       <div>
-        <p className="text-xs text-text-muted">Extension folder to load</p>
+        <p className="text-xs text-text-muted">{t("settings.browser.folderLabel")}</p>
         <div className="mt-1 flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate rounded-md border border-border bg-bg-surface px-3 py-2 font-mono text-xs text-text-primary" data-testid="browser-folder">
             {browser.extensionFolder}
           </span>
           <Button variant="ghost" onClick={() => void copyFolder()}>
-            Copy
+            {t("common.copy")}
           </Button>
         </div>
         <p className="mt-1 text-[11px] text-text-muted">
-          Expected id <span className="font-mono">{browser.extensionId || "—"}</span>
+          {t("settings.browser.expectedId")} <span className="font-mono">{browser.extensionId || "—"}</span>
         </p>
       </div>
 
       <div>
         <Button variant="ghost" onClick={onPick}>
-          I loaded a different folder…
+          {t("settings.browser.pickOther")}
         </Button>
         {/* The page names no path: this opens a NATIVE folder picker in the host,
             which derives the id and authorises the folder the USER chose. */}

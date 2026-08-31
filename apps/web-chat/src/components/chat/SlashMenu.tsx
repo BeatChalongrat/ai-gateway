@@ -8,7 +8,7 @@
 // the textarea's key events; this component only renders and reports
 // clicks, so the two can never fight over focus.
 
-import { ImageIcon, Keyboard, MessageSquarePlus, Video } from "lucide-react";
+import { ImageIcon, Keyboard, MessageSquarePlus, Sparkles, Video } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
 import type { SlashActionId, SlashCommand } from "@/lib/slashCommands";
@@ -18,6 +18,8 @@ const ICONS: Record<SlashActionId, React.ReactNode> = {
   video: <Video width={15} height={15} aria-hidden />,
   new: <MessageSquarePlus width={15} height={15} aria-hidden />,
   shortcuts: <Keyboard width={15} height={15} aria-hidden />,
+  // FIX33 B6 — a skill template.
+  skill: <Sparkles width={15} height={15} aria-hidden />,
 };
 
 export function SlashMenu({
@@ -43,7 +45,7 @@ export function SlashMenu({
       ) : (
         commands.map((cmd, i) => (
           <button
-            key={cmd.id}
+            key={cmd.skillId ?? cmd.id}
             type="button"
             role="option"
             aria-selected={i === activeIndex}
@@ -61,9 +63,9 @@ export function SlashMenu({
           >
             <span className="shrink-0 text-text-muted">{ICONS[cmd.id]}</span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm">{t(cmd.labelKey)}</span>
+              <span className="block truncate text-sm">{cmd.label ?? t(cmd.labelKey)}</span>
               <span className="block truncate text-[11px] text-text-muted">
-                {t(cmd.hintKey)}
+                {cmd.hint ?? t(cmd.hintKey)}
               </span>
             </span>
             <kbd className="shrink-0 rounded border border-border bg-bg-base px-1.5 py-0.5 font-mono text-[10px] text-text-muted">

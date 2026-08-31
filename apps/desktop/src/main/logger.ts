@@ -46,12 +46,43 @@ export function createLogger(): Logger {
     },
     attachFile(target: string) {
       fs.mkdirSync(path.dirname(target), { recursive: true });
+      // FIX33 B8 — rotate at open: shell.log → shell.log.1 → shell.log.2,
+      // keep LOG_KEEP files. Rotating only here (not mid-write) keeps the
+      // sink a plain append stream; an unbounded log under userData was the
+      // audit's D9-4.
+      rotateLogFiles(target, LOG_KEEP);
       stream = fs.createWriteStream(target, { flags: "a" });
       filePath = target;
       // Replay what was logged before the file existed (config load, lock).
       for (const line of lines) stream.write(line + "\n");
     },
   };
+}
+
+/** How many files to keep: the live one plus this many rotated (.1, .2). */
+export const LOG_KEEP = 3;
+
+/**
+ * shell.log → shell.log.1 → shell.log.2 (…up to keep-1); the oldest is
+ * dropped. A missing file is a no-op; any I/O error is swallowed — logging
+ * must never prevent the app from starting.
+ */
+export function rotateLogFiles(target: string, keep: number): void {
+  try {
+    if (!fs.existsSync(target)) return;
+    // An empty live file has nothing worth keeping; don't push out history.
+    if (fs.statSync(target).size === 0) return;
+    for (let i = keep - 1; i >= 1; i--) {
+      const from = i === 1 ? target : `${target}.${i - 1}`;
+      const to = `${target}.${i}`;
+      if (fs.existsSync(from)) {
+        if (i === keep - 1 && fs.existsSync(to)) fs.rmSync(to, { force: true });
+        fs.renameSync(from, to);
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /** scheme://host[:port]/path — query and fragment are never logged. */

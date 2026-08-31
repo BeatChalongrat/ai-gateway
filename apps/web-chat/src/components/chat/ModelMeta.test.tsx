@@ -5,11 +5,12 @@
 // has always had setConversationReasoning — neither had any UI. These tests
 // pin the wiring.
 //
-// Phase 13.1 narrowed "metadata" to the DESCRIPTION only. SRAN is an internal
-// tool on a shared account, so context windows and per-token pricing were
-// noise nobody acts on. The catalog still sends those fields — the assertions
-// below now pin that we do NOT render them, so a future change that reinstates
-// the meta line fails here rather than quietly shipping prices to users.
+// Phase 13.1 narrowed "metadata" to the DESCRIPTION only ("internal tool on
+// a shared account — pricing was noise"). FIX33 B1 reinstates the meta line,
+// quieter: credits are already visible in the header and the usage panel
+// bills per model, and the context window is what the FIX33 context meter
+// budgets against. The assertions below now pin that the line renders when
+// the catalog sends the numbers and stays absent when it doesn't.
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -108,22 +109,22 @@ describe("ModelSelector metadata", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("never renders context window or pricing, even when the catalog sends them", () => {
-    // model() carries context_window: 128000 and $2.50 / $10.00 — the fields
-    // are present and deliberately unrendered (Phase 13.1).
+  it("FIX33 B1 — renders the context window and the price per 1M tokens the catalog sends", () => {
+    // model() carries context_window: 128000 and $2.50 / $10.00.
     openPicker([model()]);
 
-    expect(screen.queryByText(/context/i)).toBeNull();
-    expect(screen.queryByText(/per 1M/i)).toBeNull();
-    expect(screen.queryByText(/\$/)).toBeNull();
-    expect(screen.queryByText(/128K/)).toBeNull();
+    const meta = screen.getAllByTestId("model-meta");
+    expect(meta.length).toBeGreaterThan(0);
+    expect(meta[0].textContent).toContain("128K");
+    expect(meta[0].textContent).toContain("$2.5 / $10");
+    expect(meta[0].textContent).toContain("per 1M");
   });
 
-  it("renders nothing extra for a model with no description", () => {
-    openPicker([model({ id: "bare", name: "Bare", description: "" })]);
+  it("renders no meta line when the catalog sends no numbers", () => {
+    openPicker([model({ id: "bare", name: "Bare", description: "", context_window: 0, input_price_per_1m: undefined, output_price_per_1m: undefined })]);
 
     expect(screen.getAllByText("Bare").length).toBeGreaterThan(0);
-    expect(screen.queryByText(/context/i)).toBeNull();
+    expect(screen.queryByTestId("model-meta")).toBeNull();
     expect(screen.queryByText(/per 1M/i)).toBeNull();
   });
 

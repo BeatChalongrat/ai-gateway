@@ -60,6 +60,15 @@ interface Props {
   onRegenerate?: () => void;
   onEdit?: (newContent: string) => void;
   onSwitchBranch?: (branchIndex: number) => void;
+  /** FIX33 B5 — quote-reply: the selected text (as a markdown blockquote)
+   *  goes to the composer. Absent = no quote button. */
+  onQuote?: (quoted: string) => void;
+}
+
+/** FIX33 B5 — the selected text as a markdown blockquote + a blank line. */
+export function toBlockquote(text: string): string {
+  const lines = text.replace(/\r\n/g, "\n").trim().split("\n");
+  return lines.map((l) => `> ${l}`).join("\n") + "\n\n";
 }
 
 // Issue 1 — the "Sources (N)" attribution rail is hidden from end users.
@@ -77,7 +86,32 @@ function MessageBubbleImpl({
   onRegenerate,
   onEdit,
   onSwitchBranch,
+  onQuote,
 }: Props) {
+  // FIX33 B5 — quote-reply. A text selection inside THIS bubble's body shows
+  // a small floating "Quote" button at the selection; clicking it hands the
+  // selection to the composer as a blockquote. Selection is read on
+  // mouseup / keyup (not selectionchange — that fires per character).
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [quoteSel, setQuoteSel] = useState<{ text: string; top: number; left: number } | null>(null);
+  function readSelection() {
+    if (!onQuote || message.isStreaming) return;
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    const text = sel?.toString().trim() ?? "";
+    if (!sel || sel.isCollapsed || !text || !bodyRef.current || !sel.anchorNode || !bodyRef.current.contains(sel.anchorNode)) {
+      setQuoteSel(null);
+      return;
+    }
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    const host = bodyRef.current.getBoundingClientRect();
+    setQuoteSel({ text, top: rect.top - host.top - 30, left: Math.max(0, rect.left - host.left) });
+  }
+  function quote() {
+    if (!quoteSel || !onQuote) return;
+    onQuote(toBlockquote(quoteSel.text));
+    setQuoteSel(null);
+    if (typeof window !== "undefined") window.getSelection()?.removeAllRanges();
+  }
   const t = useT();
   const isUser = message.role === "user";
   const router = useRouter();
@@ -336,7 +370,30 @@ function MessageBubbleImpl({
       ) : null}
 
       {/* Body */}
-      <div className="prose-chat w-full text-text-primary">
+      <div
+        ref={bodyRef}
+        className="prose-chat relative w-full text-text-primary"
+        onMouseUp={readSelection}
+        onKeyUp={readSelection}
+        onBlur={(e) => {
+          // Keep the button when focus moves TO it; drop it otherwise.
+          if (!(e.relatedTarget instanceof HTMLElement) || e.relatedTarget.dataset["quoteBtn"] !== "1") setQuoteSel(null);
+        }}
+      >
+        {quoteSel ? (
+          <button
+            type="button"
+            data-quote-btn="1"
+            data-testid="quote-button"
+            className="focus-ring absolute z-10 rounded-md border border-border bg-bg-elevated px-2 py-0.5 text-[11px] text-text-primary shadow-md"
+            style={{ top: quoteSel.top, left: quoteSel.left }}
+            aria-label={t("a11y.quoteSelection")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={quote}
+          >
+            “ {t("msg.quote")}
+          </button>
+        ) : null}
         <AssistantContent message={message} convId={convId} />
       </div>
 

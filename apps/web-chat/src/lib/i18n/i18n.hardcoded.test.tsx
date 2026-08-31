@@ -68,6 +68,62 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Turn off for this chat",
     ],
   },
+  // ── FIX33 B7 — the five desktop-only pages. settings + writing-style are
+  // fully localised; connectors / skills / tasks had their toasts, errors and
+  // attribute strings moved (JSX prose still pending — see FIX33_REPORT §5).
+  {
+    file: "app/chat/settings/page.tsx",
+    forbidden: [
+      "Couldn't load settings.",
+      ">Settings<",
+      '"Minimize to tray"',
+      '"Approved sites"',
+      '"Extension folder to load"',
+      "This screen is available in the SRAN Desktop app.",
+    ],
+  },
+  {
+    file: "app/chat/writing-style/page.tsx",
+    forbidden: [
+      "Couldn't load your writing style.",
+      "Learn my style",
+      '"Couldn\'t save."',
+      "Paste your writing samples here",
+      "This screen is available in the SRAN Desktop app.",
+    ],
+  },
+  {
+    file: "app/chat/connectors/page.tsx",
+    forbidden: [
+      "Couldn't load the connector catalog.",
+      'placeholder="Search connectors',
+      '"No connectors are available yet."',
+    ],
+  },
+  {
+    file: "app/chat/skills/page.tsx",
+    forbidden: [
+      "Couldn't load skills.",
+      'title="Delete skill"',
+      'aria-label="Create skill"',
+    ],
+  },
+  {
+    file: "app/chat/tasks/page.tsx",
+    forbidden: [
+      "Couldn't load scheduled tasks.",
+      'placeholder="Morning briefing"',
+      '"Task run failed."',
+    ],
+  },
+  {
+    file: "app/chat/tasks/CloudTasksSection.tsx",
+    forbidden: [
+      "Couldn't load cloud tasks.",
+      'placeholder="Daily digest"',
+      '"Name and prompt are both required."',
+    ],
+  },
 ];
 
 describe("T4 hardcoded-string pins", () => {

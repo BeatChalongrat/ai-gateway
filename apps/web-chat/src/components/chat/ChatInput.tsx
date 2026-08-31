@@ -6,6 +6,7 @@ import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { loadSkillTemplates, skillSlashCommands } from "@/lib/skillTemplates";
 import {
   clearDraft,
   loadDraft,
@@ -190,7 +191,20 @@ export function ChatInput({
   // (single source of truth): no separate "is open" flag to fall out of
   // sync with what the user actually typed.
   const slashToken = slashQuery(text);
-  const slashCommands = slashToken === null ? [] : filterSlashCommands(slashToken);
+  // FIX33 B6 — the user's enabled skills join the "/" list as templates.
+  // Loaded once per mount (and per hosted/web switch); a failure = no
+  // skill entries, never a broken menu.
+  const [skillCommands, setSkillCommands] = useState<SlashCommand[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void loadSkillTemplates(hosted).then((templates) => {
+      if (alive) setSkillCommands(skillSlashCommands(templates));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [hosted]);
+  const slashCommands = slashToken === null ? [] : filterSlashCommands(slashToken, skillCommands);
   const slashOpen = slashToken !== null;
   const [slashIndex, setSlashIndex] = useState(0);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -575,6 +589,11 @@ export function ChatInput({
         break;
       case "shortcuts":
         setShortcutsOpen(true);
+        break;
+      case "skill":
+        // FIX33 B6 — the template's trigger phrase becomes the draft; the
+        // user finishes the sentence and sends, activating the skill.
+        setText(cmd.insertText ?? "");
         break;
     }
     taRef.current?.focus();

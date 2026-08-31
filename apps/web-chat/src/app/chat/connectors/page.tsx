@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto } from "@/lib/hostApi";
@@ -66,7 +67,7 @@ function ConnectorMarketplace() {
         }
       }
     } catch {
-      toast("Couldn't load the connector catalog.");
+      toast(tOutside("connectors.toast.loadFailed"));
     } finally {
       setLoaded(true);
     }
@@ -108,10 +109,10 @@ function ConnectorMarketplace() {
       if (!res.ok) {
         toast(
           res.error?.startsWith("test-failed")
-            ? "That program didn't respond as an MCP server."
+            ? tOutside("connectors.toast.notMcp")
             : res.error === "addcustom-unsupported"
-              ? "Adding custom connectors isn't available in this build."
-              : "Couldn't add a custom connector.",
+              ? tOutside("connectors.toast.customUnsupported")
+              : tOutside("connectors.toast.customFailed"),
         );
         return;
       }
@@ -130,7 +131,7 @@ function ConnectorMarketplace() {
           ? await hostApi.oauthDisconnect(c.id)
           : await hostApi.oauthConnect(c.id);
         if (!res.ok) {
-          toast(OAUTH_ERROR_TEXT[res.error ?? ""] ?? (connected ? "Couldn't disconnect this connector." : "Couldn't connect this connector."));
+          toast(OAUTH_ERROR_TEXT[res.error ?? ""] ?? (connected ? tOutside("connectors.toast.disconnectFailed") : tOutside("connectors.toast.connectFailed")));
           await reload();
           return;
         }
@@ -144,7 +145,7 @@ function ConnectorMarketplace() {
       if (c.installed) {
         const res = await hostApi.uninstallConnector(c.id);
         if (!res.ok) {
-          toast("Couldn't uninstall this connector.");
+          toast(tOutside("connectors.toast.uninstallFailed"));
           return;
         }
         await reload();
@@ -158,8 +159,8 @@ function ConnectorMarketplace() {
       if (!res.ok) {
         toast(
           res.error === "api-key-unsupported"
-            ? "Key-based connectors need a secure key input, coming in a later round. No-auth and custom connectors work now."
-            : "Couldn't install this connector.",
+            ? tOutside("connectors.toast.keyUnsupported")
+            : tOutside("connectors.toast.installFailed"),
         );
         return;
       }
@@ -205,10 +206,10 @@ function ConnectorMarketplace() {
 
         <div className="mt-6">
           <Input
-            placeholder="Search connectors…"
+            placeholder={tOutside("connectors.search.placeholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search connectors"
+            aria-label={tOutside("connectors.search.aria")}
           />
         </div>
 
@@ -220,8 +221,8 @@ function ConnectorMarketplace() {
           ) : filtered.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center text-sm text-text-muted">
               {connectors.length === 0
-                ? "No connectors are available yet."
-                : "No connectors match your search."}
+                ? tOutside("connectors.empty")
+                : tOutside("connectors.noMatch")}
             </p>
           ) : (
             <div className="flex flex-col gap-3">

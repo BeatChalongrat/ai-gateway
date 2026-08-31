@@ -15,6 +15,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
+import { tOutside } from "@/lib/i18n";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, type WebSkill } from "@/lib/api";
 import { hostApi, type SkillDto } from "@/lib/hostApi";
@@ -46,7 +47,7 @@ function WebSkillsScreen() {
       const r = await api.listSkills();
       setSkills(r.skills);
     } catch {
-      toast("Couldn't load skills.");
+      toast(tOutside("skills.toast.loadFailed"));
     } finally {
       setLoaded(true);
     }
@@ -58,7 +59,7 @@ function WebSkillsScreen() {
   async function handleCreate() {
     const name = draft.name.trim();
     if (!name || !draft.instructions.trim()) {
-      toast("A skill needs a name and its instructions.");
+      toast(tOutside("skills.toast.needNameInstr"));
       return;
     }
     setSaving(true);
@@ -75,7 +76,7 @@ function WebSkillsScreen() {
       await reload();
     } catch (e) {
       // FIX22 §1a — chat-edge refuses instructions that would trip the guardrail.
-      toast(e instanceof Error && e.message ? e.message : "Couldn't create the skill.");
+      toast(e instanceof Error && e.message ? e.message : tOutside("skills.toast.createFailed"));
     } finally {
       setSaving(false);
     }
@@ -88,7 +89,7 @@ function WebSkillsScreen() {
       await api.setSkillEnabled(skill.id, next);
     } catch {
       setSkills((prev) => prev.map((s) => (s.id === skill.id ? { ...s, enabled: skill.enabled } : s)));
-      toast("Couldn't update skill.");
+      toast(tOutside("skills.toast.updateFailed"));
     }
   }
 
@@ -99,7 +100,7 @@ function WebSkillsScreen() {
       setSkills((prev) => prev.filter((s) => s.id !== skill.id));
       toast(`Deleted "${skill.name}".`);
     } catch {
-      toast("Couldn't delete skill.");
+      toast(tOutside("skills.toast.deleteFailed"));
     }
   }
 
@@ -128,7 +129,7 @@ function WebSkillsScreen() {
               e.preventDefault();
               void handleCreate();
             }}
-            aria-label="Create skill"
+            aria-label={tOutside("skills.create")}
           >
             <p className="text-sm text-text-secondary">
               Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
@@ -213,7 +214,7 @@ function SkillsScreen() {
   async function handleCreate() {
     const name = draft.name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
     if (!name || !draft.instructions.trim()) {
-      toast("A skill needs an id and its instructions.");
+      toast(tOutside("skills.toast.needIdInstr"));
       return;
     }
     setSaving(true);
@@ -225,7 +226,7 @@ function SkillsScreen() {
         instructions: draft.instructions.trim(),
       });
       if (!res.ok) {
-        toast("Couldn't create the skill.");
+        toast(tOutside("skills.toast.createFailed"));
         return;
       }
       toast(`Skill “${draft.displayName.trim() || name}” created.`);
@@ -242,7 +243,7 @@ function SkillsScreen() {
       const list = await hostApi.listSkills();
       setSkills(list);
     } catch {
-      toast("Couldn't load skills.");
+      toast(tOutside("skills.toast.loadFailed"));
     } finally {
       setLoaded(true);
     }
@@ -265,7 +266,7 @@ function SkillsScreen() {
           s.id === skill.id ? { ...s, isEnabled: skill.isEnabled } : s,
         ),
       );
-      toast("Couldn't update skill.");
+      toast(tOutside("skills.toast.updateFailed"));
     }
   }
 
@@ -274,14 +275,14 @@ function SkillsScreen() {
     try {
       const res = await hostApi.installSkill();
       if (!res.ok) {
-        toast(res.error ?? "Couldn't install skill.");
+        toast(res.error ?? tOutside("skills.toast.installFailed"));
         return;
       }
       const data = res.data;
       if (data?.cancelled) return;
       if (data?.installed) {
         toast(
-          data.name ? `Installed "${data.name}".` : "Skill installed.",
+          data.name ? `Installed "${data.name}".` : tOutside("skills.toast.installed"),
         );
         await reload();
       }
@@ -296,7 +297,7 @@ function SkillsScreen() {
     }
     const res = await hostApi.deleteSkill(skill.id);
     if (!res.ok) {
-      toast(res.error ?? "Couldn't delete skill.");
+      toast(res.error ?? tOutside("skills.toast.deleteFailed"));
       return;
     }
     setSkills((prev) => prev.filter((s) => s.id !== skill.id));
@@ -360,7 +361,7 @@ function SkillsScreen() {
               e.preventDefault();
               void handleCreate();
             }}
-            aria-label="Create skill"
+            aria-label={tOutside("skills.create")}
           >
             <p className="text-sm text-text-secondary">
               Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
@@ -489,7 +490,7 @@ function SkillCard({
             <button
               type="button"
               onClick={onDelete}
-              title="Delete skill"
+              title={tOutside("skills.delete.title")}
               aria-label={`Delete ${skill.name}`}
               className="tap-44 rounded p-1.5 text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
             >

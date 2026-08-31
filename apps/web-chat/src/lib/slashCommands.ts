@@ -14,7 +14,7 @@
 
 import type { DictKey } from "@/lib/i18n/dict";
 
-export type SlashActionId = "image" | "video" | "new" | "shortcuts";
+export type SlashActionId = "image" | "video" | "new" | "shortcuts" | "skill";
 
 export interface SlashCommand {
   id: SlashActionId;
@@ -26,6 +26,14 @@ export interface SlashCommand {
   hintKey: DictKey;
   /** Aliases so /img and /pic find the image action too. */
   aliases?: string[];
+  /** FIX33 B6 — a skill template: plain-text label/hint (user content, not
+   *  dictionary keys), the text to drop into the composer, the skill id
+   *  (React key). Still "a shortcut into an existing flow": the skill
+   *  activates on send exactly as if the user typed its trigger. */
+  label?: string;
+  hint?: string;
+  insertText?: string;
+  skillId?: string;
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -58,17 +66,20 @@ export const SLASH_COMMANDS: SlashCommand[] = [
 export function slashQuery(text: string): string | null {
   // No trim(): leading whitespace means the user is writing prose that
   // happens to contain a slash, not invoking a command.
-  const m = /^\/([a-zA-Z]*)$/.exec(text);
+  // FIX33 B6: letters of any script (a Thai skill name is a valid keyword)
+  // plus dashes — still never a space, so prose stays prose.
+  const m = /^\/([\p{L}\p{M}\p{N}-]*)$/u.exec(text);
   return m ? m[1].toLowerCase() : null;
 }
 
 /** Commands matching the typed token, in registry order. An empty query
  *  lists everything; an unknown one lists nothing (the menu then shows
  *  its empty state rather than silently disappearing). */
-export function filterSlashCommands(query: string): SlashCommand[] {
+export function filterSlashCommands(query: string, extra: readonly SlashCommand[] = []): SlashCommand[] {
   const q = query.toLowerCase();
-  if (q === "") return SLASH_COMMANDS;
-  return SLASH_COMMANDS.filter(
+  const all = extra.length ? [...SLASH_COMMANDS, ...extra] : SLASH_COMMANDS;
+  if (q === "") return all;
+  return all.filter(
     (c) =>
       c.keyword.startsWith(q) || (c.aliases ?? []).some((a) => a.startsWith(q)),
   );

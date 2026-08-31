@@ -270,6 +270,8 @@ export default function ConversationPage() {
                 onPromptPick={(text) => {
                   setInjectedText(text);
                 }}
+                // FIX33 B5 — quote-reply lands in the composer as a blockquote.
+                onQuote={(quoted) => setInjectedText(quoted)}
                 onEditMessage={(messageId, newContent) =>
                   void editMessage(convId, messageId, newContent)
                 }

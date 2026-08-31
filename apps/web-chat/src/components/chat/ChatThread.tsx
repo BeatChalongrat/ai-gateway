@@ -32,6 +32,8 @@ interface Props {
   onPromptPick?: (text: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
+  /** FIX33 B5 — quote-reply: selected assistant text → the composer. */
+  onQuote?: (quoted: string) => void;
   /** Older-page lazy-load. ChatThread renders a "Load earlier" pill
    *  at the top of the scroll container; clicking calls the
    *  parent's loader. After older messages are prepended the
@@ -50,6 +52,7 @@ export function ChatThread({
   messages,
   onRegenerate,
   onPromptPick,
+  onQuote,
   onEditMessage,
   onSwitchBranch,
   hasMoreOlder,
@@ -528,6 +531,7 @@ export function ChatThread({
                   onRegenerate={onRegenerate}
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
+                  onQuote={onQuote}
                 />
               ) : (
                 <PlainMessageList
@@ -538,6 +542,7 @@ export function ChatThread({
                   onRegenerate={onRegenerate}
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
+                  onQuote={onQuote}
                 />
               )}
             </>
@@ -679,6 +684,8 @@ interface InnerProps {
   onRegenerate: (messageId: string) => void;
   onEditMessage?: (messageId: string, newContent: string) => void;
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
+  /** FIX33 B5 — quote-reply: selected assistant text → the composer. */
+  onQuote?: (quoted: string) => void;
 }
 
 function PlainMessageList(props: InnerProps) {
@@ -748,6 +755,7 @@ function renderRow(m: Message, i: number, props: InnerProps) {
     onRegenerate,
     onEditMessage,
     onSwitchBranch,
+    onQuote,
   } = props;
   const prev = messages[i - 1];
   const extraGap = prev && prev.role !== m.role ? "mt-2" : "";
@@ -759,6 +767,7 @@ function renderRow(m: Message, i: number, props: InnerProps) {
       <MessageBubble
         convId={convId}
         message={m}
+        onQuote={m.role === "assistant" && onQuote ? onQuote : undefined}
         showFeedback={
           m.role === "assistant" &&
           !m.isStreaming &&
