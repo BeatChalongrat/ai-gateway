@@ -39,6 +39,7 @@ def _build_request_log_orm(record: RequestRecord) -> RequestLogORM:
         dlp_output_findings=record.dlp_output_findings,
         dlp_categories=",".join(record.dlp_categories) if record.dlp_categories else None,
         router_used=record.router_used,
+        task_category=record.task_category,
         policy_profile_id=record.policy_profile_id,
         input_raw=record.input_raw,
         input_masked=record.input_masked,

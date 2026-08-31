@@ -3096,7 +3096,11 @@ func (s *MessageService) resolveAutoIfNeeded(
 		numTools = len(s.toolExec.ToolDefs(conv))
 	}
 	hints := BuildRoutingHints(message, hasFiles, hasImages, historyLen, conv.ReasoningEnabled, numTools)
+	// FIX35 Part C — the conversation's cost ceiling rides along; "" lets the
+	// gateway apply the tenant / deployment default.
+	hints.Tier = conv.RoutingTier
 	slog.Info("auto_routing_hints",
+		"tier", hints.Tier,
 		"conversation_id", conv.ID.String(),
 		"needs_vision", hints.NeedsVision,
 		"needs_reasoning", hints.NeedsReasoning,

@@ -48,6 +48,13 @@ class TenantORM(Base):
     search_credit_cost: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, server_default=sa.text("5")
     )
+    # FIX35 Part C (migration 079) — the Auto router's default cost-tier
+    # ceiling for this tenant: '' = deployment default (system_settings
+    # ``auto_routing_tier_default``), else low | medium | high | xhigh | max.
+    # A conversation / request may pick a tier below it but never above.
+    auto_routing_tier: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default=sa.text("''")
+    )
     # Media generation (migration 056). ``dlp_media_gen_mask_identity``:
     # per-tenant override — when True, mask identity-class PII in media-gen
     # prompts (enterprise-strict); default False = industry-standard

@@ -553,8 +553,9 @@ interface RowProps {
   vision?: boolean;
   /** Sprint 2A.5 — media model kind badge (🎬 video / 🎵 audio / 🔊 tts). */
   mediaKind?: "video" | "audio" | "tts";
-  /** Sprint 3 — coarse cost-tier badge. Dormant until the catalog serves it. */
-  tier?: "free" | "low" | "medium" | "high";
+  /** Sprint 3 — coarse cost-tier badge. Dormant until FIX35 Part C, when the
+   *  gateway started serving ``cost_tier`` (five bands) — now live. */
+  tier?: "free" | "low" | "medium" | "high" | "xhigh" | "max";
   /** Phase 11 — the catalog has served this since day one but nothing
    *  rendered it, so users picked models blind. Second line under the name:
    *  what the model is good at.
@@ -635,11 +636,13 @@ const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
 };
 
 // Dict keys, resolved with t() where rendered (T4).
-const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high", DictKey> = {
+const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high" | "xhigh" | "max", DictKey> = {
   free: "model.tier.free",
   low: "model.tier.low",
   medium: "model.tier.medium",
   high: "model.tier.high",
+  xhigh: "model.tier.xhigh",
+  max: "model.tier.max",
 };
 
 function ModelRow({

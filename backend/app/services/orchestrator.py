@@ -100,6 +100,7 @@ from app.services.provider_key_service import ProviderKeyService
 from app.services.cache_service import CacheService
 from app.services.alert_evaluator import AlertEvaluator
 from app.services.guardrail_service import GuardrailService
+from app.domain.observability import is_meta_router_model as _is_meta_router
 from app.services.keyword_router import KeywordRouter
 from app.services.keyword_rule_service import KeywordRuleService
 from app.services.moderation_service import ModerationService
@@ -2052,6 +2053,9 @@ class GatewayOrchestrator:
                 dlp_output_findings=len(response_enforcement.match_actions),
                 dlp_categories=dlp_categories,
                 router_used=router_used,
+                # FIX35 Part C — feeds the per-tenant ranking (None when the
+                # caller named a model).
+                task_category=(payload.metadata or {}).get("auto_task") if payload.metadata else None,
                 # 4-stage DLP trace:
                 #   1. input_raw    (User → Service)  — placeholder (raw has PII)
                 #   2. input_masked (Service → AI)    — actual masked text, tokens only
@@ -2504,6 +2508,134 @@ class GatewayOrchestrator:
         except Exception as exc:  # never let key lookup break routing
             log.warning("configured_providers_lookup_failed", error=str(exc))
 
+    async def _auto_route(
+        self, ctx, payload, dict_messages, session, log, *, reasoning_requested: bool = False,
+    ):
+        """FIX35 Part C — gather what the pure router needs and run it.
+
+        The orchestrator owns every lookup: the key-valid candidate pool
+        (never dropped — a keyless provider never enters the pool), the
+        proven-key set, the admin preference, the tenant's cached 7-day
+        ranking and the effective tier ceiling. ``router.route_auto`` is
+        pure and never raises; ``None`` here means "no provider holds a
+        usable key" and the caller raises the one legitimate routing error.
+        """
+        from app.services import routing_settings
+        from app.services.auto_router import ranking as _ranking
+        from app.services.auto_router import router as _router
+        from app.services.auto_router import settings as _auto_settings
+        from app.services.auto_router import taxonomy as _taxonomy
+        from app.services.auto_router import tiers as _tiers
+        from app.services.providers.model_registry import (
+            get_all_candidates,
+            get_all_providers,
+        )
+
+        registry_providers = get_all_providers()
+        usable: set[str] = set()
+        if session is not None:
+            for provider in registry_providers:
+                try:
+                    key = await self.provider_key_service.get_api_key_async(session, provider)
+                except Exception as exc:  # never let one provider break routing
+                    log.warning("auto_routing_key_lookup_failed", provider=provider, error=str(exc))
+                    key = None
+                if key:
+                    usable.add(provider)
+        else:
+            usable = set(registry_providers)
+        # A provider the Redis health marker flagged (recent 429 / 5xx /
+        # timeout within its TTL) leaves the pool for this decision — the
+        # ranking's 7-day success rate is too slow to notice an account that
+        # ran out of credits ten minutes ago. Best-effort: a marker lookup
+        # failure keeps the provider.
+        try:
+            from app.services.gateway.fallback_orchestrator import is_provider_unhealthy
+
+            unhealthy = {p for p in usable if await is_provider_unhealthy(p)}
+            if unhealthy and unhealthy != usable:
+                log.info("auto_routing_skip_unhealthy", providers=sorted(unhealthy))
+                usable -= unhealthy
+        except Exception as exc:  # noqa: BLE001 — never let health lookups break routing
+            log.warning("auto_routing_health_lookup_failed", error=str(exc)[:200])
+        if not usable:
+            return None
+        proven: frozenset[str] = frozenset()
+        if session is not None:
+            try:
+                proven = frozenset(
+                    await self.provider_key_service.providers_with_valid_keys_async(session)
+                ) & usable
+            except Exception as exc:  # tie-break only — never fatal
+                log.warning("auto_routing_proven_lookup_failed", error=str(exc))
+        candidates = [
+            c for c in get_all_candidates()
+            if c.provider in usable
+            and getattr(c, "supports_streaming", True)
+            and not _is_meta_router(c.model)
+        ]
+        if not candidates:
+            return None
+
+        # Policy constraints the caller / policy layer put on the request
+        # (pre-FIX35 contract, kept): allowed providers and blocked models.
+        _meta = payload.metadata or {}
+        _allowed = _meta.get("allowed_providers")
+        if _allowed:
+            narrowed = [c for c in candidates if c.provider in set(_allowed)]
+            if narrowed:
+                candidates = narrowed
+        _blocked = set(_meta.get("blocked_models") or ())
+        if _blocked:
+            narrowed = [c for c in candidates if c.model not in _blocked]
+            if narrowed:
+                candidates = narrowed
+        # Legacy ``metadata.use_case`` hint → task override / reasoning.
+        _use_case = str(_meta.get("use_case") or "").lower()
+        task_override = {"coding": "code_generate", "code": "code_generate", "analysis": "data_analysis"}.get(_use_case)
+        if _use_case == "reasoning":
+            reasoning_requested = True
+
+        preferred = routing_settings.get_auto_preference(session)
+        hints = getattr(payload, "routing_hints", None)
+
+        # Step 3 inputs — most specific valid ceiling wins, never above the
+        # tenant's. Every read is cached and fails to '' (→ default).
+        try:
+            min_samples = int(_taxonomy.load_taxonomy().get("cold_start_min_samples", 20))
+        except Exception:  # noqa: BLE001 — broken asset ⇒ defaults
+            min_samples = 20
+        _tenant_id = str(getattr(ctx, "tenant_id", "") or "")
+        if session is not None:
+            # Through the request's own session — no second connection.
+            _tenant_ceiling = await _auto_settings.tenant_tier_async(_tenant_id, session)
+            _deploy_ceiling = await _auto_settings.deployment_tier_default_async(session)
+        else:
+            _tenant_ceiling = _auto_settings.tenant_tier(_tenant_id)
+            _deploy_ceiling = _auto_settings.deployment_tier_default()
+        ceiling = _tiers.effective_ceiling(
+            getattr(hints, "tier", None) if hints is not None else None,
+            _tenant_ceiling,
+            _deploy_ceiling,
+            default=_auto_settings.HARDCODED_DEFAULT,
+        )
+        # Step 2 inputs — cached per tenant; never a per-request query.
+        if session is not None:
+            tenant_ranking = await _ranking.get_ranking_async(_tenant_id, session, min_samples=min_samples)
+        else:
+            tenant_ranking = _ranking.get_ranking(_tenant_id, min_samples=min_samples)
+        return _router.route_auto(
+            candidates=candidates,
+            hints=hints,
+            messages=dict_messages,
+            ranking=tenant_ranking,
+            ceiling=ceiling,
+            preferred=preferred,
+            proven=proven,
+            reasoning_requested=reasoning_requested,
+            task_override=task_override,
+        )
+
     async def _smart_select(self, payload, session, log):
         """Provider-agnostic model selection for ``auto`` + routing_hints.
 
@@ -2620,30 +2752,98 @@ class GatewayOrchestrator:
         # clients that send no hints fall through to the legacy
         # semantic → keyword → service chain below, unchanged.
         hints = getattr(payload, "routing_hints", None)
-        if hints is not None:
-            selection = await self._smart_select(payload, session, log)
-            if selection is not None:
-                payload.model = selection.candidate.model
-                log.info(
-                    "smart_routing",
-                    selected_model=selection.candidate.model,
-                    provider=selection.candidate.provider,
-                    reason=selection.reason,
-                    hints=hints.model_dump(exclude_defaults=True),
-                    candidates_count=selection.candidates_count,
-                    filtered_count=selection.filtered_count,
+
+        # FIX35 Part C — EVERY bare ``auto`` (with or without hints) goes
+        # through the four-step router: classify → tenant ranking → tier
+        # ceiling → ordered list, always restricted to providers that hold a
+        # usable key right now. One deliberate precedence stays in front of
+        # it: a PROJECT-scoped keyword rule an admin configured in the DB is
+        # an explicit instruction from this tenant and wins as before.
+        _meta_allowed = (payload.metadata or {}).get("allowed_providers")
+        _allowed = frozenset(_meta_allowed) if _meta_allowed else None
+        if session is not None:
+            try:
+                _db_rules = await self.keyword_rule_service.get_rules_for_request_async(
+                    session, ctx.tenant_id, ctx.project_id
                 )
-                return "smart", None
-            # No candidate ⇒ no provider holds a usable key. Surface a
-            # clear error instead of an empty stream (Fix Priority #2).
+            except Exception as exc:  # never let a rule load break routing
+                log.warning("keyword_rule_load_failed", error=str(exc))
+                _db_rules = []
+            if _db_rules:
+                _proj_hint, _proj_rule = KeywordRouter(db_rules=_db_rules).get_project_scoped_hint(
+                    messages=dict_messages,
+                    requested_model=payload.model,
+                    allowed_providers=_allowed,
+                )
+                if _proj_rule is not None and _proj_hint != payload.model:
+                    payload.model = _proj_hint
+                    self._enforce_tool_capable_model(payload, session, log)
+                    log.info(
+                        "routing_decision",
+                        router="keyword_project",
+                        matched_rule=_proj_rule,
+                        model=payload.model,
+                    )
+                    return "keyword_project", _proj_rule
+                # Tenant-scoped DB rules are admin intent too (built-in
+                # default keyword rules are NOT consulted — they are what
+                # caused the P0 downgrade; the classifier replaces them).
+                _ten_hint, _ten_rule = KeywordRouter(rules=(), db_rules=_db_rules).get_model_hint(
+                    messages=dict_messages,
+                    requested_model=payload.model,
+                    allowed_providers=_allowed,
+                )
+                if _ten_rule is not None and _ten_hint != payload.model:
+                    payload.model = _ten_hint
+                    self._enforce_tool_capable_model(payload, session, log)
+                    log.info(
+                        "routing_decision",
+                        router="keyword_tenant",
+                        matched_rule=_ten_rule,
+                        model=payload.model,
+                    )
+                    return "keyword_tenant", _ten_rule
+
+        _reasoning_cfg = getattr(payload, "reasoning", None)
+        _reasoning_requested = bool(_reasoning_cfg is not None and _reasoning_cfg.mode != "off")
+        plan = await self._auto_route(
+            ctx, payload, dict_messages, session, log,
+            reasoning_requested=_reasoning_requested,
+        )
+        if plan is None:
+            # No candidate ⇒ no provider holds a usable key. This is the ONE
+            # routing outcome that is an error: there is nothing to route to.
             from app.core.exceptions import ProviderUnavailableError
 
-            log.warning("smart_routing_no_usable_provider")
+            log.warning("auto_routing_no_usable_provider")
             raise ProviderUnavailableError(
                 "No provider with a valid API key is available for auto "
                 "routing. Configure at least one provider key.",
                 details={"reason": "no_usable_providers"},
             )
+        payload.model = plan.primary.model
+        if payload.metadata is None:
+            payload.metadata = {}
+        payload.metadata["auto_task"] = plan.task
+        payload.metadata["auto_tier"] = plan.tier
+        payload.metadata["auto_candidates"] = [c.model for c in plan.fallbacks[:5]]
+        log.info(
+            "auto_route",
+            selected_model=plan.primary.model,
+            provider=plan.primary.provider,
+            task=plan.task,
+            task_confidence=plan.task_confidence,
+            tier=plan.tier,
+            tier_relaxed=plan.tier_relaxed,
+            used_ranking=plan.used_ranking,
+            reason=plan.reason,
+            signals=plan.signals,
+            fallbacks=[c.model for c in plan.fallbacks[:5]],
+            hints=hints.model_dump(exclude_defaults=True) if hints is not None else None,
+            candidates_count=plan.candidates_count,
+            filtered_count=plan.filtered_count,
+        )
+        return "auto", None
 
         # Explicit reasoning intent on an ``auto`` request forces the
         # reasoning candidate pool (P0 unlock). Without this, ``auto`` +

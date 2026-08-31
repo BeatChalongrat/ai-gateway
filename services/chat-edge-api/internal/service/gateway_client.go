@@ -237,6 +237,10 @@ type RoutingHints struct {
 	Complexity    string `json:"complexity,omitempty"` // "low" | "medium" | "high"
 	ConvTurnCount int    `json:"conv_turn_count,omitempty"`
 	Language      string `json:"language,omitempty"` // "th" | "en" | "zh" | ...
+	// Tier (FIX35 Part C) — cost ceiling the Auto router may spend up to:
+	// "" (tenant / deployment default) | low | medium | high | xhigh | max.
+	// Only meaningful with model="auto"; the gateway ignores it otherwise.
+	Tier string `json:"tier,omitempty"`
 }
 
 type GatewayChatRequest struct {
@@ -1150,6 +1154,9 @@ type GatewayModelInfo struct {
 	ContextWindow    int     `json:"context_window,omitempty"`
 	InputPricePer1M  float64 `json:"input_price_per_1m,omitempty"`
 	OutputPricePer1M float64 `json:"output_price_per_1m,omitempty"`
+	// CostTier (FIX35 Part C) — the gateway's price band for the picker
+	// badge and the Auto router's tier ceiling: low | medium | high | xhigh | max.
+	CostTier string `json:"cost_tier,omitempty"`
 }
 
 // GatewayModelCapabilities mirrors the Gateway's ModelCapabilities block

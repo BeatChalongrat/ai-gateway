@@ -64,6 +64,18 @@ def _chat(content: str = "hello there") -> dict:
     return {"status": resp.status_code, "body": resp.json()}
 
 
+def _log_for_settled(request_id: str, tries: int = 10) -> RequestLogORM | None:
+    """The request-log write is queued; give it a moment to land."""
+    import time as _t
+
+    for _ in range(tries):
+        row = _log_for(request_id)
+        if row is not None:
+            return row
+        _t.sleep(0.2)
+    return None
+
+
 def _log_for(request_id: str) -> RequestLogORM | None:
     Session = sessionmaker(bind=_integration_engine)
     s = Session()
@@ -99,46 +111,55 @@ def _install_keyword_stub(monkeypatch, return_value):
 
 
 class TestRoutingPriority:
-    def test_semantic_wins_over_keyword_when_confident(self, monkeypatch):
+    # FIX35 Part C — the semantic → built-in keyword → service chain no
+    # longer routes ``auto``. Every bare ``auto`` goes through the four-step
+    # Auto router (classify → tenant ranking → tier → ordered list). The
+    # semantic router and the BUILT-IN keyword rules (the ones that once
+    # downgraded "What is 15*37?" to gpt-4o-mini) are not consulted; only
+    # admin-configured DB keyword rules keep precedence (project, then
+    # tenant). These three tests pin that a confident semantic hint or a
+    # built-in keyword hit changes NOTHING about an auto turn any more.
+
+    def test_semantic_hint_no_longer_routes_auto(self, monkeypatch):
         _install_fake_semantic(monkeypatch, ("gpt-4o", "coding", 0.85))
-        # Keyword would otherwise force gpt-4o-mini — the semantic hint
-        # must pre-empt it so this never runs, but we stub it anyway
-        # to guarantee the test fails loudly if routing inverts.
         _install_keyword_stub(monkeypatch, ("gpt-4o-mini", "simple_tasks"))
 
-        r = _chat("write a python function")
+        # Unique text: an identical prompt from an earlier run can be served
+        # from the response cache, which writes no request_logs row.
+        r = _chat(f"write a python function nonce-{uuid.uuid4().hex[:8]}")
         assert r["status"] == 200
-        assert r["body"]["model"] == "gpt-4o"
+        assert r["body"]["model"] != "auto"
 
-        log = _log_for(r["body"]["id"])
+        log = _log_for_settled(r["body"]["id"])
         assert log is not None
-        assert log.router_used == "semantic"
+        assert log.router_used == "auto"
+        assert log.task_category == "code_generate"
 
-    def test_keyword_wins_when_semantic_not_confident(self, monkeypatch):
+    def test_builtin_keyword_hit_no_longer_routes_auto(self, monkeypatch):
         _install_fake_semantic(monkeypatch, (None, "general", 0.45))
         _install_keyword_stub(monkeypatch, ("gpt-4o", "code_tasks"))
 
         r = _chat("debug this code")
         assert r["status"] == 200
-        assert r["body"]["model"] == "gpt-4o"
+        assert r["body"]["model"] != "auto"
 
         log = _log_for(r["body"]["id"])
         assert log is not None
-        assert log.router_used == "keyword"
+        assert log.router_used == "auto"
+        assert log.task_category == "code_debug"
 
-    def test_service_wins_when_both_routers_defer(self, monkeypatch):
+    def test_plain_chat_is_classified_general_and_still_routed(self, monkeypatch):
         _install_fake_semantic(monkeypatch, (None, "general", 0.30))
-        # Keyword defers by returning (requested_model, None).
         _install_keyword_stub(monkeypatch, ("auto", None))
 
         r = _chat("what is the weather")
         assert r["status"] == 200
-        # RoutingService default for auto → gpt-4o-mini.
-        assert r["body"]["model"] == "gpt-4o-mini"
+        assert r["body"]["model"] != "auto"
 
         log = _log_for(r["body"]["id"])
         assert log is not None
-        assert log.router_used == "service"
+        assert log.router_used == "auto"
+        assert log.task_category in {"short_factual_qa", "general_chat"}
 
 
 # ---------------------------------------------------------------------------
@@ -215,11 +236,12 @@ class TestProjectScopeOverridesSemantic:
         assert log is not None
         assert log.router_used == "keyword_project"
 
-    def test_tenant_keyword_still_loses_to_semantic(
+    def test_tenant_keyword_rule_is_admin_intent_and_outranks_the_auto_router(
         self, monkeypatch, _cleanup_keyword_rules
     ):
-        # Tenant-scope rules sit below the project floor — they must
-        # not pre-empt semantic. Behaviour unchanged from before Fix 4.
+        # FIX35 Part C — semantic routing is retired for ``auto``; an
+        # admin-configured TENANT rule is explicit intent and wins over the
+        # Auto router (project rules still sit above tenant rules).
         _install_fake_semantic(monkeypatch, ("gpt-4o", "analysis", 0.95))
         _insert_keyword_rule(
             name="tenant_route_analyze",
@@ -231,8 +253,8 @@ class TestProjectScopeOverridesSemantic:
 
         r = _chat("please analyze this dataset")
         assert r["status"] == 200
-        assert r["body"]["model"] == "gpt-4o"
+        assert r["body"]["model"] == "qwen-plus"
 
         log = _log_for(r["body"]["id"])
         assert log is not None
-        assert log.router_used == "semantic"
+        assert log.router_used == "keyword_tenant"

@@ -11,6 +11,7 @@ from app.schemas.public import (
     ReasoningCapability,
 )
 from app.services.provider_key_service import ProviderKeyService
+from app.services.auto_router.tiers import band_for_candidate as _band_for_candidate
 from app.services.providers.model_registry import get_all_candidates
 from app.services.providers.openai_images_client import IMAGE_MODELS
 
@@ -142,6 +143,8 @@ async def get_models(
                 context_window=ctx,
                 input_price_per_1m=in_price,
                 output_price_per_1m=out_price,
+                # FIX35 Part C — price band for the picker badge / tier ceiling.
+                cost_tier=_band_for_candidate(c),
             )
         )
 

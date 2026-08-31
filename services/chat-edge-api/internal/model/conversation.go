@@ -71,6 +71,12 @@ type Conversation struct {
 	// locked yet (or the conversation uses an explicit model_id, which
 	// is inherently stable). Cleared when the user changes the picker.
 	LockedModel string
+	// RoutingTier (FIX35 Part C, migration 039) — the cost-tier ceiling
+	// the Auto router may spend up to for this conversation:
+	// "" (tenant / deployment default) | low | medium | high | xhigh | max.
+	// Forwarded as routing_hints.tier on every "auto" turn; ignored when
+	// the user picked a concrete model.
+	RoutingTier string
 
 	// IsPinned floats the conversation to the sidebar's "PINNED"
 	// section (migration 021), independent of the time buckets. Default

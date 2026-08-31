@@ -127,6 +127,9 @@ type conversationResponse struct {
 	ReasoningEnabled     bool   `json:"reasoning_enabled"`
 	ReasoningMode        string `json:"reasoning_mode"`
 	ShowReasoningSummary bool   `json:"show_reasoning_summary"`
+	// RoutingTier (FIX35 Part C) — Auto router cost ceiling for this
+	// conversation: "" (default) | low | medium | high | xhigh | max.
+	RoutingTier string `json:"routing_tier"`
 	// IsPinned surfaces the sidebar pin flag (migration 021) so the
 	// frontend can render the "PINNED" section + the pin/unpin toggle.
 	IsPinned bool `json:"is_pinned"`
@@ -154,6 +157,7 @@ func toResponse(c *model.Conversation) conversationResponse {
 		ReasoningEnabled:     c.ReasoningEnabled,
 		ReasoningMode:        c.ReasoningMode,
 		ShowReasoningSummary: c.ShowReasoningSummary,
+		RoutingTier:          c.RoutingTier,
 		IsPinned:             c.IsPinned,
 		IsArchived:           c.IsArchived,
 	}
@@ -315,6 +319,9 @@ type updateRequest struct {
 	ReasoningEnabled     *bool   `json:"reasoning_enabled,omitempty"`
 	ReasoningMode        *string `json:"reasoning_mode,omitempty"`
 	ShowReasoningSummary *bool   `json:"show_reasoning_summary,omitempty"`
+	// RoutingTier (FIX35 Part C) — "" | low | medium | high | xhigh | max;
+	// anything else gets a 422. Pointer so "" (reset to default) is patchable.
+	RoutingTier *string `json:"routing_tier,omitempty"`
 	// IsArchived files the conversation away from the sidebar
 	// (migration 032). Pointer so the field is patchable independently.
 	IsArchived *bool `json:"is_archived,omitempty"`
@@ -349,8 +356,13 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Title == nil && req.ModelID == nil && len(req.KnowledgeBaseID) == 0 &&
 		req.MemoryEnabled == nil && req.ReasoningEnabled == nil &&
 		req.ReasoningMode == nil && req.ShowReasoningSummary == nil &&
-		req.IsPinned == nil && req.IsArchived == nil {
+		req.IsPinned == nil && req.IsArchived == nil && req.RoutingTier == nil {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
+		return
+	}
+	// FIX35 Part C — validate routing_tier up-front, like reasoning_mode.
+	if req.RoutingTier != nil && !service.ValidRoutingTiers[*req.RoutingTier] {
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "routing_tier must be one of: low, medium, high, xhigh, max (or empty for the default)")
 		return
 	}
 	// T4: validate reasoning_mode up-front so a typo doesn't sneak
@@ -410,6 +422,12 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			r.Context(), caller.TenantUUID, caller.UserID, convID,
 			req.ReasoningEnabled, req.ReasoningMode, req.ShowReasoningSummary,
 		); err != nil {
+			h.writeUpdateError(w, err)
+			return
+		}
+	}
+	if req.RoutingTier != nil { // FIX35 Part C
+		if err := h.conversations.SetRoutingTier(r.Context(), caller.TenantUUID, caller.UserID, convID, *req.RoutingTier); err != nil {
 			h.writeUpdateError(w, err)
 			return
 		}

@@ -58,7 +58,7 @@ export interface ModelEntry {
   /** Sprint 3 — coarse cost tier for a selector badge. Optional: dormant
    *  until the gateway/chat-edge serialize it; the badge renders only when
    *  present so older payloads degrade cleanly. */
-  cost_tier?: "free" | "low" | "medium" | "high";
+  cost_tier?: RoutingTier | "free";
 }
 
 export interface ModelListResponse {
@@ -91,6 +91,10 @@ export interface Conversation {
   reasoning_enabled?: boolean;
   reasoning_mode?: string;
   show_reasoning_summary?: boolean;
+  /** FIX35 Part C — Auto router cost ceiling for this conversation:
+   *  "" (tenant / deployment default) | low | medium | high | xhigh | max.
+   *  Only meaningful while the conversation is on Auto. */
+  routing_tier?: RoutingTier | "";
   /** Sidebar pin (migration 021). When true the conversation appears
    *  in the dedicated "PINNED" section at the top of the sidebar,
    *  above the time buckets. Defaults false server-side; older
@@ -1002,3 +1006,9 @@ export interface CloudTaskRun {
   tokens?: number | null;
   error_detail?: string | null;
 }
+
+// ── FIX35 Part C — Auto router cost tiers ─────────────────────
+/** The gateway's five price bands (services/auto_router/tiers.py). A
+ *  conversation on Auto may set a ceiling; the picker shows a model's band. */
+export type RoutingTier = "low" | "medium" | "high" | "xhigh" | "max";
+export const ROUTING_TIERS: readonly RoutingTier[] = ["low", "medium", "high", "xhigh", "max"];

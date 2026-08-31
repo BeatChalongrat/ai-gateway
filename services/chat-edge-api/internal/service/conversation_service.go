@@ -267,6 +267,34 @@ func (s *ConversationService) SetPinned(
 // back). User-scope gate first so a same-tenant caller can't archive
 // someone else's conversation. Archiving is NOT deleting: the chat stays
 // openable, searchable and sendable — only the list hides it.
+// ValidRoutingTiers is the closed set the Auto router understands
+// (FIX35 Part C). "" means "use the tenant / deployment default".
+var ValidRoutingTiers = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+// SetRoutingTier pins the Auto router's cost-tier ceiling for one
+// conversation (FIX35 Part C). Only meaningful on an "auto" conversation;
+// stored regardless so the choice survives a later switch back to Auto.
+func (s *ConversationService) SetRoutingTier(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, tier string,
+) error {
+	if !ValidRoutingTiers[tier] {
+		return ErrConversationInvalidRoutingTier
+	}
+	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+		return err
+	}
+	if err := s.conversations.UpdateRoutingTier(ctx, tenantID, convID, tier); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrConversationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// ErrConversationInvalidRoutingTier — routing_tier outside ValidRoutingTiers.
+var ErrConversationInvalidRoutingTier = errors.New("invalid routing_tier")
+
 func (s *ConversationService) SetArchived(
 	ctx context.Context, tenantID, userID, convID uuid.UUID, archived bool,
 ) error {

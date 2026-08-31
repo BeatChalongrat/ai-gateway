@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
     setConversationReasoning: vi.fn(),
+    setConversationRoutingTier: vi.fn(),
     uploadFile: vi.fn(),
   },
 }));
@@ -277,6 +278,41 @@ describe("isFillerDescription", () => {
       "Fast multimodal flagship for everyday work",
     ]) {
       expect(isFillerDescription(s), s).toBe(false);
+    }
+  });
+});
+
+// ─── FIX35 Part C — Auto budget (tier ceiling) toggle ───────────
+
+describe("Auto budget toggle", () => {
+  it("shows on Auto with the workspace default and cycles to Low on click", async () => {
+    useModelStore.setState({ models: [model()], loaded: true, loading: false });
+    useChatStore.setState({ conversations: [conv({ model_id: AUTO_MODEL_ID })] });
+    mockApi.setConversationRoutingTier.mockResolvedValue(conv({ model_id: AUTO_MODEL_ID, routing_tier: "low" }));
+
+    mountComposer(AUTO_MODEL_ID);
+    const btn = screen.getByTestId("auto-tier-toggle");
+    expect(btn).toHaveAttribute("data-tier", "default");
+    expect(btn.textContent).toContain(dictionaries.en["tier.default"]);
+
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+    expect(mockApi.setConversationRoutingTier).toHaveBeenCalledWith("c1", "low");
+    expect(useChatStore.getState().conversations[0].routing_tier).toBe("low");
+  });
+
+  it("is hidden for an explicit model — an explicit pick is never routed", () => {
+    useModelStore.setState({ models: [model()], loaded: true, loading: false });
+    useChatStore.setState({ conversations: [conv({ model_id: "gpt-4o" })] });
+    mountComposer("gpt-4o");
+    expect(screen.queryByTestId("auto-tier-toggle")).toBeNull();
+  });
+
+  it("localizes the five bands + default in Thai", () => {
+    for (const k of ["tier.default", "tier.low", "tier.medium", "tier.high", "tier.xhigh", "tier.max"] as const) {
+      expect(dictionaries.th[k]).toBeTruthy();
+      expect(dictionaries.th[k]).not.toBe(dictionaries.en[k]);
     }
   });
 });

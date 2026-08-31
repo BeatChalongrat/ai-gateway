@@ -28,6 +28,7 @@ import type { ContextInfo } from "@/lib/types";
 import { useCanvasStore } from "@/stores/canvasStore";
 import type {
   Conversation,
+  RoutingTier,
   ConversationSearchHit,
   FileAttachment,
   Message,
@@ -201,6 +202,8 @@ interface ChatState {
   setConversationMemory: (id: string, enabled: boolean) => Promise<void>;
   /** T4 — patch Thinking Mode preferences (any subset). Optimistic
    *  with rollback per the memory pattern. */
+  /** FIX35 Part C — Auto router cost ceiling for one conversation. */
+  setConversationRoutingTier: (id: string, tier: RoutingTier | "") => Promise<void>;
   setConversationReasoning: (
     id: string,
     patch: {
@@ -788,6 +791,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       }));
       throw err;
+    }
+  },
+
+  async setConversationRoutingTier(id, tier) {
+    // FIX35 Part C — optimistic, revert on failure (same shape as the
+    // reasoning toggle).
+    const prev = get().conversations.find((c) => c.id === id)?.routing_tier ?? "";
+    set((s) => ({
+      conversations: s.conversations.map((c) => (c.id === id ? { ...c, routing_tier: tier } : c)),
+    }));
+    try {
+      await api.setConversationRoutingTier(id, tier);
+    } catch {
+      set((s) => ({
+        conversations: s.conversations.map((c) => (c.id === id ? { ...c, routing_tier: prev } : c)),
+      }));
+      get().setError(tOutside("tier.toast.failed"));
     }
   },
 

@@ -119,6 +119,10 @@ class ModelInfo(BaseModel):
     context_window: Optional[int] = None
     input_price_per_1m: Optional[float] = None
     output_price_per_1m: Optional[float] = None
+    # FIX35 Part C — price band (services/auto_router/tiers.py):
+    # low | medium | high | xhigh | max. The picker's tier badge and the
+    # label of the Auto router's per-conversation ceiling.
+    cost_tier: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = None
 
 
 class ModelListResponse(BaseModel):
@@ -204,6 +208,11 @@ class RoutingHints(BaseModel):
     complexity: Optional[str] = None      # "low" | "medium" | "high"
     conv_turn_count: int = 0
     language: Optional[str] = None        # "th" | "en" | "zh" | ...
+    # FIX35 Part C — cost ceiling the Auto router may spend up to for this
+    # turn: "low" | "medium" | "high" | "xhigh" | "max". None = the tenant /
+    # deployment default. Only meaningful with model="auto"; an explicit
+    # model is never touched by routing (see orchestrator._apply_router_chain).
+    tier: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = None
 
 
 class ChatCompletionsRequest(BaseModel):

@@ -75,8 +75,11 @@ class RequestRecord:
     dlp_input_action: str | None = None
     dlp_output_findings: int = 0
     dlp_categories: list[str] = field(default_factory=list)
-    # Which router won: "semantic" / "keyword" / "service" / None.
+    # Which router won: "semantic" / "keyword" / "service" / "auto" / None.
     router_used: str | None = None
+    # FIX35 Part C — the Auto router's task class (task_taxonomy.json id);
+    # None when the caller named a model. Feeds the per-tenant ranking.
+    task_category: str | None = None
     # Effective policy profile applied — project default OR a
     # per-request ``policy_profile_id`` override. Mirrors
     # RequestLogORM.policy_profile_id (migration 020).

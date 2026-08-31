@@ -10,6 +10,7 @@
 import type {
   ContextInfo,
   Conversation,
+  RoutingTier,
   ConversationListResponse,
   ErrorEnvelope,
   FeedbackResponse,
@@ -283,6 +284,15 @@ class ApiClient {
   /** T4 — patch Thinking Mode preferences for a conversation.
    *  Any subset of the three fields can be sent; the server uses
    *  COALESCE to keep unset fields at their current value. */
+  /** FIX35 Part C — the Auto router's cost ceiling for one conversation.
+   *  "" resets to the tenant / deployment default. */
+  setConversationRoutingTier(id: string, tier: RoutingTier | "") {
+    return this.json<Conversation>(`/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ routing_tier: tier }),
+    });
+  }
+
   setConversationReasoning(
     id: string,
     patch: {

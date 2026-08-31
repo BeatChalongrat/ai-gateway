@@ -100,7 +100,21 @@ def _validate_auto_fallbacks(value: str) -> str:
     return ",".join(models)
 
 
+def _validate_routing_tier(value: str) -> str:
+    """FIX35 Part C — the Auto router's deployment-wide cost ceiling."""
+    from app.services.auto_router.tiers import TIERS
+
+    v = (value or "").strip().lower()
+    if v not in TIERS:
+        raise ValueError(f"must be one of: {', '.join(TIERS)}")
+    from app.services.auto_router import settings as _auto_settings
+
+    _auto_settings.clear_cache()
+    return v
+
+
 _VALIDATORS: dict[str, Callable[[str], str]] = {
+    "auto_routing_tier_default": _validate_routing_tier,
     "free_trial_tokens": _validate_positive_int,
     "trial_model_tier": _validate_model_tier,
     "portal_signup_enabled": _validate_bool,

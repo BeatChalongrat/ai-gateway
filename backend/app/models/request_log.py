@@ -72,6 +72,12 @@ class RequestLogORM(Base):
     # Added in migration 018_add_keyword_rules.
     router_used: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # FIX35 Part C — the Auto router's task class for this request (one of
+    # the ids in services/auto_router/task_taxonomy.json), NULL when the
+    # caller named a model. The per-tenant 7-day ranking groups on it.
+    # Added in migration 079.
+    task_category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
     # Effective policy profile applied to this request — the project
     # default OR a per-request ``policy_profile_id`` override. Added
     # in migration 020_add_policy_profile_id_to_request_logs.

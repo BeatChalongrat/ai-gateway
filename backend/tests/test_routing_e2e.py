@@ -55,9 +55,23 @@ class TestRoutingE2EAuto:
         assert resp.status_code == 200
         assert resp.json()["provider"] == "anthropic"
 
-    def test_auto_reasoning_returns_anthropic(self):
+    def test_auto_reasoning_is_served_by_a_reasoning_capable_model(self):
+        # FIX35 Part C — the Auto router is provider-agnostic: ``use_case``
+        # "reasoning" pins the pool to reasoning-capable models (the P0
+        # unlock, kept), it no longer pins a vendor.
+        from app.services.providers.model_registry import get_candidate
+
         resp = _chat(model="auto", metadata={"use_case": "reasoning"})
-        assert resp.json()["provider"] == "anthropic"
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["model"] != "auto"
+        from app.services.providers.model_registry import get_all_candidates
+
+        if any(c.supports_reasoning for c in get_all_candidates() if c.provider in {"openai", "anthropic"}):
+            cand = get_candidate(body["model"])
+            assert cand is not None and cand.supports_reasoning, body["model"]
+        # (the stub registry may carry no reasoning-capable model at all —
+        #  then the router relaxes to the whole pool rather than failing)
 
 
 class TestRoutingE2EConstraints:

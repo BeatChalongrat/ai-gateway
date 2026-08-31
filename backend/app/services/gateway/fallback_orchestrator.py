@@ -199,6 +199,45 @@ class FallbackResult:
     attempts: list[FallbackAttempt] = field(default_factory=list)
 
 
+def merge_auto_candidates(
+    auto_models: list,
+    chain: list[dict[str, str]],
+    *,
+    original_provider: str,
+    original_model: str,
+    resolve,
+) -> list[dict[str, str]]:
+    """FIX35 Part C step 4 — turn the Auto router's ordered model list into
+    the fallback chain, ahead of the static tier chain.
+
+    The primary just FAILED on ``original_provider``; most failures are
+    provider-level (no credits, rate limit, outage), so candidates on a
+    DIFFERENT provider go first and same-provider ones after — otherwise
+    the ``MAX_FALLBACK_CANDIDATES`` budget is spent re-hitting the provider
+    that is down (seen live: gpt-5.6-terra → gpt-4o → gpt-4o-mini, all
+    openai, all 429, while a working OpenRouter route sat third). Pure;
+    ``resolve`` maps a model id to its provider (model_registry).
+    """
+    cross: list[dict[str, str]] = []
+    same: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for m in auto_models or []:
+        m = str(m)
+        p = resolve(m) or ""
+        if not p or m == original_model or (p, m) in seen:
+            continue
+        seen.add((p, m))
+        (same if p == original_provider else cross).append({"provider": p, "model": m})
+    merged = cross + same
+    for e in chain or []:
+        k = (e["provider"], e["model"])
+        if k in seen:
+            continue
+        seen.add(k)
+        merged.append(e)
+    return merged
+
+
 class FallbackOrchestrator:
     """Cross-provider fallback runner. Stateless, safe to share."""
 
@@ -243,6 +282,22 @@ class FallbackOrchestrator:
         )
 
         chain = get_fallback_chain(original_model, original_provider)
+        # FIX35 Part C step 4 — an auto-routed request carries the router's
+        # own ORDERED list (already key-valid, tier-capped, task-ranked).
+        # Those come first; the static cross-provider tier chain follows.
+        # An explicit request never has this metadata, so its behaviour is
+        # unchanged.
+        _auto = (getattr(request, "metadata", None) or {}).get("auto_candidates") or []
+        if _auto:
+            from app.services.providers.model_registry import resolve_provider
+
+            merged = merge_auto_candidates(
+                _auto, chain, original_provider=original_provider,
+                original_model=original_model, resolve=resolve_provider,
+            )
+            if merged:
+                log.info("fallback_auto_candidates", candidates=[f"{e['provider']}:{e['model']}" for e in merged[:5]])
+                chain = merged
         if not chain:
             log.info("fallback_no_chain")
             # Batch A: a shed request (bulkhead full) must keep its

@@ -85,7 +85,11 @@ type modelResponse struct {
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 	InputPricePerM  float64  `json:"input_price_per_1m,omitempty"`
 	OutputPricePerM float64  `json:"output_price_per_1m,omitempty"`
-	Allowed         bool     `json:"allowed"`
+	// CostTier (FIX35 Part C) — gateway price band: low | medium | high |
+	// xhigh | max. Drives the picker's tier badge (dormant since Sprint 3
+	// until this field existed) and labels the per-conversation ceiling.
+	CostTier string `json:"cost_tier,omitempty"`
+	Allowed  bool   `json:"allowed"`
 	// T4 — Thinking Mode capability. ``nil`` when the model
 	// does NOT support reasoning so the wire stays unchanged for
 	// non-reasoning models. Populated for the known set in
@@ -390,6 +394,9 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 		}
 		if m.OutputPricePer1M > 0 {
 			resp.OutputPricePerM = m.OutputPricePer1M
+		}
+		if m.CostTier != "" { // FIX35 Part C
+			resp.CostTier = m.CostTier
 		}
 		if m.ContextWindow > 0 {
 			resp.ContextWindow = m.ContextWindow

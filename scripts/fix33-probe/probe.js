@@ -21,7 +21,11 @@ const GATEWAY = "http://localhost:8080";
 const USER = "c6e631e2-51ab-44a4-9eed-45d6fc1ce9ff";
 const TENANT = "f65614b9-3328-5d45-af3a-9ebc2b6d3034";
 const MODEL = process.env.PROBE_MODEL || "gpt-5.6-terra";
-const OUT = path.join(__dirname, `probe-${process.argv[2]}.json`);
+// FIX35 Part E — PROBE_ONLY=P1,P4 re-runs a subset (to tell a flaky miss from
+// a systematic one) into its own result file so the full run is never
+// overwritten. Order is the canonical P1..P5b order regardless.
+const ONLY = process.env.PROBE_ONLY ? new Set(process.env.PROBE_ONLY.split(",").map((s) => s.trim())) : null;
+const OUT = path.join(__dirname, `probe-${process.argv[2]}${ONLY ? "-" + [...ONLY].join("") : ""}${process.env.PROBE_TAG ? "-" + process.env.PROBE_TAG : ""}.json`);
 const GATEWAY_KEY = (() => {
   const env = fs.readFileSync(path.join(REPO, ".env"), "utf8");
   const m = env.match(/^GATEWAY_API_KEY=(.+)$/m);
@@ -96,6 +100,18 @@ async function runWeb(marks) {
     const t0 = Date.now();
     const conv = await api("/conversations", { method: "POST", body: JSON.stringify({ model_id: MODEL, title: `FIX33 probe web ${turns}` }) });
     const id = conv.id;
+    // FIX35 Part E — PROBE_MEMORY=off turns memory off for the probe
+    // conversation. Two things to know before using it: (1) with memory ON a
+    // fact saved from one run's P5b ("moved to Friday") is recalled into the
+    // next run's fresh conversation and P4 fails for a reason that has nothing
+    // to do with compaction (seen live: web@400 P4 answered Friday twice) —
+    // so wipe the probe user's memories between runs instead; (2) with memory
+    // OFF chat-edge also keeps NO conversation state (no summary to store),
+    // so the compaction probes measure "dropped, not summarised" — not the
+    // product's real behaviour. Default is ON.
+    if ((process.env.PROBE_MEMORY || "on").toLowerCase() === "off") {
+      await api(`/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ memory_enabled: false }) });
+    }
     const msgs = seed(turns);
     const base = Date.now() - 86_400_000;
     for (let i = 0; i < msgs.length; i += 200) {
@@ -105,6 +121,7 @@ async function runWeb(marks) {
     const before = await api(`/conversations/${id}/context-info`);
     const probes = {};
     for (const [name, q, check] of PROBES) {
+      if (ONLY && !ONLY.has(name)) continue;
       let reply = "";
       try {
         const r = await api(`/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ content: q, stream: false }) });
@@ -156,6 +173,7 @@ async function runDesktop(marks) {
     const probes = {};
     let compileInfo = null;
     for (const [name, q, check] of PROBES) {
+      if (ONLY && !ONLY.has(name)) continue;
       const messages = [{ role: "system", content: SYSTEM }, ...chain, { role: "user", content: q }];
       let reply = "";
       try {
