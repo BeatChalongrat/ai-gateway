@@ -57,11 +57,19 @@ logs: ## Tail logs from all services
 seed: ## Seed tenants + projects + API keys + admin user + portal users
 	docker compose exec backend python -m scripts.seed_audit_data
 
+NER ?= off
+
 dlp-eval: ## FIX28: DLP detection-quality eval — both engines (Python + live Rust sidecar), must-catch recall per category + must-not-fire corpus, checked against backend/evals/dlp/baseline.json
 	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.dlp.run --require-rust --check-baseline'
 
 dlp-eval-baseline: ## FIX28: re-record the DLP eval baseline (deliberate; review the diff before committing)
 	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.dlp.run --require-rust --write-baseline'
+
+mask-eval: ## FIX37: mask-quality eval — detection + comprehension (axis A) + re-identification (axis B) on the synthetic Thai corpus. Needs GATEWAY_API_KEY in .env for the scan-rounds stage.
+	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.mask_quality.run --stage all --ner $(NER) --out /tmp/mask_eval.json'
+
+mask-eval-detect: ## FIX37: detection-only slice of the mask-quality eval (no model calls, seconds not minutes)
+	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.mask_quality.run --stage detect --ner $(NER)'
 
 migrate: ## Apply pending BACKEND (gateway) Alembic migrations to the running postgres. Run this when a long-lived container outlived a new migration (schema-drift guard names the gap).
 	docker compose exec backend python -m alembic upgrade head
