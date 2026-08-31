@@ -2027,6 +2027,8 @@ async def _chat_completions_impl(
                             # resolves the OpenRouter fallback "auto" sentinel
                             # so usage aggregation never shows "auto" rows.
                             model=resolved_log_model(route.model_name, final_model),
+                            # FIX35 Part C — feeds the per-tenant ranking.
+                            task_category=(payload.metadata or {}).get("auto_task") if payload.metadata else None,
                             # Partial-fail exits (fallback chain exhausted /
                             # unexpected error mid-stream) log as
                             # provider_error; a client disconnect still logs
