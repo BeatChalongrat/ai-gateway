@@ -22,6 +22,7 @@ import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
+import type { ContextInfo } from "@/lib/types";
 // One-way dependency: the chat store nudges the canvas store after a
 // turn (Phase 8). canvasStore must never import chatStore back.
 import { useCanvasStore } from "@/stores/canvasStore";
@@ -133,6 +134,10 @@ interface ChatState {
    *  the instant the next ": ping" landed. Cleared only by the server's
    *  recovery frame, by retry, or by stream end. */
   providerStalledStreams: Record<string, boolean>;
+  /** FIX33 A-W6 — the context meter's numbers per conversation (web: the
+   *  /context-info dry run; desktop: the host's context_budget events). */
+  contextBudgetByConv: Record<string, ContextInfo>;
+  setContextBudget: (convId: string, info: ContextInfo) => void;
   /** has_more=true for older-page-available conversations. */
   hasMoreMessages: Record<string, boolean>;
   /** True while a paginate-older request is in flight. */
@@ -335,6 +340,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abortControllers: {},
   stalledStreams: {},
   providerStalledStreams: {},
+  contextBudgetByConv: {},
+  setContextBudget(convId, info) {
+    set((s) => ({ contextBudgetByConv: { ...s.contextBudgetByConv, [convId]: info } }));
+  },
   hasMoreMessages: {},
   loadingOlder: {},
   pendingFiles: {},
@@ -1852,6 +1861,8 @@ async function consumeStream(
   tempUserId?: string,
 ) {
   let realAssistantId: string | null = null;
+  // FIX33 A-W9 — the assistant row currently marked "organizing…"; cleared by the first content delta.
+  let compactingAsst: string | null = null;
   // Wall-clock turn duration for the per-message metadata line
   // ("GPT-4o · 342 tokens · 1.2s"). Stream open → message_complete.
   const streamStartedAt = Date.now();
@@ -1994,6 +2005,15 @@ async function consumeStream(
         });
       } else if (evt.event === "content_delta") {
         const data = evt.data as SSEContentDelta;
+        if (compactingAsst) {
+          // FIX33 A-W9 — the answer is flowing: "organizing…" is over.
+          const id = compactingAsst;
+          compactingAsst = null;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, is_compacting: false } : m)) } };
+          });
+        }
         pendingDelta += data.delta;
         scheduleFlush();
       } else if (evt.event === "reasoning_delta") {
@@ -2107,6 +2127,23 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "compaction_status") {
+        // FIX33 A-W9 — the server (or the desktop host) is summarising
+        // older messages before it answers. Show "Organizing the
+        // conversation…" in place of the working dots; the first
+        // content_delta (or message_complete / error) clears it.
+        const id = realAssistantId ?? tempAsstId;
+        compactingAsst = id;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, is_compacting: true } : m)) } };
+        });
+      } else if (evt.event === "context_budget") {
+        // FIX33 A-D5 — the desktop host's live meter numbers (same shape as
+        // the web's /context-info). Stored per conversation; the meter
+        // renders from it and stays hidden below the show ratio.
+        const data = evt.data as ContextInfo;
+        if (data && typeof data.used_ratio === "number") get().setContextBudget(convId, data);
       } else if (evt.event === "search_status") {
         // Web-search phase marker — show the searching indicator. It
         // auto-hides once content streams in, and is_searching is
@@ -2304,6 +2341,7 @@ async function consumeStream(
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,
+                      is_compacting: false,
                       // Web clears the transient indicators at completion; the
                       // desktop shell KEEPS the rich tool cards so their
                       // results stay visible after the turn (like the WPF app).
@@ -2459,6 +2497,7 @@ async function consumeStream(
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,
+                      is_compacting: false,
                     }
                   : m,
               ),

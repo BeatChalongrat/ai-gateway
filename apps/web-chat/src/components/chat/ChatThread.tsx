@@ -373,9 +373,11 @@ export function ChatThread({
       ? `consent:${waitingConsent.tool}`
       : runningTool
         ? `tool:${runningTool.tool}`
-        : streamingMsg.is_searching
-          ? "gen.searching"
-          : "gen.working"
+        : streamingMsg.is_compacting
+          ? "gen.compacting"
+          : streamingMsg.is_searching
+            ? "gen.searching"
+            : "gen.working"
     : null;
   const [announcement, setAnnouncement] = useState("");
   const prevPhaseRef = useRef<string | null>(null);

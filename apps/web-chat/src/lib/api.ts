@@ -8,6 +8,7 @@
 // transient 401 no longer logs the user out — we refresh and retry.
 
 import type {
+  ContextInfo,
   Conversation,
   ConversationListResponse,
   ErrorEnvelope,
@@ -870,6 +871,19 @@ class ApiClient {
   }
   revokeShare(convId: string) {
     return this.raw(`/conversations/${convId}/share`, { method: "DELETE" });
+  }
+
+  // ----- FIX33 — context meter + manual compaction -------------
+  /** Dry-run of the context compiler: the meter's numbers (A-W6). */
+  getContextInfo(convId: string) {
+    return this.json<ContextInfo>(`/conversations/${convId}/context-info`);
+  }
+  /** "Summarize and continue" with optional instructions (A-W7). */
+  compactConversation(convId: string, instructions: string) {
+    return this.json<{ coverage_reached: boolean; messages_total: number }>(`/conversations/${convId}/compact`, {
+      method: "POST",
+      body: JSON.stringify({ instructions }),
+    });
   }
 
   // ----- Branching ------------------------------------------

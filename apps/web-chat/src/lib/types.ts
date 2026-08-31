@@ -404,6 +404,10 @@ export interface Message {
    *  the backend is searching the web. MessageBubble shows the
    *  SearchingIndicator until content streams / sources land. */
   is_searching?: boolean;
+  /** FIX33 A-W9 — the server (or the desktop host) is summarising older
+   *  messages before answering (`compaction_status: "summarizing"`); the
+   *  thread shows "Organizing the conversation…" until content streams. */
+  is_compacting?: boolean;
   /** local-only (Phase 8) — the sandboxed run_python calls this turn
    *  made, delivered by the ``code_execution`` SSE event and keyed by
    *  tool-call id. Renders the code + stdout card. NOT persisted: a
@@ -472,6 +476,29 @@ export interface Message {
   image_notice?: {
     filenames: string[];
   };
+}
+
+/** FIX33 A-W6 — the context meter's numbers. Web: GET
+ *  /conversations/{id}/context-info (a dry run of the compiler). Desktop:
+ *  the host's `context_budget` turn event / `context.info` op, same fields.
+ *  The meter renders ONLY from `meter_show_ratio` (0.70) of the budget up;
+ *  below that the header shows nothing (spec addendum #1). */
+export interface ContextInfo {
+  used_ratio: number;
+  history_tokens: number;
+  messages_budget: number;
+  threshold_tokens: number;
+  messages_total: number;
+  messages_sent?: number;
+  messages_would_send?: number;
+  state_present: boolean;
+  compacted: boolean;
+  dropped?: number;
+  omitted_older?: number;
+  est_messages_remaining: number;
+  /** Optional on the web wire; the client falls back to CONTEXT_METER_SHOW_RATIO. */
+  show_meter?: boolean;
+  meter_show_ratio?: number;
 }
 
 /** S7 — one source the AI drew on while producing an assistant

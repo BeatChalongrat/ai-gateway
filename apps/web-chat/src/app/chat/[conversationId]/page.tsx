@@ -10,6 +10,7 @@ import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
+import { ContextMeter } from "@/components/chat/ContextMeter";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
 import { WorkspaceButton } from "@/components/workspace/WorkspaceButton";
@@ -204,6 +205,8 @@ export default function ConversationPage() {
           here was redundant). Just the file-attachments indicator
           + the "..." menu on the right. */}
       <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        {/* FIX33 — quiet context meter: nothing until 70 % of the budget. */}
+        <ContextMeter conversationId={convId} />
         <MemoryIndicator conversationId={convId} />
         <WorkspaceButton
           conversationId={convId}
