@@ -37,6 +37,7 @@ because there is genuinely nothing to route to.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable, Optional, Sequence
 
@@ -60,6 +61,7 @@ class RoutePlan:
     filtered_count: int
     used_ranking: bool = False
     tier_relaxed: bool = False
+    explored: bool = False
     signals: list[str] = field(default_factory=list)
 
     @property
@@ -94,6 +96,16 @@ def _apply_ceiling(pool: list, ceiling: str) -> tuple[list, bool]:
     return [c for c in pool if tiers.tier_rank(tiers.band_for_candidate(c)) == cheapest], True
 
 
+def _prior_score(prior_pos: dict[str, int], model: str) -> float:
+    """Configured prior as a 0..1 score: first in the list is ~1, then an even
+    decay; a model absent from the prior gets a low-but-nonzero floor so the
+    tie-breakers below still order it."""
+    if model not in prior_pos:
+        return 0.15
+    n = max(len(prior_pos), 1)
+    return round(1.0 - prior_pos[model] / (n + 1), 4)
+
+
 def _order(
     pool: list,
     *,
@@ -102,25 +114,42 @@ def _order(
     preferred: Sequence[str],
     proven: frozenset[str],
 ) -> tuple[list, bool]:
-    spec = taxonomy.task_spec(task)
-    default_rank = {m: i for i, m in enumerate(spec.get("default_rank", []))}
+    """FIX36 A2 - one blended score per candidate instead of the FIX35
+    "trusted-cell wins outright, else static list" cliff:
+
+        blend = w * live + (1 - w) * prior,   w = n / (n + K)
+
+    ``live`` is the tenant's 7-day score for (rank group, model); ``prior``
+    is the configured per-group order from the asset; ``n`` is the group
+    cell's sample count and K = ``prior_weight_samples``. With no data the
+    prior decides; every request shifts weight smoothly toward the tenant's
+    own evidence - there is no hard switch at K."""
+    group = taxonomy.task_group(task)
+    prior_pos = {m: i for i, m in enumerate(taxonomy.group_prior(group))}
+    if not prior_pos:  # group missing from asset -> legacy per-task list
+        prior_pos = {m: i for i, m in enumerate(taxonomy.task_spec(task).get("default_rank", []))}
     pref_rank = {m: i for i, m in enumerate(preferred)}
+    k_samples = taxonomy.prior_weight_samples()
     used_ranking = False
-    scored: dict[str, float] = {}
-    if ranking is not None:
-        for c in pool:
-            s = ranking.score(task, c.model)
-            if s is not None:
-                scored[c.model] = s
-                used_ranking = True
+    blended: dict[str, float] = {}
+    for c in pool:
+        live, n = (None, 0)
+        if ranking is not None:
+            live, n = ranking.score_with_samples(group, c.model)
+        prior = _prior_score(prior_pos, c.model)
+        if live is None:
+            blended[c.model] = prior
+        else:
+            w = n / (n + k_samples)
+            blended[c.model] = round(w * live + (1.0 - w) * prior, 4)
+            used_ranking = True
 
     def key(c):
-        # Lower tuple sorts first. Tenant evidence first (higher score →
-        # smaller key), then the taxonomy's static order, then the admin's
-        # preference, then cost, proof, first-party, id.
+        # Lower tuple sorts first. Blended evidence first (higher score ->
+        # smaller key), then the admin's preference, then cost, proof,
+        # first-party, id.
         return (
-            -scored.get(c.model, -1.0),
-            default_rank.get(c.model, 10_000),
+            -blended.get(c.model, 0.0),
             pref_rank.get(c.model, 10_000),
             tiers.tier_rank(tiers.band_for_candidate(c)),
             0 if c.provider in proven else 1,
@@ -129,6 +158,43 @@ def _order(
         )
 
     return sorted(pool, key=key), used_ranking
+
+
+def _explore(
+    ordered: list,
+    *,
+    ranking: Optional[TenantRanking],
+    group: str,
+    rng: "random.Random | None" = None,
+) -> tuple[list, bool]:
+    """FIX36 A3 - with probability ``exploration_rate`` promote ONE
+    under-sampled candidate (fewer than min_samples requests in this rank
+    group) to primary so the ranking table keeps filling. The rest of the
+    order is untouched; the displaced primary becomes first fallback, so a
+    failed exploration still lands on the best-known model immediately.
+    Never applied to an explicit model - the orchestrator only calls the
+    router for meta ids ("auto"/empty), and route_auto also skips
+    exploration under task_override (a caller that asserted the task asked
+    for determinism)."""
+    rate = taxonomy.exploration_rate()
+    if rate <= 0.0 or len(ordered) < 2:
+        return ordered, False
+    r = (rng or random).random()
+    if r >= rate:
+        return ordered, False
+    min_n = ranking.min_samples if ranking is not None else 20
+    under: list[int] = []
+    for i, c in enumerate(ordered[1:], start=1):
+        n = 0
+        if ranking is not None:
+            _s, n = ranking.score_with_samples(group, c.model)
+        if n < min_n:
+            under.append(i)
+    if not under:
+        return ordered, False
+    pick = (rng or random).choice(under)
+    reordered = [ordered[pick], *ordered[:pick], *ordered[pick + 1:]]
+    return reordered, True
 
 
 def default_plan(candidates: Sequence["ModelCandidate"], preferred: Sequence[str], reason: str) -> Optional[RoutePlan]:
@@ -164,6 +230,7 @@ def route_auto(
     proven: frozenset[str] = frozenset(),
     reasoning_requested: bool = False,
     task_override: Optional[str] = None,
+    rng: "random.Random | None" = None,
 ) -> Optional[RoutePlan]:
     """The four steps. Returns None only for an empty candidate list.
 
@@ -211,8 +278,11 @@ def route_auto(
         pool, relaxed = _apply_ceiling(pool, ceiling)
         filtered = len(pool)
 
-        # Step 2 + 4c — order.
+        # Step 2 + 4c - order (blended prior/live), then optional exploration.
         ordered, used_ranking = _order(pool, task=tc.task, ranking=ranking, preferred=preferred, proven=proven)
+        explored = False
+        if not task_override:
+            ordered, explored = _explore(ordered, ranking=ranking, group=taxonomy.task_group(tc.task), rng=rng)
 
         bits = [f"task={tc.task}({tc.confidence:.2f})", f"tier<={ceiling}"]
         if needs_reasoning:
@@ -221,9 +291,11 @@ def route_auto(
             bits.append("vision")
         if needs_tools:
             bits.append("tools")
-        bits.append("tenant-ranked" if used_ranking else "default-rank")
+        bits.append("tenant-ranked" if used_ranking else "prior-rank")
         if relaxed:
             bits.append("tier_relaxed")
+        if explored:
+            bits.append("explore")
         return RoutePlan(
             primary=ordered[0],
             fallbacks=ordered[1:],
@@ -235,6 +307,7 @@ def route_auto(
             filtered_count=filtered,
             used_ranking=used_ranking,
             tier_relaxed=relaxed,
+            explored=explored,
             signals=list(tc.signals),
         )
     except Exception as exc:  # noqa: BLE001 — never fail because of routing

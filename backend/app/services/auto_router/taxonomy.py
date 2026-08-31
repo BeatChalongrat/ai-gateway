@@ -51,6 +51,46 @@ def task_spec(task: str) -> dict[str, Any]:
     return tasks.get(task) or tasks[GENERAL]
 
 
+DEFAULT_GROUP = "chat_light"
+
+
+def task_group(task: str) -> str:
+    """FIX36 A1 - the rank group a task belongs to (asset ``tasks.*.group``).
+    Unknown task or missing mapping -> the general-chat group, so ranking and
+    priors always have a bucket to land in."""
+    return str(task_spec(task).get("group") or DEFAULT_GROUP)
+
+
+def group_prior(group: str) -> list[str]:
+    """Ordered configurable prior for a rank group (asset ``rank_groups``).
+    Empty when the asset has no such group - the router then falls back to
+    admin preference / cost, never raises."""
+    groups = load_taxonomy().get("rank_groups") or {}
+    spec = groups.get(group) or {}
+    prior = spec.get("prior") or []
+    return [str(m) for m in prior]
+
+
+def exploration_rate() -> float:
+    """FIX36 A3 knob (asset ``exploration_rate``), clamped to [0, 0.5]."""
+    try:
+        raw = float(load_taxonomy().get("exploration_rate", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return min(max(raw, 0.0), 0.5)
+
+
+def prior_weight_samples() -> int:
+    """FIX36 A2 knob K in w = n/(n+K): how many live samples it takes for
+    tenant data to outweigh the configured prior. Asset
+    ``prior_weight_samples``; >=1."""
+    try:
+        raw = int(load_taxonomy().get("prior_weight_samples", 20))
+    except (TypeError, ValueError):
+        return 20
+    return max(raw, 1)
+
+
 @dataclass
 class TaskClass:
     task: str
