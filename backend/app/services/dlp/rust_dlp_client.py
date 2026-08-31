@@ -120,6 +120,48 @@ def _ner_registry() -> Any:
     return _NER_REGISTRY
 
 
+_THAI_NER_REGISTRY: Any = None
+
+
+def _thai_ner_registry() -> Any:
+    """Lazily build a registry containing ONLY ``thai_ner`` (FIX37).
+
+    The Rust sidecar has no Thai NER port, and the existing Presidio
+    post-pass above is gated on the tenant's ``ner_enabled`` flag — which
+    is off on this deployment. Without its own post-pass the whole Thai
+    NER layer would be dead the moment ``DLP_ENGINE=rust``, which is the
+    live setting.
+    """
+    global _THAI_NER_REGISTRY
+    if _THAI_NER_REGISTRY is None:
+        from app.services.dlp.detectors.registry import DetectorRegistry
+        from app.services.dlp.detectors.thai_ner import ThaiNerDetector
+
+        reg = DetectorRegistry()
+        reg.register(ThaiNerDetector())
+        _THAI_NER_REGISTRY = reg
+    return _THAI_NER_REGISTRY
+
+
+def _thai_ner_scan_messages_sync(
+    messages: list["Message"],
+    *,
+    scan_system_messages: bool,
+    disabled: list[str],
+) -> list[DetectionMatch]:
+    """Thai-NER-only pass over messages (blocking — call via ``to_thread``)."""
+    if "thai_ner" in disabled:
+        return []
+    try:
+        res = _thai_ner_registry().scan_messages(
+            messages, scan_system_messages=scan_system_messages
+        )
+        return list(res.matches)
+    except Exception as exc:  # noqa: BLE001 — must never break the scan
+        logger.warning("dlp_rust_thai_ner_postpass_failed", error=str(exc)[:200])
+        return []
+
+
 def _ner_scan_text_sync(
     text: str, language: str, disabled: list[str]
 ) -> list[DetectionMatch]:
@@ -373,6 +415,21 @@ class RustDlpClient:
                 scan_system_messages=scan_system_messages,
                 disabled=disabled,
                 ner_skip_roles=ner_skip_roles,
+            )
+
+        # FIX37 Thai NER post-pass. Gated on its OWN flag, not on
+        # ``ner_enabled``: the Thai layer is independent of the English
+        # Presidio analyzer and must reach a deployment that has the
+        # latter switched off. Input direction only — the outbound scan
+        # never routes through here.
+        if direction != "output" and getattr(
+            settings, "dlp_thai_ner_enabled", False
+        ):
+            all_matches = all_matches + await asyncio.to_thread(
+                _thai_ner_scan_messages_sync,
+                messages,
+                scan_system_messages=scan_system_messages,
+                disabled=disabled,
             )
 
         return DetectionResult(

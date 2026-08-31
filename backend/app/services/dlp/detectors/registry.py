@@ -275,6 +275,7 @@ def get_default_registry(
     disabled_detectors: list[str] | None = None,
     *,
     ner_enabled: bool = True,
+    thai_ner: bool | None = None,
 ) -> DetectorRegistry:
     """Return a registry with all built-in detectors, minus any disabled ones.
 
@@ -297,6 +298,13 @@ def get_default_registry(
         The orchestrator constructs both variants once at startup and
         selects per-request from ``ctx.ner_enabled`` — see
         ``GatewayOrchestrator._select_registry``.
+    thai_ner : bool | None
+        FIX37 — controls the *Thai NER axis*, which is independent of
+        ``ner_enabled`` (that one is about the English Presidio
+        analyzer). ``None`` (the default) reads
+        ``settings.dlp_thai_ner_enabled``. Pass ``False`` explicitly for
+        an OUTBOUND registry: the response path scans once per streamed
+        chunk and must stay regex-only.
     """
     from app.services.dlp.detectors.address import AddressDetector
     from app.services.dlp.detectors.api_key_secret import APIKeySecretDetector
@@ -332,6 +340,10 @@ def get_default_registry(
     if disabled_detectors is None:
         from app.core.config import settings
         disabled_detectors = settings.dlp_disabled_detectors_list
+
+    if thai_ner is None:
+        from app.core.config import settings as _s
+        thai_ner = bool(getattr(_s, "dlp_thai_ner_enabled", False))
 
     disabled_set = set(disabled_detectors)
 
@@ -411,6 +423,14 @@ def get_default_registry(
         except ImportError:
             pass
 
+    # FIX37 — Thai NER + nickname lexicon + context enhancer. Registered
+    # on the INPUT registries only (the caller passes ``thai_ner=False``
+    # for the outbound one). With the flag off the registry is byte-for-
+    # byte the pre-FIX37 set, which is what the fallback switch promises.
+    if thai_ner:
+        from app.services.dlp.detectors.thai_ner import ThaiNerDetector
+        all_detectors.append(ThaiNerDetector())
+
     registry = DetectorRegistry()
     for detector in all_detectors:
         if detector.name not in disabled_set:
@@ -421,10 +441,12 @@ def get_default_registry(
     return registry
 
 
-def get_built_in_detector_count(*, ner_enabled: bool = True) -> int:
+def get_built_in_detector_count(
+    *, ner_enabled: bool = True, thai_ner: bool | None = None
+) -> int:
     """Number of built-in detectors (excludes admin-defined custom ones).
 
     Sprint 6 verification helper — custom detectors are dynamic and provided
     at runtime, so they never count toward the built-in total.
     """
-    return len(get_default_registry(ner_enabled=ner_enabled))
+    return len(get_default_registry(ner_enabled=ner_enabled, thai_ner=thai_ner))

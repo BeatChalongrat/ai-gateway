@@ -417,6 +417,27 @@ class Settings(BaseSettings):
     dlp_ner_thai_enabled: bool = False
     dlp_ner_thai_min_ratio: float = 0.30
 
+    # FIX37 — the Thai NER layer (``detectors/thai_ner.py``). Independent
+    # of ``dlp_ner_thai_enabled`` above, which gates the ENGLISH Presidio
+    # analyzer's behaviour on Thai text. This one gates the dedicated Thai
+    # detector: the CRF ThaiNER model in the ner-service, the nickname
+    # lexicon, and the context enhancer that scores them.
+    #
+    # OFF is the pre-FIX37 shape exactly: registries are built without the
+    # detector, so a deployment can fall back with one env var and no
+    # rollback. The detector runs on the INPUT direction only — the
+    # outbound path scans once per streamed chunk (26 window scans for a
+    # long answer) and cannot afford a model pass.
+    #
+    # ``dlp_thai_ner_threshold`` is the confidence bar a scored candidate
+    # must clear; it was chosen by the Phase-3 sweep in
+    # ``backend/evals/mask_quality`` and is the one knob to retune when
+    # the corpus changes. ``dlp_thai_ner_max_chars`` skips the model for
+    # pasted-document turns, where the regex layer still applies.
+    dlp_thai_ner_enabled: bool = True
+    dlp_thai_ner_threshold: float = 0.55
+    dlp_thai_ner_max_chars: int = 4000
+
     # P1 Item 4 — Anthropic prompt caching. When True (default) the
     # Anthropic adapter sends the system prompt as a content-block array
     # with ``cache_control: {type: ephemeral}`` so Claude caches the large,
