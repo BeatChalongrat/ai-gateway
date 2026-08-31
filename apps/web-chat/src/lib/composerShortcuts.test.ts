@@ -13,7 +13,7 @@ import {
 } from "./composerShortcuts";
 
 function msg(id: string, role: Message["role"], content: string, extra?: Partial<Message>): Message {
-  return { id, role, content, status: "complete", created_at: "2026-08-31T00:00:00Z", ...extra } as Message;
+  return { id, role, content, status: "complete", created_at: "2026-08-31T00:00:00Z", ...extra } as unknown as Message;
 }
 
 describe("paste-as-file", () => {

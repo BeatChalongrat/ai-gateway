@@ -31,7 +31,9 @@ import type { Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 import { useModelStore } from "@/stores/modelStore";
 
-import QuickAskPage, { pickRecentConversations, QUICK_RECENT_COUNT } from "./page";
+import { pickRecentConversations, QUICK_RECENT_COUNT } from "@/components/quick/QuickAsk";
+
+import QuickAskPage from "./page";
 
 const chatInitial = useChatStore.getState();
 

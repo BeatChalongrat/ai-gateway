@@ -36,7 +36,7 @@ import { ChatInput } from "./ChatInput";
 const chatInitial = useChatStore.getState();
 
 function msg(id: string, role: Message["role"], content: string): Message {
-  return { id, role, content, status: "complete", created_at: "2026-08-31T00:00:00Z" } as Message;
+  return { id, role, content, status: "complete", created_at: "2026-08-31T00:00:00Z" } as unknown as Message;
 }
 
 function paste(el: Element, text: string) {
