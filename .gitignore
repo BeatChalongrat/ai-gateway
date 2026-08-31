@@ -200,3 +200,8 @@ pairing.json
 docs/OWNER_*.md
 # Landing-redesign scratch/mock dir (design reference; the portal holds the shipped code).
 _landing-redesign/
+
+# FIX33/FIX35 probe + eval artefacts (results land beside the scripts; copies live in docs/audit/)
+scripts/fix33-probe/*.json
+scripts/fix35-router-eval/results.json
+scripts/fix35-router-eval/results.md
