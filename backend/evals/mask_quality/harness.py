@@ -184,6 +184,18 @@ class GatewayClient:
         self.model = CRITERIA["axis_a"]["answer_model"]
         self._provider_key: str | None = None
 
+    def warmup(self) -> None:
+        """Resolve the provider key on the CALLING thread.
+
+        ``resolve_provider_key_async`` runs a statement on the process-wide
+        async engine, whose pooled connections bind to the event loop that
+        first used them. Calling it lazily from several worker threads (each
+        spinning its own ``asyncio.run`` loop) deadlocks on that pool — the
+        first axis-A run hung there for 15 minutes with zero output. Callers
+        MUST call this once before fanning out.
+        """
+        self._resolve_provider_key()
+
     def _resolve_provider_key(self) -> str:
         if self._provider_key:
             return self._provider_key

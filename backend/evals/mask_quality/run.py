@@ -282,6 +282,7 @@ def _cause(m: dict, q: dict, raw_text: str, masked_text: str, answer: str) -> st
 def stage_axis_a(ner: bool, detect: dict, workers: int) -> dict:
     msgs = [m for m in H.load_messages() if m.get("questions")]
     client = H.GatewayClient()
+    client.warmup()
     sysmsg = CRIT["axis_a"]["system_prompt"]
     masked_text = detect["masked_text"]
 
@@ -357,6 +358,7 @@ def stage_axis_b(ner: bool, detect: dict, workers: int) -> dict:
     msgs = [m for m in H.load_messages() if m.get("identity")]
     profiles = H.load_profiles()
     client = H.GatewayClient()
+    client.warmup()
     masked_text = detect["masked_text"]
     by_id = {p["id"]: p for p in profiles}
 

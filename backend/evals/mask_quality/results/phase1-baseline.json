@@ -1,0 +1,450 @@
+{
+ "phase": "fix37-phase1-baseline",
+ "recorded_at": "2026-09-01",
+ "criteria_version": "fix37-phase1",
+ "note": "Baseline recorded BEFORE any detector change. Rule 1 of FIX37.",
+ "existing_dlp_eval": {
+  "engines_agree": true,
+  "corpus_sentences": 108,
+  "corpus_fires": {
+   "python": 0,
+   "rust": 0
+  },
+  "categories": {
+   "api_key_secret": {
+    "caught": 22,
+    "total": 25,
+    "recall": 0.88,
+    "swallow": 0
+   },
+   "credit_card": {
+    "caught": 20,
+    "total": 20,
+    "recall": 1.0,
+    "swallow": 0
+   },
+   "email": {
+    "caught": 21,
+    "total": 21,
+    "recall": 1.0,
+    "swallow": 0
+   },
+   "phone": {
+    "caught": 22,
+    "total": 25,
+    "recall": 0.88,
+    "swallow": 0
+   },
+   "thai_address": {
+    "caught": 13,
+    "total": 25,
+    "recall": 0.52,
+    "swallow": 0
+   },
+   "thai_bank_account": {
+    "caught": 20,
+    "total": 22,
+    "recall": 0.9091,
+    "swallow": 0
+   },
+   "thai_name": {
+    "caught": 25,
+    "total": 40,
+    "recall": 0.625,
+    "swallow": 0
+   },
+   "thai_national_id": {
+    "caught": 23,
+    "total": 23,
+    "recall": 1.0,
+    "swallow": 0
+   }
+  }
+ },
+ "footprint": {
+  "images": {
+   "ai-gateway-backend:latest": "1.11GB",
+   "ai-gateway-dlp-sidecar:latest": "47.9MB",
+   "ai-gateway-ner-service:latest": "1.81GB"
+  },
+  "idle_memory": {
+   "backend": "198.9MiB",
+   "dlp-sidecar": "25.21MiB",
+   "ner-service": "1.528GiB / 4GiB limit"
+  },
+  "ner_service_model": "en=en_core_web_lg (no Thai model installed)",
+  "org_settings_ner_enabled": false
+ },
+ "corpus": {
+  "messages": 72,
+  "scenarios": {
+   "complaint": 12,
+   "sales_followup": 12,
+   "hr_case": 12,
+   "support_ticket": 12,
+   "appointment": 8,
+   "handoff": 16
+  },
+  "case_types": {
+   "name_with_prefix": 18,
+   "phone_dashed": 11,
+   "address_fragment": 13,
+   "name_common_word": 20,
+   "decoy": 27,
+   "phone_plain": 8,
+   "name_no_prefix": 20,
+   "email": 15,
+   "thai_english_mix": 10,
+   "nickname": 16,
+   "bank_account": 5,
+   "phone_thai_digits": 4,
+   "national_id": 5,
+   "phone_spaced": 6,
+   "quasi_identifier": 14,
+   "credit_card": 2,
+   "api_key": 3
+  },
+  "pii_types": {
+   "thai_name": 75,
+   "phone": 29,
+   "thai_address": 13,
+   "email": 15,
+   "thai_bank_account": 5,
+   "thai_national_id": 5,
+   "credit_card": 2,
+   "api_key_secret": 3
+  },
+  "pii_values": 147,
+  "decoys": 115,
+  "questions_context": 97,
+  "questions_identity": 65,
+  "reid_messages": 12,
+  "validation_problems": 0
+ },
+ "detection": {
+  "ner_off": {
+   "pii_masked_rate": {
+    "overall": 0.8095,
+    "by_type": {
+     "api_key_secret": 1.0,
+     "credit_card": 1.0,
+     "email": 1.0,
+     "phone": 0.8966,
+     "thai_address": 0.6154,
+     "thai_bank_account": 1.0,
+     "thai_name": 0.7333,
+     "thai_national_id": 1.0
+    },
+    "by_case_type": {
+     "address_fragment": 0.8,
+     "api_key": 1.0,
+     "bank_account": 0.9167,
+     "credit_card": 1.0,
+     "decoy": 0.82,
+     "email": 0.9118,
+     "name_common_word": 0.8974,
+     "name_no_prefix": 0.913,
+     "name_with_prefix": 0.9189,
+     "national_id": 1.0,
+     "nickname": 0.3871,
+     "phone_dashed": 0.84,
+     "phone_plain": 0.9,
+     "phone_spaced": 0.6154,
+     "phone_thai_digits": 0.375,
+     "quasi_identifier": 0.6667,
+     "thai_english_mix": 0.9
+    }
+   },
+   "decoy_survival": 1.0,
+   "counts": {
+    "pii_values": 147,
+    "decoys": 115
+   }
+  },
+  "ner_on": {
+   "pii_masked_rate": {
+    "overall": 0.8095,
+    "by_type": {
+     "api_key_secret": 1.0,
+     "credit_card": 1.0,
+     "email": 1.0,
+     "phone": 0.8966,
+     "thai_address": 0.6154,
+     "thai_bank_account": 1.0,
+     "thai_name": 0.7333,
+     "thai_national_id": 1.0
+    },
+    "by_case_type": {
+     "address_fragment": 0.8,
+     "api_key": 1.0,
+     "bank_account": 0.9167,
+     "credit_card": 1.0,
+     "decoy": 0.82,
+     "email": 0.9118,
+     "name_common_word": 0.8974,
+     "name_no_prefix": 0.913,
+     "name_with_prefix": 0.9189,
+     "national_id": 1.0,
+     "nickname": 0.3871,
+     "phone_dashed": 0.84,
+     "phone_plain": 0.9,
+     "phone_spaced": 0.6154,
+     "phone_thai_digits": 0.375,
+     "quasi_identifier": 0.6667,
+     "thai_english_mix": 0.9
+    }
+   },
+   "decoy_survival": 1.0,
+   "counts": {
+    "pii_values": 147,
+    "decoys": 115
+   }
+  },
+  "ner_on_equals_ner_off": true,
+  "leaked_values": [
+   {
+    "id": "cp04",
+    "type": "thai_name"
+   },
+   {
+    "id": "cp08",
+    "type": "thai_name"
+   },
+   {
+    "id": "cp09",
+    "type": "thai_address"
+   },
+   {
+    "id": "sf02",
+    "type": "thai_name"
+   },
+   {
+    "id": "sf03",
+    "type": "thai_address"
+   },
+   {
+    "id": "sf05",
+    "type": "thai_name"
+   },
+   {
+    "id": "sf06",
+    "type": "thai_name"
+   },
+   {
+    "id": "sf08",
+    "type": "thai_address"
+   },
+   {
+    "id": "sf11",
+    "type": "thai_name"
+   },
+   {
+    "id": "sf11",
+    "type": "thai_name"
+   },
+   {
+    "id": "hr02",
+    "type": "thai_name"
+   },
+   {
+    "id": "hr04",
+    "type": "thai_name"
+   },
+   {
+    "id": "hr08",
+    "type": "thai_name"
+   },
+   {
+    "id": "hr08",
+    "type": "phone"
+   },
+   {
+    "id": "hr10",
+    "type": "thai_name"
+   },
+   {
+    "id": "st03",
+    "type": "thai_name"
+   },
+   {
+    "id": "st07",
+    "type": "thai_name"
+   },
+   {
+    "id": "st09",
+    "type": "phone"
+   },
+   {
+    "id": "st11",
+    "type": "thai_name"
+   },
+   {
+    "id": "ap01",
+    "type": "thai_address"
+   },
+   {
+    "id": "ap02",
+    "type": "thai_name"
+   },
+   {
+    "id": "ap04",
+    "type": "thai_address"
+   },
+   {
+    "id": "ap06",
+    "type": "thai_name"
+   },
+   {
+    "id": "ap06",
+    "type": "phone"
+   },
+   {
+    "id": "hd03",
+    "type": "thai_name"
+   },
+   {
+    "id": "hd07",
+    "type": "thai_name"
+   },
+   {
+    "id": "hd12",
+    "type": "thai_name"
+   },
+   {
+    "id": "hd16",
+    "type": "thai_name"
+   }
+  ]
+ },
+ "latency_ms": {
+  "ner": false,
+  "input": {
+   "short": {
+    "chars": 19,
+    "p50": 0.501,
+    "p95": 1.265,
+    "p99": 2.334
+   },
+   "medium": {
+    "chars": 211,
+    "p50": 0.99,
+    "p95": 1.217,
+    "p99": 1.322
+   },
+   "long": {
+    "chars": 2400,
+    "p50": 9.994,
+    "p95": 12.231,
+    "p99": 13.539
+   }
+  },
+  "output_window": {
+   "chars": 160,
+   "p50": 0.682,
+   "p95": 1.108,
+   "p99": 1.177
+  },
+  "engines": {
+   "rust_sidecar_rtt": {
+    "short": {
+     "chars": 19,
+     "p50": 1.572,
+     "p95": 2.434,
+     "p99": 2.652
+    },
+    "medium": {
+     "chars": 211,
+     "p50": 3.591,
+     "p95": 4.887,
+     "p99": 5.238
+    },
+    "long": {
+     "chars": 2400,
+     "p50": 17.162,
+     "p95": 23.853,
+     "p99": 25.917
+    },
+    "output_window": {
+     "chars": 160,
+     "p50": 3.368,
+     "p95": 4.899,
+     "p99": 5.175
+    }
+   }
+  }
+ },
+ "scan_rounds_per_answer": {
+  "method": "client-visible SSE content deltas (lower bound on window scans)",
+  "short_answer": {
+   "samples": 5,
+   "per_answer": [
+    5.0,
+    8.0,
+    7.0,
+    2.0,
+    3.0
+   ],
+   "p50": 5.0,
+   "p95": 8.0,
+   "mean_answer_chars": 613,
+   "chars_per_scan": 122.7
+  },
+  "long_answer": {
+   "samples": 5,
+   "per_answer": [
+    26.0,
+    26.0,
+    26.0,
+    26.0,
+    26.0
+   ],
+   "p50": 26.0,
+   "p95": 26.0,
+   "mean_answer_chars": 4827,
+   "chars_per_scan": 185.7
+  }
+ },
+ "axis_a": {
+  "ner": false,
+  "model": "google/gemini-2.5-flash",
+  "questions": {
+   "context": 97,
+   "identity": 65,
+   "errors": 0
+  },
+  "raw_context_accuracy": 0.9691,
+  "comprehension_retention": 1.0,
+  "identity_leak": 0.1077,
+  "identity_leak_raw_control": 1.0,
+  "failure_causes": {}
+ },
+ "axis_b": {
+  "ner": false,
+  "n": 12,
+  "chance": 0.1,
+  "closed_set_accuracy": {
+   "overall": 0.75,
+   "pii_leak": 1.0,
+   "quasi": 0.6667,
+   "n_by_cause": {
+    "pii_leak": 3,
+    "quasi": 9
+   }
+  },
+  "open_attribute_recall": {
+   "overall": 0.1389,
+   "pii_leak": 0.3333,
+   "quasi": 0.0741
+  }
+ },
+ "axis_b_by_quasi_strength": {
+  "quasi_strong": {
+   "correct": 6,
+   "n": 6
+  },
+  "quasi_weak": {
+   "correct": 3,
+   "n": 6
+  }
+ }
+}
