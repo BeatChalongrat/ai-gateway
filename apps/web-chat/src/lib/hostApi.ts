@@ -133,6 +133,14 @@ function unwrap<T>(r: HostResult<T>): T {
   return r.data as T;
 }
 
+/** FIX34 Part A — the host-owned shell preferences (shell.prefs.get/set). */
+export interface ShellPrefsDto {
+  /** Electron accelerator for the quick-ask window (e.g. "CommandOrControl+Shift+A"). */
+  quickHotkey: string;
+  /** What a single click on the tray icon opens (§2.5: default "main"). */
+  trayClick: "main" | "quick";
+}
+
 export class HostError extends Error {
   constructor(public readonly code: string) {
     super(`host refused: ${code}`);
@@ -178,6 +186,14 @@ export const hostApi = {
   oauthStatus: async (connectorIds: string[]) =>
     unwrap<{ statuses: ConnectorOAuthStatusDto[] }>(await bridge.hostQuery("connectors.oauthStatus", { connectorIds })).statuses,
   addCustomConnector: () => bridge.hostQuery<{ added: boolean }>("connectors.addCustomDialog", {}, 300_000),
+
+  // FIX34 Part A — shell prefs + the quick-ask window hand-offs. A refused
+  // hotkey comes back as { ok:false, error:"hotkey-taken" | "hotkey-<reason>" }
+  // with the UNCHANGED prefs in data; the page shows the reason.
+  getShellPrefs: async () => unwrap<ShellPrefsDto>(await bridge.hostQuery("shell.prefs.get")),
+  setShellPrefs: (patch: Partial<ShellPrefsDto>) => bridge.hostQuery<ShellPrefsDto>("shell.prefs.set", patch),
+  quickClose: () => bridge.hostQuery<{ closed: boolean }>("quick.close", {}, 5_000),
+  quickOpenInMain: (conversationId: string) => bridge.hostQuery<{ opened: boolean }>("quick.openInMain", { conversationId }, 10_000),
 
   // settings (local subset)
   getSettings: async () => unwrap<SettingsSnapshot>(await bridge.hostQuery("settings.get")),

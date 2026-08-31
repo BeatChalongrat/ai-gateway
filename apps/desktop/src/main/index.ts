@@ -47,7 +47,8 @@ import { runE4Probe } from "./probes-e4";
 import { SidecarClient } from "./sidecar-client";
 import { TaskScheduler } from "./task-scheduler";
 import { buildMenuTemplate } from "./app-menu";
-import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore } from "./window-state";
+import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore, type Rect } from "./window-state";
+import { describeAccelerator, ShellPrefsStore, validateAccelerator, type ShellPrefs } from "./shell-prefs";
 import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
 import { PortalAuthClient, fingerprint } from "./portal-auth";
 import { PromptAssembler } from "./prompt-assembler";
@@ -78,6 +79,19 @@ let coordinator: TurnCoordinator | null = null;
 let sidecar: SidecarClient | null = null;
 let scheduler: TaskScheduler | null = null;
 let grants: GrantStore | null = null;
+// FIX34 Part A — the quick-ask window (created lazily, hidden not destroyed)
+// and the host-owned shell prefs (its hotkey, the tray-click behaviour).
+let quickWindow: BrowserWindow | null = null;
+let quickState: WindowStateStore | null = null;
+let shellPrefs: ShellPrefsStore | null = null;
+/** The accelerator currently registered for the quick-ask window (null = none). */
+let quickHotkeyRegistered: string | null = null;
+/** When the quick window was last shown — blur within QUICK_BLUR_GRACE_MS is ignored
+ * (Windows fires a spurious blur while a frameless window is taking focus). */
+let quickShownAt = 0;
+let quickPendingShow = false;
+const QUICK_BLUR_GRACE_MS = 250;
+const QUICK_DEFAULT_SIZE = { width: 680, height: 460 };
 
 // ── identity (FIX20 §1): the app is SRAN Desktop, one client of SRAN AI
 // Gateway. The AppUserModelId MUST equal electron-builder's appId — the
@@ -162,12 +176,20 @@ void app.whenReady().then(async () => {
   // FIX33 B2/B4 — remembered bounds / maximized / always-on-top.
   windowState = new WindowStateStore(path.join(app.getPath("userData"), "window-state.json"));
   windowState.load();
+  // FIX34 Part A — the quick-ask window remembers its own place, and the shell
+  // prefs (quick hotkey, tray click) live in their own host file.
+  quickState = new WindowStateStore(path.join(app.getPath("userData"), "quick-window-state.json"));
+  quickState.load();
+  shellPrefs = new ShellPrefsStore(path.join(app.getPath("userData"), "shell-prefs.json"));
+  const prefs = shellPrefs.load();
+  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick}`);
   log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
   log.info(`userData=${app.getPath("userData")}`);
 
   installSessionPolicy(session.defaultSession);
   createTray();
   registerHotkey();
+  registerQuickHotkey(prefs.quickHotkey, "boot");
   applyLoginItem();
 
   mainWindow = createMainWindow();
@@ -343,6 +365,13 @@ void app.whenReady().then(async () => {
         // minimizeToTray is read from settings at window-close time; no effect to apply now.
       },
       contextManager,
+      // FIX34 Part A: the quick-ask window's control-plane hooks.
+      shell: {
+        prefsGet: () => shellPrefs!.current(),
+        prefsSet: (patch) => applyShellPrefs(patch),
+        quickClose: () => hideQuickWindow("page"),
+        quickOpenInMain: (conversationId) => quickOpenInMain(conversationId),
+      },
     },
     log,
   );
@@ -745,7 +774,13 @@ function createTray(): void {
   tray = new Tray(icon);
   tray.setToolTip("SRAN Desktop");
   rebuildTrayMenu();
-  tray.on("click", () => toggleMainWindow());
+  // §2.5 (FIX34): what a click opens is a SETTING (Claude on Windows forces the
+  // quick entry with no way to change it — anthropics/claude-code#22420). The
+  // default is the ordinary-app behaviour: the main window.
+  tray.on("click", () => {
+    if (shellPrefs?.current().trayClick === "quick") toggleQuickWindow("tray");
+    else toggleMainWindow();
+  });
   log.info("tray created");
 }
 
@@ -755,6 +790,7 @@ function rebuildTrayMenu(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Show / Hide", click: () => toggleMainWindow() },
+      { label: `Quick ask\t${describeAccelerator(shellPrefs?.current().quickHotkey ?? "")}`, click: () => toggleQuickWindow("tray-menu") },
       {
         label: "Always on top",
         type: "checkbox",
@@ -780,7 +816,202 @@ function rebuildTrayMenu(): void {
 function registerHotkey(): void {
   const ok = globalShortcut.register(config.hotkey, toggleMainWindow);
   if (ok) log.info(`global hotkey registered: ${config.hotkey}`);
-  else log.warn(`global hotkey NOT registered (held by another app?): ${config.hotkey}`);
+  else {
+    log.warn(`global hotkey NOT registered (held by another app?): ${config.hotkey}`);
+    notifyHotkeyFailure("main window", config.hotkey);
+  }
+}
+
+// ── FIX34 Part A: the quick-ask window ─────────────────────────────────────
+
+/** Registers the quick-ask hotkey. A failure (another app holds the key) is
+ * TOLD to the user — an OS notification at boot, the settings page's error
+ * on a change — never swallowed. Returns false when the OS refused it. */
+function registerQuickHotkey(accelerator: string, origin: "boot" | "settings"): boolean {
+  if (quickHotkeyRegistered === accelerator) return true;
+  let ok = false;
+  try {
+    ok = globalShortcut.register(accelerator, () => toggleQuickWindow("hotkey"));
+  } catch (err) {
+    log.warn(`quick-ask hotkey register threw for ${accelerator}: ${(err as Error).message}`);
+    ok = false;
+  }
+  if (ok) {
+    if (quickHotkeyRegistered) globalShortcut.unregister(quickHotkeyRegistered);
+    quickHotkeyRegistered = accelerator;
+    log.info(`quick-ask hotkey registered: ${accelerator}`);
+    rebuildTrayMenu();
+    return true;
+  }
+  log.warn(`quick-ask hotkey NOT registered (held by another app?): ${accelerator}`);
+  if (origin === "boot") notifyHotkeyFailure("quick-ask window", accelerator);
+  return false;
+}
+
+function notifyHotkeyFailure(what: string, accelerator: string): void {
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: "SRAN Desktop — shortcut unavailable",
+        body: `${describeAccelerator(accelerator)} for the ${what} is held by another app. Change it in Settings.`,
+      }).show();
+    }
+  } catch (err) {
+    log.warn(`hotkey notification failed: ${(err as Error).message}`);
+  }
+}
+
+/** shell.prefs.set — validate, apply the OS side-effects, persist. A hotkey
+ * the OS refuses is NOT stored: the previous one keeps working and the page
+ * gets the reason. */
+function applyShellPrefs(patch: Record<string, unknown>): { ok: boolean; prefs: ShellPrefs; error?: string } {
+  const store = shellPrefs!;
+  const next: Partial<ShellPrefs> = {};
+  if (patch["trayClick"] !== undefined) {
+    if (patch["trayClick"] !== "main" && patch["trayClick"] !== "quick") return { ok: false, prefs: store.current(), error: "trayClick-invalid" };
+    next.trayClick = patch["trayClick"];
+  }
+  if (patch["quickHotkey"] !== undefined) {
+    const v = validateAccelerator(typeof patch["quickHotkey"] === "string" ? patch["quickHotkey"] : null);
+    if (!v.ok) return { ok: false, prefs: store.current(), error: `hotkey-${v.reason}` };
+    if (v.accelerator === config.hotkey) return { ok: false, prefs: store.current(), error: "hotkey-taken-by-main" };
+    if (!registerQuickHotkey(v.accelerator, "settings")) return { ok: false, prefs: store.current(), error: "hotkey-taken" };
+    next.quickHotkey = v.accelerator;
+  }
+  const prefs = store.update(next);
+  rebuildTrayMenu();
+  return { ok: true, prefs };
+}
+
+function quickPageUrl(): string {
+  return `${config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8))}/quick`;
+}
+
+function createQuickWindow(): BrowserWindow {
+  const saved = quickState?.current().bounds ?? null;
+  const displays = screen.getAllDisplays().map((d) => d.workArea);
+  const bounds = sanitizeBounds(saved, displays);
+  const win = new BrowserWindow({
+    ...(bounds ? bounds : { ...QUICK_DEFAULT_SIZE, ...quickDefaultPosition() }),
+    minWidth: 480,
+    minHeight: 320,
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: "SRAN Desktop — Quick ask",
+    icon: path.join(APP_ROOT, "assets", "app.ico"),
+    autoHideMenuBar: true,
+    webPreferences: buildWebPreferences({
+      preloadPath: path.join(__dirname, "..", "preload", "index.js"),
+      isRelease,
+    }),
+  });
+  win.setMenuBarVisibility(false);
+  const remember = () => {
+    if (!win.isDestroyed() && win.isVisible()) quickState?.update({ bounds: win.getNormalBounds() });
+  };
+  win.on("resize", remember);
+  win.on("move", remember);
+  win.on("page-title-updated", (event) => event.preventDefault());
+  win.once("ready-to-show", () => {
+    if (quickPendingShow) {
+      quickPendingShow = false;
+      presentQuickWindow(win);
+    }
+  });
+  // Close-on-blur, the quick-entry idiom (Spotlight, Claude, Raycast): the
+  // window is for one question; clicking anywhere else dismisses it.
+  win.on("blur", () => {
+    if (win.isDestroyed() || !win.isVisible()) return;
+    if (Date.now() - quickShownAt < QUICK_BLUR_GRACE_MS) return;
+    hideQuickWindow("blur");
+  });
+  win.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      hideQuickWindow("close");
+    }
+  });
+  win.on("closed", () => {
+    quickWindow = null;
+  });
+  win.webContents.on("did-finish-load", () => log.info(`quick did-finish-load ${redactUrl(win.webContents.getURL())}`));
+  win.webContents.on("did-fail-load", (_e, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) log.error(`quick did-fail-load ${code} ${description} ${redactUrl(url)}`);
+  });
+  bridge?.addWindow(win);
+  void win.loadURL(quickPageUrl()).catch((err: Error) => log.warn(`quick load rejected: ${err.message}`));
+  return win;
+}
+
+/** First-open position: centred horizontally in the top third of the display
+ * under the cursor — where a launcher box is expected to appear. */
+function quickDefaultPosition(): { x: number; y: number } {
+  const d = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return {
+    x: Math.round(d.x + (d.width - QUICK_DEFAULT_SIZE.width) / 2),
+    y: Math.round(d.y + d.height * 0.18),
+  };
+}
+
+function presentQuickWindow(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  // Re-check the saved place against the displays that exist NOW (a monitor
+  // may have gone away since the window was created).
+  const saved = quickState?.current().bounds ?? null;
+  const ok = sanitizeBounds(saved, screen.getAllDisplays().map((d) => d.workArea));
+  if (!ok) {
+    const size: Rect = { ...quickDefaultPosition(), ...QUICK_DEFAULT_SIZE };
+    win.setBounds(size);
+  }
+  quickShownAt = Date.now();
+  win.show();
+  win.focus();
+  log.info("quick-ask window shown");
+}
+
+function showQuickWindow(origin: string): void {
+  if (!sessionController?.hasSession) {
+    // Signed out: the quick box cannot work; the main window carries the sign-in view.
+    log.info(`quick-ask (${origin}): no session — showing the main window instead`);
+    showMainWindow();
+    return;
+  }
+  if (!quickWindow || quickWindow.isDestroyed()) {
+    quickPendingShow = true;
+    quickWindow = createQuickWindow();
+    log.info(`quick-ask (${origin}): window created, showing when ready`);
+    return;
+  }
+  presentQuickWindow(quickWindow);
+}
+
+function hideQuickWindow(reason: string): void {
+  if (!quickWindow || quickWindow.isDestroyed() || !quickWindow.isVisible()) return;
+  quickState?.update({ bounds: quickWindow.getNormalBounds() }, true);
+  quickWindow.hide();
+  log.info(`quick-ask window hidden (${reason})`);
+}
+
+function toggleQuickWindow(origin: string): void {
+  if (quickWindow && !quickWindow.isDestroyed() && quickWindow.isVisible()) hideQuickWindow(origin);
+  else showQuickWindow(origin);
+}
+
+/** quick.openInMain — hand a quick-ask conversation to the main window. The
+ * page has already turned memory back on (it is a normal saved chat now). */
+function quickOpenInMain(conversationId: string): void {
+  hideQuickWindow("open-in-main");
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  const pageOrigin = config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+  void win.loadURL(`${pageOrigin}/chat/${encodeURIComponent(conversationId)}`);
+  showMainWindow();
+  log.info(`quick-ask → main window: conv=${conversationId}`);
 }
 function applyLoginItem(): void {
   const current = app.getLoginItemSettings();

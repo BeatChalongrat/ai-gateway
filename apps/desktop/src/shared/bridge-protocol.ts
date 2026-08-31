@@ -67,6 +67,11 @@ export const HOST_QUERY_OPS = Object.freeze([
   // (the page asks; the host summarises with the user's instructions and sets
   // the boundary). Page-only ops, never tools — the model cannot compact.
   "context.info", "context.compact",
+  // FIX34 Part A: the quick-ask window. shell.prefs.* read/write the HOST-owned
+  // shell preferences (quick-ask hotkey, tray-click behaviour — never a tool);
+  // quick.close hides the quick-ask window (the page's Esc); quick.openInMain
+  // hands a quick-ask conversation to the main window. Page-only, all four.
+  "shell.prefs.get", "shell.prefs.set", "quick.close", "quick.openInMain",
 ] as const);
 export type HostQueryOp = (typeof HOST_QUERY_OPS)[number];
 export const E3_SUPPORTED_OPS: readonly HostQueryOp[] = Object.freeze(["session.logout", "diag.reportRendererError"]);
@@ -101,6 +106,10 @@ export interface TurnSubmitPayload {
   // branching) instead of appending a linear turn, so the ◀ n/m ▶ navigator
   // works. A field on the EXISTING message (like modelId), NOT a new message type.
   readonly editMessageId: string | null;
+  // FIX34 Part A: a turn from the quick-ask window — answered with NO tools (no
+  // tool list, so no consent prompt can ever appear in the small window). A
+  // boolean on the EXISTING message, validated below, like imageMode.
+  readonly quick: boolean;
 }
 export interface TurnCancelPayload {
   readonly conversationId: string;
@@ -178,7 +187,8 @@ export function validateTurnSubmit(payload: unknown): Validated<TurnSubmitPayloa
   const editMessageId = p["editMessageId"];
   if (editMessageId !== undefined && editMessageId !== null && typeof editMessageId !== "string") return { ok: false, reason: "editMessageId-not-string" };
   if (typeof editMessageId === "string" && editMessageId.length > 128) return { ok: false, reason: "editMessageId-too-long" };
-  return { ok: true, value: { conversationId, text, attachmentHandles: handles, modelId: typeof modelId === "string" && modelId ? modelId : null, imageMode, editMessageId: typeof editMessageId === "string" && editMessageId ? editMessageId : null } };
+  const quick = p["quick"] === true;
+  return { ok: true, value: { conversationId, text, attachmentHandles: handles, modelId: typeof modelId === "string" && modelId ? modelId : null, imageMode, editMessageId: typeof editMessageId === "string" && editMessageId ? editMessageId : null, quick } };
 }
 
 export function validateTurnCancel(payload: unknown): Validated<TurnCancelPayload> {

@@ -63,7 +63,10 @@ export type HostQueryOp =
   // from the page; the host opens a native picker).
   | "browser.pickExtensionFolder"
   // FIX33 A-D5: context meter numbers + "summarise and continue" (page-only).
-  | "context.info" | "context.compact";
+  | "context.info" | "context.compact"
+  // FIX34 Part A: host-owned shell prefs (quick-ask hotkey, tray click) and the
+  // quick-ask window's two hand-offs (close, open this chat in the main window).
+  | "shell.prefs.get" | "shell.prefs.set" | "quick.close" | "quick.openInMain";
 
 export interface HostResult<T = unknown> {
   ok: boolean;
@@ -129,6 +132,10 @@ function nonce(): string | null {
 
 class BridgeClient {
   private started = false;
+  // FIX34 Part A: set by the /quick route while it is mounted. Every turn
+  // submitted from that page carries `quick: true`, which the host answers
+  // with NO tools (so no consent card can ever appear in the small window).
+  private quickAsk = false;
   private sinks = new Map<string, TurnSink>();
   private consentHandlers = new Set<(r: ConsentRequest) => void>();
   private errorHandlers = new Set<(code: string, message: string) => void>();
@@ -140,10 +147,19 @@ class BridgeClient {
   // cursor sent in ui.ready so the host replays only what was missed.
   private lastSeq = new Map<string, number>();
 
+  /** FIX34 Part A: mark this page as the quick-ask window (tool-less turns). */
+  setQuickAsk(on: boolean): void {
+    this.quickAsk = on;
+  }
+  get isQuickAsk(): boolean {
+    return this.quickAsk;
+  }
+
   /** Test-only: drop all state so a fresh fake webview can be wired. Never
    *  called in production (start() is idempotent there). */
   resetForTest(): void {
     this.started = false;
+    this.quickAsk = false;
     this.sinks.forEach((_, id) => this.closeSink(id));
     this.sinks.clear();
     this.consentHandlers.clear();
@@ -259,7 +275,7 @@ class BridgeClient {
     // A submit resets the resume cursor: this turn's events start a fresh seq.
     this.lastSeq.delete(conversationId);
     const body = this.openSink(conversationId, signal, true);
-    const posted = this.post("turn.submit", { conversationId, text, attachmentHandles, modelId, imageMode, editMessageId });
+    const posted = this.post("turn.submit", { conversationId, text, attachmentHandles, modelId, imageMode, editMessageId, quick: this.quickAsk });
     if (!posted) {
       // No bridge/nonce — fail like an unreachable transport so the store's
       // pre-error path runs instead of hanging on an open stream.

@@ -17,9 +17,16 @@
 // Outbound messages go to the TOP FRAME only (webContents.send), never to a
 // sub-frame. session.changed is defined and never sent (E2: the page needs no
 // telling about cookie rotation).
+//
+// FIX34 Part A: MORE THAN ONE window. The main window is attached first
+// (attach); the quick-ask window is added with addWindow. The inbound side
+// was already per-webContents (nonce per sender id); the outbound side now
+// routes by "who asked" (bridge-routing.ts): a turn's events go to the window
+// that submitted it, a host.result to the requester, everything else to main.
 
 import { ipcMain, type BrowserWindow, type IpcMainEvent, type WebContents } from "electron";
 import { randomBytes } from "node:crypto";
+import { OutboundRouter } from "./bridge-routing";
 import { isTrustedSender } from "./ipc-guard";
 import { redactUrl, type Logger } from "./logger";
 import { fingerprint } from "./portal-auth";
@@ -52,7 +59,10 @@ export class BridgeChannel {
   /** nonce per webContents id — replaced on every top-frame navigation. */
   private readonly nonces = new Map<number, string>();
   private handlers: BridgeHandlers | null = null;
-  private window: BrowserWindow | null = null;
+  /** Every attached window by webContents id (main + quick-ask). */
+  private readonly windows = new Map<number, BrowserWindow>();
+  private readonly router = new OutboundRouter();
+  private ipcInstalled = false;
   /** Every accepted inbound, for the probes' evidence. */
   readonly accepted: { type: string; origin: string }[] = [];
 
@@ -62,20 +72,45 @@ export class BridgeChannel {
   ) {}
 
   attach(window: BrowserWindow, handlers: BridgeHandlers): void {
-    this.window = window;
     this.handlers = handlers;
+    this.register(window, true);
+    if (this.ipcInstalled) return;
+    this.ipcInstalled = true;
     this.guardedOn(IPC_CHANNELS.nonce, (event) => {
       // Minted per navigation: the preload runs once per document, so every
       // request here IS a new top-frame document.
       const nonce = randomBytes(32).toString("base64url");
       this.nonces.set(event.sender.id, nonce);
-      this.log.info(`Bridge nonce issued to the top document (sha256/8=${fingerprint(nonce)})`);
+      this.log.info(`Bridge nonce issued to the top document (sha256/8=${fingerprint(nonce)}, wc=${event.sender.id})`);
       event.returnValue = nonce;
     }, (event) => {
       event.returnValue = null;
     });
     this.guardedOn(IPC_CHANNELS.inbound, (event, message) => this.onInbound(event, message));
     this.log.info(`Bridge attached: channels ${IPC_CHANNELS.nonce}, ${IPC_CHANNELS.inbound} (in), ${IPC_CHANNELS.outbound} (out)`);
+  }
+
+  /** FIX34 Part A: a second window on the same origin (the quick-ask window).
+   * Same channels, same guards; only the outbound routing knows it exists. */
+  addWindow(window: BrowserWindow): void {
+    this.register(window, false);
+    this.log.info(`Bridge: window added (wc=${window.webContents.id})`);
+  }
+
+  private register(window: BrowserWindow, main: boolean): void {
+    const id = window.webContents.id;
+    this.windows.set(id, window);
+    this.router.registerWindow(id, { main });
+    window.once("closed", () => {
+      this.windows.delete(id);
+      this.router.unregisterWindow(id);
+      this.nonces.delete(id);
+    });
+  }
+
+  /** Which window (webContents id) owns a conversation's turn stream, if any. */
+  ownerOf(conversationId: string): number | null {
+    return this.router.ownerOf(conversationId);
   }
 
   /** The senderFrame check (C-2), quoted in the report. Runs before ANY
@@ -121,6 +156,7 @@ export class BridgeChannel {
     }
     const h = this.handlers;
     if (!h) return;
+    const sender = event.sender.id;
     // The closed set. Each arm validates its payload; nothing else exists.
     switch (envelope.type) {
       case "turn.submit": {
@@ -130,6 +166,7 @@ export class BridgeChannel {
           return;
         }
         this.accept("turn.submit", origin);
+        this.router.noteInbound(sender, { type: "turn.submit", payload: v.value });
         h.onTurnSubmit(v.value);
         return;
       }
@@ -140,6 +177,7 @@ export class BridgeChannel {
           return;
         }
         this.accept("turn.cancel", origin);
+        this.router.noteInbound(sender, { type: "turn.cancel", payload: v.value });
         h.onTurnCancel(v.value);
         return;
       }
@@ -160,7 +198,8 @@ export class BridgeChannel {
           return;
         }
         this.accept("ui.ready", origin);
-        this.log.info(`BRIDGE HANDSHAKE: ui.ready (nonce verified) conv=${v.value.conversationId ?? "-"} lastSeq=${v.value.lastSeq}`);
+        this.log.info(`BRIDGE HANDSHAKE: ui.ready (nonce verified) conv=${v.value.conversationId ?? "-"} lastSeq=${v.value.lastSeq} wc=${sender}`);
+        this.router.noteInbound(sender, { type: "ui.ready", payload: v.value });
         h.onUiReady(v.value);
         return;
       }
@@ -171,6 +210,7 @@ export class BridgeChannel {
           return;
         }
         this.accept(`host.query:${v.value.op}`, origin);
+        this.router.noteInbound(sender, { type: "host.query", payload: v.value });
         h.onHostQuery(v.value);
         return;
       }
@@ -182,9 +222,11 @@ export class BridgeChannel {
     this.log.info(`BRIDGE INBOUND: ${type} from ${origin}`);
   }
 
-  // ── outbound: top frame only ──────────────────────────────────────────────
+  // ── outbound: top frame of the window that asked ──────────────────────────
   post(type: OutboundType, payload: unknown): void {
-    const wc: WebContents | undefined = this.window?.webContents;
+    const target = this.router.targetFor(type, payload);
+    if (target === null) return;
+    const wc: WebContents | undefined = this.windows.get(target)?.webContents;
     if (!wc || wc.isDestroyed()) return;
     wc.send(IPC_CHANNELS.outbound, { type, payload });
   }

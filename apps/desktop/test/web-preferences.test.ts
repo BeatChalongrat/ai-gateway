@@ -47,8 +47,13 @@ describe("webPreferences", () => {
   it("is what the main window is built with (source-text link, see LIMITS)", () => {
     const source = fs.readFileSync(INDEX_TS, "utf8");
     expect(source).toMatch(/webPreferences:\s*buildWebPreferences\(/);
-    // Exactly one BrowserWindow is constructed in E1.
-    expect(source.match(/new BrowserWindow\(/g)?.length).toBe(1);
+    // E1 built exactly one BrowserWindow; FIX34 Part A adds the quick-ask
+    // window. The invariant that matters: EVERY window is built with the
+    // locked preferences — the two counts must stay equal.
+    const windows = source.match(/new BrowserWindow\(/g)?.length ?? 0;
+    const locked = source.match(/webPreferences:\s*buildWebPreferences\(/g)?.length ?? 0;
+    expect(windows).toBe(2);
+    expect(locked).toBe(windows);
     // isRelease must come from app.isPackaged, not a literal.
     expect(source).toMatch(/const isRelease = app\.isPackaged;/);
   });

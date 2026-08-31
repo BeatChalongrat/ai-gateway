@@ -100,6 +100,12 @@ describe("turn.submit: handles are opaque, never paths", () => {
     expect(validateTurnSubmit({ ...base })).toMatchObject({ ok: true, value: { imageMode: false } }); // defaults off
     expect(validateTurnSubmit({ ...base, imageMode: "yes" })).toMatchObject({ ok: true, value: { imageMode: false } }); // only strict true enables it
   });
+  // FIX34 Part A: `quick` (a tool-less quick-ask turn) rides the existing message too.
+  it("carries quick as a strict-boolean field, defaulting false", () => {
+    expect(validateTurnSubmit({ ...base, quick: true })).toMatchObject({ ok: true, value: { quick: true } });
+    expect(validateTurnSubmit({ ...base })).toMatchObject({ ok: true, value: { quick: false } });
+    expect(validateTurnSubmit({ ...base, quick: "true" })).toMatchObject({ ok: true, value: { quick: false } });
+  });
   // FIX11 §3: editMessageId is carried on the existing turn message (fork the
   // conversation server-side), NOT a new message type. Defaults null.
   it("carries editMessageId as a field, defaulting null, rejecting non-strings", () => {

@@ -19,7 +19,8 @@ import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
-import { hostApi, type SettingKey, type SettingsSnapshot } from "@/lib/hostApi";
+import { acceleratorFromKey, describeAccelerator } from "@/lib/accelerator";
+import { hostApi, type SettingKey, type SettingsSnapshot, type ShellPrefsDto } from "@/lib/hostApi";
 import { tOutside, useT } from "@/lib/i18n";
 
 export default function SettingsPage() {
@@ -223,6 +224,8 @@ export default function SettingsPage() {
               ) : null}
             </Section>
 
+            <QuickAskSection />
+
             <Section title={t("settings.section.advanced")}>
               <EndpointField
                 label={t("settings.defaultModel")}
@@ -239,6 +242,95 @@ export default function SettingsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+// FIX34 Part A — the quick-ask window's two host prefs. Claude on Windows
+// offers "set a custom keyboard shortcut" for its quick entry; the tray-click
+// choice is ours (§2.5: Claude forces the quick entry on a taskbar click with
+// no setting — anthropics/claude-code#22420, closed not planned). A shortcut
+// the OS refuses (held by another app) is reported, never silently dropped,
+// and the previous shortcut keeps working.
+function QuickAskSection() {
+  const t = useT();
+  const [prefs, setPrefs] = useState<ShellPrefsDto | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        setPrefs(await hostApi.getShellPrefs());
+      } catch {
+        setPrefs(null); // pre-FIX34 host: the section stays hidden
+      }
+    })();
+  }, []);
+  useEffect(() => {
+    if (!capturing) return;
+    function onKey(e: KeyboardEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setCapturing(false);
+        return;
+      }
+      const acc = acceleratorFromKey(e);
+      if (!acc) return; // only modifiers so far — keep waiting
+      setCapturing(false);
+      void save({ quickHotkey: acc });
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturing]);
+
+  async function save(patch: Partial<ShellPrefsDto>) {
+    setError(null);
+    const r = await hostApi.setShellPrefs(patch);
+    if (r.ok && r.data) {
+      setPrefs(r.data);
+      if (patch.quickHotkey) toast(tOutside("settings.quickHotkey.saved"));
+      return;
+    }
+    if (r.error === "hotkey-taken") setError(tOutside("settings.quickHotkey.taken"));
+    else if (r.error === "hotkey-taken-by-main") setError(tOutside("settings.quickHotkey.takenByMain"));
+    else if (r.error?.startsWith("hotkey-")) setError(tOutside("settings.quickHotkey.invalid"));
+    else toast(tOutside("settings.toast.prefsFailed"));
+  }
+
+  if (!prefs) return null;
+  return (
+    <Section title={t("settings.section.quickAsk")} hint={t("settings.section.quickAsk.hint")}>
+      <Row label={t("settings.quickHotkey")} hint={t("settings.quickHotkey.hint")}>
+        <div className="flex items-center gap-2">
+          <kbd
+            className={`rounded border px-2 py-1 font-mono text-xs ${capturing ? "border-accent text-accent" : "border-border bg-bg-base text-text-primary"}`}
+            data-testid="quick-hotkey"
+          >
+            {capturing ? t("settings.quickHotkey.capture") : describeAccelerator(prefs.quickHotkey)}
+          </kbd>
+          <Button variant="ghost" onClick={() => setCapturing((v) => !v)} data-testid="quick-hotkey-change">
+            {capturing ? t("settings.quickHotkey.cancel") : t("settings.quickHotkey.change")}
+          </Button>
+        </div>
+      </Row>
+      {error ? (
+        <p className="text-xs text-status-danger" data-testid="quick-hotkey-error">
+          {error}
+        </p>
+      ) : null}
+      <Row label={t("settings.trayClick")}>
+        <select
+          value={prefs.trayClick}
+          onChange={(e) => void save({ trayClick: e.target.value as ShellPrefsDto["trayClick"] })}
+          className="focus-ring rounded-lg border border-border bg-bg-surface px-3 py-1.5 text-sm text-text-primary"
+          data-testid="tray-click"
+        >
+          <option value="main">{t("settings.trayClick.main")}</option>
+          <option value="quick">{t("settings.trayClick.quick")}</option>
+        </select>
+      </Row>
+    </Section>
   );
 }
 

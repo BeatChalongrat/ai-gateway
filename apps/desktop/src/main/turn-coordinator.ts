@@ -157,6 +157,17 @@ export interface TurnCoordinatorOptions {
    * Absent (pure tests, probes) → FIX32's compileChain: trim + honest note, no
    * summary. The summarising logic lives THERE, never in this file (§3.6). */
   contextManager?: ContextManager;
+  /** FIX34 Part A: the quick-ask window's shell hooks (index.ts owns the
+   * windows and the host prefs file; the coordinator only relays the page's
+   * control-plane ops). Absent (tests, probes) → the ops answer
+   * quick-unsupported / prefs-unsupported. */
+  shell?: {
+    prefsGet: () => { quickHotkey: string; trayClick: string };
+    /** Applies + persists; a hotkey the OS refuses answers { ok:false, error }. */
+    prefsSet: (patch: Record<string, unknown>) => { ok: boolean; prefs: { quickHotkey: string; trayClick: string }; error?: string };
+    quickClose: () => void;
+    quickOpenInMain: (conversationId: string) => void;
+  };
 }
 
 // FIX3 §4: the sentinel the sidecar's read_document returns for a scanned PDF it
@@ -182,6 +193,9 @@ const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
   },
 };
 
+/** FIX34 Part A — the quick-ask window's system hint (a tool-less turn). Exported so the test pins it. */
+export const QUICK_ASK_HINT =
+  "This reply is for the quick-ask window: a small always-on-top box for short questions. In this window you have NO tools — no file access, no browser, no commands, no code execution, no image generation. Answer directly and concisely. If the request genuinely needs one of those, say so in one sentence and tell the user to open this chat in the main window (there is an \"Open in main window\" button), instead of guessing or describing a result you did not produce.";
 const MAX_OUTPUT_TOKENS = 8192;
 const KEEP_SCREENSHOTS = 3;
 // FIX27: attached images kept in the chain (chat-edge replays at most 5 history images).
@@ -354,6 +368,48 @@ export class TurnCoordinator {
       case "folders.list":
         this.bridge.postHostResult(payload.requestId, true, { folders: this.grants.list() });
         return;
+      // ── FIX34 Part A: shell prefs (quick-ask hotkey, tray click) + quick window ──
+      case "shell.prefs.get": {
+        if (!this.opts.shell) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "prefs-unsupported");
+          return;
+        }
+        this.bridge.postHostResult(payload.requestId, true, this.opts.shell.prefsGet());
+        return;
+      }
+      case "shell.prefs.set": {
+        if (!this.opts.shell) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "prefs-unsupported");
+          return;
+        }
+        const r = this.opts.shell.prefsSet(payload.args ?? {});
+        this.log.info(`SHELL PREFS set → ${JSON.stringify(r.prefs)}${r.ok ? "" : ` (refused: ${r.error})`}`);
+        this.bridge.postHostResult(payload.requestId, r.ok, r.prefs, r.error);
+        return;
+      }
+      case "quick.close": {
+        if (!this.opts.shell) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "quick-unsupported");
+          return;
+        }
+        this.bridge.postHostResult(payload.requestId, true, { closed: true });
+        this.opts.shell.quickClose();
+        return;
+      }
+      case "quick.openInMain": {
+        const conversationId = payload.args?.["conversationId"];
+        if (!this.opts.shell) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "quick-unsupported");
+          return;
+        }
+        if (typeof conversationId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(conversationId)) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "conversationId-missing");
+          return;
+        }
+        this.bridge.postHostResult(payload.requestId, true, { opened: true });
+        this.opts.shell.quickOpenInMain(conversationId);
+        return;
+      }
       // ── FIX33 A-D5: the context meter (read) and "summarise and continue" ──
       case "context.info": {
         const conversationId = payload.args?.["conversationId"];
@@ -859,7 +915,11 @@ export class TurnCoordinator {
     // the model (context note) and the user (compaction_notice → the page's
     // marker) are told. Silently forgetting is the failure mode this exists
     // to prevent.
-    const tools = await this.toolDefinitions(null, false, payload.imageMode);
+    // FIX34 Part A: a quick-ask turn carries NO tools — nothing to consent to,
+    // so the small window never shows a consent card (Claude's quick entry is
+    // answer-only too). The rest of the turn is identical.
+    const tools = payload.quick ? [] : await this.toolDefinitions(null, false, payload.imageMode);
+    if (payload.quick) this.log.info(`TOOLS: quick-ask turn conv=${conversationId} — no tools offered`);
     // FIX33 A-D2: with a context manager the middle is SUMMARISED before it
     // goes (state store + extraction, the state riding as a user-role pair);
     // without one, FIX32's trim + honest note.
@@ -873,8 +933,15 @@ export class TurnCoordinator {
     }
     // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
     // and offer it this turn. A system hint on the existing message, not a new type.
-    if (payload.imageMode) {
+    if (payload.imageMode && !payload.quick) {
       sendMessages.splice(1, 0, { role: "system", content: "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words." });
+    }
+    // FIX34 Part A: the quick-ask hint — same mechanism as image mode. The model
+    // is told it has no tools HERE and where they are, so a request that needs
+    // files / the browser / a command gets "open the main window" instead of a
+    // made-up result.
+    if (payload.quick) {
+      sendMessages.splice(1, 0, { role: "system", content: QUICK_ASK_HINT });
     }
     const chainStart = sendMessages.length; // where this turn's chain begins
     this.log.info(`TURN OUTBOUND conv=${conversationId}: ${sendMessages.length} msg → [${describe(sendMessages)}]`);
