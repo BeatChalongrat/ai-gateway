@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 )
 
 type UsageHandler struct {
@@ -39,6 +40,8 @@ type UsageHandler struct {
 	// live at {base}/portal/*.
 	gatewayBase string
 	client      *http.Client
+	// FIX33 A-W8 — optional; nil = the response carries no compaction block.
+	compaction *repository.CompactionUsageRepo
 }
 
 // NewUsageHandler derives the portal-API root from the configured
@@ -76,6 +79,8 @@ type usageResponse struct {
 	// the top-5 rows) — drives the panel's "Total used" footer.
 	TotalCreditsUsed int64  `json:"total_credits_used"`
 	Period           string `json:"period"`
+	// FIX33 A-W8 — the compaction bill, separate from the answers.
+	Compaction *repository.CompactionUsageTotals `json:"compaction,omitempty"`
 }
 
 // Gateway response slices (only the fields we read).
@@ -158,6 +163,20 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 	if totalCredits == 0 {
 		totalCredits = summary.Totals.Tokens
 	}
+	// FIX33 A-W8 — the cost of compacting, separate from the cost of
+	// answering (Claude's usage.iterations[]). Lifetime, like the rest
+	// of this response. Absent when the repo isn't wired; zero rows is
+	// a real answer ("compaction has cost you nothing so far").
+	var compaction *repository.CompactionUsageTotals
+	if h.compaction != nil {
+		if caller, ok := middleware.CallerFrom(r.Context()); ok {
+			if t, err := h.compaction.TotalsForUser(r.Context(), caller.TenantUUID, caller.UserID, time.Time{}); err == nil {
+				compaction = &t
+			} else {
+				slog.Warn("usage_compaction_totals_failed", "err", err.Error())
+			}
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(usageResponse{
 		Credits: usageCredits{
@@ -169,7 +188,13 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 		UsageByModel:     rows,
 		TotalCreditsUsed: totalCredits,
 		Period:           "lifetime",
+		Compaction:       compaction,
 	})
+}
+
+// SetCompactionUsageRepo wires the A-W8 sink so /usage/me can report it.
+func (h *UsageHandler) SetCompactionUsageRepo(r *repository.CompactionUsageRepo) {
+	h.compaction = r
 }
 
 func (h *UsageHandler) getJSON(ctx context.Context, token, path string, out any) error {

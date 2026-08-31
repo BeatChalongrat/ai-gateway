@@ -37,6 +37,7 @@ const stateColumns = `
 	structured_summary, confirmed_decisions, active_artifacts,
 	open_tasks, rejected_approaches, unresolved_questions,
 	summarized_up_to_message_id, message_count_at_summary, summary_token_count,
+	manual_compact_boundary_message_id, compaction_instructions,
 	created_at, updated_at
 `
 
@@ -47,6 +48,7 @@ func scanState(row pgx.Row, s *model.ConversationState) error {
 		&s.StructuredSummary, &s.ConfirmedDecisions, &s.ActiveArtifacts,
 		&s.OpenTasks, &s.RejectedApproaches, &s.UnresolvedQuestions,
 		&s.SummarizedUpToMessageID, &s.MessageCountAtSummary, &s.SummaryTokenCount,
+		&s.ManualCompactBoundaryMessageID, &s.CompactionInstructions,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
@@ -105,14 +107,16 @@ func (r *ConversationStateRepo) Upsert(
 			current_goal,
 			structured_summary, confirmed_decisions, active_artifacts,
 			open_tasks, rejected_approaches, unresolved_questions,
-			summarized_up_to_message_id, message_count_at_summary, summary_token_count
+			summarized_up_to_message_id, message_count_at_summary, summary_token_count,
+			manual_compact_boundary_message_id, compaction_instructions
 		)
 		VALUES (
 			$1, $2, $3,
 			$4,
 			$5::jsonb, $6::jsonb, $7::jsonb,
 			$8::jsonb, $9::jsonb, $10::jsonb,
-			$11, $12, $13
+			$11, $12, $13,
+			$14, $15
 		)
 		ON CONFLICT (conversation_id) DO UPDATE
 		SET current_goal               = EXCLUDED.current_goal,
@@ -125,6 +129,8 @@ func (r *ConversationStateRepo) Upsert(
 		    summarized_up_to_message_id= EXCLUDED.summarized_up_to_message_id,
 		    message_count_at_summary   = EXCLUDED.message_count_at_summary,
 		    summary_token_count        = EXCLUDED.summary_token_count,
+		    manual_compact_boundary_message_id = EXCLUDED.manual_compact_boundary_message_id,
+		    compaction_instructions    = EXCLUDED.compaction_instructions,
 		    updated_at                 = NOW()
 		RETURNING created_at, updated_at
 	`
@@ -134,6 +140,7 @@ func (r *ConversationStateRepo) Upsert(
 		s.StructuredSummary, s.ConfirmedDecisions, s.ActiveArtifacts,
 		s.OpenTasks, s.RejectedApproaches, s.UnresolvedQuestions,
 		s.SummarizedUpToMessageID, s.MessageCountAtSummary, s.SummaryTokenCount,
+		s.ManualCompactBoundaryMessageID, s.CompactionInstructions,
 	); err != nil {
 		return fmt.Errorf("upsert conversation state: %w", err)
 	}

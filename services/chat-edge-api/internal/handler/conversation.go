@@ -605,19 +605,97 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
+	// FIX33 A-W6 — the context meter. used_ratio is history ÷ the
+	// messages budget; the meter shows it against the trigger so the
+	// user sees compaction coming. est_messages_remaining is a rough
+	// "how many more messages like the recent ones fit before the
+	// trigger" — average recent message size, never negative.
+	budget := compiled.Budget.MessagesRemaining
+	usedRatio := 0.0
+	if budget > 0 {
+		usedRatio = float64(compiled.HistoryTokens) / float64(budget)
+	}
+	avg := 0
+	if compiled.MessagesTotal > 0 {
+		avg = compiled.HistoryTokens / compiled.MessagesTotal
+	}
+	estRemaining := 0
+	if avg > 0 && compiled.ThresholdTokens > compiled.HistoryTokens {
+		estRemaining = (compiled.ThresholdTokens - compiled.HistoryTokens) / avg
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"conversation_id":      convID.String(),
-		"total_budget":         compiled.Budget.TotalBudget,
-		"system_prompt_tokens": compiled.Budget.SystemPromptTokens,
-		"output_reserve":       compiled.Budget.OutputReserve,
-		"tool_reserve":         compiled.Budget.ToolReserve,
-		"messages_budget":      compiled.Budget.MessagesRemaining,
-		"messages_total":       compiled.MessagesTotal,
-		"messages_would_send":  compiled.MessagesSent,
-		"compacted":            compiled.Compacted,
-		"extraction_triggered": compiled.ExtractionTriggered,
+		"conversation_id":        convID.String(),
+		"total_budget":           compiled.Budget.TotalBudget,
+		"system_prompt_tokens":   compiled.Budget.SystemPromptTokens,
+		"output_reserve":         compiled.Budget.OutputReserve,
+		"tool_reserve":           compiled.Budget.ToolReserve,
+		"messages_budget":        budget,
+		"messages_total":         compiled.MessagesTotal,
+		"messages_would_send":    compiled.MessagesSent,
+		"compacted":              compiled.Compacted,
+		"extraction_triggered":   compiled.ExtractionTriggered,
+		"history_tokens":         compiled.HistoryTokens,
+		"sent_tokens":            compiled.SentTokens,
+		"threshold_tokens":       compiled.ThresholdTokens,
+		"used_ratio":             usedRatio,
+		"omitted_older":          compiled.OmittedOlder,
+		"dropped":                compiled.Dropped,
+		"head_kept":              compiled.HeadKept,
+		"manual_compact_pending": compiled.ManualCompact,
+		"state_present":          compiled.StatePresent,
+		"est_messages_remaining": estRemaining,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Manual compaction — POST /conversations/{id}/compact (FIX33 A-W7)
+// ---------------------------------------------------------------------------
+
+// Compact summarises the whole conversation into <conversation_state>
+// now (with the user's optional instructions on what to keep) and
+// marks the newest message as the boundary the next turn drops up to.
+// 409 when the summary could not be produced (nothing is dropped
+// then), 400 when memory is off for the conversation.
+func (h *ConversationHandler) Compact(w http.ResponseWriter, r *http.Request) {
+	if h.messages == nil {
+		WriteError(w, http.StatusServiceUnavailable, CodeInternalError, "compaction unavailable")
+		return
+	}
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	var body struct {
+		Instructions string `json:"instructions"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body) // an empty body is a valid "compact with defaults"
+	}
+	if len(body.Instructions) > 2000 {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "instructions too long (max 2000 characters)")
+		return
+	}
+	res, err := h.messages.ManualCompact(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMessageConversationNotFound):
+			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
+		case errors.Is(err, service.ErrMessageMemoryOff):
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "memory is off for this conversation, so there is nowhere to keep a summary")
+		case errors.Is(err, service.ErrMessageEmptyContent):
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "nothing to compact yet")
+		case errors.Is(err, service.ErrCompactNoSummary):
+			WriteError(w, http.StatusConflict, CodeBadRequest, "the summary could not be produced, so nothing was compacted")
+		default:
+			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 // ---------------------------------------------------------------------------

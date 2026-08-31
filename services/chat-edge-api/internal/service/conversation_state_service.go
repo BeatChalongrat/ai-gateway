@@ -10,16 +10,16 @@
 //
 // Two entry points feed the state:
 //
-//   GenerateOrUpdateState — full incremental extraction. Triggered
-//     async after every Nth message (see maybeUpdateState in
-//     message_service.go). Calls the gateway with a low-temperature
-//     JSON-only prompt and merges the result with the existing
-//     state.
+//	GenerateOrUpdateState — full incremental extraction. Triggered
+//	  async after every Nth message (see maybeUpdateState in
+//	  message_service.go). Calls the gateway with a low-temperature
+//	  JSON-only prompt and merges the result with the existing
+//	  state.
 //
-//   ApplyToolUpdate — surgical incremental update. Driven by the
-//     update_conversation_state AI tool so the model can record a
-//     decision the instant it lands, without waiting for the next
-//     extraction window.
+//	ApplyToolUpdate — surgical incremental update. Driven by the
+//	  update_conversation_state AI tool so the model can record a
+//	  decision the instant it lands, without waiting for the next
+//	  extraction window.
 //
 // BuildStateContext is the render path: it shapes the persisted
 // state into the <conversation_state> system-prompt block the
@@ -28,6 +28,7 @@ package service
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,19 +54,63 @@ var (
 // Service
 // ---------------------------------------------------------------------------
 
+// The narrow interfaces the service actually needs (FIX33). The
+// concrete pgx repos satisfy them; tests substitute in-memory fakes
+// so the extraction flow (batching, failure → keep state, no tools)
+// is provable without a database.
+type stateStore interface {
+	Get(ctx context.Context, convID, userID, tenantID uuid.UUID) (*model.ConversationState, error)
+	Upsert(ctx context.Context, s *model.ConversationState) error
+}
+
+type stateMessageSource interface {
+	ListAfter(ctx context.Context, tenantID, convID, afterMessageID uuid.UUID, limit int) ([]model.Message, error)
+	CountMessages(ctx context.Context, tenantID, convID uuid.UUID) (int, error)
+}
+
+type stateConvSource interface {
+	GetByID(ctx context.Context, tenantID, convID uuid.UUID) (*model.Conversation, error)
+}
+
+type extractionCaller interface {
+	SendChatCompletion(ctx context.Context, callCtx GatewayCallContext, req GatewayChatRequest) (*GatewayChatResponse, error)
+}
+
+// CompactionUsage is one extraction call's token bill (FIX33 A-W8 —
+// Claude's `usage.iterations[]`): the cost of compacting, kept apart
+// from the cost of answering so users and admins can see it.
+type CompactionUsage struct {
+	ConversationID uuid.UUID
+	UserID         uuid.UUID
+	TenantID       uuid.UUID
+	ModelID        string
+	Trigger        string // "auto" | "manual" | "background"
+	PromptTokens   int
+	OutputTokens   int
+	CostUSD        float64
+	MessagesFolded int
+}
+
+// CompactionUsageRecorder persists CompactionUsage rows. Optional;
+// nil = log only.
+type CompactionUsageRecorder interface {
+	RecordCompactionUsage(ctx context.Context, u CompactionUsage) error
+}
+
 // ConversationStateService owns the lifecycle of
 // chat.conversation_states. The fields are private so test wiring
 // uses the typed constructor.
 type ConversationStateService struct {
-	states    *repository.ConversationStateRepo
-	messages  *repository.MessageRepo
-	conv      *repository.ConversationRepo
-	gateway   *GatewayClient
+	states   stateStore
+	messages stateMessageSource
+	conv     stateConvSource
+	gateway  extractionCaller
 	// Model used for extraction. When empty, GenerateOrUpdateState
 	// falls back to the conversation's own model_id (so the bill
 	// stays inside the conversation's allocated budget). Future
 	// work could pin this to a cheap "summarisation" model.
 	extractionModel string
+	usage           CompactionUsageRecorder
 }
 
 func NewConversationStateService(
@@ -81,6 +126,43 @@ func NewConversationStateService(
 		gateway:  gateway,
 	}
 }
+
+// newConversationStateServiceWith is the test seam: any
+// implementation of the four narrow interfaces.
+func newConversationStateServiceWith(
+	states stateStore, messages stateMessageSource, conv stateConvSource, gateway extractionCaller,
+) *ConversationStateService {
+	return &ConversationStateService{states: states, messages: messages, conv: conv, gateway: gateway}
+}
+
+// SetCompactionUsageRecorder wires the A-W8 usage sink.
+func (s *ConversationStateService) SetCompactionUsageRecorder(r CompactionUsageRecorder) {
+	s.usage = r
+}
+
+// ExtractionOptions tunes one extraction pass (FIX33).
+type ExtractionOptions struct {
+	// BatchLimit caps how many new messages one gateway call folds.
+	// 0 = extractionBatchLimit.
+	BatchLimit int
+	// Instructions is the user's compaction guidance (A-W7). Empty =
+	// use the instructions already stored on the state row, if any.
+	Instructions string
+	// Trigger labels the usage row: "auto" | "manual" | "background".
+	Trigger string
+}
+
+// extractionBatchLimit — new messages per extraction call. Each
+// message is truncated to 500 chars in the prompt, so 120 messages ≈
+// 60K chars ≈ 15–20K tokens: comfortably inside every model window
+// we budget against, and small enough that a 1000-message backlog
+// is a handful of calls, not one 250K-token request.
+const extractionBatchLimit = 120
+
+// extractionMaxBatches bounds EnsureStateCoversUpTo — 8 × 120 = 960
+// messages per turn is the most the pre-trim refresh will fold before
+// it gives up and trims anyway (with the marker still shown).
+const extractionMaxBatches = 8
 
 // SetExtractionModel pins the model the extractor uses regardless
 // of which model the conversation chose. Optional; main.go can wire
@@ -120,60 +202,96 @@ const extractionTemperature = 0.1
 func (s *ConversationStateService) GenerateOrUpdateState(
 	ctx context.Context, convID, userID, tenantID uuid.UUID,
 ) (*model.ConversationState, error) {
+	st, _, err := s.GenerateOrUpdateStateOpts(ctx, convID, userID, tenantID, ExtractionOptions{Trigger: "background"})
+	return st, err
+}
+
+// GenerateOrUpdateStateOpts is GenerateOrUpdateState with FIX33's
+// knobs. Returns (state, messagesFolded, err). messagesFolded == 0
+// with a nil error means "nothing new to summarise" (state returned
+// as-is); a failed gateway call ALSO returns the existing state
+// untouched — a compaction pass never wipes what it already knew.
+//
+// Coverage is INCREMENTAL and starts from the OLDEST message: the
+// first pass anchors at uuid.Nil (ListAfter treats an unknown anchor
+// as "epoch"), so a 1000-message backlog is folded oldest-first in
+// BatchLimit slices — A-W1's contract that the rows the load ceiling
+// cut are summarised before anything is trimmed.
+func (s *ConversationStateService) GenerateOrUpdateStateOpts(
+	ctx context.Context, convID, userID, tenantID uuid.UUID, opts ExtractionOptions,
+) (*model.ConversationState, int, error) {
 	// 1. Existing state (may be nil for first-time extraction).
 	existing, err := s.states.Get(ctx, convID, userID, tenantID)
 	if err != nil {
-		return nil, fmt.Errorf("state lookup: %w", err)
+		return nil, 0, fmt.Errorf("state lookup: %w", err)
 	}
 
-	// 2. Fetch messages to summarise. Incremental when state exists;
-	//    falls back to the full ListContextByConversation slice
-	//    (capped at 200) on first run.
-	var newMessages []model.Message
+	batch := opts.BatchLimit
+	if batch <= 0 {
+		batch = extractionBatchLimit
+	}
+
+	// 2. Fetch the next slice of messages to summarise, oldest first.
+	anchor := uuid.Nil
 	if existing != nil && existing.SummarizedUpToMessageID != nil {
-		msgs, err := s.messages.ListAfter(
-			ctx, tenantID, convID, *existing.SummarizedUpToMessageID, 200,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("list after: %w", err)
-		}
-		newMessages = msgs
-	} else {
-		msgs, err := s.messages.ListContextByConversation(ctx, tenantID, convID, 200)
-		if err != nil {
-			return nil, fmt.Errorf("list context: %w", err)
-		}
-		newMessages = msgs
+		anchor = *existing.SummarizedUpToMessageID
+	}
+	newMessages, err := s.messages.ListAfter(ctx, tenantID, convID, anchor, batch)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list after: %w", err)
 	}
 	if len(newMessages) == 0 {
-		return existing, nil
+		return existing, 0, nil
 	}
 
 	// 3. Build the extraction prompt + call the gateway.
 	conv, err := s.conv.GetByID(ctx, tenantID, convID)
 	if err != nil {
-		return nil, fmt.Errorf("conv lookup: %w", err)
+		return nil, 0, fmt.Errorf("conv lookup: %w", err)
 	}
 	modelID := s.extractionModel
 	if modelID == "" {
 		modelID = conv.ModelID
 	}
 
-	prompt := s.buildExtractionPrompt(existing, newMessages)
-	rawJSON := s.callLLMForExtraction(ctx, modelID, prompt, GatewayCallContext{
+	instructions := strings.TrimSpace(opts.Instructions)
+	if instructions == "" && existing != nil {
+		instructions = strings.TrimSpace(existing.CompactionInstructions)
+	}
+	prompt := s.buildExtractionPrompt(existing, newMessages, instructions)
+	rawJSON, usage := s.callLLMForExtraction(ctx, modelID, prompt, GatewayCallContext{
 		TenantID:       tenantID,
 		UserID:         userID,
 		ConversationID: convID,
 	})
+	if usage != nil {
+		s.recordUsage(ctx, CompactionUsage{
+			ConversationID: convID, UserID: userID, TenantID: tenantID,
+			ModelID: modelID, Trigger: firstNonEmpty(opts.Trigger, "auto"),
+			PromptTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens,
+			CostUSD: usage.EstimatedCostUSD, MessagesFolded: len(newMessages),
+		})
+	}
 	if strings.TrimSpace(rawJSON) == "" {
 		// Gateway failed or returned empty — keep existing state
 		// rather than wiping it. Logged inside the LLM caller.
-		return existing, nil
+		return existing, 0, nil
 	}
 
-	// 4. Parse + merge with existing.
+	// 4. Parse + merge with existing. A response that is not JSON
+	//    (the model called a tool, or chatted) also keeps the
+	//    existing content — and does NOT advance the anchor, so the
+	//    slice is retried next time instead of being skipped.
 	parsed := parseExtractionResponse(rawJSON)
+	if !parsed.parsed {
+		slog.Warn("conversation state: extraction response was not JSON — state kept, anchor not advanced",
+			"conv", convID.String(), "len", len(rawJSON))
+		return existing, 0, nil
+	}
 	merged := mergeExtractionIntoState(existing, parsed, convID, userID, tenantID)
+	if instructions != "" {
+		merged.CompactionInstructions = instructions
+	}
 
 	// 5. Stamp compaction tracking.
 	lastMsg := newMessages[len(newMessages)-1]
@@ -187,9 +305,119 @@ func (s *ConversationStateService) GenerateOrUpdateState(
 
 	// 6. Persist.
 	if err := s.states.Upsert(ctx, merged); err != nil {
-		return nil, fmt.Errorf("upsert state: %w", err)
+		return nil, 0, fmt.Errorf("upsert state: %w", err)
 	}
-	return merged, nil
+	return merged, len(newMessages), nil
+}
+
+// EnsureStateCoversUpTo runs extraction passes, oldest-first, until
+// the state's anchor has reached uptoID (or nothing older remains),
+// bounded by extractionMaxBatches. This is what the pre-trim refresh
+// calls (A-W1: the rows the load ceiling cut are folded first) and
+// what manual compact calls with the newest message (A-W7). Returns
+// the final state (possibly the untouched existing one) and whether
+// coverage reached uptoID.
+func (s *ConversationStateService) EnsureStateCoversUpTo(
+	ctx context.Context, convID, userID, tenantID uuid.UUID, uptoID *uuid.UUID, opts ExtractionOptions,
+) (*model.ConversationState, bool, error) {
+	var st *model.ConversationState
+	for i := 0; i < extractionMaxBatches; i++ {
+		next, folded, err := s.GenerateOrUpdateStateOpts(ctx, convID, userID, tenantID, opts)
+		if err != nil {
+			return st, false, err
+		}
+		st = next
+		if folded == 0 {
+			// Nothing new (or the call failed and the anchor did not
+			// move) — stop rather than spin.
+			break
+		}
+		if uptoID != nil && st != nil && st.SummarizedUpToMessageID != nil && *st.SummarizedUpToMessageID == *uptoID {
+			return st, true, nil
+		}
+		batch := opts.BatchLimit
+		if batch <= 0 {
+			batch = extractionBatchLimit
+		}
+		if folded < batch {
+			// A short batch means we drained everything that exists.
+			break
+		}
+	}
+	reached := uptoID == nil || (st != nil && st.SummarizedUpToMessageID != nil && *st.SummarizedUpToMessageID == *uptoID)
+	if !reached && st != nil && st.SummarizedUpToMessageID != nil && uptoID != nil {
+		slog.Warn("conversation state: coverage did not reach the requested message within the batch bound",
+			"conv", convID.String(), "batches", extractionMaxBatches)
+	}
+	return st, reached, nil
+}
+
+// SetManualCompactBoundary records A-W7's "drop everything at or
+// before this message on the next turn" on the state row. Called
+// ONLY after EnsureStateCoversUpTo(boundary) succeeded — a compact
+// that could not summarise must not drop anything.
+func (s *ConversationStateService) SetManualCompactBoundary(
+	ctx context.Context, convID, userID, tenantID, boundary uuid.UUID, instructions string,
+) (*model.ConversationState, error) {
+	st, err := s.states.Get(ctx, convID, userID, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if st == nil {
+		st = &model.ConversationState{ConversationID: convID, UserID: userID, TenantID: tenantID}
+	}
+	b := boundary
+	st.ManualCompactBoundaryMessageID = &b
+	if strings.TrimSpace(instructions) != "" {
+		st.CompactionInstructions = strings.TrimSpace(instructions)
+	}
+	if err := s.states.Upsert(ctx, st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+func (s *ConversationStateService) recordUsage(ctx context.Context, u CompactionUsage) {
+	// Always the log line (A-W8: the cost of compacting is visible in
+	// the observability stream even before the DB sink is wired).
+	slog.Info("compaction_usage",
+		"conv", u.ConversationID.String(),
+		"user", u.UserID.String(),
+		"model", u.ModelID,
+		"trigger", u.Trigger,
+		"prompt_tokens", u.PromptTokens,
+		"output_tokens", u.OutputTokens,
+		"cost_usd", u.CostUSD,
+		"messages_folded", u.MessagesFolded,
+	)
+	if s.usage == nil {
+		return
+	}
+	if err := s.usage.RecordCompactionUsage(ctx, u); err != nil {
+		slog.Warn("compaction_usage: record failed", "conv", u.ConversationID.String(), "err", err)
+	}
+}
+
+// compactionUsageSink adapts the repository to CompactionUsageRecorder
+// (the repository package cannot import service).
+type compactionUsageSink struct {
+	repo *repository.CompactionUsageRepo
+}
+
+func NewCompactionUsageSink(repo *repository.CompactionUsageRepo) CompactionUsageRecorder {
+	return &compactionUsageSink{repo: repo}
+}
+
+func (k *compactionUsageSink) RecordCompactionUsage(ctx context.Context, u CompactionUsage) error {
+	if k.repo == nil {
+		return nil
+	}
+	return k.repo.Insert(ctx, repository.CompactionUsageRow{
+		ConversationID: u.ConversationID, TenantID: u.TenantID, UserID: u.UserID,
+		ModelID: u.ModelID, Trigger: u.Trigger,
+		PromptTokens: u.PromptTokens, OutputTokens: u.OutputTokens,
+		CostUSD: u.CostUSD, MessagesFolded: u.MessagesFolded,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -202,51 +430,24 @@ func (s *ConversationStateService) GenerateOrUpdateState(
 // owns "what shape to emit". Existing state is embedded so the
 // model can merge rather than re-derive on every pass.
 func (s *ConversationStateService) buildExtractionPrompt(
-	existing *model.ConversationState, newMessages []model.Message,
+	existing *model.ConversationState, newMessages []model.Message, instructions string,
 ) string {
 	var sb strings.Builder
-	sb.WriteString(`Analyse the following conversation messages and extract a structured state summary.
+	sb.WriteString("Analyse the following conversation messages and produce the structured state summary described in your instructions.\n")
 
-Output ONLY valid JSON with this exact shape (no markdown, no backticks):
-{
-  "current_goal": "One sentence describing what the user is trying to accomplish in this conversation",
-  "structured_summary": {
-    "key_context": "Important background for understanding this conversation",
-    "progress": "What has been accomplished so far",
-    "technical_details": "Key technical specifics (optional)"
-  },
-  "confirmed_decisions": [
-    {"decision": "A decision explicitly agreed upon"}
-  ],
-  "active_artifacts": [
-    {"name": "filename.ext", "status": "in_progress|completed|under_review", "version": 1}
-  ],
-  "open_tasks": [
-    {"task": "Something still to be done", "status": "pending|in_progress"}
-  ],
-  "rejected_approaches": [
-    {"approach": "Something considered but rejected"}
-  ],
-  "unresolved_questions": [
-    {"question": "A genuine open question"}
-  ]
-}
-
-Rules:
-- current_goal: ONE sentence. If the goal shifted, use the latest.
-- confirmed_decisions: only things explicitly agreed upon, not suggestions.
-- active_artifacts: only files/documents actually created or worked on.
-- open_tasks: TODOs identified but not yet completed.
-- rejected_approaches: only if something was explicitly ruled out.
-- unresolved_questions: only genuine open questions, not rhetorical.
-- Keep each entry concise (under 100 chars when possible).
-- Empty category → empty array [].
-- Preserve the user's language (Thai or English) in entries.
-`)
+	// A-W7 — the user's own guidance on what to keep / drop (Claude's
+	// `instructions`). Precedes the state and the messages so it
+	// frames how the model reads them.
+	if strings.TrimSpace(instructions) != "" {
+		sb.WriteString("\n--- USER INSTRUCTIONS FOR THIS SUMMARY (take precedence over the defaults) ---\n")
+		sb.WriteString(strings.TrimSpace(instructions))
+		sb.WriteString("\n")
+	}
 
 	// Embed existing state as merge context. The model is told to
 	// "update/merge" so it doesn't have to re-derive every fact.
 	if existing != nil && (existing.CurrentGoal != nil ||
+		!isEmptyJSON(existing.StructuredSummary) ||
 		!isEmptyJSON(existing.ConfirmedDecisions) ||
 		!isEmptyJSON(existing.OpenTasks)) {
 		sb.WriteString("\n--- EXISTING STATE (update/merge with new information) ---\n")
@@ -277,39 +478,59 @@ Rules:
 	return sb.String()
 }
 
-const extractionSystemPrompt = "You are a conversation analyst. Output ONLY valid JSON. No markdown fencing. No commentary."
+// FIX33 A-D3 — the extraction prompt is ONE asset shared with the
+// desktop (apps/desktop/src/main/compaction-prompt.ts holds the same
+// bytes; apps/desktop/test/compaction-prompt.test.ts byte-compares the
+// two and fails on drift — the same guard FIX32 put on the language
+// rules). It is the SYSTEM message of every extraction call, and it
+// carries A-W3's "do not call any tool" sentence.
+//
+//go:embed prompt_compaction_extraction.txt
+var compactionExtractionPromptRaw string
+
+// ExtractionSystemPrompt is the trimmed shared asset (exported for the
+// byte-compare test and the report).
+func ExtractionSystemPrompt() string { return strings.TrimSpace(compactionExtractionPromptRaw) }
 
 // callLLMForExtraction issues the non-streaming gateway call.
 // Returns "" on any failure so the caller falls back to keeping the
-// existing state rather than crashing the extraction trigger.
+// existing state rather than crashing the extraction trigger. The
+// usage (when the gateway reported one) rides along for A-W8.
+//
+// A-W3: the request carries NO tool definitions and no tool_choice —
+// the model has nothing to call — and the system prompt says so in
+// words too (Claude's documented failure: with tools present the
+// model calls one instead of writing the summary → empty block).
 func (s *ConversationStateService) callLLMForExtraction(
 	parent context.Context, modelID, userPrompt string, callCtx GatewayCallContext,
-) string {
+) (string, *GatewayChatUsage) {
 	ctx, cancel := context.WithTimeout(parent, extractionTimeout)
 	defer cancel()
 
 	req := GatewayChatRequest{
 		Model: modelID,
 		Messages: []GatewayMessage{
-			{Role: "system", Content: extractionSystemPrompt},
+			{Role: "system", Content: ExtractionSystemPrompt()},
 			{Role: "user", Content: userPrompt},
 		},
 		MaxTokens:   extractionMaxTokens,
 		Temperature: extractionTemperature,
+		Tools:       nil,
+		ToolChoice:  nil,
 	}
 	resp, err := s.gateway.SendChatCompletion(ctx, callCtx, req)
 	if err != nil {
 		slog.Warn("conversation state: extraction call failed",
 			"conv", callCtx.ConversationID.String(), "err", err)
-		return ""
+		return "", nil
 	}
 	if resp == nil || len(resp.Choices) == 0 {
-		return ""
+		return "", nil
 	}
-	if s, ok := resp.Choices[0].Message.Content.(string); ok {
-		return s
+	if str, ok := resp.Choices[0].Message.Content.(string); ok {
+		return str, resp.Usage
 	}
-	return ""
+	return "", resp.Usage
 }
 
 // parseExtractionResponse decodes the gateway's JSON envelope.
@@ -370,6 +591,11 @@ func mergeExtractionIntoState(
 		out.OpenTasks = existing.OpenTasks
 		out.RejectedApproaches = existing.RejectedApproaches
 		out.UnresolvedQuestions = existing.UnresolvedQuestions
+		// FIX33 — the compaction controls persist across passes.
+		out.SummarizedUpToMessageID = existing.SummarizedUpToMessageID
+		out.MessageCountAtSummary = existing.MessageCountAtSummary
+		out.ManualCompactBoundaryMessageID = existing.ManualCompactBoundaryMessageID
+		out.CompactionInstructions = existing.CompactionInstructions
 	}
 	if !fresh.parsed {
 		return out
@@ -559,6 +785,12 @@ func (s *ConversationStateService) BuildStateContextWithSources(
 	writeJSONArray(&sb, "Rejected approaches", state.RejectedApproaches, "approach")
 	writeJSONArray(&sb, "Unresolved questions", state.UnresolvedQuestions, "question")
 
+	// FIX33 A-W5 — the desktop's honesty rule, now on web too: the
+	// summary is what the model has of the compacted part, so a
+	// detail that is in neither the summary nor the visible messages
+	// must be reported as lost, not guessed.
+	sb.WriteString("\n")
+	sb.WriteString(StateHonestyNote)
 	sb.WriteString("\n</conversation_state>\n")
 
 	label := "Conversation state available"
@@ -572,6 +804,11 @@ func (s *ConversationStateService) BuildStateContextWithSources(
 	}}
 	return sb.String(), sources
 }
+
+// StateHonestyNote is the sentence appended inside every rendered
+// <conversation_state> block (A-W5). Exported so the desktop test can
+// pin the same wording.
+const StateHonestyNote = "This summary stands in for older messages that are no longer sent verbatim. If the user refers to something that is in neither this summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess."
 
 // writeJSONArray renders one "Label:\n- item\n- item\n" block.
 // `field` is the single load-bearing key inside each object entry

@@ -123,6 +123,17 @@ type Config struct {
 	// the repo layer still hard-caps the DB load (see message_repo.go).
 	MaxContextMessages int `env:"MAX_CONTEXT_MESSAGES" envDefault:"1000"`
 
+	// FIX33 A-W2 — auto-compact fires at a THRESHOLD, not on overflow
+	// (Claude: compaction at 150K of a bigger window). When the loaded
+	// history reaches TriggerRatio × the messages budget, the compiler
+	// refreshes <conversation_state> and trims the middle of the
+	// history down to TargetRatio × budget (the gap between the two
+	// is hysteresis: without it every turn past 85 % would pay an
+	// extraction call and drop one message). 1.0 restores the old
+	// "only when it overflows" behaviour. Both default ON in prod.
+	ContextCompactTriggerRatio float64 `env:"CONTEXT_COMPACT_TRIGGER_RATIO" envDefault:"0.85"`
+	ContextCompactTargetRatio  float64 `env:"CONTEXT_COMPACT_TARGET_RATIO" envDefault:"0.60"`
+
 	// JSON-encoded list of models exposed to the chat UI. Phase 1
 	// keeps this list flat (no per-tenant restriction; admin features
 	// land later). Empty string → fall back to the hard-coded
@@ -146,7 +157,7 @@ type Config struct {
 	// directory the service owns end-to-end; uploads land under
 	// ``{root}/{tenant_id}/{conversation_id}/{file_id}_{name}``.
 	FileStorageRoot     string `env:"FILE_STORAGE_ROOT" envDefault:"./data/uploads"`
-	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"209715200"`         // 200 MiB (raised for media gen — Sprint 1)
+	MaxFileSizeBytes    int64  `env:"MAX_FILE_SIZE_BYTES" envDefault:"209715200"`        // 200 MiB (raised for media gen — Sprint 1)
 	MaxConvFileTotal    int64  `env:"MAX_CONV_FILE_TOTAL_BYTES" envDefault:"1073741824"` // 1 GiB (raised for media gen — Sprint 1)
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`

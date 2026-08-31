@@ -32,12 +32,12 @@ type ConversationState struct {
 	// (key_context / progress / technical_details for summary;
 	// {decision: "..."} / {task: "..."} / {name, status, version}
 	// for the array fields).
-	StructuredSummary    json.RawMessage `json:"structured_summary"`
-	ConfirmedDecisions   json.RawMessage `json:"confirmed_decisions"`
-	ActiveArtifacts      json.RawMessage `json:"active_artifacts"`
-	OpenTasks            json.RawMessage `json:"open_tasks"`
-	RejectedApproaches   json.RawMessage `json:"rejected_approaches"`
-	UnresolvedQuestions  json.RawMessage `json:"unresolved_questions"`
+	StructuredSummary   json.RawMessage `json:"structured_summary"`
+	ConfirmedDecisions  json.RawMessage `json:"confirmed_decisions"`
+	ActiveArtifacts     json.RawMessage `json:"active_artifacts"`
+	OpenTasks           json.RawMessage `json:"open_tasks"`
+	RejectedApproaches  json.RawMessage `json:"rejected_approaches"`
+	UnresolvedQuestions json.RawMessage `json:"unresolved_questions"`
 
 	// Compaction tracking. SummarizedUpToMessageID pins the latest
 	// message that was folded into the summary so the next
@@ -47,6 +47,16 @@ type ConversationState struct {
 	SummarizedUpToMessageID *uuid.UUID `json:"summarized_up_to_message_id"`
 	MessageCountAtSummary   int        `json:"message_count_at_summary"`
 	SummaryTokenCount       int        `json:"summary_token_count"`
+
+	// FIX33 A-W7 — manual compaction (migration 037). When set, the
+	// ContextCompiler drops every loaded message at or before this id
+	// on the next turn (the first exchange still survives). Set ONLY
+	// after the extraction covering those messages succeeded.
+	ManualCompactBoundaryMessageID *uuid.UUID `json:"manual_compact_boundary_message_id"`
+	// CompactionInstructions is the user's guidance for the summariser
+	// (Claude's `instructions`), folded into every later extraction
+	// prompt for this conversation until replaced. Empty = default.
+	CompactionInstructions string `json:"compaction_instructions"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

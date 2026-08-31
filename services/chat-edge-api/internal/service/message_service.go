@@ -841,6 +841,12 @@ type SendInput struct {
 	// set, executeToolCalls also REFUSES any call outside the set and marks
 	// ToolExecContext.WithheldToolRequested so the run's audit shows the wall.
 	CloudToolAllowlist []string
+	// OnCompactionStart (FIX33 A-W9) — set by the streaming handler.
+	// Fires once, before the synchronous pre-trim state extraction,
+	// with the ids the SSE message_start frame needs, so the handler
+	// can open the response and show "organising the conversation…"
+	// during the pause instead of nothing. Nil on non-stream sends.
+	OnCompactionStart func(assistantID, userMessageID uuid.UUID)
 }
 
 // SendResult is what the non-stream handler returns to the client.
@@ -866,7 +872,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist)
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
@@ -1032,6 +1038,13 @@ type StreamUpdate struct {
 	// (the answer is streaming) or message_sources / message_complete.
 	SearchStatus string
 
+	// FIX33 A-W9 — compaction phase marker, "summarizing" only. Emitted
+	// before the pre-trim state extraction so the user sees "organising
+	// the conversation…" instead of an unexplained pause (claude.ai's
+	// "organizing its thoughts"). Cleared client-side by the first
+	// content_delta / message_complete / error.
+	CompactionStatus string
+
 	// Phase 8 Task 2 — run_python progress. Emitted twice per call:
 	// once with Status="running" the moment the sandbox job starts (so
 	// the user sees the code and a spinner instead of a silent 60s
@@ -1078,7 +1091,7 @@ type StreamUpdate struct {
 	ImageNotice *ImageAttachNotice
 }
 
-// ImageAttachNotice is the payload of the ``image_notice`` client event:
+// ImageAttachNotice is the payload of the “image_notice“ client event:
 // the list of attachments that fell out of the vision request this turn.
 type ImageAttachNotice struct {
 	Failures []ImageAttachFailure `json:"failures"`
@@ -1208,7 +1221,16 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	streamCtx, cancel := context.WithCancel(context.Background())
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc)
+	// FIX33 A-W9 — let the handler open the SSE response and show
+	// "organising the conversation…" the moment the pre-trim state
+	// extraction starts (it can take seconds).
+	var onExtractionStart func()
+	if in.OnCompactionStart != nil {
+		asstID, userID := asstMsg.ID, userMsg.ID
+		cb := in.OnCompactionStart
+		onExtractionStart = func() { cb(asstID, userID) }
+	}
+	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, onExtractionStart)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
@@ -1536,7 +1558,7 @@ func (s *MessageService) openAssistantStream(
 	ragQuery := lastUserContent(history)
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1799,7 +1821,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	}
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc)
+	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -2844,6 +2866,7 @@ func (s *MessageService) compileAndBuildRequest(
 	history []model.Message,
 	imgs userImageSet,
 	sources *SourcesAccumulator,
+	onExtractionStart func(),
 ) GatewayChatRequest {
 	// current-turn images drive routing + the compiler budget; the
 	// per-message map drives inline placement in the built request.
@@ -2911,13 +2934,15 @@ func (s *MessageService) compileAndBuildRequest(
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
-		Conv:        conv,
-		UserID:      userID,
-		TenantID:    tenantID,
-		History:     history,
-		ImageURLs:   imageURLs,
-		BuildPrefix: build,
-		NumTools:    numTools,
+		Conv:              conv,
+		UserID:            userID,
+		TenantID:          tenantID,
+		History:           history,
+		ImageURLs:         imageURLs,
+		BuildPrefix:       build,
+		NumTools:          numTools,
+		OmittedOlder:      s.omittedOlder(ctx, tenantID, conv.ID, len(history)),
+		OnExtractionStart: onExtractionStart,
 	})
 	if err != nil || compiled == nil {
 		// Defensive fallback — should never happen since Compile
@@ -3116,9 +3141,103 @@ func (s *MessageService) InspectContext(
 		BuildPrefix: func() (string, []ContextSource) {
 			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
 		},
-		NumTools: numTools,
+		NumTools:     numTools,
+		OmittedOlder: s.omittedOlder(ctx, tenantID, convID, len(history)),
+		DryRun:       true,
 	})
 }
+
+// omittedOlder (FIX33 A-W1) — how many active messages exist beyond the
+// loaded window. Only asks the DB when the load actually hit the
+// ceiling (len == maxContext), so the common case costs nothing. The
+// compiler counts the answer into Compacted + the marker and folds
+// those rows into the state before trimming — the old 200-cap's
+// silent drop has no successor.
+func (s *MessageService) omittedOlder(ctx context.Context, tenantID, convID uuid.UUID, loaded int) int {
+	if loaded < s.maxContext {
+		return 0
+	}
+	total, err := s.messages.CountMessages(ctx, tenantID, convID)
+	if err != nil {
+		slog.Warn("context: could not count messages beyond the load window", "conv", convID.String(), "err", err)
+		return 0
+	}
+	if total > loaded {
+		return total - loaded
+	}
+	return 0
+}
+
+// ManualCompactResult is what POST /conversations/{id}/compact returns.
+type ManualCompactResult struct {
+	State           *model.ConversationState `json:"state"`
+	BoundaryID      uuid.UUID                `json:"boundary_message_id"`
+	MessagesTotal   int                      `json:"messages_total"`
+	CoverageReached bool                     `json:"coverage_reached"`
+}
+
+// ManualCompact (FIX33 A-W7 — Claude's /compact): summarise every
+// message of the conversation into <conversation_state> NOW, honouring
+// the user's instructions, and — only if that succeeded — record the
+// newest message as the manual boundary so the next turn drops
+// everything at or before it (the first exchange still survives).
+// Nothing is dropped when the summary could not be produced: the
+// boundary is set after coverage, never before.
+func (s *MessageService) ManualCompact(
+	ctx context.Context, convID, userID, tenantID uuid.UUID, instructions string,
+) (*ManualCompactResult, error) {
+	if s.stateSvc == nil {
+		return nil, errors.New("conversation state service not configured")
+	}
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrMessageConversationNotFound
+		}
+		return nil, err
+	}
+	if conv.UserID != userID {
+		return nil, ErrMessageConversationNotFound
+	}
+	if !conv.MemoryEnabled {
+		return nil, ErrMessageMemoryOff
+	}
+	latest, err := s.messages.ListContextByConversation(ctx, tenantID, convID, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(latest) == 0 {
+		return nil, ErrMessageEmptyContent
+	}
+	last := latest[len(latest)-1].ID
+	st, reached, err := s.stateSvc.EnsureStateCoversUpTo(ctx, convID, userID, tenantID, &last, ExtractionOptions{
+		Instructions: instructions, Trigger: "manual",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if st == nil || isStateEmpty(st) {
+		// The extractor produced nothing (gateway down, model chatted):
+		// refuse to set a boundary — dropping without a summary is the
+		// thing this whole feature exists to prevent.
+		return nil, ErrCompactNoSummary
+	}
+	st, err = s.stateSvc.SetManualCompactBoundary(ctx, convID, userID, tenantID, last, instructions)
+	if err != nil {
+		return nil, err
+	}
+	total, _ := s.messages.CountMessages(ctx, tenantID, convID)
+	slog.Info("manual_compact", "conv", convID.String(), "boundary", last.String(), "reached", reached, "messages_total", total)
+	return &ManualCompactResult{State: st, BoundaryID: last, MessagesTotal: total, CoverageReached: reached}, nil
+}
+
+// ErrMessageMemoryOff — manual compact needs the state store, which a
+// temporary (memory-off) chat has opted out of.
+var ErrMessageMemoryOff = errors.New("memory is off for this conversation")
+
+// ErrCompactNoSummary — the extractor produced no usable summary, so
+// nothing was dropped.
+var ErrCompactNoSummary = errors.New("the summary could not be produced; nothing was compacted")
 
 func buildGatewayRequest(model string, history []model.Message, systemPrefix string) GatewayChatRequest {
 	return buildGatewayRequestWithImages(model, history, systemPrefix, nil, nil, nil, false)

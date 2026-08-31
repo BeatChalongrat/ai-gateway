@@ -70,6 +70,12 @@ services:
       - CHAT_EDGE_ADMIN_API_KEY=${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
       - CORS_ALLOW_ORIGINS=http://localhost:3002
       - MAX_CONTEXT_MESSAGES=1000
+      # FIX33 A-W2 — auto-compact at a threshold (default ON: 0.85 of the
+      # messages budget triggers a state refresh + a head-preserving trim
+      # down to 0.60). The repo load ceiling is 2000 rows; anything beyond
+      # is counted + marked, never dropped silently (A-W1).
+      - CONTEXT_COMPACT_TRIGGER_RATIO=${CONTEXT_COMPACT_TRIGGER_RATIO:-0.85}
+      - CONTEXT_COMPACT_TARGET_RATIO=${CONTEXT_COMPACT_TARGET_RATIO:-0.60}
       # Blob storage — default ``local`` writes under ./data/uploads
       # inside the container. Set STORAGE_BACKEND=s3 to route uploads
       # through the bundled MinIO service below (env vars wire in

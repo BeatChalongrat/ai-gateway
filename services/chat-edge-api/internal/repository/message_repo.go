@@ -87,9 +87,9 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 }
 
 // CreateImported inserts a desktop-imported message (migration 026).
-// ``ON CONFLICT (conversation_id, client_id) DO NOTHING`` makes replays of
+// “ON CONFLICT (conversation_id, client_id) DO NOTHING“ makes replays of
 // the same import batch no-ops — the caller counts skips via the returned
-// bool. ``createdAt`` is the desktop's historical timestamp, preserved
+// bool. “createdAt“ is the desktop's historical timestamp, preserved
 // verbatim (never re-stamped to NOW()). status is always 'completed'; the
 // canonical fields keep their 'legacy' defaults so imported content is
 // excluded from canonical-history replay.
@@ -299,19 +299,40 @@ func (r *MessageRepo) ListByIDs(
 	return out, nil
 }
 
+// MaxContextLoadCap bounds how many history rows one context load may
+// pull from chat.messages_masked (FIX33 A-W1). It is a query-cost
+// ceiling, NOT the context limit — MAX_CONTEXT_MESSAGES (default 1000)
+// is what the service asks for, and the ContextCompiler trims by
+// tokens. Any rows beyond the loaded window are reported to the
+// compiler via CountMessages so they are never lost silently.
+const MaxContextLoadCap = 2000
+
 // ListContextByConversation is a tighter variant used by the
 // MessageService to build the conversation context that ships to
 // the Gateway. Returns the most recent “limit“ messages in
 // CHRONOLOGICAL order (oldest → newest) and includes all statuses
 // so a paused / cancelled mid-stream still gets accounted for in
-// future turns. Limit is hard-capped at 200.
+// future turns.
+//
+// FIX33 A-W1: the old hard cap of 200 dropped the head of a long
+// conversation BEFORE the ContextCompiler ever saw it — with no
+// marker (FIX32 §1.1 measured it: recall of turns 1–100 failed at
+// 200/400 turns). The cap is now MaxContextLoadCap, a sanity
+// ceiling on the DB load only; the compiler decides by TOKEN
+// budget, and MessageService reports any rows beyond the loaded
+// window (CountMessages − len) as OmittedOlder so they are counted,
+// marked, and folded into the state extraction. Nothing is dropped
+// silently any more.
 func (r *MessageRepo) ListContextByConversation(
 	ctx context.Context,
 	tenantID, convID uuid.UUID,
 	limit int,
 ) ([]model.Message, error) {
-	if limit > 200 {
-		limit = 200
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > MaxContextLoadCap {
+		limit = MaxContextLoadCap
 	}
 	q := `
 		SELECT ` + r.messageContextColumns() + `
@@ -620,8 +641,8 @@ func (r *MessageRepo) ListContextBeforeMessage(
 	if limit <= 0 {
 		limit = 50
 	}
-	if limit > 200 {
-		limit = 200
+	if limit > MaxContextLoadCap {
+		limit = MaxContextLoadCap
 	}
 	q := `
 		SELECT ` + r.messageContextColumns() + `

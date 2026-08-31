@@ -267,6 +267,7 @@ func main() {
 	// /conversations/{id}/state read endpoint. Uses the gateway
 	// client for its extraction calls (low-temperature JSON).
 	stateSvc := service.NewConversationStateService(statesRepo, messages, conversations, gateway)
+	compactionUsageRepo := repository.NewCompactionUsageRepo(pool)
 
 	// Phase 4 — Excel Smart Workspace (Session 1) +
 	// Word/PDF Smart Reports (Session 2). Both services wired
@@ -348,7 +349,15 @@ func main() {
 	// and synchronously refreshing the state block before
 	// compaction so older messages keep their fingerprint in
 	// <conversation_state>.
-	messageSvc.SetContextCompiler(service.NewContextCompiler(stateSvc))
+	// FIX33 A-W2 — compaction fires at CONTEXT_COMPACT_TRIGGER_RATIO of
+	// the messages budget (default 0.85) and trims down to
+	// CONTEXT_COMPACT_TARGET_RATIO (0.60), instead of only on overflow.
+	contextCompiler := service.NewContextCompiler(stateSvc)
+	contextCompiler.SetRatios(cfg.ContextCompactTriggerRatio, cfg.ContextCompactTargetRatio)
+	messageSvc.SetContextCompiler(contextCompiler)
+	// FIX33 A-W8 — the token cost of every compaction pass is kept apart
+	// from the cost of answering (chat.compaction_usage, migration 038).
+	stateSvc.SetCompactionUsageRecorder(service.NewCompactionUsageSink(compactionUsageRepo))
 	// S6 — cross-conversation search. Backs the AI's
 	// search_past_conversations tool + the GET /api/v1/search
 	// endpoint. Reuses the same memory + conversation + message
@@ -447,6 +456,9 @@ func main() {
 	messageSvc.SetProjectReader(projects)
 
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
+	// FIX33 A-W8 — /usage/me reports the compaction bill separately.
+	usageHandler := handler.NewUsageHandler(cfg.GatewayAPIURL)
+	usageHandler.SetCompactionUsageRepo(compactionUsageRepo)
 	conversationHandler.SetExportSources(conversations, messages, filesRepo, cfg)
 	conversationHandler.SetKnowledgeService(knowledgeSvc)
 
@@ -527,7 +539,7 @@ func main() {
 
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
-		Usage:          handler.NewUsageHandler(cfg.GatewayAPIURL),
+		Usage:          usageHandler,
 		Conversation:   conversationHandler,
 		Project:        projectHandler,
 		CanvasArtifact: canvasArtifactHandler,
@@ -551,7 +563,7 @@ func main() {
 		// on CLOUD_SCHEDULER_ENABLED): StartScheduler → CloudTaskRunner.Tick,
 		// authorize-before-run, DB lease (migration 036), cloud tool subset.
 		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
-		Account:        handler.NewAccountHandler(exportSvc, purgeSvc),
+		Account:    handler.NewAccountHandler(exportSvc, purgeSvc),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.
 		MediaProxy: handler.NewMediaProxyHandler(gateway),

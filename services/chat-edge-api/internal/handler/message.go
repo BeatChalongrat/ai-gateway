@@ -84,11 +84,11 @@ type messageResponse struct {
 	// the desktop import endpoints (FIX 9). The desktop uses it to
 	// correlate a server row back to its local copy; nil / omitted for
 	// native chat-edge rows so the web wire is unchanged.
-	ClientID *string `json:"client_id,omitempty"`
-	Files            []fileResponse  `json:"files,omitempty"`
-	BranchIndex      int             `json:"branch_index"`
-	BranchCount      int             `json:"branch_count"`
-	HasBranches      bool            `json:"has_branches"`
+	ClientID    *string        `json:"client_id,omitempty"`
+	Files       []fileResponse `json:"files,omitempty"`
+	BranchIndex int            `json:"branch_index"`
+	BranchCount int            `json:"branch_count"`
+	HasBranches bool           `json:"has_branches"`
 	// S7 — populated only on assistant messages that have at least
 	// one context source recorded. Empty / nil for user messages
 	// and for assistants that drew on no special context (memory,
@@ -407,7 +407,7 @@ type streamDrainResult struct {
 // loops were byte-identical.
 //
 // “done“ is the request context's Done channel. When it fires
-// (client disconnected) the loop invokes ``onDisconnect`` ONCE and
+// (client disconnected) the loop invokes “onDisconnect“ ONCE and
 // then sets “done“ to nil: a cancelled context's Done channel is
 // permanently ready in select, so continuing to select on it would
 // busy-spin at 100% CPU until the service pump emits its terminal
@@ -416,8 +416,8 @@ type streamDrainResult struct {
 // terminates: pumpStreamWithTools sends a terminal update (Err or
 // Done) and defer-closes the channel on every exit path.
 //
-// Phase 5 — what ``onDisconnect`` should be:
-//   - primary streams (Send/Regenerate/Edit): ``detachOnDisconnect``.
+// Phase 5 — what “onDisconnect“ should be:
+//   - primary streams (Send/Regenerate/Edit): “detachOnDisconnect“.
 //     The generation KEEPS RUNNING server-side (writes to the dead
 //     ResponseWriter fail silently), the drain still accumulates the
 //     full content, and Finish persists it — so a refreshed client
@@ -426,6 +426,7 @@ type streamDrainResult struct {
 //     through POST /cancel → CancelStream, never through this hook.
 //   - resume streams: the broker unsubscribe — detaching a viewer
 //     must never touch the generation itself.
+//
 // detachOnDisconnect is the Phase 5 disconnect hook for primary
 // streams: do nothing — let the generation finish server-side so the
 // client can resume. (Pre-Phase-5 behaviour was stream.Cancel here,
@@ -543,6 +544,12 @@ Loop:
 					"status": ev.SearchStatus,
 				})
 			}
+			// FIX33 A-W9 — compaction phase marker ("summarizing").
+			if ev.CompactionStatus != "" {
+				writeSSEEvent(w, flusher, "compaction_status", map[string]any{
+					"status": ev.CompactionStatus,
+				})
+			}
 			// Phase 8 Task 2 — run_python progress: the code the model
 			// wrote, then its stdout/stderr + exit status. Rendered as a
 			// code+output card. Deliberately NOT persisted on the message
@@ -618,31 +625,63 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		return
 	}
 
+	// SSE headers — must be set BEFORE any write, and BEFORE the
+	// first flush. Factored so the FIX33 A-W9 early-open path below and
+	// the normal path write them exactly once.
+	started := false
+	openStream := func(assistantID, userMessageID uuid.UUID) {
+		if started {
+			return
+		}
+		started = true
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		// FIX28 §2 (F3): the client renders the user turn under an optimistic
+		// temp id; hand it the persisted row id here (Edit already did) so an
+		// edit → fork can name a real message without a reload.
+		startPayload := map[string]any{
+			"message_id":      assistantID.String(),
+			"conversation_id": in.ConversationID.String(),
+		}
+		if userMessageID != uuid.Nil {
+			startPayload["user_message_id"] = userMessageID.String()
+		}
+		writeSSEEvent(w, flusher, "message_start", startPayload)
+	}
+	// FIX33 A-W9 — when the compiler is about to run the synchronous
+	// state extraction (a pause of several seconds), open the stream NOW
+	// and tell the user the conversation is being organised. Without
+	// this the first byte only arrives after the extraction, and the
+	// pause looks like a hang.
+	in.OnCompactionStart = func(assistantID, userMessageID uuid.UUID) {
+		openStream(assistantID, userMessageID)
+		writeSSEEvent(w, flusher, "compaction_status", map[string]any{"status": "summarizing"})
+	}
+
 	stream, err := h.messages.SendStream(r.Context(), in)
 	if err != nil {
+		if started {
+			// The response is already an open SSE stream: the error must
+			// travel as a frame, not as a JSON status the client will never
+			// parse.
+			writeSSEEvent(w, flusher, "error", map[string]any{
+				"code":    "send_failed",
+				"message": sendErrorMessage(err),
+			})
+			return
+		}
 		h.writeSendError(w, err)
 		return
 	}
 
-	// SSE headers — must be set BEFORE any write, and BEFORE the
-	// first flush.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-
-	// FIX28 §2 (F3): the client renders the user turn under an optimistic
-	// temp id; hand it the persisted row id here (Edit already did) so an
-	// edit → fork can name a real message without a reload.
-	startPayload := map[string]any{
-		"message_id":      stream.AssistantID.String(),
-		"conversation_id": stream.ConversationID.String(),
-	}
+	userMessageID := uuid.Nil
 	if stream.UserMessage != nil {
-		startPayload["user_message_id"] = stream.UserMessage.ID.String()
+		userMessageID = stream.UserMessage.ID
 	}
-	writeSSEEvent(w, flusher, "message_start", startPayload)
+	openStream(stream.AssistantID, userMessageID)
 
 	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
@@ -754,6 +793,24 @@ func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, da
 // writeSendError maps service errors to HTTP responses for the
 // non-stream path AND for the pre-stream error path (when
 // SendStream returns before any SSE frame goes out).
+// sendErrorMessage is writeSendError's message half, for the FIX33 A-W9
+// case where the SSE stream is already open and the error must travel
+// as a frame.
+func sendErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, service.ErrMessageConversationNotFound):
+		return "conversation not found"
+	case errors.Is(err, service.ErrMessageEmptyContent):
+		return "content is required"
+	case strings.Contains(err.Error(), "insufficient_credits"):
+		return "เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต"
+	case errors.Is(err, service.ErrMessageGatewayUnavailable):
+		return err.Error()
+	default:
+		return "internal error"
+	}
+}
+
 func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, service.ErrMessageConversationNotFound):

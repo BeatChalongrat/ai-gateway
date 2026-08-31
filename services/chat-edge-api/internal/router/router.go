@@ -291,6 +291,11 @@ func New(
 			// a future "your chat is getting long" UI nudge.
 			r.Get("/conversations/{id}/context-info", h.Conversation.GetContextInfo)
 
+			// FIX33 A-W7 — manual compaction (Claude's /compact +
+			// instructions): summarise everything up to now into
+			// <conversation_state> and drop it from the next turn.
+			r.Post("/conversations/{id}/compact", h.Conversation.Compact)
+
 			// Conversation sharing (authenticated half — the
 			// public share-view endpoint is registered outside the
 			// RequireAuth subgroup below).
