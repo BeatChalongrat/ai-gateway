@@ -19,7 +19,7 @@ from app.services.provider_key_service import ProviderKeyService
 @respx.mock
 async def test_openrouter_invalid_key_reports_invalid():
     # The auth-required endpoint 401s on a bad key.
-    route = respx.get("https://openrouter.ai/api/v1/auth/key").mock(
+    route = respx.get("https://openrouter.ai/api/v1/key").mock(
         return_value=httpx.Response(
             401, json={"error": {"message": "No auth credentials found"}}
         )
@@ -35,7 +35,7 @@ async def test_openrouter_invalid_key_reports_invalid():
 @pytest.mark.asyncio
 @respx.mock
 async def test_openrouter_valid_key_reports_valid():
-    respx.get("https://openrouter.ai/api/v1/auth/key").mock(
+    respx.get("https://openrouter.ai/api/v1/key").mock(
         return_value=httpx.Response(200, json={"data": {"label": "k"}})
     )
     svc = ProviderKeyService()
@@ -51,7 +51,7 @@ async def test_openrouter_does_not_use_public_models_endpoint():
     public = respx.get("https://openrouter.ai/api/v1/models").mock(
         return_value=httpx.Response(200, json={"data": []})
     )
-    respx.get("https://openrouter.ai/api/v1/auth/key").mock(
+    respx.get("https://openrouter.ai/api/v1/key").mock(
         return_value=httpx.Response(401, json={"error": {"message": "bad"}})
     )
     svc = ProviderKeyService()
@@ -78,7 +78,7 @@ async def test_openai_invalid_key_reports_invalid():
 @pytest.mark.asyncio
 @respx.mock
 async def test_anthropic_invalid_key_reports_invalid():
-    respx.post("https://api.anthropic.com/v1/messages").mock(
+    respx.get("https://api.anthropic.com/v1/models").mock(
         return_value=httpx.Response(
             401, json={"error": {"message": "invalid x-api-key"}}
         )

@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import ConflictError
 from app.core.security import decrypt_provider_key, encrypt_provider_key
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
@@ -406,11 +407,28 @@ class ProviderKeyService:
 
         repo = ProviderKeyRepository(session)
         final_label = label or f"Key {self._next_label_num(session, provider_name)}"
-        row = repo.create(
-            provider_name=provider_name,
-            label=final_label,
-            api_key_encrypted=_encode(api_key),
-        )
+        existing = repo.get_by_provider_and_label(provider_name, final_label)
+        if existing is not None:
+            if existing.is_active:
+                raise ConflictError(
+                    f"An active key with label '{final_label}' already exists "
+                    f"for provider '{provider_name}'.",
+                    code="provider_key_label_conflict",
+                )
+            row = repo.update(
+                existing,
+                api_key_encrypted=_encode(api_key),
+                is_active=True,
+                last_test_status="untested",
+                last_tested_at=None,
+                last_test_latency_ms=None,
+            )
+        else:
+            row = repo.create(
+                provider_name=provider_name,
+                label=final_label,
+                api_key_encrypted=_encode(api_key),
+            )
         # Insert-if-absent, so the seeder's own "env-seed" reason survives
         # when this is called from the seed path.
         mark_provider_owned(session, KIND_KEY, provider_name, "admin-ui")
@@ -501,6 +519,8 @@ class ProviderKeyService:
                 return await self._test_openai(api_key)
             elif provider_name == "anthropic":
                 return await self._test_anthropic(api_key)
+            elif provider_name == "google":
+                return await self._test_google(api_key)
             elif provider_name == "openrouter":
                 return await self._test_openrouter(api_key)
             elif provider_name == "replicate":
@@ -512,62 +532,172 @@ class ProviderKeyService:
                     provider_name, api_key, base_url=base_url
                 )
             else:
-                return {"valid": False, "latency_ms": 0, "error": f"Unknown provider: {provider_name}"}
-        except Exception as e:
-            return {"valid": False, "latency_ms": 0, "error": str(e)[:200]}
+                return await self._test_registered_chat_provider(
+                    provider_name, api_key
+                )
+        except Exception as exc:  # noqa: BLE001 - never expose secret-bearing text
+            logger.error(
+                "Unexpected key validation failure for provider %s (%s)",
+                provider_name,
+                type(exc).__name__,
+            )
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": "internal validation error",
+                "error_type": "internal",
+                "provider_status": None,
+            }
+
+    @staticmethod
+    def _provider_error_message(resp: httpx.Response, api_key: str) -> str:
+        """Extract a short upstream message without ever echoing the key."""
+        message = ""
+        if resp.headers.get("content-type", "").startswith("application/json"):
+            try:
+                body = resp.json()
+            except ValueError:
+                body = {}
+            if isinstance(body, dict):
+                error = body.get("error")
+                if isinstance(error, dict):
+                    message = str(error.get("message") or error.get("detail") or "")
+                elif isinstance(error, str):
+                    message = error
+                if not message:
+                    message = str(body.get("message") or body.get("detail") or "")
+        message = message.replace(api_key, "[redacted]").strip()
+        return message[:200] or "provider returned no error message"
+
+    async def _test_bearer_endpoint(
+        self,
+        provider_name: str,
+        api_key: str,
+        url: str,
+        *,
+        extra_headers: dict[str, str] | None = None,
+        use_bearer: bool = True,
+    ) -> dict:
+        t0 = time.perf_counter()
+        headers = {"Authorization": f"Bearer {api_key}"} if use_bearer else {}
+        headers.update(extra_headers or {})
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+        except httpx.TimeoutException:
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "connection timed out while validating key",
+                "error_type": "timeout",
+                "provider_status": None,
+            }
+        except httpx.RequestError:
+            return {
+                "valid": False,
+                "latency_ms": round((time.perf_counter() - t0) * 1000),
+                "error": "could not connect to provider while validating key",
+                "error_type": "connection",
+                "provider_status": None,
+            }
+
+        ms = round((time.perf_counter() - t0) * 1000)
+        if resp.status_code == 200:
+            return {
+                "valid": True,
+                "latency_ms": ms,
+                "error": None,
+                "error_type": None,
+                "provider_status": 200,
+            }
+        message = self._provider_error_message(resp, api_key)
+        kind = "authentication" if resp.status_code in (401, 403) else "provider"
+        return {
+            "valid": False,
+            "latency_ms": ms,
+            "error": f"provider returned HTTP {resp.status_code}: {message}",
+            "error_type": kind,
+            "provider_status": resp.status_code,
+        }
+
+    async def _test_registered_chat_provider(
+        self, provider_name: str, api_key: str
+    ) -> dict:
+        """Probe the /models endpoint of a registered chat adapter."""
+        from app.services.provider_dispatcher import ProviderDispatcher
+        from app.services.providers.base_urls import resolve_base_url
+        from app.services.providers.openai_compatible_adapter import (
+            OpenAICompatibleAdapter,
+        )
+
+        adapter = ProviderDispatcher().adapters.get(provider_name)
+        if adapter is None:
+            if provider_name in {"cohere", "mistral", "perplexity"}:
+                return {
+                    "valid": False,
+                    "latency_ms": 0,
+                    "error": (
+                        f"provider '{provider_name}' is listed in the catalog, "
+                        "but its chat adapter is not implemented"
+                    ),
+                    "error_type": "not_implemented",
+                    "provider_status": None,
+                }
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": f"unknown provider: {provider_name}",
+                "error_type": "unknown_provider",
+                "provider_status": None,
+            }
+        if not isinstance(adapter, OpenAICompatibleAdapter):
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": f"provider '{provider_name}' has no key validation probe",
+                "error_type": "not_implemented",
+                "provider_status": None,
+            }
+
+        url = resolve_base_url(provider_name, adapter.base_url).rstrip("/")
+        return await self._test_bearer_endpoint(
+            provider_name, api_key, f"{url}/models"
+        )
 
     async def _test_openai(self, api_key: str) -> dict:
-        t0 = time.perf_counter()
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            ms = round((time.perf_counter() - t0) * 1000)
-            if resp.status_code == 200:
-                return {"valid": True, "latency_ms": ms, "error": None}
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            err = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
-            return {"valid": False, "latency_ms": ms, "error": err}
+        return await self._test_bearer_endpoint(
+            "openai", api_key, "https://api.openai.com/v1/models"
+        )
 
     async def _test_anthropic(self, api_key: str) -> dict:
-        t0 = time.perf_counter()
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-haiku-20240307", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]},
-            )
-            ms = round((time.perf_counter() - t0) * 1000)
-            if resp.status_code == 200:
-                return {"valid": True, "latency_ms": ms, "error": None}
-            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            err = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
-            return {"valid": False, "latency_ms": ms, "error": err}
+        return await self._test_bearer_endpoint(
+            "anthropic",
+            api_key,
+            "https://api.anthropic.com/v1/models",
+            extra_headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            use_bearer=False,
+        )
+
+    async def _test_google(self, api_key: str) -> dict:
+        return await self._test_bearer_endpoint(
+            "google",
+            api_key,
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            extra_headers={"x-goog-api-key": api_key},
+            use_bearer=False,
+        )
 
     async def _test_openrouter(self, api_key: str) -> dict:
         # A3: ``GET /api/v1/models`` is PUBLIC on OpenRouter — it returns 200
         # for any key (even a placeholder / garbage), so it can't validate a
-        # credential. ``GET /api/v1/auth/key`` requires auth and returns the
+        # credential. ``GET /api/v1/key`` requires auth and returns the
         # key's own metadata, so it 401s on a bad key — the correct probe.
-        t0 = time.perf_counter()
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://openrouter.ai/api/v1/auth/key",
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            ms = round((time.perf_counter() - t0) * 1000)
-            if resp.status_code == 200:
-                return {"valid": True, "latency_ms": ms, "error": None}
-            body = (
-                resp.json()
-                if resp.headers.get("content-type", "").startswith(
-                    "application/json"
-                )
-                else {}
-            )
-            err = body.get("error", {}).get("message", f"HTTP {resp.status_code}")
-            return {"valid": False, "latency_ms": ms, "error": err}
+        return await self._test_bearer_endpoint(
+            "openrouter", api_key, "https://openrouter.ai/api/v1/key"
+        )
 
     async def _test_replicate(self, api_key: str) -> dict:
         """Validate a Replicate key via ``GET /v1/account``.

@@ -23,6 +23,25 @@ export class ApiError extends Error {
   }
 }
 
+export function getApiErrorMessage(error: any, fallback: string): string {
+  const body = error?.body;
+  const nested = body?.error;
+  const candidate =
+    (typeof nested?.message === "string" && nested.message) ||
+    (typeof nested === "string" && nested) ||
+    (typeof body?.detail === "string" && body.detail) ||
+    (typeof body?.message === "string" && body.message) ||
+    (typeof body === "string" && body.trim()) ||
+    "";
+
+  if (candidate) return candidate;
+  if (error?.status === 0) return `${fallback}: request timed out`;
+  if (typeof error?.status === "number" && error.status > 0) {
+    return `${fallback} (HTTP ${error.status})`;
+  }
+  return `${fallback}: network request failed`;
+}
+
 function readCookie(name: string): string {
   if (typeof document === "undefined") return "";
   const prefix = name + "=";

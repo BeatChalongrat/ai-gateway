@@ -389,6 +389,12 @@ async def add_provider_key(
     # base_url so nothing persists on failure)
     test_result = await svc.test_key(provider_name, api_key, base_url=base_url or None)
     if not test_result["valid"]:
+        log.info(
+            "provider_key_validation_failed",
+            provider=provider_name,
+            error_type=test_result.get("error_type"),
+            provider_status=test_result.get("provider_status"),
+        )
         from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=400,
@@ -398,19 +404,58 @@ async def add_provider_key(
                     "message": f"Key validation failed: {test_result['error']}",
                 },
                 "test_result": test_result,
+                "stage": "validate",
             },
         )
 
-    if base_url:
-        previous_url = set_stored_base_url(session, provider_name, base_url)
-        if previous_url and previous_url != base_url:
-            # The old endpoint's pooled httpx client would otherwise idle
-            # in the process-global cache until shutdown.
-            from app.services.providers.http_client import evict_client
-            await evict_client(previous_url)
+    previous_url = None
+    try:
+        if base_url:
+            previous_url = set_stored_base_url(session, provider_name, base_url)
 
-    row = svc.add_key(session, provider_name, api_key, label=label)
-    svc.update_test_result(session, row.id, "valid", test_result["latency_ms"])
+        row = svc.add_key(session, provider_name, api_key, label=label)
+        svc.update_test_result(session, row.id, "valid", test_result["latency_ms"])
+    except Exception as exc:  # save failures need a browser-readable contract
+        from sqlalchemy.exc import IntegrityError
+        from app.core.exceptions import ConflictError
+        from app.services.providers.base_urls import clear_base_url_cache
+
+        session.rollback()
+        clear_base_url_cache()
+        if isinstance(exc, ConflictError):
+            raise
+        if isinstance(exc, IntegrityError):
+            raise ConflictError(
+                f"A key with label '{label or 'auto-generated'}' already exists "
+                f"for provider '{provider_name}'.",
+                code="provider_key_label_conflict",
+            ) from exc
+
+        log.error(
+            "provider_key_save_failed",
+            provider=provider_name,
+            error_type=type(exc).__name__,
+        )
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "provider_key_save_failed",
+                    "message": (
+                        "The provider accepted the key, but the gateway could "
+                        "not save it. No key was stored; check backend logs."
+                    ),
+                },
+                "stage": "save",
+            },
+        )
+
+    if previous_url and previous_url != base_url:
+        # The old endpoint's pooled httpx client would otherwise idle
+        # in the process-global cache until shutdown.
+        from app.services.providers.http_client import evict_client
+        await evict_client(previous_url)
 
     # Auto-discover the models this key can access and upsert them into
     # ``model_configs`` so they appear in the admin model list + the

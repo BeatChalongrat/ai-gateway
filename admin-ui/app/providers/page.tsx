@@ -8,7 +8,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { SkeletonCards } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
-import { api } from "../../lib/api";
+import { api, getApiErrorMessage } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { useT, type DictKey } from "../../lib/i18n";
 
@@ -197,7 +197,7 @@ function KeysPanel({
       setLabel("");
       loadKeys();
     } catch (e: any) {
-      const msg = e.body?.error?.message || t("infra.providers.toastAddFailed");
+      const msg = getApiErrorMessage(e, t("infra.providers.toastAddFailed"));
       toast(msg, "error");
     } finally {
       setAdding(false);
