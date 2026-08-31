@@ -25,8 +25,6 @@ import {
 } from "@/lib/fileUtil";
 import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch } from "@/lib/visionGate";
 import { tOutside, useT } from "@/lib/i18n";
-import type { DictKey } from "@/lib/i18n/dict";
-import type { RoutingTier } from "@/lib/types";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
   filterSlashCommands,
@@ -276,14 +274,12 @@ export function ChatInput({
   );
   const reasoningOn = Boolean(conversation?.reasoning_enabled);
   const setConversationReasoning = useChatStore((s) => s.setConversationReasoning);
-  // FIX35 Part C — the Auto router's cost ceiling for this conversation.
-  // Shown only while the conversation is on Auto: an explicit model is never
-  // routed, so a budget would be meaningless there. "" = workspace default.
-  const routingTier: RoutingTier | "" = (conversation?.routing_tier ?? "") as RoutingTier | "";
-  const setConversationRoutingTier = useChatStore((s) => s.setConversationRoutingTier);
+  // FIX36 Part B — the per-conversation cost ceiling stays server-side
+  // (conversation.routing_tier + PATCH endpoint), but the composer no longer
+  // exposes it: the user only sees Auto vs an explicit model, and the
+  // workspace default ceiling lives in admin settings. Tier = a ceiling,
+  // never a forced band — Auto picks the cheapest adequate model itself.
   const isAutoModel = activeModelId === AUTO_MODEL_ID || !activeModelId;
-  const TIER_CYCLE: Array<RoutingTier | ""> = ["", "low", "medium", "high", "xhigh", "max"];
-  const tierLabel = (tier: RoutingTier | ""): string => t(tier ? (`tier.${tier}` as DictKey) : "tier.default");
   const [isMobile, setIsMobile] = useState(false);
   // Distance (px) the on-screen keyboard is occluding the bottom of
   // the layout viewport. Updated from visualViewport.resize so the
@@ -1169,32 +1165,6 @@ export function ChatInput({
                   }`}
                 >
                   <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
-                </button>
-              ) : null}
-              {/* FIX35 Part C — Auto budget. One click cycles the ceiling
-                  (Default → Low → Medium → High → Very high → Max → Default);
-                  the current band is the label so the state is always
-                  visible. Only on Auto. */}
-              {isAutoModel && conversationId && !streaming ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = TIER_CYCLE[(TIER_CYCLE.indexOf(routingTier) + 1) % TIER_CYCLE.length];
-                    void setConversationRoutingTier(conversationId, next);
-                  }}
-                  aria-label={t("tier.toggle.aria", { tier: tierLabel(routingTier) })}
-                  title={t("tier.toggle.title", { tier: tierLabel(routingTier) })}
-                  data-testid="auto-tier-toggle"
-                  data-tier={routingTier || "default"}
-                  disabled={disabled}
-                  className={`focus-ring tap-44 inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    routingTier
-                      ? "bg-amber-500/15 text-amber-400"
-                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
-                  }`}
-                >
-                  <span aria-hidden>$</span>
-                  {tierLabel(routingTier)}
                 </button>
               ) : null}
               {canReason && conversationId && !streaming ? (

@@ -921,8 +921,6 @@ export const en = {
   // ── FIX35 Part C — Auto router cost tier (five bands) ──
   "model.tier.xhigh": "Premium++",
   "model.tier.max": "Max",
-  "tier.toggle.aria": "Auto budget: {tier}",
-  "tier.toggle.title": "Auto budget — the most the router may spend per turn: {tier}. Click to change.",
   "tier.default": "Default",
   "tier.default.hint": "Use the workspace default",
   "tier.low": "Low",
@@ -2201,8 +2199,6 @@ const th: Record<DictKey, string> = {
   // ── FIX35 Part C — Auto router cost tier (five bands) ──
   "model.tier.xhigh": "พรีเมียม++",
   "model.tier.max": "สูงสุด",
-  "tier.toggle.aria": "งบของ Auto: {tier}",
-  "tier.toggle.title": "งบของ Auto — เพดานที่ router ใช้จ่ายได้ต่อเทิร์น: {tier} คลิกเพื่อเปลี่ยน",
   "tier.default": "ค่าเริ่มต้น",
   "tier.default.hint": "ใช้ค่าเริ่มต้นของ workspace",
   "tier.low": "ต่ำ",

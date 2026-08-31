@@ -107,6 +107,14 @@ export const en = {
   "padmin.settings.autoFallbacksDesc":
     "Tried in order when the default has no usable provider key. Comma-separated model ids.",
   "padmin.settings.autoLoadingModels": "Loading models…",
+  "padmin.settings.autoTierDefault": "Auto cost ceiling",
+  "padmin.settings.autoTierDefaultDesc":
+    "The most Auto may spend per turn (workspace default). A ceiling, not a forced band — Auto still picks the cheapest model that fits the task below it.",
+  "padmin.settings.autoTier.low": "Low — cheapest models only",
+  "padmin.settings.autoTier.medium": "Medium — everyday flagships",
+  "padmin.settings.autoTier.high": "High — strong models for hard work",
+  "padmin.settings.autoTier.xhigh": "Very high — top-end models",
+  "padmin.settings.autoTier.max": "Max — no limit",
   "padmin.settings.unsavedChanges": "Unsaved changes",
   "padmin.settings.settingsSaved": "Settings saved",
   "padmin.settings.comingSoon": "Coming soon",
@@ -248,6 +256,14 @@ export const th: Record<keyof typeof en, string> = {
   "padmin.settings.autoFallbacksDesc":
     "ใช้ตามลำดับเมื่อโมเดลหลักไม่มีคีย์ที่ใช้ได้ คั่นด้วยเครื่องหมายจุลภาค",
   "padmin.settings.autoLoadingModels": "กำลังโหลดรายชื่อโมเดล…",
+  "padmin.settings.autoTierDefault": "เพดานค่าใช้จ่ายของ Auto",
+  "padmin.settings.autoTierDefaultDesc":
+    "งบสูงสุดที่ Auto ใช้ได้ต่อเทิร์น (ค่าเริ่มต้นของ workspace) เป็นเพดาน ไม่ใช่การบังคับช่วงราคา — Auto ยังเลือกโมเดลที่ถูกที่สุดที่เหมาะกับงานภายใต้เพดานนี้",
+  "padmin.settings.autoTier.low": "ต่ำ — เฉพาะโมเดลราคาถูกสุด",
+  "padmin.settings.autoTier.medium": "กลาง — โมเดลหลักสำหรับงานทั่วไป",
+  "padmin.settings.autoTier.high": "สูง — โมเดลแรงสำหรับงานยาก",
+  "padmin.settings.autoTier.xhigh": "สูงมาก — โมเดลระดับท็อป",
+  "padmin.settings.autoTier.max": "สูงสุด — ไม่จำกัด",
   "padmin.settings.unsavedChanges": "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
   "padmin.settings.settingsSaved": "บันทึกการตั้งค่าแล้ว",
   "padmin.settings.comingSoon": "เร็ว ๆ นี้",

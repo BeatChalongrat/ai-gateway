@@ -284,34 +284,24 @@ describe("isFillerDescription", () => {
   });
 });
 
-// ─── FIX35 Part C — Auto budget (tier ceiling) toggle ───────────
+// ─── FIX36 Part B — the tier ceiling left the composer ──────────
 
-describe("Auto budget toggle", () => {
-  it("shows on Auto with the workspace default and cycles to Low on click", async () => {
+describe("Auto budget toggle removed from composer", () => {
+  it("never renders in the composer — not on Auto", () => {
     useModelStore.setState({ models: [model()], loaded: true, loading: false });
     useChatStore.setState({ conversations: [conv({ model_id: AUTO_MODEL_ID })] });
-    mockApi.setConversationRoutingTier.mockResolvedValue(conv({ model_id: AUTO_MODEL_ID, routing_tier: "low" }));
-
     mountComposer(AUTO_MODEL_ID);
-    const btn = screen.getByTestId("auto-tier-toggle");
-    expect(btn).toHaveAttribute("data-tier", "default");
-    expect(btn.textContent).toContain(dictionaries.en["tier.default"]);
-
-    await act(async () => {
-      fireEvent.click(btn);
-    });
-    expect(mockApi.setConversationRoutingTier).toHaveBeenCalledWith("c1", "low");
-    expect(useChatStore.getState().conversations[0].routing_tier).toBe("low");
+    expect(screen.queryByTestId("auto-tier-toggle")).toBeNull();
   });
 
-  it("is hidden for an explicit model — an explicit pick is never routed", () => {
+  it("never renders in the composer — not on an explicit model either", () => {
     useModelStore.setState({ models: [model()], loaded: true, loading: false });
     useChatStore.setState({ conversations: [conv({ model_id: "gpt-4o" })] });
     mountComposer("gpt-4o");
     expect(screen.queryByTestId("auto-tier-toggle")).toBeNull();
   });
 
-  it("localizes the five bands + default in Thai", () => {
+  it("keeps the band labels localized in Thai (still used server-side / settings)", () => {
     for (const k of ["tier.default", "tier.low", "tier.medium", "tier.high", "tier.xhigh", "tier.max"] as const) {
       expect(dictionaries.th[k]).toBeTruthy();
       expect(dictionaries.th[k]).not.toBe(dictionaries.en[k]);

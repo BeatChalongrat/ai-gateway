@@ -25,7 +25,8 @@ type SettingKey =
   | "portal_signup_enabled"
   | "credit_low_threshold"
   | "auto_default_model"
-  | "auto_default_fallbacks";
+  | "auto_default_fallbacks"
+  | "auto_routing_tier_default";
 
 interface Setting {
   key: string;
@@ -285,6 +286,7 @@ export default function PortalSettingsPage() {
                   <AutoRoutingSection
                     defaultModel={byKey.auto_default_model}
                     fallbacks={byKey.auto_default_fallbacks}
+                    tierDefault={byKey.auto_routing_tier_default}
                     onSaved={refetch}
                   />
                 </>
@@ -708,13 +710,19 @@ interface ToolModelRow {
   cost_tier: string;
 }
 
+// FIX36 Part B — the five router cost bands, cheapest first. A ceiling,
+// not a forced band: Auto still picks the cheapest adequate model below it.
+const ROUTING_TIERS = ["low", "medium", "high", "xhigh", "max"] as const;
+
 function AutoRoutingSection({
   defaultModel,
   fallbacks,
+  tierDefault,
   onSaved,
 }: {
   defaultModel?: Setting;
   fallbacks?: Setting;
+  tierDefault?: Setting;
   onSaved: () => void;
 }) {
   const t = useT();
@@ -726,12 +734,14 @@ function AutoRoutingSection({
 
   const [model, setModel] = useState(defaultModel?.value ?? "");
   const [chain, setChain] = useState(fallbacks?.value ?? "");
+  const [tier, setTier] = useState(tierDefault?.value ?? "high");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setModel(defaultModel?.value ?? "");
     setChain(fallbacks?.value ?? "");
-  }, [defaultModel?.value, fallbacks?.value]);
+    setTier(tierDefault?.value ?? "high");
+  }, [defaultModel?.value, fallbacks?.value, tierDefault?.value]);
 
   // Only tool-capable models may be elected — the backend validator
   // enforces the same rule, this just keeps invalid picks off the menu.
@@ -742,7 +752,9 @@ function AutoRoutingSection({
   }, [modelData]);
 
   const dirty =
-    model !== (defaultModel?.value ?? "") || chain !== (fallbacks?.value ?? "");
+    model !== (defaultModel?.value ?? "") ||
+    chain !== (fallbacks?.value ?? "") ||
+    tier !== (tierDefault?.value ?? "high");
 
   async function save() {
     setSaving(true);
@@ -753,6 +765,9 @@ function AutoRoutingSection({
       }
       if (chain !== fallbacks?.value) {
         await patchSetting("auto_default_fallbacks", chain);
+      }
+      if (tier !== (tierDefault?.value ?? "high")) {
+        await patchSetting("auto_routing_tier_default", tier);
       }
     } catch (e) {
       failed = formatError(e);
@@ -839,6 +854,26 @@ function AutoRoutingSection({
           placeholder="gpt-4.1,gpt-4o-mini"
           style={fieldStyle}
         />
+      </div>
+
+      <div className="ps-setting-card" style={cardStyle}>
+        <label htmlFor="auto-routing-tier" style={labelStyle}>
+          {t("padmin.settings.autoTierDefault")}
+        </label>
+        <div style={descStyle}>{t("padmin.settings.autoTierDefaultDesc")}</div>
+        <select
+          id="auto-routing-tier"
+          data-testid="auto-routing-tier-default"
+          value={tier}
+          onChange={(e) => setTier(e.target.value)}
+          style={fieldStyle}
+        >
+          {ROUTING_TIERS.map((v) => (
+            <option key={v} value={v}>
+              {t(`padmin.settings.autoTier.${v}` as DictKey)}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: "0.875rem", marginTop: "0.25rem" }}>
