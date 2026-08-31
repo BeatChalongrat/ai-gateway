@@ -532,13 +532,9 @@ class ProviderKeyService:
                     provider_name, api_key, base_url=base_url
                 )
             else:
-                return {
-                    "valid": False,
-                    "latency_ms": 0,
-                    "error": f"unknown provider: {provider_name}",
-                    "error_type": "unknown_provider",
-                    "provider_status": None,
-                }
+                return await self._test_registered_chat_provider(
+                    provider_name, api_key
+                )
         except Exception as exc:  # noqa: BLE001 - never expose secret-bearing text
             logger.error(
                 "Unexpected key validation failure for provider %s (%s)",
@@ -623,6 +619,50 @@ class ProviderKeyService:
             "error_type": kind,
             "provider_status": resp.status_code,
         }
+
+    async def _test_registered_chat_provider(
+        self, provider_name: str, api_key: str
+    ) -> dict:
+        """Probe the /models endpoint of a registered chat adapter."""
+        from app.services.provider_dispatcher import ProviderDispatcher
+        from app.services.providers.base_urls import resolve_base_url
+        from app.services.providers.openai_compatible_adapter import (
+            OpenAICompatibleAdapter,
+        )
+
+        adapter = ProviderDispatcher().adapters.get(provider_name)
+        if adapter is None:
+            if provider_name in {"cohere", "mistral", "perplexity"}:
+                return {
+                    "valid": False,
+                    "latency_ms": 0,
+                    "error": (
+                        f"provider '{provider_name}' is listed in the catalog, "
+                        "but its chat adapter is not implemented"
+                    ),
+                    "error_type": "not_implemented",
+                    "provider_status": None,
+                }
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": f"unknown provider: {provider_name}",
+                "error_type": "unknown_provider",
+                "provider_status": None,
+            }
+        if not isinstance(adapter, OpenAICompatibleAdapter):
+            return {
+                "valid": False,
+                "latency_ms": 0,
+                "error": f"provider '{provider_name}' has no key validation probe",
+                "error_type": "not_implemented",
+                "provider_status": None,
+            }
+
+        url = resolve_base_url(provider_name, adapter.base_url).rstrip("/")
+        return await self._test_bearer_endpoint(
+            provider_name, api_key, f"{url}/models"
+        )
 
     async def _test_openai(self, api_key: str) -> dict:
         return await self._test_bearer_endpoint(
