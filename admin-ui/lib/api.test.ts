@@ -5,7 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, ApiError } from "./api";
+import { api, ApiError, getApiErrorMessage } from "./api";
 
 const BASE = "http://localhost:8080";
 
@@ -33,6 +33,26 @@ afterEach(() => {
   // Evict the CSRF cookie between tests (jsdom shares the document).
   document.cookie = "csrf_token=; Max-Age=0; path=/";
   localStorage.clear();
+});
+
+describe("API error messages", () => {
+  it("reads the structured gateway error message", () => {
+    const error = new ApiError(400, {
+      error: { message: "provider returned HTTP 401: invalid key" },
+    });
+    expect(getApiErrorMessage(error, "Failed to add key")).toBe(
+      "provider returned HTTP 401: invalid key",
+    );
+  });
+
+  it("handles plain response bodies and network failures", () => {
+    expect(
+      getApiErrorMessage(new ApiError(500, "Internal Server Error"), "Failed"),
+    ).toBe("Internal Server Error");
+    expect(getApiErrorMessage(new TypeError("fetch failed"), "Failed")).toBe(
+      "Failed: network request failed",
+    );
+  });
 });
 
 describe("double-submit CSRF header", () => {
