@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func thaiRunes(n int) string { return strings.Repeat("ก", n) }    // 1 rune, 3 bytes each
+func thaiRunes(n int) string { return strings.Repeat("ก", n) } // 1 rune, 3 bytes each
 func enChars(n int) string   { return strings.Repeat("a", n) }
 
 func TestIsComplexQuery_ThaiUsesRunesNotBytes(t *testing.T) {

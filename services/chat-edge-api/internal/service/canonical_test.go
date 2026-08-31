@@ -42,12 +42,18 @@ func TestValidateCanonicalArtifact(t *testing.T) {
 	bad(func(a *CanonicalArtifact) { a.GenerationID = "" })
 	bad(func(a *CanonicalArtifact) { a.GenerationID = "other" }) // gen != req
 	bad(func(a *CanonicalArtifact) { a.CanonicalSHA256 = "0" })
-	bad(func(a *CanonicalArtifact) { a.CanonicalSHA256 = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789" }) // uppercase
-	bad(func(a *CanonicalArtifact) { a.CanonicalSHA256 = "z" + a.CanonicalSHA256[1:] })                                       // non-hex
-	bad(func(a *CanonicalArtifact) { a.CanonicalLength++ })                                                                   // wrong length
-	bad(func(a *CanonicalArtifact) { a.CanonicalContent = "tampered <r0>" })                                                  // sha mismatch
+	bad(func(a *CanonicalArtifact) {
+		a.CanonicalSHA256 = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+	}) // uppercase
+	bad(func(a *CanonicalArtifact) { a.CanonicalSHA256 = "z" + a.CanonicalSHA256[1:] }) // non-hex
+	bad(func(a *CanonicalArtifact) { a.CanonicalLength++ })                             // wrong length
+	bad(func(a *CanonicalArtifact) { a.CanonicalContent = "tampered <r0>" })            // sha mismatch
 	// byte-length-right but rune-length-wrong: claim 3 (byte count of ก)
-	bad(func(a *CanonicalArtifact) { a.CanonicalContent = "ก"; a.CanonicalSHA256 = canonicalSHA256("ก"); a.CanonicalLength = 3 })
+	bad(func(a *CanonicalArtifact) {
+		a.CanonicalContent = "ก"
+		a.CanonicalSHA256 = canonicalSHA256("ก")
+		a.CanonicalLength = 3
+	})
 }
 
 func TestCanonicalStreamStateDeriveStatus(t *testing.T) {
@@ -164,7 +170,7 @@ func TestBuildGatewayRequestCanonicalOnly(t *testing.T) {
 		{
 			Role:             "assistant",
 			ContentMasked:    "ผลลัพธ์คือ 80000", // restored DISPLAY (raw)
-			ContentCanonical: sp(cc),              // tokenized CANONICAL
+			ContentCanonical: sp(cc),             // tokenized CANONICAL
 			CanonicalStatus:  CanonicalStatusComplete,
 			// H1 — full integrity metadata so read-time validation passes.
 			CanonicalSHA256:        sp(csha),

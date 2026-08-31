@@ -49,11 +49,11 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 }
 
 // CreateImported inserts a desktop-imported conversation keyed by the
-// client's local id (migration 026). ``ON CONFLICT DO NOTHING`` against the
+// client's local id (migration 026). “ON CONFLICT DO NOTHING“ against the
 // partial unique index makes concurrent imports of the same client_id
 // converge on a single row: returns true when this call inserted the row,
 // false on conflict (the caller resolves the winner via GetByClientID).
-// ``createdAt`` is the desktop's historical timestamp — preserved, never
+// “createdAt“ is the desktop's historical timestamp — preserved, never
 // re-stamped; nil falls back to NOW().
 func (r *ConversationRepo) CreateImported(
 	ctx context.Context, c *model.Conversation, clientID string, createdAt *time.Time,

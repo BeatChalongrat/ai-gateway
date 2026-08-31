@@ -61,7 +61,7 @@ func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelH
 // known reasoning-capable model so the frontend can render the
 // ReasoningToggle and the mode picker without an extra call.
 //
-// ``Modes`` lists every value the Gateway's ReasoningConfig.mode
+// “Modes“ lists every value the Gateway's ReasoningConfig.mode
 // Literal accepts so a new mode added Gateway-side requires only
 // a single-line change here.
 type reasoningCapability struct {
@@ -100,7 +100,7 @@ type modelResponse struct {
 }
 
 // reasoningCapableModels is the known set of model ids whose
-// Gateway-side row is flagged ``supports_reasoning=True`` by
+// Gateway-side row is flagged “supports_reasoning=True“ by
 // migration 045. Kept as a static map rather than fetching live
 // from the Gateway so the model list stays a single in-process
 // lookup (the existing /api/v1/models contract). Operators who
@@ -108,19 +108,19 @@ type modelResponse struct {
 // id here so the frontend toggle becomes visible.
 var reasoningCapableModels = map[string]struct{}{
 	// OpenAI o-series — reasoning_effort.
-	"o1":                   {},
-	"o3":                   {},
-	"o3-mini":              {},
-	"o3-2025-04-16":        {},
-	"o3-mini-2025-01-31":   {},
-	"o4-mini":              {},
-	"o3-pro":               {},
+	"o1":                 {},
+	"o3":                 {},
+	"o3-mini":            {},
+	"o3-2025-04-16":      {},
+	"o3-mini-2025-01-31": {},
+	"o4-mini":            {},
+	"o3-pro":             {},
 	// Anthropic Claude 4 family — adaptive thinking.
 	"claude-sonnet-4-20250514":   {},
 	"claude-opus-4-20250514":     {},
 	"claude-sonnet-4.5-20250514": {},
 	// DeepSeek / Groq R1 distill — openai_compatible_reasoning.
-	"deepseek-reasoner":              {},
+	"deepseek-reasoner":             {},
 	"deepseek-r1-distill-llama-70b": {},
 }
 
@@ -172,7 +172,7 @@ var modelMetadata = map[string]modelMeta{
 		// vision removed 2026-06-12: OpenAI now rejects image_url on
 		// gpt-4-turbo ("image_url is only supported by certain
 		// models", verified live) — its image input was retired.
-		Capabilities:    []string{"streaming", "function_calling"},
+		Capabilities: []string{"streaming", "function_calling"},
 	},
 	"o1": {
 		Description:     "Reasoning-tuned model that thinks before responding. Best for hard math/code.",
@@ -437,7 +437,7 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 }
 
 // containsCap reports whether the capability-string slice already carries
-// ``want`` — buildFromGateway's append-only merge guard.
+// “want“ — buildFromGateway's append-only merge guard.
 func containsCap(caps []string, want string) bool {
 	for _, c := range caps {
 		if c == want {
@@ -530,13 +530,13 @@ func (h *ModelHandler) SupportsVision(ctx context.Context, id string) bool {
 	return false
 }
 
-// KnownWithoutTools reports whether ``id`` is known to lack tool support.
+// KnownWithoutTools reports whether “id“ is known to lack tool support.
 // MessageService uses this to skip attaching the tools block so a
-// mid-conversation switch to such a model doesn't send a ``tools``
+// mid-conversation switch to such a model doesn't send a “tools“
 // request param the provider may reject.
 //
 // Models-catalog step 4: the Gateway's /v1/models has carried a
-// DB-authoritative ``capabilities.tools`` flag since migration 074, so
+// DB-authoritative “capabilities.tools“ flag since migration 074, so
 // the last successful catalog fetch is the primary source — an explicit
 // tools=false from the DB means "strip", tools=true means "keep". The
 // static modelMetadata lookup remains only as the fallback for ids the
@@ -569,10 +569,10 @@ func (h *ModelHandler) KnownWithoutTools(ctx context.Context, id string) bool {
 	return true
 }
 
-// ReasoningCapable reports whether ``id``'s catalog entry advertises
+// ReasoningCapable reports whether “id“'s catalog entry advertises
 // reasoning support (models-catalog step 3). Backed by the same cached
 // live catalog as the list endpoint, so the answer tracks the
-// DB-authoritative ``supports_reasoning`` flag: a newly onboarded
+// DB-authoritative “supports_reasoning“ flag: a newly onboarded
 // reasoning model (e.g. deepseek/deepseek-r1) is recognised without a
 // chat-edge code change. When the Gateway is unreachable the catalog
 // falls back to the static config list, which carries the historical

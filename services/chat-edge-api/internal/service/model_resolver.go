@@ -50,7 +50,7 @@ func modelTier(id string) string {
 }
 
 // isReasoningCapableID is the STATIC FALLBACK reasoning-capable set
-// (T4 — same list as ``reasoningCapableModels`` in handler/model.go,
+// (T4 — same list as “reasoningCapableModels“ in handler/model.go,
 // plus the Gemini 2.5+ / 3 prefix rule). Since models-catalog step 3
 // the live paths consult the gateway catalog (DB-authoritative,
 // handler.ModelHandler.ReasoningCapable); this set is only used when
@@ -73,7 +73,7 @@ func isReasoningCapableID(id string) bool {
 
 // complexSignals are phrases that imply multi-step reasoning, math,
 // analysis, or code work — a hit pushes an Auto turn toward a
-// reasoning-capable model. Mirrors the gateway-side ``_COMPLEX_SIGNALS``
+// reasoning-capable model. Mirrors the gateway-side “_COMPLEX_SIGNALS“
 // in backend/app/services/query_classifier.py; keep them roughly in
 // sync when tuning. Lower-cased for case-insensitive Contains checks.
 var complexSignals = []string{
@@ -204,7 +204,7 @@ func preferredDefaultModel(availableIDs []string) string {
 }
 
 // ResolveAutoModelWithReasoning extends ResolveAutoModel with the
-// T4 reasoning preference: when ``reasoningEnabled`` is true and
+// T4 reasoning preference: when “reasoningEnabled“ is true and
 // the catalog has at least one reasoning-capable id, that id wins
 // over the heuristic tier choice. Falls through to the standard
 // fast/flagship rules when no reasoning model exists (so a

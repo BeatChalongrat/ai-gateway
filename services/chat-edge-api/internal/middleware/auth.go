@@ -56,7 +56,7 @@ func CallerFrom(ctx context.Context) (Caller, bool) {
 // never ran on it returns the zero value — callers MUST only use
 // this from handlers wired inside the protected subgroup. Returns
 // the caller directly so handler code reads as
-// ``caller := middleware.MustCaller(r.Context())`` without the
+// “caller := middleware.MustCaller(r.Context())“ without the
 // (caller, _) := destructure dance every site repeats.
 func MustCaller(ctx context.Context) Caller {
 	c, _ := ctx.Value(callerKey).(Caller)

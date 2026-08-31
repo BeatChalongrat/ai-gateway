@@ -41,8 +41,8 @@ const (
 	CanonicalStatusError       = "error"
 )
 
-// CanonicalArtifact mirrors the gateway's ``dlp.canonical_final`` /
-// non-stream ``x_sran_dlp`` envelope. Canonical content only — never
+// CanonicalArtifact mirrors the gateway's “dlp.canonical_final“ /
+// non-stream “x_sran_dlp“ envelope. Canonical content only — never
 // display/raw values.
 type CanonicalArtifact struct {
 	SchemaVersion    int    `json:"schema_version"`
@@ -54,14 +54,14 @@ type CanonicalArtifact struct {
 	Status           string `json:"status"`
 }
 
-// CanonicalCapabilityFrame is the ``dlp.canonical_capability`` payload.
+// CanonicalCapabilityFrame is the “dlp.canonical_capability“ payload.
 type CanonicalCapabilityFrame struct {
 	SchemaVersion int    `json:"schema_version"`
 	GenerationID  string `json:"generation_id"`
 	Supported     bool   `json:"supported"`
 }
 
-// CanonicalUnavailableFrame is the ``dlp.canonical_unavailable`` payload.
+// CanonicalUnavailableFrame is the “dlp.canonical_unavailable“ payload.
 type CanonicalUnavailableFrame struct {
 	SchemaVersion int    `json:"schema_version"`
 	GenerationID  string `json:"generation_id"`
@@ -87,7 +87,7 @@ func isLowerHex64(s string) bool {
 	return true
 }
 
-// ValidateCanonicalArtifact returns true iff ``a`` is a well-formed
+// ValidateCanonicalArtifact returns true iff “a“ is a well-formed
 // COMPLETE artifact safe to persist + replay. Length is the Unicode
 // rune count; the SHA is over the exact UTF-8 bytes (must match the
 // gateway's producer contract).
@@ -175,11 +175,11 @@ func (s *CanonicalStreamState) OnUnavailable(f *CanonicalUnavailableFrame) {
 }
 
 // DeriveStatus computes the persisted canonical verdict from the observed
-// stream state. ``streamCompleted`` is true when the stream reached its
+// stream state. “streamCompleted“ is true when the stream reached its
 // normal terminal ([DONE]) without cancellation/error.
 //
-// Returns the status, the validated artifact (only for ``complete``), and
-// a stable error code (only for ``unavailable``). For every non-complete
+// Returns the status, the validated artifact (only for “complete“), and
+// a stable error code (only for “unavailable“). For every non-complete
 // status the artifact is nil → the caller MUST exclude the row from
 // provider history (never fall back to display).
 func (s *CanonicalStreamState) DeriveStatus(streamCompleted bool) (string, *CanonicalArtifact, string) {
@@ -221,7 +221,7 @@ const (
 )
 
 // ValidateStoredCanonicalMessage RE-VALIDATES a persisted assistant row at
-// READ time (H1) — it never trusts ``canonical_status`` alone. Returns the
+// READ time (H1) — it never trusts “canonical_status“ alone. Returns the
 // canonical content, ok, and a stable reject reason. A row that fails ANY
 // check is excluded from provider history by the caller (no display
 // fallback). The reason is log-safe; the caller must not log content.
@@ -258,7 +258,7 @@ func ValidateStoredCanonicalMessage(m model.Message) (string, bool, CanonicalRej
 }
 
 // validateNonStreamArtifact derives the persisted status for a non-stream
-// ``x_sran_dlp`` envelope. ``present`` is whether the envelope existed on
+// “x_sran_dlp“ envelope. “present“ is whether the envelope existed on
 // the response (consumer expected it because the gateway supports it).
 func validateNonStreamArtifact(a *CanonicalArtifact, present bool) (string, *CanonicalArtifact, string) {
 	if !present || a == nil {

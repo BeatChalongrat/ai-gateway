@@ -57,11 +57,11 @@ var ErrPreviewUnsupported = errors.New("file: no structured preview for this typ
 // allowedContentTypes: a type being uploadable says nothing about
 // whether preview_data.py can read it.
 var previewDataTypes = map[string]string{
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         "sheet",
-	"application/vnd.ms-excel.sheet.macroEnabled.12":                            "sheet",
-	"text/csv":                                                                  "sheet",
-	"application/csv":                                                           "sheet",
-	"text/tab-separated-values":                                                 "sheet",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "sheet",
+	"application/vnd.ms-excel.sheet.macroEnabled.12":                    "sheet",
+	"text/csv":                  "sheet",
+	"application/csv":           "sheet",
+	"text/tab-separated-values": "sheet",
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   "document",
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": "slides",
 }

@@ -150,7 +150,7 @@ func (r *FolderRepo) Delete(ctx context.Context, tenantID, userID, folderID uuid
 }
 
 // Reorder rewrites every folder's position to its index in folderIDs
-// (1-based). Done in a single statement via ``unnest ... WITH ORDINALITY``
+// (1-based). Done in a single statement via “unnest ... WITH ORDINALITY“
 // so it is atomic without an explicit transaction; only the caller's own
 // folders are touched (a foreign id in the list simply matches nothing).
 func (r *FolderRepo) Reorder(ctx context.Context, tenantID, userID uuid.UUID, folderIDs []uuid.UUID) error {

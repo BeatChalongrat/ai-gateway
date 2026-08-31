@@ -10,8 +10,8 @@
 package handler
 
 import (
-	"strings"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"

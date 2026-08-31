@@ -36,7 +36,7 @@ func (r *MemoryRepo) WithTx(tx pgx.Tx) *MemoryRepo {
 // memoryColumns is the single source of truth for SELECT projections.
 // Mirrors the model.Memory field order so scanMemory can stay a
 // straightforward unpack. Nullable text columns (category,
-// normalized_key, evidence_excerpt) COALESCE to '' so the scan
+// normalized_key, evidence_excerpt) COALESCE to ” so the scan
 // targets stay plain string instead of *string — the model exposes
 // these as JSON omitempty so the wire shape doesn't change.
 const memoryColumns = `

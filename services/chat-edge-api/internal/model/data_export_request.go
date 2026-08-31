@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	ExportTypeMemories     = "memories"
+	ExportTypeMemories      = "memories"
 	ExportTypeConversations = "conversations"
 	ExportTypeFullAccount   = "full_account"
 

@@ -119,7 +119,6 @@ func TestPreferredDefaultModel(t *testing.T) {
 	}
 }
 
-
 // TestCatalogCheckerRecognisesDbOnboardedModel is the step-3 regression
 // proof: deepseek/deepseek-r1 is reasoning-capable in model_configs but
 // was NEVER in the static set, so the old resolver could not prefer it.

@@ -58,11 +58,11 @@ type ContextBudget struct {
 // round to a clean number, drop it in.
 var ModelContextLimits = map[string]int{
 	// OpenAI
-	"gpt-4o":         120000,
-	"gpt-4o-mini":    120000,
-	"gpt-4-turbo":    120000,
-	"gpt-4":          7500,
-	"gpt-3.5-turbo":  15000,
+	"gpt-4o":        120000,
+	"gpt-4o-mini":   120000,
+	"gpt-4-turbo":   120000,
+	"gpt-4":         7500,
+	"gpt-3.5-turbo": 15000,
 
 	// Anthropic — Claude 3.5 / 4 family share the 200K hard cap.
 	"claude-sonnet-4":   190000,

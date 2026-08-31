@@ -92,10 +92,10 @@ type CreateMemoryInput struct {
 	Category   string
 	Content    string
 
-	SourceType            string
-	SourceConversationID  *uuid.UUID
-	SourceMessageID       *uuid.UUID
-	EvidenceExcerpt       string
+	SourceType           string
+	SourceConversationID *uuid.UUID
+	SourceMessageID      *uuid.UUID
+	EvidenceExcerpt      string
 
 	// ActorType is the audit-log actor: "user" (manual API), "assistant"
 	// (AI tool call), or "system" (background extractor — S8).

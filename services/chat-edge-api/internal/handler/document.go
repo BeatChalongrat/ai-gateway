@@ -119,10 +119,10 @@ type executeDocRequest struct {
 }
 
 type executeDocResponse struct {
-	File       fileResponse                  `json:"file"`
-	Validation *service.DocValidationResult  `json:"validation"`
-	Generation *service.DocGenerationResult  `json:"generation"`
-	Changes    []string                      `json:"changes"`
+	File       fileResponse                 `json:"file"`
+	Validation *service.DocValidationResult `json:"validation"`
+	Generation *service.DocGenerationResult `json:"generation"`
+	Changes    []string                     `json:"changes"`
 }
 
 func (h *DocumentHandler) Execute(w http.ResponseWriter, r *http.Request) {

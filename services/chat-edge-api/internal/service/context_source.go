@@ -7,12 +7,12 @@
 // _sources in one go.
 //
 // Two reasons to keep this separate from the model type:
-//   1. The model has a fixed uuid.UUID SourceID — runtime sources
-//      from compaction don't have one, so the accumulator type
-//      uses a *string that the persist step converts on the way out.
-//   2. The runtime path doesn't carry tenant / user / response_id
-//      until persist time — the accumulator stays tidy by only
-//      holding the descriptive fields.
+//  1. The model has a fixed uuid.UUID SourceID — runtime sources
+//     from compaction don't have one, so the accumulator type
+//     uses a *string that the persist step converts on the way out.
+//  2. The runtime path doesn't carry tenant / user / response_id
+//     until persist time — the accumulator stays tidy by only
+//     holding the descriptive fields.
 package service
 
 import (
@@ -48,6 +48,7 @@ type ContextSource struct {
 //   - each tool execution runs sequentially inside the pump
 //     goroutine
 //   - finish() runs on whichever goroutine drained the stream
+//
 // Mutex covers the rare-but-real case where a sync state
 // extraction (compile) overlaps with a separately-scheduled tool
 // execution; the cost is negligible.

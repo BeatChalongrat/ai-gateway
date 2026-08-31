@@ -26,8 +26,8 @@ type Conversation struct {
 	// LIST only. Unlike IsDeleted it does not affect Get / Search / send /
 	// export — an archived chat is fully readable, it is just filed away.
 	IsArchived bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 	// KnowledgeBaseID is the per-conversation RAG binding. Nullable
 	// because most conversations have no KB attached. When set, the
 	// message flow injects retrieved chunks into the system prompt.

@@ -28,9 +28,10 @@ func NewSearchHandler(s *service.SearchService) *SearchHandler {
 // Search runs SearchPastContext and serialises the result. Query
 // param shape mirrors the AI tool's arguments so the same mental
 // model works for human callers:
-//   q     — keyword string (required; sanitised inside the service)
-//   scope — all / messages / conversations / memories (default all)
-//   limit — 1-20 (default 10)
+//
+//	q     — keyword string (required; sanitised inside the service)
+//	scope — all / messages / conversations / memories (default all)
+//	limit — 1-20 (default 10)
 //
 // 200 + empty results on a no-hit query (rather than 404) so the
 // frontend can render "no matches" without branching on the error

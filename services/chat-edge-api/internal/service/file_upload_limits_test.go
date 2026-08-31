@@ -14,7 +14,7 @@ import (
 
 func newSizedService() *FileService {
 	return &FileService{knobs: Knobs{
-		MaxFileSizeBytes: 200 * 1024 * 1024, // 200 MiB
+		MaxFileSizeBytes: 200 * 1024 * 1024,  // 200 MiB
 		MaxConvFileTotal: 1024 * 1024 * 1024, // 1 GiB
 	}}
 }

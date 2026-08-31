@@ -2,7 +2,7 @@ package service
 
 import "testing"
 
-// B1 — a Gateway ``error`` SSE frame must parse into a ProviderError so
+// B1 — a Gateway “error“ SSE frame must parse into a ProviderError so
 // the pump can forward it to the client instead of swallowing it.
 func TestParseStreamChunk_ProviderErrorFrame(t *testing.T) {
 	raw := `{"error":{"code":"all_models_failed","message":"Unable to get a response right now","attempts":[{"model":"gpt-4o","error":"401"}]}}`

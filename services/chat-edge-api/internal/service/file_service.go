@@ -8,7 +8,7 @@
 // in exactly one place.
 //
 // Extraction runs in the BACKGROUND. Upload persists the row as
-// ``processing`` and returns; a goroutine reads the file and flips the
+// “processing“ and returns; a goroutine reads the file and flips the
 // row to a terminal extraction_status when it is done. Clients poll for
 // that status, and the send path blocks on it (waitForExtraction) so a
 // turn never reaches the model without its document — the guarantee the
@@ -418,7 +418,7 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 }
 
 // extractionJobTimeout bounds one whole background ingest (sandboxed
-// extractor + deep inspector). Comfortably above ``extractionWall`` so a
+// extractor + deep inspector). Comfortably above “extractionWall“ so a
 // run that trips the sandbox ceiling still gets to record its terminal
 // status rather than being killed mid-write.
 const extractionJobTimeout = 8 * time.Minute
@@ -426,7 +426,7 @@ const extractionJobTimeout = 8 * time.Minute
 // extractionStatusWriteTimeout is the budget for the FINAL status write.
 // It runs on a context detached from the job's deadline: if the extractor
 // itself burned the whole budget we must still be able to move the row
-// out of ``processing``, otherwise every later turn in that conversation
+// out of “processing“, otherwise every later turn in that conversation
 // would wait on a row that is never coming.
 const extractionStatusWriteTimeout = 15 * time.Second
 
@@ -984,7 +984,7 @@ const extractionWaitPoll = 400 * time.Millisecond
 
 // extractionStaleAfter is how long a row may sit in a non-terminal state
 // before we stop believing anyone is still working on it. A process
-// killed mid-extraction leaves ``processing`` rows behind forever (there
+// killed mid-extraction leaves “processing“ rows behind forever (there
 // are such rows in the live DB); without this every subsequent turn in
 // that conversation would burn the full extractionWaitTimeout waiting on
 // a goroutine that died with the old process.

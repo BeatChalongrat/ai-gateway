@@ -5,9 +5,9 @@
 // coding-language preferences, workflow preferences) and creates
 // chat.user_memories rows with:
 //
-//   memory_type = "inferred_preference"
-//   source_type = "assistant_inferred"
-//   status      = "pending_confirmation"
+//	memory_type = "inferred_preference"
+//	source_type = "assistant_inferred"
+//	status      = "pending_confirmation"
 //
 // The pending status keeps the row OUT of the system-prompt
 // injection block (GetActiveForInjection filters status='active')

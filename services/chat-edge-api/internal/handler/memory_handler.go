@@ -2,14 +2,14 @@
 //
 // Routes (all behind RequireAuth):
 //
-//   GET    /api/v1/memories                 list (paginated + filtered)
-//   POST   /api/v1/memories                 create (user_explicit)
-//   PUT    /api/v1/memories/{id}            update
-//   DELETE /api/v1/memories/{id}            soft delete
-//   POST   /api/v1/memories/{id}/pin        pin / unpin
-//   POST   /api/v1/memories/{id}/confirm    confirm / reject
-//   DELETE /api/v1/memories/all             bulk clear (optional ?scope_type=)
-//   GET    /api/v1/memories/{id}/events     audit trail
+//	GET    /api/v1/memories                 list (paginated + filtered)
+//	POST   /api/v1/memories                 create (user_explicit)
+//	PUT    /api/v1/memories/{id}            update
+//	DELETE /api/v1/memories/{id}            soft delete
+//	POST   /api/v1/memories/{id}/pin        pin / unpin
+//	POST   /api/v1/memories/{id}/confirm    confirm / reject
+//	DELETE /api/v1/memories/all             bulk clear (optional ?scope_type=)
+//	GET    /api/v1/memories/{id}/events     audit trail
 //
 // Tenant + user scoping happens inside MemoryService — the handlers
 // only parse request bodies, dispatch, and map typed errors to HTTP

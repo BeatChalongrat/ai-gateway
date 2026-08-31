@@ -18,7 +18,7 @@ import (
 // constraints / documentation; exported as consts so the service +
 // handler layers don't sprinkle string literals.
 const (
-	MemoryScopeGlobalUser  = "global_user"
+	MemoryScopeGlobalUser   = "global_user"
 	MemoryScopeConversation = "conversation"
 	MemoryScopeArtifact     = "artifact"
 	MemoryScopeTemporary    = "temporary"
@@ -30,15 +30,15 @@ const (
 	MemoryTypeInferredPreference   = "inferred_preference" // Phase 4
 	MemoryTypeArtifactReference    = "artifact_reference"
 
-	MemorySourceUserExplicit       = "user_explicit"
-	MemorySourceAssistantInferred  = "assistant_inferred"
+	MemorySourceUserExplicit        = "user_explicit"
+	MemorySourceAssistantInferred   = "assistant_inferred"
 	MemorySourceConversationSummary = "conversation_summary"
 	MemorySourceArtifactEvent       = "artifact_event"
 
-	MemoryStatusActive               = "active"
-	MemoryStatusPendingConfirmation  = "pending_confirmation"
-	MemoryStatusSuperseded           = "superseded"
-	MemoryStatusDeleted              = "deleted"
+	MemoryStatusActive              = "active"
+	MemoryStatusPendingConfirmation = "pending_confirmation"
+	MemoryStatusSuperseded          = "superseded"
+	MemoryStatusDeleted             = "deleted"
 
 	MemorySensitivityNormal     = "normal"
 	MemorySensitivityRestricted = "restricted"
@@ -62,20 +62,20 @@ type Memory struct {
 	MemoryType string `json:"memory_type"`
 	Category   string `json:"category,omitempty"`
 
-	Content        string `json:"content"`
-	NormalizedKey  string `json:"-"`
+	Content       string `json:"content"`
+	NormalizedKey string `json:"-"`
 
-	SourceType            string     `json:"source_type"`
-	SourceConversationID  *uuid.UUID `json:"source_conversation_id,omitempty"`
-	SourceMessageID       *uuid.UUID `json:"source_message_id,omitempty"`
-	EvidenceExcerpt       string     `json:"evidence_excerpt,omitempty"`
+	SourceType           string     `json:"source_type"`
+	SourceConversationID *uuid.UUID `json:"source_conversation_id,omitempty"`
+	SourceMessageID      *uuid.UUID `json:"source_message_id,omitempty"`
+	EvidenceExcerpt      string     `json:"evidence_excerpt,omitempty"`
 
 	Status string `json:"status"`
 
-	ConfidenceScore  float64 `json:"confidence_score"`
-	ImportanceScore  float64 `json:"importance_score"`
-	IsUserConfirmed  bool    `json:"is_user_confirmed"`
-	IsPinned         bool    `json:"is_pinned"`
+	ConfidenceScore float64 `json:"confidence_score"`
+	ImportanceScore float64 `json:"importance_score"`
+	IsUserConfirmed bool    `json:"is_user_confirmed"`
+	IsPinned        bool    `json:"is_pinned"`
 
 	SensitivityLevel string `json:"sensitivity_level"`
 
@@ -94,10 +94,10 @@ type Memory struct {
 // log entry so the audit endpoint + future support workflows can
 // reconstruct why a fact ended up in (or out of) memory.
 type MemoryEvent struct {
-	ID        uuid.UUID  `json:"id"`
-	MemoryID  *uuid.UUID `json:"memory_id,omitempty"`
-	TenantID  uuid.UUID  `json:"-"`
-	UserID    uuid.UUID  `json:"-"`
+	ID       uuid.UUID  `json:"id"`
+	MemoryID *uuid.UUID `json:"memory_id,omitempty"`
+	TenantID uuid.UUID  `json:"-"`
+	UserID   uuid.UUID  `json:"-"`
 
 	Action    string `json:"action"`
 	ActorType string `json:"actor_type"`

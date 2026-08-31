@@ -674,7 +674,7 @@ func (e *ToolExecutor) Execute(
 
 // dlpBlockedMarker reports whether the tool arguments are the DLP
 // "blocked" marker the backend substitutes for arguments that contained
-// protected data: ``{"_dlp_blocked": true, "reason": "...", ...}``.
+// protected data: “{"_dlp_blocked": true, "reason": "...", ...}“.
 //
 // Detection is conservative and fail-safe: if the raw arguments mention
 // the marker key but the JSON is malformed, the call is still treated as

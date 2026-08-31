@@ -38,7 +38,7 @@ func TestValidateStoredCanonicalMessage(t *testing.T) {
 	bad(RejectSchema, func(m *model.Message) { m.CanonicalSchemaVersion = nil })
 	bad(RejectGeneration, func(m *model.Message) { m.CanonicalGenerationID = nil })
 	bad(RejectGeneration, func(m *model.Message) { e := ""; m.CanonicalGenerationID = &e })
-	bad(RejectSHA, func(m *model.Message) { s := "00"; m.CanonicalSHA256 = &s })                 // not 64-hex
+	bad(RejectSHA, func(m *model.Message) { s := "00"; m.CanonicalSHA256 = &s })                           // not 64-hex
 	bad(RejectSHA, func(m *model.Message) { s := "Z" + (*m.CanonicalSHA256)[1:]; m.CanonicalSHA256 = &s }) // non-hex
 	bad(RejectLength, func(m *model.Message) { n := *m.CanonicalLength + 1; m.CanonicalLength = &n })
 	bad(RejectSHA, func(m *model.Message) { c := "xk <r0>"; m.ContentCanonical = &c }) // same rune length, sha mismatch
@@ -67,7 +67,7 @@ func TestNormalizeRoleSequence(t *testing.T) {
 	in := []GatewayMessage{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "a"},
-		{Role: "user", Content: "b"}, // consecutive user (assistant was excluded)
+		{Role: "user", Content: "b"},      // consecutive user (assistant was excluded)
 		{Role: "tool", Content: "orphan"}, // orphan tool result
 		{Role: "user", Content: "c"},
 	}

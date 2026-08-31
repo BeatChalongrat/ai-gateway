@@ -273,7 +273,7 @@ func TestBroker_StickyPhaseMarkersInSnapshot(t *testing.T) {
 
 // waitSnapshot polls Subscribe (immediately unsubscribing each probe)
 // until the snapshot satisfies cond — the tee publishes asynchronously
-// after receiving from ``in``, so asserting right after a send races.
+// after receiving from “in“, so asserting right after a send races.
 func waitSnapshot(t *testing.T, b *StreamBroker, msgID uuid.UUID, cond func(StreamSnapshot) bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

@@ -49,7 +49,7 @@ func (f *fakeStore) ListDue(_ context.Context, _ time.Time, _ int) ([]model.Clou
 }
 
 // claimCalls records each ClaimDue invocation so the lease path is testable.
-func (f *fakeStore) ClaimDue(_ context.Context, _ , _ time.Time, instanceID string, _ int) ([]model.CloudTask, error) {
+func (f *fakeStore) ClaimDue(_ context.Context, _, _ time.Time, instanceID string, _ int) ([]model.CloudTask, error) {
 	f.claims++
 	f.lastInstanceID = instanceID
 	return f.dueTasks, nil

@@ -27,12 +27,12 @@ const (
 type TenantMemorySettings struct {
 	TenantID uuid.UUID `json:"tenant_id"`
 
-	MemoryEnabled              bool `json:"memory_enabled"`
-	MaxMemoriesPerUser         int  `json:"max_memories_per_user"`
-	RetentionDays              *int `json:"retention_days,omitempty"`
-	PreferenceLearningEnabled  bool `json:"preference_learning_enabled"`
-	AllowDataExport            bool `json:"allow_data_export"`
-	AllowDataDeletion          bool `json:"allow_data_deletion"`
+	MemoryEnabled             bool `json:"memory_enabled"`
+	MaxMemoriesPerUser        int  `json:"max_memories_per_user"`
+	RetentionDays             *int `json:"retention_days,omitempty"`
+	PreferenceLearningEnabled bool `json:"preference_learning_enabled"`
+	AllowDataExport           bool `json:"allow_data_export"`
+	AllowDataDeletion         bool `json:"allow_data_deletion"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

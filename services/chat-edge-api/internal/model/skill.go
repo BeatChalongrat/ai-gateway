@@ -36,9 +36,9 @@ type Skill struct {
 	TenantID uuid.UUID `json:"-"`
 	UserID   uuid.UUID `json:"-"`
 
-	Name        string   `json:"name"`
+	Name         string   `json:"name"`
 	Description  string   `json:"description"`
-	Triggers    []string `json:"triggers"`
+	Triggers     []string `json:"triggers"`
 	Instructions string   `json:"instructions"`
 
 	Enabled bool `json:"enabled"`

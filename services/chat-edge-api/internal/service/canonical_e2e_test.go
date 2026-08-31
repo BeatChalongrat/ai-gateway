@@ -78,7 +78,7 @@ func TestCanonicalHistoryE2E_ProviderPayload(t *testing.T) {
 		t.Fatalf("asst msg: %v", err)
 	}
 	display := "จำไว้แล้วว่าเงินเดือนคือ 50000" // restored DISPLAY (raw)
-	canon := "จำไว้แล้วว่าเงินเดือนคือ <r0>"     // tokenized CANONICAL
+	canon := "จำไว้แล้วว่าเงินเดือนคือ <r0>"    // tokenized CANONICAL
 	sha, ln := canonSig(canon)
 	sv, gen := 1, "req_turn1"
 	if err := mr.UpdateContentAndCanonical(ctx, asst.ID, display, "completed", nil, nil,

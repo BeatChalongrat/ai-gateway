@@ -224,19 +224,19 @@ type GatewayReasoningConfig struct {
 // and bypassed gateway routing). Every field is omitempty so an explicit
 // model pick sends no hints and the gateway's explicit path is unchanged.
 type RoutingHints struct {
-	NeedsVision    bool   `json:"needs_vision,omitempty"`
-	NeedsReasoning bool   `json:"needs_reasoning,omitempty"`
+	NeedsVision    bool `json:"needs_vision,omitempty"`
+	NeedsReasoning bool `json:"needs_reasoning,omitempty"`
 	// HasTools/ToolCount tell the gateway this turn ships tool
 	// definitions, so it must not elect a tools-blind (or budget-tier)
 	// model — a model that ignores the tool set answers in prose and
 	// the memory/search calls never happen.
-	HasTools       bool   `json:"has_tools,omitempty"`
-	ToolCount      int    `json:"tool_count,omitempty"`
-	HasCode        bool   `json:"has_code,omitempty"`
-	HasFiles       bool   `json:"has_files,omitempty"`
-	Complexity     string `json:"complexity,omitempty"` // "low" | "medium" | "high"
-	ConvTurnCount  int    `json:"conv_turn_count,omitempty"`
-	Language       string `json:"language,omitempty"` // "th" | "en" | "zh" | ...
+	HasTools      bool   `json:"has_tools,omitempty"`
+	ToolCount     int    `json:"tool_count,omitempty"`
+	HasCode       bool   `json:"has_code,omitempty"`
+	HasFiles      bool   `json:"has_files,omitempty"`
+	Complexity    string `json:"complexity,omitempty"` // "low" | "medium" | "high"
+	ConvTurnCount int    `json:"conv_turn_count,omitempty"`
+	Language      string `json:"language,omitempty"` // "th" | "en" | "zh" | ...
 }
 
 type GatewayChatRequest struct {
@@ -409,7 +409,7 @@ type StreamEvent struct {
 	CanonicalUnavailable *CanonicalUnavailableFrame
 }
 
-// ReasoningNotice is the payload of a Gateway ``reasoning_notice``
+// ReasoningNotice is the payload of a Gateway “reasoning_notice“
 // frame: the request asked for reasoning but routing/policy resolved
 // to a model that can't reason. Model is the model that answered;
 // Reason is the Gateway's human-readable explanation (English — the
@@ -744,11 +744,11 @@ func (g *GatewayClient) do(
 //
 // FIX 1 / Option B — the chat path authenticates as a trusted internal
 // SERVICE (a short-lived, audience-bound service JWT), NOT a user-facing
-// ``gw_`` API key. The gateway validates the service JWT and bills the end
-// user from the ``X-User-ID`` / ``X-Tenant-ID`` headers we already send. This
-// DECOUPLES chat from any ``gw_`` key: rotating/revoking a developer key can
-// never break the chat UI. ``SERVICE_JWT_SECRET`` is required, so this branch
-// is always taken; ``GATEWAY_API_KEY`` is a legacy fallback only for the
+// “gw_“ API key. The gateway validates the service JWT and bills the end
+// user from the “X-User-ID“ / “X-Tenant-ID“ headers we already send. This
+// DECOUPLES chat from any “gw_“ key: rotating/revoking a developer key can
+// never break the chat UI. “SERVICE_JWT_SECRET“ is required, so this branch
+// is always taken; “GATEWAY_API_KEY“ is a legacy fallback only for the
 // (config-invalid) case where no service secret is set.
 func (g *GatewayClient) bearer() (string, error) {
 	if g.ServiceJWTSecret != "" {
@@ -912,9 +912,9 @@ func (g *GatewayClient) GenerateImages(
 // Async video generation (backend /internal/v1/jobs/*)
 // ---------------------------------------------------------------------------
 
-// rootURL strips the trailing ``/v1`` from BaseURL so we can reach the
-// backend's ROOT-level internal routes (``/internal/v1/jobs/...``), which
-// are NOT under the public ``/v1`` prefix.
+// rootURL strips the trailing “/v1“ from BaseURL so we can reach the
+// backend's ROOT-level internal routes (“/internal/v1/jobs/...“), which
+// are NOT under the public “/v1“ prefix.
 func (g *GatewayClient) rootURL() string {
 	return strings.TrimSuffix(g.BaseURL, "/v1")
 }
@@ -968,7 +968,7 @@ func (g *GatewayClient) internalHeaders(httpReq *http.Request, callCtx GatewayCa
 // ProxyPublicMedia forwards a direct-dispatch media request from web-chat to
 // the gateway's PUBLIC media route as a TRUSTED internal caller carrying the
 // end-user's identity (the same header set as SubmitVideoJob / the tool
-// path). ``subpath`` is BaseURL-relative, e.g. "/videos/generations" →
+// path). “subpath“ is BaseURL-relative, e.g. "/videos/generations" →
 // {BaseURL}/videos/generations. Returns the upstream status + raw body so
 // the caller can relay the gateway's response (and error envelope) verbatim.
 func (g *GatewayClient) ProxyPublicMedia(
@@ -1003,7 +1003,7 @@ func (g *GatewayClient) ProxyPublicMedia(
 }
 
 // ProxyPublicMediaOutput opens a streaming GET against the gateway's PUBLIC
-// media route (``/jobs/{id}/output``) as a trusted internal caller carrying
+// media route (“/jobs/{id}/output“) as a trusted internal caller carrying
 // the end-user's identity. Unlike ProxyPublicMedia this does NOT buffer the
 // body — finished artifacts are videos/audio that can run to tens of MB —
 // the caller relays resp.Body and MUST close it.
@@ -1132,8 +1132,8 @@ type GatewayModelInfo struct {
 	// Display data from model_configs (models-catalog step 1). Zero
 	// means "gateway didn't send it" — the Gateway omits unknown
 	// values, so chat-edge falls back to its curated metadata.
-	ContextWindow   int     `json:"context_window,omitempty"`
-	InputPricePer1M float64 `json:"input_price_per_1m,omitempty"`
+	ContextWindow    int     `json:"context_window,omitempty"`
+	InputPricePer1M  float64 `json:"input_price_per_1m,omitempty"`
 	OutputPricePer1M float64 `json:"output_price_per_1m,omitempty"`
 }
 
@@ -1418,7 +1418,7 @@ func (g *GatewayClient) GenerateEmbedding(
 
 // VoiceTranscribe forwards audio bytes to the gateway STT route and returns
 // the transcript. The multipart field names match the gateway route
-// (``audio`` file + optional ``language``).
+// (“audio“ file + optional “language“).
 func (g *GatewayClient) VoiceTranscribe(
 	ctx context.Context, callCtx GatewayCallContext,
 	audio []byte, filename, contentType, language string,

@@ -19,10 +19,10 @@ import (
 // pending card before sending). A future cleanup job can sweep
 // rows where MessageID IS NULL and created_at < NOW() - 24h.
 type ConversationFile struct {
-	ID               uuid.UUID
-	ConversationID   uuid.UUID
-	MessageID        *uuid.UUID
-	TenantID         uuid.UUID
+	ID             uuid.UUID
+	ConversationID uuid.UUID
+	MessageID      *uuid.UUID
+	TenantID       uuid.UUID
 	// UserID denormalises the owning conversation's user_id onto the
 	// file row (migration 013). Populated on every Create path so
 	// ownership checks + the upcoming memory system's "this user's

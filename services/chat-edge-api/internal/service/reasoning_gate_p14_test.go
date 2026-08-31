@@ -31,7 +31,6 @@ func reasoningModeWith(conv *model.Conversation, modelID, message string, capabl
 	return req.Reasoning.Mode
 }
 
-
 // --- isTrivialQuery unit ---------------------------------------------------
 
 func TestIsTrivialQuery(t *testing.T) {
@@ -43,10 +42,10 @@ func TestIsTrivialQuery(t *testing.T) {
 		{"หวัดดี", true},
 		{"hi", true},
 		{"ขอบคุณ", true},
-		{"วิเคราะห์ code นี้", false},   // complex signal
-		{"analyze this", false},          // complex signal
-		{"วันนี้วันอะไร?", false},        // a question wants an answer
-		{"```\nx=1\n```", false},         // code fence → complex
+		{"วิเคราะห์ code นี้", false}, // complex signal
+		{"analyze this", false},       // complex signal
+		{"วันนี้วันอะไร?", false},     // a question wants an answer
+		{"```\nx=1\n```", false},      // code fence → complex
 		{"please write a fairly long sentence that clearly exceeds thirty runes", false},
 	}
 	for _, c := range cases {
@@ -55,7 +54,6 @@ func TestIsTrivialQuery(t *testing.T) {
 		}
 	}
 }
-
 
 // --- attachReasoning gate --------------------------------------------------
 
@@ -109,7 +107,6 @@ func TestConversationLevelOffRespected(t *testing.T) {
 		t.Errorf("conversation off: mode=%q, want off", mode)
 	}
 }
-
 
 // --- catalog-backed gate (models-catalog step 3) ---------------------------
 

@@ -13,7 +13,7 @@ func TestNeedsTrigramSearch(t *testing.T) {
 		{"เสนอราคา", true},
 		{"ใบเสนอราคาลูกค้า", true},
 		{"invoice ใบเสนอราคา", true}, // mixed → trigram (ILIKE still matches the English half)
-		{"見積もり", true},              // Japanese
+		{"見積もり", true},               // Japanese
 		{"报价单", true},                // Chinese
 		{"견적서", true},                // Korean
 		{"café résumé", false},       // Latin diacritics stay on tsvector

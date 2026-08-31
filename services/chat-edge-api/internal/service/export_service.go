@@ -39,10 +39,10 @@ var (
 const exportExpiryWindow = 24 * time.Hour
 
 type ExportService struct {
-	memories     *repository.MemoryRepo
-	exports      *repository.DataExportRepo
-	settings     *repository.TenantMemorySettingsRepo
-	storageRoot  string // {root}/exports/ holds the generated files
+	memories    *repository.MemoryRepo
+	exports     *repository.DataExportRepo
+	settings    *repository.TenantMemorySettingsRepo
+	storageRoot string // {root}/exports/ holds the generated files
 }
 
 func NewExportService(

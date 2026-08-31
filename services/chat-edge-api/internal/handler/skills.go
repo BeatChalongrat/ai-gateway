@@ -2,10 +2,10 @@
 //
 // Routes (all behind RequireAuth):
 //
-//   GET    /api/v1/skills            list the caller's skills
-//   POST   /api/v1/skills            create a skill
-//   PATCH  /api/v1/skills/{id}       enable / disable a skill
-//   DELETE /api/v1/skills/{id}       hard-delete a skill
+//	GET    /api/v1/skills            list the caller's skills
+//	POST   /api/v1/skills            create a skill
+//	PATCH  /api/v1/skills/{id}       enable / disable a skill
+//	DELETE /api/v1/skills/{id}       hard-delete a skill
 //
 // A skill is INSTRUCTION TEXT ONLY — the handler stores + returns the
 // text; nothing here (or downstream) ever executes it. Every operation

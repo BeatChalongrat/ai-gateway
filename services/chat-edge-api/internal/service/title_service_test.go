@@ -70,11 +70,11 @@ func TestParseTitleCompletion_FreeTextIsKept(t *testing.T) {
 // signals "no usable title" (empty) so Generate falls back to the user message.
 func TestParseTitleCompletion_BrokenEnvelopeDoesNotLeakJSON(t *testing.T) {
 	for _, raw := range []string{
-		`{"title":`,        // the exact fragment seen live in the sidebar
-		`{"title": "half`,  // truncated mid-value
-		`{"title"`,         // even shorter
-		`{`,                // bare brace
-		`{"title": "x"`,    // missing closing brace
+		`{"title":`,       // the exact fragment seen live in the sidebar
+		`{"title": "half`, // truncated mid-value
+		`{"title"`,        // even shorter
+		`{`,               // bare brace
+		`{"title": "x"`,   // missing closing brace
 	} {
 		got := parseTitleCompletion(raw)
 		if got != "" {

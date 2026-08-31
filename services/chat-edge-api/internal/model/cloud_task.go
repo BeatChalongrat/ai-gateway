@@ -79,10 +79,10 @@ var CloudAllowedTools = map[string]bool{
 // boundary is legible and the exhaustiveness test can prove the union covers
 // the live registry.
 var cloudWithheldTools = map[string]string{
-	"generate_image":           "spends credits on a paid image generation",
-	"generate_video":           "spends heavily; capability gated off besides",
-	"save_memory":              "WRITES durable user memory with nobody watching",
-	"update_canvas_artifact":   "WRITES a durable conversation artifact",
+	"generate_image":            "spends credits on a paid image generation",
+	"generate_video":            "spends heavily; capability gated off besides",
+	"save_memory":               "WRITES durable user memory with nobody watching",
+	"update_canvas_artifact":    "WRITES a durable conversation artifact",
 	"update_conversation_state": "WRITES conversation state",
 }
 

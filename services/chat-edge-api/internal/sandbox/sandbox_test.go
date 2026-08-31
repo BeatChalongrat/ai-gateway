@@ -116,8 +116,8 @@ func TestSandbox_NoSecretsInEnv(t *testing.T) {
 	// Set a fake secret in THIS process's env; it must NOT reach the box.
 	t.Setenv("DATABASE_URL", "postgres://should-not-leak")
 	res, err := r.Execute(context.Background(), Spec{
-		Mode: ModeCode,
-		Code: "import os; print('LEAK' if 'DATABASE_URL' in os.environ else 'CLEAN')",
+		Mode:   ModeCode,
+		Code:   "import os; print('LEAK' if 'DATABASE_URL' in os.environ else 'CLEAN')",
 		Limits: Limits{Wall: 20 * time.Second},
 	})
 	if err != nil {
@@ -193,9 +193,9 @@ func TestSandbox_HostRunDirUsesDaemonPath(t *testing.T) {
 	// chat-edge-in-container: HostWorkDir is the host bind source (absolute),
 	// WorkDir is the in-container mount point. The daemon must -v the HOST dir.
 	got := resolveHostRunDir(
-		"/sandbox-runs",                  // WorkDir (in-container)
-		"/abs/host/data/sandbox-runs",    // HostWorkDir (host, as daemon sees it)
-		"/sandbox-runs/RID",              // localRun (in-container)
+		"/sandbox-runs",               // WorkDir (in-container)
+		"/abs/host/data/sandbox-runs", // HostWorkDir (host, as daemon sees it)
+		"/sandbox-runs/RID",           // localRun (in-container)
 		"RID",
 	)
 	if got != "/abs/host/data/sandbox-runs/RID" {

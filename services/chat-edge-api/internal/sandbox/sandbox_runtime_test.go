@@ -27,8 +27,8 @@ func TestEnforceRuntime(t *testing.T) {
 		{"", "", false},
 		// runsc REQUIRED: only a from-inside "gvisor" passes.
 		{"runsc", "gvisor", false},
-		{"runsc", "standard", true},  // silent fall-back to runc → refuse
-		{"runsc", "", true},          // couldn't self-report → treated as weak → refuse
+		{"runsc", "standard", true}, // silent fall-back to runc → refuse
+		{"runsc", "", true},         // couldn't self-report → treated as weak → refuse
 		// Unknown hardened runtime: must at least not be the standard container.
 		{"kata", "standard", true},
 		{"kata", "somevm", false},
