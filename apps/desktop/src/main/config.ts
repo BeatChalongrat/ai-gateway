@@ -114,11 +114,10 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
   if (!SCHEME_PATTERN.test(protocolScheme)) {
     throw new Error(`'protocolScheme' must match ${SCHEME_PATTERN} (got '${protocolScheme}').`);
   }
-  if (protocolScheme === "sran") {
-    // Registered to the WebView2 shell (Debug) since Phase 2 testing; the
-    // production scheme is a cut-over decision, not something to grab now.
-    throw new Error("'protocolScheme' must not be 'sran' in E1 — use a distinct dev scheme.");
-  }
+  // FIX34 Part B: sran:// is THIS app's scheme (owner decision — the WPF shell
+  // that once held it is retired and uninstalled, FIX15/FIX19). The E1 guard
+  // that refused it is gone; the pairing rule below still ties the scheme to
+  // the backend's oauthClient allow-list (desktop ↔ sran, desktop-dev ↔ sran-dev).
 
   // E2: the identity authority. An origin (validated like an allow-list
   // entry) — but it must NOT be allow-listed for navigation: the page
@@ -144,6 +143,9 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
   }
   if (oauthClient === "desktop" && protocolScheme !== "sran") {
     throw new Error("'oauthClient' desktop maps to sran:// on the backend; the scheme here does not match.");
+  }
+  if (oauthClient === "desktop-dev" && protocolScheme !== "sran-dev") {
+    throw new Error("'oauthClient' desktop-dev maps to sran-dev:// on the backend; the scheme here does not match.");
   }
   const oauthProvider = requireString(obj, "oauthProvider", sourcePath);
   if (!/^(google|github)$/.test(oauthProvider)) {

@@ -20,7 +20,8 @@ import { MessageThreadSkeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
 import { tOutside } from "@/lib/i18n";
 import { useIsStreaming } from "@/hooks/useStream";
-import { ApiError } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
+import { consumeQueryAttach, consumeQueryPrefill } from "@/lib/deepLinkParams";
 import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
@@ -74,6 +75,33 @@ export default function ConversationPage() {
 
   const [injectedText, setInjectedText] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+
+  // FIX34 Part B/C — deep-link parameters on a conversation route:
+  //   ?q=…      prefill the composer (never sent);
+  //   ?attach=… a file the desktop host already uploaded to THIS conversation
+  //             (the Explorer menu) — staged as a ready chip so the user sees
+  //             what is attached and decides whether to send.
+  useEffect(() => {
+    if (!convId) return;
+    const q = consumeQueryPrefill();
+    if (q) setInjectedText(q);
+    const attach = consumeQueryAttach();
+    if (!attach) return;
+    void (async () => {
+      try {
+        const res = await api.listFiles(convId);
+        const row = res.files.find((f) => f.id === attach);
+        if (!row) return;
+        const placeholder = new File([], row.filename, { type: row.content_type });
+        // The chip shows the real size; the bytes already live on the server.
+        Object.defineProperty(placeholder, "size", { value: row.file_size_bytes });
+        const pendingId = addPendingFile(convId, placeholder);
+        markFileReady(convId, pendingId, row.id, row.extraction_status);
+      } catch {
+        /* the file is still listed under the conversation's files */
+      }
+    })();
+  }, [convId, addPendingFile, markFileReady]);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
 
   // setActive + lazy loadMessages on convId change. We read the

@@ -37,7 +37,7 @@ import { ChatEdgeClient } from "./chat-edge-client";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
-import { parseIntent } from "./deep-link";
+import { parseAppLink, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
 import { GatewayClient } from "./gateway-client";
 import { GrantStore, defaultForbiddenRoots } from "./grants";
 import { HostTools } from "./host-tools";
@@ -79,6 +79,10 @@ let coordinator: TurnCoordinator | null = null;
 let sidecar: SidecarClient | null = null;
 let scheduler: TaskScheduler | null = null;
 let grants: GrantStore | null = null;
+/** FIX34 Part B/C: the chat-edge client, reachable from the deep-link handlers. */
+let chatEdgeRef: ChatEdgeClient | null = null;
+/** FIX34 Part B: an app link that arrived while signed out — opened right after sign-in. */
+let pendingNavigation: string | null = null;
 // FIX34 Part A — the quick-ask window (created lazily, hidden not destroyed)
 // and the host-owned shell prefs (its hotkey, the tray-click behaviour).
 let quickWindow: BrowserWindow | null = null;
@@ -213,7 +217,12 @@ void app.whenReady().then(async () => {
     new PortalAuthClient(config.gatewayUrl),
     {
       showView: (state, reason) => showSessionView(win, state, reason),
-      loadPage: () => win.loadURL(config.pageUrl),
+      loadPage: () => {
+        // FIX34 Part B: a deep link that arrived before sign-in opens now.
+        const target = pendingNavigation ?? config.pageUrl;
+        pendingNavigation = null;
+        return win.loadURL(target);
+      },
       reloadPage: () => win.webContents.reload(),
       blankPage: () => win.loadURL("about:blank"),
       openExternal: (url) => shell.openExternal(url),
@@ -228,6 +237,7 @@ void app.whenReady().then(async () => {
   const keyStore = new SafeKeyStore(path.join(app.getPath("userData"), "agent-key.bin"));
   const gateway = new GatewayClient(config.gatewayUrl, () => ctl.currentAccessToken(), keyStore, log);
   const chatEdge = new ChatEdgeClient(config.chatEdgeUrl, () => ctl.currentAccessToken(), log);
+  chatEdgeRef = chatEdge;
   const assembler = new PromptAssembler(chatEdge, log);
   // E4: the sidecar (all local tools), host tools, consent + grants.
   const dataDir = app.getPath("userData");
@@ -1034,7 +1044,163 @@ function findDeepLink(argv: readonly string[], scheme: string): string | null {
 function handleDeepLink(url: string): void {
   log.info(`DEEP LINK received: ${redactUrl(url)}`);
   showMainWindow();
-  void sessionController?.handleDeepLink(url);
+  // E2: the OAuth callback (nonce-bound; SessionController decides).
+  if (parseLoginTicket(url, config.protocolScheme) !== null) {
+    void sessionController?.handleDeepLink(url);
+    return;
+  }
+  // FIX34 Part B: app links (Claude's shape). Malformed → dropped quietly.
+  const link = parseAppLink(url, config.protocolScheme, deepLinkHost());
+  if (link === null) {
+    log.warn("DEEP LINK dropped: not a login ticket and not an app link for this scheme/host");
+    return;
+  }
+  log.info(`APP LINK: ${link.kind}${link.kind === "new" ? ` q=${link.q ? `${link.q.length} chars` : "-"} file=${link.file ? "yes" : "-"}` : ` id=${link.id}`}`);
+  void openAppLink(link);
+}
+
+/** The deep-link host mirrors the web app's host (claude://claude.ai/… ↔ sran://<pageUrl host>/…). */
+function deepLinkHost(): string {
+  try {
+    return new URL(config.pageUrl).host;
+  } catch {
+    return "";
+  }
+}
+
+function pageOrigin(): string {
+  return config.pageUrl.slice(0, config.pageUrl.indexOf("/", 8));
+}
+
+async function openAppLink(link: AppLink): Promise<void> {
+  let target: string;
+  switch (link.kind) {
+    case "chat":
+      target = `${pageOrigin()}/chat/${encodeURIComponent(link.id)}`;
+      break;
+    case "project":
+      target = `${pageOrigin()}/chat/projects?project=${encodeURIComponent(link.id)}`;
+      break;
+    case "new": {
+      if (link.file) {
+        // Part C: the Explorer menu — confirm, (grant,) upload, then open the chat
+        // with the file staged in the composer. The user still presses Send.
+        const opened = await attachFileFromLink(link.file, link.q);
+        if (!opened) return;
+        target = opened;
+        break;
+      }
+      // `q` is PREFILLED into the composer by the page and never sent (Part B rule 1).
+      target = `${pageOrigin()}/chat${link.q ? `?q=${encodeURIComponent(link.q)}` : ""}`;
+      break;
+    }
+  }
+  navigateMain(target);
+}
+
+function navigateMain(target: string): void {
+  const win = mainWindow;
+  if (!sessionController?.hasSession || !win || win.isDestroyed()) {
+    pendingNavigation = target;
+    log.info("APP LINK: no session yet — will open after sign-in");
+    return;
+  }
+  void win.loadURL(target).catch((err: Error) => log.warn(`app link navigation rejected: ${err.message}`));
+  showMainWindow();
+}
+
+// ── FIX34 Part C: "Ask SRAN about this file" (Explorer context menu) ──────────
+//
+// The rule is Claude Desktop's for folders supplied through a link: the file is
+// UNTRUSTED input, so the host shows a confirmation EVERY time — even when the
+// folder is already granted — naming the full path. A file outside every grant
+// asks for that folder in the same dialog instead of refusing. The bytes are
+// then uploaded to chat-edge as a normal attachment (never a path to the model)
+// and the chat opens with the file staged in the composer.
+
+const ATTACH_MAX_BYTES = 200 * 1024 * 1024; // chat-edge MAX_FILE_SIZE_BYTES default (web fileUtil mirrors it)
+const ATTACH_MIME: Record<string, string> = {
+  pdf: "application/pdf", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/csv", txt: "text/plain", md: "text/markdown", markdown: "text/markdown", html: "text/html", htm: "text/html", json: "application/json",
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+};
+
+async function attachFileFromLink(filePath: string, q: string | null): Promise<string | null> {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return null;
+  if (!sessionController?.hasSession) {
+    await dialog.showMessageBox(win, { type: "info", title: "SRAN Desktop", message: "Sign in first, then use “Ask SRAN about this file” again.", buttons: ["OK"] });
+    return null;
+  }
+  let size = 0;
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile()) throw new Error("not a file");
+    size = st.size;
+  } catch {
+    log.warn(`ATTACH LINK: not a readable file: ${filePath}`);
+    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That file could not be opened.", detail: filePath, buttons: ["OK"] });
+    return null;
+  }
+  if (size > ATTACH_MAX_BYTES) {
+    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That file is larger than 200 MB.", detail: filePath, buttons: ["OK"] });
+    return null;
+  }
+  const folder = path.dirname(filePath);
+  const inGrant = (grants?.list() ?? []).some((g) => {
+    const a = path.win32.normalize(folder).toLowerCase();
+    const r = path.win32.normalize(g).toLowerCase().replace(/[\\/]+$/, "");
+    return a === r || a.startsWith(r + "\\");
+  });
+  // ALWAYS confirm (Claude: "always shows a confirmation dialog … even if you've trusted that folder before").
+  const choice = await dialog.showMessageBox(win, {
+    type: "question",
+    title: "Ask SRAN about this file",
+    message: `Attach this file to a new chat?\n${filePath}`,
+    detail: inGrant
+      ? "The file is uploaded to the chat as an attachment. Nothing is sent to the model until you press Send."
+      : `This folder is not one you have shared with SRAN yet:\n${folder}\n\nAttaching also lets SRAN read files in that folder when you ask it to.`,
+    buttons: ["Cancel", inGrant ? "Attach" : "Allow folder and attach"],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true,
+  });
+  if (choice.response !== 1) {
+    log.info("ATTACH LINK: cancelled by the user");
+    return null;
+  }
+  if (!inGrant && grants) {
+    const v = grants.add(folder);
+    if (v.verdict !== "Ok") {
+      log.warn(`ATTACH LINK: folder grant refused (${v.verdict}): ${folder}`);
+      await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That folder cannot be shared with SRAN.", detail: `${folder}\n(${v.verdict})`, buttons: ["OK"] });
+      return null;
+    }
+    log.info(`ATTACH LINK: folder granted: ${v.canonical}`);
+  }
+  const chatEdge = chatEdgeRef;
+  if (!chatEdge) return null;
+  const conversationId = await chatEdge.createConversation(config.defaultModel);
+  if (!conversationId) {
+    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "Could not create a chat for the file.", buttons: ["OK"] });
+    return null;
+  }
+  const name = path.basename(filePath);
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  const mime = ATTACH_MIME[ext] ?? "application/octet-stream";
+  let fileId: string | null = null;
+  try {
+    fileId = await chatEdge.uploadFileBytes(conversationId, fs.readFileSync(filePath), name, mime);
+  } catch (err) {
+    log.warn(`ATTACH LINK: read/upload failed: ${(err as Error).message}`);
+  }
+  if (!fileId) {
+    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "The file could not be attached (unsupported type or upload failed).", detail: name, buttons: ["OK"] });
+    return null;
+  }
+  log.info(`ATTACH LINK: ${name} (${size} bytes) → conv=${conversationId} file=${fileId}`);
+  return `${pageOrigin()}/chat/${encodeURIComponent(conversationId)}?attach=${encodeURIComponent(fileId)}${q ? `&q=${encodeURIComponent(q)}` : ""}`;
 }
 
 // ── dev diagnostics ─────────────────────────────────────────────────────────

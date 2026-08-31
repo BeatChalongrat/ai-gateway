@@ -43,9 +43,9 @@ describe("shipped config", () => {
     expect(config.allowedOrigins).not.toContain(config.portalOrigin);
   });
 
-  it("uses a dev deep-link scheme, not sran://", () => {
-    expect(config.protocolScheme).not.toBe("sran");
-    expect(config.protocolScheme).toBe("sran-dev");
+  it("uses the app's own deep-link scheme, sran:// (FIX34 Part B)", () => {
+    expect(config.protocolScheme).toBe("sran");
+    expect(config.oauthClient).toBe("desktop");
   });
 
   it("refuses a config that tries to widen the list", () => {
@@ -63,7 +63,7 @@ describe("shipped config", () => {
     expect(() => validateConfig({ ...base, allowedOrigins: ["http://localhost:3002/chat"] }, "t")).toThrow(/origin, not a URL/);
     expect(() => validateConfig({ ...base, pageUrl: "http://localhost:3001/login" }, "t")).toThrow(/outside/);
     expect(() => validateConfig({ ...base, portalOrigin: "http://localhost:3002" }, "t")).toThrow(/must not also/);
-    expect(() => validateConfig({ ...base, protocolScheme: "sran" }, "t")).toThrow(/must not be 'sran'/);
+    expect(() => validateConfig({ ...base, protocolScheme: "SRAN" }, "t")).toThrow(/protocolScheme/); // grammar: lower-case only
     expect(() => validateConfig({ ...base, allowedOrigins: ["file:///C:/"] }, "t")).toThrow(/http\(s\)/);
   });
 });

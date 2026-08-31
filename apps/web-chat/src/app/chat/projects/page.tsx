@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
+import { consumeQueryProject } from "@/lib/deepLinkParams";
 import { timeAgo } from "@/components/workspace/workspaceUtil";
 import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
@@ -43,6 +44,11 @@ export default function ProjectsPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // FIX34 Part B — sran://…/project/{id} lands as /chat/projects?project={id}.
+  useEffect(() => {
+    const id = consumeQueryProject();
+    if (id) setExpandedId(id);
+  }, []);
 
   useEffect(() => {
     if (!projectsLoaded) void loadProjects();

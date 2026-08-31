@@ -13,13 +13,14 @@
 // surface (matches ChatGPT's "Where should we begin?" + Claude's
 // "Beat returns!"), not "open whatever you were working on last".
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { toast } from "@/components/ui/Toast";
+import { consumeQueryPrefill } from "@/lib/deepLinkParams";
 import { tOutside } from "@/lib/i18n";
 import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
@@ -42,6 +43,15 @@ export default function ChatLanding() {
   // Landing text is buffered locally so the user sees what they
   // typed survive the navigation into the new conversation.
   const [injectedText, setInjectedText] = useState<string | null>(null);
+
+  // FIX34 Part B — sran://…/new?q=… lands here as /chat?q=…: the text is put
+  // in the composer and NOTHING is sent (Anthropic: "Prompts are prefilled but
+  // not automatically sent" — otherwise any web page could make the app ask
+  // anything with one click). The param is removed from the address bar.
+  useEffect(() => {
+    const q = consumeQueryPrefill();
+    if (q) setInjectedText(q);
+  }, []);
 
   // Eager-created conversation id. Stored ONLY in a ref — not in
   // React state — so the landing-page ChatInput never re-renders

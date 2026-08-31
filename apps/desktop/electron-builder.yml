@@ -48,6 +48,16 @@ extraResources:
   - from: build/desktop.config.json
     to: desktop.config.json
 
+# FIX34 Part B — the app's URL scheme. electron-builder writes
+# HKCU\Software\Classes\sran (URL Protocol + shell\open\command → this exe) at
+# install and deletes it at uninstall; app.setAsDefaultProtocolClient at runtime
+# keeps it pointing at the current exe. App links: sran://<web host>/new[?q=…],
+# /chat/{id}, /project/{id}; the OAuth callback stays sran://oauth/callback.
+protocols:
+  - name: SRAN Desktop
+    schemes:
+      - sran
+
 win:
   target:
     - nsis

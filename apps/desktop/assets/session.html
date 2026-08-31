@@ -42,7 +42,7 @@
   (function () {
     var q = new URLSearchParams(location.search);
     var state = q.get("state") || "signed-out";
-    var scheme = q.get("scheme") || "sran-dev";
+    var scheme = q.get("scheme") || "sran";
     var reason = q.get("reason") || "";
     document.getElementById("signin").href = scheme + "://signin";
     document.getElementById("cancel").href = scheme + "://cancel";

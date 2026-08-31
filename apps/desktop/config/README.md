@@ -26,5 +26,9 @@ overrides everything at runtime (both modes).
 
 `sidecarPath` is ignored by the packaged app (it always uses the bundled
 sidecar) but the validator still requires the key — leave it as in the example.
-`protocolScheme` stays `sran-dev` / `oauthClient` `desktop-dev` until the
-production scheme is decided (FIX19 §1.3); the backend maps that pair today.
+`protocolScheme` is `sran` / `oauthClient` `desktop` (FIX34 Part B — the owner
+decided sran:// is this app's scheme; the backend maps that pair). The installer
+registers `sran://` per-user (electron-builder `protocols`) and the deep-link
+host mirrors `pageUrl`'s host: `sran://<host>/new?q=…`, `/chat/{id}`, `/project/{id}`.
+A dev build that must not touch the machine's `sran://` registration can still
+pair `sran-dev` with `desktop-dev`.

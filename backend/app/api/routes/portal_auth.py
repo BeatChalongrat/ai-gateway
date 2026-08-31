@@ -781,10 +781,10 @@ _DESKTOP_PAGE_SHELL = """<!doctype html>
 
 # Desktop clients and the custom scheme each one's deep link uses. An
 # ALLOW-LIST, not a parameter: the scheme never comes from the request.
-# ``desktop`` is the shipped WPF/WebView2 client on ``sran://``;
-# ``desktop-dev`` is the Electron shell under development (E1/E2), which
-# uses ``sran-dev://`` so the two never fight over one registration.
-# Production scheme ownership is a cut-over decision (Electron E6).
+# ``desktop`` is the shipped SRAN Desktop (Electron) client on ``sran://``
+# (FIX34 Part B — the WPF/WebView2 shell that first held the scheme is
+# retired); ``desktop-dev`` is a development build on ``sran-dev://`` so a
+# dev build never fights the installed app over one registration.
 _DESKTOP_CLIENT_SCHEMES: dict[str, str] = {
     "desktop": "sran",
     "desktop-dev": "sran-dev",

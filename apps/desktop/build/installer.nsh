@@ -34,11 +34,37 @@
   !endif
 !macroend
 
-; ── FIX19 §3: uninstall leaves no stale native-messaging registration ──────
+; ── FIX34 Part C: Explorer context menu — "Ask SRAN about this file" ────────
+;
+; scripts/dist.js generates build/installer-defines.nsh from the config the
+; build ships (SRAN_SCHEME, SRAN_WEB_HOST), so the verb's command is an app
+; link in the Part B shape:  sran://<web host>/new?file=<path>
+; The app parses it (deep-link.ts parseAppLink → filePathOf, deny-by-shape),
+; then ALWAYS shows a confirmation naming the full path before anything is
+; uploaded — even for a folder that is already granted (Claude Desktop's
+; rule for a folder supplied through a link). Per-user (HKCU), no admin.
+;
+; Known limit: Explorer substitutes %1 verbatim, so a file name containing
+; '#' or '?' cannot ride in a URL query — the app then opens a plain new chat
+; (the link is still well-formed; only the file part is dropped). '%' in a
+; name is left alone by the URL parser unless it forms a valid escape.
+!include "${BUILD_RESOURCES_DIR}\installer-defines.nsh"
+!define SRAN_SHELL_KEY "Software\Classes\*\shell\SRAN"
+
+!macro customInstall
+  WriteRegStr HKCU "${SRAN_SHELL_KEY}" "" "Ask SRAN about this file"
+  WriteRegStr HKCU "${SRAN_SHELL_KEY}" "Icon" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  WriteRegStr HKCU "${SRAN_SHELL_KEY}\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "${SRAN_SCHEME}://${SRAN_WEB_HOST}/new?file=%1"'
+  DetailPrint "Added Explorer context menu: Ask SRAN about this file (${SRAN_SCHEME}://${SRAN_WEB_HOST}/new?file=…)"
+!macroend
+
+; ── FIX19 §3: uninstall leaves no stale registration ───────────────────────
 ;
 ; A registry key pointing at a deleted exe is exactly the leftover cruft the
 ; owner was bitten by. The sidecar registers the host com.sran.browser.electron
-; under HKCU on first run; remove it here for Chrome and Edge.
+; under HKCU on first run; remove it here for Chrome and Edge. FIX34 Part C
+; adds the Explorer verb to the same clean-up. (The sran:// URL-protocol key
+; is electron-builder's `protocols` entry — it writes and deletes that one.)
 ;
 ; The user data folder (%APPDATA%\SranDesktop-Electron) is KEPT — electron-builder's
 ; deleteAppDataOnUninstall defaults to false and we leave it so. Deliberate:
@@ -51,4 +77,6 @@
   DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\com.sran.browser.electron"
   DeleteRegKey HKCU "Software\Microsoft\Edge\NativeMessagingHosts\com.sran.browser.electron"
   DetailPrint "Removed native-messaging host registration (com.sran.browser.electron)."
+  DeleteRegKey HKCU "${SRAN_SHELL_KEY}"
+  DetailPrint "Removed Explorer context menu (Ask SRAN about this file)."
 !macroend

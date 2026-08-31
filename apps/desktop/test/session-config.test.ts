@@ -3,8 +3,8 @@
 // Pins: the gateway is an origin that is NOT allow-listed for navigation
 // (the page reaches it with fetch); the refresh interval is an integer in
 // [1, 59] — strictly under the 60-minute access TTL; the OAuth client id
-// matches the dev scheme (desktop-dev ↔ sran-dev); a config that pairs the
-// shipped WebView2 client id with the dev scheme is refused.
+// matches the scheme (desktop ↔ sran since FIX34 Part B; desktop-dev ↔
+// sran-dev for a dev build); a config that mismatches the pair is refused.
 //
 // LIMITS: "under 60" is the only thing the guard knows about the TTL. A
 // production access TTL shorter than 60 minutes makes 45 wrong and this test
@@ -49,9 +49,9 @@ describe("shipped session config", () => {
     expect(config.sessionRefreshMinutes).toBe(45);
   });
 
-  it("dev OAuth client maps to the dev scheme", () => {
-    expect(config.oauthClient).toBe("desktop-dev");
-    expect(config.protocolScheme).toBe("sran-dev");
+  it("the shipped OAuth client maps to the shipped scheme (desktop ↔ sran)", () => {
+    expect(config.oauthClient).toBe("desktop");
+    expect(config.protocolScheme).toBe("sran");
     expect(config.oauthProvider).toBe("google");
     expect(config.signInTimeoutSeconds).toBeGreaterThanOrEqual(30);
   });
