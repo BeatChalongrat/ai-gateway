@@ -35,7 +35,11 @@ _DATA = Path(__file__).resolve().parent.parent / "data"
 
 # ── weights (Phase-3 sweeps the THRESHOLD, not these) ─────────────────────
 
-BASE_NER_PERSON = 0.50
+# Deliberately below the shipped threshold: a NER hit with NO supporting
+# signal must not mask on its own. ``เดดไลน์โปรเจกต์`` came back as a
+# PERSON from the CRF with nothing else pointing at it, and masked, until
+# the base was set under the bar.
+BASE_NER_PERSON = 0.45
 BASE_NER_LOCATION = 0.45
 BASE_NICKNAME = 0.45
 # An UNAMBIGUOUS gazetteer name — one of the 10k given names that is not
@@ -103,6 +107,22 @@ NON_NAME_PREFIXES = (
     "ตำบล", "จังหวัด", "เขต", "แขวง", "นิคม", "สนามบิน", "สถานี",
     "หน้า", "ช่วง", "ฤดู", "อากาศ", "เดือน", "ปี", "วัน",
 )
+
+
+# Verbs and prepositions that introduce a person in Thai chat and are
+# glued to the name (``ฝากตูนรับเคสนี้``, ``ให้อรอนงค์``). The gazetteer's
+# ``left_boundary`` only accepts ``ชื่อ``-family labels, which left every
+# handoff sentence unmasked. The right-hand dictionary test still guards
+# the compound cases (``แก้วน้ำ``), and NON_NAME_PREFIXES still wins.
+NAME_INTRO_WORDS = ("ฝาก", "ให้", "กับ", "และ", "ถึง", "จาก", "บอก", "พบ", "เจอ", "ตาม")
+
+
+def name_intro_before(text: str, start: int) -> str | None:
+    head = text[max(0, start - 8):start]
+    for w in NAME_INTRO_WORDS:
+        if head.endswith(w):
+            return w
+    return None
 
 
 def non_name_prefix_before(text: str, start: int) -> str | None:
@@ -238,8 +258,10 @@ def continues_into_word(
             # it cannot be a word fragment; only a compound ENDING in it
             # would be a false positive, and ``is_word_tail`` covers that.
             return is_word_tail(text, start, end)
-        left_ok = gaz.left_boundary(text, start) or bool(
-            title_prefix_before(text, start)
+        left_ok = (
+            gaz.left_boundary(text, start)
+            or bool(title_prefix_before(text, start))
+            or bool(name_intro_before(text, start))
         )
     except Exception:  # noqa: BLE001 — lexicon problems must not mask-block
         before_thai = start > 0 and _is_thai_char(text[start - 1])

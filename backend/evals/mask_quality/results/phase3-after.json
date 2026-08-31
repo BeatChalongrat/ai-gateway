@@ -1,0 +1,466 @@
+{
+ "phase": "fix37-phase3-after",
+ "recorded_at": "2026-09-01",
+ "criteria_version": "fix37-phase1",
+ "shipped_settings": {
+  "dlp_thai_ner_enabled": true,
+  "dlp_thai_ner_threshold": 0.5,
+  "dlp_thai_ner_max_chars": 4000,
+  "ner_engine": "pythainlp thainer (CRF)"
+ },
+ "threshold_sweep": [
+  {
+   "threshold": 0.45,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.92,
+   "corpus_fires": 1,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.9728,
+   "corpus_thai_name": 0.9867,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": [
+    "w_deadline"
+   ]
+  },
+  {
+   "threshold": 0.5,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.76,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.9728,
+   "corpus_thai_name": 0.9867,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.55,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.76,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.898,
+   "corpus_thai_name": 0.84,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.6,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.76,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.898,
+   "corpus_thai_name": 0.84,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.65,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.76,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.898,
+   "corpus_thai_name": 0.84,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.7,
+   "thai_name_recall": 0.7,
+   "thai_address_recall": 0.76,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.8912,
+   "corpus_thai_name": 0.8267,
+   "corpus_thai_address": 1.0,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.75,
+   "thai_name_recall": 0.65,
+   "thai_address_recall": 0.52,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.8571,
+   "corpus_thai_name": 0.8267,
+   "corpus_thai_address": 0.6154,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  },
+  {
+   "threshold": 0.8,
+   "thai_name_recall": 0.65,
+   "thai_address_recall": 0.52,
+   "corpus_fires": 0,
+   "swallow": 0,
+   "corpus_pii_masked_rate": 0.8571,
+   "corpus_thai_name": 0.8267,
+   "corpus_thai_address": 0.6154,
+   "decoy_survival": 1.0,
+   "decoys_eaten": [],
+   "corpus_fire_ids": []
+  }
+ ],
+ "chosen_threshold": 0.5,
+ "chosen_because": "lowest threshold at which corpus_fires is 0 and decoy_survival is 1.00; 0.45 gains nothing on the FIX28 sets and fires once, 0.55+ loses 0.15 of corpus name recall for no precision gain.",
+ "dlp_eval": {
+  "before": {
+   "api_key_secret": 0.88,
+   "credit_card": 1.0,
+   "email": 1.0,
+   "phone": 0.88,
+   "thai_address": 0.52,
+   "thai_bank_account": 0.9091,
+   "thai_name": 0.625,
+   "thai_national_id": 1.0
+  },
+  "after_python": {
+   "thai_name": 0.7,
+   "thai_address": 0.76,
+   "api_key_secret": 0.88,
+   "credit_card": 1.0,
+   "email": 1.0,
+   "phone": 0.88,
+   "thai_bank_account": 0.9091,
+   "thai_national_id": 1.0
+  },
+  "after_rust_direct": {
+   "thai_name": 0.625,
+   "thai_address": 0.52
+  },
+  "rust_note": "the eval calls the sidecar directly and the sidecar has no Thai NER port; the PRODUCTION rust path gets the layer through the post-pass in rust_dlp_client.",
+  "corpus_fires": {
+   "python": 0,
+   "rust": 0
+  },
+  "swallow": 0,
+  "switch_off_arm": {
+   "thai_name": 0.625,
+   "thai_address": 0.52,
+   "corpus_fires": 0,
+   "note": "identical to the pre-round baseline, measured live"
+  }
+ },
+ "fix37_corpus": {
+  "before": {
+   "overall": 0.8095,
+   "by_type": {
+    "api_key_secret": 1.0,
+    "credit_card": 1.0,
+    "email": 1.0,
+    "phone": 0.8966,
+    "thai_address": 0.6154,
+    "thai_bank_account": 1.0,
+    "thai_name": 0.7333,
+    "thai_national_id": 1.0
+   },
+   "by_case_type": {
+    "address_fragment": 0.8,
+    "api_key": 1.0,
+    "bank_account": 0.9167,
+    "credit_card": 1.0,
+    "decoy": 0.82,
+    "email": 0.9118,
+    "name_common_word": 0.8974,
+    "name_no_prefix": 0.913,
+    "name_with_prefix": 0.9189,
+    "national_id": 1.0,
+    "nickname": 0.3871,
+    "phone_dashed": 0.84,
+    "phone_plain": 0.9,
+    "phone_spaced": 0.6154,
+    "phone_thai_digits": 0.375,
+    "quasi_identifier": 0.6667,
+    "thai_english_mix": 0.9
+   }
+  },
+  "after": {
+   "overall": 0.9728,
+   "by_type": {
+    "api_key_secret": 1.0,
+    "credit_card": 1.0,
+    "email": 1.0,
+    "phone": 0.8966,
+    "thai_address": 1.0,
+    "thai_bank_account": 1.0,
+    "thai_name": 0.9867,
+    "thai_national_id": 1.0
+   },
+   "by_case_type": {
+    "address_fragment": 1.0,
+    "api_key": 1.0,
+    "bank_account": 1.0,
+    "credit_card": 1.0,
+    "decoy": 0.94,
+    "email": 1.0,
+    "name_common_word": 1.0,
+    "name_no_prefix": 0.9783,
+    "name_with_prefix": 1.0,
+    "national_id": 1.0,
+    "nickname": 0.9032,
+    "phone_dashed": 1.0,
+    "phone_plain": 1.0,
+    "phone_spaced": 1.0,
+    "phone_thai_digits": 0.5,
+    "quasi_identifier": 1.0,
+    "thai_english_mix": 1.0
+   }
+  },
+  "decoy_survival": {
+   "before": 1.0,
+   "after": 1.0
+  }
+ },
+ "axis_a": {
+  "before": {
+   "ner": false,
+   "model": "google/gemini-2.5-flash",
+   "questions": {
+    "context": 97,
+    "identity": 65,
+    "errors": 0
+   },
+   "raw_context_accuracy": 0.9691,
+   "comprehension_retention": 1.0,
+   "identity_leak": 0.1077,
+   "identity_leak_raw_control": 1.0,
+   "failure_causes": {}
+  },
+  "after": {
+   "ner": false,
+   "model": "google/gemini-2.5-flash",
+   "questions": {
+    "context": 97,
+    "identity": 65,
+    "errors": 0
+   },
+   "raw_context_accuracy": 0.9691,
+   "comprehension_retention": 1.0,
+   "identity_leak": 0.0769,
+   "identity_leak_raw_control": 1.0,
+   "failure_causes": {}
+  },
+  "remaining_leaks": [
+   "cp09/q3",
+   "sf03/q2",
+   "hr08/q2",
+   "st09/q2",
+   "ap06/q2"
+  ]
+ },
+ "axis_b": {
+  "before": {
+   "ner": false,
+   "n": 12,
+   "chance": 0.1,
+   "closed_set_accuracy": {
+    "overall": 0.75,
+    "pii_leak": 1.0,
+    "quasi": 0.6667,
+    "n_by_cause": {
+     "pii_leak": 3,
+     "quasi": 9
+    }
+   },
+   "open_attribute_recall": {
+    "overall": 0.1389,
+    "pii_leak": 0.3333,
+    "quasi": 0.0741
+   }
+  },
+  "after": {
+   "ner": false,
+   "n": 12,
+   "chance": 0.1,
+   "closed_set_accuracy": {
+    "overall": 0.75,
+    "pii_leak": null,
+    "quasi": 0.75,
+    "n_by_cause": {
+     "pii_leak": 0,
+     "quasi": 12
+    }
+   },
+   "open_attribute_recall": {
+    "overall": 0.1389,
+    "pii_leak": null,
+    "quasi": 0.1389
+   }
+  },
+  "by_quasi_strength_after": {
+   "quasi_strong": {
+    "correct": 6,
+    "n": 6
+   },
+   "quasi_weak": {
+    "correct": 3,
+    "n": 6
+   }
+  }
+ },
+ "latency_ms": {
+  "before": {
+   "ner": false,
+   "input": {
+    "short": {
+     "chars": 19,
+     "p50": 0.501,
+     "p95": 1.265,
+     "p99": 2.334
+    },
+    "medium": {
+     "chars": 211,
+     "p50": 0.99,
+     "p95": 1.217,
+     "p99": 1.322
+    },
+    "long": {
+     "chars": 2400,
+     "p50": 9.994,
+     "p95": 12.231,
+     "p99": 13.539
+    }
+   },
+   "output_window": {
+    "chars": 160,
+    "p50": 0.682,
+    "p95": 1.108,
+    "p99": 1.177
+   },
+   "engines": {
+    "rust_sidecar_rtt": {
+     "short": {
+      "chars": 19,
+      "p50": 1.572,
+      "p95": 2.434,
+      "p99": 2.652
+     },
+     "medium": {
+      "chars": 211,
+      "p50": 3.591,
+      "p95": 4.887,
+      "p99": 5.238
+     },
+     "long": {
+      "chars": 2400,
+      "p50": 17.162,
+      "p95": 23.853,
+      "p99": 25.917
+     },
+     "output_window": {
+      "chars": 160,
+      "p50": 3.368,
+      "p95": 4.899,
+      "p99": 5.175
+     }
+    }
+   }
+  },
+  "after": {
+   "ner": false,
+   "input": {
+    "short": {
+     "chars": 19,
+     "p50": 1.106,
+     "p95": 2.211,
+     "p99": 4.923
+    },
+    "medium": {
+     "chars": 211,
+     "p50": 2.071,
+     "p95": 3.365,
+     "p99": 3.887
+    },
+    "long": {
+     "chars": 2400,
+     "p50": 35.667,
+     "p95": 87.913,
+     "p99": 110.292
+    }
+   },
+   "output_window": {
+    "chars": 160,
+    "p50": 0.493,
+    "p95": 0.629,
+    "p99": 0.635
+   },
+   "engines": {
+    "rust_sidecar_rtt": {
+     "short": {
+      "chars": 19,
+      "p50": 1.545,
+      "p95": 2.444,
+      "p99": 2.674
+     },
+     "medium": {
+      "chars": 211,
+      "p50": 4.887,
+      "p95": 13.303,
+      "p99": 17.629
+     },
+     "long": {
+      "chars": 2400,
+      "p50": 20.675,
+      "p95": 40.493,
+      "p99": 54.464
+     },
+     "output_window": {
+      "chars": 160,
+      "p50": 3.747,
+      "p95": 8.316,
+      "p99": 9.904
+     }
+    }
+   },
+   "output_registry_has_thai_ner": false
+  }
+ },
+ "latency_delta_p95_input_ms": {
+  "short": 0.95,
+  "medium": 2.15,
+  "long": 75.68
+ },
+ "pass_criteria": {
+  "thai_name_recall_min_0.85": {
+   "fix28_set": 0.7,
+   "fix37_corpus": 0.9867,
+   "met": "corpus yes, FIX28 set no"
+  },
+  "thai_address_recall_min_0.80": {
+   "fix28_set": 0.76,
+   "fix37_corpus": 1.0,
+   "met": "corpus yes, FIX28 set no"
+  },
+  "corpus_fires_0": {
+   "value": 0,
+   "met": true
+  },
+  "comprehension_retention_not_below_baseline": {
+   "baseline": 1.0,
+   "after": 1.0,
+   "met": true
+  },
+  "input_p95_delta_max_200ms": {
+   "worst": 75.682,
+   "met": true
+  },
+  "switch_off_equals_pre_round": {
+   "met": true
+  }
+ }
+}

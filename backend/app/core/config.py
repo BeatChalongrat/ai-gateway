@@ -435,7 +435,7 @@ class Settings(BaseSettings):
     # the corpus changes. ``dlp_thai_ner_max_chars`` skips the model for
     # pasted-document turns, where the regex layer still applies.
     dlp_thai_ner_enabled: bool = True
-    dlp_thai_ner_threshold: float = 0.55
+    dlp_thai_ner_threshold: float = 0.50
     dlp_thai_ner_max_chars: int = 4000
 
     # P1 Item 4 — Anthropic prompt caching. When True (default) the
