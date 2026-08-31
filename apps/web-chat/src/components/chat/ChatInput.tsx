@@ -32,6 +32,14 @@ import {
   type SlashCommand,
 } from "@/lib/slashCommands";
 import { toast } from "@/components/ui/Toast";
+import {
+  EDIT_MESSAGE_EVENT,
+  VOICE_TOGGLE_EVENT,
+  lastEditableUserMessageId,
+  pastedTextFile,
+  shouldEditLastOnArrowUp,
+  shouldPasteAsFile,
+} from "@/lib/composerShortcuts";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
 import { useChatStore } from "@/stores/chatStore";
@@ -632,6 +640,31 @@ export function ChatInput({
       }
     }
 
+    // FIX34 Part D — ↑ in an EMPTY composer edits the last message (Claude's
+    // binding). With text present the arrow keeps moving the caret. The
+    // bubble that owns that message opens its edit box on the event.
+    if (
+      shouldEditLastOnArrowUp({
+        key: e.key,
+        text,
+        slashOpen,
+        hasPendingFiles: pendingFiles.length > 0,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+      })
+    ) {
+      const state = useChatStore.getState();
+      const convKey = conversationId ?? state.activeConversationId;
+      const messageId = convKey ? lastEditableUserMessageId(state.messages[convKey]) : null;
+      if (messageId) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent(EDIT_MESSAGE_EVENT, { detail: { messageId } }));
+        return;
+      }
+    }
+
     // Phase 7 — the IME composition guard lives in shouldSendOnEnter:
     // during composition Enter commits the candidate and must NOT send.
     const native = e.nativeEvent as KeyboardEvent;
@@ -765,6 +798,8 @@ export function ChatInput({
     // through onSend so the message lands correctly.
     const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
     const pendingIds = accepted.map((f) => addPendingFile(stagingBucket, f));
+    // FIX34 Part D: the paste-as-file undo needs the chip id of what it staged.
+    lastStagedRef.current = { bucket: stagingBucket, ids: pendingIds };
 
     // Phase 2 — resolve the real conv id. On the conv page this is
     // synchronous (returns props.conversationId); on the landing
@@ -827,6 +862,13 @@ export function ChatInput({
   // fires when the composer is focused. The handler stays bound
   // even before a conversation exists — handleFiles → ensureConvId
   // eager-creates one for the landing page.
+  //
+  // FIX34 Part D — a LONG text paste (≥ PASTE_AS_FILE_THRESHOLD, ChatGPT's
+  // behaviour) becomes a .txt attachment instead of a wall of text in the
+  // box; the toast offers Undo, which removes the chip and puts the text
+  // back in the composer.
+  const lastStagedRef = useRef<{ bucket: string; ids: string[] } | null>(null);
+  const pasteSeqRef = useRef(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const el = taRef.current;
@@ -842,12 +884,48 @@ export function ChatInput({
           if (f) images.push(f);
         }
       }
-      if (images.length === 0) return;
+      if (images.length > 0) {
+        e.preventDefault();
+        void handleFiles(images);
+        return;
+      }
+      const pasted = e.clipboardData?.getData("text/plain") ?? "";
+      if (!shouldPasteAsFile(pasted, false)) return;
       e.preventDefault();
-      void handleFiles(images);
+      const file = pastedTextFile(pasted, ++pasteSeqRef.current);
+      lastStagedRef.current = null;
+      void handleFiles([file]).then(() => {
+        const staged = lastStagedRef.current;
+        toast(tOutside("input.pasteAsFile", { n: String(pasted.length) }), {
+          label: tOutside("input.pasteAsFile.undo"),
+          onClick: () => {
+            if (staged) for (const id of staged.ids) removePendingFile(staged.bucket, id);
+            setText((current) => (current ? `${current}\n${pasted}` : pasted));
+            requestAnimationFrame(() => taRef.current?.focus());
+          },
+        });
+      });
     };
     el.addEventListener("paste", onPaste);
     return () => el.removeEventListener("paste", onPaste);
+  }, []);
+
+  // FIX34 Part D — Ctrl+Shift+V (global shortcut) toggles the recorder. The
+  // hook dispatches an event because the recorder lives here.
+  const voiceRef = useRef({ start: startVoice, stop: stopVoice, supported: voiceSupported, recording: isRecording, streaming });
+  voiceRef.current = { start: startVoice, stop: stopVoice, supported: voiceSupported, recording: isRecording, streaming };
+  useEffect(() => {
+    const onToggle = () => {
+      const v = voiceRef.current;
+      if (!v.supported) {
+        toast(tOutside("input.voice.unsupported"));
+        return;
+      }
+      if (v.recording) v.stop();
+      else if (!v.streaming) v.start();
+    };
+    window.addEventListener(VOICE_TOGGLE_EVENT, onToggle);
+    return () => window.removeEventListener(VOICE_TOGGLE_EVENT, onToggle);
   }, []);
 
   // Sprint 2A.5 — direct-dispatch path: a media model renders its gen form
@@ -977,6 +1055,7 @@ export function ChatInput({
           <div className="px-4 pt-3">
             <textarea
               ref={taRef}
+              data-shortcut="composer"
               rows={1}
               value={text}
               disabled={disabled}

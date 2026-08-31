@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
+import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
 import { fallbackNotice } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
@@ -151,6 +152,18 @@ function MessageBubbleImpl({
     message.id,
     speak,
   ]);
+
+  // FIX34 Part D — ↑ in an empty composer asks the LAST user message to open
+  // its edit box (the composer names the id; this bubble answers only to its own).
+  useEffect(() => {
+    if (!isUser || !onEdit) return;
+    const onRequest = (e: Event) => {
+      const id = (e as CustomEvent<{ messageId?: string }>).detail?.messageId;
+      if (id === message.id) setEditing(true);
+    };
+    window.addEventListener(EDIT_MESSAGE_EVENT, onRequest);
+    return () => window.removeEventListener(EDIT_MESSAGE_EVENT, onRequest);
+  }, [isUser, onEdit, message.id]);
 
   useEffect(() => {
     if (!editing) return;

@@ -670,6 +670,16 @@ function UserMenu({
             trailing={<MemoryTrailing />}
             setOpen={setOpen}
           />
+          {/* FIX34 Part E — Skills live in the sidebar menu for EVERY surface
+              (claude.ai: Customize › Skills), not on the landing page. The web
+              page is chat-edge-backed (FIX32 4.3); the desktop one is host-backed. */}
+          <MenuItem
+            onClick={() => router.push("/chat/skills")}
+            icon={<Wrench width={14} height={14} aria-hidden />}
+            label={t("menu.skills")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
           {/* Desktop-only screens (Phase 5). Reachable only in the shell —
               decided at RUNTIME (FIX20 §6.5): useHostedMode() is true exactly
               when the Electron preload's window.sranHost is present, so ONE
@@ -678,13 +688,6 @@ function UserMenu({
           {hosted ? (
             <>
               <div className="border-t border-border/60" />
-              <MenuItem
-                onClick={() => router.push("/chat/skills")}
-                icon={<Wrench width={14} height={14} aria-hidden />}
-                label="Skills"
-                trailing={<ArrowIcon />}
-                setOpen={setOpen}
-              />
               <MenuItem
                 onClick={() => router.push("/chat/tasks")}
                 icon={<Clock width={14} height={14} aria-hidden />}

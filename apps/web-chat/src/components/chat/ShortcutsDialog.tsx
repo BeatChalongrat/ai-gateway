@@ -23,14 +23,25 @@ export interface ShortcutRow {
   labelKey: DictKey;
   /** Key tokens. "Mod" renders as ⌘ on Mac and Ctrl elsewhere. */
   keys: string[];
+  /** FIX34 — a second binding for the same action (Claude's key next to ours). */
+  altKeys?: string[];
 }
 
-/** Every binding the web app answers to. Kept next to the dialog so the
- *  cheatsheet can never drift from what is actually bound. */
+/** Every binding the web app answers to (hooks/useKeyboardShortcuts.ts +
+ *  the composer's own ↑ / Enter handling). Kept next to the dialog so the
+ *  cheatsheet can never drift from what is actually bound. FIX34 Part D
+ *  added the rows Claude has that we lacked. */
 export const SHORTCUTS: ShortcutRow[] = [
-  { labelKey: "shortcuts.newChat", keys: ["Mod", "Shift", "N"] },
+  { labelKey: "shortcuts.newChat", keys: ["Mod", "Shift", "N"], altKeys: ["Mod", "Shift", "O"] },
   { labelKey: "shortcuts.toggleSidebar", keys: ["Mod", "Shift", "S"] },
   { labelKey: "shortcuts.searchChats", keys: ["Mod", "K"] },
+  { labelKey: "shortcuts.focusInput", keys: ["Mod", "Shift", ";"] },
+  { labelKey: "shortcuts.copyLast", keys: ["Mod", "Shift", "C"] },
+  { labelKey: "shortcuts.editLast", keys: ["Up"] },
+  { labelKey: "shortcuts.stop", keys: ["Esc"] },
+  { labelKey: "shortcuts.voice", keys: ["Mod", "Shift", "V"] },
+  { labelKey: "shortcuts.deleteConversation", keys: ["Mod", "Shift", "Backspace"] },
+  { labelKey: "shortcuts.settings", keys: ["Mod", ","] },
   { labelKey: "shortcuts.cheatsheet", keys: ["Mod", "/"] },
   { labelKey: "shortcuts.send", keys: ["Enter"] },
   { labelKey: "shortcuts.newline", keys: ["Shift", "Enter"] },
@@ -46,6 +57,8 @@ export function renderKey(token: string, mac: boolean): string {
   if (token === "Mod") return mac ? "⌘" : "Ctrl";
   if (token === "Shift") return mac ? "⇧" : "Shift";
   if (token === "Enter") return mac ? "↵" : "Enter";
+  if (token === "Backspace") return mac ? "⌫" : "Backspace";
+  if (token === "Up") return "↑";
   return token;
 }
 
@@ -125,6 +138,19 @@ export function ShortcutsDialog({
                     {renderKey(k, mac)}
                   </kbd>
                 ))}
+                {row.altKeys ? (
+                  <>
+                    <span className="px-0.5 text-[11px] text-text-muted">/</span>
+                    {row.altKeys.map((k) => (
+                      <kbd
+                        key={`alt-${k}`}
+                        className="rounded border border-border bg-bg-base px-1.5 py-0.5 font-mono text-[11px] text-text-primary"
+                      >
+                        {renderKey(k, mac)}
+                      </kbd>
+                    ))}
+                  </>
+                ) : null}
               </span>
             </li>
           ))}

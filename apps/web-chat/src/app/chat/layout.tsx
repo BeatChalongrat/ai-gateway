@@ -8,6 +8,10 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { useHostedMode } from "@/hooks/useHostedMode";
+import { useChatStore } from "@/stores/chatStore";
 import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
 import { Sidebar } from "@/components/chat/Sidebar";
@@ -123,10 +127,27 @@ export default function ChatLayout({
   // global ? / Cmd+/ binding works on every chat route, including ones
   // with no composer.
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // FIX34 Part D — Cmd/Ctrl+Shift+Backspace asks first (a shortcut must never
+  // delete silently); Cmd/Ctrl+, opens settings (desktop) or the memory &
+  // preferences page (web has no settings screen).
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const router = useRouter();
+  const hosted = useHostedMode();
+  const deleteConversation = useChatStore((s) => s.deleteConversation);
+  async function confirmDelete() {
+    const id = useChatStore.getState().activeConversationId;
+    setDeleteOpen(false);
+    if (!id) return;
+    try {
+      await deleteConversation(id);
+      router.replace("/chat");
+    } catch {
+      /* the store surfaces the error banner */
+    }
+  }
 
-  // Global keyboard shortcuts: Cmd/Ctrl+Shift+S toggles sidebar,
-  // Cmd/Ctrl+K focuses the sidebar search, Cmd/Ctrl+Shift+N starts
-  // a new chat, ? / Cmd+/ shows the shortcuts sheet.
+  // Global keyboard shortcuts (hooks/useKeyboardShortcuts.ts lists them all;
+  // ShortcutsDialog mirrors the list for the user).
   useKeyboardShortcuts({
     onShowShortcuts: () => setShortcutsOpen(true),
     onToggleSidebar: () => {
@@ -136,6 +157,8 @@ export default function ChatLayout({
         toggleCollapsed();
       }
     },
+    onDeleteConversation: () => setDeleteOpen(true),
+    onOpenSettings: () => router.push(hosted ? "/chat/settings" : "/chat/memory"),
   });
 
   if (!isReady) {
@@ -213,6 +236,24 @@ export default function ChatLayout({
         open={shortcutsOpen}
         onClose={() => setShortcutsOpen(false)}
       />
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={t("shortcuts.deleteConfirm.title")}
+        description={t("shortcuts.deleteConfirm.body")}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setDeleteOpen(false)} data-testid="delete-cancel">
+              {t("common.cancel")}
+            </Button>
+            <Button variant="danger" onClick={() => void confirmDelete()} data-testid="delete-confirm">
+              {t("common.delete")}
+            </Button>
+          </div>
+        }
+      >
+        <span />
+      </Modal>
     </div>
   );
 }
