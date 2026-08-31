@@ -348,6 +348,12 @@ MASK_TOKENS: dict[str, str] = {
     # token (and base-keyed counter) with presidio_ner so an output
     # restore step never has to distinguish the two sources.
     "thai_name_no_prefix": "[NAME]",
+    # FIX37 — the Thai NER layer emits person spans under ``thai_ner`` and
+    # address spans under ``thai_ner_location``. Both share a base token
+    # with the engine that already covers that shape, so one person keeps
+    # one placeholder however many detectors found them.
+    "thai_ner": "[NAME]",
+    "thai_ner_location": "[ADDRESS]",
     # Additional detectors from the DLP coverage expansion.
     "thai_national_id": "[THAI_ID]",
     "thai_tax_id": "[TAX_ID]",
@@ -582,6 +588,11 @@ PSEUDONYM_MAP: dict[str, str] = {
     "thai_name": "PERSON",
     "thai_name_no_prefix": "PERSON",
     "presidio_ner": "PERSON",
+    # FIX37 — the Thai NER layer. Same PERSON / ADDRESS categories as the
+    # regex detectors it backs up, so a name found by both engines keeps
+    # ONE <<PERSON_A>> across the conversation instead of minting a
+    # second placeholder.
+    "thai_ner": "PERSON",
     # Contact
     "email": "EMAIL",
     "phone": "PHONE",
@@ -602,6 +613,7 @@ PSEUDONYM_MAP: dict[str, str] = {
     # Location / demographic
     "address": "ADDRESS",
     "thai_address": "ADDRESS",
+    "thai_ner_location": "ADDRESS",
     "date_of_birth": "DOB",
     "vehicle_plate": "PLATE",
     # PDPA Section 26 sensitive

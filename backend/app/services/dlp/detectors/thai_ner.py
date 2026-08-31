@@ -200,7 +200,12 @@ class ThaiNerDetector(BaseDetector):
         seen.add((start, end))
         out.append(
             DetectionMatch(
-                detector_name=self.name,
+                # Person and address spans carry different detector names
+                # so each inherits the right mask token (and the right
+                # counter) from ``transformer.MASK_TOKENS``.
+                detector_name=(
+                    self.name if entity_type == "person" else "thai_ner_location"
+                ),
                 entity_type=entity_type,
                 category=self.category,
                 start=start,

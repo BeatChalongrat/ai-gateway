@@ -362,7 +362,11 @@ class TestDefaultRegistry:
           +1 ThaiNameNoPrefixDetector (regex fallback — registered
              regardless of ner_enabled since the Thai-name fix; see
              registry.py for the rationale)
-          = 31
+          +1 ThaiNerDetector (FIX37 — Thai NER + context enhancer,
+             registered when ``dlp_thai_ner_enabled`` is on, which is
+             the shipped default)
+          = 32
         """
         reg = get_default_registry()
-        assert len(reg) == 31
+        assert len(reg) == 32
+        assert len(get_default_registry(thai_ner=False)) == 31
