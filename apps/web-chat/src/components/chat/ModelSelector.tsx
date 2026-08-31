@@ -590,6 +590,44 @@ export function formatPricePair(input: number, output: number): string {
   return `$${f(input)} / $${f(output)}`;
 }
 
+/** FIX35 Part A — is this catalog description worth a line in the picker?
+ *
+ *  chat-edge fills uncurated rows with a provider placeholder ("OpenAI chat
+ *  model.", "Anthropic Claude model.") so the dropdown never renders blank.
+ *  That text says nothing the provider line under the name doesn't already
+ *  say, so it is noise. The rule is structural, not a per-model list: a
+ *  description earns its line when it is a real sentence — at least five
+ *  words — and is not the "<Provider> [<family>] model." template. Curated
+ *  copy ("OpenAI's most capable multimodal flagship. Great for complex
+ *  tasks, vision, and tool use.") passes; every placeholder fails. */
+export function isFillerDescription(description: string | undefined | null): boolean {
+  const text = (description ?? "").trim();
+  if (!text) return true;
+  const words = text.split(/\s+/);
+  if (words.length < 5) return true;
+  return /^\S+(?:\s+\S+){0,2}\s+(?:chat\s+)?model\.?$/i.test(text);
+}
+
+/** FIX35 Part A — the one-line hover tooltip that replaced the permanent
+ *  context/price line (FIX33 B1). The numbers are the same economics the
+ *  CreditBadge, the usage panel and the FIX33 context meter already show;
+ *  repeating them on every row was noise, so they live on hover only —
+ *  never as a permanent line. */
+export function formatModelTooltip(
+  t: (key: DictKey, vars?: Record<string, string>) => string,
+  caps: string[],
+  contextWindow?: number,
+  inputPrice?: number,
+  outputPrice?: number,
+): string | undefined {
+  const parts = [...caps];
+  if (contextWindow && contextWindow > 0) parts.push(t("model.contextWindow", { n: formatContextWindow(contextWindow) }));
+  if (typeof inputPrice === "number" && typeof outputPrice === "number") {
+    parts.push(t("model.price", { pair: formatPricePair(inputPrice, outputPrice) }));
+  }
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
   video: "🎬",
   audio: "🎵",
@@ -614,8 +652,11 @@ function ModelRow({
     reasoning ? t("model.reasoningBadge") : null,
     vision ? t("model.visionBadge") : null,
     imageGen ? t("model.imageBadge") : null,
-  ].filter(Boolean);
+  ].filter((c): c is string => Boolean(c));
   const capsTitle = caps.length ? caps.join(" · ") : undefined;
+  // FIX35 Part A — context window + price ride the SAME hover tooltip as
+  // the capabilities; nothing about token economics is a permanent line.
+  const rowTitle = formatModelTooltip(t, caps, contextWindow, inputPrice, outputPrice);
   return (
     <div
       role="option"
@@ -637,24 +678,23 @@ function ModelRow({
           line. They live on as the row tooltip; vision is told at the moment
           it matters (the attach button + the one-click switch, FIX27). */}
       <div className="min-w-0 flex-1">
-        <div className="block break-words text-sm font-medium leading-snug text-text-primary" title={capsTitle}>
+        <div className="block break-words text-sm font-medium leading-snug text-text-primary" title={rowTitle} data-testid="model-row-name">
           {label}
         </div>
         {sub ? <div className="text-[11px] text-text-muted">{sub}</div> : null}
-        {description ? (
-          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-muted">
+        {/* FIX35 Part A — a row is the NAME + the PROVIDER. We are a
+            multi-provider gateway, so the provider line stays (Claude and
+            ChatGPT can drop it: one vendor). The description survives only
+            when it says something (isFillerDescription); the FIX33 B1
+            context/price line is gone — Phase 13.1 had removed it as noise
+            and this round confirms that call: the same numbers already live
+            in the CreditBadge, the usage panel and the context meter, so
+            here they are hover-only (rowTitle above). Capability badges
+            (reasoning / vision / image / media kind) are not noise — they
+            say what the model can do — and stay exactly as they were. */}
+        {description && !isFillerDescription(description) ? (
+          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-text-muted" data-testid="model-row-description">
             {description}
-          </p>
-        ) : null}
-        {/* FIX33 B1 — context window + price per 1M tokens, one muted line,
-            only when the catalog serves the numbers. */}
-        {(contextWindow && contextWindow > 0) || (typeof inputPrice === "number" && typeof outputPrice === "number") ? (
-          <p className="mt-0.5 text-[10px] leading-snug text-text-tertiary" data-testid="model-meta">
-            {contextWindow && contextWindow > 0 ? t("model.contextWindow", { n: formatContextWindow(contextWindow) }) : null}
-            {contextWindow && contextWindow > 0 && typeof inputPrice === "number" && typeof outputPrice === "number" ? " · " : null}
-            {typeof inputPrice === "number" && typeof outputPrice === "number"
-              ? t("model.price", { pair: formatPricePair(inputPrice, outputPrice) })
-              : null}
           </p>
         ) : null}
       </div>

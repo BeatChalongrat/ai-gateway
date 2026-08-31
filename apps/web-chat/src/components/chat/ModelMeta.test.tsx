@@ -45,7 +45,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
 import { ChatInput } from "./ChatInput";
-import { ModelSelector } from "./ModelSelector";
+import { ModelSelector, isFillerDescription } from "./ModelSelector";
 
 const chatInitial = useChatStore.getState();
 
@@ -109,23 +109,46 @@ describe("ModelSelector metadata", () => {
     ).toBeGreaterThan(0);
   });
 
-  it("FIX33 B1 — renders the context window and the price per 1M tokens the catalog sends", () => {
+  it("FIX35 Part A — context window and price are hover-only: in the row tooltip, never a permanent line", () => {
     // model() carries context_window: 128000 and $2.50 / $10.00.
     openPicker([model()]);
 
-    const meta = screen.getAllByTestId("model-meta");
-    expect(meta.length).toBeGreaterThan(0);
-    expect(meta[0].textContent).toContain("128K");
-    expect(meta[0].textContent).toContain("$2.5 / $10");
-    expect(meta[0].textContent).toContain("per 1M");
+    // The FIX33 B1 permanent meta line is gone (Phase 13.1's call, confirmed).
+    expect(screen.queryByTestId("model-meta")).toBeNull();
+    expect(screen.queryByText(/per 1M/i)).toBeNull();
+    // …but the numbers are still one hover away, on the name.
+    const names = screen.getAllByTestId("model-row-name").filter((n) => n.textContent === "GPT-4o");
+    expect(names.length).toBeGreaterThan(0);
+    const title = names[0].getAttribute("title") ?? "";
+    expect(title).toContain("128K");
+    expect(title).toContain("$2.5 / $10");
+    expect(title).toContain("per 1M");
   });
 
-  it("renders no meta line when the catalog sends no numbers", () => {
+  it("renders no meta line and no tooltip numbers when the catalog sends none", () => {
     openPicker([model({ id: "bare", name: "Bare", description: "", context_window: 0, input_price_per_1m: undefined, output_price_per_1m: undefined })]);
 
     expect(screen.getAllByText("Bare").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("model-meta")).toBeNull();
     expect(screen.queryByText(/per 1M/i)).toBeNull();
+    const name = screen.getAllByTestId("model-row-name").find((n) => n.textContent === "Bare");
+    expect(name?.getAttribute("title") ?? "").not.toMatch(/per 1M|K context/);
+  });
+
+  it("FIX35 Part A — a row is name + provider: the provider line stays, filler descriptions do not", () => {
+    openPicker([
+      model({ id: "filler", name: "GPT 5.6 Terra", provider: "openai", description: "OpenAI chat model." }),
+      model({ id: "filler2", name: "Claude X", provider: "anthropic", description: "Anthropic Claude model." }),
+      model({ id: "useful", name: "GPT-4o Useful", description: "OpenAI's most capable multimodal flagship. Great for complex tasks, vision, and tool use." }),
+    ]);
+
+    // Provider line is kept — we are a multi-provider gateway.
+    expect(screen.getAllByText("openai").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("anthropic").length).toBeGreaterThan(0);
+    // The "<Provider> model." placeholder is hidden; real copy is shown.
+    expect(screen.queryByText("OpenAI chat model.")).toBeNull();
+    expect(screen.queryByText("Anthropic Claude model.")).toBeNull();
+    expect(screen.getAllByText(/most capable multimodal flagship/).length).toBeGreaterThan(0);
   });
 
   it("keeps the existing picker behaviour — Auto row still there", () => {
@@ -223,5 +246,37 @@ describe("Thinking-Mode toggle", () => {
     expect(dictionaries.th["input.reasoning"]).not.toBe(
       dictionaries.en["input.reasoning"],
     );
+  });
+});
+
+// FIX35 Part A — the filler rule is structural (a real sentence of ≥5 words
+// that is not the "<Provider> [<family>] model." template), not a list of
+// model ids. Pin both sides so a future placeholder can't sneak back in and
+// real copy can't be swallowed.
+describe("isFillerDescription", () => {
+  it("hides chat-edge's provider placeholders", () => {
+    for (const s of [
+      "OpenAI chat model.",
+      "Anthropic Claude model.",
+      "Google Gemini model.",
+      "Meta Llama model.",
+      "Mistral model.",
+      "",
+      "   ",
+      "Fast model",
+    ]) {
+      expect(isFillerDescription(s), s).toBe(true);
+    }
+  });
+
+  it("keeps descriptions that say something", () => {
+    for (const s of [
+      "OpenAI's most capable multimodal flagship. Great for complex tasks, vision, and tool use.",
+      "Cheaper, faster GPT-4o variant. Good default for everyday chat.",
+      "Reasoning-tuned model that thinks before responding. Best for hard math/code.",
+      "Fast multimodal flagship for everyday work",
+    ]) {
+      expect(isFillerDescription(s), s).toBe(false);
+    }
   });
 });
