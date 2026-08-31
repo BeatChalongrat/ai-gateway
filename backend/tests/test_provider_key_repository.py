@@ -18,7 +18,7 @@ import pytest
 
 from app.models.provider_key import ProviderKeyORM
 from app.repositories.provider_key_repository import ProviderKeyRepository
-from app.services.provider_key_service import ProviderKeyService
+from app.services.provider_key_service import ProviderKeyService, _encode
 
 
 def _make_repo(db_session) -> ProviderKeyRepository:
@@ -132,7 +132,7 @@ class TestProviderKeyServiceUsesRepository:
         """
         # Seed one row so list_keys has something to decode + mask.
         repo = _make_repo(db_session)
-        repo.create("openai", "primary", "ZW5jX2tleV9hYmM=")  # base64("enc_key_abc")
+        repo.create("openai", "primary", _encode("enc_key_abc"))
 
         captured: dict = {"calls": 0, "arg": None}
         original = ProviderKeyRepository.list_by_provider
