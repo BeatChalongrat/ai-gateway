@@ -18,29 +18,23 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { tOutside } from "@/lib/i18n";
-import { useHostedMode } from "@/hooks/useHostedMode";
+import { tOutside, useT } from "@/lib/i18n";
+import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
-  const hosted = useHostedMode();
-  // Non-hosted guard: this screen only makes sense inside the desktop
-  // shell where the host bridge is present. On the web build, show a
-  // muted notice instead of attempting host.query calls that can't land.
-  if (!hosted) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-bg-base px-6">
-        <p className="max-w-sm text-center text-sm text-text-muted">
-          This screen is available in the SRAN Desktop app.
-        </p>
-      </div>
-    );
-  }
+  // FIX34.1 Part F — desktop-only. The sidebar never shows this entry on the
+  // web; a typed URL lands back on /chat instead of a "use the desktop app"
+  // wall. chat-edge has no MCP client yet, so the web must NOT get a working
+  // marketplace here — the route stays for the desktop shell only.
+  const hosted = useDesktopOnlyRoute("/chat");
+  if (!hosted) return null;
   return <ConnectorMarketplace />;
 }
 
 function ConnectorMarketplace() {
+  const t = useT();
   const [connectors, setConnectors] = useState<CatalogConnectorDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -180,17 +174,16 @@ function ConnectorMarketplace() {
           className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary"
         >
           <BackIcon />
-          Back
+          {t("connectors.back")}
         </Link>
 
         <div className="mt-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-              Connectors
+              {t("connectors.title")}
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              Install tools the assistant can call. API keys and access
-              approvals are handled by the desktop app.
+              {t("connectors.subtitle")}
             </p>
           </div>
           <Button
@@ -200,7 +193,7 @@ function ConnectorMarketplace() {
             loading={addingCustom}
           >
             <PlusIcon />
-            Add custom connector
+            {t("connectors.addCustom")}
           </Button>
         </div>
 

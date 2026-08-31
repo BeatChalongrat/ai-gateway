@@ -15,7 +15,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { tOutside } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, type WebSkill } from "@/lib/api";
 import { hostApi, type SkillDto } from "@/lib/hostApi";
@@ -41,6 +41,7 @@ function WebSkillsScreen() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState({ name: "", description: "", triggers: "", instructions: "" });
+  const t = useT();
 
   async function reload() {
     try {
@@ -70,7 +71,7 @@ function WebSkillsScreen() {
         triggers: draft.triggers.split(",").map((t) => t.trim()).filter(Boolean),
         instructions: draft.instructions.trim(),
       });
-      toast(`Skill “${name}” created.`);
+      toast(tOutside("skills.toast.created", { name }));
       setDraft({ name: "", description: "", triggers: "", instructions: "" });
       setCreating(false);
       await reload();
@@ -94,11 +95,11 @@ function WebSkillsScreen() {
   }
 
   async function handleDelete(skill: WebSkill) {
-    if (!window.confirm(`Delete "${skill.name}"? This can't be undone.`)) return;
+    if (!window.confirm(tOutside("skills.confirmDelete", { name: skill.name }))) return;
     try {
       await api.deleteSkill(skill.id);
       setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-      toast(`Deleted "${skill.name}".`);
+      toast(tOutside("skills.toast.deleted", { name: skill.name }));
     } catch {
       toast(tOutside("skills.toast.deleteFailed"));
     }
@@ -108,17 +109,17 @@ function WebSkillsScreen() {
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pt-8 pb-12 md:px-6">
         <Link href="/chat" className="inline-flex items-center gap-1 text-sm text-text-muted transition-colors hover:text-text-secondary">
-          ← Back to chat
+          ← {t("skills.back")}
         </Link>
         <div className="mt-6 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">Skills</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{t("skills.title")}</h1>
             <p className="mt-1 text-sm text-text-secondary">
-              Instruction sets the assistant follows when they apply. They work in every chat on this account.
+              {t("skills.web.subtitle")}
             </p>
           </div>
           <Button variant="secondary" onClick={() => setCreating((v) => !v)} aria-expanded={creating}>
-            Create skill
+            {t("skills.create")}
           </Button>
         </div>
 
@@ -132,27 +133,27 @@ function WebSkillsScreen() {
             aria-label={tOutside("skills.create")}
           >
             <p className="text-sm text-text-secondary">
-              Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
+              {t("skills.form.intro")}
             </p>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Name</span>
+              <span className="text-text-secondary">{t("skills.field.name")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="สรุปแบบสั้น" required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Description (optional)</span>
+              <span className="text-text-secondary">{t("skills.field.description")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Trigger words, comma-separated (optional)</span>
+              <span className="text-text-secondary">{t("skills.field.triggers")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Instructions</span>
+              <span className="text-text-secondary">{t("skills.field.instructions")}</span>
               <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} required />
             </label>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>Cancel</Button>
-              <Button type="submit" loading={saving}>Save skill</Button>
+              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>{t("skills.form.cancel")}</Button>
+              <Button type="submit" loading={saving}>{t("skills.form.save")}</Button>
             </div>
           </form>
         ) : null}
@@ -172,20 +173,20 @@ function WebSkillsScreen() {
                     <h3 className="truncate text-base font-medium text-text-primary">{skill.name}</h3>
                     {skill.description ? <p className="mt-1 text-sm text-text-secondary">{skill.description}</p> : null}
                     {skill.triggers.length > 0 ? (
-                      <p className="mt-1 truncate text-xs text-text-muted">Triggers: {skill.triggers.join(" · ")}</p>
+                      <p className="mt-1 truncate text-xs text-text-muted">{t("skills.triggers", { list: skill.triggers.join(" · ") })}</p>
                     ) : (
-                      <p className="mt-1 text-xs text-text-muted">Applies to every message</p>
+                      <p className="mt-1 text-xs text-text-muted">{t("skills.appliesAll")}</p>
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button variant="ghost" onClick={() => void handleDelete(skill)} aria-label={`Delete ${skill.name}`}>
-                      Delete
+                    <Button variant="ghost" onClick={() => void handleDelete(skill)} aria-label={t("skills.delete.aria", { name: skill.name })}>
+                      {t("skills.delete")}
                     </Button>
                     <button
                       type="button"
                       role="switch"
                       aria-checked={skill.enabled}
-                      aria-label={`${skill.name} ${skill.enabled ? "on" : "off"}`}
+                      aria-label={`${skill.name} ${skill.enabled ? t("skills.state.on") : t("skills.state.off")}`}
                       onClick={() => void handleToggle(skill)}
                       className={`relative h-6 w-11 rounded-full transition-colors ${skill.enabled ? "bg-blue-600" : "bg-border"}`}
                     >
@@ -210,6 +211,7 @@ function SkillsScreen() {
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState({ name: "", displayName: "", triggers: "", instructions: "" });
   const [saving, setSaving] = useState(false);
+  const t = useT();
 
   async function handleCreate() {
     const name = draft.name.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -229,7 +231,7 @@ function SkillsScreen() {
         toast(tOutside("skills.toast.createFailed"));
         return;
       }
-      toast(`Skill “${draft.displayName.trim() || name}” created.`);
+      toast(tOutside("skills.toast.created", { name: draft.displayName.trim() || name }));
       setDraft({ name: "", displayName: "", triggers: "", instructions: "" });
       setCreating(false);
       await reload();
@@ -282,7 +284,7 @@ function SkillsScreen() {
       if (data?.cancelled) return;
       if (data?.installed) {
         toast(
-          data.name ? `Installed "${data.name}".` : tOutside("skills.toast.installed"),
+          data.name ? tOutside("skills.toast.installedNamed", { name: data.name }) : tOutside("skills.toast.installed"),
         );
         await reload();
       }
@@ -292,7 +294,7 @@ function SkillsScreen() {
   }
 
   async function handleDelete(skill: SkillDto) {
-    if (!window.confirm(`Delete "${skill.name}"? This can't be undone.`)) {
+    if (!window.confirm(tOutside("skills.confirmDelete", { name: skill.name }))) {
       return;
     }
     const res = await hostApi.deleteSkill(skill.id);
@@ -301,7 +303,7 @@ function SkillsScreen() {
       return;
     }
     setSkills((prev) => prev.filter((s) => s.id !== skill.id));
-    toast(`Deleted "${skill.name}".`);
+    toast(tOutside("skills.toast.deleted", { name: skill.name }));
   }
 
   return (
@@ -324,24 +326,23 @@ function SkillsScreen() {
           >
             <path d="M15 6l-6 6 6 6" />
           </svg>
-          Back to chat
+          {t("skills.back")}
         </Link>
 
         <div className="mt-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-              Skills
+              {t("skills.title")}
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              Capabilities the assistant can invoke. Toggle them on or off, or
-              install your own.
+              {t("skills.desktop.subtitle")}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="secondary" onClick={() => setCreating((v) => !v)} aria-expanded={creating}>
               <span className="inline-flex items-center gap-1.5">
                 <PlusIcon />
-                Create skill
+                {t("skills.create")}
               </span>
             </Button>
             <Button
@@ -349,7 +350,7 @@ function SkillsScreen() {
               loading={installing}
               className="shrink-0"
             >
-              Install package
+              {t("skills.install")}
             </Button>
           </div>
         </div>
@@ -364,27 +365,27 @@ function SkillsScreen() {
             aria-label={tOutside("skills.create")}
           >
             <p className="text-sm text-text-secondary">
-              Write the instructions the assistant must follow when this skill applies. Leave triggers empty to apply it to every message; otherwise it applies when the message contains one of the trigger words.
+              {t("skills.form.intro")}
             </p>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Skill id (letters, digits, dashes)</span>
+              <span className="text-text-secondary">{t("skills.field.id")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="summarize-short" required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Display name (optional)</span>
+              <span className="text-text-secondary">{t("skills.field.displayName")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} placeholder="สรุปแบบสั้น" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Trigger words, comma-separated (optional)</span>
+              <span className="text-text-secondary">{t("skills.field.triggers")}</span>
               <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
             </label>
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-text-secondary">Instructions</span>
+              <span className="text-text-secondary">{t("skills.field.instructions")}</span>
               <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} placeholder="ตอบเป็นข้อๆ ไม่เกิน 3 ข้อเสมอ ห้ามเกิน" required />
             </label>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>Cancel</Button>
-              <Button type="submit" loading={saving}>Save skill</Button>
+              <Button variant="ghost" type="button" onClick={() => setCreating(false)}>{t("skills.form.cancel")}</Button>
+              <Button type="submit" loading={saving}>{t("skills.form.save")}</Button>
             </div>
           </form>
         ) : null}
@@ -419,6 +420,7 @@ function SkillsScreen() {
 // ---------------------------------------------------------------------------
 
 function EmptySkillsState() {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center">
       <svg
@@ -436,10 +438,10 @@ function EmptySkillsState() {
         <path d="M12 2l2.4 5.4 5.9.5-4.5 3.9 1.4 5.8L12 20l-5.2 2.6 1.4-5.8-4.5-3.9 5.9-.5z" />
       </svg>
       <h2 className="text-base font-semibold tracking-tight text-text-primary">
-        No skills installed yet
+        {t("skills.empty.title")}
       </h2>
       <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
-        Install a skill file to give the assistant a new capability.
+        {t("skills.empty.desc")}
       </p>
     </div>
   );
@@ -459,6 +461,7 @@ function SkillCard({
   onDelete: () => void;
 }) {
   const triggers = skill.triggers.slice(0, 5).join(", ");
+  const t = useT();
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
@@ -476,7 +479,7 @@ function SkillCard({
           ) : null}
           {triggers ? (
             <p className="mt-3 truncate text-xs text-text-muted">
-              Triggers: {triggers}
+              {t("skills.triggers", { list: triggers })}
             </p>
           ) : null}
         </div>
@@ -484,14 +487,14 @@ function SkillCard({
           <Toggle
             checked={skill.isEnabled}
             onChange={onToggle}
-            label={`${skill.isEnabled ? "Disable" : "Enable"} ${skill.name}`}
+            label={skill.isEnabled ? t("skills.disable.aria", { name: skill.name }) : t("skills.enable.aria", { name: skill.name })}
           />
           {!skill.isBuiltin ? (
             <button
               type="button"
               onClick={onDelete}
-              title={tOutside("skills.delete.title")}
-              aria-label={`Delete ${skill.name}`}
+              title={t("skills.delete.title")}
+              aria-label={t("skills.delete.aria", { name: skill.name })}
               className="tap-44 rounded p-1.5 text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
             >
               <TrashIcon />
@@ -504,6 +507,7 @@ function SkillCard({
 }
 
 function Badge({ builtin }: { builtin: boolean }) {
+  const t = useT();
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${
@@ -512,7 +516,7 @@ function Badge({ builtin }: { builtin: boolean }) {
           : "border-status-success/40 text-status-success"
       }`}
     >
-      {builtin ? "Built-in" : "Installed"}
+      {builtin ? t("skills.badge.builtin") : t("skills.badge.installed")}
     </span>
   );
 }

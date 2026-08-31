@@ -1182,18 +1182,20 @@ export function ChatInput({
                   <BrainCircuit className="h-[18px] w-[18px]" aria-hidden />
                 </button>
               ) : null}
-              {canGenerateVideos && !streaming ? (
+              {/* FIX9 Part B: video gen isn't wired in the desktop app. FIX34.1
+                  Part F: so the desktop gets NO button, not a disabled one with
+                  a "not available here yet" tooltip — same rule as the web. */}
+              {canGenerateVideos && !streaming && !hosted ? (
                 <button
                   type="button"
                   onClick={() => {
-                    if (hosted) return; // FIX9 Part B: video gen isn't wired in the desktop app
                     setVideoMode((v) => !v);
                     setImageMode(false);
                   }}
                   aria-label={t("input.videoMode")}
-                  title={hosted ? "Video generation isn't available in the desktop app yet." : t("input.videoMode")}
-                  aria-pressed={hosted ? false : videoMode}
-                  disabled={disabled || hosted}
+                  title={t("input.videoMode")}
+                  aria-pressed={videoMode}
+                  disabled={disabled}
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode
                       ? "bg-rose-500/15 text-rose-400"

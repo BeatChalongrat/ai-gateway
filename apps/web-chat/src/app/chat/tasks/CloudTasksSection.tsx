@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { tOutside } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { CloudTask, CloudTaskRun, Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -27,15 +27,22 @@ const CLOUD_INTERVALS: { label: string; seconds: number }[] = [
 ];
 
 export function CloudTasksSection({
+  standalone = false,
   openCreateNonce,
   onRequestCreate,
 }: {
-  /** Bumped by the page's kind chooser when the user picks "Cloud" — opens
-   *  the create form (already past the kind step). Ignored at its initial 0. */
+  /** FIX34.1 Part F — true on the web, where cloud tasks are the ONLY kind:
+   *  no "Cloud" sub-heading and no kind badges, because there is nothing to
+   *  tell them apart from. The desktop (two kinds) keeps both. */
+  standalone?: boolean;
+  /** Bumped by the page when the user asks for a new cloud task (desktop:
+   *  via the kind chooser; web: directly) — opens the create form. Ignored
+   *  at its initial 0. */
   openCreateNonce: number;
-  /** Empty-state "New task" → route back through the page's kind chooser. */
+  /** Empty-state / header "New task" → route back through the page. */
   onRequestCreate: () => void;
 }) {
+  const t = useT();
   const [tasks, setTasks] = useState<CloudTask[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -124,19 +131,20 @@ export function CloudTasksSection({
       : conversations[0]?.id ?? null;
 
   return (
-    <section className="mt-10">
+    <section className={standalone ? "mt-8" : "mt-10"} data-testid="cloud-tasks-section" data-standalone={standalone ? "true" : "false"}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
-            Cloud
-            <KindBadge kind="cloud" />
-          </h2>
-          <p className="mt-1 text-sm text-text-secondary">
-            Runs on our servers on schedule, even when your computer is off.
+          {standalone ? null : (
+            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
+              {t("cloud.title")}
+              <KindBadge kind="cloud" />
+            </h2>
+          )}
+          <p className={standalone ? "text-sm text-text-secondary" : "mt-1 text-sm text-text-secondary"}>
+            {t("cloud.subtitle")}
           </p>
           <p className="mt-2 text-xs text-text-muted">
-            Cloud tasks cannot use local files and run with a read-only tool
-            set. They run at most once per hour.
+            {t("cloud.note")}
           </p>
         </div>
         {loaded && tasks.length > 0 ? (
@@ -146,7 +154,7 @@ export function CloudTasksSection({
             className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
           >
             <PlusIcon />
-            New task
+            {t("tasks.new")}
           </button>
         ) : null}
       </div>
@@ -164,6 +172,7 @@ export function CloudTasksSection({
               <CloudTaskRow
                 key={task.id}
                 task={task}
+                showKind={!standalone}
                 onToggle={(enabled) => void handleToggle(task, enabled)}
                 onDelete={() => void handleDelete(task)}
                 onHistory={() => setHistoryTask(task)}
@@ -194,6 +203,7 @@ export function CloudTasksSection({
 // ---------------------------------------------------------------------------
 
 export function KindBadge({ kind }: { kind: "cloud" | "local" }) {
+  const t = useT();
   const cloud = kind === "cloud";
   return (
     <span
@@ -202,14 +212,10 @@ export function KindBadge({ kind }: { kind: "cloud" | "local" }) {
           ? "border-border bg-bg-elevated text-text-secondary"
           : "border-border bg-transparent text-text-muted"
       }`}
-      title={
-        cloud
-          ? "Runs on our servers on schedule, even when your computer is off"
-          : "Runs only while the SRAN Desktop app is open"
-      }
+      title={cloud ? t("cloud.badge.title") : t("tasks.local.badge.title")}
     >
       {cloud ? <CloudIcon /> : <DeviceIcon />}
-      {cloud ? "Cloud" : "On this device"}
+      {cloud ? t("cloud.badge") : t("tasks.local.badge")}
     </span>
   );
 }
@@ -223,11 +229,14 @@ function CloudTaskRow({
   onToggle,
   onDelete,
   onHistory,
+  showKind = true,
 }: {
   task: CloudTask;
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
   onHistory: () => void;
+  /** false on the web (FIX34.1 Part F): one kind → no badge to distinguish. */
+  showKind?: boolean;
 }) {
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
@@ -237,7 +246,7 @@ function CloudTaskRow({
             <h3 className="truncate text-base font-medium text-text-primary">
               {task.name}
             </h3>
-            <KindBadge kind="cloud" />
+            {showKind ? <KindBadge kind="cloud" /> : null}
           </div>
           <p className="mt-1 text-xs text-text-secondary">
             {intervalLabel(task.interval_seconds)}
@@ -415,25 +424,26 @@ function Tag({ children }: { children: React.ReactNode }) {
 // ---------------------------------------------------------------------------
 
 function CloudEmptyState({ onCreate }: { onCreate: () => void }) {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-14 text-center">
       <div className="mx-auto mb-5 text-text-muted">
         <CloudIcon size={40} />
       </div>
       <h3 className="text-base font-semibold tracking-tight text-text-primary">
-        No cloud tasks
+        {t("cloud.empty.title")}
       </h3>
       <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
-        Create a task to have a prompt run on a schedule on our servers — even
-        when your computer is off.
+        {t("cloud.empty.desc")}
       </p>
       <button
         type="button"
         onClick={onCreate}
+        data-testid="cloud-tasks-new"
         className="focus-ring mt-6 inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
       >
         <PlusIcon />
-        New task
+        {t("tasks.new")}
       </button>
     </div>
   );

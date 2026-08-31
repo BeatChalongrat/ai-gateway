@@ -12,8 +12,11 @@
 //     they only ever fire while the SRAN Desktop app is open — but they CAN use
 //     local files. Desktop-only (HOSTED_MODE), talks only to the host bridge.
 //
-// The user chooses the kind (and sees the tradeoff) at create time, via the
-// KindChooser below.
+// On the DESKTOP the user chooses the kind (and sees the tradeoff) at create
+// time, via the KindChooser below. On the WEB there is exactly one kind, so
+// there is no chooser and no greyed-out "needs the desktop app" card
+// (FIX34.1 Part F): the cloud section IS the page, and "New task" opens the
+// cloud form directly. A feature the web doesn't have leaves no trace.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -26,17 +29,24 @@ import { toast } from "@/components/ui/Toast";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { hostApi, type TaskDto, type TaskRunDto } from "@/lib/hostApi";
 import { useT, tOutside } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 
 import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
 
 export default function ScheduledTasksPage() {
   const hosted = useHostedMode();
-  // The create flow starts with a KIND choice so the user sees the tradeoff at
-  // the moment of choosing. Picking a kind bumps that section's create nonce,
-  // which opens its own create form.
+  const t = useT();
+  // Desktop: the create flow starts with a KIND choice so the user sees the
+  // tradeoff at the moment of choosing. Picking a kind bumps that section's
+  // create nonce, which opens its own create form. Web: straight to cloud.
   const [chooserOpen, setChooserOpen] = useState(false);
   const [cloudCreateNonce, setCloudCreateNonce] = useState(0);
   const [localCreateNonce, setLocalCreateNonce] = useState(0);
+
+  function requestCreate() {
+    if (hosted) setChooserOpen(true);
+    else setCloudCreateNonce((n) => n + 1);
+  }
 
   return (
     <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto bg-bg-base">
@@ -58,50 +68,53 @@ export default function ScheduledTasksPage() {
           >
             <path d="M15 6l-6 6 6 6" />
           </svg>
-          Back to chat
+          {t("tasks.back")}
         </Link>
 
         <div className="mt-6">
           <h1 className="text-2xl font-semibold tracking-tight text-text-primary">
-            Scheduled tasks
+            {t("tasks.title")}
           </h1>
           <p className="mt-1 text-sm text-text-secondary">
-            Have a prompt run automatically on a schedule.
+            {t("tasks.subtitle")}
           </p>
         </div>
 
         <CloudTasksSection
+          standalone={!hosted}
           openCreateNonce={cloudCreateNonce}
-          onRequestCreate={() => setChooserOpen(true)}
+          onRequestCreate={requestCreate}
         />
 
         {hosted ? (
           <LocalTasksSection
             openCreateNonce={localCreateNonce}
-            onRequestCreate={() => setChooserOpen(true)}
+            onRequestCreate={requestCreate}
           />
         ) : null}
       </main>
 
-      <KindChooserModal
-        open={chooserOpen}
-        onClose={() => setChooserOpen(false)}
-        onPickCloud={() => {
-          setChooserOpen(false);
-          setCloudCreateNonce((n) => n + 1);
-        }}
-        onPickLocal={() => {
-          setChooserOpen(false);
-          setLocalCreateNonce((n) => n + 1);
-        }}
-      />
+      {hosted ? (
+        <KindChooserModal
+          open={chooserOpen}
+          onClose={() => setChooserOpen(false)}
+          onPickCloud={() => {
+            setChooserOpen(false);
+            setCloudCreateNonce((n) => n + 1);
+          }}
+          onPickLocal={() => {
+            setChooserOpen(false);
+            setLocalCreateNonce((n) => n + 1);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Kind chooser — the tradeoff is shown right where the user decides. On a
-// plain browser only Cloud is available; the on-device card says why.
+// Kind chooser — desktop only. The tradeoff is shown right where the user
+// decides. (The web never renders it: one kind, no choice to make.)
 // ---------------------------------------------------------------------------
 
 function KindChooserModal({
@@ -115,13 +128,13 @@ function KindChooserModal({
   onPickCloud: () => void;
   onPickLocal: () => void;
 }) {
-  const hosted = useHostedMode();
+  const t = useT();
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={tOutside("tasks.new")}
-      description={tOutside("tasks.new.where")}
+      title={t("tasks.new")}
+      description={t("tasks.new.where")}
     >
       <div className="flex flex-col gap-3">
         <button
@@ -133,35 +146,22 @@ function KindChooserModal({
             <KindBadge kind="cloud" />
           </span>
           <span className="text-xs text-text-secondary">
-            Runs on our servers on schedule, even when your computer is off.
-            Cannot use local files; runs with a read-only tool set.
+            {t("tasks.kind.cloud.desc")}
           </span>
         </button>
 
-        {hosted ? (
-          <button
-            type="button"
-            onClick={onPickLocal}
-            className="focus-ring flex flex-col items-start gap-1 rounded-lg border border-border bg-bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated"
-          >
-            <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
-              <KindBadge kind="local" />
-            </span>
-            <span className="text-xs text-text-secondary">
-              Runs only while the SRAN Desktop app is open. Can use local files.
-            </span>
-          </button>
-        ) : (
-          <div className="flex flex-col items-start gap-1 rounded-lg border border-dashed border-border bg-transparent px-4 py-3 text-left opacity-70">
-            <span className="flex items-center gap-2 text-sm font-medium text-text-muted">
-              <KindBadge kind="local" />
-            </span>
-            <span className="text-xs text-text-muted">
-              Runs only while the SRAN Desktop app is open, and can use local
-              files. Available in the SRAN Desktop app — not in the browser.
-            </span>
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={onPickLocal}
+          className="focus-ring flex flex-col items-start gap-1 rounded-lg border border-border bg-bg-surface px-4 py-3 text-left transition-colors hover:border-border-strong hover:bg-bg-elevated"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            <KindBadge kind="local" />
+          </span>
+          <span className="text-xs text-text-secondary">
+            {t("tasks.kind.local.desc")}
+          </span>
+        </button>
       </div>
     </Modal>
   );
@@ -186,6 +186,7 @@ function LocalTasksSection({
   const [editing, setEditing] = useState<TaskDto | null>(null);
   const [running, setRunning] = useState<Record<string, boolean>>({});
   const [historyTask, setHistoryTask] = useState<TaskDto | null>(null);
+  const t = useT();
 
   useEffect(() => {
     let alive = true;
@@ -236,7 +237,7 @@ function LocalTasksSection({
   }
 
   async function handleDelete(task: TaskDto) {
-    if (!window.confirm(`Delete "${task.name}"?`)) return;
+    if (!window.confirm(tOutside("tasks.confirmDelete", { name: task.name }))) return;
     try {
       const res = await hostApi.deleteTask(task.id);
       if (!res.ok) {
@@ -294,20 +295,16 @@ function LocalTasksSection({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
-            On this device
+            {t("tasks.local.title")}
             <KindBadge kind="local" />
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Prompts that run on a schedule inside the desktop app.
+            {t("tasks.local.subtitle")}
           </p>
           <p className="mt-2 text-xs text-text-muted">
-            These run only while SRAN Desktop is open (including minimized to
-            the tray). If the app is closed at the scheduled time, the task runs
-            at the next check after you reopen it — it is not run in your
-            absence. A run missed while the app was closed is caught up{" "}
-            <span className="font-medium text-text-secondary">once</span>, for
-            the most recent missed time (within the last 7 days); older missed
-            runs are skipped, not stacked up.
+            {t("tasks.local.note.pre")}
+            <span className="font-medium text-text-secondary">{t("tasks.local.note.once")}</span>
+            {t("tasks.local.note.post")}
           </p>
         </div>
         {loaded && tasks.length > 0 ? (
@@ -317,7 +314,7 @@ function LocalTasksSection({
             className="focus-ring inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
           >
             <PlusIcon />
-            New task
+            {t("tasks.new")}
           </button>
         ) : null}
       </div>
@@ -366,18 +363,22 @@ function LocalTasksSection({
 // FIX8 A1.4 — run history (every past attempt, including skips + why)
 // ---------------------------------------------------------------------------
 
-const OUTCOME_LABEL: Record<string, string> = {
-  ok: "Ran", error: "Failed", catchup: "Caught up", skipped: "Skipped",
+const OUTCOME_KEY: Record<string, DictKey> = {
+  ok: "tasks.outcome.ok",
+  error: "tasks.outcome.error",
+  catchup: "tasks.outcome.catchup",
+  skipped: "tasks.outcome.skipped",
   // FIX31 §1.2: the run needed the user's permission and nobody was there.
-  needs_permission: "Needed permission",
+  needs_permission: "tasks.outcome.needsPermission",
 };
-const REASON_LABEL: Record<string, string> = {
-  asleep: "the machine was asleep",
-  prev_running: "the previous run was still going",
-  others_running: "other tasks were already running",
+const REASON_KEY: Record<string, DictKey> = {
+  asleep: "tasks.reason.asleep",
+  prev_running: "tasks.reason.prevRunning",
+  others_running: "tasks.reason.othersRunning",
 };
 
 function HistoryModal({ task, onClose }: { task: TaskDto | null; onClose: () => void }) {
+  const t = useT();
   const [runs, setRuns] = useState<TaskRunDto[] | null>(null);
   useEffect(() => {
     if (!task) {
@@ -395,25 +396,29 @@ function HistoryModal({ task, onClose }: { task: TaskDto | null; onClose: () => 
   }, [task]);
 
   return (
-    <Modal open={task !== null} onClose={onClose} title={task ? `History — ${task.name}` : "History"} description={tOutside("tasks.history.desc")}>
+    <Modal open={task !== null} onClose={onClose} title={task ? t("tasks.history.title", { name: task.name }) : t("tasks.history")} description={t("tasks.history.desc")}>
       {runs === null ? (
-        <p className="text-sm text-text-muted">Loading…</p>
+        <p className="text-sm text-text-muted">{t("common.loading")}</p>
       ) : runs.length === 0 ? (
-        <p className="text-sm text-text-muted" data-testid="history-empty">No runs yet.</p>
+        <p className="text-sm text-text-muted" data-testid="history-empty">{t("tasks.history.empty")}</p>
       ) : (
         <ul className="flex flex-col gap-2" data-testid="history-list">
           {runs.map((r) => (
             <li key={r.id} className="rounded-md border border-border bg-bg-secondary/50 px-3 py-2 text-xs" data-outcome={r.outcome}>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-text-primary">{OUTCOME_LABEL[r.outcome] ?? r.outcome}</span>
+                <span className="font-medium text-text-primary">{OUTCOME_KEY[r.outcome] ? t(OUTCOME_KEY[r.outcome]) : r.outcome}</span>
                 <span className="text-text-muted">{formatDate(r.ranAt)}</span>
               </div>
               {r.outcome === "needs_permission" ? (
                 <p className="mt-0.5 text-text-secondary" data-testid="task-run-needs-permission">
-                  Needed your permission for {r.reason ? <span className="font-mono">{r.reason}</span> : "a tool"} — nobody was there to answer, so the action was not performed (the app never answers for you). To let this task act unattended, set its permission mode to “Never asks”.
+                  {t("tasks.history.needsPermission.pre")}
+                  {r.reason ? <span className="font-mono">{r.reason}</span> : t("tasks.history.needsPermission.aTool")}
+                  {t("tasks.history.needsPermission.post")}
                 </p>
               ) : r.reason ? (
-                <p className="mt-0.5 text-text-secondary" title={r.reason}>Skipped because {REASON_LABEL[r.reason] ?? r.reason}.</p>
+                <p className="mt-0.5 text-text-secondary" title={r.reason}>
+                  {t("tasks.history.skippedBecause", { reason: REASON_KEY[r.reason] ? t(REASON_KEY[r.reason]) : r.reason })}
+                </p>
               ) : null}
               {r.result ? <p className="mt-0.5 line-clamp-2 text-text-muted">{r.result}</p> : null}
             </li>
@@ -429,6 +434,7 @@ function HistoryModal({ task, onClose }: { task: TaskDto | null; onClose: () => 
 // ---------------------------------------------------------------------------
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center">
       <svg
@@ -447,11 +453,10 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <path d="M12 7v5l3 2" />
       </svg>
       <h3 className="text-base font-semibold tracking-tight text-text-primary">
-        No on-device tasks
+        {t("tasks.empty.title")}
       </h3>
       <p className="mx-auto mt-2 max-w-sm text-sm text-text-secondary">
-        Create a task to have a prompt run automatically on a cron schedule
-        while the desktop app is open.
+        {t("tasks.empty.desc")}
       </p>
       <button
         type="button"
@@ -459,7 +464,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         className="focus-ring mt-6 inline-flex items-center gap-1.5 rounded-lg border border-border bg-transparent px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-elevated"
       >
         <PlusIcon />
-        New task
+        {t("tasks.new")}
       </button>
     </div>
   );
@@ -503,11 +508,11 @@ function TaskRow({
             {task.cron}
           </p>
           <p className="mt-3 text-xs text-text-muted">
-            Next run: {formatDate(task.nextRunAt)}
+            {t("tasks.row.nextRun", { when: formatDate(task.nextRunAt) })}
             {" · "}
-            Last run: {formatDate(task.lastRunAt)}
+            {t("tasks.row.lastRun", { when: formatDate(task.lastRunAt) })}
             {" · "}
-            <span title={tOutside("tasks.modeTitle")}>{modeLabel}</span>
+            <span title={t("tasks.modeTitle")}>{modeLabel}</span>
           </p>
           {task.lastResult ? (
             <p className="mt-2 line-clamp-2 text-xs text-text-muted">
@@ -518,7 +523,7 @@ function TaskRow({
         <Toggle
           enabled={task.isEnabled}
           onChange={onToggle}
-          label={`Enable ${task.name}`}
+          label={t("tasks.row.enable", { name: task.name })}
         />
       </div>
 
@@ -529,20 +534,20 @@ function TaskRow({
           loading={running}
           disabled={running}
         >
-          Run now
+          {t("tasks.runNow")}
         </Button>
         <Button variant="ghost" onClick={onEdit}>
-          Edit
+          {t("tasks.edit")}
         </Button>
         <Button variant="ghost" onClick={onHistory}>
-          History
+          {t("tasks.history")}
         </Button>
         <button
           type="button"
           onClick={onDelete}
           className="ml-auto rounded-md px-2.5 py-1.5 text-sm text-status-danger transition-colors hover:bg-status-danger/10"
         >
-          Delete
+          {t("tasks.delete")}
         </button>
       </div>
     </section>
@@ -641,27 +646,28 @@ function TaskFormModal({
     }
   }
 
+  const t = useT();
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={task ? tOutside("tasks.edit.title") : tOutside("tasks.new.local.title")}
-      description={tOutside("tasks.edit.desc")}
+      title={task ? t("tasks.edit.title") : t("tasks.new.local.title")}
+      description={t("tasks.edit.desc")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("tasks.form.cancel")}
           </Button>
           <Button onClick={() => void submit()} loading={submitting}>
-            {task ? "Save" : "Create"}
+            {task ? t("tasks.form.save") : t("tasks.form.create")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <Input
-          label="Name"
-          placeholder={tOutside("tasks.field.namePlaceholder")}
+          label={t("tasks.field.name")}
+          placeholder={t("tasks.field.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -671,12 +677,12 @@ function TaskFormModal({
             htmlFor="task-prompt"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            Prompt
+            {t("tasks.field.prompt")}
           </label>
           <textarea
             id="task-prompt"
             rows={4}
-            placeholder={tOutside("tasks.field.promptPlaceholder")}
+            placeholder={t("tasks.field.promptPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
@@ -684,19 +690,19 @@ function TaskFormModal({
         </div>
         <div className="flex flex-col gap-1.5">
           <Input
-            label={tOutside("tasks.field.cron")}
+            label={t("tasks.field.cron")}
             placeholder="0 6 * * *"
             value={cron}
             onChange={(e) => setCron(e.target.value)}
             className="font-mono"
           />
           <p className="text-[11px] text-text-muted">
-            Standard 5-field cron. e.g. 0 6 * * * = daily 06:00
+            {t("tasks.field.cronHint")}
           </p>
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="task-perm" className="text-xs font-medium uppercase tracking-wider text-text-secondary">
-            Permissions
+            {t("tasks.field.permissions")}
           </label>
           <select
             id="task-perm"
@@ -705,21 +711,19 @@ function TaskFormModal({
             data-testid="task-permission-mode"
             className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
           >
-            <option value="manual">Ask before each action (safest)</option>
-            <option value="auto">Auto-approve safe actions, ask for risky ones</option>
-            <option value="skip">Never ask (only for tasks you fully trust)</option>
+            <option value="manual">{t("tasks.perm.manual")}</option>
+            <option value="auto">{t("tasks.perm.auto")}</option>
+            <option value="skip">{t("tasks.perm.skip")}</option>
           </select>
           <p className="text-[11px] text-text-muted">
-            Tip: run the task once with “Run now” so any permission prompts appear and can be granted — later
-            runs then stop stalling.
+            {t("tasks.form.tip")}
           </p>
         </div>
         {/* FIX8 A2 — the missed-run guardrail, where the prompt is written. */}
         <p className="rounded-md border border-border bg-bg-secondary/50 px-3 py-2 text-[11px] text-text-muted">
-          Because a task runs only while the app is open, a run missed while it was closed is caught up
-          <span className="font-medium text-text-secondary"> once, at the next launch</span> — so a task meant
-          for 9am can run at 11pm if the machine was off all day. Write the prompt so a late catch-up is still
-          safe (avoid “send now”, “post immediately”); older missed runs are skipped, not stacked up.
+          {t("tasks.form.catchup.pre")}
+          <span className="font-medium text-text-secondary">{t("tasks.form.catchup.once")}</span>
+          {t("tasks.form.catchup.post")}
         </p>
         {error ? (
           <p className="rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-status-danger">

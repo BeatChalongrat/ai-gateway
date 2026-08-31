@@ -70,7 +70,10 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
   },
   // ── FIX33 B7 — the five desktop-only pages. settings + writing-style are
   // fully localised; connectors / skills / tasks had their toasts, errors and
-  // attribute strings moved (JSX prose still pending — see FIX33_REPORT §5).
+  // attribute strings moved. FIX34.1 Part F finished B7: skills + tasks JSX
+  // prose is in the dict too, and the "available in the SRAN Desktop app"
+  // wall is gone everywhere (desktop-only routes redirect on the web — the
+  // `desktopOnly.notice` key no longer exists, so any use is a compile error).
   {
     file: "app/chat/settings/page.tsx",
     forbidden: [
@@ -80,6 +83,7 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       '"Approved sites"',
       '"Extension folder to load"',
       "This screen is available in the SRAN Desktop app.",
+      "desktopOnly.notice",
     ],
   },
   {
@@ -90,7 +94,12 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       '"Couldn\'t save."',
       "Paste your writing samples here",
       "This screen is available in the SRAN Desktop app.",
+      "desktopOnly.notice",
     ],
+  },
+  {
+    file: "app/quick/page.tsx",
+    forbidden: ["desktopOnly.notice", "SRAN Desktop app"],
   },
   {
     file: "app/chat/connectors/page.tsx",
@@ -98,6 +107,10 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Couldn't load the connector catalog.",
       'placeholder="Search connectors',
       '"No connectors are available yet."',
+      "This screen is available in the SRAN Desktop app.",
+      "approvals are handled by the desktop app",
+      ">Connectors<",
+      "Add custom connector",
     ],
   },
   {
@@ -106,6 +119,18 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Couldn't load skills.",
       'title="Delete skill"',
       'aria-label="Create skill"',
+      // FIX34.1 Part F — JSX prose
+      "Instruction sets the assistant follows",
+      "Capabilities the assistant can invoke",
+      "Write the instructions the assistant must follow",
+      "No skills installed yet",
+      "Install a skill file",
+      "Install package",
+      "Applies to every message",
+      "Trigger words, comma-separated",
+      '"Built-in"',
+      "This can't be undone.",
+      "Back to chat",
     ],
   },
   {
@@ -114,6 +139,18 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Couldn't load scheduled tasks.",
       'placeholder="Morning briefing"',
       '"Task run failed."',
+      // FIX34.1 Part F — the web dead end + JSX prose
+      "not in the browser",
+      "Available in the SRAN Desktop app",
+      "Runs only while the SRAN Desktop app is open",
+      "No on-device tasks",
+      "Prompts that run on a schedule inside the desktop app",
+      "Standard 5-field cron",
+      "Needed your permission for",
+      "Ask before each action",
+      "Run now",
+      "Back to chat",
+      "Scheduled tasks",
     ],
   },
   {
@@ -122,6 +159,11 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Couldn't load cloud tasks.",
       'placeholder="Daily digest"',
       '"Name and prompt are both required."',
+      // FIX34.1 Part F — kind badge + section header + empty state
+      "Runs only while the SRAN Desktop app is open",
+      '"On this device"',
+      "No cloud tasks",
+      "Cloud tasks cannot use local files",
     ],
   },
 ];

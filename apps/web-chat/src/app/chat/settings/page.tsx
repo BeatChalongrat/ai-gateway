@@ -18,13 +18,15 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
-import { useHostedMode } from "@/hooks/useHostedMode";
+import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { acceleratorFromKey, describeAccelerator } from "@/lib/accelerator";
 import { hostApi, type SettingKey, type SettingsSnapshot, type ShellPrefsDto } from "@/lib/hostApi";
 import { tOutside, useT } from "@/lib/i18n";
 
 export default function SettingsPage() {
-  const hosted = useHostedMode();
+  // FIX34.1 Part F — desktop-only. On the web this route lands on the page
+  // Ctrl+, already opens there (/chat/memory), never on a wall.
+  const hosted = useDesktopOnlyRoute("/chat/memory");
   const t = useT();
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,7 +54,7 @@ export default function SettingsPage() {
     })();
   }, [hosted]);
 
-  if (!hosted) return <DesktopOnlyNotice />;
+  if (!hosted) return null;
 
   // Persist one key, optimistic with revert. The host validates the value and
   // drops any key outside its allow-list; a refusal reverts the control.
@@ -331,15 +333,6 @@ function QuickAskSection() {
         </select>
       </Row>
     </Section>
-  );
-}
-
-function DesktopOnlyNotice() {
-  const t = useT();
-  return (
-    <div className="flex flex-1 items-center justify-center bg-bg-base px-6 text-center">
-      <p className="max-w-sm text-sm text-text-muted">{t("desktopOnly.notice")}</p>
-    </div>
   );
 }
 

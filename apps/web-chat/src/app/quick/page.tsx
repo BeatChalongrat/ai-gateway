@@ -5,18 +5,11 @@
 // components/quick/QuickAsk.tsx (the doc comment is there too).
 
 import { QuickAsk } from "@/components/quick/QuickAsk";
-import { useHostedMode } from "@/hooks/useHostedMode";
-import { useT } from "@/lib/i18n";
+import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 
 export default function QuickAskPage() {
-  const hosted = useHostedMode();
-  const t = useT();
-  if (!hosted) {
-    return (
-      <div className="flex flex-1 items-center justify-center px-6 text-center">
-        <p className="max-w-sm text-sm text-text-muted">{t("desktopOnly.notice")}</p>
-      </div>
-    );
-  }
+  // FIX34.1 Part F — on the web this route lands on /chat, never on a wall.
+  const hosted = useDesktopOnlyRoute("/chat");
+  if (!hosted) return null;
   return <QuickAsk />;
 }
