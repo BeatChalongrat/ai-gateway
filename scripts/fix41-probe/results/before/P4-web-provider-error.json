@@ -1,0 +1,61 @@
+{
+  "probe": "P4-web-provider-error",
+  "question": "the provider errors mid-stream: does the client get a terminal error frame?",
+  "verdict": "FAIL",
+  "notes": [
+    "last frame: message_complete",
+    "order: message_start,content_delta,content_delta,error,message_complete",
+    "a failed turn does NOT end on a terminal `error` frame — the last thing the client sees is a success terminator"
+  ],
+  "streams": {
+    "primary": [
+      {
+        "event": "message_start",
+        "data": {
+          "conversation_id": "a5abc411-6857-4f23-9af4-3ef045f1b881",
+          "message_id": "d84c7367-ef81-46c1-8443-dbfc9eb97b85",
+          "user_message_id": "7695b769-c9ab-4ef9-9457-0089e039902e"
+        }
+      },
+      {
+        "event": "content_delta",
+        "data": {
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "data": {
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "error",
+        "data": {
+          "attempts": [
+            {
+              "error": "503",
+              "model": "probe-model-1"
+            }
+          ],
+          "code": "all_models_failed",
+          "details": null,
+          "message": "probe-induced provider failure"
+        }
+      },
+      {
+        "event": "message_complete",
+        "data": {
+          "message_id": "d84c7367-ef81-46c1-8443-dbfc9eb97b85"
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "complete_frames": 1,
+    "error_frames": 1,
+    "has_run_id": false,
+    "has_seq": false,
+    "terminal_event": "message_complete"
+  }
+}

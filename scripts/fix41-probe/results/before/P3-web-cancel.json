@@ -1,0 +1,135 @@
+{
+  "probe": "P3-web-cancel",
+  "question": "press Stop mid-stream: how does a client learn it was cancelled rather than disconnected?",
+  "verdict": "FAIL",
+  "notes": [
+    "cancel #1 → 200 {\"cancelled\":true}",
+    "cancel #2 → 200 {\"cancelled\":false}",
+    "attached viewer's last frame: message_complete",
+    "primary stream's last frame:  message_complete",
+    "a client that did NOT press Stop cannot tell a cancel from a normal completion"
+  ],
+  "streams": {
+    "attached_viewer": [
+      {
+        "event": "message_start",
+        "data": {
+          "conversation_id": "41f59f5f-924a-4a43-b8a1-fb05f98a2cf5",
+          "message_id": "4c7626fa-778e-4bee-b559-15b539bd563d"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "data": {
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "data": {
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "data": {
+          "status": "completed"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "data": {
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "content_delta",
+        "data": {
+          "delta": "ONE TWO "
+        }
+      },
+      {
+        "event": "error",
+        "data": {
+          "code": "INTERNAL_ERROR",
+          "message": "stream error: context canceled"
+        }
+      },
+      {
+        "event": "message_complete",
+        "data": {
+          "message_id": "4c7626fa-778e-4bee-b559-15b539bd563d",
+          "model_id": "probe-model-1"
+        }
+      }
+    ],
+    "primary": [
+      {
+        "event": "message_start",
+        "data": {
+          "conversation_id": "41f59f5f-924a-4a43-b8a1-fb05f98a2cf5",
+          "message_id": "4c7626fa-778e-4bee-b559-15b539bd563d",
+          "user_message_id": "86b7c355-cab3-4573-a052-95221e4814c7"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "data": {
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "data": {
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "data": {
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "data": {
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "data": {
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "data": {
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "error",
+        "data": {
+          "code": "INTERNAL_ERROR",
+          "message": "stream error: context canceled"
+        }
+      },
+      {
+        "event": "message_complete",
+        "data": {
+          "message_id": "4c7626fa-778e-4bee-b559-15b539bd563d",
+          "model_id": "probe-model-1"
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "cancel_1_body": "{\"cancelled\":true}",
+    "cancel_1_status": 200,
+    "cancel_2_body": "{\"cancelled\":false}",
+    "cancel_2_status": 200,
+    "primary_terminal_event": "message_complete",
+    "viewer_terminal_event": "message_complete"
+  }
+}
