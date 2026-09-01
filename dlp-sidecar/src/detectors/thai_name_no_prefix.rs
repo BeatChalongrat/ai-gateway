@@ -118,7 +118,7 @@ pub const TRAIL_LABELS: &[&str] = &[
 /// ``_PASS1_ANCHOR_RE`` — change both.
 static PASS1_ANCHOR_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
-        r"(?i)(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|name)\s*[:：]?\s*$|(?:นางสาว|น\.ส\.|นาง|นาย|คุณ|ท่าน|ดร\.|นพ\.|พญ\.|พี่|น้อง)\s*$",
+        r"(?i)(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|ผู้สมัคร|ผู้ป่วย|ผู้ใช้|ลูกค้า|พนักงาน|เจ้าของ|หัวหน้า|ผู้ขอ|name|customer|employee|staff|member|owner|patient|client|user|recipient)\s*[:：]?\s*$|(?:นางสาว|น\.ส\.|นาง|นาย|คุณ|ท่าน|ดร\.|นพ\.|พญ\.|พี่|น้อง)\s*$",
     )
     .expect("pass1 anchor")
 });

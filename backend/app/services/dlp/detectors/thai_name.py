@@ -151,7 +151,14 @@ def _is_not_surname(tok: str) -> bool:
     changed no measured number and removes the observed case."""
     if tok in _NOT_SURNAME:
         return True
-    return any(tok.startswith(w) and len(tok) > len(w) for w in _NOT_SURNAME)
+    # Only the LONGER entries (field labels and verbs) may match as a prefix.
+    # The 2-character particles in the set (``มา``/``มี``/``ไป``/``ที่`` …) begin
+    # real surnames — ``มากมี`` is one, and the batch-4 parity fixture caught
+    # a prefix rule that rejected it.
+    return any(
+        len(w) >= 3 and tok.startswith(w) and len(tok) > len(w)
+        for w in _NOT_SURNAME
+    )
 
 
 def _thai_len(s: str) -> int:
@@ -191,9 +198,13 @@ class ThaiNameDetector(BaseDetector):
                 elif surname is None:
                     end = m.end("given")
                 else:
+                    # Length decides, on the RAW surname: ``trim_run`` cuts real
+                    # surnames too (``รักดี`` -> ``รัก``, caught by the batch-4
+                    # parity fixture), so it is not used here. A surname that
+                    # is a WORD passes; a clause does not.
                     sur = m.group("surname")
                     sur_start = m.start("surname") + (len(sur) - len(sur.lstrip()))
-                    sur_end = trim_run(text, sur_start, m.end("surname"))
+                    sur_end = m.end("surname")
                     if _thai_len(text[sur_start:sur_end]) > MAX_SURNAME_THAI_CHARS:
                         end = m.end("given")      # a clause, not a surname
                     else:

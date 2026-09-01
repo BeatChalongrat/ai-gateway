@@ -187,7 +187,10 @@ _NAME_LABEL_BEFORE_RE = re.compile(r"(?:ชื่อ|name)\s*[:：]?\s*$", re.IG
 # eval sets, which is why it is narrowed rather than deleted.
 # The Rust port carries the same regex — change both.
 _PASS1_ANCHOR_RE = re.compile(
-    r"(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|name)\s*[:：]?\s*$"
+    r"(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|ผู้สมัคร|ผู้ป่วย|ผู้ใช้"
+    r"|ลูกค้า|พนักงาน|เจ้าของ|หัวหน้า|ผู้ขอ"
+    r"|name|customer|employee|staff|member|owner|patient|client|user|recipient)"
+    r"\s*[:：]?\s*$"
     r"|(?:นางสาว|น\.ส\.|นาง|นาย|คุณ|ท่าน|ดร\.|นพ\.|พญ\.|พี่|น้อง)\s*$",
     re.IGNORECASE,
 )

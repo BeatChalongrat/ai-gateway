@@ -118,9 +118,12 @@ fn is_not_surname(tok: &str) -> bool {
     if NOT_SURNAME.contains(&tok) {
         return true;
     }
+    // Only the LONGER entries (field labels and verbs) may match as a prefix:
+    // the short particles in the set begin real surnames (``มากมี``). Length is
+    // counted in CHARACTERS to match Python's ``len(w) >= 3``.
     NOT_SURNAME
         .iter()
-        .any(|w| tok.starts_with(w) && tok.len() > w.len())
+        .any(|w| w.chars().count() >= 3 && tok.starts_with(w) && tok.len() > w.len())
 }
 
 fn thai_len(s: &str) -> usize {
@@ -184,16 +187,15 @@ impl Detector for ThaiNameDetector {
                     match surname {
                         None => end_b = given.end(),
                         Some(sn) => {
+                            // Length decides, on the RAW surname: ``trim_run``
+                            // cuts real surnames too (``รักดี`` -> ``รัก``), so it
+                            // is not used here. Mirrors Python.
                             let raw = sn.as_str();
                             let lead = raw.len() - raw.trim_start().len();
-                            let s_start_c = byte_to_char(text, sn.start() + lead);
-                            let s_end_c =
-                                thai_gazetteer::trim_run(&chars, s_start_c, byte_to_char(text, sn.end()));
-                            let s_end_b = chars.byte_of(s_end_c);
-                            if thai_len(&text[sn.start() + lead..s_end_b]) > MAX_SURNAME_THAI_CHARS {
+                            if thai_len(&text[sn.start() + lead..sn.end()]) > MAX_SURNAME_THAI_CHARS {
                                 end_b = given.end(); // a clause, not a surname
                             } else {
-                                end_b = s_end_b;
+                                end_b = sn.end();
                             }
                         }
                     }
@@ -254,11 +256,7 @@ mod fix40_swallow_tests {
 
     #[test]
     fn a_clause_after_the_space_is_not_a_surname() {
-        // ``เสนอ`` is a dictionary word that ``trim_run`` cuts the clause down
-        // to, and it is under the surname cap, so it rides along as a
-        // "surname". One extra word, not a clause — the residue is measured
-        // and reported in docs/FIX40_REPORT.md §7, and Python does the same.
-        assert_eq!(hits("คุณวิชัย เสนอให้เลื่อนเปิดตัวไปเดือนหน้า"), vec!["คุณวิชัย เสนอ"]);
+        assert_eq!(hits("คุณวิชัย เสนอให้เลื่อนเปิดตัวไปเดือนหน้า"), vec!["คุณวิชัย"]);
         assert_eq!(hits("คุณพิมพ์ใจ ลาป่วยสามวัน ตั้งแต่วันจันทร์"), vec!["คุณพิมพ์ใจ"]);
     }
 
@@ -267,5 +265,6 @@ mod fix40_swallow_tests {
         assert_eq!(hits("ลูกค้าชื่อคุณสมชาย ใจดี โทรมาบ่น"), vec!["คุณสมชาย ใจดี"]);
         assert_eq!(hits("คุณสมชาย โทรมา"), vec!["คุณสมชาย"]);
         assert_eq!(hits("คุณประเสริฐ ทองดี แจ้งว่ากระเบื้องบิ่น"), vec!["คุณประเสริฐ ทองดี"]);
+        assert_eq!(hits("คุณสมหญิง รักดี โทรมา"), vec!["คุณสมหญิง รักดี"]);
     }
 }
