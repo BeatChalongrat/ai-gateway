@@ -1649,10 +1649,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const sid = get().streamingAssistantId[convId] ?? tempAsstId;
         finalizeMessage(set, get, convId, sid, (err as Error).name === "AbortError" ? "cancelled" : "error");
       } finally {
+        // FIX42 C4 — release the streaming slot too, exactly as
+        // resumeStream's finally does. This probe is the ONLY path that
+        // set it and did not clear it: on the desktop, a run replayed
+        // from the host's disk ledger after a restart (FIX41 Part F) ends
+        // with error/generation_interrupted, the bubble closed correctly,
+        // and the composer stayed on "Streaming response…" with the Stop
+        // button for good — seen on the installed e19 build.
         set((s) => {
           const aborts = { ...s.abortControllers };
           if (aborts[convId] === ctrl) delete aborts[convId];
-          return { abortControllers: aborts };
+          const sids = { ...s.streamingAssistantId };
+          delete sids[convId];
+          return { abortControllers: aborts, streamingAssistantId: sids };
         });
       }
     })();
