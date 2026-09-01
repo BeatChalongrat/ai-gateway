@@ -154,8 +154,17 @@ def python_engine():
     return scan
 
 
-def rust_engine():
-    """Returns a scan callable, or None when the live sidecar is unreachable."""
+def rust_engine(*, as_served: bool = True):
+    """Returns a scan callable, or None when the live sidecar is unreachable.
+
+    FIX38 — ``as_served=True`` (the default) measures the Rust engine the
+    way it serves a request: ``RustDlpClient.scan_messages`` on the input
+    direction, which includes the Python post-passes the production path
+    applies on top of the sidecar (today: the Thai NER layer, gated on
+    ``dlp_thai_ner_enabled``). ``as_served=False`` measures the sidecar
+    alone; the runner prints that too, so the gap that a future Rust port
+    would close stays visible instead of being averaged away.
+    """
     # ONE event loop for the whole run: the gRPC channel is bound to the loop
     # that created it, so a fresh asyncio.run() per call silently returns
     # nothing after the first (the first version of this file scored the live
@@ -171,12 +180,28 @@ def rust_engine():
     except Exception:  # noqa: BLE001
         return None
 
-    def scan(text: str) -> list[Hit]:
-        r = loop.run_until_complete(client.scan_text(text, ner_enabled=False))
+    def _hits(text, r):
         if r is None:
             raise RuntimeError("Rust sidecar stopped answering mid-run")
         return [Hit(m.detector_name, text[m.start : m.end] if 0 <= m.start <= m.end <= len(text) else getattr(m, "matched_text", "")) for m in r.matches]
 
+    def scan(text: str) -> list[Hit]:
+        if as_served:
+            from app.schemas.common import Message
+
+            r = loop.run_until_complete(
+                client.scan_messages([Message(role="user", content=text)], direction="input", ner_enabled=False)
+            )
+        else:
+            r = loop.run_until_complete(client.scan_text(text, ner_enabled=False))
+        return _hits(text, r)
+
+    # The sidecar alone, on the SAME loop (a second loop would find the gRPC
+    # channel bound to the first one and silently return nothing).
+    def raw(text: str) -> list[Hit]:
+        return _hits(text, loop.run_until_complete(client.scan_text(text, ner_enabled=False)))
+
+    scan.raw = raw  # type: ignore[attr-defined]
     return scan
 
 
@@ -300,6 +325,18 @@ def main(argv: list[str] | None = None) -> int:
     results = {"python": py, "rust": rs, "data": {cat: len(v) for cat, v in sets.items()}, "corpus": len(corpus)}
 
     print(render(py, rs, len(corpus)))
+    if rs is not None:
+        # FIX38 — the sidecar with no Python post-pass, for the categories
+        # the Thai NER layer touches. This is the size of the Rust port
+        # still owed; it is reported, not gated.
+        raw_scan = getattr(scan, "raw", None)
+        if raw_scan is not None:
+            raw = {cat: score(sets[cat], {it["id"]: raw_scan(it["text"]) for it in sets[cat]}, cat)
+                   for cat in ("thai_name", "thai_address") if cat in sets}
+            results["rust_sidecar_alone"] = {c: {"caught": r.caught, "total": r.total, "recall": round(r.recall, 4)} for c, r in raw.items()}
+            print("rust sidecar alone (no Python post-pass): "
+                  + "  ".join(f"{c} {r.caught}/{r.total}" for c, r in raw.items())
+                  + "   ← the Thai NER port still owed to the sidecar")
     if a.misses:
         for eng in (py, rs):
             if not eng:

@@ -73,6 +73,81 @@ _ADDRESS_RE = re.compile(
 )
 
 
+# FIX38 Part G — where does the address END? The body above is lazy but
+# anchored on end-of-line, so with no postcode it always ran to the end of
+# the line. The owner's own live-test sentence exposed it:
+#
+#   ที่อยู่ 55/12 ซอย 5 บางนา สั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ช่วยร่างข้อความ…
+#
+# was masked as ONE <<ADDRESS_1>> from ``55/12`` to the last word — the
+# order, the quantities and the request itself all vanished and the model
+# had nothing left to answer. That is the swallow shape the FIX23 audit
+# named, one level up: not into the next word, into the rest of the turn.
+#
+# The trim below walks the body token by token (whitespace-split, which is
+# how people separate address components) and keeps:
+#   * address-ish tokens — carry a digit (55/12, 5, 10260), start with a
+#     component word or abbreviation (ซอย/ถนน/หมู่/ต./อ./จ./แขวง/เขต/อาคาร/
+#     ตึก/ชั้น/ห้อง/คอนโด/หมู่บ้าน …), or are กรุงเทพ/กทม;
+#   * up to two bare Thai tokens in a row after those — a district and a
+#     province written without keywords (``77/1 บางใหญ่ นนทบุรี``);
+# and stops at the first token that begins a new clause — a verb or a
+# particle from the stop list (สั่ง/ส่ง/ช่วย/ขอ/แล้ว/ครับ/ค่ะ/นะ …) or the
+# third bare token in a row. The postcode rule is unchanged: a 5-digit
+# postcode still ends the body on the spot. Mirrored in the Rust sidecar.
+_COMPONENT_STARTS = (
+    "ถนน", "ถ.", "ซอย", "ซ.", "หมู่บ้าน", "หมู่", "ม.", "ตำบล", "ต.", "อำเภอ",
+    "อ.", "จังหวัด", "จ.", "แขวง", "เขต", "กรุงเทพ", "กทม", "อาคาร", "ตึก",
+    "ชั้น", "ห้อง", "คอนโด", "อพาร์ทเม้นท์", "หอพัก", "นิคม", "บ้าน", "เลขที่",
+    "แยก", "ตรอก", "ริม", "ใกล้", "ตรงข้าม", "หลัง", "ข้าง",
+)
+_CLAUSE_STARTS = (
+    "สั่ง", "ส่ง", "ช่วย", "ขอ", "แล้ว", "และ", "แต่", "ให้", "เพราะ", "ถ้า",
+    "ครับ", "ค่ะ", "คะ", "นะ", "จะ", "ได้", "มี", "เป็น", "ไป", "มา", "บอก",
+    "แจ้ง", "โทร", "เบอร์", "ติดต่อ", "อยาก", "ต้อง", "ไม่", "ซื้อ", "ขาย",
+    "จอง", "เรียน", "รบกวน", "ฝาก", "ตอนนี้", "วันนี้", "พรุ่งนี้", "เมื่อวาน",
+    "ของ", "สินค้า", "พัสดุ", "เอกสาร", "ลูกค้า", "คุณ", "พี่", "น้อง",
+    "ยัง", "เพิ่ง", "กำลัง", "เคย", "ค่อย", "รอ", "เจอ", "พบ", "ถาม", "ตอบ",
+    "ทำ", "ดู", "เช็ค", "ตรวจ", "แก้", "เปลี่ยน", "ยกเลิก", "คืน", "จ่าย",
+    "โอน", "รับ", "เอา", "ใช้", "ลอง", "เปิด", "ปิด", "หา", "นัด", "ประชุม",
+)
+_MAX_BARE_RUN = 2
+
+
+def _is_component_token(tok: str) -> bool:
+    if any(ch.isdigit() for ch in tok):
+        return True
+    return tok.startswith(_COMPONENT_STARTS)
+
+
+def _starts_clause(tok: str) -> bool:
+    return tok.startswith(_CLAUSE_STARTS)
+
+
+def trim_address_end(text: str, body_start: int, body_end: int) -> int:
+    """Return the end offset of the address inside ``text[body_start:body_end]``."""
+    import re as _re
+
+    end = body_start
+    bare_run = 0
+    seen_component = False
+    for mt in _re.finditer(r"\S+", text[body_start:body_end]):
+        tok = mt.group()
+        tok_end = body_start + mt.end()
+        if _is_component_token(tok):
+            end = tok_end
+            bare_run = 0
+            seen_component = True
+            continue
+        if seen_component and _starts_clause(tok):
+            break
+        bare_run += 1
+        if bare_run > _MAX_BARE_RUN:
+            break
+        end = tok_end
+    return end if end > body_start else body_end
+
+
 class ThaiAddressDetector(BaseDetector):
     name = "thai_address"
     category = "pii"
@@ -83,9 +158,13 @@ class ThaiAddressDetector(BaseDetector):
         for m in _ADDRESS_RE.finditer(text):
             # Match the full span from the keyword through the address body.
             full_start = m.start(1)
-            full_end = m.end(2)
+            full_end = trim_address_end(text, m.start(2), m.end(2))
             matched = text[full_start:full_end].strip()
             if len(matched) < 6:
+                continue
+            # The trim may have dropped the digit that qualified the match
+            # (a far-away house number in prose): then it is not an address.
+            if not any(ch.isdigit() for ch in text[m.start(2):full_end]):
                 continue
             matches.append(
                 DetectionMatch(

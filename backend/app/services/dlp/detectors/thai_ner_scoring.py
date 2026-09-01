@@ -168,7 +168,64 @@ ADDRESS_CONTEXT = (
     "ที่อยู่", "บ้านเลขที่", "เลขที่", "ส่งของ", "จัดส่ง", "หน้างาน",
     "ซอย", "หมู่", "ถนน", "แขวง", "เขต", "ตำบล", "อำเภอ", "จังหวัด",
     "ต.", "อ.", "จ.", "รหัสไปรษณีย์",
+    # FIX38 Part E — the shapes the FIX28 address set showed still leaking
+    # were all building / room / estate addresses introduced by ``อยู่ที่``
+    # or ``ส่งที่`` ("is at" / "deliver to"), with no ซอย/ถนน/ต./อ. at all.
+    # ``ที่อยู่`` (the noun "address") never matches ``อยู่ที่`` (the verb
+    # phrase), so those sentences carried no address context and every
+    # LOCATION span from the model scored 0.45. Measured before adopting:
+    # FIX28 addresses 19 → 22/25, corpus_fires 0 → 0, decoys 1.00 → 1.00.
+    "อยู่ที่", "ส่งที่", "อาคาร", "ตึก", "ชั้น", "ห้อง", "คอนโด",
+    "อพาร์ทเม้นท์", "หอพัก", "นิคม", "หมู่บ้าน",
 )
+
+# FIX38 Part E — predicates that only a PERSON can be the subject of, in the
+# form colleagues write them glued straight onto a bare name: ``รัตนาป่วย``,
+# ``วิชัยถูกฟ้อง``, ``อรทัยยังไม่ได้เซ็นสัญญา``. Deliberately human-only:
+# verbs of saying (``บอกว่า`` / ``แจ้งว่า``) are NOT here, because an
+# announcement, a system or a department "says" things too
+# (``ประกาศแจ้งว่า…``) and ``ประกาศ`` is also a given name. This list plus a
+# left word boundary is the second signal an ambiguous gazetteer name needs
+# — see ``boundary_predicate`` and the gate in ``thai_ner.py``.
+PERSON_PREDICATES = (
+    "ป่วย", "ลาป่วย", "ลากิจ", "ลาคลอด", "ลาออก", "ขาดงาน", "มาสาย",
+    "เกษียณ", "ถูกพักงาน", "โดนพักงาน", "ถูกไล่ออก", "โดนไล่ออก",
+    "ถูกเตือน", "โดนเตือน", "ถูกฟ้อง", "โดนฟ้อง", "ถูกจับ", "โดนจับ",
+    "เป็นพยาน", "เป็นหนี้", "ค้างชำระ", "แพ้ยา", "มีอาการ", "เป็นเบาหวาน",
+    "เซ็นสัญญา", "ยังไม่ได้เซ็น", "เป็นคน",
+)
+
+
+# Thai function words that also appear in the ambiguous given-name list.
+# ``ควรเซ็นสัญญาให้เรียบร้อย`` ("should sign the contract") has exactly the
+# boundary + predicate shape, and ``ควร`` IS a registered given name — the
+# adversarial must-not-fire sentences added in FIX38 caught it masking as
+# a person on the first run. A modal, auxiliary, conjunction or adverb
+# never takes the waiver, whatever follows it.
+FUNCTION_WORDS = frozenset({
+    "ควร", "ต้อง", "อาจ", "คง", "ค่อย", "เพิ่ง", "กำลัง", "ยัง", "จะ", "ได้",
+    "ให้", "มา", "ไป", "แล้ว", "เคย", "น่า", "พึง", "ย่อม", "ถ้า", "แต่",
+    "และ", "หรือ", "เพราะ", "ก็", "จึง", "เลย", "ซึ่ง", "อัน", "ที่", "ชนิด",
+    "ประกาศ", "ความ", "การ", "อย่าง", "ตาม", "โดย", "เมื่อ", "ขณะ", "ช่วง",
+})
+
+
+def boundary_predicate(text: str, start: int, end: int) -> bool:
+    """A bare name at a left word boundary with a person-only predicate
+    glued right after it. This is the one shape where an ambiguous name
+    (also a dictionary word) may stand without a title."""
+    from app.services.dlp.detectors import thai_gazetteer as gaz
+
+    if text[start:end].strip() in FUNCTION_WORDS:
+        return False
+    try:
+        left = start == 0 or gaz.left_boundary(text, start) or bool(name_intro_before(text, start))
+    except Exception:  # noqa: BLE001
+        left = start == 0
+    if not left:
+        return False
+    tail = text[end:end + 16]
+    return any(tail.startswith(p) for p in PERSON_PREDICATES)
 
 # Ordinary Thai words the CRF routinely tags as PERSON / LOCATION on
 # conversational text. A hit on one of these is penalised, not dropped:
@@ -337,8 +394,19 @@ def score_person(
     # of ``เพลงไทยยุคเก้าศูนย์…`` in the must-not-fire corpus.
     _title = title_prefix_before(text, start)
     if (_title is None or _title in WEAK_TITLES) and _is_dictionary_word(span):
-        score -= P_DICTIONARY_WORD
-        reasons.append("-dictionary-word")
+        # FIX38 Part E — waived for a known ambiguous given name that sits
+        # at a word boundary with a person-only predicate glued after it
+        # (``รัตนาป่วยเป็นเบาหวาน``). The span still has to clear the
+        # threshold on its other signals: with nothing else in the window
+        # it lands on 0.45 and stays unmasked (``มานะมาสายอีกแล้ว`` does).
+        # Measured before adopting: FIX28 names 28 → 36/40 with
+        # corpus_fires 0 → 0; the ±30-window variant of the same idea
+        # fired 3 times (``ชนิด`` / ``ประกาศ`` / ``ควร``) and was rejected.
+        if source == "gazetteer_ambiguous" and boundary_predicate(text, start, end):
+            reasons.append("boundary-predicate")
+        else:
+            score -= P_DICTIONARY_WORD
+            reasons.append("-dictionary-word")
 
     return max(0.0, min(1.0, score)), reasons
 

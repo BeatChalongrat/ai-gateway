@@ -172,9 +172,14 @@ class ThaiNerDetector(BaseDetector):
             # shape (``ประกาศ``, ``ชนิด``, ``ควร`` scored as people because
             # a person noun happened to sit in the window). It needs a
             # title, or one of the other engines pointing at the same span.
+            # FIX38 Part E adds the third acceptable second signal: a word
+            # boundary on the left AND a person-only predicate glued on the
+            # right (``วิชัยถูกฟ้อง``). A context word anywhere in the
+            # window is NOT enough — that variant fired on the corpus.
             if source == "gazetteer_ambiguous" and not (
                 scoring.title_prefix_before(text, start)
                 or self._overlaps(regex_spans, start, end)
+                or scoring.boundary_predicate(text, start, end)
             ):
                 continue
             # ``วัดชัยมงคล`` / ``หน้าฝน`` / ``อากาศฟ้าใส`` — a place or
