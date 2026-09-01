@@ -1,6 +1,7 @@
 import asyncio
 import time
 
+import structlog
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -13,6 +14,8 @@ router = APIRouter()
 
 # Cache health result for 10s to prevent worker exhaustion from rapid polling.
 # Each uncached call does sync DB connect + Redis connect (2s timeout if Redis down).
+_hlog = structlog.get_logger(__name__)
+
 _health_cache: dict | None = None
 _health_cache_ts: float = 0.0
 _HEALTH_CACHE_TTL = 10.0
@@ -69,6 +72,38 @@ def _probe_sidecar(kind: str, addr: str, timeout: float = 0.5) -> str:
                 channel.close()
             except Exception:
                 pass
+
+
+def _probe_ner_service(timeout: float = 0.5) -> dict:
+    """FIX38 A7 — is the ner-service up, and did its Thai tagger load?
+
+    The Thai NER layer degrades to "no findings" when the service is down
+    (by design: regex keeps running). That is the right failure mode for
+    a request and the wrong one for an operator, who otherwise learns
+    about it from a leaked name. So the health page says it out loud:
+    the probe reads the service's own /health, which reports the Thai
+    tagger separately (``th_ner=ready|disabled|error: …``).
+    """
+    url = str(getattr(settings, "ner_service_url", "") or "")
+    thai_on = bool(getattr(settings, "dlp_thai_ner_enabled", False))
+    if not url:
+        return {"status": "not_configured", "thai_ner_layer": thai_on}
+    try:
+        import httpx
+
+        r = httpx.get(url.rstrip("/") + "/health", timeout=timeout)
+        data = r.json() if r.status_code == 200 else {}
+        model = str(data.get("model", ""))
+        if "th_ner=ready" in model:
+            th = "ready"
+        elif "th_ner=disabled" in model:
+            th = "disabled"
+        else:
+            th = "not_ready"
+        status = "healthy" if data.get("status") == "ready" else f"degraded ({data.get('status', r.status_code)})"
+        return {"status": status, "th_ner": th, "model": model, "thai_ner_layer": thai_on}
+    except Exception as exc:  # noqa: BLE001 — a probe never raises
+        return {"status": "unreachable", "error": f"{type(exc).__name__}", "thai_ner_layer": thai_on}
 
 
 # ── FIX26 §2.2 — liveness vs readiness ──────────────────────────────────
@@ -268,10 +303,22 @@ def _run_health_checks() -> dict:
             any_active_sidecar_down = True
     checks["sidecars"] = sidecars
 
+    # FIX38 A7 — the Thai NER layer lives in the ner-service. When the
+    # layer is on and the service (or its Thai tagger) is not, the gateway
+    # is masking fewer names than it claims: degraded, and a WARNING so it
+    # shows up somewhere other than a leak.
+    ner = _probe_ner_service()
+    checks["ner_service"] = ner
+    thai_ner_down = bool(ner.get("thai_ner_layer")) and (
+        ner.get("status") != "healthy" or ner.get("th_ner") == "not_ready"
+    )
+    if thai_ner_down:
+        _hlog.warning("thai_ner_service_down", **{k: v for k, v in ner.items() if k != "model"})
+
     db_ok = checks["database"] == "ok"
     if not db_ok:
         overall = "unhealthy"
-    elif checks["redis"] != "ok" or any_active_sidecar_down:
+    elif checks["redis"] != "ok" or any_active_sidecar_down or thai_ner_down:
         overall = "degraded"
     else:
         overall = "ok"

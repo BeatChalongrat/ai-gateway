@@ -258,8 +258,16 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     with _status_lock:
+        status = _status
+        # FIX38 A7 — a Thai tagger that was asked for and did not load is
+        # not "ready". The compose healthcheck greps for "ready", so this
+        # turns the container unhealthy (visible in ``docker ps``, blocks
+        # ``depends_on: service_healthy``) instead of serving English-only
+        # while every Thai name walks through.
+        if status == "ready" and _thai_status not in ("ready", "disabled"):
+            status = "degraded"
         return HealthResponse(
-            status=_status, model=_model_label + f", th_ner={_thai_status}"
+            status=status, model=_model_label + f", th_ner={_thai_status}"
         )
 
 

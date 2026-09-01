@@ -64,6 +64,7 @@ from app.observability.metrics import (
 )
 from app.observability.phase_timer import record_phase
 from app.services.dlp.classifier import SensitivityClassifier
+from app.services.dlp.decision_trace import trace_decision
 from app.services.dlp.detectors.registry import get_default_registry, DetectorRegistry
 from app.services.dlp.policy_engine import (
     CHANNEL_WEBCHAT,
@@ -3616,13 +3617,20 @@ class GatewayOrchestrator:
         analysis (legacy behavior). Only the V2/shadow decision is shaped;
         the authoritative legacy decision is untouched.
         """
-        return self.policy_engine.evaluate_decision(
+        decision = self.policy_engine.evaluate_decision(
             detection_result=detection_result,
             profile=profile,
             context=context,
             text=text,
             segments=segments,
         )
+        # FIX38 B3 — record why each span was masked (layer / confidence /
+        # signals), on the one boundary every chat path goes through.
+        trace_decision(
+            decision,
+            direction=getattr(getattr(context, "direction", None), "value", None),
+        )
+        return decision
 
     def _scan_text_as_result(
         self,

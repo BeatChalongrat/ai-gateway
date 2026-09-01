@@ -129,6 +129,10 @@ services:
     image: ai-gateway-ner-service:latest
     environment:
       NER_WORKERS: ${NER_WORKERS:-2}
+      # FIX38 — the CRF ThaiNER tagger. "0" runs the service English-only
+      # and /health reports th_ner=disabled (still "ready"); any load
+      # failure while "1" reports "degraded" and fails the healthcheck.
+      NER_THAI_ENABLED: ${NER_THAI_ENABLED:-1}
       # Per-language confidence floors. Thai NER is noisier than
       # English on conversational prose, so its floor stays higher
       # by default. Both are overridable per-deployment if a

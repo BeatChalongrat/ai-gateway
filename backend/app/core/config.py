@@ -438,6 +438,13 @@ class Settings(BaseSettings):
     dlp_thai_ner_threshold: float = 0.50
     dlp_thai_ner_max_chars: int = 4000
 
+    # FIX38 B3 — Presidio-style decision trace. One structured log line
+    # (``dlp_decision_trace``) per scan that had findings: detector, layer,
+    # confidence, the context-enhancer signals and the action — never the
+    # matched text. This is how a false fire or a leak is debugged after
+    # the fact; see ``app/services/dlp/decision_trace.py``.
+    dlp_decision_trace_enabled: bool = True
+
     # P1 Item 4 — Anthropic prompt caching. When True (default) the
     # Anthropic adapter sends the system prompt as a content-block array
     # with ``cache_control: {type: ephemeral}`` so Claude caches the large,
