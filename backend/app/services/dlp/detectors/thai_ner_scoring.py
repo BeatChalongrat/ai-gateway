@@ -389,6 +389,18 @@ def score_person(
     if has_context(text, start, end, NON_PERSON_CONTEXT, CONTEXT_WINDOW):
         score -= P_NON_PERSON_CONTEXT
         reasons.append("-list-context")
+    # FIX38 — a formal given name that is BUILT from a time / place
+    # classifier (``วันใหม่``, ``ปีใหม่``, ``เดือนเพ็ญ``) reads as the common
+    # phrase unless a title says otherwise. Axis A caught
+    # ``เสนอวันใหม่สองตัวเลือก`` ("offer two new dates") coming back as
+    # ``เสนอ<<PERSON_B>>สองตัวเลือก``. Same weight as an ordinary word.
+    if (
+        source == "gazetteer"
+        and not title_prefix_before(text, start)
+        and span.startswith(NON_NAME_PREFIXES)
+    ):
+        score -= P_ORDINARY_WORD
+        reasons.append("-classifier-compound")
     # A span that is an everyday word needs a title to survive. Without
     # this, ``เพลง`` (a real nickname, and the word "song") was masked out
     # of ``เพลงไทยยุคเก้าศูนย์…`` in the must-not-fire corpus.

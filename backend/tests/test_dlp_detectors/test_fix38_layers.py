@@ -307,3 +307,18 @@ def test_building_addresses_survive_the_trim():
     assert _addr("ที่อยู่ 199/22 คอนโดลุมพินี ชั้น 5 ห้อง 512 แล้วโทรบอกด้วย") == [
         "ที่อยู่ 199/22 คอนโดลุมพินี ชั้น 5 ห้อง 512"
     ]
+
+
+def test_a_name_built_from_a_time_word_needs_a_title():
+    """``เสนอวันใหม่สองตัวเลือก`` — "offer two new dates". วันใหม่ is a real
+    given name in the gazetteer; without a title it is the phrase."""
+    from app.services.dlp.detectors import thai_ner_scoring as sc
+
+    text = "ช่วยร่างคำขอโทษพร้อมเสนอวันใหม่สองตัวเลือก"
+    i = text.index("วันใหม่")
+    score, reasons = sc.score_person(text, i, i + 7, source="gazetteer")
+    assert "-classifier-compound" in reasons and score < 0.5
+    titled = "คุณวันใหม่ โทรมาแจ้งว่าของยังไม่ถึง"
+    j = titled.index("วันใหม่")
+    score2, reasons2 = sc.score_person(titled, j, j + 7, source="gazetteer")
+    assert "-classifier-compound" not in reasons2 and score2 >= 0.5
