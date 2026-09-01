@@ -117,6 +117,47 @@ _NOT_SURNAME = frozenset({
 })
 
 
+# FIX40 — how far past the title may a match run?
+#
+# ``given`` is ``[ก-๙]{2,}`` and Thai writes without spaces, so the group
+# matches an entire Thai RUN: in ``คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ``
+# it captures everything up to the first space. FIX29 added ``trim_run`` to
+# cut that back to the name — but only in the ``surname is None`` branch, so
+# a single space ANYWHERE later in the sentence produced a ``surname`` group
+# and skipped the trim entirely. The measured result (FIX40 corpus): the
+# whole message masked as one ``<<PERSON_A>>`` — product, quantities,
+# request and all. Two rules close it:
+#
+#   1. trim the GIVEN run ALWAYS. If it was cut, the run was
+#      "name + prose", so whatever followed the space is not a surname.
+#   2. a surname is a WORD, not a clause. ``trim_run`` cannot tell
+#      ``ลาป่วยสามวัน`` from ``วงศ์ใหญ่`` (neither is a dictionary word), so
+#      the length cap below is the discriminator. Measured on the eval
+#      sets, every real surname is <= 8 Thai characters while the prose
+#      runs that leaked in are 12-31. The cap is deliberately generous.
+#
+# When the cap rejects the trailing run the GIVEN NAME IS STILL MASKED —
+# the failure mode is a long surname left in the clear beside a masked
+# given name, not an unmasked person. The NER layer (``thai_ner``) covers
+# the same span independently.
+MAX_SURNAME_THAI_CHARS = 10
+
+
+def _is_not_surname(tok: str) -> bool:
+    """FIX40 — ``_NOT_SURNAME`` matched whole tokens only, so ``คุณสมชาย โทรมา``
+    kept ``โทรมา`` ("called") as a surname while ``คุณสมชาย โทร`` trimmed it.
+    Thai glues the verb to what follows, so the check is a PREFIX check. No
+    surname in either eval set begins with one of these words; the rule
+    changed no measured number and removes the observed case."""
+    if tok in _NOT_SURNAME:
+        return True
+    return any(tok.startswith(w) and len(tok) > len(w) for w in _NOT_SURNAME)
+
+
+def _thai_len(s: str) -> int:
+    return sum(1 for c in s if "\u0e01" <= c <= "\u0e5b")
+
+
 class ThaiNameDetector(BaseDetector):
     name = "thai_name"
     category = "pii"
@@ -134,15 +175,29 @@ class ThaiNameDetector(BaseDetector):
                 # mask covers only ``prefix + given name`` in cases like
                 # ``คุณสมหญิง จำนวน 10,000``.
                 surname = m.group("surname")
-                if surname is not None and surname.strip() in _NOT_SURNAME:
-                    end = m.start("surname")
+                if surname is not None and _is_not_surname(surname.strip()):
                     surname = None
-                # FIX29: a title + one Thai run that is NOT itself a name but
-                # BEGINS with a gazetteer name followed by a dictionary word
-                # is a name glued to its verb (``คุณมีชัยจองห้องประชุมไว้``) —
-                # the span ends at the name, never at the next space.
-                if surname is None:
-                    end = trim_run(text, m.start("given"), end)
+                # FIX29 + FIX40: a title + one Thai run that is NOT itself a
+                # name but BEGINS with a gazetteer name followed by a
+                # dictionary word is a name glued to its verb
+                # (``คุณมีชัยจองห้องประชุมไว้``) — the span ends at the name,
+                # never at the next space. FIX40 runs this ALWAYS, not only
+                # when the optional surname group is absent.
+                given_end = trim_run(text, m.start("given"), m.end("given"))
+                if given_end < m.end("given"):
+                    # the run was "name + prose": nothing after the space
+                    # belongs to this person.
+                    end = given_end
+                elif surname is None:
+                    end = m.end("given")
+                else:
+                    sur = m.group("surname")
+                    sur_start = m.start("surname") + (len(sur) - len(sur.lstrip()))
+                    sur_end = trim_run(text, sur_start, m.end("surname"))
+                    if _thai_len(text[sur_start:sur_end]) > MAX_SURNAME_THAI_CHARS:
+                        end = m.end("given")      # a clause, not a surname
+                    else:
+                        end = sur_end
 
                 matched = text[start:end]
 

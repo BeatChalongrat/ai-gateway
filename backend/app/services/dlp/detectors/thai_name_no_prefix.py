@@ -168,6 +168,30 @@ _TRAIL_LABELS = frozenset({
 })
 _NAME_LABEL_BEFORE_RE = re.compile(r"(?:ชื่อ|name)\s*[:：]?\s*$", re.IGNORECASE)
 
+# FIX40 — Pass 1's gate: a context keyword ANYWHERE in a 25-character window
+# was enough to read two space-separated Thai tokens as "given + surname".
+# Thai chat is full of that shape without a name in sight, and the word
+# ``ลูกค้า`` is in almost every support message, so the rule fired on
+# ``ใบ แตก`` (12 ใบ แตก 3 ใบ → ``12 <<PERSON_B>> 3 ใบ``), ``กล่อง บุบ``,
+# ``เครื่อง ค้าง``, ``ตัว เสีย``, ``รอบ บ่าย``, ``น้ำ ใจ``,
+# ``ใบ กำกับภาษี`` — measured 30 of 150 protected strings eaten on the
+# FIX40 corpus. The keyword must now sit IMMEDIATELY before the pair: a
+# name label (``ชื่อ:`` / ``ผู้รับ:`` / ``name:``) or a title
+# (``คุณ`` / ``นาย`` / ``พี่`` …). Measured against T1 (require NER
+# agreement), T2 (hand stoplist), T3 (no number before) and T5 (dictionary
+# gate): this is the only one that removed the over-masking WITHOUT
+# costing recall anywhere — see docs/FIX40_REPORT.md §3.
+#
+# What Pass 1 still carries, measured: the ``ผู้รับ: สุรชัย มั่นคง`` shape.
+# Turning the pass off entirely costs exactly that one item across both
+# eval sets, which is why it is narrowed rather than deleted.
+# The Rust port carries the same regex — change both.
+_PASS1_ANCHOR_RE = re.compile(
+    r"(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|name)\s*[:：]?\s*$"
+    r"|(?:นางสาว|น\.ส\.|นาง|นาย|คุณ|ท่าน|ดร\.|นพ\.|พญ\.|พี่|น้อง)\s*$",
+    re.IGNORECASE,
+)
+
 
 def _is_stop_token(tok: str) -> bool:
     """True when a whitespace-delimited Thai token is plainly not a name."""
@@ -325,7 +349,9 @@ class ThaiNameNoPrefixDetector(BaseDetector):
             high = min(len(text), end + _CONTEXT_WINDOW)
             before = text[low:start]
             after = text[end:high]
-            if _CONTEXT_RE.search(before + after):
+            # FIX40 — the anchor must be immediately to the LEFT of the
+            # pair, not merely somewhere in the window.
+            if _PASS1_ANCHOR_RE.search(before):
                 w1, w2 = m.group(1).split(None, 1)
                 if w2 in _TRAIL_LABELS:
                     # FIX26: the second token is a field label, never a

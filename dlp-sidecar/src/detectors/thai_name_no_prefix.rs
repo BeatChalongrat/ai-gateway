@@ -110,6 +110,19 @@ pub const TRAIL_LABELS: &[&str] = &[
     "ตำแหน่ง", "ตําแหน่ง", "แผนก", "อายุ", "วันเกิด", "จำนวน", "จํานวน",
 ];
 
+/// FIX40 — Pass 1's gate. A context keyword ANYWHERE in a 25-char window
+/// was enough to read two space-separated Thai tokens as "given + surname",
+/// and ``ลูกค้า`` is in almost every support message, so the rule fired on
+/// ``ใบ แตก`` / ``กล่อง บุบ`` / ``น้ำ ใจ`` / ``ใบ กำกับภาษี``. The anchor must
+/// now sit IMMEDIATELY before the pair. Same regex as Python's
+/// ``_PASS1_ANCHOR_RE`` — change both.
+static PASS1_ANCHOR_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"(?i)(?:ชื่อ|นามว่า|ชื่อว่า|ผู้รับ|ผู้ส่ง|ผู้แจ้ง|ลงชื่อ|name)\s*[:：]?\s*$|(?:นางสาว|น\.ส\.|นาง|นาย|คุณ|ท่าน|ดร\.|นพ\.|พญ\.|พี่|น้อง)\s*$",
+    )
+    .expect("pass1 anchor")
+});
+
 static NAME_LABEL_BEFORE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)(?:ชื่อ|name)\s*[:：]?\s*$").expect("name label regex"));
 
@@ -329,7 +342,11 @@ impl Detector for ThaiNameNoPrefixDetector {
             outside.push_str(before);
             outside.push_str(&text[abs_end_b..high_b]);
 
-            let context_ok = CONTEXT_RE.is_match(&outside).unwrap_or(false);
+            // FIX40 — the anchor must be immediately to the LEFT of the pair,
+            // not merely somewhere in the window. ``outside`` is kept so the
+            // shape of the port still matches Python's window slicing.
+            let _ = &outside;
+            let context_ok = PASS1_ANCHOR_RE.is_match(before).unwrap_or(false);
 
             // One-codepoint step used on every reject (Python ``pos = start + 1``).
             let reject_step = abs_start_b
@@ -407,5 +424,40 @@ impl Detector for ThaiNameNoPrefixDetector {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod fix40_pass1_tests {
+    //! FIX40 — Pass 1 needs an ADJACENT title / name label, not just a
+    //! context keyword somewhere in the window.
+    use super::ThaiNameNoPrefixDetector;
+    use crate::detectors::base::Detector;
+
+    fn hits(text: &str) -> Vec<String> {
+        ThaiNameNoPrefixDetector
+            .detect(text)
+            .into_iter()
+            .map(|m| m.matched_text)
+            .collect()
+    }
+
+    #[test]
+    fn a_classifier_and_a_verb_are_not_a_name() {
+        assert!(hits("ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ สรุปว่าสั่งกี่ใบ").is_empty());
+        assert!(hits("ลูกค้าแจ้งว่าส่งมา 3 กล่อง บุบ 1 กล่อง").is_empty());
+        assert!(hits("ลูกค้ามีเครื่อง 10 เครื่อง ค้าง 4 เครื่อง").is_empty());
+    }
+
+    #[test]
+    fn two_ordinary_words_are_not_a_name() {
+        assert!(hits("ทำรายงานให้ลูกค้าหน่อย ยอด ขาย เดือนนี้โตขึ้น").is_empty());
+        assert!(hits("ขอ ใบ กำกับภาษี ให้ลูกค้าด้วย").is_empty());
+        assert!(hits("ลูกค้าชมว่าพนักงานมี น้ำ ใจ มาก").is_empty());
+    }
+
+    #[test]
+    fn a_labelled_name_is_still_masked() {
+        assert_eq!(hits("ผู้รับ: สุรชัย มั่นคง"), vec!["สุรชัย มั่นคง"]);
     }
 }

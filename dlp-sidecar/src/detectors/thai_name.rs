@@ -103,6 +103,30 @@ const NOT_SURNAME: &[&str] = &[
     "จํานวน", "ตําแหน่ง", "ตำแหน่ง", "แผนก", "อายุ", "วันเกิด", "เลขบัตร",
 ];
 
+/// FIX40 — a surname is a WORD, not a clause. ``given`` matches a whole
+/// Thai RUN (Thai has no spaces), and FIX29's ``trim_run`` guard only ran
+/// in the `!has_surname` branch, so one space later in the sentence skipped
+/// it and the match swallowed the rest of the line. Mirrors Python's
+/// ``MAX_SURNAME_THAI_CHARS`` — keep both in step.
+const MAX_SURNAME_THAI_CHARS: usize = 10;
+
+/// FIX40 — ``NOT_SURNAME`` matched whole tokens only, so ``คุณสมชาย โทรมา``
+/// kept ``โทรมา`` as a surname while ``คุณสมชาย โทร`` trimmed it. Thai glues
+/// the verb to what follows, so this is a PREFIX check. Mirrors Python's
+/// ``_is_not_surname``.
+fn is_not_surname(tok: &str) -> bool {
+    if NOT_SURNAME.contains(&tok) {
+        return true;
+    }
+    NOT_SURNAME
+        .iter()
+        .any(|w| tok.starts_with(w) && tok.len() > w.len())
+}
+
+fn thai_len(s: &str) -> usize {
+    s.chars().filter(|c| ('\u{0e01}'..='\u{0e5b}').contains(c)).count()
+}
+
 pub struct ThaiNameDetector;
 
 impl Detector for ThaiNameDetector {
@@ -135,24 +159,42 @@ impl Detector for ThaiNameDetector {
 
                 // Trim an over-captured non-surname trailing word
                 // (``คุณสมหญิง จำนวน 10,000`` → ``คุณสมหญิง``).
-                let mut has_surname = false;
-                if let Some(sn) = caps.name("surname") {
-                    if NOT_SURNAME.contains(&sn.as_str().trim()) {
-                        end_b = sn.start();
-                    } else {
-                        has_surname = true;
+                let mut surname = caps.name("surname");
+                if let Some(sn) = surname {
+                    if is_not_surname(sn.as_str().trim()) {
+                        surname = None;
                     }
                 }
-                // FIX29: title + one run that begins with a gazetteer name
-                // glued to a dictionary word → the span ends at the name
-                // (``คุณมีชัยจองห้องประชุมไว้`` → ``คุณมีชัย``). Mirrors Python.
-                if !has_surname {
-                    if let Some(g) = caps.name("given") {
-                        let gs = byte_to_char(text, g.start());
-                        let ge = byte_to_char(text, end_b);
-                        let trimmed = thai_gazetteer::trim_run(&chars, gs, ge);
-                        if trimmed < ge {
-                            end_b = chars.byte_of(trimmed);
+                // FIX29 + FIX40: title + one run that begins with a gazetteer
+                // name glued to a dictionary word → the span ends at the name
+                // (``คุณมีชัยจองห้องประชุมไว้`` → ``คุณมีชัย``). FIX40 runs this
+                // ALWAYS, not only when the optional surname group is absent.
+                let given = match caps.name("given") {
+                    Some(g) => g,
+                    None => continue,
+                };
+                let g_start_c = byte_to_char(text, given.start());
+                let g_end_c = byte_to_char(text, given.end());
+                let g_trim_c = thai_gazetteer::trim_run(&chars, g_start_c, g_end_c);
+                if g_trim_c < g_end_c {
+                    // the run was "name + prose": nothing after the space
+                    // belongs to this person.
+                    end_b = chars.byte_of(g_trim_c);
+                } else {
+                    match surname {
+                        None => end_b = given.end(),
+                        Some(sn) => {
+                            let raw = sn.as_str();
+                            let lead = raw.len() - raw.trim_start().len();
+                            let s_start_c = byte_to_char(text, sn.start() + lead);
+                            let s_end_c =
+                                thai_gazetteer::trim_run(&chars, s_start_c, byte_to_char(text, sn.end()));
+                            let s_end_b = chars.byte_of(s_end_c);
+                            if thai_len(&text[sn.start() + lead..s_end_b]) > MAX_SURNAME_THAI_CHARS {
+                                end_b = given.end(); // a clause, not a surname
+                            } else {
+                                end_b = s_end_b;
+                            }
                         }
                     }
                 }
@@ -185,5 +227,45 @@ impl Detector for ThaiNameDetector {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod fix40_swallow_tests {
+    //! FIX40 — the titled detector must stop at the name, not eat the clause.
+    use super::ThaiNameDetector;
+    use crate::detectors::base::Detector;
+
+    fn hits(text: &str) -> Vec<String> {
+        ThaiNameDetector
+            .detect(text)
+            .into_iter()
+            .map(|m| m.matched_text)
+            .collect()
+    }
+
+    #[test]
+    fn a_name_glued_to_prose_stops_at_the_name() {
+        assert_eq!(
+            hits("คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ ขอให้ส่งชุดใหม่ไปแทน"),
+            vec!["คุณแก้ว"]
+        );
+    }
+
+    #[test]
+    fn a_clause_after_the_space_is_not_a_surname() {
+        // ``เสนอ`` is a dictionary word that ``trim_run`` cuts the clause down
+        // to, and it is under the surname cap, so it rides along as a
+        // "surname". One extra word, not a clause — the residue is measured
+        // and reported in docs/FIX40_REPORT.md §7, and Python does the same.
+        assert_eq!(hits("คุณวิชัย เสนอให้เลื่อนเปิดตัวไปเดือนหน้า"), vec!["คุณวิชัย เสนอ"]);
+        assert_eq!(hits("คุณพิมพ์ใจ ลาป่วยสามวัน ตั้งแต่วันจันทร์"), vec!["คุณพิมพ์ใจ"]);
+    }
+
+    #[test]
+    fn a_real_surname_is_still_masked() {
+        assert_eq!(hits("ลูกค้าชื่อคุณสมชาย ใจดี โทรมาบ่น"), vec!["คุณสมชาย ใจดี"]);
+        assert_eq!(hits("คุณสมชาย โทรมา"), vec!["คุณสมชาย"]);
+        assert_eq!(hits("คุณประเสริฐ ทองดี แจ้งว่ากระเบื้องบิ่น"), vec!["คุณประเสริฐ ทองดี"]);
     }
 }
