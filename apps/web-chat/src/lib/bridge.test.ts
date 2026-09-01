@@ -224,8 +224,46 @@ describe("bridge transport", () => {
     wv.postMessage.mockClear();
     bridge.resumeTurn("conv-r", undefined);
     expect(wv.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ nonce: NONCE, type: "ui.ready", payload: { conversationId: "conv-r", lastSeq: 3 } }),
+      // FIX41: the cursor is (runId, seq). This host sent no runId, so the
+      // page reports null — which the host reads as "same run", i.e. the
+      // pre-FIX41 behaviour.
+      expect.objectContaining({ nonce: NONCE, type: "ui.ready", payload: { conversationId: "conv-r", lastSeq: 3, runId: null } }),
     );
+  });
+
+  // FIX41 — the cursor is the PAIR. A frame from a new run must reset the
+  // seq comparison, or every frame of the second turn would be dropped for
+  // failing to advance the first turn's count.
+  it("a frame from a different run restarts the seq cursor", async () => {
+    const wv = installFakeWebview(NONCE);
+    startBridge();
+    const res1 = bridge.submitTurn("conv-runs", "x", undefined, [], null);
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-runs", runId: "run-A", seq: 40, event: "content_delta", data: { delta: "first" } } });
+    expect(bridge.peekSeq("conv-runs")).toBe(40);
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-runs", runId: "run-A", seq: 41, event: "message_complete", data: {} } });
+    await res1.text();
+
+    // Second turn on the SAME conversation, whose host-side seq happens to
+    // start lower than where the first one ended.
+    const res2 = bridge.submitTurn("conv-runs", "y", undefined, [], null);
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-runs", runId: "run-B", seq: 1, event: "message_start", data: {} } });
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-runs", runId: "run-B", seq: 2, event: "content_delta", data: { delta: "second" } } });
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-runs", runId: "run-B", seq: 3, event: "message_complete", data: {} } });
+    const text = await res2.text();
+    expect(text).toContain("second");
+    expect(bridge.peekSeq("conv-runs")).toBe(3);
+  });
+
+  // FIX41 — `cancelled` is a terminal. Without it the sink stayed open and
+  // the page waited on a run that had already ended.
+  it("cancelled closes the sink like message_complete does", async () => {
+    const wv = installFakeWebview(NONCE);
+    startBridge();
+    const res = bridge.submitTurn("conv-cancel", "x", undefined, [], null);
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-cancel", runId: "r", seq: 1, event: "message_start", data: {} } });
+    wv.emit({ type: "turn.event", payload: { conversationId: "conv-cancel", runId: "r", seq: 2, event: "cancelled", data: { message_id: "m", partial: true } } });
+    const text = await res.text();
+    expect(text).toContain("event: cancelled");
   });
 
   it("resume renders the host's replayed events", async () => {

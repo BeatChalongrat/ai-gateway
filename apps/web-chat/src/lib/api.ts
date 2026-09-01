@@ -483,20 +483,31 @@ class ApiClient {
     );
   }
   /** Phase 5 — reattach to an in-flight generation (SSE, same event
-   *  vocabulary as openMessageStream). The server replays the already
-   *  generated prefix as one content_delta, then streams the live
-   *  tail. 409 RESUME_UNAVAILABLE = not attachable yet, retry. */
+   *  vocabulary as openMessageStream).
+   *
+   *  FIX41: `startingAfter` is the client's cursor (the last seq it
+   *  RENDERED). With it the server replays only the frames that were
+   *  missed, each under its original seq — so a reattach neither loses
+   *  the tool cards that happened during the gap nor repeats what is
+   *  already on screen. Omitted (0) keeps the pre-FIX41 behaviour of
+   *  replaying the whole run.
+   *
+   *  409 RESUME_UNAVAILABLE = not attachable yet, retry.
+   *  409 RESUME_TOO_OLD = the missed frames are gone; reload the message.
+   */
   async openResumeStream(
     convId: string,
     messageId: string,
     signal: AbortSignal,
+    startingAfter = 0,
   ): Promise<Response> {
     // Hosted mode: re-open the host's event sink for this conversation's
     // in-flight turn (the host is the authority on whether one exists).
     if (usingBridgeTransport) {
       return bridge.resumeTurn(convId, signal);
     }
-    return this.raw(`/conversations/${convId}/messages/${messageId}/stream`, {
+    const q = startingAfter > 0 ? `?starting_after=${startingAfter}` : "";
+    return this.raw(`/conversations/${convId}/messages/${messageId}/stream${q}`, {
       method: "GET",
       signal,
     });

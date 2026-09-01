@@ -23,7 +23,7 @@ interface BridgeHandshake {
 }
 
 type HostToPage =
-  | { type: "turn.event"; payload: { conversationId: string; seq: number; event: string; data: unknown } }
+  | { type: "turn.event"; payload: { conversationId: string; runId?: string; seq: number; event: string; data: unknown } }
   | { type: "consent.request"; payload: ConsentRequest }
   | { type: "session.changed"; payload: unknown }
   | { type: "host.error"; payload: { code: string; message: string } }
@@ -143,9 +143,16 @@ class BridgeClient {
   // In-flight host.query calls, keyed by the requestId the host echoes back.
   private pendingQueries = new Map<string, { resolve: (r: HostResult) => void; timer: ReturnType<typeof setTimeout> }>();
   private queryCounter = 0;
-  // Last turn.event seq the page has RECEIVED per conversation — the resume
+  // Last turn.event seq the page has RENDERED per conversation — the resume
   // cursor sent in ui.ready so the host replays only what was missed.
   private lastSeq = new Map<string, number>();
+  // FIX41 — which RUN that seq belongs to (docs/STREAM_CONTRACT.md §4/§9).
+  // The cursor is the pair, not the number: a seq from a previous
+  // generation says nothing about this one. Until FIX41 correctness rested
+  // on two separate guards keeping seq monotonic across turns (the host
+  // carrying it forward, and submitTurn clearing it here). Neither is true
+  // any more once a run log can be reloaded from disk after a restart.
+  private lastRunId = new Map<string, string>();
 
   /** FIX34 Part A: mark this page as the quick-ask window (tool-less turns). */
   setQuickAsk(on: boolean): void {
@@ -162,6 +169,8 @@ class BridgeClient {
     this.quickAsk = false;
     this.sinks.forEach((_, id) => this.closeSink(id));
     this.sinks.clear();
+    this.lastSeq.clear();
+    this.lastRunId.clear();
     this.consentHandlers.clear();
     this.errorHandlers.clear();
     this.noticeHandlers.clear();
@@ -184,7 +193,7 @@ class BridgeClient {
     if (!msg || typeof msg !== "object") return;
     switch (msg.type) {
       case "turn.event": {
-        const { conversationId, seq, event, data } = msg.payload;
+        const { conversationId, runId, seq, event, data } = msg.payload;
         const sink = this.sinks.get(conversationId);
         // No sink → this frame is NOT rendered, so it must NOT advance the
         // resume cursor. (Earlier this advanced lastSeq unconditionally, which
@@ -197,8 +206,16 @@ class BridgeClient {
         // the cursor. Dedups the one race where the host both replays a buffered
         // event and posts it live, and drops any out-of-order arrival.
         if (typeof seq === "number") {
+          // A frame from a DIFFERENT run restarts the cursor: its numbers
+          // are its own, and comparing them against the previous run's
+          // would silently drop the whole answer.
+          const known = this.lastRunId.get(conversationId);
+          if (runId && known && runId !== known) {
+            this.lastSeq.delete(conversationId);
+          }
           if (seq <= (this.lastSeq.get(conversationId) ?? 0)) return; // already delivered
           this.lastSeq.set(conversationId, seq);
+          if (runId) this.lastRunId.set(conversationId, runId);
         }
         // Re-encode as one SSE frame; parseSSE splits on the blank line. seq
         // stays on the envelope — the renderer never sees it.
@@ -209,7 +226,9 @@ class BridgeClient {
           /* controller already closed */
         }
         // Terminal events end the stream, mirroring chat-edge closing the SSE.
-        if (event === "message_complete" || event === "error") {
+        // FIX41 adds `cancelled`: without it a stopped turn left the sink
+        // open and the page waiting on a run that had already ended.
+        if (event === "message_complete" || event === "error" || event === "cancelled") {
           this.closeSink(conversationId);
         }
         return;
@@ -272,8 +291,12 @@ class BridgeClient {
     imageMode = false,
     editMessageId: string | null = null,
   ): Response {
-    // A submit resets the resume cursor: this turn's events start a fresh seq.
+    // A submit resets the resume cursor: this turn's events start a fresh
+    // run. (Kept alongside the run-id check above — belt and braces, since
+    // between them they are what stops a second turn's frames from being
+    // dropped by a cursor left over from the first.)
     this.lastSeq.delete(conversationId);
+    this.lastRunId.delete(conversationId);
     const body = this.openSink(conversationId, signal, true);
     const posted = this.post("turn.submit", { conversationId, text, attachmentHandles, modelId, imageMode, editMessageId, quick: this.quickAsk });
     if (!posted) {
@@ -295,7 +318,11 @@ class BridgeClient {
     // postCancelOnAbort=false: a resume probe that finds no live turn aborts
     // its own sink; it must NOT post turn.cancel (there is nothing to cancel).
     const body = this.openSink(conversationId, signal, false);
-    const posted = this.post("ui.ready", { conversationId, lastSeq: this.lastSeq.get(conversationId) ?? 0 });
+    const posted = this.post("ui.ready", {
+      conversationId,
+      lastSeq: this.lastSeq.get(conversationId) ?? 0,
+      runId: this.lastRunId.get(conversationId) ?? null,
+    });
     if (!posted) {
       this.closeSink(conversationId);
       return new Response(null, { status: 503 });

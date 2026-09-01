@@ -402,6 +402,40 @@ type streamDrainResult struct {
 	// servedModel (FIX35 Part B) — the model that actually answered, as
 	// the gateway named it; "" when the stream never said.
 	servedModel string
+	// FIX41 — what to put in the TERMINAL error frame. The drain no
+	// longer writes its own error frame: a failed run has to END on
+	// ``error``, and it cannot if the drain spends that event mid-stream
+	// and the handler then appends message_complete after it (which is
+	// what P4 measured: the last frame of a failed turn was the success
+	// terminator).
+	errCode     string
+	errMessage  string
+	errDetails  any
+	errAttempts any
+}
+
+// terminalErrorPayload builds the terminal ``error`` frame's data from
+// whatever the drain learned. Falls back to a generic internal error so a
+// failed run always carries a code the client can localise.
+func (res streamDrainResult) terminalErrorPayload() map[string]any {
+	code, msg := res.errCode, res.errMessage
+	if code == "" {
+		code = CodeInternalError
+	}
+	if msg == "" {
+		msg = "the stream ended without a result"
+		if res.err != nil {
+			msg = fmt.Sprintf("stream error: %v", res.err)
+		}
+	}
+	out := map[string]any{"code": code, "message": msg}
+	if res.errDetails != nil {
+		out["details"] = res.errDetails
+	}
+	if res.errAttempts != nil {
+		out["attempts"] = res.errAttempts
+	}
+	return out
 }
 
 // completeWithModel adds the served model to a “message_complete“
@@ -509,11 +543,14 @@ Loop:
 				break Loop
 			}
 			if ev.Err != nil {
+				// FIX41: record it, do NOT spend the ``error`` event
+				// here. The caller emits exactly one terminal after the
+				// files/sources read-back, and it may not be ``error`` at
+				// all — a user pressing Stop arrives on this same branch
+				// as "context canceled", and reporting that to every
+				// other viewer as an internal error was P3's finding.
 				res.err = ev.Err
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":    CodeInternalError,
-					"message": fmt.Sprintf("stream error: %v", ev.Err),
-				})
+				res.errMessage = fmt.Sprintf("stream error: %v", ev.Err)
 				break Loop
 			}
 			if ev.Delta != "" {
@@ -585,13 +622,22 @@ Loop:
 			// closes the stream after, which yields the synthetic Done +
 			// message_complete terminator in the caller.
 			if ev.ProviderError != nil {
+				// FIX41: same as ev.Err — carried to the terminal frame
+				// instead of being spent here, so the run ends on
+				// ``error`` and the client never has to guess whether a
+				// mid-stream error frame was the end or not. The cost is
+				// that the error surfaces one read-back later (a DB round
+				// trip on a turn that produced no files anyway); the
+				// benefit is one unambiguous terminal.
 				res.err = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
-				writeSSEEvent(w, flusher, "error", map[string]any{
-					"code":     ev.ProviderError.Code,
-					"message":  ev.ProviderError.Message,
-					"details":  ev.ProviderError.Details,
-					"attempts": ev.ProviderError.Attempts,
-				})
+				res.errCode = ev.ProviderError.Code
+				res.errMessage = ev.ProviderError.Message
+				if ev.ProviderError.Details != nil {
+					res.errDetails = ev.ProviderError.Details
+				}
+				if len(ev.ProviderError.Attempts) > 0 {
+					res.errAttempts = ev.ProviderError.Attempts
+				}
 			}
 			// B2: a fallback notice — which model actually answered.
 			if ev.FallbackInfo != nil {
@@ -644,6 +690,17 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		return
 	}
 
+	// FIX41 — the run id is minted HERE, not in the service, because the
+	// early-open path below writes frames before SendStream returns. One
+	// id, one seq counter, one ledger for the whole run.
+	runID := uuid.NewString()
+	in.RunID = runID
+	rw := newRunWriter(w, runID, nil)
+	// Whatever happens below, the run ends on a terminal frame. A `return`
+	// that leaves the pipe silent is not a valid ending (STREAM_CONTRACT
+	// §3) — and there were two such returns before FIX41.
+	defer rw.ensureTerminal(flusher)
+
 	// SSE headers — must be set BEFORE any write, and BEFORE the
 	// first flush. Factored so the FIX33 A-W9 early-open path below and
 	// the normal path write them exactly once.
@@ -653,6 +710,14 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 			return
 		}
 		started = true
+		rw.started = true
+		// Register the run with the resume broker now, so the frames
+		// written during the early-open pause are numbered by the same
+		// counter as the ones the pump will produce.
+		h.messages.OpenRun(assistantID, runID)
+		rw.record = func(event string, build func(seq, final int64) []byte) (int64, bool) {
+			return h.messages.RecordFrame(assistantID, event, build)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
@@ -668,7 +733,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		if userMessageID != uuid.Nil {
 			startPayload["user_message_id"] = userMessageID.String()
 		}
-		writeSSEEvent(w, flusher, "message_start", startPayload)
+		writeSSEEvent(rw, flusher, "message_start", startPayload)
 	}
 	// FIX33 A-W9 — when the compiler is about to run the synchronous
 	// state extraction (a pause of several seconds), open the stream NOW
@@ -677,7 +742,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	// pause looks like a hang.
 	in.OnCompactionStart = func(assistantID, userMessageID uuid.UUID) {
 		openStream(assistantID, userMessageID)
-		writeSSEEvent(w, flusher, "compaction_status", map[string]any{"status": "summarizing"})
+		writeSSEEvent(rw, flusher, "compaction_status", map[string]any{"status": "summarizing"})
 	}
 
 	stream, err := h.messages.SendStream(r.Context(), in)
@@ -686,7 +751,8 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 			// The response is already an open SSE stream: the error must
 			// travel as a frame, not as a JSON status the client will never
 			// parse.
-			writeSSEEvent(w, flusher, "error", map[string]any{
+			// Terminal: this run failed before it produced anything.
+			writeSSEEvent(rw, flusher, "error", map[string]any{
 				"code":    "send_failed",
 				"message": sendErrorMessage(err),
 			})
@@ -702,7 +768,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	}
 	openStream(stream.AssistantID, userMessageID)
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
+	res := drainStreamEvents(rw, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	// Persist via the handle's finish callback. Uses
 	// context.Background() internally so the write completes even
@@ -716,29 +782,67 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	if res.servedModel != "" {
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
-	h.writeMessageFiles(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
-	h.writeMessageSources(w, flusher, r.Context(), in.TenantID, stream.AssistantID)
+	h.finishStream(rw, flusher, r.Context(), in.TenantID, stream, res)
+}
 
-	// Emit final completion frame. Even on error we send a
-	// message_complete so the client always has a deterministic
-	// terminator to clean up its UI state.
-	completeData := map[string]any{
-		"message_id": stream.AssistantID.String(),
-	}
-	completeWithModel(completeData, res.servedModel)
+// finishStream writes the files/sources read-back and then the run's ONE
+// terminal event (STREAM_CONTRACT §3). Shared by Send / Regenerate / Edit
+// so all three answer the same question the same way: a run that a person
+// stopped says ``cancelled``, a run that failed ENDS on ``error``, and
+// only a run that produced its answer says ``message_complete``.
+//
+// Before FIX41 each of the three ended unconditionally on
+// message_complete, so the last frame of a failed turn was the success
+// terminator and a cancel was indistinguishable from a normal finish
+// (docs/fix41/A-baseline.md, P3 and P4).
+func (h *MessageHandler) finishStream(
+	rw *runWriter,
+	flusher http.Flusher,
+	ctx context.Context,
+	tenantID uuid.UUID,
+	stream *service.StreamHandle,
+	res streamDrainResult,
+) {
+	h.writeMessageFiles(rw, flusher, ctx, tenantID, stream.AssistantID)
+	h.writeMessageSources(rw, flusher, ctx, tenantID, stream.AssistantID)
+
+	tokens := map[string]int(nil)
 	if res.usage != nil {
-		tokenUsage := map[string]int{
+		tokens = map[string]int{
 			"input":  res.usage.PromptTokens,
 			"output": res.usage.CompletionTokens,
 		}
 		// T4: surface reasoning_tokens when the Gateway broke it out
 		// (OpenAI o-series / Anthropic estimate / Gemini thoughts).
 		if res.usage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = res.usage.ReasoningTokens
+			tokens["reasoning"] = res.usage.ReasoningTokens
 		}
-		completeData["token_usage"] = tokenUsage
 	}
-	writeSSEEvent(w, flusher, "message_complete", completeData)
+
+	switch {
+	case stream.UserCancelled():
+		// A person pressed Stop. Everything produced so far stands; the
+		// answer is simply partial, and the client is told so rather than
+		// being left to infer it from a stream that went quiet.
+		data := map[string]any{
+			"message_id": stream.AssistantID.String(),
+			"partial":    true,
+		}
+		completeWithModel(data, res.servedModel)
+		if tokens != nil {
+			data["token_usage"] = tokens
+		}
+		writeSSEEvent(rw, flusher, "cancelled", data)
+	case res.err != nil:
+		writeSSEEvent(rw, flusher, "error", res.terminalErrorPayload())
+	default:
+		data := map[string]any{"message_id": stream.AssistantID.String()}
+		completeWithModel(data, res.servedModel)
+		if tokens != nil {
+			data["token_usage"] = tokens
+		}
+		writeSSEEvent(rw, flusher, "message_complete", data)
+	}
 }
 
 // writeSSEEvent serialises one SSE frame and flushes. “data“ is
@@ -808,6 +912,14 @@ func (h *MessageHandler) writeMessageSources(
 func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, data any) {
 	buf, err := json.Marshal(data)
 	if err != nil {
+		return
+	}
+	// FIX41 — a stream that was opened for a run writes through the
+	// envelope (run_id / seq / final_seq + the ledger). Everything else
+	// keeps the pre-FIX41 shape, so a caller that never wraps w — a unit
+	// test, a future non-run stream — is unaffected.
+	if rw, ok := w.(*runWriter); ok {
+		rw.emit(flusher, event, buf)
 		return
 	}
 	_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, buf)
@@ -927,14 +1039,34 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	att, err := h.messages.ResumeAttach(
-		r.Context(), caller.TenantUUID, caller.UserID, convID, msgID,
+	// FIX41 / STREAM_CONTRACT section 4 - starting_after is the client's
+	// cursor: replay only what it has not already rendered. Absent (or 0)
+	// keeps the pre-FIX41 behaviour of replaying the whole run, so a
+	// client that has not been updated is unaffected.
+	startingAfter := int64(0)
+	if raw := strings.TrimSpace(r.URL.Query().Get("starting_after")); raw != "" {
+		n, convErr := strconv.ParseInt(raw, 10, 64)
+		if convErr != nil || n < 0 {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "starting_after must be a non-negative integer")
+			return
+		}
+		startingAfter = n
+	}
+
+	att, err := h.messages.ResumeAttachFrom(
+		r.Context(), caller.TenantUUID, caller.UserID, convID, msgID, startingAfter,
 	)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrResumeUnavailable):
 			WriteError(w, http.StatusConflict, "RESUME_UNAVAILABLE",
 				"generation not attachable yet")
+		case errors.Is(err, service.ErrResumeTooOld):
+			// The frames this client is missing are gone. Saying
+			// "complete" here would show a truncated answer as if it were
+			// the whole one; the client must reload the message instead.
+			WriteError(w, http.StatusConflict, "RESUME_TOO_OLD",
+				"the stream position requested is older than the retained ledger; reload the message")
 		case errors.Is(err, service.ErrMessageConversationNotFound),
 			errors.Is(err, service.ErrMessageNotFound):
 			WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
@@ -954,21 +1086,38 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	writeSSEEvent(w, flusher, "message_start", map[string]any{
+	// FIX41 - the ledger path. Frames are replayed BYTE FOR BYTE with the
+	// seq they originally went out under, then the live tail follows off
+	// the same ledger. Nothing is re-derived, so nothing can be renumbered
+	// or reordered: replaying a folded snapshot is what turned eight
+	// frames into three and put the tool cards ahead of the text
+	// (docs/fix41/A-baseline.md, P1b).
+	if att.Frames != nil {
+		h.resumeFromLedger(w, flusher, r, msgID, att)
+		return
+	}
+
+	rw := newReplayWriter(w, replayRunID(att))
+	rw.started = true
+	defer rw.ensureTerminal(flusher)
+
+	writeSSEEvent(rw, flusher, "message_start", map[string]any{
 		"message_id":      msgID.String(),
 		"conversation_id": convID.String(),
 	})
-	h.writeResumeSnapshot(w, flusher, att.Snapshot)
+	h.writeResumeSnapshot(rw, flusher, att.Snapshot)
 
 	if att.Events != nil {
 		// Live tail — same drain as the primary stream; disconnect
 		// only unsubscribes this viewer.
-		res := drainStreamEvents(w, flusher, r.Context().Done(), att.Events, att.Cancel)
+		res := drainStreamEvents(rw, flusher, r.Context().Done(), att.Events, att.Cancel)
 		if att.Lagged() {
 			// This subscriber fell behind and was cut loose mid-stream.
 			// Tell the client to reattach fresh instead of pretending
-			// the message completed.
-			writeSSEEvent(w, flusher, "error", map[string]any{
+			// the message completed. This IS this response's terminal:
+			// the run is fine, but this view of it ends here, and the
+			// client must be able to tell that from a finished answer.
+			writeSSEEvent(rw, flusher, "error", map[string]any{
 				"code":    "RESUME_LAGGED",
 				"message": "resume stream fell behind; reattach",
 			})
@@ -980,8 +1129,12 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() == nil {
 			time.Sleep(250 * time.Millisecond)
 		}
-		h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
-		h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
+		h.writeMessageFiles(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+		h.writeMessageSources(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+		if res.err != nil {
+			writeSSEEvent(rw, flusher, "error", res.terminalErrorPayload())
+			return
+		}
 		completeData := map[string]any{"message_id": msgID.String()}
 		completeWithModel(completeData, att.Snapshot.ServedModel) // FIX35 Part B
 		if res.usage != nil {
@@ -994,20 +1147,28 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 			}
 			completeData["token_usage"] = tokenUsage
 		}
-		writeSSEEvent(w, flusher, "message_complete", completeData)
+		writeSSEEvent(rw, flusher, "message_complete", completeData)
 		return
 	}
 
 	// Terminal replay — the generation already ended; the snapshot
 	// carries the persisted row.
+	interrupted := false
 	if t := att.Snapshot.Terminal; t != nil && t.Err != nil {
-		writeSSEEvent(w, flusher, "error", map[string]any{
+		interrupted = true
+	}
+	h.writeMessageFiles(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+	h.writeMessageSources(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+	if interrupted {
+		// FIX41: an interrupted generation ENDS on error. Before, this
+		// wrote error and then message_complete, so the last thing a
+		// client learned about a lost turn was the success terminator.
+		writeSSEEvent(rw, flusher, "error", map[string]any{
 			"code":    "GENERATION_INTERRUPTED",
 			"message": "generation was interrupted",
 		})
+		return
 	}
-	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, msgID)
-	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, msgID)
 	completeData := map[string]any{"message_id": msgID.String()}
 	completeWithModel(completeData, att.Snapshot.ServedModel) // FIX35 Part B
 	if t := att.Snapshot.Terminal; t != nil && t.Usage != nil {
@@ -1020,7 +1181,77 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		}
 		completeData["token_usage"] = tokenUsage
 	}
-	writeSSEEvent(w, flusher, "message_complete", completeData)
+	writeSSEEvent(rw, flusher, "message_complete", completeData)
+}
+
+// replayRunID names a replay that has no live run behind it (the row is
+// already terminal). A synthetic id, not the message id: the client keys
+// its cursor on run_id, and a replay must not be mistaken for a
+// continuation of the generation that produced the row.
+func replayRunID(att *service.ResumeAttachment) string {
+	if att.Frames != nil && att.Frames.RunID != "" {
+		return att.Frames.RunID
+	}
+	return "replay-" + uuid.NewString()
+}
+
+// resumeFromLedger serves a reattach off the recorded frames.
+//
+// The replay set and the live subscription were taken under one lock in
+// SubscribeFrames, so no frame can fall between them and none can arrive
+// twice. Every write here is verbatim: this response never mints a seq,
+// because the run already has one for every frame, and two writers
+// numbering the same run independently is precisely the gap-and-duplicate
+// problem the ledger exists to remove.
+func (h *MessageHandler) resumeFromLedger(
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	r *http.Request,
+	msgID uuid.UUID,
+	att *service.ResumeAttachment,
+) {
+	fa := att.Frames
+	rw := newReplayWriter(w, fa.RunID)
+	rw.started = true
+	defer rw.ensureTerminal(flusher)
+
+	for _, le := range fa.Replay {
+		rw.writeRecorded(flusher, le.Event, le.Data)
+	}
+	if fa.Live == nil {
+		// The run already ended; its terminal was inside the replay. When
+		// the client's cursor was already at or past the end the replay is
+		// empty, so the ending is re-sent rather than leaving it on an
+		// open stream it would have to time out on (STREAM_CONTRACT 4).
+		if !rw.terminalWritten() {
+			writeSSEEvent(rw, flusher, "message_complete", map[string]any{
+				"message_id": msgID.String(),
+			})
+		}
+		return
+	}
+
+	done := r.Context().Done()
+	for {
+		select {
+		case <-done:
+			// This viewer went away. The run is untouched; only this
+			// subscription ends. Nothing is owed to a client that is no
+			// longer there.
+			return
+		case le, ok := <-fa.Live:
+			if !ok {
+				if fa.Lagged() {
+					writeSSEEvent(rw, flusher, "error", map[string]any{
+						"code":    "RESUME_LAGGED",
+						"message": "resume stream fell behind; reattach",
+					})
+				}
+				return
+			}
+			rw.writeRecorded(flusher, le.Event, le.Data)
+		}
+	}
 }
 
 // writeResumeSnapshot replays the already-generated prefix in the same
@@ -1123,11 +1354,8 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// SSE headers, then consume + forward the events.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	rw := h.openRunStream(w, stream)
+	defer rw.ensureTerminal(flusher)
 
 	// FIX28 §2 (F3): the client renders the user turn under an optimistic
 	// temp id; hand it the persisted row id here (Edit already did) so an
@@ -1139,9 +1367,9 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	if stream.UserMessage != nil {
 		startPayload["user_message_id"] = stream.UserMessage.ID.String()
 	}
-	writeSSEEvent(w, flusher, "message_start", startPayload)
+	writeSSEEvent(rw, flusher, "message_start", startPayload)
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
+	res := drainStreamEvents(rw, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	persistFinishReason := res.finishReason
 	if res.err != nil && persistFinishReason == "" {
@@ -1151,22 +1379,24 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
-	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
-	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
+	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
+}
 
-	completeData := map[string]any{"message_id": stream.AssistantID.String()}
-	completeWithModel(completeData, res.servedModel)
-	if res.usage != nil {
-		tokenUsage := map[string]int{
-			"input":  res.usage.PromptTokens,
-			"output": res.usage.CompletionTokens,
-		}
-		if res.usage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = res.usage.ReasoningTokens
-		}
-		completeData["token_usage"] = tokenUsage
-	}
-	writeSSEEvent(w, flusher, "message_complete", completeData)
+// openRunStream writes the SSE headers and returns the writer that owns
+// this run's envelope + ledger. Send has its own copy because its
+// early-open path has to run before the StreamHandle exists.
+func (h *MessageHandler) openRunStream(w http.ResponseWriter, stream *service.StreamHandle) *runWriter {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	asstID := stream.AssistantID
+	rw := newRunWriter(w, stream.RunID, func(event string, build func(seq, final int64) []byte) (int64, bool) {
+		return h.messages.RecordFrame(asstID, event, build)
+	})
+	rw.started = true
+	return rw
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,19 +1446,16 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 
 	// SSE — identical event format to Send so the front-end shares
 	// its rendering pipeline.
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
+	rw := h.openRunStream(w, stream)
+	defer rw.ensureTerminal(flusher)
 
-	writeSSEEvent(w, flusher, "message_start", map[string]any{
+	writeSSEEvent(rw, flusher, "message_start", map[string]any{
 		"message_id":      stream.AssistantID.String(),
 		"conversation_id": stream.ConversationID.String(),
 		"user_message_id": stream.UserMessage.ID.String(),
 	})
 
-	res := drainStreamEvents(w, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
+	res := drainStreamEvents(rw, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
 
 	persistFinishReason := res.finishReason
 	if res.err != nil && persistFinishReason == "" {
@@ -1238,22 +1465,7 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
-	h.writeMessageFiles(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
-	h.writeMessageSources(w, flusher, r.Context(), caller.TenantUUID, stream.AssistantID)
-
-	completeData := map[string]any{"message_id": stream.AssistantID.String()}
-	completeWithModel(completeData, res.servedModel)
-	if res.usage != nil {
-		tokenUsage := map[string]int{
-			"input":  res.usage.PromptTokens,
-			"output": res.usage.CompletionTokens,
-		}
-		if res.usage.ReasoningTokens > 0 {
-			tokenUsage["reasoning"] = res.usage.ReasoningTokens
-		}
-		completeData["token_usage"] = tokenUsage
-	}
-	writeSSEEvent(w, flusher, "message_complete", completeData)
+	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
 
 func (h *MessageHandler) writeEditError(w http.ResponseWriter, err error) {

@@ -1478,15 +1478,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (RESUME_RETRY_DELAYS[attempt] > 0) {
           await abortableSleep(RESUME_RETRY_DELAYS[attempt], ctrl.signal);
         }
-        resetBubble();
+        // FIX41 — with a cursor the server sends only what was missed, so
+        // the bubble must be KEPT. Resetting it here (which is right when
+        // the whole prefix is about to be replayed) would erase text the
+        // server has no intention of sending again.
+        const cursor = streamCursorFor(convId);
+        const startingAfter = cursor?.seq ?? 0;
+        if (startingAfter === 0) resetBubble();
         let res: Response;
         try {
-          res = await api.openResumeStream(convId, messageId, ctrl.signal);
+          res = await api.openResumeStream(convId, messageId, ctrl.signal, startingAfter);
         } catch (err) {
           if ((err as Error).name === "AbortError") throw err;
           continue; // network refused — back off and retry
         }
-        if (res.status === 409) continue; // not attachable yet — retry
+        if (res.status === 409) {
+          // RESUME_TOO_OLD: the frames this page is missing have been
+          // dropped by the ledger. There is no honest way to continue —
+          // stitching the tail onto a stale prefix would show a hole as if
+          // it were the answer. Reload the message from the API instead.
+          if (await isResumeTooOld(res)) {
+            clearStreamCursor(convId);
+            await get().loadMessages(convId);
+            return;
+          }
+          continue; // not attachable yet — retry
+        }
         if (res.status === 404) {
           // Conversation/message gone (deleted elsewhere). Reload the
           // authoritative list instead of inventing a local state.
@@ -1501,9 +1518,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           continue; // dropped mid-resume — reattach again
         }
         // The server cut this subscriber loose for lagging — the
-        // generation itself is fine, so reattach fresh (the reset at
-        // the top of the next attempt clears the error card).
-        if (messageState()?.error_code === "RESUME_LAGGED") continue;
+        // generation itself is fine, so reattach fresh. The cursor is
+        // dropped with it: a lagged subscriber cannot know which frames it
+        // actually received, so the next attempt replays from the top.
+        if (messageState()?.error_code === "RESUME_LAGGED") {
+          clearStreamCursor(convId);
+          continue;
+        }
         return;
       }
       // Every attempt failed — surface the P1 error card.
@@ -1838,6 +1859,49 @@ export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
 // Edit / Regenerate come back) instead of the page needing a reload.
 export const STREAM_IDLE = { timeoutMs: 90_000, checkMs: 5_000, deadMs: 180_000 };
 
+// FIX41 — the stream cursor, per conversation (docs/STREAM_CONTRACT.md §9).
+//
+// It is deliberately NOT in the zustand state: nothing renders it, and
+// putting it there would re-render every subscriber on every delta. It
+// records the last frame the page actually RENDERED — the pair
+// (run_id, seq), because a seq from a previous generation says nothing
+// about this one. A reattach sends it as `starting_after`, so the server
+// replays only what was missed instead of the whole prefix.
+const streamCursors = new Map<string, { runId: string; seq: number }>();
+
+function noteFrame(convId: string, frame: { run_id?: string; seq?: number } | undefined) {
+  if (!frame || typeof frame.seq !== "number" || frame.seq <= 0) return;
+  const runId = typeof frame.run_id === "string" ? frame.run_id : "";
+  const cur = streamCursors.get(convId);
+  // A different run restarts the count. Comparing across runs is how a
+  // client silently drops an entire answer.
+  if (!cur || cur.runId !== runId) {
+    streamCursors.set(convId, { runId, seq: frame.seq });
+    return;
+  }
+  if (frame.seq > cur.seq) streamCursors.set(convId, { runId, seq: frame.seq });
+}
+
+/** Distinguish the two 409s the resume endpoint can return. RESUME_TOO_OLD
+ *  means "reload"; RESUME_UNAVAILABLE means "retry". Treating them the same
+ *  would either spin forever or quietly show a truncated answer. */
+async function isResumeTooOld(res: Response): Promise<boolean> {
+  try {
+    const body = (await res.clone().json()) as { error?: { code?: string } };
+    return body?.error?.code === "RESUME_TOO_OLD";
+  } catch {
+    return false;
+  }
+}
+
+/** Test seam + the resume path's read of the cursor. */
+export function streamCursorFor(convId: string): { runId: string; seq: number } | undefined {
+  return streamCursors.get(convId);
+}
+export function clearStreamCursor(convId: string): void {
+  streamCursors.delete(convId);
+}
+
 // Abortable sleep so a user Stop during the backoff window cancels the
 // resume loop immediately instead of after the timer.
 function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -2001,6 +2065,10 @@ async function consumeStream(
 
   try {
     for await (const evt of parseSSE(res, signal, onActivity)) {
+      // FIX41 — advance the cursor for every frame the page is about to
+      // act on. Recorded here, one line above the dispatch, so a new event
+      // type cannot be added without it.
+      noteFrame(convId, evt.data as { run_id?: string; seq?: number });
       if (evt.event === "message_start") {
         const data = evt.data as SSEMessageStart;
         realAssistantId = data.message_id;
@@ -2390,6 +2458,8 @@ async function consumeStream(
         // so the model's new version replaces what's on screen (the
         // store keeps unsaved user edits; see loadVersions).
         useCanvasStore.getState().refreshIfOpen();
+        // FIX41 — the run is over; its cursor cannot resume anything.
+        clearStreamCursor(convId);
       } else if (evt.event === "fallback_info") {
         // B2 — a fallback model answered. Stash the requested/actual
         // model pair on the message so MessageBubble can show a small
@@ -2511,6 +2581,22 @@ async function consumeStream(
             };
           });
         }
+      } else if (evt.event === "cancelled") {
+        // FIX41 — the run was stopped by a person (this tab, another tab,
+        // or the desktop host). Everything produced so far stands; the
+        // answer is simply partial. Before this event existed, a viewer
+        // that had not pressed Stop saw an internal-error frame followed
+        // by a success terminator and had no way to tell what happened.
+        if (rafHandle != null) {
+          cancelRaf(rafHandle);
+          rafHandle = null;
+        }
+        flush();
+        const data = evt.data as { message_id?: string };
+        const id = realAssistantId ?? tempAsstId;
+        swapMessageId(set, convId, id, data?.message_id);
+        finalizeMessage(set, get, convId, data?.message_id ?? id, "cancelled");
+        clearStreamCursor(convId);
       } else if (evt.event === "error") {
         // B1 — terminal stream error. Attach the code + localized
         // message + per-model attempts to the message so the bubble

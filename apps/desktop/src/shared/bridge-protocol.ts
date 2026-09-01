@@ -125,6 +125,12 @@ export interface ConsentRespondPayload {
 export interface UiReadyPayload {
   readonly conversationId: string | null;
   readonly lastSeq: number;
+  /** FIX41 — which run `lastSeq` counts. The page's cursor is
+   *  (runId, seq): a number from a previous generation says nothing about
+   *  this one, and the host replays from the start rather than trusting
+   *  it. Optional so a page that predates FIX41 still resumes exactly as
+   *  it did (the host treats a missing runId as "same run"). */
+  readonly runId: string | null;
 }
 export interface HostQueryPayload {
   readonly requestId: string;
@@ -208,14 +214,23 @@ export function validateConsentRespond(payload: unknown): Validated<ConsentRespo
 }
 
 export function validateUiReady(payload: unknown): Validated<UiReadyPayload> {
-  if (payload === undefined || payload === null) return { ok: true, value: { conversationId: null, lastSeq: 0 } };
+  if (payload === undefined || payload === null) return { ok: true, value: { conversationId: null, lastSeq: 0, runId: null } };
   if (typeof payload !== "object") return { ok: false, reason: "payload-not-object" };
   const p = payload as Record<string, unknown>;
   const conv = p["conversationId"];
   if (conv !== undefined && conv !== null && typeof conv !== "string") return { ok: false, reason: "conversationId-not-string" };
   const seq = p["lastSeq"];
   if (seq !== undefined && (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0)) return { ok: false, reason: "lastSeq-invalid" };
-  return { ok: true, value: { conversationId: typeof conv === "string" && conv ? conv : null, lastSeq: typeof seq === "number" ? seq : 0 } };
+  const runId = p["runId"];
+  if (runId !== undefined && runId !== null && typeof runId !== "string") return { ok: false, reason: "runId-not-string" };
+  return {
+    ok: true,
+    value: {
+      conversationId: typeof conv === "string" && conv ? conv : null,
+      lastSeq: typeof seq === "number" ? seq : 0,
+      runId: typeof runId === "string" && runId ? runId : null,
+    },
+  };
 }
 
 export function validateHostQuery(payload: unknown): Validated<HostQueryPayload> {

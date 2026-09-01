@@ -71,7 +71,18 @@ interface BufferedEvent {
 interface ConversationLog {
   seq: number;
   events: BufferedEvent[];
+  /** FIX41 — the id of the generation the buffered events belong to.
+   *  A conversation has many runs; a cursor that only knows `seq` cannot
+   *  tell one from the next, and once the ledger can come back from disk
+   *  (Part F) `seq` no longer even continues from the previous process. */
+  runId: string;
+  /** The terminal event this run already emitted, or null. */
+  terminal: string | null;
 }
+
+/** FIX41 — the three events that END a run (docs/STREAM_CONTRACT.md §3).
+ *  Exactly one of them is sent, and it is always the last frame. */
+const TERMINAL_TURN_EVENTS = new Set(["message_complete", "error", "cancelled"]);
 interface RunningTurn {
   controller: AbortController;
   done: Promise<void>;
@@ -301,9 +312,30 @@ export class TurnCoordinator {
     const controller = new AbortController();
     const messageId = "asst_" + randomUUID().replace(/-/g, "");
     const turn: RunningTurn = { controller, messageId, assistantText: "", done: Promise.resolve() };
-    turn.done = this.runTurn(payload, turn).finally(() => {
-      if (this.turns.get(payload.conversationId) === turn) this.turns.delete(payload.conversationId);
-    });
+    turn.done = this.runTurn(payload, turn)
+      .catch((err: unknown) => {
+        // FIX41 — runTurn was not wrapped. Anything that THREW rather than
+        // yielding an `error` frame (a gateway client throw, a tool
+        // executor bug, a rejected persist) left the page streaming
+        // forever: the promise rejected, the turn was deleted, and no
+        // terminal event was ever sent. However it ends, it says so.
+        this.log.error(`TURN THREW conv=${payload.conversationId}: ${(err as Error)?.message ?? String(err)}`);
+        if (this.turns.get(payload.conversationId) === turn) {
+          this.emitTerminalIfMissing(payload.conversationId, {
+            code: "host_exception",
+            message: "The turn ended unexpectedly. Nothing further was received.",
+          });
+        }
+      })
+      .finally(() => {
+        if (this.turns.get(payload.conversationId) === turn) {
+          this.emitTerminalIfMissing(payload.conversationId, {
+            code: "no_result",
+            message: "The turn ended without producing a result.",
+          });
+          this.turns.delete(payload.conversationId);
+        }
+      });
     this.turns.set(payload.conversationId, turn);
   }
 
@@ -343,11 +375,17 @@ export class TurnCoordinator {
     if (!payload.conversationId) return;
     const log = this.logs.get(payload.conversationId);
     if (log) {
-      const replay = log.events.filter((e) => e.seq > payload.lastSeq);
-      if (replay.length === 0) this.log.info(`RESUME conv=${payload.conversationId}: page at seq ${payload.lastSeq}, nothing to replay`);
+      // FIX41 — the page's cursor is (runId, seq). A cursor from a
+      // DIFFERENT run says nothing about this one, so it is treated as 0
+      // and the whole run replays; anything else would silently withhold
+      // the beginning of the current answer.
+      const sameRun = !payload.runId || payload.runId === log.runId;
+      const from = sameRun ? payload.lastSeq : 0;
+      const replay = log.events.filter((e) => e.seq > from);
+      if (replay.length === 0) this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: page at seq ${payload.lastSeq}, nothing to replay`);
       else {
-        this.log.info(`RESUME conv=${payload.conversationId}: replaying ${replay.length} event(s) from seq ${payload.lastSeq + 1} (page was at ${payload.lastSeq})`);
-        for (const e of replay) this.bridge.postTurnEvent(payload.conversationId, e.seq, e.event, e.data);
+        this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: replaying ${replay.length} event(s) from seq ${from + 1} (page was at ${payload.lastSeq}${sameRun ? "" : " of another run"})`);
+        for (const e of replay) this.bridge.postTurnEvent(payload.conversationId, e.seq, e.event, e.data, log.runId);
       }
     }
     for (const [id, p] of this.pendingConsents) {
@@ -835,13 +873,43 @@ export class TurnCoordinator {
   private emit(conversationId: string, event: string, data: unknown): number {
     let log = this.logs.get(conversationId);
     if (!log) {
-      log = { seq: 0, events: [] };
+      log = { seq: 0, events: [], runId: randomUUID(), terminal: null };
       this.logs.set(conversationId, log);
     }
     const seq = ++log.seq;
     log.events.push({ seq, event, data });
-    this.bridge.postTurnEvent(conversationId, seq, event, data);
+    this.bridge.postTurnEvent(conversationId, seq, event, data, log.runId);
+    if (TERMINAL_TURN_EVENTS.has(event)) log.terminal = event;
     return seq;
+  }
+
+  /** FIX41 — the backstop for "however it ends, it says so": if the run
+   *  for this conversation never emitted one of the three terminal events,
+   *  emit `error` now. Called from the turn's catch AND its finally, so a
+   *  throw, an early return, and a path nobody has written yet all end the
+   *  same way instead of leaving the page streaming forever.
+   *
+   *  No-op when the conversation has no run, when the run already ended,
+   *  or when it never emitted anything (nothing was ever opened). */
+  private emitTerminalIfMissing(conversationId: string, err: { code: string; message: string }): void {
+    const log = this.logs.get(conversationId);
+    if (!log || log.terminal || log.events.length === 0) return;
+    this.log.warn(`TURN had no terminal event conv=${conversationId} run=${log.runId} — emitting ${err.code}`);
+    this.emit(conversationId, "error", err);
+  }
+
+  /** FIX41 — start a new run for this conversation.
+   *
+   *  `seq` is deliberately carried FORWARD rather than reset. Two guards
+   *  keep a second turn's frames from being dropped by a page cursor left
+   *  over from the first (this one, and bridge.ts clearing the cursor on
+   *  submit); FIX41 adds the run id so correctness stops depending on
+   *  either of them holding. Only the replay buffer is cleared — it exists
+   *  to serve THIS run. */
+  private beginRun(conversationId: string): string {
+    const runId = randomUUID();
+    this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [], runId, terminal: null });
+    return runId;
   }
 
   // ── the turn ───────────────────────────────────────────────────────────────
@@ -856,7 +924,8 @@ export class TurnCoordinator {
       return;
     }
     const turnNo = ++this.turnCounter;
-    this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [] });
+    const runId = this.beginRun(conversationId);
+    this.log.info(`TURN RUN conv=${conversationId} run=${runId}`);
     this.emit(conversationId, "message_start", { message_id: turn.messageId, conversation_id: conversationId });
 
     let conversation: ConversationDto | null = null;
@@ -993,14 +1062,29 @@ export class TurnCoordinator {
     // turn's page-side meta line names the router's pick).
     const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}) };
 
-    if (outcome === "error") return;
+    // A turn that has been SUPERSEDED (the user sent again, which aborts the
+    // old one) must not write a terminal: the page has already moved on to
+    // the new run, and closing its sink would strand it. Found while adding
+    // `cancelled` — the same race existed before with message_complete, it
+    // was just less visible because the page treated it as a normal finish.
+    if (this.turns.get(conversationId) !== turn) {
+      this.log.info(`TURN SUPERSEDED conv=${conversationId} — no terminal from the old run`);
+      return;
+    }
+    if (outcome === "error") return; // runLoop already emitted the terminal `error`
     if (outcome === "cancelled") {
-      this.emit(conversationId, "message_complete", completeData);
+      // FIX41 — a person pressed Stop. Saying `message_complete` here made
+      // a stopped turn indistinguishable from a finished one for anything
+      // reading the stream rather than the button.
+      this.emit(conversationId, "cancelled", { ...completeData, partial: true });
       this.log.info(`TURN CANCELLED conv=${conversationId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
       return;
     }
     if (outcome === "paused") {
-      this.emit(conversationId, "message_complete", completeData);
+      // A limit, not a person and not a failure: the answer stands and can
+      // be continued. Still `message_complete`, but it says why it stopped
+      // instead of leaving that only in the prose.
+      this.emit(conversationId, "message_complete", { ...completeData, paused: true });
       this.log.info(`TURN PAUSED conv=${conversationId} after ${elapsed} ms`);
       return;
     }
@@ -1019,7 +1103,7 @@ export class TurnCoordinator {
     const { conversationId } = payload;
     const signal = turn.controller.signal;
     const editId = payload.editMessageId as string;
-    this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [] });
+    this.beginRun(conversationId);
     this.emit(conversationId, "message_start", { message_id: turn.messageId, conversation_id: conversationId });
     this.log.info(`TURN EDIT-FORK conv=${conversationId} editOf=${editId} textLen=${payload.text.length}`);
     const res = await this.chatEdge.editStream(conversationId, editId, payload.text, signal);

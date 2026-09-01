@@ -24,6 +24,8 @@ package service
 // and receives the full prefix again.
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +41,46 @@ const resumeRetainTTL = 60 * time.Second
 // resumeSubBuffer is the per-subscriber channel capacity. Overflow ⇒
 // the subscriber is closed with lagged=true (client retries fresh).
 const resumeSubBuffer = 1024
+
+// FIX41 — the run ledger.
+//
+// The snapshot above answers "what does the message look like right
+// now". It cannot answer "what did the client miss", because folding
+// throws the ORDER away: a run whose live stream was
+// content/tool/content/code/tool/content/code/content came back from a
+// resume as code/tool/content — eight frames as three, tool cards ahead
+// of all the text (docs/fix41/A-baseline.md, P1b). No replay code can
+// recover that; the information was never stored.
+//
+// So the entry also keeps the frames it actually sent, in order, each
+// with the seq it went out under. A resume replays THOSE — byte for
+// byte, original seq — and then follows new appends live. That is what
+// makes "no gaps, no duplicates" a property of the data rather than a
+// hope about two writers agreeing.
+//
+// What is stored is exactly what went on the wire, which has already
+// been through the gateway's DLP masking. chat-edge holds no rawer copy
+// than the client does.
+
+// LedgerEvent is one recorded wire frame.
+type LedgerEvent struct {
+	Seq   int64
+	Event string
+	// Data is the exact JSON payload that was written, already carrying
+	// run_id / seq / final_seq.
+	Data json.RawMessage
+}
+
+// ledgerDefaultTTL / ledgerDefaultMaxEvents are the fallbacks when the
+// deployment sets no bounds. Both are overridable per broker
+// (SetLedgerBounds) so docker-compose owns the real numbers.
+const (
+	ledgerDefaultTTL       = 600 * time.Second
+	ledgerDefaultMaxEvents = 20000
+)
+
+// frameSubBuffer is the per-frame-subscriber channel capacity.
+const frameSubBuffer = 4096
 
 // StreamSnapshot is the point-in-time prefix a reattaching client must
 // replay before consuming live events. Phase markers are sticky so a
@@ -112,6 +154,30 @@ type brokerEntry struct {
 	toolOrder []string
 	subs      map[int]*resumeSubscriber
 	nextSub   int
+
+	// FIX41 run ledger.
+	runID string
+	// seq is the last seq handed out for this run. message_start takes 1.
+	seq int64
+	// ledger holds the frames still available for replay, oldest first.
+	ledger []LedgerEvent
+	// oldestSeq is ledger[0].Seq, or 0 when the ledger is empty. Once the
+	// cap has dropped frames this is > 1, and a starting_after below it
+	// must be answered RESUME_TOO_OLD rather than silently under-served.
+	oldestSeq int64
+	// finalSeq / terminalEvent record how the run ended. finalSeq stays 0
+	// while the run is in flight.
+	finalSeq      int64
+	terminalEvent string
+	maxEvents     int
+
+	frameSubs    map[int]*frameSubscriber
+	nextFrameSub int
+}
+
+type frameSubscriber struct {
+	ch     chan LedgerEvent
+	lagged bool
 }
 
 func (e *brokerEntry) snapshotLocked() StreamSnapshot {
@@ -153,14 +219,67 @@ type StreamBroker struct {
 	// retainTTL / afterFunc are swappable for tests.
 	retainTTL time.Duration
 	afterFunc func(d time.Duration, f func()) *time.Timer
+	// FIX41 — how long a finished run stays resumable, and how many
+	// frames one run may keep. Set from config; see SetLedgerBounds.
+	ledgerTTL       time.Duration
+	ledgerMaxEvents int
 }
 
 func NewStreamBroker() *StreamBroker {
 	return &StreamBroker{
-		entries:   make(map[uuid.UUID]*brokerEntry),
-		retainTTL: resumeRetainTTL,
-		afterFunc: time.AfterFunc,
+		entries:         make(map[uuid.UUID]*brokerEntry),
+		retainTTL:       resumeRetainTTL,
+		afterFunc:       time.AfterFunc,
+		ledgerTTL:       ledgerDefaultTTL,
+		ledgerMaxEvents: ledgerDefaultMaxEvents,
 	}
+}
+
+// SetLedgerBounds applies the deployment's ledger TTL / cap. Zero or
+// negative values keep the current setting, so a half-configured
+// environment degrades to the defaults instead of to "keep nothing".
+//
+// The TTL is how long a FINISHED run stays replayable. It also becomes
+// the entry-retention TTL, replacing the 60 s that only ever had to
+// cover a reattach racing the finish-persist: once a resume can ask for
+// "everything after seq N", the entry has to outlive the tab that went
+// away, not just the request that raced it.
+func (b *StreamBroker) SetLedgerBounds(ttl time.Duration, maxEvents int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if ttl > 0 {
+		b.ledgerTTL = ttl
+		b.retainTTL = ttl
+	}
+	if maxEvents > 0 {
+		b.ledgerMaxEvents = maxEvents
+	}
+}
+
+// OpenRun creates (or returns) the broker entry for a run so frames can
+// be recorded against it BEFORE the pump exists.
+//
+// This is load-bearing for the FIX33 early-open path: when the context
+// compiler is about to spend seconds summarising, the handler opens the
+// SSE response and writes message_start + compaction_status immediately —
+// which is before SendStream has reached teeStream. Without this those
+// first frames would fall outside the ledger, and the run's seq would
+// restart at 1 once the pump registered, handing the client two frames
+// numbered 1. An entry whose runID already matches is reused untouched.
+func (b *StreamBroker) OpenRun(msgID uuid.UUID, runID string) *brokerEntry {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if e, ok := b.entries[msgID]; ok && (runID == "" || e.runID == runID) {
+		return e
+	}
+	e := &brokerEntry{
+		subs:      make(map[int]*resumeSubscriber),
+		frameSubs: make(map[int]*frameSubscriber),
+		runID:     runID,
+		maxEvents: b.ledgerMaxEvents,
+	}
+	b.entries[msgID] = e
+	return e
 }
 
 // Tee registers msgID and returns a channel that mirrors “in“.
@@ -168,10 +287,15 @@ func NewStreamBroker() *StreamBroker {
 // drains — same buffering behaviour as the raw pump channel. The
 // mirror goroutine owns the entry lifecycle.
 func (b *StreamBroker) Tee(msgID uuid.UUID, in <-chan StreamUpdate) <-chan StreamUpdate {
-	e := &brokerEntry{subs: make(map[int]*resumeSubscriber)}
-	b.mu.Lock()
-	b.entries[msgID] = e
-	b.mu.Unlock()
+	return b.TeeRun(msgID, "", in)
+}
+
+// TeeRun is Tee with the run's id attached (FIX41). Every frame the
+// handler records against msgID is stamped with this run_id, and a
+// resume reports it so a client can tell one generation from the next
+// (a regenerate of the same message is a different run).
+func (b *StreamBroker) TeeRun(msgID uuid.UUID, runID string, in <-chan StreamUpdate) <-chan StreamUpdate {
+	e := b.OpenRun(msgID, runID)
 
 	out := make(chan StreamUpdate, 16)
 	go func() {
@@ -354,5 +478,227 @@ func (b *StreamBroker) drop(msgID uuid.UUID) {
 		close(sub.ch)
 		delete(e.subs, id)
 	}
+	// FIX41 — same for frame subscribers. A resume viewer attached to a
+	// run whose handler died without recording a terminal would otherwise
+	// wait forever; the TTL drop is its backstop.
+	for id, sub := range e.frameSubs {
+		close(sub.ch)
+		delete(e.frameSubs, id)
+	}
 	e.mu.Unlock()
+}
+
+// ---------------------------------------------------------------------------
+// FIX41 — the run ledger
+// ---------------------------------------------------------------------------
+
+// terminalFrames are the three event names that end a run. Recording one
+// closes the run: its seq becomes final_seq and every attached frame
+// subscriber is released.
+var terminalFrames = map[string]bool{
+	"message_complete": true,
+	"error":            true,
+	"cancelled":        true,
+}
+
+// Record assigns the next seq for the run, hands it to ``build`` (which
+// must return the exact bytes going out on the wire), stores the result
+// and fans it out to every attached frame subscriber.
+//
+// Only the PRIMARY writer calls this. A resume stream replays what is
+// already here; if it recorded too, the same event would land twice under
+// two different numbers and the "gapless, no duplicates" guarantee would
+// be a lie told by whichever writer got there first.
+//
+// Returns ok=false when the broker doesn't know msgID (nil broker,
+// direct-constructed test service, or an entry already dropped). The
+// caller then writes the frame without a seq, which is exactly the
+// pre-FIX41 behaviour.
+func (b *StreamBroker) Record(
+	msgID uuid.UUID, event string, build func(seq, finalSeq int64) []byte,
+) (int64, bool) {
+	b.mu.Lock()
+	e, ok := b.entries[msgID]
+	b.mu.Unlock()
+	if !ok {
+		return 0, false
+	}
+
+	e.mu.Lock()
+	e.seq++
+	seq := e.seq
+	final := int64(0)
+	if terminalFrames[event] {
+		final = seq
+	}
+	data := build(seq, final)
+	le := LedgerEvent{Seq: seq, Event: event, Data: append(json.RawMessage(nil), data...)}
+	e.ledger = append(e.ledger, le)
+	if e.oldestSeq == 0 {
+		e.oldestSeq = seq
+	}
+	// Cap: drop the OLDEST frames, never refuse to record a new one. A
+	// reattaching client needs the live tail more than it needs the
+	// beginning, and a starting_after that points into the dropped region
+	// is answered RESUME_TOO_OLD rather than silently under-served.
+	if e.maxEvents > 0 && len(e.ledger) > e.maxEvents {
+		drop := len(e.ledger) - e.maxEvents
+		e.ledger = e.ledger[drop:]
+		e.oldestSeq = e.ledger[0].Seq
+	}
+	if final != 0 {
+		e.finalSeq = seq
+		e.terminalEvent = event
+	}
+	for id, sub := range e.frameSubs {
+		select {
+		case sub.ch <- le:
+		default:
+			sub.lagged = true
+			close(sub.ch)
+			delete(e.frameSubs, id)
+			continue
+		}
+		if final != 0 {
+			close(sub.ch)
+			delete(e.frameSubs, id)
+		}
+	}
+	e.mu.Unlock()
+	return seq, true
+}
+
+// RunID reports the run id registered for msgID.
+func (b *StreamBroker) RunID(msgID uuid.UUID) string {
+	b.mu.Lock()
+	e, ok := b.entries[msgID]
+	b.mu.Unlock()
+	if !ok {
+		return ""
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.runID
+}
+
+// FrameAttachment is what a resume needs to serve a client from the
+// ledger: the frames it missed, then the ones still to come.
+type FrameAttachment struct {
+	RunID string
+	// Replay are the recorded frames with Seq > startingAfter, oldest
+	// first. Written verbatim.
+	Replay []LedgerEvent
+	// Live is nil when the run already ended (Replay then contains its
+	// terminal). Otherwise it closes when the terminal is recorded.
+	Live <-chan LedgerEvent
+	// Cancel unsubscribes. Idempotent; MUST be called.
+	Cancel func()
+	// Lagged reports (after Live closes) that this subscriber fell behind
+	// and was cut loose, so the client must reattach rather than believe
+	// the run ended.
+	Lagged func() bool
+	// FinalSeq is the run's terminal seq, or 0 while it is in flight.
+	FinalSeq int64
+}
+
+// ErrLedgerTooOld — startingAfter points at frames the cap or the TTL
+// already dropped. The caller must answer 409 RESUME_TOO_OLD; pretending
+// the run is complete would show the user a truncated answer as if it
+// were the whole one.
+var ErrLedgerTooOld = errors.New("resume: requested position is older than the ledger")
+
+// SubscribeFrames attaches to a run's ledger. Replay + registration
+// happen under one lock, so no frame can slip between "what you missed"
+// and "what comes next" — and none can arrive twice.
+//
+// ok=false ⇒ the broker doesn't know msgID; the caller falls back to the
+// persisted row.
+func (b *StreamBroker) SubscribeFrames(
+	msgID uuid.UUID, startingAfter int64,
+) (*FrameAttachment, error, bool) {
+	b.mu.Lock()
+	e, found := b.entries[msgID]
+	b.mu.Unlock()
+	if !found {
+		return nil, nil, false
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// Nothing recorded yet: the handler registered the run but has not
+	// written message_start. Treat as not-attachable so the client
+	// retries rather than receiving an empty "complete".
+	if len(e.ledger) == 0 && e.finalSeq == 0 {
+		return nil, nil, false
+	}
+	// A gap between what the client has and what survives is a hole the
+	// client cannot see. Say so.
+	if startingAfter > 0 && e.oldestSeq > startingAfter+1 {
+		return nil, ErrLedgerTooOld, true
+	}
+
+	var replay []LedgerEvent
+	for _, le := range e.ledger {
+		if le.Seq > startingAfter {
+			replay = append(replay, le)
+		}
+	}
+
+	att := &FrameAttachment{
+		RunID:    e.runID,
+		Replay:   replay,
+		FinalSeq: e.finalSeq,
+		Cancel:   func() {},
+		Lagged:   func() bool { return false },
+	}
+	if e.finalSeq != 0 {
+		// Already ended — the terminal is inside Replay.
+		return att, nil, true
+	}
+
+	sub := &frameSubscriber{ch: make(chan LedgerEvent, frameSubBuffer)}
+	id := e.nextFrameSub
+	e.nextFrameSub++
+	e.frameSubs[id] = sub
+	att.Live = sub.ch
+	att.Cancel = func() {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if s, still := e.frameSubs[id]; still {
+			close(s.ch)
+			delete(e.frameSubs, id)
+		}
+	}
+	att.Lagged = func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return sub.lagged
+	}
+	return att, nil, true
+}
+
+// LedgerLen / FrameSubscriberCount are test hooks.
+func (b *StreamBroker) LedgerLen(msgID uuid.UUID) int {
+	b.mu.Lock()
+	e, ok := b.entries[msgID]
+	b.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.ledger)
+}
+
+func (b *StreamBroker) FrameSubscriberCount(msgID uuid.UUID) int {
+	b.mu.Lock()
+	e, ok := b.entries[msgID]
+	b.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.frameSubs)
 }

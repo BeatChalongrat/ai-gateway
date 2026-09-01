@@ -221,6 +221,10 @@ describe("stream idle watchdog", () => {
       "c1",
       "srv-1",
       expect.anything(),
+      // FIX41 — the resume carries the client's cursor. This stream's
+      // frames carry no seq, so there is nothing to continue from and the
+      // whole run is replayed, exactly as before FIX41.
+      0,
     );
 
     resumed.push(frame("message_complete", { message_id: "srv-1" }));

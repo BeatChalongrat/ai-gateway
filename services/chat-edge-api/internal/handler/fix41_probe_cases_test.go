@@ -256,6 +256,11 @@ func TestFix41ProbeP1b_ToolEventOrderThroughResume(t *testing.T) {
 	notes := []string{
 		"live order:   " + liveOrder,
 		"resume order: " + resumeOrder,
+		"NOTE (after FIX41): this probe drives writeResumeSnapshot, which is",
+		"now only the FALLBACK for an entry that recorded no frames. The path",
+		"a resume actually takes is the run ledger — measured by P1c. This",
+		"probe is kept, and kept failing, because it is the evidence that a",
+		"folded snapshot cannot reproduce an order it never stored.",
 	}
 	if liveOrder != resumeOrder {
 		verdict = "FAIL"
@@ -523,4 +528,148 @@ func TestFix41ProbeP4_ProviderErrorMidStream(t *testing.T) {
 			"has_seq":         anyHasSeq(fs),
 		},
 	})
+}
+
+// ---------------------------------------------------------------------------
+// P1c — the same question as P1b, asked of the path a resume ACTUALLY takes
+//        after FIX41: the run ledger.
+//
+// P1b stays as it is and keeps failing, because it measures
+// writeResumeSnapshot, which after FIX41 is only the fallback for an entry
+// that recorded nothing. Deleting it would erase the evidence that the
+// folded snapshot cannot reproduce an order it never stored; rewriting it
+// would be moving the goalposts. So the new path gets its own probe, and
+// the report shows both.
+//
+// P1c cannot be run against the pre-FIX41 build: there was no ledger to
+// measure. That is stated rather than presented as an improved number.
+// ---------------------------------------------------------------------------
+
+func TestFix41ProbeP1c_ToolEventOrderThroughLedger(t *testing.T) {
+	probeEnabled(t)
+
+	broker := service.NewStreamBroker()
+	msgID := uuid.New()
+	runID := "probe-run-p1c"
+	broker.OpenRun(msgID, runID)
+
+	live := &capWriter{}
+	rw := newRunWriter(live, runID, func(event string, build func(seq, final int64) []byte) (int64, bool) {
+		return broker.Record(msgID, event, build)
+	})
+	rw.started = true
+
+	// The same interleaving P1b uses, written the way the primary stream
+	// writes it: through writeSSEEvent, which is the only place frames are
+	// numbered and recorded.
+	writeSSEEvent(rw, live, "message_start", map[string]any{"message_id": msgID.String()})
+	writeSSEEvent(rw, live, "content_delta", map[string]any{"delta": "before "})
+	writeSSEEvent(rw, live, "tool_activity", &service.ToolActivityUpdate{ID: "t1", Tool: "web_fetch", Phase: "started"})
+	writeSSEEvent(rw, live, "content_delta", map[string]any{"delta": "during "})
+	writeSSEEvent(rw, live, "code_execution", &service.CodeExecutionUpdate{ID: "c1", Status: "running", Code: "print(1)"})
+	writeSSEEvent(rw, live, "tool_activity", &service.ToolActivityUpdate{ID: "t1", Tool: "web_fetch", Phase: "finished"})
+	writeSSEEvent(rw, live, "content_delta", map[string]any{"delta": "after "})
+	writeSSEEvent(rw, live, "code_execution", &service.CodeExecutionUpdate{ID: "c1", Status: "completed", Stdout: "1"})
+	writeSSEEvent(rw, live, "content_delta", map[string]any{"delta": "end"})
+	writeSSEEvent(rw, live, "message_complete", map[string]any{"message_id": msgID.String()})
+
+	liveFrames := parseFrames(live.body())
+
+	// A client that reattaches after all of that, with no cursor.
+	fa, ferr, ok := broker.SubscribeFrames(msgID, 0)
+	if !ok || ferr != nil {
+		t.Fatalf("SubscribeFrames ok=%v err=%v", ok, ferr)
+	}
+	defer fa.Cancel()
+	rep := &capWriter{}
+	rrw := newReplayWriter(rep, fa.RunID)
+	rrw.started = true
+	for _, le := range fa.Replay {
+		rrw.writeRecorded(rep, le.Event, le.Data)
+	}
+	resumeFrames := parseFrames(rep.body())
+
+	// And a client that already had the first four frames.
+	faCursor, ferr2, ok2 := broker.SubscribeFrames(msgID, 4)
+	if !ok2 || ferr2 != nil {
+		t.Fatalf("SubscribeFrames(4) ok=%v err=%v", ok2, ferr2)
+	}
+	defer faCursor.Cancel()
+	cur := &capWriter{}
+	crw := newReplayWriter(cur, faCursor.RunID)
+	crw.started = true
+	for _, le := range faCursor.Replay {
+		crw.writeRecorded(cur, le.Event, le.Data)
+	}
+	cursorFrames := parseFrames(cur.body())
+
+	liveOrder := strings.Join(eventNames(liveFrames), ",")
+	resumeOrder := strings.Join(eventNames(resumeFrames), ",")
+
+	// seq must be 1..N with no gap and no repeat, and identical between
+	// the live stream and its replay.
+	seqOK := len(liveFrames) > 0 && len(liveFrames) == len(resumeFrames)
+	for i := range liveFrames {
+		if liveFrames[i].Seq != int64(i+1) {
+			seqOK = false
+			break
+		}
+		if i < len(resumeFrames) && (resumeFrames[i].Seq != liveFrames[i].Seq || resumeFrames[i].RunID != liveFrames[i].RunID) {
+			seqOK = false
+			break
+		}
+	}
+	cursorSeqOK := true
+	for i, f := range cursorFrames {
+		if f.Seq != int64(i+5) {
+			cursorSeqOK = false
+			break
+		}
+	}
+
+	verdict := "PASS"
+	notes := []string{
+		"live order:   " + liveOrder,
+		"resume order: " + resumeOrder,
+		fmt.Sprintf("starting_after=4 replayed %d frames, first seq %d", len(cursorFrames), firstSeq(cursorFrames)),
+	}
+	if liveOrder != resumeOrder {
+		verdict = "FAIL"
+		notes = append(notes, "the ledger replay does NOT reproduce the live event order")
+	}
+	if !seqOK {
+		verdict = "FAIL"
+		notes = append(notes, "seq/run_id are not identical between the live stream and its replay")
+	}
+	if !cursorSeqOK {
+		verdict = "FAIL"
+		notes = append(notes, "starting_after=4 did not resume at seq 5")
+	}
+	record(probeResult{
+		Probe:    "P1c-tool-event-order-ledger",
+		Question: "through the run ledger (the path a resume takes after FIX41): do tool_activity / code_execution come back in position, with their original seq?",
+		Verdict:  verdict,
+		Notes:    notes,
+		Streams: map[string][]probeFrame{
+			"live": liveFrames, "resume_full": resumeFrames, "resume_after_4": cursorFrames,
+		},
+		Metrics: map[string]any{
+			"live_order":            liveOrder,
+			"resume_order":          resumeOrder,
+			"orders_match":          liveOrder == resumeOrder,
+			"seq_identical":         seqOK,
+			"cursor_resumes_at_5":   cursorSeqOK,
+			"live_frames":           len(liveFrames),
+			"resume_frames":         len(resumeFrames),
+			"resume_after_4_frames": len(cursorFrames),
+			"run_id":                fa.RunID,
+		},
+	})
+}
+
+func firstSeq(fs []probeFrame) int64 {
+	if len(fs) == 0 {
+		return 0
+	}
+	return fs[0].Seq
 }

@@ -1,0 +1,195 @@
+{
+  "probe": "P3-web-cancel",
+  "question": "press Stop mid-stream: how does a client learn it was cancelled rather than disconnected?",
+  "verdict": "PASS",
+  "notes": [
+    "cancel #1 → 200 {\"cancelled\":true}",
+    "cancel #2 → 200 {\"cancelled\":false}",
+    "attached viewer's last frame: cancelled",
+    "primary stream's last frame:  cancelled"
+  ],
+  "streams": {
+    "attached_viewer": [
+      {
+        "event": "message_start",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 1,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 1,
+          "conversation_id": "f6bcb1f9-b744-4e28-a9b3-65148cf055a4",
+          "message_id": "23852f72-1c80-4a78-9c4d-aa783446a2ca",
+          "user_message_id": "d50fc267-b09e-4550-a23f-f4ad801ce6be"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 2,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 3,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 4,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 5,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 6,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 7,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "cancelled",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 8,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 8,
+          "final_seq": 8,
+          "message_id": "23852f72-1c80-4a78-9c4d-aa783446a2ca",
+          "model_id": "probe-model-1",
+          "partial": true
+        }
+      }
+    ],
+    "primary": [
+      {
+        "event": "message_start",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 1,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 1,
+          "conversation_id": "f6bcb1f9-b744-4e28-a9b3-65148cf055a4",
+          "message_id": "23852f72-1c80-4a78-9c4d-aa783446a2ca",
+          "user_message_id": "d50fc267-b09e-4550-a23f-f4ad801ce6be"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 2,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 3,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 4,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 5,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 6,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 7,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "cancelled",
+        "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+        "seq": 8,
+        "data": {
+          "run_id": "ede6d128-dacb-4c9f-9abc-4f2894690314",
+          "seq": 8,
+          "final_seq": 8,
+          "message_id": "23852f72-1c80-4a78-9c4d-aa783446a2ca",
+          "model_id": "probe-model-1",
+          "partial": true
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "cancel_1_body": "{\"cancelled\":true}",
+    "cancel_1_status": 200,
+    "cancel_2_body": "{\"cancelled\":false}",
+    "cancel_2_status": 200,
+    "primary_terminal_event": "cancelled",
+    "viewer_terminal_event": "cancelled"
+  }
+}

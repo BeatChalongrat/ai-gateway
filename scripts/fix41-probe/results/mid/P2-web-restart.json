@@ -1,0 +1,92 @@
+{
+  "probe": "P2-web-restart",
+  "question": "restart chat-edge-api mid-stream, then resume: does the client get its generation back?",
+  "verdict": "FAIL",
+  "notes": [
+    "resume HTTP status after restart: 409",
+    "resume was REFUSED after the restart: {\"error\":{\"code\":\"RESUME_UNAVAILABLE\",\"message\":\"generation not attachable yet\"}}"
+  ],
+  "streams": {
+    "live_prefix": [
+      {
+        "event": "message_start",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 1,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 1,
+          "conversation_id": "f88022ae-6f26-47c4-923d-fd45308f3338",
+          "message_id": "3e8a3f66-75dd-4ba5-ac88-54adace5d1dd",
+          "user_message_id": "1a9e9dbe-2f21-4643-b7f4-0ae16d6ef60e"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 2,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 3,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 4,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 5,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 6,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+        "seq": 7,
+        "data": {
+          "run_id": "82f0819a-07c8-4a97-8cdb-f3afa11315b9",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      }
+    ],
+    "resume_after_restart": null
+  },
+  "metrics": {
+    "resume_body": "{\"error\":{\"code\":\"RESUME_UNAVAILABLE\",\"message\":\"generation not attachable yet\"}}\n",
+    "resume_http_status": 409,
+    "resume_text": "",
+    "terminal_event": ""
+  }
+}

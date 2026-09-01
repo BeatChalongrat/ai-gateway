@@ -184,7 +184,7 @@ func TestResumeAttach_LiveBrokerWinsOverRowStatus(t *testing.T) {
 	// through it — ResumeAttach must return the live channel even
 	// though the DB row still says "streaming".
 	in := make(chan StreamUpdate)
-	out := svc.teeStream(msgID, in)
+	out, _ := svc.teeStream(msgID, "", in)
 	go func() {
 		for range out {
 			// primary consumer stand-in

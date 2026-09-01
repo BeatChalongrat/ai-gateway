@@ -230,8 +230,11 @@ export class BridgeChannel {
     if (!wc || wc.isDestroyed()) return;
     wc.send(IPC_CHANNELS.outbound, { type, payload });
   }
-  postTurnEvent(conversationId: string, seq: number, event: string, data: unknown): void {
-    this.post("turn.event", { conversationId, seq, event, data });
+  postTurnEvent(conversationId: string, seq: number, event: string, data: unknown, runId?: string): void {
+    // FIX41 — runId rides on the ENVELOPE beside seq, where the page
+    // already reads seq from. Putting it in `data` instead would mean
+    // every event payload gained a field the renderer has to ignore.
+    this.post("turn.event", { conversationId, runId, seq, event, data });
   }
   postHostError(code: string, message: string): void {
     this.post("host.error", { code, message });

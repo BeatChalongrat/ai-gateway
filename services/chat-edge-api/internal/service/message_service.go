@@ -305,11 +305,42 @@ func NewMessageService(
 // teeStream mirrors the pump channel into the resume broker keyed by
 // the assistant message id. Nil broker (direct-constructed tests) ⇒
 // pass-through unchanged.
-func (s *MessageService) teeStream(msgID uuid.UUID, ch chan StreamUpdate) <-chan StreamUpdate {
+func (s *MessageService) teeStream(msgID uuid.UUID, runID string, ch chan StreamUpdate) (<-chan StreamUpdate, string) {
 	if s.broker == nil {
-		return ch
+		return ch, runID
 	}
-	return s.broker.Tee(msgID, ch)
+	// FIX41 — every generation gets an id of its own. Not the message id:
+	// a regenerate reuses neither the row nor the client's cursor, and a
+	// client that cannot tell one run from the next will happily drop the
+	// new run's frames for failing to advance the old run's seq.
+	if runID == "" {
+		runID = uuid.NewString()
+	}
+	return s.broker.TeeRun(msgID, runID, ch), runID
+}
+
+// OpenRun lets the handler register a generation with the resume broker
+// before the pump exists, so frames written during the early-open pause
+// are numbered by the same counter as the rest of the run.
+func (s *MessageService) OpenRun(msgID uuid.UUID, runID string) {
+	if s.broker == nil {
+		return
+	}
+	s.broker.OpenRun(msgID, runID)
+}
+
+// RecordFrame stamps one outgoing SSE frame into the run's ledger and
+// returns its seq. ``build`` receives the assigned seq plus final_seq
+// (non-zero only for a terminal frame) and must return the exact bytes
+// the writer is about to send — the ledger and the wire must never
+// disagree, because a resume replays the ledger verbatim.
+func (s *MessageService) RecordFrame(
+	msgID uuid.UUID, event string, build func(seq, finalSeq int64) []byte,
+) (int64, bool) {
+	if s.broker == nil {
+		return 0, false
+	}
+	return s.broker.Record(msgID, event, build)
 }
 
 func (s *MessageService) SetImageGenerationTimeout(timeout time.Duration) {
@@ -860,6 +891,11 @@ type SendInput struct {
 	// can open the response and show "organising the conversation…"
 	// during the pause instead of nothing. Nil on non-stream sends.
 	OnCompactionStart func(assistantID, userMessageID uuid.UUID)
+	// RunID (FIX41) — the id the HANDLER already minted for this
+	// generation. The handler needs it before SendStream returns, because
+	// the OnCompactionStart early-open writes frames first; passing it in
+	// keeps one run id across both. Empty ⇒ the service mints one.
+	RunID string
 }
 
 // SendResult is what the non-stream handler returns to the client.
@@ -997,10 +1033,28 @@ type StreamHandle struct {
 	UserMessage    *model.Message
 	AssistantID    uuid.UUID // pre-allocated; sent on message_start
 	ConversationID uuid.UUID
+	// RunID (FIX41) identifies THIS generation. Announced on
+	// message_start and repeated on every frame, including replays.
+	RunID string
 
 	Events <-chan StreamUpdate
 	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage)
 	cancel func()
+	// cancelled (FIX41) reports whether POST /cancel fired for this run.
+	// The handler needs it to pick the right terminal event: a person
+	// pressing Stop must not be reported to the other viewers of the same
+	// generation as a crash, and then as a success (docs/fix41 P3).
+	cancelled func() bool
+}
+
+// UserCancelled reports whether this generation was stopped by a person
+// rather than by an error or by finishing. Safe on a handle whose path
+// has no cancel registration (returns false).
+func (h *StreamHandle) UserCancelled() bool {
+	if h.cancelled == nil {
+		return false
+	}
+	return h.cancelled()
 }
 
 // StreamUpdate is the per-event surface — one delta plus optional
@@ -1402,13 +1456,16 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		s.persistSources(persistCtx, asstMsg.ID, in.UserID, in.TenantID, conv.ID, sourcesAcc)
 	}
 
+	events, runID := s.teeStream(asstMsg.ID, in.RunID, ch)
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         s.teeStream(asstMsg.ID, ch),
+		RunID:          runID,
+		Events:         events,
 		finish:         finish,
 		cancel:         cancel,
+		cancelled:      reg.isUserCancelled,
 	}, nil
 }
 
@@ -1661,13 +1718,16 @@ func (s *MessageService) openAssistantStream(
 		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
+	events, runID := s.teeStream(asstMsg.ID, "", ch)
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         s.teeStream(asstMsg.ID, ch),
+		RunID:          runID,
+		Events:         events,
 		finish:         finish,
 		cancel:         cancel,
+		cancelled:      reg.isUserCancelled,
 	}, nil
 }
 
@@ -1915,13 +1975,16 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
+	events, runID := s.teeStream(asstMsg.ID, "", ch)
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         s.teeStream(asstMsg.ID, ch),
+		RunID:          runID,
+		Events:         events,
 		finish:         finish,
 		cancel:         cancel,
+		cancelled:      reg.isUserCancelled,
 	}, nil
 }
 
@@ -3890,13 +3953,16 @@ func (s *MessageService) directImageStream(
 		final.Status = status
 		s.finalizeConversation(persistCtx, conv, userMsg, &final)
 	}
+	events, runID := s.teeStream(asstMsg.ID, "", ch)
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         s.teeStream(asstMsg.ID, ch),
+		RunID:          runID,
+		Events:         events,
 		finish:         finish,
 		cancel:         cancel,
+		cancelled:      reg.isUserCancelled,
 	}
 }
 
@@ -4205,11 +4271,13 @@ func (s *MessageService) rejectImageStream(
 		final.Status = "completed"
 		s.finalizeConversation(persistCtx, conv, userMsg, &final)
 	}
+	events, runID := s.teeStream(asstMsg.ID, "", ch)
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
 		ConversationID: conv.ID,
-		Events:         s.teeStream(asstMsg.ID, ch),
+		RunID:          runID,
+		Events:         events,
 		finish:         finish,
 		cancel:         cancel,
 	}

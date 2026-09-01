@@ -116,10 +116,18 @@ describe("turn.submit: handles are opaque, never paths", () => {
     expect(validateTurnSubmit({ ...base, editMessageId: "x".repeat(129) })).toMatchObject({ ok: false, reason: "editMessageId-too-long" });
   });
   it("ui.ready: lastSeq must be a non-negative integer", () => {
-    expect(validateUiReady({ conversationId: "c", lastSeq: 42 })).toEqual({ ok: true, value: { conversationId: "c", lastSeq: 42 } });
-    expect(validateUiReady({})).toEqual({ ok: true, value: { conversationId: null, lastSeq: 0 } });
+    expect(validateUiReady({ conversationId: "c", lastSeq: 42 })).toEqual({ ok: true, value: { conversationId: "c", lastSeq: 42, runId: null } });
+    expect(validateUiReady({})).toEqual({ ok: true, value: { conversationId: null, lastSeq: 0, runId: null } });
     expect(validateUiReady({ lastSeq: -1 })).toMatchObject({ ok: false });
     expect(validateUiReady({ lastSeq: 1.5 })).toMatchObject({ ok: false });
+  });
+  // FIX41 — the cursor is (runId, seq). runId is optional so a page that
+  // predates FIX41 still validates, and non-strings are refused rather than
+  // trusted into the replay decision.
+  it("ui.ready: runId is optional, must be a string when present", () => {
+    expect(validateUiReady({ conversationId: "c", lastSeq: 4, runId: "r1" })).toEqual({ ok: true, value: { conversationId: "c", lastSeq: 4, runId: "r1" } });
+    expect(validateUiReady({ lastSeq: 4, runId: 7 })).toMatchObject({ ok: false, reason: "runId-not-string" });
+    expect(validateUiReady({ lastSeq: 4, runId: "" })).toEqual({ ok: true, value: { conversationId: null, lastSeq: 4, runId: null } });
   });
 });
 

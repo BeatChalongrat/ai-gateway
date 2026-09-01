@@ -38,6 +38,13 @@ var ErrResumeUnavailable = errors.New("resume: generation not attachable yet")
 // streaming row was orphaned by a restart (or persisted as error).
 var ErrGenerationInterrupted = errors.New("generation interrupted")
 
+// ErrResumeTooOld — the client asked to continue from a position the
+// ledger no longer holds (trimmed by the cap or the TTL). The handler
+// maps this to 409 RESUME_TOO_OLD so the client reloads the message from
+// the API. It must NEVER be reported as a completed stream: the user
+// would be shown a truncated answer as if it were the whole one.
+var ErrResumeTooOld = errors.New("resume: position older than the ledger")
+
 // resumeOrphanGrace: a streaming row younger than this with no broker
 // entry is treated as "not registered yet", not orphaned. The broker
 // entry is registered in the same request that inserts the row, so in
@@ -49,7 +56,16 @@ const resumeOrphanGrace = 10 * time.Second
 // SSE response. Events == nil ⇒ the generation already ended and
 // Snapshot.Terminal carries the terminal state (full replay).
 type ResumeAttachment struct {
-	Message  *model.Message
+	Message *model.Message
+	// Frames (FIX41) is the preferred path: the run's recorded wire
+	// frames, replayed verbatim with their original seq, then the live
+	// tail. Non-nil whenever the broker still holds the run.
+	//
+	// When it is set, Snapshot/Events are unused — deriving frames a
+	// second time from StreamUpdate would renumber them, and two writers
+	// numbering the same run independently is exactly the gap-and-
+	// duplicate problem this replaces.
+	Frames   *FrameAttachment
 	Snapshot StreamSnapshot
 	Events   <-chan StreamUpdate
 	// Cancel unsubscribes from the broker (idempotent, never nil).
@@ -63,6 +79,16 @@ type ResumeAttachment struct {
 
 func (s *MessageService) ResumeAttach(
 	ctx context.Context, tenantID, userID, convID, msgID uuid.UUID,
+) (*ResumeAttachment, error) {
+	return s.ResumeAttachFrom(ctx, tenantID, userID, convID, msgID, 0)
+}
+
+// ResumeAttachFrom is ResumeAttach with a cursor: only frames with
+// seq > startingAfter are replayed (FIX41 / STREAM_CONTRACT §4).
+// startingAfter == 0 replays the whole run, which is the pre-FIX41
+// behaviour and what a client that sends no cursor gets.
+func (s *MessageService) ResumeAttachFrom(
+	ctx context.Context, tenantID, userID, convID, msgID uuid.UUID, startingAfter int64,
 ) (*ResumeAttachment, error) {
 	if err := s.AssertConversationAccess(ctx, tenantID, userID, convID); err != nil {
 		return nil, err
@@ -82,6 +108,23 @@ func (s *MessageService) ResumeAttach(
 	}
 
 	if s.broker != nil {
+		// FIX41 — the ledger first. It is the only source that can say
+		// what order the client missed things in.
+		fa, ferr, ok := s.broker.SubscribeFrames(msgID, startingAfter)
+		if ok && ferr != nil {
+			return nil, ErrResumeTooOld
+		}
+		if ok {
+			return &ResumeAttachment{
+				Message: msg,
+				Frames:  fa,
+				Cancel:  fa.Cancel,
+				Lagged:  fa.Lagged,
+			}, nil
+		}
+		// Entry exists but has recorded nothing yet (the run registered
+		// microseconds ago), or predates the ledger: fall back to the
+		// folded snapshot rather than refusing the client.
 		if snap, events, cancelSub, lagged, ok := s.broker.Subscribe(msgID); ok {
 			return &ResumeAttachment{
 				Message:  msg,

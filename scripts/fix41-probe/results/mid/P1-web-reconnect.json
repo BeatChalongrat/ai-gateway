@@ -1,0 +1,225 @@
+{
+  "probe": "P1-web-reconnect",
+  "question": "close the tab mid-stream, reopen within 5s: is the text complete, duplicated, and do interleaved non-content events survive in order?",
+  "verdict": "PASS",
+  "notes": [
+    "live order:   message_start,model_resolved,analysis_status,reasoning_delta,analysis_status,content_delta,content_delta",
+    "resume order: message_start,model_resolved,analysis_status,reasoning_delta,analysis_status,content_delta,content_delta,fallback_info,content_delta,content_delta,content_delta,message_complete",
+    "resume content_delta frames: 5 (live stream sent 5)"
+  ],
+  "streams": {
+    "live_prefix": [
+      {
+        "event": "message_start",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 1,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 1,
+          "conversation_id": "15d9bca0-4837-47d9-93cc-dcd0cdd5e451",
+          "message_id": "75590695-757c-45ba-b7f2-ff3f8712e853",
+          "user_message_id": "f307d6b2-2d08-479d-87bf-51a568827478"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 2,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 3,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 4,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 5,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 6,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 7,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      }
+    ],
+    "resume": [
+      {
+        "event": "message_start",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 1,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 1,
+          "conversation_id": "15d9bca0-4837-47d9-93cc-dcd0cdd5e451",
+          "message_id": "75590695-757c-45ba-b7f2-ff3f8712e853",
+          "user_message_id": "f307d6b2-2d08-479d-87bf-51a568827478"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 2,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 3,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 4,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 5,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 6,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 7,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "fallback_info",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 8,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 8,
+          "actual_model": "probe-model-2",
+          "requested_model": "probe-model-1"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 9,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 9,
+          "delta": "THREE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 10,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 10,
+          "delta": "FOUR "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 11,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 11,
+          "delta": "FIVE"
+        }
+      },
+      {
+        "event": "message_complete",
+        "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+        "seq": 12,
+        "data": {
+          "run_id": "c8b8e2e2-2868-467e-a094-d02307e9ddb6",
+          "seq": 12,
+          "final_seq": 12,
+          "message_id": "75590695-757c-45ba-b7f2-ff3f8712e853",
+          "model_id": "probe-model-1"
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "expected_text": "ONE TWO THREE FOUR FIVE",
+    "final_text": "ONE TWO THREE FOUR FIVE",
+    "live_had_interleaving": false,
+    "resume_content_delta_frames": 5,
+    "resume_first_content_index": 5,
+    "resume_first_fallback_index": 7,
+    "resume_has_run_id": true,
+    "resume_has_seq": true,
+    "terminal_event": "message_complete",
+    "text_complete": true
+  }
+}
