@@ -56,6 +56,7 @@ import {
   type PermissionStore,
 } from "./permissions";
 import { compileChain } from "./context-compiler";
+import type { RunLedgerStore } from "./run-ledger";
 import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
@@ -219,6 +220,8 @@ const SCREENSHOT_MARKER = "[Screenshot from";
 
 export class TurnCoordinator {
   private readonly logs = new Map<string, ConversationLog>();
+  /** FIX41 Part F — the on-disk run ledger (optional; see run-ledger.ts). */
+  private runLedger: RunLedgerStore | null = null;
   private readonly turns = new Map<string, RunningTurn>();
   private readonly pendingConsents = new Map<string, PendingConsent>();
   /** FIX31 §1.1: ONE consent card at a time per page conversation. Parallel
@@ -879,7 +882,14 @@ export class TurnCoordinator {
     const seq = ++log.seq;
     log.events.push({ seq, event, data });
     this.bridge.postTurnEvent(conversationId, seq, event, data, log.runId);
-    if (TERMINAL_TURN_EVENTS.has(event)) log.terminal = event;
+    // FIX41 Part F — the run's frames go to disk as they are emitted, so a
+    // turn that the app is killed in the middle of leaves a record. Purely
+    // best-effort inside the store: bookkeeping never breaks a turn.
+    this.runLedger?.append(log.runId, { seq, event, data });
+    if (TERMINAL_TURN_EVENTS.has(event)) {
+      log.terminal = event;
+      this.runLedger?.end(log.runId);
+    }
     return seq;
   }
 
@@ -909,7 +919,55 @@ export class TurnCoordinator {
   private beginRun(conversationId: string): string {
     const runId = randomUUID();
     this.logs.set(conversationId, { seq: this.logs.get(conversationId)?.seq ?? 0, events: [], runId, terminal: null });
+    this.runLedger?.begin(conversationId, runId);
     return runId;
+  }
+
+  /** FIX41 Part F — attach the on-disk run ledger. Optional: without it
+   *  the host behaves exactly as chunk 1 did (a turn interrupted by the
+   *  app closing leaves no trace). */
+  setRunLedger(store: RunLedgerStore): void {
+    this.runLedger = store;
+  }
+
+  /**
+   * FIX41 Part F2 — settle runs the previous process was in the middle of.
+   *
+   * Called once at start-up. For each run whose file has no terminal line,
+   * the frames are restored into memory so the page can still be handed
+   * the answer that was produced, and then the run is CLOSED with an
+   * `error`. Before this, closing the app mid-turn left the page with
+   * nothing at all and the conversation with no record that the turn had
+   * ever happened — neither the question nor the partial answer, because
+   * both are persisted only after runLoop returns.
+   *
+   * Returns how many runs were settled (for the log and for tests).
+   */
+  settleInterruptedRuns(): number {
+    if (!this.runLedger) return 0;
+    let settled = 0;
+    for (const run of this.runLedger.pending()) {
+      // Never step on a live turn: if this process has already started one
+      // for the conversation, the stale file is simply reaped.
+      if (this.turns.has(run.conversationId) || this.logs.has(run.conversationId)) {
+        this.runLedger.forget(run.runId);
+        continue;
+      }
+      this.logs.set(run.conversationId, {
+        seq: run.lastSeq,
+        events: run.events.map((e) => ({ seq: e.seq, event: e.event, data: e.data })),
+        runId: run.runId,
+        terminal: null,
+      });
+      this.log.warn(`RUN INTERRUPTED conv=${run.conversationId} run=${run.runId} — ${run.events.length} frame(s) recovered, closing it`);
+      this.emit(run.conversationId, "error", {
+        code: "generation_interrupted",
+        message: "This turn was interrupted when the app closed. What had been written is kept; send again to continue.",
+      });
+      settled++;
+    }
+    this.runLedger.sweep();
+    return settled;
   }
 
   // ── the turn ───────────────────────────────────────────────────────────────

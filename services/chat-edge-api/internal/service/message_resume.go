@@ -134,6 +134,32 @@ func (s *MessageService) ResumeAttachFrom(
 				Lagged:   lagged,
 			}, nil
 		}
+		// FIX41 chunk 2 — nothing in memory. That is the normal state
+		// after a restart: the process that owned this run is gone and
+		// took its map with it. Its frames may still be in the durable
+		// mirror, and replaying them is the difference between the user
+		// getting the answer produced so far and getting a 409.
+		//
+		// The generation itself does NOT continue (see the note on
+		// LoadStoredFrames). The replay therefore ends on `error`, which
+		// is what Interrupted tells the handler.
+		if fa, ferr, ok := s.broker.LoadStoredFrames(ctx, msgID, startingAfter); ok {
+			if ferr != nil {
+				return nil, ErrResumeTooOld
+			}
+			if fa.Interrupted && (msg.Status == "streaming" || msg.Status == "pending") {
+				// Settle the row too, so the conversation list and a later
+				// reload agree with what the stream just said.
+				_ = s.messages.MarkInterrupted(ctx, msgID)
+				msg.Status = "error"
+			}
+			return &ResumeAttachment{
+				Message: msg,
+				Frames:  fa,
+				Cancel:  fa.Cancel,
+				Lagged:  fa.Lagged,
+			}, nil
+		}
 	}
 
 	noop := func() {}

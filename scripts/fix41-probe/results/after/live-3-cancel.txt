@@ -1,0 +1,33 @@
+event: message_start
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":1,"conversation_id":"dbbf52e7-21a5-4322-a818-fd7c4093b3cf","message_id":"b8a625c0-dd82-426f-88b7-aa891a5bcbc5","user_message_id":"5b882556-02c4-40be-94a1-94ff87c32f24"}
+
+event: model_resolved
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":2,"model":"fake-gw-model"}
+
+event: analysis_status
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":3,"status":"started"}
+
+event: reasoning_delta
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":4,"delta":"คิดอยู่ครู่หนึ่ง "}
+
+event: analysis_status
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":5,"status":"completed"}
+
+event: content_delta
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":6,"delta":"หนึ่ง "}
+
+event: content_delta
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":7,"delta":"สอง "}
+
+event: content_delta
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":8,"delta":"สาม "}
+
+event: fallback_info
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":9,"actual_model":"fake-gw-fallback","requested_model":"fake-gw-model"}
+
+event: content_delta
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":10,"delta":"สี่ "}
+
+event: cancelled
+data: {"run_id":"1718660c-9831-4041-aa63-079619e649d9","seq":11,"final_seq":11,"message_id":"b8a625c0-dd82-426f-88b7-aa891a5bcbc5","model_id":"fake-gw-model","partial":true}
+

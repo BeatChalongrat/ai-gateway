@@ -1,0 +1,6 @@
+event: content_delta
+data: {"run_id":"0260b3c2-a4ac-42c5-98f0-1fd453ba6191","seq":14,"delta":"แปด "}
+
+event: message_complete
+data: {"run_id":"0260b3c2-a4ac-42c5-98f0-1fd453ba6191","seq":15,"final_seq":15,"message_id":"868afc6d-1d73-4b18-90c3-9fa94ae00366","model_id":"fake-gw-model"}
+

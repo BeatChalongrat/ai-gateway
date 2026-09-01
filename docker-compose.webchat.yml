@@ -40,6 +40,26 @@ services:
       # work on Linux too.
       - GATEWAY_API_URL=http://host.docker.internal:8080/v1
       - GATEWAY_API_KEY=${GATEWAY_API_KEY:-}
+      # FIX41 — the run ledger (docs/STREAM_CONTRACT.md §8).
+      #
+      # TTL: how long a FINISHED generation stays resumable. Ten minutes,
+      # the same window OpenAI keeps for a background run — long enough
+      # for a refresh, a tunnel or a laptop lid, short enough that this
+      # stays a window and not a store.
+      #
+      # MAX_EVENTS: the cap on ONE run's frames. ~177 bytes each
+      # (measured: scripts/fix41-probe/results/E1-ledger-backends.json),
+      # so 8000 is about 1.4 MB for a single runaway generation. Past the
+      # cap the OLDEST frames are dropped and a client whose cursor points
+      # into the dropped region is told 409 RESUME_TOO_OLD — never handed
+      # a truncated answer as if it were whole.
+      #
+      # The durable half lives in redis-webchat (a background pipeline, not
+      # a write per frame: that was measured at 325 ms per turn against a
+      # 15 ms budget). Redis being unreachable is not fatal — the ledger
+      # degrades to in-memory only, which means no resume across a restart.
+      - STREAM_LEDGER_TTL_SECONDS=${STREAM_LEDGER_TTL_SECONDS:-600}
+      - STREAM_LEDGER_MAX_EVENTS=${STREAM_LEDGER_MAX_EVENTS:-8000}
       # Proves X-User-ID to the gateway so rate limits AND credit
       # billing apply to the actual end user. MUST match the backend's
       # INTERNAL_SERVICE_SECRET. Empty -> header not sent (shared-key

@@ -74,6 +74,18 @@ func newReplayWriter(w http.ResponseWriter, runID string) *runWriter {
 	return &runWriter{ResponseWriter: w, runID: runID}
 }
 
+// newReplayWriterFrom is newReplayWriter for a replay that CONTINUES an
+// existing run: any frame this response has to synthesise (a terminal the
+// dead process never got to write) picks up after the last recorded seq.
+//
+// Getting this wrong is silent and total: a client whose cursor is at 7
+// drops a frame numbered 1 for the same run, so the terminal that says
+// "this was interrupted" never reaches it and the answer stays spinning
+// forever. Caught by probe P2 after the restart path started working.
+func newReplayWriterFrom(w http.ResponseWriter, runID string, afterSeq int64) *runWriter {
+	return &runWriter{ResponseWriter: w, runID: runID, localSeq: afterSeq}
+}
+
 func (rw *runWriter) emit(flusher http.Flusher, event string, payload []byte) {
 	var out []byte
 	if rw.record != nil {
@@ -135,7 +147,7 @@ func isTerminalEvent(event string) bool {
 // envelope splices run_id / seq / final_seq into an already-marshalled
 // payload.
 //
-// A byte splice rather than a re-marshal, because ``data`` at the call
+// A byte splice rather than a re-marshal, because “data“ at the call
 // sites is sometimes a struct and sometimes carries a json.RawMessage
 // (message_sources forwards stored JSON verbatim). Round-tripping through
 // map[string]any would re-encode and reorder a payload this code has no

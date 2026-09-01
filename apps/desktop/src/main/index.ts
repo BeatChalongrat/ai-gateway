@@ -58,6 +58,7 @@ import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
 import { ContextManager } from "./context-manager";
 import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, GatewayStateExtractor, JsonConversationStateStore } from "./conversation-state";
+import { RunLedgerStore } from "./run-ledger";
 import { UpdateNotifier } from "./update-check";
 import { encodeImageForVision } from "./image-encoder";
 import { ApprovalModeResetter } from "./approval-mode";
@@ -386,6 +387,23 @@ void app.whenReady().then(async () => {
     log,
   );
   const co = coordinator;
+  // FIX41 Part F — the run ledger on disk, beside conversation-state. Two
+  // jobs: a turn interrupted by the app closing leaves a record instead of
+  // vanishing, and on the next start that run is CLOSED so the page shows
+  // the truth rather than a spinner nobody will ever answer.
+  //
+  // Privacy: these files hold assistant text in the clear, the same as
+  // conversation-state/*.json already does (docs/OPEN_DECISIONS.md #22).
+  // FIX41 follows the existing trust boundary rather than inventing a
+  // second one; the encryption question is the owner's to settle for both.
+  const runLedger = new RunLedgerStore(path.join(dataDir, "run-ledger"));
+  co.setRunLedger(runLedger);
+  try {
+    const settled = co.settleInterruptedRuns();
+    if (settled > 0) log.info(`RUN LEDGER: settled ${settled} interrupted run(s) from a previous session`);
+  } catch (err) {
+    log.warn(`run-ledger settle failed: ${(err as Error).message}`);
+  }
   void sidecar
     .ensureStarted()
     .then(async () => {

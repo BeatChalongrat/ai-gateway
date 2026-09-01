@@ -60,6 +60,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
@@ -274,6 +275,13 @@ func bringUp(t *testing.T, pool *pgxpool.Pool, gatewayURL string) (*service.Mess
 	mr := repository.NewMessageRepo(pool)
 	gw := service.NewGatewayClient(gatewayURL, "probe-key", "", 0, "probe-secret")
 	svc := service.NewMessageService(cr, mr, gw, nil, probeModels{}, 10)
+	// FIX41 chunk 2 — the durable mirror, wired exactly as main.go wires it.
+	// Each bringUp is a separate "process": its own service, its own broker,
+	// its own empty memory. Only Redis and the database are shared, which is
+	// precisely what survives `docker compose restart chat-edge-api`.
+	if rdb := probeRedis(t); rdb != nil {
+		svc.ConfigureRunLedger(10*time.Minute, 8000, rdb)
+	}
 	h := NewMessageHandler(svc)
 	prov := service.NewProvisionService(pool)
 
@@ -502,4 +510,27 @@ func (c *capWriter) body() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.buf.String()
+}
+
+// probeRedis returns the durable-mirror client, or nil when redis-webchat
+// is not up (the probe then measures the in-memory-only behaviour and the
+// P2 result says so, rather than silently reporting chunk 1 as chunk 2).
+func probeRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	url := os.Getenv("FIX41_BENCH_REDIS_URL")
+	if url == "" {
+		url = "redis://localhost:6380/1"
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		return nil
+	}
+	c := redis.NewClient(opts)
+	if err := c.Ping(context.Background()).Err(); err != nil {
+		_ = c.Close()
+		t.Logf("FIX41 probe: redis unreachable (%v) — the run ledger is in-memory only for this run", err)
+		return nil
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
 }

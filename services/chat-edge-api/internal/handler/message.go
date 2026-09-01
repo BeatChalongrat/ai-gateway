@@ -414,7 +414,7 @@ type streamDrainResult struct {
 	errAttempts any
 }
 
-// terminalErrorPayload builds the terminal ``error`` frame's data from
+// terminalErrorPayload builds the terminal “error“ frame's data from
 // whatever the drain learned. Falls back to a generic internal error so a
 // failed run always carries a code the client can localise.
 func (res streamDrainResult) terminalErrorPayload() map[string]any {
@@ -788,8 +788,8 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 // finishStream writes the files/sources read-back and then the run's ONE
 // terminal event (STREAM_CONTRACT §3). Shared by Send / Regenerate / Edit
 // so all three answer the same question the same way: a run that a person
-// stopped says ``cancelled``, a run that failed ENDS on ``error``, and
-// only a run that produced its answer says ``message_complete``.
+// stopped says “cancelled“, a run that failed ENDS on “error“, and
+// only a run that produced its answer says “message_complete“.
 //
 // Before FIX41 each of the three ended unconditionally on
 // message_complete, so the last frame of a failed turn was the success
@@ -1211,7 +1211,13 @@ func (h *MessageHandler) resumeFromLedger(
 	att *service.ResumeAttachment,
 ) {
 	fa := att.Frames
-	rw := newReplayWriter(w, fa.RunID)
+	// Any frame this response has to synthesise continues the run's own
+	// numbering — see newReplayWriterFrom.
+	after := fa.FinalSeq
+	if n := len(fa.Replay); n > 0 && fa.Replay[n-1].Seq > after {
+		after = fa.Replay[n-1].Seq
+	}
+	rw := newReplayWriterFrom(w, fa.RunID, after)
 	rw.started = true
 	defer rw.ensureTerminal(flusher)
 
@@ -1219,15 +1225,29 @@ func (h *MessageHandler) resumeFromLedger(
 		rw.writeRecorded(flusher, le.Event, le.Data)
 	}
 	if fa.Live == nil {
+		if rw.terminalWritten() {
+			return
+		}
+		if fa.Interrupted {
+			// FIX41 chunk 2 — these frames came from the durable mirror
+			// and stop without a terminal, because the process producing
+			// them went away. The user gets everything that was produced,
+			// then the truth. Writing message_complete here would present
+			// a truncated answer as a finished one, which is the exact
+			// failure the whole change exists to remove.
+			writeSSEEvent(rw, flusher, "error", map[string]any{
+				"code":    "GENERATION_INTERRUPTED",
+				"message": "generation was interrupted",
+			})
+			return
+		}
 		// The run already ended; its terminal was inside the replay. When
 		// the client's cursor was already at or past the end the replay is
 		// empty, so the ending is re-sent rather than leaving it on an
 		// open stream it would have to time out on (STREAM_CONTRACT 4).
-		if !rw.terminalWritten() {
-			writeSSEEvent(rw, flusher, "message_complete", map[string]any{
-				"message_id": msgID.String(),
-			})
-		}
+		writeSSEEvent(rw, flusher, "message_complete", map[string]any{
+			"message_id": msgID.String(),
+		})
 		return
 	}
 

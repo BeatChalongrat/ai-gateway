@@ -39,6 +39,22 @@ type Config struct {
 	// isolate state by pointing at a different DB.
 	RedisURL string `env:"REDIS_URL,required"`
 
+	// FIX41 — the run ledger's bounds (docs/STREAM_CONTRACT.md §8).
+	//
+	// TTL: how long a finished run stays resumable. Ten minutes matches
+	// the window OpenAI keeps for a background run: long enough for a
+	// refresh, a tunnel, or a laptop lid; short enough that this is a
+	// window and not a store.
+	//
+	// MaxEvents: the cap on one run's frames. Measured at ~177 bytes per
+	// frame (scripts/fix41-probe/results/E1-ledger-backends.json), so
+	// 8000 is ~1.4 MB for a single runaway generation. Past the cap the
+	// OLDEST frames go — a reattaching client needs the live tail more
+	// than the beginning, and a cursor pointing into the dropped region
+	// is answered 409 RESUME_TOO_OLD rather than quietly under-served.
+	StreamLedgerTTLSeconds int `env:"STREAM_LEDGER_TTL_SECONDS" envDefault:"600"`
+	StreamLedgerMaxEvents  int `env:"STREAM_LEDGER_MAX_EVENTS" envDefault:"8000"`
+
 	// Upstream Gateway API base URL (no trailing slash).
 	GatewayAPIURL string `env:"GATEWAY_API_URL,required"`
 

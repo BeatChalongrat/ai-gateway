@@ -1,0 +1,79 @@
+{
+  "budget_ms": 15,
+  "frames_per_turn": 404,
+  "options": [
+    {
+      "key": "L4",
+      "name": "no ledger (pre-FIX41 snapshot only)",
+      "per_turn_p50_ms": 0,
+      "per_turn_p95_ms": 0,
+      "per_frame_us": 0,
+      "per_turn_mean_us": 0,
+      "bytes_per_run": 0,
+      "survives_restart": false,
+      "cross_replica": false,
+      "notes": [
+        "the client is told to reload the message from the API when a resume fails"
+      ]
+    },
+    {
+      "key": "L1",
+      "name": "in-process slice (chunk 1)",
+      "per_turn_p50_ms": 0,
+      "per_turn_p95_ms": 0,
+      "per_frame_us": 0,
+      "per_turn_mean_us": 8.222999999999999,
+      "bytes_per_run": 71612,
+      "survives_restart": false,
+      "cross_replica": false,
+      "notes": [
+        "resume across a restart is impossible: the only copy is this process's memory"
+      ]
+    },
+    {
+      "key": "L2a",
+      "name": "Redis list, one RPUSH per frame (synchronous)",
+      "per_turn_p50_ms": 322.4131,
+      "per_turn_p95_ms": 437.5468,
+      "per_frame_us": 1083.0366336633663,
+      "per_turn_mean_us": 324936.9233333333,
+      "bytes_per_run": 71612,
+      "survives_restart": true,
+      "cross_replica": true,
+      "notes": [
+        "a per-frame cost that reads as free is not free 400 times"
+      ]
+    },
+    {
+      "key": "L2b",
+      "name": "Redis list, pipelined off the hot path (in-memory stays the read path)",
+      "per_turn_p50_ms": 0,
+      "per_turn_p95_ms": 0,
+      "per_frame_us": 0,
+      "per_turn_mean_us": 17.175,
+      "bytes_per_run": 71612,
+      "survives_restart": true,
+      "cross_replica": true,
+      "notes": [
+        "the turn pays a channel send; the round trips happen behind it",
+        "a frame can be in flight when the process dies — the window is one flush interval"
+      ]
+    },
+    {
+      "key": "L3",
+      "name": "Postgres table (one INSERT per frame, migration 080)",
+      "per_turn_p50_ms": 404.4596,
+      "per_turn_p95_ms": 543.6197,
+      "per_frame_us": 1345.593316831683,
+      "per_turn_mean_us": 424829.18,
+      "bytes_per_run": 71612,
+      "survives_restart": true,
+      "cross_replica": true,
+      "notes": [
+        "measured on an UNLOGGED table — a real (logged) one is slower, so this is the optimistic bound",
+        "needs a cleanup job; chat-edge would be writing every token of every turn to durable storage"
+      ]
+    }
+  ],
+  "runs_sampled": 200
+}

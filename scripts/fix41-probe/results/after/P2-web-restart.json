@@ -1,0 +1,176 @@
+{
+  "probe": "P2-web-restart",
+  "question": "restart chat-edge-api mid-stream, then resume: does the client get its generation back?",
+  "verdict": "PASS",
+  "notes": [
+    "resume HTTP status after restart: 200"
+  ],
+  "streams": {
+    "live_prefix": [
+      {
+        "event": "message_start",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 1,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 1,
+          "conversation_id": "43d302e9-4096-43ba-b1ff-112b38ef5c25",
+          "message_id": "799a019f-11cb-4e17-8f63-c6acc800d1b7",
+          "user_message_id": "97363e08-153a-4f29-9c90-5cf492df97ad"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 2,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 3,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 4,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 5,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 6,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 7,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      }
+    ],
+    "resume_after_restart": [
+      {
+        "event": "message_start",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 1,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 1,
+          "conversation_id": "43d302e9-4096-43ba-b1ff-112b38ef5c25",
+          "message_id": "799a019f-11cb-4e17-8f63-c6acc800d1b7",
+          "user_message_id": "97363e08-153a-4f29-9c90-5cf492df97ad"
+        }
+      },
+      {
+        "event": "model_resolved",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 2,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 2,
+          "model": "probe-model-1"
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 3,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 3,
+          "status": "started"
+        }
+      },
+      {
+        "event": "reasoning_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 4,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 4,
+          "delta": "thinking-A "
+        }
+      },
+      {
+        "event": "analysis_status",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 5,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 5,
+          "status": "completed"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 6,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 6,
+          "delta": "ONE "
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 7,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 7,
+          "delta": "TWO "
+        }
+      },
+      {
+        "event": "error",
+        "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+        "seq": 8,
+        "data": {
+          "run_id": "d0ce20e3-3054-4e4d-96f1-4fe4c62e45c0",
+          "seq": 8,
+          "final_seq": 8,
+          "code": "GENERATION_INTERRUPTED",
+          "message": "generation was interrupted"
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "resume_body": "",
+    "resume_http_status": 200,
+    "resume_text": "ONE TWO ",
+    "terminal_event": "error"
+  }
+}

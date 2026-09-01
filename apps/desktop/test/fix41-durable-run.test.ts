@@ -254,3 +254,111 @@ describe("FIX41 P6 — reload mid-turn (must not regress)", () => {
     expect(posted.slice(live).map((p) => p.seq)).toEqual([2]);
   });
 });
+
+// P5 — close the app mid-turn, open it again.
+//
+// Before FIX41 Part F the host's event log was a Map in the main process:
+// the turn vanished with the process, and because importVisible /
+// saveLocalHistory only run after runLoop returns, neither the question nor
+// the half-written answer was recorded anywhere. The user came back to a
+// conversation that had never heard of the turn.
+describe("FIX41 P5 — the app is killed mid-turn", () => {
+  function ledgerDir() {
+    return fs.mkdtempSync(path.join(os.tmpdir(), "sran-fix41-ledger-"));
+  }
+
+  it("a run interrupted by the process going away is recoverable and CLOSED on the next start", async () => {
+    const { RunLedgerStore } = await import("../src/main/run-ledger");
+    const dir = ledgerDir();
+
+    // ── session one: a turn that never finishes ──────────────────────────
+    const first = build();
+    first.co.setRunLedger(new RunLedgerStore(dir));
+    const runId = inner(first.co).beginRun("c1");
+    inner(first.co).emit("c1", "message_start", { message_id: "a1" });
+    inner(first.co).emit("c1", "content_delta", { delta: "คำตอบครึ่งเดียว" });
+    // ...and the process dies here. No terminal is ever written.
+
+    // ── session two: a brand new coordinator over the same directory ─────
+    const second = build();
+    second.co.setRunLedger(new RunLedgerStore(dir));
+    const settled = second.co.settleInterruptedRuns();
+
+    expect(settled).toBe(1);
+    // The page is handed what was produced AND an honest ending.
+    const events = second.posted.map((p) => p.event);
+    expect(events[events.length - 1]).toBe("error");
+    const err = second.posted[second.posted.length - 1];
+    expect((err.data as { code: string }).code).toBe("generation_interrupted");
+    expect(err.runId).toBe(runId);
+    // seq continues from where the interrupted run stopped, so a page that
+    // had rendered up to 2 does not re-render them.
+    expect(err.seq).toBe(3);
+
+    // And the recovered frames are replayable, so a page that reloads gets
+    // the answer-so-far rather than a blank bubble.
+    const before = second.posted.length;
+    second.co.onUiReady({ conversationId: "c1", lastSeq: 0, runId });
+    expect(second.posted.slice(before).map((p) => p.event)).toEqual([
+      "message_start", "content_delta", "error",
+    ]);
+  });
+
+  it("a run that ENDED properly is not resurrected", async () => {
+    const { RunLedgerStore } = await import("../src/main/run-ledger");
+    const dir = ledgerDir();
+    const first = build();
+    first.co.setRunLedger(new RunLedgerStore(dir));
+    inner(first.co).beginRun("c1");
+    inner(first.co).emit("c1", "message_start", {});
+    inner(first.co).emit("c1", "message_complete", {});
+
+    const second = build();
+    second.co.setRunLedger(new RunLedgerStore(dir));
+    expect(second.co.settleInterruptedRuns()).toBe(0);
+    expect(second.posted).toHaveLength(0);
+  });
+
+  it("an interrupted run older than the TTL is reaped, not replayed", async () => {
+    const { RunLedgerStore } = await import("../src/main/run-ledger");
+    const dir = ledgerDir();
+    const first = build();
+    first.co.setRunLedger(new RunLedgerStore(dir));
+    inner(first.co).beginRun("c1");
+    inner(first.co).emit("c1", "message_start", {});
+    inner(first.co).emit("c1", "content_delta", { delta: "stale" });
+
+    // Nothing is watching a turn from ten minutes ago.
+    const second = build();
+    second.co.setRunLedger(new RunLedgerStore(dir, 0));
+    expect(second.co.settleInterruptedRuns()).toBe(0);
+    expect(second.posted).toHaveLength(0);
+    expect(fs.readdirSync(dir).filter((n) => n.endsWith(".jsonl"))).toHaveLength(0);
+  });
+
+  it("a torn last line (the process died mid-write) does not lose the rest", async () => {
+    const { RunLedgerStore } = await import("../src/main/run-ledger");
+    const dir = ledgerDir();
+    const first = build();
+    first.co.setRunLedger(new RunLedgerStore(dir));
+    const runId = inner(first.co).beginRun("c1");
+    inner(first.co).emit("c1", "message_start", {});
+    inner(first.co).emit("c1", "content_delta", { delta: "kept" });
+    const file = path.join(dir, `${runId}.jsonl`);
+    fs.appendFileSync(file, '{"seq":3,"event":"content_de');
+
+    const store = new RunLedgerStore(dir);
+    const pending = store.pending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0].events.map((e) => e.event)).toEqual(["message_start", "content_delta"]);
+  });
+
+  it("a ledger directory that cannot be read never breaks a turn", async () => {
+    const { RunLedgerStore } = await import("../src/main/run-ledger");
+    const store = new RunLedgerStore(path.join(os.tmpdir(), "sran-fix41-does-not-exist", "nested"));
+    expect(store.pending()).toEqual([]);
+    expect(store.sweep()).toBe(0);
+    // Appending to a run that was never begun must not throw.
+    expect(() => store.append("no-such-run", { seq: 1, event: "x", data: {} })).not.toThrow();
+  });
+});

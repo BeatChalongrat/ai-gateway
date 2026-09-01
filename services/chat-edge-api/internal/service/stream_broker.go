@@ -24,6 +24,7 @@ package service
 // and receives the full prefix again.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -223,6 +224,19 @@ type StreamBroker struct {
 	// frames one run may keep. Set from config; see SetLedgerBounds.
 	ledgerTTL       time.Duration
 	ledgerMaxEvents int
+	// store (FIX41 chunk 2) mirrors the ledger somewhere this process's
+	// memory is not, so a restart can still answer a resume. nil ⇒
+	// in-memory only, which is chunk 1's behaviour.
+	store RunStore
+}
+
+// SetRunStore attaches the durable mirror. Nil is valid and means
+// "in-memory only" — a deployment without Redis degrades to chunk 1
+// rather than refusing to stream.
+func (b *StreamBroker) SetRunStore(st RunStore) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.store = st
 }
 
 func NewStreamBroker() *StreamBroker {
@@ -501,7 +515,7 @@ var terminalFrames = map[string]bool{
 	"cancelled":        true,
 }
 
-// Record assigns the next seq for the run, hands it to ``build`` (which
+// Record assigns the next seq for the run, hands it to “build“ (which
 // must return the exact bytes going out on the wire), stores the result
 // and fans it out to every attached frame subscriber.
 //
@@ -519,6 +533,7 @@ func (b *StreamBroker) Record(
 ) (int64, bool) {
 	b.mu.Lock()
 	e, ok := b.entries[msgID]
+	store := b.store
 	b.mu.Unlock()
 	if !ok {
 		return 0, false
@@ -549,6 +564,11 @@ func (b *StreamBroker) Record(
 	if final != 0 {
 		e.finalSeq = seq
 		e.terminalEvent = event
+	}
+	// The durable mirror gets the SAME bytes. Append never blocks (see
+	// stream_ledger_store.go): a turn is not made slower by bookkeeping.
+	if store != nil {
+		store.Append(msgID, le)
 	}
 	for id, sub := range e.frameSubs {
 		select {
@@ -599,6 +619,12 @@ type FrameAttachment struct {
 	Lagged func() bool
 	// FinalSeq is the run's terminal seq, or 0 while it is in flight.
 	FinalSeq int64
+	// Interrupted is set when the stored frames end WITHOUT a terminal —
+	// the process that was producing them went away. The handler must end
+	// such a replay on `error`, never on a `message_complete` nobody sent:
+	// a truncated answer presented as a finished one is the failure this
+	// whole change exists to remove.
+	Interrupted bool
 }
 
 // ErrLedgerTooOld — startingAfter points at frames the cap or the TTL
@@ -701,4 +727,67 @@ func (b *StreamBroker) FrameSubscriberCount(msgID uuid.UUID) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.frameSubs)
+}
+
+// LoadStoredFrames answers a resume for a run this process never had —
+// the usual case being that the process that DID have it was restarted.
+//
+// The live tail is nil by construction: the generation died with the
+// process that owned its upstream connection, and keeping it running
+// would be a background run, which FIX41 deliberately does not build.
+// What comes back is the answer so far, in order, under its original
+// numbers — and Interrupted says so, so the handler can end the run on
+// `error` instead of an invented `message_complete`.
+func (b *StreamBroker) LoadStoredFrames(
+	ctx context.Context, msgID uuid.UUID, startingAfter int64,
+) (*FrameAttachment, error, bool) {
+	b.mu.Lock()
+	store := b.store
+	b.mu.Unlock()
+	if store == nil {
+		return nil, nil, false
+	}
+	events, ok := store.Load(ctx, msgID)
+	if !ok || len(events) == 0 {
+		return nil, nil, false
+	}
+	oldest := events[0].Seq
+	if startingAfter > 0 && oldest > startingAfter+1 {
+		return nil, ErrLedgerTooOld, true
+	}
+	last := events[len(events)-1]
+	att := &FrameAttachment{
+		Cancel:      func() {},
+		Lagged:      func() bool { return false },
+		Interrupted: !terminalFrames[last.Event],
+	}
+	if !att.Interrupted {
+		att.FinalSeq = last.Seq
+	}
+	for _, ev := range events {
+		if ev.Seq > startingAfter {
+			att.Replay = append(att.Replay, ev)
+		}
+	}
+	// The run id lives inside the frames (every one carries it), so the
+	// store needs no second key to remember it.
+	var env struct {
+		RunID string `json:"run_id"`
+	}
+	if json.Unmarshal(events[0].Data, &env) == nil {
+		att.RunID = env.RunID
+	}
+	return att, nil, true
+}
+
+// ForgetStoredRun drops a run's durable copy. Called once the row it
+// belongs to has been settled, so a settled turn is not resurrected by a
+// later resume.
+func (b *StreamBroker) ForgetStoredRun(msgID uuid.UUID) {
+	b.mu.Lock()
+	store := b.store
+	b.mu.Unlock()
+	if store != nil {
+		store.Forget(msgID)
+	}
 }

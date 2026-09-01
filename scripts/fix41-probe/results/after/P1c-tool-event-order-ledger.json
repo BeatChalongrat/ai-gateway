@@ -1,0 +1,323 @@
+{
+  "probe": "P1c-tool-event-order-ledger",
+  "question": "through the run ledger (the path a resume takes after FIX41): do tool_activity / code_execution come back in position, with their original seq?",
+  "verdict": "PASS",
+  "notes": [
+    "live order:   message_start,content_delta,tool_activity,content_delta,code_execution,tool_activity,content_delta,code_execution,content_delta,message_complete",
+    "resume order: message_start,content_delta,tool_activity,content_delta,code_execution,tool_activity,content_delta,code_execution,content_delta,message_complete",
+    "starting_after=4 replayed 6 frames, first seq 5"
+  ],
+  "streams": {
+    "live": [
+      {
+        "event": "message_start",
+        "run_id": "probe-run-p1c",
+        "seq": 1,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 1,
+          "message_id": "36356bb0-1b97-4a42-aa5e-112a96c0ac70"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 2,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 2,
+          "delta": "before "
+        }
+      },
+      {
+        "event": "tool_activity",
+        "run_id": "probe-run-p1c",
+        "seq": 3,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 3,
+          "id": "t1",
+          "tool": "web_fetch",
+          "phase": "started"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 4,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 4,
+          "delta": "during "
+        }
+      },
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 5,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 5,
+          "id": "c1",
+          "status": "running",
+          "code": "print(1)",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "tool_activity",
+        "run_id": "probe-run-p1c",
+        "seq": 6,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 6,
+          "id": "t1",
+          "tool": "web_fetch",
+          "phase": "finished"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 7,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 7,
+          "delta": "after "
+        }
+      },
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 8,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 8,
+          "id": "c1",
+          "status": "completed",
+          "code": "",
+          "stdout": "1",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 9,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 9,
+          "delta": "end"
+        }
+      },
+      {
+        "event": "message_complete",
+        "run_id": "probe-run-p1c",
+        "seq": 10,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 10,
+          "final_seq": 10,
+          "message_id": "36356bb0-1b97-4a42-aa5e-112a96c0ac70"
+        }
+      }
+    ],
+    "resume_after_4": [
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 5,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 5,
+          "id": "c1",
+          "status": "running",
+          "code": "print(1)",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "tool_activity",
+        "run_id": "probe-run-p1c",
+        "seq": 6,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 6,
+          "id": "t1",
+          "tool": "web_fetch",
+          "phase": "finished"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 7,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 7,
+          "delta": "after "
+        }
+      },
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 8,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 8,
+          "id": "c1",
+          "status": "completed",
+          "code": "",
+          "stdout": "1",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 9,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 9,
+          "delta": "end"
+        }
+      },
+      {
+        "event": "message_complete",
+        "run_id": "probe-run-p1c",
+        "seq": 10,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 10,
+          "final_seq": 10,
+          "message_id": "36356bb0-1b97-4a42-aa5e-112a96c0ac70"
+        }
+      }
+    ],
+    "resume_full": [
+      {
+        "event": "message_start",
+        "run_id": "probe-run-p1c",
+        "seq": 1,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 1,
+          "message_id": "36356bb0-1b97-4a42-aa5e-112a96c0ac70"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 2,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 2,
+          "delta": "before "
+        }
+      },
+      {
+        "event": "tool_activity",
+        "run_id": "probe-run-p1c",
+        "seq": 3,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 3,
+          "id": "t1",
+          "tool": "web_fetch",
+          "phase": "started"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 4,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 4,
+          "delta": "during "
+        }
+      },
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 5,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 5,
+          "id": "c1",
+          "status": "running",
+          "code": "print(1)",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "tool_activity",
+        "run_id": "probe-run-p1c",
+        "seq": 6,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 6,
+          "id": "t1",
+          "tool": "web_fetch",
+          "phase": "finished"
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 7,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 7,
+          "delta": "after "
+        }
+      },
+      {
+        "event": "code_execution",
+        "run_id": "probe-run-p1c",
+        "seq": 8,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 8,
+          "id": "c1",
+          "status": "completed",
+          "code": "",
+          "stdout": "1",
+          "exit_code": 0
+        }
+      },
+      {
+        "event": "content_delta",
+        "run_id": "probe-run-p1c",
+        "seq": 9,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 9,
+          "delta": "end"
+        }
+      },
+      {
+        "event": "message_complete",
+        "run_id": "probe-run-p1c",
+        "seq": 10,
+        "data": {
+          "run_id": "probe-run-p1c",
+          "seq": 10,
+          "final_seq": 10,
+          "message_id": "36356bb0-1b97-4a42-aa5e-112a96c0ac70"
+        }
+      }
+    ]
+  },
+  "metrics": {
+    "cursor_resumes_at_5": true,
+    "live_frames": 10,
+    "live_order": "message_start,content_delta,tool_activity,content_delta,code_execution,tool_activity,content_delta,code_execution,content_delta,message_complete",
+    "orders_match": true,
+    "resume_after_4_frames": 6,
+    "resume_frames": 10,
+    "resume_order": "message_start,content_delta,tool_activity,content_delta,code_execution,tool_activity,content_delta,code_execution,content_delta,message_complete",
+    "run_id": "probe-run-p1c",
+    "seq_identical": true
+  }
+}

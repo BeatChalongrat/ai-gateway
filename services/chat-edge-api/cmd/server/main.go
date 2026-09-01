@@ -191,11 +191,24 @@ func main() {
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
 	messageSvc.SetImageGenerationTimeout(time.Duration(cfg.ChatEdgeImageTimeoutSeconds) * time.Second)
-	// Phase 5 — stream resume uses an IN-PROCESS broker: reattach works
-	// only against the instance that owns the generation. Correct for the
-	// current single-instance deployment (compose pins one container); a
-	// multi-replica rollout needs a shared broker (e.g. Redis pub/sub).
-	slog.Info("stream-resume broker: in-process (single-instance only; cross-instance reattach falls back to persisted row)")
+	// FIX41 — the run ledger. In-process memory is the READ path for a
+	// live process (measured 8 us per turn); Redis is a mirror written by
+	// a background pipeline (17 us per turn) so a restart — or another
+	// replica — can still replay a run it never held. The synchronous
+	// alternatives were measured and rejected: one Redis round trip per
+	// frame costs 325 ms per turn and one Postgres INSERT per frame
+	// 425 ms, against a 15 ms budget
+	// (scripts/fix41-probe/results/E1-ledger-backends.json).
+	//
+	// Redis unreachable is NOT fatal: the broker falls back to
+	// in-memory-only, which is exactly the pre-chunk-2 behaviour.
+	ledgerTTL := time.Duration(cfg.StreamLedgerTTLSeconds) * time.Second
+	messageSvc.ConfigureRunLedger(ledgerTTL, cfg.StreamLedgerMaxEvents, rdb)
+	slog.Info("stream-resume ledger configured",
+		"ttl_seconds", cfg.StreamLedgerTTLSeconds,
+		"max_events_per_run", cfg.StreamLedgerMaxEvents,
+		"durable_mirror", rdb != nil,
+	)
 	// Phase 4A.2.2 — DLP canonical history rollout (default off/shadow).
 	messageSvc.SetCanonicalHistory(cfg.DLPCanonicalHistoryEnabled, cfg.DLPCanonicalHistoryShadow)
 	// Phase 4A.2.4 — display lifecycle rollout (default off/shadow). The

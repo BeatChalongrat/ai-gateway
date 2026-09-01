@@ -1,0 +1,11 @@
+{
+  "deltas_per_turn": 200,
+  "frames_observed": 202,
+  "max_ms": 37.5005,
+  "mean_ms": 25.80399,
+  "min_ms": 20.3286,
+  "p50_ms": 25.2014,
+  "p95_ms": 32.5503,
+  "p99_ms": 33.246,
+  "turns": 40
+}

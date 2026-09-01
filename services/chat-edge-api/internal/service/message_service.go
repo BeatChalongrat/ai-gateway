@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
@@ -319,6 +320,21 @@ func (s *MessageService) teeStream(msgID uuid.UUID, runID string, ch chan Stream
 	return s.broker.TeeRun(msgID, runID, ch), runID
 }
 
+// ConfigureRunLedger applies the deployment's ledger bounds and attaches
+// the durable mirror. A nil redis client leaves the ledger in-memory only,
+// which is a degradation (no resume across a restart) and not a failure —
+// refusing to stream because a resume convenience is unavailable would be
+// the worse trade.
+func (s *MessageService) ConfigureRunLedger(ttl time.Duration, maxEvents int, rdb *redis.Client) {
+	if s.broker == nil {
+		return
+	}
+	s.broker.SetLedgerBounds(ttl, maxEvents)
+	if rdb != nil {
+		s.broker.SetRunStore(NewRedisRunStore(rdb, ttl, maxEvents))
+	}
+}
+
 // OpenRun lets the handler register a generation with the resume broker
 // before the pump exists, so frames written during the early-open pause
 // are numbered by the same counter as the rest of the run.
@@ -330,7 +346,7 @@ func (s *MessageService) OpenRun(msgID uuid.UUID, runID string) {
 }
 
 // RecordFrame stamps one outgoing SSE frame into the run's ledger and
-// returns its seq. ``build`` receives the assigned seq plus final_seq
+// returns its seq. “build“ receives the assigned seq plus final_seq
 // (non-zero only for a terminal frame) and must return the exact bytes
 // the writer is about to send — the ledger and the wire must never
 // disagree, because a resume replays the ledger verbatim.
