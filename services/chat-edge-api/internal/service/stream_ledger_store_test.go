@@ -187,3 +187,40 @@ func TestRunLedger_NoStoreIsNotAnError(t *testing.T) {
 	}
 	b.ForgetStoredRun(uuid.New()) // must not panic
 }
+
+// FIX42 D1 — the overflow is counted, once per run, and the run is
+// marked so later frames do not keep hitting the full queue. The store is
+// built by hand with an unbuffered channel and NO writer goroutine, so the
+// first Append overflows deterministically; no Redis is needed (the DEL
+// that follows a drop is fire-and-forget and its error is discarded).
+func TestRunLedger_OverflowIsCountedOncePerRun(t *testing.T) {
+	s := &redisRunStore{
+		rdb:       redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}),
+		ttl:       time.Minute,
+		maxEvents: 10,
+		in:        make(chan storedFrame),
+		done:      make(chan struct{}),
+		dropped:   make(map[uuid.UUID]bool),
+	}
+	before := RunLedgerOverflowDrops()
+	a, b := uuid.New(), uuid.New()
+
+	s.Append(a, frameFor("run-a", 1, "content_delta"))
+	if got := RunLedgerOverflowDrops() - before; got != 1 {
+		t.Fatalf("first overflow: counter advanced by %d, want 1", got)
+	}
+	s.Append(a, frameFor("run-a", 2, "content_delta"))
+	if got := RunLedgerOverflowDrops() - before; got != 1 {
+		t.Fatalf("same run again: counter advanced by %d, want still 1 (run is marked dropped)", got)
+	}
+	s.Append(b, frameFor("run-b", 1, "content_delta"))
+	if got := RunLedgerOverflowDrops() - before; got != 2 {
+		t.Fatalf("second run: counter advanced by %d, want 2", got)
+	}
+	s.mu.Lock()
+	da, db := s.dropped[a], s.dropped[b]
+	s.mu.Unlock()
+	if !da || !db {
+		t.Fatalf("dropped marks: a=%v b=%v, want both true", da, db)
+	}
+}

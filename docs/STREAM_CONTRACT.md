@@ -243,6 +243,47 @@ the rule that makes `final_seq` meaningful.
 
 Both are configuration, not constants in code.
 
+### 8.1 Bounds of durability — what the Redis mirror does NOT promise
+
+The in-process ledger is the authority while the process lives. The Redis
+copy is written **behind** the turn by one background writer that flushes
+every **25 ms or every 64 frames**, whichever comes first
+(`redisRunStore.run()`), so that a frame costs the turn ~17 µs instead of
+~1 ms. That design has two edges. Both are the intended behaviour, and
+both were unwritten until FIX42; they are declared here so nobody reads
+them as a bug later.
+
+**Case 1 — the ≤ 25 ms window.** If the process dies while frames are
+still in the writer's channel, the Redis copy is short by up to one flush
+interval. A client that reattaches with a cursor *past* the stored end —
+it rendered `seq 6`, the mirror holds `1..4` — gets an **empty replay** and
+`Interrupted=true`, i.e. `error/GENERATION_INTERRUPTED`. This is the
+**honest failure**: the answer it already rendered stays on screen, and
+the stream tells it the generation did not finish. What is *not* on offer
+is a resume that pretends frames 5–6 were never sent. The window is
+bounded by the flush interval and the exact bound is "whatever was
+produced in the last ≤ 25 ms before the crash".
+
+> Note on numbering in this case: the synthesised terminal continues from
+> the stored end (`FinalSeq` is 0 for an interrupted run, so it is
+> numbered as if the run were empty), which is *below* the client's cursor.
+> The web page still acts on it — `noteFrame` advances the cursor but does
+> not gate dispatch — so the user sees "interrupted" as intended. A client
+> that enforces §9 rule 2 literally would drop it; see OPEN_DECISIONS #40
+> for whether that is worth tightening.
+
+**Case 2 — writer overflow.** The writer's queue holds 16 384 frames. If
+it fills (Redis stalled, or tens of turns at full tilt), `Append` does
+**not** block the turn and does **not** keep a partial copy: it marks the
+run as dropped and **DELs the whole key**, so a resume for that run falls
+back to the folded snapshot (§5) rather than to a ledger with an invisible
+hole. A truncated answer with no sign of the gap is the failure the ledger
+exists to remove; refusing to store one is the right call. Until FIX42
+the only trace was a `slog.Warn` line per run. It is now **counted**:
+`run_ledger_overflow_drops` on `GET /health` (process-wide, monotonic,
+resets on restart). Zero is the expectation; the threshold at which a
+non-zero value pages someone is open — OPEN_DECISIONS #40.
+
 ---
 
 ## 9. What a client must do to be correct

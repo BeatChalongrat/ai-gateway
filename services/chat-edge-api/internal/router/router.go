@@ -125,6 +125,11 @@ func New(
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":  "ok",
 			"service": "chat-edge-api",
+			// FIX42 D1 — how many runs lost their durable ledger copy to
+			// writer overflow (STREAM_CONTRACT.md §8.1). Zero is the
+			// expectation; anything else is worth a look before it is
+			// worth an alert threshold (OPEN_DECISIONS.md #40).
+			"run_ledger_overflow_drops": service.RunLedgerOverflowDrops(),
 		})
 	})
 

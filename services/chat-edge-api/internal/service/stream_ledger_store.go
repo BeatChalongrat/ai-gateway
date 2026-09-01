@@ -38,6 +38,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,6 +79,19 @@ type storedFrame struct {
 	msgID uuid.UUID
 	ev    LedgerEvent
 }
+
+// ledgerOverflowDrops counts runs whose durable copy was thrown away
+// because the writer's queue was full (STREAM_CONTRACT.md §8.1 case 2).
+// Process-wide, monotonic, reset only by a restart. It exists so the
+// overflow is COUNTABLE — before it, the only trace was one slog.Warn
+// line per run, which nobody watches. Read through RunLedgerOverflowDrops
+// and surfaced on /health as run_ledger_overflow_drops. Counting is the
+// whole change: the drop itself behaves exactly as before.
+var ledgerOverflowDrops atomic.Int64
+
+// RunLedgerOverflowDrops reports how many runs lost their Redis copy to
+// writer overflow since the process started.
+func RunLedgerOverflowDrops() int64 { return ledgerOverflowDrops.Load() }
 
 // runLedgerQueue is the writer's backlog. Sized for tens of concurrent
 // turns at full tilt; overflow drops the run's Redis copy rather than
@@ -124,8 +138,9 @@ func (s *redisRunStore) Append(msgID uuid.UUID, ev LedgerEvent) {
 		s.mu.Lock()
 		s.dropped[msgID] = true
 		s.mu.Unlock()
+		n := ledgerOverflowDrops.Add(1)
 		slog.Warn("run ledger writer overflowed; dropping this run's durable copy",
-			"message_id", msgID.String())
+			"message_id", msgID.String(), "overflow_drops_total", n)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
