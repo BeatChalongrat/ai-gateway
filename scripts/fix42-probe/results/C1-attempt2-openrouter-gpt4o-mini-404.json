@@ -1,0 +1,255 @@
+{
+  "captured_at": "2026-09-01T22:12:50.862Z",
+  "model": "openai/gpt-4o-mini",
+  "results": [
+    {
+      "key": "glass",
+      "text": "ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ",
+      "expect": "no masking at all",
+      "conversation_id": "abe626ec-e625-4722-b798-8b3d41b13a14",
+      "finished": true,
+      "answer": "Couldn't answer right now. Try again or pick another model. Connection attempts (1) Answered without extended thinking — this model doesn’t support it AI service error 05:12",
+      "shown": [
+        {
+          "role": "user",
+          "stopped": false,
+          "spinner": false,
+          "len": 82,
+          "text": "ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ"
+        },
+        {
+          "role": "assistant",
+          "stopped": false,
+          "spinner": false,
+          "len": 173,
+          "text": "Couldn't answer right now. Try again or pick another model. Connection attempts (1) Answered without extended thinking — this model doesn’t support it AI service error 05:12"
+        }
+      ],
+      "streams": [
+        {
+          "url": "http://localhost:4000/api/v1/conversations/abe626ec-e625-4722-b798-8b3d41b13a14/messages",
+          "n": 3,
+          "done": true,
+          "events": [
+            "message_start",
+            "reasoning_notice",
+            "error"
+          ],
+          "last3": [
+            {
+              "t": 1,
+              "event": "message_start",
+              "data": {
+                "run_id": "05968ac2-5aca-4604-b32a-a165d9503933",
+                "seq": 1,
+                "conversation_id": "abe626ec-e625-4722-b798-8b3d41b13a14",
+                "message_id": "b23eefa0-50fc-40c9-8fdd-dd85d2904d1a",
+                "user_message_id": "7b33c245-01f4-48b3-bef9-2aab4d5d872a"
+              }
+            },
+            {
+              "t": 9,
+              "event": "reasoning_notice",
+              "data": {
+                "run_id": "05968ac2-5aca-4604-b32a-a165d9503933",
+                "seq": 2,
+                "model": "openai/gpt-4o-mini",
+                "reason": "Reasoning was requested (mode='auto') but the resolved model 'openai/gpt-4o-mini' is not reasoning-capable; the answer was produced without reasoning. No reasoning-capable model was available for this request after routing and policy filtering."
+              }
+            },
+            {
+              "t": 399,
+              "event": "error",
+              "data": {
+                "run_id": "05968ac2-5aca-4604-b32a-a165d9503933",
+                "seq": 3,
+                "final_seq": 3,
+                "attempts": [
+                  {
+                    "attempted_at": "2026-09-01T22:12:38.327607+00:00",
+                    "error_code": "provider_error",
+                    "error_message": "Provider 'openrouter' has no endpoint for the requested model (404).",
+                    "latency_ms": 0,
+                    "model": "openai/gpt-4o-mini",
+                    "provider": "openrouter"
+                  }
+                ],
+                "code": "all_models_failed",
+                "message": "Unable to get a response right now"
+              }
+            }
+          ]
+        }
+      ],
+      "request_logs": [
+        {
+          "request_id": "req_b3622b8a4850468fab4d7cc6f9507c30",
+          "model": "openai/gpt-4o-mini",
+          "dlp_input_action": "allow",
+          "dlp_input_findings": "0",
+          "input_masked_head": "<identity>"
+        },
+        {
+          "request_id": "You are SRAN Chat, an AI assistant built by SRAN (sran.ai): helpful, direct, and concise."
+        },
+        {
+          "request_id": "You are not the underlying model — if asked who you are, say \"SRAN Chat\". You may name the model powering you if asked."
+        },
+        {
+          "request_id": "</identity>"
+        },
+        {
+          "request_id": "Current date and time: 2026-09-02 (Wednesday) 05:12, Asia/Bangkok (UTC+7). Treat this as the present moment when answering anything time-relative (today, this year, r",
+          "model": "2026-09-01 22:12:38.331537+00"
+        },
+        {
+          "request_id": "req_22b403f1add9430881e4553a71647038",
+          "model": "deepseek/deepseek-v4-flash-0731",
+          "dlp_input_action": "mask",
+          "dlp_input_findings": "2",
+          "input_masked_head": "Two rules for handling placeholders in this conversation:"
+        },
+        {
+          "request_id": "1. Preserve every existing angle-bracket placeholder (in the shapes <<...>> or <r...>) exactly as written in the input. Do not modify, abbreviate, translate, or rename them."
+        },
+        {
+          "request_id": "2. Do not invent new placeholder tokens of either shape. If you need to refer to information that was not provided, use plain descriptions (e.g. \"the customer's address",
+          "model": "2026-09-01 22:11:34.642503+00"
+        }
+      ]
+    },
+    {
+      "key": "khun-kaew",
+      "text": "คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ",
+      "expect": "<<PERSON_A>> for the name only; แก้วน้ำ survives",
+      "conversation_id": "5abd18be-6bcf-46f4-9bc2-bf27d1aa976a",
+      "finished": true,
+      "answer": "Couldn't answer right now. Try again or pick another model. Connection attempts (2) Answered by anthropic/claude-3.5-haiku (openai/gpt-4o-mini temporarily unavailable) Answered without extended thinking — this model doesn’t support it AI service error 05:12",
+      "shown": [
+        {
+          "role": "user",
+          "stopped": false,
+          "spinner": false,
+          "len": 42,
+          "text": "คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ"
+        },
+        {
+          "role": "assistant",
+          "stopped": false,
+          "spinner": false,
+          "len": 257,
+          "text": "Couldn't answer right now. Try again or pick another model. Connection attempts (2) Answered by anthropic/claude-3.5-haiku (openai/gpt-4o-mini temporarily unavailable) Answered without extended thinking — this model doesn’t support it AI service error 05:12"
+        }
+      ],
+      "streams": [
+        {
+          "url": "http://localhost:4000/api/v1/conversations/5abd18be-6bcf-46f4-9bc2-bf27d1aa976a/messages",
+          "n": 4,
+          "done": true,
+          "events": [
+            "message_start",
+            "reasoning_notice",
+            "fallback_info",
+            "error"
+          ],
+          "last3": [
+            {
+              "t": 3,
+              "event": "reasoning_notice",
+              "data": {
+                "run_id": "30ea6170-1142-42f6-b272-34420b188b68",
+                "seq": 2,
+                "model": "anthropic/claude-3.5-haiku",
+                "reason": "Reasoning was requested (mode='auto') but the resolved model 'openai/gpt-4o-mini' is not reasoning-capable; the answer was produced without reasoning. No reasoning-capable model was available for this request after routing and policy filtering."
+              }
+            },
+            {
+              "t": 16,
+              "event": "fallback_info",
+              "data": {
+                "run_id": "30ea6170-1142-42f6-b272-34420b188b68",
+                "seq": 3,
+                "actual_model": "anthropic/claude-3.5-haiku",
+                "attempts": [
+                  {
+                    "attempted_at": "2026-09-01T22:12:45.599884+00:00",
+                    "error_code": "health_marker_skip",
+                    "error_message": "Skipped at streaming pre-check — Redis health marker indicated recent failure within TTL.",
+                    "latency_ms": 0,
+                    "model": "openai/gpt-4o-mini",
+                    "provider": "openrouter"
+                  },
+                  {
+                    "model": "anthropic/claude-3.5-haiku",
+                    "status": "success"
+                  }
+                ],
+                "reason": "Primary model unavailable (health_marker_skip)",
+                "requested_model": "openai/gpt-4o-mini"
+              }
+            },
+            {
+              "t": 122,
+              "event": "error",
+              "data": {
+                "run_id": "30ea6170-1142-42f6-b272-34420b188b68",
+                "seq": 4,
+                "final_seq": 4,
+                "attempts": [
+                  {
+                    "attempted_at": "2026-09-01T22:12:45.599884+00:00",
+                    "error_code": "health_marker_skip",
+                    "error_message": "Skipped at streaming pre-check — Redis health marker indicated recent failure within TTL.",
+                    "latency_ms": 0,
+                    "model": "openai/gpt-4o-mini",
+                    "provider": "openrouter"
+                  },
+                  {
+                    "attempted_at": "2026-09-01T22:12:45.687546+00:00",
+                    "error_code": "provider_error",
+                    "error_message": "Provider 'openrouter' has no endpoint for the requested model (404).",
+                    "latency_ms": 0,
+                    "model": "anthropic/claude-3.5-haiku",
+                    "provider": "openrouter"
+                  }
+                ],
+                "code": "all_models_failed",
+                "message": "Unable to get a response right now"
+              }
+            }
+          ]
+        }
+      ],
+      "request_logs": [
+        {
+          "request_id": "req_b57e4a52674340b3a01df896f54b5456",
+          "model": "deepseek/deepseek-v4-flash-0731",
+          "dlp_input_action": "mask",
+          "dlp_input_findings": "2",
+          "input_masked_head": "Two rules for handling placeholders in this conversation:"
+        },
+        {
+          "request_id": "1. Preserve every existing angle-bracket placeholder (in the shapes <<...>> or <r...>) exactly as written in the input. Do not modify, abbreviate, translate, or rename them."
+        },
+        {
+          "request_id": "2. Do not invent new placeholder tokens of either shape. If you need to refer to information that was not provided, use plain descriptions (e.g. \"the customer's address",
+          "model": "2026-09-01 22:12:49.628274+00"
+        },
+        {
+          "request_id": "req_23d4440b9a2340eea6a79aeefc3876d7",
+          "model": "deepseek/deepseek-v4-flash-0731",
+          "dlp_input_action": "allow",
+          "dlp_input_findings": "0",
+          "input_masked_head": "Generate a short conversation title (3-6 words) based on this exchange. The title MUST be in the same language as the user's message. If the user writes in Thai, the title must be in Thai. If in English, title in English. Reply with just the title, no quotes, no punctuation at the end."
+        },
+        {
+          "request_id": "---"
+        },
+        {
+          "request_id": "User: ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ",
+          "model": "2026-09-01 22:12:46.028515+00"
+        }
+      ]
+    }
+  ]
+}

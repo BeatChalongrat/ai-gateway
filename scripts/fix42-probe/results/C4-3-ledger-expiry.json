@@ -1,0 +1,50 @@
+{
+  "captured_at": "2026-09-01T22:34:10.047Z",
+  "before": [
+    {
+      "name": "ef3b33df-1885-4c93-b977-3bd18a899694.jsonl",
+      "bytes": 3871,
+      "mtime": "2026-09-01T22:33:28.867Z",
+      "conversationId": "7906ae89-c1bd-485e-81ef-fe129831a97c",
+      "runId": "ef3b33df-1885-4c93-b977-3bd18a899694",
+      "startedAt": "2026-09-01T22:33:16.766Z",
+      "frames": 11,
+      "events": [
+        "message_start",
+        "context_budget",
+        "status",
+        "reasoning_notice",
+        "content_delta",
+        "error"
+      ],
+      "ended": true,
+      "last_event": "end"
+    }
+  ],
+  "aged_to": "2026-09-01T22:22:56.742Z",
+  "aged": [
+    {
+      "name": "ef3b33df-1885-4c93-b977-3bd18a899694.jsonl",
+      "bytes": 3871,
+      "mtime": "2026-09-01T22:22:56.742Z",
+      "conversationId": "7906ae89-c1bd-485e-81ef-fe129831a97c",
+      "runId": "ef3b33df-1885-4c93-b977-3bd18a899694",
+      "startedAt": "2026-09-01T22:33:16.766Z",
+      "frames": 11,
+      "events": [
+        "message_start",
+        "context_budget",
+        "status",
+        "reasoning_notice",
+        "content_delta",
+        "error"
+      ],
+      "ended": true,
+      "last_event": "end"
+    }
+  ],
+  "after": [],
+  "verdict": {
+    "removed_on_relaunch": true
+  }
+}

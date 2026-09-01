@@ -1,0 +1,46 @@
+{
+  "captured_at": "2026-09-01T22:33:41.662Z",
+  "conversationId": "7906ae89-c1bd-485e-81ef-fe129831a97c",
+  "assistant_chars_at_kill": 380,
+  "shell_log_interrupted_lines": [],
+  "shown_after_relaunch": [
+    {
+      "role": "assistant",
+      "len": 969,
+      "stopped": false,
+      "error": true,
+      "spinner": false,
+      "text": "ประวัติศาสตร์กาแฟ: จากเอธิโอเปียสู่ร้านกาแฟสมัยใหม่ กาแฟ เครื่องดื่มที่ปลุกโลกให้ตื่นตัว มีประวัติศาสตร์ยาวนานและซับซ้อน จากการค้นพบโดยบังเอิญในดินแดนเอธิโอเปีย สู่เครื่องดื่มยอดนิยมที่แพร่หลายไปทั่วโลก เรื่องราวของกาแฟเต็มไปด้วยการเดินทาง การเปลี่ยนแปลงทางวัฒนธรรม และนวัตกรรม ในที่นี้ เราจะสำรวจประวัติศาสตร์กาแฟแบ่งออกเป็น 12 ยุคสำคัญ เพื่อทำความเข้าใจวิวัฒนาการของมันอย่างลึกซึ้ง ยุคที่ 1: การค้นพบในเอธิโอเปีย (ศตวรรษที่ 9) เรื่องราวการค้นพบกาแฟที่เล่าขานกันมากที่สุดคือเรื่องของคาลดี คนเลี้ยงแพ"
+    }
+  ],
+  "send_button_after_relaunch": "Send",
+  "sidebar_lists_conversation": false,
+  "ledger_files_now": [
+    {
+      "name": "ef3b33df-1885-4c93-b977-3bd18a899694.jsonl",
+      "bytes": 3871,
+      "mtime": "2026-09-01T22:33:28.867Z",
+      "conversationId": "7906ae89-c1bd-485e-81ef-fe129831a97c",
+      "runId": "ef3b33df-1885-4c93-b977-3bd18a899694",
+      "startedAt": "2026-09-01T22:33:16.766Z",
+      "frames": 11,
+      "events": [
+        "message_start",
+        "context_budget",
+        "status",
+        "reasoning_notice",
+        "content_delta",
+        "error"
+      ],
+      "ended": true,
+      "last_event": "end"
+    }
+  ],
+  "verdict": {
+    "question_shown": false,
+    "partial_answer_shown": true,
+    "closed_with_real_status": true,
+    "spinner_left": false,
+    "send_button_back": true
+  }
+}

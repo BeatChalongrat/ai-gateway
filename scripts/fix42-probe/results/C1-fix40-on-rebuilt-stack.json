@@ -1,0 +1,247 @@
+{
+  "captured_at": "2026-09-01T22:13:21.513Z",
+  "model": "google/gemini-2.5-flash",
+  "results": [
+    {
+      "key": "glass",
+      "text": "ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ",
+      "expect": "no masking at all",
+      "conversation_id": "5a063c3d-6591-47d9-9d54-436f505393c6",
+      "finished": true,
+      "answer": "ลูกค้าสั่งแก้วน้ำ 12 ใบ และแตก 3 ใบระหว่างการจัดส่งครับ Answered without extended thinking — this model doesn’t support it 05:13",
+      "shown": [
+        {
+          "role": "user",
+          "stopped": false,
+          "spinner": false,
+          "len": 82,
+          "text": "ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ"
+        },
+        {
+          "role": "assistant",
+          "stopped": false,
+          "spinner": false,
+          "len": 128,
+          "text": "ลูกค้าสั่งแก้วน้ำ 12 ใบ และแตก 3 ใบระหว่างการจัดส่งครับ Answered without extended thinking — this model doesn’t support it 05:13"
+        }
+      ],
+      "streams": [
+        {
+          "url": "http://localhost:4000/api/v1/conversations/5a063c3d-6591-47d9-9d54-436f505393c6/messages",
+          "n": 5,
+          "done": true,
+          "events": [
+            "message_start",
+            "reasoning_notice",
+            "content_delta",
+            "model_resolved",
+            "message_complete"
+          ],
+          "last3": [
+            {
+              "t": 1046,
+              "event": "content_delta",
+              "data": {
+                "run_id": "0dc777c5-add1-406a-a2c0-f6f8a6ed127d",
+                "seq": 3,
+                "delta": "ลูกค้าสั่งแก้วน้ำ 12 ใบ และแตก 3 ใบระหว่างการจัดส่งครับ"
+              }
+            },
+            {
+              "t": 1046,
+              "event": "model_resolved",
+              "data": {
+                "run_id": "0dc777c5-add1-406a-a2c0-f6f8a6ed127d",
+                "seq": 4,
+                "model": "google/gemini-2.5-flash"
+              }
+            },
+            {
+              "t": 1108,
+              "event": "message_complete",
+              "data": {
+                "run_id": "0dc777c5-add1-406a-a2c0-f6f8a6ed127d",
+                "seq": 5,
+                "final_seq": 5,
+                "message_id": "ce3cf39d-101b-4f52-9957-59be0288a1ff",
+                "model_id": "google/gemini-2.5-flash"
+              }
+            }
+          ]
+        }
+      ],
+      "request_logs": [
+        {
+          "request_id": "req_fe2c7e0230aa4ee296a15504c9060cd7",
+          "model": "google/gemini-2.5-flash",
+          "dlp_input_action": "allow",
+          "dlp_input_findings": "0",
+          "input_masked_head": "<identity>"
+        },
+        {
+          "request_id": "You are SRAN Chat, an AI assistant built by SRAN (sran.ai): helpful, direct, and concise."
+        },
+        {
+          "request_id": "You are not the underlying model — if asked who you are, say \"SRAN Chat\". You may name the model powering you if asked."
+        },
+        {
+          "request_id": "</identity>"
+        },
+        {
+          "request_id": "Current date and time: 2026-09-02 (Wednesday) 05:13, Asia/Bangkok (UTC+7). Treat this as the present moment when answering anything time-relative (today, this year, r",
+          "model": "2026-09-01 22:13:08.226652+00"
+        },
+        {
+          "request_id": "req_b57e4a52674340b3a01df896f54b5456",
+          "model": "deepseek/deepseek-v4-flash-0731",
+          "dlp_input_action": "mask",
+          "dlp_input_findings": "2",
+          "input_masked_head": "Two rules for handling placeholders in this conversation:"
+        },
+        {
+          "request_id": "1. Preserve every existing angle-bracket placeholder (in the shapes <<...>> or <r...>) exactly as written in the input. Do not modify, abbreviate, translate, or rename them."
+        },
+        {
+          "request_id": "2. Do not invent new placeholder tokens of either shape. If you need to refer to information that was not provided, use plain descriptions (e.g. \"the customer's address",
+          "model": "2026-09-01 22:12:49.628274+00"
+        }
+      ],
+      "gateway_request_id": "req_fe2c7e0230aa4ee296a15504c9060cd7",
+      "masked_user_line_as_sent_to_provider": "ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ",
+      "dlp_findings_json": []
+    },
+    {
+      "key": "khun-kaew",
+      "text": "คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ",
+      "expect": "<<PERSON_A>> for the name only; แก้วน้ำ survives",
+      "conversation_id": "49f56c79-62e4-4fa0-982d-f45f9c1a7dce",
+      "finished": true,
+      "answer": "รับทราบครับ ผมจะดำเนินการบันทึกข้อมูลนี้ไว้ หากมีคำถามเพิ่มเติมหรือต้องการให้ช่วยเหลือเรื่องอื่นๆ แจ้งได้เลยนะครับ Answered without extended thinking — this model doesn’t support it 05:13",
+      "shown": [
+        {
+          "role": "user",
+          "stopped": false,
+          "spinner": false,
+          "len": 42,
+          "text": "คุณแก้วโทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ"
+        },
+        {
+          "role": "assistant",
+          "stopped": false,
+          "spinner": false,
+          "len": 187,
+          "text": "รับทราบครับ ผมจะดำเนินการบันทึกข้อมูลนี้ไว้ หากมีคำถามเพิ่มเติมหรือต้องการให้ช่วยเหลือเรื่องอื่นๆ แจ้งได้เลยนะครับ Answered without extended thinking — this model doesn’t support it 05:13"
+        }
+      ],
+      "streams": [
+        {
+          "url": "http://localhost:4000/api/v1/conversations/49f56c79-62e4-4fa0-982d-f45f9c1a7dce/messages",
+          "n": 5,
+          "done": true,
+          "events": [
+            "message_start",
+            "reasoning_notice",
+            "content_delta",
+            "model_resolved",
+            "message_complete"
+          ],
+          "last3": [
+            {
+              "t": 1176,
+              "event": "content_delta",
+              "data": {
+                "run_id": "be4c8244-eec4-46c2-8e62-4f5ef5ae52d9",
+                "seq": 3,
+                "delta": "รับทราบครับ ผมจะดำเนินการบันทึกข้อมูลนี้ไว้ หากมีคำถามเพิ่มเติมหรือต้องการให้ช่วยเหลือเรื่องอื่นๆ แจ้งได้เลยนะครับ"
+              }
+            },
+            {
+              "t": 1176,
+              "event": "model_resolved",
+              "data": {
+                "run_id": "be4c8244-eec4-46c2-8e62-4f5ef5ae52d9",
+                "seq": 4,
+                "model": "google/gemini-2.5-flash"
+              }
+            },
+            {
+              "t": 1230,
+              "event": "message_complete",
+              "data": {
+                "run_id": "be4c8244-eec4-46c2-8e62-4f5ef5ae52d9",
+                "seq": 5,
+                "final_seq": 5,
+                "message_id": "2fba61af-a453-490a-af54-c9d0158a95a5",
+                "model_id": "google/gemini-2.5-flash"
+              }
+            }
+          ]
+        }
+      ],
+      "request_logs": [
+        {
+          "request_id": "req_883017909ab84aff908874e050990fa1",
+          "model": "google/gemini-2.5-flash",
+          "dlp_input_action": "mask",
+          "dlp_input_findings": "2",
+          "input_masked_head": "Two rules for handling placeholders in this conversation:"
+        },
+        {
+          "request_id": "1. Preserve every existing angle-bracket placeholder (in the shapes <<...>> or <r...>) exactly as written in the input. Do not modify, abbreviate, translate, or rename them."
+        },
+        {
+          "request_id": "2. Do not invent new placeholder tokens of either shape. If you need to refer to information that was not provided, use plain descriptions (e.g. \"the customer's address",
+          "model": "2026-09-01 22:13:16.380487+00"
+        },
+        {
+          "request_id": "req_98b45941fe744ce09a5ea06e0a3ede6c",
+          "model": "deepseek/deepseek-v4-flash-0731",
+          "dlp_input_action": "allow",
+          "dlp_input_findings": "0",
+          "input_masked_head": "Generate a short conversation title (3-6 words) based on this exchange. The title MUST be in the same language as the user's message. If the user writes in Thai, the title must be in Thai. If in English, title in English. Reply with just the title, no quotes, no punctuation at the end."
+        },
+        {
+          "request_id": "---"
+        },
+        {
+          "request_id": "User: ลูกค้าสั่งแก้วน้ำ 12 ใบ แตก 3 ใบ ระหว่างจัดส่ง สรุปให้หน่อยว่าสั่งกี่ใบและแตกกี่ใบ"
+        },
+        {
+          "request_id": "Assistant: ลูกค้าสั่",
+          "model": "2026-09-01 22:13:14.923243+00"
+        }
+      ],
+      "gateway_request_id": "req_883017909ab84aff908874e050990fa1",
+      "masked_user_line_as_sent_to_provider": "<<PERSON_A>>โทรมาบอกว่าแก้วน้ำที่สั่งไปแตกสองใบ",
+      "dlp_findings_json": [
+        {
+          "direction": "input",
+          "detector": "thai_name",
+          "entity_type": "thai_name",
+          "category": "pii",
+          "severity": "HIGH",
+          "span_start": 0,
+          "span_end": 7,
+          "matched_text_len": 7,
+          "confidence": 1.0,
+          "action": "mask",
+          "mask_token": "<<PERSON_A>>"
+        },
+        {
+          "direction": "input",
+          "detector": "thai_ner",
+          "entity_type": "person",
+          "category": "pii",
+          "severity": "MEDIUM",
+          "span_start": 3,
+          "span_end": 7,
+          "matched_text_len": 4,
+          "confidence": 0.95,
+          "action": "mask",
+          "mask_token": null
+        }
+      ]
+    }
+  ],
+  "note": "attempt 1 (auto) and attempt 2 (openai/gpt-4o-mini via openrouter) hit provider errors unrelated to DLP — kept as C1-attempt1-*.json / C1-attempt2-*.json. DLP verdict was identical in all three attempts (masking happens before the provider is called)."
+}
