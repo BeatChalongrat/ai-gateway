@@ -439,10 +439,24 @@ var (
 	probeResults   = map[string]probeResult{}
 )
 
-func record(r probeResult) {
+// expectedFailures are probes kept BECAUSE they fail: P1b measures the
+// folded snapshot, which after FIX41 is only the fallback for an entry
+// that recorded nothing. Its failure is the evidence that a fold cannot
+// reproduce an order it never stored, so it is not allowed to be quietly
+// "fixed" by deleting it, and it is not allowed to fail the strict run.
+var expectedFailures = map[string]bool{"P1b-tool-event-order": true}
+
+func record(t *testing.T, r probeResult) {
+	t.Helper()
 	probeResultsMu.Lock()
-	defer probeResultsMu.Unlock()
 	probeResults[r.Probe] = r
+	probeResultsMu.Unlock()
+	// FIX41_PROBE_STRICT turns a recorded FAIL into a test failure, so
+	// `-count=10` actually proves "ten times out of ten" instead of
+	// proving that the harness ran ten times.
+	if os.Getenv("FIX41_PROBE_STRICT") == "1" && r.Verdict == "FAIL" && !expectedFailures[r.Probe] {
+		t.Errorf("%s FAILED: %v", r.Probe, r.Notes)
+	}
 }
 
 func probeEnabled(t *testing.T) {

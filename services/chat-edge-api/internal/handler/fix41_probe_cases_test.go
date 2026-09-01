@@ -139,7 +139,7 @@ func TestFix41ProbeP1_ReconnectMidStream(t *testing.T) {
 	if countName(resume, "content_delta") != 5 {
 		notes = append(notes, "resume COLLAPSED the prefix into one content_delta — per-event ordering is lost")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P1-web-reconnect",
 		Question: "close the tab mid-stream, reopen within 5s: is the text complete, duplicated, and do interleaved non-content events survive in order?",
 		Verdict:  verdict,
@@ -266,7 +266,7 @@ func TestFix41ProbeP1b_ToolEventOrderThroughResume(t *testing.T) {
 		verdict = "FAIL"
 		notes = append(notes, "the resume replay does NOT reproduce the live event order")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P1b-tool-event-order",
 		Question: "do tool_activity / code_execution frames emitted during the gap come back in their original position after a resume?",
 		Verdict:  verdict,
@@ -347,7 +347,7 @@ func TestFix41ProbeP2_RestartMidStream(t *testing.T) {
 		verdict = "FAIL"
 		notes = append(notes, "resume attached but replayed no content")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P2-web-restart",
 		Question: "restart chat-edge-api mid-stream, then resume: does the client get its generation back?",
 		Verdict:  verdict,
@@ -434,7 +434,7 @@ func TestFix41ProbeP3_Cancel(t *testing.T) {
 		verdict = "FAIL"
 		notes = append(notes, "second cancel was not idempotent")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P3-web-cancel",
 		Question: "press Stop mid-stream: how does a client learn it was cancelled rather than disconnected?",
 		Verdict:  verdict,
@@ -514,7 +514,7 @@ func TestFix41ProbeP4_ProviderErrorMidStream(t *testing.T) {
 		verdict = "FAIL"
 		notes = append(notes, "a failed turn does NOT end on a terminal `error` frame — the last thing the client sees is a success terminator")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P4-web-provider-error",
 		Question: "the provider errors mid-stream: does the client get a terminal error frame?",
 		Verdict:  verdict,
@@ -645,7 +645,7 @@ func TestFix41ProbeP1c_ToolEventOrderThroughLedger(t *testing.T) {
 		verdict = "FAIL"
 		notes = append(notes, "starting_after=4 did not resume at seq 5")
 	}
-	record(probeResult{
+	record(t, probeResult{
 		Probe:    "P1c-tool-event-order-ledger",
 		Question: "through the run ledger (the path a resume takes after FIX41): do tool_activity / code_execution come back in position, with their original seq?",
 		Verdict:  verdict,

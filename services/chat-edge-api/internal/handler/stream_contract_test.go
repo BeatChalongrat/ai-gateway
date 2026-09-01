@@ -378,3 +378,56 @@ func TestStreamContract_EnvelopePreservesPayloads(t *testing.T) {
 		t.Errorf("final_seq missing from an empty payload: %s", empty)
 	}
 }
+
+// Criterion 12 — a client that has not been updated must keep working.
+//
+// The contract for that is narrow and checkable: the envelope only ADDS
+// members. Every member a pre-FIX41 payload had is still there, with the
+// same value, in a payload that still parses as one JSON object. A parser
+// that has never heard of run_id simply does not look at it.
+func TestStreamContract_EnvelopeIsPurelyAdditive(t *testing.T) {
+	cases := []struct {
+		name    string
+		payload string
+	}{
+		{"message_start", `{"message_id":"m1","conversation_id":"c1","user_message_id":"u1"}`},
+		{"content_delta", `{"delta":"สวัสดีครับ"}`},
+		{"message_complete", `{"message_id":"m1","token_usage":{"input":10,"output":20},"model_id":"gpt-4o-mini"}`},
+		{"error", `{"code":"all_models_failed","message":"x","attempts":[{"model":"a","error":"401"}]}`},
+		{"message_sources", `{"message_id":"m1","sources":[{"url":"https://example.test"}]}`},
+		{"code_execution", `{"id":"c1","status":"completed","code":"print(1)","stdout":"1","exit_code":0}`},
+		{"empty", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var before map[string]any
+			if err := json.Unmarshal([]byte(tc.payload), &before); err != nil {
+				t.Fatalf("fixture is not an object: %v", err)
+			}
+			var after map[string]any
+			if err := json.Unmarshal(envelope([]byte(tc.payload), "run-1", 7, 0), &after); err != nil {
+				t.Fatalf("enveloped payload no longer parses: %v", err)
+			}
+			for k, want := range before {
+				got, ok := after[k]
+				if !ok {
+					t.Errorf("%q disappeared from the payload", k)
+					continue
+				}
+				w, _ := json.Marshal(want)
+				g, _ := json.Marshal(got)
+				if string(w) != string(g) {
+					t.Errorf("%q changed: %s → %s", k, w, g)
+				}
+			}
+			for k := range after {
+				if _, existed := before[k]; existed {
+					continue
+				}
+				if k != "run_id" && k != "seq" && k != "final_seq" {
+					t.Errorf("the envelope added an unexpected member %q — only run_id/seq/final_seq may be added", k)
+				}
+			}
+		})
+	}
+}
