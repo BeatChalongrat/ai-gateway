@@ -151,6 +151,36 @@
    "text": "ทักมาได้เลย066-047-8355ว่างทั้งวัน",
    "value": "066-047-8355",
    "shape": "mobile/glued-no-keyword"
+  },
+  {
+   "id": "ph26",
+   "text": "เบอร์ติดต่อคือ ๐๖๒-๘๙๒-๓๒๗๖ นะคะ",
+   "value": "๐๖๒-๘๙๒-๓๒๗๖",
+   "shape": "thai-digits/mobile/dashed"
+  },
+  {
+   "id": "ph27",
+   "text": "โทร ๐๖๓๒๖๒๒๙๓๓ ได้เลยค่ะ",
+   "value": "๐๖๓๒๖๒๒๙๓๓",
+   "shape": "thai-digits/mobile/bare"
+  },
+  {
+   "id": "ph28",
+   "text": "เบอร์ร้าน ๐๓-๘๕๙-๙๘๕๘ ช่วงนี้ปิดเร็ว",
+   "value": "๐๓-๘๕๙-๙๘๕๘",
+   "shape": "thai-digits/landline/dashed"
+  },
+  {
+   "id": "ph29",
+   "text": "ติดต่อสาขาได้ที่ ๐๒๕๑๖๔๖๗๒ ครับ",
+   "value": "๐๒๕๑๖๔๖๗๒",
+   "shape": "thai-digits/landline/bare"
+  },
+  {
+   "id": "ph30",
+   "text": "ทักมาได้เลย๐๖๖-๐๔๗-๘๓๕๕ว่างทั้งวัน",
+   "value": "๐๖๖-๐๔๗-๘๓๕๕",
+   "shape": "thai-digits/mobile/glued-no-keyword"
   }
  ]
 }

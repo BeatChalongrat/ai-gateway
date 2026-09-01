@@ -207,6 +207,20 @@ def make_phone() -> list[dict]:
     # glued to Thai text, no keyword — a very common chat shape
     for v in (mobile("bare"), mobile("dashed")):
         items.append({"id": f"ph{len(items)+1:02d}", "text": f"ทักมาได้เลย{v}ว่างทั้งวัน", "value": v, "shape": "mobile/glued-no-keyword"})
+    # FIX38 C1 — Thai numerals. A Thai keyboard types ๐๘๑-๒๓๔-๕๖๗๘, and the
+    # FIX37 corpus measured 62% of these leaking while this set had none.
+    # Derived from values generated ABOVE (no extra rng draws), so every
+    # other set is byte-identical after regeneration.
+    _TH = str.maketrans("0123456789", "๐๑๒๓๔๕๖๗๘๙")
+    for src_idx, frame in (
+        (0, "เบอร์ติดต่อคือ {v} นะคะ"),
+        (1, "โทร {v} ได้เลยค่ะ"),
+        (15, "เบอร์ร้าน {v} ช่วงนี้ปิดเร็ว"),
+        (16, "ติดต่อสาขาได้ที่ {v} ครับ"),
+        (24, "ทักมาได้เลย{v}ว่างทั้งวัน"),
+    ):
+        v = items[src_idx]["value"].translate(_TH)
+        items.append({"id": f"ph{len(items)+1:02d}", "text": frame.format(v=v), "value": v, "shape": f"thai-digits/{items[src_idx]['shape']}"})
     return items
 
 

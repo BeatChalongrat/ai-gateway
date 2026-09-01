@@ -31,10 +31,32 @@ fn inside_uuid(spans: &[(usize, usize)], start_b: usize, end_b: usize) -> bool {
 static BARE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?<!\d)\+?\d{10,15}(?!\d)").expect("phone bare"));
 
+// FIX38 C1 — Thai numerals. ``\d`` is Unicode-aware in this crate, so the
+// regexes matched ``๐๘๑-๒๓๔-๕๖๗๘`` all along — but the digit COUNT below
+// used ``is_ascii_digit`` and saw zero digits, so every formatted
+// Thai-numeral number was silently dropped while Python kept it: the two
+// engines disagreed on this shape until this round. The area-code class
+// was ASCII-only in both engines (the 9-digit ``๐๒๗๗๘๘๙๙๐`` gap).
 static THAI_LANDLINE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?<!\d)(0[2-9])[\s\-]?\d{3}[\s\-]?\d{4}(?!\d)(?![A-Za-z])")
+    Regex::new(r"(?<!\d)([0๐][2-9๒-๙])[\s\-]?\d{3}[\s\-]?\d{4}(?!\d)(?![A-Za-z])")
         .expect("phone thai landline")
 });
+
+/// A digit for phone purposes: ASCII ``0-9`` or Thai ``๐-๙``. Mirrors
+/// Python's ``str.isdigit`` on the shapes users actually type.
+fn is_phone_digit(c: char) -> bool {
+    c.is_ascii_digit() || ('๐'..='๙').contains(&c)
+}
+
+/// ``000-000-0000`` / ``๐๐๐-๐๐๐-๐๐๐๐`` — an example, not a phone. Compared
+/// per char (Thai digits are three bytes each, so a byte compare lies).
+fn all_same_digit(digits: &str) -> bool {
+    let mut it = digits.chars();
+    match it.next() {
+        Some(first) => it.all(|c| c == first),
+        None => false,
+    }
+}
 
 static PHONE_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
@@ -82,7 +104,7 @@ impl Detector for PhoneDetector {
         // credit-card tail.
         for m in FORMATTED_RE.find_iter(text).flatten() {
             let span_text = m.as_str();
-            let digit_count = span_text.chars().filter(|c| c.is_ascii_digit()).count();
+            let digit_count = span_text.chars().filter(|c| is_phone_digit(*c)).count();
             if digit_count < 10 {
                 continue;
             }
@@ -98,10 +120,8 @@ impl Detector for PhoneDetector {
             // Reject trivial all-same-digit numbers (000-000-0000, …) —
             // mirrors phone.py _emit. Sample/example numbers pass through.
             let digits_only: String =
-                span_text.chars().filter(|c| c.is_ascii_digit()).collect();
-            if !digits_only.is_empty()
-                && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
-            {
+                span_text.chars().filter(|c| is_phone_digit(*c)).collect();
+            if all_same_digit(&digits_only) {
                 continue;
             }
             if inside_uuid(&uuid_spans, m.start(), m.end()) {
@@ -125,10 +145,8 @@ impl Detector for PhoneDetector {
         for m in THAI_LANDLINE_RE.find_iter(text).flatten() {
             let span_text = m.as_str();
             let digits_only: String =
-                span_text.chars().filter(|c| c.is_ascii_digit()).collect();
-            if !digits_only.is_empty()
-                && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
-            {
+                span_text.chars().filter(|c| is_phone_digit(*c)).collect();
+            if all_same_digit(&digits_only) {
                 continue;
             }
             if inside_uuid(&uuid_spans, m.start(), m.end()) {
@@ -175,10 +193,8 @@ impl Detector for PhoneDetector {
             if has_context {
                 let span_text = m.as_str();
                 let digits_only: String =
-                    span_text.chars().filter(|c| c.is_ascii_digit()).collect();
-                if !digits_only.is_empty()
-                    && digits_only.bytes().all(|b| b == digits_only.as_bytes()[0])
-                {
+                    span_text.chars().filter(|c| is_phone_digit(*c)).collect();
+                if all_same_digit(&digits_only) {
                     continue;
                 }
                 seen.insert((s_char, e_char));
@@ -196,5 +212,49 @@ impl Detector for PhoneDetector {
         // Sort by (start, end) to match Python
         out.sort_by_key(|m| (m.start, m.end));
         out
+    }
+}
+
+#[cfg(test)]
+mod thai_digit_tests {
+    //! FIX38 C1 — the shapes the FIX37 corpus caught leaking. Each shape is
+    //! also in ``backend/evals/dlp/data/must_catch/phone.json`` so the
+    //! Python/Rust parity gate covers it end to end.
+    use super::PhoneDetector;
+    use crate::detectors::base::Detector;
+
+    fn hits(text: &str) -> Vec<String> {
+        PhoneDetector
+            .detect(text)
+            .into_iter()
+            .map(|m| m.matched_text)
+            .collect()
+    }
+
+    #[test]
+    fn formatted_thai_numerals_are_caught() {
+        assert_eq!(hits("โทร ๐๘๑-๒๓๔-๕๖๗๘ นะ"), vec!["๐๘๑-๒๓๔-๕๖๗๘"]);
+    }
+
+    #[test]
+    fn nine_digit_thai_numeral_landline_is_caught() {
+        assert_eq!(hits("เบอร์ร้าน ๐๒๗๗๘๘๙๙๐ ช่วงนี้"), vec!["๐๒๗๗๘๘๙๙๐"]);
+        assert_eq!(hits("ที่ติดต่อได้คือ ๐๙๔๕๕๖๖๗๗ ค่ะ"), vec!["๐๙๔๕๕๖๖๗๗"]);
+    }
+
+    #[test]
+    fn bare_thai_numerals_still_need_a_keyword() {
+        assert_eq!(hits("เบอร์เขาคือ ๐๘๑๒๒๒๓๓๔๔ ช่วยโทรที"), vec!["๐๘๑๒๒๒๓๓๔๔"]);
+        assert!(hits("รหัสพัสดุ ๐๘๑๒๒๒๓๓๔๔ ส่งแล้ว").is_empty());
+    }
+
+    #[test]
+    fn an_all_same_example_number_is_left_alone() {
+        assert!(hits("ตัวอย่างเบอร์ ๐๐๐-๐๐๐-๐๐๐๐ ครับ").is_empty());
+    }
+
+    #[test]
+    fn a_thai_year_or_amount_is_not_a_phone() {
+        assert!(hits("ปี ๒๕๖๗ งบ ๑๒๓๔๕ บาท").is_empty());
     }
 }

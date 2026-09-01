@@ -90,6 +90,48 @@ def present(value: str, text: str) -> bool:
     return False
 
 
+def present_outside_decoys(value: str, text: str, decoys: list[str]) -> bool:
+    """FIX38 C2 — ``present`` with a word boundary the corpus itself supplies.
+
+    Thai writes without spaces, so a substring test cannot tell a leaked
+    nickname from an ordinary word that happens to contain it: ``โอ๊ต``
+    inside the *surviving* decoy ``ข้าวโอ๊ต`` was scored as a leak in
+    FIX37, which made the reported nickname recall LOWER than the truth.
+    The corpus already declares those words (``must_not_mask``), so the
+    boundary comes from the corpus, not from a dictionary heuristic: an
+    occurrence of *value* that lies entirely inside an occurrence of a
+    declared decoy longer than the value does not count as present. Every
+    other occurrence does. The digit-run rule is unchanged.
+
+    This corrects the measuring tool; it does not move the bar.
+    ``criteria.json`` still defines the locked substring rule, ``present``
+    still implements it, and the runner reports both numbers side by side.
+    """
+    v, t = norm(value).strip(), norm(text)
+    if not v:
+        return False
+    dv = _digits(v)
+    min_digits = CRITERIA["normalization"]["numeric_min_digits_for_digit_compare"]
+    if len(dv) >= min_digits and dv in _digits(t):
+        return True
+    shields = [norm(d) for d in decoys if v in norm(d) and norm(d) != v]
+    i = t.find(v)
+    while i != -1:
+        j = i + len(v)
+        covered = False
+        for d in shields:
+            k = t.find(d)
+            while k != -1 and not covered:
+                covered = k <= i and j <= k + len(d)
+                k = t.find(d, k + 1)
+            if covered:
+                break
+        if not covered:
+            return True
+        i = t.find(v, i + 1)
+    return False
+
+
 # ── masking (the production path) ─────────────────────────────────────────
 
 @dataclass
@@ -185,11 +227,19 @@ class GatewayClient:
 
     PROVIDER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-    def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        *,
+        model: str | None = None,
+    ) -> None:
         # Gateway coordinates (used by the scan-rounds stage only).
         self.base = (base_url or os.environ.get("GATEWAY_URL") or "http://localhost:8080").rstrip("/")
         self.key = api_key or os.environ.get("GATEWAY_API_KEY") or ""
-        self.model = CRITERIA["axis_a"]["answer_model"]
+        # FIX38 Part F — a second, different-vendor judge can be swapped in
+        # to check the primary. The primary stays what criteria.json says.
+        self.model = model or CRITERIA["axis_a"]["answer_model"]
         self._provider_key: str | None = None
 
     def warmup(self) -> None:

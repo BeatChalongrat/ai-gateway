@@ -62,9 +62,18 @@ _UUID_RE = re.compile(
 # 03x/04x/05x/07x). Trailing alphabetic lookahead rejects version
 # strings like ``02-release``; digit-boundary lookbehind/lookahead
 # prevent fusing with longer numeric runs.
+#
+# FIX38 C1 — Thai numerals. ``\d`` in a Python ``str`` pattern already
+# matches ``๐-๙`` (Unicode Nd) and ``str.isdigit`` counts them, so the
+# formatted and bare branches handled ``๐๘๑-๒๓๔-๕๖๗๘`` all along. This
+# branch did not: its area-code class was ASCII ``0[2-9]``, so every
+# 9-digit number typed on a Thai keyboard (``๐๒๗๗๘๘๙๙๐``, ``๐๙๔๕๕๖๖๗๗``)
+# fell through. The FIX37 corpus measured 62% of Thai-numeral phones
+# leaking; this class is the whole fix. Mirrored in the Rust sidecar
+# (``dlp-sidecar/src/detectors/phone.rs``) so the two engines agree.
 _PHONE_THAI_LANDLINE_RE = re.compile(
     r"(?<!\d)"
-    r"(0[2-9])"
+    r"([0๐][2-9๒-๙])"
     r"[\s\-]?\d{3}[\s\-]?\d{4}"
     r"(?!\d)(?![A-Za-z])"
 )

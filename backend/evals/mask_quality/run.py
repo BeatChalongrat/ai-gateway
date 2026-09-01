@@ -63,6 +63,11 @@ def stage_detect(ner: bool) -> dict:
     masker = H.Masker(ner_enabled=ner)
     per_type: dict[str, list[int]] = {}
     per_case: dict[str, list[int]] = {}
+    # FIX38 C2 — the same values scored with the decoy-aware matcher.
+    # ``pii_masked_rate`` stays the locked (substring) number; ``_strict``
+    # is the corrected tool. Both are reported; neither replaces the other.
+    per_type_strict: dict[str, list[int]] = {}
+    leaked_strict: list[dict] = []
     decoy_hits = 0
     decoy_total = 0
     eaten: list[dict] = []
@@ -78,6 +83,10 @@ def stage_detect(ner: bool) -> dict:
                 per_case.setdefault(c, []).append(ok)
             if not ok:
                 leaked.append({"id": m["id"], "type": p["type"], "value": p["value"]})
+            ok_s = 0 if H.present_outside_decoys(p["value"], r.text, m.get("must_not_mask", [])) else 1
+            per_type_strict.setdefault(p["type"], []).append(ok_s)
+            if not ok_s:
+                leaked_strict.append({"id": m["id"], "type": p["type"], "value": p["value"]})
         for d in m.get("must_not_mask", []):
             decoy_total += 1
             if H.present(d, r.text):
@@ -87,10 +96,15 @@ def stage_detect(ner: bool) -> dict:
     def rate(v: list[int]) -> float:
         return round(sum(v) / len(v), 4) if v else 0.0
     allv = [x for v in per_type.values() for x in v]
+    allv_s = [x for v in per_type_strict.values() for x in v]
     return {
         "ner": ner,
         "pii_masked_rate": {"overall": rate(allv), "by_type": {k: rate(v) for k, v in sorted(per_type.items())},
                             "by_case_type": {k: rate(v) for k, v in sorted(per_case.items())}},
+        "pii_masked_rate_strict": {"overall": rate(allv_s),
+                                   "by_type": {k: rate(v) for k, v in sorted(per_type_strict.items())},
+                                   "matcher": "present_outside_decoys (FIX38 C2)"},
+        "pii_leaked_strict": leaked_strict,
         "counts": {"pii_values": len(allv), "decoys": decoy_total},
         "decoy_survival": round(decoy_hits / decoy_total, 4) if decoy_total else 0.0,
         "decoys_eaten": eaten,
@@ -307,6 +321,8 @@ def stage_sweep(ner: bool) -> dict:
                 "swallow": gate["thai_name"]["swallow"] + gate["thai_address"]["swallow"],
                 "corpus_pii_masked_rate": det["pii_masked_rate"]["overall"],
                 "corpus_thai_name": det["pii_masked_rate"]["by_type"].get("thai_name"),
+                "corpus_thai_name_strict": det["pii_masked_rate_strict"]["by_type"].get("thai_name"),
+                "corpus_pii_masked_rate_strict": det["pii_masked_rate_strict"]["overall"],
                 "corpus_thai_address": det["pii_masked_rate"]["by_type"].get("thai_address"),
                 "decoy_survival": det["decoy_survival"],
                 "decoys_eaten": [d["decoy"] for d in det["decoys_eaten"]][:6],
@@ -328,6 +344,12 @@ def _leaked(answer: str, leak_values: list[str]) -> bool:
     return any(H.present(v, answer) for v in leak_values)
 
 
+def _leaked_strict(answer: str, leak_values: list[str], decoys: list[str]) -> bool:
+    """FIX38 C2 — the answer repeating a surviving decoy (``ข้าวโอ๊ต``) is
+    not a leak of the nickname inside it."""
+    return any(H.present_outside_decoys(v, answer, decoys) for v in leak_values)
+
+
 def _cause(m: dict, q: dict, raw_text: str, masked_text: str, answer: str) -> str:
     for d in m.get("must_not_mask", []):
         if not H.present(d, masked_text):
@@ -346,9 +368,9 @@ def _cause(m: dict, q: dict, raw_text: str, masked_text: str, answer: str) -> st
     return "other"
 
 
-def stage_axis_a(ner: bool, detect: dict, workers: int) -> dict:
+def stage_axis_a(ner: bool, detect: dict, workers: int, judge_model: str | None = None) -> dict:
     msgs = [m for m in H.load_messages() if m.get("questions")]
-    client = H.GatewayClient()
+    client = H.GatewayClient(model=judge_model)
     client.warmup()
     sysmsg = CRIT["axis_a"]["system_prompt"]
     masked_text = detect["masked_text"]
@@ -369,6 +391,7 @@ def stage_axis_a(ner: bool, detect: dict, workers: int) -> dict:
 
     ctx_raw_ok = ctx_masked_ok = ctx_total = 0
     id_total = id_leak_masked = id_leak_raw = 0
+    id_leak_masked_strict = 0
     causes: dict[str, int] = {}
     detail: list[dict] = []
     errors = 0
@@ -393,6 +416,8 @@ def stage_axis_a(ner: bool, detect: dict, workers: int) -> dict:
             else:
                 id_total += 1
                 id_leak_raw += int(_leaked(a_raw, q["leak_values"]))
+                if _leaked_strict(a_mask, q["leak_values"], m.get("must_not_mask", [])):
+                    id_leak_masked_strict += 1
                 if _leaked(a_mask, q["leak_values"]):
                     id_leak_masked += 1
                     detail.append({"id": m["id"], "q": q["id"], "cause": "identity_leak",
@@ -404,6 +429,7 @@ def stage_axis_a(ner: bool, detect: dict, workers: int) -> dict:
         "raw_context_accuracy": round(ctx_raw_ok / ctx_total, 4) if ctx_total else 0.0,
         "comprehension_retention": round(ctx_masked_ok / ctx_raw_ok, 4) if ctx_raw_ok else 0.0,
         "identity_leak": round(id_leak_masked / id_total, 4) if id_total else 0.0,
+        "identity_leak_strict": round(id_leak_masked_strict / id_total, 4) if id_total else 0.0,
         "identity_leak_raw_control": round(id_leak_raw / id_total, 4) if id_total else 0.0,
         "failure_causes": causes,
         "detail": detail,
@@ -421,17 +447,20 @@ def _candidates(profiles: list[dict], true_id: str, idx: int) -> list[dict]:
     return sorted(out, key=lambda p: p["id"])
 
 
-def stage_axis_b(ner: bool, detect: dict, workers: int) -> dict:
+def stage_axis_b(ner: bool, detect: dict, workers: int, judge_model: str | None = None) -> dict:
     msgs = [m for m in H.load_messages() if m.get("identity")]
     profiles = H.load_profiles()
-    client = H.GatewayClient()
+    client = H.GatewayClient(model=judge_model)
     client.warmup()
     masked_text = detect["masked_text"]
     by_id = {p["id"]: p for p in profiles}
 
-    def cause_of(m: dict) -> str:
+    def cause_of(m: dict, strict: bool = False) -> str:
         for p in m.get("pii", []):
-            if H.present(p["value"], masked_text[m["id"]]):
+            if strict:
+                if H.present_outside_decoys(p["value"], masked_text[m["id"]], m.get("must_not_mask", [])):
+                    return "pii_leak"
+            elif H.present(p["value"], masked_text[m["id"]]):
                 return "pii_leak"
         return "quasi"
 
@@ -467,7 +496,8 @@ def stage_axis_b(ner: bool, detect: dict, workers: int) -> dict:
         matched = sum(1 for k in CRIT["axis_b"]["open"]["attributes_scored"] if H.present(truth[k], oans))
         attr[c][0] += matched
         attr[c][1] += len(CRIT["axis_b"]["open"]["attributes_scored"])
-        detail.append({"id": m["id"], "cause": c, "quasi_strong": m["identity"].get("quasi_strong"),
+        detail.append({"id": m["id"], "cause": c, "cause_strict": cause_of(m, strict=True),
+                       "quasi_strong": m["identity"].get("quasi_strong"),
                        "closed_correct": ok, "closed_answer": ans[:40],
                        "open_attributes_matched": matched, "open_answer": oans[:220]})
 
@@ -498,10 +528,23 @@ def main(argv=None) -> int:
     ap.add_argument("--ner", default="off", choices=["on", "off"])
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--threshold", type=float, default=None,
+                    help="FIX38 Part E: run every stage at this dlp_thai_ner_threshold "
+                         "(system config, not a criterion); default = settings value")
+    ap.add_argument("--judge-model", default="",
+                    help="FIX38 Part F: answer/judge model override (a second vendor) for axis A/B; "
+                         "default = criteria.json answer_model")
     a = ap.parse_args(argv)
     ner = a.ner == "on"
+    if a.threshold is not None:
+        from app.core.config import settings as _settings
+        from app.services.dlp.detectors import thai_ner as _tn
+        _settings.dlp_thai_ner_threshold = a.threshold
+        _tn._cache.clear()
 
     res: dict = {"criteria_version": CRIT["version"], "ner_arm": a.ner,
+                 "judge_model": a.judge_model or CRIT["axis_a"]["answer_model"],
+                 "thai_ner_threshold": a.threshold,
                  "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     want = {a.stage} if a.stage != "all" else {"validate", "detect", "latency", "rounds", "axis-a", "axis-b"}
 
@@ -518,7 +561,8 @@ def main(argv=None) -> int:
         print(f"detect: overall pii_masked_rate={d['pii_masked_rate']['overall']} "
               f"decoy_survival={d['decoy_survival']}")
         for k, v in d["pii_masked_rate"]["by_type"].items():
-            print(f"  {k:20} {v}")
+            print(f"  {k:20} {v}   strict={d['pii_masked_rate_strict']['by_type'].get(k)}")
+        print(f"  strict overall (FIX38 C2 matcher) = {d['pii_masked_rate_strict']['overall']}")
     if "sweep" in want:
         res["sweep"] = stage_sweep(ner)
         print(f"{'thr':>5} {'name':>6} {'addr':>6} {'fires':>5} {'sw':>3} "
@@ -534,13 +578,14 @@ def main(argv=None) -> int:
         res["scan_rounds"] = stage_scan_rounds()
         print("scan rounds/answer:", json.dumps(res["scan_rounds"], ensure_ascii=False))
     if "axis-a" in want:
-        res["axis_a"] = stage_axis_a(ner, res["detect"], a.workers)
+        res["axis_a"] = stage_axis_a(ner, res["detect"], a.workers, a.judge_model or None)
         aa = res["axis_a"]
         print(f"axis A: raw_ctx_acc={aa['raw_context_accuracy']} "
               f"comprehension_retention={aa['comprehension_retention']} "
-              f"identity_leak={aa['identity_leak']} causes={aa['failure_causes']}")
+              f"identity_leak={aa['identity_leak']} (strict {aa['identity_leak_strict']}) "
+              f"causes={aa['failure_causes']}")
     if "axis-b" in want:
-        res["axis_b"] = stage_axis_b(ner, res["detect"], a.workers)
+        res["axis_b"] = stage_axis_b(ner, res["detect"], a.workers, a.judge_model or None)
         ab = res["axis_b"]
         print(f"axis B: closed={ab['closed_set_accuracy']} open={ab['open_attribute_recall']}")
 
