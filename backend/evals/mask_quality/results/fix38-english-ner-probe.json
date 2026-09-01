@@ -1,0 +1,295 @@
+{
+ "generated_at": "2026-09-01T08:02:14",
+ "arms": {
+  "ner_off": {
+   "ner_enabled": false,
+   "has_presidio_ner": false,
+   "recall": {
+    "email": 1.0,
+    "location": 0.0,
+    "organization": 0.0,
+    "person": 0.0,
+    "phone": 0.6667
+   },
+   "counts": {
+    "email": 2,
+    "location": 8,
+    "organization": 6,
+    "person": 25,
+    "phone": 3
+   },
+   "caught_by_detector": {
+    "email": {
+     "email": 2
+    },
+    "phone": {
+     "phone": 2
+    }
+   },
+   "misses": [
+    {
+     "id": "per01",
+     "kind": "person"
+    },
+    {
+     "id": "per02",
+     "kind": "person"
+    },
+    {
+     "id": "per03",
+     "kind": "person"
+    },
+    {
+     "id": "per04",
+     "kind": "person"
+    },
+    {
+     "id": "per05",
+     "kind": "person"
+    },
+    {
+     "id": "per06",
+     "kind": "person"
+    },
+    {
+     "id": "per07",
+     "kind": "person"
+    },
+    {
+     "id": "per08",
+     "kind": "person"
+    },
+    {
+     "id": "per09",
+     "kind": "person"
+    },
+    {
+     "id": "per10",
+     "kind": "person"
+    },
+    {
+     "id": "per11",
+     "kind": "person"
+    },
+    {
+     "id": "per12",
+     "kind": "person"
+    },
+    {
+     "id": "per13",
+     "kind": "person"
+    },
+    {
+     "id": "per14",
+     "kind": "person"
+    },
+    {
+     "id": "per15",
+     "kind": "person"
+    },
+    {
+     "id": "per16",
+     "kind": "person"
+    },
+    {
+     "id": "per17",
+     "kind": "person"
+    },
+    {
+     "id": "per18",
+     "kind": "person"
+    },
+    {
+     "id": "per19",
+     "kind": "person"
+    },
+    {
+     "id": "per20",
+     "kind": "person"
+    },
+    {
+     "id": "per21",
+     "kind": "person"
+    },
+    {
+     "id": "per22",
+     "kind": "person"
+    },
+    {
+     "id": "per23",
+     "kind": "person"
+    },
+    {
+     "id": "per24",
+     "kind": "person"
+    },
+    {
+     "id": "per25",
+     "kind": "person"
+    },
+    {
+     "id": "loc01",
+     "kind": "location"
+    },
+    {
+     "id": "loc02",
+     "kind": "location"
+    },
+    {
+     "id": "loc03",
+     "kind": "location"
+    },
+    {
+     "id": "loc04",
+     "kind": "location"
+    },
+    {
+     "id": "loc05",
+     "kind": "location"
+    },
+    {
+     "id": "loc06",
+     "kind": "location"
+    },
+    {
+     "id": "loc07",
+     "kind": "location"
+    },
+    {
+     "id": "loc08",
+     "kind": "location"
+    },
+    {
+     "id": "org01",
+     "kind": "organization"
+    },
+    {
+     "id": "org02",
+     "kind": "organization"
+    },
+    {
+     "id": "org03",
+     "kind": "organization"
+    },
+    {
+     "id": "org04",
+     "kind": "organization"
+    },
+    {
+     "id": "org05",
+     "kind": "organization"
+    },
+    {
+     "id": "org06",
+     "kind": "organization"
+    },
+    {
+     "id": "ctl05",
+     "kind": "phone"
+    }
+   ],
+   "clean_corpus": {
+    "sentences": 40,
+    "fires": 0,
+    "detail": []
+   },
+   "latency_ms": {
+    "p50": 0.19,
+    "p95": 0.34,
+    "p99": 0.46,
+    "n": 84
+   }
+  },
+  "ner_on": {
+   "ner_enabled": true,
+   "has_presidio_ner": true,
+   "recall": {
+    "email": 1.0,
+    "location": 0.75,
+    "organization": 0.0,
+    "person": 1.0,
+    "phone": 0.6667
+   },
+   "counts": {
+    "email": 2,
+    "location": 8,
+    "organization": 6,
+    "person": 25,
+    "phone": 3
+   },
+   "caught_by_detector": {
+    "person": {
+     "presidio_ner": 25
+    },
+    "location": {
+     "presidio_ner": 6
+    },
+    "email": {
+     "email": 2
+    },
+    "phone": {
+     "phone": 2
+    }
+   },
+   "misses": [
+    {
+     "id": "loc06",
+     "kind": "location"
+    },
+    {
+     "id": "loc08",
+     "kind": "location"
+    },
+    {
+     "id": "org01",
+     "kind": "organization"
+    },
+    {
+     "id": "org02",
+     "kind": "organization"
+    },
+    {
+     "id": "org03",
+     "kind": "organization"
+    },
+    {
+     "id": "org04",
+     "kind": "organization"
+    },
+    {
+     "id": "org05",
+     "kind": "organization"
+    },
+    {
+     "id": "org06",
+     "kind": "organization"
+    },
+    {
+     "id": "ctl05",
+     "kind": "phone"
+    }
+   ],
+   "clean_corpus": {
+    "sentences": 40,
+    "fires": 1,
+    "detail": [
+     {
+      "id": "clean08",
+      "detectors": [
+       "presidio_ner"
+      ],
+      "matched": [
+       "Japanese"
+      ]
+     }
+    ]
+   },
+   "latency_ms": {
+    "p50": 24.25,
+    "p95": 44.27,
+    "p99": 65.48,
+    "n": 84
+   }
+  }
+ }
+}
