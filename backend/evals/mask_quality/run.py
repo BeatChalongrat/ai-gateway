@@ -113,6 +113,152 @@ def stage_detect(ner: bool) -> dict:
     }
 
 
+# ── stage: overmask (FIX40) ───────────────────────────────────────────────
+
+def stage_overmask_detect(ner: bool) -> dict:
+    """Detection on the over-masking set.
+
+    The metric that matters here is ``keep_survival`` — the share of
+    ``must_not_mask`` strings still present verbatim after masking. The old
+    ``decoy_survival`` measures the same idea on the locked set; this one
+    exercises the shapes that set never had (two space-separated Thai words,
+    number + classifier + verb, a business term split by a space).
+    ``pii_masked_rate`` is the recall control: the fix must not buy
+    over-masking with recall.
+    """
+    msgs = H.load_overmask_messages()
+    masker = H.Masker(ner_enabled=ner)
+    per_type: dict[str, list[int]] = {}
+    per_type_strict: dict[str, list[int]] = {}
+    leaked_strict: list[dict] = []
+    per_shape_keep: dict[str, list[int]] = {}
+    keep_ok = keep_total = 0
+    eaten: list[dict] = []
+    leaked: list[dict] = []
+    masked_cache: dict[str, str] = {}
+    for m in msgs:
+        r = masker.mask(m["text"])
+        masked_cache[m["id"]] = r.text
+        for p in m.get("pii", []):
+            ok = 0 if H.present(p["value"], r.text) else 1
+            per_type.setdefault(p["type"], []).append(ok)
+            if not ok:
+                leaked.append({"id": m["id"], "type": p["type"], "value": p["value"]})
+            # Shape s4 puts the SAME string in the message twice: once as a
+            # person (``คุณแก้ว``) and once as a noun (``แก้วน้ำ``). The person
+            # occurrence is masked and the noun is a declared keep-string, so
+            # the plain substring test reads the surviving noun as a leak.
+            # Same correction as FIX38 C2 — reported beside the plain number,
+            # never instead of it.
+            ok_s = 0 if H.present_outside_decoys(p["value"], r.text, m.get("must_not_mask", [])) else 1
+            per_type_strict.setdefault(p["type"], []).append(ok_s)
+            if not ok_s:
+                leaked_strict.append({"id": m["id"], "type": p["type"], "value": p["value"]})
+        for k in m.get("must_not_mask", []):
+            keep_total += 1
+            alive = int(k in r.text)
+            keep_ok += alive
+            for sh in m.get("shapes", []):
+                per_shape_keep.setdefault(sh, []).append(alive)
+            if not alive:
+                eaten.append({"id": m["id"], "keep": k, "masked": r.text,
+                              "by": [d for d, _v, _a in r.findings]})
+
+    def rate(v: list[int]) -> float:
+        return round(sum(v) / len(v), 4) if v else 0.0
+
+    allv = [x for v in per_type.values() for x in v]
+    return {
+        "ner": ner,
+        "messages": len(msgs),
+        "pii_masked_rate": {"overall": rate(allv),
+                            "by_type": {k: rate(v) for k, v in sorted(per_type.items())}},
+        "pii_masked_rate_strict": {"overall": rate([x for v in per_type_strict.values() for x in v]),
+                                   "matcher": "present_outside_decoys (FIX38 C2)"},
+        "pii_leaked_strict": leaked_strict,
+        "keep_survival": round(keep_ok / keep_total, 4) if keep_total else 0.0,
+        "keep_survival_by_shape": {k: rate(v) for k, v in sorted(per_shape_keep.items())},
+        "counts": {"pii_values": len(allv), "keep_strings": keep_total},
+        "keep_eaten": eaten,
+        "pii_leaked": leaked,
+        "masked_text": masked_cache,
+    }
+
+
+def stage_overmask_axis(ner: bool, detect: dict, workers: int, judge_model: str | None = None) -> dict:
+    """``answer_accuracy_adjacent`` — can the model still answer a question
+    whose answer sits NEXT TO a masked span?
+
+    Same two-arm shape as axis A: every question is asked on the raw text
+    (the ceiling) and on the masked text. A question the model gets wrong on
+    the RAW text is not scored — that is the model's limit, not masking's.
+    """
+    msgs = [m for m in H.load_overmask_messages() if m.get("questions")]
+    client = H.GatewayClient(model=judge_model)
+    client.warmup()
+    sysmsg = CRIT["axis_a"]["system_prompt"]
+    masked_text = detect["masked_text"]
+
+    jobs = []
+    for m in msgs:
+        for q in m["questions"]:
+            for arm in ("raw", "masked"):
+                body = m["text"] if arm == "raw" else masked_text[m["id"]]
+                jobs.append((m, q, arm, f"ข้อความ:\n{body}\n\nคำถาม: {q['q']}"))
+
+    answers: dict[tuple[str, str, str], str] = {}
+    with futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(client.ask, sysmsg, prompt): (m["id"], q["id"], arm)
+                for (m, q, arm, prompt) in jobs}
+        for f in futures.as_completed(futs):
+            answers[futs[f]] = f.result()
+
+    by_kind: dict[str, list[int]] = {}
+    raw_ok_by_kind: dict[str, list[int]] = {}
+    id_total = id_leak = 0
+    detail: list[dict] = []
+    errors = 0
+    for m in msgs:
+        for q in m["questions"]:
+            a_raw = answers.get((m["id"], q["id"], "raw"), "")
+            a_mask = answers.get((m["id"], q["id"], "masked"), "")
+            if a_raw.startswith("__ERROR__") or a_mask.startswith("__ERROR__"):
+                errors += 1
+                continue
+            if q["kind"] == "identity":
+                id_total += 1
+                if _leaked_strict(a_mask, q["leak_values"], m.get("must_not_mask", [])):
+                    id_leak += 1
+                    detail.append({"id": m["id"], "q": q["id"], "cause": "identity_leak",
+                                   "answer_masked": a_mask[:200]})
+                continue
+            r_ok = _context_correct(a_raw, q["expect_any"])
+            raw_ok_by_kind.setdefault(q["kind"], []).append(int(r_ok))
+            if not r_ok:
+                continue  # the model cannot answer it even unmasked
+            m_ok = _context_correct(a_mask, q["expect_any"])
+            by_kind.setdefault(q["kind"], []).append(int(m_ok))
+            if not m_ok:
+                detail.append({"id": m["id"], "q": q["id"], "kind": q["kind"],
+                               "cause": "masked_broke_the_answer",
+                               "masked": masked_text[m["id"]][:220],
+                               "answer_masked": a_mask[:200]})
+
+    def rate(v: list[int]) -> float:
+        return round(sum(v) / len(v), 4) if v else 0.0
+
+    return {
+        "ner": ner,
+        "model": client.model,
+        "questions": {k: len(v) for k, v in by_kind.items()} | {"identity": id_total, "errors": errors},
+        "raw_ceiling": {k: rate(v) for k, v in raw_ok_by_kind.items()},
+        "answer_accuracy_adjacent": rate(by_kind.get("adjacent", [])),
+        "answer_accuracy_context": rate(by_kind.get("context", [])),
+        "identity_leak": round(id_leak / id_total, 4) if id_total else 0.0,
+        "detail": detail,
+    }
+
+
 # ── stage: latency ────────────────────────────────────────────────────────
 
 _SHORT = "โทรหาคุณสมชายด้วยนะ"
@@ -524,7 +670,8 @@ def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", default="all",
-                    choices=["validate", "detect", "latency", "rounds", "sweep", "axis-a", "axis-b", "all"])
+                    choices=["validate", "detect", "latency", "rounds", "sweep", "axis-a", "axis-b",
+                             "overmask", "overmask-axis", "all"])
     ap.add_argument("--ner", default="off", choices=["on", "off"])
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=6)
@@ -563,6 +710,23 @@ def main(argv=None) -> int:
         for k, v in d["pii_masked_rate"]["by_type"].items():
             print(f"  {k:20} {v}   strict={d['pii_masked_rate_strict']['by_type'].get(k)}")
         print(f"  strict overall (FIX38 C2 matcher) = {d['pii_masked_rate_strict']['overall']}")
+    if want & {"overmask", "overmask-axis"}:
+        res["overmask"] = stage_overmask_detect(ner)
+        o = res["overmask"]
+        print(f"overmask: {o['messages']} msgs  keep_survival={o['keep_survival']}  "
+              f"pii_masked_rate={o['pii_masked_rate']['overall']} "
+              f"(strict {o['pii_masked_rate_strict']['overall']})")
+        print(f"  by shape: {o['keep_survival_by_shape']}")
+        for e in o["keep_eaten"][:12]:
+            print(f"  EATEN {e['id']}: {e['keep']!r} by {e['by']}")
+    if "overmask-axis" in want:
+        res["overmask_axis"] = stage_overmask_axis(ner, res["overmask"], a.workers, a.judge_model or None)
+        oa = res["overmask_axis"]
+        print(f"overmask axis: answer_accuracy_adjacent={oa['answer_accuracy_adjacent']} "
+              f"context={oa['answer_accuracy_context']} identity_leak={oa['identity_leak']} "
+              f"raw_ceiling={oa['raw_ceiling']} n={oa['questions']}")
+        for d in oa["detail"][:10]:
+            print(f"  BROKE {d['id']}/{d.get('q')}: {d.get('answer_masked','')[:120]}")
     if "sweep" in want:
         res["sweep"] = stage_sweep(ner)
         print(f"{'thr':>5} {'name':>6} {'addr':>6} {'fires':>5} {'sw':>3} "

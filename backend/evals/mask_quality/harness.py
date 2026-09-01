@@ -40,6 +40,19 @@ def load_messages() -> list[dict]:
     return out
 
 
+def load_overmask_messages() -> list[dict]:
+    """FIX40's over-masking set — scored BESIDE the locked 72, never mixed in.
+
+    ``load_messages()`` globs ``messages_*.json``; these files are named
+    ``overmask_*.json`` on purpose, so every historical number computed
+    from the FIX37 corpus keeps its meaning.
+    """
+    out: list[dict] = []
+    for p in sorted(DATA.glob("overmask_*.json")):
+        out.extend(json.loads(p.read_text(encoding="utf-8"))["messages"])
+    return out
+
+
 def load_profiles() -> list[dict]:
     return json.loads((DATA / "profiles.json").read_text(encoding="utf-8"))["profiles"]
 
