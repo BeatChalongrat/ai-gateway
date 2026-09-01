@@ -615,7 +615,7 @@ class TestPasswordFieldDetector:
 class TestDefaultRegistry:
     def test_has_all_detectors(self):
         reg = get_default_registry()
-        assert len(reg) == 31
+        assert len(reg) == 32
         names = {d.name for d in reg.all()}
         assert names == {
             "email", "phone", "ssn", "credit_card", "iban",
@@ -634,6 +634,8 @@ class TestDefaultRegistry:
             # unconditionally since the Thai-name fix; see registry.py).
             "presidio_ner",
             "thai_name_no_prefix",
+            # FIX37 — Thai NER + nickname lexicon + context enhancer.
+            "thai_ner",
             # Thai-market contact identifier.
             "line_id",
         }
@@ -646,8 +648,8 @@ class TestDefaultRegistry:
             "thai_address", "thai_name", "address", "medical_record",
             "religion_belief", "health_condition", "criminal_record", "biometric_data",
             # NER + regex fallback (registered unconditionally since
-            # the Thai-name fix; see registry.py).
-            "presidio_ner", "thai_name_no_prefix",
+            # the Thai-name fix; see registry.py) + the FIX37 Thai layer.
+            "presidio_ner", "thai_name_no_prefix", "thai_ner",
             "line_id",
         }
         financial = reg.by_category("financial")

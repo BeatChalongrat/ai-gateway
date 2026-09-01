@@ -196,6 +196,16 @@ class GatewayOrchestrator:
         # safe to share across concurrent requests.
         self._registry_ner_on = get_default_registry(ner_enabled=True)
         self._registry_ner_off = get_default_registry(ner_enabled=False)
+        # FIX37 — outbound registries never carry the Thai NER detector.
+        # The response path scans once per streamed chunk (measured: 26
+        # window scans for a long answer), so a model call there would
+        # multiply the cost by the chunk count. Regex only, both axes.
+        self._registry_out_ner_on = get_default_registry(
+            ner_enabled=True, thai_ner=False
+        )
+        self._registry_out_ner_off = get_default_registry(
+            ner_enabled=False, thai_ner=False
+        )
         self.classifier = SensitivityClassifier()
         self.policy_evaluator = PolicyEvaluator()
         # Phase 1 — Central DLP Policy Engine. Shared decision boundary
@@ -3093,7 +3103,9 @@ class GatewayOrchestrator:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _select_registry(self, ner_enabled: bool) -> DetectorRegistry:
+    def _select_registry(
+        self, ner_enabled: bool, *, for_output: bool = False
+    ) -> DetectorRegistry:
         """Pick the cached registry matching the request's NER axis.
 
         ``ner_enabled=True`` → registry with ``presidio_ner`` (when
@@ -3101,9 +3113,15 @@ class GatewayOrchestrator:
         ``ner_enabled=False`` → registry with the regex fallback in
         place of Presidio.
 
+        ``for_output=True`` (FIX37) → the same axis, minus the Thai NER
+        detector. The outbound scan runs per streamed chunk, so it stays
+        regex-only regardless of the Thai-NER setting.
+
         Background paths that have no ``ctx`` (e.g. AI-review) should
         call this with ``ner_enabled=True`` to keep parity with the
         pre-fix behaviour."""
+        if for_output:
+            return self._registry_out_ner_on if ner_enabled else self._registry_out_ner_off
         return self._registry_ner_on if ner_enabled else self._registry_ner_off
 
     async def _select_dlp_engine_async(
@@ -3644,7 +3662,9 @@ class GatewayOrchestrator:
         if text is None:
             text = ""
 
-        registry = self._select_registry(ner_enabled)
+        registry = self._select_registry(
+            ner_enabled, for_output=(direction == "output")
+        )
         matches = registry.scan_text(text)
         if direction == "output":
             # Pre-compute the (start, end) spans of every mask-token

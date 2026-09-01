@@ -32,21 +32,24 @@ RUN (pip install --no-cache-dir "https://github.com/explosion/spacy-models/relea
     && (pip install --no-cache-dir "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1-py3-none-any.whl" \
         || echo "en_core_web_lg install skipped")
 
-# Thai NER: deliberately NOT installed here. spaCy does not publish
-# official Thai models — ``explosion/spacy-models`` has no
-# ``th_core_news_*`` release tags (catalog query returns an empty
-# version that 404s), and the PyThaiNLP HuggingFace mirror is a
-# gated repo (401 without an auth token). The code path in
-# ``main.py::_load_analyzer`` still probes for ``th_core_news_lg``
-# / ``th_core_news_sm`` and registers Thai with Presidio if either
-# is present — that's the route forward whenever a wheel becomes
-# available, e.g. via an air-gapped artifact registry the operator
-# bakes into the image at deploy time.
-#
-# Until then, Thai coverage rides on the regex ``thai_name``
-# detector (title-prefix gated, ``backend/app/services/dlp/
-# detectors/thai_name.py``) plus the conservative Thai
-# false-positive deny-list in ``presidio_ner.py``.
+# Thai NER (FIX37): PyThaiNLP's CRF ThaiNER. Chosen over the
+# WangchanBERTa transformer model after measuring both on the FIX37
+# corpus - see the rationale block in ner_service/main.py. ~10MB of
+# corpus data and no torch, so the image and the p95 stay where they
+# were. The corpus is downloaded at BUILD time so a cold worker does not
+# fetch on its first request (N6: load at start, not on demand).
+RUN pip install --no-cache-dir "pythainlp==5.0.4" "python-crfsuite==0.9.11" \
+    && python -c "from pythainlp.tag.named_entity import NER; NER(engine='thainer').tag('คุณสมชาย ใจดี')" \
+    && echo "thainer corpus warmed"
+
+# spaCy Thai: still NOT installed. spaCy publishes no official Thai
+# pipeline - ``explosion/spacy-models`` has no ``th_core_news_*``
+# release tag, so ``_load_analyzer`` finds nothing to register for
+# "th" and Presidio would answer Thai requests with the English model.
+# The probe in ``main.py::_load_analyzer`` is left in place for the day
+# a wheel exists; until then the CRF tagger above owns Thai, and the
+# regex ``thai_name`` / ``thai_address`` detectors remain the floor
+# under it (they are what runs when NER_THAI_ENABLED=0).
 
 # Copy only the ner_service package — narrower than ``COPY .`` so the
 # 7+ unrelated backend dirs (app/, migrations/, tests/) don't end up

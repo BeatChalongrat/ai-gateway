@@ -143,9 +143,14 @@ def stage_latency(ner: bool) -> dict:
     # Outbound scans are per-CHUNK windows (120-char masked tail + the new
     # delta), not per-answer — so the outbound unit cost is measured on a
     # fixed-size window, and multiplied by the rounds-per-answer count.
+    # The outbound registry is built WITHOUT the Thai NER detector, the
+    # same way the orchestrator builds it (``for_output=True``), so this
+    # row measures what the response path actually pays.
+    out_masker = H.Masker(ner_enabled=ner, thai_ner=False)
     window = _MED[:160]
-    samples = _timeit(lambda: masker.registry.scan_text(window), n, w)
+    samples = _timeit(lambda: out_masker.registry.scan_text(window), n, w)
     out["output_window"] = {"chars": len(window), **H.percentiles(samples, ps)}
+    out["output_registry_has_thai_ner"] = "thai_ner" in out_masker.registry
 
     # Live Rust sidecar — the engine that actually serves requests.
     try:
@@ -249,6 +254,68 @@ def stage_scan_rounds() -> dict:
                 "chars_per_scan": round((sum(chars) / sum(rounds)), 1) if sum(rounds) else 0,
             }
     return out
+
+
+# ── stage: sweep (Phase 3) ────────────────────────────────────────────────
+
+SWEEP_THRESHOLDS = [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
+
+
+def _dlp_eval_at(threshold: float) -> dict:
+    """Score the FIX28 must-catch sets + must-not-fire corpus in-process."""
+    from app.core.config import settings
+    from evals.dlp.run import load_corpus, load_sets, python_engine, score
+
+    settings.dlp_thai_ner_threshold = threshold
+    scan = python_engine()
+    sets, corpus = load_sets(), load_corpus()
+    out: dict = {}
+    for cat in ("thai_name", "thai_address"):
+        items = sets.get(cat) or []
+        hits = {it["id"]: scan(it["text"]) for it in items}
+        r = score(items, hits, cat)
+        out[cat] = {"recall": round(r.recall, 4), "caught": r.caught,
+                    "total": r.total, "swallow": r.swallow}
+    fires = [s["id"] for s in corpus if scan(s["text"])]
+    out["corpus_fires"] = len(fires)
+    out["corpus_fire_ids"] = fires[:10]
+    return out
+
+
+def stage_sweep(ner: bool) -> dict:
+    """Trade-off table across the confidence threshold.
+
+    Detection-side only — the model axes are re-run at the finalists,
+    because each axis-A pass costs ~330 provider calls.
+    """
+    from app.core.config import settings
+    from app.services.dlp.detectors import thai_ner
+
+    rows = []
+    original = getattr(settings, "dlp_thai_ner_threshold", 0.70)
+    try:
+        for t in SWEEP_THRESHOLDS:
+            settings.dlp_thai_ner_threshold = t
+            thai_ner._cache.clear()
+            det = stage_detect(ner)
+            gate = _dlp_eval_at(t)
+            rows.append({
+                "threshold": t,
+                "thai_name_recall": gate["thai_name"]["recall"],
+                "thai_address_recall": gate["thai_address"]["recall"],
+                "corpus_fires": gate["corpus_fires"],
+                "swallow": gate["thai_name"]["swallow"] + gate["thai_address"]["swallow"],
+                "corpus_pii_masked_rate": det["pii_masked_rate"]["overall"],
+                "corpus_thai_name": det["pii_masked_rate"]["by_type"].get("thai_name"),
+                "corpus_thai_address": det["pii_masked_rate"]["by_type"].get("thai_address"),
+                "decoy_survival": det["decoy_survival"],
+                "decoys_eaten": [d["decoy"] for d in det["decoys_eaten"]][:6],
+                "corpus_fire_ids": gate["corpus_fire_ids"],
+            })
+    finally:
+        settings.dlp_thai_ner_threshold = original
+        thai_ner._cache.clear()
+    return {"rows": rows}
 
 
 # ── stage: axis A ─────────────────────────────────────────────────────────
@@ -427,7 +494,7 @@ def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", default="all",
-                    choices=["validate", "detect", "latency", "rounds", "axis-a", "axis-b", "all"])
+                    choices=["validate", "detect", "latency", "rounds", "sweep", "axis-a", "axis-b", "all"])
     ap.add_argument("--ner", default="off", choices=["on", "off"])
     ap.add_argument("--out", default="")
     ap.add_argument("--workers", type=int, default=6)
@@ -452,6 +519,14 @@ def main(argv=None) -> int:
               f"decoy_survival={d['decoy_survival']}")
         for k, v in d["pii_masked_rate"]["by_type"].items():
             print(f"  {k:20} {v}")
+    if "sweep" in want:
+        res["sweep"] = stage_sweep(ner)
+        print(f"{'thr':>5} {'name':>6} {'addr':>6} {'fires':>5} {'sw':>3} "
+              f"{'c_all':>6} {'c_name':>6} {'c_addr':>6} {'decoy':>6}")
+        for r in res["sweep"]["rows"]:
+            print(f"{r['threshold']:>5} {r['thai_name_recall']:>6} {r['thai_address_recall']:>6} "
+                  f"{r['corpus_fires']:>5} {r['swallow']:>3} {r['corpus_pii_masked_rate']:>6} "
+                  f"{r['corpus_thai_name']:>6} {r['corpus_thai_address']:>6} {r['decoy_survival']:>6}")
     if "latency" in want:
         res["latency"] = stage_latency(ner)
         print("latency:", json.dumps(res["latency"]["input"], ensure_ascii=False))

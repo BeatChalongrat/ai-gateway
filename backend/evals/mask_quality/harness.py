@@ -102,7 +102,13 @@ class MaskResult:
 class Masker:
     """Runs detection → policy → mask exactly as the gateway does."""
 
-    def __init__(self, *, ner_enabled: bool, profile_id: str = "default") -> None:
+    def __init__(
+        self,
+        *,
+        ner_enabled: bool,
+        profile_id: str = "default",
+        thai_ner: bool | None = None,
+    ) -> None:
         from app.services.dlp.classifier import SensitivityClassifier
         from app.services.dlp.detectors.registry import get_default_registry
         from app.services.dlp.policy_engine import DLPPolicyEngine
@@ -111,7 +117,9 @@ class Masker:
         from app.services.policy.profiles import get_profile
 
         self.ner_enabled = ner_enabled
-        self.registry = get_default_registry(ner_enabled=ner_enabled)
+        self.registry = get_default_registry(
+            ner_enabled=ner_enabled, thai_ner=thai_ner
+        )
         self.engine = DLPPolicyEngine(
             classifier=SensitivityClassifier(), evaluator=PolicyEvaluator()
         )

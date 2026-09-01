@@ -45,6 +45,78 @@ _EN_CANDIDATES = ("en_core_web_lg", "en_core_web_sm")
 _TH_CANDIDATES = ("th_core_news_lg", "th_core_news_sm")
 
 _DEFAULT_ENTITIES = ("PERSON", "LOCATION", "ORGANIZATION", "GPE", "NRP")
+
+# FIX37 — Thai NER. spaCy publishes no Thai pipeline, so Presidio has
+# nothing to load for "th" and the service answered every Thai request
+# with the English model (measured: zero useful spans). PyThaiNLP's CRF
+# ThaiNER fills that hole.
+#
+# Why the CRF and not WangchanBERTa: both were measured on the FIX37
+# corpus. WangchanBERTa (thainer-corpus-v2, 419MB + torch) scored
+# name recall 0.80 at p50 232ms / p95 463ms per message; the CRF scored
+# 0.75 at p50 3.1ms / p95 6.8ms with a ~10MB corpus and no torch. The
+# inbound latency budget for this round is +200ms at p95, so the
+# transformer model is out on latency and image size (~+2GB) for five
+# points of raw recall that the scoring layer recovers from context.
+#
+# The confidence the CRF cannot give us is supplied by the gateway's
+# scoring layer (``thai_ner_scoring``), so every span leaves here with a
+# flat NER_TH_SCORE and is judged on context downstream.
+_THAI_NER_SCORE = 0.60
+_thai_tagger: Any | None = None
+_thai_status: str = "not_loaded"
+
+
+def _load_thai_tagger() -> None:
+    """Load the CRF ThaiNER tagger once per worker. Best-effort."""
+    global _thai_tagger, _thai_status
+    if os.environ.get("NER_THAI_ENABLED", "1") not in ("1", "true", "True"):
+        _thai_status = "disabled"
+        return
+    try:
+        from pythainlp.tag.named_entity import NER
+
+        tagger = NER(engine="thainer")
+        tagger.tag("อุ่นเครื่องคุณสมชาย ใจดี")  # warm the corpus load
+        _thai_tagger = tagger
+        _thai_status = "ready"
+    except Exception as exc:  # noqa: BLE001
+        _thai_tagger = None
+        _thai_status = f"error: {exc}"[:200]
+
+
+def _analyze_thai(text: str) -> list[dict]:
+    """IOB tags -> character-offset spans.
+
+    PyThaiNLP's tokenizer is lossless (``"".join(tokens) == text``), so
+    offsets come from accumulating token lengths — no re-search, and no
+    risk of landing on the wrong occurrence of a repeated name.
+    """
+    tagger = _thai_tagger
+    if tagger is None:
+        return []
+    out: list[dict] = []
+    pos = 0
+    cur_label: str | None = None
+    cur_start = 0
+    cur_end = 0
+    for token, tag in tagger.tag(text):
+        start, end = pos, pos + len(token)
+        pos = end
+        base = tag.split("-", 1)[-1] if "-" in tag else tag
+        if tag.startswith("B-"):
+            if cur_label:
+                out.append({"label": cur_label, "start": cur_start, "end": cur_end})
+            cur_label, cur_start, cur_end = base, start, end
+        elif tag.startswith("I-") and cur_label == base:
+            cur_end = end
+        else:
+            if cur_label:
+                out.append({"label": cur_label, "start": cur_start, "end": cur_end})
+            cur_label = None
+    if cur_label:
+        out.append({"label": cur_label, "start": cur_start, "end": cur_end})
+    return out
 # Per-language confidence floors. Thai NER routinely emits 0.7-0.85
 # PERSON hits on conversational verbs ("ตอบสั้นๆ", "ช่วยสรุป") that
 # the English model never produces because those words don't exist
@@ -152,6 +224,7 @@ async def _lifespan(_app: FastAPI):
     # Load on startup so the very first request doesn't pay the cold
     # start. The K8s readiness probe gates traffic on /health == "ready".
     _load_analyzer()
+    _load_thai_tagger()
     yield
 
 
@@ -185,11 +258,33 @@ class HealthResponse(BaseModel):
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     with _status_lock:
-        return HealthResponse(status=_status, model=_model_label)
+        return HealthResponse(
+            status=_status, model=_model_label + f", th_ner={_thai_status}"
+        )
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    # FIX37 — Thai goes to the Thai tagger. This branch is deliberately
+    # ahead of the Presidio readiness check: Thai coverage must not
+    # depend on the English analyzer having loaded.
+    if req.language == "th" and _thai_tagger is not None:
+        spans = _analyze_thai(req.text)
+        wanted = {e.upper() for e in (req.entities or _DEFAULT_ENTITIES)}
+        return AnalyzeResponse(
+            entities=[
+                Entity(
+                    text=req.text[s["start"]:s["end"]],
+                    label=s["label"],
+                    start=s["start"],
+                    end=s["end"],
+                    score=_THAI_NER_SCORE,
+                )
+                for s in spans
+                if s["label"].upper() in wanted
+            ]
+        )
+
     with _status_lock:
         analyzer = _analyzer
         status = _status

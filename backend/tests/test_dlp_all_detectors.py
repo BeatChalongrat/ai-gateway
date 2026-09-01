@@ -457,6 +457,8 @@ class TestCoverageMatrix:
         # (thai_name_no_prefix) is now registered unconditionally
         # alongside Presidio — see registry.py for the rationale.
         "presidio_ner", "thai_name_no_prefix",
+        # FIX37 — Thai NER + nickname lexicon + context enhancer.
+        "thai_ner",
         "line_id",
     }
 
@@ -464,7 +466,7 @@ class TestCoverageMatrix:
         registry = get_default_registry()
         names = {d.name for d in registry._detectors}
         assert names == self.EXPECTED_DETECTORS
-        assert len(registry) == 31
+        assert len(registry) == 32
 
     def test_all_have_mask_tokens(self):
         from app.services.dlp.transformer import MASK_TOKENS

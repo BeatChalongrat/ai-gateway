@@ -108,19 +108,27 @@ services:
   # workers stay light. The gateway calls this via NER_SERVICE_URL;
   # leaving the URL unset falls back to the legacy in-process loader.
   #
-  # Multi-worker: each of the 4 uvicorn workers is its own process with
-  # its own spaCy/Presidio analyzer (~12 MB for en_core_web_sm; lazy-
-  # loaded via the lifespan hook). Concurrent requests across workers
-  # are CPU-parallel; within one worker spaCy holds the GIL during
-  # analyze() but the read-only AnalyzerEngine is safe to share across
-  # coroutines.
+  # Multi-worker: each uvicorn worker is its own process with its own
+  # spaCy/Presidio analyzer AND (FIX37) its own Thai CRF tagger, both
+  # loaded at startup via the lifespan hook. Concurrent requests across
+  # workers are CPU-parallel; within one worker spaCy holds the GIL
+  # during analyze() but the read-only AnalyzerEngine is safe to share
+  # across coroutines.
+  #
+  # FIX37 sizing, measured: 4 workers with the Thai tagger reached
+  # 3.98 GiB against the old 4g cap — one allocation from an OOM kill.
+  # Per worker is ~1 GiB (en_core_web_lg + the Thai corpus), against
+  # ~380 MiB before. Two workers is ample for the load this service
+  # sees (the Thai path answers in ~3 ms and the gateway's timeout is
+  # 2 s), and the cap has headroom for a burst.  Raise NER_WORKERS only
+  # together with the memory limit.
   ner-service:
     build:
       context: ./backend
       dockerfile: ner_service/Dockerfile
     image: ai-gateway-ner-service:latest
     environment:
-      NER_WORKERS: ${NER_WORKERS:-4}
+      NER_WORKERS: ${NER_WORKERS:-2}
       # Per-language confidence floors. Thai NER is noisier than
       # English on conversational prose, so its floor stays higher
       # by default. Both are overridable per-deployment if a
@@ -133,7 +141,7 @@ services:
       resources:
         limits:
           cpus: "4.0"
-          memory: "4g"
+          memory: "5g"
         reservations:
           cpus: "2.0"
           memory: "2g"

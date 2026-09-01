@@ -737,10 +737,11 @@ class TestCoverageEndpoint:
         resp = client.get("/admin/dlp/coverage", headers=_HEADERS)
         assert resp.status_code == 200
         body = resp.json()
-        # 31 = previous 28 + labeled address + income + the regex
+        # 32 = previous 28 + labeled address + income + the regex
         # Thai-name fallback (now registered alongside Presidio; see
-        # registry.py for the gate-removal rationale).
-        assert body["summary"]["total"] == 31
+        # registry.py for the gate-removal rationale) + the FIX37 Thai
+        # NER layer.
+        assert body["summary"]["total"] == 32
 
         names = {d["name"] for d in body["detectors"]}
         assert "thai_national_id" in names
