@@ -13,11 +13,11 @@ module.exports = {
     extend: {
       colors: {
         bg: {
-          base:      "var(--bg-primary)",       // main chat canvas
-          secondary: "var(--bg-surface)",       // inputs, surface cards
-          surface:   "var(--bg-surface)",       // alias kept for older code
-          sidebar:   "var(--bg-sidebar)",
-          elevated:  "var(--bg-surface-hover)",
+          base:      "rgb(var(--bg-primary-rgb) / <alpha-value>)",       // main chat canvas
+          secondary: "rgb(var(--bg-surface-rgb) / <alpha-value>)",       // inputs, surface cards
+          surface:   "rgb(var(--bg-surface-rgb) / <alpha-value>)",       // alias kept for older code
+          sidebar:   "rgb(var(--bg-sidebar-rgb) / <alpha-value>)",
+          elevated:  "rgb(var(--bg-surface-hover-rgb) / <alpha-value>)",
         },
         border: {
           DEFAULT: "var(--border-default)",
@@ -25,22 +25,22 @@ module.exports = {
           strong:  "var(--border-hover)",
         },
         text: {
-          primary:   "var(--text-primary)",
-          secondary: "var(--text-secondary)",
-          muted:     "var(--text-tertiary)",
+          primary:   "rgb(var(--text-primary-rgb) / <alpha-value>)",
+          secondary: "rgb(var(--text-secondary-rgb) / <alpha-value>)",
+          muted:     "rgb(var(--text-tertiary-rgb) / <alpha-value>)",
         },
         accent: {
-          DEFAULT: "var(--accent)",
-          hover:   "var(--accent-hover)",
+          DEFAULT: "rgb(var(--accent-rgb) / <alpha-value>)",
+          hover:   "rgb(var(--accent-hover-rgb) / <alpha-value>)",
           subtle:  "var(--accent-subtle)",
         },
         bubble: {
-          user: "var(--user-bubble-bg)",
+          user: "rgb(var(--user-bubble-bg-rgb) / <alpha-value>)",
         },
         status: {
-          success: "var(--success)",
-          warning: "var(--warning)",
-          danger:  "var(--error)",
+          success: "rgb(var(--success-rgb) / <alpha-value>)",
+          warning: "rgb(var(--warning-rgb) / <alpha-value>)",
+          danger:  "rgb(var(--error-rgb) / <alpha-value>)",
         },
       },
       fontFamily: {
