@@ -250,12 +250,12 @@ function TierBadge({ value }: { value: string }) {
   );
 }
 
-function ProviderChip({ name, active, count, onClick }: {
-  name: string; active: boolean; count: number; onClick: () => void;
+function ProviderChip({ name, active, count, shown, title, onClick }: {
+  name: string; active: boolean; count: number; shown?: number; title?: string; onClick: () => void;
 }) {
   const c = brand(name);
   return (
-    <button onClick={onClick} style={{
+    <button onClick={onClick} title={title} style={{
       display: "inline-flex", alignItems: "center", gap: "0.3125rem",
       padding: "0.25rem 0.5rem 0.25rem 0.375rem",
       fontSize: "0.6875rem", fontWeight: active ? 600 : 500,
@@ -275,7 +275,11 @@ function ProviderChip({ name, active, count, onClick }: {
       <span style={{
         fontSize: "0.5625rem", fontWeight: 700, color: active ? c : "var(--text-muted)",
         marginLeft: "0.0625rem",
-      }}>{count}</span>
+      }}>{
+        // FIX47.6 Part A — "shown/total" so the 5-per-provider ceiling
+        // is visible at a glance; bare total where shown isn't supplied.
+        shown !== undefined ? `${shown}/${count}` : count
+      }</span>
     </button>
   );
 }
@@ -316,6 +320,9 @@ function StatCard({ value, label, icon, accent, delay = 0, iconClass }: {
 /* ── Page ────────────────────────────────────────────────────────── */
 
 const PAGE_SIZE = 15;
+// FIX47.6 Part A — at most this many models per provider may be offered
+// in the chat picker. A ceiling, not a target; enforced at the switch.
+const CHAT_CEILING = 5;
 
 export default function ModelsPage() {
   const t = useT();
@@ -326,15 +333,6 @@ export default function ModelsPage() {
   const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models/configs?limit=500");
   const [localShow, setLocalShow] = useState<Record<number, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
-  const setShowInChat = useCallback(async (id: number, next: boolean) => {
-    setSaveError(null);
-    try {
-      await api.patch(`/admin/models/${id}`, { show_in_chat: next });
-      setLocalShow((prev) => ({ ...prev, [id]: next }));
-    } catch (e) {
-      setSaveError(getApiErrorMessage(e, "save failed"));
-    }
-  }, []);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [streamingOnly, setStreamingOnly] = useState(false);
@@ -346,6 +344,32 @@ export default function ModelsPage() {
     [data, localShow],
   );
   const shownInChat = useMemo(() => items.filter((m) => m.is_active && m.show_in_chat).length, [items]);
+
+  // FIX47.6 Part A — per-provider shown count (active + show_in_chat),
+  // driving both the chips' "shown/total" figure and the ceiling guard.
+  const providerShown = useMemo(() => {
+    const c: Record<string, number> = {};
+    items.forEach((m) => { if (m.is_active && m.show_in_chat) c[m.provider] = (c[m.provider] || 0) + 1; });
+    return c;
+  }, [items]);
+
+  // FIX47.6 Part A — the chat-picker ceiling, enforced at the switch: a
+  // 6th "on" for a provider is refused WITH the reason, never silently
+  // accepted (the curation script honours the same ceiling on --apply).
+  const setShowInChat = useCallback(async (id: number, next: boolean) => {
+    setSaveError(null);
+    const item = items.find((m) => m.id === id);
+    if (next && item && (providerShown[item.provider] || 0) >= CHAT_CEILING) {
+      setSaveError(t("infra.models.ceilingRefused", { provider: item.provider, n: String(CHAT_CEILING) }));
+      return;
+    }
+    try {
+      await api.patch(`/admin/models/${id}`, { show_in_chat: next });
+      setLocalShow((prev) => ({ ...prev, [id]: next }));
+    } catch (e) {
+      setSaveError(getApiErrorMessage(e, "save failed"));
+    }
+  }, [items, providerShown, t]);
 
   const providers = useMemo(() => {
     const c: Record<string, number> = {};
@@ -491,6 +515,13 @@ export default function ModelsPage() {
                 {providers.map(([name, count]) => (
                   <ProviderChip
                     key={name} name={name} count={count}
+                    shown={providerShown[name] || 0}
+                    title={t("infra.models.providerShown", {
+                      provider: name,
+                      shown: String(providerShown[name] || 0),
+                      total: String(count),
+                      ceiling: String(CHAT_CEILING),
+                    })}
                     active={providerFilter === name}
                     onClick={() => handleProvider(providerFilter === name ? null : name)}
                   />
