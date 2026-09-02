@@ -332,7 +332,7 @@ export function ConversationItem({
                 setConfirmingDelete(false);
                 void onDelete();
               }}
-              className="focus-ring rounded bg-status-danger/85 px-2 py-1 font-medium text-white hover:bg-status-danger"
+              className="focus-ring rounded bg-status-danger px-2 py-1 font-medium text-white hover:bg-status-danger"
             >
               {t("common.delete")}
             </button>

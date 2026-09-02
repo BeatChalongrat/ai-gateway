@@ -67,16 +67,6 @@
       "reason": "OPEN_DECISIONS #42 group B (tint /5 on an opaque status/text token): dropping /5 would paint it solid — waits for the L1/L2 decision. Today: no colour."
     },
     {
-      "class": "bg-status-danger/85",
-      "sites": 5,
-      "reason": "OPEN_DECISIONS #42 group B-solid (/85 on an opaque status token; the intent was a near-solid button): today NO background — the Stop/Delete button is white-on-white in the light theme. Awaiting the owner's call on dropping /85."
-    },
-    {
-      "class": "bg-status-danger/90",
-      "sites": 1,
-      "reason": "OPEN_DECISIONS #42 group B-solid (/90 on an opaque status token; the intent was a near-solid button): today NO background — the Stop/Delete button is white-on-white in the light theme. Awaiting the owner's call on dropping /90."
-    },
-    {
       "class": "bg-status-warning/15",
       "sites": 1,
       "reason": "OPEN_DECISIONS #42 group B (tint /15 on an opaque status/text token): dropping /15 would paint it solid — waits for the L1/L2 decision. Today: no colour."
@@ -140,11 +130,6 @@
       "class": "hover:bg-status-danger/20",
       "sites": 1,
       "reason": "OPEN_DECISIONS #42 group B (tint /20 on an opaque status/text token): dropping /20 would paint it solid — waits for the L1/L2 decision. Today: no colour."
-    },
-    {
-      "class": "hover:bg-status-danger/90",
-      "sites": 1,
-      "reason": "OPEN_DECISIONS #42 group B-solid (/90 on an opaque status token; the intent was a near-solid button): today NO background — the Stop/Delete button is white-on-white in the light theme. Awaiting the owner's call on dropping /90."
     },
     {
       "class": "ring-status-warning/30",

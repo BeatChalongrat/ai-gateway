@@ -22,7 +22,7 @@ const variantClasses: Record<Variant, string> = {
   ghost:
     "bg-transparent hover:bg-bg-elevated text-text-secondary hover:text-text-primary",
   danger:
-    "bg-status-danger/90 hover:bg-status-danger text-white disabled:opacity-50",
+    "bg-status-danger hover:bg-status-danger text-white disabled:opacity-50",
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

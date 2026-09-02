@@ -15,7 +15,7 @@
   },
   "delete-confirm-dark": "not reached: locator.hover: Timeout 5000ms exceeded.",
   "stop-button-dark": {
-    "bg": "rgba(0, 0, 0, 0)",
+    "bg": "rgb(239, 68, 68)",
     "color": "rgb(255, 255, 255)"
   },
   "toast-light": {
@@ -34,7 +34,7 @@
   },
   "delete-confirm-light": "not reached: locator.hover: Timeout 5000ms exceeded.",
   "stop-button-light": {
-    "bg": "rgba(0, 0, 0, 0)",
+    "bg": "rgb(239, 68, 68)",
     "color": "rgb(255, 255, 255)"
   }
 }

@@ -62,7 +62,7 @@ export function RecordingBar({
         type="button"
         onClick={onStop}
         aria-label={t("a11y.stopRecording")}
-        className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-danger text-white transition-colors hover:bg-status-danger/90"
+        className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-status-danger text-white transition-colors hover:bg-status-danger"
       >
         <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <rect x="6" y="6" width="12" height="12" rx="2" />
