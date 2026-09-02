@@ -32,6 +32,7 @@ import { useT, tOutside } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
 
 import { CloudTasksSection, KindBadge } from "./CloudTasksSection";
+import { Switch } from "@/components/ui/Switch";
 
 export default function ScheduledTasksPage() {
   const hosted = useHostedMode();
@@ -294,9 +295,8 @@ function LocalTasksSection({
     <section className="mt-12 border-t border-border/60 pt-10">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
+          <h2 className="text-lg font-semibold tracking-tight text-text-primary">
             {t("tasks.local.title")}
-            <KindBadge kind="local" />
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
             {t("tasks.local.subtitle")}
@@ -498,12 +498,9 @@ function TaskRow({
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-medium text-text-primary">
-              {task.name}
-            </h3>
-            <KindBadge kind="local" />
-          </div>
+          <h3 className="truncate text-base font-medium text-text-primary">
+            {task.name}
+          </h3>
           <p className="mt-1 font-mono text-xs text-text-secondary">
             {task.cron}
           </p>
@@ -563,24 +560,8 @@ function Toggle({
   onChange: (enabled: boolean) => void;
   label: string;
 }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      onClick={() => onChange(!enabled)}
-      className={`focus-ring relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-        enabled ? "bg-status-success" : "bg-border-strong"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-bg-base transition-transform ${
-          enabled ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
+  // FIX43 — one Switch for the whole app (components/ui/Switch.tsx).
+  return <Switch checked={enabled} onChange={onChange} label={label} />;
 }
 
 // ---------------------------------------------------------------------------

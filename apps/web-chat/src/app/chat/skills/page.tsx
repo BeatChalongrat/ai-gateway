@@ -14,6 +14,7 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
+import { Switch } from "@/components/ui/Switch";
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useHostedMode } from "@/hooks/useHostedMode";
@@ -182,16 +183,11 @@ function WebSkillsScreen() {
                     <Button variant="ghost" onClick={() => void handleDelete(skill)} aria-label={t("skills.delete.aria", { name: skill.name })}>
                       {t("skills.delete")}
                     </Button>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={skill.enabled}
-                      aria-label={`${skill.name} ${skill.enabled ? t("skills.state.on") : t("skills.state.off")}`}
-                      onClick={() => void handleToggle(skill)}
-                      className={`relative h-6 w-11 rounded-full transition-colors ${skill.enabled ? "bg-blue-600" : "bg-border"}`}
-                    >
-                      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${skill.enabled ? "translate-x-5" : "translate-x-0.5"}`} />
-                    </button>
+                    <Switch
+                      checked={skill.enabled}
+                      onChange={() => void handleToggle(skill)}
+                      label={`${skill.name} ${skill.enabled ? t("skills.state.on") : t("skills.state.off")}`}
+                    />
                   </div>
                 </section>
               ))}

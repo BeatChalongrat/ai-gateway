@@ -18,6 +18,7 @@ import { tOutside, useT } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import type { CloudTask, CloudTaskRun, Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
+import { Switch } from "@/components/ui/Switch";
 
 // The MINIMUM cadence is one hour — cloud tasks run at most once per hour.
 const CLOUD_INTERVALS: { label: string; seconds: number }[] = [
@@ -135,9 +136,8 @@ export function CloudTasksSection({
       <div className="flex items-start justify-between gap-4">
         <div>
           {standalone ? null : (
-            <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-text-primary">
+            <h2 className="text-lg font-semibold tracking-tight text-text-primary">
               {t("cloud.title")}
-              <KindBadge kind="cloud" />
             </h2>
           )}
           <p className={standalone ? "text-sm text-text-secondary" : "mt-1 text-sm text-text-secondary"}>
@@ -172,7 +172,6 @@ export function CloudTasksSection({
               <CloudTaskRow
                 key={task.id}
                 task={task}
-                showKind={!standalone}
                 onToggle={(enabled) => void handleToggle(task, enabled)}
                 onDelete={() => void handleDelete(task)}
                 onHistory={() => setHistoryTask(task)}
@@ -229,25 +228,23 @@ function CloudTaskRow({
   onToggle,
   onDelete,
   onHistory,
-  showKind = true,
 }: {
   task: CloudTask;
   onToggle: (enabled: boolean) => void;
   onDelete: () => void;
   onHistory: () => void;
   /** false on the web (FIX34.1 Part F): one kind → no badge to distinguish. */
-  showKind?: boolean;
 }) {
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-medium text-text-primary">
-              {task.name}
-            </h3>
-            {showKind ? <KindBadge kind="cloud" /> : null}
-          </div>
+          {/* FIX43 D1 — no kind badge on a row: every row here sits under a
+              heading that already says "Cloud" (or is the whole page). A badge
+              earns its place only where kinds are mixed — the kind chooser. */}
+          <h3 className="truncate text-base font-medium text-text-primary">
+            {task.name}
+          </h3>
           <p className="mt-1 text-xs text-text-secondary">
             {intervalLabel(task.interval_seconds)}
           </p>
@@ -667,24 +664,8 @@ function Toggle({
   onChange: (enabled: boolean) => void;
   label: string;
 }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      onClick={() => onChange(!enabled)}
-      className={`focus-ring relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-        enabled ? "bg-status-success" : "bg-border-strong"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-bg-base transition-transform ${
-          enabled ? "translate-x-6" : "translate-x-1"
-        }`}
-      />
-    </button>
-  );
+  // FIX43 — one Switch for the whole app (components/ui/Switch.tsx).
+  return <Switch checked={enabled} onChange={onChange} label={label} />;
 }
 
 function intervalLabel(seconds: number): string {
