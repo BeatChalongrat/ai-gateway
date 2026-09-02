@@ -470,3 +470,47 @@ describe("FIX47.5 — what must not break", () => {
     expect(spacerOf(scroller)).toBe(0);
   });
 });
+
+describe("FIX47.5 — the held position survives the reply's final re-layout", () => {
+  let fire: (() => void) | null = null;
+  beforeEach(() => {
+    fire = null;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(cb: () => void) { fire = cb; }
+      observe() {}
+      disconnect() {}
+    });
+  });
+
+  it("a finished short answer settling shorter keeps the question where it was", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    const anchored = scroller.scrollTop; // 736
+    heights[9] = 60;
+    rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
+    expect(spacerOf(scroller)).toBe(76); // 736 + 300 − 960
+
+    // the row re-lays out 20px shorter WITHOUT a render (actions bar,
+    // cursor line): the browser clamps scrollTop to the new maximum…
+    heights[9] = 40;
+    scroller.scrollTop = 940 - 300 + 76 - 20; // = 696, what a browser would clamp to
+    fire!();
+    // …and the observer gives the room back and restores the position
+    expect(spacerOf(scroller)).toBe(96);
+    expect(scroller.scrollTop).toBe(anchored);
+  });
+
+  it("once the person has scrolled, a resize changes nothing", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 60;
+    rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
+    scroller.scrollTop = 500;
+    fireEvent.scroll(scroller);
+    const spacer = spacerOf(scroller);
+    heights[9] = 40;
+    fire!();
+    expect(scroller.scrollTop).toBe(500);
+    expect(spacerOf(scroller)).toBe(spacer);
+  });
+});

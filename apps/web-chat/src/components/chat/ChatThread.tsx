@@ -116,10 +116,20 @@ export function ChatThread({
    *  is somewhere on the way there, and sizing the spacer from it made
    *  the target unreachable. */
   const anchorTop = useRef(0);
+  /** The position the thread is HOLDING for the reader: the anchor target
+   *  from the send until either the follow takes over or the person
+   *  scrolls — including after a short turn has ended. While set, a
+   *  content resize re-sizes the spacer for it and puts the view back if
+   *  the scroller clamped (the reply's final layout settles a few px
+   *  shorter than its streaming layout; without this the finished turn
+   *  hopped up by that much). */
+  const holdTop = useRef<number | null>(null);
   const lastUserMsgKey = useRef<string | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
-  /** The programmatic scroll animation in flight (rAF handle), if any. */
+  /** The programmatic scroll animation in flight: its rAF handle (for
+   *  cancelling) and whether it is still running. */
   const scrollAnim = useRef<number | null>(null);
+  const animating = useRef(false);
   /** Set by the input events that mean "the person is scrolling" (wheel,
    *  touch, keys, scrollbar). A scroll event that arrives while one of
    *  our own scrolls is in flight is ours unless this says otherwise. */
@@ -178,8 +188,9 @@ export function ChatThread({
     setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
     // Already there, or a jump is already on its way there (the
     // late-measure re-pass lands mid-jump) → no new animation.
-    const heading = scrollAnim.current !== null ? anchorTop.current : el.scrollTop;
+    const heading = animating.current ? anchorTop.current : el.scrollTop;
     anchorTop.current = target;
+    holdTop.current = target;
     if (Math.abs(heading - target) <= tolerance) return true;
     // The anchor jump ANIMATES: it is a deliberate move the user asked for
     // by sending, and a hard cut loses the sense that the thread scrolled.
@@ -209,6 +220,7 @@ export function ChatThread({
       return;
     }
     autoScrolling.current = true;
+    animating.current = true;
     let frame = 0;
     const step = () => {
       frame += 1;
@@ -223,7 +235,7 @@ export function ChatThread({
       // One more frame so the last write's scroll event is dispatched
       // (and ignored) before the flag drops.
       scrollAnim.current = requestAnimationFrame(() => {
-        scrollAnim.current = null;
+        animating.current = false;
         autoScrolling.current = false;
       });
     };
@@ -235,6 +247,7 @@ export function ChatThread({
       cancelAnimationFrame(scrollAnim.current);
       scrollAnim.current = null;
     }
+    animating.current = false;
     autoScrolling.current = false;
   }
 
@@ -259,6 +272,7 @@ export function ChatThread({
   useLayoutEffect(() => {
     // P3 — a turn anchor never crosses conversations.
     anchorActive.current = false;
+    holdTop.current = null;
     lastUserMsgKey.current = null;
     cancelScrollAnimation();
     if (spacerRef.current) spacerRef.current.style.height = "0px";
@@ -363,6 +377,7 @@ export function ChatThread({
         return;
       }
       anchorActive.current = false; // row unreachable — old behaviour
+      holdTop.current = null;
     }
 
     // FIX30 §1: a consent card is the one thing in a turn the USER must act
@@ -378,6 +393,7 @@ export function ChatThread({
     if (consentArrived) {
       if (anchorActive.current || autoStick) {
         anchorActive.current = false;
+        holdTop.current = null;
         setSpacerPx(0);
         setAutoStick(true);
         snapTo(el, el.scrollHeight);
@@ -401,6 +417,7 @@ export function ChatThread({
       // from here (shouldResumeFollow is THE policy line to tune).
       if (shouldResumeFollow(contentH, top, el.clientHeight)) {
         anchorActive.current = false;
+        holdTop.current = null;
         setAutoStick(true); // the next delta snaps to the bottom
       }
       return;
@@ -486,12 +503,33 @@ export function ChatThread({
     if (anchorActive.current) {
       anchorActive.current = false;
       const contentH = el.scrollHeight - spacerPx();
-      setSpacerPx(spacerNeeded(el.scrollTop, el.clientHeight, contentH));
+      setSpacerPx(spacerNeeded(holdTop.current ?? el.scrollTop, el.clientHeight, contentH));
       return;
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     if (distance < NEAR_BOTTOM_PX) snapTo(el, el.scrollHeight);
   }, [anyStreaming]);
+
+  // While a position is held, a content resize (a row re-laying out
+  // without a render — the finished reply settling shorter, an image
+  // decoding, a code block collapsing) re-sizes the spacer for that
+  // position and, if the scroller already clamped, puts the view back.
+  // ResizeObserver runs after layout and before paint, so the correction
+  // is never seen.
+  useEffect(() => {
+    const el = scrollerRef.current;
+    const column = el?.firstElementChild;
+    if (!el || !column || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const top = holdTop.current;
+      if (top === null) return;
+      const contentH = el.scrollHeight - spacerPx();
+      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
+      if (!animating.current && Math.abs(el.scrollTop - top) > 1) snapTo(el, top);
+    });
+    ro.observe(column);
+    return () => ro.disconnect();
+  }, []);
 
   /** The input events that mean the PERSON is scrolling. A scroll event
    *  raised by one of our own writes never follows one of these; a
@@ -499,7 +537,7 @@ export function ChatThread({
    *  so the person's scroll wins immediately. */
   function markUserIntent() {
     userIntent.current = true;
-    if (scrollAnim.current !== null) cancelScrollAnimation();
+    if (animating.current) cancelScrollAnimation();
     window.setTimeout(() => {
       userIntent.current = false;
     }, 250);
@@ -515,6 +553,7 @@ export function ChatThread({
     // hold for this turn (the autoStick logic below then decides
     // whether to follow).
     anchorActive.current = false;
+    holdTop.current = null;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distance < NEAR_BOTTOM_PX;
     // Scrolling UP while a reply streams stops the follow at once, however
@@ -543,6 +582,7 @@ export function ChatThread({
     if (!el) return;
     setAutoStick(true);
     setPendingNew(false);
+    holdTop.current = null;
     animateScroll(el, el.scrollHeight);
   }
 
@@ -555,6 +595,7 @@ export function ChatThread({
     const card = el.querySelector<HTMLElement>('[data-testid="consent-card"]');
     if (card && typeof card.scrollIntoView === "function") {
       anchorActive.current = false;
+      holdTop.current = null;
       setAutoStick(true);
       cancelScrollAnimation();
       autoScrolling.current = true;
