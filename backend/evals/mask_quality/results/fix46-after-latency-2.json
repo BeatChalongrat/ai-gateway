@@ -1,0 +1,65 @@
+{
+ "criteria_version": "fix37-phase1",
+ "ner_arm": "off",
+ "judge_model": "google/gemini-2.5-flash",
+ "thai_ner_threshold": null,
+ "generated_at": "2026-09-02T10:40:29",
+ "latency": {
+  "ner": false,
+  "input": {
+   "short": {
+    "chars": 19,
+    "p50": 0.795,
+    "p95": 1.189,
+    "p99": 1.459
+   },
+   "medium": {
+    "chars": 211,
+    "p50": 3.012,
+    "p95": 5.091,
+    "p99": 5.48
+   },
+   "long": {
+    "chars": 2400,
+    "p50": 32.139,
+    "p95": 66.682,
+    "p99": 77.015
+   }
+  },
+  "output_window": {
+   "chars": 160,
+   "p50": 0.904,
+   "p95": 1.651,
+   "p99": 1.766
+  },
+  "engines": {
+   "rust_sidecar_rtt": {
+    "short": {
+     "chars": 19,
+     "p50": 1.346,
+     "p95": 2.011,
+     "p99": 2.205
+    },
+    "medium": {
+     "chars": 211,
+     "p50": 3.433,
+     "p95": 5.295,
+     "p99": 6.986
+    },
+    "long": {
+     "chars": 2400,
+     "p50": 16.617,
+     "p95": 22.731,
+     "p99": 23.692
+    },
+    "output_window": {
+     "chars": 160,
+     "p50": 3.526,
+     "p95": 4.565,
+     "p99": 4.663
+    }
+   }
+  },
+  "output_registry_has_thai_ner": false
+ }
+}
