@@ -332,9 +332,12 @@ export class GatewayClient {
 
   /** POST /v1/search with the agent key (web_search, host-side in E4). */
   /** FIX9 §1.1: the model ids the gateway accepts (GET /v1/models), for host-side
-   * validation of the page-supplied model. Returns null on failure (caller keeps
-   * its last-known set / fails safe). Never throws. */
-  async listModels(signal: AbortSignal): Promise<Set<string> | null> {
+   * validation of the page-supplied model. FIX47.6 Part C — each id now carries
+   * whether the catalog says it can use tools, so the coordinator can withhold
+   * tool definitions from a tools-blind model instead of erroring every turn
+   * (chat-edge's attachTools has done the same since FIX28). Returns null on
+   * failure (caller keeps its last-known map / fails safe). Never throws. */
+  async listModels(signal: AbortSignal): Promise<Map<string, { tools: boolean }> | null> {
     const key = await this.getOrProvisionKey();
     if (!key) return null;
     try {
@@ -344,9 +347,14 @@ export class GatewayClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
       });
       if (!res.ok) return null;
-      const body = (await res.json()) as { data?: { id?: unknown }[] };
-      const ids = (body.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === "string" && id.length > 0);
-      return ids.length > 0 ? new Set(ids) : null;
+      const body = (await res.json()) as { data?: { id?: unknown; capabilities?: { tools?: unknown } }[] };
+      const map = new Map<string, { tools: boolean }>();
+      for (const m of body.data ?? []) {
+        if (typeof m.id === "string" && m.id.length > 0) {
+          map.set(m.id, { tools: m.capabilities?.tools === true });
+        }
+      }
+      return map.size > 0 ? map : null;
     } catch {
       return null;
     }

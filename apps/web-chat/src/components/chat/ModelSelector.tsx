@@ -267,14 +267,17 @@ function ModelPicker({
   );
   // FIX47 Part C4 — per-row state for the message being composed: a
   // model that cannot read the attached image is disabled with the
-  // reason; a model that cannot use tools says so under its name.
+  // reason. FIX47.6 Part C — the line under a model without tool
+  // support is GUIDANCE (what it's for), never a defect label: the old
+  // "no tools" read as broken; "great for general Q&A" reads as
+  // specialised.
   const rowState = (m: ModelEntry) => {
     const chat = !m.model_kind || m.model_kind === "chat";
     const blocked = chat && needsVision && !hasVisionCap(m);
     return {
       disabled: blocked,
       disabledReason: blocked ? t("model.cantReadImages") : undefined,
-      sub: chat && !hasToolsCap(m) ? `${m.provider} · ${t("model.noTools")}` : m.provider,
+      sub: chat && !hasToolsCap(m) ? `${m.provider} · ${t("model.subGeneralQA")}` : m.provider,
     };
   };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());

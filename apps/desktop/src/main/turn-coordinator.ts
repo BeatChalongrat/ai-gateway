@@ -269,7 +269,7 @@ export class TurnCoordinator {
   // FIX9 §1.1: the models the gateway accepts, cached, for validating the
   // page-supplied model. A page can name any model string; an unknown one is
   // refused rather than passed to the gateway.
-  private acceptedModels: Set<string> | null = null;
+  private acceptedModels: Map<string, { tools: boolean }> | null = null;
   private acceptedModelsAt = 0;
   private static readonly MODELS_TTL_MS = 5 * 60_000;
 
@@ -1049,8 +1049,14 @@ export class TurnCoordinator {
     // FIX34 Part A: a quick-ask turn carries NO tools — nothing to consent to,
     // so the small window never shows a consent card (Claude's quick entry is
     // answer-only too). The rest of the turn is identical.
-    const tools = payload.quick ? [] : await this.toolDefinitions(null, false, payload.imageMode);
+    // FIX47.6 Part C: a tools-blind model gets no tools either — offering
+    // them made every turn die on model_no_tool_support (the mid-turn tool
+    // wall this round removes). The picker's guidance line tells the user
+    // such a model answers without tools.
+    const modelTakesTools = payload.quick ? false : await this.modelSupportsTools(model, signal);
+    const tools = payload.quick || !modelTakesTools ? [] : await this.toolDefinitions(null, false, payload.imageMode);
     if (payload.quick) this.log.info(`TOOLS: quick-ask turn conv=${conversationId} — no tools offered`);
+    else if (!modelTakesTools) this.log.info(`TOOLS: skipped for tools-blind model conv=${conversationId} model=${model}`);
     // FIX33 A-D2: with a context manager the middle is SUMMARISED before it
     // goes (state store + extraction, the state riding as a user-role pair);
     // without one, FIX32's trim + honest note.
@@ -1959,16 +1965,34 @@ export class TurnCoordinator {
    * backstop — a bad model still errors there); once a list is known, an unknown
    * model is refused. Trusted config models (default/force) are always in the list. */
   private async isModelAccepted(model: string, signal: AbortSignal): Promise<boolean> {
+    await this.refreshAcceptedModels(signal);
+    if (this.acceptedModels === null) return true; // never learned + fetch failed → gateway is the backstop
+    return this.acceptedModels.has(model);
+  }
+
+  private async refreshAcceptedModels(signal: AbortSignal): Promise<void> {
     const now = Date.now();
     if (this.acceptedModels === null || now - this.acceptedModelsAt >= TurnCoordinator.MODELS_TTL_MS) {
-      const set = await this.gateway.listModels(signal).catch(() => null);
-      if (set) {
-        this.acceptedModels = set;
+      const map = await this.gateway.listModels(signal).catch(() => null);
+      if (map) {
+        this.acceptedModels = map;
         this.acceptedModelsAt = now;
       }
     }
-    if (this.acceptedModels === null) return true; // never learned + fetch failed → gateway is the backstop
-    return this.acceptedModels.has(model);
+  }
+
+  /** FIX47.6 Part C — should this turn carry tool definitions at all?
+   * A model the catalog marks tools-blind gets NONE: sending tools
+   * anyway made EVERY turn on such a model die on the gateway's
+   * model_no_tool_support wall (measured live — the desktop was
+   * unusable with those models). Mirrors chat-edge attachTools: the
+   * Auto sentinel, unknown ids and a failed catalog fetch keep tools
+   * (capability unknown → don't degrade). */
+  private async modelSupportsTools(model: string, signal: AbortSignal): Promise<boolean> {
+    if (!model || model === "auto") return true;
+    await this.refreshAcceptedModels(signal);
+    const entry = this.acceptedModels?.get(model);
+    return entry ? entry.tools : true;
   }
 
   /** FIX3 §3: the honest first-launch indicator. While the sidecar is not ready,

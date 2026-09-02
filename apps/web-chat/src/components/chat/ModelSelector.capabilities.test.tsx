@@ -94,13 +94,17 @@ describe("ModelSelector — what the message needs", () => {
     expect(screen.queryByTestId("model-row-disabled")).toBeNull();
   });
 
-  it("a model that cannot use tools says so under its name", () => {
+  // FIX47.6 Part C — the sub-line for a model without tool support is
+  // guidance ("great for general Q&A"), never the defect-flavoured
+  // "no tools" it replaced.
+  it("a model that cannot use tools gets the guidance line, not a defect label", () => {
     open();
-    expect(screen.getAllByText(/no tools/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(new RegExp(dictionaries.en["model.subGeneralQA"])).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no tools/)).toBeNull();
   });
 
   it("Thai reasons exist", () => {
     expect(dictionaries.th["model.cantReadImages"]).toBeTruthy();
-    expect(dictionaries.th["model.noTools"]).toBeTruthy();
+    expect(dictionaries.th["model.subGeneralQA"]).toBeTruthy();
   });
 });
