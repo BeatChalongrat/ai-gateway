@@ -105,6 +105,9 @@ export const en = {
   "infra.models.showInChatOn": "Offered in the chat model picker — click to hide",
   "infra.models.showInChatOff": "Hidden from the chat model picker — click to offer",
   "infra.models.showInChatHelp": "Offered in the chat picker ({n} active). Independent of API access.",
+  // FIX47.6 Part A — the 5-per-provider chat-picker ceiling.
+  "infra.models.ceilingRefused": "{provider} already offers {n} models in the chat picker (the ceiling). Turn one off first.",
+  "infra.models.providerShown": "{provider}: {shown} of {total} offered in the chat picker (ceiling {ceiling})",
   "infra.models.cap.reasoning": "reasoning",
   "infra.models.cap.vision": "vision",
   "infra.models.cap.tools": "tools",
@@ -406,6 +409,9 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.showInChatOn": "แสดงในตัวเลือกโมเดลของแชท — คลิกเพื่อซ่อน",
   "infra.models.showInChatOff": "ซ่อนจากตัวเลือกโมเดลของแชท — คลิกเพื่อแสดง",
   "infra.models.showInChatHelp": "แสดงในตัวเลือกโมเดลของแชท ({n} ตัวที่เปิดอยู่) ไม่เกี่ยวกับสิทธิ์ใช้ผ่าน API",
+  // FIX47.6 Part A — เพดาน 5 โมเดลต่อผู้ให้บริการในตัวเลือกแชท
+  "infra.models.ceilingRefused": "{provider} แสดงโมเดลในตัวเลือกแชทครบ {n} ตัวแล้ว (เพดานสูงสุด) กรุณาปิดตัวอื่นก่อน",
+  "infra.models.providerShown": "{provider}: แสดงในตัวเลือกแชท {shown} จาก {total} ตัว (เพดาน {ceiling})",
   "infra.models.cap.reasoning": "คิดวิเคราะห์",
   "infra.models.countFiltered": "{n} จาก {total}",
   "infra.models.countAll": "{n} โมเดล",
