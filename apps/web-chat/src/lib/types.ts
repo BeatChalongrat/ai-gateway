@@ -55,6 +55,11 @@ export interface ModelEntry {
    *  direct-dispatch media form. Missing/undefined is treated as "chat"
    *  so older chat-edge payloads degrade cleanly. */
   model_kind?: "chat" | "video" | "audio" | "tts";
+  /** FIX47 Part C — an admin's per-model choice of what the picker offers
+   *  (model_configs.show_in_chat). Absent on older chat-edge builds =
+   *  shown. A hidden model is still allowed: a conversation bound to it
+   *  keeps working, it just is not offered for new picks. */
+  show_in_chat?: boolean;
   /** Sprint 3 — coarse cost tier for a selector badge. Optional: dormant
    *  until the gateway/chat-edge serialize it; the badge renders only when
    *  present so older payloads degrade cleanly. */

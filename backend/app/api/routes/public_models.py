@@ -145,6 +145,7 @@ async def get_models(
                 output_price_per_1m=out_price,
                 # FIX35 Part C — price band for the picker badge / tier ceiling.
                 cost_tier=_band_for_candidate(c),
+                show_in_chat=c.show_in_chat,
             )
         )
 

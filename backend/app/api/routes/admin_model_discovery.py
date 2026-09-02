@@ -74,6 +74,8 @@ class ModelConfigUpdate(BaseModel):
     cost_per_input_token: Optional[float] = None
     cost_per_output_token: Optional[float] = None
     is_active: Optional[bool] = None
+    # FIX47 Part C — the chat-picker axis, independent of ``is_active``.
+    show_in_chat: Optional[bool] = None
 
 
 def _serialize_row(row: ModelConfigORM) -> dict:
@@ -95,6 +97,7 @@ def _serialize_row(row: ModelConfigORM) -> dict:
         "source": row.source,
         "is_manual_override": row.is_manual_override,
         "is_active": row.is_active,
+        "show_in_chat": getattr(row, "show_in_chat", True),
         "last_synced_at": row.last_synced_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,

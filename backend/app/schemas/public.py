@@ -123,6 +123,9 @@ class ModelInfo(BaseModel):
     # low | medium | high | xhigh | max. The picker's tier badge and the
     # label of the Auto router's per-conversation ceiling.
     cost_tier: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = None
+    # FIX47 Part C — whether the chat picker should offer this model. Set
+    # on chat candidates only; the API may call a hidden model as before.
+    show_in_chat: Optional[bool] = None
 
 
 class ModelListResponse(BaseModel):

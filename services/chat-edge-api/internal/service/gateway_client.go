@@ -1186,6 +1186,9 @@ type GatewayModelInfo struct {
 	// CostTier (FIX35 Part C) — the gateway's price band for the picker
 	// badge and the Auto router's tier ceiling: low | medium | high | xhigh | max.
 	CostTier string `json:"cost_tier,omitempty"`
+	// ShowInChat (FIX47 Part C) — the catalogue's second axis: offered in
+	// the chat picker. nil (older gateway) means shown.
+	ShowInChat *bool `json:"show_in_chat,omitempty"`
 }
 
 // GatewayModelCapabilities mirrors the Gateway's ModelCapabilities block

@@ -1216,6 +1216,7 @@ export function ChatInput({
                 disabled={streaming}
                 compact
                 onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
+                needsVision={pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))}
               />
               {voiceSupported && !streaming ? (
                 <button

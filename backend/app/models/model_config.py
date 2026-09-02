@@ -119,6 +119,13 @@ class ModelConfigORM(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("true")
     )
+    # FIX47 Part C — the second axis (migration 080). ``is_active`` says
+    # the API may call the model; ``show_in_chat`` says the chat picker
+    # offers it. An admin curates this from the admin UI; there is no
+    # list in code.
+    show_in_chat: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("true")
+    )
     last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

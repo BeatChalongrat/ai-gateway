@@ -90,6 +90,11 @@ type modelResponse struct {
 	// until this field existed) and labels the per-conversation ceiling.
 	CostTier string `json:"cost_tier,omitempty"`
 	Allowed  bool   `json:"allowed"`
+	// ShowInChat (FIX47 Part C) — an admin's choice, per model, of what the
+	// picker offers (model_configs.show_in_chat). A hidden model stays
+	// Allowed: an existing conversation bound to it keeps working and the
+	// API may still call it. The list lives in the DB, never in code.
+	ShowInChat bool `json:"show_in_chat"`
 	// T4 — Thinking Mode capability. ``nil`` when the model
 	// does NOT support reasoning so the wire stays unchanged for
 	// non-reasoning models. Populated for the known set in
@@ -398,6 +403,9 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 		if m.CostTier != "" { // FIX35 Part C
 			resp.CostTier = m.CostTier
 		}
+		if m.ShowInChat != nil { // FIX47 Part C
+			resp.ShowInChat = *m.ShowInChat
+		}
 		if m.ContextWindow > 0 {
 			resp.ContextWindow = m.ContextWindow
 		}
@@ -652,6 +660,7 @@ func (h *ModelHandler) buildModelResponse(id, name, provider string, rb *reasoni
 		InputPricePerM:  meta.InputPricePerM,
 		OutputPricePerM: meta.OutputPricePerM,
 		Allowed:         true,
+		ShowInChat:      true,
 		Reasoning:       rb,
 	}
 }

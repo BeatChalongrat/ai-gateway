@@ -246,6 +246,8 @@ export const en = {
   "model.reasoningBadge": "Thinks",
   "model.imageBadge": "Makes images",
   "model.visionBadge": "Reads images",
+  "model.cantReadImages": "Can't read the attached image",
+  "model.noTools": "no tools",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -1586,6 +1588,8 @@ const th: Record<DictKey, string> = {
   "model.reasoningBadge": "คิดวิเคราะห์",
   "model.imageBadge": "สร้างรูป",
   "model.visionBadge": "อ่านรูปได้",
+  "model.cantReadImages": "อ่านรูปที่แนบไม่ได้",
+  "model.noTools": "ไม่ใช้เครื่องมือ",
 
   // Memory page
   "memory.back": "กลับไปแชท",

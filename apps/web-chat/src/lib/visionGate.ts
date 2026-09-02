@@ -27,6 +27,12 @@ export function hasVisionCap(model: ModelEntry): boolean {
   return VISION_CAPS.some((c) => model.capabilities?.includes(c));
 }
 
+/** FIX47 Part C4 — the model can use tools (chat-edge's capability
+ *  string for the gateway's supports_tools flag). */
+export function hasToolsCap(model: ModelEntry): boolean {
+  return Boolean(model.capabilities?.includes("function_calling"));
+}
+
 /** True when the active model (or Auto) accepts image input. Auto,
  *  a null id, and ids missing from the catalog are all optimistic —
  *  same contract as desktop's CurrentModelSupportsVision. */

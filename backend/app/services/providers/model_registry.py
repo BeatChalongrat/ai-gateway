@@ -512,6 +512,7 @@ class ModelRegistry:
             supports_reasoning=getattr(row, "supports_reasoning", False),
             reasoning_strategy=getattr(row, "reasoning_strategy", "none"),
             default_reasoning_mode=getattr(row, "default_reasoning_mode", "auto") or "auto",
+            show_in_chat=getattr(row, "show_in_chat", True),
         )
 
     def get_candidate(self, model: str) -> ModelCandidate | None:

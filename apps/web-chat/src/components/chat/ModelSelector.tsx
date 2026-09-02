@@ -14,7 +14,7 @@
 // tokens) is unchanged from the previous flat-list version.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { hasVisionCap } from "@/lib/visionGate";
+import { hasToolsCap, hasVisionCap } from "@/lib/visionGate";
 import { BrainCircuit, ImagePlus, Search, Sparkles, X, Eye } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
@@ -37,6 +37,10 @@ interface Props {
    *  that string to the backend verbatim. Optional — defaults to
    *  ``modelStore.selectModel`` / ``selectAuto``. */
   onPick?: (model: ModelEntry) => void;
+  /** FIX47 Part C4 — what the message being composed needs. A model that
+   *  cannot serve it is shown disabled with the reason, instead of being
+   *  pickable and failing after send (the ChatGPT / Claude behaviour). */
+  needsVision?: boolean;
 }
 
 // Synthetic ModelEntry used to fire onPick when the user clicks Auto.
@@ -117,7 +121,7 @@ function filterModels(models: ModelEntry[], query: string): ModelEntry[] {
   );
 }
 
-export function ModelSelector({ activeModelId, disabled, compact, onPick }: Props) {
+export function ModelSelector({ activeModelId, disabled, compact, onPick, needsVision }: Props) {
   const t = useT();
   const models = useModelStore((s) => s.models);
   const selectedId = useModelStore((s) => s.selectedModelId);
@@ -222,6 +226,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
               isAuto={isAuto}
               onPickAuto={pickAuto}
               onPickModel={pickModel}
+              needsVision={Boolean(needsVision)}
               t={t}
             />
           </div>
@@ -236,11 +241,12 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick }: Prop
 // state resets cleanly on every open.
 
 function ModelPicker({
-  models,
+  models: allModels,
   activeId,
   isAuto,
   onPickAuto,
   onPickModel,
+  needsVision,
   t,
 }: {
   models: ModelEntry[];
@@ -248,9 +254,29 @@ function ModelPicker({
   isAuto: boolean;
   onPickAuto: () => void;
   onPickModel: (m: ModelEntry) => void;
+  needsVision: boolean;
   t: ReturnType<typeof useT>;
 }) {
   const [search, setSearch] = useState("");
+  // FIX47 Part C — the picker offers the models an admin marked
+  // show_in_chat (plus the one this conversation already uses, so the
+  // pill can still name it). The rest stay in the store for lookups.
+  const models = useMemo(
+    () => allModels.filter((m) => m.show_in_chat !== false || m.id === activeId),
+    [allModels, activeId],
+  );
+  // FIX47 Part C4 — per-row state for the message being composed: a
+  // model that cannot read the attached image is disabled with the
+  // reason; a model that cannot use tools says so under its name.
+  const rowState = (m: ModelEntry) => {
+    const chat = !m.model_kind || m.model_kind === "chat";
+    const blocked = chat && needsVision && !hasVisionCap(m);
+    return {
+      disabled: blocked,
+      disabledReason: blocked ? t("model.cantReadImages") : undefined,
+      sub: chat && !hasToolsCap(m) ? `${m.provider} · ${t("model.noTools")}` : m.provider,
+    };
+  };
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -390,7 +416,7 @@ function ModelPicker({
               <ModelRow
                 key={`pop-${m.id}`}
                 label={m.name}
-                sub={m.provider}
+                {...rowState(m)}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
@@ -412,7 +438,7 @@ function ModelPicker({
               <ModelRow
                 key={`rec-${m.id}`}
                 label={m.name}
-                sub={m.provider}
+                {...rowState(m)}
                 selected={!isAuto && m.id === activeId}
                 onClick={() => onPickModel(m)}
                 reasoning={Boolean(m.reasoning?.supported)}
@@ -445,7 +471,7 @@ function ModelPicker({
                   <ModelRow
                     key={`kind-${kind}-${m.id}`}
                     label={m.name}
-                    sub={m.provider}
+                    {...rowState(m)}
                     selected={!isAuto && m.id === activeId}
                     onClick={() => onPickModel(m)}
                     mediaKind={kind}
@@ -479,6 +505,7 @@ function ModelPicker({
                 <ModelRow
                   key={`${provider}-${m.id}`}
                   label={m.name}
+                  {...rowState(m)}
                   selected={!isAuto && m.id === activeId}
                   onClick={() => onPickModel(m)}
                   reasoning={Boolean(m.reasoning?.supported)}
@@ -542,6 +569,9 @@ interface RowProps {
   sub?: string;
   selected: boolean;
   onClick: () => void;
+  /** FIX47 Part C4 — not pickable for the message being composed. */
+  disabled?: boolean;
+  disabledReason?: string;
   leading?: React.ReactNode;
   /** T4 — show a "thinks" badge when the model advertises reasoning. */
   reasoning?: boolean;
@@ -650,7 +680,7 @@ const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high" | "xhigh" | "max
 
 function ModelRow({
   label, sub, selected, onClick, leading, reasoning, imageGen, vision, mediaKind, tier,
-  description, contextWindow, inputPrice, outputPrice,
+  description, contextWindow, inputPrice, outputPrice, disabled, disabledReason,
 }: RowProps) {
   const t = useT();
   // FIX29 §2.1 — capabilities as a tooltip on the name, not as pills.
@@ -667,10 +697,17 @@ function ModelRow({
     <div
       role="option"
       aria-selected={selected}
+      aria-disabled={disabled || undefined}
       aria-label={capsTitle ? `${label} — ${capsTitle}` : label}
-      onClick={onClick}
-      className={`flex cursor-pointer items-start gap-2 px-3 py-2 transition-colors ${
-        selected ? "bg-bg-elevated/60" : "hover:bg-bg-elevated/60"
+      onClick={disabled ? undefined : onClick}
+      title={disabled ? disabledReason : undefined}
+      data-testid={disabled ? "model-row-disabled" : undefined}
+      className={`flex items-start gap-2 px-3 py-2 transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-50"
+          : selected
+            ? "cursor-pointer bg-bg-elevated/60"
+            : "cursor-pointer hover:bg-bg-elevated/60"
       }`}
     >
       {leading ? (
@@ -688,6 +725,9 @@ function ModelRow({
           {label}
         </div>
         {sub ? <div className="text-[11px] text-text-muted">{sub}</div> : null}
+        {disabled && disabledReason ? (
+          <div className="text-[11px] text-status-warning" data-testid="model-row-reason">{disabledReason}</div>
+        ) : null}
         {/* FIX35 Part A — a row is the NAME + the PROVIDER. We are a
             multi-provider gateway, so the provider line stays (Claude and
             ChatGPT can drop it: one vendor). The description survives only

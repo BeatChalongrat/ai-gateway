@@ -1,23 +1,61 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { SkeletonTable } from "../../components/ui/Skeleton";
 import Pagination from "../../components/ui/Pagination";
 import { useApi } from "../../lib/useApi";
+import { api, getApiErrorMessage } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useT, type DictKey } from "../../lib/i18n";
 
 /* ── Types ────────────────────────────────────────────────────────── */
 
 interface ModelItem {
+  id: number;
   model: string;
   provider: string;
   supports_streaming: boolean;
+  supports_tools?: boolean;
+  supports_vision?: boolean;
+  supports_reasoning?: boolean;
+  is_active: boolean;
+  // FIX47 Part C — the catalogue's second axis: offered in the chat
+  // picker. Independent of is_active (API access). Edited right here.
+  show_in_chat: boolean;
   cost_tier: string;
   latency_tier: string;
+}
+
+/* ── Show-in-chat switch (FIX47 Part C) ───────────────────────────── */
+
+function ShowInChatSwitch({ item, onChange }: { item: ModelItem; onChange: (id: number, next: boolean) => Promise<void> }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const on = item.show_in_chat;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={t("infra.models.showInChat")}
+      title={t(on ? "infra.models.showInChatOn" : "infra.models.showInChatOff")}
+      disabled={busy}
+      onClick={async () => { setBusy(true); try { await onChange(item.id, !on); } finally { setBusy(false); } }}
+      style={{
+        position: "relative", width: 34, height: 18, borderRadius: 9, border: "none", padding: 0,
+        cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1,
+        background: on ? "#10a37f" : "var(--border-default)", transition: "background 150ms",
+      }}
+    >
+      <span style={{
+        position: "absolute", top: 2, left: on ? 18 : 2, width: 14, height: 14, borderRadius: "50%",
+        background: "#fff", transition: "left 150ms", boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
+      }} />
+    </button>
+  );
 }
 
 /* ── Provider brand colors ────────────────────────────────────────── */
@@ -54,6 +92,16 @@ function getMeta(m: string) {
   if (META[m]) return META[m];
   for (const k of Object.keys(META)) { if (m.startsWith(k)) return META[k]; }
   return null;
+}
+// FIX47 Part C — the capability flags the API serves (model_configs) win
+// over the static map above; the map stays only for context sizes.
+function rowCaps(item: ModelItem): string[] {
+  const caps: string[] = [];
+  if (item.supports_vision) caps.push("vision");
+  if (item.supports_tools) caps.push("tools");
+  if (item.supports_reasoning) caps.push("reasoning");
+  if (caps.length) return caps;
+  return getMeta(item.model)?.caps ?? [];
 }
 
 /* ── Provider logo with fallback ───────────────────────────────────── */
@@ -98,6 +146,7 @@ const CAP: Record<string, { color: string; bg: string }> = {
   vision: { color: "#7c3aed", bg: "rgba(124,58,237,0.07)" },
   tools:  { color: "#0891b2", bg: "rgba(8,145,178,0.07)" },
   code:   { color: "#ca8a04", bg: "rgba(202,138,4,0.07)" },
+  reasoning: { color: "#db2777", bg: "rgba(219,39,119,0.07)" },
 };
 
 // Capability + tier VALUES are human-facing labels, so they carry a
@@ -107,6 +156,7 @@ const CAP_LABEL: Record<string, DictKey> = {
   vision: "infra.models.cap.vision",
   tools: "infra.models.cap.tools",
   code: "infra.models.cap.code",
+  reasoning: "infra.models.cap.reasoning",
 };
 const TIER_LABEL: Record<string, DictKey> = {
   budget: "infra.models.tier.budget",
@@ -269,14 +319,31 @@ const PAGE_SIZE = 15;
 
 export default function ModelsPage() {
   const t = useT();
-  const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models");
+  // The listing defaults to 100 rows server-side; the catalogue is
+  // larger than that, so ask for the whole thing.
+  const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models?limit=500");
+  const [localShow, setLocalShow] = useState<Record<number, boolean>>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const setShowInChat = useCallback(async (id: number, next: boolean) => {
+    setSaveError(null);
+    try {
+      await api.patch(`/admin/models/${id}`, { show_in_chat: next });
+      setLocalShow((prev) => ({ ...prev, [id]: next }));
+    } catch (e) {
+      setSaveError(getApiErrorMessage(e, "save failed"));
+    }
+  }, []);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [streamingOnly, setStreamingOnly] = useState(false);
   const [view, setView] = useState<"list" | "grid">("list");
   const [page, setPage] = useState(1);
 
-  const items = data?.items ?? [];
+  const items = useMemo(
+    () => (data?.items ?? []).map((m) => (m.id in localShow ? { ...m, show_in_chat: localShow[m.id] } : m)),
+    [data, localShow],
+  );
+  const shownInChat = useMemo(() => items.filter((m) => m.is_active && m.show_in_chat).length, [items]);
 
   const providers = useMemo(() => {
     const c: Record<string, number> = {};
@@ -355,6 +422,11 @@ export default function ModelsPage() {
           <EmptyState message={t("infra.models.empty")} icon={<Icon name="box" size={22} />} />
         ) : (
           <>
+            {saveError ? (
+              <div role="alert" style={{ margin: "0.75rem 1rem 0", padding: "0.5rem 0.75rem", borderRadius: 8, fontSize: "0.75rem", color: "#b91c1c", background: "rgba(185,28,28,0.08)" }}>
+                {saveError}
+              </div>
+            ) : null}
             {/* ── Toolbar ── */}
             <div className="mr-chip-fade" style={{
               animationDelay: "0.2s",
@@ -495,6 +567,7 @@ export default function ModelsPage() {
                         <th style={{ width: "15%" }}>{t("infra.models.colContext")}</th>
                         <th>{t("infra.models.colCapabilities")}</th>
                         <th style={{ textAlign: "center", width: 64 }}>{t("infra.models.stream")}</th>
+                        <th style={{ textAlign: "center", width: 96 }} title={t("infra.models.showInChatHelp", { n: String(shownInChat) })}>{t("infra.models.showInChat")}</th>
                         <th style={{ width: 84 }}>{t("infra.models.colCost")}</th>
                         <th style={{ width: 84 }}>{t("infra.models.colLatency")}</th>
                       </tr>
@@ -536,9 +609,9 @@ export default function ModelsPage() {
                             </td>
                             {/* Capabilities */}
                             <td>
-                              {meta?.caps?.length ? (
+                              {rowCaps(m).length ? (
                                 <div style={{ display: "flex", gap: "0.1875rem", flexWrap: "wrap" }}>
-                                  {meta.caps.map((c) => <CapTag key={c} cap={c} />)}
+                                  {rowCaps(m).map((c) => <CapTag key={c} cap={c} />)}
                                 </div>
                               ) : (
                                 <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
@@ -559,6 +632,10 @@ export default function ModelsPage() {
                               ) : (
                                 <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
+                            </td>
+                            {/* Show in chat (FIX47 Part C) */}
+                            <td style={{ textAlign: "center" }}>
+                              <ShowInChatSwitch item={m} onChange={setShowInChat} />
                             </td>
                             {/* Cost */}
                             <td><TierBadge value={m.cost_tier} /></td>
@@ -616,9 +693,9 @@ export default function ModelsPage() {
                         {/* Context */}
                         {meta?.ctx && <ContextBar ctx={meta.ctx} ctxK={meta.ctxK} />}
                         {/* Caps */}
-                        {meta?.caps?.length ? (
+                        {rowCaps(m).length ? (
                           <div style={{ display: "flex", gap: "0.1875rem", flexWrap: "wrap" }}>
-                            {meta.caps.map((c) => <CapTag key={c} cap={c} />)}
+                            {rowCaps(m).map((c) => <CapTag key={c} cap={c} />)}
                           </div>
                         ) : null}
                         {/* Footer badges */}
@@ -635,6 +712,10 @@ export default function ModelsPage() {
                           )}
                           <TierBadge value={m.cost_tier} />
                           <TierBadge value={m.latency_tier} />
+                          <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "0.375rem", fontSize: "0.625rem", color: "var(--text-tertiary)" }}>
+                            {t("infra.models.showInChat")}
+                            <ShowInChatSwitch item={m} onChange={setShowInChat} />
+                          </span>
                         </div>
                       </div>
                     );

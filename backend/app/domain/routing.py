@@ -39,6 +39,9 @@ class ModelCandidate:
     supports_reasoning: bool = False
     reasoning_strategy: str = "none"
     default_reasoning_mode: str = "auto"
+    # FIX47 Part C — offered in the chat picker (migration 080). Routing
+    # ignores it: a hidden model is still callable and still a fallback.
+    show_in_chat: bool = True
 
 
 @dataclass(frozen=True)
