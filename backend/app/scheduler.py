@@ -82,6 +82,25 @@ def start_scheduler(discovery_service: "ModelDiscoveryService") -> None:
         misfire_grace_time=3600,
         coalesce=True,
     )
+    # FIX47.6 Part B — weekly capability-flag drift check. Reports
+    # (structured log) where a provider's live behaviour disagrees with
+    # the stored supports_tools/supports_vision flags; repairs nothing.
+    # Paid requests (≤ its own hard cap, weekly), so gated on a setting;
+    # a Postgres advisory lock inside the job keeps multi-worker
+    # schedulers from multiplying the spend.
+    from app.core.config import settings as _settings
+
+    if _settings.capability_probe_weekly:
+        from app.services.capability_probe import run_weekly_probe
+
+        scheduler.add_job(
+            run_weekly_probe,
+            trigger=IntervalTrigger(days=7),
+            id="capability_flag_drift_check",
+            replace_existing=True,
+            misfire_grace_time=24 * 3600,
+            coalesce=True,
+        )
     if not scheduler.running:
         scheduler.start()
         logger.info("scheduler_started", job_count=len(scheduler.get_jobs()))
