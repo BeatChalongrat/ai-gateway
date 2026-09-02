@@ -666,7 +666,7 @@ function UserMenu({
           <MenuItem
             onClick={onMemory}
             icon={<Brain width={14} height={14} aria-hidden />}
-            label="Memory"
+            label={t("menu.memory")}
             trailing={<MemoryTrailing />}
             setOpen={setOpen}
           />
@@ -680,44 +680,48 @@ function UserMenu({
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
-          {/* Desktop-only screens (Phase 5). Reachable only in the shell —
-              decided at RUNTIME (FIX20 §6.5): useHostedMode() is true exactly
-              when the Electron preload's window.sranHost is present, so ONE
-              build serves both surfaces. They read/write host-local state
-              over the bridge; a plain browser never shows them. */}
+          {/* FIX43 Part B — gated per SECTION, not per page. Scheduled tasks
+              and Settings have a web half (cloud tasks are server-side; the
+              web Settings page is appearance + account), so they show on
+              both surfaces and each page hides its device-only sections
+              itself. Connectors and Writing style keep ALL their state in the
+              desktop host over the bridge (docs/FIX43_REPORT.md §B2), so they
+              stay desktop-only — decided at RUNTIME (FIX20 §6.5): hosted is
+              true exactly when the Electron preload's window.sranHost is
+              present, so ONE build serves both surfaces. */}
+          <div className="border-t border-border/60" />
+          <MenuItem
+            onClick={() => router.push("/chat/tasks")}
+            icon={<Clock width={14} height={14} aria-hidden />}
+            label={t("menu.scheduledTasks")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
           {hosted ? (
             <>
-              <div className="border-t border-border/60" />
-              <MenuItem
-                onClick={() => router.push("/chat/tasks")}
-                icon={<Clock width={14} height={14} aria-hidden />}
-                label="Scheduled tasks"
-                trailing={<ArrowIcon />}
-                setOpen={setOpen}
-              />
               <MenuItem
                 onClick={() => router.push("/chat/connectors")}
                 icon={<Plug width={14} height={14} aria-hidden />}
-                label="Connectors"
+                label={t("menu.connectors")}
                 trailing={<ArrowIcon />}
                 setOpen={setOpen}
               />
               <MenuItem
                 onClick={() => router.push("/chat/writing-style")}
                 icon={<PenLine width={14} height={14} aria-hidden />}
-                label="Writing style"
-                trailing={<ArrowIcon />}
-                setOpen={setOpen}
-              />
-              <MenuItem
-                onClick={() => router.push("/chat/settings")}
-                icon={<SettingsIcon width={14} height={14} aria-hidden />}
-                label="Settings"
+                label={t("menu.writingStyle")}
                 trailing={<ArrowIcon />}
                 setOpen={setOpen}
               />
             </>
           ) : null}
+          <MenuItem
+            onClick={() => router.push("/chat/settings")}
+            icon={<SettingsIcon width={14} height={14} aria-hidden />}
+            label={t("menu.settings")}
+            trailing={<ArrowIcon />}
+            setOpen={setOpen}
+          />
           <div className="border-t border-border/60" />
           <MenuItem
             onClick={onLogout}

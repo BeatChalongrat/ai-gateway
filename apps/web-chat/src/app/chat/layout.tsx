@@ -158,7 +158,9 @@ export default function ChatLayout({
       }
     },
     onDeleteConversation: () => setDeleteOpen(true),
-    onOpenSettings: () => router.push(hosted ? "/chat/settings" : "/chat/memory"),
+    // FIX43 Part B4 — the web has a Settings page now; Ctrl+, goes there on
+    // both surfaces (OPEN_DECISIONS #23 closed).
+    onOpenSettings: () => router.push("/chat/settings"),
   });
 
   if (!isReady) {

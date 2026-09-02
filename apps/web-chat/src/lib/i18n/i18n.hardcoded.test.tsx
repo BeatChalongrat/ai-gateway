@@ -86,6 +86,20 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "desktopOnly.notice",
     ],
   },
+  // FIX43 Part B — the two halves of /chat/settings and the sidebar's
+  // account menu (its five labels used to be bare English).
+  {
+    file: "app/chat/settings/DeviceSettings.tsx",
+    forbidden: ["Couldn't load settings.", '"Minimize to tray"', '"Approved sites"', '"Extension folder to load"'],
+  },
+  {
+    file: "app/chat/settings/WebSettings.tsx",
+    forbidden: ['"Signed in as"', '"Appearance"', '"Account"', '"Language"', '">Open<"', '"Sign out'],
+  },
+  {
+    file: "components/chat/Sidebar.tsx",
+    forbidden: ['label="Settings"', 'label="Scheduled tasks"', 'label="Connectors"', 'label="Writing style"', 'label="Memory"'],
+  },
   {
     file: "app/chat/writing-style/page.tsx",
     forbidden: [
