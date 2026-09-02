@@ -46,6 +46,14 @@ interface Props {
 const NEAR_BOTTOM_PX = 100;
 const SHOW_SCROLL_BUTTON_PX = 200;
 const VIRTUALIZE_THRESHOLD = 50;
+/** Frames the anchor jump takes (≈250 ms at 60 Hz). */
+const ANCHOR_SCROLL_FRAMES = 15;
+/** Keys that scroll the thread when focus is inside it. */
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+
+/** The key a row renders under — stable across the stream's temp→persisted
+ *  id swap (see Message.client_key). */
+const rowKey = (m: Message) => m.client_key ?? m.id;
 
 export function ChatThread({
   convId,
@@ -102,8 +110,21 @@ export function ChatThread({
   // pre-existing stick-to-bottom takes over. Any real user scroll
   // cancels the hold (see onScroll).
   const anchorActive = useRef(false);
-  const lastUserMsgId = useRef<string | null>(null);
+  /** Where the hold wants the view: the anchor target of the current
+   *  turn. The hold's spacer + handover math read THIS, not the live
+   *  scrollTop — while the anchor jump is still animating the live value
+   *  is somewhere on the way there, and sizing the spacer from it made
+   *  the target unreachable. */
+  const anchorTop = useRef(0);
+  const lastUserMsgKey = useRef<string | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
+  /** The programmatic scroll animation in flight (rAF handle), if any. */
+  const scrollAnim = useRef<number | null>(null);
+  /** Set by the input events that mean "the person is scrolling" (wheel,
+   *  touch, keys, scrollbar). A scroll event that arrives while one of
+   *  our own scrolls is in flight is ours unless this says otherwise. */
+  const userIntent = useRef(false);
+  const lastScrollTop = useRef(0);
 
   const spacerPx = () =>
     spacerRef.current ? parseFloat(spacerRef.current.style.height) || 0 : 0;
@@ -149,34 +170,83 @@ export function ChatThread({
       prevRow ? rowTopOf(prevRow, el) : null,
       ANCHOR_PREVIOUS_PEEK_PX,
     );
-    if (Math.abs(el.scrollTop - target) <= tolerance) return true;
+    // The spacer is re-derived on every pass: the composer shrinks back
+    // in the frame after the send, so the viewport measured on the first
+    // pass is a line or two short and the target sits just out of reach
+    // until this re-pass sizes the room for the real viewport.
     const contentH = el.scrollHeight - spacerPx();
     setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
-    autoScrolling.current = true;
+    // Already there, or a jump is already on its way there (the
+    // late-measure re-pass lands mid-jump) → no new animation.
+    const heading = scrollAnim.current !== null ? anchorTop.current : el.scrollTop;
+    anchorTop.current = target;
+    if (Math.abs(heading - target) <= tolerance) return true;
     // The anchor jump ANIMATES: it is a deliberate move the user asked for
     // by sending, and a hard cut loses the sense that the thread scrolled.
-    // Smoothness is switched on for this one write and off again straight
-    // after, so the per-token stick-to-bottom during streaming stays
-    // instant (a smooth scroll restarted on every token fights itself).
+    // Only this jump animates; the per-token stick-to-bottom during
+    // streaming stays instant (an animation restarted on every token
+    // fights itself).
     animateScroll(el, target);
-    requestAnimationFrame(() => {
-      autoScrolling.current = false;
-    });
     return true;
   }
 
   /** Programmatic scroll that animates unless the OS asks for reduced
-   *  motion. Driven through CSS scroll-behavior rather than
-   *  `scrollTo({behavior})` so the assignment stays a plain scrollTop
-   *  write — the same value the anchor math and the tests read back. */
+   *  motion. Driven from requestAnimationFrame, one scrollTop write per
+   *  frame, so every scroll event it raises happens while
+   *  `autoScrolling` is set and onScroll can tell it from the person's
+   *  own scrolling. (The previous driver, CSS scroll-behavior:smooth,
+   *  kept firing scroll events for ~200 ms after the flag was cleared;
+   *  the first of those counted as a user scroll and cancelled the hold
+   *  it had just set up — measured on every send, web and desktop.) */
   function animateScroll(el: HTMLElement, top: number) {
+    cancelScrollAnimation();
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!reduced) el.style.scrollBehavior = "smooth";
+    const from = el.scrollTop;
+    if (reduced || Math.abs(top - from) < 2) {
+      snapTo(el, top);
+      return;
+    }
+    autoScrolling.current = true;
+    let frame = 0;
+    const step = () => {
+      frame += 1;
+      const p = Math.min(1, frame / ANCHOR_SCROLL_FRAMES);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.scrollTop = from + (top - from) * eased;
+      lastScrollTop.current = el.scrollTop;
+      if (p < 1) {
+        scrollAnim.current = requestAnimationFrame(step);
+        return;
+      }
+      // One more frame so the last write's scroll event is dispatched
+      // (and ignored) before the flag drops.
+      scrollAnim.current = requestAnimationFrame(() => {
+        scrollAnim.current = null;
+        autoScrolling.current = false;
+      });
+    };
+    scrollAnim.current = requestAnimationFrame(step);
+  }
+
+  function cancelScrollAnimation() {
+    if (scrollAnim.current !== null) {
+      cancelAnimationFrame(scrollAnim.current);
+      scrollAnim.current = null;
+    }
+    autoScrolling.current = false;
+  }
+
+  /** Instant programmatic scroll. The flag covers the scroll event the
+   *  write raises (dispatched before the next frame's callbacks). */
+  function snapTo(el: HTMLElement, top: number) {
+    cancelScrollAnimation();
+    autoScrolling.current = true;
     el.scrollTop = top;
+    lastScrollTop.current = el.scrollTop;
     requestAnimationFrame(() => {
-      el.style.scrollBehavior = "auto";
+      autoScrolling.current = false;
     });
   }
 
@@ -189,7 +259,8 @@ export function ChatThread({
   useLayoutEffect(() => {
     // P3 — a turn anchor never crosses conversations.
     anchorActive.current = false;
-    lastUserMsgId.current = null;
+    lastUserMsgKey.current = null;
+    cancelScrollAnimation();
     if (spacerRef.current) spacerRef.current.style.height = "0px";
     // Follow state must reset too: carrying autoStick=false over from a
     // conversation the user had scrolled up in left the new one parked
@@ -252,19 +323,20 @@ export function ChatThread({
     lastStructure.current = structure;
 
     // P3 — detect the user's OWN send: the last user message carries a
-    // new id AND the list grew during this conversation's lifetime.
+    // new key AND the list grew during this conversation's lifetime.
     // A remote/incoming message never satisfies this (no new local user
-    // row), a load-earlier prepend keeps the last user id, and the
-    // special second arm covers the very first turn of a just-created
+    // row), a load-earlier prepend keeps the last user key, the stream's
+    // temp→persisted id swap keeps it too (rowKey), and the special
+    // second arm covers the very first turn of a just-created
     // conversation, where the thread mounts already mid-stream with
     // nothing to restore.
     const userIdx = lastUserIndex(messages);
     const userMsg = userIdx >= 0 ? messages[userIdx] : null;
-    const seenUserId = lastUserMsgId.current;
-    lastUserMsgId.current = userMsg?.id ?? null;
+    const seenUserKey = lastUserMsgKey.current;
+    lastUserMsgKey.current = userMsg ? rowKey(userMsg) : null;
     const isOwnSend =
       userMsg !== null &&
-      userMsg.id !== seenUserId &&
+      rowKey(userMsg) !== seenUserKey &&
       ((lengthGrew && prevLen > 0) ||
         // Second arm: the very first turn of a just-created conversation,
         // where the thread mounts already mid-stream. Bounded to that one
@@ -308,11 +380,7 @@ export function ChatThread({
         anchorActive.current = false;
         setSpacerPx(0);
         setAutoStick(true);
-        autoScrolling.current = true;
-        el.scrollTop = el.scrollHeight;
-        requestAnimationFrame(() => {
-          autoScrolling.current = false;
-        });
+        snapTo(el, el.scrollHeight);
       } else {
         setConsentPill(true);
       }
@@ -321,28 +389,25 @@ export function ChatThread({
 
     if (anchorActive.current) {
       // ── Phase 1: HOLD. The reply streams into the space below the
-      // anchor; the view does not move. The spacer shrinks as real
-      // content replaces it (never below what the current scroll
-      // position needs, so nothing ever clamps or jumps).
+      // anchor; the view does not move. The spacer is re-derived from
+      // the anchor target and the real content every time, so it
+      // shrinks to zero exactly as the reply fills the room (and stays
+      // exact if the streaming placeholder shrinks for a moment).
       const contentH = el.scrollHeight - spacerPx();
-      const needed = spacerNeeded(el.scrollTop, el.clientHeight, contentH);
-      if (needed < spacerPx()) setSpacerPx(needed);
+      const top = anchorTop.current;
+      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
       // ── Phase 2 handover: content reached the viewport bottom →
       // drop the hold and let the pre-existing stick-to-bottom follow
       // from here (shouldResumeFollow is THE policy line to tune).
-      if (shouldResumeFollow(contentH, el.scrollTop, el.clientHeight)) {
+      if (shouldResumeFollow(contentH, top, el.clientHeight)) {
         anchorActive.current = false;
-        setAutoStick(true);
+        setAutoStick(true); // the next delta snaps to the bottom
       }
       return;
     }
 
     if (autoStick) {
-      autoScrolling.current = true;
-      el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(() => {
-        autoScrolling.current = false;
-      });
+      snapTo(el, el.scrollHeight);
     } else {
       setPendingNew(true);
     }
@@ -425,29 +490,51 @@ export function ChatThread({
       return;
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance < NEAR_BOTTOM_PX) {
-      autoScrolling.current = true;
-      el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(() => {
-        autoScrolling.current = false;
-      });
-    }
+    if (distance < NEAR_BOTTOM_PX) snapTo(el, el.scrollHeight);
   }, [anyStreaming]);
 
+  /** The input events that mean the PERSON is scrolling. A scroll event
+   *  raised by one of our own writes never follows one of these; a
+   *  wheel/touch/key during the anchor animation cancels the animation
+   *  so the person's scroll wins immediately. */
+  function markUserIntent() {
+    userIntent.current = true;
+    if (scrollAnim.current !== null) cancelScrollAnimation();
+    window.setTimeout(() => {
+      userIntent.current = false;
+    }, 250);
+  }
+
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
-    if (autoScrolling.current) return;
-    // P3 — the user always wins: any real scroll cancels the anchor
-    // hold for this turn (the existing autoStick logic below then
-    // decides whether to follow, exactly as before).
-    anchorActive.current = false;
     const el = e.currentTarget;
+    const prevTop = lastScrollTop.current;
+    lastScrollTop.current = el.scrollTop;
+    if (autoScrolling.current && !userIntent.current) return;
+    userIntent.current = false;
+    // P3 — the user always wins: any real scroll cancels the anchor
+    // hold for this turn (the autoStick logic below then decides
+    // whether to follow).
+    anchorActive.current = false;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     const nearBottom = distance < NEAR_BOTTOM_PX;
-    setAutoStick(nearBottom);
+    // Scrolling UP while a reply streams stops the follow at once, however
+    // small the move — the person is reading, the way Claude/ChatGPT stop.
+    // A scroll that lands ON the bottom is not that (the scroller clamps
+    // there by itself when content above shrinks).
+    const scrolledUp = el.scrollTop < prevTop - 1 && distance > 1;
+    setAutoStick(nearBottom && !(scrolledUp && anyStreaming));
     setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
-    if (nearBottom) {
+    if (nearBottom && !scrolledUp) {
       setPendingNew(false);
       setConsentPill(false);
+    }
+    // A finished anchored turn keeps the spacer that held the view in
+    // place; once the person moves, keep only what the NEW position needs,
+    // so a short answer's blank room below goes away as they scroll off it.
+    if (!anyStreaming && spacerPx() > 0) {
+      const contentH = el.scrollHeight - spacerPx();
+      const needed = spacerNeeded(el.scrollTop, el.clientHeight, contentH);
+      if (needed < spacerPx()) setSpacerPx(needed);
     }
   }
 
@@ -456,11 +543,7 @@ export function ChatThread({
     if (!el) return;
     setAutoStick(true);
     setPendingNew(false);
-    autoScrolling.current = true;
     animateScroll(el, el.scrollHeight);
-    window.setTimeout(() => {
-      autoScrolling.current = false;
-    }, 400);
   }
 
   /** FIX30 §1: bring the consent card into view (centre it); with no
@@ -473,6 +556,7 @@ export function ChatThread({
     if (card && typeof card.scrollIntoView === "function") {
       anchorActive.current = false;
       setAutoStick(true);
+      cancelScrollAnimation();
       autoScrolling.current = true;
       card.scrollIntoView({ block: "center" });
       window.setTimeout(() => {
@@ -509,6 +593,15 @@ export function ChatThread({
       <div
         ref={scrollerRef}
         onScroll={onScroll}
+        onWheel={markUserIntent}
+        onTouchMove={markUserIntent}
+        onKeyDown={(e) => {
+          if (SCROLL_KEYS.has(e.key)) markUserIntent();
+        }}
+        onPointerDown={(e) => {
+          // the scrollbar is the only part of the scroller itself one can press
+          if (e.target === e.currentTarget) markUserIntent();
+        }}
         className="scrollbar-thin h-full overflow-y-auto px-4 py-6 md:px-10"
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
@@ -727,7 +820,7 @@ function VirtualMessageList(
         const m = messages[vi.index];
         return (
           <div
-            key={m.id}
+            key={rowKey(m)}
             data-index={vi.index}
             ref={virtualizer.measureElement}
             style={{
@@ -762,8 +855,9 @@ function renderRow(m: Message, i: number, props: InnerProps) {
   return (
     // data-msg-index — the P3 anchor locates rows by index in BOTH
     // render modes (getBoundingClientRect, so the virtualizer's
-    // translateY is included).
-    <div className={extraGap} data-msg-index={i}>
+    // translateY is included). Keyed by rowKey so the id swap after
+    // message_start never re-creates the bubble.
+    <div key={rowKey(m)} className={extraGap} data-msg-index={i}>
       <MessageBubble
         convId={convId}
         message={m}

@@ -286,3 +286,187 @@ describe("send-time turn anchoring", () => {
     expect(spacerOf(scroller)).toBe(0);
   });
 });
+
+// ── FIX47.5 — the handover has to actually happen ──────────────────
+// Measured on every send (web and desktop): the anchor jump was driven by
+// CSS scroll-behavior:smooth, which keeps raising scroll events for
+// ~200 ms after the one-frame `autoScrolling` guard dropped. The first
+// of those counted as the person scrolling, cancelled the hold, froze
+// the spacer at its send-time size and left follow/no-follow to
+// wherever the animation happened to be. These tests drive the frames
+// by hand and fire the scroll events a browser would, in between.
+
+describe("FIX47.5 — the anchor jump's own scroll events are not the user's", () => {
+  // A frame queue the test drains by hand (the browser's real order), with
+  // cancelAnimationFrame honoured — a cancelled jump must not keep moving.
+  let frames: Map<number, FrameRequestCallback>;
+  let nextId: number;
+  let scrollerEl: HTMLElement | null = null;
+  /** Run up to n frames. When a frame moved the scroller, the browser
+   *  dispatches its scroll event before the next frame's callbacks — so
+   *  fire one here too, exactly then. */
+  const flushFrames = (n = Infinity) => {
+    for (let i = 0; i < n && frames.size > 0; i++) {
+      const [id, cb] = frames.entries().next().value as [number, FrameRequestCallback];
+      frames.delete(id);
+      const before = scrollerEl?.scrollTop;
+      cb(0);
+      if (scrollerEl && scrollerEl.scrollTop !== before) fireEvent.scroll(scrollerEl);
+    }
+  };
+
+  beforeEach(() => {
+    frames = new Map();
+    nextId = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
+      const id = nextId++;
+      frames.set(id, cb);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      frames.delete(id);
+    });
+  });
+
+  /** The thread as a browser has it before a send: parked at the real
+   *  bottom (scrollTop = content − viewport; the fake geometry does not
+   *  clamp, so the mount's bottom-snap leaves scrollTop = scrollHeight). */
+  function parkedAtBottom() {
+    const view = mount(seed(8));
+    scrollerEl = view.scroller;
+    flushFrames();
+    view.scroller.scrollTop = 800 - VIEW_H;
+    fireEvent.scroll(view.scroller);
+    return view;
+  }
+
+  it("the hold survives the jump, the spacer keeps breathing, and the follow resumes on its own", () => {
+    const { scroller, rerender } = parkedAtBottom();
+    rerender(sent());
+    const target = 800 - ANCHOR_PREVIOUS_PEEK_PX;
+    // the jump is animated: first frame moves part of the way (and the
+    // browser reports it — the scroll event that used to cancel the hold)
+    flushFrames(1);
+    expect(scroller.scrollTop).toBeGreaterThan(800 - VIEW_H);
+    expect(scroller.scrollTop).toBeLessThan(target);
+    flushFrames(); // the rest of the jump, one scroll event per frame
+    expect(scroller.scrollTop).toBe(target);
+
+    // the reply grows: the hold is still on → spacer shrinks, view stays
+    heights[9] = 120;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "longer", true)]);
+    expect(scroller.scrollTop).toBe(target);
+    expect(spacerOf(scroller)).toBe(16);
+    expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
+
+    // the reply fills the viewport → handover, then stick-to-bottom
+    heights[9] = 300;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "longer still", true)]);
+    expect(spacerOf(scroller)).toBe(0);
+    heights[9] = 400;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "even longer", true)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
+  });
+
+  it("a wheel during the jump is the person's: the jump stops and the hold ends", () => {
+    const { scroller, rerender } = parkedAtBottom();
+    rerender(sent());
+    flushFrames(2);
+    const midway = scroller.scrollTop;
+    fireEvent.wheel(scroller, { deltaY: -100 });
+    scroller.scrollTop = midway - 60;
+    fireEvent.scroll(scroller);
+    scrollerEl = null; // the jump is cancelled: its frames must not move the view
+    flushFrames();
+    expect(scroller.scrollTop).toBe(midway - 60);
+
+    heights[9] = 250;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "grown", true)]);
+    expect(scroller.scrollTop).toBe(midway - 60); // nobody moves the user
+  });
+
+  it("the late-measure re-pass does not restart a jump already heading to the target", () => {
+    const { scroller, rerender } = parkedAtBottom();
+    rerender(sent());
+    const queued = frames.size; // frame 1 of the jump + the re-pass
+    flushFrames(1); // frame 1
+    flushFrames(1); // the re-pass: same target → no new animation
+    expect(frames.size).toBeLessThanOrEqual(queued);
+    flushFrames();
+    expect(scroller.scrollTop).toBe(800 - ANCHOR_PREVIOUS_PEEK_PX);
+  });
+});
+
+describe("FIX47.5 — scrolling up mid-stream stops the follow at once", () => {
+  function streamingAtBottom() {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 300; // handover
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a", true)]);
+    heights[9] = 400; // following
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "ab", true)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    // the browser clamps a bottom-snap to content − viewport; the fake
+    // geometry does not, so park the view where a browser would
+    scroller.scrollTop = scroller.scrollHeight - VIEW_H;
+    fireEvent.scroll(scroller);
+    return { scroller, rerender };
+  }
+
+  it("even a small upward scroll (inside the near-bottom band) parks the view and raises the pill", () => {
+    const { scroller, rerender } = streamingAtBottom();
+    scroller.scrollTop = scroller.scrollHeight - VIEW_H - 40; // a wheel notch up
+    fireEvent.scroll(scroller);
+
+    heights[9] = 500;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "abc", true)]);
+    expect(scroller.scrollTop).toBe(1300 - VIEW_H - 40); // where the person left it
+    expect(screen.getByText(dictionaries.en["thread.newMessages"])).toBeTruthy();
+  });
+
+  it("scrolling back to the bottom resumes the follow", () => {
+    const { scroller, rerender } = streamingAtBottom();
+    scroller.scrollTop = scroller.scrollHeight - VIEW_H - 40;
+    fireEvent.scroll(scroller);
+    scroller.scrollTop = scroller.scrollHeight - VIEW_H; // back down
+    fireEvent.scroll(scroller);
+
+    heights[9] = 500;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "abc", true)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
+  });
+
+  it("a finished short answer's blank room shrinks as the person scrolls off it", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 40;
+    rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
+    expect(spacerOf(scroller)).toBe(96); // holds the anchored view
+
+    scroller.scrollTop = 600; // reads something above
+    fireEvent.scroll(scroller);
+    expect(spacerOf(scroller)).toBe(0); // 600 + 300 <= 940 → nothing to hold
+  });
+});
+
+describe("FIX47.5 — what must not break", () => {
+  it("loading an earlier page keeps the viewport on the same rows (no jump)", async () => {
+    const older = Array.from({ length: 4 }, (_, i) =>
+      msg(`old${i}`, i % 2 === 0 ? "user" : "assistant", `older ${i}`),
+    );
+    const props = { onRegenerate: () => {}, hasMoreOlder: true, onLoadEarlier: () => {} };
+    const view = render(<ChatThread {...props} convId="c1" messages={seed(8)} />);
+    const scroller = view.container.querySelector(".overflow-y-auto") as HTMLElement;
+
+    scroller.scrollTop = 200; // reading near the top
+    fireEvent.scroll(scroller);
+    fireEvent.click(screen.getByText(dictionaries.en["thread.loadEarlier"]));
+    await Promise.resolve();
+    // 4 rows × 100px land above → the same content stays under the eye
+    view.rerender(<ChatThread {...props} convId="c1" messages={[...older, ...seed(8)]} />);
+    expect(scroller.scrollTop).toBe(600);
+    expect(spacerOf(scroller)).toBe(0);
+  });
+});

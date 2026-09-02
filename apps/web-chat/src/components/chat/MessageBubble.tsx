@@ -226,8 +226,14 @@ function MessageBubbleImpl({
       // rather than a phantom pill.
       return null;
     }
+    // No entrance animation on the user's own row: the text has just left
+    // the composer and is being scrolled to the anchor at the same moment,
+    // and a bubble fading in from transparent while it moves reads as
+    // "vanished, then reappeared somewhere else" (measured frame by frame
+    // in FIX47.5). The reply row keeps its fade — nothing of the user's is
+    // in flight there.
     return (
-      <div className="group message-enter flex w-full justify-end">
+      <div className="group flex w-full justify-end">
         <div className="flex max-w-[85%] flex-col items-end gap-1.5">
           {/* Attachments render ABOVE the text bubble (matches Claude /
               ChatGPT) so the image/file the user sent reads first. */}

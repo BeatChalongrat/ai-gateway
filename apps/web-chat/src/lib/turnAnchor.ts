@@ -4,8 +4,12 @@
 // previous message above it, so the reply streams downward into open
 // space instead of crawling up from the composer.
 //
-// Pure math only — ChatThread (web) owns the DOM. The desktop twin is
-// SranDesktop.Application.Services.TurnAnchorMath; keep the two in sync.
+// Pure math only — ChatThread (web) owns the DOM, and the desktop app
+// renders this same web bundle (Electron loads /chat from the web-chat
+// origin), so there is ONE implementation to change. A C# port,
+// SranDesktop.Application.Services.TurnAnchorMath, still sits in the
+// retired WPF tree with its tests; nothing that ships calls it, and it
+// is not kept in sync.
 
 /** Sliver of the PREVIOUS message kept visible above the anchored turn.
  *  THE one tuning knob for the anchor feel (shadcn's

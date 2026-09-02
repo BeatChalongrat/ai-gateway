@@ -383,6 +383,13 @@ export interface Message {
   context_sources?: ContextSource[];
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
+  /** local-only — the key the thread renders this row under. An
+   *  optimistic row is born with a temporary ``id`` that the stream
+   *  later replaces with the persisted one; React keys on THIS value so
+   *  the bubble is never unmounted and re-created by that swap
+   *  (``id`` is for the server; ``client_key`` is for the DOM). Absent
+   *  for rows loaded from the server, whose ``id`` never changes. */
+  client_key?: string;
   /** local-only — current feedback rating for this message. */
   feedback?: "thumbs_up" | "thumbs_down" | null;
   /** T4 — Thinking Mode. ``reasoning_content`` is the accumulated

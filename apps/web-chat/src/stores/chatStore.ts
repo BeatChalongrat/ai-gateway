@@ -1934,14 +1934,23 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 /** FIX28 §2 (F3): replace an optimistic message id with the persisted row id
  *  (user row on message_start / message_complete; assistant row on the host's
  *  message_complete). Edit / regenerate / feedback then name a real message
- *  without a reload. */
+ *  without a reload.
+ *
+ *  The row keeps rendering under the id it was born with (``client_key``):
+ *  a React key that changed with the id unmounted the bubble and mounted
+ *  a new one mid-send — the flicker the user saw on every message. */
 function swapMessageId(set: Set, convId: string, fromId: string | undefined, toId: string | undefined) {
   if (!fromId || !toId || fromId === toId) return;
   set((s) => {
     const list = s.messages[convId] ?? [];
     if (!list.some((m) => m.id === fromId)) return {};
-    return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? { ...m, id: toId } : m)) } };
+    return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? renamed(m, toId) : m)) } };
   });
+}
+
+/** The same row under its persisted id, still keyed by the id it was born with. */
+function renamed(m: Message, toId: string): Message {
+  return { ...m, id: toId, client_key: m.client_key ?? m.id };
 }
 
 async function consumeStream(
@@ -2091,7 +2100,7 @@ async function consumeStream(
             messages: {
               ...s.messages,
               [convId]: list.map((m) =>
-                m.id === tempAsstId ? { ...m, id: data.message_id } : m,
+                m.id === tempAsstId ? renamed(m, data.message_id) : m,
               ),
             },
             streamingAssistantId: {
