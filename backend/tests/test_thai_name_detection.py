@@ -5,6 +5,12 @@ Verifies the always-on registration of ``thai_name_no_prefix``,
 the negative interaction with Presidio (no duplicates, regex acts
 as a fallback floor), and that the newly-added denylist entries
 suppress the audit-observed FPs.
+
+FIX44 note: "context keyword nearby" below means IMMEDIATELY BEFORE the
+pair since FIX40 (``_PASS1_ANCHOR_RE``); every case here already has the
+keyword in that position, which is why the file stayed green while
+``test_thai_name_no_prefix.py`` did not. A keyword after the pair no
+longer fires Pass 1.
 """
 
 from __future__ import annotations
