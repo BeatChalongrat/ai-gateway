@@ -201,7 +201,27 @@ docs/OWNER_*.md
 # Landing-redesign scratch/mock dir (design reference; the portal holds the shipped code).
 _landing-redesign/
 
-# FIX33/FIX35 probe + eval artefacts (results land beside the scripts; copies live in docs/audit/)
-scripts/fix33-probe/*.json
-scripts/fix35-router-eval/results.json
-scripts/fix35-router-eval/results.md
+# ---------------------------------------------------------------------------
+# What belongs in the repo and what does not
+#
+#   IN:   source, tests, reusable tooling (scripts/probes/, backend/evals/),
+#         architecture and contract docs (docs/*.md, docs/known-issues/)
+#   OUT:  per-round working documents — reports (*_REPORT.md), task briefs
+#         (PROMPT*.md), plans (PLAN_*.md); evidence gathered while verifying
+#         a change (docs/fix*/, docs/audit/, docs/shots/); raw probe output
+#         (scripts/probes/**/results/, *.json beside the probes, scripts/*.txt);
+#         files a build step writes (apps/desktop/build/installer-defines.nsh)
+#
+# Everything under OUT stays on the author's disk; it is context for how a
+# change was made, not a description of how the system works.
+# ---------------------------------------------------------------------------
+PLAN_*.md
+docs/fix*/
+docs/audit/
+docs/shots/
+scripts/probes/**/results/
+scripts/probes/**/*.json
+scripts/probes/router-compare/results*.md
+scripts/*.txt
+scripts/*.jsonl
+apps/desktop/build/installer-defines.nsh

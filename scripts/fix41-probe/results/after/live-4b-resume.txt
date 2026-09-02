@@ -1,6 +1,0 @@
-event: content_delta
-data: {"run_id":"7cd707a6-918e-4e55-86e7-c16aafc43fe3","seq":7,"delta":"สอง "}
-
-event: error
-data: {"run_id":"7cd707a6-918e-4e55-86e7-c16aafc43fe3","seq":8,"final_seq":8,"code":"GENERATION_INTERRUPTED","message":"generation was interrupted"}
-

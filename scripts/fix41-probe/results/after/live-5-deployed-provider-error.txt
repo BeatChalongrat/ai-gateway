@@ -1,9 +1,0 @@
-event: message_start
-data: {"run_id":"74e8a024-e050-48fc-8a6d-cd4e13f0c4d5","seq":1,"conversation_id":"23da5981-e81f-4f9e-bf07-29927a99a732","message_id":"f2dc67f1-8df8-4a7e-9d10-51382aa5dad9","user_message_id":"ea79e910-6b7b-4cb5-bb0a-c8c2bd36cc8f"}
-
-event: reasoning_notice
-data: {"run_id":"74e8a024-e050-48fc-8a6d-cd4e13f0c4d5","seq":2,"model":"gpt-4o-mini","reason":"Reasoning was requested (mode='auto') but the resolved model 'gpt-4o-mini' is not reasoning-capable; the answer was produced without reasoning. No reasoning-capable model was available for this request after routing and policy filtering."}
-
-event: error
-data: {"run_id":"74e8a024-e050-48fc-8a6d-cd4e13f0c4d5","seq":3,"final_seq":3,"attempts":[{"attempted_at":"2026-09-01T20:40:44.806241+00:00","error_code":"rate_limit_exceeded","error_message":"Provider 'openai' rate limit exceeded.","latency_ms":0,"model":"gpt-4o-mini","provider":"openai"}],"code":"all_models_failed","message":"Unable to get a response right now"}
-

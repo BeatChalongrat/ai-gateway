@@ -1,9 +1,0 @@
-HTTP/1.1 200 OK
-Cache-Control: no-cache
-Connection: keep-alive
-Content-Type: text/event-stream
-X-Accel-Buffering: no
-X-Request-Id: 231aa7c1-4ee9-46cc-8793-c9ebd8b8067b
-Date: Tue, 01 Sep 2026 20:40:26 GMT
-Transfer-Encoding: chunked
-

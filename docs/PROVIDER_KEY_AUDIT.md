@@ -185,14 +185,14 @@ fallback Groq/OpenRouter -> skipped: no_api_key
 
 ผลสุดท้าย: **ยังไม่มี real model response**. Auth ของ OpenAI ใช้ได้แต่ไม่มี credits; OpenRouter ไม่มี key ที่ persisted. ดังนั้น probe ที่ค้าง **ยังรันไม่ได้** จนกว่าจะทำ owner action ข้อ 1 หรือ 2 ด้านล่าง
 
-เมื่อมี model ที่ยิงจริงผ่านแล้ว ให้กำหนด model id ที่ตรวจแล้วและรันคำสั่งจาก `scripts/fix33-probe/README.md`:
+เมื่อมี model ที่ยิงจริงผ่านแล้ว ให้กำหนด model id ที่ตรวจแล้วและรันคำสั่งจาก `scripts/probes/long-context/README.md`:
 
 ```powershell
 $env:PROBE_MODEL="<working-model-id>"
 npm --prefix apps/desktop run build
-node scripts/fix33-probe/probe.js web 20,50,100,200,400
-node scripts/fix33-probe/probe.js desktop 20,50,100,200,400
-node scripts/fix33-probe/dlp-check.js
+node scripts/probes/long-context/probe.js web 20,50,100,200,400
+node scripts/probes/long-context/probe.js desktop 20,50,100,200,400
+node scripts/probes/long-context/dlp-check.js
 ```
 
 อย่าใช้ default `gpt-5.6-terra` จนกว่าจะยืนยันว่า account/provider รองรับ model นั้นจริง
