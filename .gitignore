@@ -142,7 +142,12 @@ _retired-*/
 # Both spellings. PROMPT*.md matches a PREFIX only, so it never caught any
 # of the 75 *_PROMPT.md task briefs it was added for -- they stayed tracked
 # until the 2026-08-22 pass. The suffix form must be listed separately.
+# The lowercase working briefs (prompt-fix33-*.md ...) only match PROMPT*.md
+# because this checkout has core.ignorecase=true (Windows); a case-sensitive
+# clone (Linux CI) would see them as untracked noise, so the lowercase rule
+# is spelled out too (2026-09-03 pass).
 PROMPT*.md
+prompt-*.md
 *_PROMPT.md
 *_sandbox_*
 scratchpad/
