@@ -600,6 +600,126 @@
    "id": "f38_hope_late",
    "register": "work",
    "text": "ความหวังมาสายเสมอสำหรับคนที่ไม่ลงมือทำ"
+  },
+  {
+   "id": "f46_leadin_page",
+   "register": "work",
+   "text": "ไปที่หน้า 3 แล้วกดปุ่มสีเขียว"
+  },
+  {
+   "id": "f46_leadin_step",
+   "register": "work",
+   "text": "ให้ไปที่ขั้นตอนที่ 2 ก่อนแล้วค่อยกดยืนยัน"
+  },
+  {
+   "id": "f46_leadin_team",
+   "register": "work",
+   "text": "ส่งไปที่ทีมบัญชีภายในวันที่ 5 นะ"
+  },
+  {
+   "id": "f46_leadin_cafe",
+   "register": "work",
+   "text": "แวะที่ร้านกาแฟตอน 3 โมงแล้วค่อยไปต่อ"
+  },
+  {
+   "id": "f46_leadin_meeting_room",
+   "register": "work",
+   "text": "นัดที่ห้องประชุมชั้น 2 ตอนบ่าย 2"
+  },
+  {
+   "id": "f46_leadin_slide",
+   "register": "work",
+   "text": "ไปที่สไลด์ 12 จะเห็นกราฟยอดขาย"
+  },
+  {
+   "id": "f46_leadin_line",
+   "register": "work",
+   "text": "ไปที่บรรทัด 40 ของไฟล์แล้วแก้ค่า timeout"
+  },
+  {
+   "id": "f46_leadin_gate",
+   "register": "work",
+   "text": "มาที่ประตู 4 ก่อนเครื่องออก 30 นาที"
+  },
+  {
+   "id": "f46_leadin_counter",
+   "register": "work",
+   "text": "ไปที่เคาน์เตอร์ 7 เพื่อรับบัตรคิว"
+  },
+  {
+   "id": "f46_leadin_floor_shop",
+   "register": "work",
+   "text": "แวะที่ชั้น 3 ของห้างมีร้านหนังสือใหม่"
+  },
+  {
+   "id": "f46_leadin_channel",
+   "register": "work",
+   "text": "ไปที่ช่อง 3 ตอน 2 ทุ่มมีรายการที่ว่า"
+  },
+  {
+   "id": "f46_leadin_table",
+   "register": "work",
+   "text": "นัดที่โต๊ะ 12 ริมหน้าต่างเหมือนเดิม"
+  },
+  {
+   "id": "f46_leadin_stage",
+   "register": "work",
+   "text": "ไปที่เวที 2 ตอน 4 โมงเย็น"
+  },
+  {
+   "id": "f46_leadin_hour",
+   "register": "work",
+   "text": "ไปที่ 3 โมงเย็นพอดีนะ อย่าสาย"
+  },
+  {
+   "id": "f46_leadin_version",
+   "register": "work",
+   "text": "อยู่ที่เวอร์ชัน 2 ยังไม่ได้อัปเดตเป็น 3"
+  },
+  {
+   "id": "f46_leadin_years",
+   "register": "work",
+   "text": "อยู่ 3 ปีแล้วยังไม่เคยไปทะเล"
+  },
+  {
+   "id": "f46_leadin_queue",
+   "register": "work",
+   "text": "ตอนนี้อยู่ที่คิว 15 อีกประมาณ 20 นาที"
+  },
+  {
+   "id": "f46_leadin_chapter",
+   "register": "work",
+   "text": "ไปที่บทที่ 4 หัวข้อ 4.2 อ่านก่อนสอบ"
+  },
+  {
+   "id": "f46_leadin_temp",
+   "register": "work",
+   "text": "อยู่ที่ 25 องศาทั้งวัน แอร์ตั้งไว้ 25"
+  },
+  {
+   "id": "f46_leadin_percent",
+   "register": "work",
+   "text": "ตอนนี้อยู่ที่ 80 เปอร์เซ็นต์ของเป้า"
+  },
+  {
+   "id": "f46_leadin_road_traffic",
+   "register": "work",
+   "text": "รถติดที่ถนนนี้ 3 ชั่วโมงทุกเย็น"
+  },
+  {
+   "id": "f46_leadin_room_meeting2",
+   "register": "work",
+   "text": "ประชุมทีมที่ห้อง 501 ชั้น 5 ตอนบ่ายนะ"
+  },
+  {
+   "id": "f46_leadin_score",
+   "register": "work",
+   "text": "คะแนนอยู่ที่ 45 จาก 60 ข้อ"
+  },
+  {
+   "id": "f46_leadin_price",
+   "register": "work",
+   "text": "ราคาอยู่ที่ 1200 ต่อชั้น 2 ชิ้นได้ส่วนลด"
   }
  ]
 }

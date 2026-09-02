@@ -36,9 +36,39 @@ thai_address.rs``) carries the identical regex — change both.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from app.domain.dlp import DetectionMatch, SensitivityLevel
 from app.services.dlp.detectors.base import BaseDetector
+
+# FIX46 — the word lists live in data files shared byte-for-byte with the
+# Rust sidecar (dlp-sidecar/data/, include_str!'d there); a parity test
+# hashes both copies. Before this, the "what counts as an address part"
+# question was answered by TWO hand-typed lists in this file (the entry
+# gate's regex and the end-trim's tuple) that had drifted: the gate knew
+# nothing of ตึก/อาคาร/ห้อง/ชั้น/คอนโด, so ``อยู่ที่ 23 ตึกบี ห้อง 402``
+# passed the trim's idea of an address and failed the gate's.
+_DATA = Path(__file__).resolve().parents[1] / "data"
+
+
+def _words(fname: str) -> tuple[str, ...]:
+    return tuple(
+        ln.strip()
+        for ln in (_DATA / fname).read_text(encoding="utf-8").splitlines()
+        if ln.strip() and not ln.startswith("#")
+    )
+
+
+# Structural components — the ENTRY GATE and the first half of the trim list.
+_GATE_COMPONENTS = _words("thai_address_components.txt")
+# Locality words the trim also keeps but that do not qualify a body on their
+# own (บ้าน / เลขที่ / แยก / ริม / ใกล้ / ตรงข้าม / หลัง / ข้าง …).
+_TRIM_ONLY = _words("thai_address_trim_words.txt")
+_CLAUSE_WORDS = _words("thai_address_clause_starts.txt")
+# 77 provinces + the districts whose names begin with a clause word
+# (ขอนแก่น → ขอ, หาดใหญ่ → หา, มีนบุรี → มี, มาบตาพุด → มา): an exact-token
+# match is an address part, never a clause start.
+_LOCALITIES = frozenset(_words("thai_address_localities.txt"))
 
 
 # FIX26 §1.2 — keyword-precision split (owner decision after FIX23b §2).
@@ -61,14 +91,43 @@ _HIGH_KW = (
 # address that carries a component or postcode.
 _AMBIG_KW = r"(?:เลขที่|ที่อยู่|อยู่ที่|ส่งที่)"
 _DIGIT_NEAR = r"(?=[^\n\d]{0,30}\d)"
-_COMPONENT = (
-    r"(?=[^\n]{0,200}?(?:ถนน|ถ\.|ซอย|ซ\.|หมู่|ม\.|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\."
-    r"|แขวง|เขต|กรุงเทพ|กทม|\d{5}(?=[\s,]|$)))"
+_COMPONENT_ALT = "|".join(re.escape(w) for w in _GATE_COMPONENTS)
+# A gate component must START a token: ``ต่อชั้น`` / ``ริมถนน`` glued after a
+# Thai letter is prose, ``ชั้น 5`` / ``ถนนสุขุมวิท`` after a space or a
+# number is an address part. (``ราคาอยู่ที่ 1200 ต่อชั้น 2 ชิ้น`` fired the
+# moment ชั้น joined the gate; this is what keeps it out.)
+_NOT_AFTER_THAI = r"(?<![ก-ฺเ-๎])"
+_COMPONENT = rf"(?=[^\n]{{0,200}}?{_NOT_AFTER_THAI}(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
+# FIX46 #6 — lead-in words. ``ไปที่`` / ``มาที่`` / ``นัดที่`` / ``แวะที่`` and a
+# bare ``อยู่`` are everyday words, so they are admitted on the narrowest
+# shape only: a HOUSE NUMBER immediately after them (``ไปที่ 23 ตึกบี``,
+# ``เขาอยู่ 88/4 ถนน…``) whose next token is an address part.
+# ``ไปที่หน้า 3`` (a word between) and ``นัดที่ห้องประชุมชั้น 2`` (no number
+# first) never enter; ``ไปที่ 3 โมง`` has no address part after the number.
+# The AMBIGUOUS grade with an even tighter door.
+_LEADIN_KW = r"(?:ไปที่|มาที่|นัดที่|แวะที่|อยู่)"
+_HOUSE_NO_THEN_COMPONENT = (
+    rf"(?=[\s:：]*\d+(?:/\d+)?(?:[\s,]+|$)\s*{_NOT_AFTER_THAI}(?:{_COMPONENT_ALT}))"
+)
+# FIX46 #5 (sf03) — ``…หน้างานที่ ซอยลาดพร้าว 71 แขวงลาดพร้าว กรุงเทพ``: a bare
+# ``ที่`` followed by ``<component><name> <number>`` and a SECOND address
+# part after the number. ``ที่ถนนนี้รถติดมาก 3 ชั่วโมง`` has no second part.
+# The ``ที่`` may be glued to the previous word (``หน้างานที่ ซอย…``) — that
+# glued ``ที่`` IS the "at" this shape is about, so no left lookbehind here.
+# The FIRST part must be street-level (ซอย/ถนน/หมู่/ตำบล/แขวง/เขต): rooms,
+# floors and buildings after a bare ``ที่`` are meeting places —
+# ``ประชุมที่ห้อง 402 ชั้น 5`` is in the FIX38 prose corpus as must-not-fire.
+_STREET_ALT = "|".join(re.escape(w) for w in ("ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"))
+_COMPONENT_NUMBER_COMPONENT = (
+    rf"(?=\s*(?:{_STREET_ALT})\S{{0,25}}\s+\d[\d/\-]*(?:[\s,]+|$)"
+    rf"[^\n]{{0,120}}?(?:{_COMPONENT_ALT}|\d{{5}}(?=[\s,]|$)))"
 )
 _BODY = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))"
 _ADDRESS_RE = re.compile(
     rf"({_HIGH_KW}[\s:：]*{_DIGIT_NEAR}"
-    rf"|{_AMBIG_KW}[\s:：]*{_DIGIT_NEAR}{_COMPONENT})"
+    rf"|{_AMBIG_KW}[\s:：]*{_DIGIT_NEAR}{_COMPONENT}"
+    rf"|{_LEADIN_KW}{_HOUSE_NO_THEN_COMPONENT}[\s:：]*"
+    rf"|ที่{_COMPONENT_NUMBER_COMPONENT}[\s:：]*)"
     rf"{_BODY}"
 )
 
@@ -95,51 +154,69 @@ _ADDRESS_RE = re.compile(
 # particle from the stop list (สั่ง/ส่ง/ช่วย/ขอ/แล้ว/ครับ/ค่ะ/นะ …) or the
 # third bare token in a row. The postcode rule is unchanged: a 5-digit
 # postcode still ends the body on the spot. Mirrored in the Rust sidecar.
-_COMPONENT_STARTS = (
-    "ถนน", "ถ.", "ซอย", "ซ.", "หมู่บ้าน", "หมู่", "ม.", "ตำบล", "ต.", "อำเภอ",
-    "อ.", "จังหวัด", "จ.", "แขวง", "เขต", "กรุงเทพ", "กทม", "อาคาร", "ตึก",
-    "ชั้น", "ห้อง", "คอนโด", "อพาร์ทเม้นท์", "หอพัก", "นิคม", "บ้าน", "เลขที่",
-    "แยก", "ตรอก", "ริม", "ใกล้", "ตรงข้าม", "หลัง", "ข้าง",
-)
-_CLAUSE_STARTS = (
-    "สั่ง", "ส่ง", "ช่วย", "ขอ", "แล้ว", "และ", "แต่", "ให้", "เพราะ", "ถ้า",
-    "ครับ", "ค่ะ", "คะ", "นะ", "จะ", "ได้", "มี", "เป็น", "ไป", "มา", "บอก",
-    "แจ้ง", "โทร", "เบอร์", "ติดต่อ", "อยาก", "ต้อง", "ไม่", "ซื้อ", "ขาย",
-    "จอง", "เรียน", "รบกวน", "ฝาก", "ตอนนี้", "วันนี้", "พรุ่งนี้", "เมื่อวาน",
-    "ของ", "สินค้า", "พัสดุ", "เอกสาร", "ลูกค้า", "คุณ", "พี่", "น้อง",
-    "ยัง", "เพิ่ง", "กำลัง", "เคย", "ค่อย", "รอ", "เจอ", "พบ", "ถาม", "ตอบ",
-    "ทำ", "ดู", "เช็ค", "ตรวจ", "แก้", "เปลี่ยน", "ยกเลิก", "คืน", "จ่าย",
-    "โอน", "รับ", "เอา", "ใช้", "ลอง", "เปิด", "ปิด", "หา", "นัด", "ประชุม",
-)
+_COMPONENT_STARTS = _GATE_COMPONENTS + _TRIM_ONLY
+_CLAUSE_STARTS = _CLAUSE_WORDS
+# FIX46 #5 (hr11) — a clause word is matched as a PREFIX because Thai glues
+# verbs (ขอให้ / ทำให้ / มาส่ง). Two-character verbs are also the first two
+# characters of place names — ขอนแก่น, หาดใหญ่, มีนบุรี, มาบตาพุด — and the
+# prefix rule ended the address right before the province. So: a token in
+# the locality list is an address part outright; a bare token followed by a
+# 5-digit postcode is the "province + postcode" unit and is kept; and a
+# two-character clause prefix only counts on a short token (≤ 5 chars:
+# ขอให้ / ทำให้ / มาส่ง / ไปหา / ดูแล), never on a 7-character province.
+_SHORT_PREFIX_MAX_TOKEN = 5
+_POSTCODE_RE = re.compile(r"^\d{5}$")
+# A bare token is kept only when it can be a district/province written
+# without its keyword: at most 12 characters (บางใหญ่ / ลาดพร้าว / คลองเตย;
+# the long provinces are in the locality list) and carrying no clause word
+# inside it. Thai glues whole clauses into one whitespace token —
+# ``เขาบอกว่าขอพรให้ปิดดีลได้ก่อนสิ้นเดือนด้วย`` is ONE token — and the old
+# "two bare tokens" allowance swallowed exactly that (the sf03 decoys).
+_BARE_MAX_CHARS = 12
+_CLAUSE_INSIDE = tuple(w for w in _CLAUSE_WORDS if len(w) >= 3)
 _MAX_BARE_RUN = 2
 
 
-def _is_component_token(tok: str) -> bool:
+def _is_component_token(tok: str, next_tok: str | None = None) -> bool:
     if any(ch.isdigit() for ch in tok):
         return True
-    return tok.startswith(_COMPONENT_STARTS)
+    if tok.startswith(_COMPONENT_STARTS):
+        return True
+    if tok.strip(",.;:") in _LOCALITIES:
+        return True
+    # province + postcode written as two tokens: ``นนทบุรี 11130``
+    return next_tok is not None and _POSTCODE_RE.match(next_tok) is not None
 
 
 def _starts_clause(tok: str) -> bool:
-    return tok.startswith(_CLAUSE_STARTS)
+    for w in _CLAUSE_STARTS:
+        if tok.startswith(w):
+            if len(w) <= 2 and len(tok) > _SHORT_PREFIX_MAX_TOKEN:
+                continue
+            return True
+    return False
 
 
 def trim_address_end(text: str, body_start: int, body_end: int) -> int:
     """Return the end offset of the address inside ``text[body_start:body_end]``."""
     import re as _re
 
+    toks = list(_re.finditer(r"\S+", text[body_start:body_end]))
     end = body_start
     bare_run = 0
     seen_component = False
-    for mt in _re.finditer(r"\S+", text[body_start:body_end]):
+    for i, mt in enumerate(toks):
         tok = mt.group()
+        nxt = toks[i + 1].group() if i + 1 < len(toks) else None
         tok_end = body_start + mt.end()
-        if _is_component_token(tok):
+        if _is_component_token(tok, nxt):
             end = tok_end
             bare_run = 0
             seen_component = True
             continue
         if seen_component and _starts_clause(tok):
+            break
+        if len(tok) > _BARE_MAX_CHARS or any(w in tok for w in _CLAUSE_INSIDE):
             break
         bare_run += 1
         if bare_run > _MAX_BARE_RUN:

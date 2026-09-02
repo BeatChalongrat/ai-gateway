@@ -23,8 +23,34 @@
 
 use fancy_regex::Regex;
 use once_cell::sync::Lazy;
+use std::collections::HashSet;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
+
+// FIX46 — the word lists are the SAME FILES the Python detector reads
+// (backend/app/services/dlp/data/*.txt ≡ dlp-sidecar/data/*.txt; a Python
+// test hashes both copies). Before this the gate regex and the trim tuple
+// were typed twice and had drifted — the gate did not know ตึก/อาคาร/ห้อง/
+// ชั้น/คอนโด, so ``อยู่ที่ 23 ตึกบี ห้อง 402`` never entered.
+const COMPONENTS_TXT: &str = include_str!("../../data/thai_address_components.txt");
+const TRIM_ONLY_TXT: &str = include_str!("../../data/thai_address_trim_words.txt");
+const CLAUSE_TXT: &str = include_str!("../../data/thai_address_clause_starts.txt");
+const LOCALITIES_TXT: &str = include_str!("../../data/thai_address_localities.txt");
+
+fn words(txt: &'static str) -> Vec<&'static str> {
+    txt.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).collect()
+}
+
+static GATE_COMPONENTS: Lazy<Vec<&'static str>> = Lazy::new(|| words(COMPONENTS_TXT));
+static COMPONENT_STARTS: Lazy<Vec<&'static str>> = Lazy::new(|| {
+    let mut v = words(COMPONENTS_TXT);
+    v.extend(words(TRIM_ONLY_TXT));
+    v
+});
+static CLAUSE_STARTS: Lazy<Vec<&'static str>> = Lazy::new(|| words(CLAUSE_TXT));
+static CLAUSE_INSIDE: Lazy<Vec<&'static str>> =
+    Lazy::new(|| words(CLAUSE_TXT).into_iter().filter(|w| w.chars().count() >= 3).collect());
+static LOCALITIES: Lazy<HashSet<&'static str>> = Lazy::new(|| words(LOCALITIES_TXT).into_iter().collect());
 
 // FIX26 §1.2 — keyword-precision split, mirrored from thai_address.py:
 //   HIGH (อยู่บ้านเลขที่ / บ้านเลขที่ / phrase-initial ที่อยู่ not followed
@@ -35,16 +61,43 @@ const HIGH_KW: &str = r"(?:อยู่บ้านเลขที่|บ้า�
 // A glued ที่อยู่ (จำที่อยู่ …) drops to the AMBIGUOUS grade, not to nothing.
 const AMBIG_KW: &str = r"(?:เลขที่|ที่อยู่|อยู่ที่|ส่งที่)";
 const DIGIT_NEAR: &str = r"(?=[^\n\d]{0,30}\d)";
-const COMPONENT: &str = r"(?=[^\n]{0,200}?(?:ถนน|ถ\.|ซอย|ซ\.|หมู่|ม\.|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.|แขวง|เขต|กรุงเทพ|กทม|\d{5}(?=[\s,]|$)))";
+// FIX46 #6 — lead-in words (ไปที่ / มาที่ / นัดที่ / แวะที่ / bare อยู่): a
+// house number IMMEDIATELY after them, then an address part. Mirrors
+// _LEADIN_KW + _HOUSE_NO_THEN_COMPONENT in Python.
+const LEADIN_KW: &str = r"(?:ไปที่|มาที่|นัดที่|แวะที่|อยู่)";
+// A gate component must START a token (not glued after a Thai letter):
+// ``ต่อชั้น`` is prose, ``ชั้น 5`` is an address part.
+const NOT_AFTER_THAI: &str = r"(?<![\u{0E01}-\u{0E3A}\u{0E40}-\u{0E4E}])";
+// FIX46 #5 (sf03) — bare ``ที่`` + <street-level part><name> <number> + a
+// second part. First part street-level only (rooms/floors are meeting places).
+const STREET_WORDS: &[&str] = &["ซอย", "ซ.", "ถนน", "ถ.", "หมู่บ้าน", "หมู่", "ตำบล", "ต.", "แขวง", "เขต"];
 const BODY: &str = r"([^\n]{3,200}?\d{5}(?=[\s,]|$)|[^\n]{3,200}?(?=\n|$|\s{3,}))";
 
+fn alt(words: &[&str]) -> String {
+    words.iter().map(|w| fancy_regex::escape(w).into_owned()).collect::<Vec<_>>().join("|")
+}
+
 static ADDRESS_RE: Lazy<Regex> = Lazy::new(|| {
+    let comp_alt = alt(&GATE_COMPONENTS);
+    let street_alt = alt(STREET_WORDS);
+    let component = format!("(?=[^\\n]{{0,200}}?{nat}(?:{comp}|\\d{{5}}(?=[\\s,]|$)))", nat = NOT_AFTER_THAI, comp = comp_alt);
+    let house_no_then_component = format!(
+        "(?=[\\s:：]*\\d+(?:/\\d+)?(?:[\\s,]+|$)\\s*{nat}(?:{comp}))",
+        nat = NOT_AFTER_THAI, comp = comp_alt
+    );
+    let component_number_component = format!(
+        "(?=\\s*(?:{street})\\S{{0,25}}\\s+\\d[\\d/\\-]*(?:[\\s,]+|$)[^\\n]{{0,120}}?(?:{comp}|\\d{{5}}(?=[\\s,]|$)))",
+        street = street_alt, comp = comp_alt
+    );
     let pat = format!(
-        "({high}[\\s:：]*{dn}|{amb}[\\s:：]*{dn}{comp}){body}",
+        "({high}[\\s:：]*{dn}|{amb}[\\s:：]*{dn}{comp}|{lead}{hnc}[\\s:：]*|ที่{cnc}[\\s:：]*){body}",
         high = HIGH_KW,
         amb = AMBIG_KW,
         dn = DIGIT_NEAR,
-        comp = COMPONENT,
+        comp = component,
+        lead = LEADIN_KW,
+        hnc = house_no_then_component,
+        cnc = component_number_component,
         body = BODY,
     );
     Regex::new(&pat).expect("thai address regex")
@@ -57,52 +110,72 @@ static ADDRESS_RE: Lazy<Regex> = Lazy::new(|| {
 // (digit-bearing / component-word-initial / กรุงเทพ), allow up to two bare
 // Thai tokens in a row (district + province), stop at a clause-starting
 // verb or particle or at the third bare token.
-const COMPONENT_STARTS: &[&str] = &[
-    "ถนน", "ถ.", "ซอย", "ซ.", "หมู่บ้าน", "หมู่", "ม.", "ตำบล", "ต.", "อำเภอ",
-    "อ.", "จังหวัด", "จ.", "แขวง", "เขต", "กรุงเทพ", "กทม", "อาคาร", "ตึก",
-    "ชั้น", "ห้อง", "คอนโด", "อพาร์ทเม้นท์", "หอพัก", "นิคม", "บ้าน", "เลขที่",
-    "แยก", "ตรอก", "ริม", "ใกล้", "ตรงข้าม", "หลัง", "ข้าง",
-];
-const CLAUSE_STARTS: &[&str] = &[
-    "สั่ง", "ส่ง", "ช่วย", "ขอ", "แล้ว", "และ", "แต่", "ให้", "เพราะ", "ถ้า",
-    "ครับ", "ค่ะ", "คะ", "นะ", "จะ", "ได้", "มี", "เป็น", "ไป", "มา", "บอก",
-    "แจ้ง", "โทร", "เบอร์", "ติดต่อ", "อยาก", "ต้อง", "ไม่", "ซื้อ", "ขาย",
-    "จอง", "เรียน", "รบกวน", "ฝาก", "ตอนนี้", "วันนี้", "พรุ่งนี้", "เมื่อวาน",
-    "ของ", "สินค้า", "พัสดุ", "เอกสาร", "ลูกค้า", "คุณ", "พี่", "น้อง",
-    "ยัง", "เพิ่ง", "กำลัง", "เคย", "ค่อย", "รอ", "เจอ", "พบ", "ถาม", "ตอบ",
-    "ทำ", "ดู", "เช็ค", "ตรวจ", "แก้", "เปลี่ยน", "ยกเลิก", "คืน", "จ่าย",
-    "โอน", "รับ", "เอา", "ใช้", "ลอง", "เปิด", "ปิด", "หา", "นัด", "ประชุม",
-];
 const MAX_BARE_RUN: usize = 2;
+// FIX46 #5 (hr11) — see the Python comment: a two-character clause prefix
+// (ขอ/มา/มี/หา …) only counts on a short token (≤ 5 chars), never on a
+// 7-character province (ขอนแก่น/หาดใหญ่/มีนบุรี/มาบตาพุด); localities are
+// address parts outright; a bare token before a 5-digit postcode is the
+// "province + postcode" unit; a bare token longer than 12 chars or carrying
+// a clause word inside it ends the address (glued clauses are one token).
+const SHORT_PREFIX_MAX_TOKEN: usize = 5;
+const BARE_MAX_CHARS: usize = 12;
 
-fn is_component_token(tok: &str) -> bool {
-    tok.chars().any(|c| c.is_ascii_digit() || ('๐'..='๙').contains(&c))
-        || COMPONENT_STARTS.iter().any(|p| tok.starts_with(p))
+fn is_postcode(tok: &str) -> bool {
+    tok.len() == 5 && tok.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn is_component_token(tok: &str, next_tok: Option<&str>) -> bool {
+    if tok.chars().any(|c| c.is_ascii_digit() || ('๐'..='๙').contains(&c)) {
+        return true;
+    }
+    if COMPONENT_STARTS.iter().any(|p| tok.starts_with(p)) {
+        return true;
+    }
+    if LOCALITIES.contains(tok.trim_matches(|c| c == ',' || c == '.' || c == ';' || c == ':')) {
+        return true;
+    }
+    matches!(next_tok, Some(n) if is_postcode(n))
 }
 
 fn starts_clause(tok: &str) -> bool {
-    CLAUSE_STARTS.iter().any(|p| tok.starts_with(p))
+    let tok_len = tok.chars().count();
+    CLAUSE_STARTS.iter().any(|w| {
+        tok.starts_with(w) && !(w.chars().count() <= 2 && tok_len > SHORT_PREFIX_MAX_TOKEN)
+    })
+}
+
+fn bare_token_ends(tok: &str) -> bool {
+    tok.chars().count() > BARE_MAX_CHARS || CLAUSE_INSIDE.iter().any(|w| tok.contains(w))
 }
 
 /// Byte offset where the address ends inside ``text[body_start..body_end]``.
 fn trim_address_end(text: &str, body_start: usize, body_end: usize) -> usize {
     let body = &text[body_start..body_end];
+    // (byte start, byte end) of every whitespace-delimited token
+    let mut toks: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0usize;
+    for tok in body.split_whitespace() {
+        let rel = body[pos..].find(tok).map(|i| pos + i).unwrap_or(pos);
+        toks.push((rel, rel + tok.len()));
+        pos = rel + tok.len();
+    }
     let mut end = body_start;
     let mut bare_run = 0usize;
     let mut seen_component = false;
-    let mut pos = 0usize;
-    for tok in body.split_whitespace() {
-        // locate this token (split_whitespace gives no offsets)
-        let rel = body[pos..].find(tok).map(|i| pos + i).unwrap_or(pos);
-        let tok_end = body_start + rel + tok.len();
-        pos = rel + tok.len();
-        if is_component_token(tok) {
+    for (i, &(s, e)) in toks.iter().enumerate() {
+        let tok = &body[s..e];
+        let next_tok = toks.get(i + 1).map(|&(ns, ne)| &body[ns..ne]);
+        let tok_end = body_start + e;
+        if is_component_token(tok, next_tok) {
             end = tok_end;
             bare_run = 0;
             seen_component = true;
             continue;
         }
         if seen_component && starts_clause(tok) {
+            break;
+        }
+        if bare_token_ends(tok) {
             break;
         }
         bare_run += 1;
@@ -194,6 +267,37 @@ mod end_trim_tests {
     #[test]
     fn district_and_province_without_keywords_are_kept() {
         assert_eq!(spans("ที่อยู่ 77/1 บางใหญ่ นนทบุรี ตอนนี้ไม่มีคนอยู่"), vec!["ที่อยู่ 77/1 บางใหญ่ นนทบุรี"]);
+    }
+
+    // FIX46 — #6 and #5, the same sentences the Python tests pin.
+    #[test]
+    fn lead_in_with_house_number_then_building_is_an_address() {
+        assert_eq!(spans("ไปที่ 23 ตึกบี ห้อง 402"), vec!["ไปที่ 23 ตึกบี ห้อง 402"]);
+        assert_eq!(spans("อยู่ที่ 23 ตึกบี ห้อง 402"), vec!["อยู่ที่ 23 ตึกบี ห้อง 402"]);
+        assert_eq!(spans("เขาอยู่ 88/4 ถนนชัยพฤกษ์ ต.บางกรวย นนทบุรี 11130"), vec!["อยู่ 88/4 ถนนชัยพฤกษ์ ต.บางกรวย นนทบุรี 11130"]);
+    }
+
+    #[test]
+    fn lead_in_without_the_shape_is_prose() {
+        assert!(spans("ไปที่หน้า 3 แล้วกดปุ่มสีเขียว").is_empty());
+        assert!(spans("นัดที่ห้องประชุมชั้น 2 ตอนบ่าย 2").is_empty());
+        assert!(spans("ไปที่ 3 โมงเย็นพอดีนะ อย่าสาย").is_empty());
+        assert!(spans("ราคาอยู่ที่ 1200 ต่อชั้น 2 ชิ้นได้ส่วนลด").is_empty());
+        assert!(spans("ประชุมที่ห้อง 402 ชั้น 5 ของอาคารสำนักงานใหญ่ตอนบ่ายสองนะ").is_empty());
+    }
+
+    #[test]
+    fn bare_thi_then_soi_number_khwaeng() {
+        assert_eq!(spans("ไปวัดหน้างานที่ ซอยลาดพร้าว 71 แขวงลาดพร้าว กรุงเทพ อาทิตย์หน้า เขาบอกว่าขอพรให้ปิดดีลได้"),
+                   vec!["ที่ ซอยลาดพร้าว 71 แขวงลาดพร้าว กรุงเทพ"]);
+    }
+
+    #[test]
+    fn provinces_that_start_with_a_clause_word_are_kept() {
+        assert_eq!(spans("ที่อยู่ตามบัตรคือ 7 หมู่ 12 ต.ในเมือง อ.เมือง ขอนแก่น 40000 ช่วยร่างข้อความทวงเอกสาร"),
+                   vec!["ที่อยู่ตามบัตรคือ 7 หมู่ 12 ต.ในเมือง อ.เมือง ขอนแก่น 40000"]);
+        assert_eq!(spans("ที่อยู่ 5 ถนนนิพัทธ์อุทิศ หาดใหญ่ สงขลา 90110 ขอให้ส่งด่วน"),
+                   vec!["ที่อยู่ 5 ถนนนิพัทธ์อุทิศ หาดใหญ่ สงขลา 90110"]);
     }
 
     #[test]
