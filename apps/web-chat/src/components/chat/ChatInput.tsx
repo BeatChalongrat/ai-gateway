@@ -1257,7 +1257,7 @@ export function ChatInput({
                 aria-label={streaming ? t("input.stop") : t("input.send")}
                 className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
                   streaming
-                    ? "bg-status-danger text-white hover:bg-status-danger"
+                    ? "bg-status-danger-solid text-white hover:bg-status-danger-solid/90"
                     : "disabled:cursor-not-allowed"
                 }`}
                 style={

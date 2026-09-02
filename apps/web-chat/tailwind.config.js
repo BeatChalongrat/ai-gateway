@@ -38,9 +38,14 @@ module.exports = {
           user: "rgb(var(--user-bubble-bg-rgb) / <alpha-value>)",
         },
         status: {
+          // role tokens (text / border / tint / dot) — themed, see globals.css
           success: "rgb(var(--success-rgb) / <alpha-value>)",
           warning: "rgb(var(--warning-rgb) / <alpha-value>)",
           danger:  "rgb(var(--error-rgb) / <alpha-value>)",
+          // filled controls with white text — same in both themes (FIX45 B)
+          "success-solid": "rgb(var(--success-solid-rgb) / <alpha-value>)",
+          "warning-solid": "rgb(var(--warning-solid-rgb) / <alpha-value>)",
+          "danger-solid":  "rgb(var(--error-solid-rgb) / <alpha-value>)",
         },
       },
       fontFamily: {

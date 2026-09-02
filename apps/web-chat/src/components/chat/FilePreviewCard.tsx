@@ -138,7 +138,7 @@ function CardShell({
       ) : null}
 
       {isError ? (
-        <div className="pointer-events-none absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-status-danger text-white">
+        <div className="pointer-events-none absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-status-danger-solid text-white">
           <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
         </div>
       ) : null}

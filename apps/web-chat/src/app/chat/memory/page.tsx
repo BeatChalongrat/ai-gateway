@@ -696,7 +696,7 @@ function ConfirmDialog({
             onClick={onConfirm}
             className={`focus-ring rounded-lg px-6 py-2 text-sm font-medium transition-opacity hover:opacity-90 ${
               danger
-                ? "bg-status-danger text-white"
+                ? "bg-status-danger-solid text-white"
                 : "bg-text-primary text-bg-base"
             }`}
           >

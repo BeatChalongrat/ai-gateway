@@ -1403,7 +1403,7 @@ function ProjectHeader({
                 setConfirmingDelete(false);
                 void onDelete();
               }}
-              className="focus-ring rounded bg-status-danger px-2 py-1 font-medium text-white hover:bg-status-danger"
+              className="focus-ring rounded bg-status-danger-solid px-2 py-1 font-medium text-white hover:bg-status-danger-solid/90"
             >
               {t("project.delete")}
             </button>

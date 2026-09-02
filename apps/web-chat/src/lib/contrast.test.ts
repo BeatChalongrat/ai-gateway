@@ -10,10 +10,19 @@
 // globals.css for BOTH themes and requires WCAG AA (4.5:1). It therefore
 // also catches the next pair nobody has thought of yet.
 //
-// Scope: static className strings with a solid `bg-…` and a `text-…` in the
-// same string. Modifier classes (`/NN`) are skipped — they are not generated
-// (see scripts/check-generated-classes.js) and their real background is the
-// parent's. Dynamic class names are out of reach of a static test.
+// Scope: static className strings with a `bg-…` and a `text-…` in the same
+// string.
+//   * solid `bg-<token>`: measured as is;
+//   * tinted `bg-<token>/NN` (FIX45 Part C — generated since FIX45 Part A):
+//     measured as the tint composited over the page canvas (--bg-primary),
+//     which is where every such card in this app sits today (error cards,
+//     the memory "danger zone", consent cards). If one is ever placed on a
+//     different surface the composite is off by the difference between
+//     that surface and the canvas — a static test cannot know the parent,
+//     so that case stays out of reach; note the surface in a comment and
+//     check it by eye.
+// Dynamic class names (template pieces assembled at runtime) are out of
+// reach of a static test.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -34,12 +43,16 @@ const TOKEN_VAR: Record<string, string> = {
   "text-primary": "--text-primary", "text-secondary": "--text-secondary", "text-muted": "--text-tertiary",
   accent: "--accent", "accent-hover": "--accent-hover",
   "status-success": "--success", "status-warning": "--warning", "status-danger": "--error",
+  "status-success-solid": "--success-solid", "status-warning-solid": "--warning-solid", "status-danger-solid": "--error-solid",
   "bubble-user": "--user-bubble-bg",
 };
 
 function themeVars(theme: "dark" | "light"): Record<string, string> {
-  // dark block is the first :root, light is [data-theme="light"]
-  const start = theme === "dark" ? GLOBALS.indexOf(":root") : GLOBALS.indexOf('[data-theme="light"]');
+  // dark block is the first `:root {`, light is `[data-theme="light"] {` —
+  // matched as selectors at line start, so prose in a comment that names
+  // the other theme (globals.css does, since FIX45) cannot move the cut.
+  const start = theme === "dark" ? GLOBALS.search(/^:root\s*\{/m) : GLOBALS.search(/^\[data-theme="light"\]\s*\{/m);
+  if (start < 0) throw new Error(`no ${theme} block in globals.css`);
   const block = GLOBALS.slice(start, GLOBALS.indexOf("}", start));
   const vars: Record<string, string> = {};
   for (const m of block.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) vars[`--${m[1]}`] = m[2].trim();
@@ -80,10 +93,12 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
 }
 
 /** Every static className string that names a solid bg token and a text token. */
-export function pairsInSource(): { file: string; line: number; bg: string; text: string; cls: string }[] {
-  const out: { file: string; line: number; bg: string; text: string; cls: string }[] = [];
+type Pair = { file: string; line: number; bg: string; alpha: number; text: string; cls: string };
+
+export function pairsInSource(): Pair[] {
+  const out: Pair[] = [];
   const TOK = Object.keys({ ...TOKEN_VAR, ...PALETTE }).sort((a, b) => b.length - a.length).join("|");
-  const bgRe = new RegExp(`(?<![\\w-:])bg-(${TOK})(?![\\w-/])`);
+  const bgRe = new RegExp(`(?<![\\w-:])bg-(${TOK})(?:/(\\d{1,3}))?(?![\\w-/])`);
   const textRe = new RegExp(`(?<![\\w-:])text-(${TOK})(?![\\w-/])`);
   for (const file of sourceFiles(path.join(ROOT, "src"))) {
     const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -93,7 +108,7 @@ export function pairsInSource(): { file: string; line: number; bg: string; text:
       // Comment lines are prose (planCardUI's header quotes the bad pair).
       if (/^\s*(\/\/|\*|\{\/\*)/.test(line)) return;
       const bg = line.match(bgRe), text = line.match(textRe);
-      if (bg && text) out.push({ file: path.relative(ROOT, file).replace(/\\/g, "/"), line: i + 1, bg: bg[1], text: text[1], cls: line.trim().slice(0, 140) });
+      if (bg && text) out.push({ file: path.relative(ROOT, file).replace(/\\/g, "/"), line: i + 1, bg: bg[1], alpha: bg[2] ? Number(bg[2]) / 100 : 1, text: text[1], cls: line.trim().slice(0, 140) });
     });
   }
   return out;
@@ -106,17 +121,18 @@ function isControl(cls: string): boolean {
   return /focus-ring|<button|<Button|<Link|<a |role="button"|type="button"|type="submit"/.test(cls);
 }
 
-/** Pairs that fail today and are DECIDED to wait — each with the reason and the
- *  number. Remove the line when the token changes; the test then insists. */
-const KNOWN_BELOW_AA: Record<string, string> = {
-  "bg-status-danger+white": "--error #EF4444 with white text is 3.76:1 in both themes (memory delete confirm, RecordingBar stop). AA needs a darker danger token (#DC2626 gives 4.83:1) — OPEN_DECISIONS #44, a palette decision, not a one-line fix.",
-  "bg-bg-surface+status-danger": "text-status-danger (#EF4444) on --bg-surface is 3.56:1 in dark (WebSettings sign-out). Same root cause: the danger red is tuned for light surfaces.",
-};
+/** Pairs that fail and are DECIDED to wait — one reason and the number each.
+ *  Empty since FIX45 Part B split the status tokens by role and theme; the
+ *  test then insists on every pair. Add a line only with the measured ratio
+ *  and the decision that leaves it below AA. */
+const KNOWN_BELOW_AA: Record<string, string> = {};
 
 describe("FIX44 — bg/text token pairs are readable in both themes", () => {
   const pairs = pairsInSource();
-  it("finds the pairs it is meant to police (sanity: the FIX43.1 fixes are among them)", () => {
+  it("finds the pairs it is meant to police (sanity: the FIX43.1 fixes and a FIX45 tint are among them)", () => {
     expect(pairs.some((p) => p.file.endsWith("UpdateBanner.tsx") && p.bg === "accent" && p.text === "bg-base")).toBe(true);
+    // the error card: bg-status-danger/10 + text-status-danger (MessageBubble)
+    expect(pairs.some((p) => p.file.endsWith("MessageBubble.tsx") && p.bg === "status-danger" && p.alpha === 0.1 && p.text === "status-danger")).toBe(true);
     expect(pairs.length).toBeGreaterThan(20);
   });
 
@@ -125,11 +141,19 @@ describe("FIX44 — bg/text token pairs are readable in both themes", () => {
       const vars = themeVars(theme);
       const failures: string[] = [];
       for (const p of pairs) {
-        const bg = resolve(p.bg, vars), fg = resolve(p.text, vars);
-        if (!bg || !fg || bg[3] < 1) continue; // translucent backgrounds depend on what is behind them
+        let bg = resolve(p.bg, vars);
+        const fg = resolve(p.text, vars);
+        if (!bg || !fg || bg[3] < 1) continue; // an rgba() token depends on what is behind it
+        if (p.alpha < 1) {
+          // FIX45 Part C — a tint over the page canvas (see the header).
+          const canvas = resolve("bg-base", vars)!;
+          const tint = bg;
+          bg = [0, 1, 2].map((k) => Math.round(tint[k] * p.alpha + canvas[k] * (1 - p.alpha))).concat(1) as [number, number, number, number];
+        }
         const ratio = contrast(bg, fg);
         const floor = isControl(p.cls) ? 4.5 : 3;
-        if (ratio < floor && !KNOWN_BELOW_AA[`bg-${p.bg}+${p.text}`]) failures.push(`${p.file}:${p.line} bg-${p.bg} + text-${p.text} = ${ratio.toFixed(2)}:1 (needs ${floor}:1)`);
+        const label = p.alpha < 1 ? `bg-${p.bg}/${Math.round(p.alpha * 100)} over the canvas` : `bg-${p.bg}`;
+        if (ratio < floor && !KNOWN_BELOW_AA[`bg-${p.bg}+${p.text}`]) failures.push(`${p.file}:${p.line} ${label} + text-${p.text} = ${ratio.toFixed(2)}:1 (needs ${floor}:1)`);
       }
       expect(failures, `unreadable in the ${theme} theme:\n  ${failures.join("\n  ")}`).toEqual([]);
     });

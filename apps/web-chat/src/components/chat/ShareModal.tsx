@@ -158,7 +158,7 @@ export function ShareModal({ open, conversationId, onClose }: Props) {
                   type="button"
                   onClick={revoke}
                   disabled={busy}
-                  className="focus-ring rounded bg-status-danger px-2 py-1 text-[11px] font-medium text-white hover:bg-status-danger disabled:opacity-50"
+                  className="focus-ring rounded bg-status-danger-solid px-2 py-1 text-[11px] font-medium text-white hover:bg-status-danger-solid/90 disabled:opacity-50"
                 >
                   {t("share.revoke")}
                 </button>

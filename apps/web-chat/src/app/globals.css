@@ -74,13 +74,33 @@
   --code-header-bg: #2D2D2D;
   --code-text: #D4D4D4;
 
-  /* === Status === */
-  --success: #10A37F;
-  --success-rgb: 16 163 127; /* L1: channel form for <alpha-value> */
-  --error:   #EF4444;
-  --error-rgb: 239 68 68; /* L1: channel form for <alpha-value> */
+  /* === Status ===
+     FIX45 Part B — two axes, because one value cannot do both jobs:
+       role   `--error` / `--warning` / `--success`        = text, border,
+              icon, tint, dot: must read ON the theme's surfaces, so it is
+              LIGHTER in the dark theme and DARKER in the light one;
+              `--error-solid` / `--warning-solid` / `--success-solid` = a
+              filled control with white text (Stop, Delete, the Switch's
+              on-track): must read UNDER white, so it is the same in both
+              themes.
+       theme  every one of them is overridden in [data-theme="light"].
+     The old single #EF4444 was 3.76:1 under white, 4.28:1 on the dark
+     canvas, 3.56:1 on the dark surface — below AA in every role.
+     src/lib/contrast.test.ts holds the numbers; change these and it
+     answers. The -rgb twins are the channel form Tailwind needs for
+     opacity modifiers (FIX45 Part A). */
+  --success: #34D399;
+  --success-rgb: 52 211 153;
+  --success-solid: #047857;
+  --success-solid-rgb: 4 120 87;
+  --error:   #F87171;
+  --error-rgb: 248 113 113;
+  --error-solid: #DC2626;
+  --error-solid-rgb: 220 38 38;
   --warning: #F59E0B;
-  --warning-rgb: 245 158 11; /* L1: channel form for <alpha-value> */
+  --warning-rgb: 245 158 11;
+  --warning-solid: #B45309;
+  --warning-solid-rgb: 180 83 9;
 
   /* === Scrollbar === */
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);
@@ -146,6 +166,20 @@
 
   --scrollbar-thumb: rgba(0, 0, 0, 0.12);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.20);
+  /* === Status (light) — FIX45 Part B: darker for text on light surfaces;
+     the -solid values are theme-independent (white text on top). === */
+  --success: #065F46;
+  --success-rgb: 6 95 70;
+  --success-solid: #047857;
+  --success-solid-rgb: 4 120 87;
+  --error:   #B91C1C;
+  --error-rgb: 185 28 28;
+  --error-solid: #DC2626;
+  --error-solid-rgb: 220 38 38;
+  --warning: #92400E;
+  --warning-rgb: 146 64 14;
+  --warning-solid: #B45309;
+  --warning-solid-rgb: 180 83 9;
 }
 
 /* Smooth theme transition. Limited to background + color so layout

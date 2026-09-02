@@ -40,7 +40,7 @@ export function Switch({ checked, onChange, label, disabled, className = "", ...
       onClick={() => onChange(!checked)}
       data-testid={rest["data-testid"]}
       className={`focus-ring inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? "bg-status-success" : "bg-border-strong"
+        checked ? "bg-status-success-solid" : "bg-border-strong"
       } ${className}`}
     >
       <span

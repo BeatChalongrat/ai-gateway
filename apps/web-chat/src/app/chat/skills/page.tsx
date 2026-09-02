@@ -542,7 +542,7 @@ function Toggle({
         aria-hidden
         className={`relative inline-block h-5 w-9 rounded-full border transition-colors ${
           checked
-            ? "border-status-success bg-status-success"
+            ? "border-status-success-solid bg-status-success-solid"
             : "border-border-strong bg-bg-elevated"
         }`}
       >
