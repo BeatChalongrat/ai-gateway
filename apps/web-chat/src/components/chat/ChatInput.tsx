@@ -234,9 +234,19 @@ export function ChatInput({
     Boolean(activeModel?.capabilities?.includes("image_generation_via_tools")) ||
     Boolean(activeModel?.capabilities?.includes("image_generation"));
   // Drop image mode when the model can no longer generate images (e.g. the
-  // user switched from GPT-4o to a non-tool model).
+  // user switched from GPT-4o to a non-tool model). FIX47.6 Part C — the
+  // drop is never silent: the toast says what happened and why at the
+  // moment of the switch, instead of the mode just vanishing.
   useEffect(() => {
-    if (!canGenerateImages && imageMode) setImageMode(false);
+    if (!canGenerateImages && imageMode) {
+      setImageMode(false);
+      toast(tOutside("input.imageMode.droppedForModel", {
+        model: activeModel?.name ?? activeModelId ?? "",
+      }));
+    }
+    // activeModel/-Id are display inputs for the toast only — the mode
+    // drop must key off the capability flip alone.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canGenerateImages, imageMode]);
   // Sprint 2A — 🎬 video mode (tool path). Gated on the chat model's
   // video_generation_via_tools capability (Auto kept on, like image mode).
@@ -246,8 +256,22 @@ export function ChatInput({
   const canGenerateVideos =
     activeModelId === AUTO_MODEL_ID ||
     Boolean(activeModel?.capabilities?.includes("video_generation_via_tools"));
+  // FIX47.6 Part C — the video button renders (disabled, with the
+  // reason) when the FEATURE exists in this deployment but the selected
+  // model can't drive it. When no model in the catalog carries the
+  // capability the feature is off and no button renders at all — the
+  // FIX11/FIX34.1 rule (no affordance for something nothing can do).
+  const videoFeatureAvailable = models.some((m) =>
+    m.capabilities?.includes("video_generation_via_tools"),
+  );
   useEffect(() => {
-    if (!canGenerateVideos && videoMode) setVideoMode(false);
+    if (!canGenerateVideos && videoMode) {
+      setVideoMode(false);
+      toast(tOutside("input.videoMode.droppedForModel", {
+        model: activeModel?.name ?? activeModelId ?? "",
+      }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canGenerateVideos, videoMode]);
   // Sprint 2A.5 — Hybrid. A concrete media model (video/audio/tts) swaps
   // the chat composer for a direct-dispatch form. Auto + chat models keep
@@ -1147,17 +1171,23 @@ export function ChatInput({
                   disabled={streaming}
                 />
               ) : null}
-              {canGenerateImages && !streaming ? (
+              {/* FIX47.6 Part C — a model without tool support keeps the
+                  button VISIBLE but disabled, with the reason on
+                  hover/focus. Hiding it made the model look broken;
+                  silently-inert would be the FIX44 silent no-op. */}
+              {!streaming ? (
                 <button
                   type="button"
                   onClick={() => {
                     setImageMode((v) => !v);
                     setVideoMode(false);
                   }}
-                  aria-label={t("input.imageMode")}
-                  title={t("input.imageMode")}
+                  aria-label={canGenerateImages ? t("input.imageMode") : t("input.imageMode.needsTools")}
+                  title={canGenerateImages ? t("input.imageMode") : t("input.imageMode.needsTools")}
                   aria-pressed={imageMode}
-                  disabled={disabled}
+                  aria-disabled={!canGenerateImages || undefined}
+                  disabled={disabled || !canGenerateImages}
+                  data-testid="image-mode-button"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     imageMode
                       ? "bg-violet-500/15 text-violet-400"
@@ -1190,18 +1220,24 @@ export function ChatInput({
               ) : null}
               {/* FIX9 Part B: video gen isn't wired in the desktop app. FIX34.1
                   Part F: so the desktop gets NO button, not a disabled one with
-                  a "not available here yet" tooltip — same rule as the web. */}
-              {canGenerateVideos && !streaming && !hosted ? (
+                  a "not available here yet" tooltip — same rule as the web.
+                  FIX47.6 Part C — that rule covers HOST-level absence only:
+                  when the feature exists here but the selected MODEL can't
+                  drive it, the button stays visible and disabled with the
+                  reason (see videoFeatureAvailable above). */}
+              {videoFeatureAvailable && !streaming && !hosted ? (
                 <button
                   type="button"
                   onClick={() => {
                     setVideoMode((v) => !v);
                     setImageMode(false);
                   }}
-                  aria-label={t("input.videoMode")}
-                  title={t("input.videoMode")}
+                  aria-label={canGenerateVideos ? t("input.videoMode") : t("input.videoMode.needsTools")}
+                  title={canGenerateVideos ? t("input.videoMode") : t("input.videoMode.needsTools")}
                   aria-pressed={videoMode}
-                  disabled={disabled}
+                  aria-disabled={!canGenerateVideos || undefined}
+                  disabled={disabled || !canGenerateVideos}
+                  data-testid="video-mode-button"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode
                       ? "bg-rose-500/15 text-rose-400"

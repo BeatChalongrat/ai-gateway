@@ -247,7 +247,14 @@ export const en = {
   "model.imageBadge": "Makes images",
   "model.visionBadge": "Reads images",
   "model.cantReadImages": "Can't read the attached image",
-  "model.noTools": "no tools",
+  // FIX47.6 Part C — guidance, not a defect label: what a model without
+  // tool support IS FOR replaces the old "no tools" ("model.noTools")
+  // under its name. The old key is gone with its last caller.
+  "model.subGeneralQA": "fast & economical · great for general Q&A",
+  "input.imageMode.needsTools": "This model can't make images — pick a model that can use tools",
+  "input.videoMode.needsTools": "This model can't make videos — pick a model that can use tools",
+  "input.imageMode.droppedForModel": "Image mode turned off — {model} can't use tools",
+  "input.videoMode.droppedForModel": "Video mode turned off — {model} can't use tools",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -1034,6 +1041,9 @@ export const en = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "AI service error",
   "msg.stopped": "stopped",
+  // FIX47.6 Part D — visible failures for the message action buttons.
+  "msg.copyFailed": "Couldn't copy — select the text and press Ctrl+C",
+  "msg.feedbackFailed": "Couldn't save your feedback. Try again.",
   "msg.attempts": "Connection attempts ({n})",
   "msg.attemptOk": "success",
   "msg.attemptFail": "failed",
@@ -1590,7 +1600,12 @@ const th: Record<DictKey, string> = {
   "model.imageBadge": "สร้างรูป",
   "model.visionBadge": "อ่านรูปได้",
   "model.cantReadImages": "อ่านรูปที่แนบไม่ได้",
-  "model.noTools": "ไม่ใช้เครื่องมือ",
+  // FIX47.6 Part C — คำแนะนำการใช้งานแทนป้าย "ไม่ใช้เครื่องมือ"
+  "model.subGeneralQA": "เร็ว ประหยัด · เหมาะกับถาม-ตอบทั่วไป",
+  "input.imageMode.needsTools": "โมเดลนี้สร้างภาพไม่ได้ — เลือกโมเดลที่ใช้เครื่องมือได้",
+  "input.videoMode.needsTools": "โมเดลนี้สร้างวิดีโอไม่ได้ — เลือกโมเดลที่ใช้เครื่องมือได้",
+  "input.imageMode.droppedForModel": "ปิดโหมดสร้างภาพแล้ว — {model} ใช้เครื่องมือไม่ได้",
+  "input.videoMode.droppedForModel": "ปิดโหมดสร้างวิดีโอแล้ว — {model} ใช้เครื่องมือไม่ได้",
 
   // Memory page
   "memory.back": "กลับไปแชท",
@@ -2364,6 +2379,9 @@ const th: Record<DictKey, string> = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "บริการ AI ขัดข้อง",
   "msg.stopped": "หยุดแล้ว",
+  // FIX47.6 Part D — ปุ่มบนข้อความต้องไม่ล้มเหลวแบบเงียบ
+  "msg.copyFailed": "คัดลอกไม่สำเร็จ — เลือกข้อความแล้วกด Ctrl+C แทน",
+  "msg.feedbackFailed": "บันทึกความเห็นไม่สำเร็จ กรุณาลองใหม่",
   "msg.attempts": "รายละเอียดการลองเชื่อมต่อ ({n})",
   "msg.attemptOk": "สำเร็จ",
   "msg.attemptFail": "ล้มเหลว",
