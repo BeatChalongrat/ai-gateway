@@ -91,7 +91,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
           </MenuButton>
           {onShare ? (
             <>
-              <div className="border-t border-border/60" />
+              <div className="border-t border-border" />
               <MenuButton
                 onClick={() => {
                   setOpen(false);

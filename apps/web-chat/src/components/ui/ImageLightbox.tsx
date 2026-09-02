@@ -171,7 +171,7 @@ export function ImageLightbox() {
               setScale(1);
               setOffset({ x: 0, y: 0 });
             }}
-            className="focus-ring rounded-full bg-bg-surface/80 px-3 py-2 text-xs text-text-primary hover:bg-bg-elevated"
+            className="focus-ring rounded-full bg-bg-surface px-3 py-2 text-xs text-text-primary hover:bg-bg-elevated"
           >
             100%
           </button>
@@ -186,7 +186,7 @@ export function ImageLightbox() {
               e.stopPropagation();
               downloadFromObjectUrl(src, filename);
             }}
-            className="focus-ring rounded-full bg-bg-surface/80 p-2 text-text-primary hover:bg-bg-elevated"
+            className="focus-ring rounded-full bg-bg-surface p-2 text-text-primary hover:bg-bg-elevated"
           >
             <Download className="h-[18px] w-[18px]" aria-hidden />
           </button>
@@ -195,7 +195,7 @@ export function ImageLightbox() {
           type="button"
           aria-label={t("a11y.close")}
           onClick={close}
-          className="focus-ring rounded-full bg-bg-surface/80 p-2 text-text-primary hover:bg-bg-elevated"
+          className="focus-ring rounded-full bg-bg-surface p-2 text-text-primary hover:bg-bg-elevated"
         >
           <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
             <path

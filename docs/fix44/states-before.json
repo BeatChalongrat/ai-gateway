@@ -1,0 +1,40 @@
+{
+  "toast-dark": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(236, 236, 236)",
+    "border": "rgba(255, 255, 255, 0.12)",
+    "ring": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0"
+  },
+  "menu-divider-dark": "rgb(229, 231, 235)",
+  "input-focus-dark": "none",
+  "dropzone-dark": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(236, 236, 236)",
+    "border": "rgba(255, 255, 255, 0.2)",
+    "ring": "none"
+  },
+  "delete-confirm-dark": "not reached: locator.hover: Timeout 5000ms exceeded.",
+  "stop-button-dark": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(255, 255, 255)"
+  },
+  "toast-light": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(13, 13, 13)",
+    "border": "rgba(0, 0, 0, 0.1)",
+    "ring": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0"
+  },
+  "menu-divider-light": "rgb(229, 231, 235)",
+  "input-focus-light": "none",
+  "dropzone-light": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(13, 13, 13)",
+    "border": "rgba(0, 0, 0, 0.2)",
+    "ring": "none"
+  },
+  "delete-confirm-light": "not reached: locator.hover: Timeout 5000ms exceeded.",
+  "stop-button-light": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(255, 255, 255)"
+  }
+}

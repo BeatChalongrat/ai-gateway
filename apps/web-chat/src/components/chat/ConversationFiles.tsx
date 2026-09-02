@@ -84,7 +84,7 @@ export function ConversationFiles({ conversationId }: Props) {
       </button>
       {open ? (
         <div className="popover-appear absolute right-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-bg-surface shadow-2xl">
-          <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-wider text-text-muted">
+          <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wider text-text-muted">
             {t("convfiles.header")}
           </div>
           <div className="scrollbar-thin max-h-72 overflow-y-auto py-1">

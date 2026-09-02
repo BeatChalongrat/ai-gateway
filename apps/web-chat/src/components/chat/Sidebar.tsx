@@ -689,7 +689,7 @@ function UserMenu({
               stay desktop-only — decided at RUNTIME (FIX20 §6.5): hosted is
               true exactly when the Electron preload's window.sranHost is
               present, so ONE build serves both surfaces. */}
-          <div className="border-t border-border/60" />
+          <div className="border-t border-border" />
           <MenuItem
             onClick={() => router.push("/chat/tasks")}
             icon={<Clock width={14} height={14} aria-hidden />}
@@ -722,7 +722,7 @@ function UserMenu({
             trailing={<ArrowIcon />}
             setOpen={setOpen}
           />
-          <div className="border-t border-border/60" />
+          <div className="border-t border-border" />
           <MenuItem
             onClick={onLogout}
             icon={<LogoutIcon />}
@@ -1394,7 +1394,7 @@ function ProjectHeader({
         ) : null}
       </div>
       {confirmingDelete ? (
-        <div className="border-t border-border/60 px-3 py-2 text-[11px]">
+        <div className="border-t border-border px-3 py-2 text-[11px]">
           <p className="text-text-secondary">{t("project.deleteConfirm")}</p>
           <div className="mt-1.5 flex gap-2">
             <button

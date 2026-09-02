@@ -389,7 +389,7 @@ function KBDocumentsPanel({
   }
 
   return (
-    <div className="border-t border-border/60 bg-bg-base/50 px-4 py-4">
+    <div className="border-t border-border bg-bg-base/50 px-4 py-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary">
           Documents

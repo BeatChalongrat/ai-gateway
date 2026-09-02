@@ -71,7 +71,7 @@ export default function SharedConversationPage() {
 
   return (
     <div className="min-h-screen bg-bg-base text-text-primary">
-      <header className="border-b border-border bg-bg-base/80 backdrop-blur">
+      <header className="border-b border-border bg-bg-base backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3 md:px-8">
           <div className="flex items-center gap-2">
             <div className="h-6 w-6 rounded-md bg-gradient-to-br from-accent to-accent-subtle" />

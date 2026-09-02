@@ -260,7 +260,7 @@ function MessageBubbleImpl({
                       }
                     }}
                     rows={2}
-                    className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-border-strong bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+                    className="scrollbar-thin w-full min-w-[260px] resize-none rounded-lg border border-border-strong bg-bg-base px-3 py-2 text-[15px] text-text-primary focus:outline-none focus:ring-2 focus:ring-border-strong"
                   />
                   <div className="flex justify-end gap-2">
                     <button

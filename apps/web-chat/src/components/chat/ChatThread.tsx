@@ -570,7 +570,7 @@ export function ChatThread({
         <div
           role="status"
           data-testid="waiting-consent-notice"
-          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-primary shadow-lg backdrop-blur-sm"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary shadow-lg backdrop-blur-sm"
         >
           {waitingConsent.requestedBy?.kind === "subagent"
             ? t("thread.waitingConsentSub", { tool: waitingConsent.tool, label: waitingConsent.requestedBy.label || t("consent.subagentUnnamed") })
@@ -587,7 +587,7 @@ export function ChatThread({
         <div
           role="status"
           data-testid="tool-running-notice"
-          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
         >
           {t("thread.toolRunning", { tool: toolWait.tool, s: String(Math.round(toolWait.elapsedMs / 1000)) })}
         </div>
@@ -595,7 +595,7 @@ export function ChatThread({
         <div
           role="status"
           data-testid="stalled-stream-notice"
-          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface/95 px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
         >
           {t("thread.stalled")}
           <button
@@ -648,7 +648,7 @@ export function ChatThread({
           type="button"
           aria-label={t("thread.scrollToLatest")}
           onClick={jumpToBottom}
-          className="focus-ring popover-appear absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-border bg-bg-surface/85 p-2 text-text-secondary shadow-lg backdrop-blur-sm hover:text-text-primary"
+          className="focus-ring popover-appear absolute bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-border bg-bg-surface p-2 text-text-secondary shadow-lg backdrop-blur-sm hover:text-text-primary"
         >
           <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
             <path

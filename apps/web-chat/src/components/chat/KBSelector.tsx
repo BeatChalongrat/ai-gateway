@@ -91,7 +91,7 @@ export function KBSelector({
       </button>
       {open ? (
         <div className="popover-appear absolute bottom-10 right-0 z-30 w-64 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">
-          <div className="border-b border-border/60 px-3 py-2">
+          <div className="border-b border-border px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
               Knowledge base
             </p>
@@ -134,7 +134,7 @@ export function KBSelector({
               ))
             )}
           </div>
-          <div className="border-t border-border/60 px-3 py-2">
+          <div className="border-t border-border px-3 py-2">
             <a
               href="/chat/knowledge"
               className="text-[11px] text-text-muted hover:text-text-primary"

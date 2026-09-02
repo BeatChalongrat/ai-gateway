@@ -233,7 +233,7 @@ export function ConversationItem({
                   </span>
                 </button>
                 {moveProjectOpen ? (
-                  <div className="max-h-48 overflow-y-auto border-t border-border/60 bg-bg-base/40">
+                  <div className="max-h-48 overflow-y-auto border-t border-border bg-bg-base/40">
                     {projects.map((p) => (
                       <button
                         key={p.id}
@@ -265,7 +265,7 @@ export function ConversationItem({
                           setMoveProjectOpen(false);
                           void onCreateProjectForMove();
                         }}
-                        className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                        className="flex w-full items-center gap-2 border-t border-border px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                       >
                         <FolderPlus width={12} height={12} aria-hidden className="shrink-0" />
                         <span className="truncate">{t("project.new")}</span>
@@ -279,7 +279,7 @@ export function ConversationItem({
                           setMoveProjectOpen(false);
                           void onMoveToProject(null);
                         }}
-                        className="flex w-full items-center gap-2 border-t border-border/60 px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                        className="flex w-full items-center gap-2 border-t border-border px-3 py-1.5 text-left text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                       >
                         <span aria-hidden className="shrink-0 text-[12px]">✕</span>
                         <span className="truncate">{t("conv.removeFromProject")}</span>
@@ -319,7 +319,7 @@ export function ConversationItem({
 
       {confirmingDelete ? (
         <div
-          className="border-t border-border/60 px-3 py-2 text-[11px]"
+          className="border-t border-border px-3 py-2 text-[11px]"
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-text-secondary">

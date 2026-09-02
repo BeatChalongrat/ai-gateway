@@ -575,7 +575,7 @@ function CloudTaskFormModal({
             placeholder={tOutside("cloud.field.promptPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+            className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
           />
         </div>
         <div className="flex flex-col gap-1.5">
@@ -589,7 +589,7 @@ function CloudTaskFormModal({
             id="cloud-task-interval"
             value={intervalSeconds}
             onChange={(e) => setIntervalSeconds(Number(e.target.value))}
-            className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+            className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
           >
             {CLOUD_INTERVALS.map((opt) => (
               <option key={opt.seconds} value={opt.seconds}>
@@ -627,7 +627,7 @@ function CloudTaskFormModal({
                 id="cloud-task-conversation"
                 value={conversationId}
                 onChange={(e) => setConversationId(e.target.value)}
-                className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+                className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
               >
                 {conversations.map((c) => (
                   <option key={c.id} value={c.id}>

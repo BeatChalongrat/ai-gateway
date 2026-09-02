@@ -398,7 +398,7 @@ function ProjectDetailPanel({
   const projectChats = conversations.filter((c) => c.project_id === project.id);
 
   return (
-    <div className="flex flex-col gap-5 border-t border-border/60 bg-bg-base/50 px-5 py-5">
+    <div className="flex flex-col gap-5 border-t border-border bg-bg-base/50 px-5 py-5">
       {/* Name + instructions */}
       <Input
         label={t("projects.name.label")}
@@ -419,7 +419,7 @@ function ProjectDetailPanel({
           onChange={(e) => setInstructions(e.target.value)}
           rows={5}
           placeholder={t("projects.instructions.placeholder")}
-          className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+          className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
         />
         <div className="flex items-center justify-between text-[11px]">
           <span className="text-text-muted">
@@ -455,7 +455,7 @@ function ProjectDetailPanel({
           value={project.knowledge_base_id ?? ""}
           disabled={kbSaving || !kbsLoaded}
           onChange={(e) => void handleKBChange(e.target.value)}
-          className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40 disabled:opacity-60"
+          className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong disabled:opacity-60"
         >
           <option value="">{t("projects.kb.none")}</option>
           {knowledgeBases.map((kb) => (
@@ -514,7 +514,7 @@ function ProjectDetailPanel({
       </div>
 
       {/* Delete */}
-      <div className="border-t border-border/60 pt-3">
+      <div className="border-t border-border pt-3">
         <button
           type="button"
           onClick={onDelete}
@@ -606,7 +606,7 @@ function CreateProjectModal({
             onChange={(e) => setInstructions(e.target.value)}
             rows={4}
             placeholder={t("projects.instructions.placeholder")}
-            className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+            className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
           />
           <span className="self-end text-[11px] text-text-muted">
             {instructions.length} / {INSTRUCTIONS_MAX}
@@ -706,7 +706,7 @@ function PersonalInstructionsPanel() {
               onChange={(e) => setAbout(e.target.value)}
               rows={3}
               placeholder={t("instr.about.placeholder")}
-              className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+              className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -722,7 +722,7 @@ function PersonalInstructionsPanel() {
               onChange={(e) => setRespond(e.target.value)}
               rows={3}
               placeholder={t("instr.respond.placeholder")}
-              className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong/40"
+              className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
             />
           </div>
           <div>

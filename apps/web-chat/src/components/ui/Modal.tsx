@@ -73,7 +73,7 @@ export function Modal({
   if (!open) return null;
 
   const header = (
-    <header className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
+    <header className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
       <div>
         <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
         {description ? (
@@ -120,7 +120,7 @@ export function Modal({
             {children}
           </div>
           {footer ? (
-            <footer className="flex items-center justify-end gap-2 border-t border-border/60 bg-bg-base/40 px-5 py-3">
+            <footer className="flex items-center justify-end gap-2 border-t border-border bg-bg-base/40 px-5 py-3">
               {footer}
             </footer>
           ) : null}
@@ -148,7 +148,7 @@ export function Modal({
           {children}
         </div>
         {footer ? (
-          <footer className="flex items-center justify-end gap-2 border-t border-border/60 bg-bg-base/40 px-5 py-3">
+          <footer className="flex items-center justify-end gap-2 border-t border-border bg-bg-base/40 px-5 py-3">
             {footer}
           </footer>
         ) : null}

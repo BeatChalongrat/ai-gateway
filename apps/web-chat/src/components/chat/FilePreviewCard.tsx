@@ -154,7 +154,7 @@ function CardShell({
           e.stopPropagation();
           onRemove();
         }}
-        className="focus-ring absolute left-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-border-default bg-bg-surface/85 text-text-secondary opacity-0 backdrop-blur-sm transition-opacity hover:bg-bg-surface hover:text-text-primary group-hover:opacity-100 group-focus-within:opacity-100"
+        className="focus-ring absolute left-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-border-default bg-bg-surface text-text-secondary opacity-0 backdrop-blur-sm transition-opacity hover:bg-bg-surface hover:text-text-primary group-hover:opacity-100 group-focus-within:opacity-100"
       >
         <X className="h-3.5 w-3.5" aria-hidden />
       </button>
@@ -167,7 +167,7 @@ function CardShell({
             e.stopPropagation();
             onRetry();
           }}
-          className="focus-ring absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border-default bg-bg-surface/85 px-2 text-[10px] font-medium text-text-secondary backdrop-blur-sm transition-colors hover:bg-bg-surface hover:text-text-primary"
+          className="focus-ring absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border-default bg-bg-surface px-2 text-[10px] font-medium text-text-secondary backdrop-blur-sm transition-colors hover:bg-bg-surface hover:text-text-primary"
         >
           <RotateCw className="h-3 w-3" aria-hidden />
           Retry
