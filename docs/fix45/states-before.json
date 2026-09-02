@@ -1,0 +1,62 @@
+{
+  "toast-dark": {
+    "bg": "rgb(47, 47, 47)",
+    "color": "rgb(236, 236, 236)",
+    "border": "rgba(255, 255, 255, 0.12)",
+    "ring": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0"
+  },
+  "menu-divider-dark": "rgba(255, 255, 255, 0.12)",
+  "input-focus-dark": "none",
+  "dropzone-dark": {
+    "bg": "rgb(47, 47, 47)",
+    "color": "rgb(236, 236, 236)",
+    "border": "rgba(255, 255, 255, 0.2)",
+    "ring": "none"
+  },
+  "delete-confirm-dark": "not reached: locator.hover: Timeout 5000ms exceeded.",
+  "stop-button-dark": {
+    "bg": "rgb(239, 68, 68)",
+    "color": "rgb(255, 255, 255)"
+  },
+  "error-card-dark": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(239, 68, 68)",
+    "border": "rgb(229, 231, 235)",
+    "ring": "none"
+  },
+  "memory-clear-hover-dark": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "border": "rgb(229, 231, 235)",
+    "color": "rgb(239, 68, 68)"
+  },
+  "toast-light": {
+    "bg": "rgb(240, 240, 240)",
+    "color": "rgb(13, 13, 13)",
+    "border": "rgba(0, 0, 0, 0.1)",
+    "ring": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0"
+  },
+  "menu-divider-light": "rgba(0, 0, 0, 0.1)",
+  "input-focus-light": "none",
+  "dropzone-light": {
+    "bg": "rgb(240, 240, 240)",
+    "color": "rgb(13, 13, 13)",
+    "border": "rgba(0, 0, 0, 0.2)",
+    "ring": "none"
+  },
+  "delete-confirm-light": "not reached: locator.hover: Timeout 5000ms exceeded.",
+  "stop-button-light": {
+    "bg": "rgb(239, 68, 68)",
+    "color": "rgb(255, 255, 255)"
+  },
+  "error-card-light": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "color": "rgb(239, 68, 68)",
+    "border": "rgb(229, 231, 235)",
+    "ring": "none"
+  },
+  "memory-clear-hover-light": {
+    "bg": "rgba(0, 0, 0, 0)",
+    "border": "rgb(229, 231, 235)",
+    "color": "rgb(239, 68, 68)"
+  }
+}

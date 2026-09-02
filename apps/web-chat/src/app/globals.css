@@ -21,18 +21,25 @@
 
   /* === Background layers (default = dark) === */
   --bg-primary: #212121;
+  --bg-primary-rgb: 33 33 33; /* L1: channel form for <alpha-value> */
   --bg-sidebar: #171717;
+  --bg-sidebar-rgb: 23 23 23; /* L1: channel form for <alpha-value> */
   --bg-surface: #2F2F2F;
+  --bg-surface-rgb: 47 47 47; /* L1: channel form for <alpha-value> */
   --bg-surface-hover: #3A3A3A;
+  --bg-surface-hover-rgb: 58 58 58; /* L1: channel form for <alpha-value> */
   --bg-overlay: rgba(0, 0, 0, 0.55);
 
   /* === Text === */
   --text-primary: #ECECEC;
+  --text-primary-rgb: 236 236 236; /* L1: channel form for <alpha-value> */
   --text-secondary: #A0A0A0;
+  --text-secondary-rgb: 160 160 160; /* L1: channel form for <alpha-value> */
   /* WCAG AA — was #6B6B6B (3.0:1 on bg-primary, the app's default
      small-text colour). #8F8F8F = 4.98:1 on bg-primary while keeping
      clear separation from --text-secondary (#A0A0A0). */
   --text-tertiary: #8F8F8F;
+  --text-tertiary-rgb: 143 143 143; /* L1: channel form for <alpha-value> */
   --text-placeholder: #8E8E8E;
 
   /* === Borders === */
@@ -47,11 +54,14 @@
      OpenAI provider mark on assistant-message avatars, which uses
      hard-coded emerald hex values, not these tokens. === */
   --accent: #ECECEC;
+  --accent-rgb: 236 236 236; /* L1: channel form for <alpha-value> */
   --accent-hover: #FFFFFF;
+  --accent-hover-rgb: 255 255 255; /* L1: channel form for <alpha-value> */
   --accent-subtle: rgba(236, 236, 236, 0.12);
 
   /* === User messages === */
   --user-bubble-bg: #2F2F2F;
+  --user-bubble-bg-rgb: 47 47 47; /* L1: channel form for <alpha-value> */
   --user-bubble-text: #ECECEC;
 
   /* === Sidebar === */
@@ -66,8 +76,11 @@
 
   /* === Status === */
   --success: #10A37F;
+  --success-rgb: 16 163 127; /* L1: channel form for <alpha-value> */
   --error:   #EF4444;
+  --error-rgb: 239 68 68; /* L1: channel form for <alpha-value> */
   --warning: #F59E0B;
+  --warning-rgb: 245 158 11; /* L1: channel form for <alpha-value> */
 
   /* === Scrollbar === */
   --scrollbar-thumb: rgba(255, 255, 255, 0.12);
@@ -88,16 +101,23 @@
 [data-theme="light"] {
   color-scheme: light;
   --bg-primary: #FFFFFF;
+  --bg-primary-rgb: 255 255 255; /* L1: channel form for <alpha-value> */
   --bg-sidebar: #F9F9F9;
+  --bg-sidebar-rgb: 249 249 249; /* L1: channel form for <alpha-value> */
   --bg-surface: #F0F0F0;
+  --bg-surface-rgb: 240 240 240; /* L1: channel form for <alpha-value> */
   --bg-surface-hover: #E5E5E5;
+  --bg-surface-hover-rgb: 229 229 229; /* L1: channel form for <alpha-value> */
   --bg-overlay: rgba(0, 0, 0, 0.30);
 
   --text-primary: #0D0D0D;
+  --text-primary-rgb: 13 13 13; /* L1: channel form for <alpha-value> */
   --text-secondary: #5B5B5B;
+  --text-secondary-rgb: 91 91 91; /* L1: channel form for <alpha-value> */
   /* WCAG AA — was #8A8A8A (3.45:1 on white). #6D6D6D = 5.17:1 on
      white / 4.54:1 on bg-surface, still lighter than secondary #5B5B5B. */
   --text-tertiary: #6D6D6D;
+  --text-tertiary-rgb: 109 109 109; /* L1: channel form for <alpha-value> */
   --text-placeholder: #9B9B9B;
 
   --border-subtle: rgba(0, 0, 0, 0.06);
@@ -107,10 +127,13 @@
   /* Match the dark-theme neutralisation — accent maps to the
      foreground so straggler usages look neutral, not teal. */
   --accent: #0D0D0D;
+  --accent-rgb: 13 13 13; /* L1: channel form for <alpha-value> */
   --accent-hover: #000000;
+  --accent-hover-rgb: 0 0 0; /* L1: channel form for <alpha-value> */
   --accent-subtle: rgba(13, 13, 13, 0.08);
 
   --user-bubble-bg: #F0F0F0;
+  --user-bubble-bg-rgb: 240 240 240; /* L1: channel form for <alpha-value> */
   --user-bubble-text: #0D0D0D;
 
   --sidebar-item-hover: #EEEEEE;

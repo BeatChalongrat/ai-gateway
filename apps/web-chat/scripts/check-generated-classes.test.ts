@@ -18,9 +18,14 @@ const config = require("../tailwind.config.js");
 
 describe("FIX44 — generated-classes check", () => {
   it("flags a planted class the engine cannot build, and only that one", async () => {
-    const wanted = ["bg-status-danger/10", "bg-status-danger", "border-border/60", "border-border", "hover:bg-status-danger/10", "hover:bg-bg-elevated", "text-text-muted"];
+    // FIX45 Part A: the opaque tokens are channel-form now, so their /NN
+    // modifiers ARE generated. The border tokens still carry their own
+    // alpha (rgba var()), so a modifier on them stays unbuildable — that
+    // is the planted defect this check must keep naming.
+    const wanted = ["bg-status-danger/10", "bg-status-danger", "border-border/60", "border-border", "hover:bg-status-danger/10", "focus:ring-border-strong/40", "hover:bg-bg-elevated", "text-text-muted"];
     const css = await buildCss(config, `<div class="${wanted.join(" ")}"></div>`);
-    expect(findMissing(wanted, css)).toEqual(["bg-status-danger/10", "border-border/60", "hover:bg-status-danger/10"]);
+    expect(findMissing(wanted, css)).toEqual(["border-border/60", "focus:ring-border-strong/40"]);
+    expect(css).toContain("rgb(var(--error-rgb) / 0.1)");
   });
 
   it("would pass a config that CAN build the modifier (the L1 shape)", async () => {
