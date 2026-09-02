@@ -129,7 +129,7 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
             </button>
             <button
               type="button"
-              className="focus-ring rounded-md bg-accent px-3 py-1 text-xs font-medium text-white disabled:opacity-50"
+              className="focus-ring rounded-md bg-accent px-3 py-1 text-xs font-medium text-bg-base disabled:opacity-50"
               onClick={() => void submit()}
               disabled={busy}
               data-testid="context-compact-submit"

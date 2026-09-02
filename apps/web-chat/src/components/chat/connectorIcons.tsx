@@ -12,7 +12,9 @@
 //     mark we cannot bundle. Slack is currently in that bucket: Slack had its
 //     icon removed from simple-icons at the company's request, and its brand
 //     kit requires a manual download under Slack's own terms — bundling that
-//     is the owner's call, so Slack renders the neutral mark until then.
+//     is the owner's call. The owner has since placed one (FIX43.1): the
+//     mark now comes from public/icons/connectors/slack.svg, downloaded by
+//     the owner from Slack's brand kit under Slack's own terms.
 //
 // FIX42 D2 — the owner's own file wins. Accepting a brand kit's terms is the
 // owner's decision, not this code's, so nothing here downloads anything. What

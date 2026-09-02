@@ -25,7 +25,7 @@ export function UpdateBanner() {
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="focus-ring rounded-full bg-accent px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+        className="focus-ring rounded-full bg-accent px-3 py-1 text-xs font-medium text-bg-base hover:opacity-90"
       >
         {t("update.refresh")}
       </button>
