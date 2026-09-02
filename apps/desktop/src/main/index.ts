@@ -15,6 +15,7 @@
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   globalShortcut,
   Menu,
@@ -47,6 +48,7 @@ import { runE4Probe } from "./probes-e4";
 import { SidecarClient } from "./sidecar-client";
 import { TaskScheduler } from "./task-scheduler";
 import { buildMenuTemplate } from "./app-menu";
+import { actionFor, buildContextMenu, type ContextMenuParams } from "./context-menu";
 import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore, type Rect } from "./window-state";
 import { describeAccelerator, ShellPrefsStore, validateAccelerator, type ShellPrefs } from "./shell-prefs";
 import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
@@ -156,6 +158,7 @@ app.on("web-contents-created", (_event, contents) => {
   });
   installNavigationGuards(contents);
   installCrashHandlers(contents);
+  installContextMenu(contents);
 });
 
 app.on("child-process-gone", (_event, details) => {
@@ -765,6 +768,45 @@ function installSessionPolicy(ses: Session): void {
 }
 
 // ── crash handling ──────────────────────────────────────────────────────────
+// FIX47 Part D — right-click. Every window (main and quick-ask) gets the
+// same menu, built from what was clicked (context-menu.ts); Electron shows
+// nothing on its own. External links open in the system browser through
+// the same door as window.open (setWindowOpenHandler above).
+function installContextMenu(contents: WebContents): void {
+  contents.on("context-menu", (_event, params) => {
+    const p: ContextMenuParams = {
+      x: params.x,
+      y: params.y,
+      isEditable: params.isEditable,
+      selectionText: params.selectionText ?? "",
+      linkURL: params.linkURL ?? "",
+      mediaType: params.mediaType,
+      editFlags: params.editFlags,
+    };
+    const host = {
+      copy: () => contents.copy(),
+      cut: () => contents.cut(),
+      paste: () => contents.paste(),
+      undo: () => contents.undo(),
+      redo: () => contents.redo(),
+      selectAll: () => contents.selectAll(),
+      copyImageAt: (x: number, y: number) => contents.copyImageAt(x, y),
+      writeClipboardText: (text: string) => clipboard.writeText(text),
+      openExternal: (url: string) => {
+        log.info(`context menu → system browser: ${redactUrl(url)}`);
+        void shell.openExternal(url);
+      },
+    };
+    const template = buildContextMenu(p).map((item) =>
+      "type" in item
+        ? { type: "separator" as const }
+        : { label: item.label, accelerator: item.accelerator, enabled: item.enabled, click: () => actionFor(item, p, host) },
+    );
+    const win = BrowserWindow.fromWebContents(contents) ?? undefined;
+    Menu.buildFromTemplate(template).popup({ window: win });
+  });
+}
+
 function installCrashHandlers(contents: WebContents): void {
   contents.on("render-process-gone", (_event, details) => {
     rendererCrashes += 1;
