@@ -48,6 +48,23 @@ func NewFeedbackService(
 	}
 }
 
+// ResolveMessageID maps a desktop host's client id ("asst_<hex>") to
+// the server message id (FIX47.6 Part D). Tenant-scoped; ErrNotFound
+// becomes ErrFeedbackTargetNotFound so the handler's error mapping
+// stays uniform.
+func (s *FeedbackService) ResolveMessageID(
+	ctx context.Context, tenantID uuid.UUID, clientID string,
+) (uuid.UUID, error) {
+	id, err := s.messages.ResolveByClientID(ctx, tenantID, clientID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return uuid.Nil, ErrFeedbackTargetNotFound
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
 // CreateInput is the typed payload from the handler.
 type FeedbackCreateInput struct {
 	TenantID  uuid.UUID

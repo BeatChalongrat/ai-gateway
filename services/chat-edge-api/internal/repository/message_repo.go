@@ -132,6 +132,31 @@ func (r *MessageRepo) CreateImported(
 	return id, false, nil
 }
 
+// ResolveByClientID maps a desktop host's own message id (client_id,
+// e.g. "asst_<hex>") to the SERVER message id (FIX47.6 Part D). The
+// desktop page addresses messages by the id the host minted; anything
+// keyed server-side (feedback) must resolve through this or 400 on
+// every host-authored message. Tenant-scoped; newest wins if a client
+// id was ever reused across conversations.
+func (r *MessageRepo) ResolveByClientID(
+	ctx context.Context, tenantID uuid.UUID, clientID string,
+) (uuid.UUID, error) {
+	const q = `
+		SELECT id FROM chat.messages_masked
+		WHERE tenant_id = $1 AND client_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	var id uuid.UUID
+	if err := r.db.QueryRow(ctx, q, tenantID, clientID).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, ErrNotFound
+		}
+		return uuid.Nil, fmt.Errorf("resolve message by client id: %w", err)
+	}
+	return id, nil
+}
+
 // ListByConversation returns the message history for one
 // conversation, ordered ASCENDING by “created_at“ so the chat UI
 // renders oldest-first. “cursor“ is used for backwards-paging
