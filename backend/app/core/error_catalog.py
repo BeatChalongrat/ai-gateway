@@ -46,6 +46,9 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("all_models_failed", "No model could answer right now. Please try again or pick another model.", True),
     ErrorInfo("internal_error", "An internal error occurred. Please try again.", True),
     ErrorInfo("stream_interrupted", "The response was interrupted. Please try again.", True),
+    # per-attempt code in all_models_failed.attempts: the provider was skipped
+    # because its health marker showed a recent failure
+    ErrorInfo("health_marker_skip", "Skipped: this provider failed a moment ago. Please try again shortly.", True),
     # ── permanent for this request: retrying changes nothing ─────────────
     ErrorInfo("validation_error", "The request was rejected as invalid. Change the request before sending it again.", False),
     ErrorInfo("model_no_tool_support", "The selected model cannot use tools. Pick a model that supports tools, or turn the tools off.", False),

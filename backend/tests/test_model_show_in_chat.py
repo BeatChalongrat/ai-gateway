@@ -104,3 +104,23 @@ def test_no_model_list_is_embedded_in_the_show_in_chat_path():
         assert "show_in_chat" in src
         assert "SHOW_IN_CHAT" not in src  # no constant list
     assert "show_in_chat=getattr(row" in inspect.getsource(model_registry)
+
+
+@pytest.mark.asyncio
+async def test_changing_only_show_in_chat_does_not_freeze_the_row_out_of_discovery(db, monkeypatch):
+    from app.api.routes.admin_model_discovery import ModelConfigUpdate, update_model
+
+    row = _row("curated"); row.is_manual_override = False; row.source = "auto"
+    db.add(row); db.commit()
+
+    async def no_reload(_s):
+        return None
+
+    from app.services.providers import model_registry
+    monkeypatch.setattr(model_registry._registry, "reload", no_reload)
+    out = await update_model(row.id, ModelConfigUpdate(show_in_chat=False), session=db)
+    assert out["show_in_chat"] is False
+    assert out["is_manual_override"] is False and out["source"] == "auto"
+    # a capability edit still pins the row, as before
+    out = await update_model(row.id, ModelConfigUpdate(supports_tools=True), session=db)
+    assert out["is_manual_override"] is True and out["source"] == "manual"

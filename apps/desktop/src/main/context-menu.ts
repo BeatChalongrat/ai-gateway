@@ -86,7 +86,9 @@ export function buildContextMenu(p: ContextMenuParams): ContextMenuItem[] {
       { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: p.editFlags.canCopy && hasSelection },
       { id: "paste", label: "Paste", accelerator: "Ctrl+V", enabled: p.editFlags.canPaste },
       { type: "separator" },
-      { id: "selectAll", label: "Select All", accelerator: "Ctrl+A", enabled: p.editFlags.canSelectAll },
+      // Chromium reports canSelectAll=false for an empty field; Claude keeps
+      // the entry live there, and so does the app's Edit menu.
+      { id: "selectAll", label: "Select All", accelerator: "Ctrl+A", enabled: true },
     );
     return items;
   }

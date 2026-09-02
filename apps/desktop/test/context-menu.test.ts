@@ -26,7 +26,8 @@ describe("right-click menu — what Claude Desktop shows", () => {
   });
 
   it("empty composer: Cut and Copy greyed, Paste and Select All live, no Undo/Redo yet", () => {
-    expect(labels(params({ isEditable: true, editFlags: flags({ canPaste: true }) }))).toEqual([
+    // canSelectAll is what Chromium reports for an empty field (false) — measured on e20
+    expect(labels(params({ isEditable: true, editFlags: flags({ canPaste: true, canSelectAll: false }) }))).toEqual([
       "Cut (off)", "Copy (off)", "Paste", "—", "Select All",
     ]);
   });

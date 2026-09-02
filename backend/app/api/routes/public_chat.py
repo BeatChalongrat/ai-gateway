@@ -38,6 +38,7 @@ from app.core.exceptions import (
     DLPViolationError,
     GuardrailViolationError,
     ModerationViolationError,
+    NoCapableModelError,
     NotFoundError,
     ProviderUnavailableError,
     ValidationError,
@@ -985,7 +986,12 @@ async def _chat_completions_impl(
 
     # 1d. Router chain — semantic > keyword > service, on DLP-masked
     # messages. Mutates payload.model when a router fires. Any failure
-    # falls back to plain "service" routing so the stream never breaks.
+    # falls back to plain "service" routing so the stream never breaks —
+    # except the one routing outcome that IS the answer (FIX47 Part B):
+    # no model in the pool can serve the request's tools / images. That
+    # is raised here, before the response starts, so the client gets a
+    # 400 with the real code instead of a doomed turn ending in
+    # all_models_failed.
     dict_messages = [m.model_dump() for m in messages_to_send]
     try:
         router_used, _matched_rule = await orchestrator._apply_router_chain(
@@ -995,6 +1001,8 @@ async def _chat_completions_impl(
             session=session,
             log=log,
         )
+    except NoCapableModelError:
+        raise
     except Exception as exc:
         log.warning("router_chain_failed", error=str(exc))
         router_used = "service"

@@ -319,9 +319,11 @@ const PAGE_SIZE = 15;
 
 export default function ModelsPage() {
   const t = useT();
-  // The listing defaults to 100 rows server-side; the catalogue is
-  // larger than that, so ask for the whole thing.
-  const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models?limit=500");
+  // The DB-backed listing (model_configs: id, capability flags, is_active,
+  // show_in_chat). GET /admin/models is answered by the older registry
+  // listing, which has none of those — see admin_model_discovery.py. The
+  // listing defaults to 100 rows; ask for the whole catalogue.
+  const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models/configs?limit=500");
   const [localShow, setLocalShow] = useState<Record<number, boolean>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const setShowInChat = useCallback(async (id: number, next: boolean) => {
@@ -576,7 +578,7 @@ export default function ModelsPage() {
                       {paged.map((m, i) => {
                         const meta = getMeta(m.model);
                         return (
-                          <tr key={m.model} className="mr-row" style={{ animationDelay: `${0.3 + i * 0.03}s` }}>
+                          <tr key={`${m.provider}/${m.model}`} className="mr-row" title={m.is_active ? undefined : t("infra.models.inactive")} style={{ animationDelay: `${0.3 + i * 0.03}s`, opacity: m.is_active ? 1 : 0.45 }}>
                             {/* Model identity */}
                             <td style={{ paddingLeft: "1.125rem", paddingTop: "1.25rem", paddingBottom: "1.25rem" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "0.625rem" }}>
@@ -662,8 +664,8 @@ export default function ModelsPage() {
                   {paged.map((m, i) => {
                     const meta = getMeta(m.model);
                     return (
-                      <div key={m.model} className="mr-row" style={{
-                        animationDelay: `${0.3 + i * 0.03}s`,
+                      <div key={`${m.provider}/${m.model}`} className="mr-row" title={m.is_active ? undefined : t("infra.models.inactive")} style={{
+                        animationDelay: `${0.3 + i * 0.03}s`, opacity: m.is_active ? 1 : 0.45,
                         background: "var(--bg-surface-2)", borderRadius: 10,
                         border: "1px solid var(--border-subtle)",
                         padding: "0.875rem 1rem",

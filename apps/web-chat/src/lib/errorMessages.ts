@@ -35,6 +35,7 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "all_models_failed",
   "internal_error",
   "stream_interrupted",
+  "health_marker_skip",
   // chat-edge's own codes
   "send_failed",
   "INTERNAL_ERROR",
@@ -63,6 +64,7 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   all_models_failed: "error.all_models_failed",
   internal_error: "error.internal_error",
   stream_interrupted: "error.stream_interrupted",
+  health_marker_skip: "error.health_marker_skip",
   send_failed: "error.send_failed",
   INTERNAL_ERROR: "error.internal_error",
   PROVIDER_UNAVAILABLE: "error.provider_unavailable",

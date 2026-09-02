@@ -222,6 +222,13 @@ async def test_model(
 # GET /admin/models
 # ---------------------------------------------------------------------------
 
+# FIX47 Part C — ``GET /admin/models`` is claimed first by the legacy
+# registry listing in admin.py (mounted earlier in main.py), so the bare
+# ``""`` path below was never reached: the admin page read the registry's
+# 143 active models and never saw a DB row (no id, no flags, no
+# show_in_chat). ``/configs`` is the path the admin page uses now. The
+# bare path stays registered for any caller that reaches it directly.
+@router.get("/configs")
 @router.get("")
 def list_model_configs(
     provider: Optional[str] = Query(default=None),
@@ -298,8 +305,12 @@ async def update_model(
 
     for key, value in updates.items():
         setattr(row, key, value)
-    row.is_manual_override = True
-    row.source = "manual"
+    # FIX47 Part C — show_in_chat is an admin choice the discovery sync
+    # never writes, so changing it alone must not freeze the row out of
+    # sync (is_manual_override makes the sync skip flags and prices too).
+    if set(updates) != {"show_in_chat"}:
+        row.is_manual_override = True
+        row.source = "manual"
 
     session.flush()
     session.commit()
