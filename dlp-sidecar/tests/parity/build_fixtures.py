@@ -428,7 +428,7 @@ SPECS = [
             Case("fix26_high_ban_lek_thi_village_masks", "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร", True),
             Case("fix26_high_thi_yu_colon_masks", "ที่อยู่: 88/1 เดอะทรัสต์", True),
             Case("fix26_glued_thi_yu_with_component_masks", "จำที่อยู่ 99/88 ถนนสุขุมวิท 10110 ไว้", True),
-            Case("fix26_ambig_song_thi_building_no_component", "ส่งที่ 12 อาคารเอ ชั้น 5", False),
+            Case("fix26_ambig_song_thi_building_no_component", "ส่งที่ 12 อาคารเอ ชั้น 5", True),  # FIX46: อาคาร/ชั้น are gate parts now
             Case("fix26_ambig_yu_thi_bare_province", "อยู่ที่ 77/1 บางใหญ่ นนทบุรี", False),
             Case("fix26_ambig_lek_thi_prose", "เลขที่ให้จำเมื่อกี้คืออะไร", False),
             Case("fix26_thi_yu_relative_clause_no_mask", "สินค้าที่อยู่ในคลังมี 120 ชิ้น", False),
@@ -461,7 +461,7 @@ SPECS = [
             # test_thai_address_recall.py (xfail = accepted gap).
             Case("fix23b_road_only", "บ้านเลขที่ 12 ถนนพระราม 4", True),
             Case("fix23b_condo_only", "ที่อยู่ 199/22 คอนโดลุมพินี", True),  # FIX26: HIGH keyword recovers it
-            Case("fix23b_building_floor", "ส่งที่ 12 อาคารเอ ชั้น 5", False),
+            Case("fix23b_building_floor", "ส่งที่ 12 อาคารเอ ชั้น 5", True),  # FIX46: gap closed
             Case("fix23b_village", "บ้านเลขที่ 45/6 หมู่บ้านสัมมากร", True),
             Case("fix23b_province_bare", "อยู่ที่ 77/1 บางใหญ่ นนทบุรี", False),
             Case("fix23b_soi_abbrev", "ที่อยู่ 5 ซ.ลาดพร้าว 101", True),
@@ -471,13 +471,13 @@ SPECS = [
             Case("fix23b_english_building", "ที่อยู่ 199/22 Lumpini Condo", True),  # FIX26: HIGH keyword recovers it
             Case("fix23b_long_prose_gap", "ที่อยู่สำหรับจัดส่งสินค้าของลูกค้ารายนี้คือ 99/88 ถนนสุขุมวิท 10110", False),
             Case("fix23b_amphoe_word", "อยู่ที่ 10 อำเภอเมือง เชียงใหม่", True),
-            Case("fix23b_building_room", "ส่งที่ 23 ตึกบี ห้อง 402", False),
+            Case("fix23b_building_room", "ส่งที่ 23 ตึกบี ห้อง 402", True),  # FIX46: gap closed
             Case("fix23b_condo_postcode", "ที่อยู่ 199/22 คอนโดลุมพินี 10120", True),
-            Case("fix23b_industrial_estate", "อยู่ที่ 55 นิคมอุตสาหกรรมอมตะ ชลบุรี", False),
+            Case("fix23b_industrial_estate", "อยู่ที่ 55 นิคมอุตสาหกรรมอมตะ ชลบุรี", True),  # FIX46: gap closed
             Case("fix23b_district_only", "บ้านเลขที่ 12/3 แขวงบางนา", True),
             Case("fix23b_no_house_number", "ที่อยู่ ถนนสุขุมวิท กรุงเทพ", False),
-            Case("fix23b_room_tower", "ส่งที่ คอนโดไอดีโอ ตึก A ห้อง 1205", False),
-            Case("fix23b_apartment", "อยู่ที่ 9/1 อพาร์ทเม้นท์สุขใจ", False),
+            Case("fix23b_room_tower", "ส่งที่ คอนโดไอดีโอ ตึก A ห้อง 1205", True),  # FIX46: gap closed
+            Case("fix23b_apartment", "อยู่ที่ 9/1 อพาร์ทเม้นท์สุขใจ", True),  # FIX46: gap closed
             Case("fix23b_moo_number", "บ้านเลขที่ 3 หมู่ 5 ตำบลบางรัก", True),
             Case("fix23_company_address_question", "ที่อยู่ของบริษัทคืออะไร", False),
             Case(
