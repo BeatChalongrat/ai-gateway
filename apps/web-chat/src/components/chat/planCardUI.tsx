@@ -126,12 +126,24 @@ export function PrimaryButton({
   children,
   type = "button",
 }: ButtonProps) {
-  // Hardcoded blue (not bg-accent) because the project's --accent
-  // is a foreground hint colour — near-white in dark theme, near-
-  // black in light — so a bg-accent + text-white button rendered
-  // white-on-white on dark and disappeared. blue-600 is a solid
-  // contrast colour against BOTH bg-base (white) and bg-base-dark
-  // so the CTA pops regardless of theme.
+  // Blue on purpose — a DECISION (FIX44 Part C), not a workaround.
+  //
+  // The app has two button families and this is the second one:
+  //   1. neutral primary: bg-text-primary / bg-accent + text-bg-base
+  //      (components/ui/Button "primary", UpdateBanner, ContextMeter) —
+  //      inverts with the theme, reads as "the default action";
+  //   2. action CTA: bg-blue-600 + text-white — used where the user is
+  //      being asked to APPROVE something that will then run: this Run
+  //      button, ConsentCard's allow buttons, PendingPreferenceCard,
+  //      the Toast action. 8.6:1 on the button itself in both themes.
+  //
+  // History, so nobody re-learns it: --accent is a foreground hint colour
+  // (#ECECEC dark / #0D0D0D light), so `bg-accent text-white` was
+  // white-on-white in the dark theme. It was found here first and fixed
+  // here only; the same pair lived on in UpdateBanner and ContextMeter
+  // until FIX43.1. src/lib/contrast.test.ts now resolves every
+  // bg-token + text-token pair through both themes and fails under AA, so
+  // the next such pair fails in CI instead of in the owner's screenshot.
   return (
     <button
       type={type}
