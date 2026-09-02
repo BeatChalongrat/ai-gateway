@@ -8,19 +8,94 @@
 // (tOutside). These strings are captured onto message objects at
 // stream time, so an already-rendered error keeps the language it was
 // created in — same behavior as before, minus the always-Thai bug.
+//
+// FIX47 Part A — every code the gateway can emit has a row here, and
+// the rows are split by whether sending the same request again can
+// succeed. The old table knew nine codes; everything else showed the
+// gateway's default sentence, which was "Model unavailable, please try
+// again" for a model that can never use tools. A code missing from
+// this table is NOT told to retry: the dictionary sentence for an
+// unknown code is neutral, and the gateway's own ``retryable`` flag
+// (when the frame carries one) decides whether the retry hint appears.
+// ``errorMessages.test.ts`` reads the backend catalog and fails when
+// the two tables drift.
 
 import { tOutside } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
 
+/** Codes for which a retry of the same request may succeed. */
+export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
+  "provider_error",
+  "provider_unavailable",
+  "provider_timeout",
+  "provider_at_capacity",
+  "provider_rate_limited",
+  "rate_limit_exceeded",
+  "provider_model_not_found",
+  "all_models_failed",
+  "internal_error",
+  "stream_interrupted",
+  // chat-edge's own codes
+  "send_failed",
+  "INTERNAL_ERROR",
+  "PROVIDER_UNAVAILABLE",
+  // image pipeline
+  "image_rate_limited",
+  "image_timeout",
+  "image_provider_unavailable",
+  "image_provider_error",
+  "image_empty_response",
+  "image_bad_response",
+  "image_attachment_save_failed",
+  // stream resume
+  "GENERATION_INTERRUPTED",
+]);
+
 const ERROR_CODE_KEYS: Record<string, DictKey> = {
+  // ── transient — the message may say "try again" ───────────────────
   provider_error: "error.provider_error",
   provider_unavailable: "error.provider_unavailable",
   provider_timeout: "error.provider_timeout",
-  all_models_failed: "error.all_models_failed",
+  provider_at_capacity: "error.provider_at_capacity",
+  provider_rate_limited: "error.provider_rate_limited",
   rate_limit_exceeded: "error.rate_limit_exceeded",
+  provider_model_not_found: "error.provider_model_not_found",
+  all_models_failed: "error.all_models_failed",
+  internal_error: "error.internal_error",
+  stream_interrupted: "error.stream_interrupted",
+  send_failed: "error.send_failed",
+  INTERNAL_ERROR: "error.internal_error",
+  PROVIDER_UNAVAILABLE: "error.provider_unavailable",
+  // ── permanent for this request — the message says what to change ──
+  validation_error: "error.validation_error",
+  VALIDATION_ERROR: "error.validation_error",
+  model_no_tool_support: "error.model_no_tool_support",
+  model_no_vision_support: "error.model_no_vision_support",
+  no_capable_model: "error.no_capable_model",
+  context_length_exceeded: "error.context_length_exceeded",
+  upstream_bad_response: "error.upstream_bad_response",
+  quota_exceeded: "error.quota_exceeded",
   INSUFFICIENT_CREDITS: "error.insufficient_credits",
   insufficient_credits: "error.insufficient_credits",
-  internal_error: "error.internal_error",
+  provider_key_missing: "error.provider_key_missing",
+  provider_not_implemented: "error.provider_not_implemented",
+  authentication_error: "error.authentication_error",
+  authorization_error: "error.authorization_error",
+  policy_violation: "error.policy_violation",
+  dlp_violation: "error.dlp_violation",
+  guardrail_blocked: "error.guardrail_blocked",
+  moderation_flagged: "error.moderation_flagged",
+  content_policy_blocked: "error.content_policy_blocked",
+  provider_auth_error: "error.provider_auth_error",
+  raw_egress_blocked: "error.raw_egress_blocked",
+  search_not_enabled: "error.search_not_enabled",
+  search_unavailable: "error.search_unavailable",
+  search_query_blocked: "error.search_query_blocked",
+  not_found: "error.not_found",
+  NOT_FOUND: "error.not_found",
+  conflict: "error.conflict",
+  gateway_error: "error.gateway_error",
+  // ── image pipeline ─────────────────────────────────────────────────
   image_invalid_request: "error.image_invalid_request",
   image_auth_error: "error.image_auth_error",
   image_rate_limited: "error.image_rate_limited",
@@ -36,15 +111,51 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   GENERATION_INTERRUPTED: "error.generationInterrupted",
 };
 
-/** Localized message for a gateway error code (active locale). */
+/** The dictionary key for a code, or undefined when the code is unknown. */
+export function errorDictKey(code?: string): DictKey | undefined {
+  return code ? ERROR_CODE_KEYS[code] : undefined;
+}
+
+/** Every code this table knows (for the parity test). */
+export function knownErrorCodes(): string[] {
+  return Object.keys(ERROR_CODE_KEYS);
+}
+
+/** Whether a retry of the same request may succeed. The gateway's own
+ *  ``retryable`` flag wins when the frame carries one; otherwise the
+ *  local table decides; an unknown code is not retryable. */
+export function isRetryable(code?: string, retryable?: boolean): boolean {
+  if (typeof retryable === "boolean") return retryable;
+  return !!code && RETRYABLE_CODES.has(code);
+}
+
+/** Localized message for a gateway error code (active locale).
+ *
+ *  ``serverMessage`` is used only for a code this table does not know
+ *  and only when it is a real sentence (the gateway's catalog message,
+ *  never provider details). An unknown code with no usable sentence
+ *  gets the neutral line — "try again" is never implied for a failure
+ *  whose nature we do not know. */
 export function localizeErrorCode(
   code?: string,
   serverMessage?: string,
+  retryable?: boolean,
 ): string {
-  if (code && ERROR_CODE_KEYS[code]) {
-    return tOutside(ERROR_CODE_KEYS[code]);
+  const key = errorDictKey(code);
+  if (key) {
+    return tOutside(key);
   }
-  return serverMessage?.trim() || tOutside("error.generic");
+  const server = serverMessage?.trim();
+  if (server && !looksRaw(server)) {
+    return server;
+  }
+  return tOutside(isRetryable(code, retryable) ? "error.generic" : "error.unknownNoRetry");
+}
+
+// A message that carries a JSON body, an HTTP status or a stack is the
+// transport talking, not a sentence for a person.
+function looksRaw(msg: string): boolean {
+  return /[{}\[\]]|status=\d|body=|traceback|exception/i.test(msg);
 }
 
 /** Short notice shown under a message that a fallback model answered.

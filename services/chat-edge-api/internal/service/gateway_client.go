@@ -48,6 +48,32 @@ func (e *GatewayUnavailableError) Error() string {
 	return fmt.Sprintf("gateway unavailable: status=%d body=%s", e.Status, truncate(e.Body, 200))
 }
 
+// Envelope is the gateway's typed error body — {"error":{"code","message",
+// "retryable"}} — when the response carried one. The code is what the
+// clients localise on; Retryable is nil when the gateway did not say.
+// Before FIX47 the handler forwarded only Error() (status + raw body) as
+// "gateway unavailable", so a 400 "no model can use tools" reached the
+// person as a provider outage with the raw JSON as the message.
+type GatewayErrorEnvelope struct {
+	Code      string
+	Message   string
+	Retryable *bool
+}
+
+func (e *GatewayUnavailableError) Envelope() (GatewayErrorEnvelope, bool) {
+	var body struct {
+		Error struct {
+			Code      string `json:"code"`
+			Message   string `json:"message"`
+			Retryable *bool  `json:"retryable"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(e.Body), &body); err != nil || body.Error.Code == "" {
+		return GatewayErrorEnvelope{}, false
+	}
+	return GatewayErrorEnvelope{Code: body.Error.Code, Message: body.Error.Message, Retryable: body.Error.Retryable}, true
+}
+
 // GatewayClient is the typed HTTP client used by every chat-edge
 // service that needs DLP / LLM access.
 type GatewayClient struct {
@@ -438,6 +464,9 @@ type StreamProviderError struct {
 	Message  string         `json:"message"`
 	Details  map[string]any `json:"details,omitempty"`
 	Attempts []any          `json:"attempts,omitempty"`
+	// Retryable is the gateway's verdict on whether the same request can
+	// succeed again (app.core.error_catalog); nil when it did not say.
+	Retryable *bool `json:"retryable,omitempty"`
 }
 
 // StreamToolCallDelta is one fragment from a tool_calls[] stream

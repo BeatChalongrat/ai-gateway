@@ -15,10 +15,15 @@ Inputs the orchestrator gathers (it owns every lookup):
 
 Order of operations and the invariants each step keeps:
 
-    a. hard capability filters — reasoning (explicit reasoning intent or a
-       reasoning-preferring task) / vision / tools — each with graceful
-       relaxation so a narrow need never empties the pool (smart_router's
-       rule, kept)
+    a. capability filters — two kinds (FIX47 Part B):
+         HARD  tools the request declares / images it carries. A model
+               without the capability fails for certain, so an empty pool
+               here is NoCapableModelError, never "the whole pool again"
+               (that relaxation is how a tools turn landed on a tools-blind
+               model and died with "try again").
+         SOFT  reasoning (the answer arrives without thinking — the gateway
+               sends a reasoning_notice) and a task's *preferred* vision /
+               tools — relaxed when they would empty the pool, as before.
     b. tier ceiling — drop bands above the ceiling; if that empties the
        pool, relax to the cheapest band that has anything (a budget-only
        deployment still answers; logged as ``tier_relaxed``)
@@ -30,9 +35,11 @@ Order of operations and the invariants each step keeps:
 
 "Never fail because of routing": every step is wrapped; any exception
 collapses to ``default_plan`` (admin preference ∩ candidates, else cheapest
-capable) with reason="router_error:<type>". Only an EMPTY candidate list
-returns None — the orchestrator raises ProviderUnavailableError for that,
-because there is genuinely nothing to route to.
+capable) with reason="router_error:<type>". Two outcomes are errors by
+design: an EMPTY candidate list returns None (the orchestrator raises
+ProviderUnavailableError — nothing to route to), and a hard need no
+candidate can serve raises NoCapableModelError (routing to a model that
+cannot do the job is not "answering").
 """
 
 from __future__ import annotations
@@ -72,16 +79,65 @@ class RoutePlan:
 _AGGREGATOR_PROVIDERS = frozenset({"openrouter"})
 
 
+class NoCapableModelError(Exception):
+    """No candidate serves a HARD need (tools declared / images attached).
+
+    Pure-router exception; the orchestrator turns it into the gateway's
+    ``no_capable_model`` error. Carries what was missing and how big the
+    pool was, so the log says which capability the catalogue lacks.
+    """
+
+    def __init__(self, missing: list[str], pool_size: int, pool: list[str]):
+        self.missing = list(missing)
+        self.pool_size = pool_size
+        self.pool = list(pool)
+        super().__init__(f"no candidate supports {'+'.join(self.missing)} (pool={pool_size})")
+
+
 def _relax(pool: list, narrowed: list) -> list:
     return narrowed if narrowed else pool
 
 
-def _capability_filter(pool: list, *, needs_reasoning: bool, needs_vision: bool, needs_tools: bool) -> list:
+def _require(pool: list, attr: str, *, missing: list[str], name: str) -> list:
+    """A HARD filter: keep the candidates with ``attr``; an empty result is
+    recorded in ``missing`` (the caller raises once every hard need has
+    been checked, so the error names all of them)."""
+    kept = [c for c in pool if getattr(c, attr, False)]
+    if not kept:
+        missing.append(name)
+        return pool
+    return kept
+
+
+def _capability_filter(
+    pool: list,
+    *,
+    needs_reasoning: bool,
+    needs_vision: bool,
+    needs_tools: bool,
+    require_vision: bool = False,
+    require_tools: bool = False,
+) -> list:
+    """Soft needs relax; hard needs raise.
+
+    ``needs_*`` are preferences (a task's declared needs, an explicit
+    reasoning request): when no candidate has the capability the pool is
+    returned whole. ``require_*`` are facts about the request (tools are
+    in the payload, an image is in the messages): when no candidate has
+    the capability there is no model to route to.
+    """
+    missing: list[str] = []
+    if require_vision:
+        pool = _require(pool, "supports_vision", missing=missing, name="vision")
+    if require_tools:
+        pool = _require(pool, "supports_tools", missing=missing, name="tools")
+    if missing:
+        raise NoCapableModelError(missing, len(pool), [c.model for c in pool])
     if needs_reasoning:
         pool = _relax(pool, [c for c in pool if getattr(c, "supports_reasoning", False)])
-    if needs_vision:
+    if needs_vision and not require_vision:
         pool = _relax(pool, [c for c in pool if getattr(c, "supports_vision", False)])
-    if needs_tools:
+    if needs_tools and not require_tools:
         pool = _relax(pool, [c for c in pool if getattr(c, "supports_tools", False)])
     return pool
 
@@ -231,19 +287,39 @@ def route_auto(
     reasoning_requested: bool = False,
     task_override: Optional[str] = None,
     rng: "random.Random | None" = None,
+    require_tools: bool = False,
+    require_vision: bool = False,
 ) -> Optional[RoutePlan]:
     """The four steps. Returns None only for an empty candidate list.
 
     ``task_override`` lets a caller that already knows the task (the legacy
     ``metadata.use_case`` contract: "coding" → code_generate) skip the
     classifier; an unknown override is ignored.
+
+    ``require_tools`` / ``require_vision`` are the request's HARD needs
+    (tool definitions in the payload / an image in the messages), decided
+    by the orchestrator from the payload itself, not from a hint. When no
+    candidate serves one, ``NoCapableModelError`` is raised — this is the
+    one exception ``route_auto`` lets through.
     """
     if not candidates:
         return None
+    # The hard needs are checked BEFORE the never-fail wrapper, on the raw
+    # pool: ``default_plan`` (the collapse for any router error) must never
+    # see a candidate that cannot serve the request either.
+    missing: list[str] = []
+    hard_pool = list(candidates)
+    if require_vision:
+        hard_pool = _require(hard_pool, "supports_vision", missing=missing, name="vision")
+    if require_tools:
+        hard_pool = _require(hard_pool, "supports_tools", missing=missing, name="tools")
+    if missing:
+        raise NoCapableModelError(missing, len(hard_pool), [c.model for c in hard_pool])
+    candidates = hard_pool
     try:
         # Step 1 — classify.
-        has_images = bool(getattr(hints, "needs_vision", False)) if hints else False
-        has_tools = bool(getattr(hints, "has_tools", False)) if hints else False
+        has_images = require_vision or (bool(getattr(hints, "needs_vision", False)) if hints else False)
+        has_tools = require_tools or (bool(getattr(hints, "has_tools", False)) if hints else False)
         if task_override and task_override in taxonomy.load_taxonomy()["tasks"]:
             tc = taxonomy.TaskClass(task=task_override, confidence=1.0, score=1.0, signals=["<use_case>"])
         else:
@@ -257,15 +333,19 @@ def route_auto(
         # ceiling and the ranking may override; an explicit reasoning
         # request stays a hard need.
         prefer_reasoning = "reasoning_pref" in needs
+        # A hint alone stays a preference (an older caller may set it
+        # loosely); the payload's own tools / image blocks are the facts.
         needs_vision = has_images or "vision" in needs
         needs_tools = has_tools or "tools" in needs
 
-        # Step 4a — capability filters (relaxing).
+        # Step 4a — capability filters: hard needs raise, soft needs relax.
         pool = _capability_filter(
             list(candidates),
             needs_reasoning=needs_reasoning,
             needs_vision=needs_vision,
             needs_tools=needs_tools,
+            require_vision=require_vision,
+            require_tools=require_tools,
         )
         if prefer_reasoning and not needs_reasoning:
             thinking = [c for c in pool if getattr(c, "supports_reasoning", False)]
@@ -310,5 +390,9 @@ def route_auto(
             explored=explored,
             signals=list(tc.signals),
         )
+    except NoCapableModelError:
+        # The one routing outcome that IS an error: nothing here can serve
+        # the request. default_plan would pick a model that fails for sure.
+        raise
     except Exception as exc:  # noqa: BLE001 — never fail because of routing
         return default_plan(candidates, preferred, reason=f"router_error:{type(exc).__name__}")

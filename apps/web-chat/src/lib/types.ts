@@ -877,6 +877,9 @@ export interface SSEError {
   details?: Record<string, unknown>;
   /** Per-model failure log when the whole chain failed (B3). */
   attempts?: FallbackAttempt[];
+  /** FIX47 — the gateway's verdict: can the same request succeed on a
+   *  retry? Absent on frames from older builds. */
+  retryable?: boolean;
 }
 
 /** B2 — emitted before content when a fallback model answered. */

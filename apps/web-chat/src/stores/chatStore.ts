@@ -2616,7 +2616,7 @@ async function consumeStream(
         }
         flush();
         const data = evt.data as SSEError;
-        const localized = localizeErrorCode(data?.code, data?.message);
+        const localized = localizeErrorCode(data?.code, data?.message, data?.retryable);
         const id = realAssistantId ?? tempAsstId;
         set((s) => {
           const list = s.messages[convId] ?? [];

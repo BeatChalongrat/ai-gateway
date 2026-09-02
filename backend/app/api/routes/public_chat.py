@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, get_resolved_api_key
 from app.core.db import get_async_db
+from app.core import error_catalog
 from app.core.config import settings
 from app.core.bounded_stream import bounded_sse
 from app.core.inflight import AdmissionTimeout, registry as inflight_registry
@@ -1722,7 +1723,7 @@ async def _chat_completions_impl(
         def _emit_error(
             *,
             code: str = "provider_error",
-            message: str = "Model unavailable, please try again",
+            message: str | None = None,
             details: dict | None = None,
             attempts: list | None = None,
         ) -> str:
@@ -1737,8 +1738,19 @@ async def _chat_completions_impl(
             message) plus optional ``details`` (provider/status) and, when
             the whole fallback chain is exhausted, the per-model ``attempts``
             log (B3 ``all_models_failed``).
+
+            ``message`` defaults to the catalog sentence for ``code`` and
+            ``retryable`` says whether the same request can succeed on a
+            retry (app.core.error_catalog). The one sentence every error
+            used to carry — "Model unavailable, please try again" — told a
+            person to retry a request that could never succeed.
             """
-            err: dict = {"code": code, "message": message}
+            info = error_catalog.describe(code)
+            err: dict = {
+                "code": code,
+                "message": message or info.message,
+                "retryable": info.retryable,
+            }
             if details:
                 err["details"] = details
             if attempts:
@@ -2480,9 +2492,14 @@ async def _chat_completions_impl(
                         # B1: surface a mid-stream failure as an error frame so
                         # the client can append an error notice to the partial
                         # message instead of silently truncating.
+                        _mid_code = getattr(stream_exc, "code", "provider_error")
                         yield _emit_error(
-                            code=getattr(stream_exc, "code", "provider_error"),
-                            message="The response was interrupted, please try again",
+                            code=_mid_code,
+                            message=(
+                                error_catalog.describe("stream_interrupted").message
+                                if error_catalog.is_retryable(_mid_code)
+                                else None
+                            ),
                             details=(dict(getattr(stream_exc, "details", None) or {})
                                      or None),
                         )
@@ -2513,7 +2530,6 @@ async def _chat_completions_impl(
                         )
                         yield _emit_error(
                             code=getattr(stream_exc, "code", "provider_error"),
-                            message="Model unavailable, please try again",
                             details=(dict(getattr(stream_exc, "details", None) or {})
                                      or None),
                         )
@@ -2548,7 +2564,6 @@ async def _chat_completions_impl(
                         )
                         yield _emit_error(
                             code="all_models_failed",
-                            message="Unable to get a response right now",
                             attempts=list(_stream_fallback_attempts),
                         )
                         return
@@ -2586,7 +2601,6 @@ async def _chat_completions_impl(
                         )
                         yield _emit_error(
                             code="all_models_failed",
-                            message="Unable to get a response right now",
                             attempts=list(_stream_fallback_attempts),
                         )
                         return
@@ -2612,7 +2626,6 @@ async def _chat_completions_impl(
                         )
                         yield _emit_error(
                             code="all_models_failed",
-                            message="Unable to get a response right now",
                             attempts=list(_stream_fallback_attempts),
                         )
                         return

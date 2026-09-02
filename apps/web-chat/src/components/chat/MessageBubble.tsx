@@ -23,7 +23,7 @@ import type { FallbackAttempt, Message } from "@/lib/types";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
-import { fallbackNotice } from "@/lib/errorMessages";
+import { fallbackNotice, localizeErrorCode } from "@/lib/errorMessages";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -758,7 +758,7 @@ function ErrorNotice({
                 {a.model ?? a.provider ?? "model"}
                 {a.status === "success"
                   ? ` — ${t("msg.attemptOk")}`
-                  : ` — ${a.error ?? a.error_code ?? t("msg.attemptFail")}`}
+                  : ` — ${a.error_code ? localizeErrorCode(a.error_code) : t("msg.attemptFail")}`}
               </li>
             ))}
           </ul>

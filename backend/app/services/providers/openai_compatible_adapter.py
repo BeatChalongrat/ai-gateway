@@ -116,7 +116,9 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             cand = get_candidate(model)
             if cand is None or not cand.supports_tools:
                 raise ValidationError(
-                    f"Model '{model}' does not support tool/function calling"
+                    f"Model '{model}' does not support tool/function calling",
+                    code="model_no_tool_support",
+                    details={"model": model},
                 )
             body["tools"] = tools
             tool_choice = getattr(payload, "tool_choice", None)

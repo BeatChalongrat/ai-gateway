@@ -412,6 +412,8 @@ type streamDrainResult struct {
 	errMessage  string
 	errDetails  any
 	errAttempts any
+	// errRetryable is the gateway's retryable verdict, forwarded as-is.
+	errRetryable *bool
 }
 
 // terminalErrorPayload builds the terminal “error“ frame's data from
@@ -434,6 +436,9 @@ func (res streamDrainResult) terminalErrorPayload() map[string]any {
 	}
 	if res.errAttempts != nil {
 		out["attempts"] = res.errAttempts
+	}
+	if res.errRetryable != nil {
+		out["retryable"] = *res.errRetryable
 	}
 	return out
 }
@@ -638,6 +643,7 @@ Loop:
 				if len(ev.ProviderError.Attempts) > 0 {
 					res.errAttempts = ev.ProviderError.Attempts
 				}
+				res.errRetryable = ev.ProviderError.Retryable
 			}
 			// B2: a fallback notice — which model actually answered.
 			if ev.FallbackInfo != nil {
@@ -752,10 +758,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 			// travel as a frame, not as a JSON status the client will never
 			// parse.
 			// Terminal: this run failed before it produced anything.
-			writeSSEEvent(rw, flusher, "error", map[string]any{
-				"code":    "send_failed",
-				"message": sendErrorMessage(err),
-			})
+			writeSSEEvent(rw, flusher, "error", sendErrorFrame(err))
 			return
 		}
 		h.writeSendError(w, err)
@@ -932,6 +935,47 @@ func writeSSEEvent(w http.ResponseWriter, flusher http.Flusher, event string, da
 // sendErrorMessage is writeSendError's message half, for the FIX33 A-W9
 // case where the SSE stream is already open and the error must travel
 // as a frame.
+// gatewayEnvelope finds the gateway's typed error envelope in a send
+// error, when the gateway answered the request with one (a 4xx before
+// the stream opened: no model can serve the request's tools, the prompt
+// is over the context window, a policy block). The client localises on
+// the code; the status is the gateway's own.
+func gatewayEnvelope(err error) (status int, env service.GatewayErrorEnvelope, ok bool) {
+	var ue *service.GatewayUnavailableError
+	if !errors.As(err, &ue) {
+		return 0, service.GatewayErrorEnvelope{}, false
+	}
+	env, ok = ue.Envelope()
+	return ue.Status, env, ok
+}
+
+// sendErrorFrame is the code + message for an "error" frame on a send
+// that failed before the stream produced anything.
+func sendErrorFrame(err error) map[string]any {
+	if _, env, ok := gatewayEnvelope(err); ok {
+		out := map[string]any{"code": env.Code, "message": env.Message}
+		if env.Retryable != nil {
+			out["retryable"] = *env.Retryable
+		}
+		return out
+	}
+	return map[string]any{"code": "send_failed", "message": sendErrorMessage(err)}
+}
+
+// writeGatewayEnvelope answers a not-yet-streaming request with the
+// gateway's own status, code and message. False when there was none.
+func writeGatewayEnvelope(w http.ResponseWriter, err error) bool {
+	status, env, ok := gatewayEnvelope(err)
+	if !ok {
+		return false
+	}
+	if status < 400 || status > 599 {
+		status = http.StatusBadGateway
+	}
+	WriteError(w, status, env.Code, env.Message)
+	return true
+}
+
 func sendErrorMessage(err error) string {
 	switch {
 	case errors.Is(err, service.ErrMessageConversationNotFound):
@@ -960,7 +1004,10 @@ func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
 			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
-		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+		if writeGatewayEnvelope(w, err) {
+			return
+		}
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "the AI service is unavailable")
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}
@@ -1506,7 +1553,10 @@ func (h *MessageHandler) writeEditError(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
 			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
-		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+		if writeGatewayEnvelope(w, err) {
+			return
+		}
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "the AI service is unavailable")
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}
@@ -1583,7 +1633,10 @@ func (h *MessageHandler) writeRegenerateError(w http.ResponseWriter, err error) 
 		WriteError(w, http.StatusPaymentRequired, "INSUFFICIENT_CREDITS",
 			"เครดิตหมดแล้ว กรุณาติดต่อผู้ดูแลระบบเพื่อเติมเครดิต")
 	case errors.Is(err, service.ErrMessageGatewayUnavailable):
-		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", err.Error())
+		if writeGatewayEnvelope(w, err) {
+			return
+		}
+		WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "the AI service is unavailable")
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}

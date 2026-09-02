@@ -959,7 +959,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		_ = s.persistError(ctx, in, conv, "")
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
-			return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
 		}
 		return nil, err
 	}
@@ -986,7 +986,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 				_ = s.persistError(ctx, in, conv, "")
 				var ue *GatewayUnavailableError
 				if errors.As(err, &ue) {
-					return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+					return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
 				}
 				return nil, err
 			}
@@ -1374,7 +1374,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
-			return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
 		}
 		return nil, err
 	}
@@ -1669,7 +1669,7 @@ func (s *MessageService) openAssistantStream(
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
-			return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
 		}
 		return nil, err
 	}
@@ -1935,7 +1935,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
-			return nil, fmt.Errorf("%w: %s", ErrMessageGatewayUnavailable, ue.Error())
+			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
 		}
 		return nil, err
 	}

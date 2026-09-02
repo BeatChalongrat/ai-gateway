@@ -70,12 +70,15 @@ describe("locale gating (non-hook path)", () => {
     );
   });
 
-  it("unknown code falls back to server message, then localized generic", () => {
+  it("unknown code falls back to server message, then a localized line that does not promise a retry", () => {
+    // FIX47 Part A: an unknown failure is not told "try again" — only the
+    // gateway's own retryable flag can add that hint.
     useI18nStore.setState({ locale: "th" });
     expect(localizeErrorCode("nope", "server says hi")).toBe("server says hi");
-    expect(localizeErrorCode("nope")).toBe(dictionaries.th["error.generic"]);
+    expect(localizeErrorCode("nope")).toBe(dictionaries.th["error.unknownNoRetry"]);
+    expect(localizeErrorCode("nope", undefined, true)).toBe(dictionaries.th["error.generic"]);
     useI18nStore.setState({ locale: "en" });
-    expect(localizeErrorCode("nope")).toBe(dictionaries.en["error.generic"]);
+    expect(localizeErrorCode("nope")).toBe(dictionaries.en["error.unknownNoRetry"]);
   });
 
   it("fallbackNotice substitutes models in the active locale", () => {

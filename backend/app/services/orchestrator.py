@@ -2655,17 +2655,48 @@ class GatewayOrchestrator:
             tenant_ranking = await _ranking.get_ranking_async(_tenant_id, session, min_samples=min_samples)
         else:
             tenant_ranking = _ranking.get_ranking(_tenant_id, min_samples=min_samples)
-        return _router.route_auto(
-            candidates=candidates,
-            hints=hints,
-            messages=dict_messages,
-            ranking=tenant_ranking,
-            ceiling=ceiling,
-            preferred=preferred,
-            proven=proven,
-            reasoning_requested=reasoning_requested,
-            task_override=task_override,
+        # FIX47 Part B — the request's HARD needs come from the payload
+        # itself (tool definitions present / an image block in a message),
+        # with the caller's hint as a second source. A model without the
+        # capability fails for certain, so these are not preferences.
+        from app.services.capability_detection import (
+            request_needs_tools,
+            request_needs_vision,
         )
+
+        require_tools = request_needs_tools(payload) or bool(getattr(hints, "has_tools", False))
+        require_vision = request_needs_vision(payload) or bool(getattr(hints, "needs_vision", False))
+        try:
+            return _router.route_auto(
+                candidates=candidates,
+                hints=hints,
+                messages=dict_messages,
+                ranking=tenant_ranking,
+                ceiling=ceiling,
+                preferred=preferred,
+                proven=proven,
+                reasoning_requested=reasoning_requested,
+                task_override=task_override,
+                require_tools=require_tools,
+                require_vision=require_vision,
+            )
+        except _router.NoCapableModelError as exc:
+            from app.core.exceptions import NoCapableModelError
+
+            # The owner needs to know the catalogue (as this tenant may
+            # use it) has no model for this need — every occurrence is
+            # logged with the pool that was searched.
+            log.warning(
+                "auto_routing_no_capable_model",
+                missing=exc.missing,
+                pool_size=exc.pool_size,
+                pool=exc.pool[:20],
+                tenant_id=_tenant_id,
+                ceiling=ceiling,
+            )
+            raise NoCapableModelError(
+                details={"missing": exc.missing, "pool_size": exc.pool_size},
+            ) from exc
 
     async def _smart_select(self, payload, session, log):
         """Provider-agnostic model selection for ``auto`` + routing_hints.

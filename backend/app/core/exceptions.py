@@ -21,6 +21,7 @@ GatewayError                       (base for all gateway domain errors)
 │   └── ProviderUnavailableError   (upstream is down or unreachable)
 ├── UpstreamBadResponseError       (upstream returned unparseable response)
 ├── ContextLengthExceededError     (request exceeds the model's context window)
+├── NoCapableModelError            (auto routing: no model can serve a hard need)
 └── InternalServiceError           (unexpected internal failure)
 """
 
@@ -232,6 +233,25 @@ class ContextLengthExceededError(GatewayError):
     message = (
         "The request exceeds the model's context window. "
         "Shorten the conversation and try again."
+    )
+
+
+class NoCapableModelError(GatewayError):
+    """Auto routing found no model that can serve a HARD need of the
+    request (tools declared / images attached) among the models the
+    caller may use.
+
+    Raised instead of routing to a model that will fail: before FIX47 the
+    capability filter "relaxed" an empty pool back to the whole pool, so a
+    tools request with no tools-capable candidate landed on a tools-blind
+    model and died with a generic "try again". Not fallback-eligible — no
+    candidate can serve it. ``details.missing`` names the capabilities.
+    """
+
+    code = "no_capable_model"
+    message = (
+        "No available model supports what this request needs "
+        "(tools or images)."
     )
 
 

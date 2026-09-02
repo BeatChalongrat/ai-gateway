@@ -13,12 +13,14 @@ from fastapi.exceptions import RequestValidationError
 from app.core.responses import UTF8JSONResponse as JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core import error_catalog
 from app.core.exceptions import (
     AuthenticationError,
     AuthorizationError,
     ConflictError,
     ContextLengthExceededError,
     DLPViolationError,
+    NoCapableModelError,
     GatewayError,
     InternalServiceError,
     NotFoundError,
@@ -69,6 +71,7 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     UpstreamBadResponseError: 502,
     # 400, not 502: the request is the client's to fix (trim + retry).
     ContextLengthExceededError: 400,
+    NoCapableModelError: 400,
     InternalServiceError: 500,
 }
 
@@ -106,6 +109,9 @@ def _build_body(
 
 def _build_gateway_body(exc: GatewayError, request_id: str | None) -> dict:
     body = _build_body(exc.code, exc.message, exc.details, request_id)
+    # FIX47 — the same verdict the stream's error frame carries, so a
+    # client can tell a retryable outage from a request it must change.
+    body["error"]["retryable"] = error_catalog.is_retryable(exc.code)
     if isinstance(exc, DLPViolationError) and isinstance(exc.details, dict):
         for key in ("action", "categories", "findings_count"):
             if key in exc.details:
