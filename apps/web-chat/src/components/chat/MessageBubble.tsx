@@ -20,6 +20,8 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, Message } from "@/lib/types";
+import { copyTextToClipboard } from "@/lib/clipboard";
+import { toast } from "@/components/ui/Toast";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
@@ -189,24 +191,19 @@ function MessageBubbleImpl({
     setEditing(false);
   }
 
+  // FIX47.6 Part D — no silent failure: the copy either shows the ✓
+  // state or says why it didn't. The old empty catch hid every failure;
+  // in the desktop shell writeText is refused (permission-denied) and
+  // copy did nothing at all, measured live. The shared helper also runs
+  // the execCommand fallback on refusal (not only on absence) and
+  // honours its boolean.
   async function copyMessageContent() {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(message.content);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = message.content;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
+    const ok = await copyTextToClipboard(message.content);
+    if (ok) {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      /* clipboard blocked */
+    } else {
+      toast(t("msg.copyFailed"));
     }
   }
 

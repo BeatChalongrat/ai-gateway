@@ -20,6 +20,7 @@ import { HOSTED_MODE } from "@/lib/auth";
 import { bridge } from "@/lib/bridge";
 import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
+import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
@@ -1822,21 +1823,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async setFeedback(convId, messageId, rating) {
-    set((s) => {
-      const list = s.messages[convId] ?? [];
-      return {
-        messages: {
-          ...s.messages,
-          [convId]: list.map((m) =>
-            m.id === messageId ? { ...m, feedback: rating } : m,
-          ),
-        },
-      };
-    });
+    // FIX47.6 Part D — optimistic flip, but honest: on failure the icon
+    // reverts to what the server actually holds and a toast says so.
+    // Before this, a failed save (e.g. the desktop's host-authored
+    // message ids that the server can't resolve) left the thumb lit —
+    // a success indicator for a write that never happened.
+    const previous = (get().messages[convId] ?? []).find((m) => m.id === messageId)?.feedback ?? null;
+    const apply = (value: "thumbs_up" | "thumbs_down" | null) =>
+      set((s) => {
+        const list = s.messages[convId] ?? [];
+        return {
+          messages: {
+            ...s.messages,
+            [convId]: list.map((m) =>
+              m.id === messageId ? { ...m, feedback: value } : m,
+            ),
+          },
+        };
+      });
+    apply(rating);
     try {
       await api.setFeedback(messageId, rating);
     } catch {
-      get().setError("Couldn't save feedback. Try again.");
+      apply(previous);
+      toast(tOutside("msg.feedbackFailed"));
     }
   },
 }));

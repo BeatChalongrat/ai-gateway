@@ -756,11 +756,32 @@ function installSessionPolicy(ses: Session): void {
   ses.webRequest.onCompleted({ urls: [`${config.gatewayUrl}/portal/auth/logout`] }, (details) => {
     if (details.method === "POST" && details.statusCode === 200) sessionController?.markLogoutIntent();
   });
-  ses.setPermissionRequestHandler((_contents, permission, callback) => {
+  // FIX47.6 Part D — the deny-all stance broke the message Copy button:
+  // navigator.clipboard.writeText is gated on `clipboard-sanitized-write`,
+  // so the refusal made every copy click reject (and the page's old empty
+  // catch hid it — measured live on 0.1.0-e21). WRITING the clipboard from
+  // an allowed origin is the one permission the app's own UI needs; grant
+  // exactly that. clipboard-read stays refused — a page silently reading
+  // the user's clipboard is the risk the deny-all exists for (paste goes
+  // through native Ctrl+V / the context menu, which never ask here).
+  const clipboardWrite = new Set(["clipboard-sanitized-write"]);
+  const originAllowed = (rawOrigin: string): boolean => {
+    try {
+      return allowed.has(new URL(rawOrigin).origin);
+    } catch {
+      return false;
+    }
+  };
+  ses.setPermissionRequestHandler((contents, permission, callback) => {
+    if (clipboardWrite.has(permission) && originAllowed(contents.getURL())) {
+      callback(true);
+      return;
+    }
     log.warn(`PERMISSION REFUSED: ${permission}`);
     callback(false);
   });
-  ses.setPermissionCheckHandler(() => false);
+  ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
+    clipboardWrite.has(permission) && originAllowed(requestingOrigin));
   ses.on("will-download", (event, item) => {
     event.preventDefault();
     log.warn(`DOWNLOAD REFUSED: ${redactUrl(item.getURL())}`);

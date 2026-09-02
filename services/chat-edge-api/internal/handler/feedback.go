@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -49,12 +50,30 @@ type feedbackResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
+// FIX47.6 Part D — the desktop host mints its own message ids
+// ("asst_<32 hex>"); the page addresses messages by them, so feedback
+// must resolve them to the server row (stored as client_id) instead of
+// rejecting every host-authored message with a 400.
+var hostClientID = regexp.MustCompile(`^(asst|u)_[0-9a-f]{32}$`)
+
 func (h *FeedbackHandler) Create(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
-	msgID, err := uuid.Parse(chi.URLParam(r, "messageID"))
+	rawID := chi.URLParam(r, "messageID")
+	msgID, err := uuid.Parse(rawID)
 	if err != nil {
-		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
-		return
+		if !hostClientID.MatchString(rawID) {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
+			return
+		}
+		msgID, err = h.feedback.ResolveMessageID(r.Context(), caller.TenantUUID, rawID)
+		if err != nil {
+			if errors.Is(err, service.ErrFeedbackTargetNotFound) {
+				WriteError(w, http.StatusNotFound, CodeNotFound, "message not found")
+			} else {
+				WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+			}
+			return
+		}
 	}
 	var req feedbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
