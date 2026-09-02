@@ -69,6 +69,9 @@ describe("FIX42 D2 — connector marks", () => {
     expect(screen.getByTestId("connector-icon-fallback")).toBeTruthy();
     expect(screen.queryByTestId("connector-icon-owner-slack")).toBeNull();
     expect(FakeImage.loads).toEqual(["/icons/connectors/slack.svg"]);
+    // FIX43 C3.3 — and no <img> at all: a missing file must never show as a
+    // broken-image glyph.
+    expect(document.querySelector("img")).toBeNull();
   });
 
   it("3. a simple-icons connector keeps its bundled mark without an owner file, and yields to one", async () => {

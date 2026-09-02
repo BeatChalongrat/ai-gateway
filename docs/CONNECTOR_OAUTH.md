@@ -74,6 +74,20 @@ and must not be: `git check-ignore` the path if you ever copy it near the tree.
 
 Nothing in steps 1–5 is a code change.
 
+## The Slack mark on the connector card (owner's three steps)
+
+The card shows a neutral mark for Slack on purpose: Slack asked simple-icons to
+remove its icon, and Slack's brand kit is downloaded under Slack's own terms —
+accepting those is your decision, so the repo carries no copy and the code
+downloads nothing. The wiring (FIX42 D2, verified with a test file in FIX43 C3)
+prefers a file **you** place, served from our own origin:
+
+1. Download the Slack mark (SVG) from Slack's brand centre and accept Slack's terms yourself.
+2. Save it as `apps/web-chat/public/icons/connectors/slack.svg` (any connector id works the same way: `<id>.svg`).
+3. Rebuild the web-chat image (`public/` is baked in at build time) — the card picks it up; no code change.
+
+Remove the file and the card goes back to the neutral mark — never a broken image.
+
 ## Failure modes the flow handles
 
 | What happens | The user sees | Log |
