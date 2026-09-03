@@ -31,6 +31,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from pathlib import Path
 
@@ -126,6 +127,27 @@ def _pick_response(messages: list[dict]) -> str:
     # failure or a reasoning-eaten budget looks like from the outside.
     if "__empty__" in last_user:
         return ""
+    # FIX50 P1-B — deterministic echo lever: the mock replies with exactly
+    # the text after the marker, so a probe can drive ANY assistant output
+    # through the gateway's real output-DLP/stream path and see what
+    # reaches the client (e.g. the ::DATE cast the ip_address detector
+    # reads as IPv6).
+    if "__echo__:" in last_user:
+        return last_user.split("__echo__:", 1)[1]
+    # base64 variant — the reply text must NOT appear in the request, or
+    # inbound DLP masks it there first and the outbound leg only restores.
+    if "__echo64__:" in last_user:
+        import base64
+
+        try:
+            # separators (spaces/dots) let the probe defeat entropy-based
+            # inbound masking of the base64 blob itself
+            raw = re.sub(
+                r"[^A-Za-z0-9+/=]", "", last_user.split("__echo64__:", 1)[1]
+            )
+            return base64.b64decode(raw).decode("utf-8")
+        except Exception:
+            return "echo64 decode error"
     triggers = ("email", "phone", "card", "ssn", "password", "ไทย", "เลขประจำตัว")
     if any(t in last_user.lower() for t in triggers):
         return random.choice(_DLP_HEAVY_RESPONSES)
