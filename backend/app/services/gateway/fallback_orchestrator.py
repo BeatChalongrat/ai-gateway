@@ -83,13 +83,36 @@ logger = structlog.get_logger(__name__)
 _HEALTH_KEY_PREFIX = "provider:health:"
 _HEALTH_TTL_SECONDS = 60
 
+# FIX49 Part C — marker scope. The old marker was per PROVIDER: one
+# model failing (a 404 on a pulled id, a 402 on one oversized request)
+# dabbed the whole provider for 60 s, and with 11 of 14 usable models
+# living on one aggregator that meant "one bad model = the whole
+# system down for a minute" (measured live in the 2026-09-03 audit:
+# healthy models skipped with error_code=health_marker_skip).
+#
+# Markers are now per (provider, model). Only error codes that mean
+# "the provider's infrastructure itself is down" still set the
+# provider-wide key — a timeout or connection failure says nothing
+# about one model, it says the box is unreachable.
+_PROVIDER_WIDE_CODES = frozenset({"provider_unavailable", "provider_timeout"})
 
-async def mark_provider_unhealthy(provider: str) -> None:
-    """Set ``provider:health:{provider}`` with a 60s TTL.
 
-    Called by the orchestrator + this module whenever a provider
-    returns a fallback-eligible error. Idempotent — repeated calls
-    refresh the TTL.
+def _health_key(provider: str, model: str | None = None) -> str:
+    if model:
+        return f"{_HEALTH_KEY_PREFIX}{provider}:{model}"
+    return f"{_HEALTH_KEY_PREFIX}{provider}"
+
+
+async def mark_provider_unhealthy(
+    provider: str, model: str | None = None, *, error_code: str | None = None
+) -> None:
+    """Set the health marker with a 60s TTL.
+
+    With ``model`` the marker is scoped to that (provider, model) pair;
+    the provider-wide key is ALSO set when ``error_code`` is an
+    infrastructure-class failure (``_PROVIDER_WIDE_CODES``). Without
+    ``model`` (legacy callers) the provider-wide key is set as before.
+    Idempotent — repeated calls refresh the TTL.
     """
     if not provider:
         return
@@ -98,21 +121,25 @@ async def mark_provider_unhealthy(provider: str) -> None:
 
         client = get_async_redis()
         await client.set(
-            f"{_HEALTH_KEY_PREFIX}{provider}",
-            "unhealthy",
-            ex=_HEALTH_TTL_SECONDS,
+            _health_key(provider, model), "unhealthy", ex=_HEALTH_TTL_SECONDS
         )
+        if model and error_code in _PROVIDER_WIDE_CODES:
+            await client.set(
+                _health_key(provider), "unhealthy", ex=_HEALTH_TTL_SECONDS
+            )
     except Exception:  # noqa: BLE001
         # Health hint is best-effort — Redis outage must not break
         # the request path.
         pass
 
 
-async def clear_provider_health(provider: str) -> None:
-    """Delete the health marker for ``provider``.
+async def clear_provider_health(provider: str, model: str | None = None) -> None:
+    """Delete the health marker(s) for ``provider`` (and ``model``).
 
     Called after every successful dispatch so a recovered provider
-    doesn't keep getting skipped for the rest of the TTL window.
+    doesn't keep getting skipped for the rest of the TTL window. A
+    success on any model also clears the provider-wide key — the
+    infrastructure evidently answers.
     """
     if not provider:
         return
@@ -120,13 +147,15 @@ async def clear_provider_health(provider: str) -> None:
         from app.services._redis_pool import get_async_redis
 
         client = get_async_redis()
-        await client.delete(f"{_HEALTH_KEY_PREFIX}{provider}")
+        if model:
+            await client.delete(_health_key(provider, model))
+        await client.delete(_health_key(provider))
     except Exception:  # noqa: BLE001
         pass
 
 
-async def is_provider_unhealthy(provider: str) -> bool:
-    """Return True if the health marker for ``provider`` is set.
+async def is_provider_unhealthy(provider: str, model: str | None = None) -> bool:
+    """True if the (provider, model) pair — or the provider itself — is marked.
 
     Fail-open: any Redis error is treated as "healthy" so a Redis
     outage degrades to no-pre-check, not request-blocking.
@@ -137,7 +166,10 @@ async def is_provider_unhealthy(provider: str) -> bool:
         from app.services._redis_pool import get_async_redis
 
         client = get_async_redis()
-        exists = await client.exists(f"{_HEALTH_KEY_PREFIX}{provider}")
+        if model:
+            if await client.exists(_health_key(provider, model)):
+                return True
+        exists = await client.exists(_health_key(provider))
         return bool(exists)
     except Exception:  # noqa: BLE001
         return False
@@ -498,6 +530,7 @@ class FallbackOrchestrator:
         original_model: str,
         session: "Session | None",
         skip_providers: set[str] | None = None,
+        skip_pairs: "set[tuple[str, str]] | None" = None,
         required: "RequiredCapabilities | None" = None,
     ) -> dict | None:
         """Pick the first viable streaming fallback for a primary.
@@ -525,6 +558,7 @@ class FallbackOrchestrator:
             return None
 
         skip = skip_providers or set()
+        pairs = skip_pairs or set()
         chain = get_fallback_chain(original_model, original_provider)
         tried = 0
 
@@ -534,6 +568,10 @@ class FallbackOrchestrator:
             provider = candidate["provider"]
             model = candidate["model"]
             if provider in skip:
+                continue
+            # FIX49 Part C — a pair that already failed THIS request is
+            # out; the provider's other models stay in the running.
+            if (provider, model) in pairs:
                 continue
 
             # Capability gate — don't stream a vision/tools request from
@@ -599,6 +637,15 @@ class FallbackOrchestrator:
             provider = candidate["provider"]
             model = candidate["model"]
             if provider in skip:
+                continue
+
+            # FIX49 Part C — never fall back INTO a (provider, model)
+            # pair the health marker says just failed: the old
+            # provider-level marker made the pre-check pick a fallback
+            # on the same dead account and fail twice. A marked pair
+            # (or a provider-wide infra marker) is skipped; a healthy
+            # sibling model on the same provider stays viable.
+            if await is_provider_unhealthy(provider, model):
                 continue
 
             if required is not None:

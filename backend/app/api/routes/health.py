@@ -273,12 +273,17 @@ def _run_health_checks() -> dict:
     except Exception as e:
         checks["db_pool"] = f"error: {e}"
 
-    # Redis check — short timeout so it doesn't block workers
+    # Redis check — short timeout so it doesn't block workers.
+    # FIX49 Part C — built from settings.redis_url, the SAME config line
+    # the real pool (services/_redis_pool.py) and /ready use. The old
+    # host+port construction carried no password, so with --requirepass
+    # on (docker-compose.yml) this check failed on AUTH forever and the
+    # whole service reported "degraded" while /ready said redis: ok —
+    # a permanently-lying health signal that trains people to ignore it.
     try:
         import redis
-        r = redis.Redis(
-            host=settings.redis_host,
-            port=settings.redis_port,
+        r = redis.Redis.from_url(
+            settings.redis_url,
             socket_timeout=1,
             socket_connect_timeout=1,
         )
