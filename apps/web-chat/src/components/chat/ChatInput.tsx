@@ -288,10 +288,12 @@ export function ChatInput({
   activeModelIdRef.current = activeModelId;
   // Phase 11 — Thinking Mode toggle. The store action + server columns have
   // existed since T4; nothing ever called them, so a reasoning-capable model
-  // could never actually be told to think. Shown only when the selected model
-  // advertises the capability (Auto is excluded: the router may land on a
-  // non-reasoning model, and a toggle that silently does nothing is worse
-  // than no toggle).
+  // could never actually be told to think. FIX51 — capability is told at
+  // SELECTION time (FIX47.6 Part C rule): a concrete model that can't
+  // reason shows the toggle disabled with the reason, and the
+  // after-the-fact "answered without extended thinking" line under the
+  // reply is gone. Auto stays buttonless: the router may land on either
+  // kind, so the toggle has nothing truthful to say there.
   const canReason = Boolean(activeModel?.reasoning?.supported);
   const conversation = useChatStore((s) =>
     conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
@@ -1197,7 +1199,7 @@ export function ChatInput({
                   <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
                 </button>
               ) : null}
-              {canReason && conversationId && !streaming ? (
+              {!isAutoModel && activeModel && conversationId && !streaming ? (
                 <button
                   type="button"
                   onClick={() =>
@@ -1205,10 +1207,16 @@ export function ChatInput({
                       reasoning_enabled: !reasoningOn,
                     })
                   }
-                  aria-label={t("input.reasoning")}
-                  title={t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")}
+                  aria-label={canReason ? t("input.reasoning") : t("input.reasoning.unsupported")}
+                  title={
+                    canReason
+                      ? t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")
+                      : t("input.reasoning.unsupported")
+                  }
                   aria-pressed={reasoningOn}
-                  disabled={disabled}
+                  aria-disabled={!canReason || undefined}
+                  disabled={disabled || !canReason}
+                  data-testid="reasoning-toggle"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     reasoningOn
                       ? "bg-blue-500/15 text-blue-400"

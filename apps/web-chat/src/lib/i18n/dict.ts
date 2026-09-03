@@ -163,6 +163,7 @@ export const en = {
   "input.reasoning": "Thinking mode",
   "input.reasoning.on": "Thinking mode on — the model reasons before answering",
   "input.reasoning.off": "Thinking mode off — turn on for harder questions",
+  "input.reasoning.unsupported": "This model doesn't support thinking mode — pick another model to use it",
   "project.new": "New project",
   "project.rename": "Rename",
   "project.delete": "Delete project",
@@ -681,10 +682,6 @@ export const en = {
   "update.refresh": "Refresh",
   "update.dismiss": "Dismiss update notice",
   "error.fallbackNotice": "Answered by {actual} ({requested} temporarily unavailable)",
-  "chat.reasoningDowngraded":
-    "Answered without extended thinking — this model doesn’t support it",
-  "chat.dlpMasked":
-    "Parts of your question were hidden before the model read it ({n} place(s)) — click for details",
   "chat.imageAttachFailed":
     "Couldn’t read the attached image ({files}) — answered without it",
   "error.offline": "You're offline. Messages will send when you reconnect.",
@@ -1521,6 +1518,7 @@ const th: Record<DictKey, string> = {
   "input.reasoning": "โหมดคิดลึก",
   "input.reasoning.on": "เปิดโหมดคิดลึก — โมเดลจะคิดก่อนตอบ",
   "input.reasoning.off": "ปิดโหมดคิดลึก — เปิดเมื่อเจอคำถามยาก",
+  "input.reasoning.unsupported": "โมเดลนี้ไม่รองรับโหมดคิดลึก — เลือกโมเดลอื่นเพื่อใช้งาน",
   "project.new": "สร้างโปรเจกต์ใหม่",
   "project.rename": "เปลี่ยนชื่อ",
   "project.delete": "ลบโปรเจกต์",
@@ -2030,10 +2028,6 @@ const th: Record<DictKey, string> = {
   "update.refresh": "รีเฟรช",
   "update.dismiss": "ปิดการแจ้งเตือนอัปเดต",
   "error.fallbackNotice": "ตอบโดย {actual} ({requested} ไม่พร้อมใช้งานชั่วคราว)",
-  "chat.reasoningDowngraded":
-    "ตอบโดยไม่ใช้การคิดขั้นสูง — โมเดลนี้ไม่รองรับ",
-  "chat.dlpMasked":
-    "บางส่วนของคำถามถูกปิดบังก่อนส่งให้โมเดล ({n} จุด) — กดเพื่อดูรายละเอียด",
   "chat.imageAttachFailed":
     "อ่านรูปภาพที่แนบมาไม่ได้ ({files}) — ตอบโดยไม่ใช้รูปนั้น",
   "error.offline": "คุณออฟไลน์อยู่ ข้อความจะส่งเมื่อกลับมาออนไลน์",

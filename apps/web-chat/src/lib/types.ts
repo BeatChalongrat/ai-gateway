@@ -474,18 +474,21 @@ export interface Message {
   };
   /** FIX50 P1-C — local-only. Set when input DLP masked part of the
    *  QUESTION before the model read it. Counts per detector only,
-   *  never values or spans — the user learns the question was
-   *  altered, not what was hidden. Drives a quiet expandable notice
-   *  under the reply (the FIX48 ทอง case: the model answered a
-   *  different question and the user had no way to know why). */
+   *  never values or spans. FIX51 Part 1 (OPEN_DECISIONS #62): no
+   *  longer RENDERED — the under-answer line was removed by owner
+   *  decision. The field stays because the frame still flows and the
+   *  admin masking counter depends on the same upstream signal; a
+   *  future quieter surface (small icon, only when the mask hit the
+   *  question body) would read it from here. */
   dlp_notice?: {
     findings: number;
     by_detector: Record<string, number>;
   };
   /** local-only — set when the gateway downgraded a reasoning request
-   *  (the resolved model can't reason). Drives a small informational
-   *  line under the reply, same quiet styling as fallback_info —
-   *  this is not an error. */
+   *  (the resolved model can't reason). FIX51 Part 1: no longer
+   *  rendered — capability is told at selection time instead (the
+   *  thinking toggle disables with the reason). The field stays
+   *  because the frame still arrives and is stashed. */
   reasoning_notice?: {
     model?: string;
     reason?: string;

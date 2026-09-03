@@ -214,13 +214,25 @@ describe("Thinking-Mode toggle", () => {
     );
   });
 
-  it("is hidden for a model that cannot reason", () => {
+  it("is visible but DISABLED with the reason for a model that cannot reason (FIX51 — capability told at selection, FIX47.6 Part C rule)", () => {
     useModelStore.setState({ models: [model()], loaded: true, loading: false });
     useChatStore.setState({ conversations: [conv()] });
 
     mountComposer("gpt-4o");
 
-    expect(screen.queryByLabelText(dictionaries.en["input.reasoning"])).toBeNull();
+    const btn = screen.getByLabelText(
+      dictionaries.en["input.reasoning.unsupported"],
+    );
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("aria-disabled", "true");
+    expect(btn).toHaveAttribute(
+      "title",
+      dictionaries.en["input.reasoning.unsupported"],
+    );
+    // Thai copy exists and differs — the reason localizes.
+    expect(dictionaries.th["input.reasoning.unsupported"]).not.toBe(
+      dictionaries.en["input.reasoning.unsupported"],
+    );
   });
 
   it("is hidden on Auto — the router may pick a non-reasoning model", () => {

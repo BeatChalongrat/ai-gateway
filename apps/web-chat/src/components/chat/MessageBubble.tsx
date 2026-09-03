@@ -446,22 +446,17 @@ function MessageBubbleImpl({
         />
       ) : null}
 
-      {/* Reasoning downgrade notice — the reply was produced without
-          the requested thinking (resolved model can't reason). Same
-          quiet muted line as the fallback notice: information, not an
-          error. */}
-      {message.reasoning_notice ? <ReasoningDowngradeNotice /> : null}
-
-      {/* FIX50 P1-C — parts of the QUESTION were masked before the
-          model read them. Quiet expandable line: counts per detector,
-          never values. The user learns the question was altered — the
-          answer may be about something else. */}
-      {message.dlp_notice && message.dlp_notice.findings > 0 ? (
-        <DlpMaskNotice
-          findings={message.dlp_notice.findings}
-          byDetector={message.dlp_notice.by_detector}
-        />
-      ) : null}
+      {/* FIX51 Part 1 — two under-answer lines removed by owner decision
+          (OPEN_DECISIONS #62):
+          · the reasoning downgrade line: capability is now told at
+            SELECTION time (the thinking toggle disables with the reason
+            on a non-reasoning model, ChatInput) — the frame
+            ``reasoning_notice`` still arrives and is stored, only the
+            render is gone;
+          · the FIX50 P1-C dlp_notice line: the frame still flows
+            end-to-end and the server-side counter
+            (GET /admin/dlp/input-masking-stats) is untouched — only the
+            render is gone. */}
 
       {/* FIX32 §1.2 — compaction marker: the host stopped sending the middle
           of a long conversation. Quiet information, not an error. */}
@@ -807,56 +802,6 @@ function FallbackNotice({
   return (
     <div className="mt-0.5 text-[11px] text-text-muted">
       {fallbackNotice(requestedModel, actualModel)}
-    </div>
-  );
-}
-
-// FIX50 P1-C — input-masking notice. Same muted surface as
-// FallbackNotice, plus a click-to-expand list of per-detector counts.
-// Never shows values or spans — only that the question was altered
-// and how many places, so a beside-the-point answer (the FIX48 ทอง
-// case) stops being a mystery.
-function DlpMaskNotice({
-  findings,
-  byDetector,
-}: {
-  findings: number;
-  byDetector: Record<string, number>;
-}) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  const entries = Object.entries(byDetector).sort((a, b) => b[1] - a[1]);
-  return (
-    <div className="mt-0.5 text-[11px] text-text-muted" data-testid="dlp-mask-notice" role="note">
-      <button
-        type="button"
-        className="underline decoration-dotted underline-offset-2 hover:text-text-secondary"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        {t("chat.dlpMasked", { n: String(findings) })}
-      </button>
-      {open && entries.length > 0 ? (
-        <ul className="mt-0.5 list-none pl-4" data-testid="dlp-mask-detail">
-          {entries.map(([detector, count]) => (
-            <li key={detector}>
-              {detector} × {count}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
-
-// Reasoning downgrade notice. Same muted single-line surface as
-// FallbackNotice — informational only; the localized string carries
-// the full meaning, so the gateway's English reason is not shown.
-function ReasoningDowngradeNotice() {
-  const t = useT();
-  return (
-    <div className="mt-0.5 text-[11px] text-text-muted">
-      {t("chat.reasoningDowngraded")}
     </div>
   );
 }
@@ -1257,8 +1202,6 @@ function areEqual(prev: Props, next: Props): boolean {
     a.error_message === b.error_message &&
     a.error_attempts === b.error_attempts &&
     a.fallback_info === b.fallback_info &&
-    a.dlp_notice === b.dlp_notice &&
-    a.reasoning_notice === b.reasoning_notice &&
     a.image_notice === b.image_notice &&
     a.compaction_notice === b.compaction_notice &&
     prev.showFeedback === next.showFeedback &&
