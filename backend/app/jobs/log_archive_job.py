@@ -49,6 +49,21 @@ class ArchiveStats:
     rows_archived: int
     archive_days: int
     cutoff: str
+    schema_drift: tuple[str, ...] = ()
+
+
+_COLUMNS_SQL = text(
+    """
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = :table
+    ORDER BY ordinal_position
+    """
+)
+
+
+def _table_columns(session: Session, table: str) -> list[str]:
+    return [row[0] for row in session.execute(_COLUMNS_SQL, {"table": table})]
 
 
 def run_log_archive(
@@ -61,9 +76,37 @@ def run_log_archive(
     Returns the count of rows archived. The job is idempotent — a
     second run on the same table is a no-op because the WHERE clause
     only catches rows still in the hot table.
+
+    FIX50 P1-E (OPEN_DECISIONS #57): the INSERT names its columns
+    instead of ``SELECT r.*`` — positional copy broke the first time a
+    migration added a column to the hot table only, and had failed
+    every run since (the hot table grew unbounded, the archive never
+    received a row). If the hot table has columns the archive lacks,
+    the run REFUSES up front: archiving only the common columns would
+    silently drop the drifted columns' data, because the hot row is
+    deleted after the copy. The error names the columns so the fix is
+    a one-line migration (see 081 for the shape).
     """
     days = archive_days if archive_days is not None else settings.log_archive_days
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    hot_cols = _table_columns(session, "request_logs")
+    archive_cols = set(_table_columns(session, "request_logs_archive"))
+    missing = tuple(c for c in hot_cols if c not in archive_cols)
+    if missing:
+        logger.error(
+            "log_archive_schema_drift",
+            missing_in_archive=list(missing),
+            hint="add the columns to request_logs_archive (migration 081 pattern); the job will not move rows until the schemas agree",
+        )
+        return ArchiveStats(
+            rows_archived=0,
+            archive_days=days,
+            cutoff=cutoff.isoformat(),
+            schema_drift=missing,
+        )
+    col_list = ", ".join(hot_cols)
+    select_list = ", ".join(f"r.{c}" for c in hot_cols)
 
     total = 0
     while True:
@@ -74,7 +117,7 @@ def run_log_archive(
         # ``DELETE WHERE created_at < cutoff`` + LIMIT).
         result = session.execute(
             text(
-                """
+                f"""
                 WITH moved AS (
                     SELECT request_id
                     FROM request_logs
@@ -83,8 +126,8 @@ def run_log_archive(
                     LIMIT :batch
                 ),
                 copied AS (
-                    INSERT INTO request_logs_archive
-                    SELECT r.*
+                    INSERT INTO request_logs_archive ({col_list})
+                    SELECT {select_list}
                     FROM request_logs r
                     JOIN moved m USING (request_id)
                     RETURNING request_id
