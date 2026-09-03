@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 // allowProbeAuth is the "user is active + funded" verdict, so the live run
@@ -41,14 +41,9 @@ func TestCloudTaskLiveFire(t *testing.T) {
 		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("no DB pool: %v", err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("DB unreachable: %v", err)
-	}
+	// Own database per test, dropped when the test ends — no
+	// cleanup code, so none can silently fail (internal/testdb).
+	pool := testdb.Fresh(t)
 
 	cr := repository.NewConversationRepo(pool)
 	mr := repository.NewMessageRepo(pool)

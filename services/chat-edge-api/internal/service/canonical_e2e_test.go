@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -20,26 +19,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func e2ePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	p, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Skipf("skip: %v", err)
-	}
-	if err := p.Ping(context.Background()); err != nil {
-		p.Close()
-		t.Skipf("skip: DB unreachable %v", err)
-	}
-	if b, err := os.ReadFile("../../migrations/024_add_message_canonical_artifact.sql"); err == nil {
-		_, _ = p.Exec(context.Background(), string(b)) // idempotent
-	}
-	return p
+	// Own database per test, dropped when the test ends — no
+	// cleanup code, so none can silently fail (internal/testdb).
+	return testdb.Fresh(t)
 }
 
 func canonSig(content string) (string, int) {
@@ -50,7 +37,6 @@ func canonSig(content string) (string, int) {
 // CORE E2E — next-turn provider payload uses canonical, not restored display.
 func TestCanonicalHistoryE2E_ProviderPayload(t *testing.T) {
 	pool := e2ePool(t)
-	defer pool.Close()
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 	mr := repository.NewMessageRepo(pool)
@@ -141,7 +127,6 @@ func TestCanonicalHistoryE2E_ProviderPayload(t *testing.T) {
 // Non-stream consumer persists complete canonical from the artifact.
 func TestNonStreamConsumerPersistsCanonical(t *testing.T) {
 	pool := e2ePool(t)
-	defer pool.Close()
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 	mr := repository.NewMessageRepo(pool)

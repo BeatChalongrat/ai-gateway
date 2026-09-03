@@ -9,7 +9,6 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -18,24 +17,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func resumeTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("skipping resume integration tests: cannot create pool: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skipping resume integration tests: DB unreachable (%v)", err)
-	}
-	return pool
+	// Own database per test, dropped when the test ends — no
+	// cleanup code, so none can silently fail (internal/testdb).
+	return testdb.Fresh(t)
 }
 
 // resumeFixture builds a MessageService over the real repos plus one
@@ -69,7 +58,6 @@ func resumeFixture(
 
 func TestResumeAttach_TerminalRowFullReplay(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, userID, convID, msgID := resumeFixture(t, pool, "completed")
 
 	att, err := svc.ResumeAttach(context.Background(), tenantID, userID, convID, msgID)
@@ -89,7 +77,6 @@ func TestResumeAttach_TerminalRowFullReplay(t *testing.T) {
 
 func TestResumeAttach_OwnershipRejected(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, _, convID, msgID := resumeFixture(t, pool, "completed")
 	ctx := context.Background()
 
@@ -105,7 +92,6 @@ func TestResumeAttach_OwnershipRejected(t *testing.T) {
 
 func TestResumeAttach_MessageOutsideConversationRejected(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, userID, _, msgID := resumeFixture(t, pool, "completed")
 	// A second conversation owned by the SAME user — the message id
 	// doesn't belong to it, so reattach must refuse (no ID-mixing).
@@ -123,7 +109,6 @@ func TestResumeAttach_MessageOutsideConversationRejected(t *testing.T) {
 
 func TestResumeAttach_YoungStreamingRowUnavailable(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, userID, convID, msgID := resumeFixture(t, pool, "streaming")
 
 	// Row was JUST created and the broker has no entry (no generation
@@ -142,7 +127,6 @@ func TestResumeAttach_YoungStreamingRowUnavailable(t *testing.T) {
 
 func TestResumeAttach_AgedOrphanSettledToError(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, userID, convID, msgID := resumeFixture(t, pool, "streaming")
 	ctx := context.Background()
 
@@ -177,7 +161,6 @@ func TestResumeAttach_AgedOrphanSettledToError(t *testing.T) {
 
 func TestResumeAttach_LiveBrokerWinsOverRowStatus(t *testing.T) {
 	pool := resumeTestPool(t)
-	defer pool.Close()
 	svc, tenantID, userID, convID, msgID := resumeFixture(t, pool, "streaming")
 
 	// Register a live generation for the message and stream a prefix

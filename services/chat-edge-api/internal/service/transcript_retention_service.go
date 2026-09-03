@@ -80,6 +80,13 @@ type SweepStats struct {
 	Erased            int            `json:"erased"`
 	Counts            map[string]int `json:"counts"`
 	Errors            int            `json:"errors"`
+	// Both totals, side by side and never merged: ConversationsSeen
+	// counts everything, ConversationsSeenTestData counts the part
+	// belonging to tenants proven to be integration-test leftovers.
+	// Real minus test is the number a person should act on; the total
+	// is kept so nothing is hidden.
+	ConversationsSeenTestData int `json:"conversations_seen_test_data"`
+	TenantsLikelyTest         int `json:"tenants_likely_test"`
 }
 
 // EnforceOnce runs one pass across every retention-enabled tenant.
@@ -100,6 +107,9 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 		slog.Info("transcript retention: pass complete",
 			"tenants", stats.TenantsScanned,
 			"seen", stats.ConversationsSeen,
+			"seen_test_data", stats.ConversationsSeenTestData,
+			"seen_real", stats.ConversationsSeen-stats.ConversationsSeenTestData,
+			"tenants_likely_test", stats.TenantsLikelyTest,
 			"erased", stats.Erased,
 			"errors", stats.Errors)
 	}
@@ -123,6 +133,19 @@ func (s *TranscriptRetentionService) PreviewTenant(
 	out := map[string]int{
 		"conversations_retention_expired": len(expired),
 		"conversations_user_deleted_due":  len(purgeable),
+	}
+	// Say whose data these numbers describe. This database also holds
+	// rows left by integration tests, and a total that silently mixes
+	// them is unreadable to whoever has to decide if deletion is safe.
+	// Only positive evidence marks a tenant as test data; anything
+	// unproven is reported as real.
+	class, err := s.erase.ClassifyTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out["counts_are_test_data"] = 0
+	if class == repository.TenantLikelyTest {
+		out["counts_are_test_data"] = 1
 	}
 	for _, c := range append(append([]repository.EraseCandidate{}, expired...), purgeable...) {
 		fp, err := s.erase.CountConversationFootprint(ctx, tenantID, c.ID)
@@ -174,7 +197,15 @@ func (s *TranscriptRetentionService) enforceTenant(
 		stats.Errors++
 		return
 	}
-	stats.ConversationsSeen += len(expired) + len(purgeable)
+	seen := len(expired) + len(purgeable)
+	stats.ConversationsSeen += seen
+	// Keep the test-data share as its own running total so the pass
+	// can report both numbers instead of one blended figure.
+	if class, err := s.erase.ClassifyTenant(ctx, t.TenantID); err == nil &&
+		class == repository.TenantLikelyTest {
+		stats.TenantsLikelyTest++
+		stats.ConversationsSeenTestData += seen
+	}
 
 	if t.DryRun {
 		stats.DryRunTenants++

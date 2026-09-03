@@ -6,7 +6,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -15,31 +14,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func dlPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	p, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Skipf("skip: %v", err)
-	}
-	if err := p.Ping(context.Background()); err != nil {
-		p.Close()
-		t.Skipf("skip: DB unreachable %v", err)
-	}
-	for _, f := range []string{
-		"../../migrations/024_add_message_canonical_artifact.sql",
-		"../../migrations/025_add_message_display_state.sql",
-	} {
-		if b, err := os.ReadFile(f); err == nil {
-			_, _ = p.Exec(context.Background(), string(b)) // idempotent
-		}
-	}
-	return p
+	// Own database per test, dropped when the test ends — no
+	// cleanup code, so none can silently fail (internal/testdb).
+	return testdb.Fresh(t)
 }
 
 func dlService(pool *pgxpool.Pool) (*MessageService, *repository.MessageRepo) {
@@ -54,7 +36,6 @@ func dlService(pool *pgxpool.Pool) (*MessageService, *repository.MessageRepo) {
 
 func TestDisplayLifecycleWritePath_NoRawAtRest(t *testing.T) {
 	pool := dlPool(t)
-	defer pool.Close()
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 	svc, mr := dlService(pool)

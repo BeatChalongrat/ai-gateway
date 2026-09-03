@@ -13,7 +13,6 @@ package service
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -21,24 +20,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func shareTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("skipping share integration tests: cannot create pool: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skipping share integration tests: DB unreachable (%v)", err)
-	}
-	return pool
+	// Own database per test, dropped when the test ends — no cleanup
+	// code, so none can silently fail (see internal/testdb).
+	return testdb.Fresh(t)
 }
 
 // shareFixture builds a ShareService over the real repos plus one
@@ -92,7 +81,6 @@ func contents(msgs []model.Message) []string {
 
 func TestShareSnapshot_MessageSentAfterSharingStaysPrivate(t *testing.T) {
 	pool := shareTestPool(t)
-	defer pool.Close()
 	svc, mr, tenantID, userID, convID := shareFixture(t, pool)
 	ctx := context.Background()
 
@@ -116,7 +104,6 @@ func TestShareSnapshot_MessageSentAfterSharingStaysPrivate(t *testing.T) {
 
 func TestShareSnapshot_ReShareTakesAFreshSnapshotAndRotatesTheToken(t *testing.T) {
 	pool := shareTestPool(t)
-	defer pool.Close()
 	svc, mr, tenantID, userID, convID := shareFixture(t, pool)
 	ctx := context.Background()
 
@@ -149,7 +136,6 @@ func TestShareSnapshot_ReShareTakesAFreshSnapshotAndRotatesTheToken(t *testing.T
 
 func TestShareSnapshot_HardDeletedMessageDropsOut(t *testing.T) {
 	pool := shareTestPool(t)
-	defer pool.Close()
 	svc, _, tenantID, userID, convID := shareFixture(t, pool)
 	ctx := context.Background()
 
@@ -176,7 +162,6 @@ func TestShareSnapshot_HardDeletedMessageDropsOut(t *testing.T) {
 
 func TestShareSnapshot_LegacyLiveRowIsFrozenOnFirstResolve(t *testing.T) {
 	pool := shareTestPool(t)
-	defer pool.Close()
 	svc, mr, tenantID, userID, convID := shareFixture(t, pool)
 	ctx := context.Background()
 
@@ -209,7 +194,6 @@ func TestShareSnapshot_LegacyLiveRowIsFrozenOnFirstResolve(t *testing.T) {
 
 func TestShareSnapshot_ExpiryAndRevokeStillWork(t *testing.T) {
 	pool := shareTestPool(t)
-	defer pool.Close()
 	svc, _, tenantID, userID, convID := shareFixture(t, pool)
 	ctx := context.Background()
 

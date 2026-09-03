@@ -390,3 +390,57 @@ func regclass(t *testing.T, ctx context.Context, pool *pgxpool.Pool, rel string)
 	}
 	return reg != nil
 }
+
+// Tenant classification (retention reporting): a tenant is only ever
+// called test data on positive evidence, and anything unproven counts
+// as real. These pins guard the direction of that asymmetry — getting
+// it wrong the other way would hide real conversations from a total
+// someone uses to decide whether deletion is safe.
+func TestClassifyTenant_OnlyCallsItTestOnPositiveEvidence(t *testing.T) {
+	pool := testPool(t)
+	t.Cleanup(pool.Close)
+	ctx := context.Background()
+	erase := repository.NewConversationEraseRepo(pool)
+
+	// A derived (v5) id is provisioning, never a test helper's.
+	v5 := uuid.NewSHA1(uuid.NameSpaceDNS, []byte("a-real-workspace"))
+	got, err := erase.ClassifyTenant(ctx, v5)
+	if err != nil {
+		t.Fatalf("classify v5: %v", err)
+	}
+	if got != repository.TenantProvisioned {
+		t.Errorf("v5 id classified %q, want provisioned", got)
+	}
+
+	// A random id with nothing behind it is the throwaway shape.
+	empty := uuid.New()
+	if got, err = erase.ClassifyTenant(ctx, empty); err != nil {
+		t.Fatalf("classify empty: %v", err)
+	}
+	if got != repository.TenantLikelyTest {
+		t.Errorf("empty v4 tenant classified %q, want likely_test", got)
+	}
+
+	// A random id that does NOT match the shape must be reported as
+	// real: three conversations is past the throwaway threshold.
+	busy, user := uuid.New(), uuid.New()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx,
+			"DELETE FROM chat.conversations WHERE tenant_id = $1", busy)
+	})
+	for i := 0; i < 3; i++ {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO chat.conversations (id, tenant_id, user_id, title, model_id)
+			VALUES ($1, $2, $3, 'c', 'gpt-4o-mini')`,
+			uuid.New(), busy, user,
+		); err != nil {
+			t.Fatalf("seed busy tenant: %v", err)
+		}
+	}
+	if got, err = erase.ClassifyTenant(ctx, busy); err != nil {
+		t.Fatalf("classify busy: %v", err)
+	}
+	if got != repository.TenantUnproven {
+		t.Errorf("busy v4 tenant classified %q, want unproven (counted as real)", got)
+	}
+}

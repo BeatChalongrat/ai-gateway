@@ -41,7 +41,6 @@ func TestSearchSafeContent(t *testing.T) {
 // SearchPastContext (LLM tool + /search) must never emit legacy raw content.
 func TestSearchService_LegacyRedacted_CanonicalTokenized(t *testing.T) {
 	pool := dlPool(t)
-	defer pool.Close()
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 	mr := repository.NewMessageRepo(pool)

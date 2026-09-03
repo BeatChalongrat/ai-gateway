@@ -254,3 +254,52 @@ func (r *ConversationEraseRepo) listCandidates(
 	}
 	return out, rows.Err()
 }
+
+// TenantClass is how much is known about who a tenant belongs to.
+//
+// Retention numbers are read by people deciding whether deletion is
+// safe, and this database also holds rows left behind by integration
+// tests. Mixing the two makes a total unreadable — but guessing wrong
+// in the other direction is worse, so the classes are deliberately
+// asymmetric: a tenant is only ever called test data on POSITIVE
+// evidence, and anything unproven counts as real.
+type TenantClass string
+
+const (
+	// TenantProvisioned — the id was derived, not drawn at random
+	// (UUID version 5). Test helpers mint version-4 ids, so a
+	// version-5 id came from provisioning: real.
+	TenantProvisioned TenantClass = "provisioned"
+	// TenantLikelyTest — every signal of a throwaway tenant at once:
+	// a random (v4) id, at most two conversations, and none of the
+	// traces a person leaves behind (no saved preferences, no
+	// memories). Test runs mint one such tenant per test.
+	TenantLikelyTest TenantClass = "likely_test"
+	// TenantUnproven — a random id that does not match the test
+	// shape. Counted as real, always.
+	TenantUnproven TenantClass = "unproven"
+)
+
+// ClassifyTenant reports what can be proven about a tenant's origin.
+// It never deletes and never guesses toward "test".
+func (r *ConversationEraseRepo) ClassifyTenant(
+	ctx context.Context, tenantID uuid.UUID,
+) (TenantClass, error) {
+	// UUID version lives in the first nibble of the third group.
+	if v := tenantID.Version(); v == 5 {
+		return TenantProvisioned, nil
+	}
+	const q = `
+		SELECT
+			(SELECT count(*) FROM chat.conversations WHERE tenant_id = $1),
+			(SELECT count(*) FROM chat.user_preferences WHERE tenant_id = $1),
+			(SELECT count(*) FROM chat.user_memories   WHERE tenant_id = $1)`
+	var convs, prefs, memories int
+	if err := r.pool.QueryRow(ctx, q, tenantID).Scan(&convs, &prefs, &memories); err != nil {
+		return TenantUnproven, fmt.Errorf("classify tenant: %w", err)
+	}
+	if convs <= 2 && prefs == 0 && memories == 0 {
+		return TenantLikelyTest, nil
+	}
+	return TenantUnproven, nil
+}
