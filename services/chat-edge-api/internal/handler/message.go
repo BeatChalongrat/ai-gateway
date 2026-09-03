@@ -649,6 +649,11 @@ Loop:
 			if ev.FallbackInfo != nil {
 				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
 			}
+			// FIX50 P1-C: the question was partially masked before the
+			// model read it — counts only, never values.
+			if ev.DlpNotice != nil {
+				writeSSEEvent(w, flusher, "dlp_notice", ev.DlpNotice)
+			}
 			// FIX35 Part B — which model IS answering, as soon as the
 			// gateway names it (before content on an auto /
 			// openrouter/auto route), not only at the end.
@@ -1348,6 +1353,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.FallbackInfo != nil {
 		writeSSEEvent(w, flusher, "fallback_info", snap.FallbackInfo)
+	}
+	if snap.DlpNotice != nil { // FIX50 P1-C — sticky, like fallback_info
+		writeSSEEvent(w, flusher, "dlp_notice", snap.DlpNotice)
 	}
 	if snap.ServedModel != "" { // FIX35 Part B — sticky, like fallback_info
 		writeSSEEvent(w, flusher, "model_resolved", map[string]any{"model": snap.ServedModel})

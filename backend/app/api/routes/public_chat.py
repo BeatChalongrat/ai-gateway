@@ -1850,6 +1850,41 @@ async def _chat_completions_impl(
                 )
             )
 
+        def _emit_dlp_notice() -> str | None:
+            """FIX50 P1-C — the user must know their question was masked.
+
+            One typed frame, before any content, when input DLP actually
+            transformed the question (MASK/REDACT — an ALLOW/RESTORE
+            finding changed nothing the model sees). Carries COUNTS per
+            detector only, never values or spans: the point is "your
+            question was altered before the model read it", not a way to
+            reverse the masking. The FIX48 ทอง case is the shape this
+            exists for — the model answered a different question and the
+            user had no way to know why.
+            """
+            from app.domain.dlp import EnforcementAction as _EA
+
+            by_detector: dict[str, int] = {}
+            for ma in input_enforcement.match_actions:
+                if ma.action in (_EA.MASK, _EA.REDACT):
+                    name = ma.match.detector_name
+                    by_detector[name] = by_detector.get(name, 0) + 1
+            if not by_detector:
+                return None
+            return "data: {}\n\n".format(
+                _sse_dumps(
+                    {
+                        "type": "dlp_notice",
+                        "dlp_notice": {
+                            "direction": "input",
+                            "findings": sum(by_detector.values()),
+                            "by_detector": by_detector,
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
         from app.services.dlp.transformer import sanitize_hallucinated_brackets
 
         # Mutable state for the in-generator fallback retry. The outer
@@ -2203,6 +2238,11 @@ async def _chat_completions_impl(
         # guard keeps the call idempotent, so the normal path's own
         # finalize below never double-charges.
         _finalize_hook.append(_finalize_stream)
+
+        # FIX50 P1-C — input-masking notice, before any provider chunk.
+        _dlp_notice_frame = _emit_dlp_notice()
+        if _dlp_notice_frame is not None:
+            yield _dlp_notice_frame
 
         try:
             while True:

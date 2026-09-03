@@ -429,6 +429,12 @@ type StreamEvent struct {
 	// before the answering model's content when a fallback rescued
 	// the request, so the client can show which model actually replied.
 	FallbackInfo map[string]any
+	// FIX50 P1-C — input-masking notice. The Gateway emits
+	//   data: {"type":"dlp_notice","dlp_notice":{"direction":"input","findings":N,"by_detector":{...}}}
+	// before any content when DLP transformed the question. Counts
+	// only, never values — the user learns their question was altered,
+	// not what was hidden.
+	DlpNotice map[string]any
 	// Reasoning downgrade notice. The Gateway emits
 	//   data: {"type":"reasoning_notice","model":"...","reasoning_downgraded":true,"reason":"..."}
 	// as its FIRST frame when reasoning was requested but the resolved
@@ -627,6 +633,7 @@ type reasoningEnvelope struct {
 	// envelope so we sniff them before the OpenAI-shape decoder.
 	Error        *StreamProviderError `json:"error"`
 	FallbackInfo map[string]any       `json:"fallback_info"`
+	DlpNotice    map[string]any       `json:"dlp_notice"`
 	// Usage hint — the Gateway's final SSE frame includes a
 	// ``usage`` block when reasoning happened so the chat-edge can
 	// surface reasoning_tokens to the message_complete event. The
@@ -679,6 +686,10 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 		// B2: fallback notice frame.
 		if env.Type == "fallback_info" {
 			return &StreamEvent{FallbackInfo: env.FallbackInfo}, nil
+		}
+		// FIX50 P1-C — input-masking notice.
+		if env.Type == "dlp_notice" {
+			return &StreamEvent{DlpNotice: env.DlpNotice}, nil
 		}
 		switch env.Type {
 		case "reasoning_summary_delta":

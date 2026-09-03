@@ -95,6 +95,9 @@ type StreamSnapshot struct {
 	VideoStatus    string
 	SearchStatus   string
 	FallbackInfo   map[string]any
+	// DlpNotice: sticky like FallbackInfo — a reattaching client still
+	// learns the question was partially masked before the model saw it.
+	DlpNotice map[string]any
 	// ServedModel (FIX35 Part B): the model that answered, sticky so a
 	// reattaching client gets the ``model_resolved`` frame too.
 	ServedModel string
@@ -140,6 +143,7 @@ type brokerEntry struct {
 	video     string
 	search    string
 	fallback  map[string]any
+	dlpNotice map[string]any // FIX50 P1-C — sticky like fallback
 	served    string // FIX35 Part B — sticky like fallback: a reattaching client learns the model too
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
@@ -202,6 +206,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		VideoStatus:     e.video,
 		SearchStatus:    e.search,
 		FallbackInfo:    e.fallback,
+		DlpNotice:       e.dlpNotice,
 		ServedModel:     e.served,
 		ReasoningNotice: e.rnotice,
 		ProviderStall:   e.stall,
@@ -359,6 +364,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.FallbackInfo != nil {
 		e.fallback = ev.FallbackInfo
+	}
+	if ev.DlpNotice != nil {
+		e.dlpNotice = ev.DlpNotice
 	}
 	if ev.ServedModel != "" {
 		e.served = ev.ServedModel

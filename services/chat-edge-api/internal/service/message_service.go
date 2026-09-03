@@ -1151,6 +1151,9 @@ type StreamUpdate struct {
 	// B2 — a fallback notice forwarded from the Gateway. The handler
 	// emits it as a ``fallback_info`` SSE event.
 	FallbackInfo map[string]any
+	// FIX50 P1-C — input-masking notice forwarded from the Gateway.
+	// The handler emits it as a ``dlp_notice`` SSE event.
+	DlpNotice map[string]any
 	// FIX35 Part B — the model that actually answered, as the gateway
 	// names it (a router route resolved, or the chunk's own ``model``).
 	// Forwarded once when it becomes known; the handler emits it as a
@@ -4605,6 +4608,9 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.FallbackInfo != nil {
 				in.out <- StreamUpdate{FallbackInfo: ev.FallbackInfo}
+			}
+			if ev.DlpNotice != nil {
+				in.out <- StreamUpdate{DlpNotice: ev.DlpNotice}
 			}
 			// FIX35 Part B — forward the served model the first time the
 			// gateway names it (and again only if it changes, e.g. a

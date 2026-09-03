@@ -2514,6 +2514,37 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "dlp_notice") {
+        // FIX50 P1-C — the question was partially masked before the
+        // model read it. Stash counts on the assistant message so
+        // MessageBubble shows a quiet expandable notice — the user
+        // learns the question was altered, never the hidden values.
+        const data = evt.data as {
+          findings?: number;
+          by_detector?: Record<string, number>;
+        };
+        if (typeof data?.findings === "number" && data.findings > 0) {
+          const id = realAssistantId ?? tempAsstId;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return {
+              messages: {
+                ...s.messages,
+                [convId]: list.map((m) =>
+                  m.id === id
+                    ? {
+                        ...m,
+                        dlp_notice: {
+                          findings: data.findings as number,
+                          by_detector: data.by_detector ?? {},
+                        },
+                      }
+                    : m,
+                ),
+              },
+            };
+          });
+        }
       } else if (evt.event === "model_resolved") {
         // FIX35 Part B — the gateway named the model that is answering
         // (before content on an Auto route). Attribute the reply to it now

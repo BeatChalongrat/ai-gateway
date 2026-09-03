@@ -1296,6 +1296,10 @@ export class TurnCoordinator {
           case "fallback_info":
             if (!run.parentToolCallId) this.emit(eventConv, "fallback_info", { requested_model: ev.requested_model, actual_model: ev.actual_model, reason: ev.reason });
             break;
+          case "dlp_notice":
+            // FIX50 P1-C — same quiet-notice surface as fallback_info.
+            if (!run.parentToolCallId) this.emit(eventConv, "dlp_notice", { findings: ev.findings, by_detector: ev.by_detector });
+            break;
           case "model_resolved":
             // FIX35 Part B — attribute the turn to the model that answered and
             // tell the page now, not only at message_complete.

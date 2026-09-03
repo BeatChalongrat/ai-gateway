@@ -125,6 +125,9 @@ export type StreamEvent =
   | { kind: "reasoning_delta"; delta: string }
   | { kind: "analysis_status"; status: string }
   | { kind: "fallback_info"; requested_model: string; actual_model: string; reason: string | null }
+  /** FIX50 P1-C — input DLP masked part of the question before the model
+   *  read it. Counts per detector only, never values. */
+  | { kind: "dlp_notice"; findings: number; by_detector: Record<string, number> }
   /** FIX35 Part B — the gateway named the model that is answering (before
    *  content on an auto route). */
   | { kind: "model_resolved"; model: string }
@@ -552,6 +555,20 @@ export function parseChunk(data: string): StreamEvent[] {
       const f = root["fallback_info"] as Record<string, unknown>;
       if (typeof f["requested_model"] === "string" && typeof f["actual_model"] === "string") {
         out.push({ kind: "fallback_info", requested_model: f["requested_model"], actual_model: f["actual_model"], reason: typeof f["reason"] === "string" ? f["reason"] : null });
+      }
+    } else if (t === "dlp_notice" && typeof root["dlp_notice"] === "object" && root["dlp_notice"]) {
+      // FIX50 P1-C — the question was partially masked before the model
+      // read it; the page shows a quiet expandable notice.
+      const n = root["dlp_notice"] as Record<string, unknown>;
+      if (typeof n["findings"] === "number" && n["findings"] > 0) {
+        const by: Record<string, number> = {};
+        const raw = n["by_detector"];
+        if (raw && typeof raw === "object") {
+          for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+            if (typeof v === "number") by[k] = v;
+          }
+        }
+        out.push({ kind: "dlp_notice", findings: n["findings"], by_detector: by });
       }
     } else if (t === "reasoning_summary_delta" && typeof root["text"] === "string" && root["text"]) {
       out.push({ kind: "reasoning_delta", delta: root["text"] });

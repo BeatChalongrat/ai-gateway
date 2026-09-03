@@ -504,3 +504,81 @@ def test_dlp(body: DlpTestRequest) -> dict[str, Any]:
         "masked_text": masked_text,
         "detector_count": len(registry.all()),
     }
+
+
+# ---------------------------------------------------------------------------
+# FIX50 P1-C — input-masking frequency (the number OPEN_DECISIONS #4 needs)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dlp/input-masking-stats")
+def get_input_masking_stats(
+    days: int = 30,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """How often user QUESTIONS are masked before the model reads them.
+
+    Aggregated from request_logs (already recorded per turn since the
+    4-stage DLP trace): total turns, turns whose input was transformed,
+    and per-detector counts across those turns. This is the number the
+    over-masking weight decision (OPEN_DECISIONS #4) has been waiting
+    on — until now nobody knew how often the ทอง case actually happens.
+
+    Counts only; the endpoint never returns matched text or spans.
+    """
+    import json as _json
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text as _text
+
+    days = max(1, min(days, 365))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    totals = session.execute(
+        _text(
+            "SELECT count(*) AS turns,"
+            " count(*) FILTER (WHERE dlp_input_findings > 0"
+            "   AND dlp_input_action IN ('mask', 'redact', 'block')) AS masked"
+            " FROM request_logs WHERE created_at >= :cutoff"
+        ),
+        {"cutoff": cutoff},
+    ).one()
+
+    by_detector: dict[str, int] = {}
+    turns_with_detector: dict[str, int] = {}
+    rows = session.execute(
+        _text(
+            "SELECT dlp_findings_json FROM request_logs"
+            " WHERE created_at >= :cutoff AND dlp_input_findings > 0"
+            "   AND dlp_findings_json IS NOT NULL"
+        ),
+        {"cutoff": cutoff},
+    )
+    for (findings_json,) in rows:
+        try:
+            findings = _json.loads(findings_json)
+        except (TypeError, ValueError):
+            continue
+        seen_this_turn: set[str] = set()
+        for f in findings if isinstance(findings, list) else []:
+            if not isinstance(f, dict) or f.get("direction") != "input":
+                continue
+            if f.get("action") not in ("mask", "redact", "block"):
+                continue
+            det = str(f.get("detector") or "unknown")
+            by_detector[det] = by_detector.get(det, 0) + 1
+            seen_this_turn.add(det)
+        for det in seen_this_turn:
+            turns_with_detector[det] = turns_with_detector.get(det, 0) + 1
+
+    return {
+        "window_days": days,
+        "turns_total": int(totals.turns or 0),
+        "turns_with_input_masking": int(totals.masked or 0),
+        "findings_by_detector": dict(
+            sorted(by_detector.items(), key=lambda kv: -kv[1])
+        ),
+        "turns_by_detector": dict(
+            sorted(turns_with_detector.items(), key=lambda kv: -kv[1])
+        ),
+    }

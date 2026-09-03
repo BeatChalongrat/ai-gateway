@@ -471,6 +471,16 @@ export interface Message {
     actual_model: string;
     reason?: string;
   };
+  /** FIX50 P1-C — local-only. Set when input DLP masked part of the
+   *  QUESTION before the model read it. Counts per detector only,
+   *  never values or spans — the user learns the question was
+   *  altered, not what was hidden. Drives a quiet expandable notice
+   *  under the reply (the FIX48 ทอง case: the model answered a
+   *  different question and the user had no way to know why). */
+  dlp_notice?: {
+    findings: number;
+    by_detector: Record<string, number>;
+  };
   /** local-only — set when the gateway downgraded a reasoning request
    *  (the resolved model can't reason). Drives a small informational
    *  line under the reply, same quiet styling as fallback_info —

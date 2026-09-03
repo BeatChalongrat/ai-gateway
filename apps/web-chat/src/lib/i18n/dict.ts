@@ -683,6 +683,8 @@ export const en = {
   "error.fallbackNotice": "Answered by {actual} ({requested} temporarily unavailable)",
   "chat.reasoningDowngraded":
     "Answered without extended thinking — this model doesn’t support it",
+  "chat.dlpMasked":
+    "Parts of your question were hidden before the model read it ({n} place(s)) — click for details",
   "chat.imageAttachFailed":
     "Couldn’t read the attached image ({files}) — answered without it",
   "error.offline": "You're offline. Messages will send when you reconnect.",
@@ -2030,6 +2032,8 @@ const th: Record<DictKey, string> = {
   "error.fallbackNotice": "ตอบโดย {actual} ({requested} ไม่พร้อมใช้งานชั่วคราว)",
   "chat.reasoningDowngraded":
     "ตอบโดยไม่ใช้การคิดขั้นสูง — โมเดลนี้ไม่รองรับ",
+  "chat.dlpMasked":
+    "บางส่วนของคำถามถูกปิดบังก่อนส่งให้โมเดล ({n} จุด) — กดเพื่อดูรายละเอียด",
   "chat.imageAttachFailed":
     "อ่านรูปภาพที่แนบมาไม่ได้ ({files}) — ตอบโดยไม่ใช้รูปนั้น",
   "error.offline": "คุณออฟไลน์อยู่ ข้อความจะส่งเมื่อกลับมาออนไลน์",
