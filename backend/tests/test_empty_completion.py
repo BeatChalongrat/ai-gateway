@@ -131,3 +131,35 @@ def test_empty_completion_is_catalogued_and_retryable():
     info = error_catalog.describe("empty_completion")
     assert info.retryable is True
     assert "empty" in info.message.lower()
+
+
+# ── the opposite twin (FIX50 0.3): short answers stay success ──────────
+#
+# Both guards (public_chat streaming, orchestrator non-streaming) decide
+# through error_catalog.is_empty_completion. These pin the criterion as
+# EMPTY, never SHORT — the A.3 trap that until now was only verified
+# live and would not have survived a refactor to a length threshold.
+
+@pytest.mark.parametrize("answer", ["ใช่", "4", "No.", " ครับ "])
+def test_one_word_answer_is_not_empty(answer):
+    assert error_catalog.is_empty_completion(answer, has_tool_calls=False) is False
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t", None])
+def test_blank_answer_is_empty(blank):
+    assert error_catalog.is_empty_completion(blank, has_tool_calls=False) is True
+
+
+def test_tool_call_only_turn_is_not_empty():
+    assert error_catalog.is_empty_completion("", has_tool_calls=True) is False
+
+
+def test_both_guards_route_through_the_shared_predicate():
+    # The predicate is only a real pin if both call sites use it.
+    import inspect
+
+    from app.api.routes import public_chat
+    from app.services import orchestrator
+
+    assert "is_empty_completion" in inspect.getsource(public_chat)
+    assert "is_empty_completion" in inspect.getsource(orchestrator)

@@ -1376,9 +1376,11 @@ class GatewayOrchestrator:
         # such turns recorded as success in 48 h). A short answer passes
         # (empty-after-strip, never a length check); a tool-call-only
         # reply is a normal agentic turn.
-        if (
-            not (response_content or "").strip()
-            and not provider_response.tool_calls
+        from app.core.error_catalog import is_empty_completion as _is_empty
+
+        if _is_empty(
+            response_content,
+            has_tool_calls=bool(provider_response.tool_calls),
         ):
             from app.core.exceptions import ProviderError as _EmptyErr
 

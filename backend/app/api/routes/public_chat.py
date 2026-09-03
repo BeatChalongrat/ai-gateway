@@ -3040,9 +3040,9 @@ async def _chat_completions_impl(
         # (`emitted_parts` is checked for emptiness after strip, never
         # for length), and a tool-call-only turn is a normal agentic
         # turn, not an empty one.
-        if (
-            not "".join(emitted_parts).strip()
-            and not _streaming_tool_call_args
+        if error_catalog.is_empty_completion(
+            "".join(emitted_parts),
+            has_tool_calls=bool(_streaming_tool_call_args),
         ):
             log.warning(
                 "stream_empty_completion",

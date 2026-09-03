@@ -97,3 +97,15 @@ def describe(code: str | None) -> ErrorInfo:
 
 def is_retryable(code: str | None) -> bool:
     return describe(code).retryable
+
+
+def is_empty_completion(text: str | None, *, has_tool_calls: bool) -> bool:
+    """Whether a finished turn qualifies as ``empty_completion``.
+
+    The criterion is EMPTY, never SHORT: a one-word answer ("ใช่", "4")
+    is a normal success, and a tool-call-only turn is a normal agentic
+    turn. Both guards (streaming and non-streaming) decide through this
+    one predicate so the criterion cannot drift into a length threshold
+    on one side only.
+    """
+    return not (text or "").strip() and not has_tool_calls
