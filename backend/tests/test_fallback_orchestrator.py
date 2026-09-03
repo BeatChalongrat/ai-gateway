@@ -361,9 +361,23 @@ class _AsyncOnlyKeyService:
 
 
 @pytest.mark.asyncio
-async def test_streaming_candidate_async_uses_awaited_key_lookup():
+async def test_streaming_candidate_async_uses_awaited_key_lookup(monkeypatch):
     class _Dispatcher:
         adapters = {"anthropic": _StreamingAdapter()}
+
+    # FIX49 Part C — the async selector now consults the live Redis
+    # health markers per candidate (a marked pair must not be fallen
+    # back into). This test is about the KEY-LOOKUP contract, so the
+    # marker check is stubbed healthy; without the stub a marker left in
+    # shared Redis by an earlier test (or a live probe) makes the
+    # selector correctly skip the candidate and the assertion flake.
+    async def _healthy(provider, model=None):
+        return False
+
+    monkeypatch.setattr(
+        "app.services.gateway.fallback_orchestrator.is_provider_unhealthy",
+        _healthy,
+    )
 
     runner = FallbackOrchestrator(
         dispatcher=_Dispatcher(),
