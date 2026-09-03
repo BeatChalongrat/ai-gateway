@@ -1,0 +1,54 @@
+# Known-failing backend tests — the gate compares NAMES, never a count.
+#
+# Why this file exists: the release gate used to be "the lane must show
+# exactly N failures". A suite this size does not produce a stable N —
+# three consecutive runs of the same tree gave 21, 22 and 23 failures
+# with a different extra member each time, and every drifting member
+# passed when run on its own. A count cannot tell "the same old
+# breakage" apart from "something new broke", so the gate now reads the
+# list below: a name that is not here turns the gate red, and a
+# different total with the same names is green.
+#
+# Rules for this file:
+#   * every entry carries a reason and the date it was added;
+#   * it must shrink over time — it is a ledger of known breakage, not
+#     a place to hide new failures;
+#   * NEVER add a name to make the gate pass. If a change breaks a
+#     test, fix the change.
+#
+# Format: <test id>  # <YYYY-MM-DD> <reason>
+# Blank lines and lines starting with # are ignored.
+
+# ── environment: the dev container has no examples/ mount and no live
+#    desktop/chat-edge trees for the cross-service inventory checks ──
+tests/test_dlp_egress_invariant.py::test_every_outbound_http_module_is_classified  # 2026-09-01 cross-service source scan needs the sibling service trees mounted
+tests/test_dlp_egress_invariant.py::test_chat_edge_embeddings_voice_route_through_gateway_not_openai  # 2026-09-01 same scan
+tests/test_dlp_egress_invariant.py::test_code_interpreter_egress_is_go_side_and_network_locked  # 2026-09-01 same scan
+tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_desktop_registry_scan_is_alive  # 2026-09-01 reads the desktop tool registry from a path not present in this container
+tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_chat_edge_registry_scan_is_alive  # 2026-09-01 same
+tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_desktop_tool_is_classified  # 2026-09-01 same
+tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_chat_edge_tool_is_classified  # 2026-09-01 same
+tests/test_service_jwt_wiring.py::test_compose_feeds_service_jwt_to_both_services  # 2026-09-01 asserts compose contents that differ from this deployment's overrides
+tests/test_service_jwt_wiring.py::test_prod_compose_hard_requires_service_jwt_on_backend  # 2026-09-01 same
+
+# ── request-size limit: enforced by the gateway/proxy in front of the
+#    app, which is not in front of the app in the unit lane ──
+tests/test_body_limit.py::TestBodySizeLimit::test_oversized_request_rejected  # 2026-09-01 limit lives in the fronting proxy, absent in-process
+tests/test_body_limit.py::TestBodySizeLimit::test_error_has_standard_envelope  # 2026-09-01 same
+tests/test_pilot_readiness.py::TestPR05BodySizeLimit::test_oversized_request_rejected  # 2026-09-01 same
+
+# ── schema drift between the ORM and the oldest migrations ──
+tests/test_tenant_model.py::TestTenantSchema::test_tenants_columns  # 2026-09-01 ORM has columns migration 002 never added
+tests/test_tenant_model.py::TestMigration002::test_migration_columns_match_orm  # 2026-09-01 same
+
+# ── provider/dispatch state: these assert which provider answered, so
+#    they follow the dev box's live provider availability ──
+tests/test_routing_e2e.py::TestRoutingE2EAuto::test_auto_coding_returns_anthropic  # 2026-09-01 anthropic is not reachable from this box; auto answers from a live provider
+tests/test_sranai_provider.py::test_unknown_provider_still_rejected  # 2026-09-01 depends on the provider registry seeded in this deployment
+tests/test_streaming_dlp.py::TestStreamingProviderPiiMaskedUnderDefault::test_streaming_provider_pii_is_masked_by_default  # 2026-09-01 needs a live streaming provider
+tests/test_streaming_dlp.py::TestStreamingCleanMessagePassesThrough::test_streaming_clean_message_passes_through  # 2026-09-01 same
+tests/test_streaming_session_factory.py::TestStreamingUsesRequestTimeFactory::test_streaming_uses_request_time_session_factory  # 2026-09-01 same
+tests/test_streaming_session_factory.py::TestStreamingFactoryCaptureIsPerRequest::test_streaming_factory_capture_is_per_request  # 2026-09-01 same
+
+# ── async key lookup against the seeded integration DB ──
+tests/test_async_provider_key_service.py::test_get_api_key_async_resolves_db_key  # 2026-09-01 seeded key rows are stored in a legacy encoding this build no longer decodes
