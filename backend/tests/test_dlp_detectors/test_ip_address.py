@@ -55,6 +55,28 @@ class TestIpAddressNegative:
     def test_incomplete_ipv4(self):
         assert "ip_address" not in detector_names_for("192.168.1")
 
+    def test_sql_date_cast_is_not_ipv6(self):
+        # FIX50 P1-B — ``::DATE`` matched as the IPv6 ``::DA`` (the regex
+        # halted at the non-hex ``T``), and the mask + orphan-redact
+        # pipeline then deleted the cast from the user's SQL, leaving
+        # ``'2068-01-01'TE`` (reproduced live in the FIX48 run). The
+        # boundary guard must reject a match glued to more identifier
+        # characters.
+        assert "ip_address" not in detector_names_for(
+            "SELECT * FROM GENERATE_SERIES('2568-01-01'::DATE, '2568-12-01'::DATE)"
+        )
+        assert "ip_address" not in detector_names_for("'2025-01-01'::date")
+
+    def test_code_scope_operator_is_not_ipv6(self):
+        # C++/Rust ``::`` scoping with hex-lookalike identifiers.
+        assert "ip_address" not in detector_names_for("ns::addr and std::fabs(x)")
+
+    def test_real_ipv6_still_matches_next_to_punctuation(self):
+        # Tightening the boundary must not lose real addresses that touch
+        # punctuation (sentence end, equals, comma).
+        assert "ip_address" in detector_names_for("gateway=2001:db8::1.")
+        assert "ip_address" in detector_names_for("ping ::1, then stop")
+
     def test_ip_inside_credential_url(self):
         # Overlap resolution: when the IP lives inside a DB URL with
         # embedded credentials, CREDENTIAL wins. The IP must NOT be

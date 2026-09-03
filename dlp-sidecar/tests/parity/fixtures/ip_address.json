@@ -72,6 +72,51 @@
       "should_match": false,
       "expected_count": 0,
       "expected_spans": []
+    },
+    {
+      "id": "sql_date_cast_not_ipv6",
+      "input": "SELECT '2025-01-01'::date AS d",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "sql_date_cast_upper_not_ipv6",
+      "input": "GENERATE_SERIES('2568-01-01'::DATE, '2568-12-01'::DATE)",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "cpp_scope_not_ipv6",
+      "input": "call ns::addr and boost::asio here",
+      "should_match": false,
+      "expected_count": 0,
+      "expected_spans": []
+    },
+    {
+      "id": "ipv6_loopback_still_matches",
+      "input": "ping ::1 now",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 5,
+          "end": 8
+        }
+      ]
+    },
+    {
+      "id": "ipv6_after_punct_still_matches",
+      "input": "gw=2001:db8::1.",
+      "should_match": true,
+      "expected_count": 1,
+      "expected_spans": [
+        {
+          "start": 3,
+          "end": 14
+        }
+      ]
     }
   ]
 }

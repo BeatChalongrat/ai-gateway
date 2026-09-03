@@ -17,8 +17,14 @@ static IPV4_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static IPV6_RE: Lazy<Regex> = Lazy::new(|| {
+    // Boundary guards reject ANY adjacent identifier character (letters
+    // beyond hex, digits, underscore), not just hex: an "address" that
+    // stops mid-word is a token inside code, not an address. Without
+    // this, SQL's ``::DATE`` matches as the IPv6 ``::DA`` and C++/Rust
+    // ``ns::addr`` scoping matches ``::add`` (FIX50 P1-B). Byte-identical
+    // to ip_address.py.
     Regex::new(concat!(
-        r"(?<![0-9A-Fa-f:])",
+        r"(?<![0-9A-Za-z_:])",
         r"(?:",
         r"(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}",
         r"|(?:[0-9A-Fa-f]{1,4}:){1,7}:",
@@ -27,7 +33,7 @@ static IPV6_RE: Lazy<Regex> = Lazy::new(|| {
         r"|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}",
         r"|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}",
         r")",
-        r"(?![0-9A-Fa-f:])"
+        r"(?![0-9A-Za-z_:])"
     ))
     .expect("ipv6 regex")
 });

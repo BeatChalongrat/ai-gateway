@@ -29,8 +29,15 @@ _IPV4_RE = re.compile(
 
 # IPv6: full, leading-zero, and common compressed forms (incl. ::).
 # Conservative: requires at least one colon-group and either full/compressed form.
+# Boundary guards reject ANY adjacent identifier character (letters beyond
+# hex, digits, underscore), not just hex: an "address" that stops mid-word
+# is a token inside code, not an address. Without this, SQL's ``::DATE``
+# matches as the IPv6 ``::DA`` (the regex halts at the non-hex ``T``) and
+# C++/Rust ``ns::addr`` scoping matches ``::add`` — the mask+orphan-redact
+# pipeline then deletes the cast from the user's code (FIX50 P1-B,
+# reproduced live in the 2026-09-02 FIX48 run as ``'2068-01-01'TE``).
 _IPV6_RE = re.compile(
-    r"(?<![0-9A-Fa-f:])"
+    r"(?<![0-9A-Za-z_:])"
     r"(?:"
     r"(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}"          # full (8 groups)
     r"|(?:[0-9A-Fa-f]{1,4}:){1,7}:"                      # trailing ::
@@ -39,7 +46,7 @@ _IPV6_RE = re.compile(
     r"|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}"
     r"|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}"     # leading ::
     r")"
-    r"(?![0-9A-Fa-f:])"
+    r"(?![0-9A-Za-z_:])"
 )
 
 

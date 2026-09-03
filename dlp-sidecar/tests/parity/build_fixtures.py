@@ -173,6 +173,14 @@ SPECS = [
             # sequence of four octets present.
             Case("no_dots_no_match", "version 12345 deployed", False),
             Case("no_ip_present", "no addresses here", False),
+            # FIX50 P1-B — identifier-boundary guards: an "address" that
+            # stops mid-word is a token inside code, not an address.
+            Case("sql_date_cast_not_ipv6", "SELECT '2025-01-01'::date AS d", False),
+            Case("sql_date_cast_upper_not_ipv6",
+                 "GENERATE_SERIES('2568-01-01'::DATE, '2568-12-01'::DATE)", False),
+            Case("cpp_scope_not_ipv6", "call ns::addr and boost::asio here", False),
+            Case("ipv6_loopback_still_matches", "ping ::1 now", True),
+            Case("ipv6_after_punct_still_matches", "gw=2001:db8::1.", True),
         ],
     ),
     DetectorSpec(
