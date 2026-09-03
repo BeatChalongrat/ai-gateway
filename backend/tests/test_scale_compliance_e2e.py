@@ -42,11 +42,11 @@ class TestBackgroundTaskIntegration:
 
 
 class TestRetentionIntegration:
-    def test_cleanup_on_empty_db(self, db_session):
-        svc = RetentionService(request_log_days=1, audit_log_days=1)
-        result = svc.run_all(db_session)
-        assert result["request_logs_deleted"] == 0
-        assert result["audit_logs_deleted"] == 0
+    def test_audit_aging_on_empty_db(self, db_session):
+        svc = RetentionService(audit_log_days=1)
+        out = svc.cleanup_audit_logs(db_session, dry_run=True)
+        assert out["rows_matched"] == 0
+        assert out["rows_deleted"] == 0
 
 
 class TestAuditIntegrityIntegration:

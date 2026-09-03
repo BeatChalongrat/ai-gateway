@@ -133,36 +133,24 @@ async def lifespan(app: FastAPI):
     # Start event loop lag monitor — logs when loop is blocked > 100ms
     monitor_task = asyncio.create_task(_loop_monitor())
 
-    # Daily DLP retention — NULL-ifies raw PII columns on request_logs
-    # rows older than ``settings.dlp_raw_retention_days``. Only one
-    # gunicorn worker needs to run this, but every worker scheduling
-    # it is acceptable: the DB update is idempotent (already-NULL rows
-    # are a no-op) and the cost is one SQL UPDATE per day per worker.
-    # If that becomes a concern, promote to a distributed lock.
-    retention_task = asyncio.create_task(_daily_dlp_retention())
-
-    # Daily archive — moves request_logs rows older than
-    # ``settings.log_archive_days`` into ``request_logs_archive``.
-    # Same pattern as DLP retention: cancel-safe, idempotent, sleeps
-    # 24h between runs. See app/jobs/log_archive_job.py.
-    #
-    # Gated OFF by default (same fail-closed shape as chat-edge's cloud
-    # scheduler): the archive table has no expiry/delete path and there
-    # is no ordering between this loop and the DLP raw-retention loop,
-    # so a day where archive runs first copies un-stripped raw columns
-    # into permanent cold storage. When the flag is false the task is
-    # never created at all — there is no dormant task to mis-start.
-    archive_task: asyncio.Task | None = None
-    if settings.log_archive_enabled:
-        archive_task = asyncio.create_task(_daily_log_archive())
-    else:
+    # Nightly retention pipeline — ONE ordered task at 00:00 UTC
+    # replacing the two independent 24h loops (DLP raw-stripper +
+    # archive mover) whose lack of ordering was a live race. The order
+    # is structural inside run_retention_pipeline: strip → archive →
+    # archive-expiry → audit-aging, and the archive step is skipped on
+    # a night the strip failed. The stripper always runs; every step
+    # that DELETES is flag-gated off by default and dry-run first.
+    # See app/jobs/retention_pipeline.py.
+    retention_task = asyncio.create_task(_nightly_retention_pipeline())
+    if not settings.log_archive_enabled:
         import structlog as _structlog
 
         _structlog.get_logger("startup").info(
             "log archive NOT started: LOG_ARCHIVE_ENABLED is false "
             "(default) — waiting on the retention decision "
             "(docs/DATA_RETENTION_PLAN.md); request_logs grows in place, "
-            "nothing is moved to request_logs_archive"
+            "nothing is moved to request_logs_archive (the nightly "
+            "pipeline still runs the DLP raw-stripper)"
         )
 
     # Monthly partition maintenance — creates next month's partition
@@ -275,8 +263,6 @@ async def lifespan(app: FastAPI):
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
-    if archive_task is not None:
-        archive_task.cancel()
     alert_task.cancel()
     search_health_task.cancel()
     partition_task.cancel()
@@ -602,27 +588,6 @@ async def _db_pool_sampler() -> None:
         await asyncio.sleep(5)
 
 
-async def _daily_dlp_retention() -> None:
-    """Run ``run_dlp_retention_cleanup`` once every 24 hours.
-
-    First pass runs after a 60s warm-up so boot-time traffic doesn't
-    compete with an UPDATE over the whole table. All DB work is pushed
-    to a thread so the event loop stays responsive even on a cold index
-    scan; the retention job itself is a plain blocking function.
-    """
-    import asyncio
-
-    await asyncio.sleep(60)
-    while True:
-        try:
-            await asyncio.to_thread(_run_dlp_retention_once)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            print(f"[dlp-retention] run failed: {exc}")
-        await asyncio.sleep(24 * 60 * 60)
-
-
 def _initial_registry_reload() -> None:
     """Refresh the in-memory model registry from the DB at startup.
 
@@ -668,21 +633,33 @@ def _stop_model_discovery_scheduler() -> None:
         print(f"[shutdown] Scheduler stop skipped: {exc}")
 
 
-async def _daily_log_archive() -> None:
-    """Run the log-archive job once every 24 hours."""
+async def _nightly_retention_pipeline() -> None:
+    """Run the ordered retention pipeline at every 00:00 UTC.
+
+    No boot-time pass: the deletion hour is fixed and documented, so a
+    restart must not move it. All DB work runs in a thread; the
+    pipeline function itself owns step ordering and per-step flags.
+    """
     import asyncio
 
-    # Stagger the start so archive and retention don't both fight the
-    # DB on a cold boot — retention starts at +60s, archive at +120s.
-    await asyncio.sleep(120)
+    from app.jobs.retention_pipeline import seconds_until_next_midnight_utc
+
     while True:
         try:
-            await asyncio.to_thread(_run_log_archive_once)
+            await asyncio.sleep(seconds_until_next_midnight_utc())
+            await asyncio.to_thread(_run_retention_pipeline_once)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            print(f"[log-archive] run failed: {exc}")
-        await asyncio.sleep(24 * 60 * 60)
+            print(f"[retention-pipeline] run failed: {exc}")
+
+
+def _run_retention_pipeline_once() -> None:
+    """Open sessions per step via SessionLocal, run the pipeline."""
+    from app.core.db import SessionLocal
+    from app.jobs.retention_pipeline import run_retention_pipeline
+
+    run_retention_pipeline(SessionLocal)
 
 
 async def _daily_partition_maintenance() -> None:
@@ -733,18 +710,6 @@ async def _alert_evaluation_sweep() -> None:
         await asyncio.sleep(interval)
 
 
-def _run_log_archive_once() -> None:
-    """Open a session, run the archive job, close the session."""
-    from app.core.db import SessionLocal
-    from app.jobs.log_archive_job import run_log_archive
-
-    session = SessionLocal()
-    try:
-        run_log_archive(session)
-    finally:
-        session.close()
-
-
 def _run_partition_maintenance_once() -> None:
     """Open a session, run the maintenance job, close the session."""
     from app.core.db import SessionLocal
@@ -753,28 +718,6 @@ def _run_partition_maintenance_once() -> None:
     session = SessionLocal()
     try:
         run_partition_maintenance(session)
-    finally:
-        session.close()
-
-
-def _run_dlp_retention_once() -> None:
-    """Open a session, run the cleanup, close the session."""
-    import structlog
-
-    from app.core.db import SessionLocal
-    from app.jobs.dlp_retention import run_dlp_retention_cleanup
-
-    logger = structlog.get_logger("dlp.retention")
-
-    session = SessionLocal()
-    try:
-        stats = run_dlp_retention_cleanup(session)
-        logger.info(
-            "dlp_retention_job_ran",
-            rows_cleaned=stats.rows_with_raw_text_cleared,
-            findings_stripped=stats.rows_with_findings_stripped,
-            retention_days=stats.retention_days,
-        )
     finally:
         session.close()
 

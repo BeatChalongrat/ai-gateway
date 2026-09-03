@@ -1,81 +1,109 @@
-"""P10-05: Retention / archival policy tests."""
+"""Admin-audit-log aging tests.
 
-import uuid
+RetentionService is now single-purpose: it ages the admin audit log,
+scheduled through the nightly retention pipeline. The old
+``cleanup_request_logs`` hard-deleter was removed deliberately — it
+was never scheduled anywhere, and request_logs aging is owned by the
+DLP stripper + archive mover + partition machinery (each with its own
+tests). These tests pin the surviving behavior at FULL strength plus
+the new safety shape:
+
+* dry-run (the default) counts and deletes nothing;
+* a live pass deletes exactly the out-of-window rows — the original
+  backdated-row assertion, carried forward;
+* a live pass records ITSELF in the audit log (aging leaves evidence);
+* the request_logs deleter is really gone.
+"""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
 
-from app.domain.observability import RequestRecord
-from app.models.admin_audit_log import AdminAuditLogORM
-from app.models.tenant import TenantORM
-from app.models.project import ProjectORM
 from app.services.admin_audit_service import AdminAuditService
-from app.services.request_log_service import RequestLogService
 from app.services.retention_service import RetentionService
 import app.models  # noqa: F401
 
 
-def _seed(session):
-    tid, pid = str(uuid.uuid4()), str(uuid.uuid4())
-    session.add(TenantORM(tenant_id=tid, name="T", slug=f"t-{tid[:8]}"))
+def _record_backdated(session, days_ago: int, action: str = "test") -> None:
+    AdminAuditService().record(
+        session, actor_key_id="k1", tenant_id="t1",
+        action=action, resource_type="x", resource_id="y",
+    )
+    entry = session.execute(
+        text(
+            "SELECT id FROM admin_audit_log"
+            " WHERE action = :a ORDER BY id DESC LIMIT 1"
+        ),
+        {"a": action},
+    ).scalar()
+    session.execute(
+        text("UPDATE admin_audit_log SET timestamp = :ts WHERE id = :id"),
+        {
+            "ts": datetime.now(timezone.utc) - timedelta(days=days_ago),
+            "id": entry,
+        },
+    )
     session.flush()
-    session.add(ProjectORM(project_id=pid, tenant_id=tid, name="P"))
-    session.flush()
-    return tid, pid
 
 
-class TestRetentionCleanup:
-    def test_recent_logs_not_deleted(self, db_session):
-        tid, pid = _seed(db_session)
-        RequestLogService().persist(db_session, RequestRecord(
-            request_id="recent", tenant_id=tid, project_id=pid,
-        ))
-        svc = RetentionService(request_log_days=90)
-        deleted = svc.cleanup_request_logs(db_session)
-        assert deleted == 0
+def _count(session) -> int:
+    return int(
+        session.execute(text("SELECT count(*) FROM admin_audit_log")).scalar()
+        or 0
+    )
 
-    def test_old_logs_deleted(self, db_session):
-        tid, pid = _seed(db_session)
-        RequestLogService().persist(db_session, RequestRecord(
-            request_id="old", tenant_id=tid, project_id=pid,
-        ))
-        # Manually backdate the record
-        from app.models.request_log import RequestLogORM
-        log = db_session.get(RequestLogORM, "old")
-        log.created_at = datetime.now(timezone.utc) - timedelta(days=100)
-        db_session.flush()
 
-        svc = RetentionService(request_log_days=90)
-        deleted = svc.cleanup_request_logs(db_session)
-        assert deleted == 1
+class TestAuditLogAging:
+    def test_dry_run_counts_and_deletes_nothing(self, db_session):
+        _record_backdated(db_session, days_ago=400, action="old-a")
+        _record_backdated(db_session, days_ago=1, action="new-a")
+        before = _count(db_session)
 
-    def test_audit_retention(self, db_session):
-        AdminAuditService().record(
-            db_session, actor_key_id="k1", tenant_id="t1",
-            action="test", resource_type="x", resource_id="y",
+        out = RetentionService(audit_log_days=365).cleanup_audit_logs(
+            db_session, dry_run=True
         )
-        # Backdate
-        entry = db_session.execute(
-            text("SELECT id FROM admin_audit_log LIMIT 1")
+        assert out["dry_run"] is True
+        assert out["rows_matched"] == 1
+        assert out["rows_deleted"] == 0
+        assert _count(db_session) == before
+
+    def test_live_pass_deletes_only_out_of_window_rows(self, db_session):
+        _record_backdated(db_session, days_ago=400, action="old-b")
+        _record_backdated(db_session, days_ago=1, action="new-b")
+
+        out = RetentionService(audit_log_days=365).cleanup_audit_logs(
+            db_session, dry_run=False
+        )
+        assert out["rows_deleted"] == 1
+        remaining = db_session.execute(
+            text("SELECT action FROM admin_audit_log ORDER BY id")
+        ).scalars().all()
+        assert "old-b" not in remaining
+        assert "new-b" in remaining
+
+    def test_live_pass_records_itself(self, db_session):
+        _record_backdated(db_session, days_ago=400, action="old-c")
+        RetentionService(audit_log_days=365).cleanup_audit_logs(
+            db_session, dry_run=False
+        )
+        rec = db_session.execute(
+            text(
+                "SELECT count(*) FROM admin_audit_log"
+                " WHERE action = 'retention_delete'"
+                "   AND resource_type = 'admin_audit_log'"
+            )
         ).scalar()
-        db_session.execute(
-            text(f"UPDATE admin_audit_log SET timestamp = :ts WHERE id = :id"),
-            {"ts": datetime.now(timezone.utc) - timedelta(days=400), "id": entry},
-        )
-        db_session.flush()
+        assert int(rec or 0) >= 1, "aging must leave its own audit record"
 
-        svc = RetentionService(audit_log_days=365)
-        deleted = svc.cleanup_audit_logs(db_session)
-        assert deleted == 1
+    def test_window_floor(self):
+        with pytest.raises(ValueError):
+            RetentionService(audit_log_days=0)
 
-    def test_run_all(self, db_session):
-        svc = RetentionService()
-        result = svc.run_all(db_session)
-        assert "request_logs_deleted" in result
-        assert "audit_logs_deleted" in result
-
-    def test_configurable_retention(self):
-        svc = RetentionService(request_log_days=30, audit_log_days=180)
-        assert svc._request_log_days == 30
-        assert svc._audit_log_days == 180
+    def test_request_log_deleter_is_gone(self):
+        """The unscheduled request_logs hard-deleter was retired — its
+        job belongs to the stripper/mover/partition machinery. If it
+        comes back it must come back scheduled, dry-run-first, and
+        audited (and this pin removed deliberately)."""
+        assert not hasattr(RetentionService, "cleanup_request_logs")
+        assert not hasattr(RetentionService, "run_all")

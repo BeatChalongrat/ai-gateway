@@ -62,6 +62,18 @@ def pg_session():
         " tenant_id text,"
         " created_at timestamptz)"
     ))
+    # Twin of the admin audit table — the expiry job commits its
+    # deletion RECORD atomically with the delete, so the isolated
+    # schema needs somewhere for that row to land.
+    s.execute(text(
+        "CREATE TABLE admin_audit_log ("
+        " id serial PRIMARY KEY,"
+        " timestamp timestamptz NOT NULL DEFAULT now(),"
+        " actor_key_id text, tenant_id text, action text,"
+        " resource_type text, resource_id text, details text,"
+        " outcome text, ip_address text, user_agent text,"
+        " session_id_prefix text)"
+    ))
     s.commit()
     # The job COMMITs internally, which resets search_path on some pool
     # configs — pin it at the session start of every use.
@@ -128,3 +140,47 @@ def test_archive_refuses_on_schema_drift_before_touching_rows(pg_session):
         text("SELECT count(*) FROM request_logs WHERE request_id=:r"),
         {"r": rid},
     ).scalar() == 1
+
+
+def test_archive_expiry_dry_run_counts_only(pg_session):
+    from app.jobs.archive_expiry_job import run_archive_expiry
+
+    pg_session.execute(text(
+        "INSERT INTO request_logs_archive (request_id, tenant_id, created_at)"
+        " VALUES ('exp-old', 't', NOW() - interval '400 days'),"
+        "        ('exp-new', 't', NOW() - interval '5 days')"
+    ))
+    pg_session.commit()
+
+    stats = run_archive_expiry(pg_session, retention_days=365, dry_run=True)
+    assert stats.rows_matched == 1
+    assert stats.rows_deleted == 0
+    # Nothing was removed.
+    assert pg_session.execute(
+        text("SELECT count(*) FROM request_logs_archive")
+    ).scalar() == 2
+
+
+def test_archive_expiry_live_deletes_only_expired(pg_session):
+    from app.jobs.archive_expiry_job import run_archive_expiry
+
+    pg_session.execute(text(
+        "INSERT INTO request_logs_archive (request_id, tenant_id, created_at)"
+        " VALUES ('exp-old2', 't', NOW() - interval '400 days'),"
+        "        ('exp-new2', 't', NOW() - interval '5 days')"
+    ))
+    pg_session.commit()
+
+    stats = run_archive_expiry(pg_session, retention_days=365, dry_run=False)
+    assert stats.rows_deleted == 1
+    remaining = pg_session.execute(
+        text("SELECT request_id FROM request_logs_archive ORDER BY request_id")
+    ).scalars().all()
+    assert remaining == ["exp-new2"]
+    # The deletion record committed atomically with the delete.
+    rec = pg_session.execute(text(
+        "SELECT count(*) FROM admin_audit_log"
+        " WHERE action='retention_delete'"
+        "   AND resource_type='request_logs_archive'"
+    )).scalar()
+    assert int(rec or 0) == 1

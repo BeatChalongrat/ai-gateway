@@ -491,12 +491,34 @@ class Settings(BaseSettings):
     log_archive_enabled: bool = False
 
     # Archive retention — rows older than this are moved from
-    # ``request_logs`` to ``request_logs_archive`` by the daily job
-    # in ``app.jobs.log_archive_job`` (only when ``log_archive_enabled``
-    # is true — see above). 90 days was chosen to match the DLP raw
-    # retention window, but note that matching WINDOWS does not order
-    # the two jobs within a day.
+    # ``request_logs`` to ``request_logs_archive`` by the nightly
+    # pipeline (only when ``log_archive_enabled`` is true — see above).
+    # Ordering against the DLP raw-stripper is no longer a matter of
+    # matching windows: ``app.jobs.retention_pipeline`` runs strip →
+    # archive → expiry → audit-aging as ONE ordered sequence at 00:00
+    # UTC, and the archive step is skipped outright on a night the
+    # strip step failed.
     log_archive_days: int = 90
+
+    # Archive EXPIRY — the way out of ``request_logs_archive`` (the
+    # table used to be write-only). Rows older than
+    # ``archive_retention_days`` are deleted by the pipeline's expiry
+    # step. Off by default, and dry-run (counts only, deletes nothing)
+    # by default when enabled — the operator reads the dry-run number,
+    # then flips ``archive_expiry_dry_run`` off. Live deletions write
+    # an admin-audit row.
+    archive_expiry_enabled: bool = False
+    archive_expiry_dry_run: bool = True
+    archive_retention_days: int = 365
+
+    # Admin-audit-log aging — the audit trail's own retention. The
+    # window is deliberately LONGER than every data window (deletion
+    # evidence must outlive the data it describes); 730 is a proposed
+    # default awaiting operator sign-off, kept inert by the off-by-
+    # default flag. Dry-run first, like every deleting step.
+    audit_log_aging_enabled: bool = False
+    audit_log_aging_dry_run: bool = True
+    audit_log_retention_days: int = 730
 
     # C2 — model discovery sync behaviour.
     # ``model_discovery_auto_add`` False (default) makes the daily sync
