@@ -65,7 +65,7 @@ func idsOf(convs []model.Conversation) map[uuid.UUID]bool {
 
 func TestArchive_HidesFromTheSidebarButKeepsTheChat(t *testing.T) {
 	pool := archivePool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 
@@ -137,7 +137,7 @@ func TestArchive_HidesFromTheSidebarButKeepsTheChat(t *testing.T) {
 
 func TestArchive_IsTenantScopedAndLosesToDelete(t *testing.T) {
 	pool := archivePool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 
@@ -177,7 +177,7 @@ func TestArchive_IsTenantScopedAndLosesToDelete(t *testing.T) {
 
 func TestArchive_NewConversationsStartUnarchived(t *testing.T) {
 	pool := archivePool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	cr := repository.NewConversationRepo(pool)
 

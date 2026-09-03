@@ -49,7 +49,7 @@ func skillToolPool(t *testing.T) *pgxpool.Pool {
 
 func TestExecUseSkill_ReturnsInstructionsAndScoped(t *testing.T) {
 	pool := skillToolPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	repo := repository.NewSkillRepo(pool)
 

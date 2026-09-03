@@ -63,7 +63,7 @@ func seedSearchFixture(
 
 func TestSearchUserMessages_ThaiSubstringMatch(t *testing.T) {
 	pool := trigramPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	repo := repository.NewMessageRepo(pool)
 
@@ -93,7 +93,7 @@ func TestSearchUserMessages_ThaiSubstringMatch(t *testing.T) {
 
 func TestSearchUserMessages_EnglishStillWorks(t *testing.T) {
 	pool := trigramPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	repo := repository.NewMessageRepo(pool)
 
@@ -118,7 +118,7 @@ func TestSearchUserMessages_EnglishStillWorks(t *testing.T) {
 
 func TestSearchUserMessages_OwnershipScopeHoldsOnTrigramBranch(t *testing.T) {
 	pool := trigramPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	repo := repository.NewMessageRepo(pool)
 
@@ -139,7 +139,7 @@ func TestSearchUserMessages_OwnershipScopeHoldsOnTrigramBranch(t *testing.T) {
 
 func TestSearchTitlesForUser_ThaiSubstringMatch(t *testing.T) {
 	pool := trigramPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	repo := repository.NewConversationRepo(pool)
 

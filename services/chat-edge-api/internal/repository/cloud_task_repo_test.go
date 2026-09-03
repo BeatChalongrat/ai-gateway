@@ -115,7 +115,7 @@ func cloudTaskPool(t *testing.T) *pgxpool.Pool {
 
 func TestCloudTaskRepo_ScopingAndDueScan(t *testing.T) {
 	pool := cloudTaskPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	r := repository.NewCloudTaskRepo(pool)
 
@@ -223,7 +223,7 @@ func TestCloudTaskRepo_ScopingAndDueScan(t *testing.T) {
 // stale (crash recovery) or it is released (AdvanceAfterRun).
 func TestCloudTaskRepo_ClaimDue_SingleFlight(t *testing.T) {
 	pool := cloudTaskPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	r := repository.NewCloudTaskRepo(pool)
 

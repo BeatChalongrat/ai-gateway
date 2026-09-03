@@ -28,7 +28,7 @@ func canvasArtifactPool(t *testing.T) *pgxpool.Pool {
 
 func TestCanvasArtifactRepo_VersioningAndListing(t *testing.T) {
 	pool := canvasArtifactPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	ar := repository.NewCanvasArtifactRepo(pool)
 	cr := repository.NewConversationRepo(pool)
@@ -97,7 +97,7 @@ func TestCanvasArtifactRepo_VersioningAndListing(t *testing.T) {
 
 func TestCanvasArtifactRepo_RevertShapeKeepsHistory(t *testing.T) {
 	pool := canvasArtifactPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	ar := repository.NewCanvasArtifactRepo(pool)
 	cr := repository.NewConversationRepo(pool)
@@ -135,7 +135,7 @@ func TestCanvasArtifactRepo_RevertShapeKeepsHistory(t *testing.T) {
 
 func TestCanvasArtifactRepo_TenantAndConversationScoping(t *testing.T) {
 	pool := canvasArtifactPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	ar := repository.NewCanvasArtifactRepo(pool)
 	cr := repository.NewConversationRepo(pool)
@@ -182,7 +182,7 @@ func TestCanvasArtifactRepo_TenantAndConversationScoping(t *testing.T) {
 
 func TestCanvasArtifactRepo_ConversationDeleteCascades(t *testing.T) {
 	pool := canvasArtifactPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	ar := repository.NewCanvasArtifactRepo(pool)
 	cr := repository.NewConversationRepo(pool)

@@ -85,7 +85,7 @@ func seedConversation(
 
 func TestMerge031_MovesEveryFiledChatIntoAMatchingProject(t *testing.T) {
 	pool := mergePool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 
 	tenantID, userID := uuid.New(), uuid.New()
@@ -242,7 +242,7 @@ func TestMerge031_MovesEveryFiledChatIntoAMatchingProject(t *testing.T) {
 
 func TestMerge031_IsIdempotentAndReversible(t *testing.T) {
 	pool := mergePool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 
 	tenantID, userID := uuid.New(), uuid.New()

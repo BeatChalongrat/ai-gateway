@@ -86,7 +86,7 @@ func skillPool(t *testing.T) *pgxpool.Pool {
 
 func TestSkillRepo_ScopingAndListing(t *testing.T) {
 	pool := skillPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	r := repository.NewSkillRepo(pool)
 

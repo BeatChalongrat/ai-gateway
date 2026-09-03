@@ -233,7 +233,7 @@ func TestFix41LedgerBackendBench(t *testing.T) {
 
 	// ── L3 — Postgres, a new table. ──────────────────────────────────────
 	if pool := benchPool(t); pool != nil {
-		defer pool.Close()
+		t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 		_, err := pool.Exec(ctx, `CREATE UNLOGGED TABLE IF NOT EXISTS fix41_bench_ledger (
 			run_id uuid NOT NULL, seq bigint NOT NULL, event text NOT NULL,
 			data jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),

@@ -68,7 +68,7 @@ func (importTestModels) ModelIDs() []string       { return nil }
 
 func TestImportServiceE2E(t *testing.T) {
 	pool := importPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 
 	cr := repository.NewConversationRepo(pool)

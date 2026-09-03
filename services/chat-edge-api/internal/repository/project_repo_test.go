@@ -28,7 +28,7 @@ func projectPool(t *testing.T) *pgxpool.Pool {
 
 func TestProjectRepo_CRUDAndOwnership(t *testing.T) {
 	pool := projectPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	pr := repository.NewProjectRepo(pool)
 
@@ -75,7 +75,7 @@ func TestProjectRepo_CRUDAndOwnership(t *testing.T) {
 
 func TestProjectRepo_ConversationMembershipAndContextLookup(t *testing.T) {
 	pool := projectPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	pr := repository.NewProjectRepo(pool)
 	cr := repository.NewConversationRepo(pool)
@@ -120,7 +120,7 @@ func TestProjectRepo_ConversationMembershipAndContextLookup(t *testing.T) {
 
 func TestProjectRepo_DeleteUnassignsConversations(t *testing.T) {
 	pool := projectPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	pr := repository.NewProjectRepo(pool)
 	cr := repository.NewConversationRepo(pool)
@@ -144,7 +144,7 @@ func TestProjectRepo_DeleteUnassignsConversations(t *testing.T) {
 
 func TestProjectRepo_SetKnowledgeBase_RejectsForeignKB(t *testing.T) {
 	pool := projectPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	pr := repository.NewProjectRepo(pool)
 

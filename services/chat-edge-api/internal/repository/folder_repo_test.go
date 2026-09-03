@@ -62,7 +62,7 @@ func newConv(t *testing.T, ctx context.Context, cr *repository.ConversationRepo,
 
 func TestFolderRepo(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered first -> closes last, after row cleanup
 	ctx := context.Background()
 	fr := repository.NewFolderRepo(pool)
 	cr := repository.NewConversationRepo(pool)
