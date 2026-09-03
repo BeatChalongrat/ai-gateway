@@ -161,6 +161,14 @@ func main() {
 	sourcesRepo := repository.NewResponseContextSourceRepo(pool)
 	tenantSettingsRepo := repository.NewTenantMemorySettingsRepo(pool)
 	exportsRepo := repository.NewDataExportRepo(pool)
+	// Retention & deletion program (docs/DATA_RETENTION_PLAN.md,
+	// migration 040): the durable deletion-audit sink, the per-tenant
+	// transcript-retention settings, and the one-transaction erase
+	// cascade. Declared early — several services below take the audit
+	// sink.
+	deletionAuditRepo := repository.NewDeletionAuditRepo(pool)
+	retentionSettingsRepo := repository.NewTenantRetentionSettingsRepo(pool)
+	eraseRepo := repository.NewConversationEraseRepo(pool)
 
 	gateway := service.NewGatewayClient(
 		cfg.GatewayAPIURL, cfg.GatewayAPIKey,
@@ -258,6 +266,13 @@ func main() {
 		ExtractPythonBinary: cfg.ExtractPythonBinary,
 		PresignedURLExpiry:  cfg.PresignedURLExpiry,
 	})
+	fileSvc.SetDeletionAudit(deletionAuditRepo)
+	// The transcript sweep needs the storage backend (file OBJECTS are
+	// deleted before the row cascade), so it is built here rather than
+	// with the other retention pieces above.
+	transcriptRetention := service.NewTranscriptRetentionService(
+		retentionSettingsRepo, eraseRepo, filesRepo, deletionAuditRepo, storageBackend,
+	)
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
 	// S1 — Personal Memory Core. Service is wired alongside prefs +
@@ -274,6 +289,8 @@ func main() {
 	exportSvc := service.NewExportService(memoriesRepo, exportsRepo, tenantSettingsRepo, cfg.FileStorageRoot)
 	purgeSvc := service.NewPurgeService(memoriesRepo, statesRepo, sourcesRepo, exportsRepo, tenantSettingsRepo, cfg.FileStorageRoot)
 	retentionEnforcer := service.NewRetentionEnforcer(memoriesRepo, tenantSettingsRepo)
+	purgeSvc.SetDeletionAudit(deletionAuditRepo)
+	conversationSvc.SetDeletionAudit(deletionAuditRepo)
 	// S3 — Structured Conversation State. Backs the
 	// <conversation_state> system-prompt block, the
 	// update_conversation_state AI tool, and the GET
@@ -577,6 +594,11 @@ func main() {
 		// authorize-before-run, DB lease (migration 036), cloud tool subset.
 		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
 		Account:    handler.NewAccountHandler(exportSvc, purgeSvc),
+		// Retention & deletion program admin surface: settings (floor-
+		// validated, audited), deletion-audit reads, dry-run preview.
+		RetentionAdmin: handler.NewRetentionAdminHandler(
+			retentionSettingsRepo, deletionAuditRepo, transcriptRetention,
+		),
 		// Sprint 2A.5 — direct-dispatch media proxy. Reuses the same
 		// GatewayClient (and its internal-trust headers) as the video tool.
 		MediaProxy: handler.NewMediaProxyHandler(gateway),
@@ -616,6 +638,12 @@ func main() {
 	// background goroutine drains alongside the HTTP server.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
 	go retentionEnforcer.StartBackground(bgCtx)
+
+	// Transcript retention sweep — 00:00 UTC daily, per-tenant opt-in,
+	// dry-run by default. Deletes NOTHING for a tenant until an admin
+	// enables it and then, after reading the dry-run numbers, turns
+	// dry_run off. No boot-time pass: the deletion hour is fixed.
+	go transcriptRetention.StartBackground(bgCtx)
 
 	// FIX16 — cloud scheduled tasks: the always-on firing goroutine. OFF
 	// unless CLOUD_SCHEDULER_ENABLED=true. The runner authorizes EVERY fire

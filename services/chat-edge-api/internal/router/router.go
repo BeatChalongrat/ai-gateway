@@ -83,6 +83,10 @@ type Handlers struct {
 	CloudTasks *handler.CloudTaskHandler
 	// S9 — GDPR-style data export + right-to-erasure for memory.
 	Account *handler.AccountHandler
+	// Retention & deletion program — admin settings, deletion audit,
+	// dry-run preview (docs/DATA_RETENTION_PLAN.md). Optional (nil →
+	// routes not registered).
+	RetentionAdmin *handler.RetentionAdminHandler
 	// Usage — credit badge + per-model breakdown for web-chat.
 	// Thin authenticated proxy onto the gateway's portal API.
 	Usage *handler.UsageHandler
@@ -467,6 +471,16 @@ func New(
 			r.Get("/admin/knowledge-bases/{id}", h.Admin.KnowledgeBaseDetail)
 			r.Delete("/admin/knowledge-bases/{id}", h.Admin.DeleteKnowledgeBase)
 			r.Post("/admin/knowledge-bases/{id}/reindex", h.Admin.ReindexKnowledgeBase)
+
+			// Retention & deletion program: per-tenant settings (floor-
+			// validated, audited), the deletion-audit read path, and the
+			// deletes-nothing dry-run preview.
+			if h.RetentionAdmin != nil {
+				r.Get("/admin/retention-settings", h.RetentionAdmin.GetSettings)
+				r.Put("/admin/retention-settings", h.RetentionAdmin.PutSettings)
+				r.Get("/admin/deletion-audit", h.RetentionAdmin.ListAudit)
+				r.Get("/admin/retention-preview", h.RetentionAdmin.Preview)
+			}
 		})
 	})
 

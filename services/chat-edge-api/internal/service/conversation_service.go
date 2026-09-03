@@ -8,6 +8,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -35,10 +36,19 @@ type ModelChecker interface {
 type ConversationService struct {
 	conversations *repository.ConversationRepo
 	models        ModelChecker
+	// deletionAudit, when wired (SetDeletionAudit), records the user's
+	// soft-delete as a durable audit entry — the recorded INTENT the
+	// nightly hard-erasure later completes. Nil-safe: unset skips.
+	deletionAudit *repository.DeletionAuditRepo
 }
 
 func NewConversationService(c *repository.ConversationRepo, models ModelChecker) *ConversationService {
 	return &ConversationService{conversations: c, models: models}
+}
+
+// SetDeletionAudit wires the deletion-audit sink (main.go).
+func (s *ConversationService) SetDeletionAudit(a *repository.DeletionAuditRepo) {
+	s.deletionAudit = a
 }
 
 // CreateInput is what the handler passes after parsing JSON.
@@ -333,8 +343,12 @@ func (s *ConversationService) SetReasoning(
 	return nil
 }
 
-// Delete soft-deletes the conversation. Messages remain in
-// chat.messages_masked for audit; only the sidebar listing hides.
+// Delete soft-deletes the conversation: the user-visible removal is
+// immediate. Back-end erasure completes when the nightly transcript
+// sweep hard-deletes the row deleted_conversation_purge_days later
+// (TranscriptRetentionService) — until then the soft-deleted row is
+// the erasure queue entry. The audit entry written here records the
+// user's request; the sweep's entry records the completion.
 func (s *ConversationService) Delete(
 	ctx context.Context, tenantID, userID, convID uuid.UUID,
 ) error {
@@ -346,6 +360,22 @@ func (s *ConversationService) Delete(
 			return ErrConversationNotFound
 		}
 		return err
+	}
+	if s.deletionAudit != nil {
+		uid := userID
+		cid := convID
+		if err := s.deletionAudit.Insert(ctx, &model.DeletionAuditEntry{
+			TenantID:   tenantID,
+			UserID:     &uid,
+			Actor:      "user:" + userID.String(),
+			Action:     model.AuditActionConversationSoftDeleted,
+			Scope:      "conversation",
+			ResourceID: &cid,
+			Rule:       model.AuditRuleUserRequest,
+		}); err != nil {
+			slog.Warn("conversation delete: audit write failed",
+				"conversation", convID.String(), "err", err)
+		}
 	}
 	return nil
 }

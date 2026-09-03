@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 )
 
@@ -36,6 +37,17 @@ type PurgeService struct {
 	exports     *repository.DataExportRepo
 	settings    *repository.TenantMemorySettingsRepo
 	storageRoot string
+	// deletionAudit — the durable record of the purge. The purge
+	// deletes chat.memory_events (content-bearing evidence rows), so
+	// WITHOUT this entry the purge would erase the only proof it
+	// happened. chat.deletion_audit is outside every cascade. Wired
+	// via SetDeletionAudit; nil-safe for old tests.
+	deletionAudit *repository.DeletionAuditRepo
+}
+
+// SetDeletionAudit wires the deletion-audit sink (main.go).
+func (s *PurgeService) SetDeletionAudit(a *repository.DeletionAuditRepo) {
+	s.deletionAudit = a
 }
 
 func NewPurgeService(
@@ -145,6 +157,37 @@ func (s *PurgeService) PurgeAllUserMemories(
 	// orphaned (e.g. a failed Create that left a file but no row).
 	exportDir := filepath.Join(s.storageRoot, "exports", tenantID.String(), userID.String())
 	_ = os.RemoveAll(exportDir)
+
+	// Durable audit entry — counts only, never content. Written to
+	// chat.deletion_audit, which no cascade touches, so the evidence
+	// of the purge survives the purge (the memory_events rows it
+	// deleted were content-bearing and could not serve that role). A
+	// failed write is an ERROR — the deletion already happened and
+	// cannot be rolled back, so the operator must know the record is
+	// missing.
+	if s.deletionAudit != nil {
+		uid := userID
+		if auditErr := s.deletionAudit.Insert(ctx, &model.DeletionAuditEntry{
+			TenantID: tenantID,
+			UserID:   &uid,
+			Actor:    "user:" + userID.String(),
+			Action:   model.AuditActionMemoryPurge,
+			Scope:    "user",
+			Rule:     model.AuditRuleUserRequest,
+			Counts: map[string]int{
+				"memories":              out.MemoriesDeleted,
+				"memory_events":         out.EventsDeleted,
+				"conversation_states":   out.StatesDeleted,
+				"context_sources":       out.SourcesDeleted,
+				"export_rows":           out.ExportsDeleted,
+				"export_files_unlinked": out.ExportFilesUnlinked,
+			},
+		}); auditErr != nil {
+			slog.Error("purge: durable audit write FAILED — purge completed without its record",
+				"user", userID.String(), "tenant", tenantID.String(),
+				"err", auditErr)
+		}
+	}
 
 	// Audit log — counts only, never content (the whole point of
 	// the purge is no content remains anywhere). Logged at warn

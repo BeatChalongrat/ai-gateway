@@ -116,6 +116,15 @@ type FileService struct {
 	// Phase 4 Session 2 — same hook for docx + pdf uploads.
 	docs    *DocService
 	sandbox *sandbox.Runner
+	// deletionAudit records explicit file deletions (row + storage
+	// object) in chat.deletion_audit. Wired via SetDeletionAudit;
+	// nil-safe.
+	deletionAudit *repository.DeletionAuditRepo
+}
+
+// SetDeletionAudit wires the deletion-audit sink (main.go).
+func (s *FileService) SetDeletionAudit(a *repository.DeletionAuditRepo) {
+	s.deletionAudit = a
 }
 
 func (s *FileService) SetSandbox(r *sandbox.Runner) {
@@ -942,6 +951,23 @@ func (s *FileService) Delete(
 		return err
 	}
 	_ = s.storage.Delete(ctx, f.StoragePath)
+	if s.deletionAudit != nil {
+		uid := userID
+		fid := fileID
+		if auditErr := s.deletionAudit.Insert(ctx, &model.DeletionAuditEntry{
+			TenantID:   tenantID,
+			UserID:     &uid,
+			Actor:      "user:" + userID.String(),
+			Action:     model.AuditActionFileDeleted,
+			Scope:      "file",
+			ResourceID: &fid,
+			Rule:       model.AuditRuleUserRequest,
+			Counts:     map[string]int{"files": 1},
+		}); auditErr != nil {
+			slog.Warn("file delete: audit write failed",
+				"file", fileID.String(), "err", auditErr)
+		}
+	}
 	return nil
 }
 
