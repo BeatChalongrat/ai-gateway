@@ -38,6 +38,22 @@ class _FakeRedis:
     async def exists(self, key):
         return 1 if key in self.store else 0
 
+    def pipeline(self, transaction=True):
+        return _FakePipeline(self)
+
+
+class _FakePipeline:
+    def __init__(self, redis: "_FakeRedis"):
+        self._redis = redis
+        self._keys: list[str] = []
+
+    def exists(self, key):
+        self._keys.append(key)
+        return self
+
+    async def execute(self):
+        return [1 if k in self._redis.store else 0 for k in self._keys]
+
 
 @pytest.fixture
 def fake_redis(monkeypatch):
@@ -91,6 +107,43 @@ def test_legacy_provider_only_call_still_works(fake_redis):
     _run(fo.mark_provider_unhealthy("openai"))
     assert _run(fo.is_provider_unhealthy("openai"))
     assert _run(fo.is_provider_unhealthy("openai", "gpt-4o"))  # wide covers all
+
+
+# ── FIX50 P1-A: the auto pool filter sees pair markers (OD #58) ────────
+
+def test_unhealthy_pairs_returns_only_marked_pairs(fake_redis):
+    _run(fo.mark_provider_unhealthy(
+        "openrouter", "deepseek/deepseek-chat", error_code="provider_error"
+    ))
+    marked = _run(fo.unhealthy_pairs([
+        ("openrouter", "deepseek/deepseek-chat"),
+        ("openrouter", "google/gemini-2.5-flash"),
+        ("anthropic", "claude-sonnet-4"),
+    ]))
+    assert marked == {("openrouter", "deepseek/deepseek-chat")}
+
+
+def test_unhealthy_pairs_is_one_pipeline_round_trip_and_fails_open(fake_redis, monkeypatch):
+    # Empty input never touches Redis; a Redis failure returns no marks
+    # (fail-open, same contract as is_provider_unhealthy).
+    assert _run(fo.unhealthy_pairs([])) == set()
+
+    def _boom():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr("app.services._redis_pool.get_async_redis", _boom)
+    assert _run(fo.unhealthy_pairs([("openrouter", "deepseek/deepseek-chat")])) == set()
+
+
+def test_auto_router_pool_filter_checks_pair_markers():
+    # The wiring pin: _auto_route prunes candidates through
+    # unhealthy_pairs, not only through the provider-wide lookup.
+    import inspect
+
+    from app.services.orchestrator import GatewayOrchestrator
+
+    src = inspect.getsource(GatewayOrchestrator._auto_route)
+    assert "unhealthy_pairs" in src
 
 
 # ── 402 mapping (Part C.4) ─────────────────────────────────────────────

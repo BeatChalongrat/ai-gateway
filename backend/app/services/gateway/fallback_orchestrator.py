@@ -35,6 +35,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from collections.abc import Iterable
+
 import structlog
 
 from app.core.exceptions import GatewayError, ProviderError
@@ -152,6 +154,37 @@ async def clear_provider_health(provider: str, model: str | None = None) -> None
         await client.delete(_health_key(provider))
     except Exception:  # noqa: BLE001
         pass
+
+
+async def unhealthy_pairs(
+    pairs: Iterable[tuple[str, str]],
+) -> set[tuple[str, str]]:
+    """The subset of ``(provider, model)`` pairs with a live pair marker.
+
+    FIX50 P1-A (OPEN_DECISIONS #58): the auto-router's pool filter only
+    saw provider-wide markers, so a model whose account just ran dry
+    stayed in ``auto``'s pool until the pre-check swapped it a beat
+    later. One pipelined EXISTS round-trip checks every candidate pair
+    at once — never one GET per model on the hot path.
+
+    Provider-wide markers are NOT checked here; the caller already
+    prunes whole providers via ``is_provider_unhealthy``. Fail-open:
+    any Redis error returns the empty set.
+    """
+    unique = [(p, m) for (p, m) in dict.fromkeys(pairs) if p and m]
+    if not unique:
+        return set()
+    try:
+        from app.services._redis_pool import get_async_redis
+
+        client = get_async_redis()
+        pipe = client.pipeline(transaction=False)
+        for provider, model in unique:
+            pipe.exists(_health_key(provider, model))
+        flags = await pipe.execute()
+        return {pair for pair, flag in zip(unique, flags) if flag}
+    except Exception:  # noqa: BLE001
+        return set()
 
 
 async def is_provider_unhealthy(provider: str, model: str | None = None) -> bool:

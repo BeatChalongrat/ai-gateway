@@ -2642,6 +2642,26 @@ class GatewayOrchestrator:
         ]
         if not candidates:
             return None
+        # FIX50 P1-A (OPEN_DECISIONS #58) — the provider filter above only
+        # sees provider-wide markers; a single model whose account just
+        # ran dry (a per-pair marker) stayed in the pool until the
+        # pre-check swapped it a beat later. One pipelined round-trip
+        # checks every candidate pair; if every pair is marked the pool
+        # is kept (markers are hints — trying beats refusing).
+        try:
+            from app.services.gateway.fallback_orchestrator import unhealthy_pairs
+
+            marked = await unhealthy_pairs((c.provider, c.model) for c in candidates)
+            if marked:
+                narrowed = [c for c in candidates if (c.provider, c.model) not in marked]
+                if narrowed:
+                    log.info(
+                        "auto_routing_skip_unhealthy_pairs",
+                        pairs=sorted(f"{p}:{m}" for p, m in marked),
+                    )
+                    candidates = narrowed
+        except Exception as exc:  # noqa: BLE001 — never let health lookups break routing
+            log.warning("auto_routing_pair_health_lookup_failed", error=str(exc)[:200])
 
         # Policy constraints the caller / policy layer put on the request
         # (pre-FIX35 contract, kept): allowed providers and blocked models.
