@@ -83,3 +83,17 @@ def test_long_clean_code_block_survives_output_leg():
         _mask_full_pipeline(LONG_CLEAN_CODE_BLOCK, "output")
         == LONG_CLEAN_CODE_BLOCK
     )
+
+
+def test_sql_casts_survive_output_leg():
+    # fix50/ipv6-cast-eater — the FIX48 corruption itself: without the
+    # boundary fix the ipv6 pattern matches ::DA inside ::DATE and the
+    # mask+orphan-redact pipeline hands the user '2068-01-01'TE.
+    text = (
+        "```sql\n"
+        "SELECT * FROM GENERATE_SERIES('2568-01-01'::DATE, "
+        "'2568-12-01'::DATE, INTERVAL '1 month') AS gs(month);\n"
+        "SELECT '2025-01-01'::date + '1 month'::interval;\n"
+        "```"
+    )
+    assert _mask_full_pipeline(text, "output") == text
