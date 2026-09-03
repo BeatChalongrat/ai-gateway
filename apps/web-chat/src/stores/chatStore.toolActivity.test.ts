@@ -96,7 +96,7 @@ afterEach(() => {
 });
 
 describe("tool_activity SSE", () => {
-  it("started adds a running row; finished collapses it in place; complete clears", async () => {
+  it("started adds a running row; finished collapses it in place; complete keeps the rows", async () => {
     const s = makeStream();
     mockApi.openMessageStream.mockResolvedValue(s.response);
     const sendP = useChatStore.getState().sendMessage("c1", "hi");
@@ -132,10 +132,13 @@ describe("tool_activity SSE", () => {
     expect(acts[0]).toEqual({ id: "t1", tool: "save_memory", phase: "finished" });
     expect(acts[1].phase).toBe("started");
 
-    // message_complete clears the ephemeral list entirely.
+    // FIX50 P1-D — message_complete KEEPS the rows (both modes; the
+    // desktop shell always did): a tool-computed answer must not shed
+    // its evidence the moment the turn finishes. Cards fold to their
+    // header client-side; a reload still drops them (session-only).
     s.push(frame("message_complete", { message_id: "a1" }));
     s.close();
     await sendP;
-    expect(assistant("c1")?.tool_activities).toBeUndefined();
+    expect(assistant("c1")?.tool_activities).toHaveLength(2);
   });
 });
