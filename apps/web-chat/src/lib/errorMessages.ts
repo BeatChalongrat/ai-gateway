@@ -83,6 +83,9 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   quota_exceeded: "error.quota_exceeded",
   INSUFFICIENT_CREDITS: "error.insufficient_credits",
   insufficient_credits: "error.insufficient_credits",
+  // FIX51 Part 4 — the PROVIDER account ran dry (bare 402 upstream),
+  // distinct from the user's own credit balance above.
+  provider_no_credit: "error.provider_no_credit",
   provider_key_missing: "error.provider_key_missing",
   provider_not_implemented: "error.provider_not_implemented",
   authentication_error: "error.authentication_error",

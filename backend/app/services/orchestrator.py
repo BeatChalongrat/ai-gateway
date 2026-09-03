@@ -1258,6 +1258,9 @@ class GatewayOrchestrator:
                         session=session,
                         ctx=ctx,
                         original_error=exc,
+                        # FIX51 Part 4 — the time budget covers the
+                        # whole dispatch, so the primary's burn counts.
+                        started_at=t_provider,
                     )
                 provider_response = fallback_result.response
                 # Rewrite the route so DLP scan, request_log row, and

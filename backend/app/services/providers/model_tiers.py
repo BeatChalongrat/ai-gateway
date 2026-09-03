@@ -53,63 +53,66 @@ def _alias(model: str) -> str:
 #
 # Keyed by the bare model alias (see ``_alias``) so BOTH the direct
 # provider id (``claude-sonnet-4``) and the OpenRouter ``vendor/model`` id
-# (``anthropic/claude-sonnet-4``) resolve to the same chain. Every
-# candidate targets the OpenRouter adapter because that is the provider
-# holding a live key in this deployment — so each hop actually dispatches
-# instead of being skipped for a missing key. Each hop is a DIFFERENT
-# underlying vendor model (or a same-vendor newer revision) and never a
-# more expensive tier, satisfying the cross-provider + no-silent-upgrade
-# rules. Chains are 2 deep (3 total attempts including the primary).
+# (``anthropic/claude-sonnet-4``) resolve to the same chain. Each hop is
+# a DIFFERENT underlying vendor model (or a same-vendor newer revision)
+# and never a more expensive tier, satisfying the cross-provider +
+# no-silent-upgrade rules. Chains are 2 deep (3 total attempts including
+# the primary).
+#
+# FIX51 Part 4 (P1-F) — chains must span ACCOUNTS, not just vendors.
+# The original table sent every hop through the OpenRouter adapter
+# ("the provider holding a live key"), which made both rescue hops die
+# together the day that one account ran dry — the "cross-provider" rule
+# had quietly become cross-MODEL on a single account. Every chain now
+# carries at least one hop on a different account (DeepSeek direct or
+# OpenAI direct); ``test_fallback_orchestrator.py`` fails any chain
+# that collapses back to a single provider.
 # ---------------------------------------------------------------------------
 _OR = "openrouter"
+_DS = "deepseek"
+_OA = "openai"
 
 
-def _orc(*models: str) -> list[dict[str, str]]:
-    """Build an OpenRouter-adapter candidate list from model ids."""
-    return [{"provider": _OR, "model": m} for m in models]
+def _c(provider: str, model: str) -> dict[str, str]:
+    return {"provider": provider, "model": model}
 
+
+# Cross-account rescue hops: DeepSeek direct is the second account in
+# this deployment. v4-pro stands in for the standard/premium class,
+# v4-flash for the budget/fast class (down, never up).
+_DS_STD = _c(_DS, "deepseek-v4-pro")
+_DS_FAST = _c(_DS, "deepseek-v4-flash")
 
 CURATED_FALLBACKS: dict[str, list[dict[str, str]]] = {
-    # Standard / flagship tier — peers stay standard.
-    "claude-sonnet-4": _orc(
-        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
-    ),
-    "claude-sonnet-4.5": _orc(
-        "anthropic/claude-sonnet-4", "openai/gpt-4o"
-    ),
-    "gpt-4o": _orc(
-        "anthropic/claude-sonnet-4", "deepseek/deepseek-chat"
-    ),
-    "gemini-2.5-pro": _orc(
-        "anthropic/claude-sonnet-4", "openai/gpt-4o"
-    ),
-    "deepseek-r1": _orc("openai/gpt-4o", "anthropic/claude-sonnet-4"),
+    # Standard / flagship tier — peers stay standard; hop 2 crosses to
+    # the DeepSeek account.
+    "claude-sonnet-4": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
+    "claude-sonnet-4.5": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
+    "gpt-4o": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
+    "gemini-2.5-pro": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
+    "deepseek-r1": [_c(_OR, "openai/gpt-4o"), _DS_STD],
     # Premium → premium/standard (down, never up).
-    "claude-opus-4.1": _orc(
-        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
-    ),
-    "claude-opus-4": _orc(
-        "anthropic/claude-sonnet-4.5", "openai/gpt-4o"
-    ),
-    # Reasoning peers fall back to other reasoning models first.
-    "o3-mini": _orc("deepseek/deepseek-r1", "openai/gpt-4o"),
-    "o4-mini": _orc("deepseek/deepseek-r1", "openai/gpt-4o"),
+    "claude-opus-4.1": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
+    "claude-opus-4": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
+    # Reasoning peers fall back to another reasoning model first, then
+    # cross accounts (v4-pro answers without thinking — a downgrade the
+    # fallback notice already reports, same as any vendor swap).
+    "o3-mini": [_c(_OR, "deepseek/deepseek-r1"), _DS_STD],
+    "o4-mini": [_c(_OR, "deepseek/deepseek-r1"), _DS_STD],
     # Budget / fast tier — peers stay budget/fast (no upgrade).
-    "claude-3.5-haiku": _orc(
-        "openai/gpt-4o-mini", "deepseek/deepseek-chat"
-    ),
-    "gpt-4o-mini": _orc(
-        "anthropic/claude-3.5-haiku", "deepseek/deepseek-chat"
-    ),
-    "gemini-2.5-flash": _orc(
-        "openai/gpt-4o-mini", "deepseek/deepseek-chat"
-    ),
-    "deepseek-chat": _orc(
-        "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"
-    ),
-    "llama-3.3-70b-instruct": _orc(
-        "deepseek/deepseek-chat", "openai/gpt-4o-mini"
-    ),
+    "claude-3.5-haiku": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
+    "gpt-4o-mini": [_c(_OR, "anthropic/claude-3.5-haiku"), _DS_FAST],
+    "gemini-2.5-flash": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
+    "deepseek-chat": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
+    "llama-3.3-70b-instruct": [_DS_FAST, _c(_OR, "openai/gpt-4o-mini")],
+    # The DeepSeek-direct primaries themselves rescue AWAY from the
+    # DeepSeek account (OpenRouter, then OpenAI direct as the third
+    # account).
+    "deepseek-v4-pro": [_c(_OR, "openai/gpt-4o"), _c(_OA, "gpt-4o-mini")],
+    "deepseek-v4-flash": [
+        _c(_OR, "meta-llama/llama-3.3-70b-instruct"),
+        _c(_OA, "gpt-4o-mini"),
+    ],
 }
 
 # ---------------------------------------------------------------------------

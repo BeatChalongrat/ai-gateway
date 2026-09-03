@@ -64,6 +64,11 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("upstream_bad_response", "The AI provider rejected the request. Change the request before sending it again.", False),
     ErrorInfo("quota_exceeded", "The usage quota has been reached. Contact your administrator.", False),
     ErrorInfo("insufficient_credits", "You're out of credits. Contact your administrator to top up.", False),
+    # FIX51 Part 4 — a provider account that is out of credits (bare 402,
+    # no Retry-After). Fallback-eligible (another ACCOUNT can answer) but
+    # not user-retryable: the same request will keep failing until the
+    # account is topped up.
+    ErrorInfo("provider_no_credit", "The AI provider's account is out of credits. Contact your administrator.", False),
     ErrorInfo("provider_key_missing", "This provider has no API key configured. Contact your administrator.", False),
     ErrorInfo("provider_not_implemented", "This provider does not support the requested operation.", False),
     ErrorInfo("authentication_error", "The request was not authenticated.", False),

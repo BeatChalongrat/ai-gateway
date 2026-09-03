@@ -150,8 +150,16 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
                         "body": body,
                     },
                 )
+            # FIX51 Part 4 — a bare 402 is an ACCOUNT-level failure, not a
+            # generic provider hiccup: every model on this account is dead
+            # until someone tops up. The distinct code lets the fallback
+            # runner refuse to walk sibling models on the same account
+            # (classify_failure_scope) and lets the health marker go
+            # provider-wide, which is what actually ends the "both rescue
+            # hops die together" pattern when one aggregator runs dry.
             return ProviderError(
                 f"Provider '{provider_name}' reported insufficient credits (402).",
+                code="provider_no_credit",
                 details={"provider": provider_name, "status": status, "body": body},
             )
 

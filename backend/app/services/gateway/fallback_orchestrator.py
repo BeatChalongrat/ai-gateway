@@ -96,7 +96,78 @@ _HEALTH_TTL_SECONDS = 60
 # "the provider's infrastructure itself is down" still set the
 # provider-wide key — a timeout or connection failure says nothing
 # about one model, it says the box is unreachable.
-_PROVIDER_WIDE_CODES = frozenset({"provider_unavailable", "provider_timeout"})
+#
+# FIX51 Part 4 (P1-F) — ``provider_no_credit`` joins the set: an account
+# with no credits fails every model it serves, so scoping that marker to
+# one pair let the chain walk sibling models on the same dead account.
+_PROVIDER_WIDE_CODES = frozenset(
+    {"provider_unavailable", "provider_timeout", "provider_no_credit"}
+)
+
+
+# ---------------------------------------------------------------------------
+# FIX51 Part 4 (P1-F) — failure SCOPE decides how deep the chain walks,
+# not a fixed attempt count alone.
+#
+#   * "model"   — only this model is broken (404 / pulled id / can't do
+#                 tools): keep walking, siblings may answer.
+#   * "account" — the whole account is broken (no credits, rejected
+#                 credentials, 5xx, rate limit, outage): never try
+#                 another candidate on the SAME provider; cross to a
+#                 different account.
+#   * "request" — the request itself is doomed (too long, rejected as
+#                 invalid, policy-blocked): stop immediately, every
+#                 provider will refuse it the same way.
+#
+# Unknown shapes default to "model" (keep walking) so a new error code
+# degrades to the old behavior, never to a dead stop.
+# ---------------------------------------------------------------------------
+
+_REQUEST_SCOPED_CODES = frozenset(
+    {
+        "context_length_exceeded",
+        "validation_error",
+        "upstream_bad_response",
+        "content_policy_blocked",
+        "moderation_flagged",
+        "guardrail_blocked",
+        "dlp_violation",
+        "policy_violation",
+    }
+)
+
+_ACCOUNT_SCOPED_CODES = frozenset(
+    {
+        "provider_no_credit",
+        "provider_unavailable",
+        "provider_timeout",
+        "provider_at_capacity",
+        "provider_rate_limited",
+        "rate_limit_exceeded",
+        "provider_5xx",
+    }
+)
+
+
+def classify_failure_scope(exc: Exception) -> str:
+    """``"model"`` | ``"account"`` | ``"request"`` for a dispatch failure.
+
+    Codes carry most of the signal; for the generic ``provider_error``
+    the mapped HTTP status in ``details`` breaks the tie (401/402/403 =
+    the account's credentials or balance; >=500 = the account's infra).
+    """
+    code = getattr(exc, "code", None)
+    if code in _REQUEST_SCOPED_CODES:
+        return "request"
+    details = getattr(exc, "details", None) or {}
+    status = details.get("status")
+    if code == "provider_model_not_found" or status == 404:
+        return "model"
+    if code in _ACCOUNT_SCOPED_CODES:
+        return "account"
+    if isinstance(status, int) and (status in (401, 402, 403) or status >= 500):
+        return "account"
+    return "model"
 
 
 def _health_key(provider: str, model: str | None = None) -> str:
@@ -217,6 +288,20 @@ FALLBACK_ATTEMPT_TIMEOUT_S = 10.0
 # Spec calls for 2 (so up to 3 total attempts including the original).
 MAX_FALLBACK_CANDIDATES = 2
 
+# FIX51 Part 4 (P1-F) — the ceiling users feel is TIME, not attempt
+# count. Total turn budget (primary + all fallback attempts) before the
+# runner stops opening NEW attempts; each attempt's timeout also shrinks
+# to what's left. A primary that burns its full ~30s leaves no budget —
+# the user gets the error at ~30s instead of ~50s. The budget never
+# aborts an attempt already in flight beyond its own shrunken timeout,
+# so a slow-but-succeeding rescue is not killed retroactively.
+FALLBACK_TOTAL_BUDGET_S = 25.0
+
+# Don't bother opening an attempt with less than this much runway — a
+# real completion can't finish, and the doomed try only delays the
+# error the user is already owed.
+_MIN_ATTEMPT_RUNWAY_S = 2.0
+
 
 @dataclass(frozen=True)
 class FallbackAttempt:
@@ -329,6 +414,7 @@ class FallbackOrchestrator:
         session: "Session | None",
         ctx: "RequestContext",
         original_error: Exception | None = None,
+        started_at: float | None = None,
     ) -> FallbackResult:
         """Run the fallback chain. Raises the last error if every try fails.
 
@@ -397,12 +483,45 @@ class FallbackOrchestrator:
         last_error: GatewayError | None = None
         tried = 0
 
+        # FIX51 Part 4 (P1-F) — failure scope + time budget.
+        #
+        # ``dead_accounts``: providers whose failure THIS request was
+        # account-level (no credits / bad credentials / infra). Walking
+        # their other models is a guaranteed repeat, so they're out for
+        # the rest of this chain — the surviving attempts land on
+        # different accounts by construction.
+        #
+        # ``deadline``: the user's wait is capped in seconds, not
+        # attempts. ``started_at`` is the turn's dispatch start (the
+        # primary's ~30s burn counts against it); without it the budget
+        # covers the fallback walk alone.
+        dead_accounts: set[str] = set()
+        if original_error is not None and (
+            classify_failure_scope(original_error) == "account"
+        ):
+            dead_accounts.add(original_provider)
+        deadline = (
+            started_at if started_at is not None else time.perf_counter()
+        ) + FALLBACK_TOTAL_BUDGET_S
+
         for candidate in chain:
             if tried >= self.max_candidates:
                 break
 
             provider = candidate["provider"]
             model = candidate["model"]
+
+            # Account-scope gate — this provider already failed at the
+            # account level during THIS request (or the primary did).
+            # Does not consume an attempt slot.
+            if provider in dead_accounts:
+                log.info(
+                    "fallback_candidate_skipped",
+                    candidate_provider=provider,
+                    candidate_model=model,
+                    reason="account_failed_this_request",
+                )
+                continue
 
             # Capability gate — skip a candidate that lacks a required
             # capability. Does NOT consume an attempt slot (mirrors the
@@ -447,6 +566,18 @@ class FallbackOrchestrator:
                 )
                 continue
 
+            # Time-budget gate — opening an attempt with (almost) no
+            # runway only delays the error the user is already owed.
+            remaining_s = deadline - time.perf_counter()
+            if remaining_s < _MIN_ATTEMPT_RUNWAY_S:
+                log.warning(
+                    "fallback_budget_exhausted",
+                    budget_s=FALLBACK_TOTAL_BUDGET_S,
+                    attempts=len(attempts),
+                    tried=tried,
+                )
+                break
+
             tried += 1
             t0 = time.perf_counter()
             route = RouteDecision(provider_name=provider, model_name=model)
@@ -458,7 +589,7 @@ class FallbackOrchestrator:
                         messages=messages,
                         api_key=api_key,
                     ),
-                    timeout=self.attempt_timeout_s,
+                    timeout=min(self.attempt_timeout_s, remaining_s),
                 )
             except asyncio.TimeoutError as exc:
                 latency_ms = (time.perf_counter() - t0) * 1000
@@ -477,39 +608,56 @@ class FallbackOrchestrator:
                         attempted_at=datetime.now(timezone.utc),
                     )
                 )
-                # Mark the failed candidate so the next streaming
-                # request skips it via the Redis health pre-check.
-                await mark_provider_unhealthy(provider)
+                # A timeout is account-scoped (the box, not one model):
+                # skip this provider's other candidates and mark the
+                # pair + provider-wide health keys for later requests.
+                dead_accounts.add(provider)
+                await mark_provider_unhealthy(
+                    provider, model, error_code="provider_timeout"
+                )
                 log.warning(
                     "fallback_candidate_failed",
                     candidate_provider=provider,
                     candidate_model=model,
                     error_code="provider_timeout",
+                    failure_scope="account",
                     latency_ms=int(latency_ms),
                 )
                 continue
             except GatewayError as exc:
                 latency_ms = (time.perf_counter() - t0) * 1000
                 last_error = exc
+                code = getattr(exc, "code", "provider_error")
+                scope = classify_failure_scope(exc)
                 attempts.append(
                     FallbackAttempt(
                         provider=provider,
                         model=model,
-                        error_code=getattr(exc, "code", "provider_error"),
+                        error_code=code,
                         error_message=str(exc)[:200],
                         latency_ms=latency_ms,
                         attempted_at=datetime.now(timezone.utc),
                     )
                 )
                 if is_fallback_eligible(exc):
-                    await mark_provider_unhealthy(provider)
+                    # Pair-scoped marker (FIX49 Part C); widens to the
+                    # provider automatically for _PROVIDER_WIDE_CODES.
+                    await mark_provider_unhealthy(provider, model, error_code=code)
                 log.warning(
                     "fallback_candidate_failed",
                     candidate_provider=provider,
                     candidate_model=model,
-                    error_code=getattr(exc, "code", "provider_error"),
+                    error_code=code,
+                    failure_scope=scope,
                     latency_ms=int(latency_ms),
                 )
+                if scope == "request":
+                    # The request itself is doomed (too long, rejected,
+                    # policy) — every further vendor refuses it the same
+                    # way. Stop and surface this error now.
+                    break
+                if scope == "account":
+                    dead_accounts.add(provider)
                 continue
 
             # Success — clear any stale health marker on this provider
@@ -724,6 +872,10 @@ FALLBACK_ELIGIBLE_ERRORS: set[str] = {
     "rate_limit_exceeded",
     "provider_model_not_found",
     "provider_unavailable",
+    # FIX51 Part 4 — a bare 402: THIS account is out of credits, but a
+    # different account can still answer. The scope classifier keeps the
+    # walk off the dead account's other models.
+    "provider_no_credit",
 }
 
 
