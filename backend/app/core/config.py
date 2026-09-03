@@ -476,11 +476,26 @@ class Settings(BaseSettings):
     # does not consume the value.
     ner_workers: int = 4
 
+    # Archive kill-switch — OFF by default until the retention plan
+    # (docs/DATA_RETENTION_PLAN.md, OPEN_DECISIONS #64) is decided.
+    # The sentence below about the 90-day windows "matching" described
+    # an invariant NOTHING enforces: the DLP raw-retention job and the
+    # archive job are two independent 24h loops with no ordering, so on
+    # any given day the archive can copy rows whose raw columns have
+    # not been stripped yet into ``request_logs_archive`` — a table
+    # with no expiry and no delete path. Until an enforced ordering
+    # (or an archive-side strip/expiry) exists, the mover stays off:
+    # a growing hot table is recoverable, a raw row in permanent cold
+    # storage is not. When False the task is NEVER CREATED (not
+    # created-and-idle), so there is no code path that can run it.
+    log_archive_enabled: bool = False
+
     # Archive retention — rows older than this are moved from
     # ``request_logs`` to ``request_logs_archive`` by the daily job
-    # in ``app.jobs.log_archive_job``. 90 days matches the DLP raw
-    # retention window so cold storage never holds raw PII for
-    # longer than the live table did.
+    # in ``app.jobs.log_archive_job`` (only when ``log_archive_enabled``
+    # is true — see above). 90 days was chosen to match the DLP raw
+    # retention window, but note that matching WINDOWS does not order
+    # the two jobs within a day.
     log_archive_days: int = 90
 
     # C2 — model discovery sync behaviour.

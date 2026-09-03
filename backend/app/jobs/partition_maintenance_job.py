@@ -86,7 +86,11 @@ def run_partition_maintenance(
         name = _partition_name(cursor)
         exists = session.execute(
             text(
-                "SELECT 1 FROM pg_class WHERE relname = :name LIMIT 1"
+                "SELECT 1 FROM pg_class c"
+                " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " WHERE c.relname = :name"
+                "   AND n.nspname = current_schema()"
+                " LIMIT 1"
             ),
             {"name": name},
         ).first()
@@ -124,6 +128,11 @@ def run_partition_maintenance(
     # ``request_logs_y{YYYY}m{MM}`` naming convention from migration
     # 041). ``request_logs_default`` is intentionally excluded — it
     # absorbs out-of-range writes and is never time-bound.
+    # Parent matched within the CURRENT schema only (same fix the
+    # archive job's column introspection got): a bare relname match
+    # would enumerate children of any same-named parent in another
+    # schema, and the unqualified COUNT/DETACH below would then
+    # resolve against the wrong (or no) table.
     children = session.execute(
         text(
             """
@@ -133,6 +142,10 @@ def run_partition_maintenance(
             JOIN pg_class c ON c.oid = i.inhrelid
             JOIN pg_class p ON p.oid = i.inhparent
             WHERE p.relname = 'request_logs'
+              AND p.relnamespace = (
+                    SELECT oid FROM pg_namespace
+                    WHERE nspname = current_schema()
+              )
               AND c.relname ~ '^request_logs_y[0-9]{4}m[0-9]{2}$'
             ORDER BY c.relname
             """

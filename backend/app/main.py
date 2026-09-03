@@ -145,7 +145,25 @@ async def lifespan(app: FastAPI):
     # ``settings.log_archive_days`` into ``request_logs_archive``.
     # Same pattern as DLP retention: cancel-safe, idempotent, sleeps
     # 24h between runs. See app/jobs/log_archive_job.py.
-    archive_task = asyncio.create_task(_daily_log_archive())
+    #
+    # Gated OFF by default (same fail-closed shape as chat-edge's cloud
+    # scheduler): the archive table has no expiry/delete path and there
+    # is no ordering between this loop and the DLP raw-retention loop,
+    # so a day where archive runs first copies un-stripped raw columns
+    # into permanent cold storage. When the flag is false the task is
+    # never created at all — there is no dormant task to mis-start.
+    archive_task: asyncio.Task | None = None
+    if settings.log_archive_enabled:
+        archive_task = asyncio.create_task(_daily_log_archive())
+    else:
+        import structlog as _structlog
+
+        _structlog.get_logger("startup").info(
+            "log archive NOT started: LOG_ARCHIVE_ENABLED is false "
+            "(default) — waiting on the retention decision "
+            "(docs/DATA_RETENTION_PLAN.md); request_logs grows in place, "
+            "nothing is moved to request_logs_archive"
+        )
 
     # Monthly partition maintenance — creates next month's partition
     # if it doesn't exist yet. Sleeps 24h between checks; the CREATE
@@ -257,7 +275,8 @@ async def lifespan(app: FastAPI):
     _stop_model_discovery_scheduler()
     monitor_task.cancel()
     retention_task.cancel()
-    archive_task.cancel()
+    if archive_task is not None:
+        archive_task.cancel()
     alert_task.cancel()
     search_health_task.cancel()
     partition_task.cancel()
