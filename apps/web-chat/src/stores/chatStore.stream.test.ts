@@ -285,6 +285,71 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  it("stashes dlp_notice on the streaming message and keeps it through completion", async () => {
+    // FIX50 P1-C — the question was partially masked before the model
+    // read it; the notice must survive message_complete so the user
+    // can still see why the answer might be beside the point.
+    const s = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(s.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "hi");
+    await tick();
+    s.push(
+      frame("dlp_notice", {
+        direction: "input",
+        findings: 2,
+        by_detector: { email: 1, phone: 1 },
+      }),
+    );
+    await tick();
+    expect(messagesOf("c1").at(-1)?.dlp_notice).toEqual({
+      findings: 2,
+      by_detector: { email: 1, phone: 1 },
+    });
+    s.push(frame("message_complete", { message_id: "m" }));
+    s.close();
+    await done;
+    expect(messagesOf("c1").at(-1)?.dlp_notice?.findings).toBe(2);
+  });
+
+  it("keeps tool_activities after message_complete (FIX50 P1-D)", async () => {
+    // A correct answer produced BY a tool must not look like a bare
+    // number the moment the turn finishes — web used to clear the
+    // activity rows at completion (the desktop shell never did).
+    const s = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(s.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "search my chats");
+    await tick();
+    s.push(frame("tool_activity", { id: "t1", tool: "search_past_conversations", phase: "started" }));
+    await tick();
+    s.push(
+      frame("tool_activity", {
+        id: "t1",
+        tool: "search_past_conversations",
+        phase: "finished",
+        argsSummary: '{"query":"json"}',
+        resultPreview: "2 conversations matched…",
+        success: true,
+        durationMs: 41,
+      }),
+    );
+    await tick();
+    s.push(frame("message_complete", { message_id: "m" }));
+    s.close();
+    await done;
+    const acts = messagesOf("c1").at(-1)?.tool_activities;
+    expect(acts).toHaveLength(1);
+    expect(acts?.[0]).toMatchObject({
+      id: "t1",
+      phase: "finished",
+      resultPreview: "2 conversations matched…",
+      success: true,
+    });
+  });
+
   it("stashes reasoning_notice on the streaming message", async () => {
     const s = makeStream();
     mockApi.openMessageStream.mockResolvedValue(s.response);

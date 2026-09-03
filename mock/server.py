@@ -338,10 +338,82 @@ async def chat_completions(req: Request) -> object:
             headers={"X-Mock-Provider": _PROFILE_NAME},
         )
 
+    # FIX50 P1-D — deterministic tool-call lever: a last user message
+    # containing ``__tool__`` makes the mock CALL a tool (first round)
+    # and then answer from its result (second round, once a tool-role
+    # message is present). Lets probes drive the chat-edge tool loop —
+    # activity frames, result previews, cards — with no provider
+    # credits. The tool named is a real chat-edge tool so the loop
+    # executes end-to-end.
+    last_user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content", "")
+            last_user_msg = c if isinstance(c, str) else json.dumps(c)
+            break
+    has_tool_result = any(m.get("role") == "tool" for m in messages)
+    if "__tool__" in last_user_msg and not has_tool_result:
+        tool_call = {
+            "id": f"call_mock_{int(time.time() * 1000)}",
+            "type": "function",
+            "function": {
+                "name": "search_past_conversations",
+                "arguments": json.dumps({"query": "json"}),
+            },
+        }
+        if not stream:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "id": f"mock-{int(time.time() * 1000)}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": None, "tool_calls": [tool_call]},
+                        "finish_reason": "tool_calls",
+                    }],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22},
+                },
+                headers={"X-Mock-Provider": _PROFILE_NAME},
+            )
+
+        async def tool_stream():
+            base = {
+                "id": f"mock-{int(time.time() * 1000)}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model,
+            }
+            yield "data: " + json.dumps({**base, "choices": [{
+                "index": 0,
+                "delta": {"tool_calls": [{
+                    "index": 0,
+                    "id": tool_call["id"],
+                    "type": "function",
+                    "function": {"name": tool_call["function"]["name"], "arguments": tool_call["function"]["arguments"]},
+                }]},
+                "finish_reason": None,
+            }]}) + "\n\n"
+            yield "data: " + json.dumps({**base, "choices": [{
+                "index": 0, "delta": {}, "finish_reason": "tool_calls",
+            }], "usage": {"prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22}}) + "\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            tool_stream(),
+            media_type="text/event-stream",
+            headers={"X-Mock-Provider": _PROFILE_NAME, "Cache-Control": "no-cache"},
+        )
+
     ttfb_s = _sample(_profile["ttfb"])
     total_s = _sample(_profile["total_completion"])
     tps = _sample(_profile["tokens_per_second"])
-    response_text = _pick_response(messages)
+    if "__tool__" in last_user_msg and has_tool_result:
+        response_text = "Based on the search results, yes — you asked about JSON before."
+    else:
+        response_text = _pick_response(messages)
     tokens = _tokenize(response_text)
 
     if not stream:

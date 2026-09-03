@@ -431,11 +431,12 @@ export interface Message {
    *  cards (see the SSE handler comment in chat-edge). */
   code_runs?: CodeRun[];
   /** local-only (A2) — generic activity rows for tools WITHOUT a
-   *  dedicated indicator (save_memory, list_memories, conversation
-   *  state, past-conversation search, canvas update — plus any
-   *  unknown/MCP tool). Delivered by the ``tool_activity`` SSE event,
-   *  keyed by tool-call id. Ephemeral like code_runs and additionally
-   *  cleared at message_complete. */
+   *  dedicated indicator (past-conversation search, canvas update —
+   *  plus any unknown/MCP tool). Delivered by the ``tool_activity``
+   *  SSE event, keyed by tool-call id. FIX50 P1-D: kept after
+   *  message_complete in BOTH modes (finished cards fold to their
+   *  header) so a tool-computed answer keeps showing its work;
+   *  still ephemeral like code_runs — a reload drops them. */
   tool_activities?: ToolActivity[];
   /** local-only (desktop shell, Phase 4) — the agent's live plan
    *  checklist from ``plan_update`` frames. Ephemeral. */

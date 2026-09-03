@@ -2458,10 +2458,15 @@ async function consumeStream(
                       is_generating_video: false,
                       is_searching: false,
                       is_compacting: false,
-                      // Web clears the transient indicators at completion; the
-                      // desktop shell KEEPS the rich tool cards so their
-                      // results stay visible after the turn (like the WPF app).
-                      tool_activities: HOSTED_MODE ? m.tool_activities : undefined,
+                      // FIX50 P1-D — BOTH modes keep the tool cards after the
+                      // turn (the desktop shell always did, like the WPF app;
+                      // web used to clear them, so a correct tool-computed
+                      // answer read as a bare number the moment the turn
+                      // finished — FIX48 §2.4). Cards auto-fold to their
+                      // header 1.2 s after finishing; still session-only, a
+                      // reload drops them (persistence needs a schema change
+                      // — recorded as an open decision).
+                      tool_activities: m.tool_activities,
                       agent_status: null,
                       agent_wait: null,
                       pending_consent: null,

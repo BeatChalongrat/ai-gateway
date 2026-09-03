@@ -70,8 +70,23 @@ func TestExecuteToolCalls_VisibleToolEmitsStartedThenFinished(t *testing.T) {
 		t.Fatalf("expected %d frames, got %d: %+v", len(want), len(*frames), *frames)
 	}
 	for i, w := range want {
-		if (*frames)[i] != w {
-			t.Errorf("frame[%d] = %+v, want %+v", i, (*frames)[i], w)
+		g := (*frames)[i]
+		if g.ID != w.ID || g.Tool != w.Tool || g.Phase != w.Phase {
+			t.Errorf("frame[%d] = %+v, want %+v", i, g, w)
+		}
+		// FIX50 P1-D — the finished frame carries the tool's work
+		// (args + result preview + success), the started frame stays
+		// thin. Without the preview a tool-produced answer reads as a
+		// bare number (FIX48 §2.4).
+		if g.Phase == "finished" {
+			if g.ResultPreview == "" {
+				t.Errorf("frame[%d] finished without resultPreview", i)
+			}
+			if g.Success == nil {
+				t.Errorf("frame[%d] finished without success", i)
+			}
+		} else if g.ArgsSummary != "" || g.ResultPreview != "" || g.Success != nil {
+			t.Errorf("frame[%d] started frame must stay thin: %+v", i, g)
 		}
 	}
 }

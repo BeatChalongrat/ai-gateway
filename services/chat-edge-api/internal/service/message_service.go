@@ -1206,6 +1206,27 @@ type ToolActivityUpdate struct {
 	ID    string `json:"id"`
 	Tool  string `json:"tool"`
 	Phase string `json:"phase"` // "started" | "finished"
+	// FIX50 P1-D — a correct answer produced BY a tool must not look
+	// like a bare number (FIX48 §2.4: mechanically 7/7 vs 5/7, judged
+	// a loss because nothing showed how). The finished frame carries a
+	// compact view of what was asked and what came back, so the client
+	// renders the same collapsible card the desktop shell already
+	// shows. Previews are truncated; the model always gets full text.
+	ArgsSummary   string `json:"argsSummary,omitempty"`
+	ResultPreview string `json:"resultPreview,omitempty"`
+	Success       *bool  `json:"success,omitempty"`
+	DurationMS    int64  `json:"durationMs,omitempty"`
+}
+
+// previewForDisplay caps a tool argument/result string for the activity
+// card. Rune-safe; the full text still reaches the model untouched.
+func previewForDisplay(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 // dedicatedEventTools are the tools whose progress already has a
@@ -4754,10 +4775,19 @@ func (s *MessageService) executeToolCalls(
 				ID: tc.ID, Tool: tc.Function.Name, Phase: "started",
 			}})
 		}
+		toolStarted := time.Now()
 		out := s.toolExec.Execute(ctx, tc, ec)
 		if generic {
+			// FIX50 P1-D — the finished frame shows what was asked and
+			// what came back (truncated), so the answer's tool work is
+			// visible instead of looking like a bare result.
+			ok := !strings.HasPrefix(out, "ERROR") && !strings.HasPrefix(out, "REFUSED")
 			ec.emit(StreamUpdate{ToolActivity: &ToolActivityUpdate{
 				ID: tc.ID, Tool: tc.Function.Name, Phase: "finished",
+				ArgsSummary:   previewForDisplay(tc.Function.Arguments, 160),
+				ResultPreview: previewForDisplay(out, 600),
+				Success:       &ok,
+				DurationMS:    time.Since(toolStarted).Milliseconds(),
 			}})
 		}
 		results = append(results, GatewayMessage{
