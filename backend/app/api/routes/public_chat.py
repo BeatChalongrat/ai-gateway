@@ -1753,6 +1753,14 @@ async def _chat_completions_impl(
             used to carry — "Model unavailable, please try again" — told a
             person to retry a request that could never succeed.
             """
+            # FIX49 Part A — remember that a terminal error frame went to
+            # the wire. The client-disconnect finalize path records
+            # SUCCESS by design ("the content up to the cut was
+            # delivered"), but a stream whose delivered content IS an
+            # error frame must never count as a success row (measured: a
+            # disconnect right after model_no_tool_support produced a
+            # 0-token success in request_logs).
+            _terminal_error["code"] = code
             info = error_catalog.describe(code)
             err: dict = {
                 "code": code,
@@ -1768,6 +1776,11 @@ async def _chat_completions_impl(
             )
 
         _fallback_notice_emitted = False
+        # FIX49 Part A — set by _emit_error the moment a terminal error
+        # frame is serialised; consulted by _finalize_stream so no exit
+        # shape (client disconnect included) records that stream as a
+        # success row.
+        _terminal_error: dict = {}
         # FIX35 Part B — announced once per stream, only when the route was a
         # meta-router id and the provider's first chunk named the real model.
         _model_resolved_emitted = False
@@ -2070,16 +2083,20 @@ async def _chat_completions_impl(
                             # completions (FIX49 Part A) log as
                             # provider_error; a client disconnect still logs
                             # success — the content up to the cut WAS
-                            # delivered and billed. ``success`` must mean
-                            # "the user got an answer", so any non-completed
-                            # reason is an error in the record too.
+                            # delivered and billed — UNLESS what was
+                            # delivered included a terminal error frame.
+                            # ``success`` must mean "the user got an
+                            # answer", so any non-completed reason, and any
+                            # stream that told the client it failed, is an
+                            # error in the record too.
                             status=(
                                 RequestStatus.SUCCESS
-                                if reason == "completed"
+                                if reason == "completed" and not _terminal_error
                                 else RequestStatus.PROVIDER_ERROR
                             ),
                             error_code=(
-                                None if reason == "completed" else reason
+                                _terminal_error.get("code")
+                                or (None if reason == "completed" else reason)
                             ),
                             policy_action=overall_action.name.lower(),
                             policy_profile_id=profile.profile_id,

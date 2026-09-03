@@ -36,6 +36,9 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "internal_error",
   "stream_interrupted",
   "health_marker_skip",
+  // FIX49 Part A — the turn "completed" with no text and no tool call;
+  // a retry (or another model) is exactly the way out.
+  "empty_completion",
   // chat-edge's own codes
   "send_failed",
   "INTERNAL_ERROR",
@@ -65,6 +68,7 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   internal_error: "error.internal_error",
   stream_interrupted: "error.stream_interrupted",
   health_marker_skip: "error.health_marker_skip",
+  empty_completion: "error.empty_completion",
   send_failed: "error.send_failed",
   INTERNAL_ERROR: "error.internal_error",
   PROVIDER_UNAVAILABLE: "error.provider_unavailable",
