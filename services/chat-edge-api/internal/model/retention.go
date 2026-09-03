@@ -92,6 +92,6 @@ type DeletionAuditEntry struct {
 	Counts map[string]int `json:"counts"`
 	// Details: setting changes (old/new numbers and flags) — never
 	// content.
-	Details map[string]any `json:"details,omitempty"`
-	CreatedAt time.Time    `json:"created_at"`
+	Details   map[string]any `json:"details,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
 }

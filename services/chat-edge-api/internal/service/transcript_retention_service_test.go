@@ -64,6 +64,18 @@ func seedRetentionTenant(
 ) (tenant, user, expiredConv, freshConv, deletedConv uuid.UUID) {
 	t.Helper()
 	tenant, user = uuid.New(), uuid.New()
+	// Cleanup registered BEFORE any DB write: a Fatalf mid-seed must
+	// never strand an enabled settings row in the shared DB (the
+	// nightly sweep scans ListEnabled globally).
+	t.Cleanup(func() {
+		for _, tbl := range []string{
+			"messages_masked", "conversations",
+			"tenant_retention_settings", "deletion_audit",
+		} {
+			_, _ = pool.Exec(ctx,
+				"DELETE FROM chat."+tbl+" WHERE tenant_id = $1", tenant)
+		}
+	})
 	days := model.TranscriptRetentionMinDays
 	settings := repository.NewTenantRetentionSettingsRepo(pool)
 	if err := settings.Upsert(ctx, &model.TenantRetentionSettings{
@@ -102,15 +114,6 @@ func seedRetentionTenant(
 	freshConv = mk(1, false, 0)
 	deletedConv = mk(60, true, 45) // user-deleted 45 days ago (> 30)
 
-	t.Cleanup(func() {
-		for _, tbl := range []string{
-			"messages_masked", "conversations",
-			"tenant_retention_settings", "deletion_audit",
-		} {
-			_, _ = pool.Exec(ctx,
-				"DELETE FROM chat."+tbl+" WHERE tenant_id = $1", tenant)
-		}
-	})
 	return
 }
 
@@ -138,7 +141,7 @@ func convCount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenant uui
 
 func TestSweep_DryRunCountsAndDeletesNothing(t *testing.T) {
 	pool := retentionTestPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 
 	tenant, _, _, _, _ := seedRetentionTenant(t, ctx, pool, true, true)
@@ -166,7 +169,7 @@ func TestSweep_DryRunCountsAndDeletesNothing(t *testing.T) {
 
 func TestSweep_LivePassErasesBothRulesWithAudit(t *testing.T) {
 	pool := retentionTestPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 
 	tenant, _, expiredConv, freshConv, deletedConv :=
@@ -212,7 +215,7 @@ func TestSweep_LivePassErasesBothRulesWithAudit(t *testing.T) {
 
 func TestSweep_DisabledTenantIsUntouched(t *testing.T) {
 	pool := retentionTestPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 
 	tenant, _, _, _, _ := seedRetentionTenant(t, ctx, pool, false, false)

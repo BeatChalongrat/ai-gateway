@@ -48,7 +48,7 @@ var eraseKindToTable = map[string]string{
 
 func TestEraseCoverage_EveryConversationTableIsAccountedFor(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 
 	rows, err := pool.Query(ctx, `
@@ -182,7 +182,7 @@ func countAcrossFootprint(
 
 func TestHardDeleteConversation_CascadesAndAuditsAtomically(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 	if reg := regclass(t, ctx, pool, "chat.deletion_audit"); !reg {
 		t.Skip("skipping: chat.deletion_audit not present — run apply_migrations.sh")
@@ -190,8 +190,8 @@ func TestHardDeleteConversation_CascadesAndAuditsAtomically(t *testing.T) {
 
 	tenantA, userA := uuid.New(), uuid.New()
 	tenantB, userB := uuid.New(), uuid.New()
-	convA := seedConversationFootprint(t, ctx, pool, tenantA, userA)
-	_ = seedConversationFootprint(t, ctx, pool, tenantB, userB)
+	// Cleanup registered BEFORE seeding: a mid-seed Fatalf must not
+	// strand synthetic rows in the shared DB.
 	t.Cleanup(func() {
 		// Tenant B's synthetic rows (and any A leftovers on failure).
 		for _, tid := range []uuid.UUID{tenantA, tenantB} {
@@ -206,6 +206,8 @@ func TestHardDeleteConversation_CascadesAndAuditsAtomically(t *testing.T) {
 			}
 		}
 	})
+	convA := seedConversationFootprint(t, ctx, pool, tenantA, userA)
+	_ = seedConversationFootprint(t, ctx, pool, tenantB, userB)
 
 	erase := repository.NewConversationEraseRepo(pool)
 
@@ -268,7 +270,7 @@ func TestHardDeleteConversation_CascadesAndAuditsAtomically(t *testing.T) {
 
 func TestRetentionSettings_FloorAndDefaults(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 	if reg := regclass(t, ctx, pool, "chat.tenant_retention_settings"); !reg {
 		t.Skip("skipping: chat.tenant_retention_settings not present")
@@ -322,7 +324,7 @@ func TestRetentionSettings_FloorAndDefaults(t *testing.T) {
 
 func TestEraseCandidateWindows(t *testing.T) {
 	pool := testPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 
 	tenant, user := uuid.New(), uuid.New()
