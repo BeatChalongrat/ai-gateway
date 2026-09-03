@@ -75,6 +75,8 @@ traces/
 *_AUDIT_REPORT.md
 *_VERIFICATION_REPORT.md
 *_PLAN.md
+# Exception: the retention plan is a real project document, not a working report.
+!docs/DATA_RETENTION_PLAN.md
 *_LOG.md
 BASELINE_STATUS.md
 IMPLEMENTATION_ROADMAP.md
