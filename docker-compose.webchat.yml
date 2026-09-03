@@ -66,12 +66,15 @@ services:
       # semantics).
       - INTERNAL_SERVICE_SECRET=${INTERNAL_SERVICE_SECRET:-}
       # FIX16 — cloud scheduled tasks (the always-on unattended firing loop).
-      # OFF by default; flip CLOUD_SCHEDULER_ENABLED=true to turn it on. The
+      # FIX51 Part 2.1 (W5-7): ON by default — the revocation+balance gate
+      # this loop refuses to start without (/internal/scheduled-run/authorize)
+      # is verified live, and main.go still fails CLOSED if the authorize URL
+      # is ever emptied. Set CLOUD_SCHEDULER_ENABLED=false to turn it off. The
       # authorize URL is the BACKEND's /internal/scheduled-run/authorize
       # (revocation + balance gate); host.docker.internal:8081 is the backend's
       # host port from this stack. The 1-hour per-task floor is enforced in the
       # store; CLOUD_SCHEDULER_INTERVAL only bounds how often it scans.
-      - CLOUD_SCHEDULER_ENABLED=${CLOUD_SCHEDULER_ENABLED:-false}
+      - CLOUD_SCHEDULER_ENABLED=${CLOUD_SCHEDULER_ENABLED:-true}
       - CLOUD_TASK_AUTHORIZE_URL=${CLOUD_TASK_AUTHORIZE_URL:-http://host.docker.internal:8081}
       - CLOUD_SCHEDULER_INTERVAL=${CLOUD_SCHEDULER_INTERVAL:-60s}
       # Bug 3: read the ONE .env value (same var + dev default as the backend

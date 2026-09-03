@@ -558,3 +558,31 @@ async def anthropic_messages(req: Request) -> object:
         media_type="text/event-stream",
         headers={"X-Mock-Provider": _PROFILE_NAME, "Cache-Control": "no-cache"},
     )
+
+
+# ---------------------------------------------------------------------------
+# FIX51 Part 2.2 — mock SEARCH lever. Lets the gateway's /v1/search chain
+# and the chat web_search tool be driven end-to-end with no real search
+# key and no credits (same spirit as __echo64__ / __tool__). Shape
+# mirrors Tavily's POST /search minimally: the MockSearchProvider
+# adapter normalizes it like any other engine.
+#   * query containing "__searchfail__" -> 500 (provider-failure arm,
+#     exercises the fallback chain / SearchUnavailableError path).
+# ---------------------------------------------------------------------------
+@app.post("/search")
+async def mock_search(req: Request) -> object:
+    body = await req.json()
+    query = str(body.get("query") or "")
+    if "__searchfail__" in query:
+        return JSONResponse(status_code=500, content={"error": "mock search forced failure"})
+    n = min(int(body.get("max_results") or 5), 10)
+    results = [
+        {
+            "title": f"Mock result {i + 1} for: {query[:60]}",
+            "url": f"https://mock.example.test/result/{i + 1}",
+            "content": f"Snippet {i + 1} — canned evidence about '{query[:80]}'.",
+            "published_date": "2026-09-01",
+        }
+        for i in range(n)
+    ]
+    return JSONResponse(status_code=200, content={"results": results})

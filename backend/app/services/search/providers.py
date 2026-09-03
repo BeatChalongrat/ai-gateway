@@ -10,6 +10,7 @@ through to the next provider.
 
 from __future__ import annotations
 
+import os
 import time
 
 import httpx
@@ -243,6 +244,51 @@ class BingSearchProvider(SearchProvider):
         )
 
 
+class MockSearchProvider(SearchProvider):
+    """FIX51 Part 2.2 — dev-only engine against the local mock server.
+
+    Exists so the WHOLE search path (tenant gate → chain → normalize →
+    credit charge → web_search tool → citations) can be proven live
+    with no real key and no spend — the same lever pattern as the mock
+    chat provider's ``__echo64__`` / ``__tool__``. Registered only
+    outside production (see below), so the admin dropdown never offers
+    it to a real deployment.
+    """
+
+    provider_name = "mock"
+    BASE_URL = os.environ.get("MOCK_SEARCH_BASE_URL", "http://mock-provider:9090")
+
+    async def search(self, query: str, max_results: int) -> SearchResults:
+        t0 = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{self.BASE_URL}/search",
+                    json={"query": query, "max_results": max_results},
+                )
+        except httpx.HTTPError as e:
+            raise SearchProviderError(f"mock transport: {e}") from e
+        if resp.status_code != 200:
+            raise SearchProviderError(f"mock HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        results = [
+            SearchResult(
+                title=r.get("title", "") or "",
+                url=r.get("url", "") or "",
+                snippet=r.get("content", "") or "",
+                published_date=r.get("published_date"),
+            )
+            for r in (data.get("results") or [])
+            if r.get("url")
+        ]
+        return SearchResults(
+            query=query,
+            provider=self.provider_name,
+            results=results,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+        )
+
+
 # Registry — provider name → adapter class. The admin "add provider"
 # dropdown and SearchService both validate against these keys.
 PROVIDER_ADAPTERS: dict[str, type[SearchProvider]] = {
@@ -252,6 +298,10 @@ PROVIDER_ADAPTERS: dict[str, type[SearchProvider]] = {
     "google": GoogleSearchProvider,
     "bing": BingSearchProvider,
 }
+
+# The mock engine is a dev/test lever, never a production offer.
+if os.environ.get("APP_ENV", "development") != "production":
+    PROVIDER_ADAPTERS["mock"] = MockSearchProvider
 
 SUPPORTED_PROVIDERS = tuple(PROVIDER_ADAPTERS.keys())
 
