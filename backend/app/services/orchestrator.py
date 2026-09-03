@@ -1224,15 +1224,21 @@ class GatewayOrchestrator:
                 route.provider_name = used_provider
                 route.model_name = used_model
             # Primary succeeded — clear any stale health marker so the
-            # streaming pre-check stops skipping this provider.
-            await clear_provider_health(original_provider)
+            # streaming pre-check stops skipping this (provider, model).
+            await clear_provider_health(original_provider, original_model)
         except Exception as exc:  # noqa: BLE001
             from app.core.exceptions import GatewayError as _GwErr
 
             if isinstance(exc, _GwErr) and is_fallback_eligible(exc):
-                # Tag the primary as unhealthy so the next streaming
-                # request bypasses it via the Redis pre-check.
-                await mark_provider_unhealthy(original_provider)
+                # Tag the primary (provider, model) as unhealthy so the
+                # next streaming request bypasses it via the Redis
+                # pre-check — FIX49 Part C: scoped to the pair, so one
+                # dead model no longer dabs the whole provider.
+                await mark_provider_unhealthy(
+                    original_provider,
+                    original_model,
+                    error_code=getattr(exc, "code", None),
+                )
                 log.warning(
                     "primary_dispatch_failed_attempting_fallback",
                     provider=route.provider_name,
@@ -1363,6 +1369,33 @@ class GatewayOrchestrator:
         #
         # streaming DLP restore handled in public_chat.py
         response_content = provider_response.content
+
+        # FIX49 Part A — the non-streaming twin of the stream's
+        # empty-completion guard: a reply with no text and no tool call
+        # is an error, never a success (the streaming path measured 45
+        # such turns recorded as success in 48 h). A short answer passes
+        # (empty-after-strip, never a length check); a tool-call-only
+        # reply is a normal agentic turn.
+        if (
+            not (response_content or "").strip()
+            and not provider_response.tool_calls
+        ):
+            from app.core.exceptions import ProviderError as _EmptyErr
+
+            logger.warning(
+                "empty_completion_nonstream",
+                request_id=request_id,
+                provider=route.provider_name,
+                model=route.model_name,
+            )
+            raise _EmptyErr(
+                "The model returned an empty answer.",
+                code="empty_completion",
+                details={
+                    "provider": route.provider_name,
+                    "model": route.model_name,
+                },
+            )
         # DLP trace snapshot 3/4: provider response BEFORE any output DLP
         # work — captures exactly what the model returned, even if a
         # later mask/restore step rewrites it.

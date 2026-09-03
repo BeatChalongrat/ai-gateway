@@ -185,6 +185,6 @@ class OpenRouterAdapter(BaseProviderAdapter):
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
             async for line in resp.aiter_lines():
-                chunk = _parse_sse_line(line)
+                chunk = _parse_sse_line(line, provider_name=self.provider_name)
                 if chunk is not None:
                     yield chunk

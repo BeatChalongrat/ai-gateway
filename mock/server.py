@@ -120,6 +120,12 @@ def _pick_response(messages: list[dict]) -> str:
         if m.get("role") == "user":
             last_user = str(m.get("content", "")) or ""
             break
+    # FIX49 Part A — deterministic empty-completion lever for probing the
+    # gateway's empty_completion guard: the provider "succeeds" but sends
+    # zero content tokens, which is exactly what a swallowed in-stream
+    # failure or a reasoning-eaten budget looks like from the outside.
+    if "__empty__" in last_user:
+        return ""
     triggers = ("email", "phone", "card", "ssn", "password", "ไทย", "เลขประจำตัว")
     if any(t in last_user.lower() for t in triggers):
         return random.choice(_DLP_HEAVY_RESPONSES)

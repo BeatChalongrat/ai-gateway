@@ -1438,6 +1438,21 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		case finishReason == "error":
 			status = "error"
 		}
+		// FIX49 Part A — "completed" must mean the user got an answer.
+		// The gateway now errors an empty stream itself
+		// (empty_completion), but this is the last write before the row
+		// becomes permanent, so it holds the same line for the exact
+		// pathological shape measured in the 2026-09-03 audit: no text
+		// AND no finish_reason at all (a swallowed upstream failure —
+		// 25/25 blank gpt-5.6-terra turns persisted as completed).
+		// Deliberately narrow: a legitimate turn always carries a
+		// finish reason (stop/length/tool_calls), so an image-gen or
+		// tool-only turn that ends with empty text is never touched.
+		if status == "completed" && finishReason == "" && strings.TrimSpace(content) == "" {
+			slog.Warn("empty completion with no finish reason persisted as error",
+				"conversation_id", conv.ID.String(), "message_id", asstMsg.ID.String())
+			status = "error"
+		}
 		var tokInput, tokOutput *int
 		if usage != nil {
 			ti, to := usage.PromptTokens, usage.CompletionTokens

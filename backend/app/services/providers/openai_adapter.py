@@ -611,13 +611,23 @@ class OpenAIAdapter(BaseProviderAdapter):
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
             async for line in resp.aiter_lines():
-                chunk = _parse_sse_line(line)
+                chunk = _parse_sse_line(line, provider_name=self.provider_name)
                 if chunk is not None:
                     yield chunk
 
 
-def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
-    """Parse a single SSE line from the OpenAI streaming response."""
+def _parse_sse_line(
+    line: str, *, provider_name: str = "provider"
+) -> ProviderStreamChunk | None:
+    """Parse a single SSE line from the OpenAI streaming response.
+
+    Raises the mapped domain exception when the line is an in-stream
+    ``{"error": {...}}`` payload (FIX49 Part A): OpenRouter (and other
+    OpenAI-compatible aggregators) deliver upstream failures this way on
+    an already-committed 200 stream. Dropping the line — the previous
+    behaviour — ended the stream cleanly with zero content and the turn
+    was recorded as success.
+    """
     if not line.startswith("data: "):
         return None
 
@@ -629,6 +639,18 @@ def _parse_sse_line(line: str) -> ProviderStreamChunk | None:
         data = json.loads(data_str)
     except json.JSONDecodeError:
         return None
+
+    if isinstance(data, dict):
+        err = data.get("error")
+        # Some aggregators attach a benign empty error object next to
+        # choices; only a dict WITH content and WITHOUT choices is a
+        # real terminal error frame.
+        if isinstance(err, dict) and err and not data.get("choices"):
+            from app.services.providers.error_handler import (
+                map_stream_error_payload,
+            )
+
+            raise map_stream_error_payload(err, provider_name)
 
     # The trailing usage chunk emitted under stream_options.include_usage
     # has empty `choices` and a populated `usage`. Surface it so the route
@@ -823,6 +845,43 @@ def _parse_responses_sse_line(
     if not isinstance(data, dict):
         return None
     t = data.get("type")
+    # FIX49 Part A — the Responses API delivers failures INSIDE the 200
+    # stream: a ``type: "error"`` event followed by ``response.failed``
+    # (measured live: insufficient_quota arrived exactly this way while
+    # the HTTP status was 200). These used to fall through the "ignore
+    # unknown lifecycle events" default, so the stream ended cleanly
+    # with zero content and the gateway recorded success. Raise the
+    # mapped domain exception instead so the route layer's fallback /
+    # error machinery handles it like any other provider failure.
+    if t == "error":
+        from app.services.providers.error_handler import map_stream_error_payload
+
+        raise map_stream_error_payload(
+            data.get("error") if isinstance(data.get("error"), dict) else data,
+            "openai",
+        )
+    if t == "response.failed":
+        from app.services.providers.error_handler import map_stream_error_payload
+
+        resp_obj = data.get("response") or {}
+        err = resp_obj.get("error") if isinstance(resp_obj, dict) else None
+        raise map_stream_error_payload(
+            err if isinstance(err, dict) and err else {"type": "response.failed"},
+            "openai",
+        )
+    if t == "response.incomplete":
+        # The model stopped early (e.g. max_output_tokens). Content that
+        # DID stream has already been yielded; surface the truncation as
+        # a terminal length finish so downstream accounting is honest.
+        resp_obj = data.get("response") or {}
+        return ProviderStreamChunk(
+            delta="",
+            finish_reason="length",
+            model=resp_obj.get("model", "") if isinstance(resp_obj, dict) else "",
+            usage=_responses_usage(
+                resp_obj.get("usage") if isinstance(resp_obj, dict) else None
+            ),
+        )
     if t == "response.output_text.delta":
         return ProviderStreamChunk(
             delta=data.get("delta", "") or "", finish_reason=None, model=""

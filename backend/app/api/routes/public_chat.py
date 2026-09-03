@@ -1133,7 +1133,7 @@ async def _chat_completions_impl(
 
     _stream_required_caps = detect_required_capabilities(payload)
 
-    if await _is_unhealthy(route.provider_name):
+    if await _is_unhealthy(route.provider_name, route.model_name):
         fb_runner = orchestrator._get_fallback_orchestrator()
         # The chat hot-path ``session`` is an AsyncSession, so use the async
         # selector (awaits get_api_key_async). Passing the async session to
@@ -1847,6 +1847,10 @@ async def _chat_completions_impl(
         # instead of attempting a swap that would corrupt the body.
         first_chunk_yielded = False
         skip_providers: set[str] = set()
+        # FIX49 Part C — (provider, model) pairs that failed THIS request;
+        # the provider's other models stay viable unless the failure was
+        # infrastructure-class (then skip_providers gets the provider too).
+        skip_pairs: set[tuple[str, str]] = set()
         MAX_STREAMING_FALLBACKS = 2
 
         # Local refs we may rebind on fallback. ``adapter`` /
@@ -1865,11 +1869,16 @@ async def _chat_completions_impl(
         if _cap_frame:
             yield _cap_frame
 
-        # B2: a pre-check (Redis health marker) swap already redirected this
-        # request to a fallback before the loop. Announce it before content.
-        if _stream_fallback_used and not _fallback_notice_emitted:
-            yield _emit_fallback_info()
-            _fallback_notice_emitted = True
+        # B2 / FIX49 Part C — a pre-check (Redis health marker) swap already
+        # redirected this request to a fallback before the loop. The notice
+        # used to be emitted HERE, before the fallback had produced a single
+        # byte — so when the fallback then ALSO failed, the client received
+        # "answered by X" followed by X's error (the contradictory frames
+        # that mis-led the FIX48 diagnosis of claude-3.5-haiku). The notice
+        # is now DEFERRED (``_fallback_notice_pending``) and emitted only
+        # in front of the fallback's first real output, so a fallback_info
+        # frame always means "the named model is actually answering".
+        _fallback_notice_pending = _stream_fallback_used and not _fallback_notice_emitted
 
         def _finalize_stream(
             client_disconnected: bool, reason: str = "completed"
@@ -2057,14 +2066,20 @@ async def _chat_completions_impl(
                             # FIX35 Part C — feeds the per-tenant ranking.
                             task_category=(payload.metadata or {}).get("auto_task") if payload.metadata else None,
                             # Partial-fail exits (fallback chain exhausted /
-                            # unexpected error mid-stream) log as
+                            # unexpected error mid-stream) and empty
+                            # completions (FIX49 Part A) log as
                             # provider_error; a client disconnect still logs
                             # success — the content up to the cut WAS
-                            # delivered and billed.
+                            # delivered and billed. ``success`` must mean
+                            # "the user got an answer", so any non-completed
+                            # reason is an error in the record too.
                             status=(
-                                RequestStatus.PROVIDER_ERROR
-                                if reason == "stream_partial_fail"
-                                else RequestStatus.SUCCESS
+                                RequestStatus.SUCCESS
+                                if reason == "completed"
+                                else RequestStatus.PROVIDER_ERROR
+                            ),
+                            error_code=(
+                                None if reason == "completed" else reason
                             ),
                             policy_action=overall_action.name.lower(),
                             policy_profile_id=profile.profile_id,
@@ -2286,6 +2301,13 @@ async def _chat_completions_impl(
                                             )
                                             r_safe = r_safe[:_last_lt]
                                         if r_safe:
+                                            # FIX49 Part C — the fallback is
+                                            # really answering: announce the
+                                            # swap before its first output.
+                                            if _fallback_notice_pending:
+                                                _fallback_notice_pending = False
+                                                _fallback_notice_emitted = True
+                                                yield _emit_fallback_info()
                                             yield _emit_reasoning_chunk(r_safe)
                                     else:
                                         _reasoning_tail_masked = r_masked_window
@@ -2401,6 +2423,12 @@ async def _chat_completions_impl(
                                     emit_text, _redact_span_map,
                                 )
                                 if emit_text:
+                                    # FIX49 Part C — deferred fallback notice:
+                                    # emitted only in front of real output.
+                                    if _fallback_notice_pending:
+                                        _fallback_notice_pending = False
+                                        _fallback_notice_emitted = True
+                                        yield _emit_fallback_info()
                                     emitted_parts.append(emit_text)
                                     yield _emit_chunk(emit_text)
                                     first_chunk_yielded = True
@@ -2465,6 +2493,11 @@ async def _chat_completions_impl(
                                         }
                                     )
                             if _header_frames:
+                                # FIX49 Part C — deferred fallback notice.
+                                if _fallback_notice_pending:
+                                    _fallback_notice_pending = False
+                                    _fallback_notice_emitted = True
+                                    yield _emit_fallback_info()
                                 first_chunk_yielded = True
                                 yield _emit_tool_calls_chunk(_header_frames)
 
@@ -2475,9 +2508,9 @@ async def _chat_completions_impl(
                         if chunk.usage is not None:
                             provider_usage = chunk.usage
                     # Stream completed successfully — clear the health
-                    # marker for the provider that just answered so the
-                    # next request's pre-check stops skipping it.
-                    await _clear_health(route.provider_name)
+                    # marker for the (provider, model) that just answered
+                    # so the next request's pre-check stops skipping it.
+                    await _clear_health(route.provider_name, route.model_name)
                     break
                 except Exception as stream_exc:  # noqa: BLE001
                     from app.core.exceptions import GatewayError as _GwErr
@@ -2496,7 +2529,11 @@ async def _chat_completions_impl(
                         if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
                             stream_exc
                         ):
-                            await _mark_unhealthy(route.provider_name)
+                            await _mark_unhealthy(
+                                route.provider_name,
+                                route.model_name,
+                                error_code=getattr(stream_exc, "code", None),
+                            )
                         # B1: surface a mid-stream failure as an error frame so
                         # the client can append an error notice to the partial
                         # message instead of silently truncating.
@@ -2544,20 +2581,32 @@ async def _chat_completions_impl(
                         return
 
                     failed_provider = route.provider_name
+                    _failed_code = getattr(stream_exc, "code", "provider_error")
                     _stream_fallback_attempts.append(
                         {
                             "provider": failed_provider,
                             "model": route.model_name,
-                            "error_code": getattr(
-                                stream_exc, "code", "provider_error"
-                            ),
+                            "error_code": _failed_code,
                             "error_message": str(stream_exc)[:200],
                             "latency_ms": 0.0,
                             "attempted_at": _dt.now(_tz.utc).isoformat(),
                         }
                     )
-                    await _mark_unhealthy(failed_provider)
-                    skip_providers.add(failed_provider)
+                    # FIX49 Part C — mark and skip the PAIR that failed,
+                    # not the whole provider: with 11 of 14 usable models
+                    # on one aggregator, a provider-level skip turned one
+                    # dead model into a system-wide outage. Only an
+                    # infrastructure-class failure (timeout/unreachable)
+                    # still rules out the provider's other models.
+                    await _mark_unhealthy(
+                        failed_provider, route.model_name, error_code=_failed_code
+                    )
+                    skip_pairs.add((failed_provider, route.model_name))
+                    from app.services.gateway.fallback_orchestrator import (
+                        _PROVIDER_WIDE_CODES as _PW_CODES,
+                    )
+                    if _failed_code in _PW_CODES:
+                        skip_providers.add(failed_provider)
 
                     if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
                         # B3: the fallback chain is exhausted. Emit an
@@ -2594,6 +2643,7 @@ async def _chat_completions_impl(
                             original_model=_stream_original_model,
                             session=_lookup_session,
                             skip_providers=skip_providers,
+                            skip_pairs=skip_pairs,
                             required=_stream_required_caps,
                         )
                     finally:
@@ -2643,13 +2693,13 @@ async def _chat_completions_impl(
                     stream_api_key = fb_candidate["api_key"]
                     _stream_fallback_used = True
                     _stream_attempt_number += 1
-                    # B2: announce the swap before the fallback model's content.
-                    # Safe to emit here — the in-generator fallback only fires
-                    # while ``first_chunk_yielded`` is False, so no content has
-                    # reached the wire yet for this answer.
+                    # B2 / FIX49 Part C — DEFER the notice to the fallback's
+                    # first real output. Emitting here (before the fallback
+                    # produced anything) made the wire say "answered by X"
+                    # right before X's own failure frame when the fallback
+                    # also died — the frames must never contradict.
                     if not _fallback_notice_emitted:
-                        yield _emit_fallback_info()
-                        _fallback_notice_emitted = True
+                        _fallback_notice_pending = True
                     continue
         except GeneratorExit:
             _finalize_stream(client_disconnected=True)
@@ -2707,6 +2757,12 @@ async def _chat_completions_impl(
             # for why the secret tokens are excluded here.
             final_emit = redact_orphan_tokens(final_emit, _redact_span_map)
             if final_emit:
+                # FIX49 Part C — deferred fallback notice (a short answer
+                # can live entirely in the DLP tail window).
+                if _fallback_notice_pending:
+                    _fallback_notice_pending = False
+                    _fallback_notice_emitted = True
+                    yield _emit_fallback_info()
                 emitted_parts.append(final_emit)
                 yield _emit_chunk(final_emit)
 
@@ -2930,6 +2986,12 @@ async def _chat_completions_impl(
                 # this index. If the header was never emitted (degenerate
                 # provider that sent args without id/name first), include
                 # id+name here so the client can still reconstruct the call.
+                # FIX49 Part C — deferred fallback notice (a tool-only turn
+                # whose provider streamed args without a header frame).
+                if _fallback_notice_pending:
+                    _fallback_notice_pending = False
+                    _fallback_notice_emitted = True
+                    yield _emit_fallback_info()
                 if _idx in _emitted_tool_call_headers:
                     _arg_frame = {
                         "index": _idx,
@@ -2946,6 +3008,34 @@ async def _chat_completions_impl(
                         },
                     }
                 yield _emit_tool_calls_chunk([_arg_frame])
+
+        # FIX49 Part A — ``success`` must mean the user got an answer.
+        # A stream can reach this point with ZERO visible output while
+        # every upstream signal was swallowed (measured live: OpenAI's
+        # Responses API delivers insufficient_quota INSIDE a 200 stream;
+        # 25/25 gpt-5.6-terra turns in 48 h were blank bubbles recorded
+        # as success, so the failure never appeared on any error graph).
+        # The parsers now raise on in-stream errors, but this guard is
+        # the backstop for every current and future way a stream ends
+        # empty: no content and no tool call → an error frame the user
+        # can see and retry, and an error row the graphs can count.
+        # A short answer is NOT an empty answer — one word passes
+        # (`emitted_parts` is checked for emptiness after strip, never
+        # for length), and a tool-call-only turn is a normal agentic
+        # turn, not an empty one.
+        if (
+            not "".join(emitted_parts).strip()
+            and not _streaming_tool_call_args
+        ):
+            log.warning(
+                "stream_empty_completion",
+                request_id=ctx.request_id or "",
+                provider=route.provider_name,
+                model=route.model_name,
+            )
+            yield _emit_error(code="empty_completion")
+            _finalize_stream(client_disconnected=False, reason="empty_completion")
+            return
 
         _finalize_stream(client_disconnected=False)
 

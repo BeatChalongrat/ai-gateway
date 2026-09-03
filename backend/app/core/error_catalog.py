@@ -46,6 +46,12 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("all_models_failed", "No model could answer right now. Please try again or pick another model.", True),
     ErrorInfo("internal_error", "An internal error occurred. Please try again.", True),
     ErrorInfo("stream_interrupted", "The response was interrupted. Please try again.", True),
+    # FIX49 Part A — the turn "completed" with no text and no tool call.
+    # Whatever the upstream cause (an in-stream failure the parser
+    # missed, a model that spent its whole budget reasoning), an empty
+    # answer must never be reported as success: the user sees this
+    # message and a working retry instead of a silent blank bubble.
+    ErrorInfo("empty_completion", "The model returned an empty answer. Please try again or pick another model.", True),
     # per-attempt code in all_models_failed.attempts: the provider was skipped
     # because its health marker showed a recent failure
     ErrorInfo("health_marker_skip", "Skipped: this provider failed a moment ago. Please try again shortly.", True),

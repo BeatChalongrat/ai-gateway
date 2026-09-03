@@ -424,6 +424,19 @@ function MessageBubbleImpl({
         />
       ) : null}
 
+      {/* FIX49 Part A — a failed turn read back from the SERVER (reload /
+          another device) carries status="error" but no error_message (the
+          SSE frame was live-only). Without this the user saw a blank
+          bubble with only the tiny status label — an unexplained empty
+          message. Same red notice surface, generic localized text, and
+          the regenerate button on the row is the retry. */}
+      {!message.error_message &&
+      message.status === "error" &&
+      !message.isStreaming &&
+      !message.content.trim() ? (
+        <ErrorNotice message={t("msg.turnFailedReload")} />
+      ) : null}
+
       {/* B2 — fallback notice. A small line under the reply when a
           different model answered than the one requested. */}
       {message.fallback_info ? (

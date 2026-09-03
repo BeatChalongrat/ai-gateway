@@ -126,6 +126,35 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
                 },
             )
 
+        # FIX49 Part C — 402 (payment / budget). OpenRouter answers 402
+        # ``in_flight_budget_exhausted`` WITH ``Retry-After: 120`` when a
+        # per-window budget is briefly exhausted — the provider itself
+        # says "try again in 120 s". That used to fall into the generic
+        # 4xx bucket (upstream_bad_response, retryable=false), so the
+        # client hid the retry button on an error the provider promised
+        # would clear. With Retry-After → the retryable rate-limit class
+        # (FIX47 catalogue, retryable=true, carries retry_after).
+        # Without Retry-After the account is simply out of credits —
+        # still fallback-eligible (another provider can answer) but not
+        # something a user retry fixes.
+        if status == 402:
+            retry_after = exc.response.headers.get("retry-after")
+            if retry_after:
+                return RateLimitExceededError(
+                    f"Provider '{provider_name}' budget exhausted; provider "
+                    f"says retry in {retry_after}s.",
+                    details={
+                        "provider": provider_name,
+                        "status": status,
+                        "retry_after": retry_after,
+                        "body": body,
+                    },
+                )
+            return ProviderError(
+                f"Provider '{provider_name}' reported insufficient credits (402).",
+                details={"provider": provider_name, "status": status, "body": body},
+            )
+
         if status in (502, 503):
             return ProviderUnavailableError(
                 f"Provider '{provider_name}' returned {status}.",
@@ -183,6 +212,42 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
     return ProviderError(
         f"Unexpected error from provider '{provider_name}': {exc}",
         details={"provider": provider_name, "error_type": type(exc).__name__},
+    )
+
+
+# FIX49 Part A — providers also fail INSIDE a 200 stream. OpenAI's
+# Responses API answers 200 and then delivers e.g. insufficient_quota as
+# ``type: "error"`` / ``response.failed`` events; OpenRouter forwards
+# upstream failures as ``{"error": {...}}`` data frames on the
+# chat-completions shape. Both parsers used to drop those lines as
+# unknown types, so the stream ended cleanly with zero content and the
+# gateway recorded SUCCESS — the 21/21 empty ``gpt-5.6-terra`` turns of
+# the 2026-09-03 audit, measured live. This maps the in-stream payload
+# to the same domain exceptions map_provider_error produces for HTTP
+# statuses, so the route layer's fallback/error machinery takes over.
+def map_stream_error_payload(err: dict, provider_name: str) -> Exception:
+    """Map an in-stream provider error payload (no HTTP status) to a
+    domain exception."""
+    etype = str(err.get("type") or "")
+    ecode = str(err.get("code") or "")
+    message = str(err.get("message") or "")[:500]
+    blob = f"{etype} {ecode} {message}".lower()
+    details = {"provider": provider_name, "status": None, "body": {"error": err}}
+    if any(m in blob for m in ("insufficient_quota", "credit", "rate limit", "rate_limit")):
+        return RateLimitExceededError(
+            f"Provider '{provider_name}' reported quota/rate exhaustion "
+            f"mid-stream.",
+            details=details,
+        )
+    if "overloaded" in blob or "unavailable" in blob:
+        return ProviderUnavailableError(
+            f"Provider '{provider_name}' reported unavailability mid-stream.",
+            details=details,
+        )
+    return ProviderError(
+        f"Provider '{provider_name}' reported an error mid-stream: "
+        f"{message or etype or ecode or 'unknown'}",
+        details=details,
     )
 
 

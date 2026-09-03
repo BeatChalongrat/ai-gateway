@@ -1043,6 +1043,9 @@ export const en = {
   "msg.stopped": "stopped",
   // FIX47.6 Part D — visible failures for the message action buttons.
   "msg.copyFailed": "Couldn't copy — select the text and press Ctrl+C",
+  // FIX49 Part A — a failed turn hydrated from the server has no live
+  // error frame; this is its visible explanation instead of a blank bubble.
+  "msg.turnFailedReload": "This answer failed to generate. Press regenerate to try again.",
   "msg.feedbackFailed": "Couldn't save your feedback. Try again.",
   "msg.attempts": "Connection attempts ({n})",
   "msg.attemptOk": "success",
@@ -2381,6 +2384,8 @@ const th: Record<DictKey, string> = {
   "msg.stopped": "หยุดแล้ว",
   // FIX47.6 Part D — ปุ่มบนข้อความต้องไม่ล้มเหลวแบบเงียบ
   "msg.copyFailed": "คัดลอกไม่สำเร็จ — เลือกข้อความแล้วกด Ctrl+C แทน",
+  // FIX49 Part A — เทิร์นที่ล้มเหลวหลังรีเฟรชต้องมีคำอธิบาย ไม่ใช่ฟองว่าง
+  "msg.turnFailedReload": "รอบนี้สร้างคำตอบไม่สำเร็จ — กด \"สร้างคำตอบใหม่\" เพื่อลองอีกครั้ง",
   "msg.feedbackFailed": "บันทึกความเห็นไม่สำเร็จ กรุณาลองใหม่",
   "msg.attempts": "รายละเอียดการลองเชื่อมต่อ ({n})",
   "msg.attemptOk": "สำเร็จ",
