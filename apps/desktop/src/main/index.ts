@@ -35,6 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { BridgeChannel } from "./bridge";
 import { ChatEdgeClient } from "./chat-edge-client";
+import { sweepConversationStateTTL, wipeLocalData } from "./local-data";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
@@ -190,7 +191,14 @@ void app.whenReady().then(async () => {
   quickState.load();
   shellPrefs = new ShellPrefsStore(path.join(app.getPath("userData"), "shell-prefs.json"));
   const prefs = shellPrefs.load();
-  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick}`);
+  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick} localStateTtlDays=${prefs.localStateTtlDays}`);
+  // Local-data TTL sweep — deletes conversation-state cache files not
+  // touched in localStateTtlDays. OFF by default (0); counts only in
+  // the log, never contents.
+  if (prefs.localStateTtlDays > 0) {
+    const swept = sweepConversationStateTTL(app.getPath("userData"), prefs.localStateTtlDays);
+    if (swept > 0) log.info(`local-data TTL sweep removed ${swept} conversation-state file(s) older than ${prefs.localStateTtlDays}d`);
+  }
   log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
   log.info(`userData=${app.getPath("userData")}`);
 
@@ -860,6 +868,31 @@ function installCrashHandlers(contents: WebContents): void {
 }
 
 // ── tray / hotkey / login item / deep link ──────────────────────────────────
+/** The tray's "Clear local data…" action: confirm, wipe the plaintext
+ *  derived caches, report counts (never contents). The shell log file
+ *  is re-attached afterwards so logging keeps working. */
+async function clearLocalDataWithConfirm(): Promise<void> {
+  const { response } = await dialog.showMessageBox({
+    type: "warning",
+    buttons: ["Clear local data", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    title: "Clear local data",
+    message: "Remove locally cached conversation summaries, run records and logs from this computer?",
+    detail: "Your conversations stay on the server and re-sync on next use. This only clears this computer's local cache.",
+  });
+  if (response !== 0) return;
+  const counts = wipeLocalData(app.getPath("userData"));
+  log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
+  log.info(
+    `local data cleared: conversation-state=${counts.conversationStateFiles} run-ledger=${counts.runLedgerFiles} logs=${counts.logFiles}`,
+  );
+  new Notification({
+    title: "SRAN Desktop",
+    body: `Local data cleared (${counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles} files).`,
+  }).show();
+}
+
 function createTray(): void {
   const icon = nativeImage.createFromPath(path.join(APP_ROOT, "assets", "app.ico"));
   tray = new Tray(icon);
@@ -893,6 +926,15 @@ function rebuildTrayMenu(): void {
       { type: "separator" },
       { label: "Sign in", click: () => void sessionController?.signInFromView() },
       { label: "Sign out", click: () => void sessionController?.signOut("tray", true) },
+      { type: "separator" },
+      {
+        // Local-data wipe (retention program): removes the plaintext
+        // derived caches (conversation-state, run-ledger, logs).
+        // Everything is re-derivable from the server; still confirmed
+        // first because it is a deletion.
+        label: "Clear local data…",
+        click: () => void clearLocalDataWithConfirm(),
+      },
       { type: "separator" },
       {
         label: "Quit",

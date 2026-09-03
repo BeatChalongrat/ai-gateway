@@ -1,7 +1,7 @@
 {
   "name": "sran-desktop",
   "private": true,
-  "version": "0.1.0-e23",
+  "version": "0.1.0-e24",
   "description": "SRAN Desktop — the desktop client of SRAN AI Gateway",
   "author": "SRAN",
   "main": "dist/main/index.js",

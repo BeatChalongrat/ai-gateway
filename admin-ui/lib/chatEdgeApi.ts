@@ -50,6 +50,8 @@ export const chatEdge = {
     request(path, { method: "POST", body: JSON.stringify(data) }),
   patch: (path: string, data: unknown) =>
     request(path, { method: "PATCH", body: JSON.stringify(data) }),
+  put: (path: string, data: unknown) =>
+    request(path, { method: "PUT", body: JSON.stringify(data) }),
   delete: (path: string) => request(path, { method: "DELETE" }),
 };
 
@@ -313,4 +315,62 @@ export function reindexAdminKnowledgeBase(id: string) {
     `knowledge-bases/${encodeURIComponent(id)}/reindex`,
     {},
   ) as Promise<{ reindexed: number; failed: number; total: number }>;
+}
+
+// ── Retention & deletion program ─────────────────────────────────────
+
+export interface RetentionSettings {
+  tenant_id: string;
+  transcript_retention_enabled: boolean;
+  transcript_retention_days?: number | null;
+  deleted_conversation_purge_days: number;
+  dry_run: boolean;
+}
+
+export interface RetentionSettingsResponse {
+  settings: RetentionSettings;
+  min_days: number;
+  effective_at: string;
+}
+
+export interface DeletionAuditEntry {
+  id: string;
+  tenant_id: string;
+  user_id?: string | null;
+  actor: string;
+  action: string;
+  scope: string;
+  resource_id?: string | null;
+  rule: string;
+  counts: Record<string, number>;
+  details?: Record<string, unknown>;
+  created_at: string;
+}
+
+export function fetchRetentionSettings(tenantId: string) {
+  return chatEdge.get(
+    `retention-settings?tenant_id=${encodeURIComponent(tenantId)}`,
+  ) as Promise<RetentionSettingsResponse>;
+}
+
+export function putRetentionSettings(body: RetentionSettings) {
+  return chatEdge.put(`retention-settings`, body) as Promise<{
+    settings: RetentionSettings;
+    effective_at: string;
+    audit_ok: boolean;
+  }>;
+}
+
+export function fetchDeletionAudit(tenantId: string, action = "") {
+  const qs = new URLSearchParams({ tenant_id: tenantId });
+  if (action) qs.set("action", action);
+  return chatEdge.get(`deletion-audit?${qs.toString()}`) as Promise<{
+    entries: DeletionAuditEntry[];
+  }>;
+}
+
+export function fetchRetentionPreview(tenantId: string) {
+  return chatEdge.get(
+    `retention-preview?tenant_id=${encodeURIComponent(tenantId)}`,
+  ) as Promise<{ tenant_id: string; counts: Record<string, number>; next_run: string }>;
 }

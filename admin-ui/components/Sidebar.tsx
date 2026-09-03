@@ -64,6 +64,7 @@ const NAV_SECTIONS: { title: DictKey; items: { label: DictKey; href: string; ico
       { label: "nav.chatConversations", href: "/chat-conversations", icon: <svg {...S}><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg> },
       { label: "nav.chatUsers", href: "/chat-users", icon: <svg {...S}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11l-3-3-3 3"/><path d="M19 8v9"/></svg> },
       { label: "nav.chatKnowledge", href: "/chat-knowledge", icon: <svg {...S}><path d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg> },
+      { label: "nav.chatRetention", href: "/chat-retention", icon: <svg {...S}><path d="M3 6h18"/><path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg> },
     ],
   },
 ];

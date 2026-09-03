@@ -29,10 +29,14 @@ export interface ShellPrefs {
   quickHotkey: string;
   /** What a single click on the tray icon opens. Default: the main window. */
   trayClick: TrayClickAction;
+  /** Days after which unused conversation-state cache files are swept
+   *  at boot. 0 (the default) = sweep OFF — like every deleting
+   *  mechanism, it starts disabled and the user turns it on. */
+  localStateTtlDays: number;
 }
 
 export const DEFAULT_QUICK_HOTKEY = "CommandOrControl+Shift+A";
-export const DEFAULT_SHELL_PREFS: Readonly<ShellPrefs> = Object.freeze({ quickHotkey: DEFAULT_QUICK_HOTKEY, trayClick: "main" });
+export const DEFAULT_SHELL_PREFS: Readonly<ShellPrefs> = Object.freeze({ quickHotkey: DEFAULT_QUICK_HOTKEY, trayClick: "main", localStateTtlDays: 0 });
 
 const MODIFIERS = new Set(["commandorcontrol", "cmdorctrl", "command", "cmd", "control", "ctrl", "alt", "option", "altgr", "shift", "super", "meta"]);
 /** Modifiers that count as "a real modifier" for a global shortcut (Shift alone does not). */
@@ -112,7 +116,12 @@ export class ShellPrefsStore {
   load(): ShellPrefs {
     try {
       if (fs.existsSync(this.filePath)) {
-        const raw = JSON.parse(fs.readFileSync(this.filePath, "utf8")) as Partial<ShellPrefs>;
+        // Strip a UTF-8 BOM first: Notepad (the tool a user actually
+        // hand-edits this file with) writes one, and a BOM'd file
+        // must degrade to "that field falls back", not "every pref
+        // silently resets".
+        const text = fs.readFileSync(this.filePath, "utf8").replace(/^﻿/, "");
+        const raw = JSON.parse(text) as Partial<ShellPrefs>;
         this.prefs = sanitizePrefs(raw);
       }
     } catch {
@@ -142,8 +151,13 @@ export class ShellPrefsStore {
 /** A hand-edited or stale file cannot smuggle an invalid value: every field falls back to its default. */
 export function sanitizePrefs(raw: Partial<ShellPrefs> | null | undefined): ShellPrefs {
   const hk = validateAccelerator(typeof raw?.quickHotkey === "string" ? raw.quickHotkey : null);
+  const ttl = raw?.localStateTtlDays;
   return {
     quickHotkey: hk.ok ? hk.accelerator : DEFAULT_QUICK_HOTKEY,
     trayClick: isTrayClickAction(raw?.trayClick) ? raw.trayClick : DEFAULT_SHELL_PREFS.trayClick,
+    localStateTtlDays:
+      typeof ttl === "number" && Number.isFinite(ttl) && ttl >= 0 && ttl <= 3650
+        ? Math.floor(ttl)
+        : DEFAULT_SHELL_PREFS.localStateTtlDays,
   };
 }

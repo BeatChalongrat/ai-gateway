@@ -36,6 +36,7 @@ export const en = {
   "nav.chatConversations": "Conversation Logs",
   "nav.chatUsers": "Chat Users",
   "nav.chatKnowledge": "Knowledge Bases",
+  "nav.chatRetention": "Data Retention",
 
   "nav.openMenu": "Open menu",
   "nav.closeMenu": "Close menu",
@@ -72,6 +73,7 @@ export const th: Record<keyof typeof en, string> = {
   "nav.chatConversations": "บันทึกบทสนทนา",
   "nav.chatUsers": "ผู้ใช้เว็บแชท",
   "nav.chatKnowledge": "ฐานความรู้",
+  "nav.chatRetention": "การเก็บรักษาข้อมูล",
 
   "nav.openMenu": "เปิดเมนู",
   "nav.closeMenu": "ปิดเมนู",
