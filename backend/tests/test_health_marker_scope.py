@@ -65,7 +65,10 @@ def fake_redis(monkeypatch):
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # asyncio.run, never get_event_loop(): the latter hands back a
+    # process-wide loop that outlives the test and leaves anything
+    # cached on it (the shared redis pool) pointing at a dead loop.
+    return asyncio.run(coro)
 
 
 def test_model_scoped_mark_leaves_siblings_healthy(fake_redis):
