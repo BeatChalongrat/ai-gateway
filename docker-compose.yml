@@ -426,6 +426,31 @@ services:
       # means the migrate step was bypassed — refuse to start (named error)
       # rather than serve 500s. The dev override flips this to autoupgrade.
       SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
+      # Nightly retention pipeline (00:00 UTC): strip -> archive ->
+      # archive-expiry -> audit-aging. Each step that MOVES or DELETES
+      # is passed through explicitly so an operator can see the whole
+      # policy in one place. The defaults below repeat the code
+      # defaults on purpose — listing a knob here must not change what
+      # a deployment does; only an explicit value in the environment
+      # does that.
+      #
+      # The stripper always runs and has no switch: stopping the mover
+      # must never stop the redaction of raw columns.
+      LOG_ARCHIVE_ENABLED: ${LOG_ARCHIVE_ENABLED:-false}
+      LOG_ARCHIVE_DAYS: ${LOG_ARCHIVE_DAYS:-90}
+      # Expiry DELETES archive rows. Two switches on purpose: the
+      # feature flag, and a dry-run that reports counts without
+      # deleting. Turn the flag on first, read the numbers, then the
+      # dry-run off.
+      ARCHIVE_EXPIRY_ENABLED: ${ARCHIVE_EXPIRY_ENABLED:-false}
+      ARCHIVE_EXPIRY_DRY_RUN: ${ARCHIVE_EXPIRY_DRY_RUN:-true}
+      ARCHIVE_RETENTION_DAYS: ${ARCHIVE_RETENTION_DAYS:-365}
+      # Audit-log aging, same two-switch shape. Its window must stay
+      # LONGER than every data window above: deletion evidence has to
+      # outlive the data it describes.
+      AUDIT_LOG_AGING_ENABLED: ${AUDIT_LOG_AGING_ENABLED:-false}
+      AUDIT_LOG_AGING_DRY_RUN: ${AUDIT_LOG_AGING_DRY_RUN:-true}
+      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-730}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
