@@ -35,6 +35,11 @@ import (
 var (
 	ErrMemoryEmpty             = errors.New("memory: content is required")
 	ErrMemoryProhibitedContent = errors.New("memory: content contains prohibited data")
+	// FIX49 Part B (8a) — the content carries a DLP mask placeholder
+	// (<<PERSON_A>>, HEALTH_1, <r0>, …). Persisting it would destroy
+	// the user's real value permanently and inject the meaningless
+	// token into every future conversation.
+	ErrMemoryMaskedContent = errors.New("memory: content contains DLP mask placeholders")
 	ErrMemoryDuplicate         = errors.New("memory: identical memory already exists")
 	ErrMemoryInvalidScope      = errors.New("memory: invalid scope_type")
 	ErrMemoryInvalidType       = errors.New("memory: invalid memory_type")
@@ -145,6 +150,12 @@ func (s *MemoryService) CreateMemory(
 	// to silently store a leaked key.
 	if containsProhibitedData(content) {
 		return nil, ErrMemoryProhibitedContent
+	}
+	// FIX49 Part B (8a) — never persist masked text: the extractor sees
+	// the DLP-masked conversation, and a placeholder written to a
+	// permanent row is the user's real value destroyed forever.
+	if containsMaskedContent(content) {
+		return nil, ErrMemoryMaskedContent
 	}
 	// FIX22 §1a — would this memory 403 every future turn? Ask the gateway
 	// BEFORE any repo access; a *PromptGuardrailError names the phrase.
@@ -284,6 +295,11 @@ func (s *MemoryService) UpdateMemory(
 		}
 		if containsProhibitedData(c) {
 			return nil, ErrMemoryProhibitedContent
+		}
+		// FIX49 Part B (8a) — same rule as CreateMemory: masked text
+		// must never become the permanent value.
+		if containsMaskedContent(c) {
+			return nil, ErrMemoryMaskedContent
 		}
 		if gerr := guardPromptText(ctx, s.guard, tenantID, userID, c, "this memory"); gerr != nil {
 			return nil, gerr
@@ -622,6 +638,35 @@ var prohibitedSubstrings = []string{
 	"credit card", "card number", "cvv",
 	"bank account", "routing number",
 	"เลขบัตรเครดิต", "เลขบัญชี",
+}
+
+// FIX49 Part B (8a) — the DLP mask-token shapes the gateway can emit
+// (backend/app/services/dlp/transformer.py is the source of truth):
+//   <<CATEGORY_N>>  pseudonyms  (<<PERSON_A>>, <<EMAIL_1>>, …)
+//   <rN>            secret-class tokens (<r0>, <r1a>, …)
+//   [CATEGORY_N] / [[CATEGORY_N]]  legacy indexed tokens
+//   CATEGORY_N      bracket-stripped pseudonym residue the model
+//                   sometimes echoes (the "User HEALTH_1" rows of the
+//                   2026-09-03 audit) — matched only for the known
+//                   detector category names, so ordinary words never hit.
+//
+// A memory row is permanent and re-injected into every future
+// conversation; persisting a placeholder destroys the user's real value
+// forever (the name behind <<PERSON_A>> is unrecoverable from the row).
+// The model sees the MASKED conversation, so when the user says
+// "remember X" about a masked value, the save_memory arguments carry
+// the placeholder — the extractor must refuse to eat it, not store it.
+var reMaskTokenShapes = regexp.MustCompile(
+	`<<[A-Z][A-Z0-9_]*>>` +
+		`|<r[A-Za-z0-9_-]+>` +
+		`|\[\[?[A-Z][A-Z0-9_]*_[0-9A-Z]+\]?\]` +
+		`|\b(?:ACCOUNT|ADDRESS|BIOMETRIC|CARD|CREDENTIAL|CRIMINAL|DOB|EMAIL|HEALTH|IBAN|LINE_ID|MAC|MEDICAL|NID|PASSPORT|PERSON|PHONE|PHONE_NUMBER|PLATE|PROMPTPAY|RELIGION|SSN|TAX_ID)_[0-9A-Z]+\b`,
+)
+
+// containsMaskedContent reports whether the content carries a DLP mask
+// placeholder in any of the shapes above.
+func containsMaskedContent(content string) bool {
+	return reMaskTokenShapes.MatchString(content)
 }
 
 // containsProhibitedData returns true when the supplied content

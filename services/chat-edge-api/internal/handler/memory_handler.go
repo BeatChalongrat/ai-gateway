@@ -151,6 +151,9 @@ func (h *MemoryHandler) writeCreateError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrMemoryProhibitedContent):
 		WriteError(w, http.StatusBadRequest, CodeValidationError,
 			"content appears to contain sensitive data (API keys, IDs, financial info) and cannot be saved")
+	case errors.Is(err, service.ErrMemoryMaskedContent):
+		WriteError(w, http.StatusBadRequest, CodeValidationError,
+			"content contains protected-data placeholders (e.g. <<PERSON_A>>) and cannot be saved — the real value was masked by the data-protection policy")
 	case errors.Is(err, service.ErrPromptGuardrailBlocked):
 		// FIX22 §1a — the message names the phrase and the rule (Error()).
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
@@ -197,6 +200,9 @@ func (h *MemoryHandler) Update(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, service.ErrMemoryProhibitedContent):
 			WriteError(w, http.StatusBadRequest, CodeValidationError,
 				"content appears to contain sensitive data and cannot be saved")
+		case errors.Is(err, service.ErrMemoryMaskedContent):
+			WriteError(w, http.StatusBadRequest, CodeValidationError,
+				"content contains protected-data placeholders (e.g. <<PERSON_A>>) and cannot be saved — the real value was masked by the data-protection policy")
 		case errors.Is(err, service.ErrPromptGuardrailBlocked):
 			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 		default:

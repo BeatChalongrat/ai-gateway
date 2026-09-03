@@ -983,6 +983,12 @@ func (e *ToolExecutor) execSaveMemory(
 		switch {
 		case errors.Is(err, ErrMemoryProhibitedContent):
 			return "I can't save that — it appears to contain sensitive data (API keys, IDs, financial info, etc.)."
+		case errors.Is(err, ErrMemoryMaskedContent):
+			// FIX49 Part B (8a) — the value the user wants remembered was
+			// masked before it reached the model, so saving would store a
+			// meaningless placeholder and lose the real value forever.
+			// The result tells the model to be honest about WHY.
+			return "REFUSED: the content contains protected personal data that was masked before it reached you (a placeholder like <<PERSON_A>>). Saving it would store the placeholder, not the real value. Tell the user this specific detail is protected by the organisation's data policy and cannot be saved to memory; save any non-protected part separately if they ask."
 		case errors.Is(err, ErrPromptGuardrailBlocked):
 			// FIX22 §1a — the tool result says REFUSED, so the model cannot
 			// truthfully report a save that did not happen (the FIX5 lie).
