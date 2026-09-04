@@ -648,7 +648,7 @@ export const en = {
   // "couldn't reach the provider, try again". The provider WAS reached
   // and answered plainly, and trying again is the one thing that cannot
   // help, so the sentence says "key" and does not offer a retry.
-  "error.provider_auth_error": "The provider rejected the service's API key. Trying again won't help — contact your admin.",
+  "error.provider_auth_error": "The provider rejected the service's API key. The key has to be fixed — contact your admin.",
   "error.provider_keys_stale": "This provider's endpoint was changed, so its keys need testing again before it can be used. Contact your admin.",
   "error.raw_egress_blocked": "This request was blocked: sensitive data can't be sent to this service.",
   "error.search_not_enabled": "Web search isn't enabled for your account.",
@@ -2004,7 +2004,7 @@ const th: Record<DictKey, string> = {
   "error.guardrail_blocked": "ข้อความนี้ถูกบล็อกโดยระบบป้องกันความปลอดภัย",
   "error.moderation_flagged": "ข้อความนี้ถูกระบบตรวจสอบเนื้อหาแจ้งเตือน",
   "error.content_policy_blocked": "คำขอนี้ถูกบล็อกตามนโยบายเนื้อหาของผู้ให้บริการ",
-  "error.provider_auth_error": "ผู้ให้บริการปฏิเสธ API key ของระบบ ลองใหม่ก็ไม่ช่วย กรุณาติดต่อผู้ดูแลระบบ",
+  "error.provider_auth_error": "ผู้ให้บริการปฏิเสธ API key ของระบบ ต้องแก้ที่ key กรุณาติดต่อผู้ดูแลระบบ",
   "error.provider_keys_stale": "endpoint ของผู้ให้บริการนี้ถูกเปลี่ยน ต้องทดสอบ key ใหม่ก่อนจึงจะใช้งานได้ กรุณาติดต่อผู้ดูแลระบบ",
   "error.raw_egress_blocked": "คำขอนี้ถูกบล็อก เพราะไม่สามารถส่งข้อมูลอ่อนไหวไปยังบริการนี้ได้",
   "error.search_not_enabled": "บัญชีของคุณยังไม่เปิดใช้การค้นหาเว็บ",
