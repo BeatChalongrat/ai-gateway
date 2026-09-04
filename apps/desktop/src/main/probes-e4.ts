@@ -510,7 +510,7 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         check(
           `TOKEN for the operator to grep in BOTH stores: ${dtok}`,
           true,
-          `local: sqlite %APPDATA%/SRAN Desktop/data.db -> agent_notes; server: psql chat.user_memories`,
+          `local: sqlite %APPDATA%/SranDesktop-Electron/data.db -> agent_notes; server: psql chat.user_memories`,
         );
 
         // ── direction 2: memory OFF must write nothing and read nothing ──
@@ -525,9 +525,14 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         // header that a narrow window hides.
         const banner = String(await js(READ_TEMP_BANNER) ?? "");
         check("the temporary-chat strip is visible during the turn", banner.length > 0, `banner="${banner.slice(0, 120)}"`);
-        const refused = co.toolCallsSeen.some((t) => t.tool === "remember" && !t.ok && t.decision === "memory-off");
-        const neverOffered = !co.toolCallsSeen.some((t) => t.tool === "remember" && t.ok);
-        check("a memory-off chat did NOT save", refused || neverOffered, `reply="${or_.reply.slice(0, 200)}"`);
+        // Scoped to THIS conversation. toolCallsSeen accumulates across the
+        // whole probe, so an unscoped "remember never succeeded" is false as
+        // soon as the first half of this case succeeds on purpose — the check
+        // would fail while the behaviour was correct.
+        const inOffConv = co.toolCallsSeen.filter((t) => t.conversationId === or_.convId && t.tool === "remember");
+        const refused = inOffConv.some((t) => !t.ok && t.decision === "memory-off");
+        const neverOffered = inOffConv.length === 0;
+        check("a memory-off chat did NOT save", refused || neverOffered, `rememberCallsInThisConv=${inOffConv.length} reply="${or_.reply.slice(0, 160)}"`);
         check(
           `TOKEN that must appear in NEITHER store: ${otok}`,
           true,
