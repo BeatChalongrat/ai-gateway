@@ -35,6 +35,7 @@ from app.services.providers.openai_adapter import (
     _parse_sse_line,
 )
 from app.services.providers.parsers import parse_openai_response
+from app.services.providers.reasoning_strategies import STRATEGIES_WITH_EFFORT_KNOB
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -138,11 +139,24 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         # Unlike the native OpenAI adapter we do NOT strip temperature
         # / top_p or swap ``max_tokens`` → ``max_completion_tokens``
         # — DeepSeek-R1 / Groq accept the legacy sampling knobs.
+        #
+        # The knob goes out only for rows whose strategy says the
+        # provider takes one. A self-hosted box (vLLM / SGLang /
+        # llama.cpp) emits ``reasoning_content`` on its own and many of
+        # them reject request fields they do not know — sending an
+        # unasked-for ``reasoning_effort`` there would turn a working
+        # reasoning model into a 400. Those rows carry
+        # ``STRATEGY_REASONING_CONTENT`` and are read-only on the wire:
+        # the gateway parses their thinking, it does not steer it.
         reasoning_cfg = getattr(payload, "reasoning", None)
         if reasoning_cfg is not None and reasoning_cfg.mode != "off":
             from app.services.providers.model_registry import get_candidate
             candidate = get_candidate(model)
-            if candidate is not None and candidate.supports_reasoning:
+            if (
+                candidate is not None
+                and candidate.supports_reasoning
+                and candidate.reasoning_strategy in STRATEGIES_WITH_EFFORT_KNOB
+            ):
                 body["reasoning_effort"] = _REASONING_EFFORT_MAP.get(
                     reasoning_cfg.mode, _REASONING_EFFORT_MAP["auto"]
                 )
