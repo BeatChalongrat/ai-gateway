@@ -1080,15 +1080,23 @@ export class TurnCoordinator {
     }
     // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
     // and offer it this turn. A system hint on the existing message, not a new type.
+    //
+    // FIX61: the hint is FOLDED INTO the leading system message, never spliced
+    // in as a second one. Some OpenAI-compatible servers accept a system
+    // message only at index 0 — the self-hosted qwen3.8-27b-fp8 answers
+    // `[system, system, user]` with 400 "System message must be at the
+    // beginning", and because the toggle stays on, every later turn of that
+    // chat failed the same way while a new chat worked. chat-edge folds its
+    // own hints the same way (appendSystemHint).
     if (payload.imageMode && !payload.quick) {
-      sendMessages.splice(1, 0, { role: "system", content: "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words." });
+      foldSystemHint(sendMessages, "The user has turned on image mode. If they are asking for a picture, drawing, logo, or any visual, call the generate_image tool with a detailed prompt rather than describing the image in words.");
     }
     // FIX34 Part A: the quick-ask hint — same mechanism as image mode. The model
     // is told it has no tools HERE and where they are, so a request that needs
     // files / the browser / a command gets "open the main window" instead of a
     // made-up result.
     if (payload.quick) {
-      sendMessages.splice(1, 0, { role: "system", content: QUICK_ASK_HINT });
+      foldSystemHint(sendMessages, QUICK_ASK_HINT);
     }
     const chainStart = sendMessages.length; // where this turn's chain begins
     this.log.info(`TURN OUTBOUND conv=${conversationId}: ${sendMessages.length} msg → [${describe(sendMessages)}]`);
@@ -2378,6 +2386,23 @@ function truncate(value: string, max: number): string {
  *  schema's own default and errs towards the store the user can see and
  *  delete, rather than towards the one that used to be invisible from the
  *  web. */
+/**
+ * FIX61 — add a per-turn hint to the outbound chain WITHOUT creating a second
+ * system message. The hint is appended to the leading system message; only
+ * when the chain has no leading system message is one put in front. A hint
+ * is never placed anywhere but index 0: providers that enforce "system
+ * message must be at the beginning" reject the whole request otherwise, and
+ * a sticky toggle (image mode) then fails every later turn of that chat.
+ */
+export function foldSystemHint(messages: GatewayMessage[], hint: string): void {
+  const head = messages[0];
+  if (head && head.role === "system" && typeof head.content === "string") {
+    messages[0] = { ...head, content: `${head.content}\n\n${hint}` };
+    return;
+  }
+  messages.unshift({ role: "system", content: hint });
+}
+
 export function rememberScopeOf(args: Record<string, unknown>): "global" | "conversation" {
   return String(args["scope"] ?? "").toLowerCase() === "conversation" ? "conversation" : "global";
 }
