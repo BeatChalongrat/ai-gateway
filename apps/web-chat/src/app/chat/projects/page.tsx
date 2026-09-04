@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { ProjectMemorySection } from "@/components/chat/ProjectMemorySection";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
@@ -512,6 +513,9 @@ function ProjectDetailPanel({
           </ul>
         )}
       </div>
+
+      {/* What this project remembers */}
+      <ProjectMemorySection projectId={project.id} />
 
       {/* Delete */}
       <div className="border-t border-border pt-3">

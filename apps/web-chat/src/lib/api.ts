@@ -707,6 +707,12 @@ class ApiClient {
 
   listMemories(params?: {
     scope_type?: string;
+    /** Which instance of the scope — the project id when
+     *  `scope_type` is "project" (FIX58/59). The server REJECTS
+     *  `scope_type=project` without it (400) rather than answering
+     *  with every project's memories mixed together, so forgetting it
+     *  is a visible error and never a silent cross-project leak. */
+    scope_id?: string;
     memory_type?: string;
     status?: string;
     limit?: number;
@@ -714,6 +720,7 @@ class ApiClient {
   }) {
     const search = new URLSearchParams();
     if (params?.scope_type) search.set("scope_type", params.scope_type);
+    if (params?.scope_id) search.set("scope_id", params.scope_id);
     if (params?.memory_type) search.set("memory_type", params.memory_type);
     if (params?.status) search.set("status", params.status);
     if (params?.limit != null) search.set("limit", String(params.limit));

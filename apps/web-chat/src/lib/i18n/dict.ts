@@ -1371,6 +1371,15 @@ export const en = {
   "projects.chats.title": "Chats in this project",
   "projects.chats.empty": "No chats in this project yet.",
   "projects.newChat": "New chat in this project",
+  "projects.memory.title": "What this project remembers",
+  "projects.memory.hint":
+    "Only these chats can see these memories, and they can't see your general ones.",
+  "projects.memory.empty": "Nothing remembered in this project yet.",
+  "projects.memory.loading": "Loading…",
+  "projects.memory.loadFailed": "Couldn't load this project's memories.",
+  "projects.memory.retry": "Try again",
+  "projects.memory.deleteFailed": "Couldn't delete that memory.",
+  "projects.memory.pinFailed": "Couldn't update that memory.",
   "projects.delete": "Delete project",
   "projects.delete.confirm":
     "Delete \"{name}\"? Chats are not deleted — they just leave the project.",
@@ -2717,6 +2726,15 @@ const th: Record<DictKey, string> = {
   "projects.chats.title": "แชทในโปรเจกต์นี้",
   "projects.chats.empty": "ยังไม่มีแชทในโปรเจกต์นี้",
   "projects.newChat": "แชทใหม่ในโปรเจกต์นี้",
+  "projects.memory.title": "โปรเจกต์นี้จำอะไรไว้บ้าง",
+  "projects.memory.hint":
+    "เฉพาะแชทในโปรเจกต์นี้เท่านั้นที่เห็นความจำเหล่านี้ และแชทเหล่านี้ก็ไม่เห็นความจำทั่วไปของคุณ",
+  "projects.memory.empty": "ยังไม่มีความจำในโปรเจกต์นี้",
+  "projects.memory.loading": "กำลังโหลด…",
+  "projects.memory.loadFailed": "โหลดความจำของโปรเจกต์นี้ไม่สำเร็จ",
+  "projects.memory.retry": "ลองอีกครั้ง",
+  "projects.memory.deleteFailed": "ลบความจำนี้ไม่สำเร็จ",
+  "projects.memory.pinFailed": "อัปเดตความจำนี้ไม่สำเร็จ",
   "projects.delete": "ลบโปรเจกต์",
   "projects.delete.confirm":
     "ต้องการลบ \"{name}\" หรือไม่? แชทจะไม่ถูกลบ เพียงถูกนำออกจากโปรเจกต์เท่านั้น",
