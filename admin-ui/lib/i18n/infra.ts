@@ -120,6 +120,26 @@ export const en = {
   "infra.models.showInChatHelp": "Offered in the chat picker ({n} active). Independent of API access.",
   // FIX47.6 Part A — the 5-per-provider chat-picker ceiling.
   "infra.models.ceilingRefused": "{provider} already offers {n} models in the chat picker (the ceiling). Turn one off first.",
+
+  // Reasoning / thinking capability. The only route by which a
+  // self-hosted model can be marked reasoning-capable — no seed
+  // migration can know what an operator's own box serves.
+  "infra.models.colThinking": "Thinking",
+  "infra.models.reasoningToggle": "Reasoning capability",
+  "infra.models.reasoningOn":
+    "This model is treated as reasoning-capable: the gateway asks for thinking and shows it. Click to turn off.",
+  "infra.models.reasoningOff":
+    "Thinking is never shown for this model, even if the provider streams it. Click to turn on.",
+  "infra.models.reasoningHelp":
+    "Whether the gateway treats the model as reasoning-capable. Editing this marks the row as a manual override, so the discovery sync stops updating it.",
+  "infra.models.reasoningSaveFailed": "Could not save the reasoning setting",
+  "infra.models.strategyLabel": "How thinking is obtained",
+  "infra.models.strategyHelp":
+    "Read-only suits a self-hosted box: the gateway reads the thinking the model streams and sends nothing extra, so a server that rejects unknown request fields keeps working.",
+  "infra.models.strategy.readOnly": "read-only",
+  "infra.models.strategy.effortKnob": "effort knob",
+  "infra.models.strategy.openaiResponses": "OpenAI Responses",
+  "infra.models.strategy.geminiThinking": "Gemini thinking",
   "infra.models.providerShown": "{provider}: {shown} of {total} offered in the chat picker (ceiling {ceiling})",
   "infra.models.cap.reasoning": "reasoning",
   "infra.models.cap.vision": "vision",
@@ -435,6 +455,23 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.showInChatHelp": "แสดงในตัวเลือกโมเดลของแชท ({n} ตัวที่เปิดอยู่) ไม่เกี่ยวกับสิทธิ์ใช้ผ่าน API",
   // FIX47.6 Part A — เพดาน 5 โมเดลต่อผู้ให้บริการในตัวเลือกแชท
   "infra.models.ceilingRefused": "{provider} แสดงโมเดลในตัวเลือกแชทครบ {n} ตัวแล้ว (เพดานสูงสุด) กรุณาปิดตัวอื่นก่อน",
+
+  "infra.models.colThinking": "การคิด",
+  "infra.models.reasoningToggle": "ความสามารถด้านการคิด (reasoning)",
+  "infra.models.reasoningOn":
+    "ระบบถือว่าโมเดลนี้คิดเป็น เกตเวย์จะขอและแสดงกระบวนการคิด คลิกเพื่อปิด",
+  "infra.models.reasoningOff":
+    "โมเดลนี้จะไม่แสดงกระบวนการคิด แม้ผู้ให้บริการจะส่งมาก็ตาม คลิกเพื่อเปิด",
+  "infra.models.reasoningHelp":
+    "กำหนดว่าเกตเวย์ถือว่าโมเดลนี้คิดเป็นหรือไม่ การแก้ค่านี้จะทำให้แถวนี้กลายเป็น manual override และ discovery sync จะหยุดอัปเดตให้",
+  "infra.models.reasoningSaveFailed": "บันทึกการตั้งค่าการคิดไม่สำเร็จ",
+  "infra.models.strategyLabel": "วิธีได้มาซึ่งกระบวนการคิด",
+  "infra.models.strategyHelp":
+    "แบบอ่านอย่างเดียวเหมาะกับกล่องที่โฮสต์เอง — เกตเวย์อ่านกระบวนการคิดที่โมเดลส่งมาโดยไม่ส่งพารามิเตอร์เพิ่ม เซิร์ฟเวอร์ที่ไม่รับฟิลด์แปลกปลอมจึงยังทำงานได้ตามปกติ",
+  "infra.models.strategy.readOnly": "อ่านอย่างเดียว",
+  "infra.models.strategy.effortKnob": "ส่งระดับความพยายาม",
+  "infra.models.strategy.openaiResponses": "OpenAI Responses",
+  "infra.models.strategy.geminiThinking": "Gemini thinking",
   "infra.models.providerShown": "{provider}: แสดงในตัวเลือกแชท {shown} จาก {total} ตัว (เพดาน {ceiling})",
   "infra.models.cap.reasoning": "คิดวิเคราะห์",
   "infra.models.countFiltered": "{n} จาก {total}",

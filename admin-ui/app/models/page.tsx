@@ -21,12 +21,112 @@ interface ModelItem {
   supports_tools?: boolean;
   supports_vision?: boolean;
   supports_reasoning?: boolean;
+  // How this row's thinking is obtained. Mirrors
+  // backend providers/reasoning_strategies.py — the values are a closed
+  // set the API validates, so the select below can enumerate them.
+  reasoning_strategy?: string;
+  default_reasoning_mode?: string;
+  is_manual_override?: boolean;
   is_active: boolean;
   // FIX47 Part C — the catalogue's second axis: offered in the chat
   // picker. Independent of is_active (API access). Edited right here.
   show_in_chat: boolean;
   cost_tier: string;
   latency_tier: string;
+}
+
+/* ── Reasoning capability ─────────────────────────────────────────── */
+
+// The values backend/app/services/providers/reasoning_strategies.py
+// accepts, in the order it lists them. "none" is not offered here: the
+// switch below turns reasoning off, which is the same thing said once.
+const REASONING_STRATEGIES = [
+  "openai_compatible_reasoning_content",
+  "openai_compatible_reasoning",
+  "openai_responses_reasoning",
+  "gemini_thinking_level",
+] as const;
+
+const STRATEGY_LABEL: Record<string, DictKey> = {
+  openai_compatible_reasoning_content: "infra.models.strategy.readOnly",
+  openai_compatible_reasoning: "infra.models.strategy.effortKnob",
+  openai_responses_reasoning: "infra.models.strategy.openaiResponses",
+  gemini_thinking_level: "infra.models.strategy.geminiThinking",
+};
+
+// Turning reasoning ON without a strategy would leave the row saying
+// "this model thinks" and nothing saying how — so the switch supplies
+// the safe one: read whatever the provider streams, send nothing extra.
+// That is the only strategy correct for a box we know nothing about.
+const DEFAULT_STRATEGY = "openai_compatible_reasoning_content";
+
+function ReasoningCell({
+  item,
+  onChange,
+}: {
+  item: ModelItem;
+  onChange: (id: number, patch: Record<string, unknown>) => Promise<void>;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const on = !!item.supports_reasoning;
+  const strategy = item.reasoning_strategy && item.reasoning_strategy !== "none"
+    ? item.reasoning_strategy
+    : DEFAULT_STRATEGY;
+
+  async function run(patch: Record<string, unknown>) {
+    setBusy(true);
+    try { await onChange(item.id, patch); } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.25rem" }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={t("infra.models.reasoningToggle")}
+        title={t(on ? "infra.models.reasoningOn" : "infra.models.reasoningOff")}
+        disabled={busy}
+        onClick={() => run(
+          on
+            // Off means off on both axes: a row left claiming a strategy
+            // it no longer uses is how a stale flag survives a fix.
+            ? { supports_reasoning: false, reasoning_strategy: "none" }
+            : { supports_reasoning: true, reasoning_strategy: strategy, default_reasoning_mode: "auto" }
+        )}
+        style={{
+          position: "relative", width: 34, height: 18, borderRadius: 9, border: "none", padding: 0,
+          cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1,
+          background: on ? "#db2777" : "var(--border-default)", transition: "background 150ms",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2, left: on ? 18 : 2, width: 14, height: 14, borderRadius: "50%",
+          background: "#fff", transition: "left 150ms", boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
+        }} />
+      </button>
+      {on && (
+        <select
+          value={strategy}
+          disabled={busy}
+          aria-label={t("infra.models.strategyLabel")}
+          title={t("infra.models.strategyHelp")}
+          onChange={(e) => run({ reasoning_strategy: e.target.value })}
+          style={{
+            fontSize: "0.625rem", padding: "0.0625rem 0.125rem", maxWidth: 96,
+            border: "1px solid var(--border-default)", borderRadius: 4,
+            background: "var(--bg-surface)", color: "var(--text-secondary)",
+            cursor: busy ? "wait" : "pointer",
+          }}
+        >
+          {REASONING_STRATEGIES.map((s) => (
+            <option key={s} value={s}>{t(STRATEGY_LABEL[s])}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
 }
 
 /* ── Show-in-chat switch (FIX47 Part C) ───────────────────────────── */
@@ -332,6 +432,9 @@ export default function ModelsPage() {
   // listing defaults to 100 rows; ask for the whole catalogue.
   const { data, loading, error, refetch } = useApi<{ items: ModelItem[] }>("/admin/models/configs?limit=500");
   const [localShow, setLocalShow] = useState<Record<number, boolean>>({});
+  // Reasoning edits, kept per row like localShow so the table reflects a
+  // save without refetching 500 rows.
+  const [localReasoning, setLocalReasoning] = useState<Record<number, Partial<ModelItem>>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -340,8 +443,12 @@ export default function ModelsPage() {
   const [page, setPage] = useState(1);
 
   const items = useMemo(
-    () => (data?.items ?? []).map((m) => (m.id in localShow ? { ...m, show_in_chat: localShow[m.id] } : m)),
-    [data, localShow],
+    () => (data?.items ?? []).map((m) => {
+      let row = m.id in localShow ? { ...m, show_in_chat: localShow[m.id] } : m;
+      if (m.id in localReasoning) row = { ...row, ...localReasoning[m.id] };
+      return row;
+    }),
+    [data, localShow, localReasoning],
   );
   const shownInChat = useMemo(() => items.filter((m) => m.is_active && m.show_in_chat).length, [items]);
 
@@ -370,6 +477,32 @@ export default function ModelsPage() {
       setSaveError(getApiErrorMessage(e, "save failed"));
     }
   }, [items, providerShown, t]);
+
+  // Reasoning capability. Unlike show_in_chat this is a CAPABILITY edit,
+  // so the PATCH also sets is_manual_override — the row stops taking
+  // discovery updates until the override is cleared. That is the
+  // existing contract for every capability flag; the column's tooltip
+  // says so rather than letting the operator find out later.
+  const setReasoning = useCallback(async (id: number, patch: Record<string, unknown>) => {
+    setSaveError(null);
+    try {
+      const row = await api.patch(`/admin/models/${id}`, patch);
+      // Take the SERVER's row, not the optimistic patch: the PATCH also
+      // flips is_manual_override/source, and echoing our own guess would
+      // show a state the backend never agreed to.
+      setLocalReasoning((prev) => ({
+        ...prev,
+        [id]: {
+          supports_reasoning: row.supports_reasoning,
+          reasoning_strategy: row.reasoning_strategy,
+          default_reasoning_mode: row.default_reasoning_mode,
+          is_manual_override: row.is_manual_override,
+        },
+      }));
+    } catch (e) {
+      setSaveError(getApiErrorMessage(e, t("infra.models.reasoningSaveFailed")));
+    }
+  }, [t]);
 
   const providers = useMemo(() => {
     const c: Record<string, number> = {};
@@ -593,13 +726,14 @@ export default function ModelsPage() {
             ) : view === "list" ? (
               <>
                 <div style={{ overflowX: "auto" }}>
-                  <table className="mr-table" style={{ minWidth: 820 }}>
+                  <table className="mr-table" style={{ minWidth: 930 }}>
                     <thead>
                       <tr>
                         <th style={{ paddingLeft: "1.125rem", width: "28%" }}>{t("field.model")}</th>
                         <th style={{ width: "15%" }}>{t("infra.models.colContext")}</th>
                         <th>{t("infra.models.colCapabilities")}</th>
                         <th style={{ textAlign: "center", width: 64 }}>{t("infra.models.stream")}</th>
+                        <th style={{ textAlign: "center", width: 110 }} title={t("infra.models.reasoningHelp")}>{t("infra.models.colThinking")}</th>
                         <th style={{ textAlign: "center", width: 96 }} title={t("infra.models.showInChatHelp", { n: String(shownInChat) })}>{t("infra.models.showInChat")}</th>
                         <th style={{ width: 84 }}>{t("infra.models.colCost")}</th>
                         <th style={{ width: 84 }}>{t("infra.models.colLatency")}</th>
@@ -665,6 +799,13 @@ export default function ModelsPage() {
                               ) : (
                                 <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
+                            </td>
+                            {/* Thinking — the only route by which a
+                                self-hosted reasoning model gets flagged;
+                                no seed migration can know an operator's
+                                own box. */}
+                            <td style={{ textAlign: "center" }}>
+                              <ReasoningCell item={m} onChange={setReasoning} />
                             </td>
                             {/* Show in chat (FIX47 Part C) */}
                             <td style={{ textAlign: "center" }}>

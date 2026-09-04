@@ -65,6 +65,12 @@ describe("admin-ui dictionary", () => {
       "app.languageEn",
       "app.languageTh",
       "nav.apiKeys",
+      // Reasoning-strategy labels that name a vendor's API surface.
+      // "OpenAI Responses" and "Gemini thinking" are what those APIs are
+      // called; translating them would make the row harder to match
+      // against the provider's own docs, not easier.
+      "infra.models.strategy.openaiResponses",
+      "infra.models.strategy.geminiThinking",
     ]);
 
     const untranslated = Object.keys(en).filter((key) => {
