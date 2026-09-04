@@ -14,6 +14,7 @@ package middleware
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -107,6 +108,22 @@ func RequireAuth(
 				parsed.TenantID,
 			)
 			if err != nil {
+				// OPEN_DECISIONS #61: this 500 has been seen twice in
+				// the first ~60-90s after a restart and has never been
+				// diagnosable, because the cause died here. Every
+				// return path in EnsureUserExists already wraps its
+				// error with the stage that produced it (begin /
+				// tenant upsert / user email reconcile / user upsert /
+				// commit), so logging it is the whole difference
+				// between "it happened again" and knowing which
+				// statement failed. The response body is unchanged —
+				// the caller still learns nothing it could act on.
+				slog.Error("user_provision_failed",
+					slog.String("error", err.Error()),
+					slog.String("user_id", parsed.PortalUserID.String()),
+					slog.String("tenant_id", parsed.TenantID),
+					slog.String("path", r.URL.Path),
+				)
 				http.Error(w, "user provision failed", http.StatusInternalServerError)
 				return
 			}
