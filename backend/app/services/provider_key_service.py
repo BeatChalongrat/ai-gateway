@@ -219,6 +219,30 @@ class ProviderKeyService:
         _rr_counters[provider_name] += 1
         return candidates[idx]
 
+    def get_all_active_keys(
+        self, session: Session, provider_name: str
+    ) -> list[str]:
+        """Every key dispatch would consider, in creation order.
+
+        The same candidate list — and the same TTL cache —
+        :meth:`get_active_key` round-robins over; this hands back the
+        whole pool instead of one slot, and does NOT advance the
+        round-robin counter.
+
+        For model discovery, drawing a single key is wrong: reading a
+        provider's catalog is not a load-balanced operation, it needs
+        exactly ONE key that works. A provider holding a mix of working
+        and stale keys therefore made discovery a coin flip — see
+        ``ModelDiscoveryService._discover_with_key_fallback``.
+        """
+        mono = time.monotonic()
+        cached = _keys_cache.get(provider_name)
+        if cached is not None and cached[0] > mono:
+            return list(cached[1])
+        candidates = self._resolve_key_candidates(session, provider_name)
+        _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
+        return list(candidates)
+
     def _resolve_key_candidates(
         self, session: Session, provider_name: str
     ) -> list[str]:

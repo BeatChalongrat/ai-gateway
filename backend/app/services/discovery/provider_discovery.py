@@ -146,6 +146,49 @@ def _infer_reasoning(provider: str, model_id: str) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
+# Why a discovery came back empty
+# ---------------------------------------------------------------------------
+
+# Adapters swallow their own errors by contract — they return ``[]`` and
+# never raise. That contract is right for the sweep (one dead provider
+# must not fail the run) but it left the orchestrator, the admin API and
+# therefore the operator with nothing to look at but "0 models": a key
+# that validates green, an endpoint that is set, and an empty catalog,
+# with the reason living only in a container log line.
+#
+# Each adapter now records a SHORT, secret-free reason here, keyed by
+# provider. ``discovery_service`` clears the slot before an attempt and
+# reads it after, so a reason from an earlier attempt can never be
+# reported against a later one. Reasons are built from status codes and
+# exception TYPES, never from raw upstream text — nothing that could
+# carry a credential ever enters this dict.
+#
+# The second element says whether a DIFFERENT key could plausibly change
+# the outcome. Only an auth rejection qualifies: a box that never
+# answered, or answered with a catalog, said nothing about the
+# credential, and retrying the same dead endpoint once per key would
+# just multiply the wait.
+_failure_reasons: dict[str, tuple[str, bool]] = {}
+
+
+def record_discovery_failure(
+    provider: str, reason: str, *, key_specific: bool = False
+) -> None:
+    """Record why ``provider`` produced no models on this attempt."""
+    _failure_reasons[provider] = (reason[:200], key_specific)
+
+
+def clear_discovery_failure(provider: str) -> None:
+    """Drop any recorded reason for ``provider`` (call before an attempt)."""
+    _failure_reasons.pop(provider, None)
+
+
+def pop_discovery_failure(provider: str) -> tuple[str, bool] | None:
+    """Read and clear ``(reason, key_specific)`` recorded for ``provider``."""
+    return _failure_reasons.pop(provider, None)
+
+
+# ---------------------------------------------------------------------------
 # Internal helper — OpenAI-compatible /v1/models style
 # ---------------------------------------------------------------------------
 
@@ -164,6 +207,7 @@ async def _discover_openai_compatible(
     """
     if require_auth and not api_key:
         logger.info("discovery_skipped_no_api_key", provider=provider)
+        record_discovery_failure(provider, "no API key configured")
         return []
 
     headers = {}
@@ -175,19 +219,55 @@ async def _discover_openai_compatible(
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        status = exc.response.status_code
+        # 401/403 named explicitly: on a provider holding several keys
+        # this is the difference between "the box is down" and "the key
+        # we tried is not the box's key" — the distinction the operator
+        # needs and the one a bare status code hides.
+        key_specific = status in (401, 403)
+        reason = (
+            f"the endpoint rejected the key (HTTP {status})"
+            if key_specific
+            else f"the endpoint returned HTTP {status}"
+        )
+        logger.warning("discovery_provider_failed", provider=provider, error=str(exc)[:200])
+        record_discovery_failure(provider, reason, key_specific=key_specific)
+        return []
+    except httpx.TimeoutException as exc:
+        logger.warning("discovery_provider_failed", provider=provider, error=str(exc)[:200])
+        record_discovery_failure(
+            provider,
+            f"the endpoint did not answer within {int(_PROVIDER_TIMEOUT_SECONDS)}s",
+        )
+        return []
+    except httpx.RequestError as exc:
+        logger.warning("discovery_provider_failed", provider=provider, error=str(exc)[:200])
+        record_discovery_failure(provider, "could not connect to the endpoint")
+        return []
     except Exception as exc:
         logger.warning(
             "discovery_provider_failed",
             provider=provider,
             error=str(exc)[:200],
         )
+        # Type name only — a JSON decode error carries body text.
+        record_discovery_failure(
+            provider, f"unreadable response from the endpoint ({type(exc).__name__})"
+        )
         return []
 
     if not isinstance(payload, dict):
         logger.warning("discovery_unexpected_shape", provider=provider)
+        record_discovery_failure(
+            provider, "the endpoint's response was not an OpenAI-style model list"
+        )
         return []
     raw_items = payload.get("data") or payload.get("models") or []
     if not isinstance(raw_items, list):
+        record_discovery_failure(
+            provider, "the endpoint's response was not an OpenAI-style model list"
+        )
         return []
 
     results: list[DiscoveredModel] = []
@@ -217,6 +297,16 @@ async def _discover_openai_compatible(
                 reasoning_strategy=reasoning_strategy,
                 raw=item,
             )
+        )
+    if not results:
+        # A 200 with nothing usable is its own diagnosis, and a very
+        # different one from a 401: either the box serves an empty list,
+        # or everything it serves was filtered out as non-chat.
+        record_discovery_failure(
+            provider,
+            "the endpoint listed no chat models"
+            if raw_items
+            else "the endpoint returned an empty model list",
         )
     return results
 
@@ -456,6 +546,7 @@ async def discover_sranai(api_key: str | None) -> list[DiscoveredModel]:
     base = resolve_base_url("sranai", "")
     if not base:
         logger.info("discovery_skipped_no_endpoint", provider="sranai")
+        record_discovery_failure("sranai", "endpoint not configured")
         return []
 
     models = await _discover_openai_compatible(

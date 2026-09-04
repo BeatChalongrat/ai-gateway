@@ -227,3 +227,195 @@ def test_cost_tier_single_source_of_truth():
     assert derive_cost_tier(0.00001) == "premium"
     # The discovery-service alias IS the shared function, not a copy.
     assert disc is derive_cost_tier
+
+
+# ---------------------------------------------------------------------------
+# Key fallback: a catalog read needs ONE key that works, not a fair share
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_discovery_tries_every_key_until_one_is_accepted(fresh_db_session):
+    """The live bug: green key, saved endpoint, empty catalog.
+
+    ``sranai`` held two active keys — one left over from a previous
+    endpoint, one for the box actually configured. Discovery drew a
+    single key by round-robin, drew the stale one, the box answered 401,
+    and the adapter's swallow-and-return-[] contract turned that into a
+    silent "0 models". The draw made it a coin flip, so a retry could
+    "fix" it and hide the cause again.
+    """
+    _seed_endpoint("http://box:8000/v1")
+
+    seen: list[str | None] = []
+
+    def _respond(request: httpx.Request) -> httpx.Response:
+        auth = request.headers.get("Authorization")
+        seen.append(auth)
+        if auth == "Bearer good-key":
+            return httpx.Response(200, json={"data": [{"id": "sran-chat-7b"}]})
+        return httpx.Response(401, json={"error": {"message": "no"}})
+
+    respx.get("http://box:8000/v1/models").mock(side_effect=_respond)
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", discover_sranai, ["stale-key", "good-key"]
+    )
+
+    assert [m.model for m in models] == ["sran-chat-7b"]
+    assert reason is None
+    # Both keys were actually tried, in order — the stale one first.
+    assert seen == ["Bearer stale-key", "Bearer good-key"]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_healthy_provider_still_makes_one_request(fresh_db_session):
+    """The fallback is paid only on failure — no extra load on a good box."""
+    _seed_endpoint("http://box:8000/v1")
+    route = respx.get("http://box:8000/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "sran-chat-7b"}]})
+    )
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", discover_sranai, ["good-key", "second-key", "third-key"]
+    )
+
+    assert [m.model for m in models] == ["sran-chat-7b"]
+    assert reason is None
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_every_key_rejected_reports_the_reason(fresh_db_session):
+    """No key works → the operator gets told WHY, not just "0 models"."""
+    _seed_endpoint("http://box:8000/v1")
+    respx.get("http://box:8000/v1/models").mock(
+        return_value=httpx.Response(401, json={"error": {"message": "no"}})
+    )
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", discover_sranai, ["stale-key", "also-stale"]
+    )
+
+    assert models == []
+    assert reason is not None
+    assert "401" in reason
+
+
+@pytest.mark.asyncio
+async def test_reason_from_an_earlier_attempt_is_never_reused(fresh_db_session):
+    """A stale reason must not be attributed to a later, different run."""
+    from app.services.discovery import provider_discovery as pd
+
+    pd.record_discovery_failure("sranai", "reason from a previous run")
+
+    async def _adapter(api_key):
+        return [DiscoveredModel(provider="sranai", model="sran-chat-7b")]
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", _adapter, ["good-key"]
+    )
+    assert [m.model for m in models] == ["sran-chat-7b"]
+    assert reason is None
+    assert pd.pop_discovery_failure("sranai") is None
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_no_endpoint_reason_survives_to_the_sync_result(fresh_db_session, monkeypatch):
+    """``SyncResult`` carries the per-provider reason the adapters swallow."""
+    from app.services.discovery.pricing_fetcher import PricingFetcher
+    from app.services.provider_key_service import ProviderKeyService
+
+    async def _stub_fetch(self):
+        return {}
+    monkeypatch.setattr(PricingFetcher, "fetch", _stub_fetch)
+    monkeypatch.setattr(
+        ProviderKeyService,
+        "get_all_active_keys",
+        lambda self, session, provider: ["some-key"],
+    )
+    _seed_endpoint(None)
+
+    result = await ModelDiscoveryService().sync_provider("sranai", fresh_db_session)
+
+    assert result.models_found == 0
+    assert result.provider_errors["sranai"] == "endpoint not configured"
+    # ``errors`` keeps its old meaning — orchestrator-level failures only.
+    assert result.errors == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_sync_result_reports_models_found(fresh_db_session, monkeypatch):
+    from app.services.discovery.pricing_fetcher import PricingFetcher
+    from app.services.provider_key_service import ProviderKeyService
+
+    async def _stub_fetch(self):
+        return {}
+    monkeypatch.setattr(PricingFetcher, "fetch", _stub_fetch)
+    monkeypatch.setattr(
+        ProviderKeyService,
+        "get_all_active_keys",
+        lambda self, session, provider: ["some-key"],
+    )
+    _seed_endpoint("http://box:8000/v1")
+    respx.get("http://box:8000/v1/models").mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": "sran-chat-7b"}, {"id": "sran-chat-70b"}]}
+        )
+    )
+
+    result = await ModelDiscoveryService().sync_provider("sranai", fresh_db_session)
+
+    assert result.models_found == 2
+    assert result.inserted == 2
+    assert result.provider_errors == {}
+    assert result.to_dict()["models_found"] == 2
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_200_with_nothing_usable_is_its_own_diagnosis(fresh_db_session):
+    """A box that answers but lists only non-chat models is not a 401."""
+    _seed_endpoint("http://box:8000/v1")
+    respx.get("http://box:8000/v1/models").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "text-embedding-sran"}]})
+    )
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", discover_sranai, ["good-key"]
+    )
+    assert models == []
+    assert reason == "the endpoint listed no chat models"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_a_dead_box_is_not_retried_once_per_key(fresh_db_session):
+    """Only an auth rejection is worth trying the next key for.
+
+    A connection failure said nothing about the credential, so walking a
+    three-key pool against a dead endpoint would just triple the wait
+    behind the 15s-per-attempt timeout.
+    """
+    _seed_endpoint("http://box:8000/v1")
+    route = respx.get("http://box:8000/v1/models").mock(
+        side_effect=httpx.ConnectError("down")
+    )
+
+    svc = ModelDiscoveryService()
+    models, reason = await svc._discover_with_key_fallback(
+        "sranai", discover_sranai, ["k1", "k2", "k3"]
+    )
+
+    assert models == []
+    assert reason == "could not connect to the endpoint"
+    assert route.call_count == 1

@@ -503,6 +503,16 @@ def _mock_provider_key_service(request, monkeypatch):
         ProviderKeyService, "get_api_key", lambda self, session, provider: "test-stub-key"
     )
 
+    # Model discovery reads the whole candidate pool rather than one
+    # round-robin draw (a catalog read needs one key that WORKS, not a
+    # fair share). Stub it alongside, or discovery would fall through to
+    # a real DB read and hand its adapters ``None``.
+    monkeypatch.setattr(
+        ProviderKeyService,
+        "get_all_active_keys",
+        lambda self, session, provider: ["test-stub-key"],
+    )
+
     # Track A: the chat hot path now calls the async variant. Stub it too,
     # or the flipped handler resolves None → ProviderUnavailableError (503).
     async def _get_api_key_async_stub(self, session, provider_name):

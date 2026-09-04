@@ -67,6 +67,77 @@ function brandFor(name: string) {
   return BRAND[name] ?? { color: "#64748b", initial: name.charAt(0).toUpperCase(), display: name, noteKey: undefined };
 }
 
+// ── Model discovery outcome ──────────────────────────────────────
+// Adding a key also asks the provider for its model list. Those are two
+// SEPARATE checks and they can disagree: a key can be accepted while the
+// catalog fetch fails. Until now only the key verdict reached the screen,
+// so a provider could sit here green with no models anywhere in the
+// product and nothing on the page said why. `model_sync` was already in
+// the add-key response — it just had no reader.
+type SyncOutcome =
+  | { kind: "ok"; found: number }        // the provider listed models
+  | { kind: "empty" }                    // it answered, with nothing in it
+  | { kind: "failed"; reason: string }   // it could not be read; reason is upstream's
+  | { kind: "unchecked" };               // discovery did not run at all
+
+function readSyncOutcome(providerName: string, sync: any): SyncOutcome {
+  // null = the route skipped discovery or it blew up before producing a
+  // result. Saying "no models" there would be a guess.
+  if (!sync || typeof sync !== "object") return { kind: "unchecked" };
+  const found = typeof sync.models_found === "number" ? sync.models_found : 0;
+  if (found > 0) return { kind: "ok", found };
+  const reason = sync.provider_errors?.[providerName];
+  return typeof reason === "string" && reason
+    ? { kind: "failed", reason }
+    : { kind: "empty" };
+}
+
+function SyncOutcomeNotice({
+  outcome,
+  keyIsValid,
+  t,
+}: {
+  outcome: SyncOutcome;
+  keyIsValid: boolean;
+  t: Translate;
+}) {
+  const ok = outcome.kind === "ok";
+  const clause =
+    outcome.kind === "ok"
+      ? t("infra.providers.syncFound", { n: outcome.found })
+      : outcome.kind === "failed"
+      ? t("infra.providers.syncFailed", { reason: outcome.reason })
+      : outcome.kind === "empty"
+      ? t("infra.providers.syncEmpty")
+      : t("infra.providers.syncUnchecked");
+  // The key prefix is claimed only when a key really did validate — the
+  // one thing this notice must never get wrong is implying a working key
+  // is broken, or a broken one is fine.
+  const text = keyIsValid ? `${t("infra.providers.syncKeyOk")} · ${clause}` : clause;
+  // Warning, never error: a catalog that can't be read is not a bad key.
+  const tone = ok ? "var(--color-status-success)" : "var(--color-status-warning)";
+  return (
+    <div
+      style={{
+        padding: "0.625rem 0.75rem",
+        marginBottom: "0.75rem",
+        color: "var(--color-text-secondary)",
+        fontSize: "var(--font-size-sm)",
+        background: `color-mix(in srgb, ${tone} 8%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${tone} 25%, transparent)`,
+        borderRadius: "var(--radius-md)",
+      }}
+    >
+      <span style={{ color: tone, fontWeight: 600 }}>{text}</span>
+      {!ok && (
+        <div style={{ marginTop: "0.25rem", fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>
+          {t("infra.providers.syncHint")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function timeAgo(iso: string | null, t: Translate): string {
   if (!iso) return t("infra.never");
   const diff = Date.now() - new Date(iso).getTime();
@@ -155,6 +226,12 @@ function KeysPanel({
   const [endpointTouched, setEndpointTouched] = useState(false);
   const [adding, setAdding] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  // Held together: the model-list verdict and whether a key had actually
+  // validated when it was produced. Reading the key half off live state
+  // instead would let the notice flicker its claim while the key list
+  // reloads.
+  const [syncNotice, setSyncNotice] = useState<{ outcome: SyncOutcome; keyIsValid: boolean } | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const { toast } = useToast();
   const t = useT();
   const selfHosted = SELF_HOSTED.has(providerName);
@@ -193,6 +270,16 @@ function KeysPanel({
         base_url: selfHosted ? endpoint.trim() : undefined,
       });
       toast(t("infra.providers.toastKeySaved", { ms: result.latency_ms }));
+      // The key verdict is a toast; the model-list verdict is a notice
+      // that stays put — it is the half the operator has to act on, and
+      // a toast that vanishes is how this went unnoticed in the first
+      // place.
+      // keyIsValid is not a guess: the route returns 200 only after a
+      // live call to the provider accepted this key.
+      setSyncNotice({
+        outcome: readSyncOutcome(providerName, result.model_sync),
+        keyIsValid: true,
+      });
       setKeyInput("");
       setLabel("");
       loadKeys();
@@ -201,6 +288,28 @@ function KeysPanel({
       toast(msg, "error");
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function handleFetchModels() {
+    setSyncing(true);
+    try {
+      // Same discovery the add-key route runs, on demand — so a failure
+      // is recoverable without deleting and re-pasting a working key.
+      const result = await api.post("/admin/models/discovery/sync", {
+        provider: providerName,
+      });
+      setSyncNotice({
+        outcome: readSyncOutcome(providerName, result),
+        keyIsValid: validCount > 0,
+      });
+    } catch {
+      setSyncNotice({
+        outcome: { kind: "failed", reason: t("infra.providers.syncUnreachable") },
+        keyIsValid: validCount > 0,
+      });
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -252,10 +361,27 @@ function KeysPanel({
             </span>
           )}
         </h4>
-        <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={onClose}>
-          {t("action.close")}
-        </button>
+        <div style={{ display: "flex", gap: "0.375rem" }}>
+          <button
+            className="sran-btn sran-btn-secondary sran-btn-sm"
+            onClick={handleFetchModels}
+            disabled={syncing}
+          >
+            {syncing ? t("infra.providers.syncRunning") : t("infra.providers.syncRefetch")}
+          </button>
+          <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={onClose}>
+            {t("action.close")}
+          </button>
+        </div>
       </div>
+
+      {syncNotice && (
+        <SyncOutcomeNotice
+          outcome={syncNotice.outcome}
+          keyIsValid={syncNotice.keyIsValid}
+          t={t}
+        />
+      )}
 
       {loading ? (
         <div className="sran-empty" style={{ padding: "1rem" }}>
