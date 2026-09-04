@@ -29,6 +29,12 @@ from dataclasses import dataclass, field
 import httpx
 import structlog
 
+from app.services.providers.reasoning_strategies import (
+    STRATEGY_NONE,
+    STRATEGY_OPENAI_RESPONSES,
+    STRATEGY_REASONING_CONTENT,
+)
+
 
 logger = structlog.get_logger(__name__)
 
@@ -122,27 +128,69 @@ def _infer_capability(model_id: str, raw: dict) -> dict:
     }
 
 
+# Model-id markers for families that emit reasoning over an OpenAI-
+# compatible wire. Substring match on the lowercased id.
+#
+# A false positive here is cheap BY CONSTRUCTION: the row gets the
+# parse-only strategy, so nothing extra is put on the wire, and a model
+# that never emits ``reasoning_content`` simply never opens the analysis
+# bracket. What it does cost is membership in the reasoning routing pool
+# — which is why the admin model page can correct the flag in both
+# directions. A false NEGATIVE is what this list exists to reduce: before
+# it, every reasoning model outside OpenAI's o-series depended on someone
+# shipping a seed migration for it, so a self-hosted box — which no
+# migration can know about — never showed thinking at all.
+_REASONING_MODEL_MARKERS = (
+    # DeepSeek R1 and its distills, wherever they are served
+    "deepseek-r1", "deepseek-reasoner", "r1-distill",
+    # Qwen thinking families (QwQ, QVQ, and the Qwen3 hybrids)
+    "qwq", "qvq", "qwen3",
+    # Explicit thinking/reasoning variants across vendors
+    "thinking", "-reasoner", "-reasoning", "reasoning-",
+    # Mistral
+    "magistral",
+    # OpenAI open-weight, served locally via the harmony channel
+    "gpt-oss",
+    # Microsoft / LG / MiniMax / Zhipu
+    "phi-4-reasoning", "exaone-deep", "minimax-m1", "minimax-m2", "glm-z1",
+)
+
+
 def _infer_reasoning(provider: str, model_id: str) -> tuple[bool, str]:
     """Detect reasoning capability from a model id.
 
     OpenAI o-series (the ``o1`` / ``o3`` / ``o4`` families) reason via
     the Responses-style ``reasoning_effort`` knob. Gated to the
     ``openai`` provider so a same-prefixed model on another provider
-    isn't mis-tagged with an OpenAI-specific strategy.
+    isn't mis-tagged with an OpenAI-specific strategy — and ``openai``
+    takes ONLY that branch, so a marker below can never hand the native
+    adapter a strategy meant for the compatible wire.
 
-    Other providers' reasoning models (DeepSeek-R1, Groq R1-distill,
-    Claude 4, Gemini 2.5) are tagged via seed/manual rows today, and the
-    persist step only PROMOTES to reasoning — so returning ``(False,
-    "none")`` here never demotes them.
+    Every other OpenAI-compatible provider is matched against
+    ``_REASONING_MODEL_MARKERS`` and tagged parse-only. Before this, a
+    reasoning model reached the user's screen only if a seed migration
+    had named it — fine for the cloud catalogs, impossible for a
+    self-hosted box, where the operator saw a model that thinks and a UI
+    that never showed the thinking.
+
+    Providers whose discovery returns a static list (anthropic, google,
+    qwen, kimi, …) never reach this function; their reasoning rows keep
+    coming from seeds with their own native strategies.
+
+    The persist step only PROMOTES to reasoning, so neither a miss here
+    nor a hit can demote a row that a migration or an admin already
+    settled.
 
     Returns ``(supports_reasoning, reasoning_strategy)``.
     """
     name = model_id.lower()
-    if provider == "openai" and (
-        name.startswith("o1") or name.startswith("o3") or name.startswith("o4")
-    ):
-        return True, "openai_responses_reasoning"
-    return False, "none"
+    if provider == "openai":
+        if name.startswith("o1") or name.startswith("o3") or name.startswith("o4"):
+            return True, STRATEGY_OPENAI_RESPONSES
+        return False, STRATEGY_NONE
+    if any(marker in name for marker in _REASONING_MODEL_MARKERS):
+        return True, STRATEGY_REASONING_CONTENT
+    return False, STRATEGY_NONE
 
 
 # ---------------------------------------------------------------------------

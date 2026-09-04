@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
@@ -27,6 +27,7 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.models.model_config import ModelConfigORM
 from app.services.discovery.discovery_service import ModelDiscoveryService
 from app.services.discovery.provider_discovery import PROVIDER_DISCOVERY
+from app.services.providers.reasoning_strategies import KNOWN_STRATEGIES
 
 
 router = APIRouter(dependencies=[Depends(require_admin_session)])
@@ -36,6 +37,11 @@ router = APIRouter(dependencies=[Depends(require_admin_session)])
 # the litellm pricing cache is reused between scheduled syncs and
 # admin-triggered ones.
 _discovery_service = ModelDiscoveryService()
+
+# Same closed set as ``ReasoningConfig.mode`` on the public wire — kept
+# spelled out here rather than imported from the Literal so the admin
+# contract stays explicit, the way public_models.py does it.
+_REASONING_MODES = ("off", "auto", "low", "medium", "high")
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +70,10 @@ class ModelConfigUpdate(BaseModel):
     supports_tools: Optional[bool] = None
     supports_vision: Optional[bool] = None
     # Reasoning / thinking capability (migration 045). All three are
-    # admin-overridable like the other capability flags.
+    # admin-overridable like the other capability flags. This is the
+    # only route by which a self-hosted model can be marked
+    # reasoning-capable: no seed migration can know what an operator's
+    # own box serves.
     supports_reasoning: Optional[bool] = None
     reasoning_strategy: Optional[str] = None
     default_reasoning_mode: Optional[str] = None
@@ -76,6 +85,31 @@ class ModelConfigUpdate(BaseModel):
     is_active: Optional[bool] = None
     # FIX47 Part C — the chat-picker axis, independent of ``is_active``.
     show_in_chat: Optional[bool] = None
+
+    @field_validator("reasoning_strategy")
+    @classmethod
+    def _known_strategy(cls, v: Optional[str]) -> Optional[str]:
+        # An unrecognised strategy is not inert: the adapters branch on
+        # this string to decide what goes on the wire, so a typo would
+        # quietly downgrade a knob-taking provider to parse-only and
+        # leave no trace anywhere. Reject it at the door instead.
+        if v is not None and v not in KNOWN_STRATEGIES:
+            raise ValueError(
+                f"unknown reasoning_strategy '{v}'; expected one of "
+                + ", ".join(KNOWN_STRATEGIES)
+            )
+        return v
+
+    @field_validator("default_reasoning_mode")
+    @classmethod
+    def _known_mode(cls, v: Optional[str]) -> Optional[str]:
+        # Same closed set as ``ReasoningConfig.mode`` on the public wire.
+        if v is not None and v not in _REASONING_MODES:
+            raise ValueError(
+                f"unknown default_reasoning_mode '{v}'; expected one of "
+                + ", ".join(_REASONING_MODES)
+            )
+        return v
 
 
 def _serialize_row(row: ModelConfigORM) -> dict:
