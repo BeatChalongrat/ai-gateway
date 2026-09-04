@@ -714,3 +714,35 @@ def db_session(sqlite_engine):
 def db_inspector(sqlite_engine):
     """SQLAlchemy Inspector bound to the test engine."""
     return inspect(sqlite_engine)
+
+
+@pytest.fixture(autouse=True)
+def _restore_model_registry():
+    """Put the process-global model registry back after every test.
+
+    FIX57 — ``model_registry._registry`` is a module singleton seeded at
+    import, and ``ModelRegistry.reload`` REPLACES its contents with
+    whatever active rows the database holds. A test that triggers a
+    discovery reload against a database with no Claude rows therefore
+    empties the seeded catalogue for every test that runs after it, in
+    the same process.
+
+    That is how four tests came to fail in the full lane and pass on
+    their own: ``get_candidate("claude-3-5-sonnet-20241022")`` returned
+    None, and the admin discovery endpoint listed nothing, because
+    somebody upstream had reloaded. Nothing was wrong with either test.
+
+    The snapshot is two shallow containers, so this costs a couple of
+    microseconds per test and buys the one thing the release gate needs:
+    a test's result not depending on which tests preceded it.
+    """
+    from app.services.providers import model_registry as _mr
+
+    registry = _mr._registry
+    candidates = list(registry._candidates)
+    model_map = dict(registry._model_map)
+    try:
+        yield
+    finally:
+        registry._candidates = candidates
+        registry._model_map = model_map

@@ -23,6 +23,7 @@ from app.core.exceptions import (
     RateLimitExceededError,
     UpstreamBadResponseError,
 )
+from app.services.gateway.fallback_orchestrator import is_fallback_eligible
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 
 
@@ -85,14 +86,23 @@ class TestMapProviderError:
 
     def test_401_auth_error(self):
         # A provider 401 is OUR key being rejected, not a client error.
-        # It maps to ProviderError (fallback-eligible) so the gateway can
-        # route around a bad/expired key to a provider whose key works.
+        #
+        # FIX57 Part 4 — it used to share the generic ``provider_error``
+        # code, which bought fallback eligibility at the price of the
+        # user being told "Couldn't reach the AI provider. Please try
+        # again." for a provider that answered immediately and clearly.
+        # The code is its own now; the eligibility is asserted below
+        # rather than inherited, so this test still covers what it did.
         resp = httpx.Response(401, json={"error": "invalid key"})
         req = httpx.Request("POST", "https://x.com")
         exc = httpx.HTTPStatusError("401", request=req, response=resp)
         result = map_provider_error(exc, "openai")
         assert isinstance(result, ProviderError)
-        assert result.code == "provider_error"
+        assert result.code == "provider_auth_error"
+        assert is_fallback_eligible(result), (
+            "routing around a rejected credential to a provider whose key "
+            "works is the whole point of the chain"
+        )
 
     def test_403_forbidden_is_fallback_eligible(self):
         resp = httpx.Response(403, json={"error": "forbidden"})
@@ -100,7 +110,8 @@ class TestMapProviderError:
         exc = httpx.HTTPStatusError("403", request=req, response=resp)
         result = map_provider_error(exc, "anthropic")
         assert isinstance(result, ProviderError)
-        assert result.code == "provider_error"
+        assert result.code == "provider_auth_error"
+        assert is_fallback_eligible(result)
 
     def test_404_model_not_found_is_fallback_eligible(self):
         # An aggregator that doesn't serve the requested model id returns
