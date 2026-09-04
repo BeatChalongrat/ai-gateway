@@ -79,7 +79,14 @@ describe("FIX5 §1 — the memory prologue reads BOTH stores and renders both se
     expect(prompt).not.toContain("## Notes (this conversation)");
   });
 
-  it("local notes render even when memory is disabled (server memories are the only thing gated) — WPF parity", async () => {
+  // This assertion is the REVERSE of what it used to be, deliberately.
+  // The old rule ("only the server memories respect memoryEnabled")
+  // came from WPF parity, but it made the memory switch mean two
+  // different things: the web client's memory_enabled=false neither
+  // read nor wrote memory, while the desktop kept feeding back every
+  // note the `remember` tool had written. The switch now means the
+  // same thing in both clients, so the local stores are gated too.
+  it("renders NO memory at all when memory is off for the chat — local stores included", async () => {
     const a = assemblerWithServerMemories([{ id: "s1", content: "server-only fact", created_at: "2026-08-25T09:00:00Z" }]);
     const prompt = await a.buildSystemPrompt({
       ...baseInputs,
@@ -87,9 +94,24 @@ describe("FIX5 §1 — the memory prologue reads BOTH stores and renders both se
       localGlobalNotes: [{ content: "local global fact", createdAt: "2026-08-25T11:00:00Z" }],
       localConversationNotes: [{ content: "local conv fact", createdAt: "2026-08-25T11:00:00Z" }],
     });
+    expect(prompt).not.toContain("local global fact");
+    expect(prompt).not.toContain("local conv fact");
+    expect(prompt).not.toContain("server-only fact");
+    expect(prompt).not.toContain("## Memory (global)");
+    expect(prompt).not.toContain("## Notes (this conversation)");
+  });
+
+  it("still renders both stores when memory is on — the gate is the switch, not a silent drop", async () => {
+    const a = assemblerWithServerMemories([{ id: "s1", content: "server-only fact", created_at: "2026-08-25T09:00:00Z" }]);
+    const prompt = await a.buildSystemPrompt({
+      ...baseInputs,
+      memoryEnabled: true,
+      localGlobalNotes: [{ content: "local global fact", createdAt: "2026-08-25T11:00:00Z" }],
+      localConversationNotes: [{ content: "local conv fact", createdAt: "2026-08-25T11:00:00Z" }],
+    });
     expect(prompt).toContain("local global fact");
     expect(prompt).toContain("local conv fact");
-    expect(prompt).not.toContain("server-only fact"); // server half respects memoryEnabled
+    expect(prompt).toContain("server-only fact");
   });
 });
 

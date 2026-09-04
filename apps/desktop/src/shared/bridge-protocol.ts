@@ -87,6 +87,16 @@ export const BROWSER_BRIDGE_TOOLS: ReadonlySet<string> = Object.freeze(
   ]),
 ) as ReadonlySet<string>;
 
+/** The tools that read or write durable memory. Withheld from a chat whose
+ *  memory switch is off, which is how the desktop matches the web client:
+ *  there, memory_enabled=false omits save_memory / list_memories from the
+ *  request. `remember` writes the sidecar's local note store and
+ *  `search_past_conversations` reads across earlier chats — both are the
+ *  cross-conversation memory the switch is about. */
+export const MEMORY_TOOLS: ReadonlySet<string> = Object.freeze(
+  new Set(["remember", "search_past_conversations"]),
+) as ReadonlySet<string>;
+
 export const MAX_MESSAGE_BYTES = 1_048_576;
 export const MAX_TEXT_CHARS = 200_000;
 export const MAX_ATTACHMENTS = 32;

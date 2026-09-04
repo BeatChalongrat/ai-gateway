@@ -295,13 +295,17 @@ Web search is turned on in this app but your organisation has NOT enabled it for
    * scope. Now the local store is read too (host/query `notes._forPrompt`, passed
    * in via inputs) and merged in, matching the WPF app.
    *
-   * Parity note (matches WPF): the LOCAL notes are always rendered; only the
-   * SERVER memories respect `memoryEnabled` (AppendNotesAsync gates only
-   * GetServerMemoriesAsync on it). */
+   * `memoryEnabled` gates ALL of it, local store included. It used to gate only
+   * the server memories, which made the "memory off" switch mean two different
+   * things depending on which client the user was sitting in front of: on the
+   * web the chat neither read nor wrote memory, while here the notes the
+   * `remember` tool had written were still read back into every prompt. A
+   * switch that quietly keeps reading is worse than no switch, because the
+   * user has been told otherwise. */
   private async notesBlock(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
     const server = await this.serverMemoriesFor(inputs.memoryEnabled);
-    const localGlobal = inputs.localGlobalNotes ?? [];
-    const localConversation = inputs.localConversationNotes ?? [];
+    const localGlobal = inputs.memoryEnabled ? (inputs.localGlobalNotes ?? []) : [];
+    const localConversation = inputs.memoryEnabled ? (inputs.localConversationNotes ?? []) : [];
 
     const merged = mergeGlobalMemories(localGlobal, server);
 
@@ -318,7 +322,7 @@ Web search is turned on in this app but your organisation has NOT enabled it for
   }
 
   /** chat-edge's global_user memories (60 s cache, best-effort). Gated on
-   * memoryEnabled — the local notes are not (see notesBlock). */
+   * memoryEnabled, as are the local notes (see notesBlock). */
   private async serverMemoriesFor(memoryEnabled: boolean): Promise<{ content: string; createdAt: string }[]> {
     if (!memoryEnabled) return [];
     if (Date.now() - this.serverMemoriesAt > SERVER_MEMORY_TTL_MS) {

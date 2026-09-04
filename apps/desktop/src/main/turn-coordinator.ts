@@ -62,7 +62,7 @@ import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
-import { BROWSER_BRIDGE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { BROWSER_BRIDGE_TOOLS, MEMORY_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
 
 interface BufferedEvent {
   seq: number;
@@ -1054,7 +1054,12 @@ export class TurnCoordinator {
     // wall this round removes). The picker's guidance line tells the user
     // such a model answers without tools.
     const modelTakesTools = payload.quick ? false : await this.modelSupportsTools(model, signal);
-    const tools = payload.quick || !modelTakesTools ? [] : await this.toolDefinitions(null, false, payload.imageMode);
+    // The chat's memory switch (chat-edge's conversations.memory_enabled — the
+    // same row the web client toggles). Absent field means on, so a client or
+    // a server build that never sends it cannot silently turn memory off.
+    const memoryEnabled = conversation?.memory_enabled !== false;
+    if (!memoryEnabled) this.log.info(`MEMORY: off for conv=${conversationId} — no memory read, no memory tools`);
+    const tools = payload.quick || !modelTakesTools ? [] : await this.toolDefinitions(null, false, payload.imageMode, memoryEnabled);
     if (payload.quick) this.log.info(`TOOLS: quick-ask turn conv=${conversationId} — no tools offered`);
     else if (!modelTakesTools) this.log.info(`TOOLS: skipped for tools-blind model conv=${conversationId} model=${model}`);
     // FIX33 A-D2: with a context manager the middle is SUMMARISED before it
@@ -1091,6 +1096,7 @@ export class TurnCoordinator {
       maxIterations: this.opts.maxIterations ?? 100,
       maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
       tools,
+      memoryEnabled,
       parentToolCallId: null,
       onText: (t) => {
         turn.assistantText += t;
@@ -1243,6 +1249,10 @@ export class TurnCoordinator {
     maxIterations: number;
     maxMs: number;
     tools: GatewayToolDefinition[];
+    /** The chat's memory switch. Absent means on. Carried on the run so the
+     *  dispatch guard can refuse a memory write on every path, including a
+     *  sub-agent that inherits it from the chat that spawned it. */
+    memoryEnabled?: boolean;
     parentToolCallId: string | null;
     onText: (t: string) => void;
     /** FIX35 Part B — the gateway named the model that is answering. */
@@ -1373,7 +1383,7 @@ export class TurnCoordinator {
   /** ChatOrchestrator.ExecuteToolCallAsync — DLP marker → permission → consent → run → result. */
   private async executeToolCall(
     call: GatewayToolCall,
-    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[] } & RunWaitState,
+    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[]; memoryEnabled?: boolean } & RunWaitState,
   ): Promise<void> {
     const name = call.function.name;
     const eventConv = run.consentConversationId ?? run.conversationId;
@@ -1507,6 +1517,21 @@ export class TurnCoordinator {
       this.cwdByConversation.set(run.conversationId, args["working_directory"] as string);
     }
 
+    // A chat with memory turned off must not write one. The tool is already
+    // withheld from such a turn, so reaching here means the model asked for a
+    // tool it was not offered — refuse rather than save. The refusal is an
+    // Error for the same reason the guardrail one below is: the model cannot
+    // then tell the user it remembered something it did not. Checked here as
+    // well as at the offer site because this is the only point every path
+    // (main turn, sub-agent, scheduled task) passes through.
+    if (name === "remember" && run.memoryEnabled === false) {
+      run.messages.push(toolResult(call, "Error: memory is turned off for this chat, so nothing can be saved. Tell the user plainly that you did not save it."));
+      this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Not saved — memory is off for this chat", parentId: run.parentToolCallId, durationMs: 0 });
+      this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "memory-off", ok: false, where: "host" });
+      this.log.info(`TOOL remember REFUSED (memory is off for conversation ${run.conversationId})`);
+      return;
+    }
+
     // FIX22 §1a: `remember` writes the sidecar's durable note store, and that
     // note is folded into every later prompt. A note that matches a guardrail
     // rule would 403 every future turn — and `remember` is a tool the model can
@@ -1554,7 +1579,7 @@ export class TurnCoordinator {
       } else if (this.hostTools.has(name)) {
         where = "host";
         try {
-          const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal });
+          const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled });
           ok = r.ok;
           text = r.text;
           image = r.imageDataUri;
@@ -1790,7 +1815,7 @@ export class TurnCoordinator {
     // FIX31 §1.1: every tool a single sub-agent has (run_subagent excepted —
     // still no second level). A call that needs permission asks the USER, on
     // the parent's page, attributed; nothing is auto-approved.
-    const tools = await this.toolDefinitions(req.tools, true);
+    const tools = await this.toolDefinitions(req.tools, true, false, req.memoryEnabled !== false);
     const messages: GatewayMessage[] = [
       { role: "system", content: subAgentSystemPrompt(this.opts.homeDirectory, this.grants.list()) },
       { role: "user", content: req.task },
@@ -1807,6 +1832,7 @@ export class TurnCoordinator {
       maxIterations: NESTED_MAX_ITERATIONS,
       maxMs: NESTED_MAX_MINUTES * 60_000,
       tools,
+      memoryEnabled: req.memoryEnabled !== false,
       parentToolCallId: conversationId,
       onText: (t: string) => {
         answer += t;
@@ -1873,7 +1899,7 @@ export class TurnCoordinator {
    *  removed the behaviour (a sub-agent asks the user instead of losing the
    *  tool), and a dead parameter with a security-sounding name invites both
    *  false confidence and accidental resurrection. */
-  private async toolDefinitions(allow: string[] | null, nested: boolean, imageMode = false): Promise<GatewayToolDefinition[]> {
+  private async toolDefinitions(allow: string[] | null, nested: boolean, imageMode = false, memoryEnabled = true): Promise<GatewayToolDefinition[]> {
     let defs: GatewayToolDefinition[] = [];
     try {
       const sidecarTools = await this.sidecar.listTools();
@@ -1918,6 +1944,15 @@ export class TurnCoordinator {
     if (allow) {
       const set = new Set(allow.map((a) => a.toLowerCase()));
       out = out.filter((d) => set.has(d.function.name.toLowerCase()));
+    }
+    // Memory off for this chat means no memory tools, the same rule the two
+    // withholdings below follow: a tool that must not run is not offered. The
+    // web client already omits its save_memory / list_memories this way, so
+    // this is what makes the switch mean one thing in both clients.
+    if (!memoryEnabled) {
+      const before = out.length;
+      out = out.filter((d) => !MEMORY_TOOLS.has(d.function.name));
+      if (before !== out.length) this.log.info(`TOOLS: memory is off for this chat — withholding ${before - out.length} memory tool(s)`);
     }
     // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —
     // the model should have no vocabulary for a tool it cannot use this turn.

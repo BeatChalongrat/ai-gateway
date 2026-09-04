@@ -28,6 +28,10 @@ export interface NestedRunRequest {
   label?: string;
   parentToolCallId: string;
   conversationId: string;
+  /** Inherited from the chat that spawned this sub-agent. A sub-agent of a
+   *  memory-off chat must not save memory either — otherwise the switch is
+   *  escapable by asking for the work to be delegated. */
+  memoryEnabled?: boolean;
 }
 /** FIX30 §3.1: a sub-agent's final answer that opens like this is a failure
  *  (the prompt asks for `FAILED:`; `ERROR:` is what a model writes unprompted). */
@@ -144,7 +148,7 @@ export class HostTools {
     return name in HOST_TOOL_DEFINITIONS && (name !== "web_search" || this.webSearchEnabled());
   }
 
-  async execute(name: string, args: Record<string, unknown>, ctx: { conversationId: string; toolCallId: string; signal: AbortSignal }): Promise<HostToolResult> {
+  async execute(name: string, args: Record<string, unknown>, ctx: { conversationId: string; toolCallId: string; signal: AbortSignal; memoryEnabled?: boolean }): Promise<HostToolResult> {
     switch (name) {
       case "read_clipboard": {
         const text = String(await clipboard.readText());
@@ -215,7 +219,7 @@ export class HostTools {
               // permission raises the SAME consent card as the parent's would,
               // attributed to this subtask by label (the FIX8 boundary was a
               // stand-in for a consent path that did not exist; now it does).
-              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, label, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
+              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, label, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled }, ctx.signal);
               results[i] = `## ${label}\n${r.completed ? r.answer : r.stopReason === "failed" ? `(failed)\n${r.answer}` : `(did not finish: ${r.stopReason ?? "unknown"})\n${r.answer}`}${trace(r.trace)}`;
             }
           });
@@ -227,7 +231,7 @@ export class HostTools {
         // An empty allow-list means "every tool" (SpawnAgentTool.ReadAllowlist), not "no tools".
         const allowRaw = Array.isArray(args["tools"]) ? (args["tools"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
         const allow = allowRaw.length > 0 ? allowRaw : null;
-        const r = await this.runNested({ task, tools: allow, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId }, ctx.signal);
+        const r = await this.runNested({ task, tools: allow, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled }, ctx.signal);
         if (r.completed) return { ok: true, text: r.answer + trace(r.trace), imageDataUri: null };
         if (r.stopReason === "failed") return { ok: false, text: `Sub-agent failed: ${r.answer}${trace(r.trace)}`, imageDataUri: null };
         return { ok: false, text: `Sub-agent did not finish: ${r.stopReason ?? "the run ended unexpectedly."}${trace(r.trace)}`, imageDataUri: null };
