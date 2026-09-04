@@ -7,7 +7,8 @@ Usage:
 Exit status:
     0  no failing test outside backend/tests/known_failing.txt
     1  at least one name is new  (the gate is red)
-    2  the input could not be read
+    2  the input could not be read, or it has no pytest summary line
+       (the lane was interrupted — an unfinished run is not a green run)
 
 Why names and not a count: this suite does not produce a stable number
 of failures. Three consecutive runs of one unchanged tree gave 21, 22
@@ -31,6 +32,15 @@ _HERE = pathlib.Path(__file__).resolve()
 _KNOWN = _HERE.parent.parent / "tests" / "known_failing.txt"
 
 _FAILED_RE = re.compile(r"^FAILED\s+(\S+)")
+# pytest's closing line: "21 failed, 3995 passed, 27 skipped ... in 265.70s"
+# or "no tests ran in 0.01s". FIX61: a lane that was interrupted has no
+# such line and no FAILED lines either — it used to read as GREEN.
+_SUMMARY_RE = re.compile(r"^(?:=+ )?(?:\d+ (?:passed|failed|error|errors)\b.*|no tests ran\b.*) in \d")
+
+
+def lane_finished(text: str) -> bool:
+    """True only if pytest printed its final summary line."""
+    return any(_SUMMARY_RE.match(line.strip()) for line in text.splitlines())
 
 
 def load_known(path: pathlib.Path) -> dict[str, str]:
@@ -63,6 +73,14 @@ def main(argv: list[str]) -> int:
         text = pathlib.Path(argv[1]).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         print(f"cannot read {argv[1]}: {exc}")
+        return 2
+
+    if not lane_finished(text):
+        print(
+            "GATE NOT RUN — the lane output has no pytest summary line, so the "
+            "run was interrupted or never started. Nothing can be concluded "
+            "from it; re-run the lane."
+        )
         return 2
 
     known = load_known(_KNOWN)
