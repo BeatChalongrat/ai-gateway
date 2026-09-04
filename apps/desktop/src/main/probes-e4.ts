@@ -50,6 +50,12 @@ const TYPE_AND_SEND = (text: string) => `(() => {
 })()`;
 const CLICK_CONSENT = (testid: string) => `(() => { const b = document.querySelector('[data-testid="${testid}"]'); if (!b) return false; b.click(); return true; })()`;
 const NEW_CHAT = `(() => { const b = [...document.querySelectorAll('button, a')].find(x => /new chat|แชทใหม่/i.test((x.textContent || '') + ' ' + (x.getAttribute('aria-label') || ''))); if (b) { b.click(); return 'clicked'; } return 'no-new-chat'; })()`;
+// The sidebar's temporary-chat launcher. Clicking the real control is the
+// point: it exercises the path a user takes, including the store flag that
+// the lazy create consumes.
+const NEW_TEMP_CHAT = `(() => { const b = [...document.querySelectorAll('button, a')].find(x => /temporary chat|แชทชั่วคราว/i.test(x.textContent || '')); if (b) { b.click(); return 'clicked'; } return 'no-temp-chat'; })()`;
+// Reads the always-visible strip, so the probe can prove the user was TOLD.
+const READ_TEMP_BANNER = `(() => { const el = [...document.querySelectorAll('[role="status"]')].find(x => /temporary chat|แชทชั่วคราว/i.test(x.textContent || '')); return el ? (el.textContent || '').trim() : ''; })()`;
 
 export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void> {
   const { win, bridge, coordinator: co, sidecar, log } = ctx;
@@ -477,6 +483,56 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         const cr = await turn(`Without using any tool, what is the staging box called? Recall it from your notes for this conversation.`, "allow-once", 150_000);
         await shot("conv-recall");
         check("§1 a LATER turn of the SAME conversation recalls the note", cr.reply.includes(ctok) || cr.dom.includes(ctok), `token=${ctok} sameConv=${cr.convId === conv.convId} reply="${cr.reply.slice(0, 200)}"`);
+        break;
+      }
+
+      case "fix56mem": {
+        // Do the two clients remember in the SAME place, and does a chat
+        // with memory off really leave nothing behind?
+        //
+        // Extends the fix5mem case rather than repeating it: the same
+        // write-then-recall shape, but each half also names WHICH store
+        // it expects the fact to land in, because that is the question.
+        // The desktop `remember` tool writes the sidecar's local SQLite
+        // (agent_notes); the web client writes chat-edge's Postgres
+        // (chat.user_memories). Reading a recall out of the reply cannot
+        // tell those apart — the desktop prompt merges both — so the
+        // decisive check is done against the stores by the operator, and
+        // this case produces the tokens to look for.
+        const dtok = `desk-anchor-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        // ── direction 1: desktop writes ───────────────────────────────
+        await newChat();
+        await turn(`Use the remember tool with scope "global" to store this durable user-level fact: "My desktop anchor is ${dtok}." Then reply just "stored".`, "allow-once", 150_000);
+        await shot("fix56-desktop-write");
+        const wrote = co.toolCallsSeen.some((t) => t.tool === "remember" && t.ok);
+        check("desktop remember(global) succeeded", wrote, co.toolCallsSeen.filter((t) => t.tool === "remember").map((t) => JSON.stringify(t.args)).join(" | ") || "(not called)");
+        check(
+          `TOKEN for the operator to grep in BOTH stores: ${dtok}`,
+          true,
+          `local: sqlite %APPDATA%/SRAN Desktop/data.db -> agent_notes; server: psql chat.user_memories`,
+        );
+
+        // ── direction 2: memory OFF must write nothing and read nothing ──
+        // Turn the switch off from the page, then try to make it save.
+        const clicked = await js(NEW_TEMP_CHAT);
+        check("the sidebar has a temporary-chat launcher", clicked === "clicked", `js=${String(clicked)}`);
+        await sleep(800);
+        const otok = `off-anchor-${Math.floor(1000 + Math.random() * 9000)}`;
+        const or_ = await turn(`Use the remember tool to store: "My off anchor is ${otok}." Then tell me plainly whether it was saved.`, "allow-once", 150_000);
+        await shot("fix56-memory-off");
+        // The indicator has to be on screen the whole time, not just in a
+        // header that a narrow window hides.
+        const banner = String(await js(READ_TEMP_BANNER) ?? "");
+        check("the temporary-chat strip is visible during the turn", banner.length > 0, `banner="${banner.slice(0, 120)}"`);
+        const refused = co.toolCallsSeen.some((t) => t.tool === "remember" && !t.ok && t.decision === "memory-off");
+        const neverOffered = !co.toolCallsSeen.some((t) => t.tool === "remember" && t.ok);
+        check("a memory-off chat did NOT save", refused || neverOffered, `reply="${or_.reply.slice(0, 200)}"`);
+        check(
+          `TOKEN that must appear in NEITHER store: ${otok}`,
+          true,
+          "if this one is present anywhere, the switch is not holding",
+        );
         break;
       }
 
