@@ -5,9 +5,36 @@
 # three consecutive runs of the same tree gave 21, 22 and 23 failures
 # with a different extra member each time, and every drifting member
 # passed when run on its own. A count cannot tell "the same old
-# breakage" apart from "something new broke", so the gate now reads the
-# list below: a name that is not here turns the gate red, and a
-# different total with the same names is green.
+# breakage" apart from "something new broke", so the gate reads the list
+# below: a name that is not here turns the gate red, and a different
+# total with the same names is green.
+#
+# ── FIX57: regenerated, and the ordering it is valid for is now fixed ──
+#
+# The list above was built against a RANDOM order. pytest-randomly seeds
+# itself from the clock, so every lane reshuffled the suite and a
+# different set of order-dependent tests fell over — two lanes on one
+# unchanged tree disagreed about which failures were "new" (8 names one
+# way, 15 the other, every one of them passing in isolation). A ledger of
+# names cannot survive that: it is a statement about one ordering.
+#
+# The seed is pinned in pyproject.toml (`--randomly-seed=0`). The shuffle
+# stays — it is the only reason this suite's shared-state bugs ever
+# surface — but it is the SAME shuffle every run, so this list means
+# something. Changing that seed reshuffles the suite and invalidates this
+# file; regenerate it in the same commit.
+#
+# Four drifters were fixed rather than recorded here, because each had an
+# actual cause: two cookie tests whose "tampering" decoded to the same
+# base64 bytes about one run in sixteen; a routing-settings cache read
+# before its session check; a model-registry reload emptying the seeded
+# catalogue for every later test; and Redis health markers surviving into
+# the SSE tests. See the FIX57 commits.
+#
+# THE ONE COMMAND:
+#   docker exec -e APP_ENV=test ai-gateway-backend-1 \
+#     sh -c "cd /app && python -m pytest -m 'not integration' -q"
+#   python backend/scripts/check_known_failing.py <that output>
 #
 # Rules for this file:
 #   * every entry carries a reason and the date it was added;
@@ -18,6 +45,9 @@
 #
 # Format: <test id>  # <YYYY-MM-DD> <reason>
 # Blank lines and lines starting with # are ignored.
+#
+# Verified 2026-09-05: three consecutive lanes on one tree produced these
+# 24 names and no others, byte-identical.
 
 # ── environment: the dev container has no examples/ mount and no live
 #    desktop/chat-edge trees for the cross-service inventory checks ──
@@ -28,54 +58,48 @@ tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_desktop_registr
 tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_chat_edge_registry_scan_is_alive  # 2026-09-01 same
 tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_desktop_tool_is_classified  # 2026-09-01 same
 tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_chat_edge_tool_is_classified  # 2026-09-01 same
+
+# ── deployment shape: assertions about a compose file / proxy this box
+#    does not run ──
 tests/test_service_jwt_wiring.py::test_compose_feeds_service_jwt_to_both_services  # 2026-09-01 asserts compose contents that differ from this deployment's overrides
 tests/test_service_jwt_wiring.py::test_prod_compose_hard_requires_service_jwt_on_backend  # 2026-09-01 same
-
-# ── request-size limit: enforced by the gateway/proxy in front of the
-#    app, which is not in front of the app in the unit lane ──
 tests/test_body_limit.py::TestBodySizeLimit::test_oversized_request_rejected  # 2026-09-01 limit lives in the fronting proxy, absent in-process
 tests/test_body_limit.py::TestBodySizeLimit::test_error_has_standard_envelope  # 2026-09-01 same
 tests/test_pilot_readiness.py::TestPR05BodySizeLimit::test_oversized_request_rejected  # 2026-09-01 same
 
-# ── schema drift between the ORM and the oldest migrations ──
+# ── schema drift: the ORM carries columns migration 002 never added ──
 tests/test_tenant_model.py::TestTenantSchema::test_tenants_columns  # 2026-09-01 ORM has columns migration 002 never added
 tests/test_tenant_model.py::TestMigration002::test_migration_columns_match_orm  # 2026-09-01 same
 
-# ── provider/dispatch state: these assert which provider answered, so
-#    they follow the dev box's live provider availability ──
+# ── depends on which providers this box can actually reach / has seeded ──
 tests/test_routing_e2e.py::TestRoutingE2EAuto::test_auto_coding_returns_anthropic  # 2026-09-01 anthropic is not reachable from this box; auto answers from a live provider
 tests/test_sranai_provider.py::test_unknown_provider_still_rejected  # 2026-09-01 depends on the provider registry seeded in this deployment
+tests/test_async_provider_key_service.py::test_get_api_key_async_resolves_db_key  # 2026-09-01 seeded key rows are stored in a legacy encoding this build no longer decodes
+
+# ── needs a live streaming provider ──
 tests/test_streaming_dlp.py::TestStreamingProviderPiiMaskedUnderDefault::test_streaming_provider_pii_is_masked_by_default  # 2026-09-01 needs a live streaming provider
 tests/test_streaming_dlp.py::TestStreamingCleanMessagePassesThrough::test_streaming_clean_message_passes_through  # 2026-09-01 same
 tests/test_streaming_session_factory.py::TestStreamingUsesRequestTimeFactory::test_streaming_uses_request_time_session_factory  # 2026-09-01 same
 tests/test_streaming_session_factory.py::TestStreamingFactoryCaptureIsPerRequest::test_streaming_factory_capture_is_per_request  # 2026-09-01 same
 
-# ── async key lookup against the seeded integration DB ──
-tests/test_async_provider_key_service.py::test_get_api_key_async_resolves_db_key  # 2026-09-01 seeded key rows are stored in a legacy encoding this build no longer decodes
+# ── the shared rate-limit window (FIX55). These tests spend real requests
+#    against one process-wide limiter, so whichever of them runs after the
+#    window is exhausted gets a 429 instead of its expected status. With
+#    the order now fixed, the SAME members fail every run — but the
+#    members are decided by where the window runs out, not by the tests,
+#    which is why the group's membership changed when the order was
+#    pinned. Splitting the limiter is deferred (owner's call); the family
+#    is one bug with several names.
+tests/unit/test_public_audio.py::test_music_mode_on_tts_only_model_400  # 2026-09-05 shared rate-limit window — asserts 400, gets 429
+tests/unit/test_public_audio.py::test_valid_music_submit_200  # 2026-09-05 same window
+tests/unit/test_public_videos.py::test_valid_submit_200  # 2026-09-04 same window
 
-# ── QUARANTINE: order- and timing-dependent, not stable failures ─────
-# These pass on their own and fail only inside a full run, and which of
-# them fails changes from run to run (observed sets of 21, 22, 23 and 24
-# across six runs of unchanged trees).
-#
-# Mechanism, from the assertion text rather than a guess: they assert on
-# a response and get `429`. The app's rate limiter is a sliding window
-# kept in Redis, and the whole test session shares one API key id
-# ("test-key-id" in conftest), so requests made by earlier tests are
-# still inside the window when a later test calls through TestClient.
-# Whether any given test trips the limit therefore depends on how much
-# traffic preceded it and how fast the machine ran — which is exactly
-# the drift.
-#
-# They are quarantined, not accepted: the fix is to give the limiter
-# per-test state (or an explicit test limit) instead of a session-wide
-# window, and these lines come out again when it lands. Verified not to
-# be caused by the change that added this section — each one fails the
-# same way with and without it.
-tests/test_routing_e2e.py::TestRoutingE2EAuto::test_auto_default_returns_openai  # 2026-09-04 quarantine: shared rate-limit window
-tests/test_chat.py::test_chat_completion_stub  # 2026-09-04 quarantine: shared rate-limit window
-tests/test_provider_integration.py::TestProviderIntegrationSuccess::test_response_has_provider_field  # 2026-09-04 quarantine: shared rate-limit window
-tests/unit/test_public_videos.py::test_chat_only_model_400  # 2026-09-04 quarantine: shared rate-limit window
-tests/unit/test_public_videos.py::test_valid_submit_200  # 2026-09-04 quarantine: shared rate-limit window
-tests/unit/test_public_audio.py::test_invalid_mode_400  # 2026-09-04 quarantine: shared rate-limit window
-tests/unit/test_public_audio.py::test_non_tts_model_400  # 2026-09-04 quarantine: shared rate-limit window
+# ── Removed 2026-09-05, no longer failing under the pinned order. Left
+#    here as a note rather than deleted silently, so the next reader can
+#    see the ledger shrank by six and grew by two:
+#      test_routing_e2e.py::TestRoutingE2EAuto::test_auto_default_returns_openai
+#      test_chat.py::test_chat_completion_stub
+#      test_provider_integration.py::TestProviderIntegrationSuccess::test_response_has_provider_field
+#      unit/test_public_videos.py::test_chat_only_model_400
+#      unit/test_public_audio.py::test_invalid_mode_400
+#      unit/test_public_audio.py::test_non_tts_model_400
