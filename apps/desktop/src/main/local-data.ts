@@ -15,12 +15,17 @@
 //     never file contents.
 //   * sweepConversationStateTTL — deletes conversation-state files
 //     whose mtime is older than a per-preference window
-//     (localStateTtlDays). Runs at boot; OFF by default (0) like
-//     every other deleting mechanism in the program — the user (the
-//     owner of this local data) turns it on.
+//     (localStateTtlDays). Runs at boot; 30 days by default, 0 to
+//     disable. Unlike the server's deleting jobs this one ships ON:
+//     "off" on a server means data sits in a database the operator
+//     controls, while here it means transcripts accumulate in
+//     plaintext on a laptop forever. The cache is a convenience, not
+//     the record — the conversation lives on the server — so the safe
+//     default is the one that forgets.
 //
-// Encryption-at-rest for these files is a separate decision and is
-// deliberately NOT taken here.
+// Encryption-at-rest for these files was considered and dropped: OS
+// disk encryption already covers the threat it would address, and a
+// TTL removes the data instead of protecting it in place.
 //
 // No 'electron' import: unit-tested in plain Node.
 

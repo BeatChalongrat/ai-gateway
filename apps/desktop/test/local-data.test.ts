@@ -64,14 +64,34 @@ describe("wipeLocalData", () => {
 });
 
 describe("sweepConversationStateTTL", () => {
-  it("is OFF at ttl 0 — the default — and touches nothing", () => {
+  it("ttl 0 disables the sweep and touches nothing", () => {
     const ud = mkUserData();
     const old = new Date(Date.now() - 90 * 24 * 3600 * 1000);
     write(path.join(ud, "conversation-state"), "old.json", old);
 
-    expect(DEFAULT_SHELL_PREFS.localStateTtlDays).toBe(0);
+    // 0 is still the explicit "never sweep" value — a user who wants
+    // the cache kept forever sets it. It is no longer the DEFAULT.
     expect(sweepConversationStateTTL(ud, 0)).toBe(0);
     expect(fs.existsSync(path.join(ud, "conversation-state", "old.json"))).toBe(true);
+  });
+
+  it("defaults to a 30-day window, so an untouched install forgets", () => {
+    // FIX60 — this shipped at 0 (off) on the rule that deleting
+    // mechanisms start disabled. On a server that rule is right; here
+    // "off" means plaintext transcripts accumulate on a laptop
+    // forever, and the cache is only a convenience — the conversation
+    // itself lives on the server.
+    expect(DEFAULT_SHELL_PREFS.localStateTtlDays).toBe(30);
+
+    const ud = mkUserData();
+    const stale = new Date(Date.now() - 45 * 24 * 3600 * 1000);
+    const fresh = new Date(Date.now() - 3 * 24 * 3600 * 1000);
+    write(path.join(ud, "conversation-state"), "stale.json", stale);
+    write(path.join(ud, "conversation-state"), "fresh.json", fresh);
+
+    expect(sweepConversationStateTTL(ud, DEFAULT_SHELL_PREFS.localStateTtlDays)).toBe(1);
+    expect(fs.existsSync(path.join(ud, "conversation-state", "stale.json"))).toBe(false);
+    expect(fs.existsSync(path.join(ud, "conversation-state", "fresh.json"))).toBe(true);
   });
 
   it("removes only stale .json files when enabled", () => {
@@ -90,10 +110,16 @@ describe("sweepConversationStateTTL", () => {
 });
 
 describe("shell-prefs localStateTtlDays", () => {
-  it("defaults to 0 and rejects invalid values", () => {
-    expect(sanitizePrefs(null).localStateTtlDays).toBe(0);
-    expect(sanitizePrefs({ localStateTtlDays: -5 } as never).localStateTtlDays).toBe(0);
-    expect(sanitizePrefs({ localStateTtlDays: Number.NaN } as never).localStateTtlDays).toBe(0);
+  it("falls back to the 30-day default and rejects invalid values", () => {
+    // Garbage falls back to the DEFAULT, not to 0. Falling back to 0
+    // would let a corrupted prefs file silently switch the sweep off
+    // and keep transcripts forever — the failure mode this default
+    // exists to prevent.
+    expect(sanitizePrefs(null).localStateTtlDays).toBe(30);
+    expect(sanitizePrefs({ localStateTtlDays: -5 } as never).localStateTtlDays).toBe(30);
+    expect(sanitizePrefs({ localStateTtlDays: Number.NaN } as never).localStateTtlDays).toBe(30);
+    // A deliberate 0 is honoured — it is a choice, not corruption.
+    expect(sanitizePrefs({ localStateTtlDays: 0 } as never).localStateTtlDays).toBe(0);
     expect(sanitizePrefs({ localStateTtlDays: 45.9 } as never).localStateTtlDays).toBe(45);
   });
 });

@@ -30,13 +30,27 @@ export interface ShellPrefs {
   /** What a single click on the tray icon opens. Default: the main window. */
   trayClick: TrayClickAction;
   /** Days after which unused conversation-state cache files are swept
-   *  at boot. 0 (the default) = sweep OFF — like every deleting
-   *  mechanism, it starts disabled and the user turns it on. */
+   *  at boot. **30 by default** as of FIX60; 0 disables the sweep.
+   *
+   *  It shipped OFF, on the rule that every deleting mechanism starts
+   *  disabled. That rule is right for the server, where "off" means
+   *  data sits in a database the operator controls, and wrong here,
+   *  where "off" means transcripts accumulate in plaintext on a laptop
+   *  forever. The cache is a convenience, not a record — the
+   *  conversation itself lives on the server — so the safe default is
+   *  the one that forgets. A user who wants the old behaviour sets 0.
+   *
+   *  The window matches the industry norm for a local transcript
+   *  cache. Encryption-at-rest for these files was considered and
+   *  dropped: the OS disk encryption already covers the threat it
+   *  would address, and a TTL removes the data rather than protecting
+   *  it in place. */
   localStateTtlDays: number;
 }
 
 export const DEFAULT_QUICK_HOTKEY = "CommandOrControl+Shift+A";
-export const DEFAULT_SHELL_PREFS: Readonly<ShellPrefs> = Object.freeze({ quickHotkey: DEFAULT_QUICK_HOTKEY, trayClick: "main", localStateTtlDays: 0 });
+export const DEFAULT_LOCAL_STATE_TTL_DAYS = 30;
+export const DEFAULT_SHELL_PREFS: Readonly<ShellPrefs> = Object.freeze({ quickHotkey: DEFAULT_QUICK_HOTKEY, trayClick: "main", localStateTtlDays: DEFAULT_LOCAL_STATE_TTL_DAYS });
 
 const MODIFIERS = new Set(["commandorcontrol", "cmdorctrl", "command", "cmd", "control", "ctrl", "alt", "option", "altgr", "shift", "super", "meta"]);
 /** Modifiers that count as "a real modifier" for a global shortcut (Shift alone does not). */

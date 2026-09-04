@@ -193,8 +193,8 @@ void app.whenReady().then(async () => {
   const prefs = shellPrefs.load();
   log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick} localStateTtlDays=${prefs.localStateTtlDays}`);
   // Local-data TTL sweep — deletes conversation-state cache files not
-  // touched in localStateTtlDays. OFF by default (0); counts only in
-  // the log, never contents.
+  // touched in localStateTtlDays. 30 days by default (0 disables);
+  // counts only in the log, never contents.
   if (prefs.localStateTtlDays > 0) {
     const swept = sweepConversationStateTTL(app.getPath("userData"), prefs.localStateTtlDays);
     if (swept > 0) log.info(`local-data TTL sweep removed ${swept} conversation-state file(s) older than ${prefs.localStateTtlDays}d`);

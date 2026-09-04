@@ -24,7 +24,7 @@ auditor should be pointed at.
 | Deletion semantics | **Permanent and unrecoverable** — hard delete, not a hidden flag |
 | Evidence | Every deletion and every retention-setting change writes an audit row that **no deletion path can remove** |
 | Settings changes | Take effect **at the next scheduled run**, never retroactively or immediately; the admin UI shows the exact effective time |
-| Audit retention | Longer than every data window (proposed default 730 days, configurable) — evidence outlives the data it describes |
+| Audit retention | **365 days**, configurable — and evidence still outlives the data it describes, because a deletion's audit row is written at the moment of deletion and then keeps its own full year |
 
 ### Why the 30-day floor
 
@@ -66,8 +66,9 @@ each is visible rather than silent:
   records (no message content) are retained for billing and
   operations and are outside conversation erasure by design.
 * **Client-local caches** are the user's own copies on their own
-  machine; the desktop app provides a wipe command and an optional
-  TTL sweep, but the server cannot reach into a client device.
+  machine. The desktop app sweeps its conversation-state cache after
+  **30 days by default** and provides an immediate wipe command, but
+  the server cannot reach into a client device.
 
 ---
 
@@ -90,7 +91,7 @@ reach and why.
 | `chat.user_memories` / `memory_events` (derived facts) | yes | the user-scoped memory purge (`DELETE /account/purge-memories`) — deliberately separate: a memory may be derived from many conversations, so erasing one conversation must not silently delete facts the user still relies on |
 | Gateway `request_logs` (masked snapshots; raw columns) | raw columns for ≤ the DLP window (90 days), masked snapshots after | time-based: the nightly strip NULLs raw columns; archive + expiry + partition drops age the rows. **Not conversation-addressable** — these rows are keyed by request, not conversation, so per-conversation erasure cannot select them; their lifetime is bounded by the time-based windows instead |
 | `request_logs_archive` (cold storage) | masked only (the pipeline refuses to move rows on a night the strip failed) | the archive-expiry step |
-| Desktop local cache (`conversation-state/*.json`, run ledger, logs) | yes (plaintext) | the app's **Clear local data** command; optional TTL sweep (`localStateTtlDays`, off by default). Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
+| Desktop local cache (`conversation-state/*.json`, run ledger, logs) | yes (plaintext) | TTL sweep at launch — `localStateTtlDays`, **30 days by default** (0 disables) — plus the app's immediate **Clear local data** command. Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
 | Streaming resume ledger (Redis) | yes | self-expiring TTL (~10 minutes) |
 | Memory export files | yes | 24-hour link expiry + deleted by the memory purge |
 | `chat.cloud_task_runs`, `chat.compaction_usage` | no (counts/outcomes) | retained — content-free accounting (see exceptions) |
@@ -164,9 +165,26 @@ schedule, like every other change.
 
 `Clear local data` (tray menu, confirmed) removes the local
 conversation-state cache, run ledger and logs — counts reported,
-contents never. An optional TTL sweep (`localStateTtlDays`, default
-off) removes stale conversation-state files at launch. Local
-encryption-at-rest for these caches is a separate, open decision.
+contents never. A TTL sweep at launch (`localStateTtlDays`, **default
+30 days**; 0 disables it) removes conversation-state files that have
+not been touched inside the window.
+
+**Why a TTL and not encryption-at-rest.** The cache is written in
+plaintext, and the answer to that is to stop keeping it rather than to
+protect it in place. Two reasons. The threat encryption-at-rest would
+address here — someone with the powered-off disk — is already covered
+by the operating system's full-disk encryption, which every managed
+deployment turns on; adding a second key for these files moves the
+problem to key storage on the same machine without removing the data.
+And the cache is a convenience, not the record: the conversation
+itself lives on the server, so a file that expires costs the user
+nothing but a slower reopen. Deleting data beats guarding it.
+
+This is also why this one sweep ships ON while every server-side
+deleting job ships off. On a server, "off" means the data sits in a
+database the operator controls and can account for. On a laptop, "off"
+means transcripts accumulate in plaintext indefinitely on a device the
+operator cannot reach.
 
 ---
 
