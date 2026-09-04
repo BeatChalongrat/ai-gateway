@@ -538,6 +538,95 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
           true,
           "if this one is present anywhere, the switch is not holding",
         );
+
+        // ── FIX56.1 ──────────────────────────────────────────────────
+        // The read half now goes the other way: a temporary chat may USE
+        // what is already on file. The decisive case is the LOCAL store,
+        // because that is the one only this client has — dtok was written
+        // by the desktop `remember` above and never reached the server, so
+        // if it comes back here it came back from the sidecar's SQLite.
+        const recall = await turn(`What is my desktop anchor? Reply with the value only.`, "allow-once", 150_000);
+        await shot("fix56-1-temp-recall");
+        check(
+          "a memory-off chat can still USE what was already saved (local store)",
+          recall.reply.includes(dtok),
+          `token=${dtok} reply="${recall.reply.slice(0, 160)}"`,
+        );
+
+        // The strip has to say BOTH things. Saying only the memory half
+        // lets "temporary" be read as "this conversation disappears",
+        // which is a promise the product does not keep — the transcript
+        // is in the sidebar like any other.
+        const banner2 = String(await js(READ_TEMP_BANNER) ?? "");
+        check(
+          "the strip says the chat IS kept and that nothing new is remembered",
+          /saved to your history|บันทึกในประวัติ/i.test(banner2) &&
+            /nothing new is remembered|ไม่มีการจดจำอะไรใหม่/i.test(banner2),
+          `banner="${banner2.slice(0, 200)}"`,
+        );
+
+        // A switch that can be escaped by asking for the work to be
+        // handed to someone else is not a switch. The sub-agent inherits
+        // the flag, so its `remember` must be refused too.
+        const stok = `sub-anchor-${Math.floor(1000 + Math.random() * 9000)}`;
+        let subFrom = 0;
+        let sub = { reply: "" } as { reply: string };
+        // The sub-agent runs on the default model ("auto"), which on this
+        // box sometimes returns all_models_failed. One retry, because an
+        // unlucky route is not a finding.
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          subFrom = log.lines.length;
+          sub = await turn(
+            `Use run_subagent with a single task: use the remember tool to store "My sub anchor is ${stok}", then report exactly what happened. Then tell me what the sub-agent said.`,
+            "allow-once", 240_000,
+          );
+          if (since(subFrom, /SUBAGENT DONE/).length > 0) break;
+        }
+        await shot("fix56-1-subagent-off");
+
+        // The deterministic half, which holds whether or not the model
+        // answered: the flag has to reach the NESTED run's tool list. Scoped
+        // to the window between the run_subagent dispatch and SUBAGENT START,
+        // because the parent turn logs the same withholding for itself and an
+        // unscoped match would pass on the parent's line alone.
+        const tail = log.lines.slice(subFrom);
+        const dispatchAt = tail.findIndex((l) => /TOOL run_subagent conv=/.test(l));
+        const startAt = tail.findIndex((l) => /SUBAGENT START/.test(l));
+        const withheldForSub =
+          dispatchAt >= 0 && startAt > dispatchAt &&
+          tail.slice(dispatchAt, startAt).some((l) => /memory is off for this chat — withholding/.test(l));
+        check(
+          "the memory-off flag reached the SUB-AGENT's own tool list",
+          withheldForSub,
+          `dispatch@${dispatchAt} start@${startAt} between=${JSON.stringify(tail.slice(Math.max(dispatchAt, 0), Math.max(startAt, 0)).slice(-3))}`,
+        );
+
+        // Nested runs get their own conversationId (`subagent-…`), so this
+        // cannot be scoped by conversation the way the check above is —
+        // scope it to the tool + token instead.
+        const subSaves = co.toolCallsSeen.filter(
+          (t) => t.tool === "remember" && JSON.stringify(t.args ?? {}).includes(stok) && t.ok,
+        );
+        // A sub-agent that never got an answer out of the router saved
+        // nothing for a reason that has nothing to do with the switch. Say
+        // so rather than banking a pass: this check exists so the next one
+        // cannot be true vacuously.
+        const subRan = since(subFrom, /SUBAGENT DONE/).length > 0;
+        check(
+          "the sub-agent ran to completion (without this, the check below proves nothing)",
+          subRan,
+          `${lastLine(/SUBAGENT /)}`,
+        );
+        check(
+          "a sub-agent in a memory-off chat did NOT save either",
+          subRan && subSaves.length === 0,
+          `subagentRan=${subRan} successfulRememberCallsCarryingTheToken=${subSaves.length} reply="${sub.reply.slice(0, 160)}"`,
+        );
+        check(
+          `TOKEN that must appear in NEITHER store: ${stok}`,
+          true,
+          "the delegated save; present anywhere means the flag did not reach the sub-agent",
+        );
         break;
       }
 
