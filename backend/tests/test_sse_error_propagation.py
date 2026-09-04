@@ -41,6 +41,34 @@ def _route_session_local(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_inherited_health_markers():
+    """Clear the provider health markers this file's routing depends on.
+
+    FIX57 — these tests assert on what happens when the PRIMARY model
+    fails. When an earlier test in the lane had marked openai/gpt-4o-mini
+    unhealthy, the streaming pre-check skipped it before the adapter was
+    ever called and the turn was answered by the anthropic stub instead:
+    no error frame, no partial content, and a failure message that read
+    like the error propagation was broken.
+
+    The markers live in a shared Redis with a 60-second TTL, so whether
+    they were still set when this file ran depended on how long the
+    preceding tests had taken — one of the last two things drifting in an
+    otherwise fixed-order, fixed-seed lane.
+    """
+    from app.services._redis_pool import run_sync
+    from app.services.gateway.fallback_orchestrator import clear_provider_health
+
+    for provider in ("openai", "anthropic"):
+        try:
+            run_sync(clear_provider_health(provider, "gpt-4o-mini"))
+            run_sync(clear_provider_health(provider))
+        except Exception:  # noqa: BLE001 — no Redis here is not a failure
+            pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_streaming_fallback_candidate(monkeypatch):
     """Force the in-generator fallback selector to find nothing, so the
     failure is terminal and the generator must emit an error frame."""
