@@ -30,6 +30,29 @@ class _Log:
         self.events.append((event, kw))
 
 
+@pytest.fixture(autouse=True)
+def _no_leaked_auto_preference():
+    """Drop the routing-settings cache around every test in this file.
+
+    These tests pass ``session=None`` to reach the hardcoded Auto
+    preference, and ``get_auto_preference`` checks its process-global
+    cache BEFORE it checks the session. So whenever an earlier test in
+    the same process had warmed that cache from the database, this file
+    silently asserted against the DATABASE's default model instead of
+    the shipped one — and the swap target stopped being "gpt-4o".
+
+    That is why it drifted with a fixed order and a fixed seed: the cache
+    has a 30-second wall-clock TTL, so whether it was still warm by the
+    time these tests ran depended on how fast the preceding ~4000 tests
+    had gone that day. One run in three, near enough.
+    """
+    from app.services import routing_settings
+
+    routing_settings.clear_cache()
+    yield
+    routing_settings.clear_cache()
+
+
 def _guard(model: str, tools):
     payload = SimpleNamespace(model=model, tools=tools)
     log = _Log()

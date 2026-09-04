@@ -123,7 +123,24 @@ class TestVerifyCookie:
         cookie, _sid = manager.create_session(
             user_id="u1", tenant_id="t1", role="ADMIN"
         )
-        tampered = cookie[:-1] + ("A" if cookie[-1] != "A" else "B")
+        # Tamper a character that is NOT the last one, and assert the edit
+        # actually landed.
+        #
+        # The old version substituted cookie[-1], and failed about one run
+        # in sixteen with "DID NOT RAISE" — which read as flakiness in the
+        # session manager rather than in the tampering. It was the base64:
+        # itsdangerous signs with a 20-byte HMAC, which encodes to 27
+        # base64url characters, and 27 characters carry 162 bits for 160
+        # bits of signature. The final character's low two bits are
+        # therefore ignored, so its four in-class neighbours (A, B, C, D
+        # among them) all decode to the SAME twenty bytes. Whenever the
+        # signature happened to end in one of those, "tampering" produced a
+        # cookie that was byte-identical after decoding and verified fine.
+        # 4 of 64 possible final characters = 6.25%, which is the rate
+        # observed. Every earlier character carries all six of its bits.
+        idx = len(cookie) - 2
+        tampered = cookie[:idx] + ("A" if cookie[idx] != "A" else "B") + cookie[idx + 1:]
+        assert tampered != cookie
         with pytest.raises(SessionInvalid):
             manager.verify_cookie(tampered)
 
