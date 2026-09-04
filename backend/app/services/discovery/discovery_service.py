@@ -30,6 +30,8 @@ from app.services.discovery.provider_discovery import (
     DEFAULT_MAX_CONTEXT_TOKENS,
     DiscoveredModel,
     PROVIDER_DISCOVERY,
+    clear_discovery_failure,
+    pop_discovery_failure,
 )
 from app.services.provider_key_service import ProviderKeyService
 
@@ -52,6 +54,17 @@ class SyncResult:
     discovered_new: int = 0
     new_models: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Models the providers actually reported this run (before the
+    # auto-add decision). ``inserted``/``updated`` count what the
+    # CATALOG did; this counts what the PROVIDER said, which is the
+    # number an operator who just pasted a key wants to see.
+    models_found: int = 0
+    # provider -> short, secret-free reason it reported no models.
+    # ``errors`` keeps its old meaning (orchestrator-level failures, and
+    # the daily sweep's log line asserts on it); this is the per-provider
+    # "why zero" the adapters used to swallow. Both are returned, so a
+    # caller can say more than "0 models" without any log spelunking.
+    provider_errors: dict[str, str] = field(default_factory=dict)
     duration_seconds: float = 0.0
     synced_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
@@ -67,6 +80,8 @@ class SyncResult:
             "discovered_new": self.discovered_new,
             "new_models": list(self.new_models),
             "errors": list(self.errors),
+            "models_found": self.models_found,
+            "provider_errors": dict(self.provider_errors),
             "duration_seconds": round(self.duration_seconds, 3),
             "synced_at": self.synced_at.isoformat(),
         }
@@ -154,6 +169,51 @@ class ModelDiscoveryService:
     # Internal
     # ------------------------------------------------------------------
 
+    @staticmethod
+    async def _discover_with_key_fallback(
+        provider_name: str,
+        adapter,
+        api_keys: list[str | None],
+    ) -> tuple[list[DiscoveredModel], str | None]:
+        """Try ``adapter`` with each candidate key until one reports models.
+
+        A provider can hold several active keys — dispatch round-robins
+        over them, which is right for load. Reading a catalog is not a
+        load-balanced operation: it needs one key that works. Drawing a
+        single key by round-robin therefore made discovery a COIN FLIP
+        on any provider whose pool is mixed, and that is exactly how a
+        self-hosted box ended up with a green key, a saved endpoint and
+        an empty catalog — the draw landed on a key left over from the
+        previous endpoint and the box answered 401.
+
+        Cost is bounded and only paid on failure: the loop stops at the
+        first key that returns models, so a healthy provider still makes
+        exactly one request. It also stops on any failure a different key
+        could not fix — a box that never answered said nothing about the
+        credential, and walking the pool against a dead endpoint would
+        only multiply the wait by the number of keys.
+
+        Returns ``(models, reason)``; ``reason`` is the LAST attempt's
+        short explanation and is ``None`` on success.
+        """
+        reason: str | None = None
+        for api_key in api_keys:
+            # Clear first so a reason left by the previous key (or an
+            # earlier run) can never be read as this attempt's.
+            clear_discovery_failure(provider_name)
+            models = await adapter(api_key)
+            failure = pop_discovery_failure(provider_name)
+            if models:
+                return models, None
+            if failure is None:
+                # Empty with no recorded reason — nothing says another
+                # key would do better.
+                return [], None
+            reason, key_specific = failure
+            if not key_specific:
+                break
+        return [], reason
+
     async def _sync(
         self,
         db: Session,
@@ -181,25 +241,31 @@ class ModelDiscoveryService:
             providers = dict(PROVIDER_DISCOVERY)
 
         # API keys are read off the SYNC session — already on the
-        # caller's thread, no need to dispatch.
-        api_keys: dict[str, str | None] = {}
+        # caller's thread, no need to dispatch. The WHOLE candidate pool
+        # is read, not one round-robin draw: see
+        # :meth:`_discover_with_key_fallback`.
+        api_keys: dict[str, list[str | None]] = {}
         for provider_name in providers:
             try:
-                api_keys[provider_name] = (
-                    self.provider_key_service.get_api_key(db, provider_name)
+                pool: list[str | None] = list(
+                    self.provider_key_service.get_all_active_keys(db, provider_name)
                 )
             except Exception as exc:
-                api_keys[provider_name] = None
+                pool = []
                 result.errors.append(
                     f"{provider_name}: key lookup failed: {exc}"
                 )
+            # A keyless provider still gets one attempt with None: the
+            # static-list adapters need no credential, and the ones that
+            # do report "no API key configured" for themselves.
+            api_keys[provider_name] = pool or [None]
 
         # 3. Run all provider discoveries concurrently. Each adapter
         #    swallows its own errors and returns []; we still wrap
         #    in gather(..., return_exceptions=True) as a belt-and-
         #    braces guard.
         coros = [
-            adapter(api_keys.get(name))
+            self._discover_with_key_fallback(name, adapter, api_keys[name])
             for name, adapter in providers.items()
         ]
         discovered_lists = await asyncio.gather(*coros, return_exceptions=True)
@@ -217,11 +283,17 @@ class ModelDiscoveryService:
                 result.errors.append(
                     f"{provider_name}: adapter raised: {entry}"
                 )
+                result.provider_errors[provider_name] = (
+                    f"discovery failed unexpectedly ({type(entry).__name__})"
+                )
                 continue
-            if not entry:
+            models, reason = entry
+            if not models:
+                if reason:
+                    result.provider_errors[provider_name] = reason
                 continue
             synced_providers.add(provider_name)
-            for model in entry:
+            for model in models:
                 _enrich_with_pricing(model, self.pricing_fetcher)
                 all_discovered.append(model)
                 seen_keys.add((model.provider, model.model))
@@ -251,6 +323,7 @@ class ModelDiscoveryService:
         result.deactivated = deactivated
         result.discovered_new = discovered_new
         result.new_models = new_models
+        result.models_found = len(all_discovered)
 
         # 5. Refresh the in-memory registry so the new rows are live
         #    without waiting for the next process restart. The import
