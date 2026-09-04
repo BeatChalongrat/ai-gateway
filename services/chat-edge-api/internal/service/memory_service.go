@@ -543,17 +543,7 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 		return "", nil
 	}
 
-	var sb strings.Builder
-	sb.WriteString("<saved_user_memory>\n")
-	sb.WriteString("Facts and preferences you have saved about this user:\n")
-	for i := range memories {
-		sb.WriteString("- ")
-		sb.WriteString(memories[i].Content)
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\nUse this information naturally when relevant — do not force it into every response.\n")
-	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
-	sb.WriteString("</saved_user_memory>\n")
+	block := renderMemoryBlock(memories)
 
 	// S7 — one source per injected memory. Metadata carries the
 	// memory_type + category so the SourcesCard can render the
@@ -594,7 +584,62 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 		}
 	})
 
-	return sb.String(), sources
+	return block, sources
+}
+
+// renderMemoryBlock builds the <saved_user_memory> prompt block.
+//
+// FIX49 Part D — two sections instead of one flat list. The old block
+// ended with "Use this information naturally when relevant — do not
+// force it into every response", which told the model to treat the
+// user's own standing instructions ("answer in at most 5 bullets",
+// "always TypeScript") as optional colour; the FIX48 measurement saw 3
+// of 4 injected instructions violated (memory category 6.1/12 vs 11.5
+// bare-API — the report's largest loss, from one sentence).
+// Instruction-class memories (confirmed_instruction /
+// response_preference / inferred_preference) are now standing
+// instructions to follow in every response; only fact-class memories
+// keep the when-relevant rule. Pure function so the wording is pinned
+// by unit test.
+func renderMemoryBlock(memories []model.Memory) string {
+	instructions := make([]*model.Memory, 0, len(memories))
+	facts := make([]*model.Memory, 0, len(memories))
+	for i := range memories {
+		switch memories[i].MemoryType {
+		case model.MemoryTypeConfirmedInstruction,
+			model.MemoryTypeResponsePreference,
+			model.MemoryTypeInferredPreference:
+			instructions = append(instructions, &memories[i])
+		default: // explicit_fact / ongoing_interest / artifact_reference
+			facts = append(facts, &memories[i])
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("<saved_user_memory>\n")
+	if len(instructions) > 0 {
+		sb.WriteString("<standing_instructions>\n")
+		sb.WriteString("The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:\n")
+		for _, m := range instructions {
+			sb.WriteString("- ")
+			sb.WriteString(m.Content)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</standing_instructions>\n")
+	}
+	if len(facts) > 0 {
+		sb.WriteString("<known_facts>\n")
+		sb.WriteString("Facts about this user, saved earlier. Use them when relevant — do not force them into every response:\n")
+		for _, m := range facts {
+			sb.WriteString("- ")
+			sb.WriteString(m.Content)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</known_facts>\n")
+	}
+	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
+	sb.WriteString("</saved_user_memory>\n")
+	return sb.String()
 }
 
 // ---------------------------------------------------------------------------
