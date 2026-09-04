@@ -23,7 +23,11 @@ const crypto = require("node:crypto");
 const CHAT_EDGE = "http://localhost:4000/api/v1";
 const USER = "f1848000-0000-4000-8000-000000000048"; // the seeded probe user
 const TENANT = "169323ae-3aa2-4bc9-bb2a-e4467c716e51";
-const MODEL = "deepseek-v4-pro";
+// FIX58 — overridable so a run can be repeated on another model without
+// editing the file (which would silently break comparability with the
+// stored results). Default unchanged, so an unset env reproduces the
+// FIX56 numbers exactly.
+const MODEL = process.env.PROBE_MODEL || "deepseek-v4-pro";
 const SECRET = "dev-stable-portal-key-change-in-prod";
 
 function mintJWT() {

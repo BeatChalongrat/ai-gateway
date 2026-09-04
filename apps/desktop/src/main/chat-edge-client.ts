@@ -82,6 +82,64 @@ export class ChatEdgeClient {
     return body?.memories ?? [];
   }
 
+  /** POST /api/v1/memories — FIX58. The desktop `remember` tool writes the
+   *  SAME store the web client does, so a fact saved here is on the Memory
+   *  page and in the next web chat.
+   *
+   *  Returns a discriminated result rather than null-on-error, because the
+   *  reason matters to the caller: chat-edge refuses a save that trips the
+   *  content guardrail, that is a duplicate, or whose text was masked before
+   *  it reached the model, and each of those has to reach the model as its
+   *  own honest sentence. Collapsing them into "failed" is how a model ends
+   *  up telling the user it remembered something it did not. */
+  async createMemory(input: {
+    content: string;
+    scopeType: "global_user" | "project";
+    scopeId?: string | null;
+    memoryType?: string;
+    category?: string;
+  }): Promise<{ ok: true; id: string; content: string } | { ok: false; status: number; detail: string }> {
+    const token = this.accessToken();
+    if (!token) return { ok: false, status: 0, detail: "not signed in" };
+    const body: Record<string, unknown> = {
+      content: input.content,
+      scope_type: input.scopeType,
+      memory_type: input.memoryType || "explicit_fact",
+    };
+    if (input.scopeId) body["scope_id"] = input.scopeId;
+    if (input.category) body["category"] = input.category;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/memories`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const text = await res.text();
+          try {
+            const parsed = JSON.parse(text) as { message?: string; error?: { message?: string } };
+            detail = parsed.error?.message || parsed.message || text;
+          } catch {
+            detail = text;
+          }
+        } catch {
+          /* body unreadable — the status still tells the caller something */
+        }
+        this.log.warn(`chat-edge POST /api/v1/memories → HTTP ${res.status} ${detail.slice(0, 200)}`);
+        return { ok: false, status: res.status, detail: detail.slice(0, 300) };
+      }
+      const saved = (await res.json()) as { id?: string; content?: string };
+      return { ok: true, id: saved.id ?? "", content: saved.content ?? input.content };
+    } catch (err) {
+      const detail = (err as Error).message;
+      this.log.warn(`chat-edge POST /api/v1/memories failed: ${detail}`);
+      return { ok: false, status: 0, detail };
+    }
+  }
+
   async importMessages(conversationId: string, messages: ImportMessageItem[]): Promise<{ imported: number; skipped: number } | null> {
     const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages/import`, { messages });
     if (!res) return null;

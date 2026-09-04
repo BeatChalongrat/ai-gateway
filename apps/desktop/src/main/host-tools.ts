@@ -102,6 +102,42 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
       required: ["query"],
     },
   },
+  // FIX58 — `remember` is a HOST tool for the global scope only.
+  //
+  // Before this it wrote the sidecar's local SQLite notes, so a fact
+  // saved on the desktop was invisible on the web: two clients, two
+  // stores, one user wondering why the assistant forgot. The host owns
+  // the portal JWT (the run_python / search_past_conversations
+  // precedent), so the save goes to chat.user_memories — the store the
+  // web client already writes and the Memory page already shows.
+  //
+  // The schema is kept identical to the sidecar's so the model's tool
+  // description does not change and existing transcripts stay valid;
+  // when the sidecar is up its definition is the one offered, and only
+  // the EXECUTION is intercepted (turn-coordinator routes by
+  // hostTools.has). Listing it here also means `remember` survives a
+  // sidecar that failed to start.
+  //
+  // scope="conversation" is deliberately NOT taken over: those notes
+  // are read back from the local store by the prompt assembler, and
+  // the server's injection query reads global/project scopes only — so
+  // routing them here would save them somewhere nothing reads them
+  // back from, which is worse than the split it was meant to fix.
+  remember: {
+    name: "remember",
+    description:
+      "Save a durable note. scope 'global' stores a lasting fact about the user (available in every later chat, " +
+      "on the web app too); scope 'conversation' stores a detail that only matters inside this chat. " +
+      "Use it when the user asks you to remember something, or states a standing preference.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        note: { type: "string", description: "The fact to remember, written as a complete sentence." },
+        scope: { type: "string", enum: ["global", "conversation"], description: "'global' for a lasting user-level fact, 'conversation' for this chat only. Default 'global'." },
+      },
+      required: ["note"],
+    },
+  },
   run_subagent: {
     name: "run_subagent",
     description:
@@ -159,6 +195,52 @@ export class HostTools {
         if (typeof text !== "string") return { ok: false, text: "'text' is required.", imageDataUri: null };
         clipboard.writeText(text);
         return { ok: true, text: `Clipboard set (${text.length} chars).`, imageDataUri: null };
+      }
+      case "remember": {
+        // Only the global scope reaches here; conversation-scoped notes
+        // stay with the sidecar (see the definition above), and the
+        // turn coordinator routes on that.
+        const note = args["note"];
+        if (typeof note !== "string" || !note.trim()) {
+          return { ok: false, text: "'note' is required.", imageDataUri: null };
+        }
+        // A chat that belongs to a project remembers INTO that project
+        // (FIX58): its memories are read back only inside it, so a
+        // global save here would put a fact learned on one client's
+        // work into every other chat. The conversation is the only
+        // place that knows, so it is asked per save — `remember` is
+        // rare enough that the round-trip is not a hot path.
+        let scopeType: "global_user" | "project" = "global_user";
+        let scopeId: string | null = null;
+        try {
+          const conv = await this.chatEdge.getConversation(ctx.conversationId);
+          if (conv?.project_id) {
+            scopeType = "project";
+            scopeId = conv.project_id;
+          }
+        } catch {
+          // Could not tell — save globally rather than lose the note.
+          // Widening the audience is the wrong way to fail, so this is
+          // logged loudly enough to notice if it becomes common.
+          this.log.warn(`remember: could not resolve the project for conversation ${ctx.conversationId}; saving to global memory`);
+        }
+        const r = await this.chatEdge.createMemory({ content: note.trim(), scopeType, scopeId });
+        if (r.ok) {
+          const where = scopeType === "project" ? "this project's memory" : "your memory";
+          return { ok: true, text: `Saved to ${where}: "${r.content}"`, imageDataUri: null };
+        }
+        // Never report a save that did not happen (FIX5 §1 / FIX22 §1a).
+        // The server's own sentence is passed through when it has one —
+        // it names the actual reason (guardrail, duplicate, masked
+        // content) far better than a generic failure could.
+        if (r.status === 0) {
+          return {
+            ok: false,
+            text: "Error: the note was NOT saved — the memory service could not be reached. Tell the user plainly that it was not saved and they can ask again once the connection is back.",
+            imageDataUri: null,
+          };
+        }
+        return { ok: false, text: `Error: the note was NOT saved. ${r.detail || `The memory service returned HTTP ${r.status}.`}`, imageDataUri: null };
       }
       case "web_search": {
         const query = args["query"];

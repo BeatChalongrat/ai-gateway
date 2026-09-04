@@ -1565,7 +1565,15 @@ export class TurnCoordinator {
     let where: "host" | "sidecar" = "sidecar";
     let rpcError: string | undefined;
     const connectorTool = this.opts.connectorTools?.has(name) === true;
-    this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${connectorTool ? "host (connector)" : this.hostTools.has(name) ? "host" : "sidecar"}`);
+    // FIX58: `remember` is split by scope. A global note is a host tool now
+    // (it writes chat-edge's store, the same one the web client writes, so
+    // the two clients finally remember in one place); a conversation-scoped
+    // note stays with the sidecar, because the prompt assembler reads those
+    // back from the local store and the server's injection query never
+    // returns them. Routing both to the host would save half of them where
+    // nothing reads them.
+    const hostHandled = this.hostTools.has(name) && !(name === "remember" && rememberScopeOf(args) === "conversation");
+    this.log.info(`TOOL ${name} conv=${run.conversationId} decision=${decisionLabel} scope=${scope} → ${connectorTool ? "host (connector)" : hostHandled ? "host" : "sidecar"}`);
     // FIX30 §3.2: a local tool has NO timeout (legitimate ones run long — a
     // 30-ping took 29 s, a home-wide search 25 s). What it gets instead is a
     // heartbeat: every keepalive tick the page is told which tool is running
@@ -1581,7 +1589,7 @@ export class TurnCoordinator {
         ok = r.ok;
         text = r.text;
         image = r.imageDataUri;
-      } else if (this.hostTools.has(name)) {
+      } else if (hostHandled) {
         where = "host";
         try {
           const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled });
@@ -2361,4 +2369,15 @@ function describe(messages: GatewayMessage[]): string {
 }
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : value.slice(0, max) + `\n\n[...truncated to ${max} chars]`;
+}
+/** FIX58 — which store a `remember` call belongs to.
+ *
+ *  Only an explicit "conversation" keeps a note local; anything else,
+ *  including a missing or misspelled scope, is a global note and goes to
+ *  the server. Defaulting the unknown case to global matches the tool
+ *  schema's own default and errs towards the store the user can see and
+ *  delete, rather than towards the one that used to be invisible from the
+ *  web. */
+export function rememberScopeOf(args: Record<string, unknown>): "global" | "conversation" {
+  return String(args["scope"] ?? "").toLowerCase() === "conversation" ? "conversation" : "global";
 }
