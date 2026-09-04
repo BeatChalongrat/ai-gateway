@@ -1043,6 +1043,21 @@ async def _chat_completions_impl(
         session, route.provider_name
     )
     if not provider_api_key:
+        # FIX57 Part 3 — same symptom, opposite fixes: a provider with no
+        # key needs one added; a provider whose endpoint moved needs the
+        # keys already sitting in the list re-tested. Telling an operator
+        # to configure a key they can see is how a five-second fix turns
+        # into an afternoon.
+        from app.core.exceptions import ProviderKeysStale
+
+        if await orchestrator.provider_key_service.has_stale_keys_async(
+            session, route.provider_name
+        ):
+            raise ProviderKeysStale(
+                f"Provider '{route.provider_name}' has keys, but its endpoint "
+                f"changed and none has been tested since.",
+                details={"provider": route.provider_name},
+            )
         raise ProviderUnavailableError(
             f"No API key configured for provider '{route.provider_name}'.",
             details={"provider": route.provider_name},

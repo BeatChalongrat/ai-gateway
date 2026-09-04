@@ -78,7 +78,16 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("guardrail_blocked", "The request was blocked by a safety guardrail.", False),
     ErrorInfo("moderation_flagged", "The request was flagged by content moderation.", False),
     ErrorInfo("content_policy_blocked", "The request was blocked by the provider's content policy.", False),
-    ErrorInfo("provider_auth_error", "The provider rejected the gateway's credentials. Contact your administrator.", False),
+    # FIX57 Part 4 — a provider 401/403. Retrying is the one thing that
+    # cannot help: the credential is wrong until someone changes it. This
+    # used to arrive as the generic ``provider_error``, whose message ends
+    # "Please try again" — advice that was not merely useless but pointed
+    # away from the actual fix.
+    ErrorInfo("provider_auth_error", "The provider rejected the gateway's credentials — this is a key problem, not a network one. Contact your administrator.", False),
+    # FIX57 Part 3 — the provider's endpoint changed, so every stored key
+    # verdict was reached against a different box and none has been
+    # re-checked. Not "invalid": nobody knows yet.
+    ErrorInfo("provider_keys_stale", "This provider's endpoint changed, so its API keys need to be tested again before it can be used. Contact your administrator.", False),
     ErrorInfo("raw_egress_blocked", "The request was blocked: sensitive data cannot be sent to this service.", False),
     ErrorInfo("search_not_enabled", "Web search is not enabled for your account.", False),
     ErrorInfo("search_unavailable", "Web search is unavailable right now.", False),

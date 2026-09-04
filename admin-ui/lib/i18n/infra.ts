@@ -57,6 +57,12 @@ export const en = {
   "infra.providers.statusValid": "valid",
   "infra.providers.statusInvalid": "invalid",
   "infra.providers.statusUntested": "untested",
+  // FIX57 — the endpoint moved after this key was last tested, so the
+  // stored verdict is about a different box. Not "invalid": nobody has
+  // asked the new one yet.
+  "infra.providers.statusStale": "needs retest",
+  "infra.providers.statusStaleHint":
+    "The endpoint changed after this key was last tested. It is not being used for requests until you press Test.",
   "infra.providers.unusableNote":
     "{n} key(s) here cannot be used — a key test marked them invalid, or the value is a placeholder. Add a working key below.",
   "infra.providers.unusableBadge": "{n} unusable",
@@ -384,6 +390,9 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.statusValid": "ใช้งานได้",
   "infra.providers.statusInvalid": "ใช้ไม่ได้",
   "infra.providers.statusUntested": "ยังไม่ทดสอบ",
+  "infra.providers.statusStale": "ต้องตรวจใหม่",
+  "infra.providers.statusStaleHint":
+    "endpoint ถูกเปลี่ยนหลังทดสอบ key นี้ครั้งล่าสุด ระบบจะยังไม่ใช้ key นี้จนกว่าจะกด Test",
   "infra.providers.unusableNote":
     "มีคีย์ {n} รายการที่ใช้งานไม่ได้ — ผลทดสอบระบุว่าใช้ไม่ได้ หรือค่าที่กรอกเป็นค่าตัวอย่าง กรุณาเพิ่มคีย์ที่ใช้งานได้ด้านล่าง",
   "infra.providers.unusableBadge": "ใช้ไม่ได้ {n} รายการ",

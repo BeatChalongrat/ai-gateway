@@ -151,6 +151,17 @@ function StatusBadge({ status }: { status: string }) {
   const t = useT();
   if (status === "valid") return <Badge variant="success">{t("infra.providers.statusValid")}</Badge>;
   if (status === "invalid") return <Badge variant="error">{t("infra.providers.statusInvalid")}</Badge>;
+  // FIX57 — "stale" is not "invalid". The endpoint moved after this key
+  // was last tested, so the stored verdict is about a different box and
+  // nobody knows whether the key still works. Warning, not error: the row
+  // needs a Test press, not a replacement. Dispatch will not draw from it
+  // until then, which is why it cannot quietly read as neutral either.
+  if (status === "stale")
+    return (
+      <Badge variant="warning" title={t("infra.providers.statusStaleHint")}>
+        {t("infra.providers.statusStale")}
+      </Badge>
+    );
   return <Badge variant="neutral">{t("infra.providers.statusUntested")}</Badge>;
 }
 

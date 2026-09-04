@@ -644,7 +644,12 @@ export const en = {
   "error.guardrail_blocked": "This message was blocked by a safety guardrail.",
   "error.moderation_flagged": "This message was flagged by content moderation.",
   "error.content_policy_blocked": "This request was blocked by the provider's content policy.",
-  "error.provider_auth_error": "The provider rejected the service's credentials. Contact your admin.",
+  // FIX57 Part 4 — a provider 401/403 no longer arrives as the generic
+  // "couldn't reach the provider, try again". The provider WAS reached
+  // and answered plainly, and trying again is the one thing that cannot
+  // help, so the sentence says "key" and does not offer a retry.
+  "error.provider_auth_error": "The provider rejected the service's API key. Trying again won't help — contact your admin.",
+  "error.provider_keys_stale": "This provider's endpoint was changed, so its keys need testing again before it can be used. Contact your admin.",
   "error.raw_egress_blocked": "This request was blocked: sensitive data can't be sent to this service.",
   "error.search_not_enabled": "Web search isn't enabled for your account.",
   "error.search_unavailable": "Web search is unavailable right now.",
@@ -1999,7 +2004,8 @@ const th: Record<DictKey, string> = {
   "error.guardrail_blocked": "ข้อความนี้ถูกบล็อกโดยระบบป้องกันความปลอดภัย",
   "error.moderation_flagged": "ข้อความนี้ถูกระบบตรวจสอบเนื้อหาแจ้งเตือน",
   "error.content_policy_blocked": "คำขอนี้ถูกบล็อกตามนโยบายเนื้อหาของผู้ให้บริการ",
-  "error.provider_auth_error": "ผู้ให้บริการปฏิเสธข้อมูลยืนยันตัวตนของระบบ กรุณาติดต่อผู้ดูแลระบบ",
+  "error.provider_auth_error": "ผู้ให้บริการปฏิเสธ API key ของระบบ ลองใหม่ก็ไม่ช่วย กรุณาติดต่อผู้ดูแลระบบ",
+  "error.provider_keys_stale": "endpoint ของผู้ให้บริการนี้ถูกเปลี่ยน ต้องทดสอบ key ใหม่ก่อนจึงจะใช้งานได้ กรุณาติดต่อผู้ดูแลระบบ",
   "error.raw_egress_blocked": "คำขอนี้ถูกบล็อก เพราะไม่สามารถส่งข้อมูลอ่อนไหวไปยังบริการนี้ได้",
   "error.search_not_enabled": "บัญชีของคุณยังไม่เปิดใช้การค้นหาเว็บ",
   "error.search_unavailable": "การค้นหาเว็บใช้งานไม่ได้ในขณะนี้",

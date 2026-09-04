@@ -39,14 +39,45 @@ from app.repositories.provider_key_repository import ProviderKeyRepository
 logger = logging.getLogger(__name__)
 
 
+# FIX57 — "the endpoint moved; this verdict is about a different box".
+#
+# Named here rather than inline because three layers have to agree on the
+# spelling: the writer (mark_keys_stale), the dispatch filter
+# (_UNUSABLE_STATUSES) and the admin badge, which reads it back out of
+# list_keys.
+KEY_STATUS_STALE = "stale"
+
+
+# FIX57 — the key statuses dispatch refuses to draw from.
+#
+# ``invalid``: a live test said the provider rejects it.
+# ``stale``: the provider's endpoint changed after this key was last
+#   tested, so the stored verdict was reached against a different box.
+#   Deliberately NOT re-labelled ``invalid`` — we do not know that it
+#   fails, and guessing that it does is its own kind of lie. It means
+#   "somebody has to press Test", and the badge says exactly that.
+#
+# ``untested`` stays usable: a key that was never checked at all is the
+# operator's own choice to make, and refusing it would break every
+# deployment that seeds keys without a probe.
+_UNUSABLE_STATUSES = frozenset({"invalid", KEY_STATUS_STALE})
+
+
 def _usable_rows(
     rows: list[ProviderKeyORM], provider_name: str, *, log: bool = True
 ) -> list[tuple[ProviderKeyORM, str]]:
     """The subset of ``rows`` that dispatch will actually send.
 
-    A row is usable when it is neither marked ``invalid`` by a key test nor
-    holding a dev placeholder value. Both filters exist because either kind
-    of row would 401 silently on dispatch.
+    A row is usable when it is neither marked ``invalid`` by a key test, nor
+    marked ``stale``, nor holding a dev placeholder value. The first and last
+    are excluded because either would 401 silently on dispatch.
+
+    ``stale`` (FIX57) is different: it means the verdict on this key was
+    reached against a DIFFERENT endpoint and has not been re-checked since
+    the endpoint moved. We do not know whether it works, and a key nobody
+    has checked against the box it will be sent to is not a key dispatch
+    should be handing out — the whole point of the status is that the badge
+    and the dispatcher agree.
 
     This is the SINGLE definition of "usable" — both the resolver
     (``_resolve_key_candidates``) and the admin badge (``get_key_status``)
@@ -59,7 +90,7 @@ def _usable_rows(
     """
     out: list[tuple[ProviderKeyORM, str]] = []
     for r in rows:
-        if r.last_test_status == "invalid":
+        if r.last_test_status in _UNUSABLE_STATUSES:
             continue
         key = _decode(r.api_key_encrypted)
         if _looks_like_placeholder_key(key):
@@ -479,6 +510,91 @@ class ProviderKeyService:
         repo = ProviderKeyRepository(session)
         repo.record_test_result(key_id, status, latency_ms)
         clear_keys_cache()  # B5: a key flipping to/from "invalid" changes candidates
+
+    # ------------------------------------------------------------------
+    # FIX57 — endpoint changes invalidate the QUESTION, not the key
+    # ------------------------------------------------------------------
+
+    def mark_keys_stale(self, session: Session, provider_name: str) -> int:
+        """Flag every stored key for ``provider_name`` as needing a retest.
+
+        Called when the provider's endpoint changes. The sranai incident is
+        the whole argument: a key was stamped ``valid`` at 10:24:36 and the
+        endpoint became a different host at 10:24:40 — four seconds later —
+        and the badge went on saying ``valid`` for days. That verdict was
+        reached against a box the key would never be sent to again, and it
+        outlived the thing it was a verdict about.
+
+        Deliberately NOT ``invalid``. We do not know whether these keys
+        work on the new endpoint; asserting that they don't would be the
+        same failure wearing the opposite sign. ``stale`` says the only
+        true thing available: nobody has checked.
+
+        Rows already marked ``invalid`` are left alone — a key the provider
+        actively rejected is not made more mysterious by an endpoint move,
+        and downgrading it to "unknown" would quietly put it back in the
+        operator's list of things that might be fine.
+
+        Returns the number of rows changed. Never raises: an endpoint
+        update must not fail because the staling did.
+        """
+        try:
+            repo = ProviderKeyRepository(session)
+            changed = 0
+            for row in repo.list_by_provider(provider_name):
+                if row.last_test_status in ("invalid", KEY_STATUS_STALE):
+                    continue
+                row.last_test_status = KEY_STATUS_STALE
+                changed += 1
+            if changed:
+                session.flush()
+                clear_keys_cache()
+                logger.warning(
+                    "Provider %s endpoint changed — %d key(s) marked stale "
+                    "and withheld from dispatch until retested",
+                    provider_name,
+                    changed,
+                )
+            return changed
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Could not mark keys stale for provider %s", provider_name
+            )
+            return 0
+
+    def has_stale_keys(self, session: Session, provider_name: str) -> bool:
+        """Whether this provider has keys that are only waiting on a retest.
+
+        Lets the chat path tell "no key was ever configured" apart from
+        "the endpoint moved and nobody has pressed Test since" — two
+        situations with the same symptom and completely different fixes.
+        """
+        try:
+            repo = ProviderKeyRepository(session)
+            return any(
+                r.last_test_status == KEY_STATUS_STALE
+                for r in repo.list_active_by_provider(provider_name)
+            )
+        except Exception:  # noqa: BLE001
+            return False
+
+    async def has_stale_keys_async(
+        self, session: AsyncSession, provider_name: str
+    ) -> bool:
+        """Async variant of :meth:`has_stale_keys` for the streaming path."""
+        try:
+            rows = (
+                await session.execute(
+                    select(ProviderKeyORM.id).where(
+                        ProviderKeyORM.provider_name == provider_name,
+                        ProviderKeyORM.is_active.is_(True),
+                        ProviderKeyORM.last_test_status == KEY_STATUS_STALE,
+                    )
+                )
+            ).scalars().first()
+            return rows is not None
+        except Exception:  # noqa: BLE001
+            return False
 
     def invalidate_key_by_value(
         self, session: Session, provider_name: str, api_key: str

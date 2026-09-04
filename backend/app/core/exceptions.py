@@ -214,6 +214,27 @@ class ProviderKeyMissing(ProviderError):
     message = "No active provider API key is configured."
 
 
+class ProviderKeysStale(ProviderError):
+    """The provider HAS keys, but every one of them needs re-testing.
+
+    FIX57 Part 3. When a provider's endpoint changes, the stored verdict
+    on each key ("valid", tested at some past moment) was reached against
+    a different box, so the keys are marked ``stale`` and withheld from
+    dispatch until an operator presses Test.
+
+    Distinct from :class:`ProviderKeyMissing` because the two have
+    identical symptoms and opposite fixes: one needs a key added, the
+    other needs the keys that are already there re-checked. Telling an
+    operator to configure a key they can see in the list is how a
+    five-second fix becomes an afternoon.
+    """
+
+    code = "provider_keys_stale"
+    message = (
+        "This provider's endpoint changed; its keys must be tested again."
+    )
+
+
 class UpstreamBadResponseError(GatewayError):
     code = "upstream_bad_response"
     message = "The upstream provider returned an unparseable response."

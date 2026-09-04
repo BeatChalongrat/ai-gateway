@@ -138,6 +138,11 @@ _REQUEST_SCOPED_CODES = frozenset(
 
 _ACCOUNT_SCOPED_CODES = frozenset(
     {
+        # FIX57 — a rejected credential is the ACCOUNT's, so the walk must
+        # not try this provider's other models with the same dead key.
+        # 401/403 already classified this way via ``details['status']``;
+        # naming the code keeps it true if the status is ever dropped.
+        "provider_auth_error",
         "provider_no_credit",
         "provider_unavailable",
         "provider_timeout",
@@ -876,6 +881,14 @@ FALLBACK_ELIGIBLE_ERRORS: set[str] = {
     # different account can still answer. The scope classifier keeps the
     # walk off the dead account's other models.
     "provider_no_credit",
+    # FIX57 Part 4 — a 401/403 used to arrive here as the generic
+    # "provider_error" and was fallback-eligible by accident of sharing
+    # that code. It has its own code now so the USER gets told it is a key
+    # problem; it stays in this set on purpose, because routing around a
+    # rejected credential to a provider whose key works is exactly what
+    # the chain is for. The scope classifier keeps the walk off the rest
+    # of the same account.
+    "provider_auth_error",
 }
 
 

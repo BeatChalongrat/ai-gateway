@@ -209,4 +209,18 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
         time.monotonic() + _DB_CACHE_TTL_S,
         url.strip().rstrip("/") or None,
     )
+
+    # FIX57 — every stored verdict about this provider's keys was reached
+    # against the OLD endpoint. Retire them here, at the one place an
+    # endpoint can change, so no future caller has to remember to.
+    #
+    # Only on an actual move: a first write (previous is None, the env
+    # seed's usual case) invalidates nothing, and re-saving the same URL
+    # is not a change. Marking keys stale needs no knowledge of what the
+    # new box is — that is the point. Nobody has asked it anything yet.
+    if previous and previous.rstrip("/") != url.strip().rstrip("/"):
+        from app.services.provider_key_service import ProviderKeyService
+
+        ProviderKeyService().mark_keys_stale(session, provider_name)
+
     return previous or None

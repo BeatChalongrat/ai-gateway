@@ -176,16 +176,25 @@ def map_provider_error(exc: Exception, provider_name: str) -> Exception:
             )
 
         if status in (401, 403):
-            # The provider rejected OUR credentials — a gateway-side
-            # key problem, not a client error. Map to ProviderError
-            # (code "provider_error", which IS fallback-eligible) so
-            # the fallback chain can route around a bad/expired key to
-            # a provider whose key works, instead of surfacing an empty
-            # response. Distinct from a generic 4xx (bad request) below,
-            # which is NOT retried elsewhere because it would fail on
-            # every provider.
+            # The provider rejected OUR credentials — a gateway-side key
+            # problem, not a client error, and still fallback-eligible so
+            # the chain can route around a bad key to a provider whose key
+            # works (``provider_auth_error`` is in
+            # FALLBACK_ELIGIBLE_ERRORS). Distinct from a generic 4xx (bad
+            # request) below, which is NOT retried elsewhere because it
+            # would fail on every provider.
+            #
+            # FIX57 Part 4 — it carries its OWN code now. It used to land
+            # on the default ``provider_error``, whose user-facing message
+            # is "Couldn't reach the AI provider. Please try again." Two
+            # things wrong with that: the provider was reached, and it
+            # answered clearly; and "try again" is the one action that
+            # cannot help, because the credential stays wrong until
+            # somebody changes it. Retryable=false in the catalogue, and
+            # the message says the word "key".
             return ProviderError(
                 f"Provider '{provider_name}' rejected credentials ({status}).",
+                code="provider_auth_error",
                 details={"provider": provider_name, "status": status, "body": body},
             )
 

@@ -932,7 +932,21 @@ class GatewayOrchestrator:
         if not provider_api_key and not _calc_active:
             # Calculator answers server-side without a provider key (it bypasses
             # the provider entirely), so a missing key must not block it.
-            from app.core.exceptions import ProviderUnavailableError
+            # FIX57 Part 3 — "no key" and "the keys are all waiting on a
+            # retest" look identical from here and need opposite actions,
+            # so ask which one it is before naming it.
+            from app.core.exceptions import (
+                ProviderKeysStale,
+                ProviderUnavailableError,
+            )
+            if session is not None and await self.provider_key_service.has_stale_keys_async(
+                session, route.provider_name
+            ):
+                raise ProviderKeysStale(
+                    f"Provider '{route.provider_name}' has keys, but its "
+                    f"endpoint changed and none has been tested since.",
+                    details={"provider": route.provider_name},
+                )
             raise ProviderUnavailableError(
                 f"No API key configured for provider '{route.provider_name}'.",
                 details={"provider": route.provider_name},
