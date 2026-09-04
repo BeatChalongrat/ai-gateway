@@ -22,6 +22,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -85,6 +86,25 @@ func (h *MemoryHandler) List(w http.ResponseWriter, r *http.Request) {
 		Status:     r.URL.Query().Get("status"),
 		Limit:      limit,
 		Offset:     offset,
+	}
+	// FIX58 — scope_id narrows to ONE scope instance, and for projects
+	// it is required to keep the promise the injection query makes:
+	// without it "?scope_type=project" answers with every project's
+	// memories in one list, which is the cross-project leak arriving
+	// through the management API instead of the prompt. Still scoped to
+	// the caller by the service, so this narrows a user's own rows and
+	// can never widen them.
+	if raw := strings.TrimSpace(r.URL.Query().Get("scope_id")); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid scope_id")
+			return
+		}
+		filters.ScopeID = &id
+	} else if filters.ScopeType == model.MemoryScopeProject {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest,
+			"scope_id is required when scope_type=project")
+		return
 	}
 
 	rows, total, err := h.memories.ListByUser(r.Context(), caller.UserID, caller.TenantUUID, filters)
