@@ -10,6 +10,7 @@ import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
+import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
@@ -224,6 +225,17 @@ export default function ConversationPage() {
     />
   );
 
+  // The temporary-chat strip travels WITH the composer so it shows in
+  // both render branches below without being mounted twice, and so it
+  // does not depend on the header — which is hidden on a narrow window,
+  // taking the memory chip with it.
+  const composerBlock = (
+    <>
+      <TemporaryChatBanner conversationId={convId} />
+      {composer}
+    </>
+  );
+
   const isEmpty = messages.length === 0;
 
   return (
@@ -282,7 +294,7 @@ export default function ConversationPage() {
           // the bottom-anchored thread view below.
           <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto">
             <EmptyState onPrompt={(text) => setInjectedText(text)}>
-              {composer}
+              {composerBlock}
             </EmptyState>
           </div>
         ) : (
@@ -308,7 +320,7 @@ export default function ConversationPage() {
                 }
               />
             </ErrorBoundary>
-            {composer}
+            {composerBlock}
           </>
         )}
       </AttachmentDropZone>

@@ -32,7 +32,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { useThemeStore } from "@/stores/themeStore";
 import { ConversationListSkeleton } from "@/components/ui/Skeleton";
 import {
-  Archive, Brain, ChevronRight, Clock, FolderKanban, Pencil, PenLine, Plug, Plus,
+  Archive, Brain, BrainCircuit, ChevronRight, Clock, FolderKanban, Pencil, PenLine, Plug, Plus,
   Settings as SettingsIcon, Trash2, Wrench,
 } from "lucide-react";
 
@@ -281,6 +281,18 @@ export function Sidebar({
     onClose();
   }
 
+  // A temporary chat starts the same way an ordinary one does — the row
+  // is created lazily on the first send — so the flag is set here and
+  // consumed by that create, which PATCHes memory_enabled=false before
+  // the first message goes anywhere. Same contract the memory page's
+  // launcher uses; this one exists because the sidebar is where people
+  // actually start chats.
+  function handleNewTemporary() {
+    useChatStore.getState().setNextConversationTemporary(true);
+    newChat();
+    onClose();
+  }
+
   function handleOpenMemory() {
     router.push("/chat/memory");
     onClose();
@@ -373,6 +385,16 @@ export function Sidebar({
             <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
               ⌘⇧N
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleNewTemporary}
+            title={t("sidebar.newTemporaryChat.tooltip")}
+            className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          >
+            <BrainCircuit width={16} height={16} aria-hidden />
+            <span>{t("sidebar.newTemporaryChat")}</span>
           </button>
 
           <button

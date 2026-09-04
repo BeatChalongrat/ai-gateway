@@ -526,6 +526,15 @@ export const en = {
   "memory.popover.toggleOff": "Turn off for this chat",
   "memory.popover.toggleOn": "Turn on for this chat",
   "memory.openSettings": "Open Memory Settings",
+  // The always-visible strip above the composer. The header chip is
+  // hidden below the md breakpoint, so this is what carries the state
+  // on a narrow window.
+  "sidebar.newTemporaryChat": "Temporary chat",
+  "sidebar.newTemporaryChat.tooltip":
+    "A chat that is not saved to memory and does not use saved memories.",
+  "memory.banner.title": "Temporary chat",
+  "memory.banner.detail": "Nothing here is saved to memory, and saved memories are not used.",
+  "memory.banner.turnOn": "Turn memory on",
   "memory.toast.offForChat": "Memory turned off for this chat.",
   "memory.toast.onForChat": "Memory turned on for this chat.",
   "memory.popover.onHint": "AI can remember facts from this conversation.",
@@ -1877,6 +1886,12 @@ const th: Record<DictKey, string> = {
   "memory.popover.toggleOff": "ปิดสำหรับแชทนี้",
   "memory.popover.toggleOn": "เปิดสำหรับแชทนี้",
   "memory.openSettings": "เปิดการตั้งค่าความจำ",
+  "sidebar.newTemporaryChat": "แชทชั่วคราว",
+  "sidebar.newTemporaryChat.tooltip":
+    "แชทที่จะไม่ถูกบันทึกเป็นความจำ และไม่ใช้ความจำที่บันทึกไว้",
+  "memory.banner.title": "แชทชั่วคราว",
+  "memory.banner.detail": "แชทนี้จะไม่ถูกบันทึกเป็นความจำ และจะไม่ใช้ความจำที่บันทึกไว้",
+  "memory.banner.turnOn": "เปิดความจำ",
   "memory.toast.offForChat": "ปิดความจำสำหรับแชทนี้แล้ว",
   "memory.toast.onForChat": "เปิดความจำสำหรับแชทนี้แล้ว",
   "memory.popover.onHint": "AI สามารถจดจำข้อมูลจากบทสนทนานี้ได้",
