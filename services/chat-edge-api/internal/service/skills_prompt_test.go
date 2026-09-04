@@ -24,7 +24,7 @@ import (
 )
 
 func TestSkillsBlock_ActiveInjectsInstructions(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil, true)
 	base := CompileContext{Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New()}
 
 	// Empty → byte-identical to a no-skills prompt, and no skill markers.
@@ -48,7 +48,7 @@ func TestSkillsBlock_ActiveInjectsInstructions(t *testing.T) {
 }
 
 func TestSkillsBlock_EmptyByteIdentical(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nx\n"}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nx\n"}, nil, nil, true)
 	base := CompileContext{Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New()}
 
 	a, _ := pc.Build(context.Background(), base)
@@ -64,7 +64,7 @@ func TestSkillsBlock_EmptyByteIdentical(t *testing.T) {
 }
 
 func TestSkillsBlock_CatalogListsEnabled(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil, true)
 	in := CompileContext{
 		Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New(),
 		SkillCatalog: []model.Skill{

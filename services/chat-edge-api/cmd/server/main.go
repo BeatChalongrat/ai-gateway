@@ -366,6 +366,10 @@ func main() {
 	// system-prompt block + the save_memory / list_memories AI tools
 	// on every conversation where memory_enabled = true.
 	messageSvc.SetMemoryService(memorySvc)
+	// FIX56.1 — a temporary chat reads the saved memories but writes
+	// none. Reversible: TEMPORARY_CHAT_READS_MEMORY=false restores the
+	// stricter "reads nothing either" behaviour. Only the read moves.
+	messageSvc.SetTemporaryChatReadsMemory(cfg.TemporaryChatReadsMemory)
 	// S3 — wire the conversation-state layer. Adds the
 	// <conversation_state> system-prompt block + the
 	// update_conversation_state tool + the auto-extraction trigger

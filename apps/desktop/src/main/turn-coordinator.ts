@@ -62,7 +62,7 @@ import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
-import { BROWSER_BRIDGE_TOOLS, MEMORY_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { BROWSER_BRIDGE_TOOLS, MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
 
 interface BufferedEvent {
   seq: number;
@@ -1058,7 +1058,12 @@ export class TurnCoordinator {
     // same row the web client toggles). Absent field means on, so a client or
     // a server build that never sends it cannot silently turn memory off.
     const memoryEnabled = conversation?.memory_enabled !== false;
-    if (!memoryEnabled) this.log.info(`MEMORY: off for conv=${conversationId} — no memory read, no memory tools`);
+    // FIX56.1: the read half moved, so the line says what THIS build does
+    // instead of the sentence that was true when it was written.
+    if (!memoryEnabled) {
+      const reads = this.assembler.temporaryChatReadsMemory ? "reads saved memory" : "reads no memory";
+      this.log.info(`MEMORY: off for conv=${conversationId} — ${reads}, writes none, no memory tools`);
+    }
     const tools = payload.quick || !modelTakesTools ? [] : await this.toolDefinitions(null, false, payload.imageMode, memoryEnabled);
     if (payload.quick) this.log.info(`TOOLS: quick-ask turn conv=${conversationId} — no tools offered`);
     else if (!modelTakesTools) this.log.info(`TOOLS: skipped for tools-blind model conv=${conversationId} model=${model}`);
@@ -1945,13 +1950,20 @@ export class TurnCoordinator {
       const set = new Set(allow.map((a) => a.toLowerCase()));
       out = out.filter((d) => set.has(d.function.name.toLowerCase()));
     }
-    // Memory off for this chat means no memory tools, the same rule the two
-    // withholdings below follow: a tool that must not run is not offered. The
-    // web client already omits its save_memory / list_memories this way, so
-    // this is what makes the switch mean one thing in both clients.
+    // Memory off for this chat means no memory-WRITE tool, the same rule the
+    // two withholdings below follow: a tool that must not run is not offered.
+    // The web client omits its save_memory this way, so this is what makes the
+    // switch mean one thing in both clients.
+    //
+    // FIX56.1: the read tool goes only under the stricter setting. Injecting
+    // the saved memories into the prompt and then refusing the tool that reads
+    // the same history would be two answers to one question.
     if (!memoryEnabled) {
       const before = out.length;
-      out = out.filter((d) => !MEMORY_TOOLS.has(d.function.name));
+      const withhold = this.assembler.temporaryChatReadsMemory
+        ? MEMORY_WRITE_TOOLS
+        : new Set([...MEMORY_WRITE_TOOLS, ...MEMORY_READ_TOOLS]);
+      out = out.filter((d) => !withhold.has(d.function.name));
       if (before !== out.length) this.log.info(`TOOLS: memory is off for this chat — withholding ${before - out.length} memory tool(s)`);
     }
     // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —

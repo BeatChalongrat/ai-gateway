@@ -25,6 +25,17 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useChatStore } from "@/stores/chatStore";
 
+// FIX56.1 — a temporary chat now reads the user's saved memories and writes
+// none, so the strip says so. A deployment can restore the stricter "reads
+// nothing either" behaviour with chat-edge's TEMPORARY_CHAT_READS_MEMORY;
+// this env has to be set to match it, or the strip describes a behaviour the
+// server is not running. Only an explicit "false" flips it, so a missing or
+// misspelled value keeps the default rather than silently claiming the
+// stricter promise.
+const READS_MEMORY =
+  typeof process === "undefined" ||
+  process.env.NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY !== "false";
+
 interface Props {
   conversationId: string;
 }
@@ -62,7 +73,9 @@ export function TemporaryChatBanner({ conversationId }: Props) {
           <span className="font-medium text-text-primary">
             {t("memory.banner.title")}
           </span>{" "}
-          <span className="text-text-tertiary">{t("memory.banner.detail")}</span>
+          <span className="text-text-tertiary">
+            {t(READS_MEMORY ? "memory.banner.detail" : "memory.banner.detailStrict")}
+          </span>
         </span>
         <button
           type="button"

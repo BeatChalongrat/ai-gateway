@@ -250,7 +250,9 @@ void app.whenReady().then(async () => {
   const gateway = new GatewayClient(config.gatewayUrl, () => ctl.currentAccessToken(), keyStore, log);
   const chatEdge = new ChatEdgeClient(config.chatEdgeUrl, () => ctl.currentAccessToken(), log);
   chatEdgeRef = chatEdge;
-  const assembler = new PromptAssembler(chatEdge, log);
+  const assembler = new PromptAssembler(chatEdge, log, {
+    tempChatReadsMemory: config.temporaryChatReadsMemory,
+  });
   // E4: the sidecar (all local tools), host tools, consent + grants.
   const dataDir = app.getPath("userData");
   // FIX19 — two-mode sidecar resolution (the same dev/packaged split FIX17

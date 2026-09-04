@@ -11,6 +11,7 @@
   "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix26\\SranDesktop.ToolsSidecar.exe",
   "approvalMode": "auto",
   "webSearchEnabled": false,
+  "temporaryChatReadsMemory": true,
   "protocolScheme": "sran",
   "oauthClient": "desktop",
   "oauthProvider": "google",

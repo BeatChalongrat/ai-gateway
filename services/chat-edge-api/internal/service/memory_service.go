@@ -538,6 +538,30 @@ func (s *MemoryService) BuildMemoryContext(
 func (s *MemoryService) BuildMemoryContextWithSources(
 	ctx context.Context, userID, tenantID uuid.UUID,
 ) (string, []ContextSource) {
+	return s.buildMemoryContext(ctx, userID, tenantID, true)
+}
+
+// BuildMemoryContextTraceless is BuildMemoryContextWithSources with the
+// use_count / last_used_at accounting suppressed.
+//
+// It exists for the temporary chat. A temporary chat may now READ the
+// user's saved memories (FIX56.1 Part 1) but must leave nothing behind,
+// and the ordinary read path is not read-only: it bumps use_count and
+// last_used_at on every memory it injects. Those columns are visible in
+// the memory management UI, so an ordinary read from a temporary chat
+// would stamp "used just now" on the exact facts the user consulted
+// while believing the conversation was leaving no trace — a record of
+// what a private chat was about, written into a table the user can see.
+// No row is created either way; this is about the ones already there.
+func (s *MemoryService) BuildMemoryContextTraceless(
+	ctx context.Context, userID, tenantID uuid.UUID,
+) (string, []ContextSource) {
+	return s.buildMemoryContext(ctx, userID, tenantID, false)
+}
+
+func (s *MemoryService) buildMemoryContext(
+	ctx context.Context, userID, tenantID uuid.UUID, recordUse bool,
+) (string, []ContextSource) {
 	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID)
 	if err != nil || len(memories) == 0 {
 		return "", nil
@@ -570,6 +594,12 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 	// Async use_count bump. Each goroutine carries its own background
 	// ctx so the message turn doesn't block on these writes — and so
 	// a client disconnect doesn't cancel them mid-flight.
+	//
+	// Skipped entirely for a traceless read (temporary chat): see
+	// BuildMemoryContextTraceless.
+	if !recordUse {
+		return block, sources
+	}
 	ids := make([]uuid.UUID, len(memories))
 	for i := range memories {
 		ids[i] = memories[i].ID

@@ -387,7 +387,7 @@ export const en = {
   // ── Temporary chat section ───────────────────────────────
   "memory.temporary.title": "Temporary chat",
   "memory.temporary.description":
-    "Start a conversation that doesn’t use or create memory. Useful when you don’t want a particular topic feeding into your saved facts.",
+    "Start a conversation that creates no memory. Your chat history keeps it like any other; nothing in it is remembered afterwards.",
   "memory.temporary.button": "Start temporary chat",
   "memory.temporary.toast":
     "Starting a temporary chat — memory is off for this one.",
@@ -530,10 +530,17 @@ export const en = {
   // hidden below the md breakpoint, so this is what carries the state
   // on a narrow window.
   "sidebar.newTemporaryChat": "Temporary chat",
-  "sidebar.newTemporaryChat.tooltip":
-    "A chat that is not saved to memory and does not use saved memories.",
+  "sidebar.newTemporaryChat.tooltip": "A chat that adds nothing new to memory.",
   "memory.banner.title": "Temporary chat",
-  "memory.banner.detail": "Nothing here is saved to memory, and saved memories are not used.",
+  // Both halves, deliberately. "Temporary" reads to most people as "this
+  // conversation disappears", which is not what it does — the transcript
+  // is kept like any other. Saying only the memory half would let the
+  // product make a promise it does not keep.
+  "memory.banner.detail":
+    "This chat is saved to your history, but nothing new is remembered from it. Your saved memories are still used.",
+  // The wording for a deployment that set TEMPORARY_CHAT_READS_MEMORY=false.
+  "memory.banner.detailStrict":
+    "This chat is saved to your history, but nothing new is remembered from it, and your saved memories are not used.",
   "memory.banner.turnOn": "Turn memory on",
   "memory.toast.offForChat": "Memory turned off for this chat.",
   "memory.toast.onForChat": "Memory turned on for this chat.",
@@ -1747,7 +1754,7 @@ const th: Record<DictKey, string> = {
   // Temporary chat
   "memory.temporary.title": "แชทชั่วคราว",
   "memory.temporary.description":
-    "เริ่มสนทนาที่ไม่ใช้และไม่สร้างความจำ เหมาะเมื่อไม่ต้องการให้หัวข้อบางอย่างถูกบันทึก",
+    "เริ่มสนทนาที่จะไม่สร้างความจำใหม่ แชทนี้ยังอยู่ในประวัติตามปกติ เพียงแต่จะไม่ถูกจดจำหลังจากนั้น",
   "memory.temporary.button": "เริ่มแชทชั่วคราว",
   "memory.temporary.toast":
     "เริ่มแชทชั่วคราว — ปิดความจำเฉพาะแชทนี้",
@@ -1887,10 +1894,12 @@ const th: Record<DictKey, string> = {
   "memory.popover.toggleOn": "เปิดสำหรับแชทนี้",
   "memory.openSettings": "เปิดการตั้งค่าความจำ",
   "sidebar.newTemporaryChat": "แชทชั่วคราว",
-  "sidebar.newTemporaryChat.tooltip":
-    "แชทที่จะไม่ถูกบันทึกเป็นความจำ และไม่ใช้ความจำที่บันทึกไว้",
+  "sidebar.newTemporaryChat.tooltip": "แชทที่จะไม่จดจำอะไรใหม่",
   "memory.banner.title": "แชทชั่วคราว",
-  "memory.banner.detail": "แชทนี้จะไม่ถูกบันทึกเป็นความจำ และจะไม่ใช้ความจำที่บันทึกไว้",
+  "memory.banner.detail":
+    "แชทนี้จะถูกบันทึกในประวัติ แต่จะไม่มีการจดจำอะไรใหม่จากแชทนี้ · ยังใช้ความจำเดิมได้",
+  "memory.banner.detailStrict":
+    "แชทนี้จะถูกบันทึกในประวัติ แต่จะไม่มีการจดจำอะไรใหม่จากแชทนี้ และจะไม่ใช้ความจำเดิม",
   "memory.banner.turnOn": "เปิดความจำ",
   "memory.toast.offForChat": "ปิดความจำสำหรับแชทนี้แล้ว",
   "memory.toast.onForChat": "เปิดความจำสำหรับแชทนี้แล้ว",

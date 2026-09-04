@@ -23,7 +23,7 @@ func (s stubPrefsReader) BuildInstructionsBlock(context.Context, uuid.UUID, uuid
 }
 
 func TestLayer10_NoProject_ByteIdentical(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nไทย\n"}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nไทย\n"}, nil, nil, true)
 	base := CompileContext{Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New()}
 
 	withEmpty := base
@@ -39,7 +39,7 @@ func TestLayer10_NoProject_ByteIdentical(t *testing.T) {
 }
 
 func TestLayer10_ProjectRendersAfterUserPrefs(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nนักการเงิน\n"}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: "## About the user\nนักการเงิน\n"}, nil, nil, true)
 	in := CompileContext{
 		Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New(),
 		ProjectInstructions: "ตอบเป็นทางการ อ้างอิงสัญญาเลขที่เสมอ",
@@ -60,7 +60,7 @@ func TestLayer10_ProjectRendersAfterUserPrefs(t *testing.T) {
 }
 
 func TestLayer10_ProjectWithoutUserPrefs(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil)
+	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil, true)
 	in := CompileContext{
 		Model: "gpt-4o", TenantID: uuid.New(), UserID: uuid.New(),
 		ProjectInstructions: "โปรเจกต์เดี่ยว",

@@ -129,6 +129,11 @@ type PromptCompiler struct {
 	prefs  PreferencesReader
 	memory MemoryReader
 	state  *ConversationStateService
+
+	// tempChatReadsMemory — whether a chat with memory switched off
+	// still gets the saved-memory block. See memoryBlock; the operator
+	// flips it with TEMPORARY_CHAT_READS_MEMORY.
+	tempChatReadsMemory bool
 }
 
 // newPromptCompiler builds a compiler from the (possibly nil) services
@@ -139,8 +144,12 @@ func newPromptCompiler(
 	prefs PreferencesReader,
 	memory MemoryReader,
 	state *ConversationStateService,
+	tempChatReadsMemory bool,
 ) *PromptCompiler {
-	return &PromptCompiler{prefs: prefs, memory: memory, state: state}
+	return &PromptCompiler{
+		prefs: prefs, memory: memory, state: state,
+		tempChatReadsMemory: tempChatReadsMemory,
+	}
 }
 
 // Build assembles the 13 layers in order and returns the joined system
@@ -590,15 +599,58 @@ func (pc *PromptCompiler) skillsBlock(in CompileContext) string {
 // Layer 11 — Memory Policy + Saved Memory (emits sources)
 // ---------------------------------------------------------------------------
 
-// memoryBlock injects the saved-memory facts when memory is enabled. The
-// proactive-save POLICY now lives in the tool policy (Layer 7), so this
-// layer only surfaces what's already on file. Returns the per-memory
-// ContextSource list for S7 attribution.
+// temporaryChatNotice is emitted for EVERY memory-off conversation,
+// whether or not saved memories are read into it.
+//
+// It exists because "no memory tools attached" is not the same as "the
+// model knows it cannot remember". Without this the model happily
+// answers "got it, I'll remember that" in a chat where nothing can be
+// saved — a promise the product then breaks silently. The wording also
+// has to name what IS kept (the transcript), because a user who reads
+// "temporary" as "this conversation disappears" is being misled by us,
+// not by the model.
+const temporaryChatNotice = `<temporary_chat>
+This is a temporary chat. Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.
+If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.
+The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.
+</temporary_chat>`
+
+// memoryBlock injects the saved-memory facts. The proactive-save POLICY
+// now lives in the tool policy (Layer 7), so this layer only surfaces
+// what's already on file. Returns the per-memory ContextSource list for
+// S7 attribution.
+//
+// FIX56.1 Part 1 — a temporary chat now READS memory but still writes
+// none. The switch means "stop recording me", not "forget who I am":
+// an assistant that loses the user's language, stack and formatting the
+// moment they ask a quiet side question is one people stop using, and a
+// privacy mode nobody turns on protects nobody. The write side is
+// untouched — no tool, no extraction, no state — and the read is
+// traceless (no use_count stamp), so a temporary chat still changes
+// nothing outside its own transcript.
+//
+// tempChatReadsMemory=false restores the older, stricter behaviour for
+// deployments that want the seal in both directions.
 func (pc *PromptCompiler) memoryBlock(ctx context.Context, in CompileContext) (string, []ContextSource) {
-	if pc.memory == nil || in.Conv == nil || !in.Conv.MemoryEnabled {
+	if in.Conv == nil {
 		return "", nil
 	}
-	return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID)
+	if in.Conv.MemoryEnabled {
+		if pc.memory == nil {
+			return "", nil
+		}
+		return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID)
+	}
+
+	// Memory off for this conversation.
+	if !pc.tempChatReadsMemory || pc.memory == nil {
+		return temporaryChatNotice, nil
+	}
+	block, sources := pc.memory.BuildMemoryContextTraceless(ctx, in.UserID, in.TenantID)
+	if strings.TrimSpace(block) == "" {
+		return temporaryChatNotice, nil
+	}
+	return temporaryChatNotice + "\n\n" + block, sources
 }
 
 // ---------------------------------------------------------------------------

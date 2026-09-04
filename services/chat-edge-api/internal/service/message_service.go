@@ -88,6 +88,11 @@ type MessageService struct {
 	// Optional. Builds the <saved_user_memory> system-prompt block
 	// (S1 — Personal Memory Core). Gated by conv.MemoryEnabled.
 	memorySvc MemoryReader
+	// FIX56.1 — whether a memory-off (temporary) conversation still
+	// READS the saved memories. Writing stays off either way. Default
+	// true; operators set TEMPORARY_CHAT_READS_MEMORY=false for the
+	// stricter "seal it in both directions" behaviour.
+	tempChatReadsMemory bool
 	// Optional. Dispatches AI tool_calls (save_memory, list_memories
 	// today; future tools register here). Same MemoryEnabled gate
 	// hides the tools from the gateway request when the toggle is
@@ -248,6 +253,10 @@ type MemoryReader interface {
 	// attribution list. Concrete MemoryService implements both;
 	// fakes can implement either depending on what they exercise.
 	BuildMemoryContextWithSources(ctx context.Context, userID, tenantID uuid.UUID) (string, []ContextSource)
+	// FIX56.1 — the same block with the use_count / last_used_at
+	// accounting suppressed, for a temporary chat that may read
+	// memory but must not leave a mark on it.
+	BuildMemoryContextTraceless(ctx context.Context, userID, tenantID uuid.UUID) (string, []ContextSource)
 }
 
 // ExcelLookup is the slice of the file repo the Phase 4 Excel
@@ -300,7 +309,20 @@ func NewMessageService(
 		maxContext:             maxContext,
 		imageGenerationTimeout: 180 * time.Second,
 		broker:                 NewStreamBroker(),
+		tempChatReadsMemory:    true,
 	}
+}
+
+// SetTemporaryChatReadsMemory applies the deployment's
+// TEMPORARY_CHAT_READS_MEMORY setting. False restores the pre-FIX56.1
+// behaviour where a memory-off conversation reads nothing either.
+//
+// This only ever moves the READ side. Nothing here can enable a write
+// in a temporary chat: the tool is not attached, state extraction and
+// preference extraction are gated separately on conv.MemoryEnabled, and
+// none of those gates consult this flag.
+func (s *MessageService) SetTemporaryChatReadsMemory(v bool) {
+	s.tempChatReadsMemory = v
 }
 
 // teeStream mirrors the pump channel into the resume broker keyed by
@@ -2225,7 +2247,7 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID)
 		in.CanvasContext = s.canvasContext(ctx, tenantID, conv.ID)
 	}
-	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc)
+	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc, s.tempChatReadsMemory)
 	return pc.Build(ctx, in)
 }
 

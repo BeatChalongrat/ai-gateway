@@ -87,14 +87,25 @@ export const BROWSER_BRIDGE_TOOLS: ReadonlySet<string> = Object.freeze(
   ]),
 ) as ReadonlySet<string>;
 
-/** The tools that read or write durable memory. Withheld from a chat whose
- *  memory switch is off, which is how the desktop matches the web client:
- *  there, memory_enabled=false omits save_memory / list_memories from the
- *  request. `remember` writes the sidecar's local note store and
- *  `search_past_conversations` reads across earlier chats — both are the
- *  cross-conversation memory the switch is about. */
-export const MEMORY_TOOLS: ReadonlySet<string> = Object.freeze(
-  new Set(["remember", "search_past_conversations"]),
+/** The tools that WRITE durable memory. Never offered to a chat whose memory
+ *  switch is off — under any setting, which is what makes "nothing said here
+ *  will be remembered" a fact about the build rather than a hope about the
+ *  model. `remember` writes the sidecar's local note store; the web client
+ *  omits its save_memory the same way. */
+export const MEMORY_WRITE_TOOLS: ReadonlySet<string> = Object.freeze(
+  new Set(["remember"]),
+) as ReadonlySet<string>;
+
+/** The tools that READ across conversations. Withheld from a memory-off chat
+ *  only under the stricter TEMPORARY_CHAT_READS_MEMORY=false, because from
+ *  FIX56.1 a temporary chat may use what is already on file — offering the
+ *  saved memories in the prompt while refusing the tool that reads the same
+ *  history would be two answers to one question. chat-edge has always kept
+ *  `search_past_conversations` available regardless of the switch (tools.go),
+ *  so under the default this is also what removes a live disagreement between
+ *  the two clients. */
+export const MEMORY_READ_TOOLS: ReadonlySet<string> = Object.freeze(
+  new Set(["search_past_conversations"]),
 ) as ReadonlySet<string>;
 
 export const MAX_MESSAGE_BYTES = 1_048_576;

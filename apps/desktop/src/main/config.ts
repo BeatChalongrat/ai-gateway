@@ -35,6 +35,13 @@ export interface ShellConfig {
   readonly approvalMode: string;
   /** E4: web_search is listed only when true (the WPF default is off). */
   readonly webSearchEnabled: boolean;
+  /** FIX56.1: what a temporary chat does with the memories already on file.
+   * Absent ⇒ true: read them, write none. Set false for the stricter "read
+   * nothing either" behaviour. Mirrors chat-edge's
+   * TEMPORARY_CHAT_READS_MEMORY, and must be set to match it — the same
+   * switch cannot mean two things in the two clients. Only the READ side
+   * moves; a temporary chat writes no memory under either value. */
+  readonly temporaryChatReadsMemory: boolean;
   readonly protocolScheme: string;
   /** Backend-side client id that maps to protocolScheme (allow-listed there). */
   readonly oauthClient: string;
@@ -137,6 +144,10 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     throw new Error(`'approvalMode' must be manual, auto or skip (got '${approvalMode}').`);
   }
   const webSearchEnabled = obj["webSearchEnabled"] === true;
+  // Defaults to true when absent, and only an explicit `false` turns it off:
+  // a config written before FIX56.1, or one with a typo in the key, must not
+  // silently pick the behaviour the deployment did not choose.
+  const temporaryChatReadsMemory = obj["temporaryChatReadsMemory"] !== false;
   const oauthClient = requireString(obj, "oauthClient", sourcePath);
   if (!/^[a-z][a-z0-9-]*$/.test(oauthClient)) {
     throw new Error(`'oauthClient' must be a lower-case identifier (got '${oauthClient}').`);
@@ -170,6 +181,7 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     sidecarPath,
     approvalMode,
     webSearchEnabled,
+    temporaryChatReadsMemory,
     protocolScheme,
     oauthClient,
     oauthProvider,

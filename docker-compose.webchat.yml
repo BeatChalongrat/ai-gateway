@@ -99,6 +99,11 @@ services:
       # is counted + marked, never dropped silently (A-W1).
       - CONTEXT_COMPACT_TRIGGER_RATIO=${CONTEXT_COMPACT_TRIGGER_RATIO:-0.85}
       - CONTEXT_COMPACT_TARGET_RATIO=${CONTEXT_COMPACT_TARGET_RATIO:-0.60}
+      # A temporary chat (memory_enabled=false) reads the saved memories
+      # and writes none. false = the stricter seal: it reads nothing
+      # either. The write side does not move with this setting. Keep
+      # web-chat's NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY in step.
+      - TEMPORARY_CHAT_READS_MEMORY=${TEMPORARY_CHAT_READS_MEMORY:-true}
       # Blob storage — default ``local`` writes under ./data/uploads
       # inside the container. Set STORAGE_BACKEND=s3 to route uploads
       # through the bundled MinIO service below (env vars wire in
@@ -313,6 +318,11 @@ services:
         # / login redirect all break. Changing them requires a REBUILD.
         NEXT_PUBLIC_GATEWAY_URL: ${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
         NEXT_PUBLIC_PORTAL_URL: ${WEB_CHAT_PORTAL_URL:-http://localhost:3001}
+        # FIX56.1: what the temporary-chat strip SAYS. Must match
+        # chat-edge's TEMPORARY_CHAT_READS_MEMORY above, or the strip
+        # describes a behaviour the server is not running. Build-time
+        # inlined like the rest — changing it needs a REBUILD.
+        NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY: ${TEMPORARY_CHAT_READS_MEMORY:-true}
         # (FIX20 §6.5: the desktop shell's hosted mode is detected at RUNTIME
         # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
         # serves the browser and the Electron app.)
@@ -323,6 +333,7 @@ services:
       - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
       - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
       - NEXT_PUBLIC_PORTAL_URL=${WEB_CHAT_PORTAL_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY=${TEMPORARY_CHAT_READS_MEMORY:-true}
       - PORT=3002
     depends_on:
       - chat-edge-api

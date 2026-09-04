@@ -47,6 +47,40 @@ describe("TemporaryChatBanner", () => {
     expect(screen.getByText(dictionaries.en["memory.banner.detail"])).toBeTruthy();
   });
 
+  // FIX56.1 1.3 — the strip has to say BOTH things. "Temporary" reads to
+  // most people as "this conversation disappears"; the transcript is in
+  // fact kept, and only the remembering is off. A strip that mentions
+  // only the memory half lets the product imply a deletion it never does.
+  it("says the chat is kept AND that nothing new is remembered, in both languages", () => {
+    for (const [locale, dict] of [
+      ["en", dictionaries.en],
+      ["th", dictionaries.th],
+    ] as const) {
+      useI18nStore.setState({ locale });
+      seed(conv({ id: "c1", memory_enabled: false }));
+      render(<TemporaryChatBanner conversationId="c1" />);
+      const detail = screen.getByText(dict["memory.banner.detail"]).textContent ?? "";
+      const kept = locale === "en" ? /saved to your history/i : /บันทึกในประวัติ/;
+      const notRemembered = locale === "en" ? /nothing new is remembered/i : /ไม่มีการจดจำอะไรใหม่/;
+      const stillUses = locale === "en" ? /still used/i : /ยังใช้ความจำเดิม/;
+      expect(kept.test(detail), `${locale}: says the chat is kept`).toBe(true);
+      expect(notRemembered.test(detail), `${locale}: says nothing new is remembered`).toBe(true);
+      expect(stillUses.test(detail), `${locale}: says saved memories are still used`).toBe(true);
+      cleanup();
+    }
+  });
+
+  // The strict wording exists for a deployment that set
+  // TEMPORARY_CHAT_READS_MEMORY=false. It must differ from the default
+  // in exactly the "are still used" clause — if the two ever converge,
+  // one of the two deployments is being told the wrong thing.
+  it("keeps a distinct sentence for the read-nothing deployment", () => {
+    for (const dict of [dictionaries.en, dictionaries.th]) {
+      expect(dict["memory.banner.detailStrict"]).not.toBe(dict["memory.banner.detail"]);
+      expect(dict["memory.banner.detailStrict"]).toBeTruthy();
+    }
+  });
+
   it("renders nothing when memory is on", () => {
     seed(conv({ id: "c1", memory_enabled: true }));
     const { container } = render(<TemporaryChatBanner conversationId="c1" />);

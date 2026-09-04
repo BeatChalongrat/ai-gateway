@@ -150,6 +150,24 @@ type Config struct {
 	ContextCompactTriggerRatio float64 `env:"CONTEXT_COMPACT_TRIGGER_RATIO" envDefault:"0.85"`
 	ContextCompactTargetRatio  float64 `env:"CONTEXT_COMPACT_TARGET_RATIO" envDefault:"0.60"`
 
+	// TemporaryChatReadsMemory — what a temporary chat (a conversation
+	// with memory switched off) does with the memories already on file.
+	//
+	// true (default): it reads them and writes none. "Don't record this"
+	// is what the user is asking for; making the assistant also forget
+	// their language, stack and standing instructions turns the mode
+	// into something people avoid, and a privacy switch nobody uses
+	// protects nobody.
+	//
+	// false: it reads nothing either — the stricter, older behaviour,
+	// kept as a setting because an organisation may want the seal to run
+	// in both directions and that is a policy call, not ours.
+	//
+	// The write side does not consult this flag and cannot be turned on
+	// by it: memory tools, conversation-state extraction and preference
+	// extraction are each gated on the conversation's own memory flag.
+	TemporaryChatReadsMemory bool `env:"TEMPORARY_CHAT_READS_MEMORY" envDefault:"true"`
+
 	// JSON-encoded list of models exposed to the chat UI. Phase 1
 	// keeps this list flat (no per-tenant restriction; admin features
 	// land later). Empty string → fall back to the hard-coded

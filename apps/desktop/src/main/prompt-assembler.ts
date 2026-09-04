@@ -61,6 +61,20 @@ const SERVER_MEMORY_TTL_MS = 60_000;
 const MAX_GLOBAL_BLOCK_CHARS = 2000;
 const MAX_BLOCK_CHARS = 2000;
 
+/** FIX56.1 — the standing rule for a memory-off chat, emitted whether or not
+ * anything was recalled into it.
+ *
+ * Same three sentences the server's `<temporary_chat>` block carries
+ * (prompt_compiler.go, temporaryChatNotice), in this file's `## Heading`
+ * dialect: the desktop and the web are one product and a user who switches
+ * between them must not be told two different things. The third sentence names
+ * what IS kept, because a user who reads "temporary" as "this conversation
+ * disappears" has been misled by us, not by the model. */
+const TEMPORARY_CHAT_NOTICE = `\n\n## Temporary chat
+Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.
+If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.
+The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.\n`;
+
 const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 const parseTs = (s: string): number => {
   const t = Date.parse(s);
@@ -225,10 +239,33 @@ export class PromptAssembler {
   private serverMemories: { content: string; createdAt: string }[] = [];
   private serverMemoriesAt = 0;
 
+  /** FIX56.1 — what a temporary chat does with the memories already on
+   * file. true (the default): read them, write none. false: read nothing
+   * either, the older and stricter behaviour, kept as a setting because
+   * an organisation may want the seal to run in both directions.
+   *
+   * It moves the READ side only, on purpose. Nothing reachable from here
+   * can enable a write in a memory-off chat: the memory tools are
+   * withheld from the request and `remember` is refused at dispatch, and
+   * neither of those consults this flag. Mirrors the server's
+   * TEMPORARY_CHAT_READS_MEMORY so the two clients cannot disagree about
+   * what the same switch means. */
+  private readonly tempChatReadsMemory: boolean;
+
   constructor(
     private readonly chatEdge: ChatEdgeClient,
     private readonly log: Logger,
-  ) {}
+    opts: { tempChatReadsMemory?: boolean } = {},
+  ) {
+    this.tempChatReadsMemory = opts.tempChatReadsMemory !== false;
+  }
+
+  /** Read by the turn coordinator so its "memory is off" log line reports
+   * what this build actually does, rather than a sentence that was true
+   * when it was written. */
+  get temporaryChatReadsMemory(): boolean {
+    return this.tempChatReadsMemory;
+  }
 
   async buildSystemPrompt(inputs: PromptInputs): Promise<string> {
     return (await this.buildSystemPromptParts(inputs)).text;
@@ -295,21 +332,32 @@ Web search is turned on in this app but your organisation has NOT enabled it for
    * scope. Now the local store is read too (host/query `notes._forPrompt`, passed
    * in via inputs) and merged in, matching the WPF app.
    *
-   * `memoryEnabled` gates ALL of it, local store included. It used to gate only
-   * the server memories, which made the "memory off" switch mean two different
-   * things depending on which client the user was sitting in front of: on the
-   * web the chat neither read nor wrote memory, while here the notes the
-   * `remember` tool had written were still read back into every prompt. A
-   * switch that quietly keeps reading is worse than no switch, because the
-   * user has been told otherwise. */
+   * `memoryEnabled` gates every STORE the same way — server memories and the
+   * local sidecar notes together. It used to gate only the server memories,
+   * which made the "memory off" switch mean two different things depending on
+   * which client the user was sitting in front of: on the web the chat neither
+   * read nor wrote memory, while here the notes the `remember` tool had written
+   * were still read back into every prompt. One switch, one meaning.
+   *
+   * FIX56.1 — what that one meaning IS has since moved. A memory-off chat now
+   * reads both stores and writes to neither (see tempChatReadsMemory); the
+   * asymmetry the paragraph above was written to kill is still gone, because
+   * the two stores are still treated identically. The write side is unchanged:
+   * the memory tools are withheld and `remember` is refused at dispatch. */
   private async notesBlock(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
-    const server = await this.serverMemoriesFor(inputs.memoryEnabled);
-    const localGlobal = inputs.memoryEnabled ? (inputs.localGlobalNotes ?? []) : [];
-    const localConversation = inputs.memoryEnabled ? (inputs.localConversationNotes ?? []) : [];
+    const mayRead = inputs.memoryEnabled || this.tempChatReadsMemory;
+    const server = await this.serverMemoriesFor(mayRead);
+    const localGlobal = mayRead ? (inputs.localGlobalNotes ?? []) : [];
+    const localConversation = mayRead ? (inputs.localConversationNotes ?? []) : [];
 
     const merged = mergeGlobalMemories(localGlobal, server);
 
     let out = "";
+    // The notice goes in whether or not anything was recalled: "no memory
+    // tool attached" is not the same as "the model knows it cannot
+    // remember", and without being told it answers "got it, I'll remember
+    // that" in a chat where nothing can be saved.
+    if (!inputs.memoryEnabled) out += TEMPORARY_CHAT_NOTICE;
     out += renderGlobalBlock(merged);
     out += renderConversationBlock(localConversation);
     // FIX22 §1b: each note is its own labelled part (its fix location differs
@@ -321,10 +369,10 @@ Web search is turned on in this app but your organisation has NOT enabled it for
     return { text: out, parts };
   }
 
-  /** chat-edge's global_user memories (60 s cache, best-effort). Gated on
-   * memoryEnabled, as are the local notes (see notesBlock). */
-  private async serverMemoriesFor(memoryEnabled: boolean): Promise<{ content: string; createdAt: string }[]> {
-    if (!memoryEnabled) return [];
+  /** chat-edge's global_user memories (60 s cache, best-effort). Gated the
+   * same way as the local notes — see notesBlock. */
+  private async serverMemoriesFor(mayRead: boolean): Promise<{ content: string; createdAt: string }[]> {
+    if (!mayRead) return [];
     if (Date.now() - this.serverMemoriesAt > SERVER_MEMORY_TTL_MS) {
       try {
         const memories = await this.chatEdge.listGlobalMemories(100);
