@@ -252,11 +252,14 @@ type MemoryReader interface {
 	// S7 — same shape but also returns the per-memory source
 	// attribution list. Concrete MemoryService implements both;
 	// fakes can implement either depending on what they exercise.
-	BuildMemoryContextWithSources(ctx context.Context, userID, tenantID uuid.UUID) (string, []ContextSource)
+	//
+	// FIX58 — projectID selects the disjoint set to read: nil for a
+	// general chat, the project's id inside a project.
+	BuildMemoryContextWithSources(ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID) (string, []ContextSource)
 	// FIX56.1 — the same block with the use_count / last_used_at
 	// accounting suppressed, for a temporary chat that may read
 	// memory but must not leave a mark on it.
-	BuildMemoryContextTraceless(ctx context.Context, userID, tenantID uuid.UUID) (string, []ContextSource)
+	BuildMemoryContextTraceless(ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID) (string, []ContextSource)
 }
 
 // ExcelLookup is the slice of the file repo the Phase 4 Excel
@@ -997,6 +1000,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 				TenantID:       in.TenantID,
 				UserID:         in.UserID,
 				ConversationID: conv.ID,
+				ProjectID:      conv.ProjectID,
 				Sources:        sourcesAcc,
 				CloudToolAllow: cloudAllow,             // FIX16 §1.4 — nil on interactive turns
 				WithheldHit:    &withheldToolRequested, // set if a withheld tool is asked for
@@ -1451,6 +1455,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			TenantID:       in.TenantID,
 			UserID:         in.UserID,
 			ConversationID: conv.ID,
+			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
 		},
@@ -1751,6 +1756,7 @@ func (s *MessageService) openAssistantStream(
 			TenantID:       conv.TenantID,
 			UserID:         userID,
 			ConversationID: conv.ID,
+			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
 		},
@@ -2017,6 +2023,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			TenantID:       conv.TenantID,
 			UserID:         userID,
 			ConversationID: conv.ID,
+			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
 		},

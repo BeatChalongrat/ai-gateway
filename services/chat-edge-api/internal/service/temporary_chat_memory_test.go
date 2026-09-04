@@ -30,24 +30,31 @@ type fakeMemoryReader struct {
 	block        string
 	normalCalls  int
 	tracelessHit int
+	// FIX58 — the project the compiler asked for on the LAST call, so a
+	// test can assert which memory set a turn was entitled to read.
+	// nil means "a general chat"; the pointer is captured rather than
+	// the bool so a wrong project id fails as loudly as a missing one.
+	lastProject *uuid.UUID
 }
 
 func (f *fakeMemoryReader) BuildMemoryContext(ctx context.Context, u, t uuid.UUID) string {
-	s, _ := f.BuildMemoryContextWithSources(ctx, u, t)
+	s, _ := f.BuildMemoryContextWithSources(ctx, u, t, nil)
 	return s
 }
 
 func (f *fakeMemoryReader) BuildMemoryContextWithSources(
-	_ context.Context, _, _ uuid.UUID,
+	_ context.Context, _, _ uuid.UUID, projectID *uuid.UUID,
 ) (string, []ContextSource) {
 	f.normalCalls++
+	f.lastProject = projectID
 	return f.block, []ContextSource{{SourceType: model.SourceTypeSavedMemory, SourceID: "m1"}}
 }
 
 func (f *fakeMemoryReader) BuildMemoryContextTraceless(
-	_ context.Context, _, _ uuid.UUID,
+	_ context.Context, _, _ uuid.UUID, projectID *uuid.UUID,
 ) (string, []ContextSource) {
 	f.tracelessHit++
+	f.lastProject = projectID
 	return f.block, []ContextSource{{SourceType: model.SourceTypeSavedMemory, SourceID: "m1"}}
 }
 

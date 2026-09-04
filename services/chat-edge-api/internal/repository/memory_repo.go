@@ -77,6 +77,19 @@ type MemoryListFilters struct {
 	Status     string // empty → "active"
 	Limit      int    // default 50, max 100
 	Offset     int
+
+	// ScopeID narrows to one scope instance — the project id when
+	// ScopeType is "project" (FIX58). Ignored when nil. Without it a
+	// project filter would return every project's memories, which is
+	// the leak, not the fix.
+	ScopeID *uuid.UUID
+
+	// ExcludeScopeType drops one scope from an otherwise unfiltered
+	// list (FIX58). It exists for the list_memories tool's "all",
+	// which means "everything this chat is entitled to" and not
+	// "every row in the table": from a general chat, "all" must not
+	// reach into any project. Empty = no exclusion.
+	ExcludeScopeType string
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +231,52 @@ func (r *MemoryRepo) SoftDelete(
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SoftDeleteByProject scrubs every memory belonging to one project and
+// returns the ids it affected, newest write order irrelevant.
+//
+// FIX58 — a project's memories are reachable ONLY through that project
+// (GetActiveForInjection filters scope_id, and the management UI lists
+// per project). Deleting the project without this would leave rows that
+// no chat can read and no screen can show, but that still hold the
+// user's text: the exact "invisible data is undeletable data" shape the
+// retention work kept running into. Same scrub as SoftDelete — status
+// flipped and the content, evidence and search vector emptied — so the
+// audit row can still say a deletion happened without keeping what was
+// deleted.
+func (r *MemoryRepo) SoftDeleteByProject(
+	ctx context.Context, projectID, userID, tenantID uuid.UUID,
+) ([]uuid.UUID, error) {
+	const q = `
+		UPDATE chat.user_memories
+		SET status           = 'deleted',
+		    content          = '[deleted]',
+		    normalized_key   = NULL,
+		    evidence_excerpt = NULL,
+		    search_vector    = NULL,
+		    updated_at       = NOW()
+		WHERE scope_type = 'project'
+		  AND scope_id   = $1
+		  AND user_id    = $2
+		  AND tenant_id  = $3
+		  AND status <> 'deleted'
+		RETURNING id
+	`
+	rows, err := r.db.Query(ctx, q, projectID, userID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("soft delete project memories: %w", err)
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("soft delete project memories scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // SetPinned toggles the is_pinned flag. Pinned memories sort to the
@@ -702,6 +761,14 @@ func (r *MemoryRepo) ListByUser(
 		q += fmt.Sprintf(" AND scope_type = $%d", len(args)+1)
 		args = append(args, f.ScopeType)
 	}
+	if f.ScopeID != nil {
+		q += fmt.Sprintf(" AND scope_id = $%d", len(args)+1)
+		args = append(args, *f.ScopeID)
+	}
+	if f.ExcludeScopeType != "" {
+		q += fmt.Sprintf(" AND scope_type <> $%d", len(args)+1)
+		args = append(args, f.ExcludeScopeType)
+	}
 	if f.MemoryType != "" {
 		q += fmt.Sprintf(" AND memory_type = $%d", len(args)+1)
 		args = append(args, f.MemoryType)
@@ -745,6 +812,14 @@ func (r *MemoryRepo) CountByUser(
 		q += fmt.Sprintf(" AND scope_type = $%d", len(args)+1)
 		args = append(args, f.ScopeType)
 	}
+	if f.ScopeID != nil {
+		q += fmt.Sprintf(" AND scope_id = $%d", len(args)+1)
+		args = append(args, *f.ScopeID)
+	}
+	if f.ExcludeScopeType != "" {
+		q += fmt.Sprintf(" AND scope_type <> $%d", len(args)+1)
+		args = append(args, f.ExcludeScopeType)
+	}
 	if f.MemoryType != "" {
 		q += fmt.Sprintf(" AND memory_type = $%d", len(args)+1)
 		args = append(args, f.MemoryType)
@@ -757,21 +832,46 @@ func (r *MemoryRepo) CountByUser(
 }
 
 // GetActiveForInjection is the system-prompt builder's read path.
-// Returns the user's active global memories, pinned first, ordered
-// by importance then recency. Capped at 50 so the prompt block
-// never blows up the context window.
+// Returns the user's active memories for the given context, pinned
+// first, ordered by importance then recency. Capped at 50 so the
+// prompt block never blows up the context window.
+//
+// FIX58 — projectID selects WHICH set, and the two are disjoint:
+//
+//	projectID == nil  → scope_type = 'global_user'   (a general chat)
+//	projectID != nil  → scope_type = 'project'
+//	                    AND scope_id = *projectID     (a project chat)
+//
+// A general chat therefore cannot see any project's memories, and a
+// project chat sees neither the global set nor a sibling project's.
+// General chat memory does not automatically apply inside a project:
+// the project is the boundary the user drew, and carrying facts across
+// it would defeat the reason they drew it.
+//
+// The filter is in the WHERE clause deliberately. Fetching everything
+// and discarding the wrong rows in Go would mean another project's
+// content had already crossed into this request's memory, one
+// forgotten filter away from the prompt — and this function is the
+// single path by which memory reaches any prompt, so the narrow query
+// is what makes the guarantee checkable at the database.
 func (r *MemoryRepo) GetActiveForInjection(
-	ctx context.Context, userID, tenantID uuid.UUID,
+	ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID,
 ) ([]model.Memory, error) {
+	scopeClause := `AND scope_type = 'global_user'`
+	args := []any{userID, tenantID}
+	if projectID != nil {
+		scopeClause = `AND scope_type = 'project' AND scope_id = $3`
+		args = append(args, *projectID)
+	}
 	q := `SELECT ` + memoryColumns + `
 	      FROM chat.user_memories
 	      WHERE user_id = $1 AND tenant_id = $2
 	        AND status = 'active'
-	        AND scope_type = 'global_user'
+	        ` + scopeClause + `
 	        AND (valid_until IS NULL OR valid_until > NOW())
 	      ORDER BY is_pinned DESC, importance_score DESC, updated_at DESC
 	      LIMIT 50`
-	rows, err := r.db.Query(ctx, q, userID, tenantID)
+	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get active for injection: %w", err)
 	}

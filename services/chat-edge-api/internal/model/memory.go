@@ -23,6 +23,21 @@ const (
 	MemoryScopeArtifact     = "artifact"
 	MemoryScopeTemporary    = "temporary"
 
+	// MemoryScopeProject — the memory belongs to one project and
+	// ScopeID is that project's id. Added in FIX58.
+	//
+	// The separation is two-way on purpose: a project chat sees only
+	// its own project's memories, and a general chat sees only
+	// global_user ones. Projects are where people keep one client's
+	// work apart from another's, so a memory from project A appearing
+	// in project B is not an inconvenience, it is one customer's data
+	// surfacing in another customer's work.
+	//
+	// The read side enforces this in the SQL (GetActiveForInjection),
+	// not by filtering after the fetch: a row that is never selected
+	// cannot be leaked by a later code path that forgets to filter.
+	MemoryScopeProject = "project"
+
 	MemoryTypeExplicitFact         = "explicit_fact"
 	MemoryTypeResponsePreference   = "response_preference"
 	MemoryTypeOngoingInterest      = "ongoing_interest"

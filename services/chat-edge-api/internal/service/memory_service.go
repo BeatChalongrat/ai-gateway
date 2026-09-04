@@ -517,7 +517,7 @@ func (s *MemoryService) CountByStatus(
 func (s *MemoryService) BuildMemoryContext(
 	ctx context.Context, userID, tenantID uuid.UUID,
 ) string {
-	text, _ := s.BuildMemoryContextWithSources(ctx, userID, tenantID)
+	text, _ := s.BuildMemoryContextWithSources(ctx, userID, tenantID, nil)
 	return text
 }
 
@@ -535,10 +535,14 @@ func (s *MemoryService) BuildMemoryContext(
 // memory in the background, so the management UI can show the
 // most-referenced facts. Background writes use a fresh ctx so a
 // client disconnect doesn't kill the accounting.
+//
+// FIX58 — projectID picks which disjoint set is read: nil for a general
+// chat (global_user memories), the project's id inside a project (that
+// project's memories only). See MemoryRepo.GetActiveForInjection.
 func (s *MemoryService) BuildMemoryContextWithSources(
-	ctx context.Context, userID, tenantID uuid.UUID,
+	ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID,
 ) (string, []ContextSource) {
-	return s.buildMemoryContext(ctx, userID, tenantID, true)
+	return s.buildMemoryContext(ctx, userID, tenantID, projectID, true)
 }
 
 // BuildMemoryContextTraceless is BuildMemoryContextWithSources with the
@@ -554,15 +558,16 @@ func (s *MemoryService) BuildMemoryContextWithSources(
 // what a private chat was about, written into a table the user can see.
 // No row is created either way; this is about the ones already there.
 func (s *MemoryService) BuildMemoryContextTraceless(
-	ctx context.Context, userID, tenantID uuid.UUID,
+	ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID,
 ) (string, []ContextSource) {
-	return s.buildMemoryContext(ctx, userID, tenantID, false)
+	return s.buildMemoryContext(ctx, userID, tenantID, projectID, false)
 }
 
 func (s *MemoryService) buildMemoryContext(
-	ctx context.Context, userID, tenantID uuid.UUID, recordUse bool,
+	ctx context.Context, userID, tenantID uuid.UUID,
+	projectID *uuid.UUID, recordUse bool,
 ) (string, []ContextSource) {
-	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID)
+	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID, projectID)
 	if err != nil || len(memories) == 0 {
 		return "", nil
 	}
@@ -775,7 +780,8 @@ func validScopeType(s string) bool {
 		model.MemoryScopeGlobalUser,
 		model.MemoryScopeConversation,
 		model.MemoryScopeArtifact,
-		model.MemoryScopeTemporary:
+		model.MemoryScopeTemporary,
+		model.MemoryScopeProject: // FIX58
 		return true
 	}
 	return false

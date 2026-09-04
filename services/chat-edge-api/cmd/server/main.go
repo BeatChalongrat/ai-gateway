@@ -188,6 +188,10 @@ func main() {
 	)
 	conversationSvc := service.NewConversationService(conversations, cfg)
 	projectSvc := service.NewProjectService(projects, conversations)
+	// FIX58 — deleting a project erases the memories scoped to it.
+	// Without this they survive as rows no chat can read and no screen
+	// can list, holding the user's text with no way to remove it.
+	projectSvc.SetMemoryRepo(memoriesRepo)
 	// FIX22 §1a — the write-time prompt guard: every stored text that later
 	// lands in a system prompt (memories, project instructions, custom
 	// instructions, skill instructions) is checked against the gateway's

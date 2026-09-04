@@ -8,6 +8,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -33,10 +34,17 @@ var (
 type ProjectService struct {
 	projects      *repository.ProjectRepo
 	conversations *repository.ConversationRepo
+	// memories — FIX58. Optional; when wired, deleting a project also
+	// erases the memories scoped to it, which are unreachable once the
+	// project is gone. nil leaves the pre-FIX58 behaviour.
+	memories *repository.MemoryRepo
 	// FIX22 §1a — optional write-time prompt guard for the instructions
 	// text (it is folded verbatim into every member conversation's prompt).
 	guard PromptGuard
 }
+
+// SetMemoryRepo wires the project-memory eraser used on delete (FIX58).
+func (s *ProjectService) SetMemoryRepo(m *repository.MemoryRepo) { s.memories = m }
 
 // SetPromptGuard wires the FIX22 write-time guard (nil = unchecked).
 func (s *ProjectService) SetPromptGuard(g PromptGuard) { s.guard = g }
@@ -147,9 +155,45 @@ func (s *ProjectService) SetKnowledgeBase(
 	return p, nil
 }
 
+// Delete removes the project and erases the memories scoped to it.
+//
+// Member conversations survive: conversations.project_id is ON DELETE
+// SET NULL, so the chats fall back to being general chats. Their
+// memories cannot follow them, because a project memory was saved under
+// a separation the user asked for — silently promoting it into the
+// global set would move one client's facts into every other chat, which
+// is the leak this round exists to close, arriving by the back door.
+//
+// The memories are erased BEFORE the project row goes, so a failure
+// leaves the project (and therefore its memories) still reachable
+// rather than leaving orphans nothing can read or delete.
 func (s *ProjectService) Delete(
 	ctx context.Context, tenantID, userID, projectID uuid.UUID,
 ) error {
+	if s.memories != nil {
+		ids, err := s.memories.SoftDeleteByProject(ctx, projectID, userID, tenantID)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			mid := id
+			if err := s.memories.LogEvent(ctx, &model.MemoryEvent{
+				MemoryID:  &mid,
+				TenantID:  tenantID,
+				UserID:    userID,
+				Action:    "deleted",
+				ActorType: "system",
+				Reason:    "project deleted",
+				Metadata:  map[string]any{"project_id": projectID.String()},
+			}); err != nil {
+				// The erase is the part that matters and it already
+				// committed; a missing audit line must not resurrect
+				// the row or fail the user's delete.
+				slog.Warn("project delete: memory audit log failed",
+					"memory_id", mid.String(), "err", err)
+			}
+		}
+	}
 	if err := s.projects.Delete(ctx, tenantID, userID, projectID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrProjectNotFound

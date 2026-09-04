@@ -287,6 +287,14 @@ type ToolExecContext struct {
 	MessageID      uuid.UUID
 	Sources        *SourcesAccumulator
 
+	// ProjectID — the project this conversation belongs to, or nil for
+	// a general chat (FIX58). save_memory writes into the matching
+	// scope, so a fact learned inside a project stays inside it. The
+	// read side is the mirror of this in GetActiveForInjection; both
+	// have to agree or a memory would be saved somewhere it can never
+	// be read back from.
+	ProjectID *uuid.UUID
+
 	// Emit pushes a progress frame onto the live SSE stream mid-tool
 	// (Phase 8 Task 2 — run_python's code+output card). Nil on the
 	// non-streaming path and in unit tests; always call via emit().
@@ -964,10 +972,22 @@ func (e *ToolExecutor) execSaveMemory(
 		statusOverride = ""
 	}
 
+	// FIX58 — a save inside a project belongs to that project, not to
+	// the user's general memory. Writing it globally would be the leak
+	// this round exists to prevent: the next project's chat would read
+	// back a fact learned while working on someone else's account.
+	scopeType := model.MemoryScopeGlobalUser
+	var scopeID *uuid.UUID
+	if ec.ProjectID != nil {
+		scopeType = model.MemoryScopeProject
+		scopeID = ec.ProjectID
+	}
+
 	in := CreateMemoryInput{
 		TenantID:             ec.TenantID,
 		UserID:               ec.UserID,
-		ScopeType:            model.MemoryScopeGlobalUser,
+		ScopeType:            scopeType,
+		ScopeID:              scopeID,
 		MemoryType:           args.MemoryType,
 		Category:             args.Category,
 		Content:              args.Content,
@@ -1032,10 +1052,40 @@ func (e *ToolExecutor) execListMemories(
 		Status: model.MemoryStatusActive,
 		Limit:  100,
 	}
+	// FIX58 — inside a project, "what do you remember" means that
+	// project's memories. Listing the global set here would read the
+	// separation back out through the tool that the read-path query
+	// was just narrowed to prevent, and would show the user facts the
+	// same turn's prompt does not contain.
 	if args.ScopeType == "" || args.ScopeType == "global_user" {
-		filters.ScopeType = model.MemoryScopeGlobalUser
+		if ec.ProjectID != nil {
+			filters.ScopeType = model.MemoryScopeProject
+			filters.ScopeID = ec.ProjectID
+		} else {
+			filters.ScopeType = model.MemoryScopeGlobalUser
+		}
 	}
-	// "all" → no scope_type filter so every active memory surfaces.
+
+	// "all" means "everything THIS CHAT is entitled to", never "every
+	// row in the table". Left unbounded it was a way around the whole
+	// separation: a model working in one project could ask for scope
+	// "all" and read another client's facts back out through the tool,
+	// while the prompt beside it had been correctly narrowed. Measured
+	// live before this guard — a chat listed codewords from two
+	// projects and the global set in one answer.
+	if args.ScopeType == "all" {
+		if ec.ProjectID != nil {
+			// Inside a project, "all" is that project.
+			filters.ScopeType = model.MemoryScopeProject
+			filters.ScopeID = ec.ProjectID
+		} else {
+			// Outside one, "all" is everything except the projects:
+			// conversation- and artifact-scoped rows still surface,
+			// which is what makes this narrower than the old behaviour
+			// without being narrower than global_user alone.
+			filters.ExcludeScopeType = model.MemoryScopeProject
+		}
+	}
 
 	memories, _, err := e.memories.ListByUser(ctx, ec.UserID, ec.TenantID, filters)
 	if err != nil {

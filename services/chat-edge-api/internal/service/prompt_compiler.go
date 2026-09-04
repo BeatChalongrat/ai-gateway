@@ -635,18 +635,31 @@ func (pc *PromptCompiler) memoryBlock(ctx context.Context, in CompileContext) (s
 	if in.Conv == nil {
 		return "", nil
 	}
+	// FIX58 — which memories exist for this turn is decided by the
+	// conversation's project membership, and the two sets never mix:
+	// a project chat reads that project's memories, a general chat
+	// reads the global ones. Passing Conv.ProjectID straight through
+	// keeps the decision at the one place that knows the answer; the
+	// repository turns it into a WHERE clause so the other set is
+	// never fetched at all.
+	projectID := in.Conv.ProjectID
+
 	if in.Conv.MemoryEnabled {
 		if pc.memory == nil {
 			return "", nil
 		}
-		return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID)
+		return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID, projectID)
 	}
 
 	// Memory off for this conversation.
 	if !pc.tempChatReadsMemory || pc.memory == nil {
 		return temporaryChatNotice, nil
 	}
-	block, sources := pc.memory.BuildMemoryContextTraceless(ctx, in.UserID, in.TenantID)
+	// A temporary chat inside a project reads that project's memories
+	// (and still writes none) — the FIX56.1 rule applied to whichever
+	// set this conversation is entitled to, not a way back to the
+	// global one.
+	block, sources := pc.memory.BuildMemoryContextTraceless(ctx, in.UserID, in.TenantID, projectID)
 	if strings.TrimSpace(block) == "" {
 		return temporaryChatNotice, nil
 	}
