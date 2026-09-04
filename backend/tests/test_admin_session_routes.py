@@ -343,10 +343,20 @@ class TestSessionMe:
 
     def test_me_with_tampered_cookie_returns_401(self, client):
         self._login(client)
-        # Tamper with the stored cookie.
+        # Tamper with the stored cookie — at a character that is NOT the
+        # last one. See test_session_manager.TestVerifyCookie for the
+        # arithmetic: itsdangerous' 20-byte HMAC encodes to 27 base64url
+        # characters, so the final character's low two bits are ignored
+        # and four of the sixty-four possible endings decode to the same
+        # signature. Substituting one of those left the cookie VALID, the
+        # request succeeded, and the assertion failed about one run in
+        # sixteen — with no bug anywhere near the session routes.
         jar = client.cookies
         raw = jar.get("admin_session")
-        jar.set("admin_session", raw[:-1] + ("A" if raw[-1] != "A" else "B"))
+        idx = len(raw) - 2
+        tampered = raw[:idx] + ("A" if raw[idx] != "A" else "B") + raw[idx + 1:]
+        assert tampered != raw
+        jar.set("admin_session", tampered)
         r = client.get("/auth/session/me")
         assert r.status_code == 401
 
