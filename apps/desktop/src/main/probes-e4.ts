@@ -56,6 +56,28 @@ const NEW_CHAT = `(() => { const b = [...document.querySelectorAll('button, a')]
 const NEW_TEMP_CHAT = `(() => { const b = [...document.querySelectorAll('button, a')].find(x => /temporary chat|แชทชั่วคราว/i.test(x.textContent || '')); if (b) { b.click(); return 'clicked'; } return 'no-temp-chat'; })()`;
 // Reads the always-visible strip, so the probe can prove the user was TOLD.
 const READ_TEMP_BANNER = `(() => { const el = [...document.querySelectorAll('[role="status"]')].find(x => /temporary chat|แชทชั่วคราว/i.test(x.textContent || '')); return el ? (el.textContent || '').trim() : ''; })()`;
+// The narrow-window reading, as one snippet so the width and the two
+// signals come from the SAME layout pass.
+//
+// "Is the element in the DOM" is the wrong question and the first version
+// of this asked it: `hidden md:flex` is a CSS class, so the header chip is
+// in the document at every width and closest() found it happily — the
+// check reported the chip "present" at 640px, where it is invisible. What
+// matters is whether the user can SEE it, so both signals are measured by
+// their layout box. innerWidth is reported too, because BrowserWindow has
+// minWidth 640: asking for 420 gets 640, and a claim about "420px" would
+// otherwise be a claim about a width the window never had.
+const READ_NARROW_STATE = `(() => {
+  const shown = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const banner = [...document.querySelectorAll('[role="status"]')].find(x => /temporary chat|แชทชั่วคราว/i.test(x.textContent || ''));
+  const chipRow = document.querySelector('.md\\\\:flex');
+  return JSON.stringify({
+    innerWidth: window.innerWidth,
+    bannerVisible: shown(banner),
+    bannerText: banner ? (banner.textContent || '').trim() : '',
+    chipRowVisible: shown(chipRow),
+  });
+})()`;
 
 export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void> {
   const { win, bridge, coordinator: co, sidecar, log } = ctx;
@@ -564,6 +586,38 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
             /nothing new is remembered|ไม่มีการจดจำอะไรใหม่/i.test(banner2),
           `banner="${banner2.slice(0, 200)}"`,
         );
+
+        // "Visible at all times" was failing for a CSS reason, not a
+        // memory one, so it is tested by narrowing the actual window
+        // rather than by reading a class name. Below md the header row
+        // that holds the memory chip is not rendered at all; the strip
+        // has to still be there, which is the whole reason it exists.
+        const size0 = win.getSize();
+        const w0 = size0[0] ?? 1200;
+        const h0 = size0[1] ?? 800;
+        try {
+          win.setSize(420, 820); // clamped to minWidth 640 — still under md (768)
+          await sleep(900);
+          const narrow = JSON.parse(String(await js(READ_NARROW_STATE) ?? "{}")) as {
+            innerWidth?: number; bannerVisible?: boolean; bannerText?: string; chipRowVisible?: boolean;
+          };
+          await shot("fix56-1-narrow-window");
+          const underBreakpoint = (narrow.innerWidth ?? 9999) < 768;
+          check(
+            "the window really is below the md breakpoint (or the check below means nothing)",
+            underBreakpoint,
+            `innerWidth=${narrow.innerWidth} (asked for 420; BrowserWindow minWidth is 640)`,
+          );
+          check(
+            "below md the header chip is gone and the strip is what carries the state",
+            underBreakpoint && narrow.bannerVisible === true && narrow.chipRowVisible === false,
+            `innerWidth=${narrow.innerWidth} bannerVisible=${narrow.bannerVisible} ` +
+            `chipRowVisible=${narrow.chipRowVisible} banner="${String(narrow.bannerText).slice(0, 100)}"`,
+          );
+        } finally {
+          win.setSize(w0, h0);
+          await sleep(500);
+        }
 
         // A switch that can be escaped by asking for the work to be
         // handed to someone else is not a switch. The sub-agent inherits
