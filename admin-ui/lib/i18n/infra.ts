@@ -82,6 +82,19 @@ export const en = {
     "Endpoint not configured yet — enter the box's URL below; it is validated and saved together with the key.",
   "infra.providers.endpointNotSet": "no endpoint",
 
+  // Model discovery: a SEPARATE check from key validation. These strings
+  // must never let a failed catalog fetch read as a rejected key.
+  "infra.providers.syncKeyOk": "Key valid",
+  "infra.providers.syncFound": "found {n} model(s)",
+  "infra.providers.syncEmpty": "the provider returned no models",
+  "infra.providers.syncFailed": "could not fetch the model list: {reason}",
+  "infra.providers.syncUnchecked": "the model list was not checked",
+  "infra.providers.syncUnreachable": "the gateway could not be reached",
+  "infra.providers.syncHint":
+    "Key validity and the model list are separate checks — the key above still works.",
+  "infra.providers.syncRefetch": "Fetch model list",
+  "infra.providers.syncRunning": "Fetching…",
+
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "Model registry",
   "infra.models.subtitle":
@@ -395,6 +408,17 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.endpointMissing":
     "ยังไม่ได้ตั้งค่า endpoint — กรอก URL ของเครื่องด้านล่าง ระบบจะตรวจสอบและบันทึกพร้อมกับคีย์",
   "infra.providers.endpointNotSet": "ยังไม่มี endpoint",
+
+  "infra.providers.syncKeyOk": "คีย์ใช้งานได้",
+  "infra.providers.syncFound": "พบ {n} โมเดล",
+  "infra.providers.syncEmpty": "ผู้ให้บริการไม่ได้ส่งรายการโมเดลกลับมา",
+  "infra.providers.syncFailed": "ดึงรายการโมเดลไม่สำเร็จ: {reason}",
+  "infra.providers.syncUnchecked": "ยังไม่ได้ตรวจรายการโมเดล",
+  "infra.providers.syncUnreachable": "ติดต่อเกตเวย์ไม่ได้",
+  "infra.providers.syncHint":
+    "การตรวจคีย์กับการดึงรายการโมเดลเป็นคนละขั้นตอนกัน — คีย์ด้านบนยังใช้งานได้ตามปกติ",
+  "infra.providers.syncRefetch": "ดึงรายการโมเดล",
+  "infra.providers.syncRunning": "กำลังดึง…",
 
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "ทะเบียนโมเดล",
