@@ -445,12 +445,16 @@ services:
       ARCHIVE_EXPIRY_ENABLED: ${ARCHIVE_EXPIRY_ENABLED:-false}
       ARCHIVE_EXPIRY_DRY_RUN: ${ARCHIVE_EXPIRY_DRY_RUN:-true}
       ARCHIVE_RETENTION_DAYS: ${ARCHIVE_RETENTION_DAYS:-365}
-      # Audit-log aging, same two-switch shape. Its window must stay
-      # LONGER than every data window above: deletion evidence has to
-      # outlive the data it describes.
+      # Audit-log aging, same two-switch shape. 365 as of FIX60 (was
+      # 730): deletion evidence still outlives the data it describes,
+      # because an expiry audit row is written AT the moment of
+      # deletion and then ages on its own clock — a full year after the
+      # archive row it records is gone. The windows are now equal in
+      # wall-clock terms, so a same-day pair ages out together; raise
+      # this if an audit ever needs that margin back.
       AUDIT_LOG_AGING_ENABLED: ${AUDIT_LOG_AGING_ENABLED:-false}
       AUDIT_LOG_AGING_DRY_RUN: ${AUDIT_LOG_AGING_DRY_RUN:-true}
-      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-730}
+      AUDIT_LOG_RETENTION_DAYS: ${AUDIT_LOG_RETENTION_DAYS:-365}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}

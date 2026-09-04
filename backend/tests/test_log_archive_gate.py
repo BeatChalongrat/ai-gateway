@@ -1,37 +1,86 @@
-"""The archive mover stays off by default — and now lives inside an
-ORDERED pipeline.
+"""The retention pipeline's gating contract.
 
-``request_logs_archive`` gained an expiry path, but the mover is still
-gated: off by default, and the nightly pipeline refuses to run the
-move on a night the DLP strip failed. These pins carry the original
-gate contract forward onto the new structure:
+``log_archive_enabled`` was off by default for as long as the archive
+was a table with no way out. It has one now (the expiry step), the
+strip→archive ordering is structural rather than hoped for, and the
+windows were signed off in FIX60 — so the mover defaults ON and these
+pins move with it.
 
-* the default is False (off means the archive step never runs);
+What is asserted here is deliberately NOT "the flags are off". It is
+the part that actually protects data:
+
+* every DELETING step still defaults to DRY RUN — enabling a step
+  makes it report, never destroy. Turning a dry-run off is a separate,
+  explicit act;
+* the archive move is not a deletion: it copies to cold storage and
+  removes from hot, and it only runs after the strip;
 * the lifespan starts exactly ONE retention task — the pipeline — and
   the old free-running archive loop is gone entirely;
 * inside the pipeline the strip step is unconditional and precedes
-  the flag-gated archive step (the order the config comment used to
-  merely hope for);
-* a failed strip skips the archive step even when the flag is on.
+  the flag-gated archive step;
+* a failed strip skips the archive step even when the flag is on;
+* the flag still works as a kill switch: False means the archive step
+  never runs.
 """
 
 import inspect
 
 
-def test_log_archive_disabled_by_default():
+def test_retention_steps_enabled_per_the_signed_windows():
+    """FIX60 — the three steps are on, and the windows are the signed ones.
+
+    This replaces an older pin that asserted the flags were False. That
+    pin existed to keep the steps inert *until an operator signed off on
+    the windows*; the sign-off happened, so asserting False now would
+    pin the pre-decision state and fail the decision instead of the
+    code. The guard that matters — dry run — is asserted separately
+    below and is unchanged.
+    """
     from app.core.config import Settings
 
-    field = Settings.model_fields["log_archive_enabled"]
-    assert field.default is False
+    for flag in (
+        "log_archive_enabled",
+        "archive_expiry_enabled",
+        "audit_log_aging_enabled",
+    ):
+        assert Settings.model_fields[flag].default is True, flag
+
+    assert Settings.model_fields["log_archive_days"].default == 90
+    assert Settings.model_fields["archive_retention_days"].default == 365
+    # Equal to the archive window, not longer: deletion evidence still
+    # outlives the data because an expiry audit row is written at the
+    # moment of deletion and then ages on its own clock.
+    assert Settings.model_fields["audit_log_retention_days"].default == 365
 
 
-def test_expiry_and_audit_aging_disabled_and_dry_run_by_default():
+def test_every_deleting_step_is_dry_run_by_default():
+    """The one assertion that must never be relaxed.
+
+    Enabling a step makes it COUNT. Destroying anything requires
+    turning a dry-run off, which is a separate deliberate act — so a
+    flag flipped by accident (or by a config merge) reports numbers
+    instead of deleting rows.
+    """
     from app.core.config import Settings
 
-    for flag in ("archive_expiry_enabled", "audit_log_aging_enabled"):
-        assert Settings.model_fields[flag].default is False, flag
     for flag in ("archive_expiry_dry_run", "audit_log_aging_dry_run"):
         assert Settings.model_fields[flag].default is True, flag
+
+
+def test_audit_default_constant_matches_the_setting():
+    """The service's fallback and the setting must agree.
+
+    ``RetentionService`` takes ``audit_log_days`` with a module-level
+    default. A fallback that disagrees with the configured window is a
+    second retention policy nobody knows they have.
+    """
+    from app.core.config import Settings
+    from app.services.retention_service import DEFAULT_AUDIT_LOG_RETENTION_DAYS
+
+    assert (
+        DEFAULT_AUDIT_LOG_RETENTION_DAYS
+        == Settings.model_fields["audit_log_retention_days"].default
+    )
 
 
 def test_lifespan_runs_one_pipeline_task_and_no_free_archive_loop():

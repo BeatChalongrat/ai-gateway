@@ -476,19 +476,24 @@ class Settings(BaseSettings):
     # does not consume the value.
     ner_workers: int = 4
 
-    # Archive kill-switch — OFF by default until the retention plan
-    # (docs/DATA_RETENTION_PLAN.md, OPEN_DECISIONS #64) is decided.
-    # The sentence below about the 90-day windows "matching" described
-    # an invariant NOTHING enforces: the DLP raw-retention job and the
-    # archive job are two independent 24h loops with no ordering, so on
-    # any given day the archive can copy rows whose raw columns have
-    # not been stripped yet into ``request_logs_archive`` — a table
-    # with no expiry and no delete path. Until an enforced ordering
-    # (or an archive-side strip/expiry) exists, the mover stays off:
-    # a growing hot table is recoverable, a raw row in permanent cold
-    # storage is not. When False the task is NEVER CREATED (not
-    # created-and-idle), so there is no code path that can run it.
-    log_archive_enabled: bool = False
+    # Archive kill-switch — ON as of FIX60, after the retention plan
+    # (docs/DATA_RETENTION_PLAN.md, OPEN_DECISIONS #64) was signed off.
+    #
+    # It was off for a specific reason, and that reason is gone. The
+    # DLP raw-retention job and the archive job used to be two
+    # independent 24h loops with no ordering between them, so on any
+    # given day the archive could copy rows whose raw columns had not
+    # been stripped yet into ``request_logs_archive`` — a table that
+    # then had no expiry and no delete path. Both halves are fixed:
+    # ``app.jobs.retention_pipeline`` runs strip → archive → expiry →
+    # audit as ONE ordered sequence and skips the archive step outright
+    # on a night the strip step failed, and the expiry step below gives
+    # the archive a way out.
+    #
+    # When False the task is NEVER CREATED (not created-and-idle), so
+    # there is no code path that can run it — the kill switch stays a
+    # kill switch.
+    log_archive_enabled: bool = True
 
     # Archive retention — rows older than this are moved from
     # ``request_logs`` to ``request_logs_archive`` by the nightly
@@ -507,18 +512,27 @@ class Settings(BaseSettings):
     # by default when enabled — the operator reads the dry-run number,
     # then flips ``archive_expiry_dry_run`` off. Live deletions write
     # an admin-audit row.
-    archive_expiry_enabled: bool = False
+    archive_expiry_enabled: bool = True
     archive_expiry_dry_run: bool = True
     archive_retention_days: int = 365
 
-    # Admin-audit-log aging — the audit trail's own retention. The
-    # window is deliberately LONGER than every data window (deletion
-    # evidence must outlive the data it describes); 730 is a proposed
-    # default awaiting operator sign-off, kept inert by the off-by-
-    # default flag. Dry-run first, like every deleting step.
-    audit_log_aging_enabled: bool = False
+    # Admin-audit-log aging — the audit trail's own retention.
+    #
+    # 365 as of FIX60 (was 730, a placeholder that could not answer
+    # "why this number"). One year is the window SOC 2 / ISO 27001
+    # reviews typically expect, and it is long enough that deletion
+    # evidence still outlives the data it describes: an expiry audit
+    # row is written AT the moment of deletion and then lives its own
+    # full year, so it outlasts the archive row it records by 365 days.
+    # What the equal windows do give up is the old margin on
+    # SAME-DAY pairs — an admin action audited on day 0 now ages out
+    # the same day as a request logged on day 0, where 730 kept the
+    # record a year longer. Raise it if an audit ever asks for that.
+    #
+    # Dry-run first, like every deleting step.
+    audit_log_aging_enabled: bool = True
     audit_log_aging_dry_run: bool = True
-    audit_log_retention_days: int = 730
+    audit_log_retention_days: int = 365
 
     # C2 — model discovery sync behaviour.
     # ``model_discovery_auto_add`` False (default) makes the daily sync

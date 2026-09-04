@@ -11,9 +11,14 @@ What remains here is the one thing nothing else did: aging the admin
 audit log itself. Two rules shape it:
 
 * the audit trail must outlive the data it describes — the default
-  window (``audit_log_retention_days``, 730) is deliberately longer
-  than every data-retention window in the system, and the pipeline
-  refuses to run this step at all unless its flag is on;
+  window (``audit_log_retention_days``, 365 as of FIX60) holds that
+  because an expiry audit row is written AT the moment of deletion and
+  then lives its own full year, outlasting the archive row it records
+  by 365 days. It is no longer longer than every data window in
+  wall-clock terms (the archive default is also 365), so a same-day
+  pair now ages out together; raise the window if that margin is ever
+  required. The pipeline refuses to run this step at all unless its
+  flag is on;
 * aging the audit log is itself an audited deletion: a live run
   appends its own record (a fresh row, well inside the window)
   before the pass commits.
@@ -35,11 +40,17 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Proposed default: twice the longest data window in the system (the
-# 365-day archive default), so deletion evidence comfortably outlives
-# the data it describes. The operator can raise it; the pipeline flag
-# keeps the step inert until deliberately enabled.
-DEFAULT_AUDIT_LOG_RETENTION_DAYS = 730
+# Default: one year, matching the archive window and the settings
+# default. Deletion evidence still outlives the data it describes,
+# because the evidence row is created at the moment of deletion and
+# then ages on its own clock. The operator can raise it; the pipeline
+# flag keeps the step inert until deliberately enabled.
+#
+# Kept in step with ``settings.audit_log_retention_days`` on purpose:
+# this constant is the fallback when the service is constructed
+# without one, and a fallback that disagrees with the configured value
+# is a second retention policy nobody knows they have.
+DEFAULT_AUDIT_LOG_RETENTION_DAYS = 365
 
 
 class RetentionService:
