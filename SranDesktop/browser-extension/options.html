@@ -17,9 +17,13 @@
 </head>
 <body>
   <h1>SRAN Desktop Browser Bridge</h1>
-  <p class="hint">Paste the pairing token from SRAN Desktop → Settings → Browser, then save.
-    The desktop app must be running.</p>
-  <label for="token">Pairing token</label>
+  <p class="hint">Normally there is nothing to paste: SRAN Desktop writes the pairing token into this
+    extension's folder (pairing.json) and the extension reads it itself. The desktop app must be running.
+    Paste a token here only if you loaded the extension from a folder the app does not write to;
+    an empty field means "use the one the app provided".</p>
+  <p class="hint">This extension's id: <code id="ownId">…</code> — it must match "Expected id" in
+    SRAN Desktop → Settings → Browser.</p>
+  <label for="token">Pairing token (optional)</label>
   <input id="token" type="text" autocomplete="off" spellcheck="false">
   <button id="save">Save &amp; reconnect</button>
   <div id="status"><span class="dot off"></span><span id="statusText">Not connected</span></div>

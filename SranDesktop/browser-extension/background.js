@@ -49,9 +49,18 @@ function connect() {
   port.onMessage.addListener(onMessage);
   port.onDisconnect.addListener(() => {
     port = null;
+    // FIX70: Chrome says WHY a native connection died, once, here. "forbidden"
+    // means this extension's id is not in the host manifest's allowed_origins
+    // (the desktop app authorised a different id); "not found" means the host
+    // is not registered at all (the app has not run on this machine). Both
+    // used to collapse into a silent "Not connected".
+    const why = chrome.runtime.lastError && chrome.runtime.lastError.message ? chrome.runtime.lastError.message : '';
+    let reason = null;
+    if (/forbidden/i.test(why)) reason = 'host_forbidden';
+    else if (/not found/i.test(why)) reason = 'host_not_found';
     // Keep the actionable "token mismatch" status the reject just wrote —
     // a plain "not connected" would overwrite the one hint the user needs.
-    if (!tokenRejected) setStatus(false);
+    if (!tokenRejected) setStatus(false, reason);
     scheduleReconnect();
   });
   getToken().then((token) => {
