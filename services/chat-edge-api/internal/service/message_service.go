@@ -4320,6 +4320,10 @@ func (s *MessageService) generateImageForMessage(
 		"mime_type", "image/png",
 		"file_size_bytes", len(raw),
 	)
+	producedBy := resp.Model
+	if producedBy == "" {
+		producedBy = resp.Provider
+	}
 	if _, err := s.toolExec.imageFiles.SaveGeneratedImage(ctx, GeneratedImageInput{
 		TenantID:       in.TenantID,
 		UserID:         in.UserID,
@@ -4329,6 +4333,7 @@ func (s *MessageService) generateImageForMessage(
 		Data:           raw,
 		ContentType:    "image/png",
 		Prompt:         in.Content,
+		GeneratedBy:    producedBy,
 	}); err != nil {
 		slog.Error("image_generation_direct_save_failed",
 			"request_id", in.RequestID,

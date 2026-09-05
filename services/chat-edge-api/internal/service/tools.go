@@ -1252,6 +1252,10 @@ func (e *ToolExecutor) execGenerateImage(
 		return "The generated image was malformed. Please try again."
 	}
 
+	producedBy := resp.Model
+	if producedBy == "" {
+		producedBy = resp.Provider
+	}
 	if _, err := e.imageFiles.SaveGeneratedImage(ctx, GeneratedImageInput{
 		TenantID:       ec.TenantID,
 		UserID:         ec.UserID,
@@ -1260,6 +1264,7 @@ func (e *ToolExecutor) execGenerateImage(
 		Data:           raw,
 		ContentType:    "image/png",
 		Prompt:         args.Prompt,
+		GeneratedBy:    producedBy,
 	}); err != nil {
 		slog.Error("image_generation_save_failed",
 			"error", err.Error(),
@@ -1412,6 +1417,7 @@ func (e *ToolExecutor) execGenerateVideo(
 		Data:           data,
 		ContentType:    "video/mp4",
 		Prompt:         args.Prompt,
+		GeneratedBy:    e.videoModel,
 	}); err != nil {
 		slog.Error("video_generation_save_failed", "error", err.Error(), "job_id", jobID)
 		return "I generated the video but couldn't save it. Please try again."

@@ -537,6 +537,26 @@ type GeneratedImageInput struct {
 	Data           []byte
 	ContentType    string // image/png (default), image/jpeg, image/webp
 	Prompt         string // used for the display filename
+	// FIX67 — which destination actually produced this image (the model id,
+	// e.g. "gpt-image-1" or, after a fallback, "mock-image-1"). Surfaced under
+	// the image as "Made by …" so a user knows what made it, every time.
+	GeneratedBy string
+}
+
+// generatedByJSON packs the producing-model attribution into the file's
+// inspection_json (nil for images otherwise), so it rides the existing scanned
+// column to the client with no schema change. Empty → nil.
+func generatedByJSON(by string) *string {
+	by = strings.TrimSpace(by)
+	if by == "" {
+		return nil
+	}
+	b, err := json.Marshal(map[string]string{"generated_by": by})
+	if err != nil {
+		return nil
+	}
+	s := string(b)
+	return &s
 }
 
 // SaveGeneratedImage stores a generated image blob via the storage
@@ -594,6 +614,7 @@ func (s *FileService) SaveGeneratedImage(
 		ExtractionStatus: "completed", // images carry no extractable text
 		IsGenerated:      true,
 		Version:          1,
+		InspectionJSON:   generatedByJSON(in.GeneratedBy),
 	})
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)
@@ -624,6 +645,7 @@ type GeneratedVideoInput struct {
 	Data           []byte
 	ContentType    string // video/mp4 (default), video/webm, video/quicktime
 	Prompt         string // used for the display filename
+	GeneratedBy    string // FIX67 — producing model id, for "Made by …"
 }
 
 // SaveGeneratedVideo stores a generated video blob and creates a
@@ -678,6 +700,7 @@ func (s *FileService) SaveGeneratedVideo(
 		ExtractionStatus: "completed", // video carries no extractable text
 		IsGenerated:      true,
 		Version:          1,
+		InspectionJSON:   generatedByJSON(in.GeneratedBy),
 	})
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)

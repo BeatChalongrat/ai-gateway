@@ -67,6 +67,11 @@ type fileResponse struct {
 	// uploaded (FIX 10 dedup key) — lets it correlate a server file back
 	// to its local copy. Omitted for web uploads and generated files.
 	ClientID string `json:"client_id,omitempty"`
+	// FIX67 — the model that produced a generated image/video ("gpt-image-1",
+	// or "mock-image-1" after a fallback). Rendered under the artifact as
+	// "Made by …". Carried in inspection_json (nil for media otherwise) so no
+	// schema change / new scanned column was needed.
+	GeneratedBy string `json:"generated_by,omitempty"`
 }
 
 // FileToWire formats a model.ConversationFile for the wire. Exported
@@ -86,6 +91,15 @@ func FileToWire(f *model.ConversationFile) fileResponse {
 	}
 	if f.MessageID != nil {
 		r.MessageID = f.MessageID.String()
+	}
+	// FIX67 — attribution rides in inspection_json for generated media.
+	if f.IsGenerated && f.InspectionJSON != nil {
+		var meta struct {
+			GeneratedBy string `json:"generated_by"`
+		}
+		if json.Unmarshal([]byte(*f.InspectionJSON), &meta) == nil {
+			r.GeneratedBy = meta.GeneratedBy
+		}
 	}
 	if f.ParentFileID != nil {
 		r.ParentFileID = f.ParentFileID.String()

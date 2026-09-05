@@ -41,3 +41,32 @@ func TestFileToWireIncludesRelativeDownloadURL(t *testing.T) {
 		t.Fatalf("file metadata not preserved: %+v", wire)
 	}
 }
+
+// FIX67 — a generated image carries its producing model in inspection_json;
+// FileToWire surfaces it as generated_by (for the "Made by …" attribution).
+func TestFileToWireSurfacesGeneratedBy(t *testing.T) {
+	insp := `{"generated_by":"mock-image-1"}`
+	wire := FileToWire(&model.ConversationFile{
+		ID:               uuid.New(),
+		ConversationID:   uuid.New(),
+		OriginalFilename: "cat.png",
+		ContentType:      "image/png",
+		ExtractionStatus: "completed",
+		CreatedAt:        time.Now(),
+		IsGenerated:      true,
+		Version:          1,
+		InspectionJSON:   &insp,
+	})
+	if wire.GeneratedBy != "mock-image-1" {
+		t.Fatalf("generated_by = %q, want %q", wire.GeneratedBy, "mock-image-1")
+	}
+
+	// A non-generated file (or one without the metadata) exposes nothing.
+	plain := FileToWire(&model.ConversationFile{
+		ID: uuid.New(), ConversationID: uuid.New(), OriginalFilename: "doc.pdf",
+		ContentType: "application/pdf", ExtractionStatus: "completed", CreatedAt: time.Now(),
+	})
+	if plain.GeneratedBy != "" {
+		t.Fatalf("generated_by should be empty for a plain file, got %q", plain.GeneratedBy)
+	}
+}
