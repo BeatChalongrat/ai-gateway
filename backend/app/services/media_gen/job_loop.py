@@ -234,6 +234,72 @@ def _coerce_meta(meta) -> dict:
     return {}
 
 
+async def _submit_with_fallback(session, job, meta):
+    """Pre-dispatch fallback for an async media job (FIX67 Part 2.4).
+
+    Tries the job's own destination, then the ``media_order:<type>`` fallbacks
+    (≤2 tiers, cross-provider), until ``submit_job`` succeeds. Returns
+    ``(adapter, SubmitResult, meta)``. The caller then polls with the returned
+    adapter — a failure AFTER this point is terminal and never restarted, because
+    the provider job is dispatched and the money is committed. Fallback is only
+    ever cheap, pre-work retry.
+    """
+    from app.services.media_gen.destinations import (
+        MAX_TIERS,
+        Destination,
+        allow_mock,
+        resolve_order,
+        usable_destinations,
+    )
+    from app.services.media_gen.registry import registered_providers
+    from app.services.provider_key_service import ProviderKeyService
+
+    seq = [Destination(job.provider, job.model_id)]
+    try:
+        order = await resolve_order(session, job.job_type)
+        valid = await ProviderKeyService().providers_with_valid_keys_async(session)
+        mock_on = await allow_mock(session)
+        extras = usable_destinations(
+            order,
+            valid_providers=valid,
+            mock_enabled=mock_on,
+            registered_providers=set(registered_providers()),
+        )
+        for d in extras:
+            if len(seq) >= MAX_TIERS:
+                break
+            if any(s.provider == d.provider for s in seq):
+                continue
+            seq.append(d)
+    except Exception:  # noqa: BLE001 — order resolution must never break the primary
+        log.exception("media order resolution failed; trying the primary only")
+
+    last_exc: Exception | None = None
+    for tier, d in enumerate(seq):
+        try:
+            adapter = get_adapter(d.provider, job.job_type)
+        except UnknownProviderError as exc:
+            last_exc = exc
+            log.warning("media submit: no adapter for %s/%s (tier %d)", d.provider, job.job_type, tier)
+            continue
+        m = dict(meta)
+        m["replicate_model"] = d.model
+        try:
+            submit = await adapter.submit_job(job.input_prompt, m)
+        except Exception as exc:  # noqa: BLE001 — pre-dispatch: try the next tier
+            last_exc = exc
+            log.warning("media submit failed on %s:%s (tier %d): %s", d.provider, d.model, tier, str(exc)[:200])
+            continue
+        if tier > 0:
+            job.provider = d.provider
+            job.model_id = d.model
+            log.info("media submit fell back to %s:%s (tier %d)", d.provider, d.model, tier)
+        return adapter, submit, m
+    raise last_exc if last_exc is not None else UnknownProviderError(
+        f"no usable destination for {job.job_type}"
+    )
+
+
 async def _process_job(session, job_id: str) -> None:
     """Drive a single claimed job to a terminal state via its adapter.
 
@@ -248,23 +314,15 @@ async def _process_job(session, job_id: str) -> None:
     provider = job.provider
     modality = job.job_type
 
-    try:
-        adapter = get_adapter(provider, job.job_type)
-    except UnknownProviderError as exc:
-        job.status = "failed"
-        job.error_code = "no_adapter"
-        job.error_message = str(exc)[:500]
-        job.completed_at = datetime.now(timezone.utc)
-        await session.commit()
-        GEN_FAILURE_TOTAL.labels(modality, provider, "no_adapter").inc()
-        log.info("generation job %s failed: no_adapter", job_id)
-        return
-
     meta = _coerce_meta(job.input_metadata)
     GEN_JOBS_ACTIVE.labels(modality).inc()
     t0 = time.monotonic()
     try:
-        submit = await adapter.submit_job(job.input_prompt, meta)
+        # FIX67 — pre-dispatch fallback: try the job's destination, then the
+        # media_order fallbacks, until a provider job is dispatched. After this,
+        # the adapter is fixed and a poll failure is terminal (never restarted).
+        adapter, submit, meta = await _submit_with_fallback(session, job, meta)
+        provider = job.provider  # may have changed via fallback (metrics/attribution)
         job.external_job_id = submit.external_job_id
         await session.commit()
 

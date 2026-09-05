@@ -15,10 +15,9 @@ Three things this pins:
 from __future__ import annotations
 
 from app.api.routes.admin_model_discovery import ModelConfigUpdate
-from app.api.routes.public_models import (
-    IMAGE_GENERATION_PROVIDERS,
-    image_generation_target_available,
-)
+# FIX67 — the IMAGE_GENERATION_PROVIDERS frozenset was retired (Part 1.2). Image
+# backends are a registry now; a second backend is added there, not in a client.
+from app.services.media_gen.image_backends import registered_image_providers
 from app.services.discovery.provider_discovery import (
     _NAME_INFERENCE_PROVIDERS,
     _infer_capability,
@@ -94,15 +93,21 @@ def test_stated_booleans_win_on_a_self_hosted_endpoint():
 
 # --- 3. tools ≠ images: the image target ------------------------------
 
-def test_image_target_needs_a_usable_key_at_an_image_backend():
-    assert image_generation_target_available({"openai", "sranai"}) is True
-    assert image_generation_target_available({"sranai", "deepseek"}) is False
-    assert image_generation_target_available(set()) is False
+def test_image_target_needs_a_registered_image_backend():
+    # FIX67 — tools ≠ images still holds: an image target exists only at a
+    # provider that has a registered IMAGE backend. openai does; sranai/deepseek
+    # do not, so a valid key there is not an image target. (Whether a given
+    # deployment offers image gen further depends on the media_order + a usable
+    # key — see usable_image_destinations; this pins the backend-existence half.)
+    regs = registered_image_providers()
+    assert "openai" in regs
+    assert "sranai" not in regs
+    assert "deepseek" not in regs
 
 
 def test_image_backends_are_named_in_the_backend_not_in_a_client():
-    # the one registry; a second image backend is added here
-    assert "openai" in IMAGE_GENERATION_PROVIDERS
+    # the registry; a second image backend is added here, not in a client
+    assert {"openai", "mock"} <= registered_image_providers()
 
 
 # --- 4. every capability is admin-editable through the same PATCH ------

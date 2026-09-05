@@ -30,12 +30,15 @@ from app.schemas.public import (
     ImageUsage,
 )
 from app.services.dlp.transformer import redact_orphan_tokens
+from app.services.media_gen import destinations as media_dest
+from app.services.media_gen.image_backends import registered_image_providers
+from app.services.media_gen.image_backends.dispatch import generate_with_fallback
 from app.services.orchestrator import GatewayOrchestrator
 from app.services.policy.profile_service import get_runtime_profile_async
+from app.services.provider_key_service import ProviderKeyService
 from app.services.providers.openai_images_client import (
     DEFAULT_IMAGE_MODEL,
     IMAGE_MODELS,
-    generate_image,
 )
 
 logger = structlog.get_logger(__name__)
@@ -118,6 +121,7 @@ async def _persist(
     policy_action: str,
     dlp_findings: int,
     input_masked: str,
+    provider: str = "openai",
 ) -> None:
     """Best-effort request_log row (per-image cost; no tokens)."""
     try:
@@ -128,7 +132,7 @@ async def _persist(
                 user_id=getattr(auth, "log_user_id", None),
                 tenant_id=auth.tenant_id,
                 project_id=auth.project_id,
-                provider="openai",
+                provider=provider,
                 model=model,
                 status=status,
                 policy_action=policy_action,
@@ -168,6 +172,12 @@ async def generate_images(
 ) -> ImageGenerationResponse:
     t0 = time.perf_counter()
     request_id = str(uuid.uuid4())
+    # FIX67 — the operator-configured destination order decides which backend(s)
+    # run, in what sequence; the request's model is retained only for the wire
+    # contract (the product does not let a chat user pick the image model). The
+    # order is authoritative; ``model`` below is the requested-model label for
+    # logs. When no order is configured we fall back to the legacy single-openai
+    # path so a deployment that never seeds the order behaves exactly as before.
     model = payload.model if payload.model in IMAGE_MODELS else DEFAULT_IMAGE_MODEL
     orch = GatewayOrchestrator()
 
@@ -296,22 +306,39 @@ async def generate_images(
             )
             dlp_action = "mask"
 
-    # --- Call the provider with the masked prompt ----------------------
+    # --- Resolve the destination order and produce (FIX67) -------------
+    # The operator-configured order is authoritative. Empty order → the legacy
+    # single openai/gpt-image-1 path (byte-for-byte the pre-FIX67 behaviour).
+    order = await media_dest.resolve_order(session, "image")
+    if order:
+        valid_providers = await ProviderKeyService().providers_with_valid_keys_async(
+            session
+        )
+        mock_on = await media_dest.allow_mock(session)
+        usable = media_dest.usable_destinations(
+            order,
+            valid_providers=valid_providers,
+            mock_enabled=mock_on,
+            registered_providers=registered_image_providers(),
+        )
+    else:
+        usable = [media_dest.Destination(provider="openai", model=model)]
+
     logger.info(
         "backend_image_generation_started",
         request_id=request_id,
         tenant_id=str(auth.tenant_id),
         user_id=str(getattr(auth, "user_id", "")) or None,
-        provider="openai",
-        model=model,
+        requested_model=model,
+        destinations=[f"{d.provider}:{d.model}" for d in usable],
         endpoint="/v1/images/generations",
         timeout_ms=int(settings.image_generation_timeout_seconds * 1000),
         openai_timeout_ms=int(settings.openai_image_timeout_seconds * 1000),
     )
     try:
-        result = await generate_image(
+        result = await generate_with_fallback(
             session,
-            model=model,
+            usable,
             prompt=masked_prompt,
             request_id=request_id,
             n=payload.n,
@@ -329,8 +356,8 @@ async def generate_images(
             request_id=request_id,
             tenant_id=str(auth.tenant_id),
             user_id=str(getattr(auth, "user_id", "")) or None,
-            model=model,
-            provider="openai",
+            requested_model=model,
+            destinations=[f"{d.provider}:{d.model}" for d in usable],
             resolved_endpoint="/v1/images/generations",
             status_code=details.get("status") if isinstance(details, dict) else None,
             openai_error_type=err_body.get("type") if isinstance(err_body, dict) else None,
@@ -341,6 +368,10 @@ async def generate_images(
             fallback_result="none",
         )
         raise
+
+    # The destination that actually produced — for attribution + accurate logs.
+    produced_provider = result.provider
+    produced_model = result.model
 
     # --- Restore masked tokens in the revised_prompt -------------------
     out_data: list[ImageData] = []
@@ -359,7 +390,8 @@ async def generate_images(
 
     latency_ms = int((time.perf_counter() - t0) * 1000)
     await _persist(
-        orch, session, request_id=request_id, auth=auth, model=model,
+        orch, session, request_id=request_id, auth=auth, model=produced_model,
+        provider=produced_provider,
         status=RequestStatus.SUCCESS, latency_ms=latency_ms,
         cost_usd=result.cost_usd, policy_action=dlp_action,
         dlp_findings=dlp_findings, input_masked=masked_prompt,
@@ -384,16 +416,17 @@ async def generate_images(
         logger.warning("image_credit_deduct_failed", error=str(exc))
     logger.info(
         "image_generation",
-        request_id=request_id, model=model, cost_usd=result.cost_usd,
-        provider="openai", endpoint="/v1/images/generations",
+        request_id=request_id, model=produced_model, cost_usd=result.cost_usd,
+        provider=produced_provider, endpoint="/v1/images/generations",
+        fell_back=produced_provider != usable[0].provider if usable else False,
         dlp_action=dlp_action, findings=dlp_findings,
         latency_ms=latency_ms, count=len(out_data),
     )
 
     return ImageGenerationResponse(
-        created=result.created,
+        created=int(time.time()),
         data=out_data,
-        model=result.model,
-        provider="openai",
+        model=produced_model,
+        provider=produced_provider,
         usage=ImageUsage(cost_usd=result.cost_usd),
     )

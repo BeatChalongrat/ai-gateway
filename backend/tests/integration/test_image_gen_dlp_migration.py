@@ -37,7 +37,7 @@ def _post(prompt: str):
 def _mock_image_client(monkeypatch):
     monkeypatch.setattr(settings, "dlp_enabled", True)
     monkeypatch.setattr(
-        "app.api.routes.public_images.generate_image", _fake_generate_image
+        "app.services.providers.openai_images_client.generate_image", _fake_generate_image
     )
 
 

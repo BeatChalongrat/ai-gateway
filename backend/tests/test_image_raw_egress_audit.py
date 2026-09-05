@@ -68,7 +68,7 @@ def _auth(tenant_id):
 def _mock_image_client(monkeypatch):
     monkeypatch.setattr(settings, "dlp_enabled", True)
     monkeypatch.setattr(
-        "app.api.routes.public_images.generate_image", _fake_generate_image
+        "app.services.providers.openai_images_client.generate_image", _fake_generate_image
     )
     # The image route uses the sliding-window limiter (check_window_async),
     # which the conftest autouse fixture does NOT neutralize (it patches

@@ -113,6 +113,25 @@ def _validate_routing_tier(value: str) -> str:
     return v
 
 
+def _validate_media_order(value: str) -> str:
+    """FIX67 — a comma-separated ``provider:model`` order. Format only; the
+    cross-field checks (mock kill-switch, known model, no cost upgrade, ≤2
+    tiers) happen in ``_check_media_order`` with a session. Empty is allowed
+    (no fallback / no destination)."""
+    from app.services.media_gen.destinations import parse_order
+
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    dests = parse_order(raw)
+    if not dests:
+        raise ValidationError(
+            "Each entry must be 'provider:model' (comma-separated).",
+            code="invalid_value",
+        )
+    return ", ".join(f"{d.provider}:{d.model}" for d in dests)
+
+
 _VALIDATORS: dict[str, Callable[[str], str]] = {
     "auto_routing_tier_default": _validate_routing_tier,
     "free_trial_tokens": _validate_positive_int,
@@ -122,6 +141,9 @@ _VALIDATORS: dict[str, Callable[[str], str]] = {
     "provider_base_url:sranai": _validate_provider_base_url_setting,
     "auto_default_model": _validate_auto_model,
     "auto_default_fallbacks": _validate_auto_fallbacks,
+    "media_order:image": _validate_media_order,
+    "media_order:video": _validate_media_order,
+    "media_allow_mock": _validate_bool,
 }
 
 
@@ -168,6 +190,76 @@ def _check_tier_ceiling(key: str, value: str, session: Session) -> None:
         )
 
 
+def _check_media_order(key: str, value: str, session: Session) -> None:
+    """FIX67 cross-field rules for a media destination order (with a session).
+
+    * ≤2 tiers, each a different provider;
+    * a ``mock`` destination is refused while ``media_allow_mock`` is off — the
+      config-time half of the mock leak guard (a test enforces the runtime half);
+    * every ``(provider, model)`` must exist as a catalogue row of the right
+      capability, with a registered backend;
+    * the second tier must not be a costlier model than the first (never upgrade).
+    """
+    if key not in ("media_order:image", "media_order:video"):
+        return
+    from app.models.model_config import ModelConfigORM
+    from app.services.media_gen.destinations import (
+        MAX_TIERS,
+        is_mock_provider,
+        parse_order,
+    )
+
+    media_type = "image" if key.endswith(":image") else "video"
+    cap_col = "supports_image_gen" if media_type == "image" else "supports_video_gen"
+    dests = parse_order(value)
+    if not dests:
+        return
+    if len(dests) > MAX_TIERS:
+        raise ValidationError(
+            f"At most {MAX_TIERS} destinations (a primary and one fallback).",
+            code="invalid_value",
+        )
+    if len({d.provider for d in dests}) != len(dests):
+        raise ValidationError(
+            "Each tier must be a different provider.", code="invalid_value",
+        )
+
+    mock_on = _current_bool(session, "media_allow_mock")
+    costs: list[float] = []
+    for d in dests:
+        if is_mock_provider(d.provider) and not mock_on:
+            raise ValidationError(
+                "A 'mock' destination is not allowed unless media_allow_mock is "
+                "on. Turn on media_allow_mock first (test deployments only).",
+                code="invalid_value",
+            )
+        row = (
+            session.query(ModelConfigORM)
+            .filter(
+                ModelConfigORM.provider == d.provider,
+                ModelConfigORM.model == d.model,
+            )
+            .first()
+        )
+        if row is None or not getattr(row, cap_col, False):
+            raise ValidationError(
+                f"'{d.provider}:{d.model}' is not a known {media_type} model.",
+                code="invalid_value",
+            )
+        costs.append(float(row.cost_per_input_token or 0.0))
+    # never upgrade: the fallback must not cost more than the primary.
+    if len(costs) == 2 and costs[1] > costs[0]:
+        raise ValidationError(
+            "The fallback must not be a costlier model than the primary.",
+            code="invalid_value",
+        )
+
+
+def _current_bool(session: Session, key: str) -> bool:
+    row = session.get(SystemSettingORM, key)
+    return bool(row) and (row.value or "").strip().lower() in ("true", "1", "yes", "on")
+
+
 @router.get("")
 def list_settings(session: Session = Depends(get_db_session)):
     rows = (
@@ -209,6 +301,7 @@ def update_setting(
 
     validated = validator(body.value)
     _check_tier_ceiling(key, validated, session)
+    _check_media_order(key, validated, session)
     row.value = validated
     session.flush()
     if key in ("auto_default_model", "auto_default_fallbacks"):

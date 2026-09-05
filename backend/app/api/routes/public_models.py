@@ -12,23 +12,32 @@ from app.schemas.public import (
 )
 from app.services.provider_key_service import ProviderKeyService
 from app.services.auto_router.tiers import band_for_candidate as _band_for_candidate
+from app.services.media_gen import destinations as media_dest
+from app.services.media_gen.image_backends import registered_image_providers
 from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
 from app.services.providers.model_registry import get_all_candidates
-from app.services.providers.openai_images_client import IMAGE_MODELS
 
 router = APIRouter()
 
-# FIX62 — where image generation is actually served from. Today every
-# image request (the generate_image tool from either client, and the
-# dedicated image models) is dispatched by public_images.py to OpenAI's
-# images endpoint with the OpenAI key; a second image backend would be
-# registered here, not in a client.
-IMAGE_GENERATION_PROVIDERS: frozenset[str] = frozenset({"openai"})
 
+def usable_image_destinations(session, valid_providers):
+    """The image destinations that can produce right now, in order (≤2 tiers).
 
-def image_generation_target_available(valid_providers) -> bool:
-    """True when at least one image backend has a usable key right now."""
-    return any(p in valid_providers for p in IMAGE_GENERATION_PROVIDERS)
+    FIX67 — replaces the ``IMAGE_GENERATION_PROVIDERS`` frozenset: the operator's
+    ``media_order:image`` decides the backends, filtered to those with a usable
+    key (or ``mock`` when explicitly enabled) and a registered backend. Adding a
+    provider is a row + an adapter + an order entry, no code here."""
+    order = media_dest.resolve_order_sync(session, "image")
+    if not order:
+        # Legacy default: a lone openai destination (pre-FIX67 behaviour) so a
+        # deployment that never seeds the order still offers image generation.
+        order = [media_dest.Destination(provider="openai", model="gpt-image-1")]
+    return media_dest.usable_destinations(
+        order,
+        valid_providers=valid_providers,
+        mock_enabled=media_dest.allow_mock_sync(session),
+        registered_providers=registered_image_providers(),
+    )
 
 
 @router.get(
@@ -57,13 +66,14 @@ async def get_models(
     included (the gateway router resolves it to whatever IS reachable).
     """
     valid_providers = ProviderKeyService().providers_with_valid_keys(session)
-    # FIX62 — the one answer to "is there a model that can actually make
-    # an image right now": the generate_image tool and the dedicated
-    # image models both dispatch to OpenAI's images endpoint (see
-    # public_images.py), so the target exists exactly when OpenAI has a
-    # usable key. Kept in one place so the via-tools flag and the
-    # image-model listing cannot disagree.
-    image_target_available = image_generation_target_available(valid_providers)
+    # FIX67 — "is there a model that can make an image right now" is now "does
+    # the media_order:image have a usable destination" (a real key, or mock when
+    # enabled). One answer, so the via-tools flag and the image-model listing
+    # cannot disagree, and the 🎨 button reflects the whole ordered pipeline
+    # rather than a single hardcoded provider.
+    image_destinations = usable_image_destinations(session, valid_providers)
+    image_target_available = len(image_destinations) > 0
+    image_provider_set = {d.provider for d in image_destinations}
     entries: list[ModelInfo] = [ModelInfo(id="auto", provider="gateway")]
     # FIX28 §5.2: a video model (supports_video_gen) is listed ONCE, by the
     # media loop below with video_generation set — never as a chat entry.
@@ -179,15 +189,25 @@ async def get_models(
             )
         )
 
-    # Image models (DALL-E) — decoupled from the chat routing candidate pool
-    # so ``model:auto`` never sends a chat request to an image model. Listed
-    # only when OpenAI has a usable key (same gate as chat models).
+    # Image models — catalogue rows (supports_image_gen), decoupled from the
+    # chat routing candidate pool (they are is_active=false so ``model:auto``
+    # never elects them). FIX67: listed from the catalogue, not a Python tuple,
+    # and only for a provider that is a usable image destination right now — so
+    # a new image backend appears here by adding a row + an order entry.
+    from app.models.model_config import ModelConfigORM as _ImgRowORM
+    from sqlalchemy import select as _isel
+
     if image_target_available:
-        for m in IMAGE_MODELS:
+        img_rows = session.execute(
+            _isel(_ImgRowORM).where(_ImgRowORM.supports_image_gen.is_(True))
+        ).scalars().all()
+        for mc in img_rows:
+            if mc.provider not in image_provider_set:
+                continue
             entries.append(
                 ModelInfo(
-                    id=m,
-                    provider="openai",
+                    id=mc.model,
+                    provider=mc.provider,
                     capabilities=ModelCapabilities(image_generation=True),
                 )
             )

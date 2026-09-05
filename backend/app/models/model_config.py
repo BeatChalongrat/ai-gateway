@@ -98,6 +98,13 @@ class ModelConfigORM(Base):
     supports_tts: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("false")
     )
+    # FIX67 — image generation is a catalogue capability like video/tts
+    # (migration 085), so a second image backend is a row + adapter, not a
+    # hardcoded frozenset. Image rows stay is_active=false so they never enter
+    # the chat routing pool (0 per-token cost would otherwise win auto).
+    supports_image_gen: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=sa.text("false")
+    )
     cost_per_second: Mapped[Decimal | None] = mapped_column(
         sa.Numeric(10, 6), nullable=True
     )
