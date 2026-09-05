@@ -236,7 +236,7 @@ ${SHELL_ENVIRONMENT_LINE}`;
 }
 
 export class PromptAssembler {
-  private serverMemories: { content: string; createdAt: string }[] = [];
+  private serverMemories: MemoryNote[] = [];
   private serverMemoriesAt = 0;
 
   /** FIX56.1 — what a temporary chat does with the memories already on
@@ -371,14 +371,14 @@ Web search is turned on in this app but your organisation has NOT enabled it for
 
   /** chat-edge's global_user memories (60 s cache, best-effort). Gated the
    * same way as the local notes — see notesBlock. */
-  private async serverMemoriesFor(mayRead: boolean): Promise<{ content: string; createdAt: string }[]> {
+  private async serverMemoriesFor(mayRead: boolean): Promise<MemoryNote[]> {
     if (!mayRead) return [];
     if (Date.now() - this.serverMemoriesAt > SERVER_MEMORY_TTL_MS) {
       try {
         const memories = await this.chatEdge.listGlobalMemories(100);
         this.serverMemories = memories
           .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
-          .map((m) => ({ content: m.content, createdAt: m.created_at ?? "" }));
+          .map((m) => ({ content: m.content, createdAt: m.created_at ?? "", memoryType: m.memory_type }));
         this.serverMemoriesAt = Date.now();
       } catch (err) {
         this.log.info(`Could not read server memories: ${(err as Error).message}`);
@@ -390,13 +390,21 @@ Web search is turned on in this app but your organisation has NOT enabled it for
 
 /** MergeGlobalMemories, ported: local first (local wins a duplicate), dedup by
  * trimmed content case-insensitively, order oldest→newest. */
+/** One global memory as the prompt sees it. `memoryType` is the server's
+ * class (see MemoryDto); local sidecar notes carry none and render as facts. */
+interface MemoryNote {
+  content: string;
+  createdAt: string;
+  memoryType?: string;
+}
+
 function mergeGlobalMemories(
-  local: { content: string; createdAt: string }[],
-  server: { content: string; createdAt: string }[],
-): { content: string; createdAt: string }[] {
+  local: MemoryNote[],
+  server: MemoryNote[],
+): MemoryNote[] {
   if (server.length === 0 && local.length === 0) return [];
   const seen = new Set<string>();
-  const merged: { content: string; createdAt: string }[] = [];
+  const merged: MemoryNote[] = [];
   for (const n of [...local, ...server]) {
     const key = n.content.trim().toLowerCase();
     if (key.length === 0 || seen.has(key)) continue;
@@ -407,22 +415,49 @@ function mergeGlobalMemories(
   return merged;
 }
 
-/** AgentNotesFormatter's global half: newest-first, own cap, "(+N older…)". */
-function renderGlobalBlock(notes: { content: string; createdAt: string }[]): string {
+/** The memory classes the web frame treats as standing instructions
+ * (chat-edge renderMemoryBlock); everything else is a fact. */
+const INSTRUCTION_MEMORY_TYPES = new Set(["confirmed_instruction", "response_preference", "inferred_preference"]);
+
+/** AgentNotesFormatter's global half: newest-first, own cap, "(+N older…)".
+ *
+ * FIX63 — same words as the web frame. Until now this block told the model
+ * that every saved memory was a hint ("hints, not guarantees") while the
+ * web frame told it that standing instructions are to be followed in every
+ * response — the same saved memory, two contracts, depending on which
+ * client the user opened. The web wording is the measured one (FIX49 Part
+ * D, FIX56); this renders the same two sections with the same sentences:
+ * standing instructions (the user's confirmed/response preferences) to
+ * follow, facts to use when relevant and not force in. Local sidecar notes
+ * carry no class and stay facts. Newest-first order and the size cap are
+ * unchanged. */
+function renderGlobalBlock(notes: MemoryNote[]): string {
   if (notes.length === 0) return "";
-  let out = "\n\n## Memory (global)\n";
-  out += "Durable facts about the user, saved across ALL conversations (newest first). ";
-  out += "Apply them without re-asking; they are hints, not guarantees.\n";
+  const instructions: string[] = [];
+  const facts: string[] = [];
   let used = 0;
+  let omitted = 0;
   for (let i = notes.length - 1; i >= 0; i--) {
-    const line = "- " + oneLine(notes[i]!.content) + "\n";
+    const n = notes[i]!;
+    const line = "- " + oneLine(n.content) + "\n";
     if (used + line.length > MAX_GLOBAL_BLOCK_CHARS && used > 0) {
-      out += `(+${i + 1} older note(s) omitted)\n`;
+      omitted = i + 1;
       break;
     }
-    out += line;
+    (n.memoryType && INSTRUCTION_MEMORY_TYPES.has(n.memoryType) ? instructions : facts).push(line);
     used += line.length;
   }
+  let out = "\n\n## Memory (global)\n";
+  if (instructions.length > 0) {
+    out += "The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:\n";
+    for (const line of instructions) out += line;
+  }
+  if (facts.length > 0) {
+    out += "Facts about this user, saved earlier (newest first). Use them when relevant — do not force them into every response:\n";
+    for (const line of facts) out += line;
+  }
+  if (omitted > 0) out += `(+${omitted} older note(s) omitted)\n`;
+  out += "Do not say 'according to my memory' or mention the memory system.\n";
   return out;
 }
 

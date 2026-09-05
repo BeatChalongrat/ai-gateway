@@ -32,6 +32,11 @@ export interface MemoryDto {
   id: string;
   content: string;
   created_at?: string;
+  /** FIX63 — the server's class for the memory (confirmed_instruction,
+   * response_preference, inferred_preference, explicit_fact, …). The
+   * prompt renders standing instructions and facts under different
+   * headings, the way the web frame does; absent ⇒ treated as a fact. */
+  memory_type?: string;
 }
 /** FIX27: one row of GET /conversations/{id}/files (handler.fileResponse). */
 export interface FileRowDto {
