@@ -228,8 +228,17 @@ func TestMapImageGenerationError(t *testing.T) {
 			code: "image_auth_error",
 		},
 		{
-			name: "rate limited",
+			// FIX66 Part 4 — insufficient_quota is the image account out of
+			// credits, not a passing rate limit. It must NOT collapse to the
+			// retryable image_rate_limited ("wait and try again").
+			name: "out of credits (insufficient_quota)",
 			err:  &GatewayUnavailableError{Status: 429, Body: `{"error":{"code":"rate_limit_exceeded","message":"rate limit","details":{"status":429,"body":{"error":{"code":"insufficient_quota"}}}}}`},
+			code: "image_no_credit",
+		},
+		{
+			// A genuine rate limit (no quota/billing signal) stays retryable.
+			name: "rate limited (no quota)",
+			err:  &GatewayUnavailableError{Status: 429, Body: `{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for images","details":{"status":429,"body":{"error":{"code":"rate_limit_exceeded","type":"requests"}}}}}`},
 			code: "image_rate_limited",
 		},
 		{

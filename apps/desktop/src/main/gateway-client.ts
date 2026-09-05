@@ -14,6 +14,30 @@
 
 import type { Logger } from "./logger";
 
+/** FIX66 Part 4 — map a failed /v1/images/generations response into one
+ *  truthful sentence for the model to relay. The desktop calls the image
+ *  endpoint directly, so a failure here must never read as the chat model's
+ *  fault, and an out-of-credits account must not be dressed up as a passing
+ *  rate limit ("try again") when a top-up is what's actually needed.
+ *  Pure + exported so it is unit-testable without a live gateway. */
+export function classifyDesktopImageError(status: number, body: string): string {
+  const lower = (body || "").toLowerCase();
+  const outOfCredit =
+    lower.includes("insufficient_quota") ||
+    lower.includes("billing") ||
+    lower.includes("exceeded your current quota") ||
+    lower.includes("out of credit");
+  if (outOfCredit)
+    return "Image generation is unavailable because the image service's account is out of credits (this is separate from the chat model in use). It needs an administrator to top it up — retrying will not help.";
+  if (status === 429 || lower.includes("rate_limit") || lower.includes("rate limit"))
+    return "The image service is busy right now (this is separate from the chat model in use). Wait a moment and try again.";
+  if (status === 401 || status === 403 || lower.includes("no api key") || lower.includes("permission"))
+    return "The image service is not authorized — its API key or model permission needs an administrator's attention.";
+  if (status === 503 || lower.includes("not configured") || lower.includes("no api key configured"))
+    return "Image generation is not configured on this deployment. Please contact your administrator.";
+  return "The image could not be generated right now. Please try again in a moment.";
+}
+
 /** OpenAI-compatible wire shapes (GatewayModels.cs). E4 adds the tool chain:
  * assistant messages with tool_calls, tool-role results, and multimodal
  * user content (a screenshot image block after a screenshot tool). */
@@ -380,8 +404,11 @@ export class GatewayClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
       });
       if (!res.ok) {
-        const detail = (await res.text().catch(() => "")).slice(0, 200);
-        return { ok: false, error: `Image generation failed: HTTP ${res.status} ${detail}` };
+        const detail = (await res.text().catch(() => "")).slice(0, 400);
+        // FIX66 Part 4 — hand the model a truthful sentence, not raw HTTP/JSON.
+        // In particular an out-of-credits image account must not read as the
+        // chat model's fault (the desktop path calls the gateway directly).
+        return { ok: false, error: classifyDesktopImageError(res.status, detail) };
       }
       const body = (await res.json()) as { data?: { b64_json?: string; url?: string; revised_prompt?: string }[] };
       const first = body.data?.[0];

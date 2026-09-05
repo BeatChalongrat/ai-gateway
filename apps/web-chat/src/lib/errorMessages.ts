@@ -109,6 +109,9 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   image_invalid_request: "error.image_invalid_request",
   image_auth_error: "error.image_auth_error",
   image_rate_limited: "error.image_rate_limited",
+  // FIX66 Part 4 — the image backend's account is out of credits. NOT
+  // retryable (kept out of RETRYABLE_CODES): waiting doesn't refill it.
+  image_no_credit: "error.image_no_credit",
   image_timeout: "error.image_timeout",
   image_provider_unavailable: "error.image_provider_unavailable",
   image_provider_error: "error.image_provider_error",

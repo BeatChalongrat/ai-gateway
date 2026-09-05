@@ -4429,11 +4429,25 @@ func classifyGatewayImageError(status int, body string) *ImageGenerationError {
 			Message: "คำขอสร้างรูปไม่ถูกต้อง หรือโมเดล/ขนาดรูปไม่รองรับ",
 			Status:  providerStatusOr(providerStatus, 400),
 		}
+	// FIX66 Part 4 — the image BACKEND's account is out of credits. OpenAI
+	// returns this as a 429 with code/type "insufficient_quota" (or a billing
+	// hard-limit), which the old code lumped into image_rate_limited and told
+	// the user to "wait and try again" — advice that never helps a drained
+	// account. It is the image service that is out of credit, NOT the chat
+	// model the user picked, so the message says so and points at the admin.
+	// Non-retryable (mirrors provider_no_credit).
+	case strings.Contains(lower, "insufficient_quota") || strings.Contains(lower, "billing") ||
+		strings.Contains(lower, "exceeded your current quota") || strings.Contains(lower, "out of credit"):
+		return &ImageGenerationError{
+			Code:    "image_no_credit",
+			Message: "บริการสร้างรูปถูกใช้เครดิตหมดแล้ว จึงสร้างรูปไม่ได้ในขณะนี้ (คนละส่วนกับโมเดลแชทที่เลือก) กรุณาติดต่อผู้ดูแลระบบ",
+			Status:  providerStatusOr(providerStatus, 429),
+		}
 	case providerStatus == 429 || strings.Contains(lower, "rate_limit") ||
-		strings.Contains(lower, "insufficient_quota") || strings.Contains(lower, "quota"):
+		strings.Contains(lower, "rate limit"):
 		return &ImageGenerationError{
 			Code:    "image_rate_limited",
-			Message: "โควต้าหรือ rate limit สำหรับสร้างรูปเต็มแล้ว กรุณารอสักครู่แล้วลองใหม่",
+			Message: "บริการสร้างรูปกำลังถูกจำกัดจำนวนคำขอ (คนละส่วนกับโมเดลแชทที่เลือก) กรุณารอสักครู่แล้วลองใหม่",
 			Status:  providerStatusOr(providerStatus, 429),
 		}
 	case status == 504 || code == "provider_timeout" || strings.Contains(lower, "timed out") ||

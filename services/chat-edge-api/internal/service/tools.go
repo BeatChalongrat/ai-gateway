@@ -1214,11 +1214,18 @@ func (e *ToolExecutor) execGenerateImage(
 		// Map common provider HTTP statuses to an actionable message. The
 		// status=NNN / body markers come from GatewayUnavailableError.
 		errStr := err.Error()
+		lower := strings.ToLower(errStr)
 		switch {
 		case strings.Contains(errStr, "status=403"):
 			return "The image generation model is not available with the current API configuration. Please contact your administrator."
+		// FIX66 Part 4 — out of credits on the image backend (not a passing
+		// rate limit): tell the user it is the image service's account, not
+		// the chat model they picked, and that waiting will not help.
+		case strings.Contains(lower, "insufficient_quota") || strings.Contains(lower, "billing") ||
+			strings.Contains(lower, "exceeded your current quota") || strings.Contains(lower, "out of credit"):
+			return "Image generation is unavailable because the image service's account is out of credits (this is separate from the chat model you're using). Please contact your administrator — retrying won't help until it's topped up."
 		case strings.Contains(errStr, "status=429"):
-			return "Image generation rate limit reached. Please wait a moment and try again."
+			return "The image service is busy right now (this is separate from the chat model you're using). Please wait a moment and try again."
 		case strings.Contains(errStr, "status=401"):
 			return "The API key for image generation is invalid. Please contact your administrator."
 		case strings.Contains(errStr, "No API key configured"), strings.Contains(errStr, "status=503"):
