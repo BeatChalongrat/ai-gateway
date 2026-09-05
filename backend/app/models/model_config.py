@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, func
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -125,6 +126,16 @@ class ModelConfigORM(Base):
     # list in code.
     show_in_chat: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=sa.text("true")
+    )
+    # FIX64 — where each capability flag came from (migration 083):
+    # ``{"tools": {"source": "admin"|"provider"|"inferred"|"probe"|"seed",
+    # "at": iso, "evidence": str}, ..., "tests": {cap: last test result}}``.
+    # ``{}`` for rows that predate the column: unknown, not guessed.
+    capability_provenance: Mapped[dict] = mapped_column(
+        sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
+        nullable=False,
+        server_default=sa.text("'{}'"),
+        default=dict,
     )
     last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

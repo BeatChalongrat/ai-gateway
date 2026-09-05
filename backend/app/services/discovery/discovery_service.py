@@ -449,10 +449,39 @@ class ModelDiscoveryService:
                 # _VISION_KEYWORDS when it shipped) — an inference miss
                 # must not demote a row corrected by migration or admin.
                 # Demotion stays a manual admin action.
-                if model.supports_tools and not row.supports_tools:
+                # FIX64 — a value a person set or a test proved is not
+                # re-guessed: the row's provenance says which flags the
+                # sync may still promote, and records where a promotion
+                # came from (the provider's own statement vs a name).
+                from app.services.capability_test import (
+                    discovery_may_promote,
+                    record_provenance,
+                )
+                from app.services.discovery.provider_discovery import (
+                    _provider_stated_capabilities,
+                )
+
+                stated = _provider_stated_capabilities(model.raw)
+                if (
+                    model.supports_tools
+                    and not row.supports_tools
+                    and discovery_may_promote(row, "tools")
+                ):
                     row.supports_tools = True
-                if model.supports_vision and not row.supports_vision:
+                    record_provenance(
+                        row, "tools",
+                        "provider" if "supports_tools" in stated else "inferred",
+                    )
+                if (
+                    model.supports_vision
+                    and not row.supports_vision
+                    and discovery_may_promote(row, "vision")
+                ):
                     row.supports_vision = True
+                    record_provenance(
+                        row, "vision",
+                        "provider" if "supports_vision" in stated else "inferred",
+                    )
                 # Context: a discovered value equal to the provider-
                 # adapter sentinel means "the API didn't say and litellm
                 # had no entry" — keep the row's real value instead of

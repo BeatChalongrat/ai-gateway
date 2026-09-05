@@ -141,6 +141,9 @@ def _serialize_row(row: ModelConfigORM) -> dict:
         "is_manual_override": row.is_manual_override,
         "is_active": row.is_active,
         "show_in_chat": getattr(row, "show_in_chat", True),
+        # FIX64 — where each capability flag came from, and the last
+        # capability-test result per capability (migration 083).
+        "capability_provenance": dict(getattr(row, "capability_provenance", None) or {}),
         "last_synced_at": row.last_synced_at,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
@@ -348,6 +351,14 @@ async def update_model(
 
     for key, value in updates.items():
         setattr(row, key, value)
+    # FIX64 — a capability a person sets is remembered as theirs: the
+    # capability test proposes instead of overwriting it, and the
+    # discovery sync stops re-guessing it.
+    from app.services.capability_test import CAPABILITY_FIELDS, record_provenance
+
+    for cap, field_name in CAPABILITY_FIELDS.items():
+        if field_name in updates:
+            record_provenance(row, cap, "admin")
     # FIX47 Part C — show_in_chat is an admin choice the discovery sync
     # never writes, so changing it alone must not freeze the row out of
     # sync (is_manual_override makes the sync skip flags and prices too).
@@ -369,6 +380,71 @@ async def update_model(
         pass
 
     return _serialize_row(row)
+
+
+# ---------------------------------------------------------------------------
+# FIX64 — per-model capability test (a person clicks; nothing sweeps)
+#   GET  /{model_id}/capability-test          — what a click would send
+#   POST /{model_id}/capability-test/{cap}    — one real request, verdict
+# ---------------------------------------------------------------------------
+
+class CapabilityTestBody(BaseModel):
+    # False = report only (the admin page's "test without changing").
+    apply: bool = True
+
+
+@router.get("/{model_id}/capability-test")
+def capability_test_plan(
+    model_id: int,
+    session: Session = Depends(get_db_session),
+):
+    """Which capabilities a test would send requests for, how many, and
+    whether the provider bills — stated before anything is sent."""
+    from app.services.capability_test import plan_for
+
+    row = session.get(ModelConfigORM, model_id)
+    if row is None:
+        raise NotFoundError(
+            f"Model config #{model_id} not found.",
+            details={"model_id": model_id},
+        )
+    return plan_for(row)
+
+
+@router.post("/{model_id}/capability-test/{capability}")
+async def capability_test_run(
+    model_id: int,
+    capability: str,
+    body: CapabilityTestBody | None = None,
+    session: Session = Depends(get_db_session),
+):
+    """Send ONE real request for ``capability`` and record the verdict.
+
+    proven_yes / proven_no change the flag unless a person set it (then
+    the result is a proposal); inconclusive / unreachable change nothing
+    and are shown as such. Never 500s on a provider failure — the
+    failure is the verdict.
+    """
+    from app.services.capability_test import NOT_TESTABLE, TESTABLE, run_capability_test
+
+    row = session.get(ModelConfigORM, model_id)
+    if row is None:
+        raise NotFoundError(
+            f"Model config #{model_id} not found.",
+            details={"model_id": model_id},
+        )
+    if capability not in TESTABLE:
+        raise ValidationError(
+            f"Capability '{capability}' cannot be tested.",
+            details={
+                "capability": capability,
+                "testable": list(TESTABLE),
+                "reason": NOT_TESTABLE.get(capability, "unknown capability"),
+            },
+        )
+    apply = body.apply if body is not None else True
+    result = await run_capability_test(session, row, capability, apply=apply)
+    return {"model_id": row.id, "provider": row.provider, "model": row.model, **result}
 
 
 # ---------------------------------------------------------------------------
