@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
@@ -31,6 +31,10 @@ interface ModelItem {
   reasoning_strategy?: string;
   default_reasoning_mode?: string;
   is_manual_override?: boolean;
+  // FIX64 — where each capability flag came from (admin / provider /
+  // inferred / probe / seed) and the last capability-test result per
+  // capability. Empty for rows that predate migration 083.
+  capability_provenance?: CapabilityProvenance;
   is_active: boolean;
   // FIX47 Part C — the catalogue's second axis: offered in the chat
   // picker. Independent of is_active (API access). Edited right here.
@@ -181,6 +185,207 @@ const CAPABILITY_SWITCHES: { key: CapabilityKey; label: CapLabelKey; colour: str
   { key: "supports_tts", label: "infra.models.cap.tts", colour: "#059669" },
 ];
 
+/* ── FIX64: capability provenance + the per-model capability test ───── */
+
+type CapSource = "admin" | "provider" | "inferred" | "probe" | "seed";
+type CapVerdict = "proven_yes" | "proven_no" | "inconclusive" | "unreachable";
+interface CapTestRecord { verdict: CapVerdict; evidence?: string; at?: string; applied?: boolean; proposal?: boolean }
+interface CapabilityProvenance {
+  tools?: { source: CapSource; at?: string; evidence?: string };
+  vision?: { source: CapSource; at?: string; evidence?: string };
+  streaming?: { source: CapSource; at?: string; evidence?: string };
+  reasoning?: { source: CapSource; at?: string; evidence?: string };
+  video_gen?: { source: CapSource; at?: string; evidence?: string };
+  audio_gen?: { source: CapSource; at?: string; evidence?: string };
+  tts?: { source: CapSource; at?: string; evidence?: string };
+  tests?: Partial<Record<string, CapTestRecord>>;
+}
+// The testable capabilities, in the order the test runs them, and the
+// row field each one writes. Mirrors backend capability_test.TESTABLE.
+const TESTABLE_CAPS = ["tools", "vision", "streaming", "reasoning"] as const;
+type TestableCap = (typeof TESTABLE_CAPS)[number];
+const CAP_FIELD: Record<TestableCap, keyof ModelItem> = {
+  tools: "supports_tools", vision: "supports_vision", streaming: "supports_streaming", reasoning: "supports_reasoning",
+};
+const CAP_NAME_KEY: Record<TestableCap, CapLabelKey> = {
+  tools: "infra.models.capTest.cap.tools", vision: "infra.models.capTest.cap.vision",
+  streaming: "infra.models.capTest.cap.streaming", reasoning: "infra.models.capTest.cap.reasoning",
+};
+const PROVENANCE_CAP: Partial<Record<CapabilityKey, keyof CapabilityProvenance>> = {
+  supports_tools: "tools", supports_vision: "vision", supports_video_gen: "video_gen",
+  supports_audio_gen: "audio_gen", supports_tts: "tts",
+};
+
+interface CapTestPlan {
+  capabilities: TestableCap[];
+  requests: number;
+  requests_per_capability: Record<string, number>;
+  max_tokens_total: number;
+  paid: boolean;
+}
+interface CapTestResult {
+  capability: TestableCap;
+  verdict: CapVerdict;
+  evidence: string;
+  latency_ms: number;
+  stored_before: boolean;
+  stored_after: boolean;
+  applied: boolean;
+  proposal: boolean;
+  proposed_value: boolean | null;
+  reasoning_strategy?: string;
+  provenance?: CapabilityProvenance;
+}
+
+function sourceLabel(t: ReturnType<typeof useT>, source: CapSource | undefined): string {
+  switch (source) {
+    case "admin": return t("infra.models.capSource.admin");
+    case "provider": return t("infra.models.capSource.provider");
+    case "inferred": return t("infra.models.capSource.inferred");
+    case "probe": return t("infra.models.capSource.probe");
+    case "seed": return t("infra.models.capSource.seed");
+    default: return t("infra.models.capSource.unknown");
+  }
+}
+
+function verdictLabel(t: ReturnType<typeof useT>, v: CapVerdict): string {
+  switch (v) {
+    case "proven_yes": return t("infra.models.capTestVerdict.proven_yes");
+    case "proven_no": return t("infra.models.capTestVerdict.proven_no");
+    case "unreachable": return t("infra.models.capTestVerdict.unreachable");
+    default: return t("infra.models.capTestVerdict.inconclusive");
+  }
+}
+
+const VERDICT_COLOUR: Record<CapVerdict, string> = {
+  proven_yes: "#059669", proven_no: "#dc2626", inconclusive: "#d97706", unreachable: "#64748b",
+};
+
+/** One request per capability, in order, only while the person has not
+ *  pressed Stop; every result lands on the row as the server reports it. */
+function CapabilityTest({
+  item, onChange, onResult,
+}: {
+  item: ModelItem;
+  onChange: (id: number, patch: Record<string, unknown>) => Promise<void>;
+  onResult: (id: number, patch: Partial<ModelItem>) => void;
+}) {
+  const t = useT();
+  const [phase, setPhase] = useState<"idle" | "plan" | "running" | "done">("idle");
+  const [plan, setPlan] = useState<CapTestPlan | null>(null);
+  const [results, setResults] = useState<CapTestResult[]>([]);
+  const [current, setCurrent] = useState<TestableCap | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const stopRef = useRef(false);
+
+  const loadPlan = async () => {
+    setError(null);
+    try {
+      const p = (await api.get(`/admin/models/${item.id}/capability-test`)) as CapTestPlan;
+      setPlan(p);
+      setPhase("plan");
+    } catch (e) {
+      setError(getApiErrorMessage(e, t("infra.models.capTestFailed")));
+    }
+  };
+
+  const run = async () => {
+    if (!plan) return;
+    stopRef.current = false;
+    setStopped(false);
+    setResults([]);
+    setPhase("running");
+    const out: CapTestResult[] = [];
+    for (const cap of plan.capabilities) {
+      if (stopRef.current) { setStopped(true); break; }
+      setCurrent(cap);
+      try {
+        const r = (await api.post(`/admin/models/${item.id}/capability-test/${cap}`, { apply: true })) as CapTestResult;
+        out.push(r);
+        setResults([...out]);
+        const patch: Partial<ModelItem> = { [CAP_FIELD[cap]]: r.stored_after } as Partial<ModelItem>;
+        if (r.provenance) patch.capability_provenance = r.provenance;
+        if (r.reasoning_strategy) patch.reasoning_strategy = r.reasoning_strategy;
+        onResult(item.id, patch);
+      } catch (e) {
+        setError(getApiErrorMessage(e, t("infra.models.capTestFailed")));
+        break;
+      }
+    }
+    setCurrent(null);
+    setPhase("done");
+  };
+
+  const capNames = (caps: readonly TestableCap[]) => caps.map((c) => t(CAP_NAME_KEY[c])).join(", ");
+  const onOff = (v: boolean | null | undefined) => t(v ? "infra.models.on" : "infra.models.off");
+  const small: React.CSSProperties = { fontSize: "0.625rem", color: "var(--text-tertiary)" };
+  const btn: React.CSSProperties = {
+    fontSize: "0.625rem", padding: "0.125rem 0.5rem", borderRadius: 4, cursor: "pointer",
+    border: "1px solid var(--border-default)", background: "var(--bg-secondary)", color: "var(--text-secondary)",
+  };
+
+  if (phase === "idle") {
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", gap: "0.125rem" }}>
+        <button type="button" style={btn} data-testid="cap-test" title={t("infra.models.capTestTitle", { provider: item.provider, model: item.model })} onClick={loadPlan}>
+          {t("infra.models.capTest")}
+        </button>
+        {error && <span style={{ ...small, color: "#dc2626" }}>{error}</span>}
+      </span>
+    );
+  }
+  if (phase === "plan" && plan) {
+    return (
+      <span style={{ display: "inline-flex", flexDirection: "column", gap: "0.25rem", maxWidth: 360 }} data-testid="cap-test-plan">
+        <span style={small}>{t("infra.models.capTestPlan", { n: String(plan.requests), caps: capNames(plan.capabilities), tokens: String(plan.max_tokens_total) })}</span>
+        <span style={{ ...small, color: plan.paid ? "#d97706" : "var(--text-tertiary)" }}>{t(plan.paid ? "infra.models.capTestPaid" : "infra.models.capTestFree")}</span>
+        <span style={small}>{t("infra.models.capTestNotTestable")}</span>
+        <span style={{ display: "inline-flex", gap: "0.375rem" }}>
+          <button type="button" style={{ ...btn, fontWeight: 600 }} data-testid="cap-test-start" onClick={run}>{t("infra.models.capTestStart")}</button>
+          <button type="button" style={btn} data-testid="cap-test-cancel" onClick={() => setPhase("idle")}>{t("infra.models.capTestCancel")}</button>
+        </span>
+      </span>
+    );
+  }
+  const n = plan?.capabilities.length ?? TESTABLE_CAPS.length;
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: "0.25rem", maxWidth: 420 }} data-testid="cap-test-results">
+      {phase === "running" && current && (
+        <span style={{ display: "inline-flex", gap: "0.375rem", alignItems: "center" }}>
+          <span style={small} aria-live="polite">{t("infra.models.capTestRunning", { cap: t(CAP_NAME_KEY[current]), i: String(results.length + 1), n: String(n) })}</span>
+          <button type="button" style={btn} data-testid="cap-test-stop" onClick={() => { stopRef.current = true; }}>{t("infra.models.capTestStop")}</button>
+        </span>
+      )}
+      {results.map((r) => (
+        <span key={r.capability} style={{ ...small, display: "inline-flex", gap: "0.375rem", alignItems: "baseline", flexWrap: "wrap" }} data-testid={`cap-test-result-${r.capability}`} title={r.evidence}>
+          <strong style={{ color: "var(--text-secondary)" }}>{t(CAP_NAME_KEY[r.capability])}</strong>
+          <span style={{ color: VERDICT_COLOUR[r.verdict], fontWeight: 600 }}>{verdictLabel(t, r.verdict)}</span>
+          <span>
+            {r.applied
+              ? t("infra.models.capTestApplied", { value: onOff(r.stored_after) })
+              : r.proposal
+                ? t("infra.models.capTestProposal", { value: onOff(r.proposed_value) })
+                : t("infra.models.capTestUnchanged")}
+          </span>
+          {r.proposal && r.proposed_value !== null && (
+            <button type="button" style={btn} data-testid={`cap-test-apply-${r.capability}`} onClick={() => onChange(item.id, { [CAP_FIELD[r.capability]]: r.proposed_value })}>
+              {t("infra.models.capTestApply")}
+            </button>
+          )}
+        </span>
+      ))}
+      {phase === "done" && (
+        <span style={{ display: "inline-flex", gap: "0.375rem", alignItems: "center" }}>
+          <span style={small}>{stopped ? t("infra.models.capTestStopped", { i: String(results.length), n: String(n) }) : t("infra.models.capTestDone")}</span>
+          {error && <span style={{ ...small, color: "#dc2626" }}>{error}</span>}
+          <button type="button" style={btn} onClick={() => { setPhase("idle"); setResults([]); setError(null); }}>{t("infra.models.capTest")}</button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function CapabilitySwitch({
   item, cap, onChange,
 }: {
@@ -192,6 +397,11 @@ function CapabilitySwitch({
   const [busy, setBusy] = useState(false);
   const on = !!item[cap.key];
   const name = t(cap.label);
+  // FIX64 — the tooltip says where the value came from.
+  const provKey = PROVENANCE_CAP[cap.key];
+  const prov = provKey ? item.capability_provenance?.[provKey] : undefined;
+  const source = prov && "source" in prov ? (prov as { source: CapSource }).source : undefined;
+  const title = `${t(on ? "infra.models.capOn" : "infra.models.capOff", { cap: name })} ${t("infra.models.capSource", { source: sourceLabel(t, source) })}`;
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.625rem", color: "var(--text-tertiary)" }}>
       <button
@@ -199,7 +409,8 @@ function CapabilitySwitch({
         role="switch"
         aria-checked={on}
         aria-label={t("infra.models.capToggle", { cap: name })}
-        title={t(on ? "infra.models.capOn" : "infra.models.capOff", { cap: name })}
+        title={title}
+        data-source={source ?? "unknown"}
         disabled={busy}
         data-testid={`cap-switch-${cap.key}`}
         onClick={async () => {
@@ -222,12 +433,21 @@ function CapabilitySwitch({
   );
 }
 
-function CapabilityCell({ item, onChange }: { item: ModelItem; onChange: (id: number, patch: Record<string, unknown>) => Promise<void> }) {
+function CapabilityCell({
+  item, onChange, onResult,
+}: {
+  item: ModelItem;
+  onChange: (id: number, patch: Record<string, unknown>) => Promise<void>;
+  onResult: (id: number, patch: Partial<ModelItem>) => void;
+}) {
   return (
     <div style={{ display: "flex", gap: "0.375rem 0.625rem", flexWrap: "wrap", alignItems: "center" }}>
       {CAPABILITY_SWITCHES.map((cap) => (
         <CapabilitySwitch key={cap.key} item={item} cap={cap} onChange={onChange} />
       ))}
+      {/* FIX64 — measure instead of guess: one click, one request per
+          capability, the row shows what was found and what changed. */}
+      <CapabilityTest item={item} onChange={onChange} onResult={onResult} />
     </div>
   );
 }
@@ -603,6 +823,13 @@ export default function ModelsPage() {
     }
   }, [t]);
 
+  // FIX64 — a capability-test result is the SERVER's word on the row
+  // (flag after the verdict, provenance, a filled-in reasoning strategy);
+  // it lands in the same overlay so the switches show what was measured.
+  const applyTestResult = useCallback((id: number, patch: Partial<ModelItem>) => {
+    setLocalReasoning((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...patch } }));
+  }, []);
+
   const providers = useMemo(() => {
     const c: Record<string, number> = {};
     items.forEach((m) => { c[m.provider] = (c[m.provider] || 0) + 1; });
@@ -877,7 +1104,7 @@ export default function ModelsPage() {
                                 What the catalogue says a model can do is
                                 the admin's to correct here. */}
                             <td>
-                              <CapabilityCell item={m} onChange={setCapability} />
+                              <CapabilityCell item={m} onChange={setCapability} onResult={applyTestResult} />
                             </td>
                             {/* Stream */}
                             <td style={{ textAlign: "center" }}>
@@ -962,7 +1189,7 @@ export default function ModelsPage() {
                         {/* Context */}
                         {meta?.ctx && <ContextBar ctx={meta.ctx} ctxK={meta.ctxK} />}
                         {/* Caps — FIX62: the same switches as the table view */}
-                        <CapabilityCell item={m} onChange={setCapability} />
+                        <CapabilityCell item={m} onChange={setCapability} onResult={applyTestResult} />
                         {/* Footer badges */}
                         <div style={{ display: "flex", gap: "0.25rem", marginTop: "auto", flexWrap: "wrap" }}>
                           {m.supports_streaming && (
