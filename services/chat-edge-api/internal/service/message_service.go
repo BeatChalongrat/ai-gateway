@@ -1399,22 +1399,11 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		cancel()
 		return s.directImageStream(imageCtx, imageCancel, reg, conv, userMsg, asstMsg, in), nil
 	}
-	// Phase C + D — image routing. When the turn wants an image (the 🎨
-	// toggle OR a detected "generate an image" intent): if the selected model
-	// can call tools, apply the generate_image hint and proceed; if it
-	// CANNOT, reject with a helpful "pick a 🎨 model" message — no gateway
-	// call, no silent model swap — so the user keeps control of their model.
-	if intent := DetectImageIntent(in.Content); (in.ImageMode || intent) && toolsAttached {
-		// Unknown capability (checker not wired) -> treat as capable so we
-		// never wrongly reject; only reject when we KNOW the model can't.
-		toolCapable := s.toolCapable == nil || s.toolCapable(ctx, gwReq.Model)
-		if shouldRejectImageTurn(toolCapable, intent, in.ImageMode) {
-			slog.Info("phase-d: image request rejected (model lacks tools)",
-				"conv_model", conv.ModelID, "intent", intent, "image_mode", in.ImageMode)
-			return s.rejectImageStream(conv, userMsg, asstMsg, cancel), nil
-		}
-		applyImageModeHint(&gwReq)
-	}
+	// FIX63 — the Phase D branch that used to sit here ("reject when the
+	// model lacks tools, else apply the image-mode hint") was unreachable:
+	// every image turn returns through directImageStream above. Removed
+	// rather than left looking alive. The composer both clients share
+	// holds an image request at a model that cannot make images (FIX62).
 	stream, err := s.gateway.SendChatCompletionStream(
 		streamCtx, gatewayCallContext(in, conv), gwReq,
 	)
@@ -3970,31 +3959,6 @@ func (s *MessageService) webSearchEnabled(ctx context.Context) bool {
 	return cfg.Enabled
 }
 
-// applyImageModeHint appends a generate_image directive to the request's
-// system context when the user enabled image mode (the web-chat 🎨
-// toggle). It biases a tool-capable model to call generate_image with an
-// enhanced English prompt instead of replying in text. No-op for models
-// without tools (the gateway ignores the hint + tools). Mutates the
-// existing system message in place, or prepends one if absent.
-func applyImageModeHint(req *GatewayChatRequest) {
-	const hint = "\n\n[IMAGE MODE] The user wants an IMAGE. Treat their message as an image " +
-		"description and call the generate_image tool with a detailed, vivid ENGLISH prompt " +
-		"(translate + enhance as needed). Do not ask clarifying questions unless the description " +
-		"is empty. After the tool runs, reply with one short friendly sentence and no URL."
-	for i := range req.Messages {
-		if req.Messages[i].Role == "system" {
-			if c, ok := req.Messages[i].Content.(string); ok {
-				req.Messages[i].Content = c + hint
-				return
-			}
-		}
-	}
-	req.Messages = append(
-		[]GatewayMessage{{Role: "system", Content: strings.TrimSpace(hint)}},
-		req.Messages...,
-	)
-}
-
 func (s *MessageService) directImageStream(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -4330,41 +4294,6 @@ func providerStatusOr(status, fallback int) int {
 		return status
 	}
 	return fallback
-}
-
-// rejectImageStream (Phase D) returns a StreamHandle that emits a canned
-// "this model can't generate images" message WITHOUT calling the gateway,
-// and persists it as a normal assistant message so it lands in the
-// conversation timeline. Used when an image turn (intent or 🎨 mode) hits a
-// model that can't call tools. “cancel“ is the unused gateway stream
-// context, released in finish.
-func (s *MessageService) rejectImageStream(
-	conv *model.Conversation, userMsg, asstMsg *model.Message, cancel context.CancelFunc,
-) *StreamHandle {
-	ch := make(chan StreamUpdate, 2)
-	go func() {
-		ch <- StreamUpdate{Delta: imageUnsupportedMessage()}
-		close(ch) // channel close is the stream terminator the handler reads
-	}()
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
-		cancel() // release the unused gateway stream context
-		persistCtx := context.Background()
-		s.persistDisplayOnly(persistCtx, asstMsg.ID, content, "completed", nil, nil)
-		final := *asstMsg
-		final.ContentMasked = content
-		final.Status = "completed"
-		s.finalizeConversation(persistCtx, conv, userMsg, &final)
-	}
-	events, runID := s.teeStream(asstMsg.ID, "", ch)
-	return &StreamHandle{
-		UserMessage:    userMsg,
-		AssistantID:    asstMsg.ID,
-		ConversationID: conv.ID,
-		RunID:          runID,
-		Events:         events,
-		finish:         finish,
-		cancel:         cancel,
-	}
 }
 
 // accumulateToolCallDeltas merges a partial tool_calls delta into

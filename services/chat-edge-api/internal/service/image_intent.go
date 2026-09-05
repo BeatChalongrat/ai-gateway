@@ -2,14 +2,19 @@ package service
 
 import "strings"
 
-// Phase D — image-generation intent detection + capability gating.
+// Image-generation intent detection.
 //
-// Detect an explicit image-GENERATION intent in a chat message. When the
-// turn wants an image but the selected model can't call tools, the send
-// path REJECTS with a helpful message (telling the user to pick a 🎨 model)
-// rather than silently swapping models — so the user keeps control of which
-// model answers. Keyword-based: image requests are explicit, no ML needed.
-// Kept deliberately SPECIFIC (action phrases) to limit false positives.
+// Detect an explicit image-GENERATION intent in a chat message. An image
+// turn (🎨 mode or detected intent) is dispatched by the send path straight
+// to the image endpoint (directImageStream) — the chat model is not
+// involved, so there is nothing here about whether it can call tools.
+// FIX63 removed the Phase D "reject when the model lacks tools" branch:
+// the direct dispatch made it unreachable, and the composer both clients
+// share holds an image request at a model that cannot make images before
+// anything is sent (FIX62). Keyword-based: image requests are explicit, no
+// ML needed. Kept deliberately SPECIFIC (action phrases) to limit false
+// positives. The web-chat composer carries the same list verbatim
+// (apps/web-chat/src/lib/imageIntent.ts) — keep them in step.
 
 var thaiImageKeywords = []string{
 	"สร้างรูป", "วาดรูป", "ทำรูป", "สร้างภาพ", "วาดภาพ",
@@ -41,24 +46,4 @@ func DetectImageIntent(message string) bool {
 		}
 	}
 	return false
-}
-
-// shouldRejectImageTurn is the pure per-turn decision. When the turn wants
-// an image (explicit 🎨 mode OR detected intent) and the model is NOT
-// tool-capable, return true → the caller replies with a helpful "pick a 🎨
-// model" message instead of calling the gateway. Otherwise false → the
-// normal flow proceeds (a tool-capable model calls generate_image itself).
-func shouldRejectImageTurn(toolCapable, hasIntent, isImageMode bool) bool {
-	if !hasIntent && !isImageMode {
-		return false // not an image turn
-	}
-	return !toolCapable
-}
-
-// imageUnsupportedMessage is the assistant reply shown when an image turn
-// lands on a model that can't generate images. Generic + friendly — the
-// model id stays in the server log (not the user-facing text).
-func imageUnsupportedMessage() string {
-	return "โมเดลที่คุณเลือกไม่สามารถสร้างรูปได้ครับ " +
-		"กรุณาเลือกโมเดลที่มีไอคอน 🎨 เช่น GPT-4o หรือ Claude"
 }

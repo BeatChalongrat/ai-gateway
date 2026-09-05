@@ -1,7 +1,6 @@
 package service
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -39,52 +38,5 @@ func TestDetectImageIntentEnglish(t *testing.T) {
 		if DetectImageIntent(s) {
 			t.Errorf("did NOT expect image intent for %q", s)
 		}
-	}
-}
-
-// --- Phase D: reject (not override) when the model can't generate images ---
-
-func TestNonToolModel_ImageIntent_Rejects(t *testing.T) {
-	// non-tool model + image intent -> REJECT (helpful message, no override)
-	if !shouldRejectImageTurn(false /*toolCapable*/, true /*intent*/, false /*mode*/) {
-		t.Error("non-tool model + image intent should be rejected")
-	}
-}
-
-func TestToolModel_ImageIntent_Proceeds(t *testing.T) {
-	// tool-capable model + image intent -> proceed (it calls the tool itself)
-	if shouldRejectImageTurn(true, true, false) {
-		t.Error("tool-capable model should NOT be rejected on image intent")
-	}
-}
-
-func TestNonToolModel_NoImageIntent_Proceeds(t *testing.T) {
-	// non-tool model + no image intent -> normal chat, proceed
-	if shouldRejectImageTurn(false, false, false) {
-		t.Error("non-image turn should never be rejected")
-	}
-}
-
-func TestNonToolModel_ImageMode_Rejects(t *testing.T) {
-	// 🎨 mode on a non-tool model (safety net — 🎨 is hidden for these) -> reject
-	if !shouldRejectImageTurn(false, false, true) {
-		t.Error("image mode on a non-tool model should be rejected")
-	}
-}
-
-func TestToolModel_ImageMode_Proceeds(t *testing.T) {
-	if shouldRejectImageTurn(true, false, true) {
-		t.Error("tool-capable model in image mode should NOT be rejected")
-	}
-}
-
-func TestImageUnsupportedMessage(t *testing.T) {
-	msg := imageUnsupportedMessage()
-	// Generic — must NOT leak a model id, and must point at 🎨 models.
-	if strings.Contains(msg, "deepseek") || strings.Contains(msg, "/") {
-		t.Errorf("message should be generic (no model id), got %q", msg)
-	}
-	if !strings.Contains(msg, "🎨") {
-		t.Errorf("message should point at 🎨 models, got %q", msg)
 	}
 }
