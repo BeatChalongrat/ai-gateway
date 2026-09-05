@@ -215,6 +215,30 @@ async function documentBody(
   }
 }
 
+/** FIX65 — what replaces an image the model cannot read, so the model knows
+ * something was attached and says so instead of answering as if nothing was. */
+export const IMAGE_NOT_SENT_NOTE = "[An image was attached here but was not sent: this model cannot read images.]";
+
+/** FIX65 — replace EVERY image_url block in the chain (attachments and
+ * screenshots alike) with the note above, keeping the text. Returns how
+ * many images were removed. Used when the catalogue says the selected
+ * model cannot read images: before this, one refused image turn poisoned
+ * the chat, because the image stayed in the history and every later turn
+ * was refused too (model_no_vision_support). */
+export function stripImageBlocks(messages: { role: string; content: unknown }[]): number {
+  let removed = 0;
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    const blocks = m.content as GatewayContentBlock[];
+    const images = blocks.filter((b) => b.type === "image_url").length;
+    if (images === 0) continue;
+    removed += images;
+    const text = blocks.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).filter((t) => t.trim().length > 0);
+    m.content = [...Array<string>(images).fill(IMAGE_NOT_SENT_NOTE), ...text].join("\n");
+  }
+  return removed;
+}
+
 /** Keep the newest `keepImages` attached images in the chain; older image
  * blocks are dropped (the text block stays, with a note) so the local
  * history and every later request stay bounded — chat-edge caps replayed

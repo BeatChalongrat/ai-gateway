@@ -36,7 +36,7 @@ import type { GrantStore } from "./grants";
 import { HostTools, NESTED_MAX_ITERATIONS, NESTED_MAX_MINUTES, SUBAGENT_FAILED_RE, type NestedRunRequest, type NestedRunResult } from "./host-tools";
 import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
-import { composeUserContent, pruneAttachedImages, resolveAttachments, type ImageEncoder, type ResolvedAttachments } from "./attachments";
+import { composeUserContent, pruneAttachedImages, resolveAttachments, stripImageBlocks, type ImageEncoder, type ResolvedAttachments } from "./attachments";
 import { appendAssistantReply, roleSequence } from "./chain";
 import {
   applyApprovalMode,
@@ -269,7 +269,7 @@ export class TurnCoordinator {
   // FIX9 §1.1: the models the gateway accepts, cached, for validating the
   // page-supplied model. A page can name any model string; an unknown one is
   // refused rather than passed to the gateway.
-  private acceptedModels: Map<string, { tools: boolean }> | null = null;
+  private acceptedModels: Map<string, { tools: boolean; vision: boolean }> | null = null;
   private acceptedModelsAt = 0;
   private static readonly MODELS_TTL_MS = 5 * 60_000;
 
@@ -1291,6 +1291,15 @@ export class TurnCoordinator {
       if (!run.parentToolCallId) this.emit(eventConv, "status", { status: iteration === 1 ? "thinking" : `continuing (step ${iteration})`, iteration, max: run.maxIterations });
       pruneScreenshots(run.messages, KEEP_SCREENSHOTS);
       pruneAttachedImages(run.messages, KEEP_ATTACHED_IMAGES, isScreenshotMessage);
+      // FIX65 — a model the catalogue says cannot read images gets none:
+      // the blocks become a note the model can see, and the page is told.
+      if (!(await this.modelSupportsVision(run.model, signal))) {
+        const removed = stripImageBlocks(run.messages);
+        if (removed > 0) {
+          this.log.info(`IMAGES: ${run.model} cannot read images per the catalogue — ${removed} image block(s) replaced by a note conv=${conversationId}`);
+          if (!run.parentToolCallId) this.emit(eventConv, "image_notice", { failures: [{ filename: `${removed} image(s)`, reason: "this model cannot read images; the turn was sent without them" }] });
+        }
+      }
 
       const calls = new Map<number, { id: string; name: string; args: string }>();
       let errored = false;
@@ -1361,6 +1370,24 @@ export class TurnCoordinator {
                 break;
               }
               this.log.warn(`TOOLS: gateway refused tools for ${run.model} but the fresh model list still says it takes tools — surfacing the error`);
+            }
+            // FIX65 — the same repair for images: the list said the model
+            // sees, the gateway says it does not. Re-fetch; if the model is
+            // now known to be blind, replace the image blocks with a note,
+            // tell the page, and resend once.
+            if (ev.code === "model_no_vision_support" && !toolsRetried && iteration === 1 && !sawContent && calls.size === 0) {
+              toolsRetried = true;
+              this.acceptedModels = null;
+              this.acceptedModelsAt = 0;
+              const sees = await this.modelSupportsVision(run.model, signal);
+              const removed = sees ? 0 : stripImageBlocks(run.messages);
+              if (removed > 0) {
+                this.log.info(`IMAGES: gateway refused images for ${run.model} and the fresh model list agrees — resending conv=${conversationId} without ${removed} image block(s)`);
+                if (!run.parentToolCallId) this.emit(eventConv, "image_notice", { failures: [{ filename: `${removed} image(s)`, reason: "this model cannot read images; the turn was sent without them" }] });
+                resendWithoutTools = true;
+                break;
+              }
+              this.log.warn(`IMAGES: gateway refused images for ${run.model} but the fresh model list still says it sees (or nothing to strip) — surfacing the error`);
             }
             errored = true;
             this.log.error(`TURN ERROR conv=${conversationId}: ${ev.code} ${ev.message}`);
@@ -2075,7 +2102,14 @@ export class TurnCoordinator {
   private async refreshAcceptedModels(signal: AbortSignal): Promise<void> {
     const now = Date.now();
     if (this.acceptedModels === null || now - this.acceptedModelsAt >= TurnCoordinator.MODELS_TTL_MS) {
-      const map = await this.gateway.listModels(signal).catch(() => null);
+      // A gateway that cannot list (network, or a test double without the
+      // method) leaves the last-known map in place — never breaks a turn.
+      let map: Map<string, { tools: boolean; vision: boolean }> | null = null;
+      try {
+        map = await this.gateway.listModels(signal);
+      } catch {
+        map = null;
+      }
       if (map) {
         this.acceptedModels = map;
         this.acceptedModelsAt = now;
@@ -2095,6 +2129,19 @@ export class TurnCoordinator {
     await this.refreshAcceptedModels(signal);
     const entry = this.acceptedModels?.get(model);
     return entry ? entry.tools : true;
+  }
+
+  /** FIX65 — does the catalogue say this model can read images? Same
+   * contract as modelSupportsTools: Auto, unknown ids and a failed fetch
+   * keep the images (capability unknown → don't degrade). A model KNOWN
+   * to be blind gets no image blocks at all: before this, one refused
+   * image turn poisoned the chat, because the image stayed in the
+   * history and every later turn died on model_no_vision_support. */
+  private async modelSupportsVision(model: string, signal: AbortSignal): Promise<boolean> {
+    if (!model || model === "auto") return true;
+    await this.refreshAcceptedModels(signal);
+    const entry = this.acceptedModels?.get(model);
+    return entry ? entry.vision : true;
   }
 
   /** FIX3 §3: the honest first-launch indicator. While the sidecar is not ready,

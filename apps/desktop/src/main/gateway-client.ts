@@ -340,7 +340,7 @@ export class GatewayClient {
    * tool definitions from a tools-blind model instead of erroring every turn
    * (chat-edge's attachTools has done the same since FIX28). Returns null on
    * failure (caller keeps its last-known map / fails safe). Never throws. */
-  async listModels(signal: AbortSignal): Promise<Map<string, { tools: boolean }> | null> {
+  async listModels(signal: AbortSignal): Promise<Map<string, { tools: boolean; vision: boolean }> | null> {
     const key = await this.getOrProvisionKey();
     if (!key) return null;
     try {
@@ -350,11 +350,14 @@ export class GatewayClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
       });
       if (!res.ok) return null;
-      const body = (await res.json()) as { data?: { id?: unknown; capabilities?: { tools?: unknown } }[] };
-      const map = new Map<string, { tools: boolean }>();
+      const body = (await res.json()) as { data?: { id?: unknown; capabilities?: { tools?: unknown; vision?: unknown } }[] };
+      const map = new Map<string, { tools: boolean; vision: boolean }>();
       for (const m of body.data ?? []) {
         if (typeof m.id === "string" && m.id.length > 0) {
-          map.set(m.id, { tools: m.capabilities?.tools === true });
+          // FIX65 — vision rides along: a model the catalogue says cannot
+          // read images gets no image blocks from the host (see
+          // TurnCoordinator.modelSupportsVision).
+          map.set(m.id, { tools: m.capabilities?.tools === true, vision: m.capabilities?.vision === true });
         }
       }
       return map.size > 0 ? map : null;
