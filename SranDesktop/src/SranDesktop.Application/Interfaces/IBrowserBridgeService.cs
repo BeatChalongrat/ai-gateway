@@ -26,6 +26,13 @@ public interface IBrowserBridgeService
     /// page; generated once and DPAPI-stored.</summary>
     string GetOrCreatePairingToken();
 
+    /// <summary>FIX70: replace the pairing token with a fresh one and drop the
+    /// current extension connection. The old token is refused from this call
+    /// on (every inbound frame is checked against the current token). The value
+    /// is returned only so the host can re-provision pairing.json; it is never
+    /// logged.</summary>
+    string RotatePairingToken();
+
     /// <summary>Sends {id, method, params} and awaits the matching {id, result}.
     /// Throws <see cref="Models.BrowserNotConnectedException"/> when no paired
     /// client, TimeoutException after the (default 30 s) deadline, and

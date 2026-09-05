@@ -46,7 +46,9 @@ public sealed class HostQuerySurface
         Func<object> browserStatus,
         Func<string, (bool ok, object? data, string? error)> applyExtensionFolder,
         Func<int?, Task<(bool ok, string? url, string? site)>> browserSiteResolver,
-        ILogger logger)
+        ILogger logger,
+        Func<string, bool>? applyExtensionId = null,
+        Func<(bool ok, object? data, string? error)>? rotatePairingToken = null)
     {
         _settings = settings;
         _skills = skills;
@@ -57,7 +59,22 @@ public sealed class HostQuerySurface
         _applyExtensionFolder = applyExtensionFolder;
         _browserSiteResolver = browserSiteResolver;
         _logger = logger;
+        _applyExtensionId = applyExtensionId;
+        _rotatePairingToken = rotatePairingToken;
     }
+
+    /// <summary>FIX70: a valid, user-typed extension id is applied to the native
+    /// host manifest at once (no restart), so "Expected id" and allowed_origins
+    /// never disagree. Null in tests.</summary>
+    private readonly Func<string, bool>? _applyExtensionId;
+    /// <summary>FIX70: mint a fresh pairing token, re-provision pairing.json,
+    /// drop the live connection. The page learns only that it happened.</summary>
+    private readonly Func<(bool ok, object? data, string? error)>? _rotatePairingToken;
+
+    /// <summary>Chrome extension ids are exactly 32 letters a–p (hex mapped).
+    /// A path, a URL or a token pasted into the id field is refused here.</summary>
+    public static bool IsExtensionId(string? value) =>
+        value is { Length: 32 } && value.All(c => c is >= 'a' and <= 'p');
 
     public async Task<(bool ok, object? data, string? error)> DispatchAsync(string op, JsonObject? args)
     {
@@ -69,6 +86,8 @@ public sealed class HostQuerySurface
                 "settings.get" => Ok(SettingsSnapshot()),
                 "settings.set" => SettingsSet(args),
                 "browser.applyExtensionFolder" => ApplyBrowser(args), // host→sidecar only
+                // FIX70: page-only control-plane op — never a tool. Returns no token.
+                "browser.rotatePairingToken" => _rotatePairingToken?.Invoke() ?? (false, null, "unsupported"),
 
                 // ── skills ───────────────────────────────────────────────────
                 "skills.list" => Ok(await ReadSkillsAsync()),
@@ -159,8 +178,12 @@ public sealed class HostQuerySurface
             return (false, null, "refused");
         }
         if (!TryReadValue(mapped.Value, args, out var value))
-            return Invalid();
+            return mapped.Value == Key.BrowserExtensionId ? (false, null, "invalid-extension-id") : Invalid();
         var restartRequired = ApplySetting(mapped.Value, value);
+        // FIX70: a typed id is applied to the native-messaging manifest NOW, so
+        // the id the page shows is the id Chrome is allowed to connect with.
+        if (mapped.Value == Key.BrowserExtensionId && _applyExtensionId is not null && !_applyExtensionId((string)value!))
+            _logger.LogWarning("settings.set browserExtensionId: manifest update failed — the id is stored but not yet authorised");
         return (true, new { key, restartRequired }, null);
     }
 
@@ -716,8 +739,15 @@ public sealed class HostQuerySurface
                 url = url.Trim();
                 if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) return false;
                 value = url.TrimEnd('/'); return true;
-            case Key.DefaultModel:
             case Key.BrowserExtensionId:
+                // FIX70: exactly 32 letters a–p. A pasted path or token used to be
+                // accepted silently and became the "Expected id" — which the
+                // manifest then authorised, so nothing could ever connect.
+                if (!v.TryGetValue<string>(out var extId)) return false;
+                extId = extId.Trim();
+                if (!IsExtensionId(extId)) return false;
+                value = extId; return true;
+            case Key.DefaultModel:
             case Key.Locale:
                 if (!v.TryGetValue<string>(out var s) || s.Length > 256) return false;
                 value = s; return true;

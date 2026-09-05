@@ -136,7 +136,25 @@ try
         catch (Exception ex) { logger.LogWarning(ex, "Could not write browser-host.pipe beside the relay; browser tools may not connect"); }
 
         var active = ActiveExtensionFolder();
-        var extensionId = ConfigureBrowserFor(active);
+        // FIX70: the id Chrome assigns is derived from the folder (UTF-16 hash,
+        // fixed this round). A user-typed id that is well-formed and differs is
+        // an explicit override (e.g. Chrome was given the path in another
+        // spelling) and is KEPT — the previous code overwrote it at every start,
+        // so a manual correction was silently undone by the next launch.
+        var derivedId = BrowserExtensionInstaller.UnpackedExtensionIdFor(active);
+        var storedId = settings.Current.BrowserExtensionId;
+        // The pre-FIX70 derivation (UTF-8 hash) is what every install before this
+        // one stored; it is the bug's output, never a user's choice — replace it.
+        var legacyId = BrowserExtensionInstaller.LegacyUnpackedExtensionIdFor(active);
+        var isOverride = HostQuerySurface.IsExtensionId(storedId) && storedId != derivedId && storedId != legacyId;
+        var extensionId = isOverride ? storedId : derivedId;
+        if (storedId == legacyId && legacyId != derivedId)
+            logger.LogInformation("Browser: replacing the pre-FIX70 extension id {Legacy} with the one Chrome assigns, {Derived}", legacyId, derivedId);
+        if (extensionId != derivedId)
+            logger.LogWarning("Browser: keeping the user-set extension id {Stored} over the derived {Derived} for {Folder} (set the folder again to go back to the derived id)",
+                storedId, derivedId, active);
+        installer.Install(extensionId);                                       // allowed_origins ← placeholder + id
+        installer.ProvisionPairingToken(active, bridge.GetOrCreatePairingToken());
         if (settings.Current.BrowserExtensionId != extensionId)
         {
             var s = settings.Current.Clone();
@@ -186,6 +204,41 @@ bridge.Start();
     }
 }
 
+// FIX70: a well-formed id typed on the page is authorised at once (no restart).
+bool ApplyExtensionId(string id)
+{
+    try
+    {
+        installer.Install(id);
+        installer.ProvisionPairingToken(ActiveExtensionFolder(), bridge.GetOrCreatePairingToken());
+        logger.LogInformation("Browser: extension id set by the user ({Id}) — manifest re-authorised", id);
+        return true;
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Browser: could not re-authorise the user-set extension id");
+        return false;
+    }
+}
+// FIX70: mint a fresh pairing token (the old one is refused from now on), drop
+// the live connection, and write the new token into the active folder's
+// pairing.json so the extension self-heals on its next connect. The page learns
+// only that it happened — the value never leaves the host/sidecar.
+(bool ok, object? data, string? error) RotatePairingToken()
+{
+    try
+    {
+        var token = bridge.RotatePairingToken();
+        var provisioned = installer.ProvisionPairingToken(ActiveExtensionFolder(), token);
+        logger.LogInformation("Browser: pairing token rotated; pairing.json re-provisioned={Provisioned} (value never logged)", provisioned);
+        return (true, new { rotated = true, provisioned, connected = bridge.IsConnected }, null);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Browser: pairing token rotation failed");
+        return (false, null, "internal-error");
+    }
+}
 object BrowserStatus() => new
 {
     connected = bridge.IsConnected,
@@ -291,7 +344,8 @@ async Task<(bool ok, string? url, string? site)> ResolveBrowserSite(int? tabId)
 }
 
 // FIX2: the host-only control surface (settings/skills/tasks/connectors/notes).
-var hostQuery = new HostQuerySurface(settings, skills, taskStore, connectors, store, BrowserStatus, ApplyExtensionFolder, ResolveBrowserSite, loggerFactory.CreateLogger<HostQuerySurface>());
+var hostQuery = new HostQuerySurface(settings, skills, taskStore, connectors, store, BrowserStatus, ApplyExtensionFolder, ResolveBrowserSite, loggerFactory.CreateLogger<HostQuerySurface>(),
+    applyExtensionId: ApplyExtensionId, rotatePairingToken: RotatePairingToken);
 
 var server = new StdioMcpServer(host, session, wireIn, wireOut, loggerFactory.CreateLogger<StdioMcpServer>(),
     () => new { tools = registry.All.Count, remoteTools = connectors.GetCachedRemoteToolDefinitions().Count, browserConnected = bridge.IsConnected, browserExtensionFolder = ActiveExtensionFolder(), browserHostName = ElectronHostName, dataDir },

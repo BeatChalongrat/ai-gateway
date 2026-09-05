@@ -71,6 +71,22 @@ public sealed class BrowserBridgeService : IBrowserBridgeService, IAsyncDisposab
         return _token = generated;
     }
 
+    /// <summary>FIX70: a fresh token replaces the stored one at once; the live
+    /// connection (if any) is dropped so the next hello must carry the new
+    /// token. Every read loop compares against the CURRENT token, so the old
+    /// value is refused from here on. The value is never logged.</summary>
+    public string RotatePairingToken()
+    {
+        var generated = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+        _credentials.Save(TokenCredentialKey, generated);
+        _token = generated;
+        var client = _client;
+        var dropped = client is not null;
+        client?.Dispose(); // the read loop's finally clears _client/_paired and raises StatusChanged
+        _logger.LogInformation("Browser pairing token rotated (value never logged); live connection dropped: {Dropped}", dropped);
+        return generated;
+    }
+
     public async Task<JsonElement> RequestAsync(
         string method, object? @params = null,
         CancellationToken ct = default, TimeSpan? timeout = null)

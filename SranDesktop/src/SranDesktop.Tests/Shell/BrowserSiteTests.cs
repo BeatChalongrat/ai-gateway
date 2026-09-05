@@ -105,6 +105,7 @@ public class BrowserSiteTests
         public event EventHandler? StatusChanged { add { } remove { } }
         public void Start() { }
         public string GetOrCreatePairingToken() => "unused";
+        public string RotatePairingToken() => "unused";
         public Task<JsonElement> RequestAsync(string method, object? @params = null, CancellationToken ct = default, TimeSpan? timeout = null) =>
             throw new InvalidOperationException($"the bridge must NOT be called (method={method}) — the per-site gate must refuse first");
     }

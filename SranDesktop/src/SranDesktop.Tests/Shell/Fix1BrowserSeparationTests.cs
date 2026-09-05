@@ -49,6 +49,33 @@ public class Fix1BrowserSeparationTests
         a.Should().MatchRegex("^[a-p]{32}$"); // Chrome's 0-9a-f → a-p mapping, 32 chars
     }
 
+    /// <summary>FIX70 — the id must be the one CHROME assigns, not merely a stable
+    /// one. These are real vectors: what chrome://extensions showed for these
+    /// two folders on the owner's machine. Chrome hashes the UTF-16 path with an
+    /// upper-cased drive letter; the previous UTF-8 hash of the first folder
+    /// produced "kgdjnbajmkbkhffbefioahjfaiobkmcj", which Chrome never assigned.</summary>
+    [Theory]
+    [InlineData(@"C:\Users\Beat Beat\AppData\Roaming\SranDesktop-Electron\browser-extension", "efgbdahiebhhmboaipfbcnembbfpmgep")]
+    [InlineData(@"c:\Users\Beat Beat\AppData\Roaming\SranDesktop-Electron\browser-extension", "efgbdahiebhhmboaipfbcnembbfpmgep")]
+    [InlineData(@"C:\Users\Beat Beat\AppData\Roaming\SranDesktop-Electron\browser-extension\", "efgbdahiebhhmboaipfbcnembbfpmgep")]
+    [InlineData(@"C:\Users\Beat Beat\Desktop\ai-gateway\SranDesktop\browser-extension", "hmlchfpedehhhiomginmamndkdbnndao")]
+    public void UnpackedExtensionId_Matches_What_Chrome_Assigns(string folder, string chromeId)
+    {
+        BrowserExtensionInstaller.UnpackedExtensionIdFor(folder).Should().Be(chromeId);
+        BrowserExtensionInstaller.UnpackedExtensionIdFor(folder).Should().NotBe("kgdjnbajmkbkhffbefioahjfaiobkmcj");
+    }
+
+    /// <summary>The migration hook: the pre-FIX70 derivation of the deployed
+    /// folder is exactly the id every earlier install stored and authorised.
+    /// Startup treats a stored id equal to it as stale (not a user override).</summary>
+    [Fact]
+    public void Legacy_Derivation_Reproduces_The_Id_The_Old_Code_Stored()
+    {
+        const string folder = @"C:\Users\Beat Beat\AppData\Roaming\SranDesktop-Electron\browser-extension";
+        BrowserExtensionInstaller.LegacyUnpackedExtensionIdFor(folder).Should().Be("kgdjnbajmkbkhffbefioahjfaiobkmcj");
+        BrowserExtensionInstaller.LegacyUnpackedExtensionIdFor(folder).Should().NotBe(BrowserExtensionInstaller.UnpackedExtensionIdFor(folder));
+    }
+
     // ── §4.7: the control plane answers on the host-only surface, and is NEVER a tool ─
 
     [Fact]

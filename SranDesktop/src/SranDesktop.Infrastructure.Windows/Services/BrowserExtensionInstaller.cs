@@ -60,6 +60,32 @@ public sealed class BrowserExtensionInstaller : IBrowserExtensionInstaller
     public static string UnpackedExtensionIdFor(string folder)
     {
         var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+        // FIX70: Chrome (crx_file/id_util.cc GenerateIdForPath) hashes the path
+        // EXACTLY as its FilePath holds it — on Windows a UTF-16 string, with the
+        // drive letter normalised to upper case. This hashed the UTF-8 bytes,
+        // which yields a different id for the same folder; the manifest's
+        // allowed_origins then named an id Chrome never assigned, Chrome
+        // refused every connectNative, and nothing ever reached the app.
+        if (full.Length >= 2 && full[1] == ':' && char.IsAsciiLetterLower(full[0]))
+            full = char.ToUpperInvariant(full[0]) + full[1..];
+        var bytes = OperatingSystem.IsWindows()
+            ? System.Text.Encoding.Unicode.GetBytes(full)
+            : System.Text.Encoding.UTF8.GetBytes(full);
+        var hash = System.Security.Cryptography.SHA256.HashData(bytes);
+        var hex = Convert.ToHexString(hash).ToLowerInvariant()[..32];
+        var sb = new System.Text.StringBuilder(32);
+        foreach (var c in hex)
+            sb.Append((char)('a' + Convert.ToInt32(c.ToString(), 16)));
+        return sb.ToString();
+    }
+
+    /// <summary>FIX70 migration: what the pre-FIX70 code derived for a folder
+    /// (UTF-8 hash, no drive-letter normalisation). A stored id equal to this
+    /// is the OLD BUG's output, not a user's override, and must be replaced —
+    /// otherwise the wrong id survives the fix as a "manual setting".</summary>
+    public static string LegacyUnpackedExtensionIdFor(string folder)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
         var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(full));
         var hex = Convert.ToHexString(hash).ToLowerInvariant()[..32];
         var sb = new System.Text.StringBuilder(32);
