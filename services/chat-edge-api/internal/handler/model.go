@@ -50,6 +50,9 @@ type ModelHandler struct {
 	// KnownWithoutTools prefers it over the static metadata; nil until the
 	// first successful Gateway fetch.
 	gwTools map[string]bool
+	// gwVision (FIX65) — the Gateway's DB-authoritative vision flag per
+	// model id from the last successful fetch, for KnownWithoutVision.
+	gwVision map[string]bool
 }
 
 func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelHandler {
@@ -95,6 +98,11 @@ type modelResponse struct {
 	// Allowed: an existing conversation bound to it keeps working and the
 	// API may still call it. The list lives in the DB, never in code.
 	ShowInChat bool `json:"show_in_chat"`
+	// SelfHosted (FIX65) — the operator's own box, straight from the
+	// Gateway. The picker keeps vendor models (curated to a capability
+	// floor) and self-hosted ones (offered as they are) in separate
+	// groups; omitted for vendor models so the wire stays unchanged.
+	SelfHosted bool `json:"self_hosted,omitempty"`
 	// T4 — Thinking Mode capability. ``nil`` when the model
 	// does NOT support reasoning so the wire stays unchanged for
 	// non-reasoning models. Populated for the known set in
@@ -334,10 +342,19 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 	}
 
 	out, gwTools := h.buildFromGateway(gwModels)
+	// FIX65 — the vision flag per id, straight from the Gateway (only
+	// entries that carry a capabilities block; the rest stay unknown).
+	gwVision := make(map[string]bool, len(gwModels))
+	for _, m := range gwModels {
+		if m.Capabilities != nil {
+			gwVision[m.ID] = m.Capabilities.Vision
+		}
+	}
 	h.mu.Lock()
 	h.cached = out
 	h.cachedAt = time.Now()
 	h.gwTools = gwTools
+	h.gwVision = gwVision
 	h.mu.Unlock()
 	return out
 }
@@ -419,6 +436,7 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 		if m.ShowInChat != nil { // FIX47 Part C
 			resp.ShowInChat = *m.ShowInChat
 		}
+		resp.SelfHosted = m.SelfHosted // FIX65
 		if m.ContextWindow > 0 {
 			resp.ContextWindow = m.ContextWindow
 		}
@@ -595,6 +613,26 @@ func (h *ModelHandler) KnownWithoutTools(ctx context.Context, id string) bool {
 		}
 	}
 	return true
+}
+
+// KnownWithoutVision reports whether “id“ is known to lack image
+// input (FIX65). MessageService withholds history image blocks from
+// such a model and, when the Gateway refuses a turn with
+// model_no_vision_support, re-asks here against a fresh catalog before
+// resending without the images. Unknown ids, the Auto sentinel and the
+// gateway-down window return false (capability unknown → keep images).
+func (h *ModelHandler) KnownWithoutVision(ctx context.Context, id string) bool {
+	if id == "" {
+		return false
+	}
+	h.catalog(ctx)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.gwVision == nil {
+		return false
+	}
+	sees, ok := h.gwVision[id]
+	return ok && !sees
 }
 
 // ReasoningCapable reports whether “id“'s catalog entry advertises

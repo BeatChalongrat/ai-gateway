@@ -568,6 +568,10 @@ func main() {
 	// FIX64 — when the Gateway refuses tools the catalog said the model
 	// had, drop the cached catalog and retry the turn without tools.
 	messageSvc.SetCatalogInvalidator(modelHandler.InvalidateCatalog)
+	// FIX65 — a model the catalog says cannot read images gets no history
+	// image blocks; a model_no_vision_support refusal is retried once
+	// without them, so one failed image turn never poisons the chat.
+	messageSvc.SetNonVisionModelChecker(modelHandler.KnownWithoutVision)
 	// Approach B — vision-capable models get generated images replayed
 	// into history as image_url content so they can SEE what was made;
 	// everything else keeps the text-annotation fallback.

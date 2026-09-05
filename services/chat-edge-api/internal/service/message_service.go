@@ -113,6 +113,11 @@ type MessageService struct {
 	// FIX64 — drops the cached catalog behind nonToolModel so a stale
 	// "has tools" answer can be re-asked after the Gateway refuses tools.
 	invalidateCatalog func()
+	// FIX65 — model-id -> "known to lack image input"
+	// (handler.ModelHandler.KnownWithoutVision). History image blocks are
+	// withheld from such a model, and a model_no_vision_support refusal
+	// is retried once without them. nil / unknown / Auto => images stay.
+	nonVisionModel func(ctx context.Context, modelID string) bool
 	// Optional model-id -> reasoning-capable lookup backed by the live
 	// gateway catalog (handler.ModelHandler.ReasoningCapable) — models-
 	// catalog step 3. attachReasoning's trivial-turn downgrade gate uses
@@ -765,6 +770,16 @@ func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, mod
 // reaches the client as before.
 func (s *MessageService) SetCatalogInvalidator(fn func()) {
 	s.invalidateCatalog = fn
+}
+
+// SetNonVisionModelChecker wires a model-id -> "known to lack image
+// input" lookup (handler.ModelHandler.KnownWithoutVision). FIX65: a
+// failed image turn used to poison the chat — the image stayed in the
+// history and every later turn was refused too. With this wired, a
+// model the catalog says cannot see gets the history's images withheld,
+// and a model_no_vision_support refusal is retried once without them.
+func (s *MessageService) SetNonVisionModelChecker(fn func(ctx context.Context, modelID string) bool) {
+	s.nonVisionModel = fn
 }
 
 // SetReasoningCapabilityChecker wires a model-id -> reasoning-capable
@@ -3065,6 +3080,16 @@ func (s *MessageService) compileAndBuildRequest(
 	// just drops unused entries.
 	genNotes := s.generatedImageNotes(ctx, tenantID, history)
 
+	// FIX65 — a model the catalog says cannot read images gets no image
+	// blocks from the history at all: an earlier turn's picture would be
+	// refused by the gateway (model_no_vision_support) on every later
+	// turn and the chat would be dead. Unknown ids and Auto keep them.
+	imgsByMsg := imgs.byMsg
+	if len(imgsByMsg) > 0 && s.nonVisionModel != nil && s.nonVisionModel(ctx, modelID) {
+		slog.Info("images_withheld_non_vision_model", "model", modelID, "messages_with_images", len(imgsByMsg))
+		imgsByMsg = nil
+	}
+
 	// Approach B — when the target model can SEE images, also replay the
 	// generated images themselves as vision content (synthetic user
 	// message after each producing assistant turn). Only messages that
@@ -3102,7 +3127,7 @@ func (s *MessageService) compileAndBuildRequest(
 		// works in test setups.
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		req := buildGatewayRequestWithImages(modelID, history, prefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
@@ -3128,7 +3153,7 @@ func (s *MessageService) compileAndBuildRequest(
 			"conv", conv.ID.String(), "err", err)
 		prefix, srcs := build()
 		sources.Add(srcs...)
-		req := buildGatewayRequestWithImages(modelID, history, prefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
+		req := buildGatewayRequestWithImages(modelID, history, prefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 		return req
@@ -3138,7 +3163,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// finish() callback can persist them alongside any search-
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
-	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imgs.byMsg, genNotes, genVision, s.canonicalHistoryEnabled)
+	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 	req.RoutingHints = routingHints
 	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 	return req
@@ -3956,6 +3981,92 @@ func (s *MessageService) retryWithoutTools(
 	return stream
 }
 
+// imageNotSentNote is what replaces an image block the model cannot read,
+// so the model knows something was attached and says so instead of
+// answering as if nothing was.
+const imageNotSentNote = "[An image was attached here but was not sent: this model cannot read images.]"
+
+// stripImageBlocks replaces every image_url block in msgs with a text
+// note (merged into the message's text block) and returns how many
+// images were removed. Messages without images are untouched.
+func stripImageBlocks(msgs []GatewayMessage) int {
+	removed := 0
+	for i := range msgs {
+		blocks, ok := msgs[i].Content.([]GatewayContentBlock)
+		if !ok {
+			continue
+		}
+		var text []string
+		images := 0
+		for _, b := range blocks {
+			switch b.Type {
+			case "image_url":
+				images++
+			case "text":
+				if strings.TrimSpace(b.Text) != "" {
+					text = append(text, b.Text)
+				}
+			}
+		}
+		if images == 0 {
+			continue
+		}
+		removed += images
+		for n := 0; n < images; n++ {
+			text = append([]string{imageNotSentNote}, text...)
+		}
+		msgs[i].Content = strings.Join(text, "\n")
+	}
+	return removed
+}
+
+// retryWithoutImages is the FIX65 twin of retryWithoutTools for
+// model_no_vision_support: the catalog said the model sees, the Gateway
+// says it does not. Drop the cache, re-ask against a fresh catalog and,
+// only when the model is now known to be blind, resend the same turn once
+// with every image block replaced by a note — after telling the client,
+// through the existing image notice, that the images were not sent. nil
+// when nothing applies, so the original error reaches the client.
+func (s *MessageService) retryWithoutImages(
+	in streamPumpInput, req *GatewayChatRequest, perr *StreamProviderError,
+	healed *bool, outerIter, accumulated int, finishReason string,
+) *StreamReader {
+	if perr == nil || perr.Code != "model_no_vision_support" || *healed {
+		return nil
+	}
+	if outerIter != 0 || accumulated != 0 || finishReason != "" {
+		return nil
+	}
+	*healed = true
+	if s.invalidateCatalog == nil || s.nonVisionModel == nil {
+		return nil
+	}
+	s.invalidateCatalog()
+	if !s.nonVisionModel(in.streamCtx, req.Model) {
+		slog.Warn("images_retry_skipped_catalog_still_says_vision",
+			"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String())
+		return nil
+	}
+	removed := stripImageBlocks(req.Messages)
+	if removed == 0 {
+		return nil
+	}
+	stream, err := s.gateway.SendChatCompletionStream(in.streamCtx, in.callCtx, *req)
+	if err != nil {
+		slog.Warn("images_retry_without_images_failed",
+			"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String(), "err", err)
+		return nil
+	}
+	in.out <- StreamUpdate{ImageNotice: &ImageAttachNotice{Failures: []ImageAttachFailure{{
+		Filename: fmt.Sprintf("%d image(s)", removed),
+		Reason:   "this model cannot read images; the turn was sent without them",
+	}}}}
+	slog.Info("images_retry_without_images",
+		"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String(), "images_removed", removed,
+		"reason", "gateway refused images; catalog was stale")
+	return stream
+}
+
 // dropToolByName returns defs without the named tool (web_search gate).
 func dropToolByName(defs []GatewayTool, name string) []GatewayTool {
 	out := defs[:0]
@@ -4649,6 +4760,15 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				// tools instead of showing the person a dead turn. Once
 				// per pump, before anything has been forwarded.
 				if retried := s.retryWithoutTools(in, &req, ev.ProviderError, &healed, outerIter, len(acc), finishReason); retried != nil {
+					_ = current.Close()
+					current = retried
+					continue
+				}
+				// FIX65 — the same repair for images: the catalog said the
+				// model sees, the Gateway says it does not. Resend once
+				// with the image blocks replaced by a note, and tell the
+				// client which images were not sent.
+				if retried := s.retryWithoutImages(in, &req, ev.ProviderError, &healed, outerIter, len(acc), finishReason); retried != nil {
 					_ = current.Close()
 					current = retried
 					continue
