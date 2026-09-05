@@ -21,7 +21,7 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
-import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto } from "@/lib/hostApi";
+import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto, type InstalledConnectorDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
   // FIX34.1 Part F — desktop-only. The sidebar never shows this entry on the
@@ -36,6 +36,12 @@ export default function ConnectorsPage() {
 function ConnectorMarketplace() {
   const t = useT();
   const [connectors, setConnectors] = useState<CatalogConnectorDto[]>([]);
+  // FIX68: connectors the user added with "Add custom connector" are NOT in
+  // the catalogue (the sidecar keeps them in connectors.json) — the page used
+  // to list only the catalogue, so an added server never showed a card and
+  // could not be uninstalled from here. They lead the list, with their LIVE
+  // tool names straight from the server the sidecar dialled.
+  const [custom, setCustom] = useState<InstalledConnectorDto[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   // Ids with an action in flight — disables that card's button so a
@@ -51,6 +57,12 @@ function ConnectorMarketplace() {
     try {
       const list = await hostApi.listConnectorCatalog();
       setConnectors(list);
+      try {
+        const installed = await hostApi.listInstalledConnectors();
+        setCustom(installed.filter((c) => c.isCustom));
+      } catch {
+        setCustom([]); // an older host without listInstalled: catalogue only
+      }
       const ids = list.filter((c) => c.authType === "oauth2").map((c) => c.id);
       if (ids.length) {
         try {
@@ -92,6 +104,25 @@ function ConnectorMarketplace() {
         c.category.toLowerCase().includes(q),
     );
   }, [connectors, query]);
+  const filteredCustom = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return custom;
+    return custom.filter((c) => (c.name ?? c.id).toLowerCase().includes(q) || c.tools.some((t) => t.toLowerCase().includes(q)));
+  }, [custom, query]);
+
+  async function handleUninstallCustom(c: InstalledConnectorDto) {
+    setBusy(c.id, true);
+    try {
+      const res = await hostApi.uninstallConnector(c.id);
+      if (!res.ok) {
+        toast(tOutside("connectors.toast.uninstallFailed"));
+        return;
+      }
+      await reload();
+    } finally {
+      setBusy(c.id, false);
+    }
+  }
 
   async function handleAddCustom() {
     // Spawn consent for a custom stdio MCP server is a NATIVE host
@@ -211,14 +242,22 @@ function ConnectorMarketplace() {
             <div className="flex items-center justify-center py-10 text-text-secondary">
               <Spinner size={20} />
             </div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredCustom.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border bg-transparent px-8 py-16 text-center text-sm text-text-muted">
-              {connectors.length === 0
+              {connectors.length === 0 && custom.length === 0
                 ? tOutside("connectors.empty")
                 : tOutside("connectors.noMatch")}
             </p>
           ) : (
             <div className="flex flex-col gap-3">
+              {filteredCustom.map((c) => (
+                <CustomConnectorCard
+                  key={c.id}
+                  connector={c}
+                  busy={busyIds.has(c.id)}
+                  onUninstall={() => void handleUninstallCustom(c)}
+                />
+              ))}
               {filtered.map((c) => (
                 <ConnectorCard
                   key={c.id}
@@ -233,6 +272,60 @@ function ConnectorMarketplace() {
         </div>
       </main>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom connector card (FIX68)
+// ---------------------------------------------------------------------------
+
+/** A connector the user added themselves (a local MCP server the sidecar
+ *  spawns). The tool names are the ones the server announced on tools/list —
+ *  nothing here is hard-coded — and the only action is Uninstall, which
+ *  ends the server process and removes its tools from the model's list. */
+function CustomConnectorCard({
+  connector,
+  busy,
+  onUninstall,
+}: {
+  connector: InstalledConnectorDto;
+  busy: boolean;
+  onUninstall: () => void;
+}) {
+  const t = useT();
+  return (
+    <section
+      className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong"
+      data-testid={`connector-card-${connector.id}`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <ConnectorIcon connectorId={connector.id} name={connector.name ?? connector.id} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <HealthDot status={connector.status} />
+            <h3 className="truncate text-base font-medium text-text-primary">
+              {connector.name ?? connector.id}
+            </h3>
+            <span className="shrink-0 rounded-full border border-border bg-bg-base px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
+              {t("connectors.custom.badge")}
+            </span>
+          </div>
+          <p className="mt-2 text-sm text-text-secondary">{t("connectors.custom.description")}</p>
+          <p className="mt-3 truncate text-xs text-text-muted" data-testid="connector-tools">
+            {connector.tools.length > 0 ? connector.tools.join(" · ") : t("connectors.custom.noTools")}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          className="shrink-0"
+          onClick={onUninstall}
+          loading={busy}
+          data-testid="connector-uninstall"
+        >
+          {t("connectors.custom.uninstall")}
+        </Button>
+      </div>
+    </section>
   );
 }
 
