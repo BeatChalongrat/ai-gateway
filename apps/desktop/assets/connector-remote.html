@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Add remote connector</title>
+<style>
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#0f1115; color:#e6e8ee; font-family:'Segoe UI',system-ui,sans-serif; }
+  .card { background:#171a21; border:1px solid #262b36; border-radius:16px; padding:28px 32px;
+          width:440px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+  h1 { font-size:17px; margin:0 0 6px; font-weight:600; }
+  p  { font-size:13px; color:#9aa3b2; margin:0 0 18px; line-height:1.5; }
+  label { display:block; font-size:12px; color:#9aa3b2; margin:12px 0 4px; }
+  input, select { width:100%; box-sizing:border-box; background:#0f1115; color:#e6e8ee; border:1px solid #3a4150;
+          border-radius:8px; padding:9px 10px; font-size:14px; font-family:inherit; }
+  input:focus, select:focus { outline:none; border-color:#3b6ef5; }
+  .row { display:flex; gap:8px; }
+  .row > * { flex:1; }
+  .actions { display:flex; justify-content:flex-end; gap:8px; margin-top:22px; }
+  button { padding:10px 18px; border-radius:9px; font-size:14px; font-weight:600; border:1px solid #3a4150;
+           background:transparent; color:#c7cdd8; cursor:pointer; font-family:inherit; }
+  button.primary { background:#3b6ef5; border-color:#3b6ef5; color:#fff; }
+  button:disabled { opacity:.5; cursor:default; }
+  .hint { font-size:12px; color:#f87171; min-height:16px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <!-- Host-owned view (FIX69). This page is loaded from the app's own files,
+       never from the web origin: the chat page never sees the key. It talks
+       to the host by ONE signal — the document title — after which the host
+       reads the fields itself and closes the window. No bridge, no IPC. -->
+  <h1>Add a remote MCP connector</h1>
+  <p>The server must speak MCP over HTTPS. A key, if the server needs one, is stored encrypted on this computer and shown to nobody — not even this app's chat page.</p>
+  <label for="url">Server URL (https only)</label>
+  <input id="url" type="url" placeholder="https://mcp.example.com" autocomplete="off" spellcheck="false" autofocus>
+  <div class="hint" id="hint"></div>
+  <label>Key (optional)</label>
+  <div class="row">
+    <select id="header" aria-label="How the key is sent">
+      <option value="">Authorization: Bearer</option>
+      <option value="X-Api-Key">X-Api-Key header</option>
+      <option value="custom">Other header…</option>
+    </select>
+    <input id="headerName" type="text" placeholder="Header name" style="display:none" autocomplete="off" spellcheck="false">
+  </div>
+  <input id="key" type="password" placeholder="Paste the key" autocomplete="off" style="margin-top:8px">
+  <div class="actions">
+    <button id="cancel" type="button">Cancel</button>
+    <button id="add" type="button" class="primary" disabled>Next</button>
+  </div>
+</div>
+<script>
+  (function () {
+    var url = document.getElementById("url"), key = document.getElementById("key");
+    var header = document.getElementById("header"), headerName = document.getElementById("headerName");
+    var add = document.getElementById("add"), hint = document.getElementById("hint");
+    function check() {
+      var v = url.value.trim();
+      var ok = false;
+      if (!v) { hint.textContent = ""; }
+      else if (!/^https:\/\//i.test(v)) { hint.textContent = "Only https:// addresses are accepted."; }
+      else { try { var u = new URL(v); ok = !!u.hostname && !u.username && !u.password; hint.textContent = ok ? "" : "That address is not usable."; } catch (e) { hint.textContent = "That is not a valid URL."; } }
+      add.disabled = !ok;
+    }
+    // ?mode=key&name=<connector>: the catalogue "Install" path — the server is
+    // known, only the key is asked for. The url field is hidden and not sent.
+    var q = new URLSearchParams(location.search);
+    var keyOnly = q.get("mode") === "key";
+    if (keyOnly) {
+      var nm = q.get("name") || "this connector";
+      document.querySelector("h1").textContent = "Enter the key for " + nm;
+      document.querySelector("p").textContent = "The key is stored encrypted on this computer and shown to nobody — not even this app's chat page.";
+      document.querySelector('label[for="url"]').style.display = "none";
+      url.style.display = "none";
+      key.addEventListener("input", function () { add.disabled = key.value.length === 0; });
+      key.focus();
+    }
+    url.addEventListener("input", check);
+    header.addEventListener("change", function () { headerName.style.display = header.value === "custom" ? "" : "none"; });
+    window.__sranFormValues = function () {
+      var h = header.value === "custom" ? headerName.value.trim() : header.value;
+      return { url: url.value.trim(), authHeader: h, key: key.value };
+    };
+    add.addEventListener("click", function () { if (!add.disabled) document.title = "sran-connector-form:submit"; });
+    document.getElementById("cancel").addEventListener("click", function () { document.title = "sran-connector-form:cancel"; });
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") document.title = "sran-connector-form:cancel"; if (e.key === "Enter" && !add.disabled) document.title = "sran-connector-form:submit"; });
+  })();
+</script>
+</body>
+</html>

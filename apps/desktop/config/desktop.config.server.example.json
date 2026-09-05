@@ -1,5 +1,5 @@
 {
-  "_comment": "EXAMPLE for a build aimed at a shared server — copy it OUTSIDE the repo, replace every sran.example.internal host with the real one, then: npm run dist -- --config <your copy>. The build refuses a file still named *.example.json. Rules (enforced by the app's validator at build time): pageUrl inside allowedOrigins; gatewayUrl, chatEdgeUrl and portalOrigin NOT in allowedOrigins; the CSP must list the same hosts. sidecarPath is ignored when packaged (the bundled sidecar is used) but the key is required.",
+  "_comment": "EXAMPLE for a build aimed at a shared server — copy it OUTSIDE the repo, replace every sran.example.internal host with the real one, then: npm run dist -- --config <your copy>. The build refuses a file still named *.example.json. Rules (enforced by the app's validator at build time): pageUrl inside allowedOrigins; gatewayUrl, chatEdgeUrl and portalOrigin NOT in allowedOrigins; the CSP must list the same hosts. sidecarPath is ignored when packaged (the bundled sidecar is used) but the key is required. connectorPrivateNetwork (FIX69) is whether a user-typed remote MCP connector URL may point inside the network (loopback / RFC 1918 / link-local); default false = public https targets only; cloud metadata addresses are refused regardless. Set true only for a build meant for a company network.",
   "pageUrl": "https://chat.sran.example.internal/chat",
   "allowedOrigins": [
     "https://chat.sran.example.internal"
@@ -12,6 +12,7 @@
   "approvalMode": "auto",
   "webSearchEnabled": false,
   "temporaryChatReadsMemory": true,
+  "connectorPrivateNetwork": false,
   "protocolScheme": "sran",
   "oauthClient": "desktop",
   "oauthProvider": "google",

@@ -42,6 +42,18 @@ export interface ShellConfig {
    * switch cannot mean two things in the two clients. Only the READ side
    * moves; a temporary chat writes no memory under either value. */
   readonly temporaryChatReadsMemory: boolean;
+  /** FIX69: may a user-typed remote MCP connector URL point inside the
+   * network (loopback / RFC 1918 / link-local)? Default false: public https
+   * targets only. A deploy-time decision made in this file by whoever ships
+   * the app — never a page setting. Cloud metadata addresses are refused
+   * regardless. Enforced by the host before the dial and by the sidecar at
+   * connect time (SRAN_CONNECTOR_PRIVATE_NETWORK). */
+  readonly connectorPrivateNetwork: boolean;
+  /** FIX69: absolute path of a PEM file with extra trust anchors for remote
+   * MCP connectors on a private CA (a server inside the company network).
+   * Chain validation is not relaxed — only one more root is trusted. Null =
+   * system roots only. Reaches the sidecar as SRAN_CONNECTOR_EXTRA_CA_FILE. */
+  readonly connectorExtraCaFile: string | null;
   readonly protocolScheme: string;
   /** Backend-side client id that maps to protocolScheme (allow-listed there). */
   readonly oauthClient: string;
@@ -148,6 +160,18 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
   // a config written before FIX56.1, or one with a typo in the key, must not
   // silently pick the behaviour the deployment did not choose.
   const temporaryChatReadsMemory = obj["temporaryChatReadsMemory"] !== false;
+  // FIX69: only an explicit `true` opens internal targets to remote connectors.
+  const connectorPrivateNetwork = obj["connectorPrivateNetwork"] === true;
+  // FIX69: an extra trust-anchor file for remote connectors — absolute path,
+  // must exist at load time (a typo must fail the build/launch, not silently
+  // leave a private-CA server unreachable).
+  const rawCa = obj["connectorExtraCaFile"];
+  let connectorExtraCaFile: string | null = null;
+  if (rawCa !== undefined && rawCa !== null && rawCa !== "") {
+    if (typeof rawCa !== "string" || !path.isAbsolute(rawCa)) throw new Error("'connectorExtraCaFile' must be an absolute path to a PEM file.");
+    if (!fs.existsSync(rawCa)) throw new Error(`'connectorExtraCaFile' does not exist: ${rawCa}`);
+    connectorExtraCaFile = rawCa;
+  }
   const oauthClient = requireString(obj, "oauthClient", sourcePath);
   if (!/^[a-z][a-z0-9-]*$/.test(oauthClient)) {
     throw new Error(`'oauthClient' must be a lower-case identifier (got '${oauthClient}').`);
@@ -182,6 +206,8 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     approvalMode,
     webSearchEnabled,
     temporaryChatReadsMemory,
+    connectorPrivateNetwork,
+    connectorExtraCaFile,
     protocolScheme,
     oauthClient,
     oauthProvider,

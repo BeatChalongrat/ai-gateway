@@ -50,6 +50,10 @@ export const HOST_QUERY_OPS = Object.freeze([
   "connectors.oauthConnect", "connectors.oauthDisconnect",
   // FIX31 Part 2: configured/enabled/connected per oauth2 connector — never a token.
   "connectors.oauthStatus", "connectors.addCustomDialog",
+  // FIX69: a remote (https) MCP server, entered in a HOST-owned form — the
+  // page opens the form and learns the outcome; the URL and the key never
+  // pass through the page.
+  "connectors.addRemoteDialog",
   "settings.get", "settings.set",
   "folders.list", "folders.pickAndGrant", "folders.revoke",
   "globalNotes.list", "globalNotes.delete",

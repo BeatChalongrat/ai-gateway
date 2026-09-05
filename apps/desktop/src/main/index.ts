@@ -270,7 +270,14 @@ void app.whenReady().then(async () => {
       ? config.sidecarPath
       : path.resolve(APP_ROOT, config.sidecarPath);
   log.info(`SIDECAR resolved (${isRelease ? "packaged" : "dev"}): ${sidecarExe}`);
-  sidecar = new SidecarClient(sidecarExe, dataDir, log);
+  // FIX69: the sidecar enforces the remote-target policy at connect time; the
+  // shipped config's switch reaches it as ONE environment variable.
+  sidecar = new SidecarClient(sidecarExe, dataDir, log, {
+    ...(config.connectorPrivateNetwork ? { SRAN_CONNECTOR_PRIVATE_NETWORK: "1" } : {}),
+    ...(config.connectorExtraCaFile ? { SRAN_CONNECTOR_EXTRA_CA_FILE: config.connectorExtraCaFile } : {}),
+  });
+  if (config.connectorPrivateNetwork) log.warn("CONNECTORS: connectorPrivateNetwork=true — remote MCP connectors may target internal addresses (metadata endpoints stay refused)");
+  if (config.connectorExtraCaFile) log.info(`CONNECTORS: extra trust anchors for remote connectors from ${config.connectorExtraCaFile}`);
   const permissions = new PermissionStore(path.join(dataDir, "permissions.json"));
   grants = new GrantStore(path.join(dataDir, "grants.json"), { forbiddenRoots: defaultForbiddenRoots(process.env, dataDir) });
   if (flags.grant) {
@@ -378,6 +385,39 @@ void app.whenReady().then(async () => {
         const r = await dialog.showMessageBox(win, {
           type: "warning",
           title: "Add MCP connector",
+          message,
+          buttons: ["Cancel", "Add connector"],
+          defaultId: 0,
+          cancelId: 0,
+        });
+        return r.response === 1;
+      },
+      // FIX69 — a remote MCP server: url + key in a HOST-owned window (the chat
+      // page never sees either), the exact origin confirmed natively.
+      allowPrivateNetwork: config.connectorPrivateNetwork,
+      promptRemoteConnector: async () => {
+        if (flags.probeMcpRemote && !isRelease) {
+          const url = process.env["FIX69_PROBE_URL"] ?? "";
+          const key = process.env["FIX69_PROBE_KEY"] ?? "";
+          log.info(`PROBE remote form → url=${url} key=${key ? "set" : "none"} (--probe-mcp-remote; no host window)`);
+          return url ? { url, authHeader: process.env["FIX69_PROBE_HEADER"] ?? "", key } : null;
+        }
+        return promptRemoteConnectorForm(win);
+      },
+      // The catalogue "Install" path (a real catalogue only — placeholder cards
+      // are hidden): the same host window, key field only.
+      promptConnectorKey: async (name: string) => {
+        const v = await promptRemoteConnectorForm(win, name);
+        return v && v.key ? v.key : null;
+      },
+      confirmRemote: async (message: string) => {
+        if (flags.probeMcpRemote && !isRelease) {
+          log.info(`PROBE confirmRemote dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
+          return true;
+        }
+        const r = await dialog.showMessageBox(win, {
+          type: "warning",
+          title: "Add remote MCP connector",
           message,
           buttons: ["Cancel", "Add connector"],
           defaultId: 0,
@@ -659,6 +699,61 @@ function createMainWindow(): BrowserWindow {
     else if (level >= 2) log.info(`renderer console [${level}]: ${message.slice(0, 200)}`);
   });
   return win;
+}
+
+/** FIX69 — the remote-connector form, a HOST-owned window loaded from the
+ * app's own files (assets/connector-remote.html), modal over the main window.
+ * The page signals with ONE document-title change; the host then reads the
+ * fields itself (executeJavaScript) and closes the window. No bridge, no IPC,
+ * no web origin: the chat page never sees the url or the key, and nothing
+ * here logs them. Resolves null on Cancel / Escape / close. */
+function promptRemoteConnectorForm(parent: BrowserWindow | null, keyOnlyFor?: string): Promise<{ url: string; authHeader: string; key: string } | null> {
+  return new Promise((resolve) => {
+    const form = new BrowserWindow({
+      width: 520,
+      height: 480,
+      ...(parent && !parent.isDestroyed() ? { parent, modal: true } : {}),
+      show: false,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: "Add remote connector",
+      icon: path.join(APP_ROOT, "assets", "app.ico"),
+      autoHideMenuBar: true,
+      webPreferences: buildWebPreferences({
+        preloadPath: path.join(__dirname, "..", "preload", "index.js"),
+        isRelease,
+      }),
+    });
+    let settled = false;
+    const finish = (value: { url: string; authHeader: string; key: string } | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+      if (!form.isDestroyed()) form.close();
+    };
+    form.setMenuBarVisibility(false);
+    form.webContents.on("page-title-updated", (event, title) => {
+      event.preventDefault();
+      if (title === "sran-connector-form:cancel") finish(null);
+      else if (title === "sran-connector-form:submit") {
+        form.webContents
+          .executeJavaScript("window.__sranFormValues()", true)
+          .then((v) => {
+            const o = (v ?? {}) as { url?: unknown; authHeader?: unknown; key?: unknown };
+            finish({ url: String(o.url ?? ""), authHeader: String(o.authHeader ?? ""), key: String(o.key ?? "") });
+          })
+          .catch(() => finish(null));
+      }
+    });
+    form.on("closed", () => finish(null));
+    form.once("ready-to-show", () => form.show());
+    void form.loadFile(path.join(APP_ROOT, "assets", "connector-remote.html"), keyOnlyFor ? { query: { mode: "key", name: keyOnlyFor } } : undefined).catch((err: Error) => {
+      log.warn(`remote connector form failed to load: ${err.message}`);
+      finish(null);
+    });
+  });
 }
 
 function showSessionView(win: BrowserWindow, state: ViewState, reason?: string): void {
@@ -1363,6 +1458,11 @@ interface Flags {
    * spawn-consent dialog is answered "Add connector" and its exact text is
    * logged. Diagnostic → refused in a packaged build like every other flag. */
   probeMcpServer: string | null;
+  /** FIX69 dev: the remote-connector form's answers come from the environment
+   * (FIX69_PROBE_URL / FIX69_PROBE_HEADER / FIX69_PROBE_KEY, read per call) so
+   * the E4 probe can drive that flow without the host window; the native
+   * confirmation is answered "Add" and its text logged. Dev-only like the rest. */
+  probeMcpRemote: boolean;
   anyDiagnostic: boolean;
 }
 function parseFlags(argv: readonly string[]): Flags {
@@ -1392,6 +1492,7 @@ function parseFlags(argv: readonly string[]): Flags {
     grant: valueOf("--grant"),
     model: valueOf("--model"),
     probeMcpServer: valueOf("--probe-mcp-server"),
+    probeMcpRemote: argv.includes("--probe-mcp-remote"),
   };
   const anyDiagnostic = Object.values(f).some((v) => v !== null && v !== false);
   return { ...f, anyDiagnostic };

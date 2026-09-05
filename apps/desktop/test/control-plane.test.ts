@@ -22,6 +22,7 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "tasks.list", "tasks.create", "tasks.update", "tasks.setEnabled", "tasks.delete", "tasks.runNow", "tasks.runs",
     "connectors.listCatalog", "connectors.listInstalled", "connectors.install", "connectors.uninstall",
     "connectors.oauthConnect", "connectors.oauthDisconnect", "connectors.oauthStatus" /* FIX31 Part 2: read-only oauth status; never a tool */, "connectors.addCustomDialog",
+    "connectors.addRemoteDialog", // FIX69: opens the HOST-owned url+key form; the page names no url and never sees a key — never a tool
     "settings.get", "settings.set",
     "folders.list", "folders.pickAndGrant", "folders.revoke",
     "globalNotes.list", "globalNotes.delete",

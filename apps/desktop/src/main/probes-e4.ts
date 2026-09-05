@@ -796,6 +796,9 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         const toolsBefore = await sidecar.listTools();
         const logFrom = log.lines.length;
         await js(`(() => { const b = ${ADD_BUTTON}; if (b) b.click(); return !!b; })()`);
+        // FIX69: the button opens a two-way menu; "Local program" is the stdio path.
+        await waitFor(`!!document.querySelector('[data-testid="add-custom-local"]')`, 5_000);
+        await js(`(() => { const b = document.querySelector('[data-testid="add-custom-local"]'); if (b) b.click(); return !!b; })()`);
         const cardShown = await waitFor(`!!document.querySelector('${cardSel}')`, 90_000);
         await sleep(500);
         await shot("custom-card");
@@ -843,6 +846,153 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         const exited = readServerLog().some((e) => e["kind"] === "exit");
         check("#5 Uninstall from the card → card gone, the server process ended (its log says exit), its tools left the model's list", cardBack && gone && exited && !toolsFinal.some((t) => t.name.startsWith("fix68_")), `cardBack=${cardBack} gone=${gone} exited=${exited} fix68ToolsLeft=${toolsFinal.filter((t) => t.name.startsWith("fix68_")).map((t) => t.name).join(",") || "none"} | ${lastLine(/CONNECTOR uninstalled/)}`);
         log.info(`FIX68 PROBE conversations: deny=${d.convId} allow=${a.convId}`);
+        break;
+      }
+
+      case "fix69-remote": {
+        // FIX69 — a REMOTE (https) MCP server with a key, through the page's own
+        // "Add custom connector → Remote server" path. Run as:
+        //   FIX68_NONCE=<random> FIX68_MCP_LOG=<file> FIX69_PROBE_URL=https://localhost:<port>
+        //   FIX69_PROBE_KEY=<right key> FIX69_WRONG_KEY=<wrong key> FIX69_ACK_DIR=<dir>
+        //   npx electron . --probe-e4 fix69-remote --probe-mcp-remote
+        // against demo-mcp-server.mjs --http <port> (https via a locally trusted
+        // cert, FIX69_KEY=<right key>). The host form is replaced by the
+        // environment (read per click, so one run covers http-refused, wrong
+        // key, right key); everything else — the page, the sidecar, the policy,
+        // the consent card — is the real thing. The server's own log is the
+        // second witness; the runner outside the app decrypts the DPAPI store
+        // at two pauses (installed / uninstalled) and answers with ack files.
+        const nonce = process.env["FIX68_NONCE"] ?? "";
+        const serverLog = process.env["FIX68_MCP_LOG"] ?? "";
+        const rightKey = process.env["FIX69_PROBE_KEY"] ?? "";
+        const wrongKey = process.env["FIX69_WRONG_KEY"] ?? "";
+        const httpsUrl = process.env["FIX69_PROBE_URL"] ?? "";
+        const ackDir = process.env["FIX69_ACK_DIR"] ?? "";
+        const readServerLog = (): Array<Record<string, unknown>> => {
+          try {
+            return fs.readFileSync(serverLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+          } catch {
+            return [];
+          }
+        };
+        const serverCalls = (tool: string) => readServerLog().filter((e) => e["kind"] === "request" && e["method"] === "tools/call" && e["tool"] === tool);
+        const httpAuth = (state: string) => readServerLog().filter((e) => e["kind"] === "http" && e["auth"] === state).length;
+        const origin = new URL(httpsUrl).origin;
+        const connectorId = `custom-${origin.replace(/^https:\/\//, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
+        const cardSel = `[data-testid="connector-card-${connectorId}"]`;
+        const nonceTool = `fix68_nonce_${nonce}`;
+        const waitFor = async (code: string, ms: number): Promise<boolean> => {
+          const t0 = Date.now();
+          while (Date.now() - t0 < ms) {
+            if (await js(code)) return true;
+            await sleep(300);
+          }
+          return false;
+        };
+        const ADD_BUTTON = `[...document.querySelectorAll('button')].find(b => /add custom connector|เพิ่ม connector เอง/i.test(b.textContent || ''))`;
+        const clickRemote = async () => {
+          await js(`(() => { const b = ${ADD_BUTTON}; if (b) b.click(); return !!b; })()`);
+          await waitFor(`!!document.querySelector('[data-testid="add-custom-remote"]')`, 5_000);
+          return js(`(() => { const b = document.querySelector('[data-testid="add-custom-remote"]'); if (b) b.click(); return !!b; })()`);
+        };
+        const bodyText = async () => String(await js(`document.body.innerText.replace(/\\s+/g, ' ')`));
+        const pause = async (marker: string): Promise<boolean> => {
+          if (!ackDir) return true;
+          fs.writeFileSync(path.join(ackDir, `${marker}.marker`), new Date().toISOString());
+          const t0 = Date.now();
+          while (Date.now() - t0 < 90_000) {
+            if (fs.existsSync(path.join(ackDir, `${marker}.ack`))) return true;
+            await sleep(500);
+          }
+          return false;
+        };
+        // Evidence discipline: no check's evidence string may carry the key.
+        const clean = (s: string) => (rightKey && s.includes(rightKey)) || (wrongKey && s.includes(wrongKey)) ? "<<EVIDENCE WITHHELD: contained a key>>" : s;
+
+        await js(`location.assign('/chat/connectors')`);
+        check("connectors page shows the Add-custom-connector button", await waitFor(`!!${ADD_BUTTON}`, 20_000), "");
+
+        // ── tripwire: http is refused before any dial ────────────────────
+        const httpFrom = log.lines.length;
+        const httpBefore = readServerLog().length;
+        process.env["FIX69_PROBE_URL"] = httpsUrl.replace(/^https:/, "http:");
+        process.env["FIX69_PROBE_KEY"] = rightKey;
+        await clickRemote();
+        const httpToast = await waitFor(`/https/i.test(document.body.innerText) && /only|เท่านั้น/i.test(document.body.innerText)`, 15_000);
+        await shot("http-refused");
+        check("tripwire: a plain http URL is refused with the reason, and nothing was dialled", httpToast && since(httpFrom, /CONNECTOR remote REFUSED \(https-required\)/).length > 0 && readServerLog().length === httpBefore, clean(`toast=${httpToast} ${lastLine(/CONNECTOR remote REFUSED/)}`));
+        await sleep(1500);
+
+        // ── #5 wrong key → "key rejected", not "try again" ───────────────
+        const wrongFrom = log.lines.length;
+        process.env["FIX69_PROBE_URL"] = httpsUrl;
+        process.env["FIX69_PROBE_KEY"] = wrongKey;
+        await clickRemote();
+        const rejectedToast = await waitFor(`/rejected the key|ปฏิเสธ key/i.test(document.body.innerText)`, 60_000);
+        await shot("key-rejected");
+        const wrongSeen = httpAuth("wrong");
+        check("#5 a wrong key → the page says the server REJECTED THE KEY (server log: auth=wrong); no card, nothing installed", rejectedToast && since(wrongFrom, /CONNECTOR remote test FAILED \(key-rejected\)/).length > 0 && wrongSeen > 0 && !(await js(`!!document.querySelector('${cardSel}')`)), clean(`toast=${rejectedToast} serverAuthWrong=${wrongSeen} ${lastLine(/CONNECTOR remote test FAILED/)}`));
+        await sleep(1500);
+
+        // ── #1 + #2 right key → card with the LIVE tool list ──────────────
+        const toolsBefore = await sidecar.listTools();
+        const addFrom = log.lines.length;
+        process.env["FIX69_PROBE_KEY"] = rightKey;
+        await clickRemote();
+        const cardShown = await waitFor(`!!document.querySelector('${cardSel}')`, 90_000);
+        await sleep(500);
+        await shot("remote-card");
+        check("#1 the remote server was added through the page (card appears; host logged the add with the origin only)", cardShown && since(addFrom, /CONNECTOR added \(custom http\): /).length > 0, clean(lastLine(/CONNECTOR added \(custom http\)|test-failed|remote REFUSED/)));
+        check("#1b the confirmation dialog named the exact origin and that a key is sent", since(addFrom, /PROBE confirmRemote dialog reached/).some((l) => l.includes(origin) && /Key: yes/.test(l)), clean(lastLine(/PROBE confirmRemote/).slice(0, 300)));
+        const cardTools = String(await js(`((document.querySelector('${cardSel} [data-testid="connector-tools"]') || {}).textContent || '')`));
+        const started = readServerLog().find((e) => e["kind"] === "start");
+        const serverTools = Array.isArray(started?.["tools"]) ? (started!["tools"] as string[]) : [];
+        check("#2 the card lists exactly what the LIVE https server announced, nonce-named tool included", nonce.length > 0 && serverTools.includes(nonceTool) && serverTools.every((t) => cardTools.includes(t)), `card="${cardTools}" server=${JSON.stringify(serverTools)}`);
+        const toolsAfter = await sidecar.listTools();
+        check("#2b the model's tool list gained them without a restart", !toolsBefore.some((t) => t.name === nonceTool) && serverTools.every((t) => toolsAfter.some((a) => a.name === t)), `before=${toolsBefore.length} after=${toolsAfter.length}`);
+        const keyBadge = await js(`!!document.querySelector('${cardSel} [data-testid="connector-key-set"]')`);
+        check("#4a the card says a key is SET — and nothing more", keyBadge === true, `badge=${String(keyBadge)}`);
+
+        // ── #4 the key is nowhere it must not be ──────────────────────────
+        const installed = await sidecar.hostQuery("connectors.listInstalled", {});
+        const dtoJson = JSON.stringify(installed);
+        const pageText = await bodyText();
+        const inHostLog = log.lines.some((l) => l.includes(rightKey) || l.includes(wrongKey));
+        check("#4 the key appears in NO host log line, NOT in the connectors DTO the page receives, NOT in the page text", !inHostLog && !dtoJson.includes(rightKey) && !pageText.includes(rightKey), `hostLogLines=${log.lines.length} dtoHasKey=${dtoJson.includes(rightKey)} pageHasKey=${pageText.includes(rightKey)}`);
+        check("#4b (runner) DPAPI store holds the key encrypted — checked outside the app at this pause", await pause("installed"), "see the runner's output for the decrypt-as-user check");
+
+        // ── #3 the gate: Deny first, then Allow ───────────────────────────
+        await js(`location.assign('/chat')`);
+        await waitFor(`!!document.querySelector('textarea')`, 20_000);
+        await newChat();
+        const callsBeforeDeny = serverCalls("fix68_add_numbers").length;
+        const consentFrom = log.lines.length;
+        const d = await turn("Call the tool fix68_add_numbers with a=17 and b=25, then tell me exactly what it returned. Do not compute it yourself.", "deny", 180_000);
+        await shot("deny");
+        const denied = co.toolCallsSeen.some((t) => t.conversationId === d.convId && t.tool === "fix68_add_numbers" && t.decision === "denied");
+        check("#3 the consent card was raised for the remote tool and Deny stopped it — the https server never received the call", d.consents >= 1 && denied && serverCalls("fix68_add_numbers").length === callsBeforeDeny, clean(`consents=${d.consents} denied=${denied} serverCalls ${callsBeforeDeny}→${serverCalls("fix68_add_numbers").length} reply="${d.reply.slice(0, 80)}"`));
+        check("#3b the consent is the Network/connector class (danger.connector)", since(consentFrom, /CONSENT REQUEST .*fix68_add_numbers .*danger=danger\.connector/).length > 0, lastLine(/CONSENT REQUEST .*fix68_/));
+        await newChat();
+        const a = await turn("Call the tool fix68_add_numbers with a=17 and b=25, then tell me exactly what it returned. Do not compute it yourself.", "allow-once", 180_000);
+        await shot("allow");
+        const ran = co.toolCallsSeen.find((t) => t.conversationId === a.convId && t.tool === "fix68_add_numbers" && t.ok);
+        const call = serverCalls("fix68_add_numbers").slice(-1)[0];
+        const args = (call?.["args"] ?? {}) as Record<string, unknown>;
+        check("#3c Allow → the sidecar called the https server WITH the key (server log: auth ok, args a=17,b=25) and the reply carries 42", a.consents >= 1 && !!ran && !!call && Number(args["a"]) === 17 && Number(args["b"]) === 25 && /42/.test(a.reply) && httpAuth("wrong") === wrongSeen, clean(`ran=${!!ran} serverArgs=${JSON.stringify(args)} reply="${a.reply.slice(0, 100)}"`));
+
+        // ── #6 uninstall ──────────────────────────────────────────────────
+        await js(`location.assign('/chat/connectors')`);
+        await waitFor(`!!document.querySelector('${cardSel}')`, 20_000);
+        await js(`(() => { const b = document.querySelector('${cardSel} [data-testid="connector-uninstall"]'); if (b) b.click(); return !!b; })()`);
+        const gone = await waitFor(`!document.querySelector('${cardSel}')`, 30_000);
+        await sleep(1000);
+        await shot("uninstalled");
+        const toolsFinal = await sidecar.listTools();
+        check("#6 Uninstall → card gone, tools left the model's list", gone && !toolsFinal.some((t) => t.name.startsWith("fix68_")), `gone=${gone} left=${toolsFinal.filter((t) => t.name.startsWith("fix68_")).map((t) => t.name).join(",") || "none"}`);
+        check("#6b (runner) the key is gone from the DPAPI store — checked outside the app at this pause", await pause("uninstalled"), "see the runner's output");
+        const finalLeak = log.lines.some((l) => l.includes(rightKey) || l.includes(wrongKey));
+        check("#4c after everything, the host log still carries no key", !finalLeak, `lines=${log.lines.length}`);
+        log.info(`FIX69 PROBE conversations: deny=${d.convId} allow=${a.convId}`);
         break;
       }
 

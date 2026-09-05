@@ -60,6 +60,16 @@ import type { RunLedgerStore } from "./run-ledger";
 import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
+import { checkRemoteTarget } from "./remote-target";
+
+/** The hostname of a user-typed URL for a log line — never the query. */
+function hostnameOf(raw: string): string {
+  try {
+    return new URL(raw.trim()).hostname || "?";
+  } catch {
+    return "?";
+  }
+}
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
 import { BROWSER_BRIDGE_TOOLS, MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
@@ -150,6 +160,18 @@ export interface TurnCoordinatorOptions {
   /** Native yes/no confirmation (spawn consent). Returns true only on an
    * explicit approval — never driven without the user. */
   confirmSpawn?: (message: string) => Promise<boolean>;
+  /** FIX69: the HOST-owned form for a remote MCP server — url + optional key.
+   * Resolves null when the user cancels. The key is handed to the sidecar over
+   * the private pipe and is never logged, echoed to the page, or kept here. */
+  promptRemoteConnector?: () => Promise<{ url: string; authHeader: string; key: string } | null>;
+  /** FIX69: native confirmation naming the exact origin about to be dialled. */
+  confirmRemote?: (message: string) => Promise<boolean>;
+  /** FIX69: the catalogue "Install" path's key, from the same host-owned
+   * window (key field only). Null when cancelled. */
+  promptConnectorKey?: (connectorName: string) => Promise<string | null>;
+  /** FIX69: may a remote connector target an internal address? From the
+   * shipped config (connectorPrivateNetwork); default false. */
+  allowPrivateNetwork?: boolean;
   /** FIX2 §1.2: apply the OS/Electron side-effect of a host-owned setting
    * (startWithWindows → login item). The persisted VALUE lives only in the
    * sidecar; this derives the effect from it, so there is no second copy. */
@@ -606,8 +628,27 @@ export class TurnCoordinator {
       case "connectors.install": {
         const r = await this.sidecar.hostQuery("connectors.install", payload.args ?? {});
         if (r.error === "needs-api-key") {
-          this.log.info("HOST QUERY connectors.install: api_key connector needs a secure key input (stated limitation)");
-          this.bridge.postHostResult(payload.requestId, false, undefined, "api-key-unsupported");
+          // FIX69: the key is collected in the HOST-owned window (never the
+          // page) and handed to the sidecar over the private pipe. Only a
+          // real catalogue reaches here — placeholder cards are not shown.
+          const connectorId = typeof payload.args?.["connectorId"] === "string" ? (payload.args["connectorId"] as string) : "";
+          const name = typeof (r.data as { name?: unknown } | undefined)?.name === "string" ? ((r.data as { name: string }).name) : connectorId;
+          if (!this.opts.promptConnectorKey || !connectorId) {
+            this.log.info("HOST QUERY connectors.install: api_key connector needs a secure key input (no host window in this build)");
+            this.bridge.postHostResult(payload.requestId, false, undefined, "api-key-unsupported");
+            return;
+          }
+          const key = await this.opts.promptConnectorKey(name);
+          if (!key) {
+            this.bridge.postHostResult(payload.requestId, true, { installed: false, cancelled: true });
+            return;
+          }
+          const k = await this.sidecar.hostQuery("connectors._installApiKey", { connectorId, apiToken: key });
+          if (k.ok) {
+            this.sidecar.invalidateTools();
+            this.log.info(`CONNECTOR installed (catalogue, key set): ${connectorId}`);
+          }
+          this.bridge.postHostResult(payload.requestId, k.ok, k.data, k.error);
           return;
         }
         if (r.ok) this.sidecar.invalidateTools(); // FIX68: the tool set changed
@@ -669,6 +710,16 @@ export class TurnCoordinator {
       //    native dialog, and only then is it test-spawned + installed. ──
       case "connectors.addCustomDialog": {
         const result = await this.addCustomConnector();
+        if (result.error) this.bridge.postHostResult(payload.requestId, false, undefined, result.error);
+        else this.bridge.postHostResult(payload.requestId, true, { added: result.added });
+        return;
+      }
+      // ── addRemoteDialog — FIX69: a remote (https) MCP server. The url and the
+      //    key are collected in a HOST-owned form, checked against the target
+      //    policy, confirmed natively, then test-dialled + installed by the
+      //    sidecar. The page learns only added / cancelled / a reason code. ──
+      case "connectors.addRemoteDialog": {
+        const result = await this.addRemoteConnector();
         if (result.error) this.bridge.postHostResult(payload.requestId, false, undefined, result.error);
         else this.bridge.postHostResult(payload.requestId, true, { added: result.added });
         return;
@@ -743,6 +794,49 @@ export class TurnCoordinator {
     // new tools reach the model only after a restart.
     this.sidecar.invalidateTools();
     this.log.info(`CONNECTOR added (custom stdio): ${id} (${t.toolCount} tool(s); tool list invalidated)`);
+    return { added: true };
+  }
+
+  /** FIX69: add a remote (https) MCP connector. The url and the optional key
+   * come from the HOST-owned form (never the page); the target is checked
+   * against the policy (https only; internal addresses only when the shipped
+   * config allows; metadata never); the exact origin is confirmed natively;
+   * then the sidecar test-dials with the key over the private pipe and, on
+   * success, installs (the key goes to the DPAPI store there). Nothing here
+   * logs, keeps or returns the key. */
+  private async addRemoteConnector(): Promise<{ added: boolean; error?: string }> {
+    if (!this.opts.promptRemoteConnector || !this.opts.confirmRemote) return { added: false, error: "addremote-unsupported" };
+    const form = await this.opts.promptRemoteConnector();
+    if (!form) return { added: false }; // cancelled
+    const check = await checkRemoteTarget(form.url, { allowPrivate: this.opts.allowPrivateNetwork === true });
+    if (!check.ok) {
+      this.log.info(`CONNECTOR remote REFUSED (${check.reason}) host=${check.host ?? hostnameOf(form.url)}`);
+      return { added: false, error: `remote-refused:${check.reason}` };
+    }
+    const origin = check.origin!;
+    const host = check.host!;
+    const id = `custom-${origin.replace(/^https:\/\//, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
+    const keyed = form.key.length > 0;
+    const header = form.authHeader.trim();
+    const approved = await this.opts.confirmRemote(
+      `Add remote MCP connector "${host}"?\n\nIt will connect to:\n${origin}\n\nKey: ${keyed ? `yes — sent as ${header || "Authorization: Bearer"}` : "none"}\n\nOnly do this for a server you trust.`,
+    );
+    if (!approved) return { added: false }; // declined
+    const connector = { id, name: host, transport: "http", serverUrl: form.url.trim(), ...(header ? { authHeader: header } : {}) };
+    // The key rides ONLY in these two host→sidecar calls (private stdio pipe,
+    // never logged by either side) and lands in the DPAPI store.
+    const args: Record<string, unknown> = keyed ? { connector, apiToken: form.key } : { connector };
+    const test = await this.sidecar.hostQuery("connectors._testCustom", args);
+    if (!test.ok) return { added: false, error: test.error ?? "test-failed" };
+    const t = test.data as { ok?: boolean; toolCount?: number; error?: string; code?: string } | undefined;
+    if (!t?.ok) {
+      this.log.info(`CONNECTOR remote test FAILED (${t?.code ?? "?"}) host=${host}`);
+      return { added: false, error: `test-failed:${t?.code ?? "failed"}` };
+    }
+    const install = await this.sidecar.hostQuery("connectors._installCustom", args);
+    if (!install.ok) return { added: false, error: install.error ?? "install-failed" };
+    this.sidecar.invalidateTools();
+    this.log.info(`CONNECTOR added (custom http): ${id} → ${origin} key=${keyed ? "set" : "none"} (${t.toolCount} tool(s); tool list invalidated)`);
     return { added: true };
   }
 
