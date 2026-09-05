@@ -13,12 +13,16 @@ RUN apt-get update \
 
 WORKDIR /src
 
-COPY Cargo.toml ./
+# FIX63 — build from the tracked Cargo.lock, never from a fresh resolution.
+# Without the lockfile every image build picked whatever the registry had
+# that day; on 2026-09-05 that was icu_* 2.3.0, which needs rustc 1.88 on a
+# 1.86 builder, and the image could not be built at all.
+COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src cmd/healthcheck proto \
     && echo "fn main() {}" > src/main.rs \
     && echo "fn main() {}" > cmd/healthcheck/main.rs \
     && touch proto/.placeholder \
-    && cargo fetch
+    && cargo fetch --locked
 
 COPY proto/ ./proto/
 COPY build.rs ./
@@ -27,7 +31,7 @@ COPY src/ ./src/
 COPY data/ ./data/
 COPY cmd/ ./cmd/
 
-RUN cargo build --release --bin dlp-sidecar --bin healthcheck
+RUN cargo build --locked --release --bin dlp-sidecar --bin healthcheck
 
 # ---------------------------------------------------------------------------
 # Runtime image

@@ -20,12 +20,14 @@ WORKDIR /src
 # source edits. We seed dummy source files so ``cargo build`` has
 # something to compile against, then overwrite + rebuild with the
 # real code.
-COPY Cargo.toml ./
+# FIX63 — build from the tracked Cargo.lock, never from a fresh resolution
+# (see dlp-sidecar/Dockerfile for the day this bit).
+COPY Cargo.toml Cargo.lock ./
 RUN mkdir -p src cmd/healthcheck proto \
     && echo "fn main() {}" > src/main.rs \
     && echo "fn main() {}" > cmd/healthcheck/main.rs \
     && touch proto/.placeholder \
-    && cargo fetch
+    && cargo fetch --locked
 
 COPY proto/ ./proto/
 COPY build.rs ./
@@ -33,7 +35,7 @@ COPY src/ ./src/
 COPY cmd/ ./cmd/
 
 # Build both binaries in release mode.
-RUN cargo build --release --bin rate-limiter --bin healthcheck
+RUN cargo build --locked --release --bin rate-limiter --bin healthcheck
 
 # ---------------------------------------------------------------------------
 # Runtime image
