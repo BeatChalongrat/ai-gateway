@@ -48,6 +48,9 @@ function ConnectorMarketplace() {
   // double-tap can't fire two native dialogs.
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [addingCustom, setAddingCustom] = useState(false);
+  // FIX69: "Add custom connector" is a two-way choice — a program on this
+  // computer (stdio) or a remote https server (url + key, host-owned form).
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   // FIX31 Part 2: the host's view of each oauth2 connector (configured /
   // enabled / connected). The sidecar's `installed` flag is not the truth for
   // oauth2 — those are never installed in the sidecar; the host holds them.
@@ -96,8 +99,13 @@ function ConnectorMarketplace() {
   // description, or category. Empty query shows everything.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return connectors;
-    return connectors.filter(
+    // FIX69: a key-based catalogue card whose server URL is a placeholder (the
+    // embedded starter catalogue) has no destination — no button, no card
+    // (FIX11 / FIX34.1: nothing to do, nothing to click). OAuth cards stay:
+    // their server comes from the owner's registration file, not the catalogue.
+    const showable = connectors.filter((c) => !(c.authType === "api_key" && c.placeholder === true));
+    if (!q) return showable;
+    return showable.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.description.toLowerCase().includes(q) ||
@@ -124,21 +132,18 @@ function ConnectorMarketplace() {
     }
   }
 
-  async function handleAddCustom() {
+  async function handleAddCustom(kind: "local" | "remote") {
     // Spawn consent for a custom stdio MCP server is a NATIVE host
     // dialog — approving a child process is never rendered by the page
     // (Phase 5 §2.4). We only ask the host to open it and reload on success.
+    // FIX69: a remote server's url and key are collected in a HOST-owned
+    // window the same way; the page learns only the outcome.
+    setAddMenuOpen(false);
     setAddingCustom(true);
     try {
-      const res = await hostApi.addCustomConnector();
+      const res = kind === "remote" ? await hostApi.addRemoteConnector() : await hostApi.addCustomConnector();
       if (!res.ok) {
-        toast(
-          res.error?.startsWith("test-failed")
-            ? tOutside("connectors.toast.notMcp")
-            : res.error === "addcustom-unsupported"
-              ? tOutside("connectors.toast.customUnsupported")
-              : tOutside("connectors.toast.customFailed"),
-        );
+        toast(addErrorText(res.error ?? ""));
         return;
       }
       if (res.data?.added) await reload();
@@ -217,15 +222,48 @@ function ConnectorMarketplace() {
               {t("connectors.subtitle")}
             </p>
           </div>
-          <Button
-            variant="secondary"
-            className="shrink-0"
-            onClick={() => void handleAddCustom()}
-            loading={addingCustom}
-          >
-            <PlusIcon />
-            {t("connectors.addCustom")}
-          </Button>
+          <div className="relative shrink-0">
+            <Button
+              variant="secondary"
+              className="shrink-0"
+              onClick={() => setAddMenuOpen((v) => !v)}
+              loading={addingCustom}
+              aria-haspopup="menu"
+              aria-expanded={addMenuOpen}
+            >
+              <PlusIcon />
+              {t("connectors.addCustom")}
+            </Button>
+            {addMenuOpen ? (
+              <div
+                role="menu"
+                aria-label={t("connectors.addCustom.menuAria")}
+                data-testid="add-custom-menu"
+                className="absolute right-0 z-10 mt-2 w-72 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="add-custom-local"
+                  className="block w-full px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                  onClick={() => void handleAddCustom("local")}
+                >
+                  <span className="block font-medium">{t("connectors.addCustom.local")}</span>
+                  <span className="block text-xs text-text-muted">{t("connectors.addCustom.localHint")}</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-testid="add-custom-remote"
+                  className="block w-full border-t border-border px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                  onClick={() => void handleAddCustom("remote")}
+                >
+                  <span className="block font-medium">{t("connectors.addCustom.remote")}</span>
+                  <span className="block text-xs text-text-muted">{t("connectors.addCustom.remoteHint")}</span>
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6">
@@ -293,6 +331,17 @@ function CustomConnectorCard({
   onUninstall: () => void;
 }) {
   const t = useT();
+  // FIX69: a remote server shows where it points (the user's own URL, which
+  // carries no key) and THAT a key is set — the page never has the key.
+  const remote = connector.transport === "http";
+  const origin = (() => {
+    if (!remote || !connector.serverUrl) return null;
+    try {
+      return new URL(connector.serverUrl).origin;
+    } catch {
+      return connector.serverUrl;
+    }
+  })();
   return (
     <section
       className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong"
@@ -307,10 +356,26 @@ function CustomConnectorCard({
               {connector.name ?? connector.id}
             </h3>
             <span className="shrink-0 rounded-full border border-border bg-bg-base px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-              {t("connectors.custom.badge")}
+              {remote ? t("connectors.custom.remoteBadge") : t("connectors.custom.badge")}
             </span>
+            {connector.hasKey ? (
+              <span
+                className="shrink-0 rounded-full border border-status-success/40 bg-status-success/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-status-success"
+                data-testid="connector-key-set"
+              >
+                {t("connectors.custom.keySet")}
+              </span>
+            ) : null}
           </div>
-          <p className="mt-2 text-sm text-text-secondary">{t("connectors.custom.description")}</p>
+          <p className="mt-2 text-sm text-text-secondary">
+            {remote ? t("connectors.custom.remoteDescription") : t("connectors.custom.description")}
+            {origin ? (
+              <>
+                {" "}
+                <span className="font-mono text-xs text-text-muted" data-testid="connector-origin">{origin}</span>
+              </>
+            ) : null}
+          </p>
           <p className="mt-3 truncate text-xs text-text-muted" data-testid="connector-tools">
             {connector.tools.length > 0 ? connector.tools.join(" · ") : t("connectors.custom.noTools")}
           </p>
@@ -346,6 +411,31 @@ const OAUTH_ERROR_TEXT: Record<string, string> = {
   "oauth-browser-failed": "Couldn't open your browser for the sign-in.",
   "oauth-storage-unavailable": "Can't store the sign-in securely on this computer.",
 };
+
+/** FIX69: every way adding a custom connector can end, in the user's words.
+ *  A refused key says so ("rejected") — never "try again". */
+function addErrorText(error: string): string {
+  if (error === "addcustom-unsupported" || error === "addremote-unsupported") return tOutside("connectors.toast.customUnsupported");
+  if (error.startsWith("remote-refused:")) {
+    const reason = error.slice("remote-refused:".length);
+    if (reason === "https-required") return tOutside("connectors.toast.remoteHttps");
+    if (reason === "internal") return tOutside("connectors.toast.remoteInternal");
+    if (reason === "metadata") return tOutside("connectors.toast.remoteMetadata");
+    if (reason === "unresolvable") return tOutside("connectors.toast.remoteUnresolvable");
+    return tOutside("connectors.toast.remoteInvalid");
+  }
+  if (error === "https-required") return tOutside("connectors.toast.remoteHttps");
+  if (error.startsWith("test-failed")) {
+    const code = error.slice("test-failed".length + 1);
+    if (code === "key-rejected") return tOutside("connectors.toast.keyRejected");
+    if (code === "tls") return tOutside("connectors.toast.remoteTls");
+    if (code === "target-internal") return tOutside("connectors.toast.remoteInternal");
+    if (code === "target-metadata") return tOutside("connectors.toast.remoteMetadata");
+    if (code === "unreachable" || code === "timeout") return tOutside("connectors.toast.remoteUnreachable");
+    return tOutside("connectors.toast.notMcp");
+  }
+  return tOutside("connectors.toast.customFailed");
+}
 
 function ConnectorCard({
   connector,

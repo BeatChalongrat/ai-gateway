@@ -51,6 +51,10 @@ export interface CatalogConnectorDto {
   tools: string[];
   installed: boolean;
   status: string;
+  /** FIX69: true while the catalogue is the embedded starter one, whose server
+   * URLs are placeholders — a key-based card then has no destination and is
+   * not shown. Absent on an older host. */
+  placeholder?: boolean;
 }
 
 /** FIX31 Part 2: what the page may know about an oauth2 connector — never a token. */
@@ -70,6 +74,13 @@ export interface InstalledConnectorDto {
   name: string | null;
   tools: string[];
   status: string;
+  /** FIX69: THAT a key is stored — never the key. Absent on an older host. */
+  hasKey?: boolean;
+  /** FIX69: "stdio" | "http" for a custom connector; absent otherwise. */
+  transport?: string | null;
+  /** FIX69: the remote server's URL for a custom http connector (the user's
+   * own input; carries no key). */
+  serverUrl?: string | null;
 }
 
 /** FIX1: live browser-bridge status + the folder the user should load. */
@@ -186,6 +197,10 @@ export const hostApi = {
   oauthStatus: async (connectorIds: string[]) =>
     unwrap<{ statuses: ConnectorOAuthStatusDto[] }>(await bridge.hostQuery("connectors.oauthStatus", { connectorIds })).statuses,
   addCustomConnector: () => bridge.hostQuery<{ added: boolean }>("connectors.addCustomDialog", {}, 300_000),
+  /** FIX69: a remote (https) MCP server. The host opens ITS OWN form for the
+   * url and the optional key; the page sends nothing and learns only
+   * added / cancelled / a reason code (remote-refused:*, test-failed:*). */
+  addRemoteConnector: () => bridge.hostQuery<{ added: boolean }>("connectors.addRemoteDialog", {}, 300_000),
 
   // FIX34 Part A — shell prefs + the quick-ask window hand-offs. A refused
   // hotkey comes back as { ok:false, error:"hotkey-taken" | "hotkey-<reason>" }

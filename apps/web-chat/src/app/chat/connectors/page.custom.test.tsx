@@ -19,10 +19,13 @@ const host = vi.hoisted(() => ({
   oauthStatus: vi.fn(async () => []),
   uninstallConnector: vi.fn(async () => ({ ok: true })),
   installConnector: vi.fn(),
-  addCustomConnector: vi.fn(),
+  addCustomConnector: vi.fn(async () => ({ ok: true, data: { added: false } })),
+  addRemoteConnector: vi.fn(async () => ({ ok: true, data: { added: false } })),
   oauthConnect: vi.fn(),
   oauthDisconnect: vi.fn(),
 }));
+const toasts = vi.hoisted(() => ({ shown: [] as string[] }));
+vi.mock("@/components/ui/Toast", () => ({ toast: (m: string) => toasts.shown.push(m) }));
 
 vi.mock("@/hooks/useHostedMode", () => ({ useHostedMode: () => state.hosted }));
 vi.mock("@/lib/auth", () => ({ HOSTED_MODE: true }));
@@ -57,6 +60,63 @@ describe("/chat/connectors — custom connectors (FIX68)", () => {
     fireEvent.click(screen.getByTestId("connector-uninstall"));
     await waitFor(() => expect(host.uninstallConnector).toHaveBeenCalledWith("custom-demo-mcp-server"));
     await waitFor(() => expect(screen.queryByTestId("connector-card-custom-demo-mcp-server")).toBeNull());
+  });
+
+  it("FIX69: the Add button opens a two-way menu; the remote choice asks the HOST to open its form (the page sends nothing)", async () => {
+    render(<ConnectorsPage />);
+    await screen.findByTestId("connector-card-custom-demo-mcp-server");
+    expect(screen.queryByTestId("add-custom-menu")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /add custom connector/i }));
+    expect(screen.getByTestId("add-custom-menu")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("add-custom-remote"));
+    await waitFor(() => expect(host.addRemoteConnector).toHaveBeenCalledTimes(1));
+    expect(host.addRemoteConnector).toHaveBeenCalledWith(); // no url, no key — ever
+    expect(host.addCustomConnector).not.toHaveBeenCalled();
+  });
+
+  it("FIX69: a rejected key is reported as REJECTED, an http URL as https-only, an internal target by reason", async () => {
+    render(<ConnectorsPage />);
+    await screen.findByTestId("connector-card-custom-demo-mcp-server");
+    for (const [error, expected] of [
+      ["test-failed:key-rejected", /rejected the key/i],
+      ["remote-refused:https-required", /only https/i],
+      ["remote-refused:internal", /inside your network/i],
+      ["remote-refused:metadata", /metadata/i],
+      ["test-failed:target-internal", /inside your network/i],
+      ["test-failed:not-mcp", /didn't respond as an MCP server/i],
+    ] as const) {
+      toasts.shown.length = 0;
+      host.addRemoteConnector.mockResolvedValueOnce({ ok: false, error } as never);
+      fireEvent.click(screen.getByRole("button", { name: /add custom connector/i }));
+      fireEvent.click(screen.getByTestId("add-custom-remote"));
+      await waitFor(() => expect(toasts.shown.length).toBe(1));
+      expect(toasts.shown[0], error).toMatch(expected);
+      expect(toasts.shown[0], error).not.toMatch(/try again/i);
+    }
+  });
+
+  it("FIX69: a remote connector card shows the origin and THAT a key is set — nothing else", async () => {
+    host.listInstalledConnectors.mockResolvedValueOnce([
+      { id: "custom-mcp-example-com", isCustom: true, name: "mcp.example.com", tools: ["t1"], status: "Connected", hasKey: true, transport: "http", serverUrl: "https://mcp.example.com/mcp?x=1" },
+    ] as never);
+    render(<ConnectorsPage />);
+    const card = await screen.findByTestId("connector-card-custom-mcp-example-com");
+    expect(card).toHaveTextContent("Remote");
+    expect(screen.getByTestId("connector-origin")).toHaveTextContent("https://mcp.example.com");
+    expect(screen.getByTestId("connector-key-set")).toHaveTextContent("Key set");
+    expect(card.textContent).not.toMatch(/x=1/);
+  });
+
+  it("FIX69: a key-based catalogue card with a placeholder server is not shown; a real one is", async () => {
+    host.listConnectorCatalog.mockResolvedValueOnce([
+      { id: "github", name: "GitHub", description: "d", category: "developer", authType: "api_key", tools: [], installed: false, status: "NotConfigured", placeholder: true },
+      { id: "jira", name: "Jira", description: "d", category: "developer", authType: "api_key", tools: [], installed: false, status: "NotConfigured", placeholder: false },
+      { id: "slack", name: "Slack", description: "d", category: "communication", authType: "oauth2", tools: [], installed: false, status: "NotConfigured", placeholder: true },
+    ] as never);
+    render(<ConnectorsPage />);
+    expect(await screen.findByText("Jira")).toBeTruthy();
+    expect(screen.getByText("Slack")).toBeTruthy(); // oauth cards keep their owner-file server
+    expect(screen.queryByText("GitHub")).toBeNull();
   });
 
   it("an older host without listInstalled still renders the catalogue", async () => {

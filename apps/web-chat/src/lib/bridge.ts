@@ -52,6 +52,7 @@ export type HostQueryOp =
   | "tasks.list" | "tasks.create" | "tasks.update" | "tasks.setEnabled" | "tasks.delete" | "tasks.runNow" | "tasks.runs"
   | "connectors.listCatalog" | "connectors.listInstalled" | "connectors.install" | "connectors.uninstall"
   | "connectors.oauthConnect" | "connectors.oauthDisconnect" | "connectors.addCustomDialog"
+  | "connectors.addRemoteDialog" // FIX69: host-owned url+key form; the page names no url, sees no key
   // FIX31 Part 2: configured/enabled/connected per oauth2 connector (never a token).
   | "connectors.oauthStatus"
   | "settings.get" | "settings.set"
