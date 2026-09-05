@@ -110,6 +110,9 @@ type MessageService struct {
 	// a ``tools`` param the provider would reject. nil / unknown id /
 	// the Auto sentinel => tools stay attached.
 	nonToolModel func(ctx context.Context, modelID string) bool
+	// FIX64 — drops the cached catalog behind nonToolModel so a stale
+	// "has tools" answer can be re-asked after the Gateway refuses tools.
+	invalidateCatalog func()
 	// Optional model-id -> reasoning-capable lookup backed by the live
 	// gateway catalog (handler.ModelHandler.ReasoningCapable) — models-
 	// catalog step 3. attachReasoning's trivial-turn downgrade gate uses
@@ -751,6 +754,17 @@ func (s *MessageService) SetToolCapabilityChecker(fn func(ctx context.Context, m
 // tools are attached for every model (pre-existing behaviour).
 func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, modelID string) bool) {
 	s.nonToolModel = fn
+}
+
+// SetCatalogInvalidator wires the "drop the cached model catalog" hook
+// (handler.ModelHandler.InvalidateCatalog). FIX64: when the Gateway
+// answers model_no_tool_support on a turn this service attached tools
+// to, the catalog it consulted is stale — the hook is called, the
+// tools-blind lookup is asked again against a fresh catalog, and the
+// turn is retried once without tools. Optional — when unset, the error
+// reaches the client as before.
+func (s *MessageService) SetCatalogInvalidator(fn func()) {
+	s.invalidateCatalog = fn
 }
 
 // SetReasoningCapabilityChecker wires a model-id -> reasoning-capable
@@ -3898,6 +3912,50 @@ func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatReques
 	return true
 }
 
+// retryWithoutTools is the FIX64 stale-catalog repair. When the Gateway's
+// first frame is model_no_tool_support on a turn that carried tools, the
+// catalog this service consulted is behind the admin's switch (it is
+// cached for modelCatalogTTL). The cache is dropped, the tools-blind
+// lookup is asked again against a fresh catalog, and — only if the model
+// is now known to be tools-blind — the same request is resent with the
+// tools removed. Returns the new stream, or nil when nothing applies
+// (not that error, no tools were sent, already retried, something was
+// already forwarded, the catalog still says "has tools", or the resend
+// failed) so the caller forwards the original error as before.
+func (s *MessageService) retryWithoutTools(
+	in streamPumpInput, req *GatewayChatRequest, perr *StreamProviderError,
+	healed *bool, outerIter, accumulated int, finishReason string,
+) *StreamReader {
+	if perr == nil || perr.Code != "model_no_tool_support" || *healed {
+		return nil
+	}
+	if !in.toolsAttached || len(req.Tools) == 0 || outerIter != 0 || accumulated != 0 || finishReason != "" {
+		return nil
+	}
+	*healed = true
+	if s.invalidateCatalog == nil || s.nonToolModel == nil {
+		return nil
+	}
+	s.invalidateCatalog()
+	if !s.nonToolModel(in.streamCtx, req.Model) {
+		slog.Warn("tools_retry_skipped_catalog_still_says_tools",
+			"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String())
+		return nil
+	}
+	req.Tools = nil
+	req.ToolChoice = ""
+	stream, err := s.gateway.SendChatCompletionStream(in.streamCtx, in.callCtx, *req)
+	if err != nil {
+		slog.Warn("tools_retry_without_tools_failed",
+			"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String(), "err", err)
+		return nil
+	}
+	slog.Info("tools_retry_without_tools",
+		"model", req.Model, "conversation_id", in.toolExecCtx.ConversationID.String(),
+		"reason", "gateway refused tools; catalog was stale")
+	return stream
+}
+
 // dropToolByName returns defs without the named tool (web_search gate).
 func dropToolByName(defs []GatewayTool, name string) []GatewayTool {
 	out := defs[:0]
@@ -4515,6 +4573,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	var lastUsage *GatewayChatUsage
 
 	lastServedModel := "" // FIX35 Part B — dedupe the served-model forward
+	healed := false       // FIX64 — the stale-catalog retry happens at most once
 	for outerIter := 0; outerIter < maxToolIterations; outerIter++ {
 		var acc []GatewayToolCall
 		finishReason := ""
@@ -4583,6 +4642,17 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			// through. Never swallow: an error frame the pump drops is a
 			// blank screen on the client.
 			if ev.ProviderError != nil {
+				// FIX64 — the one error this service caused itself: it
+				// attached tools from a catalog the admin has since
+				// changed. Re-ask against a fresh catalog and, if the
+				// model is now tools-blind, resend the same turn without
+				// tools instead of showing the person a dead turn. Once
+				// per pump, before anything has been forwarded.
+				if retried := s.retryWithoutTools(in, &req, ev.ProviderError, &healed, outerIter, len(acc), finishReason); retried != nil {
+					_ = current.Close()
+					current = retried
+					continue
+				}
 				in.out <- StreamUpdate{ProviderError: ev.ProviderError}
 			}
 			if ev.FallbackInfo != nil {

@@ -279,6 +279,19 @@ func (h *ModelHandler) List(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"models": out})
 }
 
+// InvalidateCatalog drops the cached Gateway catalog so the next lookup
+// fetches a fresh one. FIX64 Part 1 measured the gap it closes: an admin
+// turns a model's tools switch off, the Gateway refuses tools for it at
+// once, but this cache still says "tools" for up to modelCatalogTTL —
+// every turn on that model dies on model_no_tool_support for five
+// minutes. The message service calls this when the Gateway's answer
+// contradicts the catalog, then re-asks.
+func (h *ModelHandler) InvalidateCatalog() {
+	h.mu.Lock()
+	h.cachedAt = time.Time{}
+	h.mu.Unlock()
+}
+
 // catalog returns the model list to serve. It prefers the Gateway's
 // live catalog (cached for modelCatalogTTL) so operator-discovered
 // models surface without a redeploy, and falls back to the static

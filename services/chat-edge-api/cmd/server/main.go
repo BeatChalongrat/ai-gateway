@@ -565,6 +565,9 @@ func main() {
 	// tools, so switching to one mid-conversation (e.g. after an image
 	// was generated) doesn't send a ``tools`` param the provider rejects.
 	messageSvc.SetNonToolModelChecker(modelHandler.KnownWithoutTools)
+	// FIX64 — when the Gateway refuses tools the catalog said the model
+	// had, drop the cached catalog and retry the turn without tools.
+	messageSvc.SetCatalogInvalidator(modelHandler.InvalidateCatalog)
 	// Approach B — vision-capable models get generated images replayed
 	// into history as image_url content so they can SEE what was made;
 	// everything else keeps the text-annotation fallback.
