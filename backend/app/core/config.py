@@ -546,12 +546,17 @@ class Settings(BaseSettings):
     model_discovery_auto_add: bool = False
     model_discovery_health_check: bool = False
     # FIX47.6 Part B — weekly capability-flag drift check (see
-    # ``services/capability_probe.py``). Unlike the daily health check
-    # above this is weekly, hard-capped, and advisory-locked to one
-    # worker, so it stays on by default: the point is that the stored
-    # supports_tools/supports_vision flags stay TRUE, and a check that
-    # never runs lets them rot again. It logs drift; it repairs nothing.
-    capability_probe_weekly: bool = True
+    # ``services/capability_probe.py``): a sweep of every model on every
+    # provider with a usable key, paid requests included, hard-capped and
+    # advisory-locked to one worker. It logs drift; it repairs nothing.
+    # FIX64 turned the default OFF: the owner's rule since FIX57 is that
+    # nothing fires capability requests on a schedule — a box that happens
+    # to be down when the sweep runs reads as a wrong flag, and a paid
+    # provider is billed for a report nobody asked for. Capabilities are
+    # now measured by a person's click per model (the admin page's Test
+    # button, ``services/capability_test.py``). Set
+    # CAPABILITY_PROBE_WEEKLY=true to run the sweep anyway.
+    capability_probe_weekly: bool = False
     # Per-provider auto-add allowlist (CSV). Providers here get their
     # discovered models auto-inserted even while the global flag above
     # stays False. Default: the self-hosted set — the operator's own
