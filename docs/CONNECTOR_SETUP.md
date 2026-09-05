@@ -78,3 +78,14 @@ Either way: the card appears with the tool names the server announced; the model
 - The URL you typed is stored as you typed it in `connectors.json`; put the key in the key field, never in the URL.
 
 Limits to know: masked content (`<<PHONE_1>>` etc.) in a custom tool's arguments is **blocked** by the gateway's unknown-tool rule for both transports; the test server is dev-only and binds loopback only — it ships in no installer or image.
+
+## 7. The browser extension (Chrome tabs as tools)
+
+1. **Load it** — chrome://extensions → *Developer mode* → *Load unpacked* → the folder shown in SRAN Desktop → Settings → Browser (`%APPDATA%\SranDesktop-Electronrowser-extension`; the app refreshes that copy at every start — never load the copy in the repo).
+2. **The id** — Chrome derives an unpacked extension's id from the folder's path; the app derives the same id from the same folder and writes it into the native-messaging manifest (`browser\com.sran.browser.electron.json`, `allowed_origins`) at every start. *Expected id* on the Settings page must equal the id under the extension on chrome://extensions. It will, unless Chrome was given the path in a different spelling; then use *I loaded a different folder…* (or type the id — 32 letters a–p; anything else is refused).
+3. **The token** — there is nothing to paste: the app writes `pairing.json` into that folder and the extension reads it itself. Paste only if you loaded a folder the app does not write to; an empty field on the options page means "use the app's".
+4. **Changed the id or the folder?** Nothing else to do: the app rewrites the manifest itself (immediately for a typed id, at the next start otherwise); no registry editing, ever. The extension retries on its own within a minute.
+5. **Token possibly leaked?** Settings → Browser → *Generate a new pairing token*. The old one stops working at once; the extension picks the new one up from `pairing.json` and reconnects.
+
+If the options page says *Chrome refused … not the id SRAN Desktop authorised*, step 2 is the fix; if it says *native host not registered*, start the app once.
+
