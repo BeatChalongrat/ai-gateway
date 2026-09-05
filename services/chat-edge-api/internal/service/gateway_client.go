@@ -1200,6 +1200,9 @@ type GatewayModelInfo struct {
 	// ShowInChat (FIX47 Part C) — the catalogue's second axis: offered in
 	// the chat picker. nil (older gateway) means shown.
 	ShowInChat *bool `json:"show_in_chat,omitempty"`
+	// SelfHosted (FIX65) — the operator's own box; the picker groups it
+	// apart from the curated vendor list. Absent means vendor.
+	SelfHosted bool `json:"self_hosted,omitempty"`
 }
 
 // GatewayModelCapabilities mirrors the Gateway's ModelCapabilities block
