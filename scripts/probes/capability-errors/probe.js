@@ -80,11 +80,56 @@ async function edgeTurn(token, modelId, content) {
   const g1ok = g1.error && g1.error.code === "model_no_tool_support" && g1.error.retryable === false && !/try again/i.test(g1.error.message);
   console.log(`G1 explicit tools-blind model + tools → ${g1.status} code=${g1.error?.code} retryable=${g1.error?.retryable} message="${g1.error?.message}"  ${g1ok ? "PASS" : "FAIL"}`);
 
-  // G2 — auto + tools with a pool that has no tools-capable model
-  const g2 = await gatewayStream(apiKey, { model: "auto", messages: [{ role: "user", content: "What time is it? Use the tool." }], tools: TOOL, max_tokens: 64, metadata: { allowed_providers: ["sranai"] } });
-  out.cases.G2_auto_no_capable_pool = { status: g2.status, error: g2.error, frames: g2.frames.length };
-  const g2ok = g2.error && g2.error.code === "no_capable_model" && g2.error.retryable === false;
-  console.log(`G2 auto + tools, pool without tools → ${g2.status} code=${g2.error?.code} retryable=${g2.error?.retryable} message="${g2.error?.message}"  ${g2ok ? "PASS" : "FAIL"}`);
+  // G2 — auto + tools with a pool that has no tools-capable model.
+  //
+  // FIX63: the pool is derived from the catalogue at run time, never from
+  // a provider named in this file. The old version pinned `sranai` on the
+  // assumption that it had no tools-capable model; when qwen turned out
+  // to call tools (measured, FIX62) the probe went red for a reason that
+  // was not the router's. The router narrows by `allowed_providers` and
+  // `blocked_models` and IGNORES a narrowing that would leave nothing
+  // (orchestrator: "if narrowed: candidates = narrowed"), so the shape
+  // must leave at least one tools-blind model standing:
+  //   1. prefer a provider with a usable key whose active chat rows all
+  //      lack tools (then allowed_providers alone expresses the case);
+  //   2. otherwise allow every provider and block every tools-capable
+  //      model, provided at least one tools-blind model remains.
+  // If the catalogue cannot express the case at all, the probe says so
+  // instead of passing or failing on a guess.
+  const rows = psql(
+    "SELECT provider, model, supports_tools FROM model_configs WHERE is_active AND show_in_chat " +
+    "AND NOT (supports_video_gen OR supports_audio_gen OR supports_tts)",
+  ).split("\n").filter(Boolean).map((l) => { const [provider, model, tools] = l.split("|"); return { provider, model, tools: tools === "t" }; });
+  const byProvider = {};
+  for (const r of rows) (byProvider[r.provider] ??= []).push(r);
+  // usable = active and not withheld (invalid / stale), mirroring
+  // ProviderKeyService._UNUSABLE_STATUSES
+  const validProviders = new Set(psql(
+    "SELECT DISTINCT provider_name FROM provider_keys WHERE is_active AND coalesce(last_test_status,'') NOT IN ('invalid','stale')",
+  ).split("\n").filter(Boolean));
+  const toolsBlindProvider = Object.keys(byProvider).find((p) => validProviders.has(p) && byProvider[p].every((r) => !r.tools));
+  let g2meta = null;
+  let g2shape = "";
+  if (toolsBlindProvider) {
+    g2meta = { allowed_providers: [toolsBlindProvider] };
+    g2shape = `allowed_providers=[${toolsBlindProvider}] (no tools-capable row there)`;
+  } else {
+    const usable = rows.filter((r) => validProviders.has(r.provider));
+    const blind = usable.filter((r) => !r.tools);
+    if (blind.length > 0) {
+      g2meta = { allowed_providers: [...validProviders], blocked_models: usable.filter((r) => r.tools).map((r) => r.model) };
+      g2shape = `blocked_models=${g2meta.blocked_models.length} tools-capable rows, ${blind.length} tools-blind left`;
+    }
+  }
+  if (!g2meta) {
+    out.cases.G2_auto_no_capable_pool = { status: null, error: null, frames: 0, not_expressible: true };
+    console.log("G2 auto + tools, pool without tools → NOT EXPRESSIBLE on this catalogue (every usable chat model can call tools); not a pass, not a fail");
+  } else {
+    const g2 = await gatewayStream(apiKey, { model: "auto", messages: [{ role: "user", content: "What time is it? Use the tool." }], tools: TOOL, max_tokens: 64, metadata: g2meta });
+    out.cases.G2_auto_no_capable_pool = { status: g2.status, error: g2.error, frames: g2.frames.length, shape: g2shape };
+    const g2ok = g2.error && g2.error.code === "no_capable_model" && g2.error.retryable === false;
+    console.log(`G2 auto + tools, pool without tools [${g2shape}] → ${g2.status} code=${g2.error?.code} retryable=${g2.error?.retryable} message="${g2.error?.message}"  ${g2ok ? "PASS" : "FAIL"}`);
+  }
 
   // G3 — auto + tools through chat-edge: the answering model must support tools
   const g3 = await edgeTurn(token, "auto", "ตอนนี้กี่โมงแล้ว ใช้เครื่องมือช่วยดูให้หน่อย");
