@@ -1282,6 +1282,9 @@ export class TurnCoordinator {
     const deadline = Date.now() + run.maxMs;
     const overdue = () => Date.now() >= deadline + (run.waitedMs ?? 0);
     let iteration = 0;
+    // FIX64 — the stale-catalog repair, at most once per run (see the
+    // error case below).
+    let toolsRetried = false;
     while (iteration < run.maxIterations && !overdue()) {
       if (signal.aborted) return "cancelled";
       iteration++;
@@ -1292,6 +1295,8 @@ export class TurnCoordinator {
       const calls = new Map<number, { id: string; name: string; args: string }>();
       let errored = false;
       let sawDone = false;
+      let sawContent = false;
+      let resendWithoutTools = false;
       for await (const ev of this.gateway.streamCompletion(
         { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: "auto", show_summary: true } },
         signal,
@@ -1299,6 +1304,7 @@ export class TurnCoordinator {
         if (signal.aborted) return "cancelled";
         switch (ev.kind) {
           case "content_delta":
+            sawContent = true;
             run.onText(ev.delta);
             if (!run.parentToolCallId) this.emit(eventConv, "content_delta", { delta: ev.delta });
             break;
@@ -1333,6 +1339,29 @@ export class TurnCoordinator {
             if (!run.parentToolCallId) this.emit(eventConv, "reasoning_notice", { model: ev.model, reason: ev.reason });
             break;
           case "error": {
+            // FIX64 — the one error this host causes itself: it offered
+            // tools from a model list the admin has since changed (the
+            // list is cached for MODELS_TTL_MS; the gateway refuses at
+            // once). Re-ask against a fresh list and, if the model is now
+            // tools-blind, resend the same turn without tools instead of
+            // showing a dead turn. Once per run, before anything of the
+            // reply has been shown, never mid-chain.
+            if (
+              ev.code === "model_no_tool_support" && run.tools.length > 0 && !toolsRetried &&
+              iteration === 1 && !sawContent && calls.size === 0
+            ) {
+              toolsRetried = true;
+              this.acceptedModels = null;
+              this.acceptedModelsAt = 0;
+              const stillTakesTools = await this.modelSupportsTools(run.model, signal);
+              if (!stillTakesTools) {
+                this.log.info(`TOOLS: gateway refused tools for ${run.model} and the fresh model list agrees — resending conv=${conversationId} without tools`);
+                run.tools = [];
+                resendWithoutTools = true;
+                break;
+              }
+              this.log.warn(`TOOLS: gateway refused tools for ${run.model} but the fresh model list still says it takes tools — surfacing the error`);
+            }
             errored = true;
             this.log.error(`TURN ERROR conv=${conversationId}: ${ev.code} ${ev.message}`);
             // FIX22 §1b: a guardrail 403 names no cause. Explain it AFTER the
@@ -1351,7 +1380,13 @@ export class TurnCoordinator {
             sawDone = true;
             break;
         }
-        if (errored) break;
+        if (errored || resendWithoutTools) break;
+      }
+      if (resendWithoutTools) {
+        // Same step, same messages, no tools: the gateway's stream is
+        // abandoned (nothing of it was shown) and the loop re-enters.
+        iteration--;
+        continue;
       }
       if (errored) return "error";
       if (signal.aborted) return "cancelled";
