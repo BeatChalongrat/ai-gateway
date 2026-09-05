@@ -103,6 +103,87 @@ function handle(msg) {
   }
 }
 
+// ── FIX69: the same server over HTTP(S), for the REMOTE-connector proof ─────
+//   node demo-mcp-server.mjs --http <port>
+//     binds 127.0.0.1 ONLY (never a public interface); POST /mcp per the
+//     streamable-HTTP transport (JSON reply), DELETE /mcp closes a session.
+//   FIX69_TLS_CERT / FIX69_TLS_KEY   PEM paths → https (the desktop accepts
+//                                    https only; a locally trusted dev cert
+//                                    for "localhost" is enough)
+//   FIX69_KEY                        when set, every request must carry it —
+//                                    `Authorization: Bearer <key>` (or the raw
+//                                    value under FIX69_AUTH_HEADER); otherwise
+//                                    401. The log records ok|missing|wrong,
+//                                    NEVER the value presented.
+const httpArg = process.argv.indexOf("--http");
+if (httpArg >= 0) {
+  const port = Number(process.argv[httpArg + 1]);
+  const KEY = process.env.FIX69_KEY || "";
+  const HEADER = (process.env.FIX69_AUTH_HEADER || "authorization").toLowerCase();
+  const certPath = process.env.FIX69_TLS_CERT || "";
+  const keyPath = process.env.FIX69_TLS_KEY || "";
+  const { readFileSync } = await import("node:fs");
+  const authState = (req) => {
+    if (!KEY) return "ok";
+    const v = req.headers[HEADER];
+    if (typeof v !== "string" || !v) return "missing";
+    const presented = HEADER === "authorization" ? v.replace(/^Bearer\s+/i, "") : v;
+    return presented === KEY ? "ok" : "wrong";
+  };
+  const handler = (req, res) => {
+    const url = new URL(req.url || "/", "http://x");
+    if (url.pathname !== "/mcp") {
+      res.writeHead(404).end();
+      return;
+    }
+    const auth = authState(req);
+    if (auth !== "ok") {
+      logLine({ kind: "http", method: req.method, auth, status: 401 });
+      res.writeHead(401, { "content-type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    if (req.method === "DELETE") {
+      logLine({ kind: "http", method: "DELETE", auth, status: 200 });
+      res.writeHead(200).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      let msg;
+      try {
+        msg = JSON.parse(body);
+      } catch {
+        res.writeHead(400).end();
+        return;
+      }
+      const reply = handle(msg);
+      if (!reply) {
+        res.writeHead(202).end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "fix69-session" }).end(JSON.stringify(reply));
+    });
+  };
+  let server;
+  if (certPath && keyPath) {
+    const { createServer } = await import("node:https");
+    server = createServer({ cert: readFileSync(certPath), key: readFileSync(keyPath) }, handler);
+  } else {
+    const { createServer } = await import("node:http");
+    server = createServer(handler);
+  }
+  server.listen(port, "127.0.0.1", () => {
+    logLine({ kind: "start", mode: certPath ? "https" : "http", port, keyRequired: Boolean(KEY), tools: tools.map((t) => t.name) });
+    process.stdout.write(`listening ${certPath ? "https" : "http"}://127.0.0.1:${port}/mcp\n`);
+  });
+  process.on("SIGINT", () => process.exit(0));
+  process.on("SIGTERM", () => process.exit(0));
+} else {
 const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
 rl.on("line", (line) => {
   if (!line.trim()) return;
@@ -121,3 +202,4 @@ rl.on("close", () => {
   process.exit(0);
 });
 logLine({ kind: "start", tools: tools.map((t) => t.name) });
+}

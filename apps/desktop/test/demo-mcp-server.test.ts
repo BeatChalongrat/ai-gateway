@@ -93,6 +93,47 @@ describe("FIX68 demo MCP server over stdio", () => {
     expect(entries.at(-1)?.["kind"]).toBe("exit");
   });
 
+  it("FIX69: over HTTP it binds loopback only, refuses a missing or wrong key with 401 and never logs the key", async () => {
+    const logFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "fix69-")), "calls.log");
+    const port = 40000 + Math.floor(Math.random() * 20000);
+    const child = spawn(process.execPath, [SERVER, "--http", String(port)], {
+      env: { ...process.env, FIX69_KEY: "s3cret-key-value", FIX68_MCP_LOG: logFile, FIX68_NONCE: "" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error("server did not start")), 10_000);
+        readline.createInterface({ input: child.stdout }).on("line", (l) => {
+          if (l.startsWith("listening")) {
+            clearTimeout(t);
+            resolve();
+          }
+        });
+      });
+      const post = (auth: string | null, body: unknown) =>
+        fetch(`http://127.0.0.1:${port}/mcp`, { method: "POST", headers: { "content-type": "application/json", ...(auth ? { authorization: auth } : {}) }, body: JSON.stringify(body) });
+      const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: {} };
+      expect((await post(null, init)).status).toBe(401);
+      expect((await post("Bearer wrong", init)).status).toBe(401);
+      const ok = await post("Bearer s3cret-key-value", init);
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get("mcp-session-id")).toBe("fix69-session");
+      const r = (await ok.json()) as { result: { serverInfo: { name: string } } };
+      expect(r.result.serverInfo.name).toBe("fix68-demo-mcp");
+      const call = await post("Bearer s3cret-key-value", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "fix68_add_numbers", arguments: { a: 2, b: 3 } } });
+      expect(((await call.json()) as { result: { content: { text: string }[] } }).result.content[0]!.text).toBe("2 + 3 = 5");
+      expect((await fetch(`http://127.0.0.1:${port}/mcp`, { method: "DELETE", headers: { authorization: "Bearer s3cret-key-value" } })).status).toBe(200);
+      expect((await fetch(`http://127.0.0.1:${port}/other`, { method: "POST" })).status).toBe(404);
+    } finally {
+      child.kill();
+    }
+    const log = fs.readFileSync(logFile, "utf8");
+    expect(log).not.toContain("s3cret-key-value");
+    expect(log).toContain("\"auth\":\"missing\"");
+    expect(log).toContain("\"auth\":\"wrong\"");
+    expect(log).toContain("\"mode\":\"http\"");
+  });
+
   it("offers no nonce tool when FIX68_NONCE is unset", async () => {
     const c = new StdioClient({ FIX68_NONCE: "" });
     clients.push(c);
