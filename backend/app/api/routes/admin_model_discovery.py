@@ -77,6 +77,12 @@ class ModelConfigUpdate(BaseModel):
     supports_reasoning: Optional[bool] = None
     reasoning_strategy: Optional[str] = None
     default_reasoning_mode: Optional[str] = None
+    # FIX62 — the dedicated media kinds, admin-overridable like every other
+    # capability flag. A self-hosted box that serves a video or audio
+    # model is only ever known to the operator, never to a seed.
+    supports_video_gen: Optional[bool] = None
+    supports_audio_gen: Optional[bool] = None
+    supports_tts: Optional[bool] = None
     max_context_tokens: Optional[int] = None
     cost_tier: Optional[str] = None
     latency_tier: Optional[str] = None
@@ -123,6 +129,9 @@ def _serialize_row(row: ModelConfigORM) -> dict:
         "supports_reasoning": getattr(row, "supports_reasoning", False),
         "reasoning_strategy": getattr(row, "reasoning_strategy", "none"),
         "default_reasoning_mode": getattr(row, "default_reasoning_mode", "auto"),
+        "supports_video_gen": bool(getattr(row, "supports_video_gen", False)),
+        "supports_audio_gen": bool(getattr(row, "supports_audio_gen", False)),
+        "supports_tts": bool(getattr(row, "supports_tts", False)),
         "max_context_tokens": row.max_context_tokens,
         "cost_tier": row.cost_tier,
         "latency_tier": row.latency_tier,

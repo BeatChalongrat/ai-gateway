@@ -17,6 +17,18 @@ from app.services.providers.openai_images_client import IMAGE_MODELS
 
 router = APIRouter()
 
+# FIX62 — where image generation is actually served from. Today every
+# image request (the generate_image tool from either client, and the
+# dedicated image models) is dispatched by public_images.py to OpenAI's
+# images endpoint with the OpenAI key; a second image backend would be
+# registered here, not in a client.
+IMAGE_GENERATION_PROVIDERS: frozenset[str] = frozenset({"openai"})
+
+
+def image_generation_target_available(valid_providers) -> bool:
+    """True when at least one image backend has a usable key right now."""
+    return any(p in valid_providers for p in IMAGE_GENERATION_PROVIDERS)
+
 
 @router.get(
     "/models",
@@ -44,6 +56,13 @@ async def get_models(
     included (the gateway router resolves it to whatever IS reachable).
     """
     valid_providers = ProviderKeyService().providers_with_valid_keys(session)
+    # FIX62 — the one answer to "is there a model that can actually make
+    # an image right now": the generate_image tool and the dedicated
+    # image models both dispatch to OpenAI's images endpoint (see
+    # public_images.py), so the target exists exactly when OpenAI has a
+    # usable key. Kept in one place so the via-tools flag and the
+    # image-model listing cannot disagree.
+    image_target_available = image_generation_target_available(valid_providers)
     entries: list[ModelInfo] = [ModelInfo(id="auto", provider="gateway")]
     # FIX28 §5.2: a video model (supports_video_gen) is listed ONCE, by the
     # media loop below with video_generation set — never as a chat entry.
@@ -87,7 +106,14 @@ async def get_models(
             cap_flags["tools"] = True
         if c.supports_reasoning:
             cap_flags["reasoning"] = True
-        if c.supports_tools:
+        # FIX62 — "can call tools" is not "can make images". The
+        # generate_image tool needs a model at the other end: image
+        # dispatch goes to the OpenAI images endpoint, so it is usable
+        # only while OpenAI has a usable key — the same gate the dedicated
+        # image models are listed under below. Both clients' 🎨 button
+        # reads this flag, so it goes dark everywhere when the target is
+        # missing, exactly like the 🎬 rule (FIX11 §1).
+        if c.supports_tools and image_target_available:
             cap_flags["image_generation_via_tools"] = True
         # Video generation via the generate_video tool. FIX11 §1: the 🎬
         # affordance must light up ONLY when video is genuinely usable, not on
@@ -152,7 +178,7 @@ async def get_models(
     # Image models (DALL-E) — decoupled from the chat routing candidate pool
     # so ``model:auto`` never sends a chat request to an image model. Listed
     # only when OpenAI has a usable key (same gate as chat models).
-    if "openai" in valid_providers:
+    if image_target_available:
         for m in IMAGE_MODELS:
             entries.append(
                 ModelInfo(

@@ -24,6 +24,7 @@ sourced from the prior hardcoded registry — discovery still
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 import httpx
@@ -102,25 +103,87 @@ _NON_CHAT_KEYWORDS = (
 )
 
 
-def _infer_capability(model_id: str, raw: dict) -> dict:
-    """Infer capability flags from a model id + raw API entry.
+# FIX62 — providers whose model ids are chosen by the vendor, so a name
+# actually says something about the model ("gpt-4o" IS a vision model).
+# Any provider NOT in this set is an OpenAI-compatible endpoint somebody
+# else runs (a self-hosted box, a LiteLLM front, a relay): the operator
+# names the model whatever they like, so the name proves nothing and the
+# inference is turned off for it — capabilities start False and the admin
+# turns them on after testing, unless the endpoint states them itself.
+_NAME_INFERENCE_PROVIDERS = frozenset({
+    "openai", "anthropic", "google", "gemini", "mistral", "cohere", "groq",
+    "deepseek", "perplexity", "openrouter", "kimi", "minimax", "qwen",
+    "xai", "zai",
+})
 
-    The keyword lists are deliberately broad — false positives here
-    cost a misleading capability flag (admin can override), false
-    negatives cost a registered chat model getting filtered out.
+# "vl" is two letters and lands inside ordinary words ("vllm", "level").
+# Match it only as its own token: qwen2-vl, qwen2.5-vl-7b, vl-…
+_VL_TOKEN = re.compile(r"(?:^|[-_/.])vl(?:$|[-_/.\d])")
+
+
+def _name_says_vision(name: str) -> bool:
+    return _VL_TOKEN.search(name) is not None or any(
+        kw in name for kw in _VISION_KEYWORDS if kw != "vl"
+    )
+
+
+def _provider_stated_capabilities(raw: dict) -> dict[str, bool]:
+    """Capability facts the endpoint itself states, when it states any.
+
+    Recognised shapes:
+    - ``supports_function_calling`` / ``supports_vision`` booleans
+      (some Anthropic-style and relay payloads);
+    - OpenRouter: ``supported_parameters`` (a list that contains
+      ``"tools"`` for tool-capable models) and
+      ``architecture.input_modalities`` (contains ``"image"`` for vision).
+    A present list is authoritative in BOTH directions — a model whose
+    ``supported_parameters`` lacks ``tools`` does not call tools, whatever
+    its name suggests.
+    """
+    out: dict[str, bool] = {}
+    if not isinstance(raw, dict):
+        return out
+    if "supports_function_calling" in raw:
+        out["supports_tools"] = bool(raw["supports_function_calling"])
+    if "supports_vision" in raw:
+        out["supports_vision"] = bool(raw["supports_vision"])
+    params = raw.get("supported_parameters")
+    if isinstance(params, list):
+        out["supports_tools"] = any(str(p).lower() == "tools" for p in params)
+    arch = raw.get("architecture")
+    if isinstance(arch, dict):
+        modalities = arch.get("input_modalities")
+        if isinstance(modalities, list):
+            out["supports_vision"] = any(str(m).lower() == "image" for m in modalities)
+    return out
+
+
+def _infer_capability(model_id: str, raw: dict, provider: str | None = None) -> dict:
+    """Capability flags for a discovered model.
+
+    Precedence: what the endpoint STATES (see
+    ``_provider_stated_capabilities``) always wins. Below that, the model
+    NAME is consulted only for vendors in ``_NAME_INFERENCE_PROVIDERS``;
+    for everyone else (``provider`` unknown or not listed) the flags are
+    False until an admin turns them on. The keyword lists stay broad for
+    the vendors they apply to — a false positive costs a flag the admin
+    can correct, a false negative costs a chat model getting filtered out.
+    ``is_chat`` is name-based for every provider: it decides whether the
+    id is a chat model at all, not what it can do.
     """
     name = model_id.lower()
-    supports_vision = any(kw in name for kw in _VISION_KEYWORDS)
-    supports_tools = any(kw in name for kw in _TOOL_KEYWORDS)
     is_chat = not any(kw in name for kw in _NON_CHAT_KEYWORDS)
-    # Respect explicit provider-side hints when present (OpenRouter,
-    # some Anthropic-style payloads). The inferred value remains a
-    # fallback.
-    if isinstance(raw, dict):
-        if "supports_function_calling" in raw:
-            supports_tools = bool(raw["supports_function_calling"])
-        if "supports_vision" in raw:
-            supports_vision = bool(raw["supports_vision"])
+    if provider is not None and provider.lower() in _NAME_INFERENCE_PROVIDERS:
+        supports_vision = _name_says_vision(name)
+        supports_tools = any(kw in name for kw in _TOOL_KEYWORDS)
+    else:
+        supports_vision = False
+        supports_tools = False
+    stated = _provider_stated_capabilities(raw)
+    if "supports_tools" in stated:
+        supports_tools = stated["supports_tools"]
+    if "supports_vision" in stated:
+        supports_vision = stated["supports_vision"]
     return {
         "supports_vision": supports_vision,
         "supports_tools": supports_tools,
@@ -325,7 +388,7 @@ async def _discover_openai_compatible(
         model_id = item.get("id") or item.get("name") or item.get("model")
         if not isinstance(model_id, str) or not model_id:
             continue
-        caps = _infer_capability(model_id, item)
+        caps = _infer_capability(model_id, item, provider)
         if not caps["is_chat"]:
             continue
         supports_reasoning, reasoning_strategy = _infer_reasoning(provider, model_id)
@@ -451,7 +514,7 @@ async def discover_openrouter(api_key: str | None) -> list[DiscoveredModel]:
         model_id = item.get("id")
         if not isinstance(model_id, str) or not model_id:
             continue
-        caps = _infer_capability(model_id, item)
+        caps = _infer_capability(model_id, item, "openrouter")
         if not caps["is_chat"]:
             continue
         pricing = item.get("pricing") or {}
@@ -535,7 +598,7 @@ def _discover_static(provider: str) -> list[DiscoveredModel]:
     models = _STATIC_MODELS.get(provider, [])
     results: list[DiscoveredModel] = []
     for model_id in models:
-        caps = _infer_capability(model_id, {})
+        caps = _infer_capability(model_id, {}, provider)
         results.append(
             DiscoveredModel(
                 provider=provider,
