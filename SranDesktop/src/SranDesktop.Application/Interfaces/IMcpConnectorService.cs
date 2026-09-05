@@ -20,6 +20,12 @@ public interface IMcpConnectorService
     /// embedded fallback otherwise.</summary>
     Task<IReadOnlyList<McpConnector>> ListAvailableAsync(CancellationToken ct = default);
 
+    /// <summary>FIX69: true when the catalogue in use is the embedded starter one,
+    /// whose server_url values are placeholders (no such hosts exist). The page
+    /// hides key-based catalogue cards in that state — a button with no
+    /// destination must not be shown.</summary>
+    bool CatalogIsEmbedded { get; }
+
     Task<IReadOnlyList<InstalledConnector>> GetInstalledAsync(CancellationToken ct = default);
 
     /// <summary>Install: persist config; optionally store an API token (DPAPI).

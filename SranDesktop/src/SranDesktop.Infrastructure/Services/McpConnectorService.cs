@@ -45,17 +45,42 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
     // tools/list — each HTTP call has its own 30s client timeout, so a hung
     // server could otherwise hold a dial ~90s). Ctor-overridable for tests.
     private readonly TimeSpan _dialTimeout;
+    /// <summary>FIX69: may a user-typed remote MCP URL point inside the network
+    /// (loopback / RFC 1918 / link-local)? Default from the process environment
+    /// (the host sets it from the shipped config); tests pass it explicitly.
+    /// Cloud metadata addresses are refused regardless.</summary>
+    private readonly bool _allowPrivateTargets;
+    /// <summary>FIX69: owner-supplied extra trust anchors for remote MCP servers
+    /// on a private CA (SRAN_CONNECTOR_EXTRA_CA_FILE); null = system roots only.</summary>
+    private readonly System.Security.Cryptography.X509Certificates.X509Certificate2Collection? _extraRoots;
+    private bool _catalogEmbedded;
+
+    public bool CatalogIsEmbedded => _catalogEmbedded;
 
     public McpConnectorService(
         ICredentialStore credentials, ILogger<McpConnectorService> logger,
         string? catalogUrl = null, ITokenSession? tokenSession = null,
-        string? stateFilePath = null, TimeSpan? dialTimeout = null)
+        string? stateFilePath = null, TimeSpan? dialTimeout = null,
+        bool? allowPrivateRemoteTargets = null,
+        System.Security.Cryptography.X509Certificates.X509Certificate2Collection? extraTrustRoots = null)
     {
         _credentials = credentials;
         _logger = logger;
         _catalogUrl = catalogUrl;
         _tokenSession = tokenSession;
         _dialTimeout = dialTimeout ?? TimeSpan.FromSeconds(45);
+        _allowPrivateTargets = allowPrivateRemoteTargets ?? RemoteTargetPolicy.AllowPrivateFromEnv();
+        try
+        {
+            _extraRoots = extraTrustRoots ?? RemoteTargetPolicy.LoadExtraRootsFromEnv();
+            if (_extraRoots is { Count: > 0 })
+                _logger.LogInformation("Remote connectors: {Count} extra trust root(s) loaded from {Env}", _extraRoots.Count, RemoteTargetPolicy.EnvExtraCaFile);
+        }
+        catch (Exception ex) when (ex is IOException or System.Security.Cryptography.CryptographicException)
+        {
+            _logger.LogWarning(ex, "Remote connectors: extra trust roots file unreadable — system roots only");
+            _extraRoots = null;
+        }
         // stateFilePath is a test seam — production always uses %APPDATA%.
         _stateFile = stateFilePath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -80,13 +105,17 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
                 var remote = JsonSerializer.Deserialize<List<McpConnector>>(
                     root.GetRawText(), new JsonSerializerOptions(JsonSerializerDefaults.Web));
                 if (remote is { Count: > 0 })
+                {
+                    _catalogEmbedded = false;
                     return _catalog = remote;
+                }
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
             {
                 _logger.LogWarning(ex, "Remote connector catalog unavailable — using embedded");
             }
         }
+        _catalogEmbedded = true;
         return _catalog = EmbeddedCatalog;
     }
 
@@ -199,11 +228,14 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
         // The pasted token is used directly — it isn't in DPAPI yet, and the
         // regular provider must not run: an auth-none custom definition would
         // resolve the portal JWT (see ResolveTokenProvider's custom guard).
+        // FIX69: a user-typed remote URL dials through the policy-checked client
+        // (internal / metadata targets refused at connect time).
         IMcpTransport transport = connector.Transport == McpConnector.TransportStdio
             ? new StdioMcpTransport(connector.Command ?? "", connector.Args, connector.Env, _logger)
             : new HttpMcpTransport(connector.ServerUrl,
                 string.IsNullOrEmpty(apiToken) ? null : () => apiToken,
-                authHeader: connector.AuthHeader);
+                RemoteTargetPolicy.CreateHttpClient(_allowPrivateTargets, TimeSpan.FromSeconds(30), _extraRoots),
+                authHeader: connector.AuthHeader, ownsHttp: true);
 
         var client = new McpRemoteClient(transport);
         try
@@ -218,12 +250,34 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
                                        or OperationCanceledException or McpProtocolException
                                        or JsonException or IOException)
         {
-            return ConnectorTestResult.Fail(ex.Message);
+            return ConnectorTestResult.Fail(ex.Message, ClassifyFailure(ex));
         }
         finally
         {
             await client.DisposeAsync();
         }
+    }
+
+    /// <summary>FIX69: the stable class of a dial failure, for the UI to name
+    /// truthfully. A rejected key is "key-rejected", never "try again".</summary>
+    internal static string ClassifyFailure(Exception ex)
+    {
+        if (RemoteTargetPolicy.FindRefusal(ex) is { } refused)
+            return "target-" + refused.Reason;
+        for (var e = (Exception?)ex; e is not null; e = e.InnerException)
+        {
+            if (e is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden })
+                return "key-rejected";
+            if (e is System.Security.Authentication.AuthenticationException)
+                return "tls";
+        }
+        if (ex is HttpRequestException { StatusCode: not null })
+            return "not-mcp"; // an https site answered, but not as an MCP server (404/5xx…)
+        if (ex is TaskCanceledException or OperationCanceledException)
+            return "timeout";
+        if (ex is McpProtocolException or JsonException)
+            return "not-mcp";
+        return "unreachable";
     }
 
     public async Task UninstallAsync(string connectorId, CancellationToken ct = default)
@@ -358,6 +412,14 @@ public sealed class McpConnectorService : IMcpConnectorService, IAsyncDisposable
             transport.Exited += (_, _) => _ = HandleStdioExitAsync(connectorId);
             return transport;
         }
+        // FIX69: a USER-ADDED http connector (record.Custom) is an arbitrary URL —
+        // it dials through the policy-checked client every time it connects.
+        // Catalogue / owner-registered connectors keep the plain client.
+        var isCustomHttp = LoadState().FirstOrDefault(c => c.Id == connector.Id)?.Custom is not null;
+        if (isCustomHttp)
+            return new HttpMcpTransport(connector.ServerUrl, ResolveTokenProvider(connector),
+                RemoteTargetPolicy.CreateHttpClient(_allowPrivateTargets, TimeSpan.FromSeconds(30), _extraRoots),
+                authHeader: connector.AuthHeader, ownsHttp: true);
         return new HttpMcpTransport(connector.ServerUrl, ResolveTokenProvider(connector),
             authHeader: connector.AuthHeader);
     }

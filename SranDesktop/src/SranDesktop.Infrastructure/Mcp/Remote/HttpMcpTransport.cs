@@ -33,10 +33,13 @@ public sealed class HttpMcpTransport : IMcpTransport
     /// keeps the Bearer scheme; any other name sends the RAW token under that
     /// header (API-key servers like X-Api-Key expect no Bearer prefix).</summary>
     public HttpMcpTransport(string baseUrl, Func<string?>? tokenProvider, HttpClient? http = null,
-        string? authHeader = null)
+        string? authHeader = null, bool ownsHttp = false)
     {
         _baseUrl = baseUrl.TrimEnd('/');
-        _ownsHttp = http is null;
+        // FIX69: a policy-checked client (RemoteTargetPolicy.CreateHttpClient) is
+        // built per transport and handed over WITH ownership, so it is disposed
+        // with the transport like the default client is.
+        _ownsHttp = http is null || ownsHttp;
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         _tokenProvider = tokenProvider;
         _authHeader = authHeader;

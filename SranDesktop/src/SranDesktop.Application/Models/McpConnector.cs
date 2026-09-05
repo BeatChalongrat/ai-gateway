@@ -72,10 +72,14 @@ public sealed class McpConnector
 /// <summary>Outcome of a pre-install "Test connection" dial (custom-connector
 /// UI): initialize + tools/list against a connector definition that is NOT
 /// persisted yet. Never throws — errors come back as text for inline display.</summary>
-public sealed record ConnectorTestResult(bool Success, int ToolCount, string? Error)
+public sealed record ConnectorTestResult(bool Success, int ToolCount, string? Error, string? Code = null)
 {
     public static ConnectorTestResult Ok(int toolCount) => new(true, toolCount, null);
-    public static ConnectorTestResult Fail(string error) => new(false, 0, error);
+    /// <summary>FIX69: <paramref name="code"/> is a stable, UI-nameable class of
+    /// failure — "key-rejected" (401/403), "tls", "unreachable", "timeout",
+    /// "not-mcp", "target-internal", "target-metadata" — so the page can say
+    /// "the server rejected the key" instead of "try again".</summary>
+    public static ConnectorTestResult Fail(string error, string? code = null) => new(false, 0, error, code);
 }
 
 /// <summary>Locally persisted install record for a connector.</summary>

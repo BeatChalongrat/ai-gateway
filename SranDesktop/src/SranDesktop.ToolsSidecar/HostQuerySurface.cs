@@ -499,16 +499,18 @@ public sealed class HostQuerySurface
 
     private async Task<(bool, object?, string?)> ConnectorsTestCustomAsync(JsonObject? args)
     {
-        var connector = ParseCustomConnector(args, out var token);
-        if (connector is null) return Invalid();
+        var connector = ParseCustomConnector(args, out var token, out var reason);
+        if (connector is null) return reason is null ? Invalid() : (false, null, reason);
         var result = await _connectors.TestConnectionAsync(connector, token);
-        return (true, new { ok = result.Success, toolCount = result.ToolCount, error = result.Error }, null);
+        // The token never rides in the answer; neither does the error text carry
+        // it (transport exceptions name hosts and status codes, not headers).
+        return (true, new { ok = result.Success, toolCount = result.ToolCount, error = result.Error, code = result.Code }, null);
     }
 
     private async Task<(bool, object?, string?)> ConnectorsInstallCustomAsync(JsonObject? args)
     {
-        var connector = ParseCustomConnector(args, out var token);
-        if (connector is null) return Invalid();
+        var connector = ParseCustomConnector(args, out var token, out var reason);
+        if (connector is null) return reason is null ? Invalid() : (false, null, reason);
         try
         {
             await _connectors.InstallCustomAsync(connector, token);
@@ -599,6 +601,9 @@ public sealed class HostQuerySurface
         authType = c.AuthType, tools = c.Tools.ToArray(),
         installed = _connectors.IsInstalled(c.Id),
         status = _connectors.GetStatus(c.Id).ToString(),
+        // FIX69: the embedded catalogue's server_url values are placeholders —
+        // the page hides key-based cards while this is true.
+        placeholder = _connectors.CatalogIsEmbedded,
     };
 
     private object InstalledDto(InstalledConnector r) => new
@@ -608,23 +613,54 @@ public sealed class HostQuerySurface
         name = r.Custom?.Name,
         tools = _connectors.GetCachedToolNames(r.Id).ToArray(),
         status = _connectors.GetStatus(r.Id).ToString(),
+        // FIX69: the page learns THAT a key is stored — never the key.
+        hasKey = r.HasCredentials,
+        transport = r.Custom?.Transport,
+        serverUrl = r.Custom?.Transport == McpConnector.TransportHttp ? r.Custom.ServerUrl : null,
     };
 
-    private static McpConnector? ParseCustomConnector(JsonObject? args, out string? apiToken)
+    private static McpConnector? ParseCustomConnector(JsonObject? args, out string? apiToken) =>
+        ParseCustomConnector(args, out apiToken, out _);
+
+    /// <summary>Two shapes: stdio (command + args) as before, and — FIX69 —
+    /// <c>transport: "http"</c> with <c>serverUrl</c> (+ optional <c>authHeader</c>).
+    /// The remote shape is <b>https only</b> on this path: the host already
+    /// refused anything else, and this is the second lock. <paramref name="reason"/>
+    /// names why a definition was refused, so the answer is never a bare "invalid".</summary>
+    private static McpConnector? ParseCustomConnector(JsonObject? args, out string? apiToken, out string? reason)
     {
+        reason = null;
         apiToken = args?["apiToken"]?.GetValue<string>();
         var def = args?["connector"] as JsonObject;
         if (def is null) return null;
         var id = def["id"]?.GetValue<string>();
         var name = def["name"]?.GetValue<string>();
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            return null;
+        var authType = string.IsNullOrWhiteSpace(apiToken) ? "none" : "api_key";
+
+        if (def["transport"]?.GetValue<string>() == McpConnector.TransportHttp)
+        {
+            var serverUrl = def["serverUrl"]?.GetValue<string>();
+            reason = SranDesktop.Infrastructure.Mcp.Remote.RemoteTargetPolicy.ValidateRemoteUrl(serverUrl);
+            if (reason is not null) return null;
+            var authHeader = def["authHeader"]?.GetValue<string>();
+            return new McpConnector
+            {
+                Id = id!, Name = name!, Description = "Custom remote connector", Category = "developer",
+                AuthType = authType, Transport = McpConnector.TransportHttp, ServerUrl = serverUrl!,
+                AuthHeader = string.IsNullOrWhiteSpace(authHeader) ? null : authHeader.Trim(),
+            };
+        }
+
         var command = def["command"]?.GetValue<string>();
-        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(command))
+        if (string.IsNullOrWhiteSpace(command))
             return null;
         var argList = (def["args"] as JsonArray)?.Select(a => a?.GetValue<string>() ?? "").Where(a => a.Length > 0).ToList() ?? new();
         return new McpConnector
         {
             Id = id!, Name = name!, Description = "Custom stdio connector", Category = "developer",
-            AuthType = string.IsNullOrWhiteSpace(apiToken) ? "none" : "api_key",
+            AuthType = authType,
             Transport = McpConnector.TransportStdio, Command = command, Args = argList,
         };
     }
