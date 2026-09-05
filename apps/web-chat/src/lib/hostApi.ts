@@ -219,6 +219,11 @@ export const hostApi = {
   // opens a NATIVE folder picker in the host, which derives the id and authorises it.
   pickExtensionFolder: () =>
     bridge.hostQuery<{ folder: string; extensionId: string; connected: boolean; cancelled?: boolean }>("browser.pickExtensionFolder"),
+  /** FIX70: mint a fresh pairing token. The old one stops working at once; the
+   * app writes the new one into the extension folder itself, so nothing is
+   * pasted. The page learns only that it happened — never a token. */
+  rotatePairingToken: () =>
+    bridge.hostQuery<{ rotated: boolean; provisioned: boolean; connected: boolean }>("browser.rotatePairingToken"),
 
   // folder grants — the page never names a path; grant opens the native picker
   listFolders: async () => unwrap<{ folders: string[] }>(await bridge.hostQuery("folders.list")).folders,

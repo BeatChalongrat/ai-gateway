@@ -63,6 +63,7 @@ export type HostQueryOp =
   // FIX1 §1.2: the one new op — browser-extension folder escape hatch (no path
   // from the page; the host opens a native picker).
   | "browser.pickExtensionFolder"
+  | "browser.rotatePairingToken" // FIX70
   // FIX33 A-D5: context meter numbers + "summarise and continue" (page-only).
   | "context.info" | "context.compact"
   // FIX34 Part A: host-owned shell prefs (quick-ask hotkey, tray click) and the

@@ -109,6 +109,30 @@ export function DeviceSettings() {
     }
   }
 
+  // FIX70: a fresh pairing token. The app writes it into the extension folder
+  // itself (pairing.json); the extension picks it up on its next connect. The
+  // old token is refused from this moment. No token is ever shown here.
+  async function rotatePairingToken() {
+    const r = await hostApi.rotatePairingToken();
+    if (!r.ok) {
+      toast(tOutside("settings.browser.rotateFailed"));
+      return;
+    }
+    toast(r.data?.provisioned ? tOutside("settings.browser.rotated") : tOutside("settings.browser.rotatedNoFolder"));
+    await refreshBrowser();
+  }
+
+  // FIX70: an extension id is exactly 32 letters a–p. A pasted path or token
+  // used to be accepted silently and shown as the "Expected id".
+  function commitExtensionId(v: string) {
+    const id = v.trim();
+    if (!/^[a-p]{32}$/.test(id)) {
+      toast(tOutside("settings.browser.badId"));
+      return;
+    }
+    void patch("browserExtensionId", id);
+  }
+
   // FIX1 §1.2 escape hatch: point the app at the folder the user actually loaded.
   async function pickExtensionFolder() {
     const r = await hostApi.pickExtensionFolder();
@@ -217,7 +241,7 @@ export function DeviceSettings() {
 
             <SitesSection />
 
-            <BrowserSection browser={settings.browser} onRefresh={refreshBrowser} onPick={pickExtensionFolder} />
+            <BrowserSection browser={settings.browser} onRefresh={refreshBrowser} onPick={pickExtensionFolder} onRotate={rotatePairingToken} />
 
             <Section title={t("settings.section.endpoints")} hint={t("settings.section.endpoints.hint")}>
               <EndpointField
@@ -246,8 +270,9 @@ export function DeviceSettings() {
               <EndpointField
                 label={t("settings.extensionId")}
                 value={settings.browserExtensionId}
-                onCommit={(v) => void patch("browserExtensionId", v)}
+                onCommit={commitExtensionId}
               />
+              <p className="text-[11px] text-text-muted">{t("settings.extensionId.hint")}</p>
             </Section>
           </div>
         )}
@@ -400,10 +425,12 @@ function BrowserSection({
   browser,
   onRefresh,
   onPick,
+  onRotate,
 }: {
   browser?: import("@/lib/hostApi").BrowserStatus;
   onRefresh: () => void;
   onPick: () => void;
+  onRotate: () => void;
 }) {
   const t = useT();
   if (!browser) return null;
@@ -475,6 +502,17 @@ function BrowserSection({
         </Button>
         {/* The page names no path: this opens a NATIVE folder picker in the host,
             which derives the id and authorises the folder the USER chose. */}
+      </div>
+
+      {/* FIX70: the pairing token is never shown here — the app writes it into the
+          extension folder (pairing.json) and the extension reads it itself, so
+          there is nothing to paste. This button replaces it; the old one stops
+          working immediately. */}
+      <div>
+        <p className="text-xs text-text-muted">{t("settings.browser.tokenNote")}</p>
+        <Button variant="ghost" className="mt-1" onClick={onRotate} data-testid="browser-rotate-token">
+          {t("settings.browser.rotate")}
+        </Button>
       </div>
     </Section>
   );
