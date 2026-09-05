@@ -8,7 +8,7 @@
   "gatewayUrl": "http://localhost:8080",
   "chatEdgeUrl": "http://localhost:4000",
   "defaultModel": "auto",
-  "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix69\\SranDesktop.ToolsSidecar.exe",
+  "sidecarPath": "..\\..\\SranDesktop\\publish\\sidecar-fix70\\SranDesktop.ToolsSidecar.exe",
   "approvalMode": "auto",
   "webSearchEnabled": false,
   "temporaryChatReadsMemory": true,

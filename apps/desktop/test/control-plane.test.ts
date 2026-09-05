@@ -27,6 +27,7 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     "folders.list", "folders.pickAndGrant", "folders.revoke",
     "globalNotes.list", "globalNotes.delete",
     "browser.pickExtensionFolder",
+    "browser.rotatePairingToken", // FIX70: control-plane, returns no token
     // FIX33 A-D5 — the context meter (read) and "summarise and continue".
     // Page-only: the model has no tool that can compact or read the meter.
     "context.info", "context.compact",

@@ -996,6 +996,76 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         break;
       }
 
+      case "fix70-browser": {
+        // FIX70 — the Chrome extension bridge, end to end, on the REAL bridge:
+        // the installed extension (id derived from its folder), the sidecar's
+        // native-messaging manifest, the relay. Needs Chrome open with the
+        // extension loaded and a tab on https://example.com (the runner opens
+        // it). Checks: connected → the model reads a tab behind the per-site
+        // consent card (Deny first, then Allow) → the pairing token is rotated
+        // and the old one is refused while the extension self-heals.
+        // The extension reconnects on its own (1 s backoff, then a 1-minute alarm)
+        // after the previous host's pipe went away — give it up to 90 s.
+        let status0 = await sidecar.status();
+        for (let i = 0; i < 90 && status0["browserConnected"] !== true; i++) {
+          await sleep(1000);
+          status0 = await sidecar.status();
+        }
+        const connected0 = status0["browserConnected"] === true;
+        check("#1/#2 the bridge is CONNECTED (extension → relay → sidecar; the page's Settings dot reads the same flag)", connected0, `browserConnected=${String(status0["browserConnected"])} folder=${String(status0["browserExtensionFolder"])}`);
+        await js(`location.assign('/chat/settings')`);
+        await sleep(2500);
+        const settingsText = String(await js(`(document.querySelector('[data-testid="browser-status"]') || {}).textContent || ''`));
+        await shot("settings-browser");
+        check("#1 Settings → Browser says Connected", /connected|เชื่อมต่อแล้ว/i.test(settingsText) && !/not connected|ยังไม่/i.test(settingsText), `status="${settingsText}"`);
+
+        // ── #3 + #4: read a tab, gated by the per-site consent card ────────
+        await js(`location.assign('/chat')`);
+        await sleep(2000);
+        await newChat();
+        const consentFrom = log.lines.length;
+        const d = await turn("Open https://example.com/ in a new browser tab with browser_navigate, then read that tab with browser_read_page and tell me the exact main heading text of the page. Do not guess it.", "deny", 180_000);
+        await shot("browser-deny");
+        const denied = co.toolCallsSeen.some((t) => t.conversationId === d.convId && /^browser_(navigate|read_page)$/.test(t.tool) && t.decision === "denied");
+        const anyRan = co.toolCallsSeen.some((t) => t.conversationId === d.convId && /^browser_(navigate|read_page)$/.test(t.tool) && t.ok);
+        check("#4 the per-site consent card was raised for the browser action and Deny stopped it (nothing navigated, nothing read)", d.consents >= 1 && denied && !anyRan, `consents=${d.consents} denied=${denied} anyRan=${anyRan} reply="${d.reply.slice(0, 100)}" | ${lastLine(/CONSENT REQUEST .*browser_/)}`);
+        await newChat();
+        const a = await turn("Open https://example.com/ in a new browser tab with browser_navigate, then read that tab with browser_read_page and tell me the exact main heading text of the page. Do not guess it.", "allow-once", 180_000);
+        await shot("browser-allow");
+        // The model may open the page with browser_navigate or with browser_tabs
+        // {action:"new", url} — both are consented per site; either counts.
+        const navigated = co.toolCallsSeen.some((t) => t.conversationId === a.convId && (t.tool === "browser_navigate" || (t.tool === "browser_tabs" && String(t.args["url"] ?? "").startsWith("https://example.com"))) && t.ok);
+        const read = co.toolCallsSeen.find((t) => t.conversationId === a.convId && t.tool === "browser_read_page" && t.ok);
+        check("#3 Allow → the page was opened (navigate or tabs) and browser_read_page ran over the bridge; the reply carries the page's heading", navigated && !!read && /Example Domain/i.test(a.reply), `opened=${navigated} read=${!!read} reply="${a.reply.slice(0, 120)}" | ${lastLine(/TOOL browser_read_page (ok|FAILED)/)}`);
+        check("#4b the consent named the site (origin) — FIX6 per-site gate", since(consentFrom, /CONSENT REQUEST .*browser_(navigate|read_page) .*site=https:\/\/example\.com/).length > 0, lastLine(/CONSENT REQUEST .*browser_/));
+        // tidy: close the tab the probe opened in the owner's Chrome (consented like any action)
+        await newChat();
+        const c = await turn("Close the browser tab whose URL is https://example.com/ (use browser_list_tabs then browser_tabs). Reply with one word when done.", "allow-once", 120_000);
+        log.info(`FIX70 PROBE tidy: closed example.com tab → consents=${c.consents} reply="${c.reply.slice(0, 60)}"`);
+
+        // ── #5: rotate the pairing token; the old one must be refused ──────
+        const rotFrom = log.lines.length;
+        const rot = await sidecar.hostQuery("browser.rotatePairingToken", {});
+        const rotData = (rot.data ?? {}) as Record<string, unknown>;
+        check("#5a rotate op answered (no token in the answer)", rot.ok && rotData["rotated"] === true && !JSON.stringify(rot).match(/[0-9a-f]{48}/), JSON.stringify(rot).slice(0, 160));
+        // the extension reconnects on its own: first with what it holds, then with pairing.json
+        let reconnected = false;
+        const t0 = Date.now();
+        while (Date.now() - t0 < 120_000) {
+          const st = await sidecar.status();
+          if (st["browserConnected"] === true) {
+            reconnected = true;
+            break;
+          }
+          await sleep(1000);
+        }
+        const rejectedOld = since(rotFrom, /pairing token mismatch/).length;
+        await shot("after-rotate");
+        check("#5 after rotation the bridge is connected again with the NEW token (old-token hellos, if any, were refused: see count)", reconnected, `reconnected=${reconnected} in ${Math.round((Date.now() - t0) / 1000)}s oldTokenRejected=${rejectedOld} | ${lastLine(/token rotated|Browser relay connected/)}`);
+        log.info(`FIX70 PROBE conversations: deny=${d.convId} allow=${a.convId}`);
+        break;
+      }
+
       default:
         check(`unknown probe '${name}'`, false, "");
     }
