@@ -164,6 +164,17 @@ export class SidecarClient {
     return tools;
   }
 
+  /** FIX68: the tool list is cached for the sidecar's lifetime, which was
+   * right while the set could only change with a restart. A connector that is
+   * installed or uninstalled mid-session changes it: without this, a freshly
+   * added MCP server's tools were not offered to the model until the app was
+   * restarted, and an uninstalled one's tools stayed on offer (the sidecar
+   * then answered "Unknown remote tool"). Called by the coordinator after any
+   * host op that changes the sidecar's connector set. */
+  invalidateTools(): void {
+    this.toolsCache = null;
+  }
+
   async status(): Promise<Record<string, unknown>> {
     await this.ensureStarted();
     const r = await this.request("sran/status", {}, 10_000);

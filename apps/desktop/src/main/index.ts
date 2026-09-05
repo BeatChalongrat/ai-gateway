@@ -358,6 +358,12 @@ void app.whenReady().then(async () => {
         return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
       },
       pickExecutableFile: async () => {
+        // FIX68 dev probe: the picker's answer comes from the command line
+        // (never in a packaged build — flags.anyDiagnostic exits above).
+        if (flags.probeMcpServer && !isRelease) {
+          log.info(`PROBE pickExecutableFile → ${flags.probeMcpServer} (--probe-mcp-server; no OS dialog)`);
+          return flags.probeMcpServer;
+        }
         const r = await dialog.showOpenDialog(win, {
           title: "Choose the MCP server program (the user picks it — the page names no process)",
           properties: ["openFile", "dontAddToRecent"],
@@ -365,6 +371,10 @@ void app.whenReady().then(async () => {
         return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
       },
       confirmSpawn: async (message: string) => {
+        if (flags.probeMcpServer && !isRelease) {
+          log.info(`PROBE confirmSpawn dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
+          return true;
+        }
         const r = await dialog.showMessageBox(win, {
           type: "warning",
           title: "Add MCP connector",
@@ -1348,6 +1358,11 @@ interface Flags {
   grant: string | null;
   /** dev: force every turn onto one model (the S2 auto-routing defect) */
   model: string | null;
+  /** FIX68 dev: the program the "Add custom connector" file picker would
+   * return, so the E4 probe can drive that flow without an OS dialog. The
+   * spawn-consent dialog is answered "Add connector" and its exact text is
+   * logged. Diagnostic → refused in a packaged build like every other flag. */
+  probeMcpServer: string | null;
   anyDiagnostic: boolean;
 }
 function parseFlags(argv: readonly string[]): Flags {
@@ -1376,6 +1391,7 @@ function parseFlags(argv: readonly string[]): Flags {
     e4Probe: valueOf("--probe-e4"),
     grant: valueOf("--grant"),
     model: valueOf("--model"),
+    probeMcpServer: valueOf("--probe-mcp-server"),
   };
   const anyDiagnostic = Object.values(f).some((v) => v !== null && v !== false);
   return { ...f, anyDiagnostic };

@@ -610,6 +610,19 @@ export class TurnCoordinator {
           this.bridge.postHostResult(payload.requestId, false, undefined, "api-key-unsupported");
           return;
         }
+        if (r.ok) this.sidecar.invalidateTools(); // FIX68: the tool set changed
+        this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
+        return;
+      }
+      // ── connectors.uninstall — forwarded as before, plus FIX68: the host's
+      //    cached tool list must forget the connector's tools, or the model is
+      //    offered tools the sidecar no longer has. ──
+      case "connectors.uninstall": {
+        const r = await this.sidecar.hostQuery("connectors.uninstall", payload.args ?? {});
+        if (r.ok) {
+          this.sidecar.invalidateTools();
+          this.log.info(`CONNECTOR uninstalled: ${String(payload.args?.["connectorId"] ?? "?")} (tool list invalidated)`);
+        }
         this.bridge.postHostResult(payload.requestId, r.ok, r.data, r.error);
         return;
       }
@@ -725,7 +738,11 @@ export class TurnCoordinator {
     if (!test.ok || !t?.ok) return { added: false, error: `test-failed:${t?.error ?? "no tools"}` };
     const install = await this.sidecar.hostQuery("connectors._installCustom", { connector });
     if (!install.ok) return { added: false, error: install.error ?? "install-failed" };
-    this.log.info(`CONNECTOR added (custom stdio): ${id} (${t.toolCount} tool(s))`);
+    // FIX68: the sidecar dialled the server and cached its tools during
+    // _installCustom; the HOST's tools/list cache must be dropped too, or the
+    // new tools reach the model only after a restart.
+    this.sidecar.invalidateTools();
+    this.log.info(`CONNECTOR added (custom stdio): ${id} (${t.toolCount} tool(s); tool list invalidated)`);
     return { added: true };
   }
 

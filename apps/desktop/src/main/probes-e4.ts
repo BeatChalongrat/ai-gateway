@@ -757,6 +757,95 @@ export async function runE4Probe(ctx: ProbeContext, name: string): Promise<void>
         break;
       }
 
+      case "fix68-connector": {
+        // FIX68 — the custom-connector path end to end, against OUR OWN MCP
+        // server (scripts/probes/fix68/demo-mcp-server.mjs), through the page's
+        // real "Add custom connector" button. Run as:
+        //   FIX68_NONCE=<random> FIX68_MCP_LOG=<file> npx electron . \
+        //     --probe-e4 fix68-connector --probe-mcp-server <abs path to the .mjs>
+        // The nonce names one of the server's tools, so a card that shows it
+        // can only have listed the LIVE process; the server's own log file is
+        // the second witness for every call (or its absence, after Deny).
+        const nonce = process.env["FIX68_NONCE"] ?? "";
+        const serverLog = process.env["FIX68_MCP_LOG"] ?? "";
+        const readServerLog = (): Array<Record<string, unknown>> => {
+          try {
+            return fs.readFileSync(serverLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+          } catch {
+            return [];
+          }
+        };
+        const serverCalls = (tool?: string) => readServerLog().filter((e) => e["kind"] === "request" && e["method"] === "tools/call" && (!tool || e["tool"] === tool));
+        const connectorId = "custom-demo-mcp-server"; // derived by the host from the file name
+        const cardSel = `[data-testid="connector-card-${connectorId}"]`;
+        const nonceTool = `fix68_nonce_${nonce}`;
+        const waitFor = async (code: string, ms: number): Promise<boolean> => {
+          const t0 = Date.now();
+          while (Date.now() - t0 < ms) {
+            if (await js(code)) return true;
+            await sleep(300);
+          }
+          return false;
+        };
+        const ADD_BUTTON = `[...document.querySelectorAll('button')].find(b => /add custom connector|เพิ่ม connector เอง/i.test(b.textContent || ''))`;
+
+        // ── #1 add through the page ──────────────────────────────────────
+        await js(`location.assign('/chat/connectors')`);
+        const hasAdd = await waitFor(`!!${ADD_BUTTON}`, 20_000);
+        check("connectors page shows the page's own Add-custom-connector button", hasAdd, "");
+        const toolsBefore = await sidecar.listTools();
+        const logFrom = log.lines.length;
+        await js(`(() => { const b = ${ADD_BUTTON}; if (b) b.click(); return !!b; })()`);
+        const cardShown = await waitFor(`!!document.querySelector('${cardSel}')`, 90_000);
+        await sleep(500);
+        await shot("custom-card");
+        check("#1 the connector was added through the page (custom card appears; host logged the add)", cardShown && since(logFrom, /CONNECTOR added \(custom stdio\): custom-demo-mcp-server/).length > 0, lastLine(/CONNECTOR added|test-failed|addcustom|_testCustom/));
+        check("#1b the spawn-consent dialog was reached BEFORE the spawn (its text names the exact command)", since(logFrom, /PROBE confirmSpawn dialog reached/).length > 0, lastLine(/PROBE confirmSpawn/).slice(0, 300));
+
+        // ── #2 the tool list comes from the live server ──────────────────
+        const cardTools = String(await js(`((document.querySelector('${cardSel} [data-testid="connector-tools"]') || {}).textContent || '')`));
+        const started = readServerLog().find((e) => e["kind"] === "start");
+        const serverTools = Array.isArray(started?.["tools"]) ? (started!["tools"] as string[]) : [];
+        check("#2 the card lists exactly what the LIVE server announced, including the nonce-named tool nothing in the repo knows", nonce.length > 0 && serverTools.includes(nonceTool) && serverTools.length > 0 && serverTools.every((t) => cardTools.includes(t)), `card="${cardTools}" server=${JSON.stringify(serverTools)}`);
+        const toolsAfter = await sidecar.listTools();
+        check("#2b the MODEL's tool list gained the server's tools without a restart (host cache invalidated)", !toolsBefore.some((t) => t.name === nonceTool) && serverTools.every((t) => toolsAfter.some((a) => a.name === t)), `before=${toolsBefore.length} after=${toolsAfter.length} nonceTool=${toolsAfter.some((a) => a.name === nonceTool)}`);
+
+        // ── #4 the gate: Deny first — the server must not hear the call ──
+        await js(`location.assign('/chat')`);
+        await waitFor(`!!document.querySelector('textarea')`, 20_000);
+        await newChat();
+        const callsBeforeDeny = serverCalls("fix68_add_numbers").length;
+        const consentFrom = log.lines.length;
+        const d = await turn("Call the tool fix68_add_numbers with a=17 and b=25, then tell me exactly what it returned. Do not compute it yourself.", "deny", 180_000);
+        await shot("deny");
+        const denied = co.toolCallsSeen.some((t) => t.conversationId === d.convId && t.tool === "fix68_add_numbers" && t.decision === "denied");
+        const callsAfterDeny = serverCalls("fix68_add_numbers").length;
+        check("#4 the consent card was raised for the connector tool and Deny stopped it — the server never received the call", d.consents >= 1 && denied && callsAfterDeny === callsBeforeDeny, `consents=${d.consents} denied=${denied} serverCalls ${callsBeforeDeny}→${callsAfterDeny} reply="${d.reply.slice(0, 100)}"`);
+        check("#4b the consent is the Network/connector class (danger.connector), i.e. it asks under \"Asks each action\"", since(consentFrom, /CONSENT REQUEST .*fix68_add_numbers .*danger=danger\.connector/).length > 0, lastLine(/CONSENT REQUEST .*fix68_/));
+
+        // ── #3 Allow once — the call reaches the server and the result comes back ──
+        await newChat();
+        const a = await turn("Call the tool fix68_add_numbers with a=17 and b=25, then tell me exactly what it returned. Do not compute it yourself.", "allow-once", 180_000);
+        await shot("allow");
+        const ran = co.toolCallsSeen.find((t) => t.conversationId === a.convId && t.tool === "fix68_add_numbers" && t.ok);
+        const call = serverCalls("fix68_add_numbers").slice(-1)[0];
+        const args = (call?.["args"] ?? {}) as Record<string, unknown>;
+        check("#3 Allow → the sidecar called the server (server log has the call with a=17,b=25) and the model's reply carries the result 42", a.consents >= 1 && !!ran && ran.where === "sidecar" && !!call && Number(args["a"]) === 17 && Number(args["b"]) === 25 && /42/.test(a.reply), `consents=${a.consents} ran=${!!ran} where=${ran?.where} serverArgs=${JSON.stringify(args)} reply="${a.reply.slice(0, 120)}" | ${lastLine(/TOOL fix68_add_numbers (ok|FAILED)/)}`);
+
+        // ── #5 uninstall from the page — tools gone, process ended ────────
+        await js(`location.assign('/chat/connectors')`);
+        const cardBack = await waitFor(`!!document.querySelector('${cardSel}')`, 20_000);
+        await js(`(() => { const b = document.querySelector('${cardSel} [data-testid="connector-uninstall"]'); if (b) b.click(); return !!b; })()`);
+        const gone = await waitFor(`!document.querySelector('${cardSel}')`, 30_000);
+        await sleep(1500);
+        await shot("uninstalled");
+        const toolsFinal = await sidecar.listTools();
+        const exited = readServerLog().some((e) => e["kind"] === "exit");
+        check("#5 Uninstall from the card → card gone, the server process ended (its log says exit), its tools left the model's list", cardBack && gone && exited && !toolsFinal.some((t) => t.name.startsWith("fix68_")), `cardBack=${cardBack} gone=${gone} exited=${exited} fix68ToolsLeft=${toolsFinal.filter((t) => t.name.startsWith("fix68_")).map((t) => t.name).join(",") || "none"} | ${lastLine(/CONNECTOR uninstalled/)}`);
+        log.info(`FIX68 PROBE conversations: deny=${d.convId} allow=${a.convId}`);
+        break;
+      }
+
       default:
         check(`unknown probe '${name}'`, false, "");
     }
