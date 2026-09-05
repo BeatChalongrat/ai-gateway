@@ -126,6 +126,12 @@ class ModelInfo(BaseModel):
     # FIX47 Part C — whether the chat picker should offer this model. Set
     # on chat candidates only; the API may call a hidden model as before.
     show_in_chat: Optional[bool] = None
+    # FIX65 — the operator's own box (base_urls.SELF_HOSTED_PROVIDERS).
+    # Vendor models in the chat picker are curated to a floor (vision +
+    # tools + streaming); a self-hosted model is offered as it is, so the
+    # picker groups it under "your own" and says what it can do. Sent
+    # only when True.
+    self_hosted: Optional[bool] = None
 
 
 class ModelListResponse(BaseModel):

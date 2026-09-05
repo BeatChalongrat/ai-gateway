@@ -1,0 +1,19 @@
+{
+  "_comment": "FIX65 Part 1 — the operator's keep list for the chat picker, one tier set per vendor as the vendors curate their own pickers. Input to backend/scripts/chat_floor.py; the floor (vision + tools + streaming) still decides. openrouter is the only route here to Claude and Gemini (no anthropic/google key), so its floor-passing rows are kept. mistral-medium-latest, command-a and sonar-pro are proposed but absent from the catalogue; their providers keep what they have (no key here, nothing to measure).",
+  "anthropic": ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
+  "openai": ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"],
+  "google": ["gemini-3.6-flash"],
+  "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash"],
+  "xai": ["grok-4.5"],
+  "kimi": ["kimi-k3"],
+  "qwen": ["qwen3.7-max"],
+  "mistral": ["mistral-medium-latest"],
+  "cohere": ["command-a"],
+  "perplexity": ["sonar-pro"],
+  "groq": ["llama-4-scout"],
+  "openrouter": [
+    "anthropic/claude-3.5-haiku", "anthropic/claude-opus-4.1", "anthropic/claude-sonnet-4", "anthropic/claude-sonnet-4.5",
+    "google/gemini-2.5-flash", "google/gemini-2.5-pro", "openai/gpt-4o", "openai/gpt-4o-mini"
+  ],
+  "sranai": ["qwen3.8-27b-fp8"]
+}
