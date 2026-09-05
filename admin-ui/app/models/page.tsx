@@ -11,6 +11,69 @@ import { api, getApiErrorMessage } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { useT, type DictKey } from "../../lib/i18n";
 
+/* ── Media destinations (FIX67) ───────────────────────────────────── */
+
+interface SettingRow {
+  key: string;
+  value: string;
+}
+
+function MediaDestinations() {
+  const t = useT();
+  const { data, refetch } = useApi<SettingRow[]>("/admin/system-settings");
+  const cur = (k: string) => data?.find((s) => s.key === k)?.value ?? "";
+  const [img, setImg] = useState<string | null>(null);
+  const [vid, setVid] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const imgVal = img ?? cur("media_order:image");
+  const vidVal = vid ?? cur("media_order:video");
+  const allowMock = cur("media_allow_mock").toLowerCase() === "true";
+
+  const save = useCallback(async (key: string, value: string) => {
+    setStatus("");
+    try {
+      await api.patch(`/admin/system-settings/${key}`, { value });
+      setStatus(t("infra.media.saved"));
+      refetch();
+    } catch (e) {
+      setStatus(getApiErrorMessage(e, "Save failed"));
+    }
+  }, [t, refetch]);
+
+  const box: React.CSSProperties = {
+    flex: 1, minWidth: 220, padding: "0.4rem 0.55rem",
+    border: "1px solid var(--border)", borderRadius: 6,
+    background: "var(--bg-surface)", color: "var(--text-primary)", fontFamily: "monospace",
+  };
+  const btn: React.CSSProperties = {
+    padding: "0.4rem 0.9rem", borderRadius: 6, border: "1px solid var(--border)",
+    background: "var(--bg-elevated)", color: "var(--text-primary)", cursor: "pointer",
+  };
+  const rowStyle: React.CSSProperties = { display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.5rem", flexWrap: "wrap" };
+
+  return (
+    <div style={{ padding: "1rem 1.15rem", border: "1px solid var(--border)", borderRadius: 10, background: "var(--bg-base)", marginBottom: "1.25rem" }}>
+      <h2 style={{ fontSize: "0.95rem", fontWeight: 600, margin: 0 }}>{t("infra.media.title")}</h2>
+      <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "0.2rem 0 0.75rem" }}>{t("infra.media.subtitle")}</p>
+      <label style={rowStyle}>
+        <span style={{ minWidth: 90, fontSize: "0.85rem" }}>{t("infra.media.image")}</span>
+        <input style={box} value={imgVal} placeholder={t("infra.media.placeholder")} onChange={(e) => setImg(e.target.value)} />
+        <button style={btn} onClick={() => save("media_order:image", imgVal)}>{t("infra.media.save")}</button>
+      </label>
+      <label style={rowStyle}>
+        <span style={{ minWidth: 90, fontSize: "0.85rem" }}>{t("infra.media.video")}</span>
+        <input style={box} value={vidVal} placeholder={t("infra.media.placeholder")} onChange={(e) => setVid(e.target.value)} />
+        <button style={btn} onClick={() => save("media_order:video", vidVal)}>{t("infra.media.save")}</button>
+      </label>
+      <label style={{ ...rowStyle, marginBottom: 0 }}>
+        <input type="checkbox" checked={allowMock} onChange={(e) => save("media_allow_mock", e.target.checked ? "true" : "false")} />
+        <span style={{ fontSize: "0.85rem" }}>{t("infra.media.allowMock")}</span>
+      </label>
+      {status ? <p style={{ fontSize: "0.8rem", color: "var(--text-muted)", margin: "0.5rem 0 0" }}>{status}</p> : null}
+    </div>
+  );
+}
+
 /* ── Types ────────────────────────────────────────────────────────── */
 
 interface ModelItem {
@@ -320,7 +383,7 @@ function CapabilityTest({
   const capNames = (caps: readonly TestableCap[]) => caps.map((c) => t(CAP_NAME_KEY[c])).join(", ");
   const onOff = (v: boolean | null | undefined) => t(v ? "infra.models.on" : "infra.models.off");
   const small: React.CSSProperties = { fontSize: "0.625rem", color: "var(--text-tertiary)" };
-  const btn: React.CSSProperties = {
+  const btn = {
     fontSize: "0.625rem", padding: "0.125rem 0.5rem", borderRadius: 4, cursor: "pointer",
     border: "1px solid var(--border-default)", background: "var(--bg-secondary)", color: "var(--text-secondary)",
   };
@@ -882,6 +945,9 @@ export default function ModelsPage() {
         </div>
         <ThemeToggle />
       </div>
+
+      {/* ── Media destinations (FIX67) ── */}
+      <MediaDestinations />
 
       {/* ── Stats row ── */}
       {!loading && !error && items.length > 0 && (

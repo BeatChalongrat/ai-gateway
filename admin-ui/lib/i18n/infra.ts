@@ -101,6 +101,17 @@ export const en = {
   "infra.providers.syncRefetch": "Fetch model list",
   "infra.providers.syncRunning": "Fetching…",
 
+  // ── Media destinations (FIX67) ────────────────────────────
+  "infra.media.title": "Media destinations",
+  "infra.media.subtitle":
+    "Ordered fallback for image/video generation (provider:model, comma-separated). Max 2, cross-provider, never a costlier fallback.",
+  "infra.media.image": "Image order",
+  "infra.media.video": "Video order",
+  "infra.media.allowMock": "Allow the test 'mock' provider (off in production)",
+  "infra.media.save": "Save",
+  "infra.media.saved": "Saved.",
+  "infra.media.placeholder": "e.g. openai:gpt-image-1",
+
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "Model registry",
   "infra.models.subtitle":
@@ -494,6 +505,17 @@ export const th: Record<keyof typeof en, string> = {
     "การตรวจคีย์กับการดึงรายการโมเดลเป็นคนละขั้นตอนกัน — คีย์ด้านบนยังใช้งานได้ตามปกติ",
   "infra.providers.syncRefetch": "ดึงรายการโมเดล",
   "infra.providers.syncRunning": "กำลังดึง…",
+
+  // ── Media destinations (FIX67) ────────────────────────────
+  "infra.media.title": "ปลายทางสื่อ",
+  "infra.media.subtitle":
+    "ลำดับ fallback สำหรับสร้างรูป/วิดีโอ (provider:model คั่นด้วยจุลภาค) สูงสุด 2 ชั้น คนละเจ้า และห้ามชั้นสองแพงกว่า",
+  "infra.media.image": "ลำดับรูป",
+  "infra.media.video": "ลำดับวิดีโอ",
+  "infra.media.allowMock": "อนุญาตผู้ให้บริการทดสอบ 'mock' (ปิดใน production)",
+  "infra.media.save": "บันทึก",
+  "infra.media.saved": "บันทึกแล้ว",
+  "infra.media.placeholder": "เช่น openai:gpt-image-1",
 
   // ── Model registry ────────────────────────────────────────
   "infra.models.title": "ทะเบียนโมเดล",
