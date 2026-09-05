@@ -1,11 +1,11 @@
-// FIX47.6 Part C — the tool wall becomes unreachable in the composer:
+// FIX47.6 Part C / FIX65 — the tool wall becomes unreachable in the composer:
 //
-//  * a model without tool support keeps the 🎨 image-mode button VISIBLE
-//    but disabled, with the reason on the control (not hidden — hiding
-//    made the model look broken; not silently inert — that's the FIX44
-//    silent no-op);
-//  * switching to a tools-blind model while image mode is ON drops the
-//    mode WITH a toast naming the model — never silently;
+//  * a model that cannot make images has NO 🎨 button (FIX65: the picker
+//    curates vendor models to a floor and labels the operator's own, so
+//    an absent button is the honest shape; FIX47.6's visible-but-disabled
+//    button belonged to a picker that offered every model);
+//  * switching to such a model while image mode is ON drops the mode WITH
+//    a toast naming the model — never silently;
 //  * the FIX47 backstop error is untouched (server-side; not this test).
 
 import { act, cleanup, render } from "@testing-library/react";
@@ -87,13 +87,10 @@ function mount(activeModelId: string) {
 }
 
 describe("tools affordance (FIX47.6 Part C)", () => {
-  it("a tools-blind model shows the image button DISABLED with the reason — not hidden, not inert", () => {
-    const { imageBtn } = mount(NO_TOOLS.id);
-    const btn = imageBtn();
-    expect(btn).not.toBeNull();
-    expect(btn!.disabled).toBe(true);
-    expect(btn!.title).toBe(dictionaries.en["input.imageMode.needsTools"]);
-    expect(btn!.getAttribute("aria-label")).toBe(dictionaries.en["input.imageMode.needsTools"]);
+  it("a model that cannot make images has NO image button (FIX65) — and nothing inert in its place", () => {
+    const { imageBtn, view } = mount(NO_TOOLS.id);
+    expect(imageBtn()).toBeNull();
+    expect(view.container.querySelector('[aria-disabled="true"][data-testid="image-mode-button"]')).toBeNull();
   });
 
   it("a tool-capable model gets the button enabled with the normal label", () => {
@@ -104,15 +101,19 @@ describe("tools affordance (FIX47.6 Part C)", () => {
     expect(btn!.title).toBe(dictionaries.en["input.imageMode"]);
   });
 
-  it("switching to a tools-blind model with image mode ON drops the mode WITH a toast", () => {
+  it("switching to a tools-blind model with image mode ON drops the mode WITH a toast and the button goes away", () => {
     const { imageBtn, switchModel } = mount(WITH_TOOLS.id);
     act(() => { imageBtn()!.click(); });
     expect(imageBtn()!.getAttribute("aria-pressed")).toBe("true");
     act(() => { switchModel(NO_TOOLS.id); });
-    expect(imageBtn()!.getAttribute("aria-pressed")).toBe("false");
+    expect(imageBtn()).toBeNull();
     const toastMsg = useToastStore.getState().message;
     expect(toastMsg).toContain("Image mode turned off");
     expect(toastMsg).toContain(NO_TOOLS.name);
+    // Back on a capable model the button returns, off.
+    act(() => { switchModel(WITH_TOOLS.id); });
+    expect(imageBtn()).not.toBeNull();
+    expect(imageBtn()!.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("Thai reasons exist", () => {

@@ -330,18 +330,37 @@ function ModelPicker({
     [filtered],
   );
 
-  const providerGroups = useMemo(() => {
-    const groups = new Map<string, ModelEntry[]>();
+  // FIX65 — two groups, the vendors' way: models that do everything (the
+  // gateway curates vendor rows to vision + tools + streaming before they
+  // reach this list, so nothing here needs a capability icon) and the
+  // operator's own box, offered as it is with what each model can do
+  // written under its name. Inside each group, per-provider sections as
+  // before, most-populated first.
+  const { vendorGroups, ownGroups } = useMemo(() => {
+    const vendor = new Map<string, ModelEntry[]>();
+    const own = new Map<string, ModelEntry[]>();
     for (const m of filtered) {
       // Media models render in their kind sections, not the provider groups.
       if (m.model_kind && m.model_kind !== "chat") continue;
       const p = m.provider || "other";
-      if (!groups.has(p)) groups.set(p, []);
-      groups.get(p)!.push(m);
+      const target = m.self_hosted ? own : vendor;
+      if (!target.has(p)) target.set(p, []);
+      target.get(p)!.push(m);
     }
-    // Most-populated providers first.
-    return [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
+    const order = (g: Map<string, ModelEntry[]>) => [...g.entries()].sort((a, b) => b[1].length - a[1].length);
+    return { vendorGroups: order(vendor), ownGroups: order(own) };
   }, [filtered]);
+
+  /** What a self-hosted model can do, from the catalogue strings the
+   *  attach gate and the 🎨 button read — never from its name. */
+  const capabilitySummary = (m: ModelEntry): string => {
+    const parts: string[] = [];
+    if (hasVisionCap(m)) parts.push(t("model.can.vision"));
+    if (hasToolsCap(m)) parts.push(t("model.can.tools"));
+    if (m.reasoning?.supported) parts.push(t("model.can.reasoning"));
+    if (m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation")) parts.push(t("model.can.images"));
+    return parts.length ? parts.join(" · ") : t("model.can.none");
+  };
 
   const toggle = (p: string) =>
     setExpanded((prev) => {
@@ -494,45 +513,64 @@ function ModelPicker({
           );
         })}
 
-        {providerGroups.map(([provider, group]) => {
-          const isExpanded = searching || expanded.has(provider);
-          const preview = isExpanded ? group : group.slice(0, PROVIDER_PREVIEW_COUNT);
-          const hiddenCount = group.length - preview.length;
-          return (
-            <Section
-              key={provider}
-              title={provider}
-              count={group.length}
-            >
-              {preview.map((m) => (
-                <ModelRow
-                  key={`${provider}-${m.id}`}
-                  label={m.name}
-                  {...rowState(m)}
-                  selected={!isAuto && m.id === activeId}
-                  onClick={() => onPickModel(m)}
-                  reasoning={Boolean(m.reasoning?.supported)}
-                  imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
-                vision={hasVisionCap(m)}
-                  mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
-                  description={m.description}
-                contextWindow={m.context_window}
-                inputPrice={m.input_price_per_1m}
-                outputPrice={m.output_price_per_1m}
-                />
-              ))}
-              {hiddenCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => toggle(provider)}
-                  className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
-                >
-                  {t("model.showMore", { n: String(hiddenCount) })}
-                </button>
-              ) : null}
-            </Section>
-          );
-        })}
+        {(
+          [
+            { key: "full", groups: vendorGroups, title: t("model.group.full"), hint: t("model.group.fullHint"), own: false },
+            { key: "own", groups: ownGroups, title: t("model.group.own"), hint: t("model.group.ownHint"), own: true },
+          ] as const
+        ).map(({ key, groups, title, hint, own }) =>
+          groups.length === 0 ? null : (
+            <div key={`group-${key}`} data-testid={`model-group-${key}`}>
+              <div className="border-t border-border px-3 pb-0.5 pt-2.5">
+                <div className="text-[11px] font-semibold text-text-secondary">{title}</div>
+                <div className="text-[10px] text-text-muted">{hint}</div>
+              </div>
+              {groups.map(([provider, group]) => {
+                const isExpanded = searching || expanded.has(provider);
+                const preview = isExpanded ? group : group.slice(0, PROVIDER_PREVIEW_COUNT);
+                const hiddenCount = group.length - preview.length;
+                return (
+                  <Section
+                    key={provider}
+                    title={provider}
+                    count={group.length}
+                  >
+                    {preview.map((m) => {
+                      const state = rowState(m);
+                      return (
+                      <ModelRow
+                        key={`${provider}-${m.id}`}
+                        label={m.name}
+                        {...state}
+                        sub={own ? `${m.provider} · ${capabilitySummary(m)}` : state.sub}
+                        selected={!isAuto && m.id === activeId}
+                        onClick={() => onPickModel(m)}
+                        reasoning={Boolean(m.reasoning?.supported)}
+                        imageGen={Boolean(m.capabilities.includes("image_generation_via_tools") || m.capabilities.includes("image_generation"))}
+                        vision={hasVisionCap(m)}
+                        mediaKind={m.model_kind && m.model_kind !== "chat" ? m.model_kind : undefined}
+                        description={m.description}
+                        contextWindow={m.context_window}
+                        inputPrice={m.input_price_per_1m}
+                        outputPrice={m.output_price_per_1m}
+                      />
+                      );
+                    })}
+                    {hiddenCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => toggle(provider)}
+                        className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
+                      >
+                        {t("model.showMore", { n: String(hiddenCount) })}
+                      </button>
+                    ) : null}
+                  </Section>
+                );
+              })}
+            </div>
+          ),
+        )}
 
         {/* Search yielded nothing (Auto already hidden in this branch). */}
         {searching && filtered.length === 0 && !showAuto ? (

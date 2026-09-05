@@ -60,6 +60,12 @@ export interface ModelEntry {
    *  shown. A hidden model is still allowed: a conversation bound to it
    *  keeps working, it just is not offered for new picks. */
   show_in_chat?: boolean;
+  /** FIX65 — the operator's own box (gateway SELF_HOSTED_PROVIDERS).
+   *  Vendor models in the picker are curated to a floor (vision + tools +
+   *  streaming) so nothing there needs a capability icon; a self-hosted
+   *  model is offered as it is, under its own group, with what it can do
+   *  spelled out. Absent = vendor. */
+  self_hosted?: boolean;
   /** Sprint 3 — coarse cost tier for a selector badge. Optional: dormant
    *  until the gateway/chat-edge serialize it; the badge renders only when
    *  present so older payloads degrade cleanly. */

@@ -1204,22 +1204,28 @@ export function ChatInput({
                   disabled={streaming}
                 />
               ) : null}
-              {/* FIX47.6 Part C — a model without tool support keeps the
-                  button VISIBLE but disabled, with the reason on
-                  hover/focus. Hiding it made the model look broken;
-                  silently-inert would be the FIX44 silent no-op. */}
-              {!streaming ? (
+              {/* FIX65 — a model that cannot make images has no 🎨 at all.
+                  FIX47.6 kept the button visible-but-disabled so a model
+                  did not look broken; that worry belonged to a picker
+                  that offered every model. Vendor models in the picker
+                  now pass a floor (vision + tools + streaming) and the
+                  operator's own models sit under a group that says what
+                  each one can do, so an absent button is the honest
+                  shape — the same rule as 🎬 below, on both clients (the
+                  desktop renders this page). Typing an image request at
+                  such a model still gets the FIX62 held notice, never a
+                  silent no-op. */}
+              {!streaming && canGenerateImages ? (
                 <button
                   type="button"
                   onClick={() => {
                     setImageMode((v) => !v);
                     setVideoMode(false);
                   }}
-                  aria-label={canGenerateImages ? t("input.imageMode") : t("input.imageMode.needsTools")}
-                  title={canGenerateImages ? t("input.imageMode") : t("input.imageMode.needsTools")}
+                  aria-label={t("input.imageMode")}
+                  title={t("input.imageMode")}
                   aria-pressed={imageMode}
-                  aria-disabled={!canGenerateImages || undefined}
-                  disabled={disabled || !canGenerateImages}
+                  disabled={disabled}
                   data-testid="image-mode-button"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     imageMode
@@ -1260,22 +1266,20 @@ export function ChatInput({
               {/* FIX9 Part B: video gen isn't wired in the desktop app. FIX34.1
                   Part F: so the desktop gets NO button, not a disabled one with
                   a "not available here yet" tooltip — same rule as the web.
-                  FIX47.6 Part C — that rule covers HOST-level absence only:
-                  when the feature exists here but the selected MODEL can't
-                  drive it, the button stays visible and disabled with the
-                  reason (see videoFeatureAvailable above). */}
-              {videoFeatureAvailable && !streaming && !hosted ? (
+                  FIX65 — and the same rule now covers the MODEL: a model
+                  that cannot drive the video tool has no button either,
+                  like 🎨 above (one rule, both clients). */}
+              {videoFeatureAvailable && canGenerateVideos && !streaming && !hosted ? (
                 <button
                   type="button"
                   onClick={() => {
                     setVideoMode((v) => !v);
                     setImageMode(false);
                   }}
-                  aria-label={canGenerateVideos ? t("input.videoMode") : t("input.videoMode.needsTools")}
-                  title={canGenerateVideos ? t("input.videoMode") : t("input.videoMode.needsTools")}
+                  aria-label={t("input.videoMode")}
+                  title={t("input.videoMode")}
                   aria-pressed={videoMode}
-                  aria-disabled={!canGenerateVideos || undefined}
-                  disabled={disabled || !canGenerateVideos}
+                  disabled={disabled}
                   data-testid="video-mode-button"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode

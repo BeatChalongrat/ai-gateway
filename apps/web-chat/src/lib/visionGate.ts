@@ -49,9 +49,16 @@ export function modelAcceptsImages(
  *  entry (other than the active one) that reads images. Prefers a
  *  well-known general model when present so the offer is not a codex. */
 export function visionAlternative(activeModelId: string | null, models: ModelEntry[]): ModelEntry | null {
-  const candidates = models.filter((m) => m.id !== activeModelId && hasVisionCap(m) && (!m.model_kind || m.model_kind === "chat"));
-  const preferred = candidates.find((m) => /^gpt-5\.6-terra$|^gpt-4o$/.test(m.id));
-  return preferred ?? candidates[0] ?? null;
+  // FIX65 — no model names in code: the offer is the catalogue's first
+  // vision-capable chat model THAT THE PICKER OFFERS (a model the admin
+  // hid from chat is never proposed), preferring one from the same
+  // provider so the switch stays as close to what the user chose as it can.
+  const candidates = models.filter(
+    (m) => m.id !== activeModelId && hasVisionCap(m) && (!m.model_kind || m.model_kind === "chat") && m.show_in_chat !== false,
+  );
+  const activeProvider = models.find((m) => m.id === activeModelId)?.provider;
+  const sameProvider = activeProvider ? candidates.find((m) => m.provider === activeProvider) : undefined;
+  return sameProvider ?? candidates[0] ?? null;
 }
 
 /** Shows the "this model can't read images — switch?" toast with the

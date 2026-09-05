@@ -169,9 +169,10 @@ test("C1 — image mode drops itself, with the reason, when the model cannot mak
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __toasts: string[] }).__toasts.join(" | ")))
     .toContain(`Image mode turned off — ${TEXT_ONLY.name} can't use tools`);
-  await expect(imageBtn).toHaveAttribute("aria-pressed", "false");
-  await expect(imageBtn).toBeDisabled();
-  await expect(imageBtn).toHaveAttribute("title", "This model can't make images — pick a model that can use tools");
+  // FIX65 — a model that cannot make images has no 🎨 at all (the picker
+  // curates vendor rows to a floor and labels the operator's own, so an
+  // absent button is the honest shape); FIX47.6's disabled button is gone.
+  await expect(imageBtn).toHaveCount(0);
 });
 
 test("C2 — an image request at a text-only model is held, nothing leaves the browser, and the same text goes through on the second send", async ({ page }) => {
@@ -179,7 +180,7 @@ test("C2 — an image request at a text-only model is held, nothing leaves the b
   await page.goto(`/chat/${CONV.id}`);
   const composer = page.locator("textarea");
   await expect(composer).toBeVisible();
-  await expect(page.getByTestId("image-mode-button")).toBeDisabled();
+  await expect(page.getByTestId("image-mode-button")).toHaveCount(0); // FIX65: no button at a text-only model
 
   await composer.fill("ทำรูปแมว");
   await composer.press("Enter");
