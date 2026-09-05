@@ -255,7 +255,10 @@ export class HostTools {
         if (typeof prompt !== "string" || !prompt.trim()) return { ok: false, text: "'prompt' is required.", imageDataUri: null };
         const r = await this.gateway.generateImage(prompt.trim(), ctx.signal);
         if (!r.ok) return { ok: false, text: r.error, imageDataUri: null };
-        return { ok: true, text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}. The image follows in the next message.`, imageDataUri: r.dataUri };
+        // FIX67 — tell the user which model produced it (every time). After a
+        // fallback this is the second-tier model, not the primary.
+        const madeBy = r.producedBy ? ` It was made by ${r.producedBy}; mention that to the user.` : "";
+        return { ok: true, text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}.${madeBy} The image follows in the next message.`, imageDataUri: r.dataUri };
       }
       case "run_python": {
         const code = args["code"];

@@ -393,7 +393,7 @@ export class GatewayClient {
   /** FIX9 Part B: generate an image (POST /v1/images/generations) with the agent
    * key — host-side, the run_python/web_search precedent, so the sidecar never
    * holds the JWT. Returns a data: URI on success. */
-  async generateImage(prompt: string, signal: AbortSignal): Promise<{ ok: true; dataUri: string; revised?: string } | { ok: false; error: string }> {
+  async generateImage(prompt: string, signal: AbortSignal): Promise<{ ok: true; dataUri: string; revised?: string; producedBy?: string } | { ok: false; error: string }> {
     const key = await this.getOrProvisionKey();
     if (!key) return { ok: false, error: "The app could not obtain a gateway key for this account." };
     try {
@@ -410,10 +410,13 @@ export class GatewayClient {
         // chat model's fault (the desktop path calls the gateway directly).
         return { ok: false, error: classifyDesktopImageError(res.status, detail) };
       }
-      const body = (await res.json()) as { data?: { b64_json?: string; url?: string; revised_prompt?: string }[] };
+      const body = (await res.json()) as { data?: { b64_json?: string; url?: string; revised_prompt?: string }[]; model?: string; provider?: string };
+      // FIX67 — which destination produced it (after a fallback this differs
+      // from the primary), for "made by …" attribution.
+      const producedBy = body.model || body.provider || undefined;
       const first = body.data?.[0];
-      if (first?.b64_json) return { ok: true, dataUri: `data:image/png;base64,${first.b64_json}`, revised: first.revised_prompt };
-      if (first?.url) return { ok: true, dataUri: first.url, revised: first.revised_prompt };
+      if (first?.b64_json) return { ok: true, dataUri: `data:image/png;base64,${first.b64_json}`, revised: first.revised_prompt, producedBy };
+      if (first?.url) return { ok: true, dataUri: first.url, revised: first.revised_prompt, producedBy };
       return { ok: false, error: "Image generation returned no image." };
     } catch (err) {
       return { ok: false, error: `Image generation failed: ${(err as Error).message}` };
