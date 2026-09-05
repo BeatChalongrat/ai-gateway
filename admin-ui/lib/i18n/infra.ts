@@ -139,6 +139,16 @@ export const en = {
   "infra.models.reasoningHelp":
     "Whether the gateway treats the model as reasoning-capable. Editing this marks the row as a manual override, so the discovery sync stops updating it.",
   "infra.models.reasoningSaveFailed": "Could not save the reasoning setting",
+  // FIX62 — every capability is a switch. The catalogue is the only place
+  // that answers "can this model do X"; a self-hosted model starts with
+  // everything off and the operator turns on what they have tested.
+  "infra.models.capToggle": "{cap} capability",
+  "infra.models.capOn": "{cap}: on — the gateway offers this to clients. Click to turn off.",
+  "infra.models.capOff": "{cap}: off — clients will not offer it for this model. Click to turn on (after testing it).",
+  "infra.models.capSaveFailed": "Could not save the capability",
+  "infra.models.cap.video": "video",
+  "infra.models.cap.audio": "audio",
+  "infra.models.cap.tts": "speech",
   "infra.models.strategyLabel": "How thinking is obtained",
   "infra.models.strategyHelp":
     "Read-only suits a self-hosted box: the gateway reads the thinking the model streams and sends nothing extra, so a server that rejects unknown request fields keeps working.",
@@ -474,6 +484,13 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.reasoningHelp":
     "กำหนดว่าเกตเวย์ถือว่าโมเดลนี้คิดเป็นหรือไม่ การแก้ค่านี้จะทำให้แถวนี้กลายเป็น manual override และ discovery sync จะหยุดอัปเดตให้",
   "infra.models.reasoningSaveFailed": "บันทึกการตั้งค่าการคิดไม่สำเร็จ",
+  "infra.models.capToggle": "ความสามารถ: {cap}",
+  "infra.models.capOn": "{cap}: เปิด — เกตเวย์เสนอความสามารถนี้ให้ไคลเอนต์ คลิกเพื่อปิด",
+  "infra.models.capOff": "{cap}: ปิด — ไคลเอนต์จะไม่เสนอความสามารถนี้ให้โมเดลนี้ คลิกเพื่อเปิด (หลังทดสอบแล้ว)",
+  "infra.models.capSaveFailed": "บันทึกความสามารถไม่สำเร็จ",
+  "infra.models.cap.video": "สร้างวิดีโอ",
+  "infra.models.cap.audio": "สร้างเสียง",
+  "infra.models.cap.tts": "แปลงข้อความเป็นเสียง",
   "infra.models.strategyLabel": "วิธีได้มาซึ่งกระบวนการคิด",
   "infra.models.strategyHelp":
     "แบบอ่านอย่างเดียวเหมาะกับกล่องที่โฮสต์เอง — เกตเวย์อ่านกระบวนการคิดที่โมเดลส่งมาโดยไม่ส่งพารามิเตอร์เพิ่ม เซิร์ฟเวอร์ที่ไม่รับฟิลด์แปลกปลอมจึงยังทำงานได้ตามปกติ",

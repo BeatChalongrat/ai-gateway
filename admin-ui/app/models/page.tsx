@@ -21,6 +21,10 @@ interface ModelItem {
   supports_tools?: boolean;
   supports_vision?: boolean;
   supports_reasoning?: boolean;
+  // FIX62 — the dedicated media kinds, editable like the other flags.
+  supports_video_gen?: boolean;
+  supports_audio_gen?: boolean;
+  supports_tts?: boolean;
   // How this row's thinking is obtained. Mirrors
   // backend providers/reasoning_strategies.py — the values are a closed
   // set the API validates, so the select below can enumerate them.
@@ -155,6 +159,76 @@ function ShowInChatSwitch({ item, onChange }: { item: ModelItem; onChange: (id: 
         background: "#fff", transition: "left 150ms", boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
       }} />
     </button>
+  );
+}
+
+/* ── Capability switches (FIX62) ──────────────────────────────────── */
+
+// FIX62 — every capability the catalogue answers for is one click here,
+// the same shape as the Thinking switch: the PATCH goes to the same
+// route, sets is_manual_override, and the server's row is what gets
+// shown afterwards. This is the only route by which a self-hosted model
+// gets a capability corrected — never a SQL statement, never a seed.
+type CapabilityKey = "supports_tools" | "supports_vision" | "supports_video_gen" | "supports_audio_gen" | "supports_tts";
+
+type CapLabelKey = Parameters<ReturnType<typeof useT>>[0];
+
+const CAPABILITY_SWITCHES: { key: CapabilityKey; label: CapLabelKey; colour: string }[] = [
+  { key: "supports_tools", label: "infra.models.cap.tools", colour: "#2563eb" },
+  { key: "supports_vision", label: "infra.models.cap.vision", colour: "#7c3aed" },
+  { key: "supports_video_gen", label: "infra.models.cap.video", colour: "#0891b2" },
+  { key: "supports_audio_gen", label: "infra.models.cap.audio", colour: "#d97706" },
+  { key: "supports_tts", label: "infra.models.cap.tts", colour: "#059669" },
+];
+
+function CapabilitySwitch({
+  item, cap, onChange,
+}: {
+  item: ModelItem;
+  cap: { key: CapabilityKey; label: CapLabelKey; colour: string };
+  onChange: (id: number, patch: Record<string, unknown>) => Promise<void>;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const on = !!item[cap.key];
+  const name = t(cap.label);
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.625rem", color: "var(--text-tertiary)" }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={t("infra.models.capToggle", { cap: name })}
+        title={t(on ? "infra.models.capOn" : "infra.models.capOff", { cap: name })}
+        disabled={busy}
+        data-testid={`cap-switch-${cap.key}`}
+        onClick={async () => {
+          setBusy(true);
+          try { await onChange(item.id, { [cap.key]: !on }); } finally { setBusy(false); }
+        }}
+        style={{
+          position: "relative", width: 28, height: 16, borderRadius: 8, border: "none", padding: 0,
+          cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1,
+          background: on ? cap.colour : "var(--border-default)", transition: "background 150ms",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2, left: on ? 14 : 2, width: 12, height: 12, borderRadius: "50%",
+          background: "#fff", transition: "left 150ms", boxShadow: "0 1px 2px rgba(0,0,0,0.3)",
+        }} />
+      </button>
+      {name}
+    </label>
+  );
+}
+
+function CapabilityCell({ item, onChange }: { item: ModelItem; onChange: (id: number, patch: Record<string, unknown>) => Promise<void> }) {
+  return (
+    <div style={{ display: "flex", gap: "0.375rem 0.625rem", flexWrap: "wrap", alignItems: "center" }}>
+      {CAPABILITY_SWITCHES.map((cap) => (
+        <CapabilitySwitch key={cap.key} item={item} cap={cap} onChange={onChange} />
+      ))}
+    </div>
   );
 }
 
@@ -504,6 +578,31 @@ export default function ModelsPage() {
     }
   }, [t]);
 
+  // FIX62 — tools / vision / video / audio / tts, same contract as the
+  // reasoning switch: one PATCH, the server's row wins, the row becomes a
+  // manual override. Kept in the same per-row overlay as reasoning so a
+  // fresh list never shows a value the backend has not agreed to.
+  const setCapability = useCallback(async (id: number, patch: Record<string, unknown>) => {
+    setSaveError(null);
+    try {
+      const row = await api.patch(`/admin/models/${id}`, patch);
+      setLocalReasoning((prev) => ({
+        ...prev,
+        [id]: {
+          ...(prev[id] ?? {}),
+          supports_tools: row.supports_tools,
+          supports_vision: row.supports_vision,
+          supports_video_gen: row.supports_video_gen,
+          supports_audio_gen: row.supports_audio_gen,
+          supports_tts: row.supports_tts,
+          is_manual_override: row.is_manual_override,
+        },
+      }));
+    } catch (e) {
+      setSaveError(getApiErrorMessage(e, t("infra.models.capSaveFailed")));
+    }
+  }, [t]);
+
   const providers = useMemo(() => {
     const c: Record<string, number> = {};
     items.forEach((m) => { c[m.provider] = (c[m.provider] || 0) + 1; });
@@ -774,15 +873,11 @@ export default function ModelsPage() {
                                 <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
                               )}
                             </td>
-                            {/* Capabilities */}
+                            {/* Capabilities — FIX62: switches, not chips.
+                                What the catalogue says a model can do is
+                                the admin's to correct here. */}
                             <td>
-                              {rowCaps(m).length ? (
-                                <div style={{ display: "flex", gap: "0.1875rem", flexWrap: "wrap" }}>
-                                  {rowCaps(m).map((c) => <CapTag key={c} cap={c} />)}
-                                </div>
-                              ) : (
-                                <span style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>—</span>
-                              )}
+                              <CapabilityCell item={m} onChange={setCapability} />
                             </td>
                             {/* Stream */}
                             <td style={{ textAlign: "center" }}>
@@ -866,12 +961,8 @@ export default function ModelsPage() {
                         </div>
                         {/* Context */}
                         {meta?.ctx && <ContextBar ctx={meta.ctx} ctxK={meta.ctxK} />}
-                        {/* Caps */}
-                        {rowCaps(m).length ? (
-                          <div style={{ display: "flex", gap: "0.1875rem", flexWrap: "wrap" }}>
-                            {rowCaps(m).map((c) => <CapTag key={c} cap={c} />)}
-                          </div>
-                        ) : null}
+                        {/* Caps — FIX62: the same switches as the table view */}
+                        <CapabilityCell item={m} onChange={setCapability} />
                         {/* Footer badges */}
                         <div style={{ display: "flex", gap: "0.25rem", marginTop: "auto", flexWrap: "wrap" }}>
                           {m.supports_streaming && (
