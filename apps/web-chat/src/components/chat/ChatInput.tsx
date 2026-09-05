@@ -24,6 +24,7 @@ import {
   validateFile,
 } from "@/lib/fileUtil";
 import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch } from "@/lib/visionGate";
+import { detectImageIntent } from "@/lib/imageIntent";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
@@ -224,6 +225,10 @@ export function ChatInput({
   // Phase C — 🎨 image mode. Gated on the selected model's capability:
   // visible for image_generation_via_tools models + Auto, hidden otherwise.
   const [imageMode, setImageMode] = useState(false);
+  // FIX62 — an image request typed at a model that cannot make images is
+  // held here (the text the user sent) so the composer can say why and
+  // let the same text through on the next send, as a plain question.
+  const [imageIntentHeld, setImageIntentHeld] = useState<string | null>(null);
   const models = useModelStore((s) => s.models);
   const activeModel =
     activeModelId && activeModelId !== AUTO_MODEL_ID
@@ -571,6 +576,19 @@ export function ChatInput({
       return;
     }
     const t2 = text.trim();
+    // FIX62 — an explicit image request at a model that cannot make
+    // images is not sent: it would either fail at the provider or come
+    // back as prose pretending to be a picture. The composer keeps the
+    // text, names the way out, and lets the SAME text through on the
+    // next send (the user has then chosen to ask in words). Shared by
+    // both clients — the desktop opens this page — so the desktop, which
+    // never passes through chat-edge's intent check, gets the same
+    // answer as the web.
+    if (!canGenerateImages && detectImageIntent(t2) && imageIntentHeld !== t2) {
+      setImageIntentHeld(t2);
+      return;
+    }
+    setImageIntentHeld(null);
     // Hand the attachment metadata to the store BEFORE onSend. The
     // clearPendingFiles calls below run synchronously, but on the
     // landing page onSend awaits ensureConv() before it reaches
@@ -1080,6 +1098,19 @@ export function ChatInput({
                   }
                 />
               ))}
+            </div>
+          ) : null}
+
+          {/* FIX62 — the held image request: why it was not sent, and the
+              way out. Cleared on the next send, on a model switch that can
+              make images, or by the user editing the text. */}
+          {imageIntentHeld !== null && !canGenerateImages ? (
+            <div
+              role="status"
+              data-testid="image-intent-blocked"
+              className="mx-4 mt-3 rounded-lg border border-border-default bg-bg-elevated px-3 py-2 text-xs text-text-secondary"
+            >
+              {t("input.imageIntent.blocked", { model: activeModel?.name ?? activeModelId ?? "" })}
             </div>
           ) : null}
 

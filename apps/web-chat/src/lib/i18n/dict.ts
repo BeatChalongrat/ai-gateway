@@ -256,6 +256,9 @@ export const en = {
   "input.videoMode.needsTools": "This model can't make videos — pick a model that can use tools",
   "input.imageMode.droppedForModel": "Image mode turned off — {model} can't use tools",
   "input.videoMode.droppedForModel": "Video mode turned off — {model} can't use tools",
+  // FIX62 — an image request typed at a model that cannot make images is
+  // held in the composer with the way out, instead of being sent to fail.
+  "input.imageIntent.blocked": "{model} can't make images. Pick a model with the 🎨 icon — or send again to ask it in words.",
 
   // ── Memory page ──────────────────────────────────────────
   "memory.back": "Back to chat",
@@ -1641,6 +1644,7 @@ const th: Record<DictKey, string> = {
   "input.videoMode.needsTools": "โมเดลนี้สร้างวิดีโอไม่ได้ — เลือกโมเดลที่ใช้เครื่องมือได้",
   "input.imageMode.droppedForModel": "ปิดโหมดสร้างภาพแล้ว — {model} ใช้เครื่องมือไม่ได้",
   "input.videoMode.droppedForModel": "ปิดโหมดสร้างวิดีโอแล้ว — {model} ใช้เครื่องมือไม่ได้",
+  "input.imageIntent.blocked": "{model} สร้างรูปไม่ได้ กรุณาเลือกโมเดลที่มีไอคอน 🎨 — หรือกดส่งอีกครั้งเพื่อถามเป็นข้อความ",
 
   // Memory page
   "memory.back": "กลับไปแชท",
