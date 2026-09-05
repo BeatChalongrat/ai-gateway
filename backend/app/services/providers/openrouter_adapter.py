@@ -81,6 +81,11 @@ class OpenRouterAdapter(BaseProviderAdapter):
             if val is not None:
                 body[param] = val
 
+        # FIX64 — the vision switch, enforced where the request is built.
+        from app.services.providers.capability_gate import require_vision
+
+        require_vision(model, messages)
+
         # Function-calling passthrough, gated on the registry capability
         # flag: silently stripping ``tools`` would leave the model unable
         # to call tools while the caller believes they were sent, so a

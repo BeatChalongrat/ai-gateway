@@ -26,8 +26,12 @@ into the FastAPI lifespan).
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _DEFAULT_HEADERS = {
     "Content-Type": "application/json",
@@ -67,6 +71,65 @@ _clients: dict[str, httpx.AsyncClient] = {}
 _lock = asyncio.Lock()
 
 
+def request_shape(body: bytes | None) -> dict | None:
+    """Content-free description of a chat body about to leave for a provider.
+
+    FIX64 — the capability switches are only proven when the request the
+    provider actually receives changes. Counts only: no message text, no
+    headers, no key material. ``None`` for a body that is not a JSON
+    object (images / audio endpoints, empty GETs).
+    """
+    if not body:
+        return None
+    try:
+        data = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    messages = data.get("messages")
+    image_parts = 0
+    n_messages = 0
+    if isinstance(messages, list):
+        n_messages = len(messages)
+        for m in messages:
+            content = m.get("content") if isinstance(m, dict) else None
+            if isinstance(content, list):
+                image_parts += sum(
+                    1
+                    for part in content
+                    if isinstance(part, dict)
+                    and part.get("type") in ("image_url", "image", "input_image")
+                )
+    tools = data.get("tools")
+    shape = {
+        "model": data.get("model"),
+        "stream": bool(data.get("stream")),
+        "messages": n_messages,
+        "tools": len(tools) if isinstance(tools, list) else 0,
+        "image_parts": image_parts,
+    }
+    if data.get("tool_choice") is not None:
+        shape["tool_choice"] = str(data["tool_choice"])[:40]
+    for knob in ("reasoning_effort", "reasoning", "thinking"):
+        if knob in data:
+            shape[knob] = True
+    return shape
+
+
+async def _log_request_shape(request: httpx.Request) -> None:
+    """httpx request hook: one ``provider_request_shape`` line per call."""
+    shape = request_shape(request.content)
+    if shape is None:
+        return
+    logger.info(
+        "provider_request_shape",
+        host=request.url.host,
+        path=request.url.path,
+        **shape,
+    )
+
+
 def _build_async_client(
     base_url: str,
     timeout_connect: float,
@@ -84,6 +147,7 @@ def _build_async_client(
         headers=dict(_DEFAULT_HEADERS),
         timeout=timeout,
         limits=_pool_limits_for(provider_name),
+        event_hooks={"request": [_log_request_shape]},
     )
 
 
@@ -174,6 +238,7 @@ def create_provider_client(
 
     return httpx.AsyncClient(
         base_url=base_url,
+        event_hooks={"request": [_log_request_shape]},
         headers=default_headers,
         timeout=timeout,
     )

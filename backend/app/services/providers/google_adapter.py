@@ -235,6 +235,10 @@ class GoogleAIAdapter(BaseProviderAdapter):
         *,
         resolved_model: str | None = None,
     ) -> dict:
+        # FIX64 — the vision switch, enforced where the request is built.
+        from app.services.providers.capability_gate import require_vision
+
+        require_vision(resolved_model or payload.model, messages)
         chat_messages, system_text = _split_system(messages)
         body: dict = {"contents": _build_contents(chat_messages)}
 

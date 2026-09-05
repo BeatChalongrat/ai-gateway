@@ -93,6 +93,11 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         resolved_model: str | None = None,
     ) -> dict:
         model = resolved_model or payload.model
+        # FIX64 — the vision switch is enforced here, where every client's
+        # request passes, the way the tools switch below always was.
+        from app.services.providers.capability_gate import require_vision
+
+        require_vision(model, messages)
         body: dict = {
             "model": model,
             "messages": [serialize_openai_wire_message(m) for m in messages],

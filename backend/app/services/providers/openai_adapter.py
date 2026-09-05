@@ -225,6 +225,10 @@ class OpenAIAdapter(BaseProviderAdapter):
         self, payload, messages, *, stream: bool = False, resolved_model: str | None = None
     ) -> dict:
         model = resolved_model or payload.model
+        # FIX64 — the vision switch, enforced where the request is built.
+        from app.services.providers.capability_gate import require_vision
+
+        require_vision(model, messages)
         body: dict = {
             "model": model,
             "messages": [self._serialize_message(m) for m in messages],

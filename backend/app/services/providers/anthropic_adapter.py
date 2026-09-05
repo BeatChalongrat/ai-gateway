@@ -124,6 +124,10 @@ class AnthropicAdapter(BaseProviderAdapter):
         """
         system_text, user_messages = self._split_system(messages)
         model = resolved_model or payload.model
+        # FIX64 — the vision switch, enforced where the request is built.
+        from app.services.providers.capability_gate import require_vision
+
+        require_vision(model, messages)
         max_tokens = (
             getattr(payload, "max_tokens", None)
             or payload.metadata.get("max_tokens", DEFAULT_MAX_TOKENS)
