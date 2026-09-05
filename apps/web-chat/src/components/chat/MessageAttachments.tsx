@@ -47,14 +47,20 @@ export function MessageAttachments({ files }: Props) {
       {videos.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           {videos.map((f) => (
-            <VideoPlayer key={f.id} fileId={f.id} filename={f.filename} />
+            <div key={f.id} className="flex flex-col gap-0.5">
+              <VideoPlayer fileId={f.id} filename={f.filename} />
+              {f.generated_by ? <MadeBy by={f.generated_by} /> : null}
+            </div>
           ))}
         </div>
       ) : null}
       {images.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {images.map((f) => (
-            <ImageThumb key={f.id} file={f} />
+            <figure key={f.id} className="m-0 flex flex-col gap-0.5">
+              <ImageThumb file={f} />
+              {f.generated_by ? <MadeBy by={f.generated_by} /> : null}
+            </figure>
           ))}
         </div>
       ) : null}
@@ -73,6 +79,18 @@ export function MessageAttachments({ files }: Props) {
         />
       ) : null}
     </div>
+  );
+}
+
+// FIX67 — attribution under a generated image/video. Shown every time (not
+// only after a fallback) so a user has a basis to compare: a picture from a
+// different model is a different thing (style, cost, quality). i18n TH/EN.
+function MadeBy({ by }: { by: string }) {
+  const t = useT();
+  return (
+    <figcaption className="text-[11px] text-text-muted" data-testid="made-by">
+      {t("chat.media.madeBy", { model: by })}
+    </figcaption>
   );
 }
 

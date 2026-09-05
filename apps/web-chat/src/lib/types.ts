@@ -230,6 +230,9 @@ export interface FileAttachment {
    *  AI edit plan (via POST /excel/execute) so the UI can flip them
    *  into the result-card treatment with version + change-log. */
   is_generated?: boolean;
+  /** FIX67 — the model that produced a generated image/video ("gpt-image-1",
+   *  or "mock-image-1" after a fallback). Shown as "Made by …" under it. */
+  generated_by?: string;
   parent_file_id?: UUID;
   version?: number;
   change_log?: string[];

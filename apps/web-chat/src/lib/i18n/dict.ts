@@ -722,6 +722,7 @@ export const en = {
   "error.fallbackNotice": "Answered by {actual} ({requested} temporarily unavailable)",
   "chat.imageAttachFailed":
     "Couldn’t read the attached image ({files}) — answered without it",
+  "chat.media.madeBy": "Made by {model}",
   "error.offline": "You're offline. Messages will send when you reconnect.",
   "error.networkStream": "Network error during streaming.",
   "error.networkRegenerate": "Network error during regenerate.",
@@ -2098,6 +2099,7 @@ const th: Record<DictKey, string> = {
   "error.fallbackNotice": "ตอบโดย {actual} ({requested} ไม่พร้อมใช้งานชั่วคราว)",
   "chat.imageAttachFailed":
     "อ่านรูปภาพที่แนบมาไม่ได้ ({files}) — ตอบโดยไม่ใช้รูปนั้น",
+  "chat.media.madeBy": "สร้างโดย {model}",
   "error.offline": "คุณออฟไลน์อยู่ ข้อความจะส่งเมื่อกลับมาออนไลน์",
   "error.networkStream": "เครือข่ายขัดข้องระหว่างสตรีมคำตอบ",
   "error.networkRegenerate": "เครือข่ายขัดข้องระหว่างสร้างคำตอบใหม่",
