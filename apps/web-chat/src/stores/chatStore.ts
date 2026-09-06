@@ -17,7 +17,7 @@ import { create } from "zustand";
 import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
 import { HOSTED_MODE } from "@/lib/auth";
-import { bridge } from "@/lib/bridge";
+import { bridge, usingBridgeTransport } from "@/lib/bridge";
 import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
@@ -35,6 +35,7 @@ import type {
   Message,
   PendingConsent,
   PendingQuestion,
+  PendingQuestionItem,
   QuestionAnswerPayload,
   PlanStep,
   Project,
@@ -1604,7 +1605,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   resolveQuestion(convId, answer) {
-    bridge.respondQuestion(answer);
+    const row = (get().messages[convId] ?? []).find((m) => m.pending_question?.promptId === answer.promptId);
     set((s) => {
       const list = s.messages[convId] ?? [];
       return {
@@ -1614,6 +1615,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       };
     });
+    if (usingBridgeTransport) {
+      // Desktop: the host holds the turn open; the answer rides the bridge.
+      bridge.respondQuestion(answer);
+      return;
+    }
+    // FIX74 web: the turn is parked server-side; the answer resumes it as a
+    // new stream on the same assistant row.
+    if (row) void answerParkedQuestion(set, get, convId, row.id, answer);
   },
 
   resolveConsent(convId, promptId, decision, scope) {
@@ -1974,6 +1983,55 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
     };
     signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** FIX74 — resume a parked web turn with the user's answer: POST the answer,
+ *  consume the continuation into the SAME assistant row. 409 (another tab
+ *  answered first) and 410 (expired) mean the server's row is the truth:
+ *  reload it, and follow the continuation if it is streaming. */
+async function answerParkedQuestion(set: Set, get: Get, convId: string, messageId: string, answer: QuestionAnswerPayload) {
+  if (get().streamingAssistantId[convId]) return; // single-flight, like resumeStream
+  const ctrl = new AbortController();
+  set((s) => ({
+    abortControllers: { ...s.abortControllers, [convId]: ctrl },
+    streamingAssistantId: { ...s.streamingAssistantId, [convId]: messageId },
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === messageId ? { ...m, status: "streaming", isStreaming: true, error_code: undefined, error_message: undefined } : m,
+      ),
+    },
+  }));
+  const releaseSlot = () =>
+    set((s) => {
+      const aborts = { ...s.abortControllers };
+      if (aborts[convId] === ctrl) delete aborts[convId];
+      const sids = { ...s.streamingAssistantId };
+      if (sids[convId] === messageId) delete sids[convId];
+      return { abortControllers: aborts, streamingAssistantId: sids };
+    });
+  try {
+    const res = await api.openQuestionAnswerStream(convId, answer.promptId, answer, ctrl.signal);
+    if (res.status === 409 || res.status === 410) {
+      releaseSlot();
+      await get().loadMessages(convId);
+      return;
+    }
+    if (!res.ok) {
+      await handleStreamPreError(res, set, get, convId, messageId);
+      return;
+    }
+    await consumeStream(res, ctrl.signal, set, get, convId, messageId);
+  } catch (err) {
+    if ((err as Error).name === "AbortError") {
+      finalizeMessage(set, get, convId, messageId, "cancelled");
+      return;
+    }
+    get().setError(tOutside("error.resumeLost"));
+    finalizeMessage(set, get, convId, messageId, "error");
+  } finally {
+    releaseSlot();
+  }
 }
 
 /** FIX28 §2 (F3): replace an optimistic message id with the persisted row id
@@ -2340,6 +2398,54 @@ async function consumeStream(
             },
           };
         });
+      } else if (evt.event === "question") {
+        // FIX74 — the model asked the user (web path). The card lands on the
+        // streaming row; any older card in the conversation is gone (one at
+        // a time). The row keeps streaming until message_paused below.
+        const data = evt.data as { promptId: string; toolCallId?: string; questions: PendingQuestionItem[] };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? { ...m, pending_question: { promptId: data.promptId, toolCallId: data.toolCallId, questions: data.questions } }
+                  : m.pending_question
+                    ? { ...m, pending_question: null }
+                    : m,
+              ),
+            },
+          };
+        });
+      } else if (evt.event === "message_paused") {
+        // FIX74 — the stream is over but the TURN is not: it waits in the
+        // database for the card's answer. The row keeps its card and its
+        // text, stops streaming, and is not "completed".
+        if (rafHandle != null) {
+          cancelRaf(rafHandle);
+          rafHandle = null;
+        }
+        flush();
+        const data = evt.data as { message_id?: string };
+        const id = realAssistantId ?? tempAsstId;
+        swapMessageId(set, convId, id, data?.message_id);
+        const finalId = data?.message_id ?? id;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === finalId
+                  ? { ...m, status: "waiting_user", isStreaming: false, is_generating_image: false, is_generating_video: false, is_searching: false, is_compacting: false, agent_status: null, agent_wait: null }
+                  : m,
+              ),
+            },
+          };
+        });
+        clearStreamCursor(convId);
       } else if (evt.event === "tool_activity") {
         // A2 — generic activity for tools WITHOUT a dedicated
         // indicator (memory/state/past-search/canvas + unknown/MCP

@@ -495,6 +495,20 @@ class ApiClient {
    *  409 RESUME_UNAVAILABLE = not attachable yet, retry.
    *  409 RESUME_TOO_OLD = the missed frames are gone; reload the message.
    */
+  /** FIX74 — answer (or skip) a parked question on the web path. The
+   *  response is the continuation stream on the same assistant message. */
+  async openQuestionAnswerStream(
+    convId: string,
+    promptId: string,
+    answer: { outcome: "answered" | "skipped"; answers: Record<string, string[]>; response: string | null },
+    signal: AbortSignal,
+  ): Promise<Response> {
+    return this.raw(`/conversations/${convId}/questions/${promptId}`, {
+      method: "POST",
+      body: JSON.stringify(answer),
+      signal,
+    });
+  }
   async openResumeStream(
     convId: string,
     messageId: string,

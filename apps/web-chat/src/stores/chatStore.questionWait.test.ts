@@ -37,7 +37,8 @@ vi.mock("@/lib/api", () => {
   }
   return { api: mockApi, ApiError };
 });
-vi.mock("@/lib/bridge", () => ({ bridge: mockBridge }));
+// The desktop path: the host holds the turn open and the answer rides the bridge.
+vi.mock("@/lib/bridge", () => ({ bridge: mockBridge, usingBridgeTransport: true }));
 vi.mock("@/hooks/useUsage", () => ({ bumpUsageVersion: vi.fn() }));
 
 import { STREAM_IDLE, useChatStore } from "./chatStore";

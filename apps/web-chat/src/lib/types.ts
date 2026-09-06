@@ -204,7 +204,10 @@ export type MessageStatus =
   | "completed"
   | "cancelled"
   | "error"
-  | "regenerated";
+  | "regenerated"
+  // FIX74 — the turn is parked on a question card (web path); the row
+  // carries ``pending_question`` and streams again when it is answered.
+  | "waiting_user";
 
 export interface TokenUsage {
   input: number;
