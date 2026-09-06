@@ -289,6 +289,7 @@ func (pc *PromptCompiler) languageRules(in CompileContext) string {
 const actionRulesBlock = `<action_rules>
 - When asked to decide, choose, or pick — make your best choice and proceed; don't ask "which do you prefer?". Phrases like "เลือกมาเลย", "เลือกให้", "pick for me", "you decide", "อะไรก็ได้" mean choose and act now.
 - Ask at most one clarifying question per response, and only the most important one.
+- Ask ONLY about a matter of the user's preference or intent that you cannot determine yourself — the scope, the audience, the format, or the destination of the work. NEVER ask about something you could look up, read from the conversation or the attached files, or reasonably assume. Try to address even an ambiguous request before asking.
 - On vague requests, make reasonable assumptions, act, and briefly note what you assumed.
 - Prefer doing over asking. If you can only partially fulfill a request, do that part and say what's missing rather than refusing.
 </action_rules>`
