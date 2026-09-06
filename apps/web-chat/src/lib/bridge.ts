@@ -17,6 +17,7 @@
 // verifies `e.Source` origin (C-2) and the closed message type set (C-4).
 
 import { HOSTED_MODE } from "./auth";
+import type { PendingQuestion, QuestionAnswerPayload } from "./types";
 
 interface BridgeHandshake {
   nonce: string;
@@ -25,6 +26,8 @@ interface BridgeHandshake {
 type HostToPage =
   | { type: "turn.event"; payload: { conversationId: string; runId?: string; seq: number; event: string; data: unknown } }
   | { type: "consent.request"; payload: ConsentRequest }
+  // FIX73: the model's question card — its own message type on the same rail.
+  | { type: "question.request"; payload: QuestionRequest }
   | { type: "session.changed"; payload: unknown }
   | { type: "host.error"; payload: { code: string; message: string } }
   // FIX22 §2: an informational host → page notice (today: a newer desktop
@@ -98,6 +101,12 @@ export interface ConsentRequest {
 type ConsentDecision = "allow" | "deny";
 type ConsentScope = "once" | "session" | "always";
 
+/** FIX73: the host's question.request payload — a PendingQuestion plus the
+ *  conversation it belongs to. */
+export interface QuestionRequest extends PendingQuestion {
+  conversationId: string;
+}
+
 // One open turn's SSE sink. The host's turn.event frames are re-encoded as
 // SSE bytes and pushed here so the unchanged parseSSE consumes them.
 interface TurnSink {
@@ -140,6 +149,7 @@ class BridgeClient {
   private quickAsk = false;
   private sinks = new Map<string, TurnSink>();
   private consentHandlers = new Set<(r: ConsentRequest) => void>();
+  private questionHandlers = new Set<(r: QuestionRequest) => void>();
   private errorHandlers = new Set<(code: string, message: string) => void>();
   private noticeHandlers = new Set<(n: HostNotice) => void>();
   // In-flight host.query calls, keyed by the requestId the host echoes back.
@@ -174,6 +184,7 @@ class BridgeClient {
     this.lastSeq.clear();
     this.lastRunId.clear();
     this.consentHandlers.clear();
+    this.questionHandlers.clear();
     this.errorHandlers.clear();
     this.noticeHandlers.clear();
     this.pendingQueries.forEach((p) => clearTimeout(p.timer));
@@ -238,6 +249,13 @@ class BridgeClient {
       case "consent.request":
         this.consentHandlers.forEach((h) => h(msg.payload));
         return;
+      case "question.request": {
+        // Shape-check before fan-out: a card with no questions must not render.
+        const q = msg.payload as QuestionRequest | undefined;
+        if (!q || typeof q.promptId !== "string" || !q.promptId || typeof q.conversationId !== "string" || !Array.isArray(q.questions) || q.questions.length === 0) return;
+        this.questionHandlers.forEach((h) => h(q));
+        return;
+      }
       case "host.error":
         this.errorHandlers.forEach((h) => h(msg.payload.code, msg.payload.message));
         return;
@@ -347,6 +365,11 @@ class BridgeClient {
     this.post("consent.respond", { promptId, decision, scope });
   }
 
+  /** FIX73: answer (or skip) the model's question card. */
+  respondQuestion(answer: QuestionAnswerPayload): void {
+    this.post("question.respond", answer);
+  }
+
   /**
    * Phase 5: call one host operation and await its result. Mints a requestId,
    * posts `host.query`, and resolves when the correlated `host.result` arrives
@@ -378,6 +401,11 @@ class BridgeClient {
   onConsentRequest(handler: (r: ConsentRequest) => void): () => void {
     this.consentHandlers.add(handler);
     return () => this.consentHandlers.delete(handler);
+  }
+
+  onQuestionRequest(handler: (r: QuestionRequest) => void): () => void {
+    this.questionHandlers.add(handler);
+    return () => this.questionHandlers.delete(handler);
   }
 
   onHostError(handler: (code: string, message: string) => void): () => void {

@@ -34,6 +34,8 @@ import type {
   FileAttachment,
   Message,
   PendingConsent,
+  PendingQuestion,
+  QuestionAnswerPayload,
   PlanStep,
   Project,
   SSEAnalysisStatus,
@@ -310,6 +312,11 @@ interface ChatState {
     decision: "allow" | "deny",
     scope: "once" | "session" | "always",
   ) => void;
+  /** FIX73 (desktop shell) — attach the model's question card to the
+   *  conversation's streaming assistant message. */
+  addPendingQuestion: (convId: string, question: PendingQuestion) => void;
+  /** FIX73 — answer or skip the question over the bridge and clear the card. */
+  resolveQuestion: (convId: string, answer: QuestionAnswerPayload) => void;
   /** T2 — user-driven recovery from a stalled stream: drops the local
    *  connection and reattaches through the existing resume machinery
    *  (the generation itself keeps running server-side). */
@@ -1581,6 +1588,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  addPendingQuestion(convId, question) {
+    const id = get().streamingAssistantId[convId];
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      const targetId = id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
+      if (!targetId) return {};
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: list.map((m) => (m.id === targetId ? { ...m, pending_question: question } : m)),
+        },
+      };
+    });
+  },
+
+  resolveQuestion(convId, answer) {
+    bridge.respondQuestion(answer);
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: list.map((m) => (m.pending_question?.promptId === answer.promptId ? { ...m, pending_question: null } : m)),
+        },
+      };
+    });
+  },
+
   resolveConsent(convId, promptId, decision, scope) {
     bridge.respondConsent(promptId, decision, scope);
     set((s) => {
@@ -2076,7 +2111,8 @@ async function consumeStream(
     // is the user's to answer; the deadman must never answer it for them
     // (it did: consent + 180 s → abort → turn.cancel → tool DENIED, with the
     // card still on the page).
-    if ((get().messages[convId] ?? []).some((m) => m.isStreaming && m.pending_consent)) {
+    // FIX73: the same for a question card — only the user can answer it.
+    if ((get().messages[convId] ?? []).some((m) => m.isStreaming && (m.pending_consent || m.pending_question))) {
       lastActivityAt = Date.now();
       if (get().stalledStreams[convId]) setStalled(false);
       return;
@@ -2400,7 +2436,7 @@ async function consumeStream(
         const data = evt.data as { text?: string; status?: string; waiting?: string | null; tool?: string; promptId?: string; elapsedMs?: number };
         const id = realAssistantId ?? tempAsstId;
         const wait: Message["agent_wait"] =
-          data.waiting === "consent" || data.waiting === "tool"
+          data.waiting === "consent" || data.waiting === "tool" || data.waiting === "question"
             ? { kind: data.waiting, tool: data.tool ?? "", promptId: data.promptId, elapsedMs: data.elapsedMs ?? 0 }
             : null;
         set((s) => {
@@ -2470,6 +2506,7 @@ async function consumeStream(
                       agent_status: null,
                       agent_wait: null,
                       pending_consent: null,
+                      pending_question: null,
                       token_usage: data.token_usage ?? null,
                       // FIX35 Part B — the model that actually answered
                       // (an Auto turn names the router's pick).
@@ -2801,7 +2838,7 @@ function finalizeMessage(
           // nothing left to wait on. A card left behind after Stop was being
           // answered into a prompt the host had already expired ("consent.respond
           // for unknown/expired prompt — ignored").
-          m.id === messageId ? { ...m, status, isStreaming: false, pending_consent: null, agent_wait: null } : m,
+          m.id === messageId ? { ...m, status, isStreaming: false, pending_consent: null, pending_question: null, agent_wait: null } : m,
         ),
       },
     };

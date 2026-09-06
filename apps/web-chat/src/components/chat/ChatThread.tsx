@@ -386,7 +386,9 @@ export function ChatThread({
     // (the card sits at the tail of the streaming row). Scrolled up on
     // purpose → the user always wins: raise the "Permission needed" pill
     // instead; the waiting notice above the composer offers "Show" either way.
-    const consentId = last?.pending_consent?.promptId ?? null;
+    // FIX73: the question card is the other thing only the user can act on —
+    // same rule, same pill.
+    const consentId = last?.pending_consent?.promptId ?? last?.pending_question?.promptId ?? null;
     const consentArrived = consentId !== null && consentId !== lastConsentId.current;
     lastConsentId.current = consentId;
     if (consentId === null && consentPill) setConsentPill(false);
@@ -452,10 +454,13 @@ export function ChatThread({
   // FIX30 §3.2: what the turn is waiting on, if anything — the consent card
   // (store state, exact) or a long local tool (the host's heartbeat frames).
   const waitingConsent = streamingMsg?.pending_consent ?? null;
+  const waitingQuestion = streamingMsg?.pending_question ?? null;
   const toolWait = streamingMsg?.agent_wait?.kind === "tool" ? streamingMsg.agent_wait : null;
   const phaseKey: string | null = streamingMsg
     ? waitingConsent
       ? `consent:${waitingConsent.tool}`
+      : waitingQuestion
+        ? "question"
       : runningTool
         ? `tool:${runningTool.tool}`
         : streamingMsg.is_compacting
@@ -472,7 +477,9 @@ export function ChatThread({
       wasStreamingRef.current = true;
       if (prevPhaseRef.current !== phaseKey) {
         prevPhaseRef.current = phaseKey;
-        if (phaseKey.startsWith("consent:")) {
+        if (phaseKey === "question") {
+          setAnnouncement(t("thread.waitingQuestion"));
+        } else if (phaseKey.startsWith("consent:")) {
           const sub = waitingConsent?.requestedBy?.kind === "subagent" ? waitingConsent.requestedBy : null;
           setAnnouncement(sub
             ? t("thread.waitingConsentSub", { tool: phaseKey.slice("consent:".length), label: sub.label || t("consent.subagentUnnamed") })
@@ -592,7 +599,7 @@ export function ChatThread({
     const el = scrollerRef.current;
     if (!el) return;
     setConsentPill(false);
-    const card = el.querySelector<HTMLElement>('[data-testid="consent-card"]');
+    const card = el.querySelector<HTMLElement>('[data-testid="consent-card"], [data-testid="question-card"]');
     if (card && typeof card.scrollIntoView === "function") {
       anchorActive.current = false;
       holdTop.current = null;
@@ -717,6 +724,21 @@ export function ChatThread({
             {t("thread.showConsent")}
           </button>
         </div>
+      ) : waitingQuestion ? (
+        <div
+          role="status"
+          data-testid="waiting-question-notice"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary shadow-lg backdrop-blur-sm"
+        >
+          {t("thread.waitingQuestion")}
+          <button
+            type="button"
+            onClick={jumpToConsent}
+            className="focus-ring rounded-full bg-text-primary px-2.5 py-0.5 font-medium text-bg-base hover:opacity-90"
+          >
+            {t("thread.showConsent")}
+          </button>
+        </div>
       ) : toolWait ? (
         <div
           role="status"
@@ -742,7 +764,7 @@ export function ChatThread({
         </div>
       ) : null}
 
-      {consentPill && waitingConsent ? (
+      {consentPill && (waitingConsent || waitingQuestion) ? (
         <button
           type="button"
           data-testid="consent-pill"
@@ -758,7 +780,7 @@ export function ChatThread({
               strokeLinejoin="round"
             />
           </svg>
-          {t("thread.permissionNeeded")}
+          {waitingConsent ? t("thread.permissionNeeded") : t("thread.questionPill")}
         </button>
       ) : pendingNew && !autoStick ? (
         <button
@@ -805,7 +827,7 @@ function structureKeyOf(m: Message | undefined): string {
   const acts = m.tool_activities ?? [];
   let finished = 0;
   for (const a of acts) if (a.phase === "finished") finished++;
-  return `${acts.length}/${finished}|${m.plan?.length ?? 0}|${m.code_runs?.length ?? 0}|${m.pending_consent?.promptId ?? ""}`;
+  return `${acts.length}/${finished}|${m.plan?.length ?? 0}|${m.code_runs?.length ?? 0}|${m.pending_consent?.promptId ?? ""}|${m.pending_question?.promptId ?? ""}`;
 }
 
 // ─── Inner list renderers ──────────────────────────────────────

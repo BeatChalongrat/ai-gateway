@@ -55,6 +55,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     bridge.onConsentRequest((req) => {
       useChatStore.getState().addPendingConsent(req.conversationId, req);
     });
+    // FIX73: the model's question card rides the same rail as its own type.
+    bridge.onQuestionRequest((req) => {
+      useChatStore.getState().addPendingQuestion(req.conversationId, req);
+    });
     // Best-effort service-worker install for PWA support. Skipped in
     // dev to avoid breaking HMR.
     registerServiceWorker();

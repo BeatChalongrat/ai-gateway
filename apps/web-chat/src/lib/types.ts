@@ -457,6 +457,10 @@ export interface Message {
    *  prompt awaiting the user. Set from the bridge's consent.request;
    *  cleared when answered. */
   pending_consent?: PendingConsent | null;
+  /** FIX73 (desktop shell) — the model's question card (ask_user_question)
+   *  awaiting the user. Set from the bridge's question.request; cleared when
+   *  answered, skipped, or the turn ends. */
+  pending_question?: PendingQuestion | null;
   /** local-only (desktop shell, Phase 4) — the phase marker text
    *  ("Working… (step n/max)"); shown while content is still empty. */
   agent_status?: string | null;
@@ -464,7 +468,7 @@ export interface Message {
    *  from the host's ``status`` frames: the consent card ("consent") or a
    *  long local tool ("tool", re-sent every heartbeat with its elapsed
    *  time). Null when the model is the one working. */
-  agent_wait?: { kind: "consent" | "tool"; tool: string; promptId?: string; elapsedMs: number } | null;
+  agent_wait?: { kind: "consent" | "tool" | "question"; tool: string; promptId?: string; elapsedMs: number } | null;
   /** local-only — wall-clock duration of the streaming turn (send →
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */
@@ -891,6 +895,30 @@ export interface PendingConsent {
   /** FIX31 §1.1: set when the request comes from a sub-agent the assistant
    *  started on its own — the card says who asked and with what task. */
   requestedBy?: { kind: "subagent"; subagentId: string; label: string; task: string };
+}
+
+/** FIX73 (desktop shell) — one question of the model's question card. */
+export interface PendingQuestionItem {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: { label: string; description: string }[];
+}
+/** FIX73 — the model asked the user something (ask_user_question). Rendered
+ *  as a card in the streaming assistant row until answered or skipped. The
+ *  "Something else" row and the free reply box are the CLIENT's additions:
+ *  the user's own text goes back as the answer, never the word "Other". */
+export interface PendingQuestion {
+  promptId: string;
+  toolCallId?: string;
+  questions: PendingQuestionItem[];
+}
+/** FIX73 — what the card posts back (question.respond). */
+export interface QuestionAnswerPayload {
+  promptId: string;
+  outcome: "answered" | "skipped";
+  answers: Record<string, string[]>;
+  response: string | null;
 }
 
 /** SSE payload — the backend serialises ToolActivityUpdate directly. */

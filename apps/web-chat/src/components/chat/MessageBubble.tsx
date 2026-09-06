@@ -53,6 +53,7 @@ import { PptxPlanCard } from "./PptxPlanCard";
 import type { PptxPlan } from "./PptxPlanCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ConsentCard } from "./ConsentCard";
+import { QuestionCard } from "./QuestionCard";
 import { PlanChecklistCard } from "./PlanChecklistCard";
 import { ToolActivityList } from "./ToolCard";
 import { useChatStore } from "@/stores/chatStore";
@@ -384,6 +385,14 @@ function MessageBubbleImpl({
               .getState()
               .resolveConsent(convId, message.pending_consent!.promptId, decision, scope)
           }
+        />
+      ) : null}
+
+      {/* FIX73 (desktop shell) — the model's question card. */}
+      {message.pending_question ? (
+        <QuestionCard
+          question={message.pending_question}
+          onAnswer={(answer) => useChatStore.getState().resolveQuestion(convId, answer)}
         />
       ) : null}
 
@@ -1218,6 +1227,7 @@ function areEqual(prev: Props, next: Props): boolean {
     a.plan === b.plan &&
     a.paused === b.paused &&
     a.pending_consent === b.pending_consent &&
+    a.pending_question === b.pending_question &&
     a.agent_status === b.agent_status &&
     a.agent_wait === b.agent_wait &&
     // S7 — re-render when the per-turn context_sources array
