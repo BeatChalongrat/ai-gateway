@@ -35,11 +35,11 @@ import {
 const BRIDGE_TS = path.resolve(__dirname, "..", "src", "main", "bridge.ts");
 
 describe("closed vocabulary — by name", () => {
-  it("exactly four turn-inbound members", () => {
-    expect([...TURN_INBOUND_TYPES]).toEqual(["turn.submit", "turn.cancel", "consent.respond", "ui.ready"]);
+  it("exactly five turn-inbound members (FIX73 added question.respond)", () => {
+    expect([...TURN_INBOUND_TYPES]).toEqual(["turn.submit", "turn.cancel", "consent.respond", "ui.ready", "question.respond"]);
   });
-  it("exactly five turn-outbound members (FIX22 added host.notice)", () => {
-    expect([...TURN_OUTBOUND_TYPES]).toEqual(["turn.event", "consent.request", "session.changed", "host.error", "host.notice"]);
+  it("exactly six turn-outbound members (FIX22 added host.notice, FIX73 question.request)", () => {
+    expect([...TURN_OUTBOUND_TYPES]).toEqual(["turn.event", "consent.request", "session.changed", "host.error", "host.notice", "question.request"]);
   });
   it("one control pair, no more", () => {
     expect([...CONTROL_INBOUND_TYPES]).toEqual(["host.query"]);

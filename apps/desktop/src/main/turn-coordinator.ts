@@ -72,7 +72,8 @@ function hostnameOf(raw: string): string {
 }
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
-import { BROWSER_BRIDGE_TOOLS, MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { BROWSER_BRIDGE_TOOLS, MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type QuestionRespondPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, CANCELLED_WHILE_ASKING, NOT_AVAILABLE_IN_THIS_RUN, formatAnswerForModel, validateAskArgs, type AskQuestion } from "./ask-user";
 
 interface BufferedEvent {
   seq: number;
@@ -108,6 +109,12 @@ interface PendingConsent {
   conversationId: string;
   payload: Record<string, unknown>;
   resolve: (r: ConsentRespondPayload) => void;
+}
+/** FIX73: a question card the model raised and the user has not answered. */
+interface PendingQuestion {
+  conversationId: string;
+  payload: Record<string, unknown>;
+  resolve: (r: QuestionRespondPayload | { cancelled: true }) => void;
 }
 
 /** FIX31 §1.1: who is asking, when it is not the assistant the user is talking
@@ -246,6 +253,10 @@ export class TurnCoordinator {
   private runLedger: RunLedgerStore | null = null;
   private readonly turns = new Map<string, RunningTurn>();
   private readonly pendingConsents = new Map<string, PendingConsent>();
+  /** FIX73: open question cards, by promptId. Same lifecycle as
+   *  pendingConsents: answered by the page, closed-as-cancelled on Stop,
+   *  re-posted on ui.ready. Never answered by the app itself. */
+  private readonly pendingQuestions = new Map<string, PendingQuestion>();
   /** FIX31 §1.1: ONE consent card at a time per page conversation. Parallel
    *  sub-agents can each need permission at once; the page holds a single card
    *  per row, so a second request would overwrite the first and leave a prompt
@@ -376,6 +387,28 @@ export class TurnCoordinator {
         p.resolve({ promptId: id, decision: "deny", scope: "once" });
       }
     }
+    // FIX73: an open question card is closed by the cancel — as cancelled,
+    // not as an answer.
+    for (const [id, p] of this.pendingQuestions) {
+      if (p.conversationId === payload.conversationId) {
+        this.pendingQuestions.delete(id);
+        p.resolve({ cancelled: true });
+      }
+    }
+  }
+
+  /** FIX73: the user's answer to a question card. Unknown/expired ids are
+   *  ignored, like consent — a stale card after a reload cannot answer a
+   *  newer question. */
+  onQuestionRespond(payload: QuestionRespondPayload): void {
+    const pending = this.pendingQuestions.get(payload.promptId);
+    if (!pending) {
+      this.log.info(`question.respond for unknown/expired prompt ${payload.promptId} — ignored`);
+      return;
+    }
+    this.pendingQuestions.delete(payload.promptId);
+    this.log.info(`QUESTION ${payload.outcome} for prompt ${payload.promptId}${payload.response ? " (free text)" : ""}`);
+    pending.resolve(payload);
   }
 
   onConsentRespond(payload: ConsentRespondPayload): void {
@@ -417,6 +450,12 @@ export class TurnCoordinator {
       if (p.conversationId === payload.conversationId) {
         this.log.info(`RESUME conv=${payload.conversationId}: re-posting pending consent ${id}`);
         this.bridge.post("consent.request", p.payload);
+      }
+    }
+    for (const [id, p] of this.pendingQuestions) {
+      if (p.conversationId === payload.conversationId) {
+        this.log.info(`RESUME conv=${payload.conversationId}: re-posting pending question ${id}`);
+        this.bridge.post("question.request", p.payload);
       }
     }
   }
@@ -1647,6 +1686,44 @@ export class TurnCoordinator {
       return;
     }
 
+    // FIX73: ask_user_question never enters the permission path below — a
+    // stored approval or the Skip mode must never "answer" a question for the
+    // user (the rule: it always falls through to a person). It is also
+    // withheld from nested and scheduled runs at the offer site; this guard is
+    // the same fact at the only point every path passes through.
+    if (name === ASK_USER_TOOL) {
+      if (run.parentToolCallId || this.activeTaskId !== null) {
+        run.messages.push(toolResult(call, NOT_AVAILABLE_IN_THIS_RUN));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Not available in this run", parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "ask-unavailable", ok: false, where: "host" });
+        this.log.info(`TOOL ${name} REFUSED — ${run.parentToolCallId ? "sub-agent" : "scheduled task"} runs cannot ask the user`);
+        return;
+      }
+      const v = validateAskArgs(args);
+      if (!v.ok) {
+        run.messages.push(toolResult(call, `Error: ${name}: ${v.reason}`));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: `Invalid question: ${v.reason}`.slice(0, 200), parentId: run.parentToolCallId, durationMs: 0 });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "ask-invalid", ok: false, where: "host" });
+        this.log.info(`TOOL ${name} REFUSED — invalid arguments: ${v.reason}`);
+        return;
+      }
+      const t0 = Date.now();
+      const answer = await this.requestQuestion(eventConv, run.conversationId, call.id, v.questions, run.signal, run);
+      const durationMs = Date.now() - t0;
+      if ("cancelled" in answer) {
+        run.messages.push(toolResult(call, CANCELLED_WHILE_ASKING));
+        this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Cancelled", parentId: run.parentToolCallId, durationMs });
+        this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "ask-cancelled", ok: false, where: "host" });
+        return;
+      }
+      const content = formatAnswerForModel(v.questions, answer);
+      run.messages.push(toolResult(call, content));
+      this.activity(eventConv, call.id, name, "finished", { success: true, resultPreview: content.slice(0, 200), parentId: run.parentToolCallId, durationMs });
+      this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: `ask-${answer.outcome}`, ok: true, where: "host" });
+      this.log.info(`TOOL ${name} ${answer.outcome} after ${durationMs} ms — ${content.slice(0, 120).replace(/\n/g, " ")}`);
+      return;
+    }
+
     // Permission (PermissionService + ApprovalMode + SensitiveReadGuard).
     const grants = this.grants.list();
     // FIX8 A1.3: a firing task's own mode wins during its run; otherwise the
@@ -2038,6 +2115,68 @@ export class TurnCoordinator {
     });
   }
 
+  /** FIX73: post the question card and wait for the user. Rides the consent
+   *  queue (one card at a time per page conversation), excludes the wait from
+   *  the run deadline (FIX31), says what it is waiting on every keepalive tick
+   *  (FIX30 §3.2), is re-posted on reload and closed by Stop. Nothing here
+   *  consults the permission store or the approval mode. */
+  private requestQuestion(
+    eventConv: string,
+    conversationId: string,
+    toolCallId: string,
+    questions: readonly AskQuestion[],
+    signal: AbortSignal,
+    wait?: RunWaitState,
+  ): Promise<QuestionRespondPayload | { cancelled: true }> {
+    const prev = this.consentQueues.get(eventConv) ?? Promise.resolve();
+    const mine = prev.then(() => (signal.aborted ? { cancelled: true as const } : this.requestQuestionNow(eventConv, conversationId, toolCallId, questions, signal, wait)));
+    this.consentQueues.set(eventConv, mine.then(() => undefined, () => undefined));
+    return mine;
+  }
+
+  private requestQuestionNow(
+    eventConv: string,
+    conversationId: string,
+    toolCallId: string,
+    questions: readonly AskQuestion[],
+    signal: AbortSignal,
+    wait?: RunWaitState,
+  ): Promise<QuestionRespondPayload | { cancelled: true }> {
+    const promptId = `question-${randomUUID().slice(0, 12)}`;
+    const payload = { promptId, conversationId: eventConv, toolCallId, questions: questions.map((q) => ({ question: q.question, header: q.header, multiSelect: q.multiSelect, options: q.options.map((o) => ({ label: o.label, description: o.description })) })) };
+    this.log.info(`QUESTION REQUEST ${promptId}: ${questions.length} question(s) [${questions.map((q) => q.header).join(", ")}]`);
+    const waitStarted = Date.now();
+    if (wait) wait.waitingSince = waitStarted;
+    const keepaliveMs = this.opts.waitKeepaliveMs ?? 15_000;
+    const sayWaiting = () => this.emit(eventConv, "status", { status: "waiting_question", waiting: "question", tool: ASK_USER_TOOL, promptId, elapsedMs: Date.now() - waitStarted });
+    sayWaiting();
+    let ticks = 0;
+    const logEvery = Math.max(1, Math.round(60_000 / keepaliveMs));
+    const keepalive = setInterval(() => {
+      sayWaiting();
+      ticks++;
+      if (ticks % logEvery === 0) this.log.info(`QUESTION WAITING ${promptId}: ${Math.round((Date.now() - waitStarted) / 1000)} s, no answer yet`);
+    }, keepaliveMs);
+    return new Promise((resolve) => {
+      const onAbort = () => {
+        if (this.pendingQuestions.delete(promptId)) settle({ cancelled: true });
+      };
+      const settle = (r: QuestionRespondPayload | { cancelled: true }) => {
+        clearInterval(keepalive);
+        signal.removeEventListener("abort", onAbort);
+        if (wait) {
+          wait.waitedMs = (wait.waitedMs ?? 0) + (Date.now() - waitStarted);
+          wait.waitingSince = null;
+        }
+        this.emit(eventConv, "status", { status: "question_answered", waiting: null, tool: ASK_USER_TOOL, promptId, outcome: "cancelled" in r ? "cancelled" : r.outcome, elapsedMs: Date.now() - waitStarted });
+        resolve(r);
+      };
+      this.pendingQuestions.set(promptId, { conversationId, payload, resolve: settle });
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.bridge.post("question.request", payload);
+    });
+  }
+
   // ── nested sub-agent runs (host capability, E4 §1 #1) ──────────────────────
   async runNested(req: NestedRunRequest, parentSignal: AbortSignal): Promise<NestedRunResult> {
     const conversationId = `subagent-${randomUUID().replace(/-/g, "")}`;
@@ -2213,6 +2352,12 @@ export class TurnCoordinator {
     // FIX8 A1.6: a task can reschedule ITSELF from inside its run — the tool exists
     // only while a scheduled task is firing (activeTaskId set), and acts on that task.
     if (this.activeTaskId !== null && !nested) out.push(UPDATE_TASK_SCHEDULE_TOOL);
+    // FIX73: the question tool is offered ONLY to an attended main turn. A
+    // sub-agent cannot talk to the user (its prompt says so; this makes it
+    // structurally true) and a scheduled task has nobody to answer — the
+    // headless rule: remove the tool rather than offer one that cannot work.
+    // Not subject to `allow`: a sub-agent allowlist naming it changes nothing.
+    if (!nested && this.activeTaskId === null) out.push(ASK_USER_TOOL_DEFINITION);
     // FIX9 Part B: generate_image is offered ONLY when the user turned on image mode
     // (the 🎨 button). Off → the model has no image tool, so it cannot pretend to.
     if (!imageMode) out = out.filter((d) => d.function.name !== "generate_image");

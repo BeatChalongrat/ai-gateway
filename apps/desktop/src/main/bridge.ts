@@ -35,12 +35,14 @@ import {
   parseEnvelope,
   validateConsentRespond,
   validateHostQuery,
+  validateQuestionRespond,
   validateTurnCancel,
   validateTurnSubmit,
   validateUiReady,
   type ConsentRespondPayload,
   type HostQueryPayload,
   type OutboundType,
+  type QuestionRespondPayload,
   type TurnCancelPayload,
   type TurnSubmitPayload,
   type UiReadyPayload,
@@ -51,6 +53,8 @@ export interface BridgeHandlers {
   onTurnSubmit(payload: TurnSubmitPayload): void;
   onTurnCancel(payload: TurnCancelPayload): void;
   onConsentRespond(payload: ConsentRespondPayload): void;
+  /** FIX73: the user's answer to the model's question card. */
+  onQuestionRespond(payload: QuestionRespondPayload): void;
   onUiReady(payload: UiReadyPayload): void;
   onHostQuery(payload: HostQueryPayload): void;
 }
@@ -189,6 +193,16 @@ export class BridgeChannel {
         }
         this.accept("consent.respond", origin);
         h.onConsentRespond(v.value);
+        return;
+      }
+      case "question.respond": {
+        const v = validateQuestionRespond(envelope.payload);
+        if (!v.ok) {
+          this.log.warn(`BRIDGE INBOUND DROPPED: question.respond payload invalid: ${v.reason}`);
+          return;
+        }
+        this.accept("question.respond", origin);
+        h.onQuestionRespond(v.value);
         return;
       }
       case "ui.ready": {

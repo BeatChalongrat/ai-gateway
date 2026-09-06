@@ -512,6 +512,7 @@ void app.whenReady().then(async () => {
     onTurnSubmit: (p) => co.onTurnSubmit(p),
     onTurnCancel: (p) => co.onTurnCancel(p),
     onConsentRespond: (p) => co.onConsentRespond(p),
+    onQuestionRespond: (p) => co.onQuestionRespond(p),
     onUiReady: (p) => co.onUiReady(p),
     onHostQuery: (p) => void co.onHostQuery(p),
   });

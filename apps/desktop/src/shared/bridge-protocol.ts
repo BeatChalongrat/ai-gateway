@@ -16,6 +16,10 @@ export const TURN_INBOUND_TYPES = Object.freeze([
   "turn.cancel",
   "consent.respond",
   "ui.ready",
+  // FIX73: the user's answer to the model's question card (ask_user_question).
+  // Its own type, not a consent.respond: that payload means "approve this tool
+  // call" and would then mean two things.
+  "question.respond",
 ] as const);
 export type TurnInboundType = (typeof TURN_INBOUND_TYPES)[number];
 
@@ -32,6 +36,10 @@ export const TURN_OUTBOUND_TYPES = Object.freeze([
   // Informational, dismissible, never modal; the page decides whether to show
   // it. The closed outbound set grows by exactly one, deliberately.
   "host.notice",
+  // FIX73: the model's question card (ask_user_question). Rides the same rail
+  // as consent.request — one card at a time, re-posted on reload, never
+  // answered by a stored approval — as its own message type.
+  "question.request",
 ] as const);
 export type OutboundType = (typeof TURN_OUTBOUND_TYPES)[number] | (typeof CONTROL_OUTBOUND_TYPES)[number];
 
@@ -148,6 +156,18 @@ export interface ConsentRespondPayload {
   // site prompts offer "once" + "always"; other tools keep "once" + "session".
   readonly scope: "once" | "session" | "always";
 }
+/** FIX73: the page's answer to a question.request. `answers` is keyed by the
+ *  question text (the reference shape) — each value the chosen label(s), or the
+ *  user's own text for the "Something else" row; `response` is a free reply
+ *  typed INSTEAD of answering; outcome "skipped" is the decline (not a
+ *  cancel: the turn goes on and the model is told nobody chose). */
+export interface QuestionRespondPayload {
+  readonly promptId: string;
+  readonly outcome: "answered" | "skipped";
+  readonly answers: Readonly<Record<string, readonly string[]>>;
+  readonly response: string | null;
+}
+export const MAX_QUESTION_FREE_TEXT = 2000;
 export interface UiReadyPayload {
   readonly conversationId: string | null;
   readonly lastSeq: number;
@@ -237,6 +257,35 @@ export function validateConsentRespond(payload: unknown): Validated<ConsentRespo
   if (p["decision"] !== "allow" && p["decision"] !== "deny") return { ok: false, reason: "decision-invalid" };
   if (p["scope"] !== "once" && p["scope"] !== "session" && p["scope"] !== "always") return { ok: false, reason: "scope-invalid" };
   return { ok: true, value: { promptId: p["promptId"], decision: p["decision"], scope: p["scope"] } };
+}
+
+export function validateQuestionRespond(payload: unknown): Validated<QuestionRespondPayload> {
+  if (typeof payload !== "object" || payload === null) return { ok: false, reason: "payload-not-object" };
+  const p = payload as Record<string, unknown>;
+  if (typeof p["promptId"] !== "string" || p["promptId"].length === 0 || p["promptId"].length > 64) return { ok: false, reason: "promptId-missing" };
+  if (p["outcome"] !== "answered" && p["outcome"] !== "skipped") return { ok: false, reason: "outcome-invalid" };
+  const answers: Record<string, string[]> = {};
+  const rawA = p["answers"];
+  if (rawA !== undefined && rawA !== null) {
+    if (typeof rawA !== "object" || Array.isArray(rawA)) return { ok: false, reason: "answers-not-object" };
+    const entries = Object.entries(rawA as Record<string, unknown>);
+    if (entries.length > 4) return { ok: false, reason: "answers-too-many" };
+    for (const [q, v] of entries) {
+      if (q.length === 0 || q.length > 500) return { ok: false, reason: "answer-key-invalid" };
+      if (!Array.isArray(v) || v.length > 4) return { ok: false, reason: "answer-not-array" };
+      const out: string[] = [];
+      for (const item of v) {
+        if (typeof item !== "string") return { ok: false, reason: "answer-not-string" };
+        if (item.length > MAX_QUESTION_FREE_TEXT) return { ok: false, reason: "answer-too-long" };
+        out.push(item);
+      }
+      answers[q] = out;
+    }
+  }
+  const response = p["response"];
+  if (response !== undefined && response !== null && typeof response !== "string") return { ok: false, reason: "response-not-string" };
+  if (typeof response === "string" && response.length > MAX_QUESTION_FREE_TEXT) return { ok: false, reason: "response-too-long" };
+  return { ok: true, value: { promptId: p["promptId"], outcome: p["outcome"], answers, response: typeof response === "string" && response.trim() ? response : null } };
 }
 
 export function validateUiReady(payload: unknown): Validated<UiReadyPayload> {
