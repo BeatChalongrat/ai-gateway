@@ -151,6 +151,7 @@ _retired-*/
 PROMPT*.md
 prompt-*.md
 *_PROMPT.md
+GAP-ANALYSIS-*.md
 *_sandbox_*
 scratchpad/
 *.patch
