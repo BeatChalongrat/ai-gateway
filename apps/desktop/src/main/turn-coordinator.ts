@@ -52,6 +52,7 @@ import {
   siteScope,
   summarizeArgs,
   toolMeta,
+  toolSubject,
   type PermissionDecision,
   type PermissionStore,
 } from "./permissions";
@@ -1660,7 +1661,12 @@ export class TurnCoordinator {
       return;
     }
     const meta = toolMeta(name);
-    this.activity(eventConv, call.id, name, "started", { argsSummary: summarizeArgs(args), parentId: run.parentToolCallId, ...(name === "run_python" ? { isCodeRun: true, codeText: String(args["code"] ?? "") } : {}) });
+    // FIX77 ② — the row label is client-side (i18n); the host adds the one
+    // human-useful argument (subject) and keeps the full dump (argsSummary)
+    // for the card's expanded detail — the consent card's argumentSummary
+    // (requestConsent below) is a separate, unchanged string.
+    const subject = toolSubject(name, args);
+    this.activity(eventConv, call.id, name, "started", { argsSummary: summarizeArgs(args), ...(subject ? { subject } : {}), parentId: run.parentToolCallId, ...(name === "run_python" ? { isCodeRun: true, codeText: String(args["code"] ?? "") } : {}) });
 
     const dlp = dlpBlocked(args);
     if (dlp !== null) {

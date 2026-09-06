@@ -242,6 +242,88 @@ export function summarizeArgs(args: Record<string, unknown>, max = 160): string 
   return joined.length > max ? joined.slice(0, max - 1) + "…" : joined;
 }
 
+// ── FIX77 ② — the one argument worth showing on a transcript tool row ──────
+// summarizeArgs stays the CONSENT string (the user approving a call has a
+// right to the full argument dump); the transcript row instead shows a
+// friendly label (client-side, i18n) plus this single human-useful value:
+// a filename, a host, a search term. Tools whose arguments are code, typed
+// text, or coordinates return null — the label alone is the row.
+
+/** Cut without ending mid-word: whole string if it fits, else cut at the
+ *  last space past the halfway mark (falling back to a hard cut) + "…". */
+function cutWordSafe(s: string, max = 60): string {
+  const t = s.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const head = t.slice(0, max);
+  const sp = head.lastIndexOf(" ");
+  return (sp > max / 2 ? head.slice(0, sp) : head) + "…";
+}
+
+function str(args: Record<string, unknown>, ...names: string[]): string | null {
+  for (const n of names) {
+    const v = args[n];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+function hostOf(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host || null;
+  } catch {
+    return null;
+  }
+}
+
+function baseOf(p: string | null): string | null {
+  if (!p) return null;
+  const b = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+  return b ? cutWordSafe(b) : null;
+}
+
+export function toolSubject(name: string, args: Record<string, unknown>): string | null {
+  switch (name) {
+    case "read_file":
+    case "read_document":
+    case "write_file":
+    case "edit_file":
+    case "list_directory":
+    case "create_directory":
+      return baseOf(str(args, "path", "directory"));
+    case "move_file":
+      return baseOf(str(args, "destination", "path"));
+    case "search_files":
+      return cut(str(args, "pattern", "query"));
+    case "run_command": {
+      const cmd = str(args, "command");
+      return cmd ? cutWordSafe(cmd.split("\n")[0] ?? cmd) : null;
+    }
+    case "browser_navigate":
+    case "open_url":
+    case "web_fetch":
+      return hostOf(str(args, "url"));
+    case "web_search":
+    case "search_past_conversations":
+    case "browser_find":
+      return cut(str(args, "query", "text"));
+    case "generate_image":
+      return cut(str(args, "prompt"));
+    case "use_skill":
+      return cut(str(args, "skill", "name"));
+    case "open_application":
+      return cut(str(args, "name", "application"));
+    default:
+      // Code, typed text, coordinates, question JSON, MCP payloads: the
+      // label alone. NEVER fall back to an argument dump here.
+      return null;
+  }
+}
+
+function cut(s: string | null): string | null {
+  return s ? cutWordSafe(s) : null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // FIX6 — per-site browser permissions (Claude-in-Chrome model, adopted exactly).
 //
