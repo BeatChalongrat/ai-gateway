@@ -165,3 +165,104 @@ describe("FIX44 — bg/text token pairs are readable in both themes", () => {
     expect(contrast(resolve("accent", vars)!, resolve("bg-base", vars)!)).toBeGreaterThan(10);
   });
 });
+
+// FIX75 Part 3b — the SECOND rule, which the test above does not measure.
+//
+// The AA check above measures a control's text against its own fill (WCAG
+// 1.4.3). It never asks whether the control is visible against the surface
+// BEHIND it — WCAG 1.4.11 Non-text Contrast, 3:1 for a UI component against
+// adjacent colour. That is how the composer's stop button escaped: white on
+// --error-solid is 4.83:1 (passes 1.4.3) while --error-solid on the dark
+// composer surface is 2.77:1 (fails 1.4.11). An invariant with a test that
+// checks the neighbouring thing.
+//
+// Scope: SOLID fills on controls — the status *-solid tokens, the accent
+// pair, and the composer's inverted fill (--text-primary, applied through
+// the `composer-send-fill` class rather than a bg- token, so it is listed
+// by hand). A static test cannot know which surface a control sits on, so
+// each fill is measured against the two surfaces solid controls sit on in
+// this app: the page canvas (--bg-primary) and the pill/card/modal surface
+// (--bg-surface). Ghost controls (bg-bg-elevated chips, borders-only) are
+// out of scope: their affordance is the border or the icon, not the fill.
+//
+// KNOWN_BELOW_1_4_11 records the fills that fail today with the measured
+// ratio and the decision that leaves them there. Every key must still be
+// in use — a fixed control must be removed from the map, not hidden by it.
+const SOLID_FILLS = ["status-danger-solid", "status-success-solid", "status-warning-solid", "accent", "accent-hover", "text-primary"];
+const SURFACES: Array<["canvas" | "surface", string]> = [["canvas", "bg-base"], ["surface", "bg-surface"]];
+
+/** Solid fills in use on controls: `bg-<solid>` on a control line, plus the
+ *  composer's class-applied inverted fill. */
+export function solidControlFills(): Array<{ file: string; line: number; fill: string }> {
+  const out: Array<{ file: string; line: number; fill: string }> = [];
+  const TOK = SOLID_FILLS.slice().sort((a, b) => b.length - a.length).join("|");
+  const bgRe = new RegExp(`(?<![\\w-:])bg-(${TOK})(?![\\w-/])`);
+  for (const file of sourceFiles(path.join(ROOT, "src"))) {
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (/^\s*(\/\/|\*|\{\/\*)/.test(line)) return;
+      const rel = path.relative(ROOT, file).replace(/\\/g, "/");
+      const bg = line.match(bgRe);
+      if (bg && isControl(line)) out.push({ file: rel, line: i + 1, fill: bg[1] });
+      if (/composer-send-fill/.test(line) && /"/.test(line)) out.push({ file: rel, line: i + 1, fill: "text-primary" });
+    });
+  }
+  return out;
+}
+
+const KNOWN_BELOW_1_4_11: Record<string, string> = {
+  // The delete-confirm buttons (ConversationItem, Sidebar, ShareModal, the
+  // memory page) and the recording bar's stop, all --error-solid on a dark
+  // surface. Red IS the meaning there (destructive confirm / recording),
+  // unlike the stream-stop button this round fixed. Left for the owner:
+  // lift --error-solid in the dark theme or give those buttons a border.
+  "status-danger-solid@surface/dark": "2.77:1 measured in FIX75; on the canvas it is 3.33:1",
+};
+// Outside this scan (the per-line convention, same as the AA check above):
+// the Switch's "on" track is bg-status-success-solid on a line without a
+// control marker. Measured in FIX75: #047857 is 2.44:1 on the dark surface
+// and 2.93:1 on the dark canvas; 4.8:1+ in light. Its knob position also
+// carries the state. Recorded, not fixed.
+
+describe("FIX75 — solid-filled controls are visible against the surface they sit on (WCAG 1.4.11, 3:1, both themes)", () => {
+  const fills = solidControlFills();
+
+  it("sees the composer's send/stop fill and the danger buttons", () => {
+    expect(fills.some((f) => f.file.endsWith("ChatInput.tsx") && f.fill === "text-primary")).toBe(true);
+    expect(fills.some((f) => f.file.endsWith("ChatInput.tsx") && f.fill === "status-danger-solid")).toBe(false); // the FIX75 defect
+    expect(fills.some((f) => f.fill === "status-danger-solid")).toBe(true);
+  });
+
+  it("every KNOWN_BELOW_1_4_11 key is still in use (a fixed control leaves the map)", () => {
+    const inUse = new Set(fills.map((f) => f.fill));
+    for (const key of Object.keys(KNOWN_BELOW_1_4_11)) expect(inUse, `${key} is no longer used on a control`).toContain(key.split("@")[0]);
+  });
+
+  for (const theme of ["dark", "light"] as const) {
+    it(`${theme}: each solid control fill ≥ 3:1 against the canvas and the surface`, () => {
+      const vars = themeVars(theme);
+      const failures: string[] = [];
+      const seen = new Set<string>();
+      for (const f of fills) {
+        const fill = resolve(f.fill, vars);
+        if (!fill) throw new Error(`cannot resolve ${f.fill}`);
+        for (const [name, surfaceTok] of SURFACES) {
+          const ratio = contrast(fill, resolve(surfaceTok, vars)!);
+          const key = `${f.fill}@${name}/${theme}`;
+          if (ratio < 3 && !KNOWN_BELOW_1_4_11[key]) {
+            const tag = `${key} = ${ratio.toFixed(2)}:1`;
+            if (!seen.has(tag)) failures.push(`${tag} (${f.file}:${f.line}${fills.filter((g) => g.fill === f.fill).length > 1 ? " and others" : ""})`);
+            seen.add(tag);
+          }
+        }
+      }
+      expect(failures, `invisible against its surface in the ${theme} theme:\n  ${failures.join("\n  ")}`).toEqual([]);
+    });
+  }
+
+  it("would have caught the FIX75 defect: --error-solid on the dark composer surface", () => {
+    const vars = themeVars("dark");
+    expect(contrast(resolve("status-danger-solid", vars)!, resolve("bg-surface", vars)!)).toBeLessThan(3);
+    expect(contrast(resolve("text-primary", vars)!, resolve("bg-surface", vars)!)).toBeGreaterThan(11);
+  });
+});

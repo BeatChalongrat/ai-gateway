@@ -1324,12 +1324,27 @@ export function ChatInput({
                   without using the accent green; the disabled state stays
                   muted on the same neutral surface as the composer chrome.
 
-                  Inline styles reference the RAW CSS variables that
-                  ``globals.css`` defines under [data-theme="dark"] and
-                  the light-mode root. ``--bg-base`` / ``--bg-elevated``
-                  only exist as Tailwind aliases (see tailwind.config.js),
-                  so we use ``--bg-primary`` and ``--bg-surface-hover``
-                  here. */}
+                  FIX75 — the STOP state uses the same inverted fill, from
+                  the same place: the ``composer-send-fill`` class in
+                  globals.css (fill --text-primary, icon --bg-primary,
+                  hover --accent-hover). It used to be the error red
+                  (--error-solid), which is 2.77:1 against the composer
+                  surface in the dark theme (WCAG 1.4.11 wants 3:1) and
+                  spent the failure colour on a routine, reversible action.
+                  One class for both states so they cannot drift apart
+                  again. While streaming, ``stop-halo`` adds a breathing
+                  box-shadow ring (colour and spread only — the button's
+                  box never moves or resizes, so the target stays under
+                  the cursor; static ring under prefers-reduced-motion).
+                  The label and the square icon carry "stop" now that
+                  the colour does not.
+
+                  The disabled state's inline style references the RAW
+                  CSS variables that ``globals.css`` defines under
+                  [data-theme="dark"] and the light-mode root.
+                  ``--bg-base`` / ``--bg-elevated`` only exist as Tailwind
+                  aliases (see tailwind.config.js), so we use
+                  ``--bg-surface-hover`` here. */}
               <button
                 type="button"
                 onClick={streaming ? onStop : submit}
@@ -1337,26 +1352,23 @@ export function ChatInput({
                 aria-label={streaming ? t("input.stop") : t("input.send")}
                 className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
                   streaming
-                    ? "bg-status-danger-solid text-white hover:bg-status-danger-solid/90"
-                    : "disabled:cursor-not-allowed"
+                    ? "composer-send-fill stop-halo"
+                    : canSend
+                      ? "composer-send-fill"
+                      : "disabled:cursor-not-allowed"
                 }`}
                 style={
-                  streaming
+                  streaming || canSend
                     ? undefined
-                    : canSend
-                      ? {
-                          background: "var(--text-primary)",
-                          color: "var(--bg-primary)",
-                        }
-                      : {
-                          background: "var(--bg-surface-hover)",
-                          color: "var(--text-tertiary)",
-                        }
+                    : {
+                        background: "var(--bg-surface-hover)",
+                        color: "var(--text-tertiary)",
+                      }
                 }
               >
                 {streaming ? (
                   <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                    <rect x="6.5" y="6.5" width="11" height="11" rx="3" />
                   </svg>
                 ) : (
                   <svg

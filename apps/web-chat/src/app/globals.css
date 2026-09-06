@@ -788,11 +788,50 @@ input {
   animation: catBreathe 2.2s ease-in-out infinite;
 }
 
+/* FIX75 — the composer's send/stop button, ONE fill for both states.
+   The circle inverts to the foreground colour (ChatGPT's send state):
+   11.33:1 against the composer surface in dark, 17.05:1 in light, icon
+   on fill 13.63:1 / 19.44:1. Both the send-ready and the streaming
+   (stop) state take this class, so the two cannot drift apart — the
+   stop state used to reach for --error-solid on its own and sat at
+   2.77:1 on the dark composer (WCAG 1.4.11 wants 3:1 for a control
+   against what it sits on), and spent the failure red on a safe,
+   reversible action. */
+.composer-send-fill {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+.composer-send-fill:hover {
+  background: var(--accent-hover);
+}
+
+/* FIX75 — the breathing halo while a stream is running. box-shadow
+   only: no transform, no size, no margin, so the hit target never moves
+   away from the cursor (touch, unsteady hands). The colour comes from
+   the --text-primary-rgb channel token, so the ring is light-on-dark in
+   the dark theme and dark-on-light in the light theme by itself — a
+   hardcoded white would vanish on a light composer. Nothing between the
+   button and the composer pill clips (no overflow on that path), so the
+   5 px spread is drawn in full. */
+@keyframes stop-halo {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(var(--text-primary-rgb) / 0.32); }
+  50%      { box-shadow: 0 0 0 5px rgb(var(--text-primary-rgb) / 0); }
+}
+.stop-halo {
+  animation: stop-halo 2.4s ease-in-out infinite;
+}
+
 /* Respect reduced-motion. Infinite loops stop at a legible rest state;
    one-shot entrances are dropped (content just appears). Tailwind's
    animate-spin spinners are included — a frozen spinner still reads as
    "busy" from its surrounding text/label. */
 @media (prefers-reduced-motion: reduce) {
+  /* FIX75 — no pulsing; a static ring at the halo's mid-strength keeps
+     "streaming" visibly different from idle without animating. */
+  .stop-halo {
+    animation: none;
+    box-shadow: 0 0 0 3px rgb(var(--text-primary-rgb) / 0.16);
+  }
   .shimmer-text {
     animation: none;
     background: none;
