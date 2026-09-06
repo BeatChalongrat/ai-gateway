@@ -15,6 +15,7 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import { tOutside } from "@/lib/i18n";
 import type { CanvasArtifactRow } from "@/lib/types";
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 
 /** Artifact types the canvas can render. C2: html/react/mermaid are
  *  EXECUTABLE (scripts run inside the allow-scripts opaque-origin
@@ -88,6 +89,9 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
   error: null,
 
   openCanvas: (artifact) => {
+    // FIX76 — take the one side-pane slot (replaces a workspace or
+    // preview pane that was open).
+    useSidePaneStore.getState().open({ kind: "canvas" });
     set({
       open: true,
       artifact,
@@ -106,7 +110,8 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     }
   },
 
-  closeCanvas: () =>
+  closeCanvas: () => {
+    useSidePaneStore.getState().closeIf("canvas");
     set({
       open: false,
       artifact: null,
@@ -115,7 +120,8 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
       dirty: false,
       versions: [],
       error: null,
-    }),
+    });
+  },
 
   setMode: (mode) => set({ mode }),
 
@@ -245,3 +251,9 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     }
   },
 }));
+
+// FIX76 — when another pane takes the slot, the canvas resets its own
+// state the same way its close button does.
+useSidePaneStore.getState().registerCloser("canvas", () => {
+  if (useCanvasStore.getState().open) useCanvasStore.getState().closeCanvas();
+});

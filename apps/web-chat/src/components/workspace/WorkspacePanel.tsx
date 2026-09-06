@@ -3,14 +3,18 @@
 // Phase 4 Session 5 — Artifact Workspace slide-over drawer.
 //
 // Mounted at the conversation page level. When `open`, it renders a
-// right-side drawer listing every generated-file lineage in the
+// right-side pane listing every generated-file lineage in the
 // conversation. Click a card → VersionTimeline takes over the panel
 // body with the lineage's full history + compare/rollback controls.
+// FIX76: the frame is the shared SidePane (docked beside the thread at
+// ≥ lg, a slide-over dialog below); `open` comes from the page's one
+// side-pane slot.
 
 import { useEffect, useState } from "react";
 
-import { Download, FolderOpen, History, X } from "lucide-react";
+import { Download, FolderOpen, History } from "lucide-react";
 
+import { SidePane } from "@/components/ui/SidePane";
 import { api, ApiError } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
 import type { GeneratedFileEntry } from "@/lib/types";
@@ -61,58 +65,38 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, convId]);
 
-  // ESC to close — matches the existing modal patterns in the app.
+  // Esc inside a lineage view goes BACK to the file list (capture phase,
+  // stopped before SidePane's own Esc handler would close the pane).
   useEffect(() => {
-    if (!open) return;
+    if (!open || !selected) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (selected) setSelected(null);
-        else onClose();
-      }
+      if (e.key !== "Escape") return;
+      e.stopImmediatePropagation();
+      setSelected(null);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, selected, onClose]);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, selected]);
 
   const totalFiles = files?.length ?? 0;
   const totalVersions = files?.reduce((acc, f) => acc + (f.version_count ?? 1), 0) ?? 0;
 
   return (
-    <>
-      {/* Backdrop */}
-      <div
-        className={`fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-200 ${
-          open ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={onClose}
-        aria-hidden
-      />
-      {/* Drawer */}
-      <aside
-        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border-default bg-bg-surface shadow-2xl transition-transform duration-200 ease-out ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
-        role="dialog"
-        aria-label={t("ws.title")}
-      >
-        <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
-          <FolderOpen className="h-5 w-5 text-text-tertiary" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-semibold text-text-primary">{t("ws.title")}</div>
-            <div className="text-xs text-text-tertiary">
-              {totalFiles} {t(totalFiles === 1 ? "unit.file" : "unit.files")} ·{" "}
-              {totalVersions} {t(totalVersions === 1 ? "unit.version" : "unit.versions")}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-            aria-label={t("ws.close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+    <SidePane
+      open={open}
+      label={t("ws.panelTitle")}
+      subtitle={
+        <>
+          {totalFiles} {t(totalFiles === 1 ? "unit.file" : "unit.files")} ·{" "}
+          {totalVersions} {t(totalVersions === 1 ? "unit.version" : "unit.versions")}
+        </>
+      }
+      icon={<FolderOpen className="h-5 w-5 text-text-tertiary" />}
+      maxWidth={448}
+      closeLabel={t("ws.close")}
+      onClose={onClose}
+      testId="workspace-panel"
+    >
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {selected ? (
@@ -143,8 +127,7 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
             />
           )}
         </div>
-      </aside>
-    </>
+    </SidePane>
   );
 }
 

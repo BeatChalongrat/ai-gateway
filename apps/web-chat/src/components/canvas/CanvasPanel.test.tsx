@@ -47,11 +47,15 @@ function openArtifact(
 describe("CanvasPanel shell", () => {
   it("opens from the store, shows type header + title, closes via button", () => {
     render(<CanvasPanel />);
-    const panel = screen.getByTestId("canvas-panel");
-    expect(panel.className).toContain("translate-x-full"); // hidden
+    // FIX76 — docked (jsdom has no matchMedia → the ≥ lg branch): nothing
+    // is in the row while closed; open, it is a complementary landmark
+    // beside the thread, not a dialog over it.
+    expect(screen.queryByTestId("canvas-panel")).toBeNull();
 
     openArtifact("html", "<h1>hi</h1>", "report.html");
-    expect(panel.className).toContain("translate-x-0");
+    const panel = screen.getByTestId("canvas-panel");
+    expect(panel.getAttribute("role")).toBe("complementary");
+    expect(panel.getAttribute("data-pane-mode")).toBe("docked");
     expect(screen.getByText("report.html")).toBeInTheDocument();
     expect(screen.getByText(/HTML preview/)).toBeInTheDocument();
 

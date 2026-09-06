@@ -38,6 +38,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Download, X } from "lucide-react";
 
+import { SidePane } from "@/components/ui/SidePane";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { api } from "@/lib/api";
 import { isImageMime } from "@/lib/fileUtil";
@@ -49,6 +50,7 @@ import type {
 } from "@/lib/previewData";
 import { richPreviewKindFor } from "@/lib/previewData";
 import type { FileAttachment } from "@/lib/types";
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 import {
   DocumentView,
   PREVIEW_PAGE_BLOCKS,
@@ -87,13 +89,9 @@ export function previewKindFor(file: {
   return "unsupported";
 }
 
-export function FilePreviewModal({
-  file,
-  onClose,
-}: {
-  file: FileAttachment;
-  onClose: () => void;
-}) {
+/** The preview itself — loaders + renderers, no frame. Used by the docked
+ *  pane (FilePreviewPane) and by the modal fallback (FilePreviewModal). */
+export function FilePreviewBody({ file }: { file: FileAttachment }) {
   const t = useT();
   const kind = previewKindFor(file);
   const rich = richPreviewKindFor(file);
@@ -106,20 +104,6 @@ export function FilePreviewModal({
   const [doc, setDoc] = useState<DocumentPreview | null>(null);
   const [deck, setDeck] = useState<SlidesPreview | null>(null);
   const [paging, setPaging] = useState(false);
-
-  // Mounted = open (the parent conditionally renders this modal), so the
-  // trap is always active for the component's lifetime.
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(dialogRef, true);
-
-  // Esc closes, matching every other overlay in the app.
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,42 +243,6 @@ export function FilePreviewModal({
   }, [file.id, sheet, doc, deck]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6"
-      onClick={onClose}
-      data-testid="preview-backdrop"
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={file.filename}
-        onClick={(e) => e.stopPropagation()}
-        className="flex h-full max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-bg-secondary shadow-2xl"
-      >
-        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
-            {file.filename}
-          </span>
-          <button
-            type="button"
-            onClick={() => void api.downloadFile(file.id, file.filename)}
-            aria-label={t("preview.download")}
-            className="focus-ring inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-          >
-            <Download width={14} height={14} aria-hidden />
-            <span className="hidden sm:inline">{t("preview.download")}</span>
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("preview.close")}
-            className="focus-ring rounded p-1 text-text-muted transition-colors hover:text-text-primary"
-          >
-            <X width={16} height={16} aria-hidden />
-          </button>
-        </div>
-
         <div className="min-h-0 flex-1 overflow-auto bg-bg-base">
           {loading ? (
             <p className="p-6 text-center text-sm text-text-muted">
@@ -355,7 +303,108 @@ export function FilePreviewModal({
             </div>
           )}
         </div>
+  );
+}
+
+function DownloadButton({ file }: { file: FileAttachment }) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={() => void api.downloadFile(file.id, file.filename)}
+      aria-label={t("preview.download")}
+      className="focus-ring inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+    >
+      <Download width={14} height={14} aria-hidden />
+      <span className="hidden sm:inline">{t("preview.download")}</span>
+    </button>
+  );
+}
+
+/** The centred modal — the FALLBACK frame, used only where no page hosts
+ *  the side-pane slot (quick-ask, the public share view). On the
+ *  conversation page the preview opens in FilePreviewPane instead. */
+export function FilePreviewModal({
+  file,
+  onClose,
+}: {
+  file: FileAttachment;
+  onClose: () => void;
+}) {
+  const t = useT();
+  // Mounted = open (the parent conditionally renders this modal), so the
+  // trap is always active for the component's lifetime.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true);
+
+  // Esc closes, matching every other overlay in the app.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6"
+      onClick={onClose}
+      data-testid="preview-backdrop"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={file.filename}
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-border bg-bg-secondary shadow-2xl"
+      >
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
+            {file.filename}
+          </span>
+          <DownloadButton file={file} />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("preview.close")}
+            className="focus-ring rounded p-1 text-text-muted transition-colors hover:text-text-primary"
+          >
+            <X width={16} height={16} aria-hidden />
+          </button>
+        </div>
+        <FilePreviewBody file={file} />
       </div>
     </div>
+  );
+}
+
+/** FIX76 — the preview in the page's side-pane slot: docked beside the
+ *  thread at ≥ lg (the chat stays live), a slide-over dialog below.
+ *  Mounted once by the conversation page; opened by MessageAttachments
+ *  through sidePaneStore. */
+export function FilePreviewPane() {
+  const t = useT();
+  const pane = useSidePaneStore((s) => s.pane);
+  const closeIf = useSidePaneStore((s) => s.closeIf);
+  const file = pane?.kind === "preview" ? pane.file : null;
+  // Keep the last file mounted through the overlay's slide-out so the
+  // frame does not empty mid-transition.
+  const lastFile = useRef<FileAttachment | null>(null);
+  if (file) lastFile.current = file;
+  const shown = file ?? lastFile.current;
+  return (
+    <SidePane
+      open={file !== null}
+      label={shown?.filename ?? t("preview.close")}
+      actions={shown ? <DownloadButton file={shown} /> : null}
+      maxWidth={672}
+      closeLabel={t("preview.close")}
+      onClose={() => closeIf("preview")}
+      testId="preview-pane"
+    >
+      {shown ? <FilePreviewBody key={shown.id} file={shown} /> : null}
+    </SidePane>
   );
 }

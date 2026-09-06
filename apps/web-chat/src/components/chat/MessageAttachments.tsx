@@ -18,6 +18,7 @@ import { api } from "@/lib/api";
 import { downloadFromObjectUrl, formatBytes, isImageMime } from "@/lib/fileUtil";
 import { useT } from "@/lib/i18n";
 import type { FileAttachment } from "@/lib/types";
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 import { openLightbox } from "@/components/ui/ImageLightbox";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { AuthedImage } from "./AuthedImage";
@@ -34,7 +35,16 @@ export function MessageAttachments({ files }: Props) {
   // Phase 10 — one preview overlay for the whole attachment group, so
   // only one file can be open at a time and the modal state does not
   // live inside each card.
+  // FIX76 — on the conversation page the preview opens in the docked
+  // side pane (page state, sidePaneStore); the local modal is the
+  // fallback for surfaces without the slot (quick-ask, share view).
+  const hostMounted = useSidePaneStore((s) => s.hostMounted);
+  const openPane = useSidePaneStore((s) => s.open);
   const [previewing, setPreviewing] = useState<FileAttachment | null>(null);
+  const preview = (f: FileAttachment) => {
+    if (hostMounted) openPane({ kind: "preview", file: f });
+    else setPreviewing(f);
+  };
 
   if (!files || files.length === 0) return null;
   const videos = files.filter((f) => isVideoMime(f.content_type));
@@ -67,7 +77,7 @@ export function MessageAttachments({ files }: Props) {
       {others.length > 0 ? (
         <div className="flex flex-col gap-1.5">
           {others.map((f) => (
-            <FileCard key={f.id} file={f} onPreview={() => setPreviewing(f)} />
+            <FileCard key={f.id} file={f} onPreview={() => preview(f)} />
           ))}
         </div>
       ) : null}

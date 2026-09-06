@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react";
 
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 import { useSidebarStore } from "@/stores/sidebarStore";
 
 // Sidebar's desktop width — kept in sync with Sidebar.tsx's
@@ -68,5 +69,8 @@ export function useFloatingPillOffset(): number {
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  return isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH / 2 : 0;
+  // FIX76 — a docked side pane takes the right edge of the chat area, so
+  // the thread's visual centre moves LEFT by half the pane's width.
+  const dockedWidth = useSidePaneStore((s) => s.dockedWidth);
+  return (isDesktop && !collapsed ? SIDEBAR_DESKTOP_WIDTH / 2 : 0) - dockedWidth / 2;
 }

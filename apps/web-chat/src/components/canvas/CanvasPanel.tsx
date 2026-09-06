@@ -17,11 +17,10 @@
 //     dangerouslySetInnerHTML anywhere in this folder — pinned by a
 //     source-scan test).
 //
-// Layout: same modal slide-over drawer pattern as WorkspacePanel
-// (backdrop z-40 + fixed right aside z-50). The two drawers cannot
-// fight: each has a full-screen backdrop, and every "Open in Canvas"
-// button lives in the chat surface UNDER the workspace backdrop, so
-// only one drawer is reachable at a time.
+// Layout (FIX76): the shared SidePane frame — docked beside the thread
+// at ≥ lg with the conversation still live, a slide-over dialog below
+// that. One pane slot for the app (sidePaneStore): opening the canvas
+// replaces an open workspace/preview pane and vice versa.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -39,6 +38,7 @@ import {
 } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import { SidePane } from "@/components/ui/SidePane";
 import { canPersist, useCanvasStore } from "@/stores/canvasStore";
 import type { CanvasArtifact } from "@/stores/canvasStore";
 
@@ -98,59 +98,34 @@ export function CanvasPanel() {
     if (!open) setHistoryOpen(false);
   }, [open]);
 
-  // ESC to close — same pattern as WorkspacePanel.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeCanvas();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, closeCanvas]);
-
+  // Esc, backdrop, focus and the dialog/landmark role live in SidePane.
   return (
-    <>
-      <div
-        className={`fixed inset-0 z-40 bg-black/40 backdrop-blur-sm transition-opacity duration-200 ${
-          open ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={closeCanvas}
-        aria-hidden
-      />
-      <aside
-        className={`fixed right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border-default bg-bg-surface shadow-2xl transition-transform duration-200 ease-out md:max-w-2xl ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
-        role="dialog"
-        aria-label={t("canvas.title")}
-        data-testid="canvas-panel"
-      >
-        <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
-          <PanelRight className="h-5 w-5 text-text-tertiary" />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold text-text-primary">
-              {artifact?.title || t("canvas.title")}
-            </div>
-            <div className="text-xs text-text-tertiary">
-              {artifact ? t(TYPE_LABEL_KEY[artifact.type]) : null}
-              {dirty ? ` · ${t("canvas.unsaved")}` : null}
-            </div>
-          </div>
-          {artifact ? (
-            <>
-              <CopyArtifactButton content={draft} />
-              <DownloadArtifactButton artifact={artifact} content={draft} />
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={closeCanvas}
-            className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-            aria-label={t("canvas.close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+    <SidePane
+      open={open}
+      label={t("canvas.title")}
+      title={artifact?.title || t("canvas.title")}
+      subtitle={
+        artifact ? (
+          <>
+            {t(TYPE_LABEL_KEY[artifact.type])}
+            {dirty ? ` · ${t("canvas.unsaved")}` : null}
+          </>
+        ) : null
+      }
+      icon={<PanelRight className="h-5 w-5 text-text-tertiary" />}
+      actions={
+        artifact ? (
+          <>
+            <CopyArtifactButton content={draft} />
+            <DownloadArtifactButton artifact={artifact} content={draft} />
+          </>
+        ) : null
+      }
+      maxWidth={672}
+      closeLabel={t("canvas.close")}
+      onClose={closeCanvas}
+      testId="canvas-panel"
+    >
 
         {/* C3 toolbar — Preview/Code toggle + save + history. Hidden
             for the empty state and for artifacts too large to edit. */}
@@ -222,8 +197,7 @@ export function CanvasPanel() {
         <div className="flex-1 overflow-hidden">
           {open ? <CanvasBody artifact={artifact} /> : null}
         </div>
-      </aside>
-    </>
+    </SidePane>
   );
 }
 

@@ -13,6 +13,7 @@ import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
 import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
 import { ShareModal } from "@/components/chat/ShareModal";
+import { FilePreviewPane } from "@/components/chat/FilePreviewModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
 import { WorkspaceButton } from "@/components/workspace/WorkspaceButton";
 import { WorkspacePanel } from "@/components/workspace/WorkspacePanel";
@@ -26,6 +27,7 @@ import { consumeQueryAttach, consumeQueryPrefill } from "@/lib/deepLinkParams";
 import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 
 export default function ConversationPage() {
   const params = useParams();
@@ -103,7 +105,23 @@ export default function ConversationPage() {
       }
     })();
   }, [convId, addPendingFile, markFileReady]);
-  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  // FIX76 — the one side-pane slot (canvas / workspace / preview) is page
+  // state in sidePaneStore. This page is its host: it announces itself so
+  // message cards open previews in the pane, and it empties the slot when
+  // the conversation changes or the page unmounts (a deleted conversation
+  // leaves this page, so that case is covered too).
+  const pane = useSidePaneStore((s) => s.pane);
+  const openPane = useSidePaneStore((s) => s.open);
+  const closePane = useSidePaneStore((s) => s.close);
+  const closePaneIf = useSidePaneStore((s) => s.closeIf);
+  const setPaneHostMounted = useSidePaneStore((s) => s.setHostMounted);
+  useEffect(() => {
+    setPaneHostMounted(true);
+    return () => {
+      closePane();
+      setPaneHostMounted(false);
+    };
+  }, [convId, closePane, setPaneHostMounted]);
 
   // setActive + lazy loadMessages on convId change. We read the
   // current messages slot via getState() rather than subscribing
@@ -250,7 +268,7 @@ export default function ConversationPage() {
         <MemoryIndicator conversationId={convId} />
         <WorkspaceButton
           conversationId={convId}
-          onOpen={() => setWorkspaceOpen(true)}
+          onOpen={() => openPane({ kind: "workspace" })}
         />
         <ConversationFiles conversationId={convId} />
         <ExportMenu
@@ -258,19 +276,15 @@ export default function ConversationPage() {
           onShare={() => setShareOpen(true)}
         />
       </div>
-      <WorkspacePanel
-        convId={convId}
-        open={workspaceOpen}
-        onClose={() => setWorkspaceOpen(false)}
-      />
-      {/* Phase 6 / C1 — read-only Canvas drawer. Store-driven (opened
-          from CodeBlock's "Open in Canvas" buttons); same modal
-          slide-over pattern as WorkspacePanel, so the two can never
-          be open at once (each is behind the other's backdrop). */}
-      <CanvasPanel />
-
+      {/* FIX76 — the thread column and the ONE side-pane slot sit in a
+          row. At ≥ lg an open pane docks as a flex sibling (the thread
+          narrows, the composer and auto-scroll keep working); below lg
+          the same panels render as slide-over dialogs. The slot holds
+          one pane at a time (sidePaneStore): opening another replaces
+          it. */}
+      <div className="flex min-h-0 flex-1">
       <AttachmentDropZone
-        className="flex flex-1 flex-col overflow-hidden"
+        className="flex min-w-0 flex-1 flex-col overflow-hidden"
         enabled={!streaming}
         onFiles={(filesRaw) => {
           // W3 — same vision gate as the composer's picker/paste paths.
@@ -324,6 +338,16 @@ export default function ConversationPage() {
           </>
         )}
       </AttachmentDropZone>
+      <WorkspacePanel
+        convId={convId}
+        open={pane?.kind === "workspace"}
+        onClose={() => closePaneIf("workspace")}
+      />
+      {/* Phase 6 / C1 — Canvas pane. Store-driven (opened from
+          CodeBlock's "Open in Canvas" buttons). */}
+      <CanvasPanel />
+      <FilePreviewPane />
+      </div>
       <ShareModal
         open={shareOpen}
         conversationId={convId}

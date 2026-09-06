@@ -19,6 +19,7 @@ import { PORTAL_URL } from "@/lib/auth";
 import { tOutside, useT } from "@/lib/i18n";
 import type { ModelUsage } from "@/lib/types";
 import { useModelStore } from "@/stores/modelStore";
+import { useSidePaneStore } from "@/stores/sidePaneStore";
 
 // Credit-level colours (badge ring + panel ring). Fixed hex — they
 // read correctly on both themes.
@@ -72,6 +73,7 @@ export function CreditBadge() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  const dockedWidth = useSidePaneStore((s) => s.dockedWidth);
   if (!data) return null;
 
   const { total, remaining } = data.credits;
@@ -79,7 +81,8 @@ export function CreditBadge() {
   const color = levelColor(pctRemaining);
 
   return (
-    <div className="absolute bottom-[76px] right-4 z-10">
+    // FIX76 — stay over the thread, not over a docked side pane.
+    <div className="absolute bottom-[76px] z-10" style={{ right: 16 + dockedWidth }}>
       {open ? (
         <div
           className="fixed inset-0 z-40"
