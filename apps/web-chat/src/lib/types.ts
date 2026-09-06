@@ -864,6 +864,10 @@ export interface ToolActivity {
   tool: string;
   phase: "started" | "finished";
   argsSummary?: string;
+  /** FIX77 ② — the ONE human-useful argument (filename, host, query) the
+   *  row shows beside its friendly label; the raw argsSummary moved into
+   *  the card's expanded detail. */
+  subject?: string;
   parentId?: string | null;
   success?: boolean;
   durationMs?: number;

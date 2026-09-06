@@ -36,9 +36,33 @@ describe("QuestionCard", () => {
     expect(screen.getByTestId("question-card").getAttribute("data-prompt-id")).toBe("question-1");
     expect(screen.getByTestId("question-header").textContent).toBe("Format");
     expect(screen.getByText("Which format?")).toBeTruthy();
-    expect(screen.getAllByTestId("question-option").map((b) => b.textContent)).toEqual(["SummaryBrief overview", "DetailedFull explanation"]);
-    expect(screen.getByTestId("question-other").textContent).toBe("Something else");
+    // FIX77 D4 — options carry their selection number.
+    expect(screen.getAllByTestId("question-option").map((b) => b.textContent)).toEqual(["1SummaryBrief overview", "2DetailedFull explanation"]);
+    expect(screen.getByTestId("question-other").textContent).toBe("3Something else");
     expect((screen.getByTestId("question-submit") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("FIX77 D1 — the model-written header chip renders as written (no uppercase transform)", () => {
+    const mixed: PendingQuestion = {
+      promptId: "question-3",
+      questions: [{ question: "ข้อไหน?", header: "ควิช tools", multiSelect: false, options: [{ label: "ก", description: "" }, { label: "ข", description: "" }] }],
+    };
+    render(<QuestionCard question={mixed} onAnswer={() => {}} />);
+    const chip = screen.getByTestId("question-header");
+    expect(chip.textContent).toBe("ควิช tools");
+    expect(chip.className).not.toMatch(/uppercase/);
+  });
+
+  it("FIX77 D4 — number keys choose options; typing in a field never triggers them", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.keyDown(window, { key: "2" });
+    expect(screen.getAllByTestId("question-option")[1]!.getAttribute("aria-checked")).toBe("true");
+    // "3" = the Something-else row; its text box opens and typing digits there must not toggle anything
+    fireEvent.keyDown(window, { key: "3" });
+    const box = screen.getByTestId("question-other-text");
+    fireEvent.keyDown(box, { key: "1" });
+    expect(screen.getAllByTestId("question-option")[0]!.getAttribute("aria-checked")).toBe("false");
   });
 
   it("single-select posts the chosen label verbatim as the answer", () => {
@@ -75,6 +99,8 @@ describe("QuestionCard", () => {
   it("a free reply answers instead of the options and rides as `response`", () => {
     const onAnswer = vi.fn();
     render(<QuestionCard question={two} onAnswer={onAnswer} />);
+    // FIX77 D3 — the free reply hides behind its toggle until asked for.
+    fireEvent.click(screen.getByTestId("question-reply-toggle"));
     fireEvent.change(screen.getByTestId("question-reply"), { target: { value: "just do both, short" } });
     expect((screen.getByTestId("question-submit") as HTMLButtonElement).disabled).toBe(false);
     fireEvent.keyDown(screen.getByTestId("question-reply"), { key: "Enter" });
@@ -95,7 +121,7 @@ describe("QuestionCard", () => {
     useI18nStore.setState({ locale: "th" });
     render(<QuestionCard question={one} onAnswer={() => {}} />);
     expect(screen.getByText("ผู้ช่วยมีคำถาม")).toBeTruthy();
-    expect(screen.getByTestId("question-other").textContent).toBe("อย่างอื่น");
+    expect(screen.getByTestId("question-other").textContent).toBe("3อย่างอื่น");
     expect(screen.getByTestId("question-skip").textContent).toBe("ข้าม");
   });
 });

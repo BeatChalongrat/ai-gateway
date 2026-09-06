@@ -22,15 +22,18 @@ describe("sub-agent cards", () => {
     // collapsed successful sub-agent: summary visible, its steps not rendered
     expect(screen.getByText("count files in Desktop")).toBeTruthy();
     expect(screen.queryByText("dir /b")).toBeNull();
-    // failed sub-agent auto-opened: its failing step is visible
+    // failed sub-agent auto-opened: its failing step is visible with the
+    // FIX77 friendly label; the failed card auto-expands so its raw input
+    // ("ping") stays reachable in the detail.
+    expect(screen.getAllByText("Ran a command").length).toBe(1);
     expect(screen.getByText("ping")).toBeTruthy();
     // FIX30 §3.1: it READS as failed — the word on the row, the name, the status.
-    expect(screen.getByText("Failed")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Sub-agent: ping google — failed/ })).toBeTruthy();
+    expect(screen.getAllByText("Failed").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /Sub-agent: ping google — Failed/ })).toBeTruthy();
     expect(cards.map((c) => c.getAttribute("data-status")).sort()).toEqual(["failed", "ok"]);
-    // expand the first
+    // expand the first — its two command steps appear as labelled cards
     fireEvent.click(screen.getByRole("button", { name: /Sub-agent: count files/ }));
-    expect(screen.getByText("dir /b")).toBeTruthy();
+    expect(screen.getAllByText("Ran a command").length).toBe(3);
     expect(screen.getByText("12 files")).toBeTruthy();
   });
 });

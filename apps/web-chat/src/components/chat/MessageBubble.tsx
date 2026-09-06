@@ -373,7 +373,13 @@ function MessageBubbleImpl({
           shell output); the thin web payloads degrade to the one-line
           running/done rows inside ToolCard. */}
       {message.tool_activities?.length ? (
-        <ToolActivityList activities={message.tool_activities} />
+        <ToolActivityList
+          activities={message.tool_activities}
+          // FIX77 ③ — with the plan card on screen, update_plan rows are
+          // duplication (the card IS the call's presentation); failures
+          // still render (the filter never drops a failed row).
+          planShown={Boolean(message.plan?.length)}
+        />
       ) : null}
 
       {/* Phase 4 (desktop shell) — in-thread tool-consent card. */}

@@ -10,9 +10,18 @@
 // What goes back: the chosen label(s) verbatim, or the user's own text — the
 // word "Other" never travels. Skip means "the user declined to choose", not
 // a cancel: the turn continues and the model is told to proceed on its own.
+//
+// FIX77 Part D — appearance only, the FIX73/74 contract is untouched:
+//   * the model-written header chip renders as written (no `uppercase` —
+//     it does nothing to Thai and mangles a mixed Thai/English header);
+//   * options are numbered and the number keys choose them (multi-select
+//     toggles); typing in a field never triggers a shortcut;
+//   * the free reply gets a distinct job ("answers everything above") and
+//     hides behind a toggle so it no longer competes with "Something else"
+//     (whose job is: my own answer to THIS question).
 
 import { MessageCircleQuestion } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useT } from "@/lib/i18n";
 import type { PendingQuestion, QuestionAnswerPayload } from "@/lib/types";
@@ -31,6 +40,7 @@ export function QuestionCard({
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [otherText, setOtherText] = useState<Record<number, string>>({});
   const [reply, setReply] = useState("");
+  const [replyOpen, setReplyOpen] = useState(false);
   const [sent, setSent] = useState(false);
 
   const toggle = (qi: number, label: string, multi: boolean) => {
@@ -71,6 +81,34 @@ export function QuestionCard({
     onAnswer({ promptId: question.promptId, outcome: "skipped", answers: {}, response: null });
   };
 
+  // FIX77 D4 — number keys pick options in the first unanswered question
+  // (with one question, simply that question). "Something else" is the
+  // last number. Never fires while the user types in a field.
+  useEffect(() => {
+    if (sent) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (!/^[1-9]$/.test(e.key)) return;
+      const d = Number(e.key);
+      const firstOpen = question.questions.findIndex((_, i) => answerOf(i).length === 0);
+      const qi = firstOpen === -1 ? question.questions.length - 1 : firstOpen;
+      const q = question.questions[qi];
+      if (!q) return;
+      if (d <= q.options.length) {
+        toggle(qi, q.options[d - 1]!.label, q.multiSelect);
+        e.preventDefault();
+      } else if (d === q.options.length + 1) {
+        toggle(qi, OTHER, q.multiSelect);
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sent, picked, otherText, question]);
+
   return (
     <div
       className="my-2 rounded-lg border border-blue-500/50 bg-blue-500/5 px-3 py-3"
@@ -80,6 +118,7 @@ export function QuestionCard({
       <div className="flex items-center gap-2">
         <MessageCircleQuestion className="h-5 w-5 shrink-0 text-blue-500" />
         <div className="text-sm font-semibold text-text-primary">{t("question.title")}</div>
+        <span className="ml-auto hidden text-[11px] text-text-muted sm:inline">{t("question.keyHint")}</span>
       </div>
 
       {question.questions.map((q, qi) => {
@@ -88,14 +127,16 @@ export function QuestionCard({
         return (
           <fieldset key={qi} className="mt-3" data-testid="question-item" disabled={sent}>
             <legend className="flex items-center gap-2 text-sm text-text-primary">
-              <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-text-tertiary" data-testid="question-header">
+              {/* the header the MODEL wrote, as written — uppercasing does
+                  nothing to Thai and breaks a mixed-script chip (FIX77 D1) */}
+              <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] font-medium text-text-tertiary" data-testid="question-header">
                 {q.header}
               </span>
               <span className="font-medium">{q.question}</span>
             </legend>
             {q.multiSelect ? <div className="mt-0.5 text-xs text-text-tertiary">{t("question.multiHint")}</div> : null}
             <div className="mt-1.5 flex flex-col gap-1">
-              {q.options.map((o) => {
+              {q.options.map((o, oi) => {
                 const on = cur.includes(o.label);
                 return (
                   <button
@@ -105,10 +146,15 @@ export function QuestionCard({
                     aria-checked={on}
                     data-testid="question-option"
                     onClick={() => toggle(qi, o.label, q.multiSelect)}
-                    className={`focus-ring flex w-full flex-col items-start rounded-md border px-3 py-1.5 text-left text-sm ${on ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-primary hover:bg-bg-surface-hover"}`}
+                    className={`focus-ring flex w-full items-baseline gap-2 rounded-md border px-3 py-1.5 text-left text-sm ${on ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-primary hover:bg-bg-surface-hover"}`}
                   >
-                    <span className="font-medium">{o.label}</span>
-                    {o.description ? <span className="text-xs text-text-secondary">{o.description}</span> : null}
+                    <span className="shrink-0 text-xs tabular-nums text-text-muted" aria-hidden data-testid="question-option-number">
+                      {oi + 1}
+                    </span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="font-medium">{o.label}</span>
+                      {o.description ? <span className="text-xs text-text-secondary">{o.description}</span> : null}
+                    </span>
                   </button>
                 );
               })}
@@ -118,8 +164,11 @@ export function QuestionCard({
                 aria-checked={otherOn}
                 data-testid="question-other"
                 onClick={() => toggle(qi, OTHER, q.multiSelect)}
-                className={`focus-ring flex w-full flex-col items-start rounded-md border border-dashed px-3 py-1.5 text-left text-sm ${otherOn ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-secondary hover:bg-bg-surface-hover"}`}
+                className={`focus-ring flex w-full items-baseline gap-2 rounded-md border border-dashed px-3 py-1.5 text-left text-sm ${otherOn ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-secondary hover:bg-bg-surface-hover"}`}
               >
+                <span className="shrink-0 text-xs tabular-nums text-text-muted" aria-hidden>
+                  {q.options.length + 1}
+                </span>
                 <span className="font-medium">{t("question.other")}</span>
               </button>
               {otherOn ? (
@@ -145,27 +194,45 @@ export function QuestionCard({
         );
       })}
 
+      {/* FIX77 D3 — the free reply answers EVERYTHING above (as opposed to
+          "Something else", which answers one question); it stays behind a
+          toggle so two empty text boxes never compete for the same answer. */}
       <div className="mt-3">
-        <label className="text-xs text-text-tertiary" htmlFor={`question-reply-${question.promptId}`}>
-          {t("question.replyLabel")}
-        </label>
-        <textarea
-          id={`question-reply-${question.promptId}`}
-          rows={1}
-          maxLength={MAX_FREE_TEXT}
-          value={reply}
-          disabled={sent}
-          onChange={(e) => setReply(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={t("question.replyPlaceholder")}
-          data-testid="question-reply"
-          className="focus-ring mt-1 w-full resize-none rounded-md border border-border bg-bg-base px-3 py-1.5 text-sm text-text-primary"
-        />
+        {!replyOpen ? (
+          <button
+            type="button"
+            disabled={sent}
+            onClick={() => setReplyOpen(true)}
+            className="focus-ring text-xs text-text-tertiary underline-offset-2 hover:text-text-secondary hover:underline disabled:opacity-50"
+            data-testid="question-reply-toggle"
+          >
+            {t("question.replyToggle")}
+          </button>
+        ) : (
+          <>
+            <label className="text-xs text-text-tertiary" htmlFor={`question-reply-${question.promptId}`}>
+              {t("question.replyLabel")}
+            </label>
+            <textarea
+              id={`question-reply-${question.promptId}`}
+              rows={1}
+              autoFocus
+              maxLength={MAX_FREE_TEXT}
+              value={reply}
+              disabled={sent}
+              onChange={(e) => setReply(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              placeholder={t("question.replyPlaceholder")}
+              data-testid="question-reply"
+              className="focus-ring mt-1 w-full resize-none rounded-md border border-border bg-bg-base px-3 py-1.5 text-sm text-text-primary"
+            />
+          </>
+        )}
       </div>
 
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">

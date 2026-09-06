@@ -2,15 +2,27 @@
 
 // Phase 4 (desktop shell) — the rich agent tool card.
 //
-// The web path emits only {id, tool, phase}; the desktop host emits rich
-// payloads (arg summary on "started"; success / result / code / screenshot /
-// live output on "finished"). This component renders a full card when the
-// payload is rich and degrades to the thin running/done row when it is not,
-// so both surfaces share one renderer. Nested sub-agent calls (parentId) are
-// grouped and rendered indented under their parent card (depth 1).
+// The web path emits thin "started" frames ({id, tool, phase, subject?})
+// and a richer "finished" frame; the desktop host emits rich payloads on
+// both (arg summary + subject on "started"; success / result / code /
+// screenshot / live output on "finished"). This component renders a full
+// card when the payload is rich and degrades to the thin running/done row
+// when it is not, so both surfaces share one renderer. Nested sub-agent
+// calls (parentId) are grouped and rendered indented under their parent
+// card (depth 1).
 //
-// Match the information the WPF app shows (MessageBubble.xaml tool cards),
-// not its pixels.
+// FIX77 — what the row SAYS changed: a friendly, localised label
+// (tool.<name> / tool.done.<name> in the dictionary, falling back to the
+// tool's name alone — never an argument dump) plus at most ONE useful
+// argument (`subject`: a filename, a host, a query). The raw argsSummary
+// moved into the expanded detail, so what the card used to show stays
+// reachable behind the expand. Two rows never render for a call that a
+// dedicated card already presents (ask_user_question → QuestionCard,
+// update_plan → PlanChecklistCard) — unless that call FAILED, because a
+// hidden tool must never fail silently. And a repeated tool's earlier
+// image folds behind a "superseded" toggle once a later run of the same
+// tool succeeded (collapse, never delete); if the last run failed,
+// nothing folds.
 
 import { useEffect, useState } from "react";
 import {
@@ -31,7 +43,10 @@ import {
   X,
 } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { ToolActivity } from "@/lib/types";
+
+import { toolActivityDoneKey, toolActivityLabelKey } from "./ToolActivityIndicator";
 
 const COLLAPSE_DELAY_MS = 1200;
 
@@ -77,12 +92,57 @@ function toolIcon(tool: string) {
   }
 }
 
-/** "run_command" → "Run command". A light humaniser; the WPF app localises
- *  via tool.name.* — we keep it self-contained and readable. */
-function friendlyName(tool: string): string {
+/** "run_command" → "Run command" — the {tool} var for the generic label
+ *  when a tool has no dictionary entry. A NAME, never an argument dump. */
+function humaniseName(tool: string): string {
   return tool
     .replace(/_/g, " ")
     .replace(/^\w/, (c) => c.toUpperCase());
+}
+
+/** FIX77 ② — the localised row label: dictionary entry when the tool has
+ *  one, otherwise the generic form around the tool's name alone. */
+function useToolLabel(tool: string, running: boolean): string {
+  const t = useT();
+  const key = running ? toolActivityLabelKey(tool) : toolActivityDoneKey(tool);
+  if (key) return t(key);
+  return t(running ? "tool.generic" : "tool.done.generic", { tool: humaniseName(tool) });
+}
+
+/** FIX77 ③ — rows that a dedicated card in the same message already
+ *  presents. Hidden ONLY while they did not fail: a failed call always
+ *  keeps its row (a tool must never fail invisibly). */
+function presentedByDedicatedCard(a: ToolActivity, planShown: boolean): boolean {
+  if (a.phase === "finished" && a.success === false) return false;
+  if (a.tool === "ask_user_question") return true; // QuestionCard is the presentation
+  if (a.tool === "update_plan" && planShown) return true; // PlanChecklistCard
+  return false;
+}
+
+/** FIX77 ① — ids whose inline image is superseded: within one sibling
+ *  group (same parentId + same tool), every finished image before the
+ *  group's LAST member folds behind a toggle — but only when that last
+ *  member did not fail. A failing final attempt collapses nothing. */
+export function supersededImageIds(activities: ToolActivity[]): Set<string> {
+  const groups = new Map<string, ToolActivity[]>();
+  for (const a of activities) {
+    if (a.tool === "subagent") continue;
+    const k = `${a.parentId ?? ""}|${a.tool}`;
+    const g = groups.get(k);
+    if (g) g.push(a);
+    else groups.set(k, [a]);
+  }
+  const out = new Set<string>();
+  for (const g of groups.values()) {
+    const withImages = g.filter((a) => a.phase === "finished" && a.imageDataUri);
+    if (withImages.length < 2) continue;
+    const last = g[g.length - 1]!;
+    if (last.phase !== "finished" || last.success === false) continue;
+    for (const a of withImages) {
+      if (a.id !== withImages[withImages.length - 1]!.id) out.add(a.id);
+    }
+  }
+  return out;
 }
 
 /** FIX29 §2.2 — one collapsible card per sub-agent (activity.tool ===
@@ -90,7 +150,8 @@ function friendlyName(tool: string): string {
  *  default with a one-line summary; opens itself while running, when it
  *  failed, or when a step inside needs the user (consent / failure) — a
  *  collapsed card must never hide something the user has to act on. */
-function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps: ToolActivity[]; all: ToolActivity[] }) {
+function SubagentCard({ activity, steps, all, superseded }: { activity: ToolActivity; steps: ToolActivity[]; all: ToolActivity[]; superseded: Set<string> }) {
+  const t = useT();
   const running = activity.phase === "started";
   const failed = activity.phase === "finished" && activity.success === false;
   const stepFailed = steps.some((s) => s.phase === "finished" && s.success === false);
@@ -113,7 +174,7 @@ function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps:
         // FIX30 §3.1: a sub-agent that did not do its job must READ as failed —
         // in the name (screen readers, the a11y tree) and on the row, not only
         // by the colour of an icon.
-        aria-label={`Sub-agent: ${activity.argsSummary ?? ""}${failed || stepFailed ? " — failed" : ""}`}
+        aria-label={`${t("subagent.label")}: ${activity.argsSummary ?? ""}${failed || stepFailed ? ` — ${t("subagent.failed")}` : ""}`}
       >
         {running ? (
           <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary" />
@@ -123,15 +184,19 @@ function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps:
           <Check className="h-3.5 w-3.5 shrink-0 text-status-success" />
         )}
         <Cpu className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden />
-        <span className="shrink-0 text-xs font-medium text-text-secondary">Sub-agent</span>
+        <span className="shrink-0 text-xs font-medium text-text-secondary">{t("subagent.label")}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-text-tertiary" title={activity.argsSummary}>
           {activity.argsSummary}
         </span>
         {!running && (failed || stepFailed) ? (
-          <span className="shrink-0 text-xs font-medium text-status-danger">Failed</span>
+          <span className="shrink-0 text-xs font-medium text-status-danger">{t("subagent.failed")}</span>
         ) : null}
         <span className="shrink-0 text-xs text-text-muted">
-          {running ? `${done}/${steps.length} steps` : `${steps.length} step${steps.length === 1 ? "" : "s"}`}
+          {running
+            ? t("subagent.progress", { done: String(done), total: String(steps.length) })
+            : steps.length === 1
+              ? t("subagent.step")
+              : t("subagent.steps", { n: String(steps.length) })}
           {activity.durationMs != null ? ` · ${Math.round(activity.durationMs / 100) / 10}s` : ""}
         </span>
         {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" />}
@@ -139,7 +204,7 @@ function SubagentCard({ activity, steps, all }: { activity: ToolActivity; steps:
       {open ? (
         <div className="border-t border-border-subtle px-2 py-1">
           {steps.map((s) => (
-            <ToolCard key={s.id} activity={s} children={all.filter((a) => a.parentId === s.id)} all={all} />
+            <ToolCard key={s.id} activity={s} children={all.filter((a) => a.parentId === s.id)} all={all} superseded={superseded} />
           ))}
           {!running && activity.resultPreview ? (
             <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-bg-elevated px-2 py-1 text-xs text-text-secondary">{activity.resultPreview}</pre>
@@ -154,16 +219,24 @@ export function ToolCard({
   activity,
   children,
   all,
+  superseded,
 }: {
   activity: ToolActivity;
   children?: ToolActivity[];
   all?: ToolActivity[];
+  superseded?: Set<string>;
 }) {
+  const t = useT();
   const running = activity.phase === "started";
   const failed = activity.phase === "finished" && activity.success === false;
+  const label = useToolLabel(activity.tool, running);
   const [expanded, setExpanded] = useState(false);
+  // FIX77 ① — an image a later same-tool run replaced starts folded;
+  // the toggle brings it back exactly as it rendered before.
+  const imageSuperseded = superseded?.has(activity.id) === true;
+  const [showOldImage, setShowOldImage] = useState(false);
   if (activity.tool === "subagent") {
-    return <SubagentCard activity={activity} steps={children ?? []} all={all ?? []} />;
+    return <SubagentCard activity={activity} steps={children ?? []} all={all ?? []} superseded={superseded ?? new Set()} />;
   }
 
   // Auto-expand while running if there is live output to watch; fold shortly
@@ -188,7 +261,8 @@ export function ToolCard({
     activity.imageDataUri != null ||
     activity.isCodeRun;
 
-  // Thin fallback (web path): the original one-line running/done row.
+  // Thin fallback (web "started" frames): the original one-line row —
+  // friendly label + the one-field subject when the backend sent one.
   if (!rich) {
     return (
       <div className="flex items-center gap-2 py-1 text-sm" data-testid="tool-activity">
@@ -197,19 +271,23 @@ export function ToolCard({
         ) : (
           <Check className="h-3.5 w-3.5 text-status-success" />
         )}
-        <span className={running ? "shimmer-text" : "text-text-muted"}>
-          {running ? `Using ${friendlyName(activity.tool)}…` : friendlyName(activity.tool)}
-        </span>
+        <span className={running ? "shimmer-text" : "text-text-muted"}>{label}</span>
+        {activity.subject ? (
+          <span className="truncate text-text-muted" data-testid="tool-subject">{activity.subject}</span>
+        ) : null}
       </div>
     );
   }
 
   const hasBody =
     activity.input ||
+    activity.argsSummary ||
     activity.resultPreview ||
     activity.output ||
     activity.codeText ||
     activity.imageDataUri;
+
+  const showImage = activity.imageDataUri && !running && (!imageSuperseded || showOldImage);
 
   return (
     <div
@@ -235,13 +313,16 @@ export function ToolCard({
           <Check className="h-4 w-4 shrink-0 text-status-success" />
         )}
         <Icon className="h-4 w-4 shrink-0 text-text-tertiary" />
-        <span className="shrink-0 text-sm font-medium text-text-primary">
-          {friendlyName(activity.tool)}
+        <span className="shrink-0 text-sm font-medium text-text-primary" data-testid="tool-label">
+          {label}
         </span>
-        {activity.argsSummary ? (
-          <span className="truncate text-sm text-text-tertiary" title={activity.argsSummary}>
-            {activity.argsSummary}
+        {activity.subject ? (
+          <span className="truncate text-sm text-text-tertiary" title={activity.subject} data-testid="tool-subject">
+            {activity.subject}
           </span>
+        ) : null}
+        {failed ? (
+          <span className="shrink-0 text-xs font-medium text-status-danger">{t("tool.failedBadge")}</span>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {activity.durationMs != null ? (
@@ -271,14 +352,25 @@ export function ToolCard({
         </pre>
       ) : null}
 
-      {/* screenshot thumbnail — shown INLINE once the card finishes, without
-          needing to expand. A screenshot tool whose card shows no image is the
-          clearest "I can't tell what it did"; this makes what the model saw
-          visible at a useful size right on the card. */}
-      {activity.imageDataUri && !running ? (
+      {/* screenshot / chart — INLINE once the card finishes, without needing
+          to expand … unless a LATER run of the same tool superseded it, in
+          which case it folds behind this toggle (collapse, never delete). */}
+      {activity.imageDataUri && !running && imageSuperseded ? (
+        <button
+          type="button"
+          onClick={() => setShowOldImage((v) => !v)}
+          className="mx-3 mb-2 flex items-center gap-1 rounded border border-dashed border-border px-2 py-1 text-xs text-text-muted hover:text-text-secondary"
+          data-testid="superseded-image-toggle"
+          aria-expanded={showOldImage}
+        >
+          {showOldImage ? <ChevronDown className="h-3 w-3" aria-hidden /> : <ChevronRight className="h-3 w-3" aria-hidden />}
+          {showOldImage ? t("tool.earlierImage.hide") : t("tool.earlierImage.show")}
+        </button>
+      ) : null}
+      {showImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={activity.imageDataUri}
+          src={activity.imageDataUri!}
           alt="tool screenshot"
           className="mx-3 mb-2 max-h-64 rounded border border-border-subtle"
         />
@@ -288,22 +380,24 @@ export function ToolCard({
         <div className="border-t border-border-subtle px-3 py-2">
           {activity.isCodeRun && activity.codeText ? (
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">Code</div>
+              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.code")}</div>
               <pre className="mb-2 max-h-48 overflow-auto rounded bg-bg-base px-3 py-2 font-mono text-xs text-text-secondary">
                 {activity.codeText}
               </pre>
             </>
-          ) : activity.input ? (
+          ) : activity.input || activity.argsSummary ? (
+            // The raw argument summary the row no longer shows — the
+            // Claude Code contract: the call and its result expand together.
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">Input</div>
-              <pre className="mb-2 max-h-32 overflow-auto rounded bg-bg-base px-3 py-2 font-mono text-xs text-text-secondary">
-                {activity.input}
+              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.input")}</div>
+              <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-bg-base px-3 py-2 font-mono text-xs text-text-secondary" data-testid="tool-input-detail">
+                {activity.input ?? activity.argsSummary}
               </pre>
             </>
           ) : null}
           {activity.resultPreview ? (
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">Output</div>
+              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.output")}</div>
               <pre
                 className={`max-h-52 overflow-auto rounded bg-bg-base px-3 py-2 font-mono text-xs ${failed ? "text-status-danger" : "text-text-secondary"}`}
               >
@@ -320,7 +414,7 @@ export function ToolCard({
       {children && children.length ? (
         <div className="ml-4 border-l-2 border-border-subtle pl-2">
           {children.map((c) => (
-            <ToolCard key={c.id} activity={c} children={(all ?? []).filter((a) => a.parentId === c.id)} all={all} />
+            <ToolCard key={c.id} activity={c} children={(all ?? []).filter((a) => a.parentId === c.id)} all={all} superseded={superseded} />
           ))}
         </div>
       ) : null}
@@ -331,15 +425,19 @@ export function ToolCard({
 /** Renders a flat tool_activities list, grouping nested (parentId) children
  *  under their parent card. Replaces ToolActivityIndicator in hosted mode;
  *  the thin web payloads still render as the one-line rows via ToolCard's
- *  fallback. */
-export function ToolActivityList({ activities }: { activities: ToolActivity[] }) {
-  const byId = new Map(activities.map((a) => [a.id, a]));
-  const roots = activities.filter((a) => !a.parentId || !byId.has(a.parentId));
-  const childrenOf = (id: string) => activities.filter((a) => a.parentId === id);
+ *  fallback. FIX77: rows a dedicated card already presents are dropped
+ *  (unless failed), and repeated-tool images are marked superseded. */
+export function ToolActivityList({ activities, planShown = false }: { activities: ToolActivity[]; planShown?: boolean }) {
+  const visible = activities.filter((a) => !presentedByDedicatedCard(a, planShown));
+  const superseded = supersededImageIds(visible);
+  const byId = new Map(visible.map((a) => [a.id, a]));
+  const roots = visible.filter((a) => !a.parentId || !byId.has(a.parentId));
+  const childrenOf = (id: string) => visible.filter((a) => a.parentId === id);
+  if (visible.length === 0) return null;
   return (
     <div className="flex flex-col" data-testid="tool-activity-list">
       {roots.map((a) => (
-        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} all={activities} />
+        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} all={visible} superseded={superseded} />
       ))}
     </div>
   );
