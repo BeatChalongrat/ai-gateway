@@ -81,6 +81,12 @@ var eraseSteps = []struct {
 	{"conversation_files", `
 		DELETE FROM chat.conversation_files
 		WHERE conversation_id = $1 AND tenant_id = $2`},
+	// FIX74 — a parked turn holds the conversation's text in its request
+	// snapshot; it goes with the conversation (the FK would cascade from
+	// messages, but erasure is counted, so it is explicit here).
+	{"pending_questions", `
+		DELETE FROM chat.pending_questions
+		WHERE conversation_id = $1 AND tenant_id = $2`},
 	{"messages", `
 		DELETE FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2`},
@@ -183,6 +189,9 @@ func (r *ConversationEraseRepo) CountConversationFootprint(
 			WHERE conversation_id = $1 AND tenant_id = $2`,
 		"conversation_files": `
 			SELECT count(*) FROM chat.conversation_files
+			WHERE conversation_id = $1 AND tenant_id = $2`,
+		"pending_questions": `
+			SELECT count(*) FROM chat.pending_questions
 			WHERE conversation_id = $1 AND tenant_id = $2`,
 		"messages": `
 			SELECT count(*) FROM chat.messages_masked

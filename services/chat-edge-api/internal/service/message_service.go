@@ -194,6 +194,11 @@ type MessageService struct {
 	// Phase 1; the second concurrent send would race the first).
 	activeStreams sync.Map // map[uuid.UUID]*streamRegistration
 
+	// FIX74 — parked web turns (ask_user_question). Nil ⇒ the tool is
+	// never offered. questionClock is test-only (expiry).
+	pendingQuestions PendingQuestionStore
+	questionClock    func() time.Time
+
 	// Phase 5 — stream resume. Mirrors every in-flight generation's
 	// events (keyed by assistant message id) so a disconnected client
 	// can reattach via GET .../messages/{id}/stream. In-process only;
@@ -992,7 +997,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist, false)
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
 	var cloudAllow map[string]bool
@@ -1152,6 +1157,11 @@ type StreamUpdate struct {
 	FinishReason string
 	Usage        *GatewayChatUsage
 	Err          error
+
+	// FIX74 — the model asked the user a question: the card payload, then
+	// Parked ends the stream (the turn waits in the database, not here).
+	Question *QuestionUpdate
+	Parked   bool
 
 	ReasoningDelta string
 	AnalysisStatus string
@@ -1359,6 +1369,10 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	if err != nil {
 		return nil, err
 	}
+	// FIX74 — a new message while a question card is pending supersedes the
+	// question (its turn is closed as cancelled; nothing is answered for
+	// the user). The new turn's history holds both texts.
+	s.supersedePending(ctx, in.TenantID, conv.ID)
 	// Create the assistant placeholder row. Inherit branch info
 	// from the just-saved user message so the placeholder lives
 	// inside the same fork group.
@@ -1399,7 +1413,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		onExtractionStart = func() { cb(asstID, userID) }
 	}
 	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
 		imageModel := ""
@@ -1506,6 +1520,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			status = "cancelled"
 		case finishReason == "error":
 			status = "error"
+		case finishReason == "parked":
+			status = model.MessageStatusWaitingUser // FIX74 — waiting for the user's answer
 		}
 		// FIX49 Part A — "completed" must mean the user got an answer.
 		// The gateway now errors an empty stream itself
@@ -1740,7 +1756,7 @@ func (s *MessageService) openAssistantStream(
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -1793,6 +1809,8 @@ func (s *MessageService) openAssistantStream(
 			status = "cancelled"
 		case finishReason == "error":
 			status = "error"
+		case finishReason == "parked":
+			status = model.MessageStatusWaitingUser // FIX74
 		}
 		var tokInput, tokOutput *int
 		if usage != nil {
@@ -2007,7 +2025,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil)
-	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil)
+	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -2060,6 +2078,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			status = "cancelled"
 		case finishReason == "error":
 			status = "error"
+		case finishReason == "parked":
+			status = model.MessageStatusWaitingUser // FIX74
 		}
 		var tokInput, tokOutput *int
 		if usage != nil {
@@ -2285,9 +2305,12 @@ func (s *MessageService) activeToolNames(conv *model.Conversation) []string {
 		return nil
 	}
 	defs := s.toolExec.ToolDefs(conv)
-	names := make([]string, 0, len(defs))
+	names := make([]string, 0, len(defs)+1)
 	for i := range defs {
 		names = append(names, defs[i].Function.Name)
+	}
+	if s.pendingQuestions != nil {
+		names = append(names, AskUserTool)
 	}
 	return names
 }
@@ -3902,7 +3925,7 @@ const maxToolIterations = 5
 // providers 400 on an unexpected “tools“ param, which would break a
 // conversation after the user switches to such a model. Unknown ids and
 // the Auto sentinel keep tools (capability unknown → don't degrade).
-func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatRequest, conv *model.Conversation, cloudAllow []string) bool {
+func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatRequest, conv *model.Conversation, cloudAllow []string, attended bool) bool {
 	if s.toolExec == nil {
 		return false
 	}
@@ -3925,6 +3948,14 @@ func (s *MessageService) attachTools(ctx context.Context, req *GatewayChatReques
 	// are never even presented to an unattended model.
 	if cloudAllow != nil {
 		defs = keepOnlyTools(defs, cloudAllow)
+	}
+	// FIX74 — ask_user_question is offered ONLY where a person can answer
+	// and the turn can wait: a streaming interactive turn with the parked-
+	// turn store wired. The non-stream path and a cloud scheduled run never
+	// see it (the headless rule: remove the tool rather than offer one that
+	// cannot work).
+	if attended && cloudAllow == nil && s.pendingQuestions != nil {
+		defs = append(defs, askUserToolDef())
 	}
 	if len(defs) == 0 {
 		return false
@@ -4526,6 +4557,14 @@ type streamPumpInput struct {
 	// pump feeds the dlp.canonical_* events here (never to ``out``); the
 	// finish closure reads it after the channel drains (happens-before).
 	canon *CanonicalStreamState
+	// FIX74 — a continuation of a parked turn starts at startIter (the
+	// iteration cap counts model rounds, not the hours the user took) and
+	// carries what the earlier generation already streamed, so a second
+	// park stores the whole prefix.
+	startIter       int
+	contentPrefix   string
+	reasoningPrefix string
+	servedModel     string
 }
 
 // pumpStreamWithTools reads chunks from the initial gateway stream,
@@ -4702,9 +4741,13 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	req := in.initialReq
 	var lastUsage *GatewayChatUsage
 
-	lastServedModel := "" // FIX35 Part B — dedupe the served-model forward
-	healed := false       // FIX64 — the stale-catalog retry happens at most once
-	for outerIter := 0; outerIter < maxToolIterations; outerIter++ {
+	lastServedModel := in.servedModel // FIX35 Part B — dedupe the served-model forward
+	healed := false                   // FIX64 — the stale-catalog retry happens at most once
+	// FIX74 — what this generation has streamed so far, for a park.
+	var contentSoFar, reasoningSoFar strings.Builder
+	contentSoFar.WriteString(in.contentPrefix)
+	reasoningSoFar.WriteString(in.reasoningPrefix)
+	for outerIter := in.startIter; outerIter < maxToolIterations; outerIter++ {
 		var acc []GatewayToolCall
 		finishReason := ""
 		isToolCallStream := false
@@ -4751,6 +4794,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				finishReason = ev.FinishReason
 			}
 			if ev.Delta != "" {
+				contentSoFar.WriteString(ev.Delta)
 				in.out <- StreamUpdate{
 					Delta:        ev.Delta,
 					Usage:        ev.Usage,
@@ -4763,6 +4807,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			// content text in the same frame, so distinct updates
 			// here preserve causal ordering on the wire.
 			if ev.ReasoningDelta != "" {
+				reasoningSoFar.WriteString(ev.ReasoningDelta)
 				in.out <- StreamUpdate{ReasoningDelta: ev.ReasoningDelta}
 			}
 			if ev.AnalysisStatus != "" {
@@ -4853,9 +4898,37 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 		// watcher cannot mistake work for a stall; restart it once we are
 		// waiting on the model again.
 		stall.EndAwait()
-		asstToolMsg, results := s.executeToolCalls(in.streamCtx, acc, in.toolExecCtx)
-		req.Messages = append(req.Messages, asstToolMsg)
-		req.Messages = append(req.Messages, results...)
+		// FIX74 — a VALID ask_user_question parks the turn: the calls before
+		// it run, the question is written to the database with the request
+		// as it stands, the card goes out, and the pump ends. Nothing is
+		// answered here. (An invalid one falls through to the executor,
+		// which answers it with the validation error.)
+		if askIdx, questions := firstValidAsk(acc); askIdx >= 0 && s.pendingQuestions != nil && in.toolExecCtx.CloudToolAllow == nil {
+			asstToolMsg, results := s.executeToolCalls(in.streamCtx, acc[:askIdx], in.toolExecCtx)
+			asstToolMsg.ToolCalls = acc // the assistant turn carries the whole round
+			req.Messages = append(req.Messages, asstToolMsg)
+			req.Messages = append(req.Messages, results...)
+			row, perr := s.parkQuestion(in.toolExecCtx, req, outerIter, in.toolsAttached, lastServedModel,
+				contentSoFar.String(), reasoningSoFar.String(), acc[askIdx], questions, acc[askIdx+1:])
+			if perr != nil {
+				// Could not park (store down, or a second pending question in
+				// this conversation): the model is told, the turn goes on.
+				slog.Warn("question_park_failed", "conversation_id", in.toolExecCtx.ConversationID.String(), "err", perr.Error())
+				req.Messages = append(req.Messages, GatewayMessage{Role: "tool", ToolCallID: acc[askIdx].ID, Name: AskUserTool,
+					Content: "Error: the question could not be shown to the user right now. Make the most reasonable assumption and say so."})
+				for _, d := range acc[askIdx+1:] {
+					req.Messages = append(req.Messages, GatewayMessage{Role: "tool", ToolCallID: d.ID, Name: d.Function.Name, Content: askNotExecutedAfterQuestion})
+				}
+			} else {
+				in.out <- StreamUpdate{Question: &QuestionUpdate{PromptID: row.ID.String(), MessageID: row.MessageID.String(), ToolCallID: acc[askIdx].ID, Questions: questions}}
+				in.out <- StreamUpdate{Parked: true, FinishReason: "parked", Usage: lastUsage}
+				return
+			}
+		} else {
+			asstToolMsg, results := s.executeToolCalls(in.streamCtx, acc, in.toolExecCtx)
+			req.Messages = append(req.Messages, asstToolMsg)
+			req.Messages = append(req.Messages, results...)
+		}
 
 		// Opening the next round IS waiting on the provider (this call
 		// blocks until the upstream response headers arrive).

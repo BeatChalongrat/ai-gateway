@@ -95,6 +95,16 @@ type messageResponse struct {
 	// state, search, compaction). omitempty keeps the wire size
 	// honest.
 	ContextSources []contextSourceResponse `json:"context_sources,omitempty"`
+	// FIX74 — the question card a parked assistant turn is waiting on
+	// (status waiting_user). Same shape the desktop bridge posts, so the
+	// page renders one component for both.
+	PendingQuestion *pendingQuestionResponse `json:"pending_question,omitempty"`
+}
+
+type pendingQuestionResponse struct {
+	PromptID   string          `json:"promptId"`
+	ToolCallID string          `json:"toolCallId"`
+	Questions  json.RawMessage `json:"questions"`
 }
 
 // contextSourceResponse mirrors model.ResponseContextSource on the
@@ -265,6 +275,20 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// FIX74 — the parked question, if any. One query per list; an expired
+	// one is settled on the way (its row is then listed as cancelled).
+	if pq, err := h.messages.PendingQuestionFor(r.Context(), caller.TenantUUID, caller.UserID, convID); err == nil {
+		for i := range msgs {
+			if pq != nil && msgs[i].ID == pq.MessageID {
+				items[i].PendingQuestion = &pendingQuestionResponse{PromptID: pq.ID.String(), ToolCallID: pq.ToolCallID, Questions: json.RawMessage(pq.Questions)}
+			} else if pq == nil && msgs[i].Status == model.MessageStatusWaitingUser {
+				// The row says waiting but nothing is pending any more
+				// (expired / superseded / cancelled) — say stopped, not waiting.
+				items[i].Status = "cancelled"
+			}
+		}
+	}
+
 	// Join file attachments. Skipped silently if the file repo
 	// isn't wired (unit tests / older deployments) — the wire
 	// response just omits ``files`` per message.
@@ -414,6 +438,9 @@ type streamDrainResult struct {
 	errAttempts any
 	// errRetryable is the gateway's retryable verdict, forwarded as-is.
 	errRetryable *bool
+	// FIX74 — the run ended because the turn parked on a question.
+	parked         bool
+	parkedPromptID string
 }
 
 // terminalErrorPayload builds the terminal “error“ frame's data from
@@ -678,11 +705,22 @@ Loop:
 			if ev.ImageNotice != nil {
 				writeSSEEvent(w, flusher, "image_notice", ev.ImageNotice)
 			}
+			// FIX74 — the model asked the user a question. The card goes out
+			// as its own frame (recorded in the ledger, so a reattach replays
+			// it), then the run ends on message_paused below.
+			if ev.Question != nil {
+				res.parkedPromptID = ev.Question.PromptID
+				writeSSEEvent(w, flusher, "question", ev.Question)
+			}
 			if ev.FinishReason != "" {
 				res.finishReason = ev.FinishReason
 			}
 			if ev.Usage != nil {
 				res.usage = ev.Usage
+			}
+			if ev.Parked {
+				res.parked = true
+				break Loop
 			}
 			if ev.Done {
 				break Loop
@@ -828,6 +866,16 @@ func (h *MessageHandler) finishStream(
 	}
 
 	switch {
+	case res.parked:
+		// FIX74 — the turn is waiting for the user's answer, in the
+		// database. The card was sent as its own frame; this terminal tells
+		// the client the stream is over WITHOUT calling the turn finished.
+		data := map[string]any{
+			"message_id": stream.AssistantID.String(),
+			"prompt_id":  res.parkedPromptID,
+		}
+		completeWithModel(data, res.servedModel)
+		writeSSEEvent(rw, flusher, "message_paused", data)
 	case stream.UserCancelled():
 		// A person pressed Stop. Everything produced so far stands; the
 		// answer is simply partial, and the client is told so rather than
@@ -1050,8 +1098,110 @@ func (h *MessageHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cancelled := h.messages.CancelStream(convID)
+	// FIX74 — a parked turn has no stream; Stop closes its question as
+	// cancelled (never as an answer).
+	if h.messages.CancelPendingQuestion(r.Context(), caller.TenantUUID, caller.UserID, convID) {
+		cancelled = true
+	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"cancelled": cancelled})
+}
+
+// ---------------------------------------------------------------------------
+// FIX74 — answer a parked question
+// ---------------------------------------------------------------------------
+
+type answerQuestionRequest struct {
+	Outcome  string              `json:"outcome"`
+	Answers  map[string][]string `json:"answers"`
+	Response *string             `json:"response"`
+}
+
+// AnswerQuestion resumes a parked turn with the user's answer and streams
+// the continuation on the SAME assistant message id.
+//
+//	POST /api/v1/conversations/{id}/questions/{promptID}
+//	→ SSE stream (message_start … message_complete)
+//	→ 409 QUESTION_ALREADY_ANSWERED when another tab got there first
+//	→ 410 QUESTION_EXPIRED after the 24 h window
+func (h *MessageHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	promptID, err := uuid.Parse(chi.URLParam(r, "promptID"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid question id")
+		return
+	}
+	var body answerQuestionRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+	in := service.AnswerQuestionInput{
+		TenantID:       caller.TenantUUID,
+		UserID:         caller.UserID,
+		ConversationID: convID,
+		PromptID:       promptID,
+		Answer:         service.QuestionAnswer{Outcome: body.Outcome, Answers: body.Answers, Response: body.Response},
+		RequestID:      r.Header.Get("X-Request-Id"),
+		RunID:          uuid.NewString(),
+	}
+	if in.RequestID == "" {
+		in.RequestID = uuid.NewString()
+	}
+	stream, err := h.messages.ResumeQuestion(r.Context(), in)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrQuestionInvalid):
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "invalid answer")
+		case errors.Is(err, service.ErrQuestionNotFound), errors.Is(err, service.ErrMessageConversationNotFound):
+			WriteError(w, http.StatusNotFound, CodeNotFound, "question not found")
+		case errors.Is(err, service.ErrQuestionNotPending):
+			WriteError(w, http.StatusConflict, "QUESTION_ALREADY_ANSWERED", "this question was already answered")
+		case errors.Is(err, service.ErrQuestionExpired):
+			WriteError(w, http.StatusGone, "QUESTION_EXPIRED", "this question expired before it was answered")
+		default:
+			h.writeSendError(w, err)
+		}
+		return
+	}
+	rw := newRunWriter(w, in.RunID, nil)
+	defer rw.ensureTerminal(flusher)
+	rw.started = true
+	h.messages.OpenRun(stream.AssistantID, in.RunID)
+	rw.record = func(event string, build func(seq, final int64) []byte) (int64, bool) {
+		return h.messages.RecordFrame(stream.AssistantID, event, build)
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	writeSSEEvent(rw, flusher, "message_start", map[string]any{
+		"message_id":      stream.AssistantID.String(),
+		"conversation_id": convID.String(),
+		"resumed":         true,
+		"prompt_id":       promptID.String(),
+	})
+	res := drainStreamEvents(rw, flusher, r.Context().Done(), stream.Events, detachOnDisconnect)
+	persistFinishReason := res.finishReason
+	if res.err != nil && persistFinishReason == "" {
+		persistFinishReason = "error"
+	}
+	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	if res.servedModel != "" {
+		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
+	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
 
 // ---------------------------------------------------------------------------

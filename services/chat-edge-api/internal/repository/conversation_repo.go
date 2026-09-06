@@ -663,6 +663,11 @@ func (r *ConversationRepo) SoftDelete(ctx context.Context, tenantID, convID uuid
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	// FIX74 — a parked question in a deleted conversation can never be
+	// answered; close it so it is not left "pending" forever (best-effort,
+	// the erase cascade removes the row itself later).
+	_, _ = r.db.Exec(ctx, `UPDATE chat.pending_questions SET status = 'cancelled', closed_at = NOW()
+		WHERE conversation_id = $1 AND tenant_id = $2 AND status = 'pending'`, convID, tenantID)
 	return nil
 }
 

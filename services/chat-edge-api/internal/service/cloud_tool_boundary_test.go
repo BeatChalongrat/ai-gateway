@@ -39,6 +39,7 @@ func liveToolNames() []string {
 		webFetchToolDef(),
 		runPythonToolDef(),
 		updateCanvasArtifactToolDef(),
+		askUserToolDef(), // FIX74 — offered on attended streaming turns only
 	} {
 		names = append(names, d.Function.Name)
 	}

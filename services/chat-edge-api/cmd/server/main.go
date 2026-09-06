@@ -216,6 +216,8 @@ func main() {
 	// in-memory-only, which is exactly the pre-chunk-2 behaviour.
 	ledgerTTL := time.Duration(cfg.StreamLedgerTTLSeconds) * time.Second
 	messageSvc.ConfigureRunLedger(ledgerTTL, cfg.StreamLedgerMaxEvents, rdb)
+	// FIX74 — parked web turns (ask_user_question). Migration 042.
+	messageSvc.SetPendingQuestionStore(repository.NewPendingQuestionRepo(pool))
 	slog.Info("stream-resume ledger configured",
 		"ttl_seconds", cfg.StreamLedgerTTLSeconds,
 		"max_events_per_run", cfg.StreamLedgerMaxEvents,

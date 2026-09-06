@@ -455,6 +455,13 @@ var toolDescriptions = map[string]string{
 		"automatically — never fabricate an image URL.",
 	"generate_video": "- generate_video: Create a short video clip when the user " +
 		"asks for one. The clip attaches to your reply automatically.",
+	// FIX74 — the question card. The WHEN is in action_rules (preference
+	// or intent only, never what you can look up); this is the HOW.
+	"ask_user_question": "- ask_user_question: When you must ask the user something, use this tool " +
+		"instead of asking in text: it shows choices the user can click and a box for their own " +
+		"words, and the turn waits for the answer. One question is usually right; never more than " +
+		"four. Do not add an 'Other' option (the app adds one). Do not repeat the question as text " +
+		"after calling it. If the user skips it, proceed on your own judgment and say what you assumed.",
 }
 
 // toolPolicyOrder fixes the paragraph order regardless of how ActiveTools
@@ -462,6 +469,7 @@ var toolDescriptions = map[string]string{
 var toolPolicyOrder = []string{
 	"save_memory", "list_memories", "search_past_conversations", "update_conversation_state",
 	"web_search", "web_fetch", "run_python", "generate_image", "generate_video",
+	"ask_user_question",
 }
 
 func (pc *PromptCompiler) toolPolicy(in CompileContext) string {

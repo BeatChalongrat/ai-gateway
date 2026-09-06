@@ -42,6 +42,7 @@ var eraseKindToTable = map[string]string{
 	"shared_conversations":     "shared_conversations",
 	"cloud_scheduled_tasks":    "cloud_scheduled_tasks",
 	"conversation_files":       "conversation_files",
+	"pending_questions":        "pending_questions", // FIX74
 	"messages":                 "messages_masked",
 	"conversations":            "conversations",
 }
@@ -150,6 +151,14 @@ func seedConversationFootprint(
 			VALUES ($1, $2, $3, $4, 'p.txt', 'p.txt', 'text/plain', 5, $5)`,
 			[]any{fileID, convID, tenantID, userID,
 				fmt.Sprintf("erase-probe/%s.txt", fileID)}},
+		// FIX74 — a parked turn (its request snapshot holds the conversation's text).
+		{"pending_question", `
+			INSERT INTO chat.pending_questions
+				(tenant_id, user_id, conversation_id, message_id, tool_call_id,
+				 questions_json, state_json, expires_at)
+			SELECT $1, $2, $3, m.id, 'call_probe', '[]'::jsonb, '{}'::jsonb, NOW() + interval '1 day'
+			FROM chat.messages_masked m WHERE m.conversation_id = $3 LIMIT 1`,
+			[]any{tenantID, userID, convID}},
 	}
 	for _, s := range stmts {
 		if _, err := pool.Exec(ctx, s.sql, s.args...); err != nil {

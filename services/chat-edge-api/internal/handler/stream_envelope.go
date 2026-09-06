@@ -141,7 +141,8 @@ func (rw *runWriter) terminalWritten() bool {
 }
 
 func isTerminalEvent(event string) bool {
-	return event == "message_complete" || event == "error" || event == "cancelled"
+	// FIX74 — message_paused ends a run whose turn is parked on a question.
+	return event == "message_complete" || event == "error" || event == "cancelled" || event == "message_paused"
 }
 
 // envelope splices run_id / seq / final_seq into an already-marshalled

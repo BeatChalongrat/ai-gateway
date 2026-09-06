@@ -84,6 +84,7 @@ var cloudWithheldTools = map[string]string{
 	"save_memory":               "WRITES durable user memory with nobody watching",
 	"update_canvas_artifact":    "WRITES a durable conversation artifact",
 	"update_conversation_state": "WRITES conversation state",
+	"ask_user_question":         "asks a person, and nobody is watching an unattended run", // FIX74
 }
 
 // IsCloudToolAllowed reports whether an unattended cloud run may use the tool.

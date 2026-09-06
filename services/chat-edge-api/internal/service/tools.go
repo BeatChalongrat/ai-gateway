@@ -675,6 +675,15 @@ func (e *ToolExecutor) Execute(
 		return e.execUpdateCanvasArtifact(ctx, call.Function.Arguments, ec)
 	case "use_skill":
 		return e.execUseSkill(ctx, call.Function.Arguments, ec)
+	case AskUserTool:
+		// FIX74 — a VALID call never reaches here (the pump parks the turn
+		// first); this branch answers an invalid one with the contract's
+		// error so the model can re-ask correctly, and a stray one on a
+		// path that cannot park with a plain refusal.
+		if _, err := validateAskArgs(call.Function.Arguments); err != nil {
+			return fmt.Sprintf("Error: %s: %v", AskUserTool, err)
+		}
+		return "Error: " + AskUserTool + " is not available in this run (nobody can answer here). Make the most reasonable assumption and state it in your answer."
 	default:
 		return fmt.Sprintf("Unknown tool %q.", call.Function.Name)
 	}

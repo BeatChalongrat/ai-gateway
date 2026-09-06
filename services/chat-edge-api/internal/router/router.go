@@ -223,6 +223,8 @@ func New(
 			// Send + Regenerate go through the rate-limit middleware
 			// — both kick off an expensive Gateway round-trip.
 			r.With(sendRateLimit).Post("/conversations/{id}/messages", h.Message.Send)
+			// FIX74 — answer a parked question; resumes the turn as a stream.
+			r.With(sendRateLimit).Post("/conversations/{id}/questions/{promptID}", h.Message.AnswerQuestion)
 			r.With(sendRateLimit).Post(
 				"/conversations/{id}/messages/{messageID}/regenerate",
 				h.Message.Regenerate,
