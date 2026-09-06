@@ -3099,14 +3099,18 @@ async def _chat_completions_impl(
             "".join(emitted_parts),
             has_tool_calls=bool(_streaming_tool_call_args),
         ):
+            empty_code = "output_limit_reached" if final_finish_reason == "length" else "empty_completion"
             log.warning(
                 "stream_empty_completion",
                 request_id=ctx.request_id or "",
                 provider=route.provider_name,
                 model=route.model_name,
+                finish_reason=final_finish_reason,
+                completion_tokens=provider_usage.completion_tokens if provider_usage else None,
+                reasoning_observed=bool(_reasoning_text_total),
             )
-            yield _emit_error(code="empty_completion")
-            _finalize_stream(client_disconnected=False, reason="empty_completion")
+            yield _emit_error(code=empty_code)
+            _finalize_stream(client_disconnected=False, reason=empty_code)
             return
 
         _finalize_stream(client_disconnected=False)

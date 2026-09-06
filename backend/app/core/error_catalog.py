@@ -52,6 +52,7 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     # answer must never be reported as success: the user sees this
     # message and a working retry instead of a silent blank bubble.
     ErrorInfo("empty_completion", "The model returned an empty answer. Please try again or pick another model.", True),
+    ErrorInfo("output_limit_reached", "The model reached its output limit before answering or calling a tool. Try again or choose another model for this task.", True),
     # per-attempt code in all_models_failed.attempts: the provider was skipped
     # because its health marker showed a recent failure
     ErrorInfo("health_marker_skip", "Skipped: this provider failed a moment ago. Please try again shortly.", True),

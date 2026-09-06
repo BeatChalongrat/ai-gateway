@@ -106,6 +106,71 @@ def _chat_stream(content: str = "hello", model: str = "gpt-4o-mini"):
     )
 
 
+@pytest.mark.parametrize("finish_reason,expected", [
+    ("length", "output_limit_reached"),
+    ("stop", "empty_completion"),
+    (None, "empty_completion"),
+])
+def test_empty_stream_preserves_the_provider_finish_reason(monkeypatch, finish_reason, expected):
+    from app.services.providers.openai_adapter import _parse_sse_line
+
+    async def _empty(self, payload, messages, **kwargs):
+        frames = [
+            {"choices": [{"delta": {"reasoning_content": "synthetic reasoning"}, "finish_reason": None}]},
+            {"choices": [{"delta": {}, "finish_reason": finish_reason}], "usage": {
+                "completion_tokens": 8192, "prompt_tokens": 7166, "total_tokens": 15358,
+                "completion_tokens_details": {"reasoning_tokens": 10901},
+            }},
+        ]
+        for frame in frames:
+            yield _parse_sse_line("data: " + json.dumps(frame))
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _empty)
+    response = _chat_stream()
+    assert response.status_code == 200
+    errors = [e["error"] for e in _parse_sse(response.content) if "error" in e]
+    assert len(errors) == 1
+    assert errors[0]["code"] == expected
+    assert errors[0]["retryable"] is True
+
+
+@pytest.mark.parametrize("content,tool_calls", [
+    ("4", None),
+    ("", [{"index": 0, "id": "call_test", "type": "function",
+           "function": {"name": "get_time", "arguments": "{}"}}]),
+])
+def test_length_finish_with_content_or_tools_is_not_empty(monkeypatch, content, tool_calls):
+    async def _answer(self, payload, messages, **kwargs):
+        yield ProviderStreamChunk(delta=content, tool_calls=tool_calls, finish_reason="length", model="gpt-4o-mini")
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _answer)
+    response = _chat_stream()
+    assert response.status_code == 200
+    events = _parse_sse(response.content)
+    assert not [e for e in events if "error" in e]
+    assert any(c.get("finish_reason") == "length" for e in events for c in e.get("choices", []))
+
+
+@pytest.mark.parametrize("finish_reason,expected", [
+    ("length", "output_limit_reached"),
+    ("stop", "empty_completion"),
+])
+def test_empty_nonstream_uses_the_same_error_code(monkeypatch, finish_reason, expected):
+    from app.domain.providers import ProviderResponse
+    from app.services.provider_dispatcher import ProviderDispatcher
+
+    async def _empty(self, route, payload, messages, api_key=None):
+        return ProviderResponse(content="", model=route.model_name, finish_reason=finish_reason)
+
+    monkeypatch.setattr(ProviderDispatcher, "dispatch", _empty)
+    response = client.post("/v1/chat/completions", headers=_HEADERS, json={
+        "model": "gpt-4o-mini", "messages": [{"role": "user", "content": "synthetic empty response"}],
+    })
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == expected
+    assert response.json()["error"]["retryable"] is True
+
+
 def test_pre_stream_failure_emits_all_models_failed(monkeypatch):
     async def _raise_immediately(
         self, payload, messages, *, resolved_model=None, api_key=None

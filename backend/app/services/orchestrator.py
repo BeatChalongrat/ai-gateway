@@ -1400,16 +1400,21 @@ class GatewayOrchestrator:
             has_tool_calls=bool(provider_response.tool_calls),
         ):
             from app.core.exceptions import ProviderError as _EmptyErr
+            from app.core.error_catalog import describe as _describe_error
 
+            empty_code = "output_limit_reached" if provider_response.finish_reason == "length" else "empty_completion"
             logger.warning(
                 "empty_completion_nonstream",
                 request_id=request_id,
                 provider=route.provider_name,
                 model=route.model_name,
+                finish_reason=provider_response.finish_reason,
+                completion_tokens=provider_response.usage.completion_tokens if provider_response.usage else None,
+                reasoning_observed=bool(provider_response.reasoning_content),
             )
             raise _EmptyErr(
-                "The model returned an empty answer.",
-                code="empty_completion",
+                _describe_error(empty_code).message,
+                code=empty_code,
                 details={
                     "provider": route.provider_name,
                     "model": route.model_name,
