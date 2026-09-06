@@ -37,6 +37,18 @@ The four values:
     recognise, so guessing a knob onto one risks turning a working
     reasoning model into a 400.
 
+``openai_compatible_enable_thinking``
+    Same as ``..._reasoning_content`` on the way IN by default (thinking
+    on, nothing sent), but the box ALSO honours the Qwen/vLLM chat-template
+    off-switch ``chat_template_kwargs={"enable_thinking": false}``. Set
+    ONLY on a row whose endpoint has been MEASURED to accept it and to
+    actually stop thinking (FIX72 measured gateway.9arm.co serving
+    qwen3.8-27b-fp8: with the switch, completion dropped 59→31 tokens,
+    ``reasoning_content`` disappeared, and the tool call still fired). The
+    adapter sends the switch only when ``reasoning.mode == "off"``; every
+    other mode is byte-identical to ``..._reasoning_content``. Never set
+    this by guessing a model name — an unrecognised field is a 400.
+
 Everything downstream of the adapters (the auto-enable in the
 orchestrator, ``show_summary``, the SSE analysis bracket) keys off
 ``supports_reasoning``, never off the strategy — so a parse-only row
@@ -50,12 +62,14 @@ STRATEGY_OPENAI_RESPONSES = "openai_responses_reasoning"
 STRATEGY_GEMINI_THINKING = "gemini_thinking_level"
 STRATEGY_OPENAI_COMPATIBLE = "openai_compatible_reasoning"
 STRATEGY_REASONING_CONTENT = "openai_compatible_reasoning_content"
+STRATEGY_ENABLE_THINKING = "openai_compatible_enable_thinking"
 
 # Every value the admin API will accept for ``reasoning_strategy``.
 # Ordered as the admin UI lists them.
 KNOWN_STRATEGIES = (
     STRATEGY_NONE,
     STRATEGY_REASONING_CONTENT,
+    STRATEGY_ENABLE_THINKING,
     STRATEGY_OPENAI_COMPATIBLE,
     STRATEGY_OPENAI_RESPONSES,
     STRATEGY_GEMINI_THINKING,
@@ -65,3 +79,10 @@ KNOWN_STRATEGIES = (
 # OpenAI-compatible adapter sends ``reasoning_effort`` for these and
 # stays silent for the rest.
 STRATEGIES_WITH_EFFORT_KNOB = frozenset({STRATEGY_OPENAI_COMPATIBLE})
+
+# Strategies whose box honours the Qwen/vLLM chat-template off-switch.
+# The OpenAI-compatible adapter sends
+# ``chat_template_kwargs={"enable_thinking": false}`` for these ONLY when
+# ``reasoning.mode == "off"`` — never on any other mode, and never for a
+# strategy not listed here (an unknown field 400s a self-hosted box).
+STRATEGIES_WITH_ENABLE_THINKING_OFF = frozenset({STRATEGY_ENABLE_THINKING})

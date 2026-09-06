@@ -35,7 +35,10 @@ from app.services.providers.openai_adapter import (
     _parse_sse_line,
 )
 from app.services.providers.parsers import parse_openai_response
-from app.services.providers.reasoning_strategies import STRATEGIES_WITH_EFFORT_KNOB
+from app.services.providers.reasoning_strategies import (
+    STRATEGIES_WITH_EFFORT_KNOB,
+    STRATEGIES_WITH_ENABLE_THINKING_OFF,
+)
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -165,6 +168,23 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 body["reasoning_effort"] = _REASONING_EFFORT_MAP.get(
                     reasoning_cfg.mode, _REASONING_EFFORT_MAP["auto"]
                 )
+        # FIX72 — an explicit "off" is honoured for the Qwen/vLLM chat-template
+        # family (STRATEGY_ENABLE_THINKING). The box emits reasoning_content on
+        # its own and by default keeps thinking ON; the ONLY way to stop it is
+        # the chat-template kwarg, measured on gateway.9arm.co to actually drop
+        # reasoning to zero while preserving tool calls. Sent only for a row
+        # whose strategy says the endpoint accepts it — every other reasoning
+        # row stays byte-identical when mode is "off" (thinking stays on, which
+        # is what "off unsupported here" honestly means).
+        if reasoning_cfg is not None and reasoning_cfg.mode == "off":
+            from app.services.providers.model_registry import get_candidate
+            candidate = get_candidate(model)
+            if (
+                candidate is not None
+                and candidate.supports_reasoning
+                and candidate.reasoning_strategy in STRATEGIES_WITH_ENABLE_THINKING_OFF
+            ):
+                body["chat_template_kwargs"] = {"enable_thinking": False}
 
         return body
 

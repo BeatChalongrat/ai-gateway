@@ -32,6 +32,8 @@ from app.services.providers.parsers import parse_openai_response
 from app.services.providers.reasoning_strategies import (
     KNOWN_STRATEGIES,
     STRATEGIES_WITH_EFFORT_KNOB,
+    STRATEGIES_WITH_ENABLE_THINKING_OFF,
+    STRATEGY_ENABLE_THINKING,
     STRATEGY_GEMINI_THINKING,
     STRATEGY_NONE,
     STRATEGY_OPENAI_COMPATIBLE,
@@ -204,11 +206,67 @@ def test_effort_knob_set_matches_the_strategy_that_documents_it():
     assert STRATEGY_REASONING_CONTENT not in STRATEGIES_WITH_EFFORT_KNOB
 
 
+# ---------------------------------------------------------------------------
+# FIX72 — the vLLM enable_thinking off-switch, honoured only on "off" and only
+# for the strategy whose box was MEASURED to accept it.
+# ---------------------------------------------------------------------------
+
+def test_enable_thinking_row_sends_the_off_switch_only_on_off(monkeypatch):
+    monkeypatch.setattr(
+        model_registry,
+        "get_candidate",
+        lambda m: _candidate("sranai", m, strategy=STRATEGY_ENABLE_THINKING),
+    )
+    adapter = OpenAICompatibleAdapter()
+    adapter.provider_name = "sranai"
+    adapter.base_url = "http://box:8000/v1"
+
+    off_payload = _payload("qwen3.8-27b-fp8", reasoning=ReasoningConfig(mode="off"))
+    off = adapter._build_body(
+        off_payload, off_payload.messages, resolved_model="qwen3.8-27b-fp8"
+    )
+    assert off["chat_template_kwargs"] == {"enable_thinking": False}
+
+    # auto (or any non-off mode) must NOT send the switch — thinking stays on,
+    # byte-identical to the parse-only strategy.
+    auto = adapter._build_body(
+        _payload("qwen3.8-27b-fp8", reasoning=ReasoningConfig(mode="auto")),
+        _payload("qwen3.8-27b-fp8").messages,
+        resolved_model="qwen3.8-27b-fp8",
+    )
+    assert "chat_template_kwargs" not in auto
+
+
+def test_off_switch_is_not_sent_to_a_parse_only_box(monkeypatch):
+    """A box without a measured off-switch must never receive the field — an
+    unknown kwarg 400s a self-hosted server (the whole reason it is gated)."""
+    monkeypatch.setattr(
+        model_registry,
+        "get_candidate",
+        lambda m: _candidate("sranai", m, strategy=STRATEGY_REASONING_CONTENT),
+    )
+    adapter = OpenAICompatibleAdapter()
+    adapter.provider_name = "sranai"
+    adapter.base_url = "http://box:8000/v1"
+    body = adapter._build_body(
+        _payload("qwen3-27b", reasoning=ReasoningConfig(mode="off")),
+        _payload("qwen3-27b").messages,
+        resolved_model="qwen3-27b",
+    )
+    assert "chat_template_kwargs" not in body
+
+
+def test_enable_thinking_off_set_matches_its_strategy():
+    assert STRATEGIES_WITH_ENABLE_THINKING_OFF == {STRATEGY_ENABLE_THINKING}
+    assert STRATEGY_REASONING_CONTENT not in STRATEGIES_WITH_ENABLE_THINKING_OFF
+
+
 def test_every_strategy_the_adapters_branch_on_is_admin_settable():
     """A strategy an adapter honours but the API rejects is unreachable."""
     for strategy in (
         STRATEGY_NONE,
         STRATEGY_REASONING_CONTENT,
+        STRATEGY_ENABLE_THINKING,
         STRATEGY_OPENAI_COMPATIBLE,
         STRATEGY_OPENAI_RESPONSES,
         STRATEGY_GEMINI_THINKING,
