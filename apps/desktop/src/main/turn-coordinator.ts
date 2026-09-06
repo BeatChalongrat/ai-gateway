@@ -1396,6 +1396,16 @@ export class TurnCoordinator {
     // FIX64 — the stale-catalog repair, at most once per run (see the
     // error case below).
     let toolsRetried = false;
+    // FIX72 — a reasoning model whose thinking overran the output budget
+    // (output_limit_reached: the round ended on finish_reason=length with no
+    // answer and no tool call — measured on qwen3.8-27b-fp8 for ~20% of
+    // ambiguous single-round prompts) is retried ONCE with thinking off.
+    // Measured: with thinking off the same ambiguous prompt called the tool
+    // 5/5 in ~40 completion tokens. Once set, thinking stays off for the rest
+    // of THIS run (the model has shown it over-thinks this task); it is a
+    // no-op at the gateway for any model whose box has no off-switch, so a
+    // model that cannot be quieted simply surfaces the error on the retry.
+    let thinkingOff = false;
     while (iteration < run.maxIterations && !overdue()) {
       if (signal.aborted) return "cancelled";
       iteration++;
@@ -1418,7 +1428,7 @@ export class TurnCoordinator {
       let sawContent = false;
       let resendWithoutTools = false;
       for await (const ev of this.gateway.streamCompletion(
-        { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: "auto", show_summary: true } },
+        { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: thinkingOff ? "off" : "auto", show_summary: !thinkingOff } },
         signal,
       )) {
         if (signal.aborted) return "cancelled";
@@ -1459,6 +1469,19 @@ export class TurnCoordinator {
             if (!run.parentToolCallId) this.emit(eventConv, "reasoning_notice", { model: ev.model, reason: ev.reason });
             break;
           case "error": {
+            // FIX72 — the round ran out of output budget before answering or
+            // calling a tool (a reasoning model spending the whole budget
+            // thinking). Retry the run ONCE with thinking off rather than
+            // killing it. Only before anything of this round was shown and no
+            // tool call landed; guarded to once by `thinkingOff`.
+            if (
+              ev.code === "output_limit_reached" && !thinkingOff && !sawContent && calls.size === 0
+            ) {
+              thinkingOff = true;
+              this.log.info(`REASONING: ${run.model} hit its output limit before answering — retrying conv=${conversationId} with thinking off`);
+              resendWithoutTools = true; // reuse: abandon this stream, re-enter the same step
+              break;
+            }
             // FIX64 — the one error this host causes itself: it offered
             // tools from a model list the admin has since changed (the
             // list is cached for MODELS_TTL_MS; the gateway refuses at
@@ -1538,6 +1561,15 @@ export class TurnCoordinator {
       // The assistant message WITH tool_calls goes into history first.
       const assistantText = lastAssistantDelta(run.messages);
       run.messages.push({ role: "assistant", content: assistantText, tool_calls: pending });
+      // FIX72 — a round may carry MORE THAN ONE tool_use block (the browser
+      // batch contract; measured 1/round for qwen and deepseek today, so this
+      // is forward-correctness). Run them in the order they appear and
+      // STOP at the first failure: the later calls were planned assuming the
+      // earlier ones succeeded, so each is answered with the exact contract
+      // text rather than executed against a state that never happened. Only
+      // engages for a real batch (pending.length > 1); a single-call round is
+      // byte-identical to before.
+      let batchFailed = false;
       for (const call of pending) {
         if (signal.aborted) {
           run.messages.push(toolResult(call, "Not executed: the turn was cancelled."));
@@ -1547,10 +1579,16 @@ export class TurnCoordinator {
           run.messages.push(toolResult(call, "Not executed: the turn was paused at its time limit. It can be resumed to continue."));
           continue;
         }
+        if (batchFailed) {
+          run.messages.push(toolResult(call, NOT_EXECUTED_AFTER_FAILURE));
+          this.activity(eventConv, call.id, call.function.name, "finished", { success: false, resultPreview: "Not executed (earlier action failed)", parentId: run.parentToolCallId, durationMs: 0 });
+          continue;
+        }
         await this.executeToolCall(call, run);
         // FIX31 §1.1: the user refused one of this sub-agent's tools — the run
         // ends here, FAILED, instead of asking again (or trying another route).
         if (run.deniedTool && run.parentToolCallId) return "denied";
+        if (pending.length > 1 && toolResultErrored(run.messages, call.id)) batchFailed = true;
       }
       if (overdue()) {
         run.onText("\n\nPaused: reached the 20-minute limit. The task can be continued.");
@@ -2496,29 +2534,77 @@ export class TurnCoordinator {
             { role: "system", content: "Generate a very short title (3-6 words, no quotes, no trailing period, same language as the conversation) for this chat. Reply with the title only." },
             { role: "user", content: `User: ${truncate(firstUser, 500)}\n\nAssistant: ${truncate(firstReply, 500)}` },
           ],
-          max_tokens: 30,
+          // FIX72 — a title needs no thinking, and a reasoning model spending
+          // its budget thinking (measured on qwen3.8-27b-fp8: 30 tokens all
+          // went to reasoning, content came back empty, the chat was left
+          // silently untitled) is the exact failure this closes. Thinking off
+          // (a no-op for a model whose box has no off-switch) plus a slightly
+          // larger budget than the old 30 so a little leaked thinking still
+          // leaves room for the six words.
+          max_tokens: 64,
+          reasoning: { mode: "off", show_summary: false },
         },
         controller.signal,
       )) {
         if (ev.kind === "content_delta") title += ev.delta;
         else if (ev.kind === "error") {
           clearTimeout(timer);
+          // Even a model error must not leave the chat silently untitled — a
+          // title derived from the user's first words is better than none.
+          const fb = deriveTitle("", firstUser);
+          if (fb && (await this.chatEdge.renameConversation(conversationId, fb))) this.log.info(`TURN TITLE conv=${conversationId} (fallback, model errored): ${fb}`);
           return;
         }
       }
       clearTimeout(timer);
-      const cleaned = title.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
-      if (cleaned.length === 0 || cleaned.length > 80) return;
-      if (await this.chatEdge.renameConversation(conversationId, cleaned)) this.log.info(`TURN TITLE conv=${conversationId}: ${cleaned}`);
+      const chosen = deriveTitle(title, firstUser);
+      if (!chosen) {
+        this.log.warn(`TURN TITLE conv=${conversationId}: model returned no title and no user text to fall back to — chat left untitled`);
+        return;
+      }
+      const fromModel = title.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
+      if (await this.chatEdge.renameConversation(conversationId, chosen)) {
+        this.log.info(`TURN TITLE conv=${conversationId}: ${chosen}${chosen === fromModel ? "" : " (fallback from user text — model returned empty)"}`);
+      }
     } catch (err) {
       this.log.info(`Title generation skipped for ${conversationId}: ${(err as Error).message}`);
     }
   }
 }
 
+/** FIX72 — turn a model's title output into a title that is NEVER silently
+ * empty. The model's text wins when it is a sane length; otherwise fall back
+ * to the first words of the user's own message (already in the user's
+ * language). Returns null only when there is nothing at all to title with. */
+export function deriveTitle(modelOutput: string, firstUser: string): string | null {
+  const cleaned = modelOutput.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
+  if (cleaned.length > 0 && cleaned.length <= 80) return cleaned;
+  // Fallback: first few words (space-separated languages) capped by characters
+  // (Thai and other space-less scripts fall through to the char cap).
+  const words = firstUser.trim().split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
+  const fb = words.slice(0, 60).trim();
+  return fb.length > 0 ? fb : null;
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────────
 function toolResult(call: GatewayToolCall, content: string): GatewayMessage {
   return { role: "tool", tool_call_id: call.id, name: call.function.name, content };
+}
+// FIX72 — the exact text the browser-tool batch contract specifies for a
+// later call in a batch that was skipped because an earlier one failed.
+export const NOT_EXECUTED_AFTER_FAILURE = "Not executed: an earlier action in this turn failed.";
+/** Whether the tool result already pushed for `callId` is an error. Tool
+ * results are `Error: …` on failure (executeToolCall) and the raw output on
+ * success; a screenshot pushes an extra user message AFTER the result, so we
+ * match on tool_call_id rather than "the last message". */
+export function toolResultErrored(messages: GatewayMessage[], callId: string): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === "tool" && m.tool_call_id === callId) {
+      return typeof m.content === "string" && m.content.startsWith("Error");
+    }
+  }
+  return false;
 }
 function screenshotMessage(toolName: string, dataUri: string): GatewayMessage {
   return {

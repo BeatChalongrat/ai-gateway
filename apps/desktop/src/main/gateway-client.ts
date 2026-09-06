@@ -64,8 +64,12 @@ export interface CompletionRequest {
   max_tokens?: number;
   tools?: GatewayToolDefinition[];
   tool_choice?: "auto";
-  /** Web parity: chat-edge attaches this on every turn; the gateway no-ops for models that cannot reason. */
-  reasoning?: { mode: "auto"; show_summary: true };
+  /** Web parity: chat-edge attaches this on every turn; the gateway no-ops for models that cannot reason.
+   *  FIX72: "off" is now expressible — the gateway honours it for a provider
+   *  family whose box has a measured thinking off-switch (sranai qwen via the
+   *  vLLM enable_thinking chat-template kwarg); for every other model it is a
+   *  no-op, exactly as "auto" already was on non-reasoning models. */
+  reasoning?: { mode: "auto" | "off"; show_summary: boolean };
   /** FIX36 Part D — caller-side DLP options ride in the request metadata.
    *  The state extractor sets {dlp_response_restore:"off"} so the gateway
    *  skips restoring masked values in THAT reply: the summary then carries
