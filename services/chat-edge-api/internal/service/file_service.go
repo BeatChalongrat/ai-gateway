@@ -1437,7 +1437,7 @@ func (s *FileService) ImageDataURLsForMessage(
 	ctx context.Context, tenantID, messageID uuid.UUID,
 ) []string {
 	urls, _ := s.ImageDataURLsForMessageChecked(ctx, tenantID, messageID)
-	return urls
+	return visionURLs(urls)
 }
 
 // ImageAttachFailure names one attached image that could NOT be turned
@@ -1459,13 +1459,22 @@ type ImageAttachFailure struct {
 // silently — they ride the text-extraction path, not vision.
 func (s *FileService) ImageDataURLsForMessageChecked(
 	ctx context.Context, tenantID, messageID uuid.UUID,
-) ([]string, []ImageAttachFailure) {
+) ([]VisionImage, []ImageAttachFailure) {
 	files, err := s.files.ListByMessage(ctx, tenantID, messageID)
 	if err != nil || len(files) == 0 {
 		return nil, nil
 	}
-	out := make([]string, 0, len(files))
+	out := make([]VisionImage, 0, len(files))
 	var fails []ImageAttachFailure
+	// FIX76 — Index/Total are the image's place among this message's
+	// images in attach order, fixed here before any history cap.
+	total := 0
+	for i := range files {
+		if isImageContentType(strings.ToLower(strings.TrimSpace(files[i].ContentType))) {
+			total++
+		}
+	}
+	index := 0
 	for i := range files {
 		f := &files[i]
 		ct := strings.ToLower(strings.TrimSpace(f.ContentType))
@@ -1483,6 +1492,7 @@ func (s *FileService) ImageDataURLsForMessageChecked(
 			}
 			continue
 		}
+		index++
 		url, err := s.imageDataURL(ctx, f)
 		if err != nil {
 			// Already logged inside imageDataURLSized. Surface it.
@@ -1493,7 +1503,7 @@ func (s *FileService) ImageDataURLsForMessageChecked(
 			continue
 		}
 		if url != "" {
-			out = append(out, url)
+			out = append(out, VisionImage{URL: url, Filename: f.OriginalFilename, Index: index, Total: total})
 		}
 	}
 	if len(out) == 0 {
@@ -1565,7 +1575,7 @@ const (
 // annotation the caller keeps on every generated-image message.
 func (s *FileService) GeneratedImageVisionURLs(
 	ctx context.Context, tenantID uuid.UUID, messageIDs []uuid.UUID,
-) map[uuid.UUID][]string {
+) map[uuid.UUID][]VisionImage {
 	if len(messageIDs) == 0 {
 		return nil
 	}
@@ -1578,13 +1588,24 @@ func (s *FileService) GeneratedImageVisionURLs(
 		f     *model.ConversationFile
 	}
 	cands := make([]candidate, 0, 4)
+	// FIX76 — Index/Total per message in creation order, fixed before the
+	// caps so a pruned set keeps its numbers.
+	indexOf := make(map[*model.ConversationFile]int)
+	totalOf := make(map[uuid.UUID]int)
 	for msgID, files := range byMsg {
+		var mine []*model.ConversationFile
 		for i := range files {
 			f := &files[i]
 			if f.IsGenerated && isImageContentType(f.ContentType) {
-				cands = append(cands, candidate{msgID, f})
+				mine = append(mine, f)
 			}
 		}
+		sort.Slice(mine, func(i, j int) bool { return mine[i].CreatedAt.Before(mine[j].CreatedAt) })
+		for i, f := range mine {
+			indexOf[f] = i + 1
+			cands = append(cands, candidate{msgID, f})
+		}
+		totalOf[msgID] = len(mine)
 	}
 	if len(cands) == 0 {
 		return nil
@@ -1595,7 +1616,7 @@ func (s *FileService) GeneratedImageVisionURLs(
 		return cands[i].f.CreatedAt.After(cands[j].f.CreatedAt)
 	})
 
-	out := make(map[uuid.UUID][]string)
+	out := make(map[uuid.UUID][]VisionImage)
 	perMsg := make(map[uuid.UUID]int)
 	included, skipped := 0, 0
 	for _, c := range cands {
@@ -1619,7 +1640,7 @@ func (s *FileService) GeneratedImageVisionURLs(
 			skipped++
 			continue
 		}
-		out[c.msgID] = append(out[c.msgID], url)
+		out[c.msgID] = append(out[c.msgID], VisionImage{URL: url, Filename: c.f.OriginalFilename, Index: indexOf[c.f], Total: totalOf[c.msgID]})
 		perMsg[c.msgID]++
 		included++
 	}

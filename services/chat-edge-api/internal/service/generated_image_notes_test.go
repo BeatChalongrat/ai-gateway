@@ -85,8 +85,8 @@ func TestBuildGatewayRequest_ReplaysGeneratedImagesAsSyntheticUserTurn(t *testin
 		{ID: uuid.New(), Role: "user", ContentMasked: "แมวในรูปสีอะไร"},
 	}
 	notes := map[uuid.UUID]string{asstID: generatedImageNote([]string{"cat.png"})}
-	vision := map[uuid.UUID][]string{
-		asstID: {"data:image/png;base64,AAAA"},
+	vision := map[uuid.UUID][]VisionImage{
+		asstID: {{URL: "data:image/png;base64,AAAA", Filename: "cat.png"}},
 	}
 
 	req := buildGatewayRequestWithImages("gpt-4o", history, "sys", nil, notes, vision, false)
@@ -103,18 +103,21 @@ func TestBuildGatewayRequest_ReplaysGeneratedImagesAsSyntheticUserTurn(t *testin
 	if !ok {
 		t.Fatalf("synthetic content is %T, want []GatewayContentBlock", synth.Content)
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("expected image + text blocks, got %d", len(blocks))
+	if len(blocks) != 3 {
+		t.Fatalf("expected label + image + text blocks, got %d", len(blocks))
 	}
-	if blocks[0].Type != "image_url" || blocks[0].ImageURL == nil ||
-		blocks[0].ImageURL.URL != "data:image/png;base64,AAAA" {
-		t.Errorf("image block malformed: %+v", blocks[0])
+	if blocks[0].Type != "text" || blocks[0].Text != "Image 1 of 1: cat.png" {
+		t.Errorf("FIX76 label malformed: %+v", blocks[0])
 	}
-	if blocks[0].ImageURL.Detail != "low" {
-		t.Errorf("detail = %s, want low", blocks[0].ImageURL.Detail)
+	if blocks[1].Type != "image_url" || blocks[1].ImageURL == nil ||
+		blocks[1].ImageURL.URL != "data:image/png;base64,AAAA" {
+		t.Errorf("image block malformed: %+v", blocks[1])
 	}
-	if blocks[1].Type != "text" || !strings.Contains(blocks[1].Text, "Reference") {
-		t.Errorf("text block malformed: %+v", blocks[1])
+	if blocks[1].ImageURL.Detail != "low" {
+		t.Errorf("detail = %s, want low", blocks[1].ImageURL.Detail)
+	}
+	if blocks[2].Type != "text" || !strings.Contains(blocks[2].Text, "Reference") {
+		t.Errorf("text block malformed: %+v", blocks[2])
 	}
 	// The real final user turn must still be last and untouched.
 	if got := req.Messages[4].Content.(string); got != "แมวในรูปสีอะไร" {

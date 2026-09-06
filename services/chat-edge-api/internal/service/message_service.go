@@ -225,7 +225,7 @@ type FileLinker interface {
 	// ImageDataURLsForMessageChecked is ImageDataURLsForMessage plus the
 	// per-image failure list, so the streaming send paths can tell the
 	// user an attachment couldn't be read instead of silently dropping it.
-	ImageDataURLsForMessageChecked(ctx context.Context, tenantID, messageID uuid.UUID) ([]string, []ImageAttachFailure)
+	ImageDataURLsForMessageChecked(ctx context.Context, tenantID, messageID uuid.UUID) ([]VisionImage, []ImageAttachFailure)
 	// GeneratedImageNotes returns a per-message annotation describing
 	// the AI-generated image attachments on each given message (one
 	// batched query). The request builder appends it to the assistant
@@ -238,7 +238,7 @@ type FileLinker interface {
 	// the file-service layer) so the builder can replay them as vision
 	// content when the target model supports it (Approach B). nil when
 	// none qualify — callers then rely on the text annotation alone.
-	GeneratedImageVisionURLs(ctx context.Context, tenantID uuid.UUID, messageIDs []uuid.UUID) map[uuid.UUID][]string
+	GeneratedImageVisionURLs(ctx context.Context, tenantID uuid.UUID, messageIDs []uuid.UUID) map[uuid.UUID][]VisionImage
 }
 
 // PreferencesReader pulls the user's custom instructions for system-
@@ -3083,7 +3083,7 @@ func (s *MessageService) compileAndBuildRequest(
 ) GatewayChatRequest {
 	// current-turn images drive routing + the compiler budget; the
 	// per-message map drives inline placement in the built request.
-	imageURLs := imgs.current
+	imageURLs := visionURLs(imgs.current)
 	numTools := 0
 	if s.toolExec != nil {
 		numTools = len(s.toolExec.ToolDefs(conv))
@@ -3118,7 +3118,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// message after each producing assistant turn). Only messages that
 	// already earned a note are queried; non-vision / unknown / Auto
 	// models keep the text-annotation-only behaviour.
-	var genVision map[uuid.UUID][]string
+	var genVision map[uuid.UUID][]VisionImage
 	if len(genNotes) > 0 {
 		vision := s.visionCapable != nil && s.visionCapable(ctx, modelID)
 		if vision && s.fileSvc != nil {
@@ -3534,9 +3534,9 @@ func buildGatewayRequest(model string, history []model.Message, systemPrefix str
 // Outbound-only, same as the notes: nothing is stored or shown in the
 // chat UI.
 func buildGatewayRequestWithImages(
-	model string, history []model.Message, systemPrefix string, imagesByMsg map[uuid.UUID][]string,
+	model string, history []model.Message, systemPrefix string, imagesByMsg map[uuid.UUID][]VisionImage,
 	generatedNotes map[uuid.UUID]string,
-	generatedVision map[uuid.UUID][]string,
+	generatedVision map[uuid.UUID][]VisionImage,
 	canonicalHistoryEnabled bool,
 ) GatewayChatRequest {
 	msgs := make([]GatewayMessage, 0, len(history)+1)
@@ -3591,21 +3591,14 @@ func buildGatewayRequestWithImages(
 			emptyText := strings.TrimSpace(text) == ""
 			imgs := imagesByMsg[m.ID]
 			if len(imgs) > 0 {
-				// Image-attach path: build multimodal blocks (image
-				// URLs FIRST — Anthropic guidance — then one text block).
-				// Applied to EVERY user message that carries images so an
-				// earlier turn's picture stays inline in history, not just
-				// the latest turn. Empty text gets an image-specific prompt.
-				blocks := make([]GatewayContentBlock, 0, len(imgs)+1)
-				for _, url := range imgs {
-					blocks = append(blocks, GatewayContentBlock{
-						Type: "image_url",
-						ImageURL: &GatewayImageURL{
-							URL:    url,
-							Detail: "auto",
-						},
-					})
-				}
+				// Image-attach path: build multimodal blocks (images
+				// FIRST — Anthropic guidance — each introduced by its
+				// FIX76 label "Image n of N: <filename>", then one text
+				// block). Applied to EVERY user message that carries
+				// images so an earlier turn's picture stays inline in
+				// history, not just the latest turn. Empty text gets an
+				// image-specific prompt.
+				blocks := labelledImageBlocks(imgs, "auto")
 				if emptyText {
 					text = "What's in this image?"
 				}
@@ -3628,23 +3621,15 @@ func buildGatewayRequestWithImages(
 		msgs = append(msgs, GatewayMessage{Role: m.Role, Content: content})
 
 		// Approach B — replay this assistant turn's generated images as
-		// a synthetic user message right after it (image blocks first,
-		// one text block last — same shape as the upload-vision path).
+		// a synthetic user message right after it (label + image per
+		// picture first, one text block last — same shape as the
+		// upload-vision path, so "รูป 2" resolves the same way for a
+		// generated picture as for an attached one).
 		if m.Role == "assistant" {
-			if urls := generatedVision[m.ID]; len(urls) > 0 {
-				blocks := make([]GatewayContentBlock, 0, len(urls)+1)
-				for _, url := range urls {
-					blocks = append(blocks, GatewayContentBlock{
-						Type: "image_url",
-						ImageURL: &GatewayImageURL{
-							URL: url,
-							// "low" always: context continuity needs the
-							// gist, not pixel-perfect detail (~85 tokens
-							// vs 765+ per image).
-							Detail: "low",
-						},
-					})
-				}
+			if gen := generatedVision[m.ID]; len(gen) > 0 {
+				// "low" always: context continuity needs the gist, not
+				// pixel-perfect detail (~85 tokens vs 765+ per image).
+				blocks := labelledImageBlocks(gen, "low")
 				blocks = append(blocks, GatewayContentBlock{
 					Type: "text",
 					Text: "[Reference: the AI-generated image(s) from the assistant's reply above, attached so you can see what the user received. This is not a new user request.]",
@@ -3745,8 +3730,8 @@ func (s *MessageService) lastUserImageURLs(
 //   - failures: attachments on the CURRENT turn that could not be encoded,
 //     surfaced to the user as an image_notice.
 type userImageSet struct {
-	byMsg    map[uuid.UUID][]string
-	current  []string
+	byMsg    map[uuid.UUID][]VisionImage
+	current  []VisionImage
 	failures []ImageAttachFailure
 }
 
@@ -3773,7 +3758,7 @@ func (s *MessageService) resolveUserImages(
 			break
 		}
 	}
-	byMsg := make(map[uuid.UUID][]string)
+	byMsg := make(map[uuid.UUID][]VisionImage)
 	total := 0 // replayed (non-current) images admitted so far
 	// Newest-first so the caps keep the most recent history images.
 	for i := len(history) - 1; i >= 0; i-- {
@@ -4034,7 +4019,8 @@ func stripImageBlocks(msgs []GatewayMessage) int {
 			case "image_url":
 				images++
 			case "text":
-				if strings.TrimSpace(b.Text) != "" {
+				// FIX76 — a label must never outlive its image.
+				if strings.TrimSpace(b.Text) != "" && !isImageLabel(b) {
 					text = append(text, b.Text)
 				}
 			}

@@ -23,6 +23,15 @@ type fakeFileLinker struct {
 	fails map[uuid.UUID][]ImageAttachFailure
 }
 
+// vis wraps bare URLs the way the file service now hands them over.
+func vis(urls ...string) []VisionImage {
+	out := make([]VisionImage, len(urls))
+	for i, u := range urls {
+		out[i] = VisionImage{URL: u, Filename: "img.png"}
+	}
+	return out
+}
+
 func (f *fakeFileLinker) AttachToMessage(
 	context.Context, uuid.UUID, uuid.UUID, uuid.UUID, []uuid.UUID,
 ) (int64, error) {
@@ -36,8 +45,8 @@ func (f *fakeFileLinker) ImageDataURLsForMessage(_ context.Context, _, m uuid.UU
 }
 func (f *fakeFileLinker) ImageDataURLsForMessageChecked(
 	_ context.Context, _, m uuid.UUID,
-) ([]string, []ImageAttachFailure) {
-	return f.urls[m], f.fails[m]
+) ([]VisionImage, []ImageAttachFailure) {
+	return vis(f.urls[m]...), f.fails[m]
 }
 func (f *fakeFileLinker) GeneratedImageNotes(
 	context.Context, uuid.UUID, []uuid.UUID,
@@ -46,7 +55,7 @@ func (f *fakeFileLinker) GeneratedImageNotes(
 }
 func (f *fakeFileLinker) GeneratedImageVisionURLs(
 	context.Context, uuid.UUID, []uuid.UUID,
-) map[uuid.UUID][]string {
+) map[uuid.UUID][]VisionImage {
 	return nil
 }
 
@@ -75,7 +84,7 @@ func TestResolveUserImages_SurfacesCurrentTurnFailure(t *testing.T) {
 		t.Fatalf("current-turn failure not surfaced: %+v", set.failures)
 	}
 	// The earlier turn's good image must still be in the map — not dropped.
-	if got := set.byMsg[u1]; len(got) != 1 || got[0] != "data:image/png;base64,AAAA" {
+	if got := set.byMsg[u1]; len(got) != 1 || got[0].URL != "data:image/png;base64,AAAA" {
 		t.Fatalf("earlier image dropped: %+v", set.byMsg)
 	}
 }
@@ -114,7 +123,7 @@ func TestBuildGatewayRequest_EarlierImageSurvivesLaterTextTurns(t *testing.T) {
 		{ID: uuid.New(), Role: "user", ContentMasked: "another thing"},
 		{ID: uuid.New(), Role: "user", ContentMasked: "what was in the first image?"},
 	}
-	imagesByMsg := map[uuid.UUID][]string{u1: {"data:image/png;base64,IMG"}}
+	imagesByMsg := map[uuid.UUID][]VisionImage{u1: vis("data:image/png;base64,IMG")}
 
 	req := buildGatewayRequestWithImages("m", history, "", imagesByMsg, nil, nil, false)
 
@@ -126,16 +135,19 @@ func TestBuildGatewayRequest_EarlierImageSurvivesLaterTextTurns(t *testing.T) {
 	if !ok {
 		t.Fatalf("earlier user turn is %T, want []GatewayContentBlock", req.Messages[0].Content)
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("expected image + text blocks, got %d", len(blocks))
+	if len(blocks) != 3 {
+		t.Fatalf("expected label + image + text blocks, got %d", len(blocks))
 	}
-	// Image-before-text ordering (Anthropic guidance).
-	if blocks[0].Type != "image_url" || blocks[0].ImageURL == nil ||
-		blocks[0].ImageURL.URL != "data:image/png;base64,IMG" {
-		t.Errorf("block 0 must be the image: %+v", blocks[0])
+	// FIX76 label, then image-before-text ordering (Anthropic guidance).
+	if !isImageLabel(blocks[0]) {
+		t.Errorf("block 0 must be the image label: %+v", blocks[0])
 	}
-	if blocks[1].Type != "text" || blocks[1].Text != "see this" {
-		t.Errorf("block 1 must be the message text: %+v", blocks[1])
+	if blocks[1].Type != "image_url" || blocks[1].ImageURL == nil ||
+		blocks[1].ImageURL.URL != "data:image/png;base64,IMG" {
+		t.Errorf("block 1 must be the image: %+v", blocks[1])
+	}
+	if blocks[2].Type != "text" || blocks[2].Text != "see this" {
+		t.Errorf("block 2 must be the message text: %+v", blocks[2])
 	}
 	// The final ("what was in the first image?") turn is a plain string —
 	// proving the image did NOT re-home onto the last user message.
@@ -153,9 +165,9 @@ func TestBuildGatewayRequest_EachImageMessageGetsOwnBlocks(t *testing.T) {
 		{ID: uuid.New(), Role: "assistant", ContentMasked: "ok"},
 		{ID: u2, Role: "user", ContentMasked: "second"},
 	}
-	imagesByMsg := map[uuid.UUID][]string{
-		u1: {"data:image/png;base64,ONE"},
-		u2: {"data:image/png;base64,TWO"},
+	imagesByMsg := map[uuid.UUID][]VisionImage{
+		u1: vis("data:image/png;base64,ONE"),
+		u2: vis("data:image/png;base64,TWO"),
 	}
 
 	req := buildGatewayRequestWithImages("m", history, "", imagesByMsg, nil, nil, false)
