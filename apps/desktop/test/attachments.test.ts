@@ -80,8 +80,10 @@ describe("images become image_url blocks on the user message", () => {
     const content = composeUserContent("ในรูปนี้เขียนว่าอะไร", r);
     expect(Array.isArray(content)).toBe(true);
     const blocks = content as { type: string; text?: string }[];
-    expect(blocks[0]!.type).toBe("image_url");
-    expect(blocks[1]).toEqual({ type: "text", text: "ในรูปนี้เขียนว่าอะไร" });
+    // FIX76 — each image is introduced by its label; the user's text stays last
+    expect(blocks[0]).toEqual({ type: "text", text: "Image 1 of 1: shot.png" });
+    expect(blocks[1]!.type).toBe("image_url");
+    expect(blocks[2]).toEqual({ type: "text", text: "ในรูปนี้เขียนว่าอะไร" });
   });
 
   it("an image that cannot be encoded is a named failure, not a silent drop", async () => {
@@ -94,7 +96,7 @@ describe("images become image_url blocks on the user message", () => {
   it("image only, no text → the same default prompt chat-edge uses", async () => {
     const r = await resolveAttachments(source(), encode, CONV, [PNG.id], { log });
     const blocks = composeUserContent("   ", r) as { type: string; text?: string }[];
-    expect(blocks[1]).toEqual({ type: "text", text: "What's in this image?" });
+    expect(blocks[2]).toEqual({ type: "text", text: "What's in this image?" });
   });
 });
 
@@ -151,8 +153,10 @@ describe("documents become the untrusted observation envelope in the user text",
   it("images and a document together: blocks first, observations inside the single text block", async () => {
     const r = await resolveAttachments(source(), encode, CONV, [DOCX.id, PNG.id], { log });
     const blocks = composeUserContent("compare", r) as { type: string; text?: string }[];
-    expect(blocks.map((b) => b.type)).toEqual(["image_url", "text"]);
-    expect(blocks[1]!.text).toMatch(/^compare\n\n## Typed untrusted file observations/);
+    // FIX76 — label, image, then the one text block
+    expect(blocks.map((b) => b.type)).toEqual(["text", "image_url", "text"]);
+    expect(blocks[0]!.text).toBe("Image 1 of 1: shot.png");
+    expect(blocks[2]!.text).toMatch(/^compare\n\n## Typed untrusted file observations/);
     expect(r.attached.map((a) => a.kind)).toEqual(["document", "image"]);
   });
 });

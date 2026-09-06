@@ -47,6 +47,8 @@ export interface AttachmentFailure {
 export interface ResolvedAttachments {
   /** image_url blocks in attach order — go FIRST on the user message. */
   imageBlocks: GatewayContentBlock[];
+  /** FIX76 — the filename of each image block, same order, for its label. */
+  imageNames: string[];
   /** the observation block for documents ("" when none). */
   observations: string;
   /** the handles that resolved to a row of this conversation (chat-edge import links them). */
@@ -105,8 +107,43 @@ export function buildObservationBlock(entries: { row: AttachmentFileRow; body: s
   return out + OBSERVATION_FOOTER;
 }
 
-/** The user message content for a turn with attachments: image blocks first
- * (Anthropic guidance, same as chat-edge), then ONE text block carrying the
+// ---------------------------------------------------------------------------
+// FIX76 — image labels. Every attached image is announced by a short text
+// block RIGHT BEFORE it: "Image 2 of 3: design-ref.png". Without it the
+// model resolves "รูป 2" from position alone and can never resolve a
+// filename at all. The wording is one fixed English form on both surfaces
+// (the model reads it, not the user; English tokenises cheapest and the
+// prompt's other framing is English) and is pinned across languages by
+// chat-edge's contract test, which reads THIS file.
+//
+// A label must never outlive its image: stripImageBlocks (a model that
+// cannot see) and pruneAttachedImages (the history cap) both drop the
+// label with the image. Numbers are never rewritten after pruning — the
+// user's "รูป 3" still means the third image they attached.
+// ---------------------------------------------------------------------------
+export const IMAGE_LABEL_TEMPLATE = "Image {n} of {total}: {filename}";
+export const IMAGE_LABEL_MAX_NAME = 80;
+export const IMAGE_LABEL_RE = /^Image \d+ of \d+: /;
+
+/** The filename as it appears in a label: control characters and line
+ * breaks become one space, long names are cut at IMAGE_LABEL_MAX_NAME. */
+export function imageLabelName(filename: string): string {
+  const clean = filename.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  if (clean.length === 0) return "image";
+  return clean.length > IMAGE_LABEL_MAX_NAME ? `${clean.slice(0, IMAGE_LABEL_MAX_NAME - 1)}…` : clean;
+}
+
+export function imageLabel(n: number, total: number, filename: string): string {
+  return IMAGE_LABEL_TEMPLATE.replace("{n}", String(n)).replace("{total}", String(total)).replace("{filename}", imageLabelName(filename));
+}
+
+export function isImageLabelBlock(b: GatewayContentBlock): b is { type: "text"; text: string } {
+  return b.type === "text" && IMAGE_LABEL_RE.test(b.text);
+}
+
+/** The user message content for a turn with attachments: for each image a
+ * label text block then the image block (Anthropic guidance: images first,
+ * each introduced — same as chat-edge), then ONE text block carrying the
  * user's words plus the document observations. No attachments → the plain
  * string, unchanged. */
 export function composeUserContent(userText: string, resolved: ResolvedAttachments): string | GatewayContentBlock[] {
@@ -117,7 +154,14 @@ export function composeUserContent(userText: string, resolved: ResolvedAttachmen
   }
   if (resolved.observations) text = `${text}\n\n${resolved.observations}`;
   if (resolved.imageBlocks.length === 0) return text;
-  return [...resolved.imageBlocks, { type: "text", text }];
+  const total = resolved.imageBlocks.length;
+  const blocks: GatewayContentBlock[] = [];
+  resolved.imageBlocks.forEach((b, i) => {
+    blocks.push({ type: "text", text: imageLabel(i + 1, total, resolved.imageNames[i] ?? "") });
+    blocks.push(b);
+  });
+  blocks.push({ type: "text", text });
+  return blocks;
 }
 
 export interface ResolveOptions {
@@ -136,7 +180,7 @@ export async function resolveAttachments(
   handles: readonly string[],
   opts: ResolveOptions,
 ): Promise<ResolvedAttachments> {
-  const out: ResolvedAttachments = { imageBlocks: [], observations: "", fileIds: [], attached: [], failures: [] };
+  const out: ResolvedAttachments = { imageBlocks: [], imageNames: [], observations: "", fileIds: [], attached: [], failures: [] };
   if (handles.length === 0) return out;
   const waitMs = opts.waitMs ?? 6 * 60_000;
   const pollMs = opts.pollMs ?? 1000;
@@ -167,6 +211,7 @@ export async function resolveAttachments(
         continue;
       }
       out.imageBlocks.push({ type: "image_url", image_url: { url: uri } });
+      out.imageNames.push(row.filename);
       out.fileIds.push(row.id);
       out.attached.push({ id: row.id, filename: row.filename, kind: "image" });
       continue;
@@ -233,7 +278,8 @@ export function stripImageBlocks(messages: { role: string; content: unknown }[])
     const images = blocks.filter((b) => b.type === "image_url").length;
     if (images === 0) continue;
     removed += images;
-    const text = blocks.filter((b): b is { type: "text"; text: string } => b.type === "text").map((b) => b.text).filter((t) => t.trim().length > 0);
+    // FIX76 — a label must never outlive its image: drop them with the blocks.
+    const text = blocks.filter((b): b is { type: "text"; text: string } => b.type === "text" && !isImageLabelBlock(b)).map((b) => b.text).filter((t) => t.trim().length > 0);
     m.content = [...Array<string>(images).fill(IMAGE_NOT_SENT_NOTE), ...text].join("\n");
   }
   return removed;
@@ -263,23 +309,35 @@ export function pruneAttachedImages(messages: { role: string; content: unknown }
     // keep the LAST `allowed` images of this message (attach order = reading order)
     const keepFrom = images - allowed;
     let idx = 0;
+    // FIX76 — a label (the text block right before an image) is dropped with
+    // its image and kept with it, numbering untouched.
+    let pendingLabel: GatewayContentBlock | null = null;
     for (const b of blocks) {
+      if (isImageLabelBlock(b)) {
+        pendingLabel = b;
+        continue;
+      }
       if (b.type === "image_url") {
         if (idx++ >= keepFrom) {
+          if (pendingLabel) next.push(pendingLabel);
           next.push(b);
           kept++;
         }
+        pendingLabel = null;
         continue;
       }
+      pendingLabel = null;
       next.push(b);
     }
     const removed = images - kept;
-    const textIdx = next.findIndex((b) => b.type === "text");
+    // the note goes on the user's own text block, never on a label
+    const textIdx = next.findIndex((b) => b.type === "text" && !isImageLabelBlock(b));
     const note = ` (${removed} attached image${removed === 1 ? "" : "s"} removed to save context)`;
     if (textIdx >= 0) {
       const t = next[textIdx] as { type: "text"; text: string };
       next[textIdx] = { type: "text", text: t.text + note };
     } else next.push({ type: "text", text: note.trim() });
-    m.content = kept === 0 ? (next.find((b) => b.type === "text") as { type: "text"; text: string }).text : next;
+    const own = next.find((b): b is { type: "text"; text: string } => b.type === "text" && !isImageLabelBlock(b));
+    m.content = kept === 0 ? (own?.text ?? note.trim()) : next;
   }
 }
