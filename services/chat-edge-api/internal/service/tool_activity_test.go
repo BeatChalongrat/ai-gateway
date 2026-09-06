@@ -91,6 +91,41 @@ func TestExecuteToolCalls_VisibleToolEmitsStartedThenFinished(t *testing.T) {
 	}
 }
 
+// FIX77 ② — the row's one useful argument. A known tool's query/title
+// rides the frame as Subject; an unknown (MCP) tool gets none — the
+// client renders the friendly label alone, never a raw-JSON dump.
+func TestToolSubject_KnownToolsOnly_NeverADump(t *testing.T) {
+	if got := toolSubject("search_past_conversations", `{"query":"excel plan","scope":"all"}`); got != "excel plan" {
+		t.Errorf("search subject = %q, want %q", got, "excel plan")
+	}
+	if got := toolSubject("update_canvas_artifact", `{"title":"Dashboard","content":"..."}`); got != "Dashboard" {
+		t.Errorf("canvas subject = %q, want %q", got, "Dashboard")
+	}
+	if got := toolSubject("some_future_mcp_tool", `{"query":"x","secret":"y"}`); got != "" {
+		t.Errorf("unknown tool must have NO subject, got %q", got)
+	}
+	if got := toolSubject("search_past_conversations", `not json`); got != "" {
+		t.Errorf("unparseable args must yield no subject, got %q", got)
+	}
+}
+
+func TestExecuteToolCalls_FramesCarrySubject(t *testing.T) {
+	s := &MessageService{toolExec: &ToolExecutor{}}
+	ec := ToolExecContext{}
+	frames := collectActivity(&ec)
+	_, _ = s.executeToolCalls(context.Background(), []GatewayToolCall{
+		call("call_1", "search_past_conversations", `{"_dlp_blocked": true, "reason": "test", "query": "งบ 2569"}`),
+	}, ec)
+	if len(*frames) != 2 {
+		t.Fatalf("expected 2 frames, got %d", len(*frames))
+	}
+	for i, f := range *frames {
+		if f.Subject != "งบ 2569" {
+			t.Errorf("frame[%d] subject = %q, want %q", i, f.Subject, "งบ 2569")
+		}
+	}
+}
+
 func TestExecuteToolCalls_SilentByDesignToolsEmitNothing(t *testing.T) {
 	s := &MessageService{toolExec: &ToolExecutor{}}
 	ec := ToolExecContext{}

@@ -1281,6 +1281,36 @@ type ToolActivityUpdate struct {
 	ResultPreview string `json:"resultPreview,omitempty"`
 	Success       *bool  `json:"success,omitempty"`
 	DurationMS    int64  `json:"durationMs,omitempty"`
+	// FIX77 ② — the ONE human-useful argument for the row itself (a
+	// query, a title), so the client's friendly label never needs the
+	// raw JSON dump; ArgsSummary stays for the card's expanded detail.
+	Subject string `json:"subject,omitempty"`
+}
+
+// toolSubject extracts the one argument worth showing next to a tool
+// row's friendly label. Known tools only; an unknown (MCP) tool gets ""
+// so the client renders the label alone — never an argument dump.
+func toolSubject(tool, argsJSON string) string {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	pick := func(names ...string) string {
+		for _, n := range names {
+			if v, ok := args[n].(string); ok && strings.TrimSpace(v) != "" {
+				return previewForDisplay(strings.TrimSpace(v), 60)
+			}
+		}
+		return ""
+	}
+	switch tool {
+	case "search_past_conversations":
+		return pick("query")
+	case "update_canvas_artifact":
+		return pick("title", "name")
+	default:
+		return ""
+	}
 }
 
 // previewForDisplay caps a tool argument/result string for the activity
@@ -4999,6 +5029,7 @@ func (s *MessageService) executeToolCalls(
 		if generic {
 			ec.emit(StreamUpdate{ToolActivity: &ToolActivityUpdate{
 				ID: tc.ID, Tool: tc.Function.Name, Phase: "started",
+				Subject: toolSubject(tc.Function.Name, tc.Function.Arguments),
 			}})
 		}
 		toolStarted := time.Now()
@@ -5014,6 +5045,7 @@ func (s *MessageService) executeToolCalls(
 				ResultPreview: previewForDisplay(out, 600),
 				Success:       &ok,
 				DurationMS:    time.Since(toolStarted).Milliseconds(),
+				Subject:       toolSubject(tc.Function.Name, tc.Function.Arguments),
 			}})
 		}
 		results = append(results, GatewayMessage{
