@@ -16,6 +16,7 @@
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowRightLeft } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
@@ -26,6 +27,7 @@ import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
 import { fallbackNotice, localizeErrorCode } from "@/lib/errorMessages";
+import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -421,6 +423,8 @@ function MessageBubbleImpl({
         <ErrorNotice
           message={message.error_message}
           attempts={message.error_attempts}
+          switchFromModel={message.error_code === "output_limit_reached" ? message.model_id ?? undefined : undefined}
+          convId={convId}
         />
       ) : null}
 
@@ -754,11 +758,21 @@ function MessageMeta({ message }: { message: Message }) {
 function ErrorNotice({
   message,
   attempts,
+  switchFromModel,
+  convId,
 }: {
   message: string;
   attempts?: FallbackAttempt[];
+  switchFromModel?: string;
+  convId?: string;
 }) {
   const t = useT();
+  const models = useModelStore((s) => s.models);
+  const currentModel = useChatStore((s) => s.conversations.find((c) => c.id === convId)?.model_id);
+  const setConversationModel = useChatStore((s) => s.setConversationModel);
+  const [switching, setSwitching] = useState(false);
+  const alternative = switchFromModel && (!currentModel || currentModel === switchFromModel)
+    ? outputLimitAlternative(switchFromModel, models) : null;
   const hasAttempts = Array.isArray(attempts) && attempts.length > 0;
   return (
     <div
@@ -769,6 +783,22 @@ function ErrorNotice({
         <WarningIcon />
         <span className="leading-snug">{message}</span>
       </div>
+      {alternative && convId ? (
+        <button
+          type="button"
+          disabled={switching}
+          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline disabled:opacity-50"
+          onClick={async () => {
+            setSwitching(true);
+            try { await setConversationModel(convId, alternative.id); }
+            catch { toast(t("chat.toast.modelChangeFailed")); }
+            finally { setSwitching(false); }
+          }}
+        >
+          <ArrowRightLeft size={14} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{t("error.switchModel", { model: alternative.name || alternative.id })}</span>
+        </button>
+      ) : null}
       {hasAttempts ? (
         <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">
           <summary className="cursor-pointer select-none">
