@@ -141,6 +141,14 @@ TOOL_ARG_POLICY: dict[str, str] = {
     # was classified in FIX 8; this one shipped later and was missed,
     # which surfaced as unknown_tool_blocked_masked_args in production).
     "read_document": LOCAL_EXECUTION,
+    # FIX73 — the desktop's question card: the arguments are the questions
+    # and options the model wants to SHOW THE USER on their own machine
+    # (rendered by the app, answered by a click); nothing in them leaves
+    # the machine or reaches a third party. Without this entry a question
+    # that mentioned a masked entity (a place, a name, a date) came back as
+    # unknown_tool_blocked_masked_args — measured live in the FIX73 Part D
+    # run, 1 of 3 qwen asks — and the user never saw the card.
+    "ask_user_question": LOCAL_EXECUTION,
     # Desktop screen/UIA READ layer + pixel-region zoom — arguments are
     # coordinates, element ids from the last read_screen_elements
     # snapshot, or a window title matched against local windows; nothing

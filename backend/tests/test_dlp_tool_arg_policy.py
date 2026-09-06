@@ -145,6 +145,10 @@ class TestToolArgPolicy:
             # (screen + UIA read layer), integer refs / DOM-local query
             # (browser read layer).
             "read_document",
+            # FIX73: the question card's arguments are shown to the user on
+            # their own machine; a masked place/name/date in a question must
+            # not block the card (it did: unknown_tool_blocked_masked_args).
+            "ask_user_question",
             "computer_zoom",
             "get_computer_state",
             "read_screen_elements",
@@ -203,6 +207,16 @@ class TestToolArgPolicy:
         assert reason == "local_execution"
         assert out == args
         assert is_local_execution_tool("read_document") is True
+
+    def test_ask_user_question_with_masked_entity_still_reaches_the_card(self):
+        # FIX73: a question whose option names a masked entity is client-bound
+        # (rendered by the desktop for the user) — allowed, like read_document.
+        args = '{"questions": [{"question": "Which trip?", "header": "Trip", "options": [{"label": "<r0> in spring"}, {"label": "<r1> later"}]}]}'
+        out, blocked, reason = enforce_tool_arg_safety("ask_user_question", args)
+        assert blocked is False
+        assert reason == "local_execution"
+        assert out == args
+        assert is_local_execution_tool("ask_user_question") is True
 
     @pytest.mark.parametrize(
         "tool, args",
