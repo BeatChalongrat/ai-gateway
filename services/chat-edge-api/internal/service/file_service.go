@@ -809,6 +809,10 @@ type GeneratedFileInput struct {
 	// OriginalFilename is the display/download name (the sandbox artifact
 	// basename, e.g. "chart.png"). Sanitised here.
 	OriginalFilename string
+	// GeneratedBy (FIX81) — the producing model, for the Made-by caption
+	// (inspection_json.generated_by, the FIX67 mechanism images and videos
+	// already use). Empty = no attribution, exactly as before.
+	GeneratedBy string
 }
 
 // SaveGeneratedFile stores an arbitrary generated artifact and creates a
@@ -859,6 +863,7 @@ func (s *FileService) SaveGeneratedFile(
 		ExtractionStatus: "completed", // sandbox artifacts carry no extractable text
 		IsGenerated:      true,
 		Version:          1,
+		InspectionJSON:   generatedByJSON(in.GeneratedBy),
 	})
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)

@@ -594,6 +594,7 @@ func main() {
 		Model:          modelHandler,
 		Feedback:       handler.NewFeedbackHandler(feedbackSvc),
 		File:           handler.NewFileHandler(fileSvc),
+		GeneratedFile:  handler.NewGeneratedFileHandler(fileSvc),
 		Preferences:    preferencesHandler,
 		Share:          shareHandler,
 		Admin:          adminHandler,

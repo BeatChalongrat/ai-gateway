@@ -46,6 +46,10 @@ type Handlers struct {
 	Model          *handler.ModelHandler
 	Feedback       *handler.FeedbackHandler
 	File           *handler.FileHandler
+	// GeneratedFile (FIX81) — the one client door for persisting an
+	// assistant-produced file into a conversation (desktop generate_image,
+	// the media forms' finished jobs).
+	GeneratedFile *handler.GeneratedFileHandler
 	Preferences    *handler.PreferencesHandler
 	Share          *handler.ShareHandler
 	Admin          *handler.AdminHandler
@@ -263,6 +267,10 @@ func New(
 			// conversation; download + delete go through the file
 			// id so the URL doesn't leak conversation membership.
 			r.Post("/conversations/{id}/files", h.File.Upload)
+			// FIX81 — assistant-produced bytes persist through the SAME
+			// SaveGeneratedFile pipeline the web tools use (Made-by
+			// attribution included), instead of dying in a data URI.
+			r.Post("/conversations/{id}/files/generated", h.GeneratedFile.Save)
 			r.Get("/conversations/{id}/files", h.File.List)
 			r.Get("/files/{fileID}/download", h.File.Download)
 			// Extracted text of one attachment. The desktop agent's
