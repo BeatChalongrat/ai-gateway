@@ -46,6 +46,19 @@ export function canvasTypeForBlock(
   return null;
 }
 
+// FIX81 Part B — does this HTML depend on script to BE the thing it is?
+// The inline thread preview runs with sandbox="" (script-less by design),
+// so an html block that carries script would render as a dead copy of an
+// interactive page: buttons that do nothing, layout that never runs (the
+// owner's game). Detection errs toward "needs scripts": a card is never
+// wrong, a dead preview always is. Matches <script> tags, inline on*
+// handlers and javascript: URLs — a mention of these in ESCAPED text
+// (&lt;script&gt;) does not match, and a raw mention in visible text only
+// pushes the block to the card, the safe direction.
+export function htmlNeedsScripts(html: string): boolean {
+  return /<script\b/i.test(html) || /\son[a-z]+\s*=/i.test(html) || /(?:href|src|action)\s*=\s*["']?\s*javascript:/i.test(html);
+}
+
 // ---------------------------------------------------------------------------
 // Sandbox security model (C2 — executable artifacts).
 //

@@ -609,6 +609,20 @@ class ApiClient {
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   }
 
+  /** FIX81 — persist assistant-produced bytes as a generated
+   *  ConversationFile (the one delivery pipeline). Used by the media
+   *  forms so a finished job survives reset/reload instead of dying
+   *  with its object URL. */
+  saveGeneratedConversationFile(
+    convId: string,
+    body: { filename: string; content_type: string; data_base64: string; generated_by?: string },
+  ) {
+    return this.json<import("./types").FileAttachment>(
+      `/conversations/${convId}/files/generated`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  }
+
   // ----- Excel Smart Workspace (Phase 4) --------------------
   /** Run the deep inspector against an xlsx upload. The structure
    *  is also cached server-side in inspection_json so a subsequent

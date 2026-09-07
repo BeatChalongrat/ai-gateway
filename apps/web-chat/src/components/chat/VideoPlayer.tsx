@@ -10,9 +10,11 @@
 
 import { useEffect, useState } from "react";
 
-import { VideoOff } from "lucide-react";
+import { Download, VideoOff } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { downloadFromObjectUrl } from "@/lib/fileUtil";
+import { useT } from "@/lib/i18n";
 
 interface Props {
   fileId: string;
@@ -22,6 +24,7 @@ interface Props {
 }
 
 export function VideoPlayer({ fileId, filename, className }: Props) {
+  const t = useT();
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -69,12 +72,27 @@ export function VideoPlayer({ fileId, filename, className }: Props) {
     );
   }
   return (
-    <video
-      src={url}
-      controls
-      preload="metadata"
-      className={`mt-1 w-full max-w-[480px] rounded-lg border border-border bg-black ${className ?? ""}`}
-      aria-label={filename ?? "Generated video"}
-    />
+    <div className={`group relative mt-1 w-full max-w-[480px] ${className ?? ""}`}>
+      <video
+        src={url}
+        controls
+        preload="metadata"
+        className="w-full rounded-lg border border-border bg-black"
+        aria-label={filename ?? "Generated video"}
+      />
+      {/* FIX81 ③ — a generated video is a FILE the user keeps, not only a
+          player. Saves straight from the loaded object URL (zero re-fetch),
+          the ImageThumb pattern; focus reveals it for keyboard use. */}
+      <button
+        type="button"
+        aria-label={t("common.download")}
+        title={t("common.download")}
+        data-testid="video-download"
+        onClick={() => downloadFromObjectUrl(url, filename ?? "generated-video.mp4")}
+        className="focus-ring absolute right-1.5 top-1.5 rounded-md bg-black/55 p-1.5 text-white opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        <Download className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </div>
   );
 }

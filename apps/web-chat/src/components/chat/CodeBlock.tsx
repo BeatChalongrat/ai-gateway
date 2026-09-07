@@ -20,7 +20,7 @@ import {
   artifactKeyFor,
   useCanvasSource,
 } from "@/components/canvas/CanvasSourceContext";
-import { buildHtmlSrcDoc, buildSvgSrcDoc, canvasTypeForBlock } from "@/components/canvas/canvasUtil";
+import { buildHtmlSrcDoc, buildSvgSrcDoc, canvasTypeForBlock, htmlNeedsScripts } from "@/components/canvas/canvasUtil";
 import { useT } from "@/lib/i18n";
 import { useCanvasStore } from "@/stores/canvasStore";
 import type { CanvasArtifactType } from "@/stores/canvasStore";
@@ -82,8 +82,17 @@ export function CodeBlock({ children }: PreProps) {
       {/* FIX29 §2.3 (defect #23): an html / svg artifact RENDERS in the thread.
           Static posture only (sandbox="" — no scripts, no network, opaque
           origin): the executable render stays behind "Open in Canvas", which
-          is the expand-to-full-size action, not the price of admission. */}
-      {canvasType === "html" || canvasType === "svg" ? (
+          is the expand-to-full-size action, not the price of admission.
+
+          FIX81 Part B — that holds ONLY for content that needs no script.
+          An interactive page rendered script-less is not a smaller version
+          of the thing, it is a broken version of it (the owner's game: a
+          start button that does nothing). Script-dependent html gets a card
+          that opens the canvas — where allow-scripts is granted
+          deliberately, behind the user's click — and the raw source keeps
+          rendering below as before. SVG stays inline (sanitizeSvg strips
+          script by design, so a script-less frame is a faithful render). */}
+      {canvasType === "svg" || (canvasType === "html" && !htmlNeedsScripts(codeText)) ? (
         <div className="code-block-preview border-b border-border-subtle bg-white" data-testid="inline-artifact">
           <iframe
             sandbox=""
@@ -94,6 +103,8 @@ export function CodeBlock({ children }: PreProps) {
             className="h-72 w-full border-0"
           />
         </div>
+      ) : canvasType === "html" ? (
+        <InteractiveArtifactCard content={codeText} title={filename} />
       ) : null}
       <div className="code-block-body scrollbar-thin">
         <pre className="code-block-content">
@@ -113,6 +124,45 @@ export function CodeBlock({ children }: PreProps) {
         </button>
       ) : null}
     </div>
+  );
+}
+
+// FIX81 Part B — the card an INTERACTIVE html block gets instead of a
+// dead script-less thumbnail: name, what it is, and one action that opens
+// the canvas (the surface that grants allow-scripts deliberately, behind
+// the user's click — FIX76 docks it beside the chat, so opening no longer
+// costs the conversation). The raw source keeps rendering below.
+function InteractiveArtifactCard({ content, title }: { content: string; title?: string }) {
+  const t = useT();
+  const openCanvas = useCanvasStore((s) => s.openCanvas);
+  const source = useCanvasSource();
+  const open = () =>
+    openCanvas({
+      type: "html",
+      content,
+      title,
+      conversationId: source?.conversationId,
+      messageId: source?.messageId,
+      artifactKey: source ? artifactKeyFor(source.messageId, content) : undefined,
+    });
+  return (
+    <button
+      type="button"
+      onClick={open}
+      data-testid="interactive-artifact-card"
+      className="focus-ring flex w-full items-center gap-3 border-b border-border-subtle bg-bg-surface px-4 py-3 text-left hover:bg-bg-surface-hover"
+    >
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-tertiary">
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <path d="m10 8 4 2.5-4 2.5z" fill="currentColor" stroke="none" />
+        <path d="M8 21h8M12 17v4" />
+      </svg>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-text-primary">{title ?? t("code.interactiveTitle")}</span>
+        <span className="block text-xs text-text-secondary">{t("code.interactiveHint")}</span>
+      </span>
+      <span className="shrink-0 rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text-secondary">{t("canvas.open")}</span>
+    </button>
   );
 }
 

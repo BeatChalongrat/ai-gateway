@@ -7,11 +7,16 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Download } from "lucide-react";
+
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { downloadFromObjectUrl } from "@/lib/fileUtil";
 import { tOutside, useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
 import type { MediaJobStatus, ModelEntry } from "@/lib/types";
+
+import { mediaOutputFilename, persistMediaOutput } from "./persistOutput";
 
 import { CostPreview } from "./CostPreview";
 import { ProvenanceBadge } from "./ProvenanceBadge";
@@ -55,6 +60,10 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
   // output_url is a gateway-relative path.
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   const [outputFailed, setOutputFailed] = useState(false);
+  // FIX81 ③ — the finished bytes persist as a ConversationFile (once per
+  // job), so the track survives "Generate another" and a reload.
+  const [savedName, setSavedName] = useState<string | null>(null);
+  const savedForJob = useRef<string | null>(null);
   const pollRef = useRef<number | null>(null);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "owner";
@@ -74,6 +83,13 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
         }
         objectUrl = u;
         setOutputUrl(u);
+        // Persist once per job, when the form runs inside a conversation.
+        if (conversationId && job && savedForJob.current !== job.job_id) {
+          savedForJob.current = job.job_id;
+          void persistMediaOutput(conversationId, u, prompt, model.id).then((row) => {
+            if (!cancelled && row) setSavedName(row.filename);
+          });
+        }
       })
       .catch(() => {
         if (!cancelled) setOutputFailed(true);
@@ -103,6 +119,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
     // phase leaves "done"; just drop the local references here.
     setOutputUrl(null);
     setOutputFailed(false);
+    setSavedName(null);
   }
 
   function startPolling(jobId: string) {
@@ -266,6 +283,27 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
             />
           )}
           {outputUrl && job.provenance ? <ProvenanceBadge provenance={job.provenance} /> : null}
+          {/* FIX81 ③ — the output is a FILE the user keeps, not only a
+              player: a download from the loaded bytes, and a note that it
+              is saved in this conversation's files (when it is). */}
+          {outputUrl ? (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                data-testid="media-download"
+                onClick={() => downloadFromObjectUrl(outputUrl, mediaOutputFilename(prompt, "audio/mpeg"))}
+                className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden />
+                {t("common.download")}
+              </button>
+              {savedName ? (
+                <span className="text-xs text-text-tertiary" data-testid="media-saved-note">
+                  {t("media.savedToFiles", { name: savedName })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={reset}
