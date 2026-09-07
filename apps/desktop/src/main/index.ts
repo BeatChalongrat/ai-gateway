@@ -898,7 +898,24 @@ function installSessionPolicy(ses: Session): void {
   });
   ses.setPermissionCheckHandler((_contents, permission, requestingOrigin) =>
     clipboardWrite.has(permission) && originAllowed(requestingOrigin));
-  ses.on("will-download", (event, item) => {
+  // FIX80 — the blanket refusal made EVERY download affordance in the
+  // app a silent no-op: message-attachment downloads, generated images,
+  // canvas export, conversation export (all are <a download> on blob
+  // URLs in web-chat). A download the APP'S OWN page starts is the
+  // product working, not a drive-by; letting it proceed shows Electron's
+  // native save dialog. Anything not initiated by an allowed origin
+  // stays refused, which is what the deny-all was for.
+  ses.on("will-download", (event, item, contents) => {
+    let initiator = "";
+    try {
+      initiator = new URL(contents.getURL()).origin;
+    } catch {
+      /* refused below */
+    }
+    if (allowed.has(initiator)) {
+      log.info(`DOWNLOAD ALLOWED (${initiator}): ${redactUrl(item.getURL())} → save dialog`);
+      return;
+    }
     event.preventDefault();
     log.warn(`DOWNLOAD REFUSED: ${redactUrl(item.getURL())}`);
   });

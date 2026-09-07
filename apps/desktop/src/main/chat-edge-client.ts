@@ -55,6 +55,17 @@ export interface ImportMessageItem {
   created_at: string;
   file_ids?: string[];
 }
+/** POST /api/v1/code/run response (FIX80: rows carry the persisted
+ *  ConversationFile id when a conversation was named). */
+export interface RunCodeResult {
+  exit: number;
+  stdout?: string;
+  stderr?: string;
+  timed_out?: boolean;
+  truncated?: boolean;
+  images?: { id?: string; filename: string; data_uri: string }[];
+  files?: { id?: string; filename: string; content_type: string; size_bytes: number }[];
+}
 
 export class ChatEdgeClient {
   constructor(
@@ -151,22 +162,25 @@ export class ChatEdgeClient {
     return (await res.json()) as { imported: number; skipped: number };
   }
 
-  /** POST /api/v1/code/run — the code interpreter (run_python, host-side in E4). */
-  async runCode(code: string, fileIds: string[], signal: AbortSignal): Promise<{ exit: number; stdout?: string; stderr?: string; timed_out?: boolean; truncated?: boolean; images?: { filename: string; data_uri: string }[] } | null> {
+  /** POST /api/v1/code/run — the code interpreter (run_python, host-side in E4).
+   *  FIX80: naming the conversation makes chat-edge persist every produced
+   *  artifact as a ConversationFile (images AND xlsx/csv/…), each row coming
+   *  back with its file id — the desktop's delivery path into the chat. */
+  async runCode(code: string, fileIds: string[], signal: AbortSignal, conversationId?: string): Promise<RunCodeResult | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
       const res = await fetch(`${this.baseUrl}/api/v1/code/run`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ code, files: fileIds }),
+        body: JSON.stringify({ code, files: fileIds, ...(conversationId ? { conversation_id: conversationId } : {}) }),
         signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]),
       });
       if (!res.ok) {
         this.log.warn(`chat-edge POST /api/v1/code/run → HTTP ${res.status}`);
         return null;
       }
-      return (await res.json()) as { exit: number; stdout?: string; stderr?: string; truncated?: boolean; images?: { filename: string; data_uri: string }[] };
+      return (await res.json()) as RunCodeResult;
     } catch (err) {
       this.log.warn(`chat-edge code/run failed: ${(err as Error).message}`);
       return null;

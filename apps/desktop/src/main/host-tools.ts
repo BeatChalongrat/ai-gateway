@@ -23,6 +23,11 @@ export interface HostToolResult {
    *  renders them all; imageDataUri stays the first for the paths that
    *  can only carry one (the model's vision message). */
   imageDataUris?: string[];
+  /** FIX80 — ConversationFiles this call persisted server-side (run_python
+   *  artifacts: charts AND xlsx/csv/…). The coordinator shows them under
+   *  the assistant message (message_files) and links them at import
+   *  (file_ids), so the user can open and download them from the chat. */
+  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
 }
 export interface NestedRunRequest {
   task: string;
@@ -79,14 +84,19 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
     name: "run_python",
     description:
       "Execute Python in a secure, isolated server sandbox (no network) and return its stdout/stderr. " +
-      "Use it for real computation, data analysis, math, or to generate a chart — instead of guessing. " +
-      "numpy, pandas, matplotlib and openpyxl are available (use matplotlib.use('Agg')). print() what " +
-      "you want to see. To attach a chart image to your reply, save it to /job/out/ " +
-      "(e.g. plt.savefig('/job/out/chart.png')). Read the output, then refine and run again or explain " +
-      "the result. Do NOT invent output you did not see. " +
-      "Making alternatives for the user to choose between? Save them all in ONE run under distinct names " +
-      "(/job/out/option-a.png, /job/out/option-b.png) — all are shown. Re-running because the previous " +
-      "attempt was wrong? Write to the SAME filename — only the last attempt stays visible.",
+      "Use it for real computation, data analysis, math, or to generate a chart or a file — instead of " +
+      "guessing. numpy, pandas, matplotlib and openpyxl are available (use matplotlib.use('Agg')). " +
+      "print() what you want to see. THE way to hand the user a picture or a file (PNG, xlsx, csv, …) " +
+      "is to WRITE IT TO /job/out/ — e.g. plt.savefig('/job/out/chart.png') or " +
+      "df.to_excel('/job/out/report.xlsx'). Everything in /job/out/ is attached to the chat, where the " +
+      "user can view and download it; files written anywhere else are discarded. Files made with " +
+      "run_command or write_file stay on the user's computer and CANNOT be attached to the chat, and " +
+      "pasting base64 of a file into your reply never works — use /job/out/ instead. " +
+      "Read the output, then refine and run again or explain the result. Do NOT invent output you did " +
+      "not see. Making alternatives for the user to choose between? Save them all in ONE run under " +
+      "distinct names (/job/out/option-a.png, /job/out/option-b.png) — all are shown. Re-running " +
+      "because the previous attempt was wrong? Write to the SAME filename — only the last attempt " +
+      "stays visible.",
     inputSchema: { type: "object", properties: { code: { type: "string", description: "The Python source to run. Self-contained; use print() to surface results." } }, required: ["code"] },
   },
   // FIX11 §2: search the user's own past conversations/messages/memories.
@@ -271,7 +281,12 @@ export class HostTools {
       case "run_python": {
         const code = args["code"];
         if (typeof code !== "string" || !code.trim()) return { ok: false, text: "'code' is required.", imageDataUri: null };
-        const r = await this.chatEdge.runCode(code, [], ctx.signal);
+        // FIX80 — naming the conversation makes chat-edge PERSIST every
+        // /job/out/ artifact as a ConversationFile; before this, images
+        // lived only in a session data URI and .xlsx/.csv bytes were
+        // silently discarded, so the model went hunting for somewhere on
+        // the user's disk to write a "real file" (the owner's PNG turn).
+        const r = await this.chatEdge.runCode(code, [], ctx.signal, ctx.conversationId);
         if (!r) return { ok: false, text: "Code interpreter call failed (chat-edge unreachable or refused).", imageDataUri: null };
         const lines: string[] = [`Exit code: ${r.exit}`];
         const stdout = (r.stdout ?? "").replace(/\n+$/, "");
@@ -281,11 +296,25 @@ export class HostTools {
         if (r.truncated) lines.push("[output truncated]");
         if (!stdout && !stderr) lines.push("(no output was printed)");
         const images = r.images ?? [];
-        if (images.length) lines.push("", "Generated image(s): " + images.map((i) => i.filename).join(", "));
+        const files = r.files ?? [];
+        const attached: { id: string; filename: string; content_type: string; file_size_bytes: number }[] = [];
+        for (const i of images) if (i.id) attached.push({ id: i.id, filename: i.filename, content_type: guessImageMime(i.data_uri), file_size_bytes: dataUriBytes(i.data_uri) });
+        for (const f of files) if (f.id) attached.push({ id: f.id, filename: f.filename, content_type: f.content_type, file_size_bytes: f.size_bytes });
+        if (attached.length) {
+          lines.push("", "Attached to this chat (the user can open and download them there — no need to save them anywhere else): " + attached.map((a) => a.filename).join(", "));
+        } else if (images.length || files.length) {
+          lines.push("", "Generated: " + [...images.map((i) => i.filename), ...files.map((f) => f.filename)].join(", "));
+        }
         // FIX79 — a single run may deliberately produce ALTERNATIVES; every
         // image rides the result so the card shows them all (the first one
         // used to be the only survivor).
-        return { ok: true, text: lines.join("\n"), imageDataUri: images[0]?.data_uri ?? null, ...(images.length > 1 ? { imageDataUris: images.map((i) => i.data_uri) } : {}) };
+        return {
+          ok: true,
+          text: lines.join("\n"),
+          imageDataUri: images[0]?.data_uri ?? null,
+          ...(images.length > 1 ? { imageDataUris: images.map((i) => i.data_uri) } : {}),
+          ...(attached.length ? { attachedFiles: attached } : {}),
+        };
       }
       case "search_past_conversations": {
         const query = args["query"];
@@ -336,6 +365,19 @@ export class HostTools {
         return { ok: false, text: `Unknown host tool '${name}'.`, imageDataUri: null };
     }
   }
+}
+
+/** Mime from a data URI ("data:image/png;base64,…"), image/png fallback. */
+function guessImageMime(dataUri: string): string {
+  const m = /^data:([^;,]+)[;,]/.exec(dataUri);
+  return m?.[1] ?? "image/png";
+}
+
+/** Approximate byte size of a base64 data URI's payload. */
+function dataUriBytes(dataUri: string): number {
+  const i = dataUri.indexOf(",");
+  if (i < 0) return 0;
+  return Math.floor(((dataUri.length - i - 1) * 3) / 4);
 }
 
 function trace(entries: string[]): string {

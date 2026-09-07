@@ -16,7 +16,9 @@
 //   message_start, content_delta, reasoning_delta, analysis_status, status,
 //   tool_activity {id, tool, phase, argsSummary, subject?, parentId?, success?, durationMs?,
 //   resultPreview?, imageDataUri?, imageDataUris?, isCodeRun?, codeText?}, tool_output {id, chunk},
-//   plan_update {steps}, fallback_info, reasoning_notice, error, message_complete.
+//   plan_update {steps}, message_files {message_id, files} (FIX80 — files a
+//   tool persisted into the conversation), fallback_info, reasoning_notice,
+//   error, message_complete.
 //
 // History: userData/history/<conversation>.json keeps the FULL gateway
 // message list including assistant tool_calls and tool results (chat-edge's
@@ -99,6 +101,10 @@ const TERMINAL_TURN_EVENTS = new Set(["message_complete", "error", "cancelled"])
 interface RunningTurn {
   controller: AbortController;
   done: Promise<void>;
+  /** FIX80 — ConversationFiles the turn's tools persisted server-side
+   *  (run_python artifacts). Shown live via a message_files frame and
+   *  linked to the assistant row at import (file_ids). */
+  attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
   messageId: string;
   assistantText: string;
   /** FIX35 Part B — the model the gateway said actually answered (an
@@ -1902,6 +1908,22 @@ export class TurnCoordinator {
           text = r.text;
           image = r.imageDataUri;
           imagesAll = r.imageDataUris && r.imageDataUris.length > 1 ? r.imageDataUris : null;
+          // FIX80 — the tool persisted files into the conversation
+          // (run_python artifacts): show them under the assistant message
+          // NOW (message_files) and remember them for the import, which
+          // links them to the assistant row (file_ids) so they survive a
+          // reload and sync to the web view.
+          if (ok && r.attachedFiles?.length) {
+            const turn = this.turns.get(eventConv);
+            if (turn) {
+              turn.attachedFiles = [...(turn.attachedFiles ?? []), ...r.attachedFiles];
+              const now = new Date().toISOString();
+              this.emit(eventConv, "message_files", {
+                message_id: turn.messageId,
+                files: turn.attachedFiles.map((f) => ({ ...f, extraction_status: "completed", created_at: now, message_id: turn.messageId })),
+              });
+            }
+          }
         } catch (err) {
           ok = false;
           text = `${name} threw: ${(err as Error).message}`;
@@ -2665,13 +2687,17 @@ export class TurnCoordinator {
   }
 
   private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<void> {
-    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0) return;
+    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return;
     const now = new Date().toISOString();
     const items = [];
     // FIX27: file_ids link the uploaded rows to this user message on chat-edge
     // (the web view shows the chips; a web continuation replays the images).
     if (userText.length > 0 || fileIds.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now, ...(fileIds.length ? { file_ids: fileIds } : {}) });
-    if (turn.assistantText.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString() });
+    // FIX80 — files the turn's tools persisted (run_python artifacts) link
+    // to the ASSISTANT row, so they render under the reply after a reload
+    // and on the web view, exactly like web run_python attachments.
+    const asstFileIds = (turn.attachedFiles ?? []).map((f) => f.id);
+    if (turn.assistantText.length > 0 || asstFileIds.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}) });
     void chain;
     const result = await this.chatEdge.importMessages(conversationId, items);
     if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
