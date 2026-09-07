@@ -85,7 +85,11 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
     description:
       "Execute Python in a secure, isolated server sandbox (no network) and return its stdout/stderr. " +
       "Use it for real computation, data analysis, math, or to generate a chart or a file — instead of " +
-      "guessing. numpy, pandas, matplotlib and openpyxl are available (use matplotlib.use('Agg')). " +
+      "guessing. Available: data science (numpy, pandas, scipy, scikit-learn, statsmodels, sympy), " +
+      "charts (matplotlib, seaborn — use matplotlib.use('Agg'); Thai text renders correctly by " +
+      "default), reading AND writing Excel, Word, PowerPoint and PDF files, OCR of scanned documents " +
+      "including Thai, images (pillow), and legacy Thai-encoded CSVs (charset-normalizer detects " +
+      "TIS-620/CP874). " +
       "print() what you want to see. THE way to hand the user a picture or a file (PNG, xlsx, csv, …) " +
       "is to WRITE IT TO /job/out/ — e.g. plt.savefig('/job/out/chart.png') or " +
       "df.to_excel('/job/out/report.xlsx'). Everything in /job/out/ is attached to the chat, where the " +
