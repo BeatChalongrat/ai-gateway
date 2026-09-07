@@ -1668,7 +1668,10 @@ func runPythonToolDef() GatewayTool {
 				"reply automatically. After it runs, read the output and either refine the code and run " +
 				"again, or explain the result to the user. Do NOT invent output you did not see; run the " +
 				"code to find out. To read files the user attached to this conversation, pass their " +
-				"file_id(s) in 'files' — each is mounted read-only at /job/in/<original_filename>.",
+				"file_id(s) in 'files' — each is mounted read-only at /job/in/<original_filename>. " +
+				"Making alternatives for the user to choose between? Save them all in ONE run under " +
+				"distinct names (/job/out/option-a.png, /job/out/option-b.png) — all are attached. " +
+				"Re-running because the previous attempt was wrong? Write to the SAME filename.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
