@@ -231,7 +231,17 @@ async def get_models(
             ),
         )
     ).scalars().all()
+    # FIX84 Part B — the ``mock`` provider is a test backend. The admin switch
+    # ``media_allow_mock`` (default off) already refuses it as a generation
+    # DESTINATION (destinations.usable_destinations), and the image listing
+    # above honours that. This listing did not, so "Mock Video 1 · mock" sat
+    # first in every real user's picker while the switch said no. Same
+    # answer, same switch, no third axis: a mock row is offered only while
+    # the operator has explicitly allowed mock.
+    mock_enabled = media_dest.allow_mock_sync(session)
     for mc in media_rows:
+        if media_dest.is_mock_provider(mc.provider) and not mock_enabled:
+            continue
         mcaps: dict[str, bool] = {}
         if mc.supports_video_gen:  # FIX28 §5.2: kind is a fact; the gate is elsewhere
             mcaps["video_generation"] = True

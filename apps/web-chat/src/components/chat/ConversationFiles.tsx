@@ -5,7 +5,8 @@
 // download link. Fetches on open so we don't pay for the round-trip
 // on conversations that have no attachments yet.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 import { useT } from "@/lib/i18n";
 
@@ -45,14 +46,9 @@ export function ConversationFiles({ conversationId }: Props) {
     };
   }, [conversationId]);
 
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", off);
-    return () => document.removeEventListener("mousedown", off);
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(ref, open, closePopover);
 
   async function refetch() {
     setLoading(true);

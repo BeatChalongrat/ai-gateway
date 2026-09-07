@@ -32,7 +32,7 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { toast } from "@/components/ui/Toast";
-import { VOICE_TOGGLE_EVENT, lastAssistantResponse } from "@/lib/composerShortcuts";
+import { CONV_SEARCH_EVENT, VOICE_TOGGLE_EVENT, lastAssistantResponse } from "@/lib/composerShortcuts";
 import { tOutside } from "@/lib/i18n";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -44,6 +44,10 @@ interface Options {
   onDeleteConversation?: () => void;
   /** FIX34 — Cmd/Ctrl+, */
   onOpenSettings?: () => void;
+  /** FIX84 row 1 — Cmd/Ctrl+K when the sidebar's search input is not on
+   *  screen yet: the caller brings the sidebar into view (mobile drawer
+   *  / collapsed rail); the hook then asks the sidebar to expand search. */
+  onSearchConversations?: () => void;
 }
 
 const TEXT_INPUT_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
@@ -95,6 +99,8 @@ export function useKeyboardShortcuts(opts: Options) {
   deleteRef.current = opts.onDeleteConversation;
   const settingsRef = useRef(opts.onOpenSettings);
   settingsRef.current = opts.onOpenSettings;
+  const searchRef = useRef(opts.onSearchConversations);
+  searchRef.current = opts.onSearchConversations;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -145,14 +151,25 @@ export function useKeyboardShortcuts(opts: Options) {
       }
 
       if (!e.shiftKey && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
         const el = document.querySelector<HTMLInputElement>(
           'input[data-shortcut="conv-search"]',
         );
         if (el) {
-          e.preventDefault();
           el.focus();
           el.select();
+          return;
         }
+        // FIX84 row 1 — the input is not mounted until the search row is
+        // expanded (Sidebar keeps that as local state). Bring the sidebar
+        // on screen first, then ask it to expand; the dispatch is deferred
+        // one tick so a sidebar that was collapsed or closed has mounted
+        // its listener by the time the event arrives.
+        searchRef.current?.();
+        window.setTimeout(
+          () => window.dispatchEvent(new CustomEvent(CONV_SEARCH_EVENT)),
+          0,
+        );
         return;
       }
 

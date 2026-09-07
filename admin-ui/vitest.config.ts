@@ -8,6 +8,11 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // FIX84 — the first .tsx test in this lane: Next's tsconfig keeps jsx
+  // "preserve", which esbuild cannot execute; the automatic runtime lets
+  // component tests import pages directly.
+  // (same trick as apps/web-chat/vitest.config.ts: the oxc transform, no plugin)
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],

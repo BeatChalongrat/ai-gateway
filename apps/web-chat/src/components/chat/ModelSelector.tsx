@@ -13,7 +13,8 @@
 // outer shell (mobile bottom sheet / desktop popover, backdrop, theme
 // tokens) is unchanged from the previous flat-list version.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 import { hasToolsCap, hasVisionCap } from "@/lib/visionGate";
 import { BrainCircuit, ImagePlus, Search, Sparkles, X, Eye } from "lucide-react";
 
@@ -135,16 +136,9 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close on outside click (mousedown so it fires before the trigger's
-  // own click toggles it back open).
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: globalThis.MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", off);
-    return () => document.removeEventListener("mousedown", off);
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(ref, open, closePopover);
 
   // Lazy-load the catalog the first time the picker opens.
   useEffect(() => {

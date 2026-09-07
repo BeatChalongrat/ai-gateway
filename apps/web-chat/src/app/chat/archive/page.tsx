@@ -39,8 +39,11 @@ export default function ArchivePage() {
   }, []);
 
   async function unarchive(id: string) {
-    await setArchived(id, false);
-    toast(t("archive.toast.unarchived"));
+    // FIX84 row 6 — one click, one outcome. The store raises the failure
+    // banner itself and rolls the row back; the success toast belongs
+    // only to the case the server accepted.
+    const ok = await setArchived(id, false);
+    if (ok) toast(t("archive.toast.unarchived"));
   }
 
   return (

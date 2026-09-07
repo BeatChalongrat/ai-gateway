@@ -160,6 +160,11 @@ export default function UsagePage() {
                   key={r}
                   onClick={() => setRange(r)}
                   type="button"
+                  // FIX84 row 4 — the chips always filtered the loaded rows
+                  // (verified by driving them); what was missing was the
+                  // machine-readable pressed state, so nothing but the eye
+                  // could tell which range was active.
+                  aria-pressed={active}
                   className="chip-bounce px-3 py-1.5 text-sm font-medium rounded-md"
                   style={{
                     background: active ? "var(--bg-elevated)" : "transparent",

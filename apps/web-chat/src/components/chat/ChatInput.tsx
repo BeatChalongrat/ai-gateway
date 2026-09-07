@@ -28,9 +28,11 @@ import { detectImageIntent } from "@/lib/imageIntent";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
+  applySlashAvailability,
   filterSlashCommands,
   slashQuery,
   type SlashCommand,
+  type SlashOffer,
 } from "@/lib/slashCommands";
 import { toast } from "@/components/ui/Toast";
 import {
@@ -213,10 +215,6 @@ export function ChatInput({
       alive = false;
     };
   }, [hosted]);
-  const slashCommands = slashToken === null ? [] : filterSlashCommands(slashToken, skillCommands);
-  const slashOpen = slashToken !== null;
-  const [slashIndex, setSlashIndex] = useState(0);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // Reset the highlight whenever the candidate list changes, so Enter
   // never runs the action that happened to sit at a stale index.
   useEffect(() => {
@@ -283,6 +281,28 @@ export function ChatInput({
   // the chat composer (modelKind defaults to "chat" when the model is the
   // Auto sentinel, unknown, or a payload without model_kind).
   const modelKind = activeModel?.model_kind ?? "chat";
+
+  // FIX84 row 2 — the menu offers exactly what the toolbar offers: the
+  // same capability answers decide usable / disabled-with-reason / hidden
+  // (lib/slashCommands.applySlashAvailability). No second list.
+  const imageFeatureAvailable = models.some(
+    (m) =>
+      m.capabilities?.includes("image_generation_via_tools") ||
+      m.capabilities?.includes("image_generation"),
+  );
+  const slashCommands =
+    slashToken === null
+      ? []
+      : applySlashAvailability(filterSlashCommands(slashToken, skillCommands), {
+          canGenerateImages,
+          imageFeatureAvailable,
+          canGenerateVideos,
+          videoFeatureAvailable,
+          hosted,
+        });
+  const slashOpen = slashToken !== null;
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // W3 — vision gating. The picker's accept-list and the send gate
   // react to the model instantly; the paste/drop paths gate through
   // gateImagesForVision (reading the CURRENT id via the ref, because
@@ -628,17 +648,24 @@ export function ChatInput({
   // Every slash action is a shortcut into a flow that already exists —
   // see lib/slashCommands.ts. Running one always clears the token so the
   // composer is left empty and ready for the real message.
-  function runSlashCommand(cmd: SlashCommand) {
+  function runSlashCommand(cmd: SlashOffer) {
+    // FIX84 row 2 — a listed-but-disabled command says why instead of
+    // silently swallowing the token: the reason is toasted and the
+    // composer keeps whatever the user typed.
+    if (cmd.disabledReasonKey) {
+      toast(tOutside(cmd.disabledReasonKey));
+      taRef.current?.focus();
+      return;
+    }
     setText("");
     switch (cmd.id) {
       case "image":
-        // Mirrors the toolbar button: the mode only exists when the
-        // selected model can generate images, so this is a no-op
-        // otherwise rather than a mode the send path would drop.
-        if (canGenerateImages) setImageMode(true);
+        // Only offered when the selected model can generate images (the
+        // availability rule above mirrors the toolbar button).
+        setImageMode(true);
         break;
       case "video":
-        if (canGenerateVideos) setVideoMode(true);
+        setVideoMode(true);
         break;
       case "new":
         // Same handler the sidebar button and Cmd+Shift+N use.

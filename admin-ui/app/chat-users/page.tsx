@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import ConfirmModal from "../../components/ui/ConfirmModal";
 import PageHeader from "../../components/ui/PageHeader";
 import Pagination from "../../components/ui/Pagination";
 import ErrorState from "../../components/ui/ErrorState";
@@ -70,7 +71,19 @@ export default function ChatUsersPage() {
     void load();
   }, [load]);
 
+  // FIX84 Part D — disabling a user is destructive (they lose chat access
+  // at once, with no undo from their side) and used to fire on the first
+  // click. It now asks first, naming the user and the consequence.
+  // Re-enabling restores access, so it stays one click.
+  const [disableTarget, setDisableTarget] = useState<AdminUserRow | null>(null);
+
+  function requestToggle(u: AdminUserRow) {
+    if (u.is_active) setDisableTarget(u);
+    else void toggleActive(u);
+  }
+
   async function toggleActive(u: AdminUserRow) {
+    setDisableTarget(null);
     setPendingId(u.id);
     try {
       await patchAdminUser(u.id, { is_active: !u.is_active });
@@ -266,7 +279,7 @@ export default function ChatUsersPage() {
                         <td>
                           <button
                             type="button"
-                            onClick={() => void toggleActive(u)}
+                            onClick={() => requestToggle(u)}
                             disabled={pendingId === u.id}
                             // State-aware, token-colored affordance for the
                             // active/inactive concept: enabling a disabled user
@@ -308,6 +321,17 @@ export default function ChatUsersPage() {
           )}
         </div>
       )}
+      <ConfirmModal
+        open={!!disableTarget}
+        onClose={() => setDisableTarget(null)}
+        onConfirm={() => disableTarget && void toggleActive(disableTarget)}
+        title={t("chat.users.disableTitle")}
+        message={t("chat.users.disableBody", {
+          name: disableTarget?.name || disableTarget?.email || "",
+        })}
+        confirmLabel={t("chat.users.disableConfirm")}
+        loading={!!disableTarget && pendingId === disableTarget.id}
+      />
     </div>
   );
 }

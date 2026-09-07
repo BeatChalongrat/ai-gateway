@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
@@ -19,14 +20,9 @@ export function ExportMenu({ conversationId, onShare }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", off);
-    return () => document.removeEventListener("mousedown", off);
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(ref, open, closePopover);
 
   async function exportFile(format: "markdown" | "json") {
     setOpen(false);

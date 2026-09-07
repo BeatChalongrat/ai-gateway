@@ -13,7 +13,8 @@
 // Lazy-loads the KB list on first dropdown open so the chat page
 // doesn't pay the round-trip until the user actually cares.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 
@@ -42,16 +43,9 @@ export function KBSelector({
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside click. We use mousedown so clicking inside still
-  // gets a chance to handle the event before the outer guard fires.
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", off);
-    return () => document.removeEventListener("mousedown", off);
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(wrapRef, open, closePopover);
 
   // Lazy-load on first open so the chat page doesn't pay the round-
   // trip for users who never use RAG.

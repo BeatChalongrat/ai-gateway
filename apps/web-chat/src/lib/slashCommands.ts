@@ -89,3 +89,55 @@ export function filterSlashCommands(query: string, extra: readonly SlashCommand[
 export function shouldShowSlashMenu(text: string): boolean {
   return slashQuery(text) !== null;
 }
+
+// FIX84 Part A row 2 — a slash command is offered exactly where the toolbar
+// button it stands for is offered. The composer's 🎨 / 🎬 buttons already
+// read the catalogue's capability answer (FIX62/64/65: provider-aware
+// detection, the chat floor, "a key being present is not a key being
+// usable"); this function applies the SAME answers to the menu instead of
+// keeping a second list. Three outcomes, mirroring the buttons:
+//   * usable   → listed and runnable;
+//   * disabled → listed with the reason (the feature exists on this
+//                deployment, the SELECTED model cannot drive it — the 🎬
+//                rule from FIX47.6 Part C); picking it toasts the reason
+//                and leaves the composer text alone;
+//   * hidden   → not listed (nothing on this deployment can do it — the
+//                FIX11/FIX34.1 rule: no affordance for what nothing can do;
+//                video is also hidden on the desktop host, like its button).
+// A model that gains the capability later simply flips the flags on the
+// next catalogue load — there is nothing here to update.
+export interface SlashAvailability {
+  canGenerateImages: boolean;
+  imageFeatureAvailable: boolean;
+  canGenerateVideos: boolean;
+  videoFeatureAvailable: boolean;
+  hosted: boolean;
+}
+
+export type SlashOffer = SlashCommand & {
+  /** Present when the command is listed but cannot run right now:
+   *  the dictionary key of the reason shown in the menu and toasted on pick. */
+  disabledReasonKey?: DictKey;
+};
+
+export function applySlashAvailability(
+  commands: readonly SlashCommand[],
+  a: SlashAvailability,
+): SlashOffer[] {
+  const out: SlashOffer[] = [];
+  for (const cmd of commands) {
+    if (cmd.id === "image") {
+      if (a.canGenerateImages) out.push(cmd);
+      else if (a.imageFeatureAvailable) out.push({ ...cmd, disabledReasonKey: "input.imageMode.needsTools" });
+      continue;
+    }
+    if (cmd.id === "video") {
+      if (a.hosted || !a.videoFeatureAvailable) continue;
+      if (a.canGenerateVideos) out.push(cmd);
+      else out.push({ ...cmd, disabledReasonKey: "input.videoMode.needsTools" });
+      continue;
+    }
+    out.push(cmd);
+  }
+  return out;
+}

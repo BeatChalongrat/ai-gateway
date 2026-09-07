@@ -92,6 +92,9 @@ export const en = {
   "chat.users.updateFailed": "Failed to update user",
   "chat.users.enableUser": "Enable user",
   "chat.users.disableUser": "Disable user",
+  "chat.users.disableTitle": "Disable this user?",
+  "chat.users.disableBody": "Disable {name}? They lose access to chat immediately; their conversations are kept. You can enable them again from this page.",
+  "chat.users.disableConfirm": "Disable user",
 
   // ── Knowledge bases (list) ───────────────────────────────
   "chat.kb.title": "Knowledge Bases",
@@ -253,6 +256,9 @@ export const th: Record<keyof typeof en, string> = {
   "chat.users.updateFailed": "อัปเดตผู้ใช้ไม่สำเร็จ",
   "chat.users.enableUser": "เปิดใช้งานผู้ใช้",
   "chat.users.disableUser": "ปิดใช้งานผู้ใช้",
+  "chat.users.disableTitle": "ปิดใช้งานผู้ใช้รายนี้?",
+  "chat.users.disableBody": "ปิดใช้งาน {name} หรือไม่? ผู้ใช้จะเข้าใช้แชทไม่ได้ทันที บทสนทนายังเก็บไว้ และเปิดใช้งานอีกครั้งได้จากหน้านี้",
+  "chat.users.disableConfirm": "ปิดใช้งานผู้ใช้",
 
   // ── Knowledge bases (list) ───────────────────────────────
   "chat.kb.title": "ฐานความรู้",

@@ -36,6 +36,7 @@ import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { downloadMemoryExport } from "@/lib/memoryExport";
 import type { Memory } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 
@@ -214,18 +215,18 @@ export default function MemorySettingsPage() {
   async function handleExport() {
     setExporting(true);
     try {
-      const res = await api.exportMemories();
-      // Browser-side download: open a fresh tab pointed at the
-      // download endpoint. The auth layer attaches the Portal
-      // token via the same fetch chain elsewhere — for a direct
-      // navigation we lean on the portal_access_token cookie that
-      // the Portal mirrors cross-port on localhost (same trick
-      // file downloads use today).
-      window.open(api.exportDownloadUrl(res.export_id), "_blank");
-      toast(t("memory.export.ready", { size: prettySize(res.size_bytes) }));
+      // FIX84 row 5 — the bytes travel through the authenticated client and
+      // land as an in-app blob download (lib/memoryExport.ts); "ready" is
+      // said only once that has happened. The old window.open of the
+      // download URL sent the desktop to a cookie-less system browser
+      // (401) while this toast still said ready.
+      const out = await downloadMemoryExport(api);
+      toast(t("memory.export.ready", { size: prettySize(out.sizeBytes) }));
     } catch (err) {
+      // A server message (e.g. "export disabled for this tenant") is shown
+      // as is; a bare transport failure gets the dictionary sentence.
       const msg =
-        err instanceof ApiError ? err.message : t("memory.export.error");
+        err instanceof ApiError && err.message ? err.message : t("memory.export.error");
       toast(msg);
     } finally {
       setExporting(false);

@@ -233,7 +233,12 @@ interface ChatState {
   /** Archive / un-archive. NOT a delete — the chat only leaves the
    *  sidebar list. Optimistic: the row disappears (or comes back)
    *  immediately; rolls back on failure. */
-  setConversationArchived: (id: string, archived: boolean) => Promise<void>;
+  /** FIX84 row 6 — resolves true only when the server accepted the move.
+   *  The optimistic list update is rolled back on failure and the error
+   *  banner raised here; callers must NOT announce success unless this
+   *  returns true (the archive page used to toast "moved back" on top of
+   *  the failure banner). */
+  setConversationArchived: (id: string, archived: boolean) => Promise<boolean>;
   /** Archived conversations, loaded on demand by the archive view.
    *  Kept out of `conversations` so the sidebar's grouping/pagination
    *  logic never has to filter them out. */
@@ -690,7 +695,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const existing =
       get().conversations.find((c) => c.id === id) ??
       get().archivedConversations.find((c) => c.id === id);
-    if (!existing) return;
+    if (!existing) return false;
 
     // Optimistic move between the two lists. Archiving must feel like
     // filing, not loading: the row leaves the sidebar at once.
@@ -705,6 +710,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       await api.setConversationArchived(id, archived);
+      return true;
     } catch {
       // Put it back exactly where it was.
       set((s) => ({
@@ -716,6 +722,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           : [{ ...existing, is_archived: true }, ...s.archivedConversations.filter((c) => c.id !== id)],
       }));
       get().setError(tOutside("archive.error.failed"));
+      return false;
     }
   },
 

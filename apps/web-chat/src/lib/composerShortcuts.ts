@@ -22,6 +22,13 @@ export const EDIT_MESSAGE_EVENT = "sran:edit-message";
 /** Fired by the global shortcut (Ctrl+Shift+V); the composer toggles the mic. */
 export const VOICE_TOGGLE_EVENT = "sran:voice-toggle";
 
+/** FIX84 row 1 — dispatched on ``window`` by Cmd/Ctrl+K (useKeyboardShortcuts)
+ *  when the sidebar's search input is not mounted; the Sidebar listens and
+ *  expands its search row (whose input autofocuses). Lives here, next to the
+ *  other composer/sidebar events, so tests that mock the hook module keep
+ *  working. */
+export const CONV_SEARCH_EVENT = "sran:conversation-search";
+
 export function shouldPasteAsFile(text: string, hasImages: boolean): boolean {
   if (hasImages) return false;
   return text.length >= PASTE_AS_FILE_THRESHOLD;

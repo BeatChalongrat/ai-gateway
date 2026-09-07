@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import PageHeader from "../../components/ui/PageHeader";
 import Badge from "../../components/ui/Badge";
+import ConfirmModal from "../../components/ui/ConfirmModal";
 import ErrorState from "../../components/ui/ErrorState";
 import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
@@ -338,7 +339,13 @@ function KeysPanel({
     }
   }
 
+  // FIX84 Part D sibling — deactivating a provider key stops traffic on it
+  // and cannot be undone (the row stays inactive; a new key must be added).
+  // It used to fire on the first click; it now asks, naming the key.
+  const [deleteTarget, setDeleteTarget] = useState<ProviderKey | null>(null);
+
   async function handleDelete(keyId: string) {
+    setDeleteTarget(null);
     try {
       await api.delete(`/admin/providers/${providerName}/keys/${keyId}`);
       toast(t("infra.providers.toastDeactivated"));
@@ -429,7 +436,7 @@ function KeysPanel({
                       <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => handleTest(k.id)} disabled={testingId === k.id}>
                         {testingId === k.id ? "…" : t("action.test")}
                       </button>
-                      <button className="sran-btn sran-btn-danger sran-btn-sm" onClick={() => handleDelete(k.id)}>
+                      <button className="sran-btn sran-btn-danger sran-btn-sm" onClick={() => setDeleteTarget(k)}>
                         {t("action.delete")}
                       </button>
                     </div>
@@ -444,6 +451,18 @@ function KeysPanel({
           {t("infra.providers.noKeysConfigured")}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && void handleDelete(deleteTarget.id)}
+        title={t("infra.providers.deleteKeyTitle")}
+        message={t("infra.providers.deleteKeyBody", {
+          label: deleteTarget?.label || "—",
+          masked: deleteTarget?.key_masked || "",
+        })}
+        confirmLabel={t("infra.providers.deleteKeyConfirm")}
+      />
 
       {selfHosted && (
         <div style={{ marginBottom: "0.75rem" }}>

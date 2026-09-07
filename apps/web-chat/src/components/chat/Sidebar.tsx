@@ -21,7 +21,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { logoutSession } from "@/lib/auth";
+import { CONV_SEARCH_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -118,6 +120,16 @@ export function Sidebar({
   );
   const debouncedSearch = useDebounce(search, 300);
   const t = useT();
+  const hint = useShortcutHint();
+
+  // FIX84 row 1 — Cmd/Ctrl+K arrives here when the search input is not
+  // mounted yet (it only exists while the row is expanded). Expanding the
+  // row mounts the autofocused input, which is what the shortcut wants.
+  useEffect(() => {
+    const onSearchShortcut = () => setSearchExpanded(true);
+    window.addEventListener(CONV_SEARCH_EVENT, onSearchShortcut);
+    return () => window.removeEventListener(CONV_SEARCH_EVENT, onSearchShortcut);
+  }, []);
 
   useEffect(() => {
     if (!conversationsLoaded) void loadConversations();
@@ -351,7 +363,7 @@ export function Sidebar({
             type="button"
             onClick={onToggleCollapsed}
             aria-label={t("a11y.collapseSidebar")}
-            title="Collapse sidebar (⌘⇧S)"
+            title={`${t("a11y.collapseSidebar")} (${hint("Mod+Shift+S")})`}
             className="focus-ring tap-44 hidden rounded-md p-1.5 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary md:inline-flex"
           >
             <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -383,7 +395,7 @@ export function Sidebar({
             </svg>
             <span>{t("sidebar.newChat")}</span>
             <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
-              ⌘⇧N
+              {hint("Mod+Shift+N")}
             </span>
           </button>
 
@@ -477,7 +489,7 @@ export function Sidebar({
               </svg>
               <span>{t("sidebar.searchChats")}</span>
               <span className="ml-auto hidden text-[10px] text-text-muted md:inline">
-                ⌘K
+                {hint("Mod+K")}
               </span>
             </button>
           )}
@@ -504,10 +516,12 @@ export function Sidebar({
           }}
           onTogglePin={(id) => togglePinConversation(id)}
           onToggleArchive={async (id) => {
-            await setConversationArchived(id, true);
+            const ok = await setConversationArchived(id, true);
             // Archiving the OPEN chat would leave the user staring at a
             // thread that is no longer in the list — send them home.
-            if (id === activeId) router.replace("/chat");
+            // FIX84 row 6: only when it actually archived; on failure the
+            // row is back in the list and the banner says so.
+            if (ok && id === activeId) router.replace("/chat");
           }}
           projects={projects}
           onMoveToProject={(id, projectId) => moveConversationToProject(id, projectId)}

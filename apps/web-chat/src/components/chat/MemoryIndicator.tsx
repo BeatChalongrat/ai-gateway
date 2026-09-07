@@ -14,7 +14,8 @@
 // the Sidebar's UserMenu uses. Lives in the chat header next to
 // WorkspaceButton / ConversationFiles / ExportMenu.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 import { useRouter } from "next/navigation";
 
 import { Brain, BrainCircuit } from "lucide-react";
@@ -48,21 +49,9 @@ export function MemoryIndicator({ conversationId }: Props) {
   // reads; the chat layout's useMemoryPendingPoll keeps it fresh.
   const pendingCount = useMemoryPendingStore((s) => s.count);
 
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(wrapRef, open, closePopover);
 
   async function toggle() {
     if (!conv) return;

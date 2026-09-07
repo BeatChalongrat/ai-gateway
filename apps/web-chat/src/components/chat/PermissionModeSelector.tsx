@@ -16,7 +16,8 @@
 // the menu, and the menu says it resets to "Asks each action" on restart
 // (§1c.3 — the host enforces that; this only tells the user).
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useDismissable } from "@/hooks/useDismissable";
 import { AlertTriangle, FastForward, Hand } from "lucide-react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
@@ -85,14 +86,9 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
     };
   }, [hosted]);
 
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: globalThis.MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", off);
-    return () => document.removeEventListener("mousedown", off);
-  }, [open]);
+  // FIX84 row 3 — outside-click AND Escape, through the one shared rule.
+  const closePopover = useCallback(() => setOpen(false), []);
+  useDismissable(ref, open, closePopover);
 
   if (!hosted) return null;
 

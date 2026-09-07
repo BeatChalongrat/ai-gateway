@@ -23,6 +23,7 @@ import {
   useNewChatHandler,
 } from "@/hooks/useKeyboardShortcuts";
 import { useMemoryPendingPoll } from "@/hooks/useMemoryPendingCount";
+import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { redirectToPortalLogin } from "@/lib/auth";
 import { useT } from "@/lib/i18n";
 import { useAuthStore } from "@/stores/authStore";
@@ -161,6 +162,16 @@ export default function ChatLayout({
     // FIX43 Part B4 — the web has a Settings page now; Ctrl+, goes there on
     // both surfaces (OPEN_DECISIONS #23 closed).
     onOpenSettings: () => router.push("/chat/settings"),
+    // FIX84 row 1 — Ctrl+K from anywhere: bring the sidebar on screen (the
+    // mobile drawer, or the collapsed rail), then the hook asks it to expand
+    // its search row.
+    onSearchConversations: () => {
+      if (typeof window !== "undefined" && window.innerWidth < 768) {
+        setSidebarOpen(true);
+      } else if (useSidebarStore.getState().collapsed) {
+        toggleCollapsed();
+      }
+    },
   });
 
   if (!isReady) {
@@ -276,12 +287,13 @@ function CollapsedRail({
   onNewChat: () => void;
 }) {
   const t = useT();
+  const hint = useShortcutHint();
   return (
     <div className="hidden items-center gap-1 md:flex">
       <button
         type="button"
         aria-label={t("a11y.expandSidebar")}
-        title="Expand sidebar (⌘⇧S)"
+        title={`${t("a11y.expandSidebar")} (${hint("Mod+Shift+S")})`}
         onClick={onExpand}
         className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
@@ -290,7 +302,7 @@ function CollapsedRail({
       <button
         type="button"
         aria-label={t("sidebar.newChat")}
-        title="New chat (⌘⇧N)"
+        title={`${t("sidebar.newChat")} (${hint("Mod+Shift+N")})`}
         onClick={onNewChat}
         className="focus-ring tap-44 rounded-md p-2 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
