@@ -397,6 +397,7 @@ export function FilePreviewPane() {
   return (
     <SidePane
       open={file !== null}
+      widthKey="preview"
       label={shown?.filename ?? t("preview.close")}
       actions={shown ? <DownloadButton file={shown} /> : null}
       maxWidth={672}

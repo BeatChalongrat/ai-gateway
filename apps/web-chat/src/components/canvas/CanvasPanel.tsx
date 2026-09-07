@@ -102,6 +102,7 @@ export function CanvasPanel() {
   return (
     <SidePane
       open={open}
+      widthKey="canvas"
       label={t("canvas.title")}
       title={artifact?.title || t("canvas.title")}
       subtitle={

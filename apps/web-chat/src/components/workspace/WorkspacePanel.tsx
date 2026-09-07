@@ -84,6 +84,7 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
   return (
     <SidePane
       open={open}
+      widthKey="workspace"
       label={t("ws.panelTitle")}
       subtitle={
         <>

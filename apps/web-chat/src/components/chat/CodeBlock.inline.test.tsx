@@ -49,4 +49,29 @@ describe("inline artifact preview", () => {
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(screen.queryByTestId("interactive-artifact-card")).toBeNull();
   });
+
+  // FIX82 ② — ONE Open-in-Canvas affordance per block (the FIX77 rule,
+  // different widget): the card carries the action for script-needing
+  // html, so the header button hides there and stays everywhere else.
+  it("exactly one Open affordance renders per block, and Copy is untouched", () => {
+    const openLabel = "Open in Canvas";
+    // card case: script-needing html → card only, no header button
+    const { unmount } = render(<CodeBlock><code className="language-html">{`<script>go()</script>`}</code></CodeBlock>);
+    expect(screen.getByTestId("interactive-artifact-card")).toBeTruthy();
+    expect(screen.getAllByText(openLabel)).toHaveLength(1);
+    expect(screen.getByLabelText("Copy code")).toBeTruthy();
+    unmount();
+    // header case: script-free html → inline frame + header button only
+    render(<CodeBlock><code className="language-html">{"<h1>static</h1>"}</code></CodeBlock>);
+    expect(screen.queryByTestId("interactive-artifact-card")).toBeNull();
+    expect(screen.getAllByText(openLabel)).toHaveLength(1);
+    cleanup();
+    // no-frame types (markdown / mermaid / react): header button only
+    for (const [langCls, src] of [["language-markdown", "# hi"], ["language-mermaid", "graph TD; A-->B"], ["language-jsx", "export default () => <b>x</b>"]] as const) {
+      render(<CodeBlock><code className={langCls}>{src}</code></CodeBlock>);
+      expect(screen.getAllByText(openLabel)).toHaveLength(1);
+      expect(screen.queryByTestId("interactive-artifact-card")).toBeNull();
+      cleanup();
+    }
+  });
 });

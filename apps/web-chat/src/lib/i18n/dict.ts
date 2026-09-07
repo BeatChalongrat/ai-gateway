@@ -141,6 +141,7 @@ export const en = {
 
   "preview.title": "Preview",
   "preview.close": "Close preview",
+  "pane.resize": "Resize panel (drag, or use arrow keys; double-click to reset)",
   "preview.download": "Download",
   "preview.loading": "Loading preview…",
   "preview.failed": "Couldn't load this file.",
@@ -1689,6 +1690,7 @@ const th: Record<DictKey, string> = {
 
   "preview.title": "ดูตัวอย่าง",
   "preview.close": "ปิดตัวอย่าง",
+  "pane.resize": "ปรับขนาดแผง (ลาก หรือใช้ปุ่มลูกศร ดับเบิลคลิกเพื่อรีเซ็ต)",
   "preview.download": "ดาวน์โหลด",
   "preview.loading": "กำลังโหลดตัวอย่าง…",
   "preview.failed": "เปิดไฟล์นี้ไม่สำเร็จ",

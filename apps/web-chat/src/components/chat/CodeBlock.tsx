@@ -61,7 +61,16 @@ export function CodeBlock({ children }: PreProps) {
   // Phase 6 / C1 — previewable blocks (html/svg/markdown) get an
   // "Open in Canvas" button NEXT TO copy, never replacing it. The
   // inline code block stays the default render; the canvas is opt-in.
+  //
+  // FIX82 ② — ONE Open affordance per block (the FIX77 rule, different
+  // widget: a block fully presented by a card needs no second button).
+  // Script-needing html renders the FIX81 card, which explains why there
+  // is no preview and carries the action — so the header button hides
+  // for exactly that case and stays for everything else (svg and
+  // script-free html with their inline frames, markdown/mermaid/react
+  // with no card at all). Copy is untouched.
   const canvasType = canvasTypeForBlock(lang, codeText);
+  const interactiveHtml = canvasType === "html" && htmlNeedsScripts(codeText);
   const filename = label !== "Code" && label.includes(".") ? label : undefined;
 
   return (
@@ -70,7 +79,7 @@ export function CodeBlock({ children }: PreProps) {
         <span className="code-block-lang" title={lang || undefined}>
           {label}
         </span>
-        {canvasType ? (
+        {canvasType && !interactiveHtml ? (
           <OpenCanvasButton
             type={canvasType}
             content={codeText}
@@ -92,7 +101,7 @@ export function CodeBlock({ children }: PreProps) {
           deliberately, behind the user's click — and the raw source keeps
           rendering below as before. SVG stays inline (sanitizeSvg strips
           script by design, so a script-less frame is a faithful render). */}
-      {canvasType === "svg" || (canvasType === "html" && !htmlNeedsScripts(codeText)) ? (
+      {canvasType === "svg" || (canvasType === "html" && !interactiveHtml) ? (
         <div className="code-block-preview border-b border-border-subtle bg-white" data-testid="inline-artifact">
           <iframe
             sandbox=""
