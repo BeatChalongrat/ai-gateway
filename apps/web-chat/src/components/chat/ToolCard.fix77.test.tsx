@@ -122,4 +122,24 @@ describe("FIX77 ① — a later run supersedes an earlier image (collapse, never
     expect(supersededImageIds([first, other]).size).toBe(0);
     expect(supersededImageIds([first, second, running]).size).toBe(0);
   });
+
+  // FIX79 — the owner's rule: alternatives offered for a choice must ALL
+  // be visible; only retries (a later run of the same tool) fold.
+  it("several images from ONE run are alternatives — all render, nothing folds", () => {
+    const alts = act({ id: "a1", tool: "run_python", imageDataUris: [PNG, PNG, PNG], isCodeRun: true, codeText: "3 options" });
+    render(<ToolActivityList activities={[alts]} />);
+    expect(screen.getAllByAltText("tool screenshot")).toHaveLength(3);
+    expect(screen.queryByTestId("superseded-image-toggle")).toBeNull();
+  });
+
+  it("a later run supersedes an earlier run's WHOLE set together, and the toggle restores it whole", () => {
+    const earlierPair = act({ id: "a2", tool: "run_python", imageDataUris: [PNG, PNG], isCodeRun: true, codeText: "v1 pair" });
+    const finalPair = act({ id: "a3", tool: "run_python", imageDataUris: [PNG, PNG], isCodeRun: true, codeText: "v2 pair" });
+    render(<ToolActivityList activities={[earlierPair, finalPair]} />);
+    // only the final run's two alternatives show; ONE toggle for the folded pair
+    expect(screen.getAllByAltText("tool screenshot")).toHaveLength(2);
+    expect(screen.getAllByTestId("superseded-image-toggle")).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("superseded-image-toggle"));
+    expect(screen.getAllByAltText("tool screenshot")).toHaveLength(4);
+  });
 });

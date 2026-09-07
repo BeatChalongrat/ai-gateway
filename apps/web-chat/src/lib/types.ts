@@ -876,6 +876,10 @@ export interface ToolActivity {
   isCodeRun?: boolean;
   codeText?: string | null;
   imageDataUri?: string | null;
+  /** FIX79 — every image ONE call produced (run_python alternatives saved
+   *  under distinct names in a single run). All render; a later run of the
+   *  same tool supersedes the whole set together. */
+  imageDataUris?: string[] | null;
   /** Accumulated live stdout/stderr from ``tool_output`` frames. */
   output?: string;
 }

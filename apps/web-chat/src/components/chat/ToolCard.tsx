@@ -119,10 +119,20 @@ function presentedByDedicatedCard(a: ToolActivity, planShown: boolean): boolean 
   return false;
 }
 
-/** FIX77 ① — ids whose inline image is superseded: within one sibling
- *  group (same parentId + same tool), every finished image before the
- *  group's LAST member folds behind a toggle — but only when that last
- *  member did not fail. A failing final attempt collapses nothing. */
+/** FIX79 — the images ONE call produced: the multi-image field when the
+ *  run saved several alternatives, else the single image. Several images
+ *  from one run are alternatives the user must see side by side (the
+ *  owner's rule) — supersede only ever folds ACROSS runs, never within. */
+function imagesOf(a: ToolActivity): string[] {
+  if (a.imageDataUris?.length) return a.imageDataUris;
+  return a.imageDataUri ? [a.imageDataUri] : [];
+}
+
+/** FIX77 ① — ids whose inline image(s) are superseded: within one sibling
+ *  group (same parentId + same tool), every finished image-bearing RUN
+ *  before the group's LAST member folds behind a toggle — but only when
+ *  that last member did not fail. A failing final attempt collapses
+ *  nothing, and a run's several alternatives fold (or stay) together. */
 export function supersededImageIds(activities: ToolActivity[]): Set<string> {
   const groups = new Map<string, ToolActivity[]>();
   for (const a of activities) {
@@ -134,7 +144,7 @@ export function supersededImageIds(activities: ToolActivity[]): Set<string> {
   }
   const out = new Set<string>();
   for (const g of groups.values()) {
-    const withImages = g.filter((a) => a.phase === "finished" && a.imageDataUri);
+    const withImages = g.filter((a) => a.phase === "finished" && imagesOf(a).length > 0);
     if (withImages.length < 2) continue;
     const last = g[g.length - 1]!;
     if (last.phase !== "finished" || last.success === false) continue;
@@ -253,12 +263,13 @@ export function ToolCard({
   }, [running, failed]);
 
   const Icon = toolIcon(activity.tool);
+  const cardImages = imagesOf(activity);
   const rich =
     activity.argsSummary != null ||
     activity.resultPreview != null ||
     activity.input != null ||
     activity.output != null ||
-    activity.imageDataUri != null ||
+    cardImages.length > 0 ||
     activity.isCodeRun;
 
   // Thin fallback (web "started" frames): the original one-line row —
@@ -285,9 +296,9 @@ export function ToolCard({
     activity.resultPreview ||
     activity.output ||
     activity.codeText ||
-    activity.imageDataUri;
+    cardImages.length > 0;
 
-  const showImage = activity.imageDataUri && !running && (!imageSuperseded || showOldImage);
+  const showImages = cardImages.length > 0 && !running && (!imageSuperseded || showOldImage);
 
   return (
     <div
@@ -354,8 +365,10 @@ export function ToolCard({
 
       {/* screenshot / chart — INLINE once the card finishes, without needing
           to expand … unless a LATER run of the same tool superseded it, in
-          which case it folds behind this toggle (collapse, never delete). */}
-      {activity.imageDataUri && !running && imageSuperseded ? (
+          which case it folds behind this toggle (collapse, never delete).
+          FIX79: several images from ONE run are alternatives — they all
+          render, and they fold or return together as one set. */}
+      {cardImages.length > 0 && !running && imageSuperseded ? (
         <button
           type="button"
           onClick={() => setShowOldImage((v) => !v)}
@@ -367,14 +380,17 @@ export function ToolCard({
           {showOldImage ? t("tool.earlierImage.hide") : t("tool.earlierImage.show")}
         </button>
       ) : null}
-      {showImage ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={activity.imageDataUri!}
-          alt="tool screenshot"
-          className="mx-3 mb-2 max-h-64 rounded border border-border-subtle"
-        />
-      ) : null}
+      {showImages
+        ? cardImages.map((uri, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={uri}
+              alt="tool screenshot"
+              className="mx-3 mb-2 max-h-64 rounded border border-border-subtle"
+            />
+          ))
+        : null}
 
       {expanded && !running ? (
         <div className="border-t border-border-subtle px-3 py-2">
