@@ -14,8 +14,8 @@
 //
 // turn.event vocabulary to the page (the Phase 3/4 payloads web-chat renders):
 //   message_start, content_delta, reasoning_delta, analysis_status, status,
-//   tool_activity {id, tool, phase, argsSummary, parentId?, success?, durationMs?,
-//   resultPreview?, imageDataUri?, isCodeRun?, codeText?}, tool_output {id, chunk},
+//   tool_activity {id, tool, phase, argsSummary, subject?, parentId?, success?, durationMs?,
+//   resultPreview?, imageDataUri?, imageDataUris?, isCodeRun?, codeText?}, tool_output {id, chunk},
 //   plan_update {steps}, fallback_info, reasoning_notice, error, message_complete.
 //
 // History: userData/history/<conversation>.json keeps the FULL gateway
@@ -1864,6 +1864,9 @@ export class TurnCoordinator {
     let ok = false;
     let text = "";
     let image: string | null = null;
+    // FIX79 — every image ONE call produced (run_python alternatives);
+    // rides the finished frame so the card renders them all.
+    let imagesAll: string[] | null = null;
     let where: "host" | "sidecar" = "sidecar";
     let rpcError: string | undefined;
     const connectorTool = this.opts.connectorTools?.has(name) === true;
@@ -1898,6 +1901,7 @@ export class TurnCoordinator {
           ok = r.ok;
           text = r.text;
           image = r.imageDataUri;
+          imagesAll = r.imageDataUris && r.imageDataUris.length > 1 ? r.imageDataUris : null;
         } catch (err) {
           ok = false;
           text = `${name} threw: ${(err as Error).message}`;
@@ -1947,6 +1951,7 @@ export class TurnCoordinator {
       resultPreview: content.length > 200 ? content.slice(0, 200) + "..." : content,
       parentId: run.parentToolCallId,
       ...(image ? { imageDataUri: image } : {}),
+      ...(imagesAll ? { imageDataUris: imagesAll } : {}),
     });
     this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: decisionLabel, ok, where, ...(rpcError ? { rpcError } : {}) });
     run.onTrace?.(`${name}${ok ? "" : " (failed)"}`);

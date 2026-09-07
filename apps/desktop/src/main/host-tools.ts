@@ -18,6 +18,11 @@ export interface HostToolResult {
   ok: boolean;
   text: string;
   imageDataUri: string | null;
+  /** FIX79 — EVERY image this one call produced, when there is more than
+   *  one (run_python alternatives saved under distinct names). The card
+   *  renders them all; imageDataUri stays the first for the paths that
+   *  can only carry one (the model's vision message). */
+  imageDataUris?: string[];
 }
 export interface NestedRunRequest {
   task: string;
@@ -78,7 +83,10 @@ export const HOST_TOOL_DEFINITIONS: Record<string, HostToolDefinition> = {
       "numpy, pandas, matplotlib and openpyxl are available (use matplotlib.use('Agg')). print() what " +
       "you want to see. To attach a chart image to your reply, save it to /job/out/ " +
       "(e.g. plt.savefig('/job/out/chart.png')). Read the output, then refine and run again or explain " +
-      "the result. Do NOT invent output you did not see.",
+      "the result. Do NOT invent output you did not see. " +
+      "Making alternatives for the user to choose between? Save them all in ONE run under distinct names " +
+      "(/job/out/option-a.png, /job/out/option-b.png) — all are shown. Re-running because the previous " +
+      "attempt was wrong? Write to the SAME filename — only the last attempt stays visible.",
     inputSchema: { type: "object", properties: { code: { type: "string", description: "The Python source to run. Self-contained; use print() to surface results." } }, required: ["code"] },
   },
   // FIX11 §2: search the user's own past conversations/messages/memories.
@@ -274,7 +282,10 @@ export class HostTools {
         if (!stdout && !stderr) lines.push("(no output was printed)");
         const images = r.images ?? [];
         if (images.length) lines.push("", "Generated image(s): " + images.map((i) => i.filename).join(", "));
-        return { ok: true, text: lines.join("\n"), imageDataUri: images[0]?.data_uri ?? null };
+        // FIX79 — a single run may deliberately produce ALTERNATIVES; every
+        // image rides the result so the card shows them all (the first one
+        // used to be the only survivor).
+        return { ok: true, text: lines.join("\n"), imageDataUri: images[0]?.data_uri ?? null, ...(images.length > 1 ? { imageDataUris: images.map((i) => i.data_uri) } : {}) };
       }
       case "search_past_conversations": {
         const query = args["query"];
