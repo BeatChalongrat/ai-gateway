@@ -162,6 +162,32 @@ export class ChatEdgeClient {
     return (await res.json()) as { imported: number; skipped: number };
   }
 
+  /** POST /api/v1/conversations/{id}/files/generated — FIX81: the one
+   *  door for persisting an assistant-produced file into the chat
+   *  (generate_image). Returns the ConversationFile row fields the
+   *  message_files frame needs, or null on failure (the caller degrades
+   *  to the inline-only card, never loses the turn). */
+  async attachGeneratedFile(conversationId: string, dataBase64: string, filename: string, contentType: string, generatedBy?: string): Promise<{ id: string; filename: string; content_type: string; file_size_bytes: number } | null> {
+    const token = this.accessToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/conversations/${encodeURIComponent(conversationId)}/files/generated`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ filename, content_type: contentType, data_base64: dataBase64, ...(generatedBy ? { generated_by: generatedBy } : {}) }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) {
+        this.log.warn(`chat-edge POST files/generated → HTTP ${res.status}`);
+        return null;
+      }
+      return (await res.json()) as { id: string; filename: string; content_type: string; file_size_bytes: number };
+    } catch (err) {
+      this.log.warn(`chat-edge files/generated failed: ${(err as Error).message}`);
+      return null;
+    }
+  }
+
   /** POST /api/v1/code/run — the code interpreter (run_python, host-side in E4).
    *  FIX80: naming the conversation makes chat-edge persist every produced
    *  artifact as a ConversationFile (images AND xlsx/csv/…), each row coming

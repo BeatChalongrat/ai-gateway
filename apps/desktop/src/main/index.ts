@@ -217,6 +217,11 @@ void app.whenReady().then(async () => {
   sessionController = new SessionController(
     {
       gatewayUrl: config.gatewayUrl,
+      // FIX81 ⑤ — the page calls chat-edge with credentials:"include" too
+      // (conversations, plan-card execute, file downloads); on a split-host
+      // deploy those calls carried no cookie and 401'd. Dev (one host)
+      // dedupes to one write.
+      sessionCookieUrls: [config.gatewayUrl, config.chatEdgeUrl],
       oauthProvider: config.oauthProvider,
       oauthClient: config.oauthClient,
       scheme: config.protocolScheme,
@@ -935,6 +940,7 @@ function installContextMenu(contents: WebContents): void {
       selectionText: params.selectionText ?? "",
       linkURL: params.linkURL ?? "",
       mediaType: params.mediaType,
+      srcURL: params.srcURL ?? "",
       editFlags: params.editFlags,
     };
     const host = {
@@ -950,6 +956,9 @@ function installContextMenu(contents: WebContents): void {
         log.info(`context menu → system browser: ${redactUrl(url)}`);
         void shell.openExternal(url);
       },
+      // FIX81 ④ — Save Image As: one download mechanism (will-download,
+      // app-origin allowed → native save dialog), not a second path.
+      downloadURL: (url: string) => contents.downloadURL(url),
     };
     const template = buildContextMenu(p).map((item) =>
       "type" in item

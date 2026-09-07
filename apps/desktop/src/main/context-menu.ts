@@ -27,6 +27,9 @@ export interface ContextMenuParams {
   readonly selectionText: string;
   readonly linkURL: string;
   readonly mediaType: string;
+  /** FIX81 ④ — the image's source URL (data:/blob:/https:), for Save
+   *  Image As. Empty when the target is not an image. */
+  readonly srcURL?: string;
   readonly editFlags: {
     readonly canUndo: boolean;
     readonly canRedo: boolean;
@@ -40,7 +43,7 @@ export interface ContextMenuParams {
 export type ContextMenuItem =
   | { readonly type: "separator" }
   | {
-      readonly id: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll" | "openLink" | "copyLink" | "copyImage";
+      readonly id: "undo" | "redo" | "cut" | "copy" | "paste" | "selectAll" | "openLink" | "copyLink" | "copyImage" | "saveImage";
       readonly label: string;
       readonly accelerator?: string;
       readonly enabled: boolean;
@@ -68,7 +71,14 @@ export function buildContextMenu(p: ContextMenuParams): ContextMenuItem[] {
     );
   }
   if (p.mediaType === "image") {
-    items.push({ id: "copyImage", label: "Copy Image", enabled: true }, { type: "separator" });
+    items.push(
+      { id: "copyImage", label: "Copy Image", enabled: true },
+      // FIX81 ④ — Save goes through webContents.downloadURL, which lands in
+      // the SAME will-download policy FIX80 repaired (app-origin allowed →
+      // native save dialog) — one download mechanism, not a second one.
+      { id: "saveImage", label: "Save Image As…", enabled: Boolean(p.srcURL) },
+      { type: "separator" },
+    );
   }
 
   if (p.isEditable) {
@@ -112,6 +122,9 @@ export interface ContextMenuHost {
   copyImageAt(x: number, y: number): void;
   writeClipboardText(text: string): void;
   openExternal(url: string): void;
+  /** FIX81 ④ — start a download of the image's source URL (rides the
+   *  will-download policy: app-origin → save dialog). */
+  downloadURL(url: string): void;
 }
 
 /** What clicking an item does — separated from Electron for the tests. */
@@ -127,5 +140,6 @@ export function actionFor(item: ContextMenuItem, p: ContextMenuParams, host: Con
     case "openLink": return host.openExternal(p.linkURL);
     case "copyLink": return host.writeClipboardText(p.linkURL);
     case "copyImage": return host.copyImageAt(p.x, p.y);
+    case "saveImage": return p.srcURL ? host.downloadURL(p.srcURL) : undefined;
   }
 }

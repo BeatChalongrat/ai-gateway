@@ -276,7 +276,21 @@ export class HostTools {
         // FIX67 — tell the user which model produced it (every time). After a
         // fallback this is the second-tier model, not the primary.
         const madeBy = r.producedBy ? ` It was made by ${r.producedBy}; mention that to the user.` : "";
-        return { ok: true, text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}.${madeBy} The image follows in the next message.`, imageDataUri: r.dataUri };
+        // FIX81 ① — persist the image as a ConversationFile (the FIX80
+        // delivery pipeline), so it survives a restart, renders as an
+        // attachment and downloads — instead of living only in this
+        // session's data URI. A failed save degrades to the old card-only
+        // behaviour; the turn is never lost over it.
+        const comma = r.dataUri.indexOf(",");
+        const b64 = comma >= 0 ? r.dataUri.slice(comma + 1) : "";
+        const name = imageFilenameFor(prompt.trim());
+        const saved = b64 ? await this.chatEdge.attachGeneratedFile(ctx.conversationId, b64, name, guessImageMime(r.dataUri), r.producedBy ?? undefined) : null;
+        return {
+          ok: true,
+          text: `Generated an image${r.revised ? ` (revised prompt: ${r.revised})` : ""}.${madeBy}${saved ? " It is attached to this chat as a file the user can view and download." : ""} The image follows in the next message.`,
+          imageDataUri: r.dataUri,
+          ...(saved ? { attachedFiles: [{ id: saved.id, filename: saved.filename, content_type: saved.content_type, file_size_bytes: saved.file_size_bytes }] } : {}),
+        };
       }
       case "run_python": {
         const code = args["code"];
@@ -365,6 +379,19 @@ export class HostTools {
         return { ok: false, text: `Unknown host tool '${name}'.`, imageDataUri: null };
     }
   }
+}
+
+/** Display filename for a generated image: a rune-safe slug of the
+ *  prompt + .png (the web side's generatedImageFilename, in spirit). */
+function imageFilenameFor(prompt: string): string {
+  const slug = prompt
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40)
+    .trim()
+    .replace(/ /g, "-");
+  return (slug || "generated-image") + ".png";
 }
 
 /** Mime from a data URI ("data:image/png;base64,…"), image/png fallback. */

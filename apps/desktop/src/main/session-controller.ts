@@ -40,8 +40,35 @@ export interface SessionSurface {
   openExternal(url: string): Promise<void>;
 }
 
+/** FIX81 ⑤ — the distinct URLs the session cookies are set on: every
+ *  origin the page reaches with credentials, deduped by ORIGIN so a dev
+ *  config where gateway and chat-edge share a host writes each cookie
+ *  once, exactly as before. Malformed entries are dropped; an empty or
+ *  all-malformed list falls back to the gateway alone. */
+export function sessionCookieTargets(gatewayUrl: string, extra?: string[]): string[] {
+  const urls = extra?.length ? extra : [gatewayUrl];
+  const byOrigin = new Map<string, string>();
+  for (const u of urls) {
+    try {
+      const o = new URL(u).origin;
+      if (!byOrigin.has(o)) byOrigin.set(o, u);
+    } catch {
+      /* a malformed entry never silently drops the gateway */
+    }
+  }
+  if (byOrigin.size === 0) return [gatewayUrl];
+  return [...byOrigin.values()];
+}
+
 export interface SessionControllerOptions {
   gatewayUrl: string;
+  /** FIX81 ⑤ — EVERY origin the page reaches with credentials:"include".
+   *  The jar used to be filled for gatewayUrl only; on a split-host deploy
+   *  (gateway and chat-edge on different hosts) every page→chat-edge call
+   *  — plan-card execute, file downloads, the conversation list — would
+   *  have carried no cookie and 401'd. Dev never showed it because both
+   *  are localhost and cookies ignore ports. Defaults to [gatewayUrl]. */
+  sessionCookieUrls?: string[];
   oauthProvider: string;
   oauthClient: string;
   scheme: string;
@@ -285,34 +312,47 @@ export class SessionController {
     await this.injectCookies(tokens, reason);
   }
 
+  private cookieUrls(): string[] {
+    return sessionCookieTargets(this.opts.gatewayUrl, this.opts.sessionCookieUrls);
+  }
+
   // ── cookies: the ONLY way session state reaches the page ───────────────────
   private async injectCookies(tokens: SessionTokens, reason: string): Promise<void> {
-    const secure = this.opts.gatewayUrl.startsWith("https:");
-    const common = { url: this.opts.gatewayUrl, path: "/", httpOnly: true, secure, sameSite: "lax" as const };
-    // Host-only: no `domain` → Electron/Chromium sets a host-only cookie for
-    // the URL's host, exactly what the server does (auth_cookie_domain="").
-    // SESSION cookies (no expirationDate): they are not persisted to disk, so
-    // the jar cannot outlive safeStorage — it is rebuilt from the store at
-    // every boot. (Found live: with an expirationDate the jar survived a
-    // restart and a page could be signed in while the host had no session.)
-    await this.cookies.set({ ...common, name: ACCESS_COOKIE, value: tokens.accessToken });
-    await this.cookies.set({ ...common, name: REFRESH_COOKIE, value: tokens.refreshToken });
+    for (const url of this.cookieUrls()) {
+      const secure = url.startsWith("https:");
+      const common = { url, path: "/", httpOnly: true, secure, sameSite: "lax" as const };
+      // Host-only: no `domain` → Electron/Chromium sets a host-only cookie for
+      // the URL's host, exactly what the server does (auth_cookie_domain="").
+      // SESSION cookies (no expirationDate): they are not persisted to disk, so
+      // the jar cannot outlive safeStorage — it is rebuilt from the store at
+      // every boot. (Found live: with an expirationDate the jar survived a
+      // restart and a page could be signed in while the host had no session.)
+      await this.cookies.set({ ...common, name: ACCESS_COOKIE, value: tokens.accessToken });
+      await this.cookies.set({ ...common, name: REFRESH_COOKIE, value: tokens.refreshToken });
+    }
     await this.cookies.flushStore();
-    const jar = await this.cookies.get({ url: this.opts.gatewayUrl });
-    const access = jar.filter((c) => c.name === ACCESS_COOKIE);
-    const refresh = jar.filter((c) => c.name === REFRESH_COOKIE);
-    const describe = (c: Electron.Cookie) =>
-      `domain=${c.domain} hostOnly=${c.hostOnly} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure} sameSite=${c.sameSite} sha256/8=${fingerprint(c.value)}`;
-    this.log.info(`Jar updated (reason=${reason}): ${access.length} access cookie(s), ${refresh.length} refresh cookie(s) for ${this.opts.gatewayUrl}`);
-    for (const c of access) this.log.info(`  ${ACCESS_COOKIE}: ${describe(c)}`);
-    for (const c of refresh) this.log.info(`  ${REFRESH_COOKIE}: ${describe(c)}`);
+    for (const url of this.cookieUrls()) {
+      const jar = await this.cookies.get({ url });
+      const access = jar.filter((c) => c.name === ACCESS_COOKIE);
+      const refresh = jar.filter((c) => c.name === REFRESH_COOKIE);
+      const describe = (c: Electron.Cookie) =>
+        `domain=${c.domain} hostOnly=${c.hostOnly} path=${c.path} httpOnly=${c.httpOnly} secure=${c.secure} sameSite=${c.sameSite} sha256/8=${fingerprint(c.value)}`;
+      this.log.info(`Jar updated (reason=${reason}): ${access.length} access cookie(s), ${refresh.length} refresh cookie(s) for ${url}`);
+      for (const c of access) this.log.info(`  ${ACCESS_COOKIE}: ${describe(c)}`);
+      for (const c of refresh) this.log.info(`  ${REFRESH_COOKIE}: ${describe(c)}`);
+    }
   }
 
   private async clearJar(): Promise<void> {
-    await this.cookies.remove(this.opts.gatewayUrl, ACCESS_COOKIE);
-    await this.cookies.remove(this.opts.gatewayUrl, REFRESH_COOKIE);
+    let left = 0;
+    for (const url of this.cookieUrls()) {
+      await this.cookies.remove(url, ACCESS_COOKIE);
+      await this.cookies.remove(url, REFRESH_COOKIE);
+    }
     await this.cookies.flushStore();
-    const left = (await this.cookies.get({ url: this.opts.gatewayUrl })).filter((c) => c.name === ACCESS_COOKIE || c.name === REFRESH_COOKIE).length;
+    for (const url of this.cookieUrls()) {
+      left += (await this.cookies.get({ url })).filter((c) => c.name === ACCESS_COOKIE || c.name === REFRESH_COOKIE).length;
+    }
     this.log.info(`Jar cleared (${left} session cookie(s) remain)`);
   }
 
