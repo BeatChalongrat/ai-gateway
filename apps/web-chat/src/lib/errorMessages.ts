@@ -28,6 +28,10 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "provider_error",
   "provider_unavailable",
   "provider_timeout",
+  // FIX80 — the provider went silent mid-stream and the client watchdog
+  // ended the turn (measured: 108 chunks in 2.4 s, then 60 s of nothing).
+  // A retry of the same request usually streams fine.
+  "stream_stalled",
   "provider_at_capacity",
   "provider_rate_limited",
   "rate_limit_exceeded",
@@ -107,6 +111,9 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   NOT_FOUND: "error.not_found",
   conflict: "error.conflict",
   gateway_error: "error.gateway_error",
+  // FIX80 — the desktop watchdog's mid-stream silence abort, named
+  // honestly instead of "connection stalled" with no next step.
+  stream_stalled: "error.stream_stalled",
   // ── image pipeline ─────────────────────────────────────────────────
   image_invalid_request: "error.image_invalid_request",
   image_auth_error: "error.image_auth_error",
