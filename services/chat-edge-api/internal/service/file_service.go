@@ -774,6 +774,25 @@ func (s *FileService) openFileLocalCopy(
 	return p, sanitizeFilename(f.OriginalFilename), cl, nil
 }
 
+// AssertConversationOwned is the upload path's ownership gate as a
+// standalone check (FIX80 — /code/run persists desktop run_python
+// artifacts and must never write into someone else's conversation).
+// Returns ErrFileConvNotFound for both "absent" and "not yours" — the
+// existence-leak is intentional, matching the upload path above.
+func (s *FileService) AssertConversationOwned(ctx context.Context, tenantID, userID, convID uuid.UUID) error {
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrFileConvNotFound
+		}
+		return err
+	}
+	if conv.UserID != userID {
+		return ErrFileConvNotFound
+	}
+	return nil
+}
+
 // GeneratedFileInput carries a sandbox-produced artifact (chart png,
 // xlsx, csv, …) to persist as a ConversationFile attached to an assistant
 // message. Generalises GeneratedImageInput for arbitrary content types so
