@@ -44,15 +44,33 @@ type sandboxRunner interface {
 // own Clamp() is a second belt on top. run_python gets a bit more room
 // than plan-exec's DefaultLimits (compute workloads load pandas/numpy),
 // but stays well under the sandbox hard caps (maxWall 300s / maxMem 2GiB).
+// FIX78 — limits measured against THIS host, not copied from Anthropic's
+// page: their sandbox gives 5 GiB RAM / 5 GiB disk / 90 s; our Docker VM
+// has 15.2 GiB total shared with the whole 20-container stack, so what
+// this machine can honestly serve is 2 GiB × maxConcurrentCodeRuns = 6 GiB
+// worst-case (tmpfs scratch pages are charged to the same cgroup memory
+// cap, so scratch cannot add on top). Wall goes to Anthropic's 90 s per
+// cell. A real server with ≥32 GiB dedicated could raise MemoryMB toward
+// their 5 GiB — raise maxConcurrentCodeRuns and this together, never one
+// alone.
 var codeInterpreterLimits = sandbox.Limits{
-	Wall:       60 * time.Second,
-	MemoryMB:   1024,
+	Wall:       90 * time.Second,
+	MemoryMB:   2048,
 	PidsLimit:  256,
 	CPUs:       "1.0",
 	MaxOutputB: 256 << 10, // 256 KiB per stream — the model doesn't need more
 	FileSizeB:  64 << 20,  // 64 MiB per produced artifact
-	ScratchMB:  512,
+	ScratchMB:  1024,
 }
+
+// maxConcurrentCodeRuns bounds simultaneous sandbox containers. Before
+// this there was NO limit — N users meant N containers, and the ceiling
+// that matters is limit × concurrency, not limit. 3 × 2 GiB = 6 GiB of
+// the 15.2 GiB VM. Waiters queue on the caller's context (a cancelled
+// turn stops waiting).
+const maxConcurrentCodeRuns = 3
+
+var codeRunSlots = make(chan struct{}, maxConcurrentCodeRuns)
 
 const (
 	// maxCodeBytes bounds the model-authored source shipped to the sandbox.
@@ -85,6 +103,14 @@ func NewCodeInterpreter(runner sandboxRunner) *CodeInterpreter {
 func (c *CodeInterpreter) Run(
 	ctx context.Context, code string, inputs []sandbox.InputFile,
 ) (*sandbox.Result, error) {
+	// FIX78 — the concurrency gate that makes the 2 GiB per-run cap an
+	// actual bound on the host (limit × concurrency, see the constant).
+	select {
+	case codeRunSlots <- struct{}{}:
+		defer func() { <-codeRunSlots }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	return c.runner.Execute(ctx, sandbox.Spec{
 		Mode:   sandbox.ModeCode,
 		Code:   code,

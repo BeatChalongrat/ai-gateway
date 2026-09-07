@@ -22,9 +22,14 @@ FROM python:3.12-slim AS base
 # `tha` is the whole point — the users are Thai and scanned Thai forms are
 # the common case; `eng` rides along because real documents mix scripts.
 # Language data is ~5 MB each and read-only at runtime.
+# FIX78 — the shell utilities Anthropic's code-execution container ships
+# (unzip/7zip/bc/ripgrep/fd/sqlite), minus unrar: it is in Debian's
+# non-free section, and the licence test this file already applies (the
+# PyMuPDF rejection below) excludes it. p7zip opens most rar archives.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr tesseract-ocr-tha tesseract-ocr-eng \
+        unzip p7zip-full bc ripgrep fd-find sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Office/data libs. openpyxl/python-docx/reportlab/pypdf/python-pptx/
@@ -38,10 +43,23 @@ RUN apt-get update \
 # obvious choice because it is AGPL-3.0, which is not a licence this
 # product can ship. pdf2image was rejected because it shells out to
 # poppler-utils, i.e. another apt dependency for the same result.
+#
+# FIX78 — the scientific/file stack Anthropic's code-execution sandbox
+# documents (scipy/scikit-learn/statsmodels/seaborn/sympy/mpmath/pyarrow/
+# xlsxwriter/xlrd/tqdm; python-dateutil+pytz ride with pandas, joblib with
+# scikit-learn), all BSD/MIT/Apache/MPL — plus charset-normalizer (MIT),
+# which their list has no need for and ours does: Thai CSVs exported from
+# Excel are commonly TIS-620/CP874, and without detection the model
+# analyses mojibake confidently. Their four heavy-dependency picks
+# (pdf2image/tabula-py/pdfkit/reportlab[pycairo]) stay rejected: plain
+# reportlab + pypdfium2 cover the same ground with no poppler/JVM/
+# wkhtmltopdf/cairo.
 RUN pip install --no-cache-dir \
         openpyxl python-docx reportlab pypdf python-pptx pdfplumber lxml \
         numpy pandas matplotlib \
         pypdfium2 pytesseract pillow \
+        scipy scikit-learn statsmodels seaborn sympy mpmath \
+        pyarrow xlsxwriter xlrd tqdm charset-normalizer \
     && find /usr/local/lib/python3.12 -name '__pycache__' -type d -prune -exec rm -rf {} + \
     && rm -rf /root/.cache
 
@@ -53,6 +71,27 @@ RUN pip install --no-cache-dir \
 WORKDIR /sandbox
 COPY scripts/ /sandbox/scripts/
 COPY sandbox/runner/sandbox_runner.py /sandbox/sandbox_runner.py
+
+# FIX78 Part 2 — Thai text in charts, with the model doing NOTHING.
+# Sarabun (SIL OFL, already shipped for the plan-exec generators) sat in
+# /sandbox/scripts/fonts where matplotlib never looks — the owner's chart
+# came out as boxes and the model concluded "sandbox has no Thai font".
+# Three pieces:
+#   1. the faces go into /usr/local/share/fonts (a directory matplotlib's
+#      font manager scans);
+#   2. a baked matplotlibrc puts Sarabun FIRST in the sans-serif chain —
+#      Sarabun carries full Thai AND Latin, DejaVu Sans stays next for
+#      symbols, and unicode_minus off keeps negative ticks from becoming
+#      boxes (Sarabun lacks U+2212);
+#   3. the font cache is prebuilt so the first run doesn't pay a rescan —
+#      the runner copies it into tmpfs (matplotlib wants its config dir
+#      writable) and points MPLCONFIGDIR there.
+RUN mkdir -p /usr/local/share/fonts/sarabun \
+    && cp /sandbox/scripts/fonts/Sarabun-Regular.ttf /sandbox/scripts/fonts/Sarabun-Bold.ttf /usr/local/share/fonts/sarabun/ \
+    && printf 'font.family: sans-serif\nfont.sans-serif: Sarabun, DejaVu Sans, Bitstream Vera Sans, sans-serif\naxes.unicode_minus: False\n' > /sandbox/matplotlibrc \
+    && MPLCONFIGDIR=/sandbox/mplcache MATPLOTLIBRC=/sandbox/matplotlibrc python3 -c "import matplotlib.pyplot; import matplotlib.font_manager as fm; assert any('Sarabun' in f.name for f in fm.fontManager.ttflist), 'Sarabun not visible to matplotlib'" \
+    && chmod -R a+rX /sandbox/mplcache /sandbox/matplotlibrc /usr/local/share/fonts/sarabun
+ENV MATPLOTLIBRC=/sandbox/matplotlibrc
 
 # Drop privileges by default too (belt-and-braces; the Go caller also
 # passes --user 65534:65534). matplotlib/openpyxl write only to the

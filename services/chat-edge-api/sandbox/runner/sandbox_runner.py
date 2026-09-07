@@ -44,6 +44,7 @@ Everything else the child leaves in /job/out is an artifact.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -128,9 +129,19 @@ def _cap(buf: bytes, limit: int):
 def main() -> int:
     # tmpfs-backed writable spots for libs that insist on a HOME/config.
     os.environ["HOME"] = "/tmp"
-    os.environ["MPLCONFIGDIR"] = "/tmp"
     os.environ["TMPDIR"] = "/tmp"
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    # FIX78 Part 2 — seed matplotlib's config dir from the image-baked
+    # cache (font list prebuilt at build time, Sarabun included) so a run
+    # neither rescans every font on startup nor loses the Thai default.
+    # matplotlib wants the dir writable, hence the copy into tmpfs; a
+    # missing bake degrades to the old per-run cache in /tmp.
+    mpl_dir = "/tmp/__mplconfig"
+    try:
+        shutil.copytree("/sandbox/mplcache", mpl_dir)
+    except OSError:
+        mpl_dir = "/tmp"
+    os.environ["MPLCONFIGDIR"] = mpl_dir
 
     try:
         with open(os.path.join(JOB_IN, "job.json"), encoding="utf-8") as f:
@@ -195,6 +206,16 @@ def main() -> int:
 
     out, t1 = _cap(out, max_out)
     err, t2 = _cap(err, max_out)
+    # FIX78 Part A — an OOM kill used to surface as a bare "Exit code: -9"
+    # with empty stderr (the cgroup killer takes the child silently), which
+    # reads as a mystery crash. Name the likeliest cause and the way out;
+    # appended AFTER the cap so the note itself is never truncated away.
+    if exit_code == -9 and not timed_out:
+        err += (
+            b"\n[sandbox] the process was killed (signal 9) - most likely the run "
+            b"exceeded the sandbox memory limit. Use less memory at once "
+            b"(process the data in chunks, or free large objects early)."
+        )
     with open(os.path.join(JOB_OUT, "__stdout"), "wb") as f:
         f.write(out)
     with open(os.path.join(JOB_OUT, "__stderr"), "wb") as f:

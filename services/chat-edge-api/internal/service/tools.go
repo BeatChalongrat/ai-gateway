@@ -1659,9 +1659,12 @@ func runPythonToolDef() GatewayTool {
 			Name: "run_python",
 			Description: "Execute Python code in a secure, isolated sandbox (no network access) and " +
 				"return its stdout/stderr. Use this to do real computation, data analysis, math, or to " +
-				"generate charts and files — instead of guessing an answer. numpy, pandas, matplotlib, " +
-				"openpyxl are available (use matplotlib.use('Agg') for headless plotting). print() " +
-				"anything you want to see in the result. " +
+				"generate charts and files — instead of guessing an answer. Available: data science " +
+				"(numpy, pandas, scipy, scikit-learn, statsmodels, sympy), charts (matplotlib, seaborn — " +
+				"use matplotlib.use('Agg'); Thai text renders correctly by default), reading AND writing " +
+				"Excel, Word, PowerPoint and PDF files, OCR of scanned documents including Thai, images " +
+				"(pillow), and legacy Thai-encoded CSVs (charset-normalizer detects TIS-620/CP874). " +
+				"print() anything you want to see in the result. " +
 				"IMPORTANT: to attach a chart or file to your reply, WRITE IT TO THE /job/out/ DIRECTORY — " +
 				"e.g. plt.savefig('/job/out/chart.png') or df.to_excel('/job/out/report.xlsx'). Files " +
 				"written anywhere else are discarded. Anything you write to /job/out/ is attached to your " +
