@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
+import { useT } from "@/lib/i18n";
 
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 
@@ -32,9 +33,11 @@ interface Props {
 export function KBSelector({
   conversationId,
   activeKBId,
+
   onPick,
   disabled,
 }: Props) {
+  const t = useT();
   const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
   const loaded = useKnowledgeStore((s) => s.loaded);
   const loading = useKnowledgeStore((s) => s.loading);
@@ -60,7 +63,8 @@ export function KBSelector({
     : null;
   const isActive = !!activeKB;
 
-  const label = activeKB ? activeKB.name : "Knowledge";
+  const label = activeKB ? activeKB.name : t("kb.picker.label");
+  const pickLabel = activeKB ? t("kb.picker.active", { name: activeKB.name }) : t("kb.picker.pick");
 
   return (
     <div ref={wrapRef} className="relative">
@@ -68,12 +72,8 @@ export function KBSelector({
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={disabled}
-        aria-label={
-          activeKB ? `Knowledge base: ${activeKB.name}` : "Pick a knowledge base"
-        }
-        title={
-          activeKB ? `Knowledge base: ${activeKB.name}` : "Pick a knowledge base"
-        }
+        aria-label={pickLabel}
+        title={pickLabel}
         className={`focus-ring inline-flex h-8 max-w-[140px] items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors disabled:opacity-50 ${
           isActive
             ? "border-border-strong bg-bg-elevated text-text-primary"
@@ -87,7 +87,7 @@ export function KBSelector({
         <div className="popover-appear absolute bottom-10 right-0 z-30 w-64 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">
           <div className="border-b border-border px-3 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
-              Knowledge base
+              {t("menu.knowledgeBase")}
             </p>
           </div>
           <div className="max-h-72 overflow-y-auto">
@@ -97,21 +97,20 @@ export function KBSelector({
                 setOpen(false);
                 if (activeKBId) await onPick(null);
               }}
-              title="None"
-              subtitle="No retrieval — chat with the model directly"
+              title={t("kb.picker.none")}
+              subtitle={t("kb.picker.noneHint")}
             />
             {loading && !loaded ? (
-              <div className="px-3 py-3 text-text-muted">Loading…</div>
+              <div className="px-3 py-3 text-text-muted">{t("common.loading")}</div>
             ) : knowledgeBases.length === 0 ? (
               <div className="px-3 py-3 text-text-muted">
-                No knowledge bases yet.{" "}
+                {t("kb.empty.title")}{" "}
                 <a
                   href="/chat/knowledge"
                   className="text-text-primary underline-offset-2 hover:underline"
                 >
-                  Create one
+                  {t("kb.picker.createOne")}
                 </a>
-                .
               </div>
             ) : (
               knowledgeBases.map((kb) => (
@@ -123,7 +122,7 @@ export function KBSelector({
                     if (activeKBId !== kb.id) await onPick(kb.id);
                   }}
                   title={kb.name}
-                  subtitle={`${kb.document_count} ${kb.document_count === 1 ? "doc" : "docs"} · ${kb.total_chunks} ${kb.total_chunks === 1 ? "chunk" : "chunks"}`}
+                  subtitle={`${kb.document_count} ${kb.document_count === 1 ? t("kb.unit.document") : t("kb.unit.documents")} · ${kb.total_chunks} ${kb.total_chunks === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}`}
                 />
               ))
             )}
@@ -133,7 +132,7 @@ export function KBSelector({
               href="/chat/knowledge"
               className="text-[11px] text-text-muted hover:text-text-primary"
             >
-              Manage knowledge bases →
+              {t("kb.picker.manage")}
             </a>
           </div>
         </div>

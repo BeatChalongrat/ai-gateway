@@ -25,7 +25,7 @@ export default function QuickAction({ icon, title, description, href }: Props) {
         className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
         style={{
           background: "rgba(99, 102, 241, 0.12)",
-          color: "var(--accent-primary)",
+          color: "var(--accent-text)",
         }}
       >
         {icon}
@@ -42,7 +42,7 @@ export default function QuickAction({ icon, title, description, href }: Props) {
           {title}
           <span
             className="inline-flex transition-transform group-hover:translate-x-0.5"
-            style={{ color: "var(--accent-primary)" }}
+            style={{ color: "var(--accent-text)" }}
           >
             <ArrowRight size={14} />
           </span>

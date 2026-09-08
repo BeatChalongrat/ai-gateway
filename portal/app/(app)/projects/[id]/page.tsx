@@ -247,7 +247,7 @@ export default function ProjectDetailPage() {
           className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
           style={{
             background: "rgba(99,102,241,0.12)",
-            color: "var(--accent-primary)",
+            color: "var(--accent-text)",
           }}
         >
           <FolderOpen size={24} strokeWidth={1.75} />
@@ -302,7 +302,7 @@ export default function ProjectDetailPage() {
               style={{
                 background: "rgba(99,102,241,0.08)",
                 border: "1px solid rgba(99,102,241,0.2)",
-                color: "var(--accent-primary)",
+                color: "var(--accent-text)",
               }}
             >
               <Key size={26} strokeWidth={1.5} />
@@ -370,7 +370,7 @@ export default function ProjectDetailPage() {
                             style={{
                               fontSize: 12,
                               fontWeight: 500,
-                              color: "var(--accent-primary)",
+                              color: "var(--accent-text)",
                               background: "transparent",
                               border: "none",
                               cursor: "pointer",
@@ -646,7 +646,7 @@ function BackLink() {
       style={{
         fontSize: 13,
         fontWeight: 500,
-        color: "var(--accent-primary)",
+        color: "var(--accent-text)",
         background: "transparent",
         border: "none",
         cursor: "pointer",
@@ -675,7 +675,7 @@ function StatTile({
         className="w-9 h-9 rounded-lg flex items-center justify-center"
         style={{
           background: "rgba(99,102,241,0.14)",
-          color: "var(--accent-primary)",
+          color: "var(--accent-text)",
         }}
       >
         <Icon size={18} strokeWidth={1.75} />

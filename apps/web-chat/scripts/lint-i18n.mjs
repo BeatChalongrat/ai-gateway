@@ -49,7 +49,11 @@ const found = [];
 for (const r of results) {
   const file = relative(appRoot, r.filePath).replace(/\\/g, "/");
   for (const m of r.messages) {
-    if (!m.ruleId) continue;
+    // Only the i18n rule counts. ESLint also reports "Definition for rule
+    // '…' was not found" for the app's own `eslint-disable` comments that
+    // name rules this one-job config does not load (FIX87: 15 such
+    // entries were inflating the inventory and could never be fixed).
+    if (m.ruleId !== "i18next/no-literal-string") continue;
     found.push({ key: keyOf(file, m), file, line: m.line, message: m.message });
   }
 }

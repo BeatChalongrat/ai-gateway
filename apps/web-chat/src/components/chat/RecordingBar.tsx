@@ -46,7 +46,7 @@ export function RecordingBar({
           aria-hidden
         />
         <span className="text-xs font-medium text-text-primary">
-          {isTranscribing ? "Transcribing…" : "Recording"}
+          {isTranscribing ? t("voicebar.transcribing") : t("voicebar.recording")}
         </span>
         <span className="text-xs tabular-nums text-text-muted">
           {formatTime(elapsedSec)}
@@ -55,7 +55,7 @@ export function RecordingBar({
       </div>
       <div className="min-w-0 flex-1 truncate text-xs text-text-secondary">
         {preview || (
-          <span className="text-text-muted">Speak now…</span>
+          <span className="text-text-muted">{t("voicebar.speakNow")}</span>
         )}
       </div>
       <button

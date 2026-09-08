@@ -359,7 +359,7 @@ function MemberRow({
                 fontSize: 10.5,
                 fontWeight: 600,
                 background: "rgba(99,102,241,0.12)",
-                color: "var(--accent-primary)",
+                color: "var(--accent-text)",
                 border: "1px solid rgba(99,102,241,0.25)",
               }}
             >

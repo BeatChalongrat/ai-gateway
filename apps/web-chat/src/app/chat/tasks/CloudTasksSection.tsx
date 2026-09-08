@@ -21,10 +21,10 @@ import { useChatStore } from "@/stores/chatStore";
 import { Switch } from "@/components/ui/Switch";
 
 // The MINIMUM cadence is one hour — cloud tasks run at most once per hour.
-const CLOUD_INTERVALS: { label: string; seconds: number }[] = [
-  { label: "Every hour", seconds: 3600 },
-  { label: "Every 6 hours", seconds: 21600 },
-  { label: "Every day", seconds: 86400 },
+const CLOUD_INTERVALS: { labelKey: "cloud.interval.hour" | "cloud.interval.sixHours" | "cloud.interval.day"; seconds: number }[] = [
+  { labelKey: "cloud.interval.hour", seconds: 3600 },
+  { labelKey: "cloud.interval.sixHours", seconds: 21600 },
+  { labelKey: "cloud.interval.day", seconds: 86400 },
 ];
 
 export function CloudTasksSection({
@@ -111,7 +111,7 @@ export function CloudTasksSection({
   }
 
   async function handleDelete(task: CloudTask) {
-    if (!window.confirm(`Delete "${task.name}"?`)) return;
+    if (!window.confirm(tOutside("tasks.confirmDelete", { name: task.name }))) return;
     try {
       await api.deleteCloudTask(task.id);
       setTasks((list) => list.filter((t) => t.id !== task.id));
@@ -540,21 +540,21 @@ function CloudTaskFormModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {tOutside("common.cancel")}
           </Button>
           <Button
             onClick={() => void submit()}
             loading={submitting}
             disabled={noConversations}
           >
-            Create
+            {tOutside("cloud.new.create")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <Input
-          label="Name"
+          label={tOutside("cloud.field.name")}
           placeholder={tOutside("cloud.field.namePlaceholder")}
           value={name}
           maxLength={120}
@@ -566,7 +566,7 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-prompt"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            Prompt
+            {tOutside("cloud.field.prompt")}
           </label>
           <textarea
             id="cloud-task-prompt"
@@ -583,7 +583,7 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-interval"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            Schedule
+            {tOutside("cloud.field.schedule")}
           </label>
           <select
             id="cloud-task-interval"
@@ -593,12 +593,12 @@ function CloudTaskFormModal({
           >
             {CLOUD_INTERVALS.map((opt) => (
               <option key={opt.seconds} value={opt.seconds}>
-                {opt.label}
+                {tOutside(opt.labelKey)}
               </option>
             ))}
           </select>
           <p className="text-[11px] text-text-muted">
-            Cloud tasks run at most once per hour.
+            {tOutside("cloud.field.scheduleHint")}
           </p>
         </div>
         <Input
@@ -614,12 +614,11 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-conversation"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            Conversation
+            {tOutside("cloud.field.conversation")}
           </label>
           {noConversations ? (
             <p className="rounded-md border border-border bg-bg-secondary/50 px-3 py-2 text-xs text-text-muted">
-              A cloud task runs inside a conversation. Start a chat first, then
-              come back to schedule it.
+              {tOutside("cloud.field.conversationHint")}
             </p>
           ) : (
             <>
@@ -631,12 +630,12 @@ function CloudTaskFormModal({
               >
                 {conversations.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.title || "Untitled"}
+                    {c.title || tOutside("conv.untitled")}
                   </option>
                 ))}
               </select>
               <p className="text-[11px] text-text-muted">
-                The task runs as a new turn in this conversation.
+                {tOutside("cloud.field.conversationNote")}
               </p>
             </>
           )}
@@ -670,7 +669,7 @@ function Toggle({
 
 function intervalLabel(seconds: number): string {
   const match = CLOUD_INTERVALS.find((o) => o.seconds === seconds);
-  if (match) return match.label;
+  if (match) return tOutside(match.labelKey);
   if (seconds % 86400 === 0) return `Every ${seconds / 86400} days`;
   if (seconds % 3600 === 0) return `Every ${seconds / 3600} hours`;
   return `Every ${seconds}s`;

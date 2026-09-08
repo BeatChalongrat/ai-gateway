@@ -55,7 +55,7 @@ export default function KnowledgeBasePage() {
   async function handleDeleteKB(kb: KnowledgeBase) {
     if (
       !window.confirm(
-        `Delete "${kb.name}"? All ${kb.document_count} documents and ${kb.total_chunks} chunks will be permanently removed.`,
+        tOutside("kb.confirmDelete", { name: kb.name, docs: String(kb.document_count), chunks: String(kb.total_chunks) }),
       )
     ) {
       return;
@@ -339,6 +339,7 @@ function KBDocumentsPanel({
   kb: KnowledgeBase;
   onDelete: () => void;
 }) {
+  const t = useT();
   const documents = useKnowledgeStore((s) => s.documentsByKB[kb.id]);
   const uploading = useKnowledgeStore((s) => s.uploadingByKB[kb.id]) ?? [];
   const loadDocs = useKnowledgeStore((s) => s.loadDocuments);
@@ -370,7 +371,7 @@ function KBDocumentsPanel({
   }
 
   async function handleDeleteDoc(doc: KnowledgeDocument) {
-    if (!window.confirm(`Delete "${doc.filename}"?`)) return;
+    if (!window.confirm(t("kb.confirmDeleteDoc", { name: doc.filename }))) return;
     try {
       await deleteDocument(kb.id, doc.id);
       toast(tOutside("kb.toast.docDeleted"));
@@ -392,7 +393,7 @@ function KBDocumentsPanel({
     <div className="border-t border-border bg-bg-base/50 px-4 py-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary">
-          Documents
+          {t("kb.docs.title")}
         </h3>
         <div className="flex items-center gap-2">
           <label className="cursor-pointer">
@@ -407,7 +408,7 @@ function KBDocumentsPanel({
               }}
             />
             <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated">
-              <PlusIcon /> Upload
+              <PlusIcon /> {t("kb.docs.upload")}
             </span>
           </label>
           <button
@@ -415,7 +416,7 @@ function KBDocumentsPanel({
             onClick={onDelete}
             className="rounded-md px-2 py-1.5 text-xs text-status-danger hover:bg-status-danger/10"
           >
-            Delete KB
+            {t("kb.docs.deleteKb")}
           </button>
         </div>
       </div>
@@ -425,10 +426,7 @@ function KBDocumentsPanel({
           <Spinner size={16} />
         </div>
       ) : documents.length === 0 && uploading.length === 0 ? (
-        <p className="py-2 text-xs text-text-muted">
-          No documents yet. Upload PDFs, DOCX, XLSX, CSV, or TXT — up to 50 MB
-          each.
-        </p>
+        <p className="py-2 text-xs text-text-muted">{t("kb.docs.empty")}</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
           {uploading.map((u) => (
@@ -466,6 +464,7 @@ function DocumentRow({
   onDelete: () => void;
   onReindex: () => void;
 }) {
+  const t = useT();
   return (
     <li className="flex items-center gap-3 rounded-md border border-border bg-bg-surface px-3 py-2">
       <StatusPill status={doc.status} />
@@ -476,7 +475,7 @@ function DocumentRow({
         <p className="text-[11px] text-text-muted">
           {humanSize(doc.file_size_bytes)}
           {doc.status === "indexed"
-            ? ` · ${doc.chunk_count} ${doc.chunk_count === 1 ? "chunk" : "chunks"}`
+            ? ` · ${doc.chunk_count} ${doc.chunk_count === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}`
             : ""}
           {doc.status === "failed" && doc.error_message
             ? ` · ${doc.error_message}`
@@ -560,6 +559,7 @@ function CreateKBModal({
     chunk_overlap: number;
   }) => Promise<void>;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -597,30 +597,30 @@ function CreateKBModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="New knowledge base"
-      description="Group of documents the AI can retrieve from"
+      title={t("kb.dialog.title")}
+      description={t("kb.dialog.description")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void submit()} loading={submitting}>
-            Create
+            {t("kb.create")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <Input
-          label="Name"
-          placeholder="Company handbook"
+          label={t("kb.dialog.name")}
+          placeholder={t("kb.dialog.namePlaceholder")}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
         <Input
-          label="Description (optional)"
-          placeholder="Internal policies, onboarding docs…"
+          label={t("kb.dialog.desc")}
+          placeholder={t("kb.dialog.descPlaceholder")}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
@@ -629,12 +629,12 @@ function CreateKBModal({
           onClick={() => setAdvanced((v) => !v)}
           className="self-start text-xs text-text-muted hover:text-text-primary"
         >
-          {advanced ? "Hide" : "Show"} advanced options
+          {advanced ? t("kb.dialog.hideAdvanced") : t("kb.dialog.showAdvanced")}
         </button>
         {advanced ? (
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="Chunk size"
+              label={t("kb.dialog.chunkSize")}
               type="number"
               min={100}
               max={2048}
@@ -642,7 +642,7 @@ function CreateKBModal({
               onChange={(e) => setChunkSize(Number(e.target.value) || 512)}
             />
             <Input
-              label="Chunk overlap"
+              label={t("kb.dialog.chunkOverlap")}
               type="number"
               min={0}
               max={512}

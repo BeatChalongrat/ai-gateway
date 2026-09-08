@@ -153,7 +153,7 @@ export default function BillingPage() {
           style={{
             background: "rgba(99,102,241,0.08)",
             border: "1px solid rgba(99,102,241,0.25)",
-            color: "var(--accent-primary)",
+            color: "var(--accent-text)",
             fontSize: 13,
             padding: "8px 12px",
             borderRadius: 8,
@@ -624,7 +624,7 @@ function TxTypeChip({ type }: { type: string }) {
       label: "Usage",
       Icon: Zap,
       bg: "rgba(99,102,241,0.12)",
-      color: "var(--accent-primary)",
+      color: "var(--accent-text)",
     },
     manual_topup: {
       label: "Top-up",

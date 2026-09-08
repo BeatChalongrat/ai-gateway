@@ -28,8 +28,16 @@
   --text-primary: #1A1C23;
   --text-secondary: #4B5673;
   --text-tertiary: #6B6F7E;
-  --text-muted: #8B92A5;
-  --accent-primary: #6366F1;
+  /* FIX87 Part C — muted text is still text: 4.5:1 on the canvas and on
+     cards (was #8B92A5, 2.9:1 — the dashboard / billing table headers). */
+  --text-muted: #6B7185;
+  /* FIX87 Part C — the fill under white button text: 4.9:1 (was #6366F1,
+     4.47:1). Still ≥ 3:1 against the dark canvas (WCAG 1.4.11). */
+  --accent-primary: #5B5EEE;
+  /* FIX87 Part C — accent-coloured TEXT (links, "View all", counts). One
+     fill token cannot be both readable under white and readable as text
+     on the dark canvas, so text has its own: 4.6:1 here, 6.5:1 in dark. */
+  --accent-text: #5B5EEE;
   --accent-success: #059669;
   --accent-warning: #D97706;
   --accent-danger: #DC2626;
@@ -49,9 +57,11 @@
   --border-subtle: #141D3F;
   --text-primary: #FFFFFF;
   --text-secondary: #8B96BA;
-  --text-tertiary: #6B7699;
-  --text-muted: #4B5885;
-  --accent-primary: #6366F1;
+  /* FIX87 Part C — 4.5:1 on the dark canvas and cards (was 4.1:1 / 2.7:1). */
+  --text-tertiary: #808AB0;
+  --text-muted: #7C87AE;
+  --accent-primary: #5B5EEE;
+  --accent-text: #8B8FF9;
   --accent-success: #10B981;
   --accent-warning: #F59E0B;
   --accent-danger: #F87171;

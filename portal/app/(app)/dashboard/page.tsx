@@ -627,7 +627,7 @@ function ChatLaunchPanel() {
       </div>
       <ArrowUpRight
         size={16}
-        style={{ color: "var(--accent-primary)", flexShrink: 0 }}
+        style={{ color: "var(--accent-text)", flexShrink: 0 }}
       />
     </a>
   );
@@ -958,14 +958,14 @@ function TeamUsageSection({ role }: { role?: string | null }) {
             gap: 8,
           }}
         >
-          <Users size={15} strokeWidth={1.8} style={{ color: "var(--accent-primary)" }} />
+          <Users size={15} strokeWidth={1.8} style={{ color: "var(--accent-text)" }} />
           Team usage
         </h2>
         <Link
           href="/team"
           style={{
             fontSize: 12,
-            color: "var(--accent-primary)",
+            color: "var(--accent-text)",
             textDecoration: "none",
             display: "inline-flex",
             alignItems: "center",
@@ -1162,7 +1162,7 @@ function RecentActivitySection({
           href="/usage"
           style={{
             fontSize: 12,
-            color: "var(--accent-primary)",
+            color: "var(--accent-text)",
             textDecoration: "none",
             display: "inline-flex",
             alignItems: "center",
@@ -1193,7 +1193,7 @@ function RecentActivitySection({
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "var(--accent-primary)",
+              color: "var(--accent-text)",
             }}
           >
             <ScrollText size={18} strokeWidth={1.5} />
@@ -1253,7 +1253,7 @@ function RecentActivitySection({
             <Link
               href="/usage"
               style={{
-                color: "var(--accent-primary)",
+                color: "var(--accent-text)",
                 textDecoration: "none",
                 fontWeight: 500,
                 display: "inline-flex",

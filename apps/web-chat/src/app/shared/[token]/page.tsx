@@ -1,5 +1,7 @@
 "use client";
 
+import { useT } from "@/lib/i18n";
+
 // Public read-only conversation view. Routed at /shared/{token}.
 // No auth — anyone with the link can read. No sidebar, no input,
 // no file download (server-side the file blob endpoint is auth
@@ -15,6 +17,7 @@ import { fetchPublicShared, type PublicSharedView } from "@/lib/api";
 import { formatBytes, iconEmojiFor, iconKindFor, isImageMime } from "@/lib/fileUtil";
 
 export default function SharedConversationPage() {
+  const t = useT();
   const params = useParams();
   const token =
     typeof params?.token === "string" ? params.token : null;
@@ -59,10 +62,10 @@ export default function SharedConversationPage() {
         <div className="max-w-md">
           <div className="mx-auto mb-4 h-12 w-12 rounded-2xl bg-gradient-to-br from-accent to-accent-subtle opacity-50" />
           <h1 className="text-lg font-semibold text-text-primary">
-            Shared conversation unavailable
+            {t("shared.unavailable.title")}
           </h1>
           <p className="mt-2 text-sm text-text-muted">
-            This link has expired or doesn&apos;t exist.
+            {t("shared.unavailable.body")}
           </p>
         </div>
       </div>

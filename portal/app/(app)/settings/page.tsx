@@ -256,7 +256,7 @@ export default function SettingsPage() {
                   style={{
                     fontSize: 11,
                     fontWeight: 500,
-                    color: "var(--accent-primary)",
+                    color: "var(--accent-text)",
                     background: "transparent",
                     border: "1px solid var(--border-default)",
                     cursor: "pointer",
@@ -283,7 +283,7 @@ export default function SettingsPage() {
                 style={{
                   background: "rgba(99,102,241,0.12)",
                   border: "1px solid rgba(99,102,241,0.3)",
-                  color: "var(--accent-primary)",
+                  color: "var(--accent-text)",
                   fontSize: 12,
                   fontWeight: 500,
                 }}
@@ -486,7 +486,7 @@ export default function SettingsPage() {
                 gap: 6,
               }}
             >
-              <Globe size={14} style={{ color: "var(--accent-primary)" }} />
+              <Globe size={14} style={{ color: "var(--accent-text)" }} />
               Language
             </div>
             <div

@@ -111,6 +111,7 @@ typecheck: ## TypeScript typecheck for the web-chat frontend
 
 web-test: ## Vitest unit lanes for the three web apps (runs on the HOST — node_modules in Docker is a named volume the host can't reach)
 	cd apps/web-chat && npm test
+	cd apps/web-chat && npm run lint:i18n
 	cd portal && npm test
 	cd admin-ui && npm test
 

@@ -61,7 +61,7 @@ export const Input = forwardRef<HTMLInputElement, Props>(function Input(
             style={{
               fontSize: 12,
               fontWeight: 500,
-              color: "var(--accent-primary)",
+              color: "var(--accent-text)",
               background: "transparent",
               border: "none",
               cursor: "pointer",

@@ -124,7 +124,10 @@
   --text-primary: #1A1C23;
   --text-secondary: #4B5673;
   --text-tertiary: #6B6F7E;
-  --text-muted: #8B92A5;
+  /* FIX87 Part C — muted text is still text: 4.5:1 on the canvas and on
+     cards (was #8B92A5, 2.9:1 — table headers, placeholders, pagination
+     at 10–13 px). */
+  --text-muted: #6B7185;
 
   /* Accents */
   --accent-primary: #6366F1;
@@ -160,8 +163,10 @@
 
   --text-primary: #FFFFFF;
   --text-secondary: #8B96BA;
-  --text-tertiary: #6B7699;
-  --text-muted: #4B5885;
+  /* FIX87 Part C — 4.5:1 on the dark canvas and cards (was #6B7699 4.1:1
+     and #4B5885 2.7:1). */
+  --text-tertiary: #808AB0;
+  --text-muted: #7C87AE;
 
   --accent-primary: #6366F1;
   --accent-success: #10B981;

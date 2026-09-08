@@ -167,9 +167,22 @@ const PINS: Array<{ file: string; forbidden: string[] }> = [
       "Scheduled tasks",
     ],
   },
+  // ── FIX87 Part A — FIX83 row 6: the English left on daily Thai screens.
+  { file: "components/chat/KBSelector.tsx", forbidden: ['"Knowledge"', '"Pick a knowledge base"', "Knowledge base: ${", '"None"', "No retrieval", "Loading…", "No knowledge bases yet.", ">Create one<", '"doc" : "docs"', '"chunk" : "chunks"'] },
+  { file: "components/chat/RecordingBar.tsx", forbidden: ['"Transcribing…"', '"Recording"', "Speak now…"] },
+  { file: "components/chat/MessageBubble.tsx", forbidden: [">Cancel<", "Save & Submit"] },
+  { file: "components/chat/ConversationFiles.tsx", forbidden: ['file{count === 1 ? "" : "s"}'] },
+  { file: "app/chat/knowledge/page.tsx", forbidden: ['`Delete "${', ">Documents<", "> Upload", "Delete KB", "No documents yet.", '"chunk" : "chunks"', 'title="New knowledge base"', '>Cancel<', '>Create<', 'label="Name"', 'placeholder="Company handbook"', 'label="Description (optional)"', "advanced options", 'label="Chunk size"', 'label="Chunk overlap"'] },
+  { file: "app/shared/[token]/page.tsx", forbidden: ["Shared conversation unavailable", "This link has expired"] },
   {
     file: "app/chat/tasks/CloudTasksSection.tsx",
     forbidden: [
+      'label: "Every hour"',
+      'label: "Every 6 hours"',
+      'label: "Every day"',
+      '`Delete "${task.name}"?`',
+      'label="Name"',
+      ">Cancel<", ">Create<", ">Prompt<", ">Schedule<", ">Conversation<", "Cloud tasks run at most once per hour.", "A cloud task runs inside a conversation.", "The task runs as a new turn", '"Untitled"',
       "Couldn't load cloud tasks.",
       'placeholder="Daily digest"',
       '"Name and prompt are both required."',

@@ -72,7 +72,7 @@ export default function ProjectCard({
             className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
             style={{
               background: "rgba(99,102,241,0.14)",
-              color: "var(--accent-primary)",
+              color: "var(--accent-text)",
             }}
           >
             <FolderOpen className="w-5 h-5" strokeWidth={1.75} />

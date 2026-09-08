@@ -73,7 +73,7 @@ export default function EmptyState({
         style={{
           background: "rgba(99,102,241,0.10)",
           border: "1px solid rgba(99,102,241,0.20)",
-          color: "var(--accent-primary)",
+          color: "var(--accent-text)",
         }}
       >
         {icon}

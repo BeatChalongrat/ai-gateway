@@ -334,7 +334,7 @@ export function InviteSection({ tenantName, onInviteChanged }: Props) {
                 height: 36,
                 borderRadius: 10,
                 background: "rgba(99,102,241,0.12)",
-                color: "var(--accent-primary)",
+                color: "var(--accent-text)",
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",

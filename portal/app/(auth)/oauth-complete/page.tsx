@@ -149,7 +149,7 @@ function OAuthCompleteInner() {
         <a
           href="/login"
           className="mt-4 inline-block font-medium hover:underline"
-          style={{ color: "var(--accent-primary)" }}
+          style={{ color: "var(--accent-text)" }}
         >
           Back to sign in
         </a>

@@ -76,7 +76,7 @@ export function ConversationFiles({ conversationId }: Props) {
         title={t("convfiles.aria", { n: String(count) })}
       >
         <span aria-hidden>📎</span>
-        <span>{count} file{count === 1 ? "" : "s"}</span>
+        <span>{count} {count === 1 ? t("unit.file") : t("unit.files")}</span>
       </button>
       {open ? (
         <div className="popover-appear absolute right-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-bg-surface shadow-2xl">

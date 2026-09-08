@@ -274,14 +274,14 @@ function MessageBubbleImpl({
                       onClick={() => setEditing(false)}
                       className="focus-ring rounded-md border border-border px-2.5 py-1 text-[12px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       type="button"
                       onClick={submitEdit}
                       className="focus-ring rounded-md bg-text-primary px-2.5 py-1 text-[12px] font-medium text-bg-base hover:opacity-90"
                     >
-                      Save & Submit
+                      {t("msg.edit.saveSubmit")}
                     </button>
                   </div>
                 </div>
