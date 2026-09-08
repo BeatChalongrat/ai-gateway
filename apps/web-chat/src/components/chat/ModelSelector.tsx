@@ -166,6 +166,11 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
     : activeModel
       ? shortLabel(activeModel.name ?? activeModel.id)
       : t("model.selectModel");
+  const fullLabel = isAuto
+    ? t("model.auto.name")
+    : activeModel
+      ? (activeModel.name ?? activeModel.id)
+      : t("model.selectModel");
 
   return (
     <div ref={ref} className="relative">
@@ -173,17 +178,24 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`focus-ring flex items-center gap-1 rounded-full text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-default disabled:opacity-80 ${
+        className={`focus-ring flex max-w-full items-center gap-1 rounded-full text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 ${
           compact ? "px-2 py-1" : "px-2.5 py-1.5"
         }`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={t("model.selectModel")}
+        // FIX86 Part D — the full name is one hover away; the pill itself
+        // stays one line (it wrapped to three at 390 px).
+        title={fullLabel}
       >
         {isAuto ? (
-          <Sparkles width={12} height={12} className="text-text-tertiary" aria-hidden />
+          <Sparkles width={12} height={12} className="shrink-0 text-text-tertiary" aria-hidden />
         ) : null}
-        <span className="font-medium text-text-primary">{triggerLabel}</span>
+        <span
+          className="block max-w-[9rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
+          data-testid="model-trigger-label"
+        >
+          {triggerLabel}
+        </span>
         <svg width={10} height={10} viewBox="0 0 24 24" fill="none" aria-hidden className="text-text-muted">
           <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>

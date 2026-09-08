@@ -74,6 +74,7 @@ export function Sidebar({
   const loadConversations = useChatStore((s) => s.loadConversations);
   const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
   const conversationsLoaded = useChatStore((s) => s.conversationsLoaded);
+  const conversationsLoadFailed = useChatStore((s) => s.conversationsLoadFailed);
   const hasMoreConversations = useChatStore((s) => s.hasMoreConversations);
   const loadingMoreConversations = useChatStore((s) => s.loadingMoreConversations);
   const searchResults = useChatStore((s) => s.conversationsSearchResults);
@@ -1075,6 +1076,9 @@ function ConversationsArea({
   onDeleteProject,
 }: AreaProps) {
   const t = useT();
+  // FIX86 Part C — "could not load" is not "you have none".
+  const conversationsLoadFailed = useChatStore((s) => s.conversationsLoadFailed);
+  const loadConversations = useChatStore((s) => s.loadConversations);
   const ref = useRef<HTMLDivElement>(null);
   const useVirtual = rows.length >= VIRTUALIZE_THRESHOLD;
   const projectCtx: ProjectCtx = {
@@ -1109,6 +1113,24 @@ function ConversationsArea({
     return (
       <nav className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2">
         <ConversationListSkeleton rows={5} />
+      </nav>
+    );
+  }
+
+  if (rows.length === 0 && conversationsLoadFailed && !searchActive) {
+    // FIX86 Part C — "could not load" must not read as "you have none".
+    return (
+      <nav className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="px-3 py-4 text-xs text-text-muted" role="status" data-testid="sidebar-load-failed">
+          <div>{t("sidebar.loadFailed")}</div>
+          <button
+            type="button"
+            onClick={() => void loadConversations()}
+            className="focus-ring mt-2 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:border-border-strong"
+          >
+            {t("sidebar.retry")}
+          </button>
+        </div>
       </nav>
     );
   }

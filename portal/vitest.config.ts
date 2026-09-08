@@ -7,6 +7,10 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // FIX86 — the portal's first .tsx test: tsconfig keeps jsx "preserve",
+  // which cannot execute; the automatic runtime lets vitest render
+  // components (same setting admin-ui adopted in FIX84).
+  oxc: { jsx: { runtime: "automatic" } },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),

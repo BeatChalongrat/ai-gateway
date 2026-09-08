@@ -107,7 +107,7 @@ export function FolderChip({ disabled }: { disabled?: boolean }) {
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className="focus-ring flex max-w-[180px] items-center gap-1 rounded-full px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-default disabled:opacity-80"
+        className="focus-ring flex max-w-[180px] items-center gap-1 rounded-full px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${t("folders.chip.title")}: ${label}`}

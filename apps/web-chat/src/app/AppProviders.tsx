@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ImageLightbox } from "@/components/ui/ImageLightbox";
 import { ToastViewport } from "@/components/ui/Toast";
 import { UpdateBanner } from "@/components/ui/UpdateBanner";
@@ -75,14 +76,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       {children}
-      {errorBanner ? (
-        <div
-          role="alert"
-          className="fixed bottom-6 right-6 z-50 max-w-sm rounded-md border border-status-danger/40 bg-status-danger/15 px-4 py-3 text-sm text-text-primary shadow-lg fade-in-up"
-        >
-          {errorBanner}
-        </div>
-      ) : null}
+      <ErrorBanner message={errorBanner} />
       <ToastViewport />
       <ImageLightbox />
       <UpdateBanner />

@@ -129,15 +129,14 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 	rows := make([]usageModelRow, 0, len(summary.TopModels))
 	for _, m := range summary.TopModels {
 		// Display credits come from the gateway (real logged cost ×
-		// USAGE_CREDITS_PER_USD). Fallback to raw tokens (the legacy
-		// 1 credit = 1 token convention) when talking to an older
-		// gateway that doesn't send credits yet.
+		// USAGE_CREDITS_PER_USD). FIX86: there is no longer a "fall back
+		// to raw tokens" branch — the gateway that answers this call is
+		// this repo's and always sends credits_used, and a tenant whose
+		// logged cost is genuinely zero (self-hosted models) was being
+		// shown TOKEN counts labelled as credits, a second way for two
+		// screens to disagree.
 		credits := m.CreditsUsed
 		totalCredits := summary.Totals.CreditsUsed
-		if totalCredits == 0 {
-			credits = m.Tokens
-			totalCredits = summary.Totals.Tokens
-		}
 		pct := 0.0
 		if totalCredits > 0 {
 			pct = math.Round(float64(credits)/float64(totalCredits)*1000) / 10
@@ -159,10 +158,9 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The request-log roll-up (tenant-wide, priced from logged cost).
+	// Reported under its own name; "used" is the ledger below.
 	totalCredits := summary.Totals.CreditsUsed
-	if totalCredits == 0 {
-		totalCredits = summary.Totals.Tokens
-	}
 	// FIX33 A-W8 — the cost of compacting, separate from the cost of
 	// answering (Claude's usage.iterations[]). Lifetime, like the rest
 	// of this response. Absent when the repo isn't wired; zero rows is
@@ -178,6 +176,10 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// FIX86 — ONE source for "used": the account ledger (/portal/me),
+	// the same field the Portal's USED shows. TotalCreditsUsed below is
+	// the request-log roll-up and is a different fact (tenant scope,
+	// float cost × rate); the UI labels it separately.
 	_ = json.NewEncoder(w).Encode(usageResponse{
 		Credits: usageCredits{
 			Total:     me.CreditBalance + me.CreditUsed,

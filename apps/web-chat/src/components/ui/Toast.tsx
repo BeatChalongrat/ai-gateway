@@ -9,6 +9,7 @@ import { useEffect } from "react";
 
 import { create } from "zustand";
 
+import { PILL_GAP, useBottomInset } from "@/hooks/useBottomInset";
 import { useFloatingPillOffset } from "@/hooks/useFloatingPillOffset";
 
 /** FIX27 §2.2 — an optional one-click action on a toast ("Switch to GPT-4o"),
@@ -51,6 +52,8 @@ export function ToastViewport({ duration = 2500 }: { duration?: number }) {
   // Where a bottom-centred pill belongs over the chat column. Shared
   // with UpdateBanner so the two cannot drift apart.
   const sidebarOffset = useFloatingPillOffset();
+  // FIX86 — and above the composer, whatever its height is right now.
+  const inset = useBottomInset();
 
   useEffect(() => {
     if (!message) return;
@@ -62,8 +65,8 @@ export function ToastViewport({ duration = 2500 }: { duration?: number }) {
   if (!message) return null;
   return (
     <div
-      className={`toast-appear fixed bottom-6 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-bg-surface px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm ${action ? "pointer-events-auto" : "pointer-events-none"}`}
-      style={{ left: `calc(50% + ${sidebarOffset}px)` }}
+      className={`toast-appear fixed z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border border-border bg-bg-surface px-4 py-2 text-xs text-text-primary shadow-2xl backdrop-blur-sm ${action ? "pointer-events-auto" : "pointer-events-none"}`}
+      style={{ left: `calc(50% + ${sidebarOffset}px)`, bottom: inset + PILL_GAP }}
       role="status"
       aria-live="polite"
       key={nonce}

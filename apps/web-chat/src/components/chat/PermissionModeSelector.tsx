@@ -121,7 +121,7 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className={`focus-ring flex items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors hover:bg-bg-elevated disabled:cursor-default disabled:opacity-80 ${
+        className={`focus-ring flex items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-40 ${
           isSkip ? "text-amber-500 hover:text-amber-400" : "text-text-secondary hover:text-text-primary"
         }`}
         aria-haspopup="menu"

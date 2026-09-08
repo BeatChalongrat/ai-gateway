@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useComposerHeightProbe } from "@/hooks/useBottomInset";
+
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
@@ -338,6 +340,10 @@ export function ChatInput({
   const [keyboardInset, setKeyboardInset] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // FIX86 — the ONE producer of the vertical axis: whatever this box
+  // measures, every bottom-floating element sits above it.
+  const composerRootRef = useRef<HTMLDivElement>(null);
+  useComposerHeightProbe(composerRootRef);
   // Explicit IME composition tracking (Phase 4, Thai IME). WebView2's native
   // KeyboardEvent.isComposing can be unreliable in an embedded control, so we
   // also track composition via compositionstart/end and OR it into the
@@ -1037,6 +1043,8 @@ export function ChatInput({
 
   return (
     <div
+      ref={composerRootRef}
+      data-testid="composer-root"
       className="safe-bottom bg-bg-base px-3 py-3 md:px-6 md:py-4"
       style={
         keyboardInset > 0

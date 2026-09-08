@@ -7,13 +7,26 @@
 // amber 20–50%, red < 20%), the remaining balance, and a chevron that
 // flips while the panel is open. The panel opens UPWARD from the pill
 // with a slide-up fade. Click-outside (backdrop) and Escape both
-// close it. Numbers come from the same proxied portal API the Portal
-// Dashboard reads; 1 credit = 1 token, lifetime pool (no reset).
+// close it.
+//
+// FIX86 — two rules this file now keeps:
+//  * "above the composer" is a RELATIONSHIP (`useBottomInset`), not the
+//    literal 76 px it used to be; the badge moves when the composer does.
+//  * ONE number means "used". The ring and the footer both read the
+//    account ledger (`credits.used`, what actually left the balance —
+//    the same field the Portal's USED shows). The per-model bars come
+//    from the request-log roll-up (tenant-wide, priced from logged
+//    cost) and are labelled as such; their total is shown under its own
+//    name, never as "used".
+//  * The badge does not vanish when the gateway cannot answer: it says
+//    the number is unavailable and offers a retry (FIX77: collapse,
+//    never delete).
 
 import { useEffect, useState } from "react";
 
 import { ChevronUp, ExternalLink } from "lucide-react";
 
+import { BADGE_GAP, useBottomInset } from "@/hooks/useBottomInset";
 import { useUsage } from "@/hooks/useUsage";
 import { PORTAL_URL } from "@/lib/auth";
 import { tOutside, useT } from "@/lib/i18n";
@@ -61,7 +74,7 @@ function levelColor(pctRemaining: number): string {
 export function CreditBadge() {
   const t = useT();
   const [open, setOpen] = useState(false);
-  const { data } = useUsage();
+  const { data, isError } = useUsage();
 
   // Escape closes the panel (backdrop handles click-outside).
   useEffect(() => {
@@ -74,15 +87,25 @@ export function CreditBadge() {
   }, [open]);
 
   const dockedWidth = useSidePaneStore((s) => s.dockedWidth);
-  if (!data) return null;
+  const inset = useBottomInset();
+  // Nothing yet and nothing wrong: the first fetch is in flight — no
+  // pill flashes a placeholder. A failed fetch keeps the pill and says so.
+  if (!data && !isError) return null;
+  const unavailable = !data;
 
-  const { total, remaining } = data.credits;
+  const { total, remaining } = data?.credits ?? { total: 0, remaining: 0 };
   const pctRemaining = total > 0 ? Math.round((remaining / total) * 100) : 100;
-  const color = levelColor(pctRemaining);
+  const color = unavailable ? "var(--text-tertiary)" : levelColor(pctRemaining);
 
   return (
     // FIX76 — stay over the thread, not over a docked side pane.
-    <div className="absolute bottom-[76px] z-10" style={{ right: 16 + dockedWidth }}>
+    // FIX86 — and above the composer's MEASURED height, whatever it is.
+    <div
+      className="absolute z-10"
+      style={{ right: 16 + dockedWidth, bottom: inset + BADGE_GAP }}
+      data-testid="credit-badge"
+      data-unavailable={unavailable ? "true" : undefined}
+    >
       {open ? (
         <div
           className="fixed inset-0 z-40"
@@ -96,15 +119,16 @@ export function CreditBadge() {
 
         <button
           type="button"
-          aria-label={t("a11y.usageAndCredits")}
+          aria-label={unavailable ? t("usage.unavailable") : t("a11y.usageAndCredits")}
+          title={unavailable ? t("usage.unavailable") : undefined}
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
           className="focus-ring relative z-50 inline-flex items-center gap-2 rounded-[20px] border border-border bg-bg-base py-1.5 pl-2 pr-3.5 transition-colors hover:border-border-strong"
         >
-          <MiniRing pct={pctRemaining} color={color} />
+          <MiniRing pct={unavailable ? 0 : pctRemaining} color={color} />
           <span className="text-xs font-medium tabular-nums text-text-primary">
-            {remaining.toLocaleString()}
+            {unavailable ? "—" : remaining.toLocaleString()}
           </span>
           <ChevronUp
             size={12}
@@ -155,7 +179,7 @@ function MiniRing({ pct, color }: { pct: number; color: string }) {
 
 function UsagePanel({ onClose }: { onClose: () => void }) {
   const t = useT();
-  const { data, refetch, isStale } = useUsage();
+  const { data, refetch, isStale, isFetching } = useUsage();
   const models = useModelStore((s) => s.models);
 
   // Refresh on open when the cached snapshot is older than staleTime
@@ -165,13 +189,38 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!data) return null;
+  if (!data) {
+    // FIX86 Part C — the number is unavailable; say so, keep the way out.
+    return (
+      <div
+        role="dialog"
+        aria-label={t("a11y.usage")}
+        data-testid="usage-panel-unavailable"
+        className="usage-panel-enter absolute bottom-[calc(100%+8px)] right-0 z-50 w-80 max-w-[calc(100vw-32px)] rounded-xl border border-border bg-bg-surface p-4 shadow-xl"
+      >
+        <div className="text-sm font-semibold text-text-primary">{t("usage.unavailable")}</div>
+        <p className="mt-1 text-xs text-text-muted">{t("usage.unavailableHint")}</p>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          disabled={isFetching}
+          className="focus-ring mt-3 rounded-full border border-border px-3 py-1 text-xs font-medium text-text-primary transition-colors hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isFetching ? "…" : t("usage.retry")}
+        </button>
+      </div>
+    );
+  }
 
   const { total, remaining, reset_date } = data.credits;
   const pctRemaining = total > 0 ? Math.round((remaining / total) * 100) : 100;
   const ringColor = levelColor(pctRemaining);
   const rows = data.usage_by_model;
-  const totalUsed = data.total_credits_used ?? data.credits.used;
+  // ONE source for "used": the account ledger — the same number the ring
+  // is drawn from and the Portal's USED shows. The request-log roll-up
+  // (`total_credits_used`) is a different fact and gets its own label.
+  const deducted = data.credits.used;
+  const loggedTotal = data.total_credits_used;
 
   const displayName = (id: string) =>
     models.find((m) => m.id === id)?.name ?? id;
@@ -215,10 +264,13 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Usage by model */}
+      {/* Usage by model — from the request-log roll-up, tenant-wide */}
       <div className="px-4 pb-1 pt-3">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-muted">
           {t("usage.byModel")}
+          <span className="ml-1 normal-case tracking-normal text-text-tertiary" data-testid="usage-by-model-scope">
+            · {t("usage.byModelScope")}
+          </span>
         </div>
         {rows.length === 0 ? (
           <p className="pb-2 text-xs text-text-muted">{t("usage.empty")}</p>
@@ -235,13 +287,24 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
         )}
       </div>
 
-      {/* Footer */}
+      {/* Footer — the ledger, i.e. what the ring already says */}
       <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-        <span className="text-xs text-text-muted">{t("usage.totalUsed")}</span>
-        <span className="text-xs font-medium tabular-nums text-text-primary">
-          {totalUsed.toLocaleString()} {t("usage.unit.credits")}
+        <span className="text-xs text-text-muted">{t("usage.deducted")}</span>
+        <span className="text-xs font-medium tabular-nums text-text-primary" data-testid="usage-deducted">
+          {deducted.toLocaleString()} {t("usage.unit.credits")}
         </span>
       </div>
+      {typeof loggedTotal === "number" ? (
+        <div
+          className="flex items-center justify-between px-4 pb-2.5 text-[11px] text-text-tertiary"
+          title={t("usage.logTotalHint")}
+        >
+          <span>{t("usage.logTotal")}</span>
+          <span className="tabular-nums" data-testid="usage-log-total">
+            {loggedTotal.toLocaleString()} {t("usage.unit.credits")}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

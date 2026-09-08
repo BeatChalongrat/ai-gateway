@@ -94,10 +94,13 @@ export default function DashboardPage() {
       </div>
     );
 
+  // FIX86 Part C — a failed /portal/me is UNKNOWN, not zero. The hero
+  // gets `unavailable` and prints no number it did not receive.
+  const unavailable = user === null;
   const balance = user?.credit_balance ?? 0;
   const used = user?.credit_used ?? 0;
   const total = balance + used;
-  const percent = total > 0 ? Math.round((balance / total) * 100) : 100;
+  const percent = unavailable ? 0 : total > 0 ? Math.round((balance / total) * 100) : 100;
   const planLabel = user?.plan
     ? user.plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
     : "Free Trial";
@@ -192,7 +195,8 @@ export default function DashboardPage() {
         used={used}
         total={total}
         percent={percent}
-        planLabel={planLabel}
+        planLabel={unavailable ? "—" : planLabel}
+        unavailable={unavailable}
       />
 
       <QuickstartGrid />
@@ -223,17 +227,22 @@ function CreditHero({
   total,
   percent,
   planLabel,
+  unavailable = false,
 }: {
   balance: number;
   used: number;
   total: number;
   percent: number;
   planLabel: string;
+  /** FIX86 — the account could not be read: every figure renders as "—". */
+  unavailable?: boolean;
 }) {
   const r = 42;
   const circumference = 2 * Math.PI * r;
   const dashOffset = circumference * (1 - percent / 100);
   const displayBalance = useCountUp(balance, 1000);
+  // Zero and unknown must never look the same.
+  const num = (n: number) => (unavailable ? "—" : n.toLocaleString());
 
   return (
     <div
@@ -312,7 +321,9 @@ function CreditHero({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {displayBalance.toLocaleString()}
+            <span data-testid="hero-balance" aria-label={unavailable ? "Available credits unavailable" : undefined}>
+              {num(displayBalance)}
+            </span>
           </div>
           <div
             style={{
@@ -321,7 +332,7 @@ function CreditHero({
               marginTop: 6,
             }}
           >
-            of {total.toLocaleString()} lifetime allotment
+            {unavailable ? "Balance could not be loaded" : `of ${total.toLocaleString()} lifetime allotment`}
           </div>
 
           {/* Stats row */}
@@ -333,8 +344,8 @@ function CreditHero({
               flexWrap: "wrap",
             }}
           >
-            <HeroStat label="Used" value={used.toLocaleString()} />
-            <HeroStat label="Remaining" value={balance.toLocaleString()} />
+            <HeroStat label="Used" value={num(used)} />
+            <HeroStat label="Remaining" value={num(balance)} />
             {/* "Next Reset" removed (F6): value was a permanent "—". Re-add
                 when the backend exposes a real reset date. */}
           </div>
@@ -425,7 +436,7 @@ function CreditHero({
                 className="font-heading"
                 style={{ fontSize: 20, fontWeight: 700, color: "#FFFFFF", lineHeight: 1 }}
               >
-                {percent}%
+                {unavailable ? "—" : `${percent}%`}
               </div>
               <div
                 style={{

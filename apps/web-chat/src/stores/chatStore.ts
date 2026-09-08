@@ -95,6 +95,8 @@ export interface PendingFile {
 interface ChatState {
   conversations: Conversation[];
   conversationsLoaded: boolean;
+  /** FIX86 — the last list load failed (not "you have none"). */
+  conversationsLoadFailed: boolean;
   /** True once the first /conversations page has been fetched. */
   conversationsCursor: string | null;
   hasMoreConversations: boolean;
@@ -340,6 +342,7 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   conversationsLoaded: false,
+  conversationsLoadFailed: false,
   archivedConversations: [],
   archivedLoaded: false,
   archivedLoading: false,
@@ -488,11 +491,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({
         conversations: res.conversations,
         conversationsLoaded: true,
+        conversationsLoadFailed: false,
         conversationsCursor: res.next_cursor,
         hasMoreConversations: res.has_more,
       });
     } catch (err) {
-      set({ conversationsLoaded: true });
+      set({ conversationsLoaded: true, conversationsLoadFailed: true });
       if (err instanceof ApiError && err.status !== 401) {
         set({ errorBanner: "Couldn't load conversations." });
       }

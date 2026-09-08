@@ -110,6 +110,8 @@ export default function BillingPage() {
   // early return for the loading state. When `user` isn't loaded yet,
   // target is 0 and the hook is a no-op.
   const displayBalance = useCountUp(user?.credit_balance ?? 0, 1000);
+  // FIX86 Part C — no account, no number: "—" is not "0".
+  const unavailable = user === null;
 
   if (loading)
     return (
@@ -238,9 +240,13 @@ export default function BillingPage() {
                   fontVariantNumeric: "tabular-nums",
                 }}
               >
-                {formatTokens(displayBalance)}
+                <span data-testid="billing-balance" aria-label={unavailable ? "Current balance unavailable" : undefined}>
+                  {unavailable ? "—" : formatTokens(displayBalance)}
+                </span>
               </span>
-              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>credits</span>
+              <span style={{ fontSize: 13, color: "rgba(255,255,255,0.6)" }}>
+                {unavailable ? "balance could not be loaded" : "credits"}
+              </span>
             </p>
           </div>
           <div className="flex flex-col items-end gap-3">
@@ -261,8 +267,8 @@ export default function BillingPage() {
             </span>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>
               Used (lifetime):{" "}
-              <span style={{ color: "rgba(255,255,255,0.9)", fontWeight: 500 }}>
-                {formatTokens(user?.credit_used ?? 0)}
+              <span style={{ color: "rgba(255,255,255,0.9)", fontWeight: 500 }} data-testid="billing-used">
+                {unavailable ? "—" : formatTokens(user?.credit_used ?? 0)}
               </span>
             </div>
           </div>
