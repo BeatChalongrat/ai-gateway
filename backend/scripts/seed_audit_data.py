@@ -205,6 +205,9 @@ def seed_portal_users(session):
                 email_verified=u["email_verified"],
                 credit_balance=u["credit_balance"],
                 credit_used=u["credit_used"],
+                # FIX88 — the ceiling is what migration 088 backfills
+                # for a real row: balance + used.
+                credit_quota=u["credit_balance"] + u["credit_used"],
             )
             session.add(user)
             session.flush()
@@ -227,6 +230,7 @@ def seed_portal_users(session):
             existing.email_verified = u["email_verified"]
             existing.credit_balance = u["credit_balance"]
             existing.credit_used = u["credit_used"]
+            existing.credit_quota = u["credit_balance"] + u["credit_used"]
             session.flush()
     return created
 

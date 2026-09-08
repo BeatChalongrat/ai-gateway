@@ -65,6 +65,11 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("upstream_bad_response", "The AI provider rejected the request. Change the request before sending it again.", False),
     ErrorInfo("quota_exceeded", "The usage quota has been reached. Contact your administrator.", False),
     ErrorInfo("insufficient_credits", "You're out of credits. Contact your administrator to top up.", False),
+    # FIX88 Part A — an ADMIN top-up that would lift a user's balance above
+    # their credit ceiling. Not retryable: the same amount will keep being
+    # refused until the ceiling is raised (or a smaller amount is sent).
+    # The refusal carries balance / quota / room / amount in `details`.
+    ErrorInfo("credit_ceiling", "The top-up would pass this user's credit ceiling. Raise the ceiling, or top up at most the room that is left.", False),
     # FIX51 Part 4 — a provider account that is out of credits (bare 402,
     # no Retry-After). Fallback-eligible (another ACCOUNT can answer) but
     # not user-retryable: the same request will keep failing until the

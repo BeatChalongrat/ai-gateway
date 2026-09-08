@@ -11,6 +11,8 @@ export interface PortalUser {
   status: string;
   credit_balance: number;
   credit_used: number;
+  /** FIX88 — the per-user ceiling the balance is filled to. */
+  credit_quota?: number;
   credit_percent_used: number;
   is_low_credit: boolean;
   email_verified?: boolean;

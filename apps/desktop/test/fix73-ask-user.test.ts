@@ -31,7 +31,7 @@ import { PermissionStore } from "../src/main/permissions";
 import { GrantStore } from "../src/main/grants";
 import { baseSystemPrompt, subAgentSystemPrompt } from "../src/main/prompt-assembler";
 import { TurnCoordinator } from "../src/main/turn-coordinator";
-import { ASK_LIMITS, ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, formatAnswerForModel, validateAskArgs } from "../src/main/ask-user";
+import { ASK_LIMITS, ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, displayLength, formatAnswerForModel, validateAskArgs } from "../src/main/ask-user";
 import { validateQuestionRespond, TURN_INBOUND_TYPES, TURN_OUTBOUND_TYPES } from "../src/shared/bridge-protocol";
 
 const lines: string[] = [];
@@ -124,6 +124,25 @@ async function until(pred: () => boolean, ms = 5000): Promise<void> {
 }
 const questionPosts = (h: { posts: { type: string; payload: Record<string, unknown> }[] }) => h.posts.filter((p) => p.type === "question.request").map((p) => p.payload);
 const toolResultFor = (messages: GatewayMessage[], id: string) => messages.find((m) => m.role === "tool" && m.tool_call_id === id);
+
+// FIX88 Part E — the header limit counts what the user sees, so a Thai
+// header is not punished for its vowel and tone marks.
+describe("FIX88 — the header limit is measured as displayed", () => {
+  it("หัวข้อเรียงความ is 15 code points and 12 on screen — and validates", () => {
+    expect([..."หัวข้อเรียงความ"].length).toBe(15);
+    expect(displayLength("หัวข้อเรียงความ")).toBe(12);
+    const r = validateAskArgs({ questions: [{ question: "หัวข้อ?", header: "หัวข้อเรียงความ", options: [{ label: "ก" }, { label: "ข" }] }] });
+    expect(r.ok).toBe(true);
+  });
+  it("a header longer than 12 as displayed is still refused, and the schema carries no code-point maxLength", () => {
+    const r = validateAskArgs({ questions: [{ question: "Q", header: "หัวข้อเรียงความยาว", options: [{ label: "ก" }, { label: "ข" }] }] });
+    expect(r.ok).toBe(false);
+    expect((r as { reason: string }).reason).toMatch(/header is longer than 12/);
+    const header = (ASK_USER_TOOL_DEFINITION.function.parameters as { properties: { questions: { items: { properties: { header: Record<string, unknown> } } } } }).properties.questions.items.properties.header;
+    expect(header.maxLength).toBeUndefined();
+    expect(String(header.description)).toMatch(/as displayed/);
+  });
+});
 
 describe("FIX73 — the card and the answer", () => {
   it("posts question.request (never consent.request) with the validated questions, and the chosen label comes back as the tool result", async () => {
@@ -332,11 +351,15 @@ describe("FIX73 — the contract is enforced before any card", () => {
   });
 
   it("the tool definition carries the documented counts and the header limit, and forbids 'Other' in its description", () => {
-    const p = ASK_USER_TOOL_DEFINITION.function.parameters as { properties: { questions: { maxItems: number; items: { properties: { header: { maxLength: number }; options: { minItems: number; maxItems: number } } } } } };
+    const p = ASK_USER_TOOL_DEFINITION.function.parameters as { properties: { questions: { maxItems: number; items: { properties: { header: { maxLength?: number; description: string }; options: { minItems: number; maxItems: number } } } } } };
     expect(p.properties.questions.maxItems).toBe(4);
     expect(p.properties.questions.items.properties.options.minItems).toBe(2);
     expect(p.properties.questions.items.properties.options.maxItems).toBe(4);
-    expect(p.properties.questions.items.properties.header.maxLength).toBe(12);
+    // FIX88 Part E — the header limit is stated in the description (as
+    // displayed) and enforced by validateAskArgs; no code-point maxLength.
+    expect(p.properties.questions.items.properties.header.maxLength).toBeUndefined();
+    expect(p.properties.questions.items.properties.header.description).toMatch(/at most 12 characters as displayed/);
+    expect(ASK_LIMITS.MAX_HEADER).toBe(12);
     expect(ASK_USER_TOOL_DEFINITION.function.description).toMatch(/Do not add an 'Other' option/);
   });
 

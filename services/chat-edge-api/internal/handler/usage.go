@@ -88,6 +88,22 @@ type usageResponse struct {
 type portalMe struct {
 	CreditBalance int64 `json:"credit_balance"`
 	CreditUsed    int64 `json:"credit_used"`
+	// FIX88 — the per-user ceiling (migration 088 backfilled it to
+	// balance + used, so a deployment that has just migrated shows the
+	// same total it showed before). Absent (0) on a gateway older than
+	// FIX88 → the old derivation, so nothing divides by zero.
+	CreditQuota int64 `json:"credit_quota"`
+}
+
+// creditsTotal — FIX88: "full" is a stored fact, the ceiling. The old
+// derivation balance + used inflated the denominator on every top-up, so
+// a topped-up account could never read as full again. Kept as the
+// fallback only for a gateway that does not send the ceiling.
+func creditsTotal(me portalMe) int64 {
+	if me.CreditQuota > 0 {
+		return me.CreditQuota
+	}
+	return me.CreditBalance + me.CreditUsed
 }
 
 type portalUsageSummary struct {
@@ -182,7 +198,7 @@ func (h *UsageHandler) Me(w http.ResponseWriter, r *http.Request) {
 	// float cost × rate); the UI labels it separately.
 	_ = json.NewEncoder(w).Encode(usageResponse{
 		Credits: usageCredits{
-			Total:     me.CreditBalance + me.CreditUsed,
+			Total:     creditsTotal(me),
 			Used:      me.CreditUsed,
 			Remaining: me.CreditBalance,
 			ResetDate: nil,

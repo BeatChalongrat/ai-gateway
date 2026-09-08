@@ -155,6 +155,35 @@ export function supersededImageIds(activities: ToolActivity[]): Set<string> {
   return out;
 }
 
+/** FIX88 Part E — ids of FAILED attempts that a later attempt of the same
+ *  tool (same sibling group: parentId + tool) then made good. The failed
+ *  row stays — a tool must never fail invisibly — but it no longer sits
+ *  fully expanded with its raw input above the attempt that worked: it
+ *  starts folded to its header (collapse, never delete — FIX77's rule).
+ *  Computed over ALL activities, because the successful retry may itself
+ *  be presented by a dedicated card (ask_user_question → QuestionCard)
+ *  and therefore be absent from the visible list. */
+export function supersededFailureIds(activities: ToolActivity[]): Set<string> {
+  const groups = new Map<string, ToolActivity[]>();
+  for (const a of activities) {
+    if (a.tool === "subagent") continue;
+    const k = `${a.parentId ?? ""}|${a.tool}`;
+    const g = groups.get(k);
+    if (g) g.push(a);
+    else groups.set(k, [a]);
+  }
+  const out = new Set<string>();
+  for (const g of groups.values()) {
+    for (let i = 0; i < g.length; i++) {
+      const a = g[i]!;
+      if (a.phase !== "finished" || a.success !== false) continue;
+      const madeGood = g.slice(i + 1).some((b) => b.phase === "finished" && b.success !== false);
+      if (madeGood) out.add(a.id);
+    }
+  }
+  return out;
+}
+
 /** FIX29 §2.2 — one collapsible card per sub-agent (activity.tool ===
  *  "subagent", emitted by the host with the sub-agent id). Collapsed by
  *  default with a one-line summary; opens itself while running, when it
@@ -230,11 +259,14 @@ export function ToolCard({
   children,
   all,
   superseded,
+  foldedFailures,
 }: {
   activity: ToolActivity;
   children?: ToolActivity[];
   all?: ToolActivity[];
   superseded?: Set<string>;
+  /** FIX88 Part E — failed attempts a later attempt made good: folded. */
+  foldedFailures?: Set<string>;
 }) {
   const t = useT();
   const running = activity.phase === "started";
@@ -245,22 +277,26 @@ export function ToolCard({
   // the toggle brings it back exactly as it rendered before.
   const imageSuperseded = superseded?.has(activity.id) === true;
   const [showOldImage, setShowOldImage] = useState(false);
+  // FIX88 Part E — a failure the next attempt made good stays as a row
+  // (never deleted) but does not auto-expand its raw input.
+  const failureFolded = failed && foldedFailures?.has(activity.id) === true;
   if (activity.tool === "subagent") {
     return <SubagentCard activity={activity} steps={children ?? []} all={all ?? []} superseded={superseded ?? new Set()} />;
   }
 
   // Auto-expand while running if there is live output to watch; fold shortly
-  // after finishing (unless failed — keep failures open).
+  // after finishing (unless failed — keep failures open, except a failure a
+  // later attempt superseded, which folds like any finished row).
   useEffect(() => {
     if (running && activity.output) setExpanded(true);
   }, [running, activity.output]);
   useEffect(() => {
-    if (!running && !failed) {
+    if (!running && (!failed || failureFolded)) {
       const t = setTimeout(() => setExpanded(false), COLLAPSE_DELAY_MS);
       return () => clearTimeout(t);
     }
     if (failed) setExpanded(true);
-  }, [running, failed]);
+  }, [running, failed, failureFolded]);
 
   const Icon = toolIcon(activity.tool);
   const cardImages = imagesOf(activity);
@@ -302,10 +338,11 @@ export function ToolCard({
 
   return (
     <div
-      className={`rounded-lg border ${failed ? "border-status-danger/50" : "border-border"} bg-bg-surface my-1`}
+      className={`rounded-lg border ${failed && !failureFolded ? "border-status-danger/50" : "border-border"} bg-bg-surface my-1 ${failureFolded ? "opacity-80" : ""}`}
       data-testid="tool-card"
       data-tool={activity.tool}
       data-status={running ? "running" : failed ? "failed" : "ok"}
+      data-folded-failure={failureFolded ? "true" : undefined}
     >
       <button
         type="button"
@@ -334,6 +371,9 @@ export function ToolCard({
         ) : null}
         {failed ? (
           <span className="shrink-0 text-xs font-medium text-status-danger">{t("tool.failedBadge")}</span>
+        ) : null}
+        {failureFolded ? (
+          <span className="shrink-0 text-xs text-text-muted" data-testid="tool-retried-note">{t("tool.retriedNote")}</span>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {activity.durationMs != null ? (
@@ -430,7 +470,7 @@ export function ToolCard({
       {children && children.length ? (
         <div className="ml-4 border-l-2 border-border-subtle pl-2">
           {children.map((c) => (
-            <ToolCard key={c.id} activity={c} children={(all ?? []).filter((a) => a.parentId === c.id)} all={all} superseded={superseded} />
+            <ToolCard key={c.id} activity={c} children={(all ?? []).filter((a) => a.parentId === c.id)} all={all} superseded={superseded} foldedFailures={foldedFailures} />
           ))}
         </div>
       ) : null}
@@ -446,6 +486,9 @@ export function ToolCard({
 export function ToolActivityList({ activities, planShown = false }: { activities: ToolActivity[]; planShown?: boolean }) {
   const visible = activities.filter((a) => !presentedByDedicatedCard(a, planShown));
   const superseded = supersededImageIds(visible);
+  // FIX88 Part E — over ALL activities: the successful retry may be hidden
+  // behind its dedicated card (ask_user_question) and absent from `visible`.
+  const foldedFailures = supersededFailureIds(activities);
   const byId = new Map(visible.map((a) => [a.id, a]));
   const roots = visible.filter((a) => !a.parentId || !byId.has(a.parentId));
   const childrenOf = (id: string) => visible.filter((a) => a.parentId === id);
@@ -453,7 +496,7 @@ export function ToolActivityList({ activities, planShown = false }: { activities
   return (
     <div className="flex flex-col" data-testid="tool-activity-list">
       {roots.map((a) => (
-        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} all={visible} superseded={superseded} />
+        <ToolCard key={a.id} activity={a} children={childrenOf(a.id)} all={visible} superseded={superseded} foldedFailures={foldedFailures} />
       ))}
     </div>
   );

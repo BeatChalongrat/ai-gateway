@@ -63,8 +63,17 @@ def get_me(
 
     balance = int(user.credit_balance)
     used = int(user.credit_used)
+    quota = int(user.credit_quota)
     lifetime = balance + used
-    percent_used = (used / lifetime * 100.0) if lifetime > 0 else 0.0
+    # FIX88 — the ring is used / CEILING. Migration 088 backfilled the
+    # ceiling to balance + used, so on day one this is the same number
+    # the old derivation produced; a zero ceiling (never granted
+    # anything) keeps the lifetime formula so nothing divides by zero
+    # and a pre-backfill row reads exactly as before.
+    if quota > 0:
+        percent_used = used / quota * 100.0
+    else:
+        percent_used = (used / lifetime * 100.0) if lifetime > 0 else 0.0
     threshold = _low_credit_threshold(session)
 
     # tenant_name lookup — the Team page header ("Invite teammates to
@@ -85,6 +94,7 @@ def get_me(
         "status": user.status,
         "credit_balance": balance,
         "credit_used": used,
+        "credit_quota": quota,
         "credit_percent_used": round(percent_used, 2),
         "is_low_credit": threshold > 0 and balance < threshold,
         "email_verified": bool(user.email_verified),
@@ -136,6 +146,7 @@ def update_me(
         "status": user.status,
         "credit_balance": int(user.credit_balance),
         "credit_used": int(user.credit_used),
+        "credit_quota": int(user.credit_quota),
         "preferred_language": user.preferred_language or "en",
         "tenant_id": user.tenant_id,
         "tenant_role": user.tenant_role or "member",

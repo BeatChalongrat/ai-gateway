@@ -21,7 +21,7 @@
 //     (whose job is: my own answer to THIS question).
 
 import { MessageCircleQuestion } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useT } from "@/lib/i18n";
 import type { PendingQuestion, QuestionAnswerPayload } from "@/lib/types";
@@ -42,6 +42,7 @@ export function QuestionCard({
   const [reply, setReply] = useState("");
   const [replyOpen, setReplyOpen] = useState(false);
   const [sent, setSent] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const toggle = (qi: number, label: string, multi: boolean) => {
     setPicked((p) => {
@@ -81,19 +82,80 @@ export function QuestionCard({
     onAnswer({ promptId: question.promptId, outcome: "skipped", answers: {}, response: null });
   };
 
-  // FIX77 D4 — number keys pick options in the first unanswered question
-  // (with one question, simply that question). "Something else" is the
-  // last number. Never fires while the user types in a field.
+  // FIX77 D4 — number keys pick options in the ACTIVE question: the first
+  // unanswered one (with one question, simply that question). "Something
+  // else" is the last number. Never fires while the user types in a field.
+  // FIX88 Part C — the active question is shown, not just computed (the
+  // marker on its legend), and Enter confirms once an answer exists.
+  const firstOpen = question.questions.findIndex((_, i) => answerOf(i).length === 0);
+  const activeQi = firstOpen === -1 ? question.questions.length - 1 : firstOpen;
+  const many = question.questions.length > 1;
+
+  // FIX88 Part C — the card takes focus when it appears, so the keys that
+  // answer it reach it. Measured on the real bundle: with Part B returning
+  // the caret to the composer after a send, the number keys landed in the
+  // composer as text (FIX77 D4's correct rule: typing in a field is never a
+  // shortcut) and Enter sent a message instead of answering. The turn is
+  // PARKED on this card — it is the current task, not an interruption.
+  // The exception is a person actually drafting: a composer (or any field)
+  // with text in it keeps the caret, and the card is still reachable by
+  // Tab, by mouse, and through the thread's own "question" pill.
+  // The card root is not a text field, so no soft keyboard opens; scroll is
+  // left to the thread (FIX30 brings the card into view or raises the pill).
+  useEffect(() => {
+    if (sent) return;
+    const el = document.activeElement as HTMLElement | null;
+    const field =
+      el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
+        ? el.value
+        : el?.isContentEditable
+          ? el.textContent ?? ""
+          : null;
+    if (field !== null && field.trim().length > 0) return; // a real draft: leave it
+    rootRef.current?.focus({ preventScroll: true });
+    // Only when the card first appears for this prompt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question.promptId]);
+
   useEffect(() => {
     if (sent) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       const el = e.target as HTMLElement | null;
+      // The two text inputs own their Enter (they submit from inside);
+      // typing anywhere else (the composer) is never a shortcut.
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (e.key === "Enter") {
+        // FIX88 Part C — Enter confirms. The owner's screenshot: option 2
+        // highlighted, Enter did nothing — worse, on a focused option
+        // button Enter re-fired its click and DEselected it. Rules:
+        //   * from nowhere (body — the number-key case) or from inside the
+        //     card: confirm when an answer exists;
+        //   * on a focused option that is NOT yet chosen: let the native
+        //     click choose it (Tab + Enter still selects);
+        //   * on Skip / Answer / the reply toggle: their own click;
+        //   * on any control outside the card (Send, a menu): not ours.
+        if (e.shiftKey) return;
+        const root = rootRef.current;
+        // e.target is the window itself for a key pressed with nothing
+        // focused (jsdom and real browsers alike) — not a Node.
+        const node = el instanceof Node ? el : null;
+        const inside = !!(node && root && root.contains(node));
+        const fromNowhere = !node || node === document.body || node === document.documentElement;
+        if (!inside && !fromNowhere) return;
+        if (inside && el instanceof HTMLButtonElement) {
+          const kind = el.getAttribute("data-testid");
+          if (kind === "question-skip" || kind === "question-submit" || kind === "question-reply-toggle") return;
+          if (el.getAttribute("aria-checked") === "false") return; // choose it first
+        }
+        if (!canSubmit) return;
+        e.preventDefault();
+        submit();
+        return;
+      }
       if (!/^[1-9]$/.test(e.key)) return;
       const d = Number(e.key);
-      const firstOpen = question.questions.findIndex((_, i) => answerOf(i).length === 0);
-      const qi = firstOpen === -1 ? question.questions.length - 1 : firstOpen;
+      const qi = activeQi;
       const q = question.questions[qi];
       if (!q) return;
       if (d <= q.options.length) {
@@ -107,17 +169,28 @@ export function QuestionCard({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sent, picked, otherText, question]);
+  }, [sent, picked, otherText, question, reply, replyOpen]);
 
   return (
     <div
-      className="my-2 rounded-lg border border-blue-500/50 bg-blue-500/5 px-3 py-3"
+      ref={rootRef}
+      // Focusable as a container (never in the tab order): the card takes
+      // focus when it appears so 1–9 and Enter reach it, and Enter here is
+      // the card's own — the option buttons keep theirs.
+      tabIndex={-1}
+      className="my-2 rounded-lg border border-blue-500/50 bg-blue-500/5 px-3 py-3 focus:outline-none"
       data-testid="question-card"
       data-prompt-id={question.promptId}
+      data-active-question={activeQi}
     >
       <div className="flex items-center gap-2">
         <MessageCircleQuestion className="h-5 w-5 shrink-0 text-blue-500" />
         <div className="text-sm font-semibold text-text-primary">{t("question.title")}</div>
+        {many ? (
+          <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] tabular-nums text-text-tertiary" data-testid="question-count">
+            {t("question.count", { n: String(question.questions.length) })}
+          </span>
+        ) : null}
         <span className="ml-auto hidden text-[11px] text-text-muted sm:inline">{t("question.keyHint")}</span>
       </div>
 
@@ -125,14 +198,22 @@ export function QuestionCard({
         const cur = picked[qi] ?? [];
         const otherOn = cur.includes(OTHER);
         return (
-          <fieldset key={qi} className="mt-3" data-testid="question-item" disabled={sent}>
-            <legend className="flex items-center gap-2 text-sm text-text-primary">
+          <fieldset key={qi} className="mt-3" data-testid="question-item" data-active={many && qi === activeQi ? "true" : undefined} disabled={sent}>
+            <legend className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
               {/* the header the MODEL wrote, as written — uppercasing does
                   nothing to Thai and breaks a mixed-script chip (FIX77 D1) */}
               <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] font-medium text-text-tertiary" data-testid="question-header">
                 {q.header}
               </span>
               <span className="font-medium">{q.question}</span>
+              {/* FIX88 Part C — which question the number keys act on was
+                  invisible state; with several questions the active one
+                  says so on its own line. */}
+              {many && qi === activeQi && !sent ? (
+                <span className="rounded border border-blue-500/50 px-1.5 py-0.5 text-[11px] text-blue-500" data-testid="question-active-marker">
+                  {t("question.activeMarker", { n: String(qi + 1), total: String(question.questions.length) })}
+                </span>
+              ) : null}
             </legend>
             {q.multiSelect ? <div className="mt-0.5 text-xs text-text-tertiary">{t("question.multiHint")}</div> : null}
             <div className="mt-1.5 flex flex-col gap-1">

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -73,6 +74,37 @@ func TestAskUserContract_MatchesDesktop(t *testing.T) {
 	}
 	if !strings.Contains(src, `(other|others|something else|none of (the|these) above|อื่น\s*ๆ|อื่นๆ|อื่น|ไม่ใช่ข้อไหนเลย)`) {
 		t.Errorf("the 'Other' label rule differs from the desktop's")
+	}
+}
+
+// FIX88 Part E — the 12-character header limit is measured as displayed on
+// both sides: "หัวข้อเรียงความ" (15 code points, 12 on screen) is accepted, a
+// 13-base-character Thai header is refused, and neither side declares a
+// code-point maxLength in the schema (a strict provider would refuse the
+// Thai header before our check ran).
+func TestAskUserContract_HeaderLengthIsDisplayLength(t *testing.T) {
+	if displayLength("หัวข้อเรียงความ") != 12 {
+		t.Fatalf("display length of the owner's header: %d", displayLength("หัวข้อเรียงความ"))
+	}
+	ok := `{"questions":[{"question":"หัวข้อ?","header":"หัวข้อเรียงความ","options":[{"label":"ก"},{"label":"ข"}]}]}`
+	if _, err := validateAskArgs(ok); err != nil {
+		t.Fatalf("a 12-character-as-displayed Thai header must validate: %v", err)
+	}
+	long := `{"questions":[{"question":"Q","header":"หัวข้อเรียงความยาว","options":[{"label":"ก"},{"label":"ข"}]}]}` // 15 base characters
+	if _, err := validateAskArgs(long); err == nil || !strings.Contains(err.Error(), "header is longer than 12") {
+		t.Fatalf("a 15-base-character header must be refused: %v", err)
+	}
+	def := askUserToolDef()
+	raw, _ := json.Marshal(def)
+	if strings.Contains(string(raw), `"header":{"type":"string","maxLength"`) || regexp.MustCompile(`"header":\{[^}]*"maxLength"`).MatchString(string(raw)) {
+		t.Fatalf("the header schema must not carry a code-point maxLength: %s", raw)
+	}
+	src := readDesktopAskUser(t)
+	if !strings.Contains(src, `s.replace(/\p{M}/gu, "")`) {
+		t.Errorf("the desktop must count the header the same way (strip \\p{M}, count the rest)")
+	}
+	if strings.Contains(src, `header: { type: "string", maxLength:`) {
+		t.Errorf("the desktop header schema must not carry a code-point maxLength either")
 	}
 }
 

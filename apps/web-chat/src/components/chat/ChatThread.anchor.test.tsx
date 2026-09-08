@@ -514,3 +514,112 @@ describe("FIX47.5 — the held position survives the reply's final re-layout", (
     expect(spacerOf(scroller)).toBe(spacer);
   });
 });
+
+// FIX88 Part D — "เขียนลงมาไม่สุด (บางครั้ง)". Measured on the real bundle
+// (reports/fix88/scroll-probe.js): the reply that crosses the viewport
+// bottom only on its LAST flush handed over and then waited for a next
+// delta that never came — the tail sat 435–535 px below the fold with no
+// pill. Growth that never arrives as a content delta (the virtualizer's
+// late measurement, the finished row's meta/actions lines, a thinking
+// block, an image) was likewise never handed over nor followed.
+describe("FIX88 — the reply follows to the end", () => {
+  let fire: (() => void) | null = null;
+  beforeEach(() => {
+    fire = null;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(cb: () => void) { fire = cb; }
+      observe() {}
+      disconnect() {}
+    });
+  });
+
+  it("the handover moves the view to the bottom in the same pass — a final flush that crosses the fold is followed", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    const anchored = scroller.scrollTop; // 736
+    heights[9] = 120; // short of the fold: hold
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a", true)]);
+    expect(scroller.scrollTop).toBe(anchored);
+    // ONE big last flush: 120 → 700 (well past 736 + 300), then the stream ends
+    heights[9] = 700;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a b c d e f", true)]);
+    expect(spacerOf(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight); // the OLD code left it at 736
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a b c d e f", false)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+  });
+
+  it("growth that never came as a delta (a resize while holding) hands over by the same rule", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    const anchored = scroller.scrollTop;
+    heights[9] = 120;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a", true)]);
+    expect(scroller.scrollTop).toBe(anchored);
+    heights[9] = 400; // the row re-lays out taller with NO render (late measurement, highlighting, an image)
+    fire!();
+    expect(spacerOf(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+  });
+
+  it("while following a live reply, a resize keeps the bottom; a short resize while holding still only re-sizes the spacer", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 400; // past the fold: handover + bottom
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "long", true)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    // a browser holds scrollTop at scrollHeight − viewport; the fake model
+    // does not clamp, so put it where a browser would have it
+    scroller.scrollTop = scroller.scrollHeight - VIEW_H;
+    heights[9] = 520; // grows without a delta
+    fire!();
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+
+    // and the hold case that must NOT move: still short after the resize
+    const second = mount(seed(8));
+    second.rerender(sent());
+    const anchored = second.scroller.scrollTop;
+    heights[9] = 100;
+    second.rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a", true)]);
+    heights[9] = 130;
+    fire!();
+    expect(second.scroller.scrollTop).toBe(anchored);
+    expect(spacerOf(second.scroller)).toBe(736 + 300 - 1030);
+  });
+
+  it("the stream ending on a row that grew past the fold without a delta (meta/actions lines) hands over; a short one keeps its spacer", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    const anchored = scroller.scrollTop;
+    heights[9] = 100; // 900 + 100 < 736 + 300: short, the hold is on
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "same text", true)]);
+    expect(scroller.scrollTop).toBe(anchored);
+    heights[9] = 420; // the finished row's meta + actions lines: no content change
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "same text", false)]);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+
+    const short = mount(seed(8));
+    short.rerender(sent());
+    const a2 = short.scroller.scrollTop;
+    heights[9] = 60;
+    short.rerender([...sent().slice(0, 9), msg("a-new", "assistant", "done", false)]);
+    expect(short.scroller.scrollTop).toBe(a2);
+    expect(spacerOf(short.scroller)).toBe(76);
+  });
+
+  it("the reader always wins: scrolled up during the stream, neither a delta nor a resize moves them", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    heights[9] = 400;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "long", true)]);
+    scroller.scrollTop = 300; // reads something above
+    fireEvent.scroll(scroller);
+    heights[9] = 600;
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "longer", true)]);
+    expect(scroller.scrollTop).toBe(300);
+    heights[9] = 700;
+    fire!();
+    expect(scroller.scrollTop).toBe(300);
+    expect(screen.getByText(dictionaries.en["thread.newMessages"])).toBeTruthy();
+  });
+});

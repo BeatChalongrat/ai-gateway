@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -34,6 +35,21 @@ const (
 	AskMaxDescription = 200
 	AskMaxFreeText    = 2000
 )
+
+// displayLength — FIX88 Part E — text length AS DISPLAYED: a base character
+// with its combining marks is one character (Unicode category M stripped,
+// the rest counted). "หัวข้อเรียงความ" is 15 code points and 12 on screen.
+// Identical to the desktop's displayLength by construction; the contract
+// test pins that both sides use this rule.
+func displayLength(s string) int {
+	n := 0
+	for _, r := range s {
+		if !unicode.Is(unicode.M, r) {
+			n++
+		}
+	}
+	return n
+}
 
 // pendingQuestionTTL — how long a parked web turn may wait for its answer
 // (Part A §1). Lazy: nothing fires at the deadline; an answer after it is
@@ -87,7 +103,9 @@ func askUserToolDef() GatewayTool {
 							"type": "object",
 							"properties": map[string]any{
 								"question": map[string]any{"type": "string", "maxLength": AskMaxQuestion, "description": "The full question, in the user's language."},
-								"header":   map[string]any{"type": "string", "maxLength": AskMaxHeader, "description": "A short chip label for the question (max 12 characters), e.g. 'Format'."},
+								// FIX88 Part E — no maxLength: JSON Schema counts code points and a
+								// strict provider would refuse a Thai header before displayLength ran.
+								"header": map[string]any{"type": "string", "description": "A short chip label for the question, at most 12 characters as displayed (Thai vowel and tone marks do not count), e.g. 'Format' or 'รูปแบบ'."},
 								"options": map[string]any{
 									"type":        "array",
 									"minItems":    AskMinOptions,
@@ -161,8 +179,8 @@ func validateAskArgs(rawArgs string) ([]AskQuestion, error) {
 		if header == "" {
 			return nil, fmt.Errorf("%s.header is required (a label of at most %d characters)", where, AskMaxHeader)
 		}
-		if utf8.RuneCountInString(header) > AskMaxHeader {
-			return nil, fmt.Errorf("%s.header is longer than %d characters", where, AskMaxHeader)
+		if displayLength(header) > AskMaxHeader {
+			return nil, fmt.Errorf("%s.header is longer than %d characters (as displayed; Thai marks do not count)", where, AskMaxHeader)
 		}
 		hk := strings.ToLower(header)
 		if headers[hk] {

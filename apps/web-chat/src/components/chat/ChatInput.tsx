@@ -501,6 +501,19 @@ export function ChatInput({
     });
   }, [isRecording, voiceTranscript, resetVoiceTranscript]);
 
+  /** FIX88 Part B — focus the composer after a send unless the device is
+   *  touch or the composer already has it. Reads activeElement after one
+   *  frame so a click on Send has finished committing its state swap. */
+  function refocusAfterSend() {
+    if (typeof window === "undefined") return;
+    if (!window.matchMedia("(pointer: fine)").matches) return;
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta || document.activeElement === ta) return;
+      ta.focus({ preventScroll: true });
+    });
+  }
+
   // When a stream ends (completed / stopped / errored / regenerate
   // finished), give the caret back to the composer so the user can keep
   // typing without a click — but ONLY when focus was actually lost:
@@ -636,6 +649,17 @@ export function ChatInput({
     );
     onSend(t2, readyFileIds, imageMode, videoMode);
     setText("");
+    // FIX88 Part B — the caret comes back to the composer after a send,
+    // however the send was fired. A mouse click on Send leaves focus on
+    // that button (which then becomes Stop), and the stream-end restore
+    // below deliberately leaves focus that sits on a live control alone —
+    // so nothing ever gave the composer back, and the next message needed
+    // a second click. The send button is not "somewhere the user moved
+    // focus to": it is the control that just fired. ChatGPT and Claude
+    // both keep the composer focused after a send; so do we. Same touch
+    // guard as the restore below (no soft keyboard over the reply), and
+    // an already-focused composer is left untouched (no caret reset).
+    refocusAfterSend();
     // Delete the persisted draft NOW — the debounced empty-save would
     // also clear it, but a reload inside that 1s window must not
     // resurrect an already-sent message.

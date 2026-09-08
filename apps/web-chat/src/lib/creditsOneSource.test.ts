@@ -46,6 +46,29 @@ describe("one number, one source: the ledger's credit_used", () => {
     expect(me).toMatch(/used = int\(user\.credit_used\)/);
   });
 
+  // FIX88 Part A — and "full" has one source too: the stored ceiling
+  // (portal_users.credit_quota), read by chat-edge and the portal alike.
+  // A side that goes back to balance + used as its total fails here.
+  it("the total is the ceiling on both sides, never balance + used again", () => {
+    const go = read("services/chat-edge-api/internal/handler/usage.go");
+    expect(go).toMatch(/CreditQuota\s+int64\s+`json:"credit_quota"`/);
+    expect(go).toMatch(/Total:\s*creditsTotal\(me\)/);
+    expect(go).not.toMatch(/Total:\s*me\.CreditBalance \+ me\.CreditUsed/);
+    const dash = read("portal/app/(app)/dashboard/page.tsx");
+    expect(dash).toMatch(/user\.credit_quota/);
+    expect(dash).not.toMatch(/const total = balance \+ used;/);
+    const me = read("backend/app/api/routes/portal_me.py");
+    expect(me).toMatch(/"credit_quota":\s*quota/);
+    expect(me).toMatch(/quota = int\(user\.credit_quota\)/);
+    // the ceiling is a stored column with a backfill equal to the old derivation
+    const mig = read("backend/migrations/versions/088_portal_user_credit_quota.py");
+    expect(mig).toMatch(/UPDATE portal_users SET credit_quota = credit_balance \+ credit_used/);
+    // and no route writes the balance directly: the ledger service is the only writer
+    const admin = read("backend/app/api/routes/admin_portal_users.py");
+    expect(admin).not.toMatch(/\.credit_balance\s*[-+]?=/);
+    expect(admin).not.toMatch(/\.credit_quota\s*[-+]?=/);
+  });
+
   it("the roll-up is named for what it is on the backend, so nobody mistakes it for the ledger", () => {
     const me = read("backend/app/api/routes/portal_me.py");
     expect(me).toMatch(/Display credits — derived from real logged cost, NOT the/);

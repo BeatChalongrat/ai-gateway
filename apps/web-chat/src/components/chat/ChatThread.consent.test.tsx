@@ -138,7 +138,10 @@ describe("FIX30 §1 — the consent card is reachable", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());
     const anchored = scroller.scrollTop;
-    heights[9] = 250; // cards, still short of the viewport → the hold is on
+    // FIX88 Part D — 120 px keeps the content short of the viewport at the
+    // hold (900 + 120 < 736 + 300); the previous 250 already crossed it,
+    // and only the old "snap on the NEXT delta" gap kept the view parked.
+    heights[9] = 120; // cards, still short of the viewport → the hold is on
     rerender(sent({ tool_activities: [finished("p", "update_plan"), finished("s", "run_subagent"), started("c", "run_command")] }));
     expect(scroller.scrollTop).toBe(anchored);
 

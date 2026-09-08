@@ -16,7 +16,7 @@ func TestUsageMe_UsedIsTheLedgerAndTheRollupKeepsItsOwnName(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/portal/me":
-			_, _ = w.Write([]byte(`{"credit_balance": 52331072, "credit_used": 47818928}`))
+			_, _ = w.Write([]byte(`{"credit_balance": 52331072, "credit_used": 47818928, "credit_quota": 100150000}`))
 		case "/portal/me/usage/summary":
 			// tenant-wide roll-up: a DIFFERENT number (another member's usage is in it)
 			_, _ = w.Write([]byte(`{"totals": {"requests": 1840, "tokens": 12335193, "credits_used": 51835899},
@@ -83,5 +83,49 @@ func TestUsageMe_ZeroRollupIsZeroNotTokens(t *testing.T) {
 	}
 	if out.UsageByModel[0].CreditsUsed != 0 || out.UsageByModel[0].Tokens != 9000 {
 		t.Fatalf("tokens stay tokens, credits stay credits: %+v", out.UsageByModel[0])
+	}
+}
+
+// FIX88 Part A — "full" is the stored ceiling, not balance + used. After a
+// 500k top-up on 500k-left-of-1M the ring must read 1,000,000 of
+// 1,000,000, not of 1,500,000. A gateway that does not send the ceiling
+// (pre-FIX88) still gets the old derivation.
+func TestUsageMe_TotalIsTheCeiling(t *testing.T) {
+	cases := []struct {
+		name  string
+		me    string
+		total int64
+	}{
+		{"topped up to full: quota is the total", `{"credit_balance": 1000000, "credit_used": 500000, "credit_quota": 1000000}`, 1000000},
+		{"day one after the backfill: identical to the old derivation", `{"credit_balance": 52331072, "credit_used": 47818928, "credit_quota": 100150000}`, 100150000},
+		{"gateway without the ceiling: the old derivation", `{"credit_balance": 700, "credit_used": 300}`, 1000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/portal/me":
+					_, _ = w.Write([]byte(c.me))
+				case "/portal/me/usage/summary":
+					_, _ = w.Write([]byte(`{"totals": {"requests": 1, "tokens": 1, "credits_used": 1}, "top_models": []}`))
+				default:
+					w.WriteHeader(404)
+				}
+			}))
+			defer gateway.Close()
+			h := NewUsageHandler(gateway.URL + "/v1")
+			req := httptest.NewRequest(http.MethodGet, "/usage/me", nil)
+			req.Header.Set("Authorization", "Bearer portal-token")
+			rec := httptest.NewRecorder()
+			h.Me(rec, req)
+			var out usageResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if out.Credits.Total != c.total {
+				t.Fatalf("total: got %d want %d", out.Credits.Total, c.total)
+			}
+		})
 	}
 }

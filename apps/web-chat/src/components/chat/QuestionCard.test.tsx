@@ -125,3 +125,137 @@ describe("QuestionCard", () => {
     expect(screen.getByTestId("question-skip").textContent).toBe("ข้าม");
   });
 });
+
+// FIX88 Part C — the card answers from the keyboard: Enter confirms, the
+// header counts the questions, and the question the number keys act on is
+// marked instead of being invisible state.
+describe("QuestionCard — FIX88 keyboard reachability", () => {
+  it("Enter after a number key confirms the chosen option", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.keyDown(window, { key: "2" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer.mock.calls[0]![0].answers).toEqual({ "Which format?": ["Detailed"] });
+  });
+
+  it("Enter on the focused, already-chosen option confirms — it no longer deselects it", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    const opt = screen.getAllByTestId("question-option")[1]!;
+    fireEvent.click(opt);
+    opt.focus();
+    expect(opt.getAttribute("aria-checked")).toBe("true");
+    fireEvent.keyDown(opt, { key: "Enter" });
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(opt.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("Enter on a focused option that is not chosen is left to the button (it chooses, never confirms)", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.keyDown(window, { key: "1" });
+    const other = screen.getAllByTestId("question-option")[1]!;
+    other.focus();
+    fireEvent.keyDown(other, { key: "Enter" });
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("Enter with nothing chosen does nothing, and Enter on a control outside the card is not the card's", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onAnswer).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "1" });
+    const send = document.createElement("button");
+    document.body.appendChild(send);
+    send.focus();
+    fireEvent.keyDown(send, { key: "Enter" });
+    expect(onAnswer).not.toHaveBeenCalled();
+    send.remove();
+  });
+
+  it("Enter inside the 'Something else' box submits once (the box's own handler; no double answer)", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.click(screen.getByTestId("question-other"));
+    const box = screen.getByTestId("question-other-text") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "PDF please" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer.mock.calls[0]![0].answers).toEqual({ "Which format?": ["PDF please"] });
+  });
+
+  it("Skip is reachable with the keyboard (a focused Skip + Enter skips, the card does not answer instead)", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    fireEvent.keyDown(window, { key: "1" });
+    const skip = screen.getByTestId("question-skip") as HTMLButtonElement;
+    skip.focus();
+    fireEvent.keyDown(skip, { key: "Enter" }); // the window handler stays out of it
+    expect(onAnswer).not.toHaveBeenCalled();
+    fireEvent.click(skip); // what the browser does for Enter on a button
+    expect(onAnswer.mock.calls[0]![0].outcome).toBe("skipped");
+  });
+
+  it("with several questions the header counts them and the active one is marked; the marker follows the number keys", () => {
+    render(<QuestionCard question={two} onAnswer={() => {}} />);
+    expect(screen.getByTestId("question-count").textContent).toBe("2 questions");
+    const card = screen.getByTestId("question-card");
+    expect(card.getAttribute("data-active-question")).toBe("0");
+    const items = screen.getAllByTestId("question-item");
+    expect(items[0]!.getAttribute("data-active")).toBe("true");
+    expect(items[1]!.getAttribute("data-active")).toBeNull();
+    expect(screen.getByTestId("question-active-marker").textContent).toBe("number keys → question 1 of 2");
+    fireEvent.keyDown(window, { key: "1" }); // answers question 1
+    expect(card.getAttribute("data-active-question")).toBe("1");
+    expect(items[1]!.getAttribute("data-active")).toBe("true");
+    expect(screen.getByTestId("question-active-marker").textContent).toBe("number keys → question 2 of 2");
+  });
+
+  it("a single question shows no count and no marker", () => {
+    render(<QuestionCard question={one} onAnswer={() => {}} />);
+    expect(screen.queryByTestId("question-count")).toBeNull();
+    expect(screen.queryByTestId("question-active-marker")).toBeNull();
+  });
+});
+
+// FIX88 Part C — the card must be able to RECEIVE the keys that answer it.
+// Measured on the real bundle: with the composer holding the caret after a
+// send (Part B), 1–9 typed into the composer and Enter sent a message.
+describe("QuestionCard — the waiting card takes focus", () => {
+  it("focuses itself when it appears, so number keys and Enter reach it", () => {
+    render(<QuestionCard question={one} onAnswer={() => {}} />);
+    expect(document.activeElement).toBe(screen.getByTestId("question-card"));
+    expect(screen.getByTestId("question-card").getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("an empty composer loses the caret to the card; a composer with a draft keeps it", () => {
+    const empty = document.createElement("textarea");
+    document.body.appendChild(empty);
+    empty.focus();
+    const first = render(<QuestionCard question={one} onAnswer={() => {}} />);
+    expect(document.activeElement).toBe(screen.getByTestId("question-card"));
+    first.unmount();
+    empty.remove();
+
+    const drafting = document.createElement("textarea");
+    document.body.appendChild(drafting);
+    drafting.value = "ข้อความที่กำลังพิมพ์";
+    drafting.focus();
+    render(<QuestionCard question={one} onAnswer={() => {}} />);
+    expect(document.activeElement).toBe(drafting);
+    drafting.remove();
+  });
+
+  it("with the card focused, a number key then Enter answers — no mouse", () => {
+    const onAnswer = vi.fn();
+    render(<QuestionCard question={one} onAnswer={onAnswer} />);
+    const card = screen.getByTestId("question-card");
+    expect(document.activeElement).toBe(card);
+    fireEvent.keyDown(card, { key: "1" });
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onAnswer).toHaveBeenCalledTimes(1);
+    expect(onAnswer.mock.calls[0]![0].answers).toEqual({ "Which format?": ["Summary"] });
+  });
+});

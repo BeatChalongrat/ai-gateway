@@ -14,9 +14,18 @@ import { useApi } from "../../lib/useApi";
 import { useT, type DictKey } from "../../lib/i18n";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
+import { balanceAfterCeiling, roomToCeiling } from "../../lib/credits";
 
 type Translate = ReturnType<typeof useT>;
 
+// FIX88 Part A — a user's credits are a balance filled TOWARDS a stored
+// ceiling (credit_quota). Three actions move them, all posted to the
+// ledger by the backend: top up (capped at the ceiling; "fill to full" is
+// the obvious one), reset to full (balance := ceiling), and change the
+// ceiling (the balance moves by the same difference, floored at 0). Each
+// works on one user from the row menu / detail drawer, or on an explicit
+// tick-box selection through one confirm that names the count and the
+// total credits moved.
 interface PortalUser {
   id: string;
   email: string;
@@ -25,6 +34,7 @@ interface PortalUser {
   status: string;
   credit_balance: number;
   credit_used: number;
+  credit_quota: number;
   email_verified?: boolean;
   created_at: string;
   updated_at?: string;
@@ -52,7 +62,14 @@ interface UserDetail extends PortalUser {
   transactions: Transaction[];
 }
 
+interface BulkResult {
+  results: { user_id: string; ok: boolean; error?: string; message?: string; balance_after: number; quota_after: number; moved: number }[];
+  total_moved: number;
+  reduced_count: number;
+}
+
 type StatusFilter = "all" | "active" | "suspended" | "free_trial" | "paid";
+type CreditAction = "topup" | "reset" | "quota";
 
 function formatTokensCompact(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`;
@@ -64,10 +81,10 @@ function formatTokensFull(n: number): string {
   return n.toLocaleString();
 }
 
-function creditPercent(balance: number, used: number): number {
-  const lifetime = balance + used;
-  if (lifetime <= 0) return 0;
-  return Math.round((balance / lifetime) * 100);
+/** Percent of the CEILING still available. A zero ceiling reads as empty. */
+function creditPercent(balance: number, quota: number): number {
+  if (quota <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((balance / quota) * 100)));
 }
 
 function creditColor(pct: number, balance: number): string {
@@ -96,11 +113,15 @@ const STATUS_KEYS: Record<string, DictKey> = {
 const TX_TYPE_KEYS: Record<string, DictKey> = {
   topup: "padmin.users.txTopup",
   top_up: "padmin.users.txTopup",
+  manual_topup: "padmin.users.txTopup",
   usage: "padmin.users.txUsage",
   refund: "padmin.users.txRefund",
   adjustment: "padmin.users.txAdjustment",
   admin_adjustment: "padmin.users.txAdjustment",
   trial_grant: "padmin.users.txTrialGrant",
+  signup_bonus: "padmin.users.txTrialGrant",
+  reset_to_full: "padmin.users.txReset",
+  purchase: "padmin.users.txPurchase",
 };
 
 function prettifySlug(slug: string): string {
@@ -175,15 +196,43 @@ export default function PortalUsersPage() {
     return { total, active, suspended, freeTrial };
   }, [allUsers]);
 
+  // ------- selection (explicit tick boxes; never "everyone I cannot see") -------
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const selected = useMemo(() => allUsers.filter((u) => selectedIds.has(u.id)), [allUsers, selectedIds]);
+  const allVisibleSelected = filtered.length > 0 && filtered.every((u) => selectedIds.has(u.id));
+  function toggleRow(id: string) {
+    setSelectedIds((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function toggleAllVisible() {
+    setSelectedIds((s) => {
+      const n = new Set(s);
+      if (allVisibleSelected) filtered.forEach((u) => n.delete(u.id));
+      else filtered.forEach((u) => n.add(u.id));
+      return n;
+    });
+  }
+
   // ------- modals -------
   const [detailUser, setDetailUser] = useState<PortalUser | null>(null);
   const [detail, setDetail] = useState<UserDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  const [topupUser, setTopupUser] = useState<PortalUser | null>(null);
-  const [topupAmount, setTopupAmount] = useState("");
-  const [topupDesc, setTopupDesc] = useState("");
-  const [topupSaving, setTopupSaving] = useState(false);
+  // One credit modal for the three actions; `targets` is one user (row
+  // menu / drawer) or the selection (bulk bar).
+  const [action, setAction] = useState<CreditAction | null>(null);
+  const [targets, setTargets] = useState<PortalUser[]>([]);
+  const [amountText, setAmountText] = useState("");
+  const [fill, setFill] = useState(false);
+  const [quotaText, setQuotaText] = useState("");
+  const [desc, setDesc] = useState("");
+  const [saving, setSaving] = useState(false);
+  // The final confirm: every bulk action, and any single-user reduction.
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const [suspendTarget, setSuspendTarget] = useState<PortalUser | null>(null);
   const [suspendWorking, setSuspendWorking] = useState(false);
@@ -207,34 +256,131 @@ export default function PortalUsersPage() {
     setDetail(null);
   }
 
-  function openTopup(u: PortalUser) {
-    setTopupUser(u);
-    setTopupAmount("");
-    setTopupDesc("");
+  function openAction(a: CreditAction, users: PortalUser[]) {
+    setAction(a);
+    setTargets(users);
+    setAmountText("");
+    setFill(false);
+    setQuotaText(users.length === 1 ? String(users[0]!.credit_quota) : "");
+    setDesc("");
+    setConfirmOpen(false);
+  }
+  function closeAction() {
+    if (saving) return;
+    setAction(null);
+    setTargets([]);
+    setConfirmOpen(false);
   }
 
-  async function handleTopup() {
-    if (!topupUser) return;
-    const amount = parseInt(topupAmount, 10);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast(t("padmin.users.amountInvalid"), "error");
+  const isBulk = targets.length > 1;
+  const one = targets.length === 1 ? targets[0]! : null;
+  const amount = parseInt(amountText, 10);
+  const newQuota = parseInt(quotaText, 10);
+  const room = (u: PortalUser) => roomToCeiling(u.credit_balance, u.credit_quota);
+
+  // ------- previews (what the confirm names) -------
+  const preview = useMemo(() => {
+    if (!action) return null;
+    if (action === "topup") {
+      if (fill) {
+        const total = targets.reduce((s, u) => s + room(u), 0);
+        const full = targets.filter((u) => room(u) === 0).length;
+        return { total, full, skipped: 0, reduced: 0 };
+      }
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const eligible = targets.filter((u) => amount <= room(u));
+      return { total: amount * eligible.length, full: 0, skipped: targets.length - eligible.length, reduced: 0 };
+    }
+    if (action === "reset") {
+      const total = targets.reduce((s, u) => s + room(u), 0);
+      const full = targets.filter((u) => room(u) === 0).length;
+      return { total, full, skipped: 0, reduced: 0 };
+    }
+    // quota
+    if (!Number.isFinite(newQuota) || newQuota < 0) return null;
+    let total = 0;
+    let reduced = 0;
+    for (const u of targets) {
+      const moved = balanceAfterCeiling(u.credit_balance, u.credit_quota, newQuota) - u.credit_balance;
+      total += moved;
+      if (newQuota < u.credit_quota) reduced++;
+    }
+    return { total, full: 0, skipped: 0, reduced };
+  }, [action, targets, fill, amount, newQuota]);
+
+  const singleOverCeiling = one !== null && action === "topup" && !fill && Number.isFinite(amount) && amount > room(one);
+  const singleLowering = one !== null && action === "quota" && Number.isFinite(newQuota) && newQuota < one.credit_quota;
+
+  const canApply = (() => {
+    if (!action || targets.length === 0) return false;
+    if (action === "topup") return fill ? targets.some((u) => room(u) > 0) : Number.isFinite(amount) && amount > 0 && !singleOverCeiling;
+    if (action === "reset") return targets.some((u) => room(u) > 0);
+    return Number.isFinite(newQuota) && newQuota >= 0 && (isBulk || newQuota !== one!.credit_quota);
+  })();
+
+  /** The primary button: bulk and any single reduction go through the
+   *  ConfirmModal (FIX84's rule — name the user, the consequence); the
+   *  ordinary single-user add applies at once. */
+  function onPrimary() {
+    if (!canApply) return;
+    if (isBulk || singleLowering) {
+      setConfirmOpen(true);
       return;
     }
-    setTopupSaving(true);
+    void apply();
+  }
+
+  async function apply() {
+    if (!action || targets.length === 0) return;
+    setSaving(true);
     try {
-      await api.post(`/admin/portal-users/${topupUser.id}/topup`, {
-        amount,
-        description: topupDesc.trim() || undefined,
-      });
-      toast(t("padmin.users.topupSuccess", { amount: amount.toLocaleString() }));
-      setTopupUser(null);
+      const description = desc.trim() || undefined;
+      if (isBulk) {
+        const body: Record<string, unknown> = { user_ids: targets.map((u) => u.id), description };
+        if (action === "topup") {
+          body.action = fill ? "fill" : "topup";
+          if (!fill) body.amount = amount;
+        } else if (action === "reset") {
+          body.action = "reset";
+        } else {
+          body.action = "quota";
+          body.quota = newQuota;
+        }
+        const res = (await api.post(`/admin/portal-users/bulk`, body)) as BulkResult;
+        const ok = res.results.filter((r) => r.ok).length;
+        const failed = res.results.length - ok;
+        const vars = { ok: String(ok), n: String(res.results.length), failed: String(failed), total: res.total_moved.toLocaleString() };
+        toast(failed > 0 ? t("padmin.users.bulkPartial", vars) : t("padmin.users.bulkDone", vars), failed > 0 ? "error" : undefined);
+        setSelectedIds(new Set());
+      } else if (one) {
+        if (action === "topup") {
+          if (fill && room(one) === 0) {
+            toast(t("padmin.users.resetNoop", { name: one.display_name || one.email }));
+          } else {
+            await api.post(`/admin/portal-users/${one.id}/topup`, fill ? { fill: true, description } : { amount, description });
+            toast(t("padmin.users.topupSuccess", { amount: (fill ? room(one) : amount).toLocaleString() }));
+          }
+        } else if (action === "reset") {
+          const res = (await api.post(`/admin/portal-users/${one.id}/reset`, { description })) as { transaction: Transaction | null };
+          if (res.transaction) toast(t("padmin.users.resetSuccess", { delta: res.transaction.amount.toLocaleString() }));
+          else toast(t("padmin.users.resetNoop", { name: one.display_name || one.email }));
+        } else {
+          await api.post(`/admin/portal-users/${one.id}/quota`, { quota: newQuota, description });
+          toast(t("padmin.users.ceilingSuccess", { quota: newQuota.toLocaleString() }));
+        }
+      }
+      const reopen = one && detailUser?.id === one.id ? one : null;
+      setAction(null);
+      setTargets([]);
+      setConfirmOpen(false);
       refetch();
-      if (detailUser?.id === topupUser.id) openDetail(topupUser);
+      if (reopen) openDetail(reopen);
     } catch (e) {
       const msg = e instanceof ApiError ? e.body?.error?.message : null;
-      toast(msg || t("padmin.users.topupFailed"), "error");
+      toast(msg || (isBulk ? t("padmin.users.bulkFailed") : t("padmin.users.topupFailed")), "error");
+      setConfirmOpen(false);
     } finally {
-      setTopupSaving(false);
+      setSaving(false);
     }
   }
 
@@ -259,6 +405,29 @@ export default function PortalUsersPage() {
   }
 
   const quickAmounts = [100000, 500000, 1000000];
+
+  const nameOf = (u: PortalUser) => u.display_name || u.email;
+
+  // The confirm text: bulk names the count and the total credits (and the
+  // reductions separately); a single reduction names the user, the new
+  // ceiling and the new balance.
+  const confirmText = (() => {
+    if (!action || !preview) return "";
+    if (!isBulk && one && action === "quota") {
+      const nb = balanceAfterCeiling(one.credit_balance, one.credit_quota, newQuota);
+      return t("padmin.users.ceilingLowerBody", {
+        name: nameOf(one), oldQuota: formatTokensFull(one.credit_quota), newQuota: formatTokensFull(newQuota),
+        oldBalance: formatTokensFull(one.credit_balance), newBalance: formatTokensFull(nb), removed: formatTokensFull(one.credit_balance - nb),
+      });
+    }
+    const n = String(targets.length);
+    if (action === "topup" && !fill) return t("padmin.users.bulkTopupBody", { n, amount: formatTokensFull(amount), total: formatTokensFull(preview.total), skipped: String(preview.skipped) });
+    if (action === "topup") return t("padmin.users.bulkFillBody", { n, total: formatTokensFull(preview.total), full: String(preview.full) });
+    if (action === "reset") return t("padmin.users.bulkResetBody", { n, total: formatTokensFull(preview.total), full: String(preview.full) });
+    return t("padmin.users.bulkQuotaBody", { n, quota: formatTokensFull(newQuota), total: formatTokensFull(preview.total), reduced: String(preview.reduced) });
+  })();
+
+  const actionTitle = action === "topup" ? t("padmin.users.topup") : action === "reset" ? t("padmin.users.reset") : t("padmin.users.changeCeiling");
 
   return (
     <div className="p-4 sm:p-6 lg:p-10" style={{ maxWidth: 1400, margin: "0 auto" }}>
@@ -370,6 +539,30 @@ export default function PortalUsersPage() {
           </div>
         </div>
 
+        {/* FIX88 — bulk bar: only for an explicit selection */}
+        {selected.length > 0 ? (
+          <div
+            data-testid="bulk-bar"
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", borderBottom: "1px solid var(--color-border-default)", background: "var(--bg-elevated)", flexWrap: "wrap" }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)" }} data-testid="bulk-count">
+              {t("padmin.users.selected", { n: String(selected.length) })}
+            </span>
+            <button className="sran-btn sran-btn-primary sran-btn-sm" onClick={() => openAction("topup", selected)} data-testid="bulk-topup">
+              <Icon name="dollar" size={13} /> {t("padmin.users.topup")}
+            </button>
+            <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => openAction("reset", selected)} data-testid="bulk-reset">
+              {t("padmin.users.reset")}
+            </button>
+            <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => openAction("quota", selected)} data-testid="bulk-quota">
+              {t("padmin.users.changeCeiling")}
+            </button>
+            <button className="sran-btn sran-btn-secondary sran-btn-sm" onClick={() => setSelectedIds(new Set())} style={{ marginLeft: "auto" }} data-testid="bulk-clear">
+              {t("padmin.users.clearSelection")}
+            </button>
+          </div>
+        ) : null}
+
         {/* Body */}
         {loading ? (
           <div style={{ padding: 20 }}>
@@ -387,9 +580,18 @@ export default function PortalUsersPage() {
           <table className="sran-table">
             <thead>
               <tr>
-                <th style={{ paddingLeft: 20 }}>{t("field.user")}</th>
+                <th style={{ width: 36, paddingLeft: 20 }}>
+                  <input
+                    type="checkbox"
+                    aria-label={t("padmin.users.selectAllVisible")}
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    data-testid="select-all"
+                  />
+                </th>
+                <th>{t("field.user")}</th>
                 <th>{t("padmin.users.plan")}</th>
-                <th style={{ width: 200 }}>{t("padmin.users.credits")}</th>
+                <th style={{ width: 220 }}>{t("padmin.users.credits")}</th>
                 <th>{t("padmin.users.usage")}</th>
                 <th style={{ textAlign: "center", width: 110 }}>{t("field.status")}</th>
                 <th style={{ width: 120 }}>{t("field.created")}</th>
@@ -398,12 +600,22 @@ export default function PortalUsersPage() {
             </thead>
             <tbody>
               {filtered.map((u) => {
-                const pct = creditPercent(u.credit_balance, u.credit_used);
+                const pct = creditPercent(u.credit_balance, u.credit_quota);
                 const color = creditColor(pct, u.credit_balance);
                 const initial = (u.display_name || u.email || "?").charAt(0).toUpperCase();
+                const checked = selectedIds.has(u.id);
                 return (
-                  <tr key={u.id} style={{ cursor: "pointer" }} onClick={() => openDetail(u)}>
-                    <td style={{ paddingLeft: 20 }}>
+                  <tr key={u.id} style={{ cursor: "pointer" }} onClick={() => openDetail(u)} data-testid="user-row" data-user-id={u.id} aria-selected={checked}>
+                    <td style={{ paddingLeft: 20 }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={t("padmin.users.selectRow", { name: nameOf(u) })}
+                        checked={checked}
+                        onChange={() => toggleRow(u.id)}
+                        data-testid="select-row"
+                      />
+                    </td>
+                    <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <div style={{
                           width: 34, height: 34, borderRadius: 6,
@@ -432,8 +644,9 @@ export default function PortalUsersPage() {
                           <div style={{ width: 60, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden", flexShrink: 0 }}>
                             <div style={{ width: `${pct}%`, height: "100%", background: color, transition: "width 250ms" }} />
                           </div>
-                          <span style={{ fontSize: 12, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
+                          <span style={{ fontSize: 12, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }} data-testid="row-credits">
                             {formatTokensCompact(u.credit_balance)}
+                            <span style={{ color: "var(--text-tertiary)" }}> / {formatTokensCompact(u.credit_quota)}</span>
                           </span>
                         </div>
                       )}
@@ -448,7 +661,9 @@ export default function PortalUsersPage() {
                     <td onClick={(e) => e.stopPropagation()}>
                       <RowActions
                         user={u}
-                        onTopup={() => openTopup(u)}
+                        onTopup={() => openAction("topup", [u])}
+                        onReset={() => openAction("reset", [u])}
+                        onQuota={() => openAction("quota", [u])}
                         onToggle={() => setSuspendTarget(u)}
                         onView={() => openDetail(u)}
                       />
@@ -494,22 +709,29 @@ export default function PortalUsersPage() {
 
             <div style={{ borderTop: "1px solid var(--color-border-default)", paddingTop: "0.75rem" }}>
               <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)", marginBottom: 8 }}>{t("padmin.users.credits")}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.balance")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_balance)}</div></div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.balance")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} data-testid="detail-balance">{formatTokensFull(detailUser.credit_balance)}</div></div>
+                <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.ceiling")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} data-testid="detail-quota">{formatTokensFull(detailUser.credit_quota)}</div></div>
                 <div><div style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t("padmin.users.used")}</div><div style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{formatTokensFull(detailUser.credit_used)}</div></div>
               </div>
               <div style={{ marginTop: 8, height: 6, borderRadius: 3, background: "var(--bg-elevated)", overflow: "hidden" }}>
                 <div style={{
-                  width: `${creditPercent(detailUser.credit_balance, detailUser.credit_used)}%`,
+                  width: `${creditPercent(detailUser.credit_balance, detailUser.credit_quota)}%`,
                   height: "100%",
-                  background: creditColor(creditPercent(detailUser.credit_balance, detailUser.credit_used), detailUser.credit_balance),
+                  background: creditColor(creditPercent(detailUser.credit_balance, detailUser.credit_quota), detailUser.credit_balance),
                 }} />
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="sran-btn sran-btn-primary" onClick={() => openTopup(detailUser)}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button className="sran-btn sran-btn-primary" onClick={() => openAction("topup", [detailUser])}>
                 <Icon name="dollar" size={14} /> {t("padmin.users.topup")}
+              </button>
+              <button className="sran-btn sran-btn-secondary" onClick={() => openAction("reset", [detailUser])}>
+                {t("padmin.users.reset")}
+              </button>
+              <button className="sran-btn sran-btn-secondary" onClick={() => openAction("quota", [detailUser])}>
+                {t("padmin.users.changeCeiling")}
               </button>
               <button
                 className="sran-btn sran-btn-secondary"
@@ -561,63 +783,146 @@ export default function PortalUsersPage() {
         ) : null}
       </Modal>
 
-      {/* Top-up modal */}
+      {/* FIX88 — the credit action modal (top up / reset / ceiling; one user or the selection) */}
       <Modal
-        open={!!topupUser}
-        onClose={() => !topupSaving && setTopupUser(null)}
-        title={t("padmin.users.topup")}
+        open={action !== null && !confirmOpen}
+        onClose={closeAction}
+        title={actionTitle}
         footer={
           <>
             <button
               className="sran-btn sran-btn-secondary"
-              onClick={() => setTopupUser(null)}
-              disabled={topupSaving}
+              onClick={closeAction}
+              disabled={saving}
             >
               {t("action.cancel")}
             </button>
             <button
               className="sran-btn sran-btn-primary"
-              onClick={handleTopup}
-              disabled={topupSaving}
+              onClick={onPrimary}
+              disabled={saving || !canApply}
+              data-testid="credit-action-primary"
             >
-              {topupSaving ? t("padmin.users.processing") : t("padmin.users.confirmTopup")}
+              {saving
+                ? t("padmin.users.processing")
+                : isBulk
+                  ? t("padmin.users.bulkConfirm", { n: String(targets.length) })
+                  : action === "topup"
+                    ? t("padmin.users.confirmTopup")
+                    : action === "reset"
+                      ? t("padmin.users.reset")
+                      : singleLowering
+                        ? t("padmin.users.lowerCeiling")
+                        : t("padmin.users.changeCeiling")}
             </button>
           </>
         }
       >
-        {topupUser ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        {action ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }} data-testid="credit-action-modal" data-action={action} data-bulk={isBulk ? "true" : "false"}>
             <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-              {t("field.user")}: <strong>{topupUser.display_name || topupUser.email}</strong>
-              <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }}>
-                {t("padmin.users.currentBalance")}: <strong style={{ color: "var(--text-primary)" }}>{formatTokensFull(topupUser.credit_balance)}</strong> {t("padmin.tokensUnit")}
-              </div>
+              {t("field.user")}: <strong>{one ? nameOf(one) : t("padmin.users.forUsers", { n: String(targets.length) })}</strong>
+              {one ? (
+                <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginTop: 2 }} data-testid="credit-action-figures">
+                  {t("padmin.users.currentBalance")}: <strong style={{ color: "var(--text-primary)" }}>{formatTokensFull(one.credit_balance)}</strong>{" "}
+                  {t("padmin.users.ofCeiling", { quota: formatTokensFull(one.credit_quota) })}
+                  {action === "topup" ? (
+                    <> · {t("padmin.users.roomLeft")}: <strong style={{ color: "var(--text-primary)" }}>{formatTokensFull(room(one))}</strong></>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
-            <div>
-              <label className="sran-label">{t("padmin.users.amountTokens")}</label>
-              <input
-                type="number"
-                min={1}
-                className="sran-input"
-                placeholder={t("padmin.users.amountPlaceholder")}
-                value={topupAmount}
-                onChange={(e) => setTopupAmount(e.target.value)}
-                autoFocus
-              />
-              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                {quickAmounts.map((a) => (
+            {action === "topup" ? (
+              <div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                   <button
-                    key={a}
                     type="button"
-                    className="sran-btn sran-btn-secondary sran-btn-sm"
-                    onClick={() => setTopupAmount(String(a))}
+                    className={`sran-btn sran-btn-sm ${fill ? "sran-btn-primary" : "sran-btn-secondary"}`}
+                    onClick={() => setFill((v) => !v)}
+                    aria-pressed={fill}
+                    disabled={!!one && room(one) === 0}
+                    data-testid="fill-to-full"
                   >
-                    +{formatTokensCompact(a)}
+                    {one && room(one) === 0
+                      ? t("padmin.users.alreadyFull")
+                      : t("padmin.users.fillToFull", { room: one ? formatTokensCompact(room(one)) : formatTokensCompact(preview?.total ?? 0) })}
                   </button>
-                ))}
+                </div>
+                {!fill ? (
+                  <>
+                    <label className="sran-label">{t("padmin.users.amountTokens")}</label>
+                    <input
+                      type="number"
+                      min={1}
+                      className="sran-input"
+                      placeholder={t("padmin.users.amountPlaceholder")}
+                      value={amountText}
+                      onChange={(e) => setAmountText(e.target.value)}
+                      autoFocus
+                      data-testid="amount-input"
+                    />
+                    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                      {quickAmounts.map((a) => (
+                        <button
+                          key={a}
+                          type="button"
+                          className="sran-btn sran-btn-secondary sran-btn-sm"
+                          onClick={() => setAmountText(String(a))}
+                        >
+                          +{formatTokensCompact(a)}
+                        </button>
+                      ))}
+                    </div>
+                    {singleOverCeiling && one ? (
+                      <div style={{ marginTop: 8, fontSize: 12, color: "var(--error-text, #EF4444)" }} role="alert" data-testid="over-ceiling">
+                        {t("padmin.users.overCeiling", { over: formatTokensFull(amount - room(one)), room: formatTokensFull(room(one)) })}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
               </div>
-            </div>
+            ) : null}
+
+            {action === "reset" && one ? (
+              <div style={{ fontSize: 13, color: "var(--text-secondary)" }} data-testid="reset-preview">
+                {room(one) === 0
+                  ? t("padmin.users.alreadyFull")
+                  : t("padmin.users.resetBody", { name: nameOf(one), balance: formatTokensFull(one.credit_balance), quota: formatTokensFull(one.credit_quota), delta: formatTokensFull(room(one)) })}
+              </div>
+            ) : null}
+
+            {action === "quota" ? (
+              <div>
+                <label className="sran-label">{t("padmin.users.newCeiling")}</label>
+                <input
+                  type="number"
+                  min={0}
+                  className="sran-input"
+                  value={quotaText}
+                  onChange={(e) => setQuotaText(e.target.value)}
+                  autoFocus
+                  data-testid="quota-input"
+                />
+                {one && Number.isFinite(newQuota) && newQuota >= 0 ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-secondary)" }} data-testid="quota-preview">
+                    {t("padmin.users.ceilingPreview", {
+                      oldQuota: formatTokensFull(one.credit_quota), newQuota: formatTokensFull(newQuota),
+                      oldBalance: formatTokensFull(one.credit_balance), newBalance: formatTokensFull(balanceAfterCeiling(one.credit_balance, one.credit_quota, newQuota)),
+                    })}
+                  </div>
+                ) : null}
+                {(singleLowering || (isBulk && (preview?.reduced ?? 0) > 0)) ? (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "var(--error-text, #EF4444)" }} role="alert" data-testid="lower-warning">
+                    {t("padmin.users.ceilingLowerWarn")}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {isBulk && preview ? (
+              <div style={{ fontSize: 12, color: "var(--text-secondary)" }} data-testid="bulk-preview">{confirmText}</div>
+            ) : null}
 
             <div>
               <label className="sran-label">{t("padmin.users.descriptionOptional")}</label>
@@ -625,14 +930,25 @@ export default function PortalUsersPage() {
                 type="text"
                 className="sran-input"
                 placeholder={t("padmin.users.descPlaceholder")}
-                value={topupDesc}
-                onChange={(e) => setTopupDesc(e.target.value)}
+                value={desc}
+                onChange={(e) => setDesc(e.target.value)}
                 maxLength={500}
               />
             </div>
           </div>
         ) : null}
       </Modal>
+
+      {/* FIX88 — the one confirm for every bulk action and any single reduction */}
+      <ConfirmModal
+        open={confirmOpen}
+        onClose={() => !saving && setConfirmOpen(false)}
+        onConfirm={() => void apply()}
+        title={isBulk ? t("padmin.users.bulkTitle", { n: String(targets.length) }) : t("padmin.users.ceilingLowerTitle")}
+        message={confirmText}
+        confirmLabel={isBulk ? t("padmin.users.bulkConfirm", { n: String(targets.length) }) : t("padmin.users.lowerCeiling")}
+        loading={saving}
+      />
 
       <ConfirmModal
         open={!!suspendTarget}
@@ -667,11 +983,15 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 function RowActions({
   user,
   onTopup,
+  onReset,
+  onQuota,
   onToggle,
   onView,
 }: {
   user: PortalUser;
   onTopup: () => void;
+  onReset: () => void;
+  onQuota: () => void;
   onToggle: () => void;
   onView: () => void;
 }) {
@@ -686,6 +1006,7 @@ function RowActions({
         }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         title={t("field.actions")}
+        aria-label={t("field.actions")}
         style={{
           background: "none",
           border: "1px solid transparent",
@@ -727,6 +1048,8 @@ function RowActions({
           }}
         >
           <ActionItem icon={<Icon name="dollar" size={14} />} label={t("padmin.users.topup")} onClick={() => { setOpen(false); onTopup(); }} />
+          <ActionItem icon={<Icon name="play" size={14} />} label={t("padmin.users.reset")} onClick={() => { setOpen(false); onReset(); }} />
+          <ActionItem icon={<Icon name="settings" size={14} />} label={t("padmin.users.changeCeiling")} onClick={() => { setOpen(false); onQuota(); }} />
           <ActionItem
             icon={user.status === "active" ? <Icon name="pause" size={14} /> : <Icon name="play" size={14} />}
             label={user.status === "active" ? t("padmin.users.suspend") : t("padmin.users.activate")}

@@ -89,6 +89,10 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   quota_exceeded: "error.quota_exceeded",
   INSUFFICIENT_CREDITS: "error.insufficient_credits",
   insufficient_credits: "error.insufficient_credits",
+  // FIX88 Part A — an admin-side refusal (a top-up beyond a user's credit
+  // ceiling). It never reaches a chat turn; the sentence exists because
+  // every catalogue code must be sayable in both languages.
+  credit_ceiling: "error.credit_ceiling",
   // FIX51 Part 4 — the PROVIDER account ran dry (bare 402 upstream),
   // distinct from the user's own credit balance above.
   provider_no_credit: "error.provider_no_credit",

@@ -43,13 +43,16 @@ def _clean():
         db.close()
 
 
-def _make_user(db, email="u@test.com", balance=1000) -> PortalUserORM:
+def _make_user(db, email="u@test.com", balance=1000, quota=None) -> PortalUserORM:
     user = PortalUserORM(
         id=str(uuid.uuid4()),
         email=email,
         password_hash="dummy",
         credit_balance=balance,
         credit_used=0,
+        # FIX88 — a real row's ceiling is what migration 088 backfills:
+        # balance + used. Tests that top up past it pass a bigger one.
+        credit_quota=balance if quota is None else quota,
         plan="free_trial",
         status="active",
         # NOT NULL since SSO Phase 1 A1 — conftest seeds this tenant
@@ -114,7 +117,9 @@ def test_deduct_credits_clamps_at_zero():
 def test_topup_credits_increases_balance():
     db = _Session()
     try:
-        user = _make_user(db, balance=100)
+        # Ceiling 10,000: the 5,000 top-up fits (FIX88 caps manual
+        # top-ups at credit_quota).
+        user = _make_user(db, balance=100, quota=10_000)
         tx = credit_service.topup_credits(
             db, user.id, 5000, created_by="admin@ex.com",
             description="refill",

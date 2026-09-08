@@ -41,6 +41,18 @@ export const ASK_LIMITS = Object.freeze({
   MAX_FREE_TEXT: 2000,
 });
 
+/** FIX88 Part E — text length AS DISPLAYED: a base character together with
+ *  its combining marks is ONE character. Thai vowels and tone marks (ั ิ ้ ์ …)
+ *  are separate code points, so "หัวข้อเรียงความ" is 15 code points but 12 on
+ *  screen; counting code points punished Thai headers for being Thai. The
+ *  rule is deliberately the simple one (strip Unicode category M, count
+ *  the rest) so the Go copy in chat-edge is identical by construction —
+ *  a grapheme segmenter on one side and a library on the other could
+ *  disagree on edge cases. */
+export function displayLength(s: string): number {
+  return [...s.replace(/\p{M}/gu, "")].length;
+}
+
 export interface AskOption {
   readonly label: string;
   readonly description: string;
@@ -77,7 +89,10 @@ export const ASK_USER_TOOL_DEFINITION: GatewayToolDefinition = {
             type: "object",
             properties: {
               question: { type: "string", maxLength: ASK_LIMITS.MAX_QUESTION, description: "The full question, in the user's language." },
-              header: { type: "string", maxLength: ASK_LIMITS.MAX_HEADER, description: "A short chip label for the question (max 12 characters), e.g. 'Format'." },
+              // No JSON-Schema maxLength here: it counts code points, and a
+              // provider that validates strictly would refuse a Thai header
+              // before our own (display-length) check ever ran.
+              header: { type: "string", description: "A short chip label for the question, at most 12 characters as displayed (Thai vowel and tone marks do not count), e.g. 'Format' or 'รูปแบบ'." },
               options: {
                 type: "array",
                 minItems: ASK_LIMITS.MIN_OPTIONS,
@@ -125,7 +140,7 @@ export function validateAskArgs(args: Record<string, unknown>): AskValidation {
     if (question.length > ASK_LIMITS.MAX_QUESTION) return { ok: false, reason: `${where}.question is longer than ${ASK_LIMITS.MAX_QUESTION} characters — put the explanation in your message, keep the question short` };
     const header = typeof o["header"] === "string" ? o["header"].trim() : "";
     if (!header) return { ok: false, reason: `${where}.header is required (a label of at most ${ASK_LIMITS.MAX_HEADER} characters)` };
-    if ([...header].length > ASK_LIMITS.MAX_HEADER) return { ok: false, reason: `${where}.header is longer than ${ASK_LIMITS.MAX_HEADER} characters` };
+    if (displayLength(header) > ASK_LIMITS.MAX_HEADER) return { ok: false, reason: `${where}.header is longer than ${ASK_LIMITS.MAX_HEADER} characters (as displayed; Thai marks do not count)` };
     const hk = header.toLowerCase();
     if (headers.has(hk)) return { ok: false, reason: `${where}.header '${header}' repeats an earlier question's header` };
     headers.add(hk);

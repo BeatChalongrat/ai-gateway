@@ -33,6 +33,20 @@ class PortalUserORM(Base):
     credit_used: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default="0"
     )
+    # FIX88 — the ceiling the balance is filled TO. Before this column
+    # every screen derived "total" as balance + used, so a top-up
+    # inflated the denominator and "full" could never be reached.
+    # Migration 088 backfills it to exactly that derived value. Rules
+    # (all in ``credit_service``): a manual top-up never lifts the
+    # balance above the quota; signup bonus / purchase are GRANTS that
+    # raise both; changing the quota moves the balance by the same
+    # delta (floored at 0). Usage never touches it.
+    credit_quota: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default="0",
+        comment="Per-user credit ceiling; balance is filled to this, never above.",
+    )
     plan: Mapped[str] = mapped_column(String(32), nullable=False, server_default="free_trial")
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active")
     email_verified: Mapped[bool] = mapped_column(

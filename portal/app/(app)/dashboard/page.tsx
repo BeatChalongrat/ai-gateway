@@ -99,7 +99,10 @@ export default function DashboardPage() {
   const unavailable = user === null;
   const balance = user?.credit_balance ?? 0;
   const used = user?.credit_used ?? 0;
-  const total = balance + used;
+  // FIX88 — "of N" is the stored ceiling (credit_quota). The old balance +
+  // used grew with every top-up, so a refilled account never read as
+  // full. A gateway that does not send the ceiling keeps the old sum.
+  const total = user?.credit_quota && user.credit_quota > 0 ? user.credit_quota : balance + used;
   const percent = unavailable ? 0 : total > 0 ? Math.round((balance / total) * 100) : 100;
   const planLabel = user?.plan
     ? user.plan.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
@@ -332,7 +335,7 @@ function CreditHero({
               marginTop: 6,
             }}
           >
-            {unavailable ? "Balance could not be loaded" : `of ${total.toLocaleString()} lifetime allotment`}
+            {unavailable ? "Balance could not be loaded" : `of ${total.toLocaleString()} credit ceiling`}
           </div>
 
           {/* Stats row */}

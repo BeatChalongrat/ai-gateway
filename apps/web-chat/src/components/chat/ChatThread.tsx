@@ -85,6 +85,15 @@ export function ChatThread({
   const retryStalledStream = useChatStore((s) => s.retryStalledStream);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [autoStick, setAutoStick] = useState(true);
+  /** FIX88 Part D — the follow state as a ref, for the ResizeObserver
+   *  below (its closure is created once; React state would be stale).
+   *  Written wherever the state is, through setFollow. */
+  const followRef = useRef(true);
+  const setFollow = (v: boolean) => {
+    followRef.current = v;
+    setAutoStick(v);
+  };
+  const streamingRef = useRef(false);
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [pendingNew, setPendingNew] = useState(false);
   const lastLen = useRef(0);
@@ -144,6 +153,23 @@ export function ChatThread({
     // per streamed token would be wasted renders.
     if (spacerRef.current) spacerRef.current.style.height = `${Math.round(px)}px`;
   };
+
+  /** FIX88 Part D — the hold ends and the follow begins, and the view goes
+   *  to the bottom IN THE SAME PASS. It used to set the follow flag and
+   *  wait for "the next delta" to snap; measured on the real bundle, the
+   *  reply that crosses the viewport bottom only on its LAST flush (the
+   *  RAF-batched buffer holding several lines, a burst before
+   *  message_complete, a non-streaming answer landing at once) had no
+   *  next delta — the hand-over happened, nothing followed, and the tail
+   *  sat below the fold (435–535 px in the probe) with no pill, since a
+   *  pill is for a reader who scrolled away and nobody had. */
+  function handOver(el: HTMLElement) {
+    anchorActive.current = false;
+    holdTop.current = null;
+    setSpacerPx(0);
+    setFollow(true);
+    snapTo(el, el.scrollHeight);
+  }
 
   /** Content offset of a row's top (getBoundingClientRect so the
    *  virtualizer's translateY positioning is included). */
@@ -279,7 +305,7 @@ export function ChatThread({
     // Follow state must reset too: carrying autoStick=false over from a
     // conversation the user had scrolled up in left the new one parked
     // wherever it happened to render, with only a pill for company.
-    setAutoStick(true);
+    setFollow(true);
     setPendingNew(false);
     setFarFromBottom(false);
     const scroller = scrollerRef.current;
@@ -366,7 +392,7 @@ export function ChatThread({
     if (isOwnSend) {
       anchorActive.current = true;
       if (applyAnchor(userIdx)) {
-        setAutoStick(false); // follow is suspended while the hold lasts
+        setFollow(false); // follow is suspended while the hold lasts
         setPendingNew(false); // one's own send never raises the pill
         // Late-measure re-pass: virtualized rows start at the 200px
         // estimate; re-derive the target next frame once real
@@ -397,7 +423,7 @@ export function ChatThread({
         anchorActive.current = false;
         holdTop.current = null;
         setSpacerPx(0);
-        setAutoStick(true);
+        setFollow(true);
         snapTo(el, el.scrollHeight);
       } else {
         setConsentPill(true);
@@ -418,9 +444,7 @@ export function ChatThread({
       // drop the hold and let the pre-existing stick-to-bottom follow
       // from here (shouldResumeFollow is THE policy line to tune).
       if (shouldResumeFollow(contentH, top, el.clientHeight)) {
-        anchorActive.current = false;
-        holdTop.current = null;
-        setAutoStick(true); // the next delta snaps to the bottom
+        handOver(el);
       }
       return;
     }
@@ -435,6 +459,7 @@ export function ChatThread({
   // After streaming completes: if user is still "near bottom" (within
   // 100px) snap to bottom to show the full response.
   const anyStreaming = messages.some((m) => m.isStreaming);
+  streamingRef.current = anyStreaming;
 
   // ── Screen-reader announcements ─────────────────────────────
   // One persistent polite live region for the whole thread. Persistent
@@ -505,12 +530,20 @@ export function ChatThread({
     if (!el) return;
     // P3 — the turn ended while still anchored (short reply): keep the
     // view exactly where it is, drop the hold, and trim the spacer to
-    // the minimum the current position needs. Never bottom-snap an
-    // anchored turn.
+    // the minimum the current position needs. Never bottom-snap a SHORT
+    // anchored turn. FIX88 Part D — decided from the geometry of this
+    // commit, which already includes the finished row's meta/actions
+    // lines: a reply that now reaches past the viewport bottom is not
+    // short, and the follow it never got is given here.
     if (anchorActive.current) {
-      anchorActive.current = false;
       const contentH = el.scrollHeight - spacerPx();
-      setSpacerPx(spacerNeeded(holdTop.current ?? el.scrollTop, el.clientHeight, contentH));
+      const top = holdTop.current ?? el.scrollTop;
+      if (shouldResumeFollow(contentH, top, el.clientHeight)) {
+        handOver(el);
+        return;
+      }
+      anchorActive.current = false;
+      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
       return;
     }
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -523,16 +556,35 @@ export function ChatThread({
   // position and, if the scroller already clamped, puts the view back.
   // ResizeObserver runs after layout and before paint, so the correction
   // is never seen.
+  //
+  // FIX88 Part D — growth is a fact about geometry, not about a React
+  // commit. The message effect above sees only a content delta or a
+  // structure change; the virtualizer's late row measurement, a thinking
+  // block, the finished row's meta/actions lines, syntax highlighting, an
+  // image decoding all grow the column HERE and used to be neither handed
+  // over nor followed. Now: still holding → the same handover rule as the
+  // effect; following a live reply → keep the bottom. A reader who
+  // scrolled away has followRef false and is never moved.
   useEffect(() => {
     const el = scrollerRef.current;
     const column = el?.firstElementChild;
     if (!el || !column || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       const top = holdTop.current;
-      if (top === null) return;
-      const contentH = el.scrollHeight - spacerPx();
-      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
-      if (!animating.current && Math.abs(el.scrollTop - top) > 1) snapTo(el, top);
+      if (top !== null) {
+        const contentH = el.scrollHeight - spacerPx();
+        if (anchorActive.current && shouldResumeFollow(contentH, top, el.clientHeight)) {
+          handOver(el);
+          return;
+        }
+        setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
+        if (!animating.current && Math.abs(el.scrollTop - top) > 1) snapTo(el, top);
+        return;
+      }
+      if (followRef.current && streamingRef.current && !animating.current) {
+        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (distance > 1) snapTo(el, el.scrollHeight);
+      }
     });
     ro.observe(column);
     return () => ro.disconnect();
@@ -568,7 +620,7 @@ export function ChatThread({
     // A scroll that lands ON the bottom is not that (the scroller clamps
     // there by itself when content above shrinks).
     const scrolledUp = el.scrollTop < prevTop - 1 && distance > 1;
-    setAutoStick(nearBottom && !(scrolledUp && anyStreaming));
+    setFollow(nearBottom && !(scrolledUp && anyStreaming));
     setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
     if (nearBottom && !scrolledUp) {
       setPendingNew(false);
@@ -587,7 +639,7 @@ export function ChatThread({
   function jumpToBottom() {
     const el = scrollerRef.current;
     if (!el) return;
-    setAutoStick(true);
+    setFollow(true);
     setPendingNew(false);
     holdTop.current = null;
     animateScroll(el, el.scrollHeight);
@@ -603,7 +655,7 @@ export function ChatThread({
     if (card && typeof card.scrollIntoView === "function") {
       anchorActive.current = false;
       holdTop.current = null;
-      setAutoStick(true);
+      setFollow(true);
       cancelScrollAnimation();
       autoScrolling.current = true;
       card.scrollIntoView({ block: "center" });
