@@ -134,7 +134,7 @@ class ProviderDispatcher:
         payload,
         messages: list[Message],
         first_key: str | None,
-        key_resolver: Callable[[str], str | None] | None,
+        key_resolver: Callable[[str, str | None], str | None] | None,
         invalidate_key: Callable[[str, str], None] | None,
     ) -> ProviderResponse:
         """Dispatch to a single (provider, model), rotating keys on 401/403.
@@ -167,7 +167,7 @@ class ProviderDispatcher:
                     raise
                 tried.add(key)
                 invalidate_key(provider, key)
-                next_key = key_resolver(provider) if key_resolver else None
+                next_key = key_resolver(provider, model) if key_resolver else None
                 if not next_key or next_key in tried:
                     logger.warning(
                         "dispatch_auth_pool_exhausted",
@@ -191,7 +191,7 @@ class ProviderDispatcher:
         messages: list[Message],
         *,
         api_key: str | None = None,
-        key_resolver: Callable[[str], str | None] | None = None,
+        key_resolver: Callable[[str, str | None], str | None] | None = None,
         invalidate_key: Callable[[str, str], None] | None = None,
         max_hops: int = _MAX_LAYER1_HOPS,
     ) -> tuple[ProviderResponse, str, str]:
@@ -201,8 +201,10 @@ class ProviderDispatcher:
         Tries ``route.provider_name`` / ``route.model_name`` first using
         ``api_key``. On a fallback-eligible failure, walks
         ``route.fallbacks`` (each entry is ``(provider, model)``) in
-        order, resolving the per-provider API key via ``key_resolver``
-        (typically ``provider_key_service.get_active_key``). Candidates
+        order, resolving the API key via ``key_resolver(provider, model)``
+        (typically ``provider_key_service.get_active_key`` — FIX85 hands
+        it the model too, so a provider holding keys for two boxes draws
+        the key whose box serves that model). Candidates
         without a registered adapter or without an API key are skipped
         and do NOT consume one of the ``max_hops`` slots — same rule
         the Layer-2 fallback orchestrator uses.
@@ -253,7 +255,7 @@ class ProviderDispatcher:
                 attempt_key = api_key
             else:
                 attempt_key = (
-                    key_resolver(provider) if key_resolver else None
+                    key_resolver(provider, model) if key_resolver else None
                 )
                 if not attempt_key:
                     logger.info(

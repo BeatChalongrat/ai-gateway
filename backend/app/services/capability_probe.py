@@ -275,13 +275,14 @@ async def run_probe(
     results: list[dict] = []
 
     async def _probe_provider(provider: str, models: list[dict]) -> None:
-        api_key = key_service.get_active_key(session, provider)
         for p in models:
             entry = dict(p)
             results.append(entry)
             if p["media"]:
                 entry["outcome"] = "skipped_media"
                 continue
+            # FIX85 — per model: the key whose box serves it.
+            api_key = key_service.get_active_key(session, provider, model=p["model"])
             if not api_key:
                 entry["outcome"] = "skipped_no_key"
                 continue

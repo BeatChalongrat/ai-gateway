@@ -51,7 +51,7 @@ async def check_model_health(
     from app.services.provider_key_service import ProviderKeyService
 
     if api_key is None:
-        api_key = ProviderKeyService().get_active_key(session, provider)
+        api_key = ProviderKeyService().get_active_key(session, provider, model=model)
     if not api_key:
         return {
             "healthy": False,

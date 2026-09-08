@@ -75,6 +75,11 @@ class DiscoveredModel:
     supports_reasoning: bool = False
     reasoning_strategy: str = "none"
     raw: dict = field(default_factory=dict)
+    # FIX85 Part C — which key (and so which box) reported this model:
+    # ``{key_id: {"base_url", "label", "at"}}``. Stamped by the discovery
+    # service when the key that answered is a ProviderCredential with a
+    # row; empty for static lists and legacy keys.
+    served_by: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -647,14 +652,15 @@ async def discover_google(api_key: str | None) -> list[DiscoveredModel]:
 async def discover_sranai(api_key: str | None) -> list[DiscoveredModel]:
     """Self-hosted Sran AI box — endpoint is operator-configured.
 
-    The URL comes from the DB-first resolver (admin UI setting → env
-    override) at call time, so the daily sweep and the add-key trigger
-    both follow whatever the admin last saved. No endpoint yet → skip
-    quietly (the box simply isn't wired up).
+    FIX85: the URL comes OFF THE KEY when the key has one of its own,
+    else from the provider-level row (admin UI setting) — resolved at
+    call time, so the daily sweep and the add-key trigger both follow
+    whatever the admin last saved. No endpoint yet → skip quietly (the
+    box simply isn't wired up).
     """
-    from app.services.providers.base_urls import resolve_base_url
+    from app.services.providers.base_urls import effective_base_url
 
-    base = resolve_base_url("sranai", "")
+    base = effective_base_url("sranai", "", api_key)
     if not base:
         logger.info("discovery_skipped_no_endpoint", provider="sranai")
         record_discovery_failure("sranai", "endpoint not configured")

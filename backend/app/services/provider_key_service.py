@@ -32,9 +32,11 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.exceptions import ConflictError
 from app.core.security import decrypt_provider_key, encrypt_provider_key
+from app.models.model_config import ModelConfigORM
 from app.models.provider import ProviderORM
 from app.models.provider_key import ProviderKeyORM
 from app.repositories.provider_key_repository import ProviderKeyRepository
+from app.services.providers.credential import ProviderCredential
 
 logger = logging.getLogger(__name__)
 
@@ -107,12 +109,69 @@ def _usable_rows(
 
 def _filter_placeholder_candidates(
     rows: list[ProviderKeyORM], provider_name: str
-) -> list[str]:
-    """Decoded keys for the rows dispatch will actually send.
+) -> list[ProviderCredential]:
+    """Credentials for the rows dispatch will actually send.
 
     Thin wrapper over :func:`_usable_rows` kept for call-site readability.
+    FIX85: each value is a :class:`ProviderCredential` — the decoded key
+    (it IS a ``str``) carrying the row's own endpoint, so the key and the
+    endpoint leave this module together and are never looked up twice.
     """
-    return [key for _row, key in _usable_rows(rows, provider_name)]
+    return [
+        ProviderCredential(key, base_url=row.base_url, key_id=row.id, label=row.label)
+        for row, key in _usable_rows(rows, provider_name)
+    ]
+
+
+def _effective_endpoint(provider_name: str, credential: object) -> str | None:
+    """Where a request with ``credential`` goes, normalised for comparison.
+
+    Per-key endpoint → provider-level row → ``None`` (the adapter's own
+    default, which this module does not know and does not need to: two
+    keys of one cloud provider both resolve to ``None`` and so match).
+    """
+    from app.services.providers.base_urls import effective_base_url
+
+    return (effective_base_url(provider_name, "", credential) or "").rstrip("/") or None
+
+
+def _served_endpoints_from_rows(rows) -> dict[str, frozenset[str | None]]:
+    """``{model: endpoints that reported it}`` from ``(model, served_by_keys)`` pairs.
+
+    FIX85 Part C. A model reported by no key (``{}``) is absent from the
+    map, and dispatch treats it as it always has.
+    """
+    out: dict[str, frozenset[str | None]] = {}
+    for model, served in rows:
+        if not served:
+            continue
+        endpoints = frozenset(
+            ((entry or {}).get("base_url") or "").rstrip("/") or None
+            for entry in served.values()
+        )
+        out[model] = endpoints
+    return out
+
+
+def _pool_for_model(
+    provider_name: str,
+    candidates: list[ProviderCredential],
+    served: dict[str, frozenset[str | None]],
+    model: str | None,
+) -> list[ProviderCredential]:
+    """The candidates that reach the box that serves ``model``.
+
+    Unrecorded model (or no model asked) → every candidate, unchanged
+    from before FIX85. Recorded → only the keys whose effective endpoint
+    is one that reported the model. An empty result is NOT softened back
+    to "any key": sending the request to a box that never listed the
+    model is the 401 / "no such model" this round exists to end, and the
+    caller names the situation instead (:meth:`diagnose_missing_key`).
+    """
+    if not model or model not in served:
+        return candidates
+    wanted = served[model]
+    return [c for c in candidates if _effective_endpoint(provider_name, c) in wanted]
 
 
 def _encode(key: str) -> str:
@@ -181,7 +240,14 @@ _rr_counters: dict[str, int] = defaultdict(int)
 # ``clear_keys_cache()`` is exposed for explicit invalidation after an
 # admin key add / rotate / test-status change.
 _KEYS_CACHE_TTL_S = 30.0
-_keys_cache: dict[str, tuple[float, list[str]]] = {}
+# provider -> (expiry, candidates, served-endpoints-by-model). FIX85: the
+# candidates are ProviderCredential values (key + its own endpoint, read in
+# ONE SELECT), and the served map (Part C) is read alongside them, so the
+# three facts a dispatch needs are never served from caches of different
+# ages. Writes to the provider-level endpoint clear this cache too
+# (``base_urls.set_stored_base_url``) — shared invalidation, not a second
+# copy.
+_keys_cache: dict[str, tuple[float, list[ProviderCredential], dict[str, frozenset[str | None]]]] = {}
 
 
 def clear_keys_cache() -> None:
@@ -230,29 +296,43 @@ class ProviderKeyService:
     # Key resolution (round-robin across active valid keys)
     # ------------------------------------------------------------------
 
-    def get_active_key(self, session: Session, provider_name: str) -> str | None:
-        """Get next API key for provider via round-robin.
-
-        Priority: provider_keys table → legacy providers.api_key_encrypted → env var.
-        Skips keys where last_test_status = 'invalid'.
-        """
+    def _cached(
+        self, session: Session, provider_name: str
+    ) -> tuple[list[ProviderCredential], dict[str, frozenset[str | None]]]:
         mono = time.monotonic()
         cached = _keys_cache.get(provider_name)
         if cached is not None and cached[0] > mono:
-            candidates = cached[1]
-        else:
-            candidates = self._resolve_key_candidates(session, provider_name)
-            _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
+            return cached[1], cached[2]
+        candidates = self._resolve_key_candidates(session, provider_name)
+        served = self._served_endpoints(session, provider_name)
+        _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates, served)
+        return candidates, served
 
-        if not candidates:
+    def get_active_key(
+        self, session: Session, provider_name: str, model: str | None = None
+    ) -> ProviderCredential | None:
+        """Get next API key for provider via round-robin.
+
+        Priority: provider_keys table → legacy providers.api_key_encrypted.
+        Skips keys where last_test_status = 'invalid' or 'stale'.
+
+        FIX85: the value is a :class:`ProviderCredential` — a ``str`` equal
+        to the key, carrying the endpoint the key belongs to. Pass
+        ``model`` (Part C) to draw only from the keys whose box reported
+        that model; for a model nobody has recorded, the pool is the whole
+        provider, as before.
+        """
+        candidates, served = self._cached(session, provider_name)
+        pool = _pool_for_model(provider_name, candidates, served, model)
+        if not pool:
             return None
-        idx = _rr_counters[provider_name] % len(candidates)
+        idx = _rr_counters[provider_name] % len(pool)
         _rr_counters[provider_name] += 1
-        return candidates[idx]
+        return pool[idx]
 
     def get_all_active_keys(
         self, session: Session, provider_name: str
-    ) -> list[str]:
+    ) -> list[ProviderCredential]:
         """Every key dispatch would consider, in creation order.
 
         The same candidate list — and the same TTL cache —
@@ -266,22 +346,17 @@ class ProviderKeyService:
         and stale keys therefore made discovery a coin flip — see
         ``ModelDiscoveryService._discover_with_key_fallback``.
         """
-        mono = time.monotonic()
-        cached = _keys_cache.get(provider_name)
-        if cached is not None and cached[0] > mono:
-            return list(cached[1])
-        candidates = self._resolve_key_candidates(session, provider_name)
-        _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
+        candidates, _served = self._cached(session, provider_name)
         return list(candidates)
 
     def _resolve_key_candidates(
         self, session: Session, provider_name: str
-    ) -> list[str]:
+    ) -> list[ProviderCredential]:
         """Resolve the ordered candidate key list (uncached).
 
         Priority: provider_keys table → legacy providers.api_key_encrypted.
-        No environment tier — keys are UI-configured only. Decoded to plain
-        strings so the cache holds no ORM.
+        No environment tier — keys are UI-configured only. Decoded to
+        credentials (plain ``str`` values) so the cache holds no ORM.
         """
         repo = ProviderKeyRepository(session)
         rows = repo.list_active_by_provider(provider_name)
@@ -294,21 +369,115 @@ class ProviderKeyService:
             select(ProviderORM).where(ProviderORM.name == provider_name)
         ).scalar_one_or_none()
         if provider and provider.api_key_encrypted:
-            return [_decode(provider.api_key_encrypted)]
+            return [ProviderCredential(_decode(provider.api_key_encrypted))]
 
         return []
 
+    def _served_endpoints(
+        self, session: Session, provider_name: str
+    ) -> dict[str, frozenset[str | None]]:
+        """FIX85 Part C — which endpoints reported each of the provider's models."""
+        try:
+            rows = session.execute(
+                select(ModelConfigORM.model, ModelConfigORM.served_by_keys).where(
+                    ModelConfigORM.provider == provider_name,
+                    ModelConfigORM.is_active.is_(True),
+                )
+            ).all()
+        except Exception:  # noqa: BLE001 — a DB without the column dispatches as before
+            return {}
+        return _served_endpoints_from_rows(rows)
+
+    def diagnose_missing_key(
+        self, session: Session, provider_name: str, model: str | None = None
+    ):
+        """The exception to raise when :meth:`get_active_key` returned None.
+
+        Three situations share that symptom and need three different
+        actions, so the caller must not guess:
+
+        * the model was listed by a box no usable key reaches
+          (``model_not_served`` — test or re-add that box's key);
+        * the endpoint moved and nobody has re-tested (``provider_keys_stale``);
+        * there is no key at all (``provider_unavailable``).
+        """
+        from app.core.exceptions import (
+            ModelNotServed,
+            ProviderKeysStale,
+            ProviderUnavailableError,
+        )
+
+        candidates, served = self._cached(session, provider_name)
+        if model and model in served and candidates:
+            return ModelNotServed(
+                f"Model '{model}' was listed by an endpoint of provider "
+                f"'{provider_name}' that no usable key reaches.",
+                details={"provider": provider_name, "model": model},
+            )
+        if self.has_stale_keys(session, provider_name):
+            return ProviderKeysStale(
+                f"Provider '{provider_name}' has keys, but its endpoint "
+                f"changed and none has been tested since.",
+                details={"provider": provider_name},
+            )
+        return ProviderUnavailableError(
+            f"No API key configured for provider '{provider_name}'.",
+            details={"provider": provider_name},
+        )
+
+    async def diagnose_missing_key_async(
+        self, session: AsyncSession, provider_name: str, model: str | None = None
+    ):
+        """Async mirror of :meth:`diagnose_missing_key`."""
+        from app.core.exceptions import (
+            ModelNotServed,
+            ProviderKeysStale,
+            ProviderUnavailableError,
+        )
+
+        candidates, served = await self._cached_async(session, provider_name)
+        if model and model in served and candidates:
+            return ModelNotServed(
+                f"Model '{model}' was listed by an endpoint of provider "
+                f"'{provider_name}' that no usable key reaches.",
+                details={"provider": provider_name, "model": model},
+            )
+        if await self.has_stale_keys_async(session, provider_name):
+            return ProviderKeysStale(
+                f"Provider '{provider_name}' has keys, but its endpoint "
+                f"changed and none has been tested since.",
+                details={"provider": provider_name},
+            )
+        return ProviderUnavailableError(
+            f"No API key configured for provider '{provider_name}'.",
+            details={"provider": provider_name},
+        )
+
     # Backward compat alias
-    def get_api_key(self, session: Session, provider_name: str) -> str | None:
-        return self.get_active_key(session, provider_name)
+    def get_api_key(
+        self, session: Session, provider_name: str, model: str | None = None
+    ) -> ProviderCredential | None:
+        return self.get_active_key(session, provider_name, model)
 
     # ------------------------------------------------------------------
     # Async variants (Track A) — additive; sync paths above unchanged.
     # ------------------------------------------------------------------
 
-    async def get_active_key_async(
+    async def _cached_async(
         self, session: AsyncSession, provider_name: str
-    ) -> str | None:
+    ) -> tuple[list[ProviderCredential], dict[str, frozenset[str | None]]]:
+        mono = time.monotonic()
+        cached = _keys_cache.get(provider_name)
+        if cached is not None and cached[0] > mono:
+            return cached[1], cached[2]
+        candidates = await self._resolve_key_candidates_async(session, provider_name)
+        served = await self._served_endpoints_async(session, provider_name)
+        _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates, served)
+        return candidates, served
+
+    async def get_active_key_async(
+        self, session: AsyncSession, provider_name: str, model: str | None = None
+    ) -> ProviderCredential | None:
         """Async variant of :meth:`get_active_key`.
 
         Identical cache + round-robin logic. The Phase-1 ``_keys_cache``
@@ -317,25 +486,33 @@ class ProviderKeyService:
         the ``_rr_counters`` round-robin remain plain sync operations
         (fine on the event loop — no I/O).
         """
-        mono = time.monotonic()
-        cached = _keys_cache.get(provider_name)
-        if cached is not None and cached[0] > mono:
-            candidates = cached[1]
-        else:
-            candidates = await self._resolve_key_candidates_async(
-                session, provider_name
-            )
-            _keys_cache[provider_name] = (mono + _KEYS_CACHE_TTL_S, candidates)
-
-        if not candidates:
+        candidates, served = await self._cached_async(session, provider_name)
+        pool = _pool_for_model(provider_name, candidates, served, model)
+        if not pool:
             return None
-        idx = _rr_counters[provider_name] % len(candidates)
+        idx = _rr_counters[provider_name] % len(pool)
         _rr_counters[provider_name] += 1
-        return candidates[idx]
+        return pool[idx]
+
+    async def _served_endpoints_async(
+        self, session: AsyncSession, provider_name: str
+    ) -> dict[str, frozenset[str | None]]:
+        try:
+            rows = (
+                await session.execute(
+                    select(ModelConfigORM.model, ModelConfigORM.served_by_keys).where(
+                        ModelConfigORM.provider == provider_name,
+                        ModelConfigORM.is_active.is_(True),
+                    )
+                )
+            ).all()
+        except Exception:  # noqa: BLE001
+            return {}
+        return _served_endpoints_from_rows(rows)
 
     async def _resolve_key_candidates_async(
         self, session: AsyncSession, provider_name: str
-    ) -> list[str]:
+    ) -> list[ProviderCredential]:
         """Async mirror of :meth:`_resolve_key_candidates`.
 
         Resolves the ordered candidate key list (uncached) using awaited
@@ -366,15 +543,15 @@ class ProviderKeyService:
             )
         ).scalar_one_or_none()
         if provider and provider.api_key_encrypted:
-            return [_decode(provider.api_key_encrypted)]
+            return [ProviderCredential(_decode(provider.api_key_encrypted))]
 
         return []
 
     # Backward compat alias (async)
     async def get_api_key_async(
-        self, session: AsyncSession, provider_name: str
-    ) -> str | None:
-        return await self.get_active_key_async(session, provider_name)
+        self, session: AsyncSession, provider_name: str, model: str | None = None
+    ) -> ProviderCredential | None:
+        return await self.get_active_key_async(session, provider_name, model)
 
     def providers_with_valid_keys(self, session: Session) -> set[str]:
         """Providers that have at least one active, validated key.
@@ -426,12 +603,17 @@ class ProviderKeyService:
 
     def list_keys(self, session: Session, provider_name: str) -> list[dict]:
         """List all keys for a provider (masked, with status)."""
+        from app.services.providers.base_urls import resolve_base_url
+
         repo = ProviderKeyRepository(session)
         rows = repo.list_by_provider(provider_name)
+        provider_default = resolve_base_url(provider_name, "") or None
+        served_counts = self._models_served_counts(session, provider_name)
 
         result = []
         for r in rows:
             raw = _decode(r.api_key_encrypted)
+            own = (r.base_url or "").strip().rstrip("/") or None
             result.append({
                 "id": r.id,
                 "provider_name": r.provider_name,
@@ -442,13 +624,51 @@ class ProviderKeyService:
                 "last_test_status": r.last_test_status or "untested",
                 "last_test_latency_ms": r.last_test_latency_ms,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                # FIX85 — which box this key belongs to. ``base_url`` is the
+                # row's own endpoint (None = inherits); ``effective_base_url``
+                # is where a request on it actually goes today;
+                # ``endpoint_source`` says which of the two it was.
+                "base_url": own,
+                "effective_base_url": own or provider_default,
+                "endpoint_source": "key" if own else ("provider" if provider_default else "none"),
+                # The endpoint the stored verdict was reached against —
+                # an "invalid" can say which box said no.
+                "last_tested_base_url": r.last_tested_base_url,
+                # Part C — models this key's endpoint reported at the last fetch.
+                "models_served": served_counts.get(r.id, 0),
             })
         return result
 
+    def _models_served_counts(self, session: Session, provider_name: str) -> dict[str, int]:
+        """``{key_id: number of active models whose served_by_keys names it}``."""
+        try:
+            rows = session.execute(
+                select(ModelConfigORM.served_by_keys).where(
+                    ModelConfigORM.provider == provider_name,
+                    ModelConfigORM.is_active.is_(True),
+                )
+            ).scalars().all()
+        except Exception:  # noqa: BLE001
+            return {}
+        counts: dict[str, int] = defaultdict(int)
+        for served in rows:
+            for key_id in (served or {}):
+                counts[key_id] += 1
+        return dict(counts)
+
     def add_key(
-        self, session: Session, provider_name: str, api_key: str, label: str | None = None
+        self,
+        session: Session,
+        provider_name: str,
+        api_key: str,
+        label: str | None = None,
+        base_url: str | None = None,
     ) -> ProviderKeyORM:
         """Insert a new provider key.
+
+        ``base_url`` (FIX85) is the endpoint this key talks to; the caller
+        has already passed it through ``validate_provider_base_url``.
+        ``None`` = the provider-level row, as every key was before.
 
         Also records that this provider is now database-owned, so the
         first-boot env seed can never act on it again — see
@@ -477,12 +697,15 @@ class ProviderKeyService:
                 last_test_status="untested",
                 last_tested_at=None,
                 last_test_latency_ms=None,
+                last_tested_base_url=None,
+                base_url=base_url,
             )
         else:
             row = repo.create(
                 provider_name=provider_name,
                 label=final_label,
                 api_key_encrypted=_encode(api_key),
+                base_url=base_url,
             )
         # Insert-if-absent, so the seeder's own "env-seed" reason survives
         # when this is called from the seed path.
@@ -504,19 +727,75 @@ class ProviderKeyService:
             clear_keys_cache()  # B5: bust the resolved-key cache
 
     def update_test_result(
-        self, session: Session, key_id: str, status: str, latency_ms: int | None = None
+        self,
+        session: Session,
+        key_id: str,
+        status: str,
+        latency_ms: int | None = None,
+        *,
+        tested_base_url: str | None = None,
     ) -> None:
-        """Update the test result for a key."""
+        """Update the test result for a key.
+
+        ``tested_base_url`` (FIX85) records the endpoint the verdict was
+        reached against, so the badge can say WHICH box answered.
+        """
         repo = ProviderKeyRepository(session)
-        repo.record_test_result(key_id, status, latency_ms)
+        repo.record_test_result(key_id, status, latency_ms, tested_base_url)
         clear_keys_cache()  # B5: a key flipping to/from "invalid" changes candidates
+
+    def set_key_base_url(
+        self, session: Session, key_id: str, base_url: str | None
+    ) -> dict:
+        """FIX85 — point ONE key at a (different) box.
+
+        ``base_url`` is already validated by the caller (the same SSRF
+        gate the provider-level endpoint uses); ``None`` puts the key back
+        on the provider-level default. Only this key's verdict is retired
+        (``stale``, never ``invalid`` — nobody has asked the new box yet),
+        and only when the endpoint actually changed; a key the provider
+        already rejected stays rejected.
+
+        Returns ``{"previous", "current", "changed", "staled"}``.
+        """
+        repo = ProviderKeyRepository(session)
+        row = repo.get_by_id(key_id)
+        if row is None:
+            from app.core.exceptions import NotFoundError
+
+            raise NotFoundError(f"Key '{key_id}' not found")
+        previous = (row.base_url or "").strip().rstrip("/") or None
+        current = (base_url or "").strip().rstrip("/") or None
+        changed = previous != current
+        staled = False
+        if changed:
+            row.base_url = current
+            if row.last_test_status not in ("invalid", KEY_STATUS_STALE):
+                row.last_test_status = KEY_STATUS_STALE
+                staled = True
+            session.flush()
+            clear_keys_cache()
+            logger.warning(
+                "Provider key %s for %s moved to a different endpoint%s",
+                row.id,
+                row.provider_name,
+                " — marked stale and withheld from dispatch until retested" if staled else "",
+            )
+        return {"previous": previous, "current": current, "changed": changed, "staled": staled}
 
     # ------------------------------------------------------------------
     # FIX57 — endpoint changes invalidate the QUESTION, not the key
     # ------------------------------------------------------------------
 
-    def mark_keys_stale(self, session: Session, provider_name: str) -> int:
+    def mark_keys_stale(
+        self, session: Session, provider_name: str, *, inheriting_only: bool = False
+    ) -> int:
         """Flag every stored key for ``provider_name`` as needing a retest.
+
+        ``inheriting_only`` (FIX85): the provider-level endpoint moved, so
+        only the keys WITHOUT an endpoint of their own were affected — a
+        key that points at its own box never used the value that changed,
+        and its verdict is still about the box it will be sent to.
 
         Called when the provider's endpoint changes. The sranai incident is
         the whole argument: a key was stamped ``valid`` at 10:24:36 and the
@@ -543,6 +822,8 @@ class ProviderKeyService:
             changed = 0
             for row in repo.list_by_provider(provider_name):
                 if row.last_test_status in ("invalid", KEY_STATUS_STALE):
+                    continue
+                if inheriting_only and (row.base_url or "").strip():
                     continue
                 row.last_test_status = KEY_STATUS_STALE
                 changed += 1
@@ -673,7 +954,7 @@ class ProviderKeyService:
                 )
             else:
                 return await self._test_registered_chat_provider(
-                    provider_name, api_key
+                    provider_name, api_key, base_url=base_url
                 )
         except Exception as exc:  # noqa: BLE001 - never expose secret-bearing text
             logger.error(
@@ -761,9 +1042,14 @@ class ProviderKeyService:
         }
 
     async def _test_registered_chat_provider(
-        self, provider_name: str, api_key: str
+        self, provider_name: str, api_key: str, *, base_url: str | None = None
     ) -> dict:
-        """Probe the /models endpoint of a registered chat adapter."""
+        """Probe the /models endpoint of a registered chat adapter.
+
+        ``base_url`` (FIX85): a per-key endpoint, honoured here as it is
+        at dispatch. The admin API only writes one for self-hosted
+        providers; a row that carries one anyway is tested against it.
+        """
         from app.services.provider_dispatcher import ProviderDispatcher
         from app.services.providers.base_urls import resolve_base_url
         from app.services.providers.openai_compatible_adapter import (
@@ -799,7 +1085,9 @@ class ProviderKeyService:
                 "provider_status": None,
             }
 
-        url = resolve_base_url(provider_name, adapter.base_url).rstrip("/")
+        url = ((base_url or "").strip().rstrip("/")) or resolve_base_url(
+            provider_name, adapter.base_url
+        ).rstrip("/")
         return await self._test_bearer_endpoint(
             provider_name, api_key, f"{url}/models"
         )
@@ -999,6 +1287,7 @@ class ProviderKeyService:
         legacy_db = bool(provider and provider.api_key_encrypted)
 
         total = len(usable) + (1 if legacy_db else 0)
+        active = [k for k in keys if k["is_active"]]
 
         result = {
             "provider_name": provider_name,
@@ -1011,7 +1300,12 @@ class ProviderKeyService:
             # Rows the operator has that dispatch will NOT use (invalid or
             # placeholder). Lets the UI explain a "no key" badge on a
             # provider that visibly has key rows, instead of looking broken.
-            "unusable_keys": len([k for k in keys if k["is_active"]]) - len(usable),
+            "unusable_keys": len(active) - len(usable),
+            # FIX85 Part 6 — WHICH case the unusable rows are: "the
+            # endpoint moved, press Test" and "the box said no" have the
+            # same badge count and opposite fixes.
+            "stale_keys": len([k for k in active if k["last_test_status"] == KEY_STATUS_STALE]),
+            "invalid_keys": len([k for k in active if k["last_test_status"] == "invalid"]),
         }
 
         # Self-hosted providers expose their operator-set endpoint so the
@@ -1023,7 +1317,15 @@ class ProviderKeyService:
         )
 
         if provider_name in SELF_HOSTED_PROVIDERS:
-            result["base_url"] = resolve_base_url(provider_name, "")
+            # ``base_url`` stays the PROVIDER-LEVEL default (the fallback);
+            # ``endpoint_configured`` says whether requests have anywhere to
+            # go at all — a default, or at least one active key with an
+            # endpoint of its own.
+            default = resolve_base_url(provider_name, "")
+            result["base_url"] = default
+            result["endpoint_configured"] = bool(default) or any(
+                k["base_url"] for k in active
+            )
         return result
 
     # Legacy compat

@@ -37,6 +37,7 @@ import time
 from urllib.parse import urlsplit
 
 from app.core.exceptions import ValidationError
+from app.services.providers.credential import endpoint_of
 
 # Providers whose endpoint is operator-supplied (self-hosted boxes) and
 # therefore configurable from the admin UI. The key-validation flow uses
@@ -100,6 +101,27 @@ def resolve_base_url(provider_name: str, default: str) -> str:
     if db_value:
         return db_value
     return default.rstrip("/")
+
+
+def effective_base_url(provider_name: str, default: str, api_key: object = None) -> str:
+    """The endpoint a request carrying ``api_key`` goes to.
+
+    FIX85 — an endpoint belongs to the key. Order: the endpoint on the
+    key itself (a :class:`ProviderCredential` whose row has ``base_url``)
+    → the provider-level ``system_settings`` row → the adapter default.
+    A plain string key, ``None``, or a credential without an endpoint of
+    its own all take the second and third steps, which is exactly what
+    :func:`resolve_base_url` did before keys could carry one — so a
+    deployment where no key has an endpoint of its own is unchanged.
+
+    This is the ONLY function an adapter should call to find its base
+    URL: it reads the endpoint off the key it was handed, so the key and
+    the endpoint cannot come from two different lookups.
+    """
+    own = endpoint_of(api_key)
+    if own:
+        return own
+    return resolve_base_url(provider_name, default)
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +240,23 @@ def set_stored_base_url(session, provider_name: str, url: str) -> str | None:
     # seed's usual case) invalidates nothing, and re-saving the same URL
     # is not a change. Marking keys stale needs no knowledge of what the
     # new box is — that is the point. Nobody has asked it anything yet.
-    if previous and previous.rstrip("/") != url.strip().rstrip("/"):
-        from app.services.provider_key_service import ProviderKeyService
+    #
+    # FIX85 — only the keys that actually moved: a key with an endpoint
+    # of its own never used this row, so its verdict is still about the
+    # box it points at. ``inheriting_only`` leaves those alone.
+    from app.services.provider_key_service import (
+        ProviderKeyService,
+        clear_keys_cache,
+    )
 
-        ProviderKeyService().mark_keys_stale(session, provider_name)
+    if previous and previous.rstrip("/") != url.strip().rstrip("/"):
+        ProviderKeyService().mark_keys_stale(
+            session, provider_name, inheriting_only=True
+        )
+    # Shared invalidation (FIX85): the resolved-key cache holds the
+    # credentials whose endpoint-less rows resolve THROUGH this value, so
+    # a write here drops that cache too — the pair is never served from
+    # two caches of different ages.
+    clear_keys_cache()
 
     return previous or None

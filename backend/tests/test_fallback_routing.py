@@ -70,7 +70,7 @@ class TestLayer1Dispatch:
             _payload(),
             _messages(),
             api_key="primary-key",
-            key_resolver=lambda p: f"key-{p}",
+            key_resolver=lambda p, m=None: f"key-{p}",
         )
         assert resp.content == "ok"
         assert used_provider == "openai"
@@ -96,7 +96,7 @@ class TestLayer1Dispatch:
             _payload(),
             _messages(),
             api_key="primary-key",
-            key_resolver=lambda p: f"key-{p}",
+            key_resolver=lambda p, m=None: f"key-{p}",
         )
         assert resp.content == "fallback ok"
         assert used_provider == "anthropic"
@@ -128,7 +128,7 @@ class TestLayer1Dispatch:
                 _payload(),
                 _messages(),
                 api_key="primary-key",
-                key_resolver=lambda p: f"key-{p}",
+                key_resolver=lambda p, m=None: f"key-{p}",
             )
         # Only the primary was tried — non-eligible code short-circuits.
         assert call_log == ["openai"]
@@ -149,7 +149,7 @@ class TestLayer1Dispatch:
                 _payload(),
                 _messages(),
                 api_key="primary-key",
-                key_resolver=lambda p: f"key-{p}",
+                key_resolver=lambda p, m=None: f"key-{p}",
             )
 
     @pytest.mark.asyncio
@@ -173,7 +173,7 @@ class TestLayer1Dispatch:
                 _payload(),
                 _messages(),
                 api_key="primary-key",
-                key_resolver=lambda p: f"key-{p}",
+                key_resolver=lambda p, m=None: f"key-{p}",
                 max_hops=2,
             )
         # Exactly 3 attempts: primary + 2 hops.
@@ -198,7 +198,7 @@ class TestLayer1Dispatch:
 
         # ``anthropic`` has no key (resolver returns None); ``openrouter``
         # does. The hop counter should still allow the openrouter try.
-        def resolver(provider: str) -> str | None:
+        def resolver(provider: str, model: str | None = None) -> str | None:
             return None if provider == "anthropic" else f"key-{provider}"
 
         resp, used_provider, _ = await dispatcher.dispatch_with_fallback(

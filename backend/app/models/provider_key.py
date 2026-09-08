@@ -20,6 +20,14 @@ class ProviderKeyORM(Base):
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)  # valid, invalid, untested
     last_test_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # FIX85 — the endpoint THIS key talks to (migration 087). NULL = use the
+    # provider-level ``system_settings`` row, which is what every row did
+    # before the column existed. Only meaningful for self-hosted providers;
+    # the admin API refuses to set it elsewhere.
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # FIX85 — the endpoint the stored verdict was reached against, so an
+    # "invalid" can say WHICH box said no.
+    last_tested_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (

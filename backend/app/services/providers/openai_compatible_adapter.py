@@ -27,7 +27,7 @@ import httpx
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk
 from app.services.providers.base import BaseProviderAdapter
-from app.services.providers.base_urls import resolve_base_url
+from app.services.providers.base_urls import effective_base_url
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.openai_adapter import (
@@ -193,13 +193,15 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         headers.update(self._extra_headers())
         return headers
 
-    async def _get_client(self):
-        # Resolve at call time so PROVIDER_BASE_URL_OVERRIDES can steer
-        # traffic to the perf mock without a code change. Falls through
-        # to the subclass's hardcoded ``base_url`` when no override set.
-        effective_base_url = resolve_base_url(self.provider_name, self.base_url)
+    async def _get_client(self, api_key: str | None = None):
+        # FIX85 — the endpoint comes OFF THE KEY: a credential that
+        # carries its own endpoint goes there; a plain key (or a
+        # credential without one) resolves the provider-level row and
+        # then the subclass's hardcoded ``base_url``, exactly as before.
+        # Resolved at call time so an admin edit propagates without a
+        # restart.
         return await get_provider_client(
-            base_url=effective_base_url,
+            base_url=effective_base_url(self.provider_name, self.base_url, api_key),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             provider_name=self.provider_name,
@@ -219,7 +221,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
     ) -> ProviderResponse:
         body = self._build_body(payload, messages, resolved_model=resolved_model)
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         headers = self._request_headers(api_key)
         resp = await call_with_retry(
             lambda: client.post("/chat/completions", json=body, headers=headers),
@@ -246,7 +248,7 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
             payload, messages, stream=True, resolved_model=resolved_model
         )
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         headers = self._request_headers(api_key)
         async with client.stream(
             "POST", "/chat/completions", json=body, headers=headers

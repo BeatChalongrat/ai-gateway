@@ -89,6 +89,10 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     # verdict was reached against a different box and none has been
     # re-checked. Not "invalid": nobody knows yet.
     ErrorInfo("provider_keys_stale", "This provider's endpoint changed, so its API keys need to be tested again before it can be used. Contact your administrator.", False),
+    # FIX85 Part C — the model was listed by one box of the provider and no
+    # usable key reaches that box; another key would hit a box that never
+    # had the model. Not retryable: the fix is a key test or a re-fetch.
+    ErrorInfo("model_not_served", "No configured key currently reaches the endpoint that serves this model — its key needs testing, or the model list re-fetching. Contact your administrator.", False),
     ErrorInfo("raw_egress_blocked", "The request was blocked: sensitive data cannot be sent to this service.", False),
     ErrorInfo("search_not_enabled", "Web search is not enabled for your account.", False),
     ErrorInfo("search_unavailable", "Web search is unavailable right now.", False),

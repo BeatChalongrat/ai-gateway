@@ -103,6 +103,7 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   content_policy_blocked: "error.content_policy_blocked",
   provider_auth_error: "error.provider_auth_error",
   provider_keys_stale: "error.provider_keys_stale",
+  model_not_served: "error.model_not_served",
   raw_egress_blocked: "error.raw_egress_blocked",
   search_not_enabled: "error.search_not_enabled",
   search_unavailable: "error.search_unavailable",

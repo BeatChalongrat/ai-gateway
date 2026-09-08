@@ -302,8 +302,21 @@ def update_setting(
     validated = validator(body.value)
     _check_tier_ceiling(key, validated, session)
     _check_media_order(key, validated, session)
-    row.value = validated
-    session.flush()
+    if key.startswith("provider_base_url:"):
+        # FIX85 — this row is the provider-level endpoint, and an edit
+        # here is the same move the providers page makes: it must retire
+        # the verdicts of the keys that inherit it. Before this it wrote
+        # the value directly, so a key tested against the old box kept
+        # saying "valid" — the exact hole ae949b2 closed on the other
+        # route.
+        from app.services.providers.base_urls import set_stored_base_url
+
+        set_stored_base_url(session, key[len("provider_base_url:"):], validated)
+        session.flush()
+        session.refresh(row)
+    else:
+        row.value = validated
+        session.flush()
     if key in ("auto_default_model", "auto_default_fallbacks"):
         # Take effect on the next turn instead of after the read TTL —
         # the whole point is "change it without a deploy".

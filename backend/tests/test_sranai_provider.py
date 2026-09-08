@@ -265,7 +265,8 @@ def test_sranai_registered_in_dispatcher():
 async def test_adapter_raises_clean_error_when_unconfigured(monkeypatch):
     import app.services.providers.sranai_adapter as mod
 
-    monkeypatch.setattr(mod, "resolve_base_url", lambda name, default: "")
+    # FIX85 — the adapter asks ONE function, with the key in hand.
+    monkeypatch.setattr(mod, "effective_base_url", lambda name, default, api_key=None: "")
     adapter = mod.SranAIAdapter()
     with pytest.raises(ProviderUnavailableError):
         await adapter._get_client()
@@ -277,10 +278,10 @@ async def test_adapter_gets_pooled_client_when_configured(monkeypatch):
     import app.services.providers.openai_compatible_adapter as base_mod
 
     # Both the guard (sranai_adapter) and the base _get_client
-    # (openai_compatible_adapter) import resolve_base_url into their own
+    # (openai_compatible_adapter) import effective_base_url into their own
     # namespace — patch both so they agree, as they do in production.
-    monkeypatch.setattr(mod, "resolve_base_url", lambda name, default: "http://box:8000/v1")
-    monkeypatch.setattr(base_mod, "resolve_base_url", lambda name, default: "http://box:8000/v1")
+    monkeypatch.setattr(mod, "effective_base_url", lambda name, default, api_key=None: "http://box:8000/v1")
+    monkeypatch.setattr(base_mod, "effective_base_url", lambda name, default, api_key=None: "http://box:8000/v1")
     adapter = mod.SranAIAdapter()
     client = await adapter._get_client()
     assert str(client.base_url).rstrip("/") == "http://box:8000/v1"

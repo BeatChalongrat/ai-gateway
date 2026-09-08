@@ -549,7 +549,9 @@ class FallbackOrchestrator:
             # even if it sits further down the chain.
             api_key: str | None = None
             if session is not None:
-                api_key = await self.key_service.get_api_key_async(session, provider)
+                api_key = await self.key_service.get_api_key_async(
+                    session, provider, model=model
+                )
             if not api_key:
                 attempts.append(
                     FallbackAttempt(
@@ -768,7 +770,7 @@ class FallbackOrchestrator:
                 if not model_meets(required, model):
                     continue
 
-            api_key = self.key_service.get_api_key(session, provider)
+            api_key = self.key_service.get_api_key(session, provider, model=model)
             if not api_key:
                 # No key → skip without consuming a real attempt slot,
                 # mirroring the run() loop's defensive contract.
@@ -840,7 +842,9 @@ class FallbackOrchestrator:
                 if not model_meets(required, model):
                     continue
 
-            api_key = await self.key_service.get_api_key_async(session, provider)
+            api_key = await self.key_service.get_api_key_async(
+                session, provider, model=model
+            )
             if not api_key:
                 continue
 

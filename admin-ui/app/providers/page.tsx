@@ -25,6 +25,16 @@ interface ProviderKey {
   last_test_status: string;
   last_test_latency_ms: number | null;
   created_at: string;
+  // FIX85 — the box this key belongs to. `base_url` is the key's own
+  // endpoint (null = inherits the provider default), `effective_base_url`
+  // is where its requests go today, `endpoint_source` says which.
+  base_url?: string | null;
+  effective_base_url?: string | null;
+  endpoint_source?: "key" | "provider" | "none";
+  // The endpoint the stored verdict was reached against.
+  last_tested_base_url?: string | null;
+  // Models this key's endpoint reported at the last fetch.
+  models_served?: number;
 }
 
 interface ProviderItem {
@@ -148,10 +158,23 @@ function timeAgo(iso: string | null, t: Translate): string {
   return t("time.daysAgo", { n: Math.floor(diff / 86400000) });
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, testedAt }: { status: string; testedAt?: string | null }) {
   const t = useT();
-  if (status === "valid") return <Badge variant="success">{t("infra.providers.statusValid")}</Badge>;
-  if (status === "invalid") return <Badge variant="error">{t("infra.providers.statusInvalid")}</Badge>;
+  // FIX85 Part 6 — "invalid" alone made the owner conclude the agent had
+  // broken something; the verdict was real, but about the OTHER box. The
+  // badge now carries which endpoint said yes or no.
+  if (status === "valid")
+    return (
+      <Badge variant="success" title={testedAt ? t("infra.providers.acceptedBy", { url: testedAt }) : undefined}>
+        {t("infra.providers.statusValid")}
+      </Badge>
+    );
+  if (status === "invalid")
+    return (
+      <Badge variant="error" title={testedAt ? t("infra.providers.rejectedBy", { url: testedAt }) : undefined}>
+        {t("infra.providers.statusInvalid")}
+      </Badge>
+    );
   // FIX57 — "stale" is not "invalid". The endpoint moved after this key
   // was last tested, so the stored verdict is about a different box and
   // nobody knows whether the key still works. Warning, not error: the row
@@ -224,18 +247,30 @@ function KeysPanel({
   providerName,
   currentEndpoint,
   onClose,
+  onEndpointChanged,
 }: {
   providerName: string;
   currentEndpoint?: string;
   onClose: () => void;
+  onEndpointChanged?: () => void;
 }) {
   const [keys, setKeys] = useState<ProviderKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [keysError, setKeysError] = useState<string | null>(null);
   const [label, setLabel] = useState("");
   const [keyInput, setKeyInput] = useState("");
+  // FIX85 — two endpoint inputs with two meanings. `endpoint` is the
+  // PROVIDER DEFAULT (the fallback for keys without one of their own);
+  // `newKeyEndpoint` is the box the key being added talks to. Before
+  // this, the single field silently rewrote the provider default on
+  // every add — which is how adding a key for box B retired box A's.
   const [endpoint, setEndpoint] = useState(currentEndpoint ?? "");
   const [endpointTouched, setEndpointTouched] = useState(false);
+  const [savingDefault, setSavingDefault] = useState(false);
+  const [newKeyEndpoint, setNewKeyEndpoint] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const [adding, setAdding] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
   // Held together: the model-list verdict and whether a key had actually
@@ -254,7 +289,11 @@ function KeysPanel({
     if (!endpointTouched && currentEndpoint) setEndpoint(currentEndpoint);
   }, [currentEndpoint, endpointTouched]);
 
-  const endpointOk = /^https?:\/\/\S+$/.test(endpoint.trim());
+  const urlOk = (v: string) => /^https?:\/\/\S+$/.test(v.trim());
+  const endpointOk = urlOk(endpoint);
+  // A new key needs SOME endpoint: its own, or the provider default.
+  const hasDefault = !!currentEndpoint;
+  const newKeyEndpointOk = newKeyEndpoint.trim() ? urlOk(newKeyEndpoint) : hasDefault;
 
   const loadKeys = useCallback(async () => {
     setKeysError(null);
@@ -273,13 +312,15 @@ function KeysPanel({
 
   async function handleAdd() {
     if (!keyInput.trim()) return;
-    if (selfHosted && !endpointOk) return;
+    if (selfHosted && !newKeyEndpointOk) return;
     setAdding(true);
     try {
       const result = await api.post(`/admin/providers/${providerName}/keys`, {
         api_key: keyInput.trim(),
         label: label.trim() || undefined,
-        base_url: selfHosted ? endpoint.trim() : undefined,
+        // Only an endpoint the admin typed travels with the key; empty
+        // means "inherit the default" and is stored as NULL.
+        base_url: selfHosted && newKeyEndpoint.trim() ? newKeyEndpoint.trim() : undefined,
       });
       toast(t("infra.providers.toastKeySaved", { ms: result.latency_ms }));
       // The key verdict is a toast; the model-list verdict is a notice
@@ -294,12 +335,61 @@ function KeysPanel({
       });
       setKeyInput("");
       setLabel("");
+      setNewKeyEndpoint("");
       loadKeys();
+      onEndpointChanged?.();
     } catch (e: any) {
       const msg = getApiErrorMessage(e, t("infra.providers.toastAddFailed"));
       toast(msg, "error");
     } finally {
       setAdding(false);
+    }
+  }
+
+  // FIX85 — the provider DEFAULT endpoint, saved on its own.
+  async function handleSaveDefault() {
+    if (!endpointOk) return;
+    setSavingDefault(true);
+    try {
+      await api.put(`/admin/providers/${providerName}/base_url`, { base_url: endpoint.trim() });
+      toast(t("infra.providers.toastDefaultSaved"));
+      setEndpointTouched(false);
+      loadKeys();
+      onEndpointChanged?.();
+    } catch (e: any) {
+      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed")), "error");
+    } finally {
+      setSavingDefault(false);
+    }
+  }
+
+  // FIX85 — ONE key's endpoint. Empty = back on the default.
+  function startEdit(k: ProviderKey) {
+    setEditingId(k.id);
+    setEditValue(k.base_url || "");
+  }
+
+  async function handleSaveEdit(keyId: string, value: string | null) {
+    if (value && !urlOk(value)) return;
+    setSavingEdit(true);
+    try {
+      const result = await api.patch(`/admin/providers/${providerName}/keys/${keyId}`, {
+        base_url: value ? value.trim() : null,
+      });
+      toast(
+        result?.changed
+          ? result?.staled
+            ? t("infra.providers.toastEndpointSaved")
+            : t("infra.providers.toastEndpointMoved")
+          : t("infra.providers.toastEndpointUnchanged"),
+      );
+      setEditingId(null);
+      loadKeys();
+      onEndpointChanged?.();
+    } catch (e: any) {
+      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed")), "error");
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -332,6 +422,9 @@ function KeysPanel({
       if (result.valid) toast(t("infra.providers.toastKeyValid", { ms: result.latency_ms }));
       else toast(t("infra.providers.toastKeyInvalid", { error: result.error }), "error");
       loadKeys();
+      // The card's stale/invalid counts read from key/status — refresh
+      // them so a verdict shows on the card without closing the panel.
+      onEndpointChanged?.();
     } catch {
       toast(t("infra.testFailed"), "error");
     } finally {
@@ -417,6 +510,7 @@ function KeysPanel({
               <tr>
                 <th>{t("infra.providers.colLabel")}</th>
                 <th>{t("infra.providers.colKey")}</th>
+                {selfHosted && <th>{t("infra.providers.colEndpoint")}</th>}
                 <th>{t("field.status")}</th>
                 <th>{t("infra.providers.colLatency")}</th>
                 <th>{t("infra.providers.colLastTested")}</th>
@@ -425,10 +519,86 @@ function KeysPanel({
             </thead>
             <tbody>
               {activeKeys.map((k) => (
-                <tr key={k.id}>
+                <tr key={k.id} data-testid={`key-row-${k.label}`}>
                   <td style={{ fontWeight: 500 }}>{k.label || "—"}</td>
                   <td><code style={{ fontSize: "var(--font-size-xs)" }}>{k.key_masked}</code></td>
-                  <td><StatusBadge status={k.last_test_status} /></td>
+                  {selfHosted && (
+                    <td data-testid="key-endpoint">
+                      {editingId === k.id ? (
+                        <div style={{ display: "flex", gap: "0.375rem", alignItems: "center", flexWrap: "wrap" }}>
+                          <input
+                            className="sran-input"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            placeholder={currentEndpoint || "http://host.docker.internal:8000/v1"}
+                            aria-label={t("infra.providers.editEndpoint")}
+                            style={{ fontSize: "var(--font-size-xs)", minWidth: 220 }}
+                          />
+                          <button
+                            className="sran-btn sran-btn-primary sran-btn-sm"
+                            disabled={savingEdit || !editValue.trim() || !urlOk(editValue)}
+                            onClick={() => handleSaveEdit(k.id, editValue)}
+                          >
+                            {t("action.save")}
+                          </button>
+                          {hasDefault && (
+                            <button
+                              className="sran-btn sran-btn-secondary sran-btn-sm"
+                              disabled={savingEdit}
+                              onClick={() => handleSaveEdit(k.id, null)}
+                              title={t("infra.providers.useDefaultEndpointHint")}
+                            >
+                              {t("infra.providers.useDefaultEndpoint")}
+                            </button>
+                          )}
+                          <button className="sran-btn sran-btn-secondary sran-btn-sm" disabled={savingEdit} onClick={() => setEditingId(null)}>
+                            {t("action.cancel")}
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: "0.375rem", alignItems: "center", flexWrap: "wrap" }}>
+                          <code style={{ fontSize: "var(--font-size-xs)" }}>
+                            {k.effective_base_url || t("infra.providers.endpointNotSet")}
+                          </code>
+                          {k.endpoint_source === "key" ? (
+                            <Badge variant="info" title={t("infra.providers.endpointOwnHint")}>
+                              {t("infra.providers.endpointOwn")}
+                            </Badge>
+                          ) : k.endpoint_source === "provider" ? (
+                            <Badge variant="neutral" title={t("infra.providers.endpointInheritedHint")}>
+                              {t("infra.providers.endpointInherited")}
+                            </Badge>
+                          ) : (
+                            <Badge variant="warning">{t("infra.providers.endpointNotSet")}</Badge>
+                          )}
+                          {typeof k.models_served === "number" && k.models_served > 0 && (
+                            <span
+                              style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}
+                              title={t("infra.providers.modelsServedHint")}
+                            >
+                              {t("infra.providers.modelsServed", { n: k.models_served })}
+                            </span>
+                          )}
+                          <button
+                            className="sran-btn sran-btn-secondary sran-btn-sm"
+                            onClick={() => startEdit(k)}
+                            title={t("infra.providers.editEndpoint")}
+                            aria-label={`${t("infra.providers.editEndpoint")} ${k.label}`}
+                          >
+                            {t("action.edit")}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  )}
+                  <td>
+                    <StatusBadge status={k.last_test_status} testedAt={k.last_tested_base_url} />
+                    {k.last_test_status === "invalid" && k.last_tested_base_url && (
+                      <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.125rem" }}>
+                        {t("infra.providers.rejectedBy", { url: k.last_tested_base_url })}
+                      </div>
+                    )}
+                  </td>
                   <td>{k.last_test_latency_ms ? `${k.last_test_latency_ms}ms` : "—"}</td>
                   <td style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)" }}>{timeAgo(k.last_tested_at, t)}</td>
                   <td>
@@ -465,35 +635,38 @@ function KeysPanel({
       />
 
       {selfHosted && (
-        <div style={{ marginBottom: "0.75rem" }}>
-          {!currentEndpoint && !endpoint.trim() && (
-            <div
-              style={{
-                padding: "0.625rem 0.75rem",
-                marginBottom: "0.625rem",
-                color: "var(--color-text-secondary)",
-                fontSize: "var(--font-size-sm)",
-                background: "color-mix(in srgb, var(--color-warning, #f59e0b) 8%, transparent)",
-                border: "1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 25%, transparent)",
-                borderRadius: "var(--radius-md)",
+        <div
+          style={{
+            marginBottom: "0.75rem",
+            padding: "0.625rem 0.75rem",
+            border: "1px dashed var(--color-border-default)",
+            borderRadius: "var(--radius-md)",
+          }}
+          data-testid="default-endpoint"
+        >
+          <label className="sran-label">{t("infra.providers.defaultEndpointLabel")}</label>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input
+              className="sran-input"
+              value={endpoint}
+              onChange={(e) => {
+                setEndpointTouched(true);
+                setEndpoint(e.target.value);
               }}
+              placeholder="http://host.docker.internal:8000/v1"
+              aria-label={t("infra.providers.defaultEndpointLabel")}
+              style={{ fontSize: "var(--font-size-sm)", flex: 1 }}
+            />
+            <button
+              className="sran-btn sran-btn-secondary sran-btn-sm"
+              onClick={handleSaveDefault}
+              disabled={savingDefault || !endpointOk || (!endpointTouched && endpoint.trim() === (currentEndpoint ?? ""))}
             >
-              {t("infra.providers.endpointMissing")}
-            </div>
-          )}
-          <label className="sran-label">{t("infra.providers.endpointLabel")}</label>
-          <input
-            className="sran-input"
-            value={endpoint}
-            onChange={(e) => {
-              setEndpointTouched(true);
-              setEndpoint(e.target.value);
-            }}
-            placeholder="http://host.docker.internal:8000/v1"
-            style={{ fontSize: "var(--font-size-sm)" }}
-          />
+              {savingDefault ? "…" : t("action.save")}
+            </button>
+          </div>
           <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
-            {t("infra.providers.endpointHint")}
+            {hasDefault ? t("infra.providers.defaultEndpointHint") : t("infra.providers.defaultEndpointNone")}
           </div>
         </div>
       )}
@@ -534,15 +707,40 @@ function KeysPanel({
             style={{ fontSize: "var(--font-size-sm)" }}
           />
         </div>
+        {selfHosted && (
+          <div style={{ flex: 1, minWidth: "220px" }}>
+            <label className="sran-label">
+              {hasDefault ? t("infra.providers.newKeyEndpointLabel") : t("infra.providers.endpointLabel")}
+            </label>
+            <input
+              className="sran-input"
+              value={newKeyEndpoint}
+              onChange={(e) => setNewKeyEndpoint(e.target.value)}
+              placeholder={currentEndpoint ? currentEndpoint : "http://host.docker.internal:8000/v1"}
+              aria-label={t("infra.providers.newKeyEndpointLabel")}
+              style={{ fontSize: "var(--font-size-sm)" }}
+            />
+            <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.25rem" }}>
+              {hasDefault
+                ? t("infra.providers.newKeyEndpointOptional")
+                : t("infra.providers.newKeyEndpointRequired")}
+            </div>
+          </div>
+        )}
         <button
           className="sran-btn sran-btn-primary"
           onClick={handleAdd}
-          disabled={adding || !keyInput.trim() || (selfHosted && !endpointOk)}
+          disabled={adding || !keyInput.trim() || (selfHosted && !newKeyEndpointOk)}
           style={{ whiteSpace: "nowrap" }}
         >
           {adding ? t("infra.providers.validating") : t("infra.providers.addValidate")}
         </button>
       </div>
+      {selfHosted && (
+        <div style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginTop: "0.5rem" }}>
+          {t("infra.providers.endpointHint")}
+        </div>
+      )}
     </div>
   );
 }
@@ -693,7 +891,21 @@ function ProviderCard({
         {/* A provider can show "no key" while visibly holding key rows —
             every row is invalid or a placeholder, so dispatch has nothing.
             Say so on the card, or the badge reads as a bug. */}
-        {!keyStatus?.configured && unusableKeys > 0 && (
+        {/* FIX85 Part 6 — WHICH case: "endpoint moved, press Test" and
+            "the box said no" had one badge and opposite fixes. */}
+        {(keyStatus?.stale_keys ?? 0) > 0 && (
+          <Badge variant="warning" title={t("infra.providers.statusStaleHint")}>
+            {t("infra.providers.staleCount", { n: keyStatus.stale_keys })}
+          </Badge>
+        )}
+        {(keyStatus?.invalid_keys ?? 0) > 0 && (
+          <Badge variant="error" title={t("infra.providers.invalidCountHint")}>
+            {t("infra.providers.invalidCount", { n: keyStatus.invalid_keys })}
+          </Badge>
+        )}
+        {!keyStatus?.configured &&
+          unusableKeys > 0 &&
+          (keyStatus?.stale_keys ?? 0) + (keyStatus?.invalid_keys ?? 0) < unusableKeys && (
           <Badge
             variant="warning"
             title={t("infra.providers.unusableNote", { n: unusableKeys })}
@@ -701,7 +913,9 @@ function ProviderCard({
             {t("infra.providers.unusableBadge", { n: unusableKeys })}
           </Badge>
         )}
-        {SELF_HOSTED.has(p.provider_name) && keyStatus !== undefined && !keyStatus?.base_url && (
+        {SELF_HOSTED.has(p.provider_name) &&
+          keyStatus !== undefined &&
+          !(keyStatus?.endpoint_configured ?? !!keyStatus?.base_url) && (
           <Badge variant="warning">{t("infra.providers.endpointNotSet")}</Badge>
         )}
         <span
@@ -940,6 +1154,12 @@ export default function ProvidersPage() {
                     providerName={p.provider_name}
                     currentEndpoint={keyStatuses[p.provider_name]?.base_url || undefined}
                     onClose={() => handleClosePanel(p.provider_name)}
+                    onEndpointChanged={() =>
+                      api
+                        .get(`/admin/providers/${p.provider_name}/key/status`)
+                        .then((s) => setKeyStatuses((prev) => ({ ...prev, [p.provider_name]: s })))
+                        .catch(() => {})
+                    }
                   />
                 )}
               </div>

@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import ProviderUnavailableError
 from app.services.provider_key_service import ProviderKeyService
-from app.services.providers.base_urls import resolve_base_url
+from app.services.providers.base_urls import effective_base_url
 from app.services.providers.error_handler import call_with_retry
 from app.services.providers.http_client import get_provider_client
 
@@ -145,7 +145,7 @@ async def generate_image(
     _ = (response_format, style)  # accepted for forward-compat, not forwarded
 
     client = await get_provider_client(
-        base_url=resolve_base_url("openai", OPENAI_BASE_URL),
+        base_url=effective_base_url("openai", OPENAI_BASE_URL, key),
         timeout_connect=settings.provider_timeout_connect,
         timeout_read=settings.provider_timeout_read,
         provider_name="openai",

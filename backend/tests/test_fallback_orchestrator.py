@@ -67,10 +67,10 @@ class _FakeKeyService:
     def __init__(self, keys_for: set[str]) -> None:
         self.keys_for = keys_for
 
-    def get_api_key(self, session, provider: str) -> str | None:
+    def get_api_key(self, session, provider: str, model: str | None = None) -> str | None:
         return f"sk-{provider}" if provider in self.keys_for else None
 
-    async def get_api_key_async(self, session, provider: str) -> str | None:
+    async def get_api_key_async(self, session, provider: str, model: str | None = None) -> str | None:
         # The FallbackOrchestrator.run() hot path was refactored to the
         # async key lookup; mirror the sync stub so the fake satisfies it.
         return self.get_api_key(session, provider)
@@ -350,13 +350,13 @@ class _AsyncOnlyKeyService:
     un-awaited execute), so it explodes here; only the awaited async path is
     valid. Mirrors the real failure mode the bug exposed."""
 
-    def get_api_key(self, session, provider):  # noqa: D401
+    def get_api_key(self, session, provider, model=None):  # noqa: D401
         raise AssertionError(
             "sync get_api_key must NOT be called on the async streaming "
             "pre-check path (it does an un-awaited AsyncSession.execute)"
         )
 
-    async def get_api_key_async(self, session, provider):
+    async def get_api_key_async(self, session, provider, model=None):
         return f"sk-{provider}"
 
 

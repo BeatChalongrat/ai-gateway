@@ -358,14 +358,17 @@ async def add_provider_key(
     """Add a new API key — validates against the real API before saving.
 
     Self-hosted providers (``base_urls.SELF_HOSTED_PROVIDERS``) may send
-    a ``base_url`` alongside the key: it is SSRF-gated, used for the
-    validation probe, and persisted to ``system_settings`` only after
-    the probe succeeds (so a typo'd endpoint is never stored).
+    a ``base_url`` alongside the key. FIX85: it is SSRF-gated, used for
+    the validation probe, and stored ON THE KEY ROW after the probe
+    succeeds — the endpoint belongs to the key. It no longer rewrites the
+    provider-level row (that is what made adding a key for box B retire
+    every key for box A). Omitted, the key inherits the provider-level
+    default, which must then exist.
     """
     from app.services.provider_key_service import ProviderKeyService
     from app.services.providers.base_urls import (
         SELF_HOSTED_PROVIDERS,
-        set_stored_base_url,
+        resolve_base_url,
         validate_provider_base_url,
     )
 
@@ -382,6 +385,16 @@ async def add_provider_key(
         )
     if base_url:
         base_url = validate_provider_base_url(base_url)
+    tested_base_url: str | None = base_url or None
+    if provider_name in SELF_HOSTED_PROVIDERS and not base_url:
+        tested_base_url = resolve_base_url(provider_name, "") or None
+        if not tested_base_url:
+            from app.core.exceptions import ValidationError
+            raise ValidationError(
+                "This provider has no default endpoint yet — enter the "
+                "box's URL together with the key.",
+                code="endpoint_required",
+            )
 
     svc = ProviderKeyService()
 
@@ -408,20 +421,22 @@ async def add_provider_key(
             },
         )
 
-    previous_url = None
     try:
-        if base_url:
-            previous_url = set_stored_base_url(session, provider_name, base_url)
-
-        row = svc.add_key(session, provider_name, api_key, label=label)
-        svc.update_test_result(session, row.id, "valid", test_result["latency_ms"])
+        row = svc.add_key(
+            session, provider_name, api_key, label=label, base_url=base_url or None
+        )
+        svc.update_test_result(
+            session,
+            row.id,
+            "valid",
+            test_result["latency_ms"],
+            tested_base_url=tested_base_url,
+        )
     except Exception as exc:  # save failures need a browser-readable contract
         from sqlalchemy.exc import IntegrityError
         from app.core.exceptions import ConflictError
-        from app.services.providers.base_urls import clear_base_url_cache
 
         session.rollback()
-        clear_base_url_cache()
         if isinstance(exc, ConflictError):
             raise
         if isinstance(exc, IntegrityError):
@@ -450,12 +465,6 @@ async def add_provider_key(
                 "stage": "save",
             },
         )
-
-    if previous_url and previous_url != base_url:
-        # The old endpoint's pooled httpx client would otherwise idle
-        # in the process-global cache until shutdown.
-        from app.services.providers.http_client import evict_client
-        await evict_client(previous_url)
 
     # Auto-discover the models this key can access and upsert them into
     # ``model_configs`` so they appear in the admin model list + the
@@ -489,10 +498,104 @@ async def add_provider_key(
         "label": row.label,
         "valid": True,
         "latency_ms": test_result["latency_ms"],
+        # FIX85 — the box this key belongs to (own) and where its
+        # requests go (effective); never the key.
+        "base_url": row.base_url,
+        "effective_base_url": tested_base_url,
         # Present when discovery ran; null when it was skipped/failed.
         # Shape: {provider, inserted, updated, skipped_override,
         # deactivated, errors, duration_seconds, synced_at}.
         "model_sync": model_sync,
+    }
+
+
+@router.patch("/providers/{provider_name}/keys/{key_id}")
+async def set_provider_key_endpoint(
+    provider_name: str,
+    key_id: str,
+    body: dict,
+    session: Session = Depends(get_db_session),
+):
+    """FIX85 — point ONE key at a box.
+
+    ``{"base_url": "http://..."}`` gives the key an endpoint of its own;
+    ``{"base_url": null}`` puts it back on the provider-level default
+    (which must then exist). Same SSRF gate as every other endpoint,
+    self-hosted providers only. Only this key's verdict is retired
+    (``stale``) and only if the endpoint actually changed.
+    """
+    from app.services.provider_key_service import ProviderKeyService
+    from app.services.providers.base_urls import (
+        SELF_HOSTED_PROVIDERS,
+        resolve_base_url,
+        validate_provider_base_url,
+    )
+    from app.core.exceptions import NotFoundError, ValidationError
+
+    row = session.get(ProviderKeyORM, key_id)
+    if row is None or row.provider_name != provider_name:
+        raise NotFoundError(f"Key '{key_id}' not found")
+    if provider_name not in SELF_HOSTED_PROVIDERS:
+        raise ValidationError(
+            f"base_url is not configurable for provider '{provider_name}'"
+        )
+    raw = body.get("base_url")
+    url = validate_provider_base_url(raw) if (raw or "").strip() else None
+    if url is None and not resolve_base_url(provider_name, ""):
+        raise ValidationError(
+            "This provider has no default endpoint — a key without an "
+            "endpoint of its own would have nowhere to go.",
+            code="endpoint_required",
+        )
+
+    svc = ProviderKeyService()
+    outcome = svc.set_key_base_url(session, key_id, url)
+    if outcome["changed"] and outcome["previous"]:
+        # Hygiene: the old box's pooled client would otherwise idle
+        # until shutdown (a next request for that URL rebuilds one).
+        from app.services.providers.http_client import evict_client
+
+        await evict_client(outcome["previous"])
+    listed = next((k for k in svc.list_keys(session, provider_name) if k["id"] == key_id), None)
+    return {**outcome, "key": listed}
+
+
+@router.put("/providers/{provider_name}/base_url")
+async def set_provider_default_endpoint(
+    provider_name: str,
+    body: dict,
+    session: Session = Depends(get_db_session),
+):
+    """FIX85 — the provider-level DEFAULT endpoint, written on its own.
+
+    It used to be written only as a side effect of adding a key. It is
+    the fallback for keys without an endpoint of their own — a default,
+    not a master: a key that carries its own endpoint ignores it. Moving
+    it retires the verdicts of the inheriting keys only.
+    """
+    from app.services.provider_key_service import ProviderKeyService
+    from app.services.providers.base_urls import (
+        SELF_HOSTED_PROVIDERS,
+        set_stored_base_url,
+        validate_provider_base_url,
+    )
+    from app.core.exceptions import ValidationError
+
+    if provider_name not in SELF_HOSTED_PROVIDERS:
+        raise ValidationError(
+            f"base_url is not configurable for provider '{provider_name}'"
+        )
+    url = validate_provider_base_url(body.get("base_url") or "")
+    previous = set_stored_base_url(session, provider_name, url)
+    if previous and previous.rstrip("/") != url:
+        from app.services.providers.http_client import evict_client
+
+        await evict_client(previous)
+    svc = ProviderKeyService()
+    return {
+        "base_url": url,
+        "previous": previous,
+        "keys": svc.list_keys(session, provider_name),
     }
 
 
@@ -523,12 +626,25 @@ async def test_provider_key(
         from app.core.exceptions import NotFoundError
         raise NotFoundError(f"Key '{key_id}' not found")
 
+    from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS, resolve_base_url
+
     svc = ProviderKeyService()
     raw_key = _decode(row.api_key_encrypted)
-    result = await svc.test_key(provider_name, raw_key)
-    svc.update_test_result(session, key_id, "valid" if result["valid"] else "invalid", result.get("latency_ms"))
+    # FIX85 — the pair is tested, not the key against whatever endpoint
+    # happens to be set: a key with its own endpoint is probed there.
+    result = await svc.test_key(provider_name, raw_key, base_url=row.base_url)
+    tested_base_url = (row.base_url or "").strip() or None
+    if tested_base_url is None and provider_name in SELF_HOSTED_PROVIDERS:
+        tested_base_url = resolve_base_url(provider_name, "") or None
+    svc.update_test_result(
+        session,
+        key_id,
+        "valid" if result["valid"] else "invalid",
+        result.get("latency_ms"),
+        tested_base_url=tested_base_url,
+    )
 
-    return result
+    return {**result, "tested_base_url": tested_base_url}
 
 
 @router.get("/models", response_model=AdminListResponse[ModelDetail])

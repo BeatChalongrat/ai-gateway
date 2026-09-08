@@ -379,7 +379,7 @@ async def run_capability_test(session, row: Any, cap: str, *, apply: bool = True
 
     field_name = CAPABILITY_FIELDS[cap]
     stored_before = bool(getattr(row, field_name, False))
-    api_key = ProviderKeyService().get_active_key(session, row.provider)
+    api_key = ProviderKeyService().get_active_key(session, row.provider, model=row.model)
     if not api_key:
         result = {
             "capability": cap,

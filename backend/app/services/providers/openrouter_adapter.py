@@ -14,7 +14,7 @@ import httpx
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk
 from app.services.providers.base import BaseProviderAdapter
-from app.services.providers.base_urls import resolve_base_url
+from app.services.providers.base_urls import effective_base_url
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.openai_adapter import _parse_sse_line
@@ -136,9 +136,9 @@ class OpenRouterAdapter(BaseProviderAdapter):
             "HTTP-Referer": settings.app_name,
         }
 
-    async def _get_client(self):
+    async def _get_client(self, api_key: str | None = None):
         return await get_provider_client(
-            base_url=resolve_base_url(self.provider_name, OPENROUTER_BASE_URL),
+            base_url=effective_base_url(self.provider_name, OPENROUTER_BASE_URL, api_key),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             provider_name=self.provider_name,
@@ -149,7 +149,7 @@ class OpenRouterAdapter(BaseProviderAdapter):
     ) -> ProviderResponse:
         body = self._build_body(payload, messages, resolved_model=resolved_model)
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         headers = self._request_headers(api_key)
         resp = await call_with_retry(
             lambda: client.post("/chat/completions", json=body, headers=headers),
@@ -172,7 +172,7 @@ class OpenRouterAdapter(BaseProviderAdapter):
             payload, messages, stream=True, resolved_model=resolved_model
         )
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         headers = self._request_headers(api_key)
         async with client.stream(
             "POST", "/chat/completions", json=body, headers=headers

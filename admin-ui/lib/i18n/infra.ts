@@ -90,6 +90,36 @@ export const en = {
   "infra.providers.endpointMissing":
     "Endpoint not configured yet — enter the box's URL below; it is validated and saved together with the key.",
   "infra.providers.endpointNotSet": "no endpoint",
+  // FIX85 — an endpoint belongs to the key. The table shows which box
+  // each key talks to; the provider-level value is a default, not a master.
+  "infra.providers.colEndpoint": "Endpoint",
+  "infra.providers.endpointOwn": "own",
+  "infra.providers.endpointOwnHint": "This key has an endpoint of its own. The provider default does not apply to it.",
+  "infra.providers.endpointInherited": "default",
+  "infra.providers.endpointInheritedHint": "This key has no endpoint of its own — it uses the provider's default endpoint. That is not an error.",
+  "infra.providers.editEndpoint": "Edit endpoint",
+  "infra.providers.useDefaultEndpoint": "Use default",
+  "infra.providers.useDefaultEndpointHint": "Remove this key's own endpoint so it follows the provider default.",
+  "infra.providers.toastEndpointSaved": "Endpoint saved — this key is withheld from requests until you press Test",
+  "infra.providers.toastEndpointMoved": "Endpoint saved",
+  "infra.providers.toastEndpointUnchanged": "Endpoint unchanged",
+  "infra.providers.toastEndpointFailed": "Failed to save endpoint",
+  "infra.providers.defaultEndpointLabel": "Default endpoint",
+  "infra.providers.defaultEndpointHint":
+    "Used only by keys that have no endpoint of their own. A key with its own endpoint ignores it. Moving it marks the keys that inherit it as needing a retest.",
+  "infra.providers.defaultEndpointNone":
+    "No default endpoint. Every key carries its own; set one here only if you want new keys to inherit it.",
+  "infra.providers.toastDefaultSaved": "Default endpoint saved",
+  "infra.providers.newKeyEndpointLabel": "Endpoint (this key's box)",
+  "infra.providers.newKeyEndpointOptional": "Leave empty to use the default endpoint. Enter a URL to point this key at its own box.",
+  "infra.providers.newKeyEndpointRequired": "Required — this provider has no default endpoint yet. Each key can point at its own box.",
+  "infra.providers.rejectedBy": "test failed at {url}",
+  "infra.providers.acceptedBy": "test passed at {url}",
+  "infra.providers.staleCount": "{n} need retest — endpoint changed",
+  "infra.providers.invalidCount": "{n} invalid",
+  "infra.providers.invalidCountHint": "A live test against the key's endpoint said no. Open the panel to see which box rejected it.",
+  "infra.providers.modelsServed": "{n} models",
+  "infra.providers.modelsServedHint": "Models this key's endpoint reported at the last fetch. Requests for them are sent through a key on this endpoint.",
 
   // Model discovery: a SEPARATE check from key validation. These strings
   // must never let a failed catalog fetch read as a rejected key.
@@ -500,6 +530,34 @@ export const th: Record<keyof typeof en, string> = {
   "infra.providers.endpointMissing":
     "ยังไม่ได้ตั้งค่า endpoint — กรอก URL ของเครื่องด้านล่าง ระบบจะตรวจสอบและบันทึกพร้อมกับคีย์",
   "infra.providers.endpointNotSet": "ยังไม่มี endpoint",
+  "infra.providers.colEndpoint": "ปลายทาง (Endpoint)",
+  "infra.providers.endpointOwn": "ของตัวเอง",
+  "infra.providers.endpointOwnHint": "คีย์นี้มี endpoint ของตัวเอง ค่าเริ่มต้นของผู้ให้บริการไม่มีผลกับคีย์นี้",
+  "infra.providers.endpointInherited": "ค่าเริ่มต้น",
+  "infra.providers.endpointInheritedHint": "คีย์นี้ไม่มี endpoint ของตัวเอง จึงใช้ endpoint เริ่มต้นของผู้ให้บริการ — ไม่ใช่ข้อผิดพลาด",
+  "infra.providers.editEndpoint": "แก้ endpoint",
+  "infra.providers.useDefaultEndpoint": "ใช้ค่าเริ่มต้น",
+  "infra.providers.useDefaultEndpointHint": "ลบ endpoint ของคีย์นี้ ให้กลับไปใช้ค่าเริ่มต้นของผู้ให้บริการ",
+  "infra.providers.toastEndpointSaved": "บันทึก endpoint แล้ว — ระบบจะยังไม่ใช้คีย์นี้จนกว่าจะกด Test",
+  "infra.providers.toastEndpointMoved": "บันทึก endpoint แล้ว",
+  "infra.providers.toastEndpointUnchanged": "endpoint ไม่เปลี่ยน",
+  "infra.providers.toastEndpointFailed": "บันทึก endpoint ไม่สำเร็จ",
+  "infra.providers.defaultEndpointLabel": "Endpoint เริ่มต้น",
+  "infra.providers.defaultEndpointHint":
+    "ใช้เฉพาะกับคีย์ที่ไม่มี endpoint ของตัวเอง คีย์ที่มี endpoint ของตัวเองจะไม่สนใจค่านี้ การเปลี่ยนค่านี้จะทำให้คีย์ที่ใช้ค่าเริ่มต้นต้องตรวจใหม่",
+  "infra.providers.defaultEndpointNone":
+    "ยังไม่มี endpoint เริ่มต้น ทุกคีย์มี endpoint ของตัวเอง ตั้งค่านี้เฉพาะเมื่อต้องการให้คีย์ใหม่ใช้ค่าเดียวกัน",
+  "infra.providers.toastDefaultSaved": "บันทึก endpoint เริ่มต้นแล้ว",
+  "infra.providers.newKeyEndpointLabel": "Endpoint (เครื่องของคีย์นี้)",
+  "infra.providers.newKeyEndpointOptional": "เว้นว่างเพื่อใช้ endpoint เริ่มต้น หรือกรอก URL เพื่อให้คีย์นี้ชี้ไปที่เครื่องของตัวเอง",
+  "infra.providers.newKeyEndpointRequired": "จำเป็น — ผู้ให้บริการนี้ยังไม่มี endpoint เริ่มต้น แต่ละคีย์ชี้ไปที่เครื่องของตัวเองได้",
+  "infra.providers.rejectedBy": "ทดสอบไม่ผ่านที่ {url}",
+  "infra.providers.acceptedBy": "ทดสอบผ่านที่ {url}",
+  "infra.providers.staleCount": "ต้องตรวจใหม่ {n} รายการ — endpoint เปลี่ยน",
+  "infra.providers.invalidCount": "ใช้ไม่ได้ {n} รายการ",
+  "infra.providers.invalidCountHint": "ทดสอบจริงกับ endpoint ของคีย์แล้วถูกปฏิเสธ เปิดแผงเพื่อดูว่าเครื่องไหนปฏิเสธ",
+  "infra.providers.modelsServed": "{n} โมเดล",
+  "infra.providers.modelsServedHint": "โมเดลที่ endpoint ของคีย์นี้รายงานเมื่อดึงรายการล่าสุด คำขอถึงโมเดลเหล่านี้จะส่งผ่านคีย์บน endpoint นี้",
 
   "infra.providers.syncKeyOk": "คีย์ใช้งานได้",
   "infra.providers.syncFound": "พบ {n} โมเดล",

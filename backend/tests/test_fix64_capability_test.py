@@ -204,7 +204,7 @@ def fake_dispatch(monkeypatch):
         return {"capability": cap, "verdict": state["verdict"], "evidence": state["evidence"], "latency_ms": 1}
 
     class _Keys:
-        def get_active_key(self, session, provider):
+        def get_active_key(self, session, provider, model=None):
             return "k"
 
     async def _reload(session):
@@ -282,7 +282,7 @@ async def test_proven_reasoning_fills_the_read_only_strategy(fake_dispatch):
 @pytest.mark.asyncio
 async def test_no_key_is_unreachable(monkeypatch):
     class _Keys:
-        def get_active_key(self, session, provider):
+        def get_active_key(self, session, provider, model=None):
             return None
 
     monkeypatch.setattr("app.services.provider_key_service.ProviderKeyService", _Keys)

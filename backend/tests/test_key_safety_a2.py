@@ -114,7 +114,7 @@ async def test_dispatch_rotates_to_next_key_on_401(monkeypatch):
 
     monkeypatch.setattr(ProviderDispatcher, "dispatch", _fake_dispatch)
 
-    def _resolver(provider):
+    def _resolver(provider, model=None):
         return "good-key"
 
     def _invalidate(provider, key):
@@ -152,7 +152,7 @@ async def test_dispatch_bounded_when_all_keys_401(monkeypatch):
     # Resolver hands out a fresh key once, then the pool is empty.
     pool = ["key-2"]
 
-    def _resolver(provider):
+    def _resolver(provider, model=None):
         return pool.pop(0) if pool else None
 
     def _invalidate(provider, key):
@@ -193,7 +193,7 @@ async def test_non_auth_error_does_not_rotate(monkeypatch):
             payload=None,
             messages=[],
             first_key="key-1",
-            key_resolver=lambda p: "key-2",
+            key_resolver=lambda p, m=None: "key-2",
             invalidate_key=lambda p, k: invalidated.append(k),
         )
 

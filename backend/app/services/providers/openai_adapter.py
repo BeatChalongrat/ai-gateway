@@ -15,7 +15,7 @@ import structlog
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk, ProviderUsage
 from app.services.providers.base import BaseProviderAdapter
-from app.services.providers.base_urls import resolve_base_url
+from app.services.providers.base_urls import effective_base_url
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.parsers import parse_openai_response
@@ -500,7 +500,7 @@ class OpenAIAdapter(BaseProviderAdapter):
         key = api_key or ""
 
         client = await get_provider_client(
-            base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
+            base_url=effective_base_url(self.provider_name, OPENAI_BASE_URL, api_key),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             provider_name=self.provider_name,
@@ -547,7 +547,7 @@ class OpenAIAdapter(BaseProviderAdapter):
         key = api_key or ""
 
         client = await get_provider_client(
-            base_url=resolve_base_url(self.provider_name, OPENAI_BASE_URL),
+            base_url=effective_base_url(self.provider_name, OPENAI_BASE_URL, api_key),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             provider_name=self.provider_name,

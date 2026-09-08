@@ -235,6 +235,24 @@ class ProviderKeysStale(ProviderError):
     )
 
 
+class ModelNotServed(ProviderError):
+    """The model was listed by a box that no usable key reaches.
+
+    FIX85 Part C. Discovery records which key's endpoint reported each
+    model. When every key at that endpoint is stale, invalid or gone,
+    sending the request through another key of the same provider would
+    reach a different box — the 401 / "no such model" the round exists
+    to end — so dispatch names the situation instead.
+
+    Not ``provider_keys_stale``: that one says "the endpoint moved", this
+    one says "the box that has this model is unreachable through the
+    keys you have". Not retryable; the fix is on the admin page.
+    """
+
+    code = "model_not_served"
+    message = "No configured key currently reaches the endpoint that serves this model."
+
+
 class UpstreamBadResponseError(GatewayError):
     code = "upstream_bad_response"
     message = "The upstream provider returned an unparseable response."

@@ -60,10 +60,10 @@ class _FakeKeyService:
     def __init__(self, keys_for: set[str]) -> None:
         self.keys_for = keys_for
 
-    def get_api_key(self, session, provider: str) -> str | None:
+    def get_api_key(self, session, provider: str, model: str | None = None) -> str | None:
         return f"sk-{provider}" if provider in self.keys_for else None
 
-    async def get_api_key_async(self, session, provider: str) -> str | None:
+    async def get_api_key_async(self, session, provider: str, model: str | None = None) -> str | None:
         return self.get_api_key(session, provider)
 
 

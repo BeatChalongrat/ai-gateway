@@ -144,6 +144,16 @@ class ModelConfigORM(Base):
         server_default=sa.text("'{}'"),
         default=dict,
     )
+    # FIX85 — which keys' endpoints reported this model when the catalogue
+    # was fetched (migration 087): ``{key_id: {"base_url": str|None,
+    # "label": str|None, "at": iso}}``. ``{}`` = never recorded; dispatch
+    # then treats the row as it always has (any key of the provider).
+    served_by_keys: Mapped[dict] = mapped_column(
+        sa.JSON().with_variant(postgresql.JSONB(), "postgresql"),
+        nullable=False,
+        server_default=sa.text("'{}'"),
+        default=dict,
+    )
     last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

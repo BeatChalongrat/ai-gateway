@@ -26,7 +26,7 @@ import httpx
 from app.core.config import settings
 from app.domain.providers import ProviderResponse, ProviderStreamChunk, ProviderUsage
 from app.services.providers.base import BaseProviderAdapter
-from app.services.providers.base_urls import resolve_base_url
+from app.services.providers.base_urls import effective_base_url
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.http_client import get_provider_client
 
@@ -284,11 +284,11 @@ class GoogleAIAdapter(BaseProviderAdapter):
 
         return body
 
-    async def _get_client(self):
+    async def _get_client(self, api_key: str | None = None):
         # Auth travels as the ``key`` query param (see call sites), so the
         # pooled client needs no per-request headers.
         return await get_provider_client(
-            base_url=resolve_base_url(self.provider_name, GOOGLE_BASE_URL),
+            base_url=effective_base_url(self.provider_name, GOOGLE_BASE_URL, api_key),
             timeout_connect=settings.provider_timeout_connect,
             timeout_read=settings.provider_timeout_read,
             provider_name=self.provider_name,
@@ -306,7 +306,7 @@ class GoogleAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=model)
         key = api_key or settings.google_api_key
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         resp = await call_with_retry(
             lambda: client.post(
                 f"/models/{model}:generateContent",
@@ -332,7 +332,7 @@ class GoogleAIAdapter(BaseProviderAdapter):
         body = self._build_body(payload, messages, resolved_model=model)
         key = api_key or settings.google_api_key
 
-        client = await self._get_client()
+        client = await self._get_client(api_key)
         async with client.stream(
             "POST",
             f"/models/{model}:streamGenerateContent",

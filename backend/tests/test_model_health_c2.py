@@ -18,7 +18,7 @@ async def test_health_probe_healthy_on_success(monkeypatch, db_session):
     monkeypatch.setattr(ProviderDispatcher, "dispatch", _ok)
     monkeypatch.setattr(
         "app.services.provider_key_service.ProviderKeyService.get_active_key",
-        lambda self, s, p: "k",
+        lambda self, s, p, model=None: "k",
     )
 
     result = await check_model_health(db_session, "openai", "gpt-4o")
@@ -36,7 +36,7 @@ async def test_health_probe_unhealthy_on_provider_error(monkeypatch, db_session)
     monkeypatch.setattr(ProviderDispatcher, "dispatch", _fail)
     monkeypatch.setattr(
         "app.services.provider_key_service.ProviderKeyService.get_active_key",
-        lambda self, s, p: "k",
+        lambda self, s, p, model=None: "k",
     )
 
     result = await check_model_health(db_session, "openai", "ghost-model")
@@ -48,7 +48,7 @@ async def test_health_probe_unhealthy_on_provider_error(monkeypatch, db_session)
 async def test_health_probe_no_key_is_unhealthy_not_raised(monkeypatch, db_session):
     monkeypatch.setattr(
         "app.services.provider_key_service.ProviderKeyService.get_active_key",
-        lambda self, s, p: None,
+        lambda self, s, p, model=None: None,
     )
     result = await check_model_health(db_session, "openai", "gpt-4o")
     assert result["healthy"] is False

@@ -1038,29 +1038,20 @@ async def _chat_completions_impl(
             auth=auth, payload=payload, session=session, _preflight_done=True
         )
 
-    # 4. Resolve provider API key.
+    # 4. Resolve provider API key — with the endpoint it belongs to, and
+    # for THIS model (FIX85: a provider can hold keys for two boxes).
     provider_api_key = await orchestrator.provider_key_service.get_api_key_async(
-        session, route.provider_name
+        session, route.provider_name, model=route.model_name
     )
     if not provider_api_key:
-        # FIX57 Part 3 — same symptom, opposite fixes: a provider with no
-        # key needs one added; a provider whose endpoint moved needs the
-        # keys already sitting in the list re-tested. Telling an operator
-        # to configure a key they can see is how a five-second fix turns
-        # into an afternoon.
-        from app.core.exceptions import ProviderKeysStale
-
-        if await orchestrator.provider_key_service.has_stale_keys_async(
-            session, route.provider_name
-        ):
-            raise ProviderKeysStale(
-                f"Provider '{route.provider_name}' has keys, but its endpoint "
-                f"changed and none has been tested since.",
-                details={"provider": route.provider_name},
-            )
-        raise ProviderUnavailableError(
-            f"No API key configured for provider '{route.provider_name}'.",
-            details={"provider": route.provider_name},
+        # FIX57 Part 3 / FIX85 Part C — same symptom, three different
+        # fixes: a provider with no key needs one added; a provider whose
+        # endpoint moved needs the keys already in the list re-tested; a
+        # model whose box no usable key reaches needs THAT key tested.
+        # Telling an operator to configure a key they can see is how a
+        # five-second fix turns into an afternoon.
+        raise await orchestrator.provider_key_service.diagnose_missing_key_async(
+            session, route.provider_name, route.model_name
         )
 
     # Bind the cross-turn DLP vault resolver once per request so

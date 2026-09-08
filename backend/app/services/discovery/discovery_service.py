@@ -33,7 +33,8 @@ from app.services.discovery.provider_discovery import (
     clear_discovery_failure,
     pop_discovery_failure,
 )
-from app.services.provider_key_service import ProviderKeyService
+from app.services.provider_key_service import ProviderKeyService, _effective_endpoint
+from app.services.providers.credential import ProviderCredential
 
 
 logger = structlog.get_logger(__name__)
@@ -85,6 +86,32 @@ class SyncResult:
             "duration_seconds": round(self.duration_seconds, 3),
             "synced_at": self.synced_at.isoformat(),
         }
+
+
+def _group_by_endpoint(
+    provider_name: str, pool: list
+) -> list[list]:
+    """Split a provider's key pool into groups that reach the same box.
+
+    FIX85 Part C. Order is the pool's (creation) order, so a provider
+    whose keys all share one endpoint yields one group holding the
+    whole pool — the pre-FIX85 request pattern, unchanged.
+    """
+    groups: dict[str | None, list] = {}
+    for key in pool:
+        endpoint = _effective_endpoint(provider_name, key) if isinstance(key, ProviderCredential) else None
+        groups.setdefault(endpoint, []).append(key)
+    return list(groups.values())
+
+
+def _reclaim(row: ModelConfigORM, claims: dict, answered: set[str]) -> None:
+    """Rewrite ``row.served_by_keys``: drop the answered keys' old claims,
+    add ``claims``. Assigns a NEW dict so SQLAlchemy sees the change."""
+    current = dict(row.served_by_keys or {})
+    kept = {k: v for k, v in current.items() if k not in answered}
+    kept.update(claims)
+    if kept != current:
+        row.served_by_keys = kept
 
 
 def _enrich_with_pricing(
@@ -204,6 +231,18 @@ class ModelDiscoveryService:
             models = await adapter(api_key)
             failure = pop_discovery_failure(provider_name)
             if models:
+                # FIX85 Part C — remember WHICH key (and so which box)
+                # reported these models. Only a key with a row can be
+                # named; a legacy / stub key leaves the models unstamped
+                # and dispatch treats them as it always has.
+                if isinstance(api_key, ProviderCredential) and api_key.key_id:
+                    stamp = {
+                        "base_url": _effective_endpoint(provider_name, api_key),
+                        "label": api_key.label,
+                        "at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    for m in models:
+                        m.served_by = {**m.served_by, api_key.key_id: dict(stamp)}
                 return models, None
             if failure is None:
                 # Empty with no recorded reason — nothing says another
@@ -244,7 +283,14 @@ class ModelDiscoveryService:
         # caller's thread, no need to dispatch. The WHOLE candidate pool
         # is read, not one round-robin draw: see
         # :meth:`_discover_with_key_fallback`.
-        api_keys: dict[str, list[str | None]] = {}
+        #
+        # FIX85 Part C — a provider can hold keys for DIFFERENT boxes, and
+        # each box has its own catalogue. The pool is grouped by the
+        # endpoint each key actually reaches; every group is asked (one
+        # working key per group is enough), and the answers are merged.
+        # A provider whose keys all share one endpoint is one group — the
+        # exact request pattern of before.
+        api_keys: dict[str, list[list[str | None]]] = {}
         for provider_name in providers:
             try:
                 pool: list[str | None] = list(
@@ -258,14 +304,14 @@ class ModelDiscoveryService:
             # A keyless provider still gets one attempt with None: the
             # static-list adapters need no credential, and the ones that
             # do report "no API key configured" for themselves.
-            api_keys[provider_name] = pool or [None]
+            api_keys[provider_name] = _group_by_endpoint(provider_name, pool) or [[None]]
 
         # 3. Run all provider discoveries concurrently. Each adapter
         #    swallows its own errors and returns []; we still wrap
         #    in gather(..., return_exceptions=True) as a belt-and-
         #    braces guard.
         coros = [
-            self._discover_with_key_fallback(name, adapter, api_keys[name])
+            self._discover_every_endpoint(name, adapter, api_keys[name])
             for name, adapter in providers.items()
         ]
         discovered_lists = await asyncio.gather(*coros, return_exceptions=True)
@@ -277,7 +323,12 @@ class ModelDiscoveryService:
         # is intentionally NOT added — soft-deactivate must skip those
         # providers entirely so their seed/auto rows survive transient
         # outages instead of getting wiped to is_active=False.
+        # FIX85: with several boxes, "authoritative" means EVERY box
+        # answered — one box down must not deactivate the other's models.
         synced_providers: set[str] = set()
+        # provider -> key ids that answered this run (their earlier
+        # claims on models they no longer list are dropped in persist).
+        answered_keys: dict[str, set[str]] = {}
         for (provider_name, _), entry in zip(providers.items(), discovered_lists):
             if isinstance(entry, BaseException):
                 result.errors.append(
@@ -287,16 +338,24 @@ class ModelDiscoveryService:
                     f"discovery failed unexpectedly ({type(entry).__name__})"
                 )
                 continue
-            models, reason = entry
+            models, reason, complete = entry
             if not models:
                 if reason:
                     result.provider_errors[provider_name] = reason
                 continue
-            synced_providers.add(provider_name)
+            if complete:
+                synced_providers.add(provider_name)
+            elif reason:
+                # Some models arrived, one box did not answer: say so
+                # (nothing of that box is deactivated).
+                result.errors.append(f"{provider_name}: {reason}")
+                result.provider_errors[provider_name] = reason
             for model in models:
                 _enrich_with_pricing(model, self.pricing_fetcher)
                 all_discovered.append(model)
                 seen_keys.add((model.provider, model.model))
+                if model.served_by:
+                    answered_keys.setdefault(provider_name, set()).update(model.served_by)
 
         # 4. Upsert + soft-deactivate in a single thread hop so the
         #    event loop doesn't block on psycopg I/O.
@@ -307,6 +366,7 @@ class ModelDiscoveryService:
                 seen_keys=seen_keys,
                 synced_providers=synced_providers,
                 provider_filter=provider_filter,
+                answered_keys=answered_keys,
             )
 
         (
@@ -343,6 +403,45 @@ class ModelDiscoveryService:
         )
         return result
 
+    async def _discover_every_endpoint(
+        self,
+        provider_name: str,
+        adapter,
+        groups: list[list[str | None]],
+    ) -> tuple[list[DiscoveredModel], str | None, bool]:
+        """FIX85 Part C — ask each box the provider's keys reach, merge.
+
+        Returns ``(models, reason, complete)``: ``complete`` is True when
+        every group answered with models — only then may the caller treat
+        the union as the provider's whole catalogue (and deactivate what
+        is missing from it). A single group is exactly the pre-FIX85
+        call.
+        """
+        merged: dict[str, DiscoveredModel] = {}
+        reason: str | None = None
+        complete = True
+        for group in groups:
+            models, group_reason = await self._discover_with_key_fallback(
+                provider_name, adapter, group
+            )
+            if not models:
+                complete = False
+                if group_reason:
+                    endpoint = _effective_endpoint(provider_name, group[0]) if group and group[0] is not None else None
+                    where = f"{endpoint}: " if endpoint and len(groups) > 1 else ""
+                    reason = reason or f"{where}{group_reason}"
+                continue
+            for m in models:
+                have = merged.get(m.model)
+                if have is None:
+                    merged[m.model] = m
+                else:
+                    # Same model on two boxes: one catalogue row, both
+                    # claims. Capability flags come from the first box
+                    # that listed it (they are inferred from the id).
+                    have.served_by = {**have.served_by, **m.served_by}
+        return list(merged.values()), reason, complete
+
     def _persist_results(
         self,
         db: Session,
@@ -351,6 +450,7 @@ class ModelDiscoveryService:
         seen_keys: set[tuple[str, str]],
         synced_providers: set[str],
         provider_filter: str | None,
+        answered_keys: dict[str, set[str]] | None = None,
     ) -> tuple[int, int, int, int, int, list[str]]:
         """Apply the upsert + soft-deactivate logic.
 
@@ -374,6 +474,7 @@ class ModelDiscoveryService:
         # off so cloud catalogs (e.g. OpenRouter's hundreds of models
         # with un-vetted pricing) still land as log-only.
         auto_add_providers = settings.model_discovery_auto_add_providers_set
+        answered_keys = answered_keys or {}
         inserted = 0
         updated = 0
         skipped_override = 0
@@ -427,10 +528,18 @@ class ModelDiscoveryService:
                             supports_reasoning=model.supports_reasoning,
                             reasoning_strategy=model.reasoning_strategy,
                             default_reasoning_mode="auto",
+                            served_by_keys=dict(model.served_by),
                         )
                     )
                     inserted += 1
                     continue
+
+                # FIX85 Part C — who serves it is a FACT about the boxes,
+                # not a curated capability, so it is recorded on manual
+                # rows too (before the override guard below). A key that
+                # answered this run re-asserts its claims; its stale ones
+                # go; keys that did not answer keep theirs.
+                _reclaim(row, model.served_by, answered_keys.get(model.provider, set()))
 
                 if row.is_manual_override:
                     # Touch the timestamp so admins can see the sync
@@ -536,6 +645,13 @@ class ModelDiscoveryService:
             for (provider_name, model_name), row in existing.items():
                 if (provider_name, model_name) in seen_keys:
                     continue
+                # FIX85 Part C — a key that answered and no longer lists
+                # this model no longer serves it, whatever else happened.
+                answered = answered_keys.get(provider_name)
+                if answered and provider_name != (provider_filter or provider_name):
+                    answered = None
+                if answered:
+                    _reclaim(row, {}, answered)
                 if provider_name not in synced_providers:
                     continue
                 # When syncing a single provider, only consider rows

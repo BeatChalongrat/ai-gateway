@@ -923,29 +923,26 @@ class GatewayOrchestrator:
             if _calc_outcome is not None:
                 log.info("secure_calc_applied", result_token=_calc_outcome.token)
 
-        # 6. Resolve provider API key (DB → env var fallback)
+        # 6. Resolve provider API key (DB only). FIX85: the key comes
+        # back WITH the endpoint it belongs to (ProviderCredential), and
+        # asking with the model draws from the keys whose box serves it.
         provider_api_key = None
         if session is not None:
             provider_api_key = await self.provider_key_service.get_api_key_async(
-                session, route.provider_name
+                session, route.provider_name, model=route.model_name
             )
         if not provider_api_key and not _calc_active:
             # Calculator answers server-side without a provider key (it bypasses
             # the provider entirely), so a missing key must not block it.
-            # FIX57 Part 3 — "no key" and "the keys are all waiting on a
-            # retest" look identical from here and need opposite actions,
-            # so ask which one it is before naming it.
-            from app.core.exceptions import (
-                ProviderKeysStale,
-                ProviderUnavailableError,
-            )
-            if session is not None and await self.provider_key_service.has_stale_keys_async(
-                session, route.provider_name
-            ):
-                raise ProviderKeysStale(
-                    f"Provider '{route.provider_name}' has keys, but its "
-                    f"endpoint changed and none has been tested since.",
-                    details={"provider": route.provider_name},
+            # FIX57 Part 3 / FIX85 Part C — "no key", "the keys are all
+            # waiting on a retest" and "the box that has this model is
+            # unreachable" look identical from here and need three
+            # different actions, so ask which one it is before naming it.
+            from app.core.exceptions import ProviderUnavailableError
+
+            if session is not None:
+                raise await self.provider_key_service.diagnose_missing_key_async(
+                    session, route.provider_name, route.model_name
                 )
             raise ProviderUnavailableError(
                 f"No API key configured for provider '{route.provider_name}'.",
@@ -1160,10 +1157,14 @@ class GatewayOrchestrator:
         # admin/portal/background) so the async request session is not
         # reused across the provider await. Fallback is rare and provider
         # keys are cached, so this seldom touches the DB.
-        def _resolve_fallback_key(provider_name: str) -> str | None:
+        def _resolve_fallback_key(
+            provider_name: str, model_name: str | None = None
+        ) -> str | None:
             from app.core.db import SessionLocal as _SyncSession
             with _SyncSession() as _s:
-                return self.provider_key_service.get_api_key(_s, provider_name)
+                return self.provider_key_service.get_api_key(
+                    _s, provider_name, model=model_name
+                )
 
         # A2: when a provider rejects a key with 401/403 mid-dispatch, flip
         # that key's row to invalid so the round-robin pool stops handing it
