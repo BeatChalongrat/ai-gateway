@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
+import { connectorAccess } from "@/lib/connectorCapability";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto, type InstalledConnectorDto } from "@/lib/hostApi";
 
 export default function ConnectorsPage() {
@@ -103,6 +104,10 @@ function ConnectorMarketplace() {
     // embedded starter catalogue) has no destination — no button, no card
     // (FIX11 / FIX34.1: nothing to do, nothing to click). OAuth cards stay:
     // their server comes from the owner's registration file, not the catalogue.
+    // FIX89 Part B: that rule stands — what it lacked was a TRACE. The names
+    // are listed below the cards with the reason (see `unavailable`), so
+    // "four cards, where did the rest go?" has an answer on the page instead
+    // of only in docs/CONNECTOR_SETUP.md. Collapse, never delete.
     const showable = connectors.filter((c) => !(c.authType === "api_key" && c.placeholder === true));
     if (!q) return showable;
     return showable.filter(
@@ -112,6 +117,13 @@ function ConnectorMarketplace() {
         c.category.toLowerCase().includes(q),
     );
   }, [connectors, query]);
+  /** FIX89 Part B — exactly the cards the filter above removed: real
+   *  catalogue entries with nowhere to go. Never filtered by the search box:
+   *  it answers "is that everything?", which is not a search result. */
+  const unavailable = useMemo(
+    () => connectors.filter((c) => c.authType === "api_key" && c.placeholder === true),
+    [connectors],
+  );
   const filteredCustom = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return custom;
@@ -161,11 +173,18 @@ function ConnectorMarketplace() {
           ? await hostApi.oauthDisconnect(c.id)
           : await hostApi.oauthConnect(c.id);
         if (!res.ok) {
-          toast(OAUTH_ERROR_TEXT[res.error ?? ""] ?? (connected ? tOutside("connectors.toast.disconnectFailed") : tOutside("connectors.toast.connectFailed")));
+          toast(oauthErrorText(res.error ?? "") ?? (connected ? tOutside("connectors.toast.disconnectFailed") : tOutside("connectors.toast.connectFailed")));
           await reload();
           return;
         }
-        toast(connected ? `${c.name} disconnected.` : `${c.name} connected.`);
+        // FIX89 Part B — was a hard-coded English template literal, which
+        // the ratchet's rule does not see (it flags JSX text and string
+        // literals in attributes, not a template inside a call).
+        toast(
+          connected
+            ? tOutside("connectors.toast.disconnected", { name: c.name })
+            : tOutside("connectors.toast.connected", { name: c.name }),
+        );
         await reload();
         return;
       }
@@ -308,6 +327,28 @@ function ConnectorMarketplace() {
             </div>
           )}
         </div>
+
+        {/* FIX89 Part B — the connectors this build cannot offer yet, named.
+            FIX69's rule stands (a card with no destination is not a card), so
+            there is no button here and nothing that looks usable: just what
+            exists, why it is not a card, and the way out. Without this the
+            page silently showed four of eight. */}
+        {loaded && unavailable.length > 0 ? (
+          <section
+            className="mt-8 rounded-xl border border-dashed border-border px-5 py-4"
+            data-testid="connectors-unavailable"
+            aria-label={t("connectors.unavailable.aria")}
+          >
+            <h2 className="text-sm font-medium text-text-secondary">
+              {t("connectors.unavailable.title", { n: String(unavailable.length) })}
+            </h2>
+            <p className="mt-2 text-xs leading-relaxed text-text-muted">
+              {t("connectors.unavailable.body", {
+                names: unavailable.map((c) => c.name).join(", "),
+              })}
+            </p>
+          </section>
+        ) : null}
       </main>
     </div>
   );
@@ -398,19 +439,27 @@ function CustomConnectorCard({
 // Connector card
 // ---------------------------------------------------------------------------
 
-/** FIX31 Part 2: every way the host's OAuth flow can end, in the user's words. */
-const OAUTH_ERROR_TEXT: Record<string, string> = {
-  "oauth-unsupported": "Sign-in for connectors isn't available in this build.",
-  "oauth-not-configured": "This connector isn't set up yet — it needs an app registration from your administrator.",
-  "oauth-disabled": "This connector is set up but switched off by your administrator.",
-  "oauth-denied": "Not connected — you declined, or the provider refused.",
-  "oauth-timeout": "Not connected — the sign-in wasn't completed in time. Click Connect to try again.",
-  "oauth-cancelled": "The sign-in was cancelled.",
-  "oauth-state-mismatch": "Not connected — the sign-in didn't match this request. Click Connect to try again.",
-  "oauth-exchange-failed": "Not connected — the provider didn't issue a token. Try again, or check the registration.",
-  "oauth-browser-failed": "Couldn't open your browser for the sign-in.",
-  "oauth-storage-unavailable": "Can't store the sign-in securely on this computer.",
-};
+/** FIX31 Part 2: every way the host's OAuth flow can end, in the user's words.
+ *  FIX89 Part B: the words now come from the catalogue in both languages —
+ *  the wording itself is unchanged (it is the right wording; it was only
+ *  English-only). */
+const OAUTH_ERROR_KEY = {
+  "oauth-unsupported": "connectors.oauth.unsupported",
+  "oauth-not-configured": "connectors.oauth.notConfigured",
+  "oauth-disabled": "connectors.oauth.disabled",
+  "oauth-denied": "connectors.oauth.denied",
+  "oauth-timeout": "connectors.oauth.timeout",
+  "oauth-cancelled": "connectors.oauth.cancelled",
+  "oauth-state-mismatch": "connectors.oauth.stateMismatch",
+  "oauth-exchange-failed": "connectors.oauth.exchangeFailed",
+  "oauth-browser-failed": "connectors.oauth.browserFailed",
+  "oauth-storage-unavailable": "connectors.oauth.storageUnavailable",
+} as const;
+
+function oauthErrorText(error: string): string | null {
+  const key = OAUTH_ERROR_KEY[error as keyof typeof OAUTH_ERROR_KEY];
+  return key ? tOutside(key) : null;
+}
 
 /** FIX69: every way adding a custom connector can end, in the user's words.
  *  A refused key says so ("rejected") — never "try again". */
@@ -448,6 +497,7 @@ function ConnectorCard({
   busy: boolean;
   onAction: () => void;
 }) {
+  const t = useT();
   const isOAuth = connector.authType === "oauth2";
   // FIX31 Part 2: the host owns the provider sign-in. A card is connectable
   // only when the owner's registration file names this connector AND enables
@@ -457,19 +507,21 @@ function ConnectorCard({
   const oauthReason = !isOAuth || oauthConnected
     ? null
     : !oauthStatus
-      ? "Sign-in for connectors isn't available in this build."
+      ? t("connectors.oauth.unsupported")
       : !oauthStatus.configured
-        ? "Not set up yet — this connector needs an app registration from your administrator."
+        ? t("connectors.oauth.notConfigured")
         : !oauthStatus.enabled
-          ? "Set up, but switched off by your administrator."
+          ? t("connectors.oauth.switchedOff")
           : null;
   const actionLabel = isOAuth
     ? oauthConnected
-      ? "Disconnect"
-      : "Connect"
+      ? t("connectors.action.disconnect")
+      : t("connectors.action.connect")
     : connector.installed
-      ? "Uninstall"
-      : "Install";
+      ? t("connectors.action.uninstall")
+      : t("connectors.action.install");
+  // FIX89 Part B — what it can do, not what its functions are called.
+  const access = connectorAccess(connector.tools, connector.id);
 
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
@@ -491,9 +543,9 @@ function ConnectorCard({
               {connector.description}
             </p>
           ) : null}
-          {connector.tools.length > 0 ? (
-            <p className="mt-3 truncate text-xs text-text-muted">
-              {connector.tools.join(" · ")}
+          {access.key ? (
+            <p className="mt-3 text-xs text-text-muted" data-testid="connector-access">
+              {t(access.key)}
             </p>
           ) : null}
         </div>
@@ -516,7 +568,7 @@ function ConnectorCard({
             </span>
           ) : oauthConnected ? (
             <span className="max-w-[220px] text-right text-[11px] leading-snug text-text-muted" data-testid="oauth-connected">
-              Connected in this app{oauthStatus?.expiresAt ? ` · renews automatically` : ""}.
+              {oauthStatus?.expiresAt ? t("connectors.connectedHereRenews") : t("connectors.connectedHere")}
             </span>
           ) : null}
         </div>

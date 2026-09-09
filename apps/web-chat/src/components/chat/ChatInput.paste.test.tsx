@@ -1,9 +1,12 @@
-// FIX34 Part D — the composer's two new behaviours:
-//   * a long paste (≥ 5,000 chars, ChatGPT's threshold) becomes a .txt
-//     attachment with an Undo that puts the text back and drops the chip;
-//     a short paste is left to the browser (text lands in the box);
-//   * ↑ in an EMPTY composer asks the last user message to open its edit
-//     box; with text present the arrow is not intercepted.
+// FIX89 Part A — a long paste is TEXT: nothing is intercepted, nothing is
+// uploaded, nothing is converted, whatever its length. FIX34 turned a paste
+// of 5,000+ characters into a .txt attachment (ChatGPT's rule); the Claude
+// chat app the owner compared against keeps it in the composer, which grows
+// to about half the window and then scrolls inside itself. Pasting an IMAGE
+// is unchanged.
+//
+// FIX34 Part D — ↑ in an EMPTY composer asks the last user message to open
+// its edit box; with text present the arrow is not intercepted.
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +28,7 @@ vi.mock("@/hooks/useWhisperInput", () => ({
 }));
 
 import { useToastStore } from "@/components/ui/Toast";
-import { EDIT_MESSAGE_EVENT, PASTE_AS_FILE_THRESHOLD } from "@/lib/composerShortcuts";
+import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore } from "@/lib/i18n";
 import type { Message } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -72,30 +75,33 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("paste → file (FIX34 Part D)", () => {
-  it("a paste at the threshold becomes a .txt chip with an Undo that restores the text", async () => {
+describe("a long paste stays text (FIX89 Part A)", () => {
+  it("a 5,000-character paste is left to the browser: no upload, no chip, no toast, not prevented", async () => {
     const { ta } = mount();
-    const long = "x".repeat(PASTE_AS_FILE_THRESHOLD);
+    const long = "x".repeat(5_000);
     let ev!: Event;
     await act(async () => {
       ev = paste(ta, long);
     });
-    expect(ev.defaultPrevented).toBe(true);
-    await vi.waitFor(() => expect(mockApi.uploadFile).toHaveBeenCalledTimes(1));
-    const uploaded = mockApi.uploadFile.mock.calls[0][1] as File;
-    expect(uploaded.name).toMatch(/^pasted-text-\d{8}\.txt$/);
-    expect(uploaded.type).toBe("text/plain");
-    expect(useChatStore.getState().pendingFiles.c1?.length).toBe(1);
-    expect(ta.value).toBe("");
-    await vi.waitFor(() => expect(useToastStore.getState().action?.label).toBe("Undo"));
-    await act(async () => {
-      useToastStore.getState().action!.onClick();
-    });
+    // not intercepted → the browser puts the text in the box itself
+    expect(ev.defaultPrevented).toBe(false);
+    expect(mockApi.uploadFile).not.toHaveBeenCalled();
     expect(useChatStore.getState().pendingFiles.c1?.length ?? 0).toBe(0);
-    expect(ta.value).toBe(long);
+    expect(useToastStore.getState().message).toBeNull();
   });
 
-  it("a short paste is not intercepted", async () => {
+  it("50,000 characters are still just text", async () => {
+    const { ta } = mount();
+    let ev!: Event;
+    await act(async () => {
+      ev = paste(ta, "y".repeat(50_000));
+    });
+    expect(ev.defaultPrevented).toBe(false);
+    expect(mockApi.uploadFile).not.toHaveBeenCalled();
+    expect(useChatStore.getState().pendingFiles.c1?.length ?? 0).toBe(0);
+  });
+
+  it("a short paste is not intercepted either", async () => {
     const { ta } = mount();
     let ev!: Event;
     await act(async () => {
@@ -103,6 +109,25 @@ describe("paste → file (FIX34 Part D)", () => {
     });
     expect(ev.defaultPrevented).toBe(false);
     expect(mockApi.uploadFile).not.toHaveBeenCalled();
+  });
+
+  it("pasting an IMAGE still becomes an attachment", async () => {
+    const { ta } = mount();
+    const png = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    let ev!: Event;
+    await act(async () => {
+      ev = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(ev, "clipboardData", {
+        value: {
+          items: [{ kind: "file", type: "image/png", getAsFile: () => png }],
+          getData: () => "",
+        },
+      });
+      ta.dispatchEvent(ev);
+    });
+    expect(ev.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(mockApi.uploadFile).toHaveBeenCalledTimes(1));
+    expect((mockApi.uploadFile.mock.calls[0][1] as File).name).toBe("shot.png");
   });
 });
 

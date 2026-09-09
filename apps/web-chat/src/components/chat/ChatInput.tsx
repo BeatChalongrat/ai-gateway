@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { useComposerHeightProbe } from "@/hooks/useBottomInset";
+import { useDismissable } from "@/hooks/useDismissable";
 
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
@@ -41,9 +43,8 @@ import {
   EDIT_MESSAGE_EVENT,
   VOICE_TOGGLE_EVENT,
   lastEditableUserMessageId,
-  pastedTextFile,
+  maxTextareaHeight,
   shouldEditLastOnArrowUp,
-  shouldPasteAsFile,
 } from "@/lib/composerShortcuts";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useWhisperInput } from "@/hooks/useWhisperInput";
@@ -99,10 +100,6 @@ interface Props {
   onRequestConversation?: () => Promise<string | null>;
 }
 
-// 6 lines × ~24px on desktop; trimmed to 4 lines on phones so the
-// keyboard + bubble never crowd the viewport at the same time.
-const MAX_TEXTAREA_HEIGHT_DESKTOP = 180;
-const MAX_TEXTAREA_HEIGHT_MOBILE = 120;
 const MAX_CONCURRENT_UPLOADS = 3;
 const EMPTY_PENDING_FILES = [] as const;
 // Sentinel bucket key used to stage files BEFORE a conversation id
@@ -127,6 +124,7 @@ export function ChatInput({
 }: Props) {
   const t = useT();
   const hosted = useHostedMode();
+  const router = useRouter();
   const [text, setText] = useState("");
 
   // ── Composer draft persistence (Batch 1 W1 — desktop parity) ────
@@ -343,6 +341,14 @@ export function ChatInput({
   // FIX86 — the ONE producer of the vertical axis: whatever this box
   // measures, every bottom-floating element sits above it.
   const composerRootRef = useRef<HTMLDivElement>(null);
+  // FIX89 Part B — the "+" is a MENU on the desktop, where connectors exist:
+  // attach files, or open the connectors page (Claude reaches its connector
+  // directory from the composer the same way). In a plain browser there is no
+  // connectors page at all — `/chat/connectors` bounces back to `/chat`
+  // (useDesktopOnlyRoute) — so there the "+" stays what it was: one click,
+  // straight to the file picker.
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   useComposerHeightProbe(composerRootRef);
   // Explicit IME composition tracking (Phase 4, Thai IME). WebView2's native
   // KeyboardEvent.isComposing can be unreliable in an embedded control, so we
@@ -373,9 +379,48 @@ export function ChatInput({
     voiceInputMethod === "whisper" ||
     (voiceInputMethod === "web-speech" && !webSpeech.isSupported);
   const voiceSupported = useWhisperPath ? whisper.isSupported : webSpeech.isSupported;
-  const maxTextareaHeight = isMobile
-    ? MAX_TEXTAREA_HEIGHT_MOBILE
-    : MAX_TEXTAREA_HEIGHT_DESKTOP;
+  // FIX89 Part A — the cap is a relationship, not two magic numbers: about
+  // half of the window the composer is actually in, minus the composer's own
+  // chrome, floored at what the cap used to be so it can only grow. Measured
+  // here (not assumed) and re-measured whenever the window or the chrome
+  // changes; `visualViewport` is what shrinks when a soft keyboard opens.
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [chromeHeight, setChromeHeight] = useState(0);
+  const maxTextareaHeightPx = maxTextareaHeight(viewportHeight, chromeHeight, isMobile);
+  const closeAttachMenu = useCallback(() => setAttachMenuOpen(false), []);
+  useDismissable(attachMenuRef, attachMenuOpen, closeAttachMenu);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    const sync = () => setViewportHeight(vv?.height ?? window.innerHeight);
+    sync();
+    window.addEventListener("resize", sync);
+    vv?.addEventListener("resize", sync);
+    return () => {
+      window.removeEventListener("resize", sync);
+      vv?.removeEventListener("resize", sync);
+    };
+  }, []);
+
+  // The chrome around the text area (toolbar row, padding, chips): the box's
+  // height minus the text area's. A ResizeObserver keeps it live, so a second
+  // row of attachment chips takes its room out of the text area's share
+  // rather than pushing the box past half the window.
+  useEffect(() => {
+    const root = composerRootRef.current;
+    const ta = taRef.current;
+    if (!root || !ta || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const next = Math.max(0, Math.round(root.getBoundingClientRect().height - ta.getBoundingClientRect().height));
+      setChromeHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    ro.observe(ta);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -438,8 +483,8 @@ export function ChatInput({
     const ta = taRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, maxTextareaHeight)}px`;
-  }, [text, maxTextareaHeight]);
+    ta.style.height = `${Math.min(ta.scrollHeight, maxTextareaHeightPx)}px`;
+  }, [text, maxTextareaHeightPx]);
 
   useEffect(() => {
     if (!injectedText) return;
@@ -970,12 +1015,14 @@ export function ChatInput({
   // even before a conversation exists — handleFiles → ensureConvId
   // eager-creates one for the landing page.
   //
-  // FIX34 Part D — a LONG text paste (≥ PASTE_AS_FILE_THRESHOLD, ChatGPT's
-  // behaviour) becomes a .txt attachment instead of a wall of text in the
-  // box; the toast offers Undo, which removes the chip and puts the text
-  // back in the composer.
+  // FIX89 Part A — a long TEXT paste is left alone: it lands in the composer
+  // as text, the box grows to about half the window and then scrolls inside
+  // itself, and the sent message collapses under the Show more / Show less
+  // that MessageBubble already applies over 12 rendered lines. FIX34 turned a
+  // paste of 5,000+ characters into a .txt attachment (ChatGPT's rule); the
+  // Claude chat app, which is what the owner compared against, does not. There
+  // is nothing to undo because nothing happens to the text.
   const lastStagedRef = useRef<{ bucket: string; ids: string[] } | null>(null);
-  const pasteSeqRef = useRef(0);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const el = taRef.current;
@@ -994,24 +1041,8 @@ export function ChatInput({
       if (images.length > 0) {
         e.preventDefault();
         void handleFiles(images);
-        return;
       }
-      const pasted = e.clipboardData?.getData("text/plain") ?? "";
-      if (!shouldPasteAsFile(pasted, false)) return;
-      e.preventDefault();
-      const file = pastedTextFile(pasted, ++pasteSeqRef.current);
-      lastStagedRef.current = null;
-      void handleFiles([file]).then(() => {
-        const staged = lastStagedRef.current;
-        toast(tOutside("input.pasteAsFile", { n: String(pasted.length) }), {
-          label: tOutside("input.pasteAsFile.undo"),
-          onClick: () => {
-            if (staged) for (const id of staged.ids) removePendingFile(staged.bucket, id);
-            setText((current) => (current ? `${current}\n${pasted}` : pasted));
-            requestAnimationFrame(() => taRef.current?.focus());
-          },
-        });
-      });
+      // Text of any length: the browser's own paste, untouched.
     };
     el.addEventListener("paste", onPaste);
     return () => el.removeEventListener("paste", onPaste);
@@ -1202,7 +1233,7 @@ export function ChatInput({
               }}
               className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
               style={{
-                maxHeight: maxTextareaHeight,
+                maxHeight: maxTextareaHeightPx,
                 transition: "height 100ms ease-out",
               }}
             />
@@ -1224,23 +1255,63 @@ export function ChatInput({
                 conversation in props AND no provider callback). */}
             <div className="flex min-w-0 items-center gap-1.5">
               {conversationId || onRequestConversation ? (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  aria-label={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
-                  title={acceptsImages ? t("input.attach") : t("input.attachNoImages")}
-                  disabled={streaming || disabled}
-                  className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M12 5v14M5 12h14"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
+                <div className="relative" ref={attachMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => (hosted ? setAttachMenuOpen((v) => !v) : fileInputRef.current?.click())}
+                    aria-label={hosted ? t("input.attachMenu.aria") : acceptsImages ? t("input.attach") : t("input.attachNoImages")}
+                    title={hosted ? t("input.attachMenu.aria") : acceptsImages ? t("input.attach") : t("input.attachNoImages")}
+                    aria-haspopup={hosted ? "menu" : undefined}
+                    aria-expanded={hosted ? attachMenuOpen : undefined}
+                    disabled={streaming || disabled}
+                    data-testid="attach-button"
+                    className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M12 5v14M5 12h14"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                  {hosted && attachMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label={t("input.attachMenu.aria")}
+                      data-testid="attach-menu"
+                      className="popover-appear absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-lg"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="attach-menu-files"
+                        className="block w-full px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                        onClick={() => {
+                          setAttachMenuOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <span className="block font-medium">{t("input.attachMenu.files")}</span>
+                        <span className="block text-xs text-text-muted">{t("input.attachMenu.filesHint")}</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-testid="attach-menu-connectors"
+                        className="block w-full border-t border-border px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                        onClick={() => {
+                          setAttachMenuOpen(false);
+                          router.push("/chat/connectors");
+                        }}
+                      >
+                        <span className="block font-medium">{t("input.attachMenu.connectors")}</span>
+                        <span className="block text-xs text-text-muted">{t("input.attachMenu.connectorsHint")}</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {/* FIX25/25b — desktop only: the granted folders and the permission
                   mode (both render nothing in a plain browser). Control-plane
