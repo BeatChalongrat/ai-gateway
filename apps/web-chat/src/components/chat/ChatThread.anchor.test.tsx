@@ -10,7 +10,7 @@
 // path and the P2-collapse interplay are exercised in the real-browser
 // harness + manual QA; here the "long message" case uses a tall row.)
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The bubble's internals (markdown, voice, router) are irrelevant to
@@ -23,6 +23,7 @@ vi.mock("./MessageBubble", () => ({
 
 import type { Message } from "@/lib/types";
 import { useI18nStore } from "@/lib/i18n";
+import { useChatStore } from "@/stores/chatStore";
 import { dictionaries } from "@/lib/i18n/dict";
 import { ANCHOR_PREVIOUS_PEEK_PX } from "@/lib/turnAnchor";
 
@@ -60,6 +61,7 @@ const origGBCR = HTMLElement.prototype.getBoundingClientRect;
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
   heights = {};
+  useChatStore.setState({ turnScrollRequests: {} });
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
     cb(0);
     return 0;
@@ -67,7 +69,7 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", () => {});
   Object.defineProperty(HTMLElement.prototype, "scrollTop", {
     configurable: true,
-    get() { return scrollTops.get(this) ?? 0; },
+    get() { return Math.max(0, Math.min(scrollTops.get(this) ?? 0, this.scrollHeight - VIEW_H)); },
     set(v: number) { scrollTops.set(this, v); },
   });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", {
@@ -79,7 +81,7 @@ beforeEach(() => {
     get() {
       if (!isScroller(this)) return 0;
       const rows = this.querySelectorAll("[data-msg-index]").length;
-      return topOf(rows) + spacerOf(this as HTMLElement);
+      return Math.max(VIEW_H, topOf(rows) + spacerOf(this as HTMLElement));
     },
   });
   HTMLElement.prototype.getBoundingClientRect = function () {
@@ -89,6 +91,10 @@ beforeEach(() => {
       const i = Number(idxAttr);
       const sc = this.closest(".overflow-y-auto") as HTMLElement | null;
       return fakeRect(topOf(i) - (sc ? sc.scrollTop : 0), H(i));
+    }
+    const parent = this.parentElement;
+    if (parent && isScroller(parent) && parent.firstElementChild === this) {
+      return fakeRect(-parent.scrollTop, topOf(parent.querySelectorAll("[data-msg-index]").length));
     }
     return fakeRect(0, 0);
   };
@@ -130,10 +136,23 @@ function mount(initial: Message[], convId = "c1") {
   const scroller = view.container.querySelector(
     ".overflow-y-auto",
   ) as HTMLElement;
+  let previous = initial;
+  let previousConv = convId;
   return {
     scroller,
-    rerender: (m: Message[], id = convId) =>
-      view.rerender(<ChatThread {...props} convId={id} messages={m} />),
+    rerender: (m: Message[], id = convId) => act(() => {
+      const user = [...m].reverse().find((row) => row.role === "user");
+      const oldUser = [...previous].reverse().find((row) => row.role === "user");
+      if (id === previousConv && user && user.id !== oldUser?.id) {
+        const reply = m[m.length - 1];
+        useChatStore.setState({ turnScrollRequests: { [id]: {
+          id: reply.id, kind: "send", userKey: user.client_key ?? user.id, replyKey: reply.client_key ?? reply.id,
+        } } });
+      }
+      previous = m;
+      previousConv = id;
+      view.rerender(<ChatThread {...props} convId={id} messages={m} />);
+    }),
   };
 }
 
@@ -194,7 +213,7 @@ describe("send-time turn anchoring", () => {
 
     heights[9] = 400; // next delta after handover → stick-to-bottom again
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "even longer", true)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
   });
 
   it("spacer is zero when content below the anchor already exceeds the viewport", () => {
@@ -202,7 +221,8 @@ describe("send-time turn anchoring", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent({ userContent: "very\nlong\nmessage" }));
 
-    expect(scroller.scrollTop).toBe(800 - ANCHOR_PREVIOUS_PEEK_PX);
+    // The synchronous animation has finished; an already-full turn hands over.
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
     expect(spacerOf(scroller)).toBe(0);
   });
 
@@ -219,13 +239,10 @@ describe("send-time turn anchoring", () => {
   });
 
   // ── Decision: what happens to the spacer when the turn ends ──
-  // It SHRINKS to exactly what still holds the anchored position, and no
-  // further. Removing it outright would clamp scrollTop and yank the thread
-  // upward the instant a short answer landed — the one thing the anchor
-  // exists to prevent. It reaches 0 on its own whenever the reply is long
-  // enough to fill the room below the anchor.
+  // FIX91 deliberately reverses the retained-spacer policy: completion
+  // repays the reservation, and the short reply settling downward is intended.
 
-  it("a short answer keeps only the spacer that holds the view in place", () => {
+  it("a short answer releases all reserved space and settles at the real bottom", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());
 
@@ -235,13 +252,13 @@ describe("send-time turn anchoring", () => {
 
     // The reply finishes short — one line, nowhere near filling the viewport.
     heights[9] = 40;
-    rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "done", false)]);
 
     // content = 8 seeded rows + the sent message + a 40px reply = 940;
-    // holding scrollTop 736 in a 300px viewport needs exactly 96px.
-    expect(scroller.scrollTop).toBe(anchored); // not yanked
-    expect(spacerOf(scroller)).toBe(96);
-    expect(spacerOf(scroller)).toBeLessThan(164); // smaller than mid-stream
+    expect(scroller.scrollTop).toBe(640);
+    expect(spacerOf(scroller)).toBe(0);
+    expect(screen.queryByRole("button", { name: dictionaries.en["thread.scrollToLatest"] })).toBeNull();
+    expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
   });
 
   // ── Rule 3: opening or switching a conversation lands at the bottom ──
@@ -256,11 +273,11 @@ describe("send-time turn anchoring", () => {
 
     // ...switches to c2, then back to c1. Both must land at the newest turn.
     rerender(seed(8), "c2");
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
 
     rerender(seed(8), "c1");
     expect(scroller.scrollTop).toBe(
-      scroller.scrollHeight,
+      scroller.scrollHeight - VIEW_H,
       );
   });
 
@@ -276,13 +293,40 @@ describe("send-time turn anchoring", () => {
     // follows immediately instead of raising "new messages".
     heights[8] = 100;
     rerender([...seed(8), msg("a1", "assistant", "hi", true)], "c2");
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
   });
 
   it("does not anchor or move on a fresh conversation open", () => {
     const { scroller } = mount(seed(8));
     // default open behaviour: bottom-anchored, no spacer
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
+    expect(spacerOf(scroller)).toBe(0);
+  });
+
+  it("opening an existing two-row streaming turn creates no send reservation", () => {
+    heights[1] = 40;
+    const { scroller } = mount([msg("user", "user"), msg("reply", "assistant", "partial", true)]);
+    expect(scroller.scrollTop).toBe(0);
+    expect(spacerOf(scroller)).toBe(0);
+  });
+
+  it("prepending older history preserves the visible row without calling it new content", () => {
+    const { scroller, rerender } = mount(seed(8));
+    scroller.scrollTop = 200;
+    fireEvent.scroll(scroller);
+    rerender([msg("older-u", "user"), msg("older-a", "assistant"), ...seed(8)]);
+    expect(scroller.scrollTop).toBe(400);
+    expect(spacerOf(scroller)).toBe(0);
+    expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
+    expect(screen.getByRole("button", { name: dictionaries.en["thread.scrollToLatest"] })).toBeTruthy();
+  });
+
+  it("a tool wait without a terminal status retains the live reservation", () => {
+    const { scroller, rerender } = mount(seed(8));
+    rerender(sent());
+    rerender([...sent().slice(0, 9), { ...msg("a-new", "assistant", "", false), status: "waiting_user" }]);
+    expect(spacerOf(scroller)).toBe(36);
+    rerender([...sent().slice(0, 9), msg("a-new", "assistant", "", false)]);
     expect(spacerOf(scroller)).toBe(0);
   });
 });
@@ -328,9 +372,7 @@ describe("FIX47.5 — the anchor jump's own scroll events are not the user's", (
     });
   });
 
-  /** The thread as a browser has it before a send: parked at the real
-   *  bottom (scrollTop = content − viewport; the fake geometry does not
-   *  clamp, so the mount's bottom-snap leaves scrollTop = scrollHeight). */
+  /** The thread before a send, parked at the real bottom. */
   function parkedAtBottom() {
     const view = mount(seed(8));
     scrollerEl = view.scroller;
@@ -365,7 +407,7 @@ describe("FIX47.5 — the anchor jump's own scroll events are not the user's", (
     expect(spacerOf(scroller)).toBe(0);
     heights[9] = 400;
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "even longer", true)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
     expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
   });
 
@@ -396,6 +438,30 @@ describe("FIX47.5 — the anchor jump's own scroll events are not the user's", (
     flushFrames();
     expect(scroller.scrollTop).toBe(800 - ANCHOR_PREVIOUS_PEEK_PX);
   });
+
+  it("two sends before queued frames run leave only the newest reservation", () => {
+    const { scroller, rerender } = parkedAtBottom();
+    rerender(sent());
+    const second = [...sent(), msg("u-second", "user"), msg("a-second", "assistant", "", true)];
+    rerender(second);
+    act(() => flushFrames());
+    expect(scroller.scrollTop).toBe(1000 - ANCHOR_PREVIOUS_PEEK_PX);
+    expect(spacerOf(scroller)).toBe(36);
+    rerender([...second.slice(0, -1), msg("a-second", "assistant", "done", false)]);
+    act(() => flushFrames());
+    expect(spacerOf(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(900);
+  });
+
+  it("switching away and back invalidates unfinished anchor callbacks", () => {
+    const { scroller, rerender } = parkedAtBottom();
+    rerender(sent());
+    rerender(seed(4), "c2");
+    rerender(sent(), "c1");
+    act(() => flushFrames());
+    expect(spacerOf(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(700);
+  });
 });
 
 describe("FIX47.5 — scrolling up mid-stream stops the follow at once", () => {
@@ -406,9 +472,8 @@ describe("FIX47.5 — scrolling up mid-stream stops the follow at once", () => {
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a", true)]);
     heights[9] = 400; // following
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "ab", true)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
-    // the browser clamps a bottom-snap to content − viewport; the fake
-    // geometry does not, so park the view where a browser would
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
+    // Dispatch the scroll event from the bottom-snap.
     scroller.scrollTop = scroller.scrollHeight - VIEW_H;
     fireEvent.scroll(scroller);
     return { scroller, rerender };
@@ -434,16 +499,16 @@ describe("FIX47.5 — scrolling up mid-stream stops the follow at once", () => {
 
     heights[9] = 500;
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "abc", true)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
     expect(screen.queryByText(dictionaries.en["thread.newMessages"])).toBeNull();
   });
 
-  it("a finished short answer's blank room shrinks as the person scrolls off it", () => {
+  it("a finished short answer has no reservation left for a reader to scroll into", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());
     heights[9] = 40;
     rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
-    expect(spacerOf(scroller)).toBe(96); // holds the anchored view
+    expect(spacerOf(scroller)).toBe(0);
 
     scroller.scrollTop = 600; // reads something above
     fireEvent.scroll(scroller);
@@ -471,7 +536,7 @@ describe("FIX47.5 — what must not break", () => {
   });
 });
 
-describe("FIX47.5 — the held position survives the reply's final re-layout", () => {
+describe("FIX91 — a completed reservation cannot return after re-layout", () => {
   let fire: (() => void) | null = null;
   beforeEach(() => {
     fire = null;
@@ -482,22 +547,20 @@ describe("FIX47.5 — the held position survives the reply's final re-layout", (
     });
   });
 
-  it("a finished short answer settling shorter keeps the question where it was", () => {
+  it("a completed short answer follows a later shrink without recreating its reservation", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());
     const anchored = scroller.scrollTop; // 736
     heights[9] = 60;
     rerender([...sent().slice(0, 9), msg("a1", "assistant", "done", false)]);
-    expect(spacerOf(scroller)).toBe(76); // 736 + 300 − 960
+    expect(spacerOf(scroller)).toBe(0);
 
     // the row re-lays out 20px shorter WITHOUT a render (actions bar,
     // cursor line): the browser clamps scrollTop to the new maximum…
     heights[9] = 40;
-    scroller.scrollTop = 940 - 300 + 76 - 20; // = 696, what a browser would clamp to
     fire!();
-    // …and the observer gives the room back and restores the position
-    expect(spacerOf(scroller)).toBe(96);
-    expect(scroller.scrollTop).toBe(anchored);
+    expect(spacerOf(scroller)).toBe(0);
+    expect(scroller.scrollTop).toBe(640);
   });
 
   it("once the person has scrolled, a resize changes nothing", () => {
@@ -544,9 +607,9 @@ describe("FIX88 — the reply follows to the end", () => {
     heights[9] = 700;
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a b c d e f", true)]);
     expect(spacerOf(scroller)).toBe(0);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight); // the OLD code left it at 736
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H); // the OLD code left it at 736
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "a b c d e f", false)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
   });
 
   it("growth that never came as a delta (a resize while holding) hands over by the same rule", () => {
@@ -559,7 +622,7 @@ describe("FIX88 — the reply follows to the end", () => {
     heights[9] = 400; // the row re-lays out taller with NO render (late measurement, highlighting, an image)
     fire!();
     expect(spacerOf(scroller)).toBe(0);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
   });
 
   it("while following a live reply, a resize keeps the bottom; a short resize while holding still only re-sizes the spacer", () => {
@@ -567,16 +630,17 @@ describe("FIX88 — the reply follows to the end", () => {
     rerender(sent());
     heights[9] = 400; // past the fold: handover + bottom
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "long", true)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
-    // a browser holds scrollTop at scrollHeight − viewport; the fake model
-    // does not clamp, so put it where a browser would have it
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
+    // Start the resize with the viewport at the natural bottom.
     scroller.scrollTop = scroller.scrollHeight - VIEW_H;
     heights[9] = 520; // grows without a delta
     fire!();
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
 
     // and the hold case that must NOT move: still short after the resize
+    cleanup();
     const second = mount(seed(8));
+    heights[9] = 100;
     second.rerender(sent());
     const anchored = second.scroller.scrollTop;
     heights[9] = 100;
@@ -587,7 +651,7 @@ describe("FIX88 — the reply follows to the end", () => {
     expect(spacerOf(second.scroller)).toBe(736 + 300 - 1030);
   });
 
-  it("the stream ending on a row that grew past the fold without a delta (meta/actions lines) hands over; a short one keeps its spacer", () => {
+  it("completion follows final layout without a delta and releases both long and short reservations", () => {
     const { scroller, rerender } = mount(seed(8));
     rerender(sent());
     const anchored = scroller.scrollTop;
@@ -596,15 +660,16 @@ describe("FIX88 — the reply follows to the end", () => {
     expect(scroller.scrollTop).toBe(anchored);
     heights[9] = 420; // the finished row's meta + actions lines: no content change
     rerender([...sent().slice(0, 9), msg("a-new", "assistant", "same text", false)]);
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
 
+    cleanup();
+    heights[9] = 100;
     const short = mount(seed(8));
     short.rerender(sent());
-    const a2 = short.scroller.scrollTop;
     heights[9] = 60;
     short.rerender([...sent().slice(0, 9), msg("a-new", "assistant", "done", false)]);
-    expect(short.scroller.scrollTop).toBe(a2);
-    expect(spacerOf(short.scroller)).toBe(76);
+    expect(short.scroller.scrollTop).toBe(660);
+    expect(spacerOf(short.scroller)).toBe(0);
   });
 
   it("the reader always wins: scrolled up during the stream, neither a delta nor a resize moves them", () => {

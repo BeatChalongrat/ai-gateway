@@ -17,6 +17,14 @@
  *  e.g. to ~1/3 of the viewport height — nothing else needs touching. */
 export const ANCHOR_PREVIOUS_PEEK_PX = 64;
 
+/** A local action, consumed once by the thread; loading history is not a send. */
+export interface TurnScrollRequest {
+  id: string;
+  kind: "send" | "regenerate";
+  userKey: string;
+  replyKey: string;
+}
+
 /**
  * Scroll offset that puts the sent message's top `peek` pixels below the
  * viewport top. The peek is a MAXIMUM: when the previous message is
@@ -36,7 +44,9 @@ export function anchorTarget(
  * Height of the bottom spacer that makes `target` reachable: the part of
  * the viewport below the existing content when scrolled to `target`.
  * Recomputed as the reply streams in, so it shrinks to zero on its own
- * once real content fills the room. Never negative, never cumulative —
+ * once real content fills the room. Only valid during a live hold;
+ * terminal completion releases it even if the reply never fills the room.
+ * Never negative, never cumulative —
  * always derived fresh from the current geometry.
  */
 export function spacerNeeded(
@@ -58,5 +68,5 @@ export function shouldResumeFollow(
   scrollTop: number,
   viewportHeight: number,
 ): boolean {
-  return contentHeight >= scrollTop + viewportHeight - 0.5;
+  return contentHeight >= scrollTop + viewportHeight - 1;
 }

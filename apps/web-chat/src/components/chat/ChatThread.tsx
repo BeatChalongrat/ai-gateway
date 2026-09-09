@@ -10,7 +10,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
@@ -43,8 +43,7 @@ interface Props {
   onLoadEarlier?: () => Promise<void> | void;
 }
 
-const NEAR_BOTTOM_PX = 100;
-const SHOW_SCROLL_BUTTON_PX = 200;
+const SCROLL_TOLERANCE_PX = 1;
 const VIRTUALIZE_THRESHOLD = 50;
 /** Frames the anchor jump takes (≈250 ms at 60 Hz). */
 const ANCHOR_SCROLL_FRAMES = 15;
@@ -93,7 +92,6 @@ export function ChatThread({
     followRef.current = v;
     setAutoStick(v);
   };
-  const streamingRef = useRef(false);
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [pendingNew, setPendingNew] = useState(false);
   const lastLen = useRef(0);
@@ -125,15 +123,8 @@ export function ChatThread({
    *  is somewhere on the way there, and sizing the spacer from it made
    *  the target unreachable. */
   const anchorTop = useRef(0);
-  /** The position the thread is HOLDING for the reader: the anchor target
-   *  from the send until either the follow takes over or the person
-   *  scrolls — including after a short turn has ended. While set, a
-   *  content resize re-sizes the spacer for it and puts the view back if
-   *  the scroller clamped (the reply's final layout settles a few px
-   *  shorter than its streaming layout; without this the finished turn
-   *  hopped up by that much). */
+  /** A live turn's temporary reservation. Terminal states always release it. */
   const holdTop = useRef<number | null>(null);
-  const lastUserMsgKey = useRef<string | null>(null);
   const spacerRef = useRef<HTMLDivElement>(null);
   /** The programmatic scroll animation in flight: its rAF handle (for
    *  cancelling) and whether it is still running. */
@@ -144,9 +135,53 @@ export function ChatThread({
    *  our own scrolls is in flight is ours unless this says otherwise. */
   const userIntent = useRef(false);
   const lastScrollTop = useRef(0);
+  const turnEpoch = useRef(0);
+  const scrollEpoch = useRef(0);
+  const anchorUserKey = useRef<string | null>(null);
+  const anchorReplyKey = useRef<string | null>(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const readingLandmark = useRef<{ key: string; offset: number } | null>(null);
+  const intentEpoch = useRef(0);
+  const lastTailKey = useRef<string | null>(null);
+  const scrollRequest = useChatStore((s) => s.turnScrollRequests[convId]);
 
-  const spacerPx = () =>
-    spacerRef.current ? parseFloat(spacerRef.current.style.height) || 0 : 0;
+  function geometry(el: HTMLElement) {
+    const column = el.firstElementChild as HTMLElement | null;
+    const contentEnd = column
+      ? column.getBoundingClientRect().bottom - el.getBoundingClientRect().top - el.clientTop + el.scrollTop
+      : 0;
+    const contentH = contentEnd + (parseFloat(getComputedStyle(el).paddingBottom) || 0);
+    return { contentEnd, contentH, bottom: Math.max(0, contentH - el.clientHeight) };
+  }
+
+  function refreshAffordance(el: HTMLElement, newContent = false) {
+    const below = geometry(el).contentEnd > el.scrollTop + el.clientHeight + SCROLL_TOLERANCE_PX;
+    setFarFromBottom(below);
+    setPendingNew((pending) => below && !followRef.current && !anchorActive.current && (pending || newContent));
+    if (!below) setConsentPill(false);
+  }
+
+  function rememberReader(el: HTMLElement) {
+    const edge = el.getBoundingClientRect().top + el.clientTop;
+    const row = Array.from(el.querySelectorAll<HTMLElement>("[data-msg-index]")).find(
+      (item) => item.getBoundingClientRect().bottom > edge + 1,
+    );
+    const message = row ? messagesRef.current[Number(row.dataset.msgIndex)] : null;
+    readingLandmark.current = row && message
+      ? { key: rowKey(message), offset: row.getBoundingClientRect().top - edge }
+      : null;
+  }
+
+  function releaseHold() {
+    turnEpoch.current += 1;
+    anchorActive.current = false;
+    holdTop.current = null;
+    anchorUserKey.current = null;
+    anchorReplyKey.current = null;
+    setSpacerPx(0);
+  }
+
   const setSpacerPx = (px: number) => {
     // Imperative on purpose: sizing the spacer must land in the same
     // layout pass as the scrollTop write, and a React state round-trip
@@ -164,11 +199,9 @@ export function ChatThread({
    *  sat below the fold (435–535 px in the probe) with no pill, since a
    *  pill is for a reader who scrolled away and nobody had. */
   function handOver(el: HTMLElement) {
-    anchorActive.current = false;
-    holdTop.current = null;
-    setSpacerPx(0);
+    releaseHold();
     setFollow(true);
-    snapTo(el, el.scrollHeight);
+    snapTo(el, geometry(el).bottom);
   }
 
   /** Content offset of a row's top (getBoundingClientRect so the
@@ -184,17 +217,16 @@ export function ChatThread({
    *  In a virtualized thread the appended row may not be realized yet
    *  (user was scrolled far up) — jump to the tail first so the
    *  virtualizer renders it, then retry for a few frames. */
-  function applyAnchor(userIdx: number, tolerance = 0, retries = 5) {
+  function applyAnchor(userIdx: number, tolerance = 0, retries = 5, epoch = turnEpoch.current) {
     const el = scrollerRef.current;
-    if (!el) return false;
+    if (!el || epoch !== turnEpoch.current || !anchorActive.current) return false;
     const row = el.querySelector<HTMLElement>(`[data-msg-index="${userIdx}"]`);
     if (!row) {
       if (retries <= 0) return false;
-      autoScrolling.current = true;
-      el.scrollTop = el.scrollHeight;
+      snapTo(el, el.scrollHeight);
       requestAnimationFrame(() => {
-        autoScrolling.current = false;
-        if (anchorActive.current) applyAnchor(userIdx, 8, retries - 1);
+        if (epoch !== turnEpoch.current) return;
+        if (anchorActive.current) applyAnchor(userIdx, 8, retries - 1, epoch);
       });
       return true;
     }
@@ -210,13 +242,14 @@ export function ChatThread({
     // in the frame after the send, so the viewport measured on the first
     // pass is a line or two short and the target sits just out of reach
     // until this re-pass sizes the room for the real viewport.
-    const contentH = el.scrollHeight - spacerPx();
+    const contentH = geometry(el).contentH;
     setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
     // Already there, or a jump is already on its way there (the
     // late-measure re-pass lands mid-jump) → no new animation.
     const heading = animating.current ? anchorTop.current : el.scrollTop;
     anchorTop.current = target;
     holdTop.current = target;
+    refreshAffordance(el);
     if (Math.abs(heading - target) <= tolerance) return true;
     // The anchor jump ANIMATES: it is a deliberate move the user asked for
     // by sending, and a hard cut loses the sense that the thread scrolled.
@@ -237,6 +270,7 @@ export function ChatThread({
    *  it had just set up — measured on every send, web and desktop.) */
   function animateScroll(el: HTMLElement, top: number) {
     cancelScrollAnimation();
+    const epoch = scrollEpoch.current;
     const reduced =
       typeof window.matchMedia === "function" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -249,11 +283,13 @@ export function ChatThread({
     animating.current = true;
     let frame = 0;
     const step = () => {
+      if (epoch !== scrollEpoch.current) return;
       frame += 1;
       const p = Math.min(1, frame / ANCHOR_SCROLL_FRAMES);
       const eased = 1 - Math.pow(1 - p, 3);
       el.scrollTop = from + (top - from) * eased;
       lastScrollTop.current = el.scrollTop;
+      refreshAffordance(el);
       if (p < 1) {
         scrollAnim.current = requestAnimationFrame(step);
         return;
@@ -261,14 +297,17 @@ export function ChatThread({
       // One more frame so the last write's scroll event is dispatched
       // (and ignored) before the flag drops.
       scrollAnim.current = requestAnimationFrame(() => {
+        if (epoch !== scrollEpoch.current) return;
         animating.current = false;
         autoScrolling.current = false;
+        reconcileRef.current();
       });
     };
     scrollAnim.current = requestAnimationFrame(step);
   }
 
   function cancelScrollAnimation() {
+    scrollEpoch.current += 1;
     if (scrollAnim.current !== null) {
       cancelAnimationFrame(scrollAnim.current);
       scrollAnim.current = null;
@@ -284,182 +323,153 @@ export function ChatThread({
     autoScrolling.current = true;
     el.scrollTop = top;
     lastScrollTop.current = el.scrollTop;
+    refreshAffordance(el);
+    const epoch = scrollEpoch.current;
     requestAnimationFrame(() => {
-      autoScrolling.current = false;
+      if (epoch === scrollEpoch.current) autoScrolling.current = false;
     });
   }
 
-  // Opening or switching to a conversation ALWAYS lands at the bottom —
-  // the newest turn, the way Claude/ChatGPT/Gemini behave. This replaced a
-  // per-conversation scroll memory that restored the previous reading
-  // position: switching away and back dropped you mid-thread with no sign
-  // that newer messages existed below. "Continue the conversation" is the
-  // intent behind opening one; a stale offset is never what you meant.
+  // Conversation and generation boundaries invalidate every queued anchor pass.
   useLayoutEffect(() => {
-    // P3 — a turn anchor never crosses conversations.
-    anchorActive.current = false;
-    holdTop.current = null;
-    lastUserMsgKey.current = null;
+    releaseHold();
     cancelScrollAnimation();
-    if (spacerRef.current) spacerRef.current.style.height = "0px";
-    // Follow state must reset too: carrying autoStick=false over from a
-    // conversation the user had scrolled up in left the new one parked
-    // wherever it happened to render, with only a pill for company.
     setFollow(true);
     setPendingNew(false);
     setFarFromBottom(false);
-    const scroller = scrollerRef.current;
-    if (scroller) {
-      autoScrolling.current = true;
-      scroller.scrollTop = scroller.scrollHeight;
-    }
-    // Force the message effect below to treat this as a fresh render so
-    // the bottom-anchoring actually fires once the list has rendered.
+    setConsentPill(false);
+    readingLandmark.current = null;
+    lastConsentId.current = null;
     lastLen.current = -1;
     lastLastContent.current = "\u0000";
+    const el = scrollerRef.current;
+    if (el) snapTo(el, geometry(el).bottom);
+    return () => {
+      turnEpoch.current += 1;
+      cancelScrollAnimation();
+    };
   }, [convId]);
 
-  // Track the top message id + scroll offset BEFORE every render so
-  // a prepend (older-page load) can restore the user's viewport.
-  const prevFirstId = useRef<string | null>(null);
-  const preservedTopHeight = useRef<number | null>(null);
+  function reconcile(newContent = false) {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const currentMessages = messagesRef.current;
+    if (anchorActive.current) {
+      const reply = currentMessages.find((m) => rowKey(m) === anchorReplyKey.current);
+      const live = reply && (reply.isStreaming || reply.status === "waiting_user" ||
+        reply.pending_consent || reply.pending_question);
+      // FIX91: terminal completion repays the entire reservation, including
+      // short replies. A transport pause for a question is still a live turn.
+      if (!live) {
+        handOver(el);
+        return;
+      }
+      const idx = currentMessages.findIndex((m) => rowKey(m) === anchorUserKey.current);
+      const row = el.querySelector<HTMLElement>(`[data-msg-index="${idx}"]`);
+      if (row) {
+        const previous = el.querySelector<HTMLElement>(`[data-msg-index="${idx - 1}"]`);
+        const target = anchorTarget(rowTopOf(row, el), previous ? rowTopOf(previous, el) : null, ANCHOR_PREVIOUS_PEEK_PX);
+        if (Math.abs(target - anchorTop.current) > 1 && animating.current) animateScroll(el, target);
+        anchorTop.current = target;
+        holdTop.current = target;
+        const contentH = geometry(el).contentH;
+        setSpacerPx(spacerNeeded(target, el.clientHeight, contentH));
+        if (!animating.current) {
+          if (shouldResumeFollow(contentH, target, el.clientHeight)) {
+            handOver(el);
+            return;
+          }
+          if (Math.abs(el.scrollTop - target) > 1) snapTo(el, target);
+        }
+      }
+    } else if (followRef.current) {
+      setSpacerPx(0);
+      const bottom = geometry(el).bottom;
+      if (!animating.current && Math.abs(el.scrollTop - bottom) > 1) snapTo(el, bottom);
+    } else {
+      const landmark = readingLandmark.current;
+      if (landmark) {
+        const idx = currentMessages.findIndex((m) => rowKey(m) === landmark.key);
+        const row = el.querySelector<HTMLElement>(`[data-msg-index="${idx}"]`);
+        if (idx >= 0 && !row) {
+          // The virtualizer has not committed this row yet; do not replace
+          // the saved reader with whichever estimated rows arrive first.
+          refreshAffordance(el, newContent);
+          return;
+        }
+        if (row) {
+          const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientTop;
+          if (Math.abs(offset - landmark.offset) > 1) {
+            snapTo(el, Math.max(0, Math.min(geometry(el).bottom, el.scrollTop + offset - landmark.offset)));
+          }
+        }
+      }
+      rememberReader(el);
+    }
+    refreshAffordance(el, newContent);
+  }
 
-  // useLayoutEffect runs synchronously after DOM mutations but
-  // BEFORE the browser paints — that's the only place where a
-  // scrollTop adjustment will be invisible to the user.
+  const reconcileRef = useRef<() => void>(() => {});
+  reconcileRef.current = () => reconcile();
+
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const newFirstId = messages[0]?.id ?? null;
-    const isPrepend =
-      preservedTopHeight.current != null &&
-      newFirstId !== null &&
-      newFirstId !== prevFirstId.current;
-    if (isPrepend) {
-      const delta = el.scrollHeight - preservedTopHeight.current!;
-      el.scrollTop = el.scrollTop + delta;
-    }
-    prevFirstId.current = newFirstId;
-    preservedTopHeight.current = null;
-  });
-
-  // Auto-scroll to bottom when:
-  //   - a new message arrives (length changed)
-  //   - the last message's content grew (streaming)
-  // …unless the user has scrolled up (autoStick=false), in which
-  // case we mark `pendingNew` so a "↓ New messages" pill appears.
-  useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
     const last = messages[messages.length - 1];
-    const prevLen = lastLen.current;
-    const lengthGrew = messages.length !== prevLen;
-    const contentGrew = last?.content !== lastLastContent.current;
     const structure = structureKeyOf(last);
-    const structureGrew = structure !== lastStructure.current;
-    if (!lengthGrew && !contentGrew && !structureGrew) return;
+    const tailKey = last ? rowKey(last) : null;
+    const newContent = (messages.length > lastLen.current && tailKey !== lastTailKey.current) || last?.content !== lastLastContent.current ||
+      structure !== lastStructure.current;
+    lastTailKey.current = tailKey;
     lastLen.current = messages.length;
     lastLastContent.current = last?.content ?? "";
     lastStructure.current = structure;
 
-    // P3 — detect the user's OWN send: the last user message carries a
-    // new key AND the list grew during this conversation's lifetime.
-    // A remote/incoming message never satisfies this (no new local user
-    // row), a load-earlier prepend keeps the last user key, the stream's
-    // temp→persisted id swap keeps it too (rowKey), and the special
-    // second arm covers the very first turn of a just-created
-    // conversation, where the thread mounts already mid-stream with
-    // nothing to restore.
-    const userIdx = lastUserIndex(messages);
-    const userMsg = userIdx >= 0 ? messages[userIdx] : null;
-    const seenUserKey = lastUserMsgKey.current;
-    lastUserMsgKey.current = userMsg ? rowKey(userMsg) : null;
-    const isOwnSend =
-      userMsg !== null &&
-      rowKey(userMsg) !== seenUserKey &&
-      ((lengthGrew && prevLen > 0) ||
-        // Second arm: the very first turn of a just-created conversation,
-        // where the thread mounts already mid-stream. Bounded to that one
-        // case (the user message plus its streaming reply) so switching
-        // INTO an existing conversation that happens to be streaming still
-        // lands at the bottom, per rule 3.
-        (prevLen === -1 && Boolean(last?.isStreaming) && messages.length <= 2));
-
-    // P3 — anchor the user's own turn near the top, unconditionally:
-    // it fires pinned-to-bottom, scrolled-up, or position-restored
-    // alike (deliberately overriding "the reading position wins" for
-    // one's own send only).
-    if (isOwnSend) {
-      anchorActive.current = true;
-      if (applyAnchor(userIdx)) {
-        setFollow(false); // follow is suspended while the hold lasts
-        setPendingNew(false); // one's own send never raises the pill
-        // Late-measure re-pass: virtualized rows start at the 200px
-        // estimate; re-derive the target next frame once real
-        // measurements land so the anchor sits where it should.
-        requestAnimationFrame(() => {
-          if (anchorActive.current) applyAnchor(userIdx, 8);
-        });
-        return;
+    if (scrollRequest) {
+      const idx = messages.findIndex((m) => rowKey(m) === scrollRequest.userKey);
+      if (scrollRequest.kind === "regenerate" || idx >= 0) {
+        useChatStore.setState((state) => state.turnScrollRequests[convId]?.id === scrollRequest.id
+          ? { turnScrollRequests: { ...state.turnScrollRequests, [convId]: undefined } }
+          : state);
+        const wasFollowing = followRef.current || anchorActive.current;
+        releaseHold();
+        cancelScrollAnimation();
+        if (scrollRequest.kind === "send") {
+          anchorActive.current = true;
+          anchorUserKey.current = scrollRequest.userKey;
+          anchorReplyKey.current = scrollRequest.replyKey;
+          readingLandmark.current = null;
+          setFollow(false);
+          setPendingNew(false);
+          setFarFromBottom(false);
+          if (applyAnchor(idx)) {
+            const epoch = turnEpoch.current;
+            requestAnimationFrame(() => {
+              if (epoch === turnEpoch.current && anchorActive.current) {
+                const currentIdx = messagesRef.current.findIndex((m) => rowKey(m) === anchorUserKey.current);
+                applyAnchor(currentIdx, 8, 5, epoch);
+                reconcileRef.current();
+              }
+            });
+          }
+        } else {
+          setFollow(wasFollowing);
+        }
       }
-      anchorActive.current = false; // row unreachable — old behaviour
-      holdTop.current = null;
     }
 
-    // FIX30 §1: a consent card is the one thing in a turn the USER must act
-    // on, so it must never sit where the user cannot see it. Following, or
-    // still holding the send anchor → drop the hold and bring it into view
-    // (the card sits at the tail of the streaming row). Scrolled up on
-    // purpose → the user always wins: raise the "Permission needed" pill
-    // instead; the waiting notice above the composer offers "Show" either way.
-    // FIX73: the question card is the other thing only the user can act on —
-    // same rule, same pill.
     const consentId = last?.pending_consent?.promptId ?? last?.pending_question?.promptId ?? null;
     const consentArrived = consentId !== null && consentId !== lastConsentId.current;
     lastConsentId.current = consentId;
-    if (consentId === null && consentPill) setConsentPill(false);
+    if (!consentId) setConsentPill(false);
     if (consentArrived) {
-      if (anchorActive.current || autoStick) {
-        anchorActive.current = false;
-        holdTop.current = null;
-        setSpacerPx(0);
-        setFollow(true);
-        snapTo(el, el.scrollHeight);
-      } else {
-        setConsentPill(true);
-      }
-      return;
+      if (anchorActive.current || followRef.current) handOver(el);
+      else setConsentPill(geometry(el).contentEnd > el.scrollTop + el.clientHeight + 1);
     }
+    reconcile(newContent);
+  }, [messages, scrollRequest, convId]);
 
-    if (anchorActive.current) {
-      // ── Phase 1: HOLD. The reply streams into the space below the
-      // anchor; the view does not move. The spacer is re-derived from
-      // the anchor target and the real content every time, so it
-      // shrinks to zero exactly as the reply fills the room (and stays
-      // exact if the streaming placeholder shrinks for a moment).
-      const contentH = el.scrollHeight - spacerPx();
-      const top = anchorTop.current;
-      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
-      // ── Phase 2 handover: content reached the viewport bottom →
-      // drop the hold and let the pre-existing stick-to-bottom follow
-      // from here (shouldResumeFollow is THE policy line to tune).
-      if (shouldResumeFollow(contentH, top, el.clientHeight)) {
-        handOver(el);
-      }
-      return;
-    }
-
-    if (autoStick) {
-      snapTo(el, el.scrollHeight);
-    } else {
-      setPendingNew(true);
-    }
-  }, [messages, autoStick, consentPill]);
-
-  // After streaming completes: if user is still "near bottom" (within
-  // 100px) snap to bottom to show the full response.
   const anyStreaming = messages.some((m) => m.isStreaming);
-  streamingRef.current = anyStreaming;
 
   // ── Screen-reader announcements ─────────────────────────────
   // One persistent polite live region for the whole thread. Persistent
@@ -525,156 +535,120 @@ export function ChatThread({
     }
   }, [phaseKey, t]);
   useEffect(() => {
-    if (anyStreaming) return;
-    const el = scrollerRef.current;
-    if (!el) return;
-    // P3 — the turn ended while still anchored (short reply): keep the
-    // view exactly where it is, drop the hold, and trim the spacer to
-    // the minimum the current position needs. Never bottom-snap a SHORT
-    // anchored turn. FIX88 Part D — decided from the geometry of this
-    // commit, which already includes the finished row's meta/actions
-    // lines: a reply that now reaches past the viewport bottom is not
-    // short, and the follow it never got is given here.
-    if (anchorActive.current) {
-      const contentH = el.scrollHeight - spacerPx();
-      const top = holdTop.current ?? el.scrollTop;
-      if (shouldResumeFollow(contentH, top, el.clientHeight)) {
-        handOver(el);
-        return;
-      }
-      anchorActive.current = false;
-      setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
-      return;
-    }
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance < NEAR_BOTTOM_PX) snapTo(el, el.scrollHeight);
-  }, [anyStreaming]);
-
-  // While a position is held, a content resize (a row re-laying out
-  // without a render — the finished reply settling shorter, an image
-  // decoding, a code block collapsing) re-sizes the spacer for that
-  // position and, if the scroller already clamped, puts the view back.
-  // ResizeObserver runs after layout and before paint, so the correction
-  // is never seen.
-  //
-  // FIX88 Part D — growth is a fact about geometry, not about a React
-  // commit. The message effect above sees only a content delta or a
-  // structure change; the virtualizer's late row measurement, a thinking
-  // block, the finished row's meta/actions lines, syntax highlighting, an
-  // image decoding all grow the column HERE and used to be neither handed
-  // over nor followed. Now: still holding → the same handover rule as the
-  // effect; following a live reply → keep the bottom. A reader who
-  // scrolled away has followRef false and is never moved.
-  useEffect(() => {
     const el = scrollerRef.current;
     const column = el?.firstElementChild;
     if (!el || !column || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      const top = holdTop.current;
-      if (top !== null) {
-        const contentH = el.scrollHeight - spacerPx();
-        if (anchorActive.current && shouldResumeFollow(contentH, top, el.clientHeight)) {
-          handOver(el);
-          return;
-        }
-        setSpacerPx(spacerNeeded(top, el.clientHeight, contentH));
-        if (!animating.current && Math.abs(el.scrollTop - top) > 1) snapTo(el, top);
-        return;
-      }
-      if (followRef.current && streamingRef.current && !animating.current) {
-        const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if (distance > 1) snapTo(el, el.scrollHeight);
-      }
-    });
+    const ro = new ResizeObserver(() => reconcileRef.current());
     ro.observe(column);
-    return () => ro.disconnect();
+    ro.observe(el);
+    const restore = () => {
+      if (document.visibilityState === "visible") reconcileRef.current();
+    };
+    document.addEventListener("visibilitychange", restore);
+    return () => {
+      ro.disconnect();
+      document.removeEventListener("visibilitychange", restore);
+    };
   }, []);
 
-  /** The input events that mean the PERSON is scrolling. A scroll event
-   *  raised by one of our own writes never follows one of these; a
-   *  wheel/touch/key during the anchor animation cancels the animation
-   *  so the person's scroll wins immediately. */
   function markUserIntent() {
     userIntent.current = true;
-    if (animating.current) cancelScrollAnimation();
-    window.setTimeout(() => {
-      userIntent.current = false;
-    }, 250);
+    const epoch = ++intentEpoch.current;
+    requestAnimationFrame(() => {
+      if (epoch === intentEpoch.current) userIntent.current = false;
+    });
+  }
+
+  function onWheel(e: React.WheelEvent<HTMLDivElement>) {
+    if (e.deltaY === 0) return;
+    for (let node = e.target as HTMLElement; node && node !== e.currentTarget; node = node.parentElement!) {
+      const max = node.scrollHeight - node.clientHeight;
+      if (max > 1 && /auto|scroll/.test(getComputedStyle(node).overflowY) &&
+          (e.deltaY > 0 ? node.scrollTop < max - 1 : node.scrollTop > 1)) return;
+    }
+    // A downward gesture at a browser-clamped bottom emits no scroll event.
+    if (e.deltaY > 0 && !anchorActive.current && !followRef.current &&
+        e.currentTarget.scrollTop >= geometry(e.currentTarget).bottom - 1) {
+      jumpToBottom();
+      return;
+    }
+    markUserIntent();
   }
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     const prevTop = lastScrollTop.current;
-    lastScrollTop.current = el.scrollTop;
-    if (autoScrolling.current && !userIntent.current) return;
+    const top = el.scrollTop;
+    lastScrollTop.current = top;
+    refreshAffordance(el);
+    if ((autoScrolling.current || animating.current) && !userIntent.current) return;
+    // Native clamping after a shrink is geometry, not a request to stop reading.
+    const clamped = Math.min(prevTop, Math.max(0, el.scrollHeight - el.clientHeight));
+    if (!userIntent.current && Math.abs(top - clamped) <= 1) return;
+    if (Math.abs(top - prevTop) <= 1) {
+      userIntent.current = false;
+      return;
+    }
     userIntent.current = false;
-    // P3 — the user always wins: any real scroll cancels the anchor
-    // hold for this turn (the autoStick logic below then decides
-    // whether to follow).
-    anchorActive.current = false;
-    holdTop.current = null;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const nearBottom = distance < NEAR_BOTTOM_PX;
-    // Scrolling UP while a reply streams stops the follow at once, however
-    // small the move — the person is reading, the way Claude/ChatGPT stop.
-    // A scroll that lands ON the bottom is not that (the scroller clamps
-    // there by itself when content above shrinks).
-    const scrolledUp = el.scrollTop < prevTop - 1 && distance > 1;
-    setFollow(nearBottom && !(scrolledUp && anyStreaming));
-    setFarFromBottom(distance > SHOW_SCROLL_BUTTON_PX);
-    if (nearBottom && !scrolledUp) {
+    cancelScrollAnimation();
+    releaseHold();
+    const bottom = geometry(el).bottom;
+    const returned = top > prevTop + 1 && top >= bottom - 1;
+    setFollow(returned);
+    if (el.scrollTop > bottom) snapTo(el, bottom);
+    if (returned) {
+      readingLandmark.current = null;
       setPendingNew(false);
       setConsentPill(false);
+    } else {
+      rememberReader(el);
     }
-    // A finished anchored turn keeps the spacer that held the view in
-    // place; once the person moves, keep only what the NEW position needs,
-    // so a short answer's blank room below goes away as they scroll off it.
-    if (!anyStreaming && spacerPx() > 0) {
-      const contentH = el.scrollHeight - spacerPx();
-      const needed = spacerNeeded(el.scrollTop, el.clientHeight, contentH);
-      if (needed < spacerPx()) setSpacerPx(needed);
-    }
+    refreshAffordance(el);
   }
 
   function jumpToBottom() {
     const el = scrollerRef.current;
     if (!el) return;
+    releaseHold();
+    readingLandmark.current = null;
     setFollow(true);
     setPendingNew(false);
-    holdTop.current = null;
-    animateScroll(el, el.scrollHeight);
+    setConsentPill(false);
+    animateScroll(el, geometry(el).bottom);
+    refreshAffordance(el);
   }
 
-  /** FIX30 §1: bring the consent card into view (centre it); with no
-   *  scrollIntoView (jsdom) fall back to the tail, where the card lives. */
   function jumpToConsent() {
     const el = scrollerRef.current;
     if (!el) return;
-    setConsentPill(false);
     const card = el.querySelector<HTMLElement>('[data-testid="consent-card"], [data-testid="question-card"]');
+    releaseHold();
+    setConsentPill(false);
+    readingLandmark.current = null;
+    setFollow(true);
     if (card && typeof card.scrollIntoView === "function") {
-      anchorActive.current = false;
-      holdTop.current = null;
-      setFollow(true);
       cancelScrollAnimation();
       autoScrolling.current = true;
       card.scrollIntoView({ block: "center" });
-      window.setTimeout(() => {
-        autoScrolling.current = false;
-      }, 400);
-      return;
+      lastScrollTop.current = el.scrollTop;
+      const epoch = scrollEpoch.current;
+      requestAnimationFrame(() => {
+        if (epoch === scrollEpoch.current) autoScrolling.current = false;
+        refreshAffordance(el);
+      });
+    } else {
+      jumpToBottom();
     }
-    jumpToBottom();
   }
 
   async function handleLoadEarlier() {
     if (!onLoadEarlier || loadingOlder || !hasMoreOlder) return;
     const el = scrollerRef.current;
-    if (el) preservedTopHeight.current = el.scrollHeight;
+    if (el && !followRef.current && !anchorActive.current) rememberReader(el);
     try {
       await onLoadEarlier();
     } catch {
-      preservedTopHeight.current = null;
+      // Keep the existing viewport when the older-page request fails.
     }
   }
 
@@ -693,16 +667,17 @@ export function ChatThread({
       <div
         ref={scrollerRef}
         onScroll={onScroll}
-        onWheel={markUserIntent}
+        onWheel={onWheel}
         onTouchMove={markUserIntent}
         onKeyDown={(e) => {
-          if (SCROLL_KEYS.has(e.key)) markUserIntent();
+          if (SCROLL_KEYS.has(e.key) && !(e.target as HTMLElement).closest("input, textarea, select, button, [contenteditable=true]")) markUserIntent();
         }}
         onPointerDown={(e) => {
           // the scrollbar is the only part of the scroller itself one can press
           if (e.target === e.currentTarget) markUserIntent();
         }}
         className="scrollbar-thin h-full overflow-y-auto px-4 py-6 md:px-10"
+        style={{ overflowAnchor: "none" }}
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 ? (
@@ -717,6 +692,11 @@ export function ChatThread({
               {shouldVirtualize ? (
                 <VirtualMessageList
                   scrollerRef={scrollerRef}
+                  preservedKey={readingLandmark.current?.key ?? null}
+                  onScrollWrite={() => {
+                    const el = scrollerRef.current;
+                    if (el) lastScrollTop.current = el.scrollTop;
+                  }}
                   convId={convId}
                   messages={messages}
                   lastAsstIdx={lastAsstIdx}
@@ -907,14 +887,32 @@ function PlainMessageList(props: InnerProps) {
 function VirtualMessageList(
   props: InnerProps & {
     scrollerRef: React.RefObject<HTMLDivElement>;
+    preservedKey: string | null;
+    onScrollWrite: () => void;
   },
 ) {
   const { scrollerRef, messages } = props;
+  const preservedIndex = messages.findIndex((m) => rowKey(m) === props.preservedKey);
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scrollerRef.current,
     estimateSize: () => 200,
     overscan: 5,
+    getItemKey: (index) => rowKey(messages[index]),
+    rangeExtractor(range) {
+      const indexes = defaultRangeExtractor(range);
+      // A prepend can move the reader's row outside the estimated window.
+      // Keep that landmark measurable until the viewport has been restored.
+      if (preservedIndex >= 0 && !indexes.includes(preservedIndex)) {
+        indexes.push(preservedIndex);
+        indexes.sort((a, b) => a - b);
+      }
+      return indexes;
+    },
+    scrollToFn(offset, options, instance) {
+      elementScroll(offset, options, instance);
+      props.onScrollWrite();
+    },
     measureElement(element) {
       // Some browsers report 0 during a transition; the virtualizer
       // tolerates it but a measured pixel value is preferable.
@@ -1043,13 +1041,6 @@ function LoadEarlierBar({
 function lastAssistantIndex(messages: Message[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "assistant") return i;
-  }
-  return -1;
-}
-
-function lastUserIndex(messages: Message[]): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") return i;
   }
   return -1;
 }

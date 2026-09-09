@@ -17,7 +17,7 @@
 //   • the notice, pill and live-region announcement go away when the card
 //     is answered.
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./MessageBubble", () => ({
@@ -57,6 +57,7 @@ const origGBCR = HTMLElement.prototype.getBoundingClientRect;
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
   heights = {};
+  useChatStore.setState({ turnScrollRequests: {} });
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
     cb(0);
     return 0;
@@ -64,7 +65,7 @@ beforeEach(() => {
   vi.stubGlobal("cancelAnimationFrame", () => {});
   Object.defineProperty(HTMLElement.prototype, "scrollTop", {
     configurable: true,
-    get() { return scrollTops.get(this) ?? 0; },
+    get() { return Math.max(0, Math.min(scrollTops.get(this) ?? 0, this.scrollHeight - VIEW_H)); },
     set(v: number) { scrollTops.set(this, v); },
   });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return isScroller(this) ? VIEW_H : 0; } });
@@ -73,7 +74,7 @@ beforeEach(() => {
     get() {
       if (!isScroller(this)) return 0;
       const rows = this.querySelectorAll("[data-msg-index]").length;
-      return topOf(rows) + spacerOf(this as HTMLElement);
+      return Math.max(VIEW_H, topOf(rows) + spacerOf(this as HTMLElement));
     },
   });
   HTMLElement.prototype.getBoundingClientRect = function () {
@@ -83,6 +84,10 @@ beforeEach(() => {
       const i = Number(idxAttr);
       const sc = this.closest(".overflow-y-auto") as HTMLElement | null;
       return fakeRect(topOf(i) - (sc ? sc.scrollTop : 0), H(i));
+    }
+    const parent = this.parentElement;
+    if (parent && isScroller(parent) && parent.firstElementChild === this) {
+      return fakeRect(-parent.scrollTop, topOf(parent.querySelectorAll("[data-msg-index]").length));
     }
     return fakeRect(0, 0);
   };
@@ -107,7 +112,19 @@ function mount(initial: Message[]) {
   const props = { onRegenerate: () => {} };
   const view = render(<ChatThread {...props} convId="c1" messages={initial} />);
   const scroller = view.container.querySelector(".overflow-y-auto") as HTMLElement;
-  return { scroller, rerender: (m: Message[]) => view.rerender(<ChatThread {...props} convId="c1" messages={m} />) };
+  let previous = initial;
+  return { scroller, rerender: (m: Message[]) => act(() => {
+    const user = [...m].reverse().find((row) => row.role === "user");
+    const oldUser = [...previous].reverse().find((row) => row.role === "user");
+    if (user && user.id !== oldUser?.id) {
+      const reply = m[m.length - 1];
+      useChatStore.setState({ turnScrollRequests: { c1: {
+        id: reply.id, kind: "send", userKey: user.id, replyKey: reply.id,
+      } } });
+    }
+    previous = m;
+    view.rerender(<ChatThread {...props} convId="c1" messages={m} />);
+  }) };
 }
 
 const consent = { promptId: "consent-1", tool: "run_command", argumentSummary: "Get-Date", dangerClass: "danger.shell" };
@@ -131,7 +148,7 @@ describe("FIX30 §1 — the consent card is reachable", () => {
     expect(spacerOf(scroller)).toBe(0); // handover happened on structural growth
     heights[9] = 420;
     rerender(sent({ tool_activities: [finished("p", "update_plan"), finished("s", "run_subagent"), started("c", "run_command")] }));
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight); // following again
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H); // following again
   });
 
   it("consent while still anchored (the owner's shape) → the tail scrolls into view, the notice names the tool", () => {
@@ -147,7 +164,7 @@ describe("FIX30 §1 — the consent card is reachable", () => {
 
     heights[9] = 500; // + the consent card
     rerender(sent({ tool_activities: [finished("p", "update_plan"), finished("s", "run_subagent"), started("c", "run_command")], pending_consent: consent }));
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
     expect(spacerOf(scroller)).toBe(0);
     const notice = screen.getByTestId("waiting-consent-notice");
     expect(notice.textContent).toContain("Waiting for your permission — run_command");
@@ -188,7 +205,7 @@ describe("FIX30 §1 — the consent card is reachable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: dictionaries.en["thread.showConsent"] }));
     // jsdom has no scrollIntoView → the tail fallback, which is where the card is.
-    expect(scroller.scrollTop).toBe(scroller.scrollHeight);
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
     expect(screen.queryByTestId("consent-pill")).toBeNull();
   });
 

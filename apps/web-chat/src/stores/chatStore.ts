@@ -24,6 +24,7 @@ import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
+import type { TurnScrollRequest } from "@/lib/turnAnchor";
 // One-way dependency: the chat store nudges the canvas store after a
 // turn (Phase 8). canvasStore must never import chatStore back.
 import { useCanvasStore } from "@/stores/canvasStore";
@@ -113,6 +114,7 @@ interface ChatState {
   activeConversationId: string | null;
   /** message lists keyed by conversation id. */
   messages: Record<string, Message[]>;
+  turnScrollRequests: Record<string, TurnScrollRequest | undefined>;
   /** True once loadMessages has completed for a conversation —
    *  success or failure. Lets the page distinguish three states
    *  cleanly:
@@ -355,6 +357,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversationsSearchLoading: false,
   activeConversationId: null,
   messages: {},
+  turnScrollRequests: {},
   messagesLoaded: {},
   streamingAssistantId: {},
   abortControllers: {},
@@ -1255,6 +1258,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         ],
       },
+      turnScrollRequests: { ...s.turnScrollRequests, [convId]: {
+        id: tempAsstId, kind: "send", userKey: tempUserId, replyKey: tempAsstId,
+      } },
       streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
     }));
 
@@ -1749,6 +1755,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return {
         messages: { ...s.messages, [convId]: updated },
+        turnScrollRequests: { ...s.turnScrollRequests, [convId]: {
+          id: tempAsstId, kind: "regenerate", userKey: "", replyKey: tempAsstId,
+        } },
         streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
       };
     });
@@ -1822,6 +1831,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
       return {
         messages: { ...s.messages, [convId]: truncated },
+        turnScrollRequests: { ...s.turnScrollRequests, [convId]: {
+          id: tempAsstId, kind: "send", userKey: list[idx].client_key ?? list[idx].id,
+          replyKey: tempAsstId,
+        } },
         streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
       };
     });
