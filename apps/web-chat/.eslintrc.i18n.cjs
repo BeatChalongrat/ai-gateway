@@ -34,6 +34,18 @@ module.exports = {
         "jsx-attributes": {
           include: ["title", "placeholder", "aria-label", "alt"],
         },
+        // FIX90 — a dictionary lookup is not a hard-coded string. Inside an
+        // included attribute the rule descends into the expression and
+        // flagged the KEY: `placeholder={tOutside("connectors.empty")}` was
+        // reported as a violation, and 25 of the 128 baseline entries were
+        // exactly that. A baseline that calls correct code a violation
+        // spends the reader's trust for nothing, and the entries can never
+        // be fixed — the only way to "fix" one is to stop translating.
+        // Excluding the two lookup helpers leaves every other callee
+        // validated (`toast(...)` included, once the rule can see it).
+        callees: {
+          exclude: ["t", "tOutside"],
+        },
         message: "User-visible string must go through t() — see src/lib/i18n/dict.ts",
       },
     ],

@@ -149,12 +149,35 @@ browser bundle. Two vars matter for a non-localhost deploy — set them in
 
 ### Migrations
 
-- **Backend** (Alembic, `backend/migrations/versions/`, latest **064**) applies on
-  backend startup — nothing to run by hand.
+- **Backend** (Alembic, `backend/migrations/versions/`) applies when the backend
+  CONTAINER starts — the container's own command runs `alembic upgrade head`
+  before the app — and `make bootstrap` also applies them explicitly, in a
+  one-shot container, before anything boots.
 - **Chat-edge** SQL migrations apply via the Postgres init hook on a *fresh*
   volume only. On an existing volume run `make chat-edge-migrate-main` (main
   stack) or `make chat-edge-migrate` (webchat stack). `make bootstrap` handles
   this for you.
+
+#### "SCHEMA DRIFT … refusing to start" — the backend will not come up
+
+A container that has been running while you pulled a new migration has a
+schema older than the code: its `alembic upgrade head` ran once, at container
+start, and a hot reload does not re-run it. The backend then refuses to start
+and says so:
+
+```
+SCHEMA DRIFT: DB at 087, code needs 088 - refusing to start.
+Run 'alembic upgrade head' (or 'make migrate') before booting the app.
+```
+
+Run **`make migrate`** and the app comes back on its next reload; the container
+itself stays up throughout, so the command has something to attach to.
+
+This is the default in dev as well as prod (**FIX90**). It used to be
+`autoupgrade`, which applied pending migrations *in-process* — so any import of
+the app, including a test run inside the container, silently migrated your
+database. Set `SCHEMA_DRIFT_MODE=autoupgrade` in your own `.env` if you want
+that back; `warn` and `off` are also accepted.
 
 For a clean UAT box see `scripts/uat/README.md`.
 

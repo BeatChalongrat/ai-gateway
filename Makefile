@@ -71,8 +71,15 @@ mask-eval: ## FIX37: mask-quality eval — detection + comprehension (axis A) + 
 mask-eval-detect: ## FIX37: detection-only slice of the mask-quality eval (no model calls, seconds not minutes)
 	docker exec ai-gateway-backend-1 sh -c 'cd /app && python -m evals.mask_quality.run --stage detect --ner $(NER)'
 
+# FIX90 — `exec` first: it is instant and it is the common case, because a
+# fail-closed app does NOT take its container down (uvicorn's reloader
+# outlives it), so exec still has something to attach to — measured on a
+# scratch stack. When there is no running backend at all, fall back to a
+# one-shot container, which needs nothing to be up and never imports the
+# app, so the startup guard cannot refuse the very command that fixes it.
 migrate: ## Apply pending BACKEND (gateway) Alembic migrations to the running postgres. Run this when a long-lived container outlived a new migration (schema-drift guard names the gap).
-	docker compose exec backend python -m alembic upgrade head
+	docker compose exec -T backend python -m alembic upgrade head \
+	  || docker compose run --rm backend python -m alembic upgrade head
 
 clean: ## Stop the stack AND remove volumes (wipes DB + redis data)
 	docker compose down -v

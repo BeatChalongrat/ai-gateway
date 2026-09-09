@@ -23,10 +23,27 @@ services:
       - ./examples:/examples:ro
     environment:
       # Schema-drift guard (FIX 3): dev hot-reloads source, so code can
-      # advance past a long-lived container's schema. autoupgrade runs
-      # 'alembic upgrade head' in-process (advisory-locked) on boot so the
-      # drift self-heals instead of 500ing every request on a missing column.
-      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-autoupgrade}
+      # advance past a long-lived container's schema — the container's own
+      # `alembic upgrade head` (in `command:` above) runs once at container
+      # START, and a hot reload does not re-run it.
+      #
+      # FIX90: that gap used to be closed by `autoupgrade`, which applied the
+      # pending migrations IN-PROCESS. It meant any import of the app — a
+      # pytest run inside the container, a one-off `python -c` — silently
+      # migrated the developer's database; FIX88's migration 088 reached the
+      # live database that way, not by anyone running it. A guard that
+      # changes the thing it is guarding is not a guard.
+      #
+      # The default is now the same as prod's: refuse to start and name the
+      # command. Measured on a scratch stack (own project, own volume, no
+      # published ports): on an EMPTY volume the container command migrates
+      # before uvicorn, so a fresh clone boots normally (healthy in 25 s);
+      # with the DB deliberately one revision behind, the app refuses with
+      # "SCHEMA DRIFT: DB at 087, code needs 088 - refusing to start", the
+      # CONTAINER stays up (uvicorn's reloader outlives the failed app), so
+      # `make migrate` reaches it, and the next reload comes back 200.
+      # Set SCHEMA_DRIFT_MODE=autoupgrade in your own .env to opt back in.
+      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
       # watchfiles polls on the Windows-to-container bridge — docker
       # inotify events don't always propagate through the Hyper-V layer.
       WATCHFILES_FORCE_POLLING: "true"

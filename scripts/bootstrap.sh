@@ -4,11 +4,12 @@
 # Idempotent end to end: safe to re-run on an already-provisioned box.
 #
 #   1. Generate .env (if absent) with strong secrets — scripts/gen_env.sh
-#   2. docker compose up -d              (dev stack; hot-reload overlay)
-#   3. Health-gate every critical svc    — scripts/wait_for_health.sh
-#   4. Apply chat-edge SQL migrations     (idempotent IF NOT EXISTS)
-#   5. Seed admin+portal ONLY if not seeded (query admin first)
-#   6. Print a clear "what's up / what's not" summary
+#   2. Apply BACKEND migrations           (one-shot container, no app import)
+#   3. docker compose up -d              (dev stack; hot-reload overlay)
+#   4. Health-gate every critical svc    — scripts/wait_for_health.sh
+#   5. Apply chat-edge SQL migrations     (idempotent IF NOT EXISTS)
+#   6. Seed admin+portal ONLY if not seeded (query admin first)
+#   7. Print a clear "what's up / what's not" summary
 # ─────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -29,16 +30,34 @@ bash scripts/gen_env.sh
 #     (belt-and-suspenders: gen_env should have ensured them).
 bash scripts/preflight.sh
 
-# 2. bring up the dev stack ------------------------------------------------
+# 2. backend migrations ----------------------------------------------------
+# FIX90 — an EXPLICIT step, because the schema is no longer allowed to
+# appear as a side effect. The dev backend's `command:` does run
+# `alembic upgrade head` at container start, but only at container START:
+# an existing container that `up -d` does not recreate keeps a schema older
+# than the code, and the seed below would then hit a missing column. The
+# guard's default is now `failclosed` (it refuses rather than migrating
+# behind your back), so nothing else would apply them.
+#
+# A one-shot container, not `exec`: it needs no running backend (that is
+# the whole point) and it replaces the service command, so `app.main` — and
+# with it the startup guard — is never imported and cannot deadlock. It
+# only needs postgres, which compose starts as its dependency. Idempotent:
+# on an already-migrated database alembic prints nothing and exits 0.
+echo ""
+echo "[bootstrap] Applying backend (gateway) migrations — one-shot, before anything boots..."
+docker compose run --rm backend python -m alembic upgrade head
+
+# 3. bring up the dev stack ------------------------------------------------
 echo ""
 echo "[bootstrap] Starting the dev stack (docker compose up -d)..."
 docker compose up -d
 
-# 3. health gate (replaces sleep) ------------------------------------------
+# 4. health gate (replaces sleep) ------------------------------------------
 echo ""
 bash scripts/wait_for_health.sh
 
-# 4. chat-edge migrations --------------------------------------------------
+# 5. chat-edge migrations --------------------------------------------------
 # The Go chat-edge binary VERIFIES but never APPLIES migrations. Fresh
 # volumes get them from the postgres init hook; an existing-volume operator
 # would otherwise be left fail-closed — so apply them here every run
@@ -48,7 +67,7 @@ echo "[bootstrap] Applying chat-edge SQL migrations to the main postgres (idempo
 bash scripts/apply_chat_edge_migrations_main.sh \
   || echo "[bootstrap] NOTE: migration step reported errors (usually 'already applied') — review the output above."
 
-# 5. idempotent seed -------------------------------------------------------
+# 6. idempotent seed -------------------------------------------------------
 echo ""
 echo "[bootstrap] Checking whether the admin user is already seeded..."
 SEEDED="$(docker compose exec -T backend python -c \
@@ -62,7 +81,7 @@ else
   docker compose exec -T backend python -m scripts.seed_audit_data
 fi
 
-# 6. summary ---------------------------------------------------------------
+# 7. summary ---------------------------------------------------------------
 cat <<'EOF'
 
 ════════════════════════════════════════════════════════════════
