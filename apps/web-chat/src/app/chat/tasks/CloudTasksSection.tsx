@@ -424,7 +424,7 @@ function CloudEmptyState({ onCreate }: { onCreate: () => void }) {
   const t = useT();
   return (
     <div className="rounded-xl border border-dashed border-border bg-transparent px-8 py-14 text-center">
-      <div className="mx-auto mb-5 text-text-muted">
+      <div className="mb-5 flex justify-center text-text-muted">
         <CloudIcon size={40} />
       </div>
       <h3 className="text-base font-semibold tracking-tight text-text-primary">
