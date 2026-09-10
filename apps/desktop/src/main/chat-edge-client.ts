@@ -95,6 +95,17 @@ export class ChatEdgeClient {
     return body?.messages ?? [];
   }
 
+  /** FIX105 Part B — one transcript page, oldest first, and whether older rows
+   *  remain. chat-edge serves at most 100 rows a page (newest first, flipped)
+   *  and pages back with `before` = the oldest id of the page already read.
+   *  null on any failure. */
+  async listMessagesPage(conversationId: string, limit: number, before?: string): Promise<{ messages: MessageDto[]; hasMore: boolean } | null> {
+    const q = `limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`;
+    const body = await this.get<{ messages?: MessageDto[]; has_more?: boolean }>(`/api/v1/conversations/${encodeURIComponent(conversationId)}/messages?${q}`);
+    if (!body) return null;
+    return { messages: body.messages ?? [], hasMore: body.has_more === true };
+  }
+
   async listGlobalMemories(limit = 100): Promise<MemoryDto[]> {
     const body = await this.get<{ memories?: MemoryDto[] }>(`/api/v1/memories?scope_type=global_user&status=active&limit=${limit}&offset=0`, 4_000);
     return body?.memories ?? [];

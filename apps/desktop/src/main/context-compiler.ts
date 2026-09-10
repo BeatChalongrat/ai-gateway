@@ -134,6 +134,8 @@ export interface CompiledChain {
   headDropped: boolean;
   /** FIX105: the newest message alone is larger than the messages budget — no trim makes this request fit. */
   newestOverBudget: boolean;
+  /** FIX105 Part B: transcript rows never loaded (beyond the load ceiling): counted and told, never summarised here. */
+  omittedOlder: number;
   /** tokens of the history as LOADED (before any trim) — the meter's numerator. */
   historyTokensLoaded: number;
   /** triggerRatio × messagesRemaining — the meter's "compaction at" mark. */
@@ -160,6 +162,8 @@ export interface CompileOptions {
   manualBoundaryIndex?: number | null;
   /** Whether a summary is present (the context note says so). */
   summaryPresent?: boolean;
+  /** FIX105 Part B: older transcript rows that were never loaded. Like chat-edge's OmittedOlder they make the request compacted and are named in the context note. */
+  omittedOlder?: number;
 }
 
 /** The context note the MODEL sees, appended to the system message. */
@@ -197,9 +201,11 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   const preambleTokens = preamble.reduce((s, m) => s + messageTokens(m), 0);
 
   const historyTokens = history.reduce((s, m) => s + messageTokens(m), 0);
+  const omittedOlder = Math.max(0, Math.trunc(opts.omittedOlder ?? 0));
   const newestOverBudget = history.length > 0 && messageTokens(history[history.length - 1]!) > remaining;
   const base = {
     totalMessages: history.length,
+    omittedOlder,
     newestOverBudget,
     historyTokensLoaded: historyTokens,
     thresholdTokens,
@@ -209,7 +215,7 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, sentTokens: historyTokens, stateInjected: false, headDropped: false, dropStart: 0, dropEnd: 0, ...base });
 
   const overThreshold = historyTokens >= thresholdTokens;
-  if (!overThreshold && boundary === null) return untouched();
+  if (!overThreshold && boundary === null && omittedOlder === 0) return untouched();
 
   const units = toUnits(history);
   const noteReserve = CONTEXT_NOTE_RESERVE;
@@ -271,10 +277,10 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   const kept = [...head, ...tail];
   const keptMessages = kept.flatMap((u) => u.messages);
   const dropped = history.length - keptMessages.length;
-  if (dropped <= 0) return untouched();
+  if (dropped <= 0 && omittedOlder === 0) return untouched();
 
   const keptRecent = tail.reduce((s, u) => s + u.messages.length, 0);
-  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent, headMessages > 0, opts.summaryPresent === true) };
+  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped + omittedOlder, keptRecent, headMessages > 0, opts.summaryPresent === true) };
   const out: GatewayMessage[] = [newSystem, ...preamble, ...keptMessages];
   const keptTokens = keptMessages.reduce((s, m) => s + messageTokens(m), 0);
   return {
@@ -287,8 +293,8 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
     sentTokens: keptTokens + preambleTokens,
     stateInjected: preamble.length > 0,
     headDropped: unpinHead && dropped > 0,
-    dropStart: headMessages,
-    dropEnd: headMessages + dropped,
+    dropStart: dropped > 0 ? headMessages : 0,
+    dropEnd: dropped > 0 ? headMessages + dropped : 0,
     ...base,
   };
 }

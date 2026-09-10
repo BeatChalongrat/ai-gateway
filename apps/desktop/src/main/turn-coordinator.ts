@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { BridgeChannel } from "./bridge";
-import type { ChatEdgeClient, ConversationDto } from "./chat-edge-client";
+import type { ChatEdgeClient, ConversationDto, MessageDto } from "./chat-edge-client";
 import type { ConnectorOAuth } from "./connector-oauth";
 import type { ConnectorTools } from "./connector-mcp";
 import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
@@ -255,6 +255,11 @@ const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
 export const QUICK_ASK_HINT =
   "This reply is for the quick-ask window: a small always-on-top box for short questions. In this window you have NO tools — no file access, no browser, no commands, no code execution, no image generation. Answer directly and concisely. If the request genuinely needs one of those, say so in one sentence and tell the user to open this chat in the main window (there is an \"Open in main window\" button), instead of guessing or describing a result you did not produce.";
 const MAX_OUTPUT_TOKENS = 8192;
+/** FIX105 Part B — chat-edge serves at most 100 transcript rows a page. */
+const HISTORY_PAGE_SIZE = 100;
+/** FIX105 Part B — how far back the host reads a transcript it has no local chain for. chat-edge's own load
+ *  ceiling (MAX_CONTEXT_MESSAGES) is 1,000 by default; rows beyond it are counted and said, never dropped quietly. */
+const HISTORY_LOAD_CEILING = 1000;
 /** FIX105 — chat-edge's CodeMessageTooLong and its sentence (message_too_long.go; pinned by context-budget-pin.test.ts). */
 const MESSAGE_TOO_LONG_CODE = "message_too_long";
 const MESSAGE_TOO_LONG_TEXT = "This message alone is too long for this model. Shorten it or split it into parts; the rest of the conversation is unaffected.";
@@ -568,7 +573,7 @@ export class TurnCoordinator {
           const memoryEnabled = conversation?.memory_enabled !== false;
           const tools = (await this.modelSupportsTools(model, signal)) ? await this.toolDefinitions(null, false, false, memoryEnabled) : [];
           const basis = await this.budgetBasis(conversationId, model, signal);
-          this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled }));
+          this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled, omittedOlder: built.omittedOlder }));
         } catch (err) {
           this.bridge.postHostResult(payload.requestId, false, undefined, `context-info-failed:${(err as Error).message.slice(0, 80)}`);
         }
@@ -969,7 +974,7 @@ export class TurnCoordinator {
       const taskTools = await this.toolDefinitions(null, false);
       const taskBasis = await this.budgetBasis(conversationId, model, controller.signal);
       const tcc = this.opts.contextManager
-        ? await this.opts.contextManager.compile(conversationId, built.messages, { model, basis: taskBasis, numTools: taskTools.length, memoryEnabled: conversation?.memory_enabled !== false }, controller.signal)
+        ? await this.opts.contextManager.compile(conversationId, built.messages, { model, basis: taskBasis, numTools: taskTools.length, memoryEnabled: conversation?.memory_enabled !== false, omittedOlder: built.omittedOlder }, controller.signal)
         : compileChain(built.messages, taskBasis, taskTools.length);
       if (tcc.compacted) this.log.info(`CONTEXT COMPILED conv=${conversationId} (task ${task.id}) status=compacted total=${tcc.totalMessages} sent=${tcc.sentMessages} dropped=${tcc.dropped}`);
       const taskChainStart = tcc.messages.length;
@@ -1191,6 +1196,7 @@ export class TurnCoordinator {
 
     let messages: GatewayMessage[];
     let userText = payload.text;
+    let omittedOlder = 0;
     let attached: ResolvedAttachments | null = null;
     // FIX29 §3.2: know whether the browser bridge is up BEFORE the prompt is
     // built, so the prompt can say "browser access is unavailable" instead of
@@ -1204,6 +1210,7 @@ export class TurnCoordinator {
       const built = await this.buildMessages(conversationId, conversation, payload.text, attached);
       messages = built.messages;
       userText = built.userText;
+      omittedOlder = built.omittedOlder;
     } catch (err) {
       this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
       this.emit(conversationId, "error", { code: "host_exception", message: "The turn could not be prepared." });
@@ -1258,8 +1265,8 @@ export class TurnCoordinator {
     // FIX104: measured against the catalogue's window for the model that answers.
     const basis = await this.budgetBasis(conversationId, model, signal);
     const cc = this.opts.contextManager
-      ? await this.opts.contextManager.compile(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled }, signal)
-      : compileChain(messages, basis, tools.length);
+      ? await this.opts.contextManager.compile(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled, omittedOlder }, signal)
+      : compileChain(messages, basis, tools.length, { omittedOlder });
     const sendMessages = cc.messages;
     if (cc.compacted) {
       // FIX104 (the web's FIX102 Part C): with a context manager the page is
@@ -2645,7 +2652,7 @@ export class TurnCoordinator {
     return resolved;
   }
 
-  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string }> {
+  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string; omittedOlder: number }> {
     let project = null;
     if (conversation?.project_id) {
       const projects = await this.chatEdge.listProjects();
@@ -2719,12 +2726,21 @@ export class TurnCoordinator {
     const system = assembled.text;
     const messages: GatewayMessage[] = [{ role: "system", content: system }];
     let history = this.loadLocalHistory(conversationId);
+    let omittedOlder = 0;
     if (history === null) {
       // No local chain history (a conversation started on the web or before
       // E4): the visible transcript from chat-edge.
+      // FIX105 Part B — all of it, up to a ceiling. This read asked for 200 rows
+      // and chat-edge serves at most 100, newest first, so a web conversation
+      // opened here silently started from its newest 100: the page showed
+      // everything (it pages on its own) while the MODEL answered about part of
+      // a conversation. The host now pages back; rows beyond the ceiling are
+      // counted (omittedOlder → the context note, the meter, the loss notice).
       try {
-        const rows = await this.chatEdge.listMessages(conversationId);
-        history = rows
+        const loaded = await this.loadServerTranscript(conversationId);
+        if (loaded.hasMore) omittedOlder = Math.max(1, (conversation?.message_count ?? 0) - loaded.rows.length);
+        if (loaded.pages > 1 || loaded.hasMore) this.log.info(`HISTORY conv=${conversationId}: ${loaded.rows.length} transcript rows in ${loaded.pages} page(s)${loaded.hasMore ? `, ~${omittedOlder} older not loaded (ceiling ${HISTORY_LOAD_CEILING})` : ""}`);
+        history = loaded.rows
           .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
           .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
       } catch (err) {
@@ -2756,7 +2772,26 @@ export class TurnCoordinator {
       if (m.role === "user" && typeof m.content === "string") parts.push({ ...PROMPT_PART.earlierMessage, text: m.content });
     }
     this.promptPartsByConversation.set(conversationId, parts);
-    return { messages, userText };
+    return { messages, userText, omittedOlder };
+  }
+
+  /** FIX105 Part B — the chat-edge transcript, oldest first, paged back until it
+   * ends or HISTORY_LOAD_CEILING rows are loaded. Throws when a page cannot be
+   * read, so a caller never mistakes part of a transcript for all of it. */
+  private async loadServerTranscript(conversationId: string): Promise<{ rows: MessageDto[]; hasMore: boolean; pages: number }> {
+    const pages: MessageDto[][] = [];
+    let before: string | undefined;
+    let hasMore = true;
+    let total = 0;
+    while (hasMore && total < HISTORY_LOAD_CEILING) {
+      const page = await this.chatEdge.listMessagesPage(conversationId, HISTORY_PAGE_SIZE, before);
+      if (!page) throw new Error(`transcript page ${pages.length + 1} could not be read`);
+      pages.unshift(page.messages);
+      total += page.messages.length;
+      hasMore = page.hasMore && page.messages.length > 0;
+      before = page.messages[0]?.id;
+    }
+    return { rows: pages.flat(), hasMore, pages: pages.length };
   }
 
   /** FIX28 §2: the chat-edge row ids of this turn's user + assistant messages

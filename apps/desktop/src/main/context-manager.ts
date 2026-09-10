@@ -74,6 +74,8 @@ export interface ContextBudgetEvent {
   budget_window: number;
   total_budget: number;
   output_reserve: number;
+  /** FIX105 Part B: transcript rows never loaded — chat-edge's omitted_older. */
+  omitted_older: number;
   /** FIX105: the first exchange was left out of what is sent (too large to pin, or no room for the newest message). */
   head_dropped: boolean;
   /** FIX105: the newest message alone is larger than the whole messages budget. */
@@ -99,6 +101,8 @@ export interface TurnBudget {
   numTools: number;
   /** The conversation's memory switch; absent means on. */
   memoryEnabled?: boolean;
+  /** FIX105 Part B: older transcript rows the host never loaded (beyond its load ceiling). */
+  omittedOlder?: number;
 }
 
 export interface ContextManagerDeps {
@@ -164,12 +168,15 @@ export class ContextManager {
     }
 
     const statePresent = !isStateEmpty(state);
-    const summaryStatus = plan.compacted ? summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, statePresent) : "";
+    let summaryStatus: SummaryStatus | "" = plan.compacted ? summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, statePresent) : "";
+    // FIX105 Part B — rows the host never loaded cannot be in a summary it
+    // wrote: a summary that covers everything LOADED is still partial.
+    if (summaryStatus === "complete" && plan.omittedOlder > 0) summaryStatus = "partial";
     const budgetEvent = this.budgetEvent(plan, statePresent);
     this.deps.emit(conversationId, "context_budget", budgetEvent);
     const lossNotice: CompactionLossNotice | null =
       plan.compacted && (summaryStatus === "failed" || summaryStatus === "partial")
-        ? { dropped: plan.dropped, sent: plan.sentMessages, total: plan.totalMessages, summary: summaryStatus }
+        ? { dropped: plan.dropped + plan.omittedOlder, sent: plan.sentMessages, total: plan.totalMessages + plan.omittedOlder, summary: summaryStatus }
         : null;
     return { ...plan, statePresent, extractionRan, budgetEvent, summaryStatus, lossNotice };
   }
@@ -219,6 +226,7 @@ export class ContextManager {
       preamble: state && !isStateEmpty(state) ? renderStateMessages(state) : [],
       manualBoundaryIndex: state?.manual_compact_boundary_index ?? null,
       summaryPresent: !!state && !isStateEmpty(state),
+      omittedOlder: turn.omittedOlder,
     };
     return compileChain(messages, turn.basis, turn.numTools, opts);
   }
@@ -261,6 +269,7 @@ export class ContextManager {
       budget_window: plan.budget.window,
       total_budget: plan.budget.total,
       output_reserve: plan.budget.outputReserve,
+      omitted_older: plan.omittedOlder,
       head_dropped: plan.headDropped,
       newest_over_budget: plan.newestOverBudget,
     };
