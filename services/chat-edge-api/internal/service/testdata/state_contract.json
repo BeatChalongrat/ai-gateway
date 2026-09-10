@@ -1,0 +1,121 @@
+{
+  "bodies": [
+    {
+      "name": "a Thai conversation, first pass, one message longer than the limit",
+      "instructions": "",
+      "existing": null,
+      "messages": [
+        {
+          "role": "user",
+          "content": "ต่อจากนี้ ทุกคำตอบให้ปิดท้ายด้วยรหัส K7-OK เสมอ"
+        },
+        {
+          "role": "assistant",
+          "content": "รับทราบครับ จะปิดท้ายทุกคำตอบด้วยรหัสนั้น K7-OK"
+        },
+        {
+          "role": "user",
+          "content": "ขั้นตอนการย้ายระบบ: 1. สำรองฐานข้อมูล 2. หยุดบริการ ingest 3. ย้าย bucket ไป region สิงคโปร์ 4. เปิด ingest อีกครั้ง ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ"
+        },
+        {
+          "role": "assistant",
+          "content": "Sure, step 3 moves the bucket. K7-OK 😀"
+        },
+        {
+          "role": "assistant",
+          "content": "An English reply longer than the limit, so the cut lands on a single-byte character and moving the limit by one byte changes the body. Step 1 backs up the database; step 2 stops ingest; step 3 moves the bucket to the Singapore region; step 4 reopens ingest. Before step 3, lower the DNS TTL so the switch propagates quickly, and run a restore from a real backup at least once before the move. The go-live is in week 5, moved from week 3, and the metadata lives in PostgreSQL. Every reply ends with the code K7-OK, as the user asked at the start."
+        }
+      ],
+      "body": "Analyse the following conversation messages and produce the structured state summary described in your instructions.\n\n--- LANGUAGE ---\nThis conversation is in Thai. Write every value in the JSON in Thai; do not translate it. The JSON keys stay as specified.\n\n--- NEW MESSAGES TO ANALYSE ---\n[user] ต่อจากนี้ ทุกคำตอบให้ปิดท้ายด้วยรหัส K7-OK เสมอ\n[assistant] รับทราบครับ จะปิดท้ายทุกคำตอบด้วยรหัสนั้น K7-OK\n[user] ขั้นตอนการย้ายระบบ: 1. สำรองฐานข้อมูล 2. หยุดบริการ ingest 3. ย้าย bucket ไป region สิงคโปร์ 4. เปิด ingest อีกครั้ง ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้วยครับ ขอรายละเอียดเพิ่มเติมของแต่ละขั้นตอนด้... [truncated]\n[assistant] Sure, step 3 moves the bucket. K7-OK 😀\n[assistant] An English reply longer than the limit, so the cut lands on a single-byte character and moving the limit by one byte changes the body. Step 1 backs up the database; step 2 stops ingest; step 3 moves the bucket to the Singapore region; step 4 reopens ingest. Before step 3, lower the DNS TTL so the switch propagates quickly, and run a restore from a real backup at least once before the move. The go-live is in week 5, moved from week 3, and the metadata lives in PostgreSQL. Every reply ends with th... [truncated]\n"
+    },
+    {
+      "name": "an English merge with instructions, an existing state and a masked placeholder",
+      "instructions": "keep the numbers",
+      "existing": {
+        "current_goal": "Plan the migration",
+        "structured_summary": {
+          "key_context": "Budget 487,250 THB; call <<PHONE_1>> & confirm",
+          "progress": "Steps agreed"
+        },
+        "confirmed_decisions": [
+          {
+            "decision": "Use PostgreSQL"
+          }
+        ],
+        "open_tasks": []
+      },
+      "messages": [
+        {
+          "role": "user",
+          "content": "The launch moved from 12 October to 19 October."
+        },
+        {
+          "role": "assistant",
+          "content": "Noted: launch on 19 October. K7-OK"
+        },
+        {
+          "role": "user",
+          "content": "What is left before launch?"
+        }
+      ],
+      "body": "Analyse the following conversation messages and produce the structured state summary described in your instructions.\n\n--- USER INSTRUCTIONS FOR THIS SUMMARY (take precedence over the defaults) ---\nkeep the numbers\n\n--- LANGUAGE ---\nThis conversation is in English. Write every value in the JSON in English; do not translate it. The JSON keys stay as specified.\n\n--- EXISTING STATE (update/merge with new information) ---\n{\"active_artifacts\":[],\"confirmed_decisions\":[{\"decision\":\"Use PostgreSQL\"}],\"current_goal\":\"Plan the migration\",\"open_tasks\":[],\"rejected_approaches\":[],\"structured_summary\":{\"key_context\":\"Budget 487,250 THB; call <<PHONE_1>> & confirm\",\"progress\":\"Steps agreed\"},\"unresolved_questions\":[]}\n\n--- NEW MESSAGES TO ANALYSE ---\n[user] The launch moved from 12 October to 19 October.\n[assistant] Noted: launch on 19 October. K7-OK\n[user] What is left before launch?\n"
+    }
+  ],
+  "renders": [
+    {
+      "name": "a full state in the shape the extraction prompt asks for",
+      "state": {
+        "current_goal": "ย้ายระบบไป region สิงคโปร์",
+        "structured_summary": {
+          "key_context": "งบประมาณ 487,250 บาท; ขั้นตอนที่ 3 คือย้าย bucket ไป region สิงคโปร์",
+          "progress": "ตกลงลำดับขั้นตอนแล้ว",
+          "technical_details": "ลด TTL ของ DNS ล่วงหน้า"
+        },
+        "confirmed_decisions": [
+          {
+            "decision": "ใช้ PostgreSQL"
+          }
+        ],
+        "active_artifacts": [
+          {
+            "name": "plan.md",
+            "status": "in_progress"
+          }
+        ],
+        "open_tasks": [
+          {
+            "task": "ทดสอบการกู้คืน",
+            "status": "pending"
+          }
+        ],
+        "rejected_approaches": [
+          {
+            "approach": "MongoDB"
+          }
+        ],
+        "unresolved_questions": [
+          {
+            "question": "ใครอนุมัติ downtime"
+          }
+        ]
+      },
+      "block": "<conversation_state>\nSummary of this conversation so far (older messages have been compacted):\n\nGoal: ย้ายระบบไป region สิงคโปร์\n\nKey context: งบประมาณ 487,250 บาท; ขั้นตอนที่ 3 คือย้าย bucket ไป region สิงคโปร์\n\nProgress: ตกลงลำดับขั้นตอนแล้ว\n\nTechnical details: ลด TTL ของ DNS ล่วงหน้า\n\nConfirmed decisions:\n- ใช้ PostgreSQL\n\nActive artifacts:\n- plan.md (in_progress)\n\nOpen tasks:\n- ทดสอบการกู้คืน\n\nRejected approaches:\n- MongoDB\n\nUnresolved questions:\n- ใครอนุมัติ downtime\n\nThis summary stands in for older messages that are no longer sent verbatim. If the user refers to something that is in neither this summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.\n</conversation_state>\n"
+    },
+    {
+      "name": "a summary value that is a list, not a string",
+      "state": {
+        "current_goal": null,
+        "structured_summary": {
+          "key_context": [
+            "3. Move the bucket",
+            "- 4. Reopen ingest",
+            7
+          ],
+          "progress": "",
+          "details": "a key the renderer does not show"
+        }
+      },
+      "block": "<conversation_state>\nSummary of this conversation so far (older messages have been compacted):\n\nKey context: - 3. Move the bucket\n- 4. Reopen ingest\n\nThis summary stands in for older messages that are no longer sent verbatim. If the user refers to something that is in neither this summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.\n</conversation_state>\n"
+    }
+  ]
+}

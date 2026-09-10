@@ -27,6 +27,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -35,6 +36,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -158,8 +160,8 @@ type ExtractionOptions struct {
 }
 
 // extractionBatchLimit — new messages per extraction call. Each
-// message is truncated to 500 chars in the prompt, so 120 messages ≈
-// 60K chars ≈ 15–20K tokens: comfortably inside every model window
+// message is truncated to 500 bytes in the prompt, so 120 messages ≈
+// 60K bytes ≈ 15–20K tokens: comfortably inside every model window
 // we budget against, and small enough that a 1000-message backlog
 // is a handful of calls, not one 250K-token request.
 const extractionBatchLimit = 120
@@ -554,22 +556,50 @@ func (s *ConversationStateService) buildExtractionPrompt(
 			"rejected_approaches":  rawOrEmptyArray(existing.RejectedApproaches),
 			"unresolved_questions": rawOrEmptyArray(existing.UnresolvedQuestions),
 		}
-		if b, err := json.Marshal(blob); err == nil {
-			sb.Write(b)
-			sb.WriteString("\n")
+		// FIX106 — no HTML escaping. json.Marshal rewrites every < and > as a
+		// unicode escape, so the placeholder <<PHONE_1>> reached the model as
+		// escape sequences — valid JSON, but not the text the prompt tells it to
+		// copy exactly — and the desktop never escaped. encoding/json sorts the
+		// map keys; the desktop writes the same order.
+		// testdata/state_contract.json pins both.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(blob); err == nil {
+			sb.Write(buf.Bytes()) // Encode ends the line
 		}
 	}
 
 	sb.WriteString("\n--- NEW MESSAGES TO ANALYSE ---\n")
 	for i := range newMessages {
 		msg := &newMessages[i]
-		content := msg.ContentMasked
-		if len(content) > 500 {
-			content = content[:500] + "... [truncated]"
-		}
-		sb.WriteString(fmt.Sprintf("[%s] %s\n", msg.Role, content))
+		sb.WriteString(fmt.Sprintf("[%s] %s\n", msg.Role, truncateForExtraction(msg.ContentMasked)))
 	}
 	return sb.String()
+}
+
+// extractionMessageLimit is how much of each message the summariser reads,
+// in UTF-8 bytes — the budget chat-edge has always used (about 166 Thai
+// characters, 500 English ones).
+//
+// FIX106: the cut now lands on a character boundary. It used to slice the
+// bytes wherever 500 fell, splitting a Thai character and sending invalid
+// UTF-8. The desktop cut at 500 UTF-16 units instead — three times as much
+// Thai — and now cuts exactly as this does (testdata/state_contract.json).
+// Reading more of each message was NOT adopted: a 120-message Thai batch
+// would roughly triple in size and could overflow a 16k model's window, and
+// no measurement this round covers that.
+const extractionMessageLimit = 500
+
+func truncateForExtraction(content string) string {
+	if len(content) <= extractionMessageLimit {
+		return content
+	}
+	cut := extractionMessageLimit
+	for cut > 0 && !utf8.RuneStart(content[cut]) {
+		cut--
+	}
+	return content[:cut] + "... [truncated]"
 }
 
 // FIX33 A-D3 — the extraction prompt is ONE asset shared with the
@@ -886,6 +916,38 @@ func (s *ConversationStateService) BuildStateContextWithSources(
 		return "", nil
 	}
 
+	text := renderStateBlock(state)
+
+	label := "Conversation state available"
+	if state.CurrentGoal != nil && *state.CurrentGoal != "" {
+		label = "Goal: " + *state.CurrentGoal
+	}
+	sources := []ContextSource{{
+		SourceType:   model.SourceTypeConversationState,
+		SourceID:     state.ConversationID.String(),
+		DisplayLabel: TruncateLabel(label),
+	}}
+	return text, sources
+}
+
+// stateSummarySections is the order and heading of every structured_summary
+// key in the rendered block — the three keys the extraction prompt asks for.
+// The desktop renders the same list (conversation-state.ts);
+// testdata/state_contract.json pins both.
+//
+// FIX106 measured a form with verbatim sections (standing rules, the user's
+// requests, exact details, current work) against this prompt and did not ship
+// it (scripts/probes/summary-recall): one run recalled 4 of 7 facts where this
+// prompt recalled 7, the other returned JSON that did not parse.
+var stateSummarySections = []struct{ key, label string }{
+	{"key_context", "Key context"},
+	{"progress", "Progress"},
+	{"technical_details", "Technical details"},
+}
+
+// renderStateBlock is the <conversation_state> text for one state row. Pure,
+// so the cross-tree contract test can call it.
+func renderStateBlock(state *model.ConversationState) string {
 	var sb strings.Builder
 	sb.WriteString("<conversation_state>\n")
 	sb.WriteString("Summary of this conversation so far (older messages have been compacted):\n")
@@ -896,19 +958,19 @@ func (s *ConversationStateService) BuildStateContextWithSources(
 		sb.WriteString("\n")
 	}
 
-	// structured_summary is a map[string]string in practice — render
-	// each non-empty entry as "Key: value".
 	if len(state.StructuredSummary) > 2 { // not "{}"
-		var summary map[string]string
+		var summary map[string]any
 		if err := json.Unmarshal(state.StructuredSummary, &summary); err == nil {
-			for _, key := range []string{"key_context", "progress", "technical_details"} {
-				if val := strings.TrimSpace(summary[key]); val != "" {
-					sb.WriteString("\n")
-					sb.WriteString(titleCase(strings.ReplaceAll(key, "_", " ")))
-					sb.WriteString(": ")
-					sb.WriteString(val)
-					sb.WriteString("\n")
+			for _, sec := range stateSummarySections {
+				val := summaryText(summary[sec.key])
+				if val == "" {
+					continue
 				}
+				sb.WriteString("\n")
+				sb.WriteString(sec.label)
+				sb.WriteString(": ")
+				sb.WriteString(val)
+				sb.WriteString("\n")
 			}
 		}
 	}
@@ -926,17 +988,33 @@ func (s *ConversationStateService) BuildStateContextWithSources(
 	sb.WriteString("\n")
 	sb.WriteString(StateHonestyNote)
 	sb.WriteString("\n</conversation_state>\n")
+	return sb.String()
+}
 
-	label := "Conversation state available"
-	if state.CurrentGoal != nil && *state.CurrentGoal != "" {
-		label = "Goal: " + *state.CurrentGoal
+// summaryText renders one structured_summary value: a string as written, a
+// list of strings (models sometimes return one) as "- " lines. Anything else
+// is left out rather than failing the whole block — before FIX106 one
+// non-string value made the entire summary disappear from the prompt.
+func summaryText(v any) string {
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t)
+	case []any:
+		lines := make([]string, 0, len(t))
+		for _, item := range t {
+			str, ok := item.(string)
+			if !ok || strings.TrimSpace(str) == "" {
+				continue
+			}
+			str = strings.TrimSpace(str)
+			if !strings.HasPrefix(str, "- ") {
+				str = "- " + str
+			}
+			lines = append(lines, str)
+		}
+		return strings.Join(lines, "\n")
 	}
-	sources := []ContextSource{{
-		SourceType:   model.SourceTypeConversationState,
-		SourceID:     state.ConversationID.String(),
-		DisplayLabel: TruncateLabel(label),
-	}}
-	return sb.String(), sources
+	return ""
 }
 
 // StateHonestyNote is the sentence appended inside every rendered

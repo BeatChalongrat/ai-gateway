@@ -102,7 +102,7 @@ export function emptyState(conversationId: string): ConversationStateRecord {
 export function isStateEmpty(s: ConversationStateRecord | null | undefined): boolean {
   if (!s) return true;
   if (s.current_goal && s.current_goal.trim()) return false;
-  if (Object.values(s.structured_summary ?? {}).some((v) => typeof v === "string" && v.trim())) return false;
+  if (Object.values(s.structured_summary ?? {}).some((v) => summaryText(v) !== "")) return false;
   return [s.confirmed_decisions, s.active_artifacts, s.open_tasks, s.rejected_approaches, s.unresolved_questions].every((a) => !a || a.length === 0);
 }
 
@@ -182,35 +182,102 @@ export interface StateExtractor {
   extract(input: ExtractionInput): Promise<ExtractionResult>;
 }
 
-/** The prompt body — mirrors chat-edge's buildExtractionPrompt. */
+/**
+ * How much of each message the summariser reads: chat-edge's extractionMessageLimit,
+ * 500 UTF-8 bytes, cut on a character boundary. FIX106: the desktop used to cut
+ * at 500 UTF-16 units — three times as much Thai as chat-edge sends.
+ */
+export const EXTRACTION_MESSAGE_BYTES = 500;
+
+function truncateUtf8(text: string, limit: number): string {
+  if (Buffer.byteLength(text, "utf8") <= limit) return text;
+  let bytes = 0;
+  let out = "";
+  for (const ch of text) {
+    const b = Buffer.byteLength(ch, "utf8");
+    if (bytes + b > limit) break;
+    bytes += b;
+    out += ch;
+  }
+  return out + "... [truncated]";
+}
+
+const LANGUAGE_NAMES: Record<string, string> = { th: "Thai", en: "English", ja: "Japanese", ko: "Korean", zh: "Chinese" };
+
+/** chat-edge's detectLanguage: the first character that names a script decides. */
+export function detectLanguage(text: string): string {
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x0e00 && c <= 0x0e7f) return "th";
+    if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(ch)) return "ja";
+    if (/\p{Script=Hangul}/u.test(ch)) return "ko";
+    if (/\p{Script=Han}/u.test(ch)) return "zh";
+  }
+  return "en";
+}
+
+function plainText(m: GatewayMessage): string {
+  const c = m.content as unknown;
+  if (typeof c === "string") return c;
+  if (Array.isArray(c)) return (c as { type?: string; text?: string }[]).map((b) => (b?.type === "text" ? b.text ?? "" : "[image]")).join(" ");
+  return "";
+}
+
+/** chat-edge's conversationLanguageName: the language of the user's messages, most frequent wins. */
+export function conversationLanguageName(messages: readonly GatewayMessage[]): string {
+  const count = (onlyUser: boolean) => {
+    const c: Record<string, number> = {};
+    for (const m of messages) if (!onlyUser || m.role === "user") c[detectLanguage(plainText(m))] = (c[detectLanguage(plainText(m))] ?? 0) + 1;
+    return c;
+  };
+  let counts = count(true);
+  if (Object.keys(counts).length === 0) counts = count(false);
+  let best = "";
+  let n = 0;
+  for (const code of ["th", "ja", "ko", "zh", "en"]) {
+    if ((counts[code] ?? 0) > n) {
+      best = code;
+      n = counts[code]!;
+    }
+  }
+  return LANGUAGE_NAMES[best] ?? "";
+}
+
+/**
+ * The prompt body — chat-edge's buildExtractionPrompt, byte for byte
+ * (FIX106: testdata/state_contract.json is checked by both trees). Before
+ * FIX106 this body had no language line, cut messages by a different unit and
+ * wrote the existing state in a different key order.
+ */
 export function buildExtractionUserBody(existing: ConversationStateRecord | null, messages: readonly GatewayMessage[], instructions: string): string {
   const parts: string[] = ["Analyse the following conversation messages and produce the structured state summary described in your instructions.\n"];
   const instr = instructions.trim();
   if (instr) parts.push(`\n--- USER INSTRUCTIONS FOR THIS SUMMARY (take precedence over the defaults) ---\n${instr}\n`);
-  if (existing && !isStateEmpty(existing)) {
+  const lang = conversationLanguageName(messages);
+  if (lang) parts.push(`\n--- LANGUAGE ---\nThis conversation is in ${lang}. Write every value in the JSON in ${lang}; do not translate it. The JSON keys stay as specified.\n`);
+  const hasSummary = existing && Object.keys(existing.structured_summary ?? {}).length > 0;
+  if (existing && (existing.current_goal !== null || hasSummary || (existing.confirmed_decisions ?? []).length > 0 || (existing.open_tasks ?? []).length > 0)) {
     parts.push("\n--- EXISTING STATE (update/merge with new information) ---\n");
+    // Keys in chat-edge's order (encoding/json sorts map keys).
     parts.push(
       JSON.stringify({
-        current_goal: existing.current_goal ?? "",
-        structured_summary: existing.structured_summary ?? {},
-        confirmed_decisions: existing.confirmed_decisions ?? [],
         active_artifacts: existing.active_artifacts ?? [],
+        confirmed_decisions: existing.confirmed_decisions ?? [],
+        current_goal: existing.current_goal ?? "",
         open_tasks: existing.open_tasks ?? [],
         rejected_approaches: existing.rejected_approaches ?? [],
+        structured_summary: existing.structured_summary ?? {},
         unresolved_questions: existing.unresolved_questions ?? [],
       }) + "\n",
     );
   }
   parts.push("\n--- NEW MESSAGES TO ANALYSE ---\n");
   for (const m of messages) {
-    let text = "";
-    const c = m.content as unknown;
-    if (typeof c === "string") text = c;
-    else if (Array.isArray(c)) text = (c as { type?: string; text?: string }[]).map((b) => (b?.type === "text" ? b.text ?? "" : "[image]")).join(" ");
+    let text = plainText(m);
     if (m.role === "assistant" && m.tool_calls && m.tool_calls.length > 0) {
       text = `${text} (called tool${m.tool_calls.length > 1 ? "s" : ""}: ${m.tool_calls.map((t) => t.function?.name ?? "?").join(", ")})`.trim();
     }
-    if (text.length > 500) text = text.slice(0, 500) + "... [truncated]";
+    text = truncateUtf8(text, EXTRACTION_MESSAGE_BYTES);
     parts.push(`[${m.role}] ${text}\n`);
   }
   return parts.join("");
@@ -275,6 +342,9 @@ export class GatewayStateExtractor implements StateExtractor {
       // CompletionRequest carries no temperature; chat-edge pins 0.1 on its
       // side. The gateway default is fine for a JSON envelope.)
       max_tokens: 1500,
+      // FIX106 — no thinking, as chat-edge sends (FIX102 Part D): a reasoning
+      // model's thinking shares the 1,500-token cap and can leave no JSON.
+      reasoning: { mode: "off", show_summary: false },
       // FIX36 Part D — the stored summary must never carry raw PII (A-D6):
       // ask the gateway to SKIP restoring masked values in THIS reply, so
       // the state keeps placeholders exactly like the web extractor (which
@@ -301,9 +371,25 @@ export class GatewayStateExtractor implements StateExtractor {
   }
 }
 
-// ── renderer: chat-edge's BuildStateContext, byte-compatible where it matters ──
-function titleCase(s: string): string {
-  return s.length ? s[0]!.toUpperCase() + s.slice(1) : s;
+// ── renderer: chat-edge's renderStateBlock, byte for byte (testdata/state_contract.json) ──
+
+/** chat-edge's stateSummarySections: the three keys the extraction prompt asks for, in order. */
+export const STATE_SUMMARY_SECTIONS: readonly { key: string; label: string }[] = [
+  { key: "key_context", label: "Key context" },
+  { key: "progress", label: "Progress" },
+  { key: "technical_details", label: "Technical details" },
+];
+
+/** chat-edge's summaryText: a string as written, a list of strings as "- " lines, anything else left out. */
+export function summaryText(v: unknown): string {
+  if (typeof v === "string") return v.trim();
+  if (Array.isArray(v)) {
+    return v
+      .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+      .map((x) => (x.trim().startsWith("- ") ? x.trim() : `- ${x.trim()}`))
+      .join("\n");
+  }
+  return "";
 }
 function list(label: string, items: Record<string, unknown>[] | undefined, field: string): string {
   if (!items || items.length === 0) return "";
@@ -316,9 +402,9 @@ function list(label: string, items: Record<string, unknown>[] | undefined, field
 export function renderStateBlock(state: ConversationStateRecord): string {
   let out = "<conversation_state>\nSummary of this conversation so far (older messages have been compacted):\n";
   if (state.current_goal && state.current_goal.trim()) out += `\nGoal: ${state.current_goal.trim()}\n`;
-  for (const key of ["key_context", "progress", "technical_details"]) {
-    const v = state.structured_summary?.[key];
-    if (typeof v === "string" && v.trim()) out += `\n${titleCase(key.replace(/_/g, " "))}: ${v.trim()}\n`;
+  for (const sec of STATE_SUMMARY_SECTIONS) {
+    const v = summaryText(state.structured_summary?.[sec.key]);
+    if (v) out += `\n${sec.label}: ${v}\n`;
   }
   out += list("Confirmed decisions", state.confirmed_decisions, "decision");
   if (state.active_artifacts && state.active_artifacts.length > 0) {
