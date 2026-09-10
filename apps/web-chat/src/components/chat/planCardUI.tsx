@@ -52,12 +52,12 @@ export function CardShell({
   // canvas; the inner header/footer dividers stay subtle for
   // visual hierarchy.
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm">
+    <div className="my-3 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-sm">
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
         <span className="flex-shrink-0">{headerIcon}</span>
         <span className="text-sm font-semibold text-text-primary">{headerTitle}</span>
         {metadata ? (
-          <span className="ml-auto text-xs text-text-tertiary">{metadata}</span>
+          <span className="ml-auto text-xs text-text-muted">{metadata}</span>
         ) : null}
       </div>
       <div className="space-y-3 px-4 py-3">{children}</div>
@@ -81,7 +81,7 @@ interface PlanListProps {
 export function PlanList({ title, children }: PlanListProps) {
   return (
     <div>
-      <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-tertiary">
+      <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-muted">
         {title}
       </div>
       <ul className="space-y-1 text-sm text-text-primary">{children}</ul>
@@ -100,7 +100,7 @@ export function PlanListItem({ icon, index, children }: PlanListItemProps) {
     <li className="flex items-start gap-2">
       <span className="mt-0.5 flex-shrink-0">{icon}</span>
       {index != null ? (
-        <span className="w-5 flex-shrink-0 text-right text-text-tertiary">{index}.</span>
+        <span className="w-5 flex-shrink-0 text-right text-text-muted">{index}.</span>
       ) : null}
       <span className="min-w-0 flex-1">{children}</span>
     </li>
@@ -163,7 +163,7 @@ export function PrimaryButton({
 
 export function SecondaryButton({ onClick, disabled, icon, children }: ButtonProps) {
   // Uses the existing CSS-variable theme tokens — bg-bg-elevated,
-  // text-text-primary, border-border-default — so it tracks light/
+  // text-text-primary, border-border — so it tracks light/
   // dark automatically via the project's data-theme switch. No
   // dark: Tailwind classes (this project doesn't enable them).
   return (
@@ -171,7 +171,7 @@ export function SecondaryButton({ onClick, disabled, icon, children }: ButtonPro
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:cursor-not-allowed disabled:opacity-60"
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface disabled:cursor-not-allowed disabled:opacity-60"
     >
       {icon}
       <span>{children}</span>
@@ -195,7 +195,7 @@ export function DownloadButton({
     <button
       type="button"
       onClick={() => void api.downloadFile(fileId, filename)}
-      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
+      className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
     >
       <Download className="h-4 w-4" />
       <span>{label ?? t("common.download")}</span>
@@ -207,7 +207,7 @@ export function DownloadButton({
 // 2 · 12 KB · 5 slides ·…) under the result card's header.
 export function MetadataRow({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-tertiary">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted">
       {children}
     </div>
   );

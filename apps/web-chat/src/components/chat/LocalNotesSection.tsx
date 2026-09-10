@@ -60,15 +60,15 @@ export function LocalNotesSection() {
       <div className="my-8 h-px bg-border-subtle" />
       <section data-testid="local-notes-section">
         <div className="flex items-baseline gap-2">
-          <Laptop className="h-3.5 w-3.5 text-text-tertiary" aria-hidden />
+          <Laptop className="h-3.5 w-3.5 text-text-muted" aria-hidden />
           <h2 className="text-sm font-semibold text-text-primary">{t("memory.local.title")}</h2>
         </div>
         <p className="mt-1 text-sm text-text-secondary">{t("memory.local.description")}</p>
         <div className="mt-3">
           {error ? (
-            <p className="text-xs text-text-tertiary">{error}</p>
+            <p className="text-xs text-text-muted">{error}</p>
           ) : notes === null ? null : notes.length === 0 ? (
-            <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-4 text-center text-xs text-text-tertiary">
+            <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-4 text-center text-xs text-text-muted">
               {t("memory.local.empty")}
             </p>
           ) : (
@@ -84,7 +84,7 @@ export function LocalNotesSection() {
                     disabled={busy === n.id}
                     onClick={() => void remove(n.id)}
                     aria-label={t("memory.local.delete")}
-                    className="focus-ring shrink-0 rounded-md p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
+                    className="focus-ring shrink-0 rounded-md p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>

@@ -91,7 +91,7 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
         title={`${info!.history_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens`}
       >
         {label}
-        {info!.compacted || info!.state_present ? <span className="ml-1 text-text-tertiary">· {t("context.compacted")}</span> : null}
+        {info!.compacted || info!.state_present ? <span className="ml-1 text-text-muted">· {t("context.compacted")}</span> : null}
       </span>
       <button
         type="button"

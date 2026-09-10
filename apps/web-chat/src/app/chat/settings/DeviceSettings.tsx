@@ -397,9 +397,9 @@ function SitesSection() {
   return (
     <Section title={t("settings.section.sites")} hint={t("settings.section.sites.hint")}>
       {sites === null ? (
-        <p className="text-sm text-text-tertiary">{t("common.loading")}</p>
+        <p className="text-sm text-text-muted">{t("common.loading")}</p>
       ) : sites.length === 0 ? (
-        <p className="text-sm text-text-tertiary" data-testid="sites-empty">{t("settings.sites.empty")}</p>
+        <p className="text-sm text-text-muted" data-testid="sites-empty">{t("settings.sites.empty")}</p>
       ) : (
         <ul className="space-y-1" data-testid="sites-list">
           {sites.map((origin) => (

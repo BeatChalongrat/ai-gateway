@@ -120,7 +120,7 @@ function MenuButton({
       onClick={onClick}
       className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
     >
-      <span aria-hidden className="shrink-0 text-text-tertiary">
+      <span aria-hidden className="shrink-0 text-text-muted">
         {icon}
       </span>
       <span>{children}</span>

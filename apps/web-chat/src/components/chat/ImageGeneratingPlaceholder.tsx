@@ -22,7 +22,7 @@ export function ImageGeneratingPlaceholder() {
       <div className="skeleton absolute inset-0 rounded-none" aria-hidden />
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4">
         <ImageIcon
-          className="h-8 w-8 animate-pulse text-text-tertiary"
+          className="h-8 w-8 animate-pulse text-text-muted"
           aria-hidden
         />
         <div className="text-center">

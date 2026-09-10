@@ -57,13 +57,13 @@ export interface ExcelPlan {
   [k: string]: unknown;
 }
 
-// All action icons render in text-text-tertiary so the plan list
+// All action icons render in text-text-muted so the plan list
 // reads as structural metadata. The icon SHAPE alone carries the
 // "what kind of mutation" hint; colour was removed in Session 5.1
 // because the cards were starting to look like an AI template
 // brochure and the visual hierarchy was lost (blue CTA needs to
 // be the only thing that pops).
-const ACTION_ICON_CLASS = "h-4 w-4 text-text-tertiary";
+const ACTION_ICON_CLASS = "h-4 w-4 text-text-muted";
 const ACTION_ICONS: Record<string, ReactNode> = {
   create_sheet:     <Plus className={ACTION_ICON_CLASS} />,
   delete_sheet:     <Plus className={`${ACTION_ICON_CLASS} -rotate-45`} />,
@@ -188,7 +188,7 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
               icon={
                 <Plus
                   className={`h-4 w-4 ${
-                    line.startsWith("ERROR") ? "text-status-danger" : "text-text-tertiary"
+                    line.startsWith("ERROR") ? "text-status-danger" : "text-text-muted"
                   }`}
                 />
               }

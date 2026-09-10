@@ -298,7 +298,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
                 {t("common.download")}
               </button>
               {savedName ? (
-                <span className="text-xs text-text-tertiary" data-testid="media-saved-note">
+                <span className="text-xs text-text-muted" data-testid="media-saved-note">
                   {t("media.savedToFiles", { name: savedName })}
                 </span>
               ) : null}

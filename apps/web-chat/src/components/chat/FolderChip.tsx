@@ -116,9 +116,9 @@ export function FolderChip({ disabled }: { disabled?: boolean }) {
         data-count={folders === null ? "" : String(count)}
       >
         {count === 0 ? (
-          <FolderPlus width={12} height={12} className="text-text-tertiary" aria-hidden />
+          <FolderPlus width={12} height={12} className="text-text-muted" aria-hidden />
         ) : (
-          <FolderOpen width={12} height={12} className="text-text-tertiary" aria-hidden />
+          <FolderOpen width={12} height={12} className="text-text-muted" aria-hidden />
         )}
         <span className={`truncate font-medium ${count === 0 ? "" : "text-text-primary"}`}>{label}</span>
       </button>
@@ -153,7 +153,7 @@ export function FolderChip({ disabled }: { disabled?: boolean }) {
                 <ul className="flex flex-col gap-1" data-testid="folder-chip-list">
                   {folders.map((f) => (
                     <li key={f} title={f} className="flex items-center gap-2 rounded-md px-2.5 py-1.5">
-                      <FolderOpen width={12} height={12} className="shrink-0 text-text-tertiary" aria-hidden />
+                      <FolderOpen width={12} height={12} className="shrink-0 text-text-muted" aria-hidden />
                       <span className="truncate font-medium text-text-primary">{folderBasename(f)}</span>
                       <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">{f}</span>
                     </li>

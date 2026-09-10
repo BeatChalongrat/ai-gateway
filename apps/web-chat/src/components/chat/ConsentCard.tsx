@@ -73,7 +73,7 @@ export function ConsentCard({
               ? t("consent.subagentFrom", { label: sub.label })
               : t("consent.subagentFromUnnamed")}
           </div>
-          <div className="mt-1 text-text-tertiary">{t("consent.subagentTaskLabel")}</div>
+          <div className="mt-1 text-text-muted">{t("consent.subagentTaskLabel")}</div>
           <blockquote className="mt-0.5 max-h-24 overflow-auto whitespace-pre-wrap border-l-2 border-amber-500/50 pl-2 text-text-primary">
             {sub.task}
           </blockquote>
@@ -103,7 +103,7 @@ export function ConsentCard({
           {consent.argumentDetail}
         </pre>
       ) : consent.argumentSummary ? (
-        <div className="mt-2 truncate text-xs text-text-tertiary" title={consent.argumentSummary}>
+        <div className="mt-2 truncate text-xs text-text-muted" title={consent.argumentSummary}>
           {consent.argumentSummary}
         </div>
       ) : null}
@@ -130,7 +130,7 @@ export function ConsentCard({
         <button
           type="button"
           onClick={() => onDecision("allow", "once")}
-          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-bg-surface-hover focus-ring"
+          className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-bg-elevated focus-ring"
           data-testid="consent-allow-once"
         >
           {site ? "Allow this action" : "Allow once"}

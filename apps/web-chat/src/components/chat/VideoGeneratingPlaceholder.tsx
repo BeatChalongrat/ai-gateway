@@ -70,7 +70,7 @@ export function VideoGeneratingPlaceholder({
         <div className="skeleton absolute inset-0 rounded-none" aria-hidden />
       ) : null}
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4">
-        <Video className="h-8 w-8 animate-pulse text-text-tertiary" aria-hidden />
+        <Video className="h-8 w-8 animate-pulse text-text-muted" aria-hidden />
         <div className="w-full max-w-[240px] text-center">
           {hasProgress ? (
             <div

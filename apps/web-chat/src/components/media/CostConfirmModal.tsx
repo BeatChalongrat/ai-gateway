@@ -61,12 +61,12 @@ export function CostConfirmModal({
     >
       <div className="flex flex-col gap-3 text-sm">
         <div className="flex items-center justify-between">
-          <span className="text-text-tertiary">{t("media.confirm.costApprox")}</span>
+          <span className="text-text-muted">{t("media.confirm.costApprox")}</span>
           <span className="text-base font-semibold text-text-primary">{estimatedUsd}</span>
         </div>
         {balanceAfterUsd ? (
           <div className="flex items-center justify-between">
-            <span className="text-text-tertiary">{t("media.confirm.balanceAfter")}</span>
+            <span className="text-text-muted">{t("media.confirm.balanceAfter")}</span>
             <span className="text-text-secondary">
               {balanceBeforeUsd ? `${balanceBeforeUsd} → ` : ""}
               {balanceAfterUsd}

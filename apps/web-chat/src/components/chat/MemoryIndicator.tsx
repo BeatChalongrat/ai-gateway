@@ -90,7 +90,7 @@ export function MemoryIndicator({ conversationId }: Props) {
             : t("memory.indicator.offTooltip")
         }
         className={`focus-ring relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors hover:bg-bg-elevated ${
-          enabled ? "text-text-tertiary" : "text-text-muted"
+          enabled ? "text-text-muted" : "text-text-muted"
         }`}
       >
         {enabled ? (
@@ -122,7 +122,7 @@ export function MemoryIndicator({ conversationId }: Props) {
             <div className="text-xs font-semibold text-text-primary">
               {enabled ? t("memory.popover.on") : t("memory.popover.off")}
             </div>
-            <div className="mt-0.5 text-[11px] text-text-tertiary">
+            <div className="mt-0.5 text-[11px] text-text-muted">
               {enabled
                 ? t("memory.popover.onHint")
                 : t("memory.popover.offHint")}
@@ -135,9 +135,9 @@ export function MemoryIndicator({ conversationId }: Props) {
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
           >
             {enabled ? (
-              <BrainCircuit className="h-3.5 w-3.5 text-text-tertiary" />
+              <BrainCircuit className="h-3.5 w-3.5 text-text-muted" />
             ) : (
-              <Brain className="h-3.5 w-3.5 text-text-tertiary" />
+              <Brain className="h-3.5 w-3.5 text-text-muted" />
             )}
             <span>{enabled ? t("memory.popover.toggleOff") : t("memory.popover.toggleOn")}</span>
           </button>
@@ -167,7 +167,7 @@ function SettingsIcon() {
       viewBox="0 0 24 24"
       fill="none"
       aria-hidden
-      className="text-text-tertiary"
+      className="text-text-muted"
     >
       <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.7" />
       <path

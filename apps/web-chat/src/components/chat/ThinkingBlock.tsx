@@ -85,7 +85,7 @@ export function ThinkingBlock({
         // During streaming the button is non-interactive in practice (the
         // block is force-expanded) — it just hosts the shimmer label.
         aria-label={isStreaming ? t("reasoning.thinking") : undefined}
-        className="flex items-center gap-1.5 text-xs text-text-tertiary transition-colors hover:text-text-secondary"
+        className="flex items-center gap-1.5 text-xs text-text-muted transition-colors hover:text-text-secondary"
       >
         {isStreaming ? (
           // ChatGPT-style "Thinking…" with a bright wave sweeping across
@@ -112,7 +112,7 @@ export function ThinkingBlock({
       {(expanded || isStreaming) && content ? (
         <div
           ref={contentRef}
-          className="mt-2 max-h-[300px] overflow-y-auto whitespace-pre-wrap border-l-2 border-border-default pl-3 text-xs leading-relaxed text-text-tertiary"
+          className="mt-2 max-h-[300px] overflow-y-auto whitespace-pre-wrap border-l-2 border-border pl-3 text-xs leading-relaxed text-text-muted"
         >
           {content}
         </div>

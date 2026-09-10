@@ -216,15 +216,15 @@ function SubagentCard({ activity, steps, all, superseded }: { activity: ToolActi
         aria-label={`${t("subagent.label")}: ${activity.argsSummary ?? ""}${failed || stepFailed ? ` — ${t("subagent.failed")}` : ""}`}
       >
         {running ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-tertiary" />
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-text-muted" />
         ) : failed || stepFailed ? (
           <X className="h-3.5 w-3.5 shrink-0 text-status-danger" />
         ) : (
           <Check className="h-3.5 w-3.5 shrink-0 text-status-success" />
         )}
-        <Cpu className="h-3.5 w-3.5 shrink-0 text-text-tertiary" aria-hidden />
+        <Cpu className="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
         <span className="shrink-0 text-xs font-medium text-text-secondary">{t("subagent.label")}</span>
-        <span className="min-w-0 flex-1 truncate text-sm text-text-tertiary" title={activity.argsSummary}>
+        <span className="min-w-0 flex-1 truncate text-sm text-text-muted" title={activity.argsSummary}>
           {activity.argsSummary}
         </span>
         {!running && (failed || stepFailed) ? (
@@ -314,7 +314,7 @@ export function ToolCard({
     return (
       <div className="flex items-center gap-2 py-1 text-sm" data-testid="tool-activity">
         {running ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-text-tertiary" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-text-muted" />
         ) : (
           <Check className="h-3.5 w-3.5 text-status-success" />
         )}
@@ -352,20 +352,20 @@ export function ToolCard({
         {/* status glyph */}
         {running ? (
           <span className="relative flex h-2.5 w-2.5 shrink-0">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-text-tertiary/60" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-text-tertiary" />
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-text-muted/60" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-text-muted" />
           </span>
         ) : failed ? (
           <X className="h-4 w-4 shrink-0 text-status-danger" />
         ) : (
           <Check className="h-4 w-4 shrink-0 text-status-success" />
         )}
-        <Icon className="h-4 w-4 shrink-0 text-text-tertiary" />
+        <Icon className="h-4 w-4 shrink-0 text-text-muted" />
         <span className="shrink-0 text-sm font-medium text-text-primary" data-testid="tool-label">
           {label}
         </span>
         {activity.subject ? (
-          <span className="truncate text-sm text-text-tertiary" title={activity.subject} data-testid="tool-subject">
+          <span className="truncate text-sm text-text-muted" title={activity.subject} data-testid="tool-subject">
             {activity.subject}
           </span>
         ) : null}
@@ -392,7 +392,7 @@ export function ToolCard({
       {/* running indeterminate bar */}
       {running ? (
         <div className="mx-3 mb-1 h-0.5 overflow-hidden rounded bg-border">
-          <div className="h-full w-1/3 animate-[shimmer_1.4s_infinite] bg-text-tertiary/50" />
+          <div className="h-full w-1/3 animate-[shimmer_1.4s_infinite] bg-text-muted/50" />
         </div>
       ) : null}
 
@@ -436,7 +436,7 @@ export function ToolCard({
         <div className="border-t border-border-subtle px-3 py-2">
           {activity.isCodeRun && activity.codeText ? (
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.code")}</div>
+              <div className="mb-1 text-xs font-medium text-text-muted">{t("tool.section.code")}</div>
               <pre className="mb-2 max-h-48 overflow-auto rounded bg-bg-base px-3 py-2 font-mono text-xs text-text-secondary">
                 {activity.codeText}
               </pre>
@@ -445,7 +445,7 @@ export function ToolCard({
             // The raw argument summary the row no longer shows — the
             // Claude Code contract: the call and its result expand together.
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.input")}</div>
+              <div className="mb-1 text-xs font-medium text-text-muted">{t("tool.section.input")}</div>
               <pre className="mb-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-bg-base px-3 py-2 font-mono text-xs text-text-secondary" data-testid="tool-input-detail">
                 {activity.input ?? activity.argsSummary}
               </pre>
@@ -453,7 +453,7 @@ export function ToolCard({
           ) : null}
           {activity.resultPreview ? (
             <>
-              <div className="mb-1 text-xs font-medium text-text-tertiary">{t("tool.section.output")}</div>
+              <div className="mb-1 text-xs font-medium text-text-muted">{t("tool.section.output")}</div>
               <pre
                 className={`max-h-52 overflow-auto rounded bg-bg-base px-3 py-2 font-mono text-xs ${failed ? "text-status-danger" : "text-text-secondary"}`}
               >

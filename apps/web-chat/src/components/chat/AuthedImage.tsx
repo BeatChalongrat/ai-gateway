@@ -64,7 +64,7 @@ export function AuthedImage({ fileId, alt, className, onReady }: Props) {
   if (failed) {
     return (
       <div
-        className={`flex items-center justify-center bg-bg-elevated text-text-tertiary ${className ?? ""}`}
+        className={`flex items-center justify-center bg-bg-elevated text-text-muted ${className ?? ""}`}
         title={alt}
         aria-label={alt}
       >

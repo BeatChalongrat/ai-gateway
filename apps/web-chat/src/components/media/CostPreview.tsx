@@ -23,12 +23,12 @@ export function CostPreview({
   return (
     <div className="rounded-lg border border-border bg-bg-secondary px-3 py-2 text-sm">
       <div className="flex items-center justify-between">
-        <span className="text-text-tertiary">{t("media.cost.estimated")}</span>
+        <span className="text-text-muted">{t("media.cost.estimated")}</span>
         <span className="font-medium text-text-primary">{estimateUsd}</span>
       </div>
       {balanceBefore && balanceAfter ? (
         <div className="mt-1 flex items-center justify-between">
-          <span className="text-text-tertiary">{t("media.cost.balance")}</span>
+          <span className="text-text-muted">{t("media.cost.balance")}</span>
           <span className="text-text-secondary">
             {balanceBefore} → {balanceAfter}
           </span>

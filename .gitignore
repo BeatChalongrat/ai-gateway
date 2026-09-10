@@ -241,3 +241,7 @@ scripts/probes/router-compare/results*.md
 scripts/*.txt
 scripts/*.jsonl
 apps/desktop/build/installer-defines.nsh
+
+# Output folders written by AI tooling. The repo is meant to read as the
+# owner's own work; a folder named after a tool does not belong in it.
+Claude outputs/

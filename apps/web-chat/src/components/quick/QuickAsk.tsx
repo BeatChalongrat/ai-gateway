@@ -230,7 +230,7 @@ export function QuickAsk() {
         <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto px-3 pt-3">
           {!convId && recents.length > 0 ? (
             <div data-testid="quick-recents">
-              <p className="mb-1 px-1 text-[11px] uppercase tracking-wider text-text-tertiary">{t("quick.recent")}</p>
+              <p className="mb-1 px-1 text-[11px] uppercase tracking-wider text-text-muted">{t("quick.recent")}</p>
               <ul className="flex flex-col">
                 {recents.map((c) => (
                   <li key={c.id}>
@@ -239,7 +239,7 @@ export function QuickAsk() {
                       onClick={() => setConvId(c.id)}
                       className="focus-ring flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                     >
-                      <MessageSquare width={14} height={14} className="shrink-0 text-text-tertiary" aria-hidden />
+                      <MessageSquare width={14} height={14} className="shrink-0 text-text-muted" aria-hidden />
                       <span className="truncate">{c.title || t("conv.untitled")}</span>
                     </button>
                   </li>
@@ -269,7 +269,7 @@ export function QuickAsk() {
           injectedText={injectedText}
           onInjectedTextConsumed={() => setInjectedText(null)}
         />
-        <p className="px-4 pb-2 text-[11px] text-text-tertiary">{t("quick.hint")}</p>
+        <p className="px-4 pb-2 text-[11px] text-text-muted">{t("quick.hint")}</p>
       </div>
     </div>
   );

@@ -92,7 +92,7 @@ export function WorkspacePanel({ convId, open, onClose }: Props) {
           {totalVersions} {t(totalVersions === 1 ? "unit.version" : "unit.versions")}
         </>
       }
-      icon={<FolderOpen className="h-5 w-5 text-text-tertiary" />}
+      icon={<FolderOpen className="h-5 w-5 text-text-muted" />}
       maxWidth={448}
       closeLabel={t("ws.close")}
       onClose={onClose}
@@ -145,7 +145,7 @@ function FileList({
 }) {
   const t = useT();
   if (loading && files == null) {
-    return <div className="text-xs text-text-tertiary">{t("ws.loading")}</div>;
+    return <div className="text-xs text-text-muted">{t("ws.loading")}</div>;
   }
   if (error) {
     return (
@@ -156,7 +156,7 @@ function FileList({
   }
   if (!files || files.length === 0) {
     return (
-      <div className="rounded-md border border-border-subtle bg-bg-base/40 px-3 py-6 text-center text-xs text-text-tertiary">
+      <div className="rounded-md border border-border-subtle bg-bg-base/40 px-3 py-6 text-center text-xs text-text-muted">
         {t("ws.empty")}
       </div>
     );
@@ -178,12 +178,12 @@ function FileList({
                   {f.filename}
                 </div>
                 {f.version ? (
-                  <span className="flex-shrink-0 rounded-full border border-border-default px-2 py-0.5 text-[10px] font-semibold text-text-tertiary">
+                  <span className="flex-shrink-0 rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold text-text-muted">
                     v{f.version}
                   </span>
                 ) : null}
               </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-tertiary">
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-muted">
                 <span>{humanSize(f.file_size_bytes)}</span>
                 <span>·</span>
                 <span>{timeAgo(f.created_at)}</span>
@@ -200,7 +200,7 @@ function FileList({
                 <button
                   type="button"
                   onClick={() => void api.downloadFile(f.id, f.filename)}
-                  className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
+                  className="focus-ring inline-flex items-center gap-1 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                 >
                   <Download className="h-3 w-3" />
                   {t("common.download")}
@@ -208,7 +208,7 @@ function FileList({
                 <button
                   type="button"
                   onClick={() => onPick(f)}
-                  className="focus-ring inline-flex items-center gap-1 rounded-md border border-border-default bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
+                  className="focus-ring inline-flex items-center gap-1 rounded-md border border-border bg-bg-elevated px-2 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-surface"
                 >
                   <History className="h-3 w-3" />
                   {t("ws.history", { n: String(f.version_count) })}

@@ -113,7 +113,7 @@ export function CanvasPanel() {
           </>
         ) : null
       }
-      icon={<PanelRight className="h-5 w-5 text-text-tertiary" />}
+      icon={<PanelRight className="h-5 w-5 text-text-muted" />}
       actions={
         artifact ? (
           <>
@@ -132,7 +132,7 @@ export function CanvasPanel() {
             for the empty state and for artifacts too large to edit. */}
         {artifact && artifact.content.length <= MAX_CANVAS_CHARS ? (
           <div className="flex items-center gap-1 border-b border-border-subtle px-3 py-1.5">
-            <div className="flex overflow-hidden rounded-lg border border-border-default">
+            <div className="flex overflow-hidden rounded-lg border border-border">
               <ModeButton
                 active={mode === "preview"}
                 onClick={() => setMode("preview")}
@@ -177,7 +177,7 @@ export function CanvasPanel() {
                 </button>
               </>
             ) : (
-              <span className="px-2 text-[11px] text-text-tertiary">
+              <span className="px-2 text-[11px] text-text-muted">
                 {t("canvas.sessionOnly")}
               </span>
             )}
@@ -246,12 +246,12 @@ function VersionRail() {
       data-testid="canvas-versions"
     >
       {loading ? (
-        <div className="flex items-center gap-2 px-1 py-1 text-xs text-text-tertiary">
+        <div className="flex items-center gap-2 px-1 py-1 text-xs text-text-muted">
           <Loader2 className="h-3 w-3 animate-spin" />
           {t("canvas.historyLoading")}
         </div>
       ) : versions.length === 0 ? (
-        <div className="px-1 py-1 text-xs text-text-tertiary">
+        <div className="px-1 py-1 text-xs text-text-muted">
           {t("canvas.historyEmpty")}
         </div>
       ) : (
@@ -262,7 +262,7 @@ function VersionRail() {
               className="flex items-center gap-2 rounded px-1 py-1 text-xs"
             >
               <span className="font-medium text-text-primary">v{v.version}</span>
-              <span className="truncate text-text-tertiary">
+              <span className="truncate text-text-muted">
                 {new Date(v.created_at).toLocaleString()}
               </span>
               {i === 0 ? (
@@ -322,7 +322,7 @@ function CanvasBody({ artifact }: { artifact: CanvasArtifact | null }) {
   const source = rendered;
   if (!artifact || !source.trim()) {
     return (
-      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-tertiary">
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-muted">
         {t("canvas.empty")}
       </div>
     );
@@ -461,7 +461,7 @@ function ExecutableFrame({ srcDoc, title }: { srcDoc: string; title: string }) {
       <div className="relative flex-1">
         {phase === "loading" ? (
           <div
-            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 text-sm text-text-tertiary"
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 text-sm text-text-muted"
             data-testid="canvas-loading"
           >
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -511,7 +511,7 @@ function CopyArtifactButton({ content }: { content: string }) {
     <button
       type="button"
       onClick={copy}
-      className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+      className="focus-ring rounded p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       aria-label={copied ? t("code.copied") : t("code.copyAria")}
       title={copied ? t("code.copied") : t("code.copy")}
     >
@@ -580,7 +580,7 @@ function DownloadArtifactButton({
       <button
         type="button"
         onClick={download}
-        className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border-default bg-bg-elevated px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-bg-surface"
+        className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary transition-colors hover:bg-bg-surface"
       >
         <Download className="h-4 w-4" />
         {t("canvas.download")}
@@ -591,7 +591,7 @@ function DownloadArtifactButton({
     <button
       type="button"
       onClick={download}
-      className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+      className="focus-ring rounded p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       aria-label={t("canvas.download")}
       title={t("canvas.download")}
     >

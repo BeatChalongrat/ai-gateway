@@ -51,15 +51,15 @@ export function timeAgo(iso: string): string {
 }
 
 // changeIcon — per-change-type glyph for the comparison card.
-// All in text-text-tertiary so the diff reads as structural
+// All in text-text-muted so the diff reads as structural
 // metadata, not as a coloured alarm. The Plus / Minus / arrow
 // shapes alone carry the "added / removed / changed" signal.
 export function changeIcon(type: string): ReactNode {
   if (type.endsWith("_added")) {
-    return <Plus className="h-3.5 w-3.5 text-text-tertiary" />;
+    return <Plus className="h-3.5 w-3.5 text-text-muted" />;
   }
   if (type.endsWith("_removed")) {
-    return <Minus className="h-3.5 w-3.5 text-text-tertiary" />;
+    return <Minus className="h-3.5 w-3.5 text-text-muted" />;
   }
-  return <ArrowUpDown className="h-3.5 w-3.5 text-text-tertiary" />;
+  return <ArrowUpDown className="h-3.5 w-3.5 text-text-muted" />;
 }

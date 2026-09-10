@@ -1,0 +1,3 @@
+{
+  "text-text-placeholder": "FIX97 — NOT a rename, a missing token. These 6 uses are all the `placeholder:` variant on inputs and they mean --text-placeholder, which globals.css declares but tailwind.config.js has no key for. Renaming them to text-text-muted would be wrong in the light theme, where the two variables genuinely differ: --text-placeholder is #9B9B9B and --text-tertiary is #6D6D6D. There is also no ::placeholder rule in globals.css, so --text-placeholder currently has zero working consumers in either direction. Adding the key (and its -rgb channel form) reaches globals.css, which Part 4 put out of scope; recorded here rather than papered over with a wrong colour."
+}

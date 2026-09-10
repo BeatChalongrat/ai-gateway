@@ -42,9 +42,9 @@ export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: P
 	}
 
 	return (
-		<div className="rounded-lg border border-border-default bg-bg-surface px-4 py-3">
+		<div className="rounded-lg border border-border bg-bg-surface px-4 py-3">
 			<p className="text-sm text-text-primary">{memory.content}</p>
-			<p className="mt-1 text-xs text-text-tertiary">{metaParts.join(" · ")}</p>
+			<p className="mt-1 text-xs text-text-muted">{metaParts.join(" · ")}</p>
 
 			{memory.evidence_excerpt ? (
 				<p className="mt-1 text-xs italic text-text-muted">
@@ -66,7 +66,7 @@ export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: P
 					type="button"
 					onClick={() => void onReject(memory.id)}
 					disabled={saving}
-					className="focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-60"
+					className="focus-ring inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-60"
 				>
 					<X className="h-3.5 w-3.5" aria-hidden />
 					{t("memory.pending.reject")}

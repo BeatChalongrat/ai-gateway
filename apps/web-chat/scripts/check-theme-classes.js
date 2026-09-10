@@ -41,6 +41,7 @@ const path = require("node:path");
 const ROOT = path.resolve(__dirname, "..");
 const SRC = path.join(ROOT, "src");
 const CONFIG = path.join(ROOT, "tailwind.config.js");
+const ALLOWLIST = path.join(__dirname, "theme-classes.allowlist.json");
 
 /** Every colour scale the theme declares: scale -> Set of valid keys. */
 function declaredScales() {
@@ -124,7 +125,14 @@ function scan(scales) {
 }
 
 const scales = declaredScales();
-const { findings, counts } = scan(scales);
+let { findings, counts } = scan(scales);
+// An allowlisted name is one we have decided NOT to rename, each with its
+// reason on the record — the shape check-generated-classes.js already uses.
+// It is still dead; it is just dead on purpose and written down.
+const allow = fs.existsSync(ALLOWLIST) ? JSON.parse(fs.readFileSync(ALLOWLIST, "utf8")) : {};
+const allowed = findings.filter((f) => allow[f.dead]);
+findings = findings.filter((f) => !allow[f.dead]);
+counts = new Map([...counts].filter(([k]) => !allow[k]));
 const listOnly = process.argv.includes("--list");
 
 if (counts.size > 0) {
@@ -144,5 +152,7 @@ if (counts.size > 0) {
     process.exit(1);
   }
 } else {
-  console.log(`theme-classes: 0 dead theme utilities (${scales.size} scales policed: ${[...scales.keys()].join(", ")})`);
+  const n = Object.keys(allow).length;
+  console.log(`theme-classes: 0 dead theme utilities (${scales.size} scales policed: ${[...scales.keys()].join(", ")})`
+    + (n ? `; ${allowed.length} use(s) of ${n} allowlisted name(s), each with a reason` : ""));
 }

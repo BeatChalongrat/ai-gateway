@@ -268,7 +268,7 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
       <div className="px-4 pb-1 pt-3">
         <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-text-muted">
           {t("usage.byModel")}
-          <span className="ml-1 normal-case tracking-normal text-text-tertiary" data-testid="usage-by-model-scope">
+          <span className="ml-1 normal-case tracking-normal text-text-muted" data-testid="usage-by-model-scope">
             · {t("usage.byModelScope")}
           </span>
         </div>
@@ -296,7 +296,7 @@ function UsagePanel({ onClose }: { onClose: () => void }) {
       </div>
       {typeof loggedTotal === "number" ? (
         <div
-          className="flex items-center justify-between px-4 pb-2.5 text-[11px] text-text-tertiary"
+          className="flex items-center justify-between px-4 pb-2.5 text-[11px] text-text-muted"
           title={t("usage.logTotalHint")}
         >
           <span>{t("usage.logTotal")}</span>

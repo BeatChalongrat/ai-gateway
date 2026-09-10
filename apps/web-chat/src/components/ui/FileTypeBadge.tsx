@@ -9,7 +9,7 @@
 // cleaner visual hierarchy where the only colour in the workspace
 // surface is the blue primary CTA.
 //
-// Theming: uses the project's text-text-tertiary token (resolves
+// Theming: uses the project's text-text-muted token (resolves
 // via the data-theme CSS variable swap), so the badge tracks
 // light↔dark without `dark:` utility classes (which aren't enabled
 // in this project's Tailwind config).
@@ -96,7 +96,7 @@ export function FileTypeBadge({
   return (
     <div
       className={cls(
-        "relative flex-shrink-0 text-text-tertiary",
+        "relative flex-shrink-0 text-text-muted",
         config.wrapper,
         className,
       )}
@@ -145,7 +145,7 @@ export function StatusBadge({ status, size = "md", className }: StatusBadgeProps
   // intentionally muted (most status badges are successes — no
   // need to scream green).
   let icon: ReactNode;
-  let tint = "text-text-tertiary";
+  let tint = "text-text-muted";
   switch (status) {
     case "error":
       icon = <X className={inner} />;
@@ -167,7 +167,7 @@ export function StatusBadge({ status, size = "md", className }: StatusBadgeProps
   return (
     <span
       className={cls(
-        "inline-flex flex-shrink-0 items-center justify-center rounded-full border border-text-tertiary/60",
+        "inline-flex flex-shrink-0 items-center justify-center rounded-full border border-text-muted/60",
         wrap,
         tint,
         className,

@@ -238,13 +238,13 @@ export function SidePane({ open, label, title, subtitle, icon, actions, maxWidth
       {icon}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold text-text-primary">{title ?? label}</div>
-        {subtitle ? <div className="truncate text-xs text-text-tertiary">{subtitle}</div> : null}
+        {subtitle ? <div className="truncate text-xs text-text-muted">{subtitle}</div> : null}
       </div>
       {actions}
       <button
         type="button"
         onClick={onClose}
-        className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+        className="focus-ring rounded p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
         aria-label={closeLabel}
         data-testid={testId ? `${testId}-close` : undefined}
       >
@@ -269,7 +269,7 @@ export function SidePane({ open, label, title, subtitle, icon, actions, maxWidth
         aria-label={label}
         data-testid={testId}
         data-pane-mode="docked"
-        className="relative flex h-full shrink-0 flex-col border-l border-border-default bg-bg-surface"
+        className="relative flex h-full shrink-0 flex-col border-l border-border bg-bg-surface"
         style={widthStyle}
       >
         {/* FIX82 — the splitter: a 7 px hit area straddling the border,
@@ -324,7 +324,7 @@ export function SidePane({ open, label, title, subtitle, icon, actions, maxWidth
         aria-hidden={open ? undefined : true}
         data-testid={testId}
         data-pane-mode="overlay"
-        className={`fixed right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border-default bg-bg-surface shadow-2xl transition-transform duration-200 ease-out ${
+        className={`fixed right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-bg-surface shadow-2xl transition-transform duration-200 ease-out ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
         style={{ maxWidth }}

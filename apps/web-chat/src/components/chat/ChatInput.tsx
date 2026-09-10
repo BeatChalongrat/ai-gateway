@@ -1198,7 +1198,7 @@ export function ChatInput({
             <div
               role="status"
               data-testid="image-intent-blocked"
-              className="mx-4 mt-3 rounded-lg border border-border-default bg-bg-elevated px-3 py-2 text-xs text-text-secondary"
+              className="mx-4 mt-3 rounded-lg border border-border bg-bg-elevated px-3 py-2 text-xs text-text-secondary"
             >
               {t("input.imageIntent.blocked", { model: activeModel?.name ?? activeModelId ?? "" })}
             </div>
@@ -1265,7 +1265,7 @@ export function ChatInput({
                     aria-expanded={hosted ? attachMenuOpen : undefined}
                     disabled={streaming || disabled}
                     data-testid="attach-button"
-                    className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
                       <path
@@ -1360,7 +1360,7 @@ export function ChatInput({
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     imageMode
                       ? "bg-violet-500/15 text-violet-400"
-                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
                   }`}
                 >
                   <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
@@ -1387,7 +1387,7 @@ export function ChatInput({
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     reasoningOn
                       ? "bg-blue-500/15 text-blue-400"
-                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
                   }`}
                 >
                   <BrainCircuit className="h-[18px] w-[18px]" aria-hidden />
@@ -1414,7 +1414,7 @@ export function ChatInput({
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     videoMode
                       ? "bg-rose-500/15 text-rose-400"
-                      : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
                   }`}
                 >
                   <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
@@ -1434,7 +1434,7 @@ export function ChatInput({
                   aria-label={t("input.voice")}
                   title={t("input.voice")}
                   disabled={disabled}
-                  className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                  className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                     <rect x="9" y="3" width="6" height="11" rx="3" />

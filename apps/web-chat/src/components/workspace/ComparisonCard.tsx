@@ -20,7 +20,7 @@ export function ComparisonCard({ result, onClose }: Props) {
   const t = useT();
   const { v1, v2, comparison } = result;
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-border-default bg-bg-surface shadow-sm">
+    <div className="my-3 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-sm">
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
         <span className="text-sm font-semibold text-text-primary">
           {t("ws.comparing", { a: String(v1.version), b: String(v2.version) })}
@@ -28,14 +28,14 @@ export function ComparisonCard({ result, onClose }: Props) {
         <button
           type="button"
           onClick={onClose}
-          className="focus-ring ml-auto rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+          className="focus-ring ml-auto rounded p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
           aria-label={t("ws.closeComparison")}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
       <div className="space-y-3 px-4 py-3">
-        <div className="text-xs text-text-tertiary">
+        <div className="text-xs text-text-muted">
           {t("ws.sizeChange", {
             from: humanSize(v1.file_size_bytes),
             to: humanSize(v2.file_size_bytes),
@@ -44,7 +44,7 @@ export function ComparisonCard({ result, onClose }: Props) {
         </div>
         {comparison.structural_changes.length > 0 ? (
           <div>
-            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-tertiary">
+            <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-text-muted">
               {t("plan.changes")}
             </div>
             <ul className="space-y-1 text-sm text-text-primary">

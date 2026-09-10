@@ -133,7 +133,7 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
       >
         {(() => {
           const Icon = mode ? MODE_ICONS[mode] : Hand;
-          return <Icon width={12} height={12} className={isSkip ? undefined : "text-text-tertiary"} aria-hidden />;
+          return <Icon width={12} height={12} className={isSkip ? undefined : "text-text-muted"} aria-hidden />;
         })()}
         <span className={`font-medium ${isSkip ? "" : "text-text-primary"}`}>
           {current ? t(current.labelKey) : t("perm.mode.label")}
@@ -182,7 +182,7 @@ export function PermissionModeSelector({ disabled }: { disabled?: boolean }) {
                     <span className="mt-0.5 shrink-0">
                       {(() => {
                         const Icon = MODE_ICONS[m.id];
-                        return <Icon width={14} height={14} className={warn ? "text-amber-500" : active ? "text-text-primary" : "text-text-tertiary"} aria-hidden />;
+                        return <Icon width={14} height={14} className={warn ? "text-amber-500" : active ? "text-text-primary" : "text-text-muted"} aria-hidden />;
                       })()}
                     </span>
                     <span className="min-w-0 flex-1">

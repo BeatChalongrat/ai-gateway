@@ -68,12 +68,12 @@ export function TemporaryChatBanner({ conversationId }: Props) {
         role="status"
         className="mx-auto flex max-w-3xl items-center gap-2 rounded-t-lg border border-b-0 border-border bg-bg-elevated px-3 py-1.5 text-[11px] text-text-secondary"
       >
-        <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+        <BrainCircuit className="h-3.5 w-3.5 shrink-0 text-text-muted" />
         <span className="min-w-0 flex-1">
           <span className="font-medium text-text-primary">
             {t("memory.banner.title")}
           </span>{" "}
-          <span className="text-text-tertiary">
+          <span className="text-text-muted">
             {t(READS_MEMORY ? "memory.banner.detail" : "memory.banner.detailStrict")}
           </span>
         </span>

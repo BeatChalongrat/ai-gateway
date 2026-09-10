@@ -43,7 +43,7 @@ export function ModeResetBanner() {
         type="button"
         onClick={() => setNotice(null)}
         aria-label={t("perm.mode.reset.dismiss")}
-        className="focus-ring rounded-md p-1 text-text-tertiary transition-colors hover:bg-bg-surface hover:text-text-primary"
+        className="focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary"
       >
         <X className="h-3.5 w-3.5" />
       </button>

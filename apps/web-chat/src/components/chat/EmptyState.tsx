@@ -172,7 +172,7 @@ export function EmptyState({ onPrompt, children }: Props) {
               {/* Icon inherits the chip's text colour — no accent
                   tint, no green. The chips are intentionally muted
                   so they read as suggestions, not CTAs. */}
-              <span className="text-text-tertiary">{c.icon}</span>
+              <span className="text-text-muted">{c.icon}</span>
               <span>{t(c.labelKey)}</span>
             </button>
           ))}

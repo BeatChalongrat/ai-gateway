@@ -55,7 +55,7 @@ export function VideoPlayer({ fileId, filename, className }: Props) {
   if (failed) {
     return (
       <div
-        className={`flex aspect-video w-full max-w-[480px] items-center justify-center rounded-lg border border-border bg-bg-elevated text-text-tertiary ${className ?? ""}`}
+        className={`flex aspect-video w-full max-w-[480px] items-center justify-center rounded-lg border border-border bg-bg-elevated text-text-muted ${className ?? ""}`}
         title={filename ?? "video"}
         aria-label={filename ?? "video"}
       >

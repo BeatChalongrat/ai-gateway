@@ -188,7 +188,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
         title={fullLabel}
       >
         {isAuto ? (
-          <Sparkles width={12} height={12} className="shrink-0 text-text-tertiary" aria-hidden />
+          <Sparkles width={12} height={12} className="shrink-0 text-text-muted" aria-hidden />
         ) : null}
         <span
           className="block max-w-[9rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
@@ -384,7 +384,7 @@ function ModelPicker({
       {/* Search — always visible, pinned above the scroll area. */}
       <div className="shrink-0 border-b border-border p-2">
         <div className="flex items-center gap-2 rounded-lg bg-bg-base px-2.5 py-1.5">
-          <Search width={14} height={14} className="shrink-0 text-text-tertiary" aria-hidden />
+          <Search width={14} height={14} className="shrink-0 text-text-muted" aria-hidden />
           <input
             ref={inputRef}
             type="text"
@@ -397,14 +397,14 @@ function ModelPicker({
               }
             }}
             placeholder={t("model.searchPlaceholder")}
-            className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-tertiary"
+            className="min-w-0 flex-1 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
           />
           {search ? (
             <button
               type="button"
               aria-label={t("a11y.clearSearch")}
               onClick={() => setSearch("")}
-              className="focus-ring shrink-0 rounded text-text-tertiary hover:text-text-primary"
+              className="focus-ring shrink-0 rounded text-text-muted hover:text-text-primary"
             >
               <X width={14} height={14} aria-hidden />
             </button>
@@ -420,7 +420,7 @@ function ModelPicker({
             sub={t("model.auto.description")}
             selected={isAuto}
             onClick={onPickAuto}
-            leading={<Sparkles width={13} height={13} className="text-text-tertiary" aria-hidden />}
+            leading={<Sparkles width={13} height={13} className="text-text-muted" aria-hidden />}
           />
         ) : null}
 
@@ -566,7 +566,7 @@ function ModelPicker({
                       <button
                         type="button"
                         onClick={() => toggle(provider)}
-                        className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-tertiary transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
+                        className="focus-ring w-full rounded-md px-3 py-2 text-left text-[12px] text-text-muted transition-colors hover:bg-bg-elevated/60 hover:text-text-secondary"
                       >
                         {t("model.showMore", { n: String(hiddenCount) })}
                       </button>
@@ -600,11 +600,11 @@ function Section({
     <div className="border-t border-border first:border-t-0">
       <div className="flex items-center justify-between px-3 pb-1 pt-2">
         <div className="flex min-w-0 items-center">
-          <span className="truncate text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+          <span className="truncate text-[10px] font-medium uppercase tracking-wider text-text-muted">
             {title}
           </span>
         </div>
-        {count ? <span className="shrink-0 text-[10px] text-text-tertiary">{count}</span> : null}
+        {count ? <span className="shrink-0 text-[10px] text-text-muted">{count}</span> : null}
       </div>
       <div>{children}</div>
     </div>
@@ -804,7 +804,7 @@ function ModelRow({
       {tier ? (
         <span
           title={t("model.tier.tooltip", { tier: t(TIER_LABEL_KEY[tier]) })}
-          className="inline-flex shrink-0 items-center rounded-md bg-bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary"
+          className="inline-flex shrink-0 items-center rounded-md bg-bg-elevated px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
         >
           {t(TIER_LABEL_KEY[tier])}
         </span>

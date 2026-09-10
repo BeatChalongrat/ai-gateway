@@ -311,7 +311,7 @@ export default function MemorySettingsPage() {
         <header className="mt-6 flex items-start gap-3">
           <span
             aria-hidden
-            className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border-subtle text-text-tertiary"
+            className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border-subtle text-text-muted"
           >
             <Brain className="h-5 w-5" />
           </span>
@@ -333,12 +333,12 @@ export default function MemorySettingsPage() {
         {pending.length > 0 ? (
           <section className="mt-8">
             <div className="flex items-baseline gap-2">
-              <Sparkles className="h-3.5 w-3.5 text-text-tertiary" aria-hidden />
+              <Sparkles className="h-3.5 w-3.5 text-text-muted" aria-hidden />
               <h2 className="text-xs font-medium uppercase tracking-wider text-text-muted">
                 {t("memory.suggested.title", { count: String(pending.length) })}
               </h2>
             </div>
-            <p className="mt-1 text-xs text-text-tertiary">
+            <p className="mt-1 text-xs text-text-muted">
               {t("memory.suggested.description")}
             </p>
             <div className="mt-3 space-y-2">
@@ -379,7 +379,7 @@ export default function MemorySettingsPage() {
             <div className="relative mt-3">
               <Search
                 aria-hidden
-                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary"
+                className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted"
               />
               <input
                 type="text"
@@ -403,7 +403,7 @@ export default function MemorySettingsPage() {
             ) : !memories || memories.length === 0 ? (
               <EmptyState onAdd={() => setCreateOpen(true)} />
             ) : filteredMemories && filteredMemories.length === 0 ? (
-              <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-6 text-center text-xs text-text-tertiary">
+              <p className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-6 text-center text-xs text-text-muted">
                 {t("memory.noResults", { query: searchQuery })}
               </p>
             ) : (
@@ -610,7 +610,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
   const t = useT();
   return (
     <div className="rounded-lg border border-border-subtle bg-bg-surface px-6 py-10 text-center">
-      <Brain className="mx-auto h-9 w-9 text-text-tertiary" />
+      <Brain className="mx-auto h-9 w-9 text-text-muted" />
       <p className="mt-4 text-sm font-medium text-text-primary">
         {t("memory.empty.title")}
       </p>
@@ -623,7 +623,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       <button
         type="button"
         onClick={onAdd}
-        className="focus-ring mx-auto mt-5 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+        className="focus-ring mx-auto mt-5 inline-flex items-center gap-1.5 rounded-lg border border-border-subtle bg-transparent px-3 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
         <Plus className="h-3.5 w-3.5" />
         {t("memory.addMemory")}
@@ -648,7 +648,7 @@ function ErrorState({
       <button
         type="button"
         onClick={onRetry}
-        className="focus-ring mt-3 rounded-md px-2 py-1 text-xs text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+        className="focus-ring mt-3 rounded-md px-2 py-1 text-xs text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
         {retryLabel}
       </button>

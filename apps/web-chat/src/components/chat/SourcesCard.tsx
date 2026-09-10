@@ -35,15 +35,15 @@ interface Props {
 	onOpenConversation?: (conversationId: string | null | undefined) => void;
 }
 
-// Monochrome icons by type — same text-text-tertiary treatment the
+// Monochrome icons by type — same text-text-muted treatment the
 // other Phase 4 / S2 cards use. The icon SHAPE alone carries the
 // type hint (no per-type colour wash).
 const SOURCE_ICONS: Record<ContextSourceType, JSX.Element> = {
-	saved_memory: <Brain className="h-3.5 w-3.5 text-text-tertiary" />,
-	conversation_state: <Layers className="h-3.5 w-3.5 text-text-tertiary" />,
-	past_conversation: <MessageSquare className="h-3.5 w-3.5 text-text-tertiary" />,
-	file_context: <FileText className="h-3.5 w-3.5 text-text-tertiary" />,
-	compacted_history: <Archive className="h-3.5 w-3.5 text-text-tertiary" />,
+	saved_memory: <Brain className="h-3.5 w-3.5 text-text-muted" />,
+	conversation_state: <Layers className="h-3.5 w-3.5 text-text-muted" />,
+	past_conversation: <MessageSquare className="h-3.5 w-3.5 text-text-muted" />,
+	file_context: <FileText className="h-3.5 w-3.5 text-text-muted" />,
+	compacted_history: <Archive className="h-3.5 w-3.5 text-text-muted" />,
 };
 
 const SOURCE_LABELS: Record<ContextSourceType, string> = {
@@ -73,7 +73,7 @@ export function SourcesCard({ sources, onEditMemory, onOpenConversation }: Props
 			<button
 				type="button"
 				onClick={() => setExpanded((v) => !v)}
-				className="focus-ring flex w-full items-center justify-between px-3 py-1.5 text-xs text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-secondary"
+				className="focus-ring flex w-full items-center justify-between px-3 py-1.5 text-xs text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-secondary"
 				aria-expanded={expanded}
 			>
 				<span>
@@ -129,7 +129,7 @@ function SourceRow({
 	onHide: () => void;
 }) {
 	const icon = SOURCE_ICONS[source.source_type] ?? (
-		<FileText className="h-3.5 w-3.5 text-text-tertiary" />
+		<FileText className="h-3.5 w-3.5 text-text-muted" />
 	);
 	const typeLabel = SOURCE_LABELS[source.source_type] ?? source.source_type;
 	const meta = secondaryLine(source);
@@ -141,7 +141,7 @@ function SourceRow({
 				<p className="truncate text-xs text-text-secondary" title={source.display_label}>
 					{source.display_label}
 				</p>
-				<p className="text-[11px] text-text-tertiary">
+				<p className="text-[11px] text-text-muted">
 					{typeLabel}
 					{meta ? ` · ${meta}` : null}
 				</p>
@@ -180,7 +180,7 @@ function RowAction({
 			aria-label={label}
 			title={label}
 			onClick={onClick}
-			className="focus-ring rounded p-1 text-text-tertiary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+			className="focus-ring rounded p-1 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
 		>
 			{children}
 		</button>

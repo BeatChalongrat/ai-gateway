@@ -159,9 +159,9 @@ function InteractiveArtifactCard({ content, title }: { content: string; title?: 
       type="button"
       onClick={open}
       data-testid="interactive-artifact-card"
-      className="focus-ring flex w-full items-center gap-3 border-b border-border-subtle bg-bg-surface px-4 py-3 text-left hover:bg-bg-surface-hover"
+      className="focus-ring flex w-full items-center gap-3 border-b border-border-subtle bg-bg-surface px-4 py-3 text-left hover:bg-bg-elevated"
     >
-      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-tertiary">
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0 text-text-muted">
         <rect x="2" y="3" width="20" height="14" rx="2" />
         <path d="m10 8 4 2.5-4 2.5z" fill="currentColor" stroke="none" />
         <path d="M8 21h8M12 17v4" />

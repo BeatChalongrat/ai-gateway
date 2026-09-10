@@ -72,7 +72,7 @@ export interface PptxPlan {
 // so the deck outline reads as structural metadata rather than
 // a coloured status alarm. Icon SHAPE alone carries the slide-
 // type hint.
-const SLIDE_ICON_CLASS = "h-4 w-4 text-text-tertiary";
+const SLIDE_ICON_CLASS = "h-4 w-4 text-text-muted";
 const SLIDE_ICONS: Record<string, ReactNode> = {
   title:              <Presentation className={SLIDE_ICON_CLASS} />,
   section_divider:    <LayoutTemplate className={SLIDE_ICON_CLASS} />,
@@ -191,7 +191,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
       </MetadataRow>
       {slideLog && slideLog.length > 0 ? (
         <details open={slideLog.length <= 8}>
-          <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-tertiary">
+          <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-muted">
             {t("plan.slideLog", { n: String(slideLog.length) })}
           </summary>
           <ul className="mt-2 space-y-1 text-sm text-text-primary">
@@ -201,7 +201,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
                   className={`mt-0.5 flex-shrink-0 ${
                     entry.status === "error"
                       ? "text-status-danger"
-                      : "text-text-tertiary"
+                      : "text-text-muted"
                   }`}
                 >
                   {entry.status === "error" ? "✗" : "✓"}
@@ -219,7 +219,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
         </details>
       ) : changes && changes.length > 0 ? (
         <details>
-          <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-tertiary">
+          <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-text-muted">
             {t("plan.changeLog", { n: String(changes.length) })}
           </summary>
           <ul className="mt-2 space-y-1 text-sm text-text-primary">
@@ -229,7 +229,7 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
                 <li key={i} className="flex items-start gap-2">
                   <span
                     className={`mt-0.5 flex-shrink-0 ${
-                      broken ? "text-status-danger" : "text-text-tertiary"
+                      broken ? "text-status-danger" : "text-text-muted"
                     }`}
                   >
                     {broken ? "✗" : "✓"}

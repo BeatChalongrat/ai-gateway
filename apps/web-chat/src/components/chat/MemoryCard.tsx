@@ -13,7 +13,7 @@
 // Visual language matches the rest of the chat surface: muted
 // monochrome (no per-type accent colours), the CSS-variable
 // tokens (text-text-primary / -secondary / -tertiary / -muted),
-// border-border-subtle / border-border-default for grouping.
+// border-border-subtle / border-border for grouping.
 
 import { Pencil, Pin, PinOff, X } from "lucide-react";
 
@@ -68,25 +68,25 @@ export function MemoryCard({
 
   return (
     <div
-      className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-3 transition-colors hover:border-border-default"
+      className="rounded-lg border border-border-subtle bg-bg-surface px-4 py-3 transition-colors hover:border-border"
       data-pinned={memory.is_pinned ? "true" : undefined}
     >
       <div className="flex items-start gap-2">
         {memory.is_pinned ? (
           <Pin
-            className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-tertiary"
+            className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-text-muted"
             aria-label={t("memory.card.pinned")}
           />
         ) : null}
         <p className="min-w-0 flex-1 text-sm text-text-primary">{memory.content}</p>
       </div>
 
-      <p className="mt-1 text-xs text-text-tertiary">{metaParts.join(" · ")}</p>
+      <p className="mt-1 text-xs text-text-muted">{metaParts.join(" · ")}</p>
 
       {sourceLabel ? (
         <p className="mt-0.5 text-xs text-text-muted">
           {t("memory.card.sourceLabel")}{" "}
-          <span className="text-text-tertiary">{sourceLabel}</span>
+          <span className="text-text-muted">{sourceLabel}</span>
         </p>
       ) : null}
 
@@ -141,8 +141,8 @@ function CardAction({
       onClick={onClick}
       className={`focus-ring inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors ${
         danger
-          ? "text-text-tertiary hover:bg-status-danger/10 hover:text-status-danger"
-          : "text-text-tertiary hover:bg-bg-elevated hover:text-text-primary"
+          ? "text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
+          : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
       }`}
     >
       {icon}

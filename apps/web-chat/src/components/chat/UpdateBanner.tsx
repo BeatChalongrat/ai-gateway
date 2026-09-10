@@ -64,13 +64,13 @@ export function UpdateBanner() {
     >
       <span className="min-w-0 flex-1">
         {t("update.available", { latest: notice.latest, current: notice.current })}{" "}
-        <span className="text-text-tertiary">{t("update.howTo")}</span>
+        <span className="text-text-muted">{t("update.howTo")}</span>
       </span>
       <button
         type="button"
         onClick={dismiss}
         aria-label={t("update.desktopDismiss")}
-        className="focus-ring rounded-md p-1 text-text-tertiary transition-colors hover:bg-bg-surface hover:text-text-primary"
+        className="focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary"
       >
         <X className="h-3.5 w-3.5" />
       </button>

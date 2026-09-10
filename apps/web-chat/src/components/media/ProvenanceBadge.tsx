@@ -46,7 +46,7 @@ export function ProvenanceBadge({ provenance, className }: Props) {
       aria-label={tooltip}
       className={
         "inline-flex items-center gap-1 rounded-full border border-border " +
-        "bg-bg-elevated px-2 py-0.5 text-[11px] text-text-tertiary " +
+        "bg-bg-elevated px-2 py-0.5 text-[11px] text-text-muted " +
         "backdrop-blur " +
         (className ?? "")
       }
