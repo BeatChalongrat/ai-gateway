@@ -53,6 +53,16 @@ type ModelHandler struct {
 	// gwVision (FIX65) — the Gateway's DB-authoritative vision flag per
 	// model id from the last successful fetch, for KnownWithoutVision.
 	gwVision map[string]bool
+	// gwContext (FIX101) — the Gateway's ADVERTISED context window per
+	// model id (model_configs.max_context_tokens), from the last
+	// successful fetch. Recorded SEPARATELY from the cached
+	// modelResponse rows on purpose: those rows fall back to the static
+	// modelMetadata guesses (128000 / 200000) when the Gateway sends
+	// nothing, and a guess presented to the context compiler as data is
+	// the whole defect this round exists to end. Only a value the
+	// Gateway actually sent lands here; an id that is absent means
+	// "the catalogue does not know", not "128000".
+	gwContext map[string]int
 }
 
 func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelHandler {
@@ -345,9 +355,13 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 	// FIX65 — the vision flag per id, straight from the Gateway (only
 	// entries that carry a capabilities block; the rest stay unknown).
 	gwVision := make(map[string]bool, len(gwModels))
+	gwContext := make(map[string]int, len(gwModels))
 	for _, m := range gwModels {
 		if m.Capabilities != nil {
 			gwVision[m.ID] = m.Capabilities.Vision
+		}
+		if m.ContextWindow > 0 { // FIX101 — only what the Gateway sent
+			gwContext[m.ID] = m.ContextWindow
 		}
 	}
 	h.mu.Lock()
@@ -355,6 +369,7 @@ func (h *ModelHandler) catalog(ctx context.Context) []modelResponse {
 	h.cachedAt = time.Now()
 	h.gwTools = gwTools
 	h.gwVision = gwVision
+	h.gwContext = gwContext
 	h.mu.Unlock()
 	return out
 }
@@ -633,6 +648,48 @@ func (h *ModelHandler) KnownWithoutVision(ctx context.Context, id string) bool {
 	}
 	sees, ok := h.gwVision[id]
 	return ok && !sees
+}
+
+// AdvertisedContextWindow reports the context window the CATALOGUE
+// carries for “id“ — model_configs.max_context_tokens, which an
+// operator edits in the admin console — in tokens, or 0 when the
+// catalogue does not know it.
+//
+// FIX101: this is the number the context compiler budgets against, via
+// service.ContextWindowLookup. Before it, the compiler consulted only
+// its own hard-coded map and fell through to a 120,000 default, so a
+// model nobody had pinned was treated as a flagship: Typhoon-S-ThaiLLM-
+// 8B-Instruct was budgeted at 120,000 against a real 16,384 and the
+// owner's conversation was reported 11 % full while the provider was
+// refusing it.
+//
+// It is deliberately ADVERTISED, not working: the headroom convention
+// belongs in exactly one place (service.workingLimitFrom), applied to
+// whatever number arrives, rather than being pre-subtracted at each
+// source and then impossible to audit.
+//
+// Returning 0 is a real answer and the caller must honour it: it means
+// the Gateway did not send a window for this id, and the caller's own
+// fallback — the seed map, then a conservative default — is more honest
+// than a number invented here.
+func (h *ModelHandler) AdvertisedContextWindow(ctx context.Context, id string) int {
+	if id == "" || id == service.AutoModelID {
+		// "auto" is a router sentinel, not a model, and it STAYS in the
+		// conversation row (221 of the owner's conversations carry it) —
+		// the gateway's router picks the answering model per turn, after
+		// the budget has already been decided. There is no window to
+		// report. Returning 0 sends the caller to defaultContextLimit,
+		// which is the smallest window measured on a model serving this
+		// deployment — the only value that cannot overflow whichever
+		// model the router lands on. Reporting some other model's window
+		// here would budget the turn against a model that is not
+		// answering it.
+		return 0
+	}
+	h.catalog(ctx)
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.gwContext[id]
 }
 
 // ReasoningCapable reports whether “id“'s catalog entry advertises

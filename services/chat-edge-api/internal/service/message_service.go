@@ -113,6 +113,8 @@ type MessageService struct {
 	// FIX64 — drops the cached catalog behind nonToolModel so a stale
 	// "has tools" answer can be re-asked after the Gateway refuses tools.
 	invalidateCatalog func()
+	// contextWindow (FIX101) — catalogue lookup for the context budget.
+	contextWindow ContextWindowLookup
 	// FIX65 — model-id -> "known to lack image input"
 	// (handler.ModelHandler.KnownWithoutVision). History image blocks are
 	// withheld from such a model, and a model_no_vision_support refusal
@@ -764,6 +766,15 @@ func (s *MessageService) SetToolCapabilityChecker(fn func(ctx context.Context, m
 // tools are attached for every model (pre-existing behaviour).
 func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, modelID string) bool) {
 	s.nonToolModel = fn
+}
+
+// SetContextWindowLookup wires the catalogue's advertised context window
+// (handler.ModelHandler.AdvertisedContextWindow) for the ONE budget this
+// service builds itself — the /context-info path taken when no compiler
+// is wired. The compiler holds its own copy; both must read the same
+// source or the meter would disagree with the send.
+func (s *MessageService) SetContextWindowLookup(fn ContextWindowLookup) {
+	s.contextWindow = fn
 }
 
 // SetCatalogInvalidator wires the "drop the cached model catalog" hook
@@ -3381,7 +3392,11 @@ func (s *MessageService) InspectContext(
 		// shape they'd get with the compiler wired — just with no
 		// compaction ever applied.
 		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
-		budget := CalculateBudget(conv.ModelID, EstimateTokens(prefix)+4, 0, 0, 0, numTools*perToolTokens)
+		// FIX101 — s.compiler is nil only in tests and misconfiguration,
+		// but the number it reports still has to come from the same place
+		// the real path uses, or /context-info would answer with the seed
+		// map while the send budgeted against the catalogue.
+		budget := CalculateBudgetWith(ctx, s.contextWindow, conv.ModelID, EstimateTokens(prefix)+4, 0, 0, 0, numTools*perToolTokens)
 		return &CompiledContext{
 			SystemPrefix:  prefix,
 			History:       history,

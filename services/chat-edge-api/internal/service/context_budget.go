@@ -14,7 +14,10 @@
 //     model doesn't waste 50K of useable budget on reserve
 package service
 
-import "strings"
+import (
+	"context"
+	"strings"
+)
 
 // ContextBudget is the per-request allocation snapshot. The
 // ContextCompiler returns this verbatim in CompiledContext so
@@ -48,14 +51,26 @@ type ContextBudget struct {
 	MessagesRemaining int
 }
 
-// ModelContextLimits records the working context-window size we
-// budget against for each provider/model. These are deliberately
-// BELOW the provider's documented hard cap so:
-//   - prompt-tuning churn doesn't accidentally overflow
-//   - the conservative estimator's overshoot stays inside budget
+// ── Two different numbers, and the difference is the whole bug ────────
 //
-// Add a new model: pick the documented cap, knock 5–10 % off,
-// round to a clean number, drop it in.
+// An ADVERTISED window is what the provider says the model holds
+// (Typhoon: 16,384). A WORKING limit is what we budget against, which is
+// deliberately smaller so prompt-tuning churn and the estimator's
+// overshoot stay inside the real cap. Everything in ModelContextLimits
+// below is a WORKING limit — somebody already subtracted the headroom
+// by hand. Everything the catalogue carries is ADVERTISED.
+//
+// FIX101: mixing the two is how this went wrong. Use workingLimitFrom()
+// on anything that arrives from data; never on a value out of the map.
+//
+// ModelContextLimits is now a SEED, not the authority. The authority is
+// the catalogue (model_configs.max_context_tokens, operator-editable in
+// the admin console, refreshed on chat-edge's five-minute TTL). The map
+// answers only for ids the catalogue does not carry — a gateway that is
+// down, or a model discovered after this binary was built.
+//
+// Add a new model here: pick the documented cap, knock 5–10 % off,
+// round to a clean number, drop it in. Better: put it in the catalogue.
 var ModelContextLimits = map[string]int{
 	// OpenAI
 	"gpt-4o":        120000,
@@ -82,16 +97,98 @@ var ModelContextLimits = map[string]int{
 	"gemini-2.0-flash": 500000,
 }
 
-// defaultContextLimit is the fallback for models we haven't pinned
-// in the map. Mirrors a modern flagship's working size; if the
-// real model is smaller, the estimator's overshoot keeps the
-// request from blowing past the hard cap.
-const defaultContextLimit = 120000
+// headroomFraction is the 5–10 % convention the map documents, applied
+// as an actual step to an actual number instead of being typed in once
+// per model and then trusted forever. 10 %: the conservative end,
+// because the estimator that has to fit inside it runs high, and because
+// the cost of being 10 % under is some lost history while the cost of
+// being over is a refused turn.
+const headroomFraction = 0.90
 
-// GetModelContextLimit looks up the working limit, falling back to
-// prefix match (so "claude-sonnet-4-20250514" inherits the
-// "claude-sonnet-4" entry) and finally to defaultContextLimit.
+// headroomStep rounds the result DOWN to a clean number — the second
+// half of the map's own instruction, "round to a clean number".
+const headroomStep = 500
+
+// smallestObservedWindow is 16,384: the smallest context window measured
+// on a model actually serving this deployment. Four of the seven
+// self-hosted models refuse there — Typhoon-S-ThaiLLM-8B-Instruct (the
+// model that broke the owner's conversation on 2026-09-10),
+// OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2,
+// Pathumma-ThaiLLM-qwen3-8b-think-3.0.0 and THaLLE-0.2-ThaiLLM-8B-fa —
+// each verified by the provider's own refusal sentence. It is also
+// gpt-3.5-turbo's cap.
+const smallestObservedWindow = 16384
+
+// workingLimitFrom turns an ADVERTISED window into the working limit we
+// budget against. This is the only place the headroom convention lives.
+func workingLimitFrom(advertised int) int {
+	if advertised <= 0 {
+		// Not "unknown model" — "caller passed nothing". The unknown-model
+		// answer is defaultContextLimit, chosen by GetModelContextLimitWith;
+		// resolving it here would make the two definitions circular.
+		advertised = smallestObservedWindow
+	}
+	w := int(float64(advertised) * headroomFraction)
+	if w >= headroomStep {
+		w -= w % headroomStep
+	}
+	return w
+}
+
+// defaultContextLimit is the fallback for a model neither the catalogue
+// nor the seed map knows.
+//
+// It used to be 120,000, justified in a comment that read: "Mirrors a
+// modern flagship's working size; if the real model is smaller, the
+// estimator's overshoot keeps the request from blowing past the hard
+// cap." That sentence was false, and it is worth saying why rather than
+// deleting it quietly, because otherwise the next person writes it
+// again. The estimator runs a few per cent high. Nothing about a few per
+// cent saves a request when the assumed window is seven times the real
+// one — which is exactly what happened: Typhoon inherited 120,000
+// against a real 16,384, so the app reported the conversation 11 % full
+// while the provider refused it at 16,413 tokens. A comment that claims
+// a safety property the code does not have is worse than no comment.
+//
+// The replacement is conservative on purpose. An unknown model that is
+// genuinely larger loses some history until somebody catalogues it,
+// which is one admin edit and is recoverable. An unknown model that is
+// genuinely smaller refuses the turn, which is not.
+var defaultContextLimit = workingLimitFrom(smallestObservedWindow)
+
+// ContextWindowLookup answers "what does the CATALOGUE say this model's
+// advertised window is", in tokens; 0 means it does not know. Backed by
+// handler.ModelHandler's cached gateway catalogue, which is
+// model_configs.max_context_tokens — operator-editable in the admin
+// console, refreshed on the five-minute TTL, invalidatable. Optional:
+// nil falls through to the seed map, the pre-FIX101 behaviour.
+type ContextWindowLookup func(ctx context.Context, modelID string) int
+
+// GetModelContextLimit resolves the WORKING limit from the seed map
+// alone. Kept for callers with no catalogue to hand;
+// GetModelContextLimitWith is the one production uses.
 func GetModelContextLimit(modelID string) int {
+	return GetModelContextLimitWith(context.Background(), nil, modelID)
+}
+
+// GetModelContextLimitWith resolves the WORKING limit in priority order:
+//
+//  1. the catalogue's advertised window, with headroom applied
+//  2. an exact seed-map entry (already a working limit)
+//  3. the longest matching seed-map prefix, so
+//     "claude-sonnet-4-20250514" inherits "claude-sonnet-4"
+//  4. defaultContextLimit
+//
+// The catalogue wins outright rather than being combined with the map,
+// because an operator who edits the number in the admin console has to
+// see it take effect — a "whichever is smaller" rule would silently
+// ignore them raising a limit the map understates.
+func GetModelContextLimitWith(ctx context.Context, lookup ContextWindowLookup, modelID string) int {
+	if lookup != nil {
+		if advertised := lookup(ctx, modelID); advertised > 0 {
+			return workingLimitFrom(advertised)
+		}
+	}
 	if v, ok := ModelContextLimits[modelID]; ok {
 		return v
 	}
@@ -135,7 +232,20 @@ func CalculateBudget(
 	modelID string,
 	systemPromptTokens, memoryTokens, stateTokens, fileTokens, toolReserve int,
 ) ContextBudget {
-	total := GetModelContextLimit(modelID)
+	return CalculateBudgetWith(
+		context.Background(), nil, modelID,
+		systemPromptTokens, memoryTokens, stateTokens, fileTokens, toolReserve,
+	)
+}
+
+// CalculateBudgetWith is CalculateBudget with the catalogue in hand.
+func CalculateBudgetWith(
+	ctx context.Context,
+	lookup ContextWindowLookup,
+	modelID string,
+	systemPromptTokens, memoryTokens, stateTokens, fileTokens, toolReserve int,
+) ContextBudget {
+	total := GetModelContextLimitWith(ctx, lookup, modelID)
 	output := outputReserveFor(total)
 
 	b := ContextBudget{

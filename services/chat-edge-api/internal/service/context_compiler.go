@@ -73,6 +73,25 @@ type ContextCompiler struct {
 	states       *ConversationStateService
 	triggerRatio float64
 	targetRatio  float64
+	// contextWindow (FIX101) — the catalogue's advertised window for a
+	// model id. nil means "no catalogue wired": the budget then comes
+	// from the seed map alone, which is the pre-FIX101 behaviour.
+	contextWindow ContextWindowLookup
+}
+
+// SetContextWindowLookup wires the catalogue into the budget
+// (handler.ModelHandler.AdvertisedContextWindow). Without it the
+// compiler budgets every unpinned model at defaultContextLimit — which
+// is how Typhoon came to be treated as a flagship.
+func (c *ContextCompiler) SetContextWindowLookup(fn ContextWindowLookup) {
+	c.contextWindow = fn
+}
+
+// ContextWindowLookupFn exposes the wired lookup so callers that build a
+// budget outside Compile (the context-info fallback path) use the same
+// source rather than quietly falling back to the seed map.
+func (c *ContextCompiler) ContextWindowLookupFn() ContextWindowLookup {
+	return c.contextWindow
 }
 
 func NewContextCompiler(states *ConversationStateService) *ContextCompiler {
@@ -217,7 +236,7 @@ func (c *ContextCompiler) Compile(
 		OmittedOlder:  in.OmittedOlder,
 	}
 
-	budget := c.budgetFor(in, prefix)
+	budget := c.budgetFor(ctx, in, prefix)
 	out.Budget = budget
 
 	historyTokens := estimateHistoryTokens(in.History, in.ImageURLs)
@@ -410,14 +429,14 @@ func ratioOf(n int, ratio float64) int {
 // re-walking the markers — but the high-level "system prompt
 // total" is what budget math needs; per-block detail is
 // observability sugar.
-func (c *ContextCompiler) budgetFor(in CompileInputs, prefix string) ContextBudget {
+func (c *ContextCompiler) budgetFor(ctx context.Context, in CompileInputs, prefix string) ContextBudget {
 	sysTokens := EstimateTokens(prefix)
 	// Add the per-message framing overhead for the system message
 	// itself — buildGatewayRequestWithImages prepends one system
 	// message before the history.
 	sysTokens += 4
 	toolReserve := in.NumTools * perToolTokens
-	return CalculateBudget(in.Conv.ModelID, sysTokens, 0, 0, 0, toolReserve)
+	return CalculateBudgetWith(ctx, c.contextWindow, in.Conv.ModelID, sysTokens, 0, 0, 0, toolReserve)
 }
 
 // stateIsStaleForCompaction — would an extraction pass add anything?

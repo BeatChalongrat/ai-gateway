@@ -570,6 +570,13 @@ func main() {
 	// FIX64 — when the Gateway refuses tools the catalog said the model
 	// had, drop the cached catalog and retry the turn without tools.
 	messageSvc.SetCatalogInvalidator(modelHandler.InvalidateCatalog)
+	// FIX101 — the context budget stops being a hard-coded map and starts
+	// being data: the catalogue's max_context_tokens, which an operator
+	// edits in the admin console. Wired into BOTH the compiler (every
+	// send) and the service (the /context-info fallback) so the meter the
+	// user reads and the budget the send uses can never disagree.
+	messageSvc.SetContextWindowLookup(modelHandler.AdvertisedContextWindow)
+	contextCompiler.SetContextWindowLookup(modelHandler.AdvertisedContextWindow)
 	// FIX65 — a model the catalog says cannot read images gets no history
 	// image blocks; a model_no_vision_support refusal is retried once
 	// without them, so one failed image turn never poisons the chat.
