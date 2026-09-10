@@ -657,7 +657,8 @@ export const en = {
   "file.err.uploadFailed": "Upload failed. Try again.",
 
   // ── Phase-2 i18n sweep — gateway error codes ────────────────
-  "error.provider_error": "Couldn't reach the AI provider. Please try again.",
+  "error.provider_error":
+    "Couldn't reach the AI provider. Please try again, or choose another model.",
   "error.provider_unavailable": "The AI service is temporarily unavailable. Please try again.",
   "error.provider_timeout": "The AI provider took too long to respond. Please try again.",
   "error.all_models_failed": "Couldn't answer right now. Try again or pick another model.",
@@ -682,7 +683,8 @@ export const en = {
   // can help. A code whose failure is permanent for this request never
   // says "try again"; it says what to change. errorMessages.test.ts
   // checks this against the backend catalog.
-  "error.unknownNoRetry": "The request could not be completed.",
+  "error.unknownNoRetry":
+    "The request could not be completed. Sending the same request is unlikely to help — pick a different model, or tell your administrator if it keeps happening.",
   "error.provider_at_capacity": "The AI provider is at capacity right now. Please try again shortly.",
   "error.provider_rate_limited": "The AI provider is rate-limiting requests. Please wait a moment and try again.",
   "error.provider_model_not_found": "The provider didn't serve this model. Try again or pick another model.",
@@ -722,7 +724,8 @@ export const en = {
   "error.search_query_blocked": "The search was blocked because the query contains sensitive data.",
   "error.not_found": "That wasn't found.",
   "error.conflict": "This request conflicts with the current state. Reload and check.",
-  "error.gateway_error": "The request could not be completed.",
+  "error.gateway_error":
+    "The gateway could not complete the request. Pick a different model, or tell your administrator if it keeps happening.",
   "error.stream_stalled": "The model stopped sending data mid-reply (nothing arrived for 60 seconds), so this turn was ended. Sending again usually works; if it keeps happening, try another model.",
   "error.conversationDeleted": "This conversation was deleted.",
   "error.conversationLoadFailed": "Couldn't load this conversation. Please try again.",
@@ -2266,7 +2269,8 @@ const th: Record<DictKey, string> = {
   "file.err.uploadFailed": "อัปโหลดไม่สำเร็จ กรุณาลองใหม่",
 
   // ── Phase-2 i18n sweep — gateway error codes ────────────────
-  "error.provider_error": "ไม่สามารถเชื่อมต่อกับผู้ให้บริการ AI ได้ กรุณาลองใหม่อีกครั้ง",
+  "error.provider_error":
+    "ไม่สามารถเชื่อมต่อกับผู้ให้บริการ AI ได้ กรุณาลองใหม่อีกครั้ง หรือเลือกโมเดลอื่น",
   "error.provider_unavailable": "บริการ AI ไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่อีกครั้ง",
   "error.provider_timeout": "ผู้ให้บริการ AI ตอบสนองช้าเกินไป กรุณาลองใหม่อีกครั้ง",
   "error.all_models_failed": "ไม่สามารถตอบได้ในขณะนี้ กรุณาลองใหม่ หรือเลือกโมเดลอื่น",
@@ -2287,7 +2291,8 @@ const th: Record<DictKey, string> = {
   "error.image_attachment_save_failed": "สร้างรูปแล้วแต่บันทึกไฟล์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
   "error.image_cancelled": "ยกเลิกการสร้างรูปแล้ว",
   "error.generic": "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง",
-  "error.unknownNoRetry": "ไม่สามารถดำเนินการคำขอนี้ได้",
+  "error.unknownNoRetry":
+    "ไม่สามารถดำเนินการคำขอนี้ได้ การส่งคำขอเดิมซ้ำมักไม่ช่วย ลองเปลี่ยนเป็นโมเดลอื่น หรือแจ้งผู้ดูแลระบบหากยังเกิดขึ้นอีก",
   "error.provider_at_capacity": "ผู้ให้บริการ AI รับคำขอเต็มแล้วในขณะนี้ กรุณาลองใหม่อีกสักครู่",
   "error.provider_rate_limited": "ผู้ให้บริการ AI จำกัดจำนวนคำขออยู่ กรุณารอสักครู่แล้วลองใหม่",
   "error.provider_model_not_found": "ผู้ให้บริการไม่ได้ให้บริการโมเดลนี้ กรุณาลองใหม่ หรือเลือกโมเดลอื่น",
@@ -2323,7 +2328,8 @@ const th: Record<DictKey, string> = {
   "error.search_query_blocked": "การค้นหาถูกบล็อก เพราะคำค้นมีข้อมูลอ่อนไหว",
   "error.not_found": "ไม่พบรายการที่ต้องการ",
   "error.conflict": "คำขอนี้ขัดกับสถานะปัจจุบัน กรุณาโหลดหน้าใหม่แล้วตรวจสอบ",
-  "error.gateway_error": "ไม่สามารถดำเนินการคำขอนี้ได้",
+  "error.gateway_error":
+    "เกตเวย์ไม่สามารถดำเนินการคำขอนี้ได้ ลองเปลี่ยนเป็นโมเดลอื่น หรือแจ้งผู้ดูแลระบบหากยังเกิดขึ้นอีก",
   "error.stream_stalled": "โมเดลหยุดส่งข้อมูลกลางคำตอบ (ไม่มีข้อมูลเข้ามาเกิน 60 วินาที) รอบนี้จึงถูกหยุด — ส่งใหม่อีกครั้งมักได้ผล ถ้าเกิดซ้ำลองเปลี่ยนโมเดลดูครับ",
   "error.conversationDeleted": "ห้องสนทนานี้ถูกลบไปแล้ว",
   "error.conversationLoadFailed": "โหลดห้องสนทนานี้ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",

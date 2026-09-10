@@ -85,6 +85,40 @@ describe("gateway error codes → messages", () => {
     expect(localizeErrorCode("model_no_tool_support")).not.toMatch(RETRY_WORDS.en);
   });
 
+  // FIX94 Item 2 — the red box in the owner's screenshot read only "The
+  // request could not be completed.": no reason, no next step. Two different
+  // codes shared that one sentence (gateway_error, and the unknown-code
+  // fallback), so it could not even be told which had happened. Both now name
+  // a next step, and neither may imply that resending will help — the
+  // non-retryable rule above still governs the wording.
+  it("the dead-end codes offer a next step without promising a retry", () => {
+    for (const key of ["error.gateway_error", "error.unknownNoRetry"] as const) {
+      for (const lang of ["en", "th"] as const) {
+        const s = dictionaries[lang][key];
+        expect(s, `${lang} ${key} should name the model as a way out`).toMatch(
+          lang === "en" ? /different model/i : /โมเดล/,
+        );
+        expect(s, `${lang} ${key} should name who to tell`).toMatch(
+          lang === "en" ? /administrator/i : /ผู้ดูแล/,
+        );
+      }
+    }
+    // and they are no longer the same sentence, in either language
+    expect(dictionaries.en["error.gateway_error"]).not.toBe(dictionaries.en["error.unknownNoRetry"]);
+    expect(dictionaries.th["error.gateway_error"]).not.toBe(dictionaries.th["error.unknownNoRetry"]);
+  });
+
+  // The code a user actually gets when a self-hosted box has no fallback
+  // chain (FIX93 measured it on 9 of 20 qwen runs) is provider_error — the
+  // gateway's internal "No fallback chain registered for model 'x'" sentence
+  // never reaches the screen, because this code is in the table and the
+  // dictionary wins. What it lacked was the one move that works when a single
+  // provider is down: change model.
+  it("provider_error names the model as a way out", () => {
+    expect(dictionaries.en["error.provider_error"]).toMatch(/another model/i);
+    expect(dictionaries.th["error.provider_error"]).toMatch(/โมเดลอื่น/);
+  });
+
   it("an unknown code is not told to retry unless the gateway says so", () => {
     expect(localizeErrorCode("some_new_code")).toBe(dictionaries.en["error.unknownNoRetry"]);
     expect(localizeErrorCode("some_new_code", undefined, true)).toBe(dictionaries.en["error.generic"]);
