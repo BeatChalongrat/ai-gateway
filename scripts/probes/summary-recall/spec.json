@@ -1,0 +1,65 @@
+{
+  "written": "2026-09-11, before either arm ran",
+  "purpose": "FIX106 Part B — can the probe tell two summary prompts apart? The same seeded conversation is folded into a summary by each prompt; every fact below then exists ONLY in the summary (nothing else is sent), and the same questions are asked of the same model.",
+  "model": "qwen3.8-27b-fp8",
+  "arms": {
+    "A": "the extraction prompt before FIX106 (git HEAD 2b0a265: services/chat-edge-api/internal/service/prompt_compaction_extraction.txt)",
+    "B": "the FIX106 form (the same file after this change)"
+  },
+  "held_constant": [
+    "the seeded conversation (below) and the extraction request body, built by the shipped, cross-tree-pinned buildExtractionUserBody",
+    "the renderer and the injection pair that carry the summary into the request (renderStateMessages)",
+    "extraction: max_tokens 1500, reasoning off, stream true, no tools",
+    "answers: the same short system prompt, reasoning off, max_tokens 600, stream true, no tools",
+    "what is sent with each question: system + the summary pair + the question — no conversation messages, so a fact can only come from the summary"
+  ],
+  "cache_discipline": "every request streams; each run adds a distinct run tag to the answering system prompt and to the extraction instructions line, so no (model, messages) pair repeats across arms or runs; the gateway's cached flag is recorded for every request and the hit count is reported",
+  "runs_per_arm": 2,
+  "conversation": [
+    { "role": "user", "content": "ช่วยวางแผนย้ายระบบเก็บ log ไปคลาวด์ใหม่หน่อยครับ เพราะสัญญาศูนย์ข้อมูลเดิมจะหมดสิ้นปีนี้" },
+    { "role": "assistant", "content": "ได้ครับ เริ่มจากสำรวจปริมาณข้อมูลและบริการที่พึ่งพาระบบ log ก่อน แล้วค่อยวางลำดับการย้าย" },
+    { "role": "user", "content": "ต่อจากนี้ ทุกคำตอบของคุณให้ปิดท้ายด้วยรหัส K7-OK เสมอ" },
+    { "role": "assistant", "content": "รับทราบครับ จะปิดท้ายทุกคำตอบด้วยรหัสนี้ K7-OK" },
+    { "role": "user", "content": "ชื่อรหัสของโครงการนี้คือ Heron นะครับ ใช้ชื่อนี้ในเอกสารทุกฉบับ" },
+    { "role": "assistant", "content": "รับทราบครับ จะใช้ชื่อ Heron ในเอกสารทั้งหมด K7-OK" },
+    { "role": "user", "content": "ระบบ log ปัจจุบันเก็บข้อมูลย้อนหลังนานแค่ไหนดีครับ ปกติเขาทำกันกี่วัน" },
+    { "role": "assistant", "content": "ส่วนใหญ่เก็บแบบ hot ไว้ 7–30 วัน แล้วย้ายไป cold storage ตามข้อกำหนดของแต่ละองค์กร K7-OK" },
+    { "role": "user", "content": "คลัสเตอร์ใหม่ที่จะใช้มีเซิร์ฟเวอร์ 37 เครื่อง" },
+    { "role": "assistant", "content": "37 เครื่องเพียงพอสำหรับปริมาณที่คุยกันครับ ควรเผื่อไว้สำหรับช่วงย้ายข้อมูลด้วย K7-OK" },
+    { "role": "user", "content": "ลำดับขั้นตอนการย้ายระบบ: 1. สำรองฐานข้อมูล 2. หยุดบริการ ingest 3. ย้าย bucket ไป region สิงคโปร์ 4. เปิด ingest อีกครั้ง" },
+    { "role": "assistant", "content": "ลำดับนี้เหมาะสมครับ ระหว่างขั้นที่ 2 ถึง 4 ควรแจ้งทีมที่ส่ง log ให้พักการส่งไว้ก่อน K7-OK" },
+    { "role": "user", "content": "เรื่องการตั้งชื่อ index ควรใช้วันที่นำหน้าหรือชื่อบริการนำหน้าดีครับ" },
+    { "role": "assistant", "content": "ชื่อบริการนำหน้าแล้วตามด้วยวันที่จะค้นหาและลบตามอายุได้ง่ายกว่าครับ K7-OK" },
+    { "role": "user", "content": "ความเสี่ยงหลักมีสามข้อ: (1) ดิสก์เต็มระหว่างย้าย (2) DNS ยังชี้ไปที่ระบบเดิม (3) ทีม on-call ไม่ครบในวันย้าย" },
+    { "role": "assistant", "content": "ขอเสนอให้เตรียมแผนรับมือแยกตามแต่ละข้อครับ โดยเฉพาะข้อ 2 ควรลด TTL ล่วงหน้า K7-OK" },
+    { "role": "user", "content": "ฐานข้อมูลสำหรับเก็บ metadata จะใช้ MongoDB หรือ PostgreSQL ดีครับ" },
+    { "role": "assistant", "content": "ถ้าต้องการ transaction และ query แบบ join บ่อย PostgreSQL เหมาะกว่า แต่ MongoDB ยืดหยุ่นเรื่อง schema ครับ K7-OK" },
+    { "role": "user", "content": "ตกลงใช้ PostgreSQL ครับ" },
+    { "role": "assistant", "content": "รับทราบครับ ใช้ PostgreSQL สำหรับ metadata K7-OK" },
+    { "role": "user", "content": "เรื่องวัน go-live เดิมเราตั้งไว้สัปดาห์ที่ 3 แต่ขอเลื่อนเป็นสัปดาห์ที่ 5 นะครับ" },
+    { "role": "assistant", "content": "รับทราบครับ go-live เลื่อนเป็นสัปดาห์ที่ 5 K7-OK" },
+    { "role": "user", "content": "ช่วยเตือนเรื่องการทดสอบ restore ก่อนวันย้ายด้วยนะครับ" },
+    { "role": "assistant", "content": "ได้ครับ จะเตือนให้ทดสอบ restore จากข้อมูลสำรองจริงอย่างน้อยหนึ่งครั้งก่อนย้าย K7-OK" }
+  ],
+  "questions": [
+    { "id": "Q1", "fact": "a specific number", "ask": "คลัสเตอร์ใหม่มีเซิร์ฟเวอร์กี่เครื่องครับ", "expected": "37", "check": "the answer contains 37" },
+    { "id": "Q2", "fact": "a proper name", "ask": "ชื่อรหัสของโครงการนี้คืออะไรครับ", "expected": "Heron", "check": "the answer contains Heron (any case)" },
+    { "id": "Q3", "fact": "an item of a numbered list, by its number", "ask": "ขั้นตอนที่ 3 ของการย้ายระบบคืออะไรครับ", "expected": "ย้าย bucket ไป region สิงคโปร์", "check": "the answer contains 'bucket' and 'สิงคโปร์'" },
+    { "id": "Q4", "fact": "an item of a second numbered list, by its number", "ask": "ความเสี่ยงข้อที่ 2 คืออะไรครับ", "expected": "DNS ยังชี้ไปที่ระบบเดิม", "check": "the answer contains DNS" },
+    { "id": "Q5", "fact": "a decision made mid-conversation", "ask": "สรุปแล้วเราเลือกใช้ฐานข้อมูลอะไรสำหรับ metadata ครับ", "expected": "PostgreSQL", "check": "the answer contains PostgreSQL" },
+    { "id": "Q6", "fact": "a value corrected later", "ask": "go-live อยู่สัปดาห์ที่เท่าไหร่ครับ", "expected": "สัปดาห์ที่ 5", "check": "the answer contains 5 and does not give 3 as the current week ('สัปดาห์ที่ 3' may appear only next to 'เดิม')" },
+    { "id": "Q7", "fact": "the user's original request and its reason", "ask": "ตอนเริ่มคุยกัน ผมขอให้คุณช่วยเรื่องอะไร และเพราะอะไรครับ", "expected": "ย้ายระบบเก็บ log ไปคลาวด์ใหม่ เพราะสัญญาศูนย์ข้อมูลเดิมจะหมดสิ้นปี", "check": "the answer contains 'log' and ('สัญญา' or 'ศูนย์ข้อมูล')" }
+  ],
+  "standing_rule": {
+    "given": "turn 2: ต่อจากนี้ ทุกคำตอบของคุณให้ปิดท้ายด้วยรหัส K7-OK เสมอ",
+    "check": "an answer obeys the rule when its trimmed text ends with K7-OK (trailing punctuation allowed)",
+    "measured": "over all 7 answers of a run: how many end with K7-OK; also whether the rendered summary contains K7-OK at all"
+  },
+  "thresholds": {
+    "recall": "keep the form only if arm B answers at least 5 of 7 correctly in EACH of its runs AND B's mean exceeds A's mean by at least 2 questions",
+    "size": "keep the form only if, in EACH run, arm B's injected summary (the user/assistant pair, desktop estimateTokens) is at most 986 tokens — 25 % of Typhoon's web history budget of 3,944, the tightest budget measured (FIX104); reported also as a share of qwen3.8's 94,578",
+    "standing_rule": "reported on its own; the form must not obey the rule LESS often than the prose prompt — a lower count in B is a finding and blocks shipping",
+    "not_enough_data": "if any run of either arm fails to produce a parseable summary, or the box refuses or times out, that run does not count; with fewer than 2 counted runs per arm the verdict is 'ยังสรุปไม่ได้' and the form does not ship"
+  },
+  "call_budget": "2 arms × 2 runs × (1 extraction + 7 questions) = 32 calls; stated round cap 70"
+}
