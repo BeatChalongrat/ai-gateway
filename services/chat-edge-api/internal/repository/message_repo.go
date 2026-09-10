@@ -339,6 +339,12 @@ const MaxContextLoadCap = 2000
 // so a paused / cancelled mid-stream still gets accounted for in
 // future turns.
 //
+// FIX100 Part A: superseded rows are excluded here for the same reason
+// as in ListContextBeforeMessage — a regenerate leaves the replaced row
+// is_active, so without this every SUBSEQUENT ordinary send re-loaded it
+// too, and a fix to the regenerate query alone would have been undone by
+// the next message the user typed.
+//
 // FIX33 A-W1: the old hard cap of 200 dropped the head of a long
 // conversation BEFORE the ContextCompiler ever saw it — with no
 // marker (FIX32 §1.1 measured it: recall of turns 1–100 failed at
@@ -363,6 +369,7 @@ func (r *MessageRepo) ListContextByConversation(
 		SELECT ` + r.messageContextColumns() + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true
+		  AND status <> 'regenerated'
 		ORDER BY created_at DESC
 		LIMIT $3
 	`
@@ -685,6 +692,23 @@ func (r *MessageRepo) UpdateStatus(ctx context.Context, msgID uuid.UUID, status 
 // BEFORE “before“, in chronological order, capped at “limit“.
 // Used by regenerate to rebuild the gateway context up to (but
 // excluding) the assistant message being replaced.
+//
+// FIX100 Part A — “superseded“ is excluded here, and ONLY superseded.
+// Regenerate flips the row it replaces to status=regenerated but leaves
+// is_active=true (the row keeps its token usage and timestamps for
+// audit, and the transcript still renders it), so every later
+// regenerate re-loaded it and the message count climbed one per press:
+// measured 25 → 26 → 27 on the owner's conversation e493ca28.
+//
+// status=regenerated is the one status that means “the user asked for
+// this to be replaced and the replacement is right there“ — dropping it
+// loses nothing anybody is still reading. It is NOT a licence to filter
+// on status generally: measured on the live database, 109 assistant
+// rows with status=error and 30 with status=cancelled hold REAL TEXT
+// that streamed to the screen before the failure or the stop. Dropping
+// those would delete something the user actually saw. Emptiness is the
+// safe test for those, and it is applied where the provider payload is
+// built (buildGatewayRequestWithImages), not here.
 func (r *MessageRepo) ListContextBeforeMessage(
 	ctx context.Context,
 	tenantID, convID uuid.UUID,
@@ -702,6 +726,7 @@ func (r *MessageRepo) ListContextBeforeMessage(
 		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND created_at < $3
 		  AND is_active = true
+		  AND status <> 'regenerated'
 		ORDER BY created_at DESC
 		LIMIT $4
 	`

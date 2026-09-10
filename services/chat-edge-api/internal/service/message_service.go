@@ -3594,9 +3594,42 @@ func buildGatewayRequestWithImages(
 		}
 	}
 
+	skippedAssistant := false
 	for i, m := range history {
 		var content any = m.ContentMasked
 		if m.Role == "assistant" {
+			// FIX100 Part A — an assistant row with no text NEVER reaches a
+			// provider, whatever its status. A failed or cancelled turn
+			// leaves a row behind (the placeholder is created before the
+			// upstream stream opens, so a turn that dies before its first
+			// delta stores content_masked = ""); it is is_active, so every
+			// context read since has loaded it, and every request since has
+			// carried {"role":"assistant","content":""}. Measured on the
+			// live database: 287 such rows across 182 conversations.
+			//
+			// The test is EMPTINESS, not status, and that is the whole
+			// point. Filtering on status would drop 109 error rows and 30
+			// cancelled rows that hold real streamed text — a reply the
+			// person read on their screen before it broke — and would still
+			// miss the 29 rows that are blank while marked completed.
+			// Emptiness catches every one of the 287 and takes none of the
+			// 139 back.
+			//
+			// Skipping a row can leave two user turns adjacent; that is what
+			// normalizeRoleSequence at the foot of this function repairs.
+			blank := strings.TrimSpace(m.ContentMasked) == "" &&
+				len(imagesByMsg[m.ID]) == 0 && len(generatedVision[m.ID]) == 0
+			if blank && canonicalHistoryEnabled {
+				// Canonical mode decides for itself: a row can be blank in
+				// content_masked and still hold valid canonical text.
+				if _, ok, _ := ValidateStoredCanonicalMessage(m); ok {
+					blank = false
+				}
+			}
+			if blank {
+				skippedAssistant = true
+				continue
+			}
 			// Phase 4A.2.2.1 (H1) — canonical-only provider history with
 			// READ-TIME re-validation. When enabled, an assistant row
 			// contributes its CANONICAL content ONLY if it RE-VALIDATES
@@ -3668,11 +3701,19 @@ func buildGatewayRequestWithImages(
 			}
 		}
 	}
-	if canonicalHistoryEnabled {
-		// H2 — excluding non-complete assistant rows can leave a
-		// provider-invalid role sequence (e.g. consecutive user turns) or
-		// orphan tool messages. Normalize WITHOUT reintroducing any raw
-		// display/legacy assistant content.
+	// H2 — excluding assistant rows can leave a provider-invalid role
+	// sequence (e.g. consecutive user turns) or orphan tool messages.
+	// Normalize WITHOUT reintroducing any raw display/legacy assistant
+	// content.
+	//
+	// FIX100 Part A extends this to the NON-canonical path — the path this
+	// deployment actually runs (DLP_CANONICAL_HISTORY_ENABLED defaults to
+	// false and is not set) — but ONLY when the emptiness guard above
+	// actually dropped a row. Repairing a sequence this function did not
+	// break is a wider change than the round asked for: two adjacent user
+	// turns that were already in the history are left exactly as they were
+	// being sent before.
+	if canonicalHistoryEnabled || skippedAssistant {
 		msgs = normalizeRoleSequence(msgs)
 	}
 	return GatewayChatRequest{Model: model, Messages: msgs}
