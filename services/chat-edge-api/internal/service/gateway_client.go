@@ -312,6 +312,11 @@ type GatewayChatRequest struct {
 	// Omitted for the main chat flow so existing calls stay identical;
 	// forwarded verbatim by the backend openai_adapter when present.
 	ResponseFormat any `json:"response_format,omitempty"`
+	// NewestMessageOverBudget (FIX105) is never sent. The compiler sets it
+	// when the newest message alone is larger than the whole messages
+	// budget, so a context_length_exceeded refusal can be named for what it
+	// is: this message is too long, not this conversation.
+	NewestMessageOverBudget bool `json:"-"`
 }
 
 // GatewayCallContext carries the per-request identity headers we

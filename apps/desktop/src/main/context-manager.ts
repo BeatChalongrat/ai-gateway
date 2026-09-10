@@ -74,6 +74,10 @@ export interface ContextBudgetEvent {
   budget_window: number;
   total_budget: number;
   output_reserve: number;
+  /** FIX105: the first exchange was left out of what is sent (too large to pin, or no room for the newest message). */
+  head_dropped: boolean;
+  /** FIX105: the newest message alone is larger than the whole messages budget. */
+  newest_over_budget: boolean;
 }
 
 /** chat-edge's Summary* values (FIX102 Part C). */
@@ -257,6 +261,8 @@ export class ContextManager {
       budget_window: plan.budget.window,
       total_budget: plan.budget.total,
       output_reserve: plan.budget.outputReserve,
+      head_dropped: plan.headDropped,
+      newest_over_budget: plan.newestOverBudget,
     };
   }
 

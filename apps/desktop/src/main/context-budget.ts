@@ -39,6 +39,8 @@ export const OUTPUT_RESERVE_MAX = 16_000;
 export const PER_TOOL_TOKENS = 200;
 /** chat-edge CalculateBudgetWith: never less than this for history. */
 export const MESSAGES_FLOOR = 2_000;
+/** chat-edge headPinMaxShare (FIX105): the first exchange is pinned only while it costs at most this share of the messages budget. */
+export const HEAD_PIN_MAX_SHARE = 0.25;
 
 /** chat-edge workingLimitFrom: an ADVERTISED window → the WORKING limit budgeted against. */
 export function workingLimitFrom(advertised: number): number {

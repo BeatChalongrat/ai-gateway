@@ -107,6 +107,23 @@ describe("ContextMeter", () => {
     expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.noSummary"].replace("{sent}", "6").replace("{total}", "30"));
   });
 
+  // FIX105 — the first exchange is no longer kept forever; when it is among
+  // what the assistant no longer sees word for word, the meter says so.
+  it("trimming with the first exchange left out says the start of the conversation is in the summary", async () => {
+    mockApi.getContextInfo.mockResolvedValue(info(0.4, { compacted: true, state_present: true, state_injected: true, head_dropped: true, messages_total: 6, messages_would_send: 3 }));
+    const { unmount } = render(<ContextMeter conversationId="c1" />);
+    await act(tick);
+    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.headSummarized"].replace("{sent}", "1").replace("{total}", "6"));
+    unmount();
+    mockApi.getContextInfo.mockResolvedValue(info(0.4, { compacted: true, state_present: false, head_dropped: true, messages_total: 6, messages_would_send: 1 }));
+    render(<ContextMeter conversationId="c1" />);
+    await act(tick);
+    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.headNoSummary"].replace("{sent}", "1").replace("{total}", "6"));
+    for (const k of ["context.rolling.headSummarized", "context.rolling.headNoSummary", "error.message_too_long"] as const) {
+      expect(dictionaries.th[k]).toBeTruthy();
+    }
+  });
+
   it("an older desktop build that still sends the LOADED ratio (2.29) never reads above 100 %", async () => {
     // Not trimming yet but over: capped. Trimming: no percent at all.
     mockApi.getContextInfo.mockResolvedValue(info(2.29, { est_messages_remaining: 0 }));

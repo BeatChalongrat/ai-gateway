@@ -85,6 +85,10 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   model_no_vision_support: "error.model_no_vision_support",
   no_capable_model: "error.no_capable_model",
   context_length_exceeded: "error.context_length_exceeded",
+  // FIX105 — ONE message is over the budget on its own (chat-edge
+  // message_too_long.go; the desktop host names the same case). The advice
+  // is about this message, not the conversation, so it has its own sentence.
+  message_too_long: "error.message_too_long",
   upstream_bad_response: "error.upstream_bad_response",
   quota_exceeded: "error.quota_exceeded",
   INSUFFICIENT_CREDITS: "error.insufficient_credits",

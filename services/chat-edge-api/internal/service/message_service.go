@@ -3239,6 +3239,7 @@ func (s *MessageService) compileAndBuildRequest(
 	sources.Add(compiled.Sources...)
 	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 	applyContextHints(routingHints, compiled)
+	req.NewestMessageOverBudget = compiled.NewestOverBudget
 	req.RoutingHints = routingHints
 	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 	notice := compiled.LossNotice()
@@ -5005,7 +5006,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 					current = retried
 					continue
 				}
-				in.out <- StreamUpdate{ProviderError: ev.ProviderError}
+				in.out <- StreamUpdate{ProviderError: messageTooLongOr(ev.ProviderError, req.NewestMessageOverBudget)}
 			}
 			if ev.FallbackInfo != nil {
 				in.out <- StreamUpdate{FallbackInfo: ev.FallbackInfo}

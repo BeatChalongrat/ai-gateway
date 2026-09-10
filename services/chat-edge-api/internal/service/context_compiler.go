@@ -67,6 +67,13 @@ const (
 // that joins the system prefix when compaction happens.
 const contextNoteReserve = 120
 
+// headPinMaxShare (FIX105) — the first exchange is pinned verbatim only
+// while it costs at most this share of the messages budget. A standing
+// instruction fits many times over; a pasted document or an essay-length
+// first reply does not, and becomes ordinary history instead of a weight
+// the conversation can never put down.
+const headPinMaxShare = 0.25
+
 // ContextCompiler holds the dependencies the compile step needs.
 // Decoupled from MessageService so unit tests can swap in fakes;
 // MessageService wires both itself and the compiler in main.go.
@@ -223,6 +230,14 @@ type CompiledContext struct {
 	// request leaves out: one of the Summary* values when Compacted, ""
 	// otherwise.
 	SummaryStatus string
+	// HeadDropped (FIX105) — the first exchange is normally pinned verbatim;
+	// this request left it out, because it was too large to pin or keeping
+	// it left no room for the newest message.
+	HeadDropped bool
+	// NewestOverBudget (FIX105) — the newest message alone is larger than
+	// the whole messages budget. No trim can make that fit, and a provider
+	// refusal is about THIS message, not the conversation.
+	NewestOverBudget bool
 }
 
 // Compile is the single entry point for the message-service send
@@ -262,6 +277,10 @@ func (c *ContextCompiler) Compile(
 	out.HistoryTokens = historyTokens
 	out.SentTokens = historyTokens
 	out.ThresholdTokens = ratioOf(budget.MessagesRemaining, c.triggerRatio)
+	headCap := ratioOf(budget.MessagesRemaining, headPinMaxShare)
+	if n := len(in.History); n > 0 {
+		out.NewestOverBudget = estimateHistoryTokens(in.History[n-1:], in.ImageURLs) > budget.MessagesRemaining
+	}
 
 	// A-W7 — a pending manual compact boundary on the state row.
 	var boundary *uuid.UUID
@@ -300,7 +319,7 @@ func (c *ContextCompiler) Compile(
 	if historyTokens >= out.ThresholdTokens {
 		target = ratioOf(budget.MessagesRemaining, c.targetRatio)
 	}
-	plan := planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
+	plan := planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary, headCap)
 
 	// Threshold / omitted / boundary — refresh the conversation
 	// state synchronously so the messages we're about to drop end
@@ -349,7 +368,7 @@ func (c *ContextCompiler) Compile(
 			if in.BuildState != nil {
 				stateBlock, stateSources = in.BuildState()
 			}
-			plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
+			plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary, headCap)
 		}
 	}
 
@@ -357,6 +376,7 @@ func (c *ContextCompiler) Compile(
 	out.MessagesSent = len(plan.kept)
 	out.Dropped = len(in.History) - len(plan.kept)
 	out.HeadKept = plan.headKept
+	out.HeadDropped = plan.headDropped
 	out.ManualCompact = plan.boundaryApplied
 	out.Compacted = out.Dropped > 0 || in.OmittedOlder > 0
 	out.SentTokens = estimateHistoryTokens(plan.kept, in.ImageURLs)
@@ -674,6 +694,9 @@ type trimPlan struct {
 	tailKept        int // messages kept from the tail
 	dropEnd         int // History index one past the last DROPPED message (0 = nothing dropped)
 	boundaryApplied bool
+	// headDropped (FIX105): there was a first exchange and this plan did
+	// not pin it (too large, or it left no room for the newest message).
+	headDropped bool
 }
 
 // planHeadPreservingTrim keeps the first exchange (the first user
@@ -682,24 +705,55 @@ type trimPlan struct {
 // from the desktop compiler (FIX32 divergence #1): the user's turn-1
 // standing instruction is the last thing to die, not the first.
 //
+// FIX105 — but not at any price. A head that can never be evicted is
+// how a conversation dies for good: Typhoon answered a first question
+// with 18,600 characters, that exchange alone was three times the
+// messages budget, and every later turn was refused with nothing left
+// that trimming was allowed to remove. The head is now pinned only
+// while
+//   - it costs at most headCap tokens (headPinMaxShare of the budget),
+//     so a pasted document or an essay-length first reply is ordinary
+//     history: the oldest part, summarised and left out first; and
+//   - keeping it still leaves room for the newest message.
+//
+// Otherwise it is dropped like any other old message and headDropped
+// says so. Remembering what the conversation is about is the summary's
+// job, not an immortal first exchange's.
+//
 // boundary (A-W7): when set and present in the slice, every message
-// at or before it is dropped regardless of budget (head excepted).
+// at or before it is dropped regardless of budget (a pinned head
+// excepted).
 //
 // The newest message always ships even if it alone overflows — a
 // system-only request dead-ends the loop (the old rule, kept).
-func planHeadPreservingTrim(history []model.Message, imageURLs []string, budget int, boundary *uuid.UUID) trimPlan {
+func planHeadPreservingTrim(history []model.Message, imageURLs []string, budget int, boundary *uuid.UUID, headCap int) trimPlan {
 	n := len(history)
 	if n == 0 {
 		return trimPlan{kept: history}
 	}
 
-	// Head: the first user message and the reply that answered it.
-	headCount := 0
-	if history[0].Role == "user" {
-		headCount = 1
-		if n > 1 && history[1].Role == "assistant" {
-			headCount = 2
+	cost := func(i int) int {
+		t := EstimateTokens(history[i].ContentMasked) + 4
+		if len(imageURLs) > 0 && history[i].Role == "user" && i == n-1 {
+			t += 500 * len(imageURLs)
 		}
+		return t
+	}
+
+	// Head: the first user message and the reply that answered it.
+	naturalHead := 0
+	if history[0].Role == "user" {
+		naturalHead = 1
+		if n > 1 && history[1].Role == "assistant" {
+			naturalHead = 2
+		}
+	}
+	headCount, headTokens := naturalHead, 0
+	for i := 0; i < headCount; i++ {
+		headTokens += cost(i)
+	}
+	if headCount > 0 && n > headCount && (headTokens > headCap || headTokens+cost(n-1) > budget) {
+		headCount, headTokens = 0, 0
 	}
 
 	// The tail may not start before the boundary (A-W7) or inside
@@ -724,23 +778,10 @@ func planHeadPreservingTrim(history []model.Message, imageURLs []string, budget 
 		tailFloor = n - 1
 	}
 
-	cost := func(i int) int {
-		t := EstimateTokens(history[i].ContentMasked) + 4
-		if len(imageURLs) > 0 && history[i].Role == "user" && i == n-1 {
-			t += 500 * len(imageURLs)
-		}
-		return t
-	}
-
-	headTokens := 0
-	for i := 0; i < headCount; i++ {
-		headTokens += cost(i)
-	}
-
 	// Fast path — everything fits and no boundary: untouched.
 	if boundary == nil || !boundaryApplied {
 		if estimateHistoryTokens(history, imageURLs) <= budget {
-			return trimPlan{kept: history, headKept: headCount, tailKept: n - headCount}
+			return trimPlan{kept: history, headKept: naturalHead, tailKept: n - naturalHead}
 		}
 	}
 
@@ -765,7 +806,7 @@ func planHeadPreservingTrim(history []model.Message, imageURLs []string, budget 
 
 	if tailStart == headCount {
 		// Nothing dropped at all.
-		return trimPlan{kept: history, headKept: headCount, tailKept: n - headCount}
+		return trimPlan{kept: history, headKept: naturalHead, tailKept: n - naturalHead}
 	}
 
 	kept := make([]model.Message, 0, headCount+(n-tailStart))
@@ -777,6 +818,7 @@ func planHeadPreservingTrim(history []model.Message, imageURLs []string, budget 
 		tailKept:        n - tailStart,
 		dropEnd:         tailStart,
 		boundaryApplied: boundaryApplied,
+		headDropped:     naturalHead > 0 && headCount == 0,
 	}
 }
 

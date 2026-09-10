@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, ApiError } from "@/lib/api";
-import { isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
+import { headLeftOut, isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
 import { hostApi } from "@/lib/hostApi";
 import { useT } from "@/lib/i18n";
 import type { ContextInfo } from "@/lib/types";
@@ -66,7 +66,10 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
   let tokensTitle: string | undefined;
   if (trimming) {
     const { sent, total } = messagesSeen(info!);
-    label = t(info!.state_present ? "context.rolling" : "context.rolling.noSummary", { sent: String(sent), total: String(total) });
+    // FIX105 — when the start of the conversation is among what is left out, say so.
+    const head = headLeftOut(info!);
+    const key = info!.state_present ? (head ? "context.rolling.headSummarized" : "context.rolling") : head ? "context.rolling.headNoSummary" : "context.rolling.noSummary";
+    label = t(key, { sent: String(sent), total: String(total) });
     tokensTitle = typeof info!.sent_tokens === "number" ? `${info!.sent_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens` : undefined;
   } else {
     const pct = meterPercent(info!);

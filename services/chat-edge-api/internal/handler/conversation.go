@@ -647,6 +647,8 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 		"omitted_older":          compiled.OmittedOlder,
 		"dropped":                compiled.Dropped,
 		"head_kept":              compiled.HeadKept,
+		"head_dropped":           compiled.HeadDropped,
+		"newest_over_budget":     compiled.NewestOverBudget,
 		"manual_compact_pending": compiled.ManualCompact,
 		"state_present":          compiled.StatePresent,
 		"state_injected":         compiled.StateInjected,

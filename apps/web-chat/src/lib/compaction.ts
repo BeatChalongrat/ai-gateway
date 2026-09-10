@@ -54,6 +54,17 @@ export function lossNoticeFromSources(sources: ContextSource[] | null | undefine
   return null;
 }
 
+/**
+ * FIX105 — the first exchange used to be kept word for word forever, which is
+ * how an 18,600-character first reply made a conversation unrecoverable. It
+ * is now left out like any other old message when it is too large to keep,
+ * and the meter says so rather than letting the start of the conversation
+ * disappear quietly.
+ */
+export function headLeftOut(info: ContextInfo): boolean {
+  return isTrimming(info) && info.head_dropped === true;
+}
+
 /** Conversation messages the assistant sees this turn — without the injected summary pair — and how many there are. */
 export function messagesSeen(info: ContextInfo): { sent: number; total: number } {
   const sentRaw = info.messages_would_send ?? info.messages_sent ?? info.messages_total;

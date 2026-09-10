@@ -558,6 +558,10 @@ export interface ContextInfo {
   state_injected?: boolean;
   /** FIX102 — the model the budget was measured against (web only). */
   budget_model?: string;
+  /** FIX105 — the first exchange is not among the messages sent verbatim (too large to keep, or the newest message needed the room). */
+  head_dropped?: boolean;
+  /** FIX105 — the newest message alone is larger than the whole messages budget. */
+  newest_over_budget?: boolean;
   /** Optional on the web wire; the client falls back to CONTEXT_METER_SHOW_RATIO. */
   show_meter?: boolean;
   meter_show_ratio?: number;

@@ -255,6 +255,9 @@ const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
 export const QUICK_ASK_HINT =
   "This reply is for the quick-ask window: a small always-on-top box for short questions. In this window you have NO tools — no file access, no browser, no commands, no code execution, no image generation. Answer directly and concisely. If the request genuinely needs one of those, say so in one sentence and tell the user to open this chat in the main window (there is an \"Open in main window\" button), instead of guessing or describing a result you did not produce.";
 const MAX_OUTPUT_TOKENS = 8192;
+/** FIX105 — chat-edge's CodeMessageTooLong and its sentence (message_too_long.go; pinned by context-budget-pin.test.ts). */
+const MESSAGE_TOO_LONG_CODE = "message_too_long";
+const MESSAGE_TOO_LONG_TEXT = "This message alone is too long for this model. Shorten it or split it into parts; the rest of the conversation is unaffected.";
 /** chat-edge's IsAutoModel: the router sentinel (or no model at all). */
 function isAutoModel(id: string): boolean {
   const s = id.trim();
@@ -1305,6 +1308,7 @@ export class TurnCoordinator {
       tools,
       memoryEnabled,
       routingContext,
+      newestOverBudget: cc.newestOverBudget,
       parentToolCallId: null,
       onText: (t) => {
         turn.assistantText += t;
@@ -1463,6 +1467,8 @@ export class TurnCoordinator {
     memoryEnabled?: boolean;
     /** FIX104 — auto only: what the compiled request needs (routing_hints). */
     routingContext?: { minContextTokens: number; preferredContextTokens: number };
+    /** FIX105 — the compiler saw the newest message alone over the budget. */
+    newestOverBudget?: boolean;
     parentToolCallId: string | null;
     onText: (t: string) => void;
     /** FIX35 Part B — the gateway named the model that is answering. */
@@ -1615,11 +1621,17 @@ export class TurnCoordinator {
             // fact from the labelled parts of the prompt we sent — diagnostic
             // only (the turn is already refused), appended to the error the
             // page shows, never stored in a message that gets re-sent.
-            let message = ev.message;
+            // FIX105 — a refusal of a request whose newest message alone was over
+            // the budget: no trim could have fixed it, and "this conversation is
+            // too long" would send the person to shorten the wrong thing.
+            // chat-edge renames the same case (message_too_long.go).
+            const tooLong = ev.code === "context_length_exceeded" && run.newestOverBudget === true;
+            const code = tooLong ? MESSAGE_TOO_LONG_CODE : ev.code;
+            let message = tooLong ? MESSAGE_TOO_LONG_TEXT : ev.message;
             if (ev.code === "gateway_forbidden" && /guardrail/i.test(ev.message)) {
               message += PromptGuard.explain403(this.promptPartsByConversation.get(run.conversationId) ?? []);
             }
-            if (!run.parentToolCallId) this.emit(eventConv, "error", { code: ev.code, message });
+            if (!run.parentToolCallId) this.emit(eventConv, "error", { code, message });
             else run.onText(`\n[error: ${ev.message}]`);
             break;
           }

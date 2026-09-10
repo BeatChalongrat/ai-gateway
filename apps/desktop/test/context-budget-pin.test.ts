@@ -79,6 +79,24 @@ describe("FIX104 — the desktop budget rules are chat-edge's (context_budget.go
     expect(COMPACT_TARGET_RATIO).toBe(goConst(compiler, "DefaultCompactTargetRatio"));
   });
 
+  it("FIX105 — the head is pinned by the same share and the same two conditions", () => {
+    const compiler = read("context_compiler.go");
+    expect(B.HEAD_PIN_MAX_SHARE).toBe(goConst(compiler, "headPinMaxShare"));
+    expect(goFunc(compiler, "planHeadPreservingTrim")).toContain("headTokens > headCap || headTokens+cost(n-1) > budget");
+    const ts = fs.readFileSync(path.join(__dirname, "..", "src", "main", "context-compiler.ts"), "utf8");
+    expect(ts).toContain("naturalHeadTokens > Math.trunc(remaining * HEAD_PIN_MAX_SHARE) || naturalHeadTokens + newestUnitTokens + noteReserve + preambleTokens > limit");
+  });
+
+  it("FIX105 — a message too long on its own gets the same code and sentence on both surfaces", () => {
+    const go = read("message_too_long.go");
+    const goText = go.match(/const messageTooLongText = "([^"]+)"/)?.[1];
+    const goCode = go.match(/const CodeMessageTooLong = "([^"]+)"/)?.[1];
+    const ts = fs.readFileSync(path.join(__dirname, "..", "src", "main", "turn-coordinator.ts"), "utf8");
+    expect(goText).toBeTruthy();
+    expect(ts.match(/const MESSAGE_TOO_LONG_TEXT = "([^"]+)"/)?.[1]).toBe(goText);
+    expect(ts.match(/const MESSAGE_TOO_LONG_CODE = "([^"]+)"/)?.[1]).toBe(goCode);
+  });
+
   it("the desktop's only addition: the reserve never falls below the max_tokens a request sends", () => {
     expect(B.outputReserveForRequest(14_500, 8192)).toBe(8192); // chat-edge alone: 3,625
     expect(B.outputReserveForRequest(117_500, 8192)).toBe(16_000);

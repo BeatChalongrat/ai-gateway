@@ -44,7 +44,7 @@ func conv() *model.Conversation {
 func TestPlanHeadPreservingTrim_KeepsFirstExchangeAndNewestTail(t *testing.T) {
 	h := seed(40)
 	total := estimateHistoryTokens(h, nil)
-	plan := planHeadPreservingTrim(h, nil, total/2, nil)
+	plan := planHeadPreservingTrim(h, nil, total/2, nil, 1<<30)
 	if plan.headKept != 2 {
 		t.Fatalf("head kept = %d, want 2", plan.headKept)
 	}
@@ -68,7 +68,7 @@ func TestPlanHeadPreservingTrim_KeepsFirstExchangeAndNewestTail(t *testing.T) {
 
 func TestPlanHeadPreservingTrim_FitsUntouched(t *testing.T) {
 	h := seed(6)
-	plan := planHeadPreservingTrim(h, nil, estimateHistoryTokens(h, nil), nil)
+	plan := planHeadPreservingTrim(h, nil, estimateHistoryTokens(h, nil), nil, 1<<30)
 	if len(plan.kept) != len(h) || plan.dropEnd != 0 {
 		t.Fatal("a fitting history must be returned untouched")
 	}
@@ -76,7 +76,7 @@ func TestPlanHeadPreservingTrim_FitsUntouched(t *testing.T) {
 
 func TestPlanHeadPreservingTrim_NewestAlwaysShips(t *testing.T) {
 	h := seed(4)
-	plan := planHeadPreservingTrim(h, nil, 1, nil)
+	plan := planHeadPreservingTrim(h, nil, 1, nil, 1<<30)
 	if plan.kept[len(plan.kept)-1].ID != h[3].ID {
 		t.Fatal("the newest message must ship even when it alone overflows")
 	}
@@ -85,7 +85,7 @@ func TestPlanHeadPreservingTrim_NewestAlwaysShips(t *testing.T) {
 func TestPlanHeadPreservingTrim_ManualBoundaryDropsUpToIt(t *testing.T) {
 	h := seed(20)
 	boundary := h[10].ID
-	plan := planHeadPreservingTrim(h, nil, 1<<20, &boundary) // unlimited budget
+	plan := planHeadPreservingTrim(h, nil, 1<<20, &boundary, 1<<30) // unlimited budget
 	if !plan.boundaryApplied {
 		t.Fatal("boundary not applied")
 	}

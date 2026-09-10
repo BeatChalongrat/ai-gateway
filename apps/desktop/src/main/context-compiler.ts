@@ -10,11 +10,15 @@
 // reserves, pinned against the Go source since FIX104), trim-when-over —
 // with the deliberate divergences the report lists:
 //
-//   1. THE FIRST EXCHANGE ALWAYS SURVIVES. chat-edge trims oldest-first, so
-//      the user's turn-1 standing instruction is the first thing to die; the
-//      brief ranks it the thing that must die LAST. We keep the head (the
-//      first user message and its reply) plus the newest tail, and drop the
-//      middle.
+//   1. THE FIRST EXCHANGE SURVIVES — WHILE IT IS SMALL. chat-edge trimmed
+//      oldest-first, so the user's turn-1 standing instruction was the first
+//      thing to die; we keep the head (the first user message and its reply)
+//      plus the newest tail, and drop the middle. FIX105: the head is pinned
+//      only while it costs at most HEAD_PIN_MAX_SHARE of the budget and
+//      leaves room for the newest message. An 18,600-character first reply
+//      pinned for good made a conversation unrecoverable; an oversized head
+//      is now ordinary history, summarised and dropped first. chat-edge
+//      ported the head rule and applies the same cap.
 //   2. TOOL CHAINS ARE ATOMIC. The desktop chain carries assistant(tool_calls)
 //      + tool results (chat-edge's stored history has no tool rows). A unit is
 //      either one plain message or one whole tool group — never an orphan tool
@@ -30,7 +34,7 @@
 //
 // No 'electron' import: unit-tested in plain Node.
 
-import { type BudgetBasis, MESSAGES_FLOOR, PER_TOOL_TOKENS, outputReserveForRequest, workingLimitFor } from "./context-budget";
+import { type BudgetBasis, HEAD_PIN_MAX_SHARE, MESSAGES_FLOOR, PER_TOOL_TOKENS, outputReserveForRequest, workingLimitFor } from "./context-budget";
 import type { GatewayMessage } from "./gateway-client";
 
 // FIX104: the per-model window map that stood here (`auto` and five gpt ids
@@ -126,6 +130,10 @@ export interface CompiledChain {
   sentTokens: number;
   /** The state pair rides in `messages` (compacted with a preamble). */
   stateInjected: boolean;
+  /** FIX105: there was a first exchange and this plan did not pin it (too large, or no room for the newest unit). */
+  headDropped: boolean;
+  /** FIX105: the newest message alone is larger than the messages budget — no trim makes this request fit. */
+  newestOverBudget: boolean;
   /** tokens of the history as LOADED (before any trim) — the meter's numerator. */
   historyTokensLoaded: number;
   /** triggerRatio × messagesRemaining — the meter's "compaction at" mark. */
@@ -155,11 +163,11 @@ export interface CompileOptions {
 }
 
 /** The context note the MODEL sees, appended to the system message. */
-function contextNote(dropped: number, keptRecent: number, summaryPresent: boolean): string {
+function contextNote(dropped: number, keptRecent: number, headKept: boolean, summaryPresent: boolean): string {
   return (
     `\n\n<context_note>\nThis conversation is long: ${dropped} earlier message${dropped === 1 ? "" : "s"} ` +
-    `${dropped === 1 ? "is" : "are"} not included verbatim. The first exchange and the most recent ${keptRecent} ` +
-    `message${keptRecent === 1 ? "" : "s"} are included verbatim. ` +
+    `${dropped === 1 ? "is" : "are"} not included verbatim. ${headKept ? "The first exchange and the" : "The"} most recent ${keptRecent} ` +
+    `message${keptRecent === 1 ? " is" : "s are"} included verbatim. ` +
     (summaryPresent ? "A summary of the older part is in <conversation_state> above. " : "No summary of the older part is available. ") +
     `If the user refers to something that is in neither the summary nor the visible messages, say you may have lost ` +
     `that detail and ask them to restate it — do not guess.\n</context_note>`
@@ -189,30 +197,48 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   const preambleTokens = preamble.reduce((s, m) => s + messageTokens(m), 0);
 
   const historyTokens = history.reduce((s, m) => s + messageTokens(m), 0);
+  const newestOverBudget = history.length > 0 && messageTokens(history[history.length - 1]!) > remaining;
   const base = {
     totalMessages: history.length,
+    newestOverBudget,
     historyTokensLoaded: historyTokens,
     thresholdTokens,
     budget: { total, system: sysTokens, toolReserve, outputReserve, messagesRemaining: remaining, model: basis.model, window: basis.window },
   };
   const boundary = typeof opts.manualBoundaryIndex === "number" && opts.manualBoundaryIndex >= 0 && opts.manualBoundaryIndex < history.length ? opts.manualBoundaryIndex : null;
-  const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, sentTokens: historyTokens, stateInjected: false, dropStart: 0, dropEnd: 0, ...base });
+  const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, sentTokens: historyTokens, stateInjected: false, headDropped: false, dropStart: 0, dropEnd: 0, ...base });
 
   const overThreshold = historyTokens >= thresholdTokens;
   if (!overThreshold && boundary === null) return untouched();
 
   const units = toUnits(history);
+  const noteReserve = CONTEXT_NOTE_RESERVE;
+  // The tail's budget: newest units first until it is spent (below).
+  const limit = overThreshold ? Math.floor(remaining * target) : remaining;
   // Head: the first user message and the reply that answered it (units 0..1,
   // when they are the plain first exchange). Never more than 2 units.
-  let headCount = 0;
+  // FIX105 — pinned only while that cannot kill the conversation: at most
+  // HEAD_PIN_MAX_SHARE of the messages budget, and never when keeping it
+  // leaves no room for the newest unit. Otherwise it is ordinary old history,
+  // summarised and dropped first, and headDropped says so. (FIX104 measured
+  // the alternative: an 18,600-character first reply, pinned for good, and a
+  // conversation refused on every turn after it.) chat-edge's
+  // planHeadPreservingTrim applies the same rule.
+  let naturalHead = 0;
   if (units.length > 0 && units[0]!.messages[0]!.role === "user") {
-    headCount = 1;
-    if (units.length > 1 && units[1]!.messages[0]!.role === "assistant" && !units[1]!.messages[0]!.tool_calls) headCount = 2;
+    naturalHead = 1;
+    if (units.length > 1 && units[1]!.messages[0]!.role === "assistant" && !units[1]!.messages[0]!.tool_calls) naturalHead = 2;
   }
+  const naturalHeadTokens = units.slice(0, naturalHead).reduce((s, u) => s + u.tokens, 0);
+  const newestUnitTokens = units.length > 0 ? units[units.length - 1]!.tokens : 0;
+  const unpinHead =
+    naturalHead > 0 &&
+    units.length > naturalHead &&
+    (naturalHeadTokens > Math.trunc(remaining * HEAD_PIN_MAX_SHARE) || naturalHeadTokens + newestUnitTokens + noteReserve + preambleTokens > limit);
+  const headCount = unpinHead ? 0 : naturalHead;
   const head = units.slice(0, headCount);
   const headTokens = head.reduce((s, u) => s + u.tokens, 0);
   const headMessages = head.reduce((s, u) => s + u.messages.length, 0);
-  const noteReserve = CONTEXT_NOTE_RESERVE;
 
   // The tail may not start before the boundary's unit (A-W7) or inside the head.
   let tailFloor = headCount;
@@ -231,7 +257,6 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   // Tail: newest units first until the (target) budget is spent. The LAST
   // unit (the new user turn) always ships, even if it alone overflows — a
   // system-only request dead-ends the loop (chat-edge's rule).
-  const limit = overThreshold ? Math.floor(remaining * target) : remaining;
   let used = headTokens + noteReserve + preambleTokens;
   let cut = units.length; // first kept tail unit index
   for (let i = units.length - 1; i >= tailFloor; i--) {
@@ -249,7 +274,7 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   if (dropped <= 0) return untouched();
 
   const keptRecent = tail.reduce((s, u) => s + u.messages.length, 0);
-  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent, opts.summaryPresent === true) };
+  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent, headMessages > 0, opts.summaryPresent === true) };
   const out: GatewayMessage[] = [newSystem, ...preamble, ...keptMessages];
   const keptTokens = keptMessages.reduce((s, m) => s + messageTokens(m), 0);
   return {
@@ -261,6 +286,7 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
     historyTokens: keptTokens,
     sentTokens: keptTokens + preambleTokens,
     stateInjected: preamble.length > 0,
+    headDropped: unpinHead && dropped > 0,
     dropStart: headMessages,
     dropEnd: headMessages + dropped,
     ...base,
