@@ -237,6 +237,11 @@ docs/audit/
 docs/shots/
 scripts/probes/**/results/
 scripts/probes/**/*.json
+# FIX99 — the exception is a PRE-REGISTRATION, not a result. The rule above
+# exists to keep probe output out of the repo; this file is the asks, their
+# labels, the labelling rule and the thresholds, all fixed before the run.
+# If it is not in the history, "written before" cannot be checked by anyone.
+!scripts/probes/format-eval/prereg.json
 scripts/probes/router-compare/results*.md
 scripts/*.txt
 scripts/*.jsonl
