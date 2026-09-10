@@ -1736,7 +1736,13 @@ async def _chat_completions_impl(
 
         def _emit_error(
             *,
-            code: str = "provider_error",
+            # FIX100 Part C — REQUIRED. It used to default to
+            # provider_error, which is a real code with a real meaning
+            # ("the AI provider returned an error, please try again"), so
+            # any caller that forgot to classify made that claim on the
+            # gateway's behalf. Every one of the six call sites passes a
+            # code today; requiring it keeps the default from growing back.
+            code: str,
             message: str | None = None,
             details: dict | None = None,
             attempts: list | None = None,
@@ -2578,6 +2584,35 @@ async def _chat_completions_impl(
                 except Exception as stream_exc:  # noqa: BLE001
                     from app.core.exceptions import GatewayError as _GwErr
 
+                    # FIX100 Part C — what actually failed, kept rather than
+                    # thrown away. An exception that reaches here without a
+                    # ``code`` attribute is not a provider error; it is an
+                    # exception nobody classified, and calling it
+                    # provider_error made a claim nobody had made while
+                    # hiding the real provider_error rows among it.
+                    #
+                    # ``str(exc)`` is not enough on its own: an
+                    # argument-less exception stringifies to "", which is
+                    # how the owner's qwen failure was recorded as
+                    # error="" details={} — 30,260 ms of waiting and not
+                    # even the class name survived. The class and the repr
+                    # are logged separately, and the class rides the error
+                    # frame's details so the failure is nameable from the
+                    # transcript alone.
+                    _stream_code = getattr(stream_exc, "code", None)
+                    _unclassified = _stream_code is None
+                    if _unclassified:
+                        _stream_code = "unclassified_error"
+                    _exc_class = type(stream_exc).__name__
+                    _exc_module = type(stream_exc).__module__
+                    _exc_detail: dict = dict(
+                        getattr(stream_exc, "details", None) or {}
+                    )
+                    if _unclassified:
+                        _exc_detail.setdefault(
+                            "exception", f"{_exc_module}.{_exc_class}"
+                        )
+
                     # Mid-stream errors cannot be recovered — headers and
                     # part of the body are already on the wire. Log and
                     # close the SSE gracefully; the client sees the partial
@@ -2588,6 +2623,9 @@ async def _chat_completions_impl(
                             provider=route.provider_name,
                             model=route.model_name,
                             error=str(stream_exc)[:200],
+                            error_class=f"{_exc_module}.{_exc_class}",
+                            error_repr=repr(stream_exc)[:300],
+                            error_code=_stream_code,
                         )
                         if isinstance(stream_exc, _GwErr) and _is_fallback_eligible(
                             stream_exc
@@ -2600,7 +2638,7 @@ async def _chat_completions_impl(
                         # B1: surface a mid-stream failure as an error frame so
                         # the client can append an error notice to the partial
                         # message instead of silently truncating.
-                        _mid_code = getattr(stream_exc, "code", "provider_error")
+                        _mid_code = _stream_code
                         yield _emit_error(
                             code=_mid_code,
                             message=(
@@ -2608,8 +2646,7 @@ async def _chat_completions_impl(
                                 if error_catalog.is_retryable(_mid_code)
                                 else None
                             ),
-                            details=(dict(getattr(stream_exc, "details", None) or {})
-                                     or None),
+                            details=_exc_detail or None,
                         )
                         return
 
@@ -2632,19 +2669,20 @@ async def _chat_completions_impl(
                             request_id=ctx.request_id or "",
                             provider=route.provider_name,
                             model=route.model_name,
-                            error_code=getattr(stream_exc, "code", "provider_error"),
+                            error_code=_stream_code,
                             error=str(stream_exc)[:300],
-                            details=dict(getattr(stream_exc, "details", None) or {}),
+                            error_class=f"{_exc_module}.{_exc_class}",
+                            error_repr=repr(stream_exc)[:300],
+                            details=_exc_detail,
                         )
                         yield _emit_error(
-                            code=getattr(stream_exc, "code", "provider_error"),
-                            details=(dict(getattr(stream_exc, "details", None) or {})
-                                     or None),
+                            code=_stream_code,
+                            details=_exc_detail or None,
                         )
                         return
 
                     failed_provider = route.provider_name
-                    _failed_code = getattr(stream_exc, "code", "provider_error")
+                    _failed_code = _stream_code
                     _stream_fallback_attempts.append(
                         {
                             "provider": failed_provider,

@@ -730,6 +730,11 @@ export const en = {
   "error.conflict": "This request conflicts with the current state. Reload and check.",
   "error.gateway_error":
     "The gateway could not complete the request. Pick a different model, or tell your administrator if it keeps happening.",
+  // FIX100 Part C — the exception nobody classified. It must not sound
+  // like a diagnosis we do not have, and it must not say "try again",
+  // which here would mean the same button that already failed.
+  "error.unclassified_error":
+    "Something went wrong while the reply was being received, and we could not identify what. Write a new message to continue.",
   "error.stream_stalled": "The model stopped sending data mid-reply (nothing arrived for 60 seconds), so this turn was ended. Sending again usually works; if it keeps happening, try another model.",
   "error.conversationDeleted": "This conversation was deleted.",
   "error.conversationLoadFailed": "Couldn't load this conversation. Please try again.",
@@ -2335,6 +2340,8 @@ const th: Record<DictKey, string> = {
   "error.conflict": "คำขอนี้ขัดกับสถานะปัจจุบัน กรุณาโหลดหน้าใหม่แล้วตรวจสอบ",
   "error.gateway_error":
     "เกตเวย์ไม่สามารถดำเนินการคำขอนี้ได้ ลองเปลี่ยนเป็นโมเดลอื่น หรือแจ้งผู้ดูแลระบบหากยังเกิดขึ้นอีก",
+  "error.unclassified_error":
+    "เกิดข้อผิดพลาดระหว่างรับคำตอบ และเรายังระบุไม่ได้ว่าเป็นเรื่องอะไร กรุณาพิมพ์ข้อความใหม่เพื่อคุยต่อครับ",
   "error.stream_stalled": "โมเดลหยุดส่งข้อมูลกลางคำตอบ (ไม่มีข้อมูลเข้ามาเกิน 60 วินาที) รอบนี้จึงถูกหยุด — ส่งใหม่อีกครั้งมักได้ผล ถ้าเกิดซ้ำลองเปลี่ยนโมเดลดูครับ",
   "error.conversationDeleted": "ห้องสนทนานี้ถูกลบไปแล้ว",
   "error.conversationLoadFailed": "โหลดห้องสนทนานี้ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",

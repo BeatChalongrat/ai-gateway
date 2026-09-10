@@ -228,6 +228,14 @@ def test_mid_stream_failure_emits_error_after_content(monkeypatch):
 
 
 def test_pre_stream_non_eligible_failure_emits_error(monkeypatch):
+    """FIX100 Part C — an exception nobody classified says so.
+
+    This test used to assert ``provider_error`` here, and that assertion
+    was the defect written down: ``ValueError("not a gateway error")`` is
+    not the provider returning an error, and reporting it as one made a
+    claim nobody had made — while burying the real provider_error rows
+    among a catch-all in every log query since.
+    """
     async def _raise_value_error(
         self, payload, messages, *, resolved_model=None, api_key=None
     ) -> AsyncIterator[ProviderStreamChunk]:
@@ -241,7 +249,75 @@ def test_pre_stream_non_eligible_failure_emits_error(monkeypatch):
     errors = [e for e in events if "error" in e]
 
     assert errors, f"expected an error frame, got {events}"
-    assert errors[0]["error"]["code"] == "provider_error"
+    err = errors[0]["error"]
+    assert err["code"] == "unclassified_error"
+    assert err["retryable"] is False
+    # The class survives to the frame, so the failure is nameable from the
+    # transcript alone.
+    assert err["details"]["exception"] == "builtins.ValueError"
+
+
+def test_unclassified_exception_keeps_its_class_when_str_is_empty(monkeypatch):
+    """The owner's qwen failure, reduced to its one hard fact.
+
+    It was logged as provider_error with ``error=""`` and ``details={}``
+    after 30,260 ms. The empty string is not a mystery: ``str()`` of an
+    argument-less exception IS the empty string, so the only thing the
+    handler recorded about a half-minute failure was nothing at all. The
+    class name is never empty, which is why it is what gets recorded.
+    """
+
+    class ReadError(Exception):
+        pass
+
+    async def _raise_bare(
+        self, payload, messages, *, resolved_model=None, api_key=None
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        raise ReadError()
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _raise_bare)
+
+    resp = _chat_stream()
+    errors = [e["error"] for e in _parse_sse(resp.content) if "error" in e]
+    assert errors, "expected an error frame"
+    assert str(ReadError()) == "", "premise of this test"
+    assert errors[0]["code"] == "unclassified_error"
+    assert errors[0]["details"]["exception"].endswith(".ReadError")
+
+
+def test_a_real_gateway_error_still_says_what_it_is(monkeypatch):
+    """The other half: unclassified must not swallow a classified failure.
+
+    A GatewayError carries its own code and details, and nothing here may
+    overwrite either — the point of the new code is to stop borrowing
+    provider_error, not to start borrowing unclassified_error.
+    """
+    from app.core.exceptions import UpstreamBadResponseError
+
+    async def _raise_classified(
+        self, payload, messages, *, resolved_model=None, api_key=None
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        # Astra's call 7, verbatim: deepseek, HTTP 400, thinking mode.
+        raise UpstreamBadResponseError(
+            "provider rejected the request",
+            details={
+                "provider": "deepseek",
+                "status": 400,
+                "body": {"error": {"message": "The `reasoning_content` in the thinking mode must be passed back to the API."}},
+            },
+        )
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _raise_classified)
+
+    resp = _chat_stream()
+    errors = [e["error"] for e in _parse_sse(resp.content) if "error" in e]
+    assert errors, "expected an error frame"
+    assert errors[0]["code"] == "upstream_bad_response"
+    assert errors[0]["retryable"] is False
+    assert errors[0]["details"]["provider"] == "deepseek"
+    assert "exception" not in errors[0]["details"]
 
 
 def test_successful_fallback_emits_fallback_info_metadata(monkeypatch):

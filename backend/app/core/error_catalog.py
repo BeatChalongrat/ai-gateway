@@ -105,6 +105,28 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("not_found", "The requested resource was not found.", False),
     ErrorInfo("conflict", "The request conflicts with the current state.", False),
     ErrorInfo("gateway_error", "The request could not be completed.", False),
+    # FIX100 Part C — the turn died on an exception nobody classified.
+    #
+    # ``provider_error`` was doing two jobs: a real upstream error, AND the
+    # default for any exception that reached the stream handler without a
+    # ``code`` attribute. The second job hid the first. The owner's qwen
+    # failure on 2026-09-10 was logged as provider_error with error="" and
+    # details={} after 30,260 ms — an empty string because str() of an
+    # argument-less exception is empty, so even the CLASS was lost — and it
+    # read to everyone, including the person waiting, as "the provider
+    # returned an error", which is a claim nobody had made.
+    #
+    # Not retryable, following this file's own stated default, and the
+    # choice is worth writing down because it is arguable. What lands here
+    # is anything from a transport blip (a retry would work) to a bug in our
+    # own parser (a retry never will), and we cannot tell them apart — that
+    # is the definition of the code. Of the two ways to be wrong, promising
+    # a retry that cannot work is the one this file exists to end, and the
+    # cost of the other is one typed message: FIX100 Part B replaces the
+    # retry button with "write a new message instead", which is what
+    # recovered the owner's conversation. Flip it to True the day the logs
+    # show these are overwhelmingly transport.
+    ErrorInfo("unclassified_error", "Something went wrong while the reply was being received, and we could not identify what. Write a new message to continue.", False),
 )
 
 CATALOG: dict[str, ErrorInfo] = {e.code: e for e in _ENTRIES}

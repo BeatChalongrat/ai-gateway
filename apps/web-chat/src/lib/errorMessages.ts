@@ -116,6 +116,13 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   NOT_FOUND: "error.not_found",
   conflict: "error.conflict",
   gateway_error: "error.gateway_error",
+  // FIX100 Part C — the turn died on an exception nobody classified.
+  // Deliberately NOT in RETRYABLE_CODES: what lands here ranges from a
+  // transport blip to a bug in our own parser and the code exists exactly
+  // because we cannot tell them apart, so the sentence names the one way
+  // out we can promise — write a new message — and Part B's gate replaces
+  // Regenerate with it.
+  unclassified_error: "error.unclassified_error",
   // FIX80 — the desktop watchdog's mid-stream silence abort, named
   // honestly instead of "connection stalled" with no next step.
   stream_stalled: "error.stream_stalled",
