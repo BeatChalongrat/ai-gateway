@@ -395,7 +395,32 @@ async def test_no_chain_fallback_preserves_at_capacity_503():
         )
     assert excinfo.value is original  # same object — headers intact
 
-    # A NON-capacity error still gets the explanatory no-chain wrapper.
+    # FIX98 — every other code is preserved too, not just at-capacity.
+    # With no chain we never attempted a fallback, so the original error IS
+    # what happened; replacing it announces our routing configuration instead
+    # of the event. Measured live: a non-streaming request to a self-hosted
+    # model died on a provider timeout at ~92 s and the user was told "No
+    # fallback chain registered for model 'qwen3.8-27b-fp8'" — which names
+    # neither the timeout nor anything actionable. provider_timeout already
+    # has a row in the frontend table and a sentence in both languages, so
+    # letting the real code through is all that was needed.
+    timeout = ProviderError("Provider 'boxprov' timed out.", code="provider_timeout")
+    with pytest.raises(ProviderError) as passed_through:
+        await runner.run(
+            original_provider="boxprov",
+            original_model="model-with-no-chain",
+            request=None,
+            messages=[],
+            session=None,
+            ctx=_Ctx(),
+            original_error=timeout,
+        )
+    assert passed_through.value is timeout
+    assert passed_through.value.code == "provider_timeout"
+    assert "No fallback chain" not in passed_through.value.message
+
+    # The explanatory wrapper survives for the case it was written for:
+    # no chain AND nothing to report about why the primary failed.
     with pytest.raises(ProviderError) as generic:
         await runner.run(
             original_provider="boxprov",
@@ -404,6 +429,6 @@ async def test_no_chain_fallback_preserves_at_capacity_503():
             messages=[],
             session=None,
             ctx=_Ctx(),
-            original_error=ProviderError("upstream 500"),
+            original_error=None,
         )
     assert "No fallback chain" in generic.value.message

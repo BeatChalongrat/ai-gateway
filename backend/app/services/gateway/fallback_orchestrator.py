@@ -456,16 +456,25 @@ class FallbackOrchestrator:
                 chain = merged
         if not chain:
             log.info("fallback_no_chain")
-            # Batch A: a shed request (bulkhead full) must keep its
-            # 503 + Retry-After semantics for the client. Wrapping it
-            # in the generic no-chain 502 here would tell the caller
-            # "provider broken" when the truthful signal is "provider
-            # busy, retry shortly" — found live on a chain-less
-            # self-hosted model.
-            if (
-                original_error is not None
-                and getattr(original_error, "code", None) == "provider_at_capacity"
-            ):
+            # FIX98 — when there is no chain we never attempted a fallback, so
+            # the ORIGINAL error is what happened and the only thing worth
+            # telling the caller. Replacing it announces our routing
+            # configuration instead of the event: a request that died on a
+            # provider timeout was surfacing as "No fallback chain registered
+            # for model 'qwen3.8-27b-fp8'", which names neither the timeout
+            # nor anything the user can act on. Measured: a non-streaming
+            # 8 KB-prompt request to a self-hosted model fails at 91.6-92.1 s
+            # (3 of 3) and every one of them reported the wrong event.
+            #
+            # This widens a rule that was already here for exactly one code.
+            # Batch A had kept provider_at_capacity intact so a shed request
+            # keeps its 503 + Retry-After rather than reading as "provider
+            # broken" — the same argument applies to every code, so the
+            # special case becomes the general one.
+            #
+            # The generic error below is kept for the case it was written
+            # for: no chain AND no original error to report.
+            if original_error is not None:
                 raise original_error
             raise ProviderError(
                 f"No fallback chain registered for model '{original_model}'.",
