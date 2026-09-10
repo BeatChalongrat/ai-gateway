@@ -27,6 +27,7 @@ import {
 	X,
 } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { ContextSource, ContextSourceType } from "@/lib/types";
 
 interface Props {
@@ -128,18 +129,20 @@ function SourceRow({
 	onOpen?: () => void;
 	onHide: () => void;
 }) {
+	const t = useT();
 	const icon = SOURCE_ICONS[source.source_type] ?? (
 		<FileText className="h-3.5 w-3.5 text-text-muted" />
 	);
 	const typeLabel = SOURCE_LABELS[source.source_type] ?? source.source_type;
 	const meta = secondaryLine(source);
+	const label = localizedLabel(source, t);
 
 	return (
 		<div className="group flex items-start gap-2 py-1.5">
 			<span className="mt-0.5 flex-shrink-0">{icon}</span>
 			<div className="min-w-0 flex-1">
-				<p className="truncate text-xs text-text-secondary" title={source.display_label}>
-					{source.display_label}
+				<p className="truncate text-xs text-text-secondary" title={label}>
+					{label}
 				</p>
 				<p className="text-[11px] text-text-muted">
 					{typeLabel}
@@ -185,6 +188,30 @@ function RowAction({
 			{children}
 		</button>
 	);
+}
+
+// localizedLabel (FIX102 Part E) — the compaction row was built as an
+// English sentence in Go, so a Thai screen read "Conversation compacted (22
+// older messages summarized)". chat-edge now sends a code plus the numbers
+// in metadata, the way error codes reach localizeErrorCode; the sentence is
+// written here. Rows persisted before the code existed keep the label they
+// were stored with.
+export function localizedLabel(source: ContextSource, t: ReturnType<typeof useT>): string {
+	const meta = source.metadata ?? {};
+	if (source.source_type !== "compacted_history" || meta["code"] !== "conversation_compacted" || typeof meta["missing"] !== "number") {
+		return source.display_label;
+	}
+	const n = String(meta["missing"]);
+	switch (meta["summary"]) {
+		case "failed":
+			return t("sources.compacted.noSummary", { n });
+		case "partial":
+			return t("sources.compacted.partial", { n });
+		case "off":
+			return t("sources.compacted.memoryOff", { n });
+		default:
+			return t("sources.compacted", { n });
+	}
 }
 
 // secondaryLine renders the muted metadata tail after the type
