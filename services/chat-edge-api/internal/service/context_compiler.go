@@ -172,6 +172,11 @@ type CompileInputs struct {
 	// sent history (StateInjectionMessages) — never into the system
 	// message. Nil = no state injection.
 	BuildState func() (string, []ContextSource)
+	// BudgetModelID (FIX102) is the concrete model the budget is measured
+	// against when it is not Conv.ModelID — for an "auto" conversation, the
+	// model that answered its last completed turn. Empty = Conv.ModelID,
+	// which for "auto" is the conservative default.
+	BudgetModelID string
 }
 
 // CompiledContext is what Compile returns. Mirrors the shape the
@@ -208,6 +213,11 @@ type CompiledContext struct {
 	// StateInjected (FIX33.1) — History[0..1] are the synthetic
 	// user/assistant pair carrying the state block.
 	StateInjected bool
+	// BudgetModel (FIX102) is the model id the budget was measured
+	// against; BudgetWindow is the catalogue's advertised window for it,
+	// 0 when the catalogue did not know it (seed map or default).
+	BudgetModel  string
+	BudgetWindow int
 }
 
 // Compile is the single entry point for the message-service send
@@ -238,6 +248,10 @@ func (c *ContextCompiler) Compile(
 
 	budget := c.budgetFor(ctx, in, prefix)
 	out.Budget = budget
+	out.BudgetModel = budgetModelOf(in)
+	if c.contextWindow != nil {
+		out.BudgetWindow = c.contextWindow(ctx, out.BudgetModel)
+	}
 
 	historyTokens := estimateHistoryTokens(in.History, in.ImageURLs)
 	out.HistoryTokens = historyTokens
@@ -436,7 +450,16 @@ func (c *ContextCompiler) budgetFor(ctx context.Context, in CompileInputs, prefi
 	// message before the history.
 	sysTokens += 4
 	toolReserve := in.NumTools * perToolTokens
-	return CalculateBudgetWith(ctx, c.contextWindow, in.Conv.ModelID, sysTokens, 0, 0, 0, toolReserve)
+	return CalculateBudgetWith(ctx, c.contextWindow, budgetModelOf(in), sysTokens, 0, 0, 0, toolReserve)
+}
+
+// budgetModelOf is the model the budget is measured against: the caller's
+// BudgetModelID when it named one, else the conversation's own model.
+func budgetModelOf(in CompileInputs) string {
+	if id := in.BudgetModelID; id != "" {
+		return id
+	}
+	return in.Conv.ModelID
 }
 
 // stateIsStaleForCompaction — would an extraction pass add anything?
@@ -480,6 +503,7 @@ func (c *ContextCompiler) logCompiled(
 	slog.Info("context_compiled",
 		"conv", in.Conv.ID.String(),
 		"model", in.Conv.ModelID,
+		"budget_model", out.BudgetModel,
 		"status", status,
 		"budget_total", out.Budget.TotalBudget,
 		"system_tokens", out.Budget.SystemPromptTokens,

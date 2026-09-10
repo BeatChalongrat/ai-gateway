@@ -267,6 +267,16 @@ type RoutingHints struct {
 	// "" (tenant / deployment default) | low | medium | high | xhigh | max.
 	// Only meaningful with model="auto"; the gateway ignores it otherwise.
 	Tier string `json:"tier,omitempty"`
+	// MinContextTokens (FIX102) — what this compiled request needs a model
+	// to hold: prompt plus the output reserve. HARD: the router never picks
+	// a model whose catalogue window is smaller, because that model would
+	// refuse it.
+	MinContextTokens int `json:"min_context_tokens,omitempty"`
+	// PreferredContextTokens (FIX102) — the window this conversation is
+	// budgeted against (the model that answered its last turn). SOFT: the
+	// router keeps the turn on a model at least that large when the tier
+	// ceiling leaves one, so the next turn's budget does not collapse.
+	PreferredContextTokens int `json:"preferred_context_tokens,omitempty"`
 }
 
 type GatewayChatRequest struct {

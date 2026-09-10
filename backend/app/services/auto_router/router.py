@@ -109,6 +109,31 @@ def _require(pool: list, attr: str, *, missing: list[str], name: str) -> list:
     return kept
 
 
+def _context_hint(hints, name: str) -> int:
+    """A FIX102 context hint as a non-negative int; 0 when absent."""
+    if hints is None:
+        return 0
+    try:
+        return max(int(getattr(hints, name, 0) or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _window(candidate) -> int:
+    return int(getattr(candidate, "max_context_tokens", 0) or 0)
+
+
+def _require_window(pool: list, tokens: int, *, missing: list[str]) -> list:
+    """FIX102 — the HARD context filter. A model whose catalogue window is
+    smaller than the compiled request refuses it before inference, so it is
+    no more a candidate than a tools-blind model is for a tools turn."""
+    kept = [c for c in pool if _window(c) >= tokens]
+    if not kept:
+        missing.append("context")
+        return pool
+    return kept
+
+
 def _capability_filter(
     pool: list,
     *,
@@ -313,6 +338,9 @@ def route_auto(
         hard_pool = _require(hard_pool, "supports_vision", missing=missing, name="vision")
     if require_tools:
         hard_pool = _require(hard_pool, "supports_tools", missing=missing, name="tools")
+    min_context = _context_hint(hints, "min_context_tokens")
+    if min_context:
+        hard_pool = _require_window(hard_pool, min_context, missing=missing)
     if missing:
         raise NoCapableModelError(missing, len(hard_pool), [c.model for c in hard_pool])
     candidates = hard_pool
@@ -356,6 +384,17 @@ def route_auto(
         # Step 3 — tier ceiling. The task's own preferred band lowers the
         # start of the search but never raises the ceiling.
         pool, relaxed = _apply_ceiling(pool, ceiling)
+        # FIX102 — SOFT: keep an auto conversation on a model at least as
+        # large as the window it is budgeted against, when the ceiling left
+        # one. Otherwise one turn on a small model shrinks the next turn's
+        # budget from ~90 turns of room to ~4. Never overrides the ceiling.
+        preferred_window = _context_hint(hints, "preferred_context_tokens")
+        window_kept = False
+        if preferred_window:
+            roomy = [c for c in pool if _window(c) >= preferred_window]
+            if roomy:
+                pool = roomy
+                window_kept = True
         filtered = len(pool)
 
         # Step 2 + 4c - order (blended prior/live), then optional exploration.
@@ -372,6 +411,10 @@ def route_auto(
         if needs_tools:
             bits.append("tools")
         bits.append("tenant-ranked" if used_ranking else "prior-rank")
+        if min_context:
+            bits.append(f"context>={min_context}")
+        if window_kept:
+            bits.append(f"window>={preferred_window}")
         if relaxed:
             bits.append("tier_relaxed")
         if explored:

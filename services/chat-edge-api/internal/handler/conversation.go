@@ -644,6 +644,7 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"conversation_id":        convID.String(),
+		"budget_model":           compiled.BudgetModel,
 		"total_budget":           compiled.Budget.TotalBudget,
 		"system_prompt_tokens":   compiled.Budget.SystemPromptTokens,
 		"output_reserve":         compiled.Budget.OutputReserve,

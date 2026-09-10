@@ -222,6 +222,16 @@ class RoutingHints(BaseModel):
     # deployment default. Only meaningful with model="auto"; an explicit
     # model is never touched by routing (see orchestrator._apply_router_chain).
     tier: Optional[Literal["low", "medium", "high", "xhigh", "max"]] = None
+    # FIX102 — what the compiled request needs a model to hold (prompt plus
+    # the output reserve chat-edge held back). HARD: a candidate whose
+    # catalogue window is smaller would refuse the request, so it is never
+    # picked; an empty pool is ``no_capable_model`` with missing=["context"].
+    min_context_tokens: int = Field(0, ge=0)
+    # FIX102 — the window chat-edge budgeted this conversation against (the
+    # model that answered its last turn). SOFT, applied after the tier
+    # ceiling: prefer candidates at least this large, so the next turn's
+    # budget does not collapse because one turn went to a smaller model.
+    preferred_context_tokens: int = Field(0, ge=0)
 
 
 class ChatCompletionsRequest(BaseModel):

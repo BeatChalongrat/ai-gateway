@@ -3208,6 +3208,7 @@ func (s *MessageService) compileAndBuildRequest(
 		OmittedOlder:      omittedOlder,
 		OnExtractionStart: onExtractionStart,
 		BuildState:        s.stateBlockBuilder(ctx, conv, userID, tenantID),
+		BudgetModelID:     s.budgetModelFor(ctx, conv, history),
 	})
 	if err != nil || compiled == nil {
 		// Defensive fallback — should never happen since Compile
@@ -3228,6 +3229,7 @@ func (s *MessageService) compileAndBuildRequest(
 	// tool hits the model adds during the turn.
 	sources.Add(compiled.Sources...)
 	req := buildGatewayRequestWithImages(modelID, compiled.History, compiled.SystemPrefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
+	applyContextHints(routingHints, compiled)
 	req.RoutingHints = routingHints
 	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
 	return req
@@ -3414,11 +3416,82 @@ func (s *MessageService) InspectContext(
 		BuildPrefix: func() (string, []ContextSource) {
 			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
 		},
-		NumTools:     numTools,
-		OmittedOlder: s.omittedOlder(ctx, tenantID, convID, len(history)),
-		DryRun:       true,
-		BuildState:   s.stateBlockBuilder(ctx, conv, userID, tenantID),
+		NumTools:      numTools,
+		OmittedOlder:  s.omittedOlder(ctx, tenantID, convID, len(history)),
+		DryRun:        true,
+		BuildState:    s.stateBlockBuilder(ctx, conv, userID, tenantID),
+		BudgetModelID: s.budgetModelFor(ctx, conv, history),
 	})
+}
+
+// budgetModelFor (FIX102 Part A) names the model a turn's context budget
+// is measured against.
+//
+// A pinned model budgets against itself. "auto" is the hard case: chat-edge
+// never resolves it — the request leaves here as model="auto" and the
+// gateway's router picks the answering model after DLP, in another
+// service, long after this budget was fixed. So the budget cannot follow
+// the model that WILL answer. It follows the model that DID: the one that
+// answered this conversation's last completed turn, which every completed
+// "auto" row has carried since FIX35 Part B. The router is then told, via
+// applyContextHints, how big the compiled request is, so it cannot hand
+// the turn to a model that would refuse it.
+//
+// That model is used only while the catalogue lists it. /v1/models carries
+// only models whose provider holds a usable key, so a model that has lost
+// its key, been deactivated or was never catalogued falls back to the
+// conservative default rather than budgeting a conversation for a model
+// nothing can call. No evidence at all — a new "auto" conversation — is the
+// same default, and a first turn is small.
+func (s *MessageService) budgetModelFor(ctx context.Context, conv *model.Conversation, history []model.Message) string {
+	if conv == nil || !IsAutoModel(conv.ModelID) {
+		return ""
+	}
+	served := lastServedModel(history)
+	if served == "" || s.contextWindow == nil || s.contextWindow(ctx, served) <= 0 {
+		return ""
+	}
+	return served
+}
+
+// lastServedModel is the concrete model that answered the newest completed
+// assistant turn in history, or "" when there is none. Error, cancelled,
+// streaming and regenerated rows are skipped: they either carry the "auto"
+// sentinel or describe a reply that is not the one in the transcript.
+func lastServedModel(history []model.Message) string {
+	for i := len(history) - 1; i >= 0; i-- {
+		m := history[i]
+		if m.Role != "assistant" || m.Status != "completed" || m.ModelID == nil {
+			continue
+		}
+		if id := strings.TrimSpace(*m.ModelID); id != "" && !IsAutoModel(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+// applyContextHints (FIX102 Part A) tells the gateway's router what the
+// compiled request needs, on an "auto" turn only (hints is nil otherwise).
+//
+// MinContextTokens is everything the provider must hold: the system prefix
+// (plus the context note when compaction added one), the tool reserve, the
+// history actually sent and the output reserve the budget held back. The
+// router treats it as a hard need. PreferredContextTokens is the window the
+// budget was measured against — 0 when the default was used — and the
+// router treats it as a preference, so an auto conversation that has room
+// for 90 turns is not quietly handed to a model with room for 4.
+func applyContextHints(h *RoutingHints, cc *CompiledContext) {
+	if h == nil || cc == nil {
+		return
+	}
+	b := cc.Budget
+	need := b.SystemPromptTokens + b.ToolReserve + cc.SentTokens + b.OutputReserve
+	if cc.Compacted {
+		need += contextNoteReserve
+	}
+	h.MinContextTokens = need
+	h.PreferredContextTokens = cc.BudgetWindow
 }
 
 // stateBlockBuilder (FIX33.1 Part 2) — the compiler's source for the
