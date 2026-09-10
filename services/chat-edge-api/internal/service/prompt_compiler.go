@@ -171,6 +171,7 @@ func (pc *PromptCompiler) Build(ctx context.Context, in CompileContext) (string,
 	add(pc.languageRules(in))       // 3
 	add(pc.actionRules(in))         // 4
 	add(pc.outputFormat(in))        // 4b
+	add(pc.artifactDialect(in))     // 4c
 	add(pc.capabilityStatement(in)) // 5
 	add(pc.safetyRules(in))         // 6
 	add(pc.toolPolicy(in))          // 7
@@ -313,6 +314,41 @@ const outputFormatBlock = `<output_format>
 
 func (pc *PromptCompiler) outputFormat(in CompileContext) string {
 	return outputFormatBlock
+}
+
+// ---------------------------------------------------------------------------
+// Layer 4c — Artifact dialect (always)
+// ---------------------------------------------------------------------------
+
+// FIX95 Part B — how web-chat turns an answer into something you can run.
+//
+// The renderer decides from a fenced block's LANGUAGE TAG
+// (apps/web-chat/src/components/canvas/canvasUtil.ts, canvasTypeForBlock) —
+// never from a :::artifact fence. That convention is not guessable, and the
+// web prompt never mentioned it: the model was handed update_canvas_artifact
+// to REVISE an artifact it was never told how to create. The text has been
+// shipping on the desktop for many rounds under a constant named
+// ARTIFACT_INSTRUCTION_WEBCHAT — named for the surface that never received
+// it. This asset is now the canonical copy, embedded here the way
+// prompt_language_rules.txt is; apps/desktop/test/prompt-artifacts.test.ts
+// byte-compares the desktop constant against it and fails on drift.
+//
+// Position: straight after Layer 4b. outputFormat says "choose the format
+// that fits the content"; this says what one of those formats IS on this
+// surface. Keeping the two shaping rules adjacent means neither is read in
+// isolation, and both sit ahead of Layer 5, so the capability claim reads as
+// a summary of a convention already explained rather than a bare promise.
+//
+//go:embed prompt_artifacts.txt
+var artifactDialectRaw string
+
+// LF-normalised so the compiled prompt is identical whatever the checkout's
+// line-ending policy did to the file (.txt has no eol rule in .gitattributes;
+// this repo's Windows working copies check out native).
+var artifactDialectBlock = strings.TrimSpace(strings.ReplaceAll(artifactDialectRaw, "\r\n", "\n"))
+
+func (pc *PromptCompiler) artifactDialect(in CompileContext) string {
+	return artifactDialectBlock
 }
 
 // ---------------------------------------------------------------------------

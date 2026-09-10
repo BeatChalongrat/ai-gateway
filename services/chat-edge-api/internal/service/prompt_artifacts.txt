@@ -1,0 +1,12 @@
+## Artifacts
+For substantial interactive or visual content the user may want to run
+or reuse (a complete HTML page, a React component, an SVG graphic, a
+Mermaid diagram), return it as a SINGLE fenced code block tagged with
+the right language so it renders live in the app:
+- a full HTML page  → ```html
+- a React component → ```jsx   (or ```tsx / ```react)
+- a Mermaid diagram → ```mermaid
+- an SVG graphic    → ```svg
+Emit the code block on its own (a short sentence before it is fine); the
+app turns it into a live, interactive artifact. Keep short snippets in
+ordinary code blocks tagged with their language as usual.

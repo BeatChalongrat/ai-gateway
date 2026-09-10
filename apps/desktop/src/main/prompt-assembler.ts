@@ -183,7 +183,15 @@ ${SHELL_ENVIRONMENT_LINE}`);
 /** The web-chat artifact dialect — verbatim from AgentTurnAssembler
  * (ArtifactDialect.WebChatCodeBlock). web-chat detects an artifact from a
  * fenced block's LANGUAGE TAG (canvasUtil.canvasTypeForBlock), never from a
- * :::artifact fence. */
+ * :::artifact fence.
+ *
+ * FIX95 — the canonical copy is now
+ * services/chat-edge-api/internal/service/prompt_artifacts.txt, which the Go
+ * compiler embeds so the WEB path finally sends this too (for many rounds
+ * this constant was named for web-chat and reached only the desktop). The
+ * text below is unchanged, deliberately: desktop was not broken, so its
+ * compiled prompt must not move. test/prompt-artifacts.test.ts byte-compares
+ * the two and pins that. Reword one side and the lane goes red. */
 export const ARTIFACT_INSTRUCTION_WEBCHAT = `
 
 ## Artifacts
