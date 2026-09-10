@@ -623,24 +623,8 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	// FIX33 A-W6 — the context meter. used_ratio is history ÷ the
-	// messages budget; the meter shows it against the trigger so the
-	// user sees compaction coming. est_messages_remaining is a rough
-	// "how many more messages like the recent ones fit before the
-	// trigger" — average recent message size, never negative.
 	budget := compiled.Budget.MessagesRemaining
-	usedRatio := 0.0
-	if budget > 0 {
-		usedRatio = float64(compiled.HistoryTokens) / float64(budget)
-	}
-	avg := 0
-	if compiled.MessagesTotal > 0 {
-		avg = compiled.HistoryTokens / compiled.MessagesTotal
-	}
-	estRemaining := 0
-	if avg > 0 && compiled.ThresholdTokens > compiled.HistoryTokens {
-		estRemaining = (compiled.ThresholdTokens - compiled.HistoryTokens) / avg
-	}
+	meter := contextMeter(compiled)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"conversation_id":        convID.String(),
@@ -657,14 +641,61 @@ func (h *ConversationHandler) GetContextInfo(w http.ResponseWriter, r *http.Requ
 		"history_tokens":         compiled.HistoryTokens,
 		"sent_tokens":            compiled.SentTokens,
 		"threshold_tokens":       compiled.ThresholdTokens,
-		"used_ratio":             usedRatio,
+		"used_ratio":             meter.UsedRatio,
+		"over_budget":            meter.OverBudget,
+		"trimming":               meter.Trimming,
 		"omitted_older":          compiled.OmittedOlder,
 		"dropped":                compiled.Dropped,
 		"head_kept":              compiled.HeadKept,
 		"manual_compact_pending": compiled.ManualCompact,
 		"state_present":          compiled.StatePresent,
-		"est_messages_remaining": estRemaining,
+		"state_injected":         compiled.StateInjected,
+		"est_messages_remaining": meter.EstRemaining,
 	})
+}
+
+// contextMeterView is what the context meter reports (FIX102 Part B).
+type contextMeterView struct {
+	UsedRatio    float64
+	OverBudget   bool
+	Trimming     bool
+	EstRemaining int
+}
+
+// contextMeter turns one dry-run compile into the meter's numbers.
+//
+// FIX33 made used_ratio the LOADED history over the messages budget. Stored
+// history only grows, so the moment trimming became routine the ratio
+// stayed above 1 for good — FIX101 measured 229 %, FIX102's probe 340 % by
+// its twelfth turn — and the meter sat at a capped 100 % that no longer
+// tracked anything. A number over 100 % of what will be sent describes a
+// request that cannot exist.
+//
+// Now every number describes the request the next turn will SEND:
+//
+//   - used_ratio is the sent history over the budget, never above 1.
+//     Before any trim nothing is dropped, so sent == loaded and the value
+//     is exactly what it was. over_budget flags the one real case above 1:
+//     the newest message alone does not fit.
+//   - trimming says older messages are being left out (or were never
+//     loaded). A gauge that is always full carries no information, so the
+//     client stops showing a percent then and says what is sent instead.
+//   - est_messages_remaining counts down to the first trim — messages like
+//     the recent ones that fit before the trigger — and is 0 once trimming.
+func contextMeter(c *service.CompiledContext) contextMeterView {
+	v := contextMeterView{Trimming: c.Compacted}
+	if budget := c.Budget.MessagesRemaining; budget > 0 {
+		v.UsedRatio = float64(c.SentTokens) / float64(budget)
+	}
+	if v.UsedRatio > 1 {
+		v.UsedRatio, v.OverBudget = 1, true
+	}
+	if !v.Trimming && c.MessagesTotal > 0 && c.ThresholdTokens > c.HistoryTokens {
+		if avg := c.HistoryTokens / c.MessagesTotal; avg > 0 {
+			v.EstRemaining = (c.ThresholdTokens - c.HistoryTokens) / avg
+		}
+	}
+	return v
 }
 
 // ---------------------------------------------------------------------------

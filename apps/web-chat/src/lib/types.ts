@@ -550,6 +550,14 @@ export interface ContextInfo {
   dropped?: number;
   omitted_older?: number;
   est_messages_remaining: number;
+  /** FIX102 — tokens of the history the next turn sends (web only). */
+  sent_tokens?: number;
+  /** FIX102 — the newest message alone does not fit; used_ratio is clamped to 1. */
+  over_budget?: boolean;
+  /** FIX102 — the sent history starts with the injected summary pair (web only). */
+  state_injected?: boolean;
+  /** FIX102 — the model the budget was measured against (web only). */
+  budget_model?: string;
   /** Optional on the web wire; the client falls back to CONTEXT_METER_SHOW_RATIO. */
   show_meter?: boolean;
   meter_show_ratio?: number;

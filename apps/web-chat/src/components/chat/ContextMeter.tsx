@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, ApiError } from "@/lib/api";
-import { meterPercent, shouldShowMeter } from "@/lib/compaction";
+import { isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
 import { hostApi } from "@/lib/hostApi";
 import { useT } from "@/lib/i18n";
 import type { ContextInfo } from "@/lib/types";
@@ -59,9 +59,21 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
   }, [open]);
 
   if (!shouldShowMeter(info)) return null;
-  const pct = meterPercent(info!);
-  const n = Math.max(0, info!.est_messages_remaining);
-  const label = n > 0 ? t("context.meter", { pct: String(pct), n: String(n) }) : t("context.meter.full", { pct: String(pct) });
+  // FIX102 — two states, never a number over what is sent. Approaching the
+  // first trim: a countdown. Trimming routinely: what the assistant sees.
+  const trimming = isTrimming(info!);
+  let label: string;
+  let tokensTitle: string | undefined;
+  if (trimming) {
+    const { sent, total } = messagesSeen(info!);
+    label = t(info!.state_present ? "context.rolling" : "context.rolling.noSummary", { sent: String(sent), total: String(total) });
+    tokensTitle = typeof info!.sent_tokens === "number" ? `${info!.sent_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens` : undefined;
+  } else {
+    const pct = meterPercent(info!);
+    const n = Math.max(0, info!.est_messages_remaining);
+    label = n > 0 && !info!.over_budget ? t("context.meter", { pct: String(pct), n: String(n) }) : t("context.meter.full", { pct: String(pct) });
+    tokensTitle = `${info!.history_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens`;
+  }
 
   async function submit() {
     if (busy) return;
@@ -88,10 +100,10 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
         className="text-[11px] text-text-muted"
         role="status"
         aria-label={t("context.meter.aria")}
-        title={`${info!.history_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens`}
+        title={tokensTitle}
+        data-state={trimming ? "trimming" : "approaching"}
       >
         {label}
-        {info!.compacted || info!.state_present ? <span className="ml-1 text-text-muted">· {t("context.compacted")}</span> : null}
       </span>
       <button
         type="button"
