@@ -78,6 +78,14 @@ traces/
 # Exception: the retention plan is a real project document, not a working report.
 !docs/DATA_RETENTION_PLAN.md
 *_LOG.md
+
+# The same classes spelled with hyphens. The rules above were written with
+# underscores, so UX-TEST-PLAN.md and UX-TEST-QUESTIONS.md sat untracked and
+# visible at the root until 2026-09-10. A name that is not one of these shapes
+# is still not covered -- working documents belong in scratchpad/ (line 156).
+*-REPORT.md
+*-PLAN.md
+*-QUESTIONS.md
 BASELINE_STATUS.md
 IMPLEMENTATION_ROADMAP.md
 RUNBOOK.md
