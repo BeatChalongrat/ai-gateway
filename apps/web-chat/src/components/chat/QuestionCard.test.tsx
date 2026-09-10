@@ -248,6 +248,41 @@ describe("QuestionCard — the waiting card takes focus", () => {
     drafting.remove();
   });
 
+  // FIX96 — the card separates from the thread by fill + border + shadow,
+  // never by a coloured outline. The blue it used to carry was not even a
+  // design-system colour: this app's --accent is monochrome (#ECECEC dark /
+  // #0D0D0D light) and the card hard-coded Tailwind's blue-500/600. Accent
+  // survives in exactly two places, both of them states: the option you
+  // chose, and the button that sends. Anything else coloured is drift back.
+  it("wears no hard-coded colour: raised neutral surface, accent only on the chosen option and Answer", () => {
+    const { container } = render(<QuestionCard question={two} onAnswer={() => {}} />);
+    const card = screen.getByTestId("question-card");
+    expect(card.className).toContain("bg-bg-surface");
+    expect(card.className).toContain("border-border");
+    expect(card.className).toMatch(/shadow/);
+    // no blue (or any other palette hue) anywhere in the card's markup
+    for (const el of container.querySelectorAll<HTMLElement>("*")) {
+      expect(el.className.toString()).not.toMatch(/\b(?:bg|text|border)-(?:blue|indigo|violet|sky|cyan)-\d{3}\b/);
+    }
+    // the accent IS allowed, and only on the two states
+    const accented = [...container.querySelectorAll<HTMLElement>("*")].filter((el) =>
+      /\baccent\b/.test(el.className.toString()),
+    );
+    for (const el of accented) {
+      const id = el.getAttribute("data-testid");
+      expect(["question-option", "question-other", "question-submit"]).toContain(id);
+    }
+  });
+
+  it("the explanatory skip sentence is gone from the card and carried by Skip's title instead", () => {
+    render(<QuestionCard question={two} onAnswer={() => {}} />);
+    expect(screen.queryByText(/proceed on its own judgment/i)).toBeNull();
+    expect(screen.getByTestId("question-skip")).toHaveAttribute("title");
+    // the buttons keep their own labels — the owner was explicit about this
+    expect(screen.getByTestId("question-skip").textContent).toBe("Skip");
+    expect(screen.getByTestId("question-submit").textContent).toBe("Answer");
+  });
+
   it("with the card focused, a number key then Enter answers — no mouse", () => {
     const onAnswer = vi.fn();
     render(<QuestionCard question={one} onAnswer={onAnswer} />);

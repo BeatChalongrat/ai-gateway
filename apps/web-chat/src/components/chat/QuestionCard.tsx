@@ -178,44 +178,62 @@ export function QuestionCard({
       // focus when it appears so 1–9 and Enter reach it, and Enter here is
       // the card's own — the option buttons keep theirs.
       tabIndex={-1}
-      className="my-2 rounded-lg border border-blue-500/50 bg-blue-500/5 px-3 py-3 focus:outline-none"
+      // FIX96 — the keyboard legend is hidden below `sm` (a phone has no
+      // number row to press), so the card itself carries it as a title:
+      // the shortcut is never undiscoverable, only unobtrusive.
+      title={t("question.keyHint")}
+      className="mx-auto my-2 max-w-xl rounded-xl border border-border bg-bg-surface px-4 py-3 shadow-lg focus:outline-none"
       data-testid="question-card"
       data-prompt-id={question.promptId}
       data-active-question={activeQi}
     >
       <div className="flex items-center gap-2">
-        <MessageCircleQuestion className="h-5 w-5 shrink-0 text-blue-500" />
+        <MessageCircleQuestion className="h-5 w-5 shrink-0 text-text-secondary" />
         <div className="text-sm font-semibold text-text-primary">{t("question.title")}</div>
         {many ? (
-          <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] tabular-nums text-text-tertiary" data-testid="question-count">
+          <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] tabular-nums text-text-secondary" data-testid="question-count">
             {t("question.count", { n: String(question.questions.length) })}
           </span>
         ) : null}
-        <span className="ml-auto hidden text-[11px] text-text-muted sm:inline">{t("question.keyHint")}</span>
       </div>
 
       {question.questions.map((q, qi) => {
         const cur = picked[qi] ?? [];
         const otherOn = cur.includes(OTHER);
+        // FIX96 — the question the number keys act on stands forward and the
+        // rest step back. The step is a TOKEN, not opacity: measured on this
+        // card's surface, the largest opacity that still keeps the quietest
+        // text on it at 4.5:1 is 0.91 (dark) / 0.88 (light) — a dim nobody
+        // can see. text-secondary is 5.12:1 dark and 5.96:1 light against
+        // bg-surface, so the hierarchy is visible AND every question stays
+        // readable. Nothing about which question is active changes here;
+        // this is the same activeQi the keys already used.
+        const back = many && qi !== activeQi && !sent;
         return (
           <fieldset key={qi} className="mt-3" data-testid="question-item" data-active={many && qi === activeQi ? "true" : undefined} disabled={sent}>
-            <legend className="flex flex-wrap items-center gap-2 text-sm text-text-primary">
+            <legend className={`flex flex-wrap items-center gap-2 text-sm ${back ? "text-text-secondary" : "text-text-primary"}`}>
               {/* the header the MODEL wrote, as written — uppercasing does
                   nothing to Thai and breaks a mixed-script chip (FIX77 D1) */}
-              <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] font-medium text-text-tertiary" data-testid="question-header">
+              <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] font-medium text-text-secondary" data-testid="question-header">
                 {q.header}
               </span>
               <span className="font-medium">{q.question}</span>
               {/* FIX88 Part C — which question the number keys act on was
-                  invisible state; with several questions the active one
-                  says so on its own line. */}
+                  invisible state. FIX96 keeps the fact and drops the blue
+                  pill: the active question's own text stays at full strength
+                  while the others step back to secondary (`back` above), and
+                  the marker rides along as a neutral chip. It was tried
+                  WITHOUT the marker first — the step-back does say which
+                  question is current, but every question numbers its options
+                  from 1, so with four lists on screen nothing said which "1"
+                  the key would hit. The marker answers that; it stays. */}
               {many && qi === activeQi && !sent ? (
-                <span className="rounded border border-blue-500/50 px-1.5 py-0.5 text-[11px] text-blue-500" data-testid="question-active-marker">
+                <span className="rounded bg-bg-base px-1.5 py-0.5 text-[11px] text-text-secondary" data-testid="question-active-marker">
                   {t("question.activeMarker", { n: String(qi + 1), total: String(question.questions.length) })}
                 </span>
               ) : null}
             </legend>
-            {q.multiSelect ? <div className="mt-0.5 text-xs text-text-tertiary">{t("question.multiHint")}</div> : null}
+            {q.multiSelect ? <div className="mt-0.5 text-xs text-text-secondary">{t("question.multiHint")}</div> : null}
             <div className="mt-1.5 flex flex-col gap-1">
               {q.options.map((o, oi) => {
                 const on = cur.includes(o.label);
@@ -227,9 +245,9 @@ export function QuestionCard({
                     aria-checked={on}
                     data-testid="question-option"
                     onClick={() => toggle(qi, o.label, q.multiSelect)}
-                    className={`focus-ring flex w-full items-baseline gap-2 rounded-md border px-3 py-1.5 text-left text-sm ${on ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-primary hover:bg-bg-surface-hover"}`}
+                    className={`focus-ring flex w-full items-baseline gap-2 rounded-lg border px-3 py-1.5 text-left text-sm ${on ? "border-accent bg-accent/10 text-text-primary" : "border-transparent bg-bg-base text-text-primary hover:bg-bg-elevated"}`}
                   >
-                    <span className="shrink-0 text-xs tabular-nums text-text-muted" aria-hidden data-testid="question-option-number">
+                    <span className="shrink-0 text-xs tabular-nums text-text-secondary" aria-hidden data-testid="question-option-number">
                       {oi + 1}
                     </span>
                     <span className="flex min-w-0 flex-col">
@@ -245,9 +263,9 @@ export function QuestionCard({
                 aria-checked={otherOn}
                 data-testid="question-other"
                 onClick={() => toggle(qi, OTHER, q.multiSelect)}
-                className={`focus-ring flex w-full items-baseline gap-2 rounded-md border border-dashed px-3 py-1.5 text-left text-sm ${otherOn ? "border-blue-500 bg-blue-500/10 text-text-primary" : "border-border text-text-secondary hover:bg-bg-surface-hover"}`}
+                className={`focus-ring flex w-full items-baseline gap-2 rounded-lg border border-dashed px-3 py-1.5 text-left text-sm ${otherOn ? "border-accent bg-accent/10 text-text-primary" : "border-border-subtle bg-bg-base text-text-secondary hover:bg-bg-elevated"}`}
               >
-                <span className="shrink-0 text-xs tabular-nums text-text-muted" aria-hidden>
+                <span className="shrink-0 text-xs tabular-nums text-text-secondary" aria-hidden>
                   {q.options.length + 1}
                 </span>
                 <span className="font-medium">{t("question.other")}</span>
@@ -284,14 +302,14 @@ export function QuestionCard({
             type="button"
             disabled={sent}
             onClick={() => setReplyOpen(true)}
-            className="focus-ring text-xs text-text-tertiary underline-offset-2 hover:text-text-secondary hover:underline disabled:opacity-50"
+            className="focus-ring text-xs text-text-secondary underline-offset-2 hover:text-text-primary hover:underline disabled:opacity-50"
             data-testid="question-reply-toggle"
           >
             {t("question.replyToggle")}
           </button>
         ) : (
           <>
-            <label className="text-xs text-text-tertiary" htmlFor={`question-reply-${question.promptId}`}>
+            <label className="text-xs text-text-secondary" htmlFor={`question-reply-${question.promptId}`}>
               {t("question.replyLabel")}
             </label>
             <textarea
@@ -316,13 +334,18 @@ export function QuestionCard({
         )}
       </div>
 
+      {/* FIX96 — the keyboard legend moved here from above the first
+          question, where it competed with the title for the top line. It is
+          still visible (on anything wider than a phone) and still carried by
+          the card's own title attribute, so a pointer user finds it too. */}
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        <span className="mr-auto text-xs text-text-tertiary">{t("question.skipHint")}</span>
+        <span className="mr-auto hidden text-[11px] text-text-secondary sm:inline">{t("question.keyHint")}</span>
         <button
           type="button"
           onClick={skip}
+          title={t("question.skipTitle")}
           disabled={sent}
-          className="focus-ring rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary hover:bg-bg-surface-hover disabled:opacity-50"
+          className="focus-ring rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-text-secondary hover:bg-bg-elevated disabled:opacity-50"
           data-testid="question-skip"
         >
           {t("question.skip")}
@@ -331,7 +354,7 @@ export function QuestionCard({
           type="button"
           onClick={submit}
           disabled={!canSubmit}
-          className="focus-ring rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="focus-ring rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-bg-base hover:opacity-90 disabled:opacity-50"
           data-testid="question-submit"
         >
           {t("question.submit")}
