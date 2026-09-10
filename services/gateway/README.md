@@ -24,7 +24,7 @@ Phase 1: client ──> Go gateway (:8080) ──> Python (backend:8080)
 - **Prometheus metrics** at `/__gw/metrics` (low-cardinality: bucketed
   path groups, no tenant labels).
 - **Request-ID propagation** (`X-Request-Id`) into Python logs.
-- **Liveness/readiness**: `/__gw/health`, `/__gw/ready`.
+- **Liveness/readiness**: `/__gw/health`, `/__gw/ready`. Ready requires Postgres **and** the Python backend's `/ready`; a DLP-sidecar outage (masking on the Python fallback) is reported as `"degraded"`, not as not-ready (FIX103).
 - **Graceful shutdown** (30s drain for in-flight streams).
 
 ## What the gateway deliberately does NOT do (Phase 1)

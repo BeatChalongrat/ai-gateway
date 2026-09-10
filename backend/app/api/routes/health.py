@@ -148,20 +148,38 @@ async def _ready_check_redis() -> str:
 
 
 async def _ready_check_dlp() -> str:
-    """A real scan through the engine the request path uses."""
+    """A real scan through the engine the request path uses — fail-over included.
+
+    FIX103 Part A: with DLP_ENGINE=rust, a sidecar that is stopped or wedged
+    does NOT let text through unmasked. ``orchestrator._run_dlp_scan`` gets
+    ``None`` from the Rust client and rescans on the Python registry (31
+    detectors, a superset of the sidecar's 30); proven live with the sidecar
+    stopped and paused — the provider answered "cannot see" for the planted
+    phone and email. So a sidecar outage is not "a chat request cannot be
+    masked", and readiness no longer says it is: it reports ``degraded`` and
+    stays 200. It goes red only when NO engine can scan the planted PII.
+
+    Before this, /ready returned 503 for a sidecar outage while every request
+    was still being masked, and the backend container's healthcheck (which
+    probes /ready) would have called a working backend unhealthy.
+    """
+    from app.services.dlp.detectors.registry import get_default_registry
+
+    def _python_found() -> set:
+        return {m.detector_name for m in get_default_registry(ner_enabled=False).scan_text(_PLANTED_PII)}
+
     engine_name = str(getattr(settings, "dlp_engine", "python")).lower()
     if engine_name in ("rust", "shadow"):
         from app.services.dlp.rust_dlp_client import RustDlpClient
 
         res = await RustDlpClient.instance().scan_text(_PLANTED_PII, ner_enabled=False)
-        if res is None:
-            raise RuntimeError("rust dlp engine unreachable")
-        found = {m.detector_name for m in res.matches}
-    else:
-        from app.services.dlp.detectors.registry import get_default_registry
-
-        found = {m.detector_name for m in get_default_registry(ner_enabled=False).scan_text(_PLANTED_PII)}
-    if not found & {"phone", "email"}:
+        if res is not None and {m.detector_name for m in res.matches} & {"phone", "email"}:
+            return f"ok ({engine_name})"
+        why = "unreachable" if res is None else "found nothing"
+        if not (await asyncio.to_thread(_python_found)) & {"phone", "email"}:
+            raise RuntimeError(f"no dlp engine can scan: rust sidecar {why}, python fallback found nothing")
+        return f"degraded: rust sidecar {why} — masking on the python fallback"
+    if not (await asyncio.to_thread(_python_found)) & {"phone", "email"}:
         raise RuntimeError(f"dlp engine scanned but found nothing ({engine_name})")
     return f"ok ({engine_name})"
 
@@ -227,7 +245,9 @@ async def ready():
         failures.append("stuck_requests")
 
     status = "ready" if not failures else "not-ready"
-    body = {"status": status, "failures": failures, "checks": checks}
+    # FIX103 — ready but running on a fallback is said, not hidden in a string.
+    degraded = [k for k, v in checks.items() if isinstance(v, str) and v.startswith("degraded")]
+    body = {"status": status, "failures": failures, "degraded": degraded, "checks": checks}
     return JSONResponse(status_code=200 if not failures else 503, content=body)
 
 

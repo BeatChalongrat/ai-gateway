@@ -101,6 +101,9 @@ def test_bounded_stream_hard_timeout_closes_inner_generator():
 
 
 # ── readiness ──────────────────────────────────────────────────────────
+_REAL_DLP_CHECK = health_mod._ready_check_dlp
+
+
 @pytest.fixture
 def ready_app(monkeypatch):
     app = FastAPI()
@@ -138,6 +141,47 @@ def test_ready_red_when_the_dlp_engine_cannot_scan(ready_app, monkeypatch):
     assert r.status_code == 503
     assert r.json()["failures"] == ["dlp_engine"]
     assert "unreachable" in r.json()["checks"]["dlp_engine"]
+
+
+def _sidecar_down(monkeypatch, python_finds=True):
+    """FIX103 — the Rust client returns None (stopped or wedged sidecar), the
+    engine is rust, and the real _ready_check_dlp runs."""
+    from app.services.dlp import rust_dlp_client
+    from app.services.dlp.detectors import registry as registry_mod
+
+    class _Down:
+        async def scan_text(self, *_a, **_k):
+            return None
+
+    monkeypatch.setattr(health_mod, "_ready_check_dlp", _REAL_DLP_CHECK)
+    monkeypatch.setattr(health_mod.settings, "dlp_engine", "rust")
+    monkeypatch.setattr(rust_dlp_client.RustDlpClient, "instance", staticmethod(lambda: _Down()))
+    if not python_finds:
+        class _Blind:
+            def scan_text(self, _t):
+                return []
+
+        monkeypatch.setattr(registry_mod, "get_default_registry", lambda **_k: _Blind())
+
+
+def test_ready_stays_ready_but_says_degraded_when_only_the_sidecar_is_down(ready_app, monkeypatch):
+    # FIX103 Part A proved the request path masks on Python when the sidecar
+    # is down; readiness must describe that, not report "cannot serve".
+    _sidecar_down(monkeypatch)
+    r = TestClient(ready_app).get("/ready")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ready" and body["failures"] == []
+    assert body["degraded"] == ["dlp_engine"]
+    assert body["checks"]["dlp_engine"].startswith("degraded: rust sidecar unreachable")
+
+
+def test_ready_red_when_no_dlp_engine_can_scan(ready_app, monkeypatch):
+    _sidecar_down(monkeypatch, python_finds=False)
+    r = TestClient(ready_app).get("/ready")
+    assert r.status_code == 503
+    assert r.json()["failures"] == ["dlp_engine"]
+    assert "no dlp engine can scan" in r.json()["checks"]["dlp_engine"]
 
 
 def test_ready_red_when_a_request_outlived_its_bound(ready_app, monkeypatch):

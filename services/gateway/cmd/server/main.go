@@ -35,10 +35,10 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/gateway/internal/auth"
 	"github.com/BeatChalongrat/ai-gateway/gateway/internal/config"
-	"github.com/BeatChalongrat/ai-gateway/gateway/internal/httpx"
-	gwmw "github.com/BeatChalongrat/ai-gateway/gateway/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/gateway/internal/metrics"
+	gwmw "github.com/BeatChalongrat/ai-gateway/gateway/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/gateway/internal/proxy"
+	"github.com/BeatChalongrat/ai-gateway/gateway/internal/ready"
 )
 
 const v1Prefix = "/v1/"
@@ -124,15 +124,12 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
-	r.Get("/__gw/ready", func(w http.ResponseWriter, req *http.Request) {
-		ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
-		defer cancel()
-		if err := pool.Ping(ctx); err != nil {
-			httpx.WriteError(w, http.StatusServiceUnavailable, "not_ready", "postgres unreachable")
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ready"}`))
+	// FIX103 — ready means Postgres AND the Python backend it proxies to
+	// (see internal/ready); a DLP-sidecar outage passes through as degraded.
+	r.Method(http.MethodGet, "/__gw/ready", ready.Checker{
+		DB:         pool,
+		BackendURL: cfg.PythonServiceURL,
+		Client:     &http.Client{Timeout: ready.Timeout},
 	})
 	r.Handle("/__gw/metrics", promhttp.Handler())
 
