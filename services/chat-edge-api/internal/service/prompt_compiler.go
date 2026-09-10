@@ -336,10 +336,23 @@ func (pc *PromptCompiler) capabilityStatement(in CompileContext) string {
 		"remember user facts across chats and search past conversations (via tools)",
 		"generate and edit Excel (.xlsx), Word (.docx), PDF, and PowerPoint (.pptx) files, including charts inside Excel/PowerPoint (bar, line, pie, area, scatter)",
 		"process uploaded files (images, documents, spreadsheets, PDFs)",
+		// FIX95 Part A — this replaces a CANNOT that was false in both of
+		// its halves. It said "show charts/graphs/visualizations inline in
+		// chat — only inside downloadable files", unconditionally, ahead of
+		// any tool. Measured against the renderer that decides
+		// (apps/web-chat/src/components/canvas/canvasUtil.ts,
+		// canvasTypeForBlock): an svg or a script-free html fence renders
+		// INLINE in the thread, and mermaid / jsx / tsx / react / markdown
+		// open in the canvas panel on one click. Nothing is confined to a
+		// downloadable file. So the denial went and this took its place.
+		// Deliberately tag-free: the tag list belongs to the artifact
+		// dialect, which is the one place that teaches the convention, and
+		// a capability sentence that repeated it would be a second copy to
+		// drift. capability_truth_test.go reads canvasUtil.ts and fails if
+		// the renderer stops rendering what this claims.
+		"draw diagrams and charts and build small interactive pages that appear in the chat itself, by writing them as a fenced code block",
 	}
-	cannot := []string{
-		"show charts/graphs/visualizations inline in chat — only inside downloadable files",
-	}
+	cannot := []string{}
 
 	if active["run_python"] {
 		can = append(can, "run Python code in a secure sandbox (via the run_python tool) for calculations, data analysis, and chart files")
@@ -382,8 +395,15 @@ func (pc *PromptCompiler) capabilityStatement(in CompileContext) string {
 	var b strings.Builder
 	b.WriteString("<capabilities>\nYou CAN: ")
 	b.WriteString(strings.Join(can, "; "))
-	b.WriteString(".\nYou CANNOT (be honest, never pretend you can): ")
-	b.WriteString(strings.Join(cannot, "; "))
+	// FIX95 — the CANNOT list no longer starts with a seeded entry, so it is
+	// now conceivable for it to be empty. It is not today (two clauses are
+	// appended unconditionally above), but an empty list would otherwise
+	// render "You CANNOT (be honest…): ." — a sentence that denies nothing
+	// and reads like a bug. Omit the line instead.
+	if len(cannot) > 0 {
+		b.WriteString(".\nYou CANNOT (be honest, never pretend you can): ")
+		b.WriteString(strings.Join(cannot, "; "))
+	}
 	b.WriteString(".\n</capabilities>")
 	block := b.String()
 	if tc := in.TenantConfig; tc != nil {
