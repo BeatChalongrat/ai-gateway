@@ -150,6 +150,15 @@ type Config struct {
 	ContextCompactTriggerRatio float64 `env:"CONTEXT_COMPACT_TRIGGER_RATIO" envDefault:"0.85"`
 	ContextCompactTargetRatio  float64 `env:"CONTEXT_COMPACT_TARGET_RATIO" envDefault:"0.60"`
 
+	// ContextSummaryModel (FIX102 Part D) — the model that writes the
+	// <conversation_state> summary when compaction folds older messages.
+	// Empty (default) = the model the conversation is answered by, as
+	// before. When set, it is tried first and the chat model second, so a
+	// summariser that is not served, not usable by the tenant, or replies
+	// with something other than the JSON never costs the summary. The call
+	// goes through the gateway as the conversation's own tenant and user.
+	ContextSummaryModel string `env:"CONTEXT_SUMMARY_MODEL"`
+
 	// TemporaryChatReadsMemory — what a temporary chat (a conversation
 	// with memory switched off) does with the memories already on file.
 	//

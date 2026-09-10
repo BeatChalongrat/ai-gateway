@@ -303,6 +303,9 @@ func main() {
 	// /conversations/{id}/state read endpoint. Uses the gateway
 	// client for its extraction calls (low-temperature JSON).
 	stateSvc := service.NewConversationStateService(statesRepo, messages, conversations, gateway)
+	// FIX102 Part D — an operator-chosen summariser; empty keeps the chat model.
+	stateSvc.SetExtractionModel(cfg.ContextSummaryModel)
+	slog.Info("context summariser", "model", cfg.ContextSummaryModel, "fallback", "the conversation's chat model")
 	compactionUsageRepo := repository.NewCompactionUsageRepo(pool)
 
 	// Phase 4 — Excel Smart Workspace (Session 1) +

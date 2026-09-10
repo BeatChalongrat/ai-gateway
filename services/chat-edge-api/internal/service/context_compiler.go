@@ -328,7 +328,9 @@ func (c *ContextCompiler) Compile(
 		if in.OnExtractionStart != nil {
 			in.OnExtractionStart()
 		}
-		st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{Trigger: "auto"})
+		// FIX102 Part D — the summariser falls back to the model that
+		// answers: for "auto" that is BudgetModelID, not the sentinel.
+		st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{Trigger: "auto", ChatModel: in.BudgetModelID})
 		if err != nil {
 			slog.Warn("context_compiler: pre-compaction state extraction failed",
 				"conv", in.Conv.ID.String(), "err", err)

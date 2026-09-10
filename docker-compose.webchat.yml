@@ -99,6 +99,10 @@ services:
       # is counted + marked, never dropped silently (A-W1).
       - CONTEXT_COMPACT_TRIGGER_RATIO=${CONTEXT_COMPACT_TRIGGER_RATIO:-0.85}
       - CONTEXT_COMPACT_TARGET_RATIO=${CONTEXT_COMPACT_TARGET_RATIO:-0.60}
+      # FIX102 — the model that writes compaction summaries. Empty = the
+      # conversation's own chat model; when set, the chat model is the
+      # fallback whenever the summariser produces no summary.
+      - CONTEXT_SUMMARY_MODEL=${CONTEXT_SUMMARY_MODEL:-}
       # A temporary chat (memory_enabled=false) reads the saved memories
       # and writes none. false = the stricter seal: it reads nothing
       # either. The write side does not move with this setting. Keep

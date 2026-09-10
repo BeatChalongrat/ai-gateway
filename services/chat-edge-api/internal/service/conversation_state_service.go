@@ -150,6 +150,11 @@ type ExtractionOptions struct {
 	Instructions string
 	// Trigger labels the usage row: "auto" | "manual" | "background".
 	Trigger string
+	// ChatModel (FIX102 Part D) is the model the conversation is actually
+	// answered by — for "auto", the one that answered its last turn. The
+	// summary falls back to it when no summariser is configured or the
+	// summariser produced nothing. Empty = the conversation's model_id.
+	ChatModel string
 }
 
 // extractionBatchLimit — new messages per extraction call. Each
@@ -164,11 +169,39 @@ const extractionBatchLimit = 120
 // it gives up and trims anyway (with the marker still shown).
 const extractionMaxBatches = 8
 
-// SetExtractionModel pins the model the extractor uses regardless
-// of which model the conversation chose. Optional; main.go can wire
-// this from a config knob later.
+// SetExtractionModel sets the summariser (FIX102 Part D,
+// CONTEXT_SUMMARY_MODEL): the model tried FIRST for every summary,
+// whichever model the conversation chose. Empty = no summariser, the chat
+// model writes it, as before.
+//
+// FIX101 measured why this exists: asked about two turns that had been
+// folded away, an 8B model got one right and one wrong with both facts in
+// the summary — an 8B misreading an 8B's summary. The model that answers
+// in Thai does not have to be the model that summarises.
+//
+// It is not a way round the tenant's entitlements: the call goes through
+// the gateway with the conversation's own tenant and user, exactly like the
+// chat turn — the same credit balance, rate limit, DLP and project policy —
+// and chat-edge never chooses a provider or a key. A summariser the tenant
+// cannot use fails there, and the chat model is tried next.
 func (s *ConversationStateService) SetExtractionModel(modelID string) {
-	s.extractionModel = modelID
+	s.extractionModel = strings.TrimSpace(modelID)
+}
+
+// extractionModels is the order a summary is attempted in: the summariser,
+// then the chat model (opts.ChatModel, else the conversation's model_id).
+func (s *ConversationStateService) extractionModels(chatModel, convModel string) []string {
+	chat := strings.TrimSpace(chatModel)
+	if chat == "" {
+		chat = strings.TrimSpace(convModel)
+	}
+	out := make([]string, 0, 2)
+	for _, id := range []string{s.extractionModel, chat} {
+		if id != "" && (len(out) == 0 || out[0] != id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -269,43 +302,55 @@ func (s *ConversationStateService) extractOnce(
 	if err != nil {
 		return extractPass{}, fmt.Errorf("conv lookup: %w", err)
 	}
-	modelID := s.extractionModel
-	if modelID == "" {
-		modelID = conv.ModelID
-	}
-
 	instructions := strings.TrimSpace(opts.Instructions)
 	if instructions == "" && existing != nil {
 		instructions = strings.TrimSpace(existing.CompactionInstructions)
 	}
 	prompt := s.buildExtractionPrompt(existing, newMessages, instructions)
-	rawJSON, usage := s.callLLMForExtraction(ctx, modelID, prompt, GatewayCallContext{
+	callCtx := GatewayCallContext{
 		TenantID:       tenantID,
 		UserID:         userID,
 		ConversationID: convID,
-	})
-	if usage != nil {
-		s.recordUsage(ctx, CompactionUsage{
-			ConversationID: convID, UserID: userID, TenantID: tenantID,
-			ModelID: modelID, Trigger: firstNonEmpty(opts.Trigger, "auto"),
-			PromptTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens,
-			CostUSD: usage.EstimatedCostUSD, MessagesFolded: len(newMessages),
-		})
-	}
-	if strings.TrimSpace(rawJSON) == "" {
-		// Gateway failed or returned empty — keep existing state
-		// rather than wiping it. Logged inside the LLM caller.
-		return extractPass{state: existing, failed: true}, nil
 	}
 
-	// 4. Parse + merge with existing. A response that is not JSON
-	//    (the model called a tool, or chatted) also keeps the
-	//    existing content — and does NOT advance the anchor, so the
-	//    slice is retried next time instead of being skipped.
-	parsed := parseExtractionResponse(rawJSON)
+	// 4. Call, then parse + merge with existing. FIX102 Part D: the
+	//    operator's summariser first, the model that answers the
+	//    conversation second. A failed call or a reply that is not JSON
+	//    (the model called a tool, or chatted) moves on to the next model;
+	//    when none produces one, the existing content is kept and the anchor
+	//    does NOT advance, so the slice is retried next time.
+	models := s.extractionModels(opts.ChatModel, conv.ModelID)
+	var parsed extractedState
+	for i, modelID := range models {
+		rawJSON, usage := s.callLLMForExtraction(ctx, modelID, prompt, callCtx)
+		if usage != nil {
+			s.recordUsage(ctx, CompactionUsage{
+				ConversationID: convID, UserID: userID, TenantID: tenantID,
+				ModelID: modelID, Trigger: firstNonEmpty(opts.Trigger, "auto"),
+				PromptTokens: usage.PromptTokens, OutputTokens: usage.CompletionTokens,
+				CostUSD: usage.EstimatedCostUSD, MessagesFolded: len(newMessages),
+			})
+		}
+		next := ""
+		if i+1 < len(models) {
+			next = models[i+1]
+		}
+		if strings.TrimSpace(rawJSON) == "" {
+			// Failure detail is logged inside the LLM caller.
+			if next != "" {
+				slog.Warn("conversation state: no summary from this model — trying the next",
+					"conv", convID.String(), "model", modelID, "next", next)
+			}
+			continue
+		}
+		if p := parseExtractionResponse(rawJSON); p.parsed {
+			parsed = p
+			break
+		}
+		slog.Warn("conversation state: extraction response was not JSON",
+			"conv", convID.String(), "model", modelID, "len", len(rawJSON), "next", next)
+	}
 	if !parsed.parsed {
-		slog.Warn("conversation state: extraction response was not JSON — state kept, anchor not advanced",
-			"conv", convID.String(), "len", len(rawJSON))
 		return extractPass{state: existing, failed: true}, nil
 	}
 	merged := mergeExtractionIntoState(existing, parsed, convID, userID, tenantID)
@@ -483,6 +528,16 @@ func (s *ConversationStateService) buildExtractionPrompt(
 		sb.WriteString("\n")
 	}
 
+	// FIX102 Part D — the summary is written in the conversation's
+	// language. The shared asset says "preserve the user's language", and a
+	// Thai thread summarised into English still loses the thing that
+	// matters most; with a summariser that is not the chat model the
+	// language has to be stated, not inferred.
+	if lang := conversationLanguageName(newMessages); lang != "" {
+		sb.WriteString("\n--- LANGUAGE ---\n")
+		sb.WriteString(fmt.Sprintf("This conversation is in %s. Write every value in the JSON in %s; do not translate it. The JSON keys stay as specified.\n", lang, lang))
+	}
+
 	// Embed existing state as merge context. The model is told to
 	// "update/merge" so it doesn't have to re-derive every fact.
 	if existing != nil && (existing.CurrentGoal != nil ||
@@ -591,6 +646,11 @@ func (s *ConversationStateService) callLLMForExtraction(
 		Temperature: extractionTemperature,
 		Tools:       nil,
 		ToolChoice:  nil,
+		// FIX102 Part D — no thinking. A reasoning model's thinking shares
+		// the 1,500-token cap: the only qwen3.8-27b-fp8 extraction on record
+		// used exactly 1,500 output tokens. "off" sends the Qwen/vLLM
+		// enable_thinking switch and no reasoning parameters elsewhere.
+		Reasoning: &GatewayReasoningConfig{Mode: "off"},
 	}
 	resp, err := s.gateway.SendChatCompletion(ctx, callCtx, req)
 	if err != nil {
@@ -1015,6 +1075,34 @@ func removeFromJSONArray(data json.RawMessage, key, value string) json.RawMessag
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
+
+var languageNames = map[string]string{"th": "Thai", "en": "English", "ja": "Japanese", "ko": "Korean", "zh": "Chinese"}
+
+// conversationLanguageName names the language the user writes in across
+// msgs (detectLanguage per user message, the most frequent wins; assistant
+// messages decide only when no user message is present). "" for no messages.
+func conversationLanguageName(msgs []model.Message) string {
+	count := func(role string) map[string]int {
+		c := map[string]int{}
+		for i := range msgs {
+			if role == "" || msgs[i].Role == role {
+				c[detectLanguage(msgs[i].ContentMasked)]++
+			}
+		}
+		return c
+	}
+	counts := count("user")
+	if len(counts) == 0 {
+		counts = count("")
+	}
+	best, n := "", 0
+	for _, code := range []string{"th", "ja", "ko", "zh", "en"} {
+		if counts[code] > n {
+			best, n = code, counts[code]
+		}
+	}
+	return languageNames[best]
+}
 
 func isStateEmpty(s *model.ConversationState) bool {
 	if s == nil {
