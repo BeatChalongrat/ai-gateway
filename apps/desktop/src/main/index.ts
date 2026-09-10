@@ -60,6 +60,7 @@ import { SessionController, type ViewState } from "./session-controller";
 import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
 import { ContextManager } from "./context-manager";
+import { ModelWindows } from "./model-windows";
 import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, GatewayStateExtractor, JsonConversationStateStore } from "./conversation-state";
 import { RunLedgerStore } from "./run-ledger";
 import { UpdateNotifier } from "./update-check";
@@ -332,6 +333,10 @@ void app.whenReady().then(async () => {
     emit: (c, e, d) => coordinator?.emitTurnEvent(c, e, d),
   });
   log.info(`CONTEXT MANAGER: summariser ${summaryOff ? "OFF (DESKTOP_COMPACTION_SUMMARY=off)" : "on"} trigger=${COMPACT_TRIGGER_RATIO} target=${COMPACT_TARGET_RATIO} meter=${CONTEXT_METER_SHOW_RATIO}`);
+  // FIX104: every turn is budgeted against the gateway catalogue's context
+  // window; the last answer is kept under userData so a cold start without the
+  // gateway budgets against it instead of a guess.
+  const modelWindows = new ModelWindows(path.join(dataDir, "model-windows.json"), log);
   coordinator = new TurnCoordinator(
     bridge,
     gateway,
@@ -345,6 +350,7 @@ void app.whenReady().then(async () => {
       homeDirectory: app.getPath("home"),
       dataDir,
       defaultModel: config.defaultModel,
+      modelWindows,
       ...(flags.model && !isRelease ? { forceModel: flags.model } : {}),
       approvalMode: config.approvalMode,
       promptGuard,

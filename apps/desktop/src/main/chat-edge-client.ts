@@ -27,6 +27,8 @@ export interface MessageDto {
   status?: string | null;
   client_id?: string | null;
   created_at?: string;
+  /** The model that answered (an assistant row), or the conversation's pick. FIX104 reads it for `auto`'s budget. */
+  model_id?: string | null;
 }
 export interface MemoryDto {
   id: string;

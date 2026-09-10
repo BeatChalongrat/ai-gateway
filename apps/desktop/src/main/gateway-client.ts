@@ -76,6 +76,11 @@ export interface CompletionRequest {
    *  placeholders (like the web extractor's ContentMasked source) instead
    *  of raw PII. Normal chat turns never set this. */
   metadata?: Record<string, unknown>;
+  /** FIX104 — on `model="auto"`, what the compiled request needs and the window
+   *  it was budgeted against, so the router cannot hand it to a model that
+   *  would refuse it (chat-edge's applyContextHints, FIX102 Part A). Travels
+   *  inside routing_hints only; never a field of its own on the wire. */
+  routingContext?: { minContextTokens: number; preferredContextTokens: number };
 }
 /** FIX3 §1: provider-agnostic capability hints for `model="auto"`, mirroring the
  * gateway's RoutingHints (schemas/public.py) and what chat-edge sends. Partial is
@@ -86,13 +91,19 @@ export function buildRoutingHints(request: CompletionRequest): Record<string, un
     (m) => Array.isArray(m.content) && m.content.some((b) => b.type === "image_url"),
   );
   const convTurns = request.messages.filter((m) => m.role === "user" || m.role === "assistant").length;
-  return {
+  const hints: Record<string, unknown> = {
     needs_vision: hasVision,
     needs_reasoning: !!request.reasoning,
     has_tools: toolCount > 0,
     tool_count: toolCount,
     conv_turn_count: convTurns,
   };
+  // chat-edge sends both with omitempty: min is HARD (no_capable_model when
+  // nothing holds it), preferred is SOFT and 0 when the default was used.
+  const ctx = request.routingContext;
+  if (ctx && ctx.minContextTokens > 0) hints["min_context_tokens"] = Math.floor(ctx.minContextTokens);
+  if (ctx && ctx.preferredContextTokens > 0) hints["preferred_context_tokens"] = Math.floor(ctx.preferredContextTokens);
+  return hints;
 }
 
 /** FIX5 §2: classify a gateway HTTP 429 into the message a user should see. A
@@ -367,8 +378,10 @@ export class GatewayClient {
    * whether the catalog says it can use tools, so the coordinator can withhold
    * tool definitions from a tools-blind model instead of erroring every turn
    * (chat-edge's attachTools has done the same since FIX28). Returns null on
-   * failure (caller keeps its last-known map / fails safe). Never throws. */
-  async listModels(signal: AbortSignal): Promise<Map<string, { tools: boolean; vision: boolean }> | null> {
+   * failure (caller keeps its last-known map / fails safe). Never throws.
+   * FIX104 — and the catalogue's context window (0 when it gives none), the
+   * number the desktop now budgets a conversation against. */
+  async listModels(signal: AbortSignal): Promise<Map<string, { tools: boolean; vision: boolean; contextWindow: number }> | null> {
     const key = await this.getOrProvisionKey();
     if (!key) return null;
     try {
@@ -378,14 +391,15 @@ export class GatewayClient {
         signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]),
       });
       if (!res.ok) return null;
-      const body = (await res.json()) as { data?: { id?: unknown; capabilities?: { tools?: unknown; vision?: unknown } }[] };
-      const map = new Map<string, { tools: boolean; vision: boolean }>();
+      const body = (await res.json()) as { data?: { id?: unknown; context_window?: unknown; capabilities?: { tools?: unknown; vision?: unknown } }[] };
+      const map = new Map<string, { tools: boolean; vision: boolean; contextWindow: number }>();
       for (const m of body.data ?? []) {
         if (typeof m.id === "string" && m.id.length > 0) {
           // FIX65 — vision rides along: a model the catalogue says cannot
           // read images gets no image blocks from the host (see
           // TurnCoordinator.modelSupportsVision).
-          map.set(m.id, { tools: m.capabilities?.tools === true, vision: m.capabilities?.vision === true });
+          const contextWindow = typeof m.context_window === "number" && m.context_window > 0 ? Math.floor(m.context_window) : 0;
+          map.set(m.id, { tools: m.capabilities?.tools === true, vision: m.capabilities?.vision === true, contextWindow });
         }
       }
       return map.size > 0 ? map : null;
@@ -469,7 +483,8 @@ export class GatewayClient {
       // whole turn. chat-edge already sends hints for web-chat; the Electron host
       // talks to the gateway directly and did not. The presence of hints alone
       // switches the path; the fields refine the pick.
-      const body: Record<string, unknown> = { ...request, stream: true };
+      const { routingContext: _routingContext, ...wire } = request;
+      const body: Record<string, unknown> = { ...wire, stream: true };
       if (request.model === "auto") body["routing_hints"] = buildRoutingHints(request);
       if (request.metadata) body["metadata"] = request.metadata;
       const res = await fetch(`${this.gatewayUrl}/v1/chat/completions`, {

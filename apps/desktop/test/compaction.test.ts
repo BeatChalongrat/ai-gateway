@@ -5,10 +5,13 @@
 // system message — the DLP note in conversation-state.ts), the page gets the
 // "organising" status before the extraction and the budget after it, and the
 // meter is hidden below 70 %.
+// FIX104: the budget comes from a BudgetBasis; the meter, the summary status,
+// the loss notice and memory-off follow chat-edge (FIX102).
 import { describe, expect, it } from "vitest";
 
+import type { BudgetBasis } from "../src/main/context-budget";
 import { compileChain, estimateTokens } from "../src/main/context-compiler";
-import { ContextManager } from "../src/main/context-manager";
+import { ContextManager, type TurnBudget, summaryStatusOf } from "../src/main/context-manager";
 import {
   CONTEXT_METER_SHOW_RATIO,
   COMPACT_TARGET_RATIO,
@@ -25,13 +28,15 @@ import {
 import type { GatewayMessage } from "../src/main/gateway-client";
 
 const log = { info: () => {}, warn: () => {}, error: () => {}, attachFile: () => {} } as unknown as import("../src/main/logger").Logger;
+const TERRA: BudgetBasis = { model: "gpt-5.6-terra", window: 128_000, outputTokens: 8192 };
+const turn = (over: Partial<TurnBudget> = {}): TurnBudget => ({ model: "gpt-5.6-terra", basis: TERRA, numTools: 0, ...over });
 const sys = (): GatewayMessage => ({ role: "system", content: "s".repeat(400) });
 const u = (t: string): GatewayMessage => ({ role: "user", content: t });
 const a = (t: string): GatewayMessage => ({ role: "assistant", content: t });
 
 /** A chain whose history sits at `ratio` of the model's messages budget. */
-function chainAt(ratio: number, model = "gpt-5.6-terra"): GatewayMessage[] {
-  const probe = compileChain([sys(), u("x")], model, 0);
+function chainAt(ratio: number, basis: BudgetBasis = TERRA): GatewayMessage[] {
+  const probe = compileChain([sys(), u("x")], basis, 0);
   const budget = probe.budget.messagesRemaining;
   const out: GatewayMessage[] = [sys(), u("STANDING: end every answer with ผ่าน"), a("รับทราบ ผ่าน")];
   const per = 120; // ≈ tokens per message below
@@ -66,7 +71,7 @@ describe("shared numbers", () => {
 describe("compileChain with options (the pure plan)", () => {
   it("below the trigger: untouched, the very same array, meter numbers still reported", () => {
     const msgs = chainAt(0.5);
-    const cc = compileChain(msgs, "gpt-5.6-terra", 0, { triggerRatio: 0.85, targetRatio: 0.6 });
+    const cc = compileChain(msgs, TERRA, 0, { triggerRatio: 0.85, targetRatio: 0.6 });
     expect(cc.messages).toBe(msgs);
     expect(cc.compacted).toBe(false);
     expect(cc.thresholdTokens).toBe(Math.floor(cc.budget.messagesRemaining * 0.85));
@@ -75,7 +80,7 @@ describe("compileChain with options (the pure plan)", () => {
 
   it("at 90 % — above the trigger, BELOW overflow — it compacts to ≤ 60 %, keeps the first exchange and the newest turn", () => {
     const msgs = chainAt(0.9);
-    const cc = compileChain(msgs, "gpt-5.6-terra", 0, { triggerRatio: 0.85, targetRatio: 0.6 });
+    const cc = compileChain(msgs, TERRA, 0, { triggerRatio: 0.85, targetRatio: 0.6 });
     expect(cc.compacted).toBe(true);
     expect(cc.historyTokens).toBeLessThanOrEqual(Math.floor(cc.budget.messagesRemaining * 0.6));
     expect(cc.messages[1]).toBe(msgs[1]);
@@ -89,13 +94,13 @@ describe("compileChain with options (the pure plan)", () => {
 
   it("without options the FIX32 behaviour is unchanged (overflow only)", () => {
     const msgs = chainAt(0.9);
-    expect(compileChain(msgs, "gpt-5.6-terra", 0).compacted).toBe(false);
+    expect(compileChain(msgs, TERRA, 0).compacted).toBe(false);
   });
 
   it("the preamble (state pair) rides after the system message, before the preserved head, and is budgeted", () => {
     const msgs = chainAt(0.9);
     const pre = renderStateMessages({ ...emptyState("c"), current_goal: "plan the trip" });
-    const cc = compileChain(msgs, "gpt-5.6-terra", 0, { triggerRatio: 0.85, targetRatio: 0.6, preamble: pre, summaryPresent: true });
+    const cc = compileChain(msgs, TERRA, 0, { triggerRatio: 0.85, targetRatio: 0.6, preamble: pre, summaryPresent: true });
     expect(cc.messages[0].role).toBe("system");
     expect(cc.messages[1].role).toBe("user");
     expect(cc.messages[1].content as string).toContain("<conversation_state>");
@@ -104,11 +109,14 @@ describe("compileChain with options (the pure plan)", () => {
     // The SUMMARY TEXT never enters the system message (the note only names the tag).
     expect(cc.messages[0].content as string).not.toContain("plan the trip");
     expect(cc.messages[0].content as string).toContain("A summary of the older part is in <conversation_state>");
+    // FIX104: the pair counts toward what is sent, like chat-edge's SentTokens.
+    expect(cc.stateInjected).toBe(true);
+    expect(cc.sentTokens).toBeGreaterThan(cc.historyTokens);
   });
 
   it("a manual boundary drops everything at or before it (head excepted) even when it all fits", () => {
     const msgs = [sys(), u("first"), a("hi"), u("q1"), a("a1"), u("q2"), a("a2"), u("q3")];
-    const cc = compileChain(msgs, "gpt-5.6-terra", 0, { triggerRatio: 0.85, targetRatio: 0.6, manualBoundaryIndex: 4 });
+    const cc = compileChain(msgs, TERRA, 0, { triggerRatio: 0.85, targetRatio: 0.6, manualBoundaryIndex: 4 });
     expect(cc.compacted).toBe(true);
     // boundary index 4 = "q2": everything at or before it goes (q1, a1, q2), the head stays.
     expect(cc.messages.map((m) => m.content)).toEqual([cc.messages[0].content, "first", "hi", "a2", "q3"]);
@@ -122,7 +130,7 @@ describe("compileChain with options (the pure plan)", () => {
     const call: GatewayMessage = { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function", function: { name: "read_file", arguments: "{}" } }] } as GatewayMessage;
     const result: GatewayMessage = { role: "tool", content: "x".repeat(400), tool_call_id: "c1" } as GatewayMessage;
     msgs.splice(Math.floor(msgs.length / 2), 0, call, result);
-    const cc = compileChain(msgs, "gpt-5.6-terra", 0, { triggerRatio: 0.85, targetRatio: 0.6 });
+    const cc = compileChain(msgs, TERRA, 0, { triggerRatio: 0.85, targetRatio: 0.6 });
     const roles = cc.messages.map((m) => m.role);
     for (let i = 0; i < roles.length; i++) {
       if (roles[i] === "tool") expect(cc.messages[i - 1]!.role === "tool" || !!cc.messages[i - 1]!.tool_calls).toBe(true);
@@ -135,12 +143,15 @@ describe("ContextManager", () => {
   it("no state, no extractor: trims with the honest note and reports the budget — nothing breaks", async () => {
     const ev = events();
     const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: null, log, emit: ev.emit });
-    const out = await mgr.compile("c", chainAt(0.9), "gpt-5.6-terra", 0, new AbortController().signal);
+    const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(out.statePresent).toBe(false);
     expect(out.extractionRan).toBe(false);
     expect(out.messages[0].content as string).toContain("No summary of the older part is available");
     expect(ev.list.map((e) => e.event)).toEqual(["context_budget"]);
+    // chat-edge: no summariser and no state is "off" — the meter says so; no loss notice.
+    expect(out.summaryStatus).toBe("off");
+    expect(out.lossNotice).toBeNull();
   });
 
   it("crossing the trigger: says 'summarizing' first, folds exactly the range that will be dropped, injects the state as a USER pair, re-plans", async () => {
@@ -149,7 +160,7 @@ describe("ContextManager", () => {
     const ex = new FakeExtractor(okReply("plan the trip"));
     const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
     const msgs = chainAt(0.9);
-    const out = await mgr.compile("c", msgs, "gpt-5.6-terra", 0, new AbortController().signal);
+    const out = await mgr.compile("c", msgs, turn(), new AbortController().signal);
     expect(out.extractionRan).toBe(true);
     expect(out.statePresent).toBe(true);
     expect(ev.list[0]!.event).toBe("compaction_status");
@@ -167,6 +178,8 @@ describe("ContextManager", () => {
     expect(out.messages[0].content as string).not.toContain("plan the trip");
     // Head still survives after the state pair.
     expect(out.messages[3]).toBe(msgs[1]);
+    expect(out.summaryStatus).toBe("complete");
+    expect(out.lossNotice).toBeNull();
   });
 
   it("an incremental pass resumes from the anchor, not from zero", async () => {
@@ -175,27 +188,64 @@ describe("ContextManager", () => {
     const ex = new FakeExtractor(okReply("g"));
     const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
     const msgs = chainAt(0.9);
-    await mgr.compile("c", msgs, "gpt-5.6-terra", 0, new AbortController().signal);
+    await mgr.compile("c", msgs, turn(), new AbortController().signal);
     const anchor = store.get("c")!.message_count_at_summary;
     // Grow the conversation past the trigger again.
     const more = [...msgs, ...chainAt(0.5).slice(3)];
     ex.calls = [];
-    await mgr.compile("c", more, "gpt-5.6-terra", 0, new AbortController().signal);
+    await mgr.compile("c", more, turn(), new AbortController().signal);
     if (ex.calls.length > 0) expect(ex.calls[0]!.messages[0]).toBe(more[1 + anchor]);
     expect(ex.calls.every((c) => c.existing !== null)).toBe(true);
   });
 
-  it("a failed extraction keeps the existing state AND the anchor; the turn still goes out trimmed", async () => {
+  it("a failed extraction keeps the existing state AND the anchor; the turn still goes out trimmed, and says the summary is partial", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
     store.put({ ...emptyState("c"), current_goal: "keep me", message_count_at_summary: 4 });
     const ex = new FakeExtractor(() => ({ ok: false, error: "gateway down" }));
     const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
-    const out = await mgr.compile("c", chainAt(0.9), "gpt-5.6-terra", 0, new AbortController().signal);
+    const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(store.get("c")!.current_goal).toBe("keep me");
     expect(store.get("c")!.message_count_at_summary).toBe(4);
     expect(out.messages[1].content as string).toContain("keep me"); // the OLD state is still injected
+    expect(out.summaryStatus).toBe("partial");
+    expect(out.lossNotice).toEqual({ dropped: out.dropped, sent: out.sentMessages, total: out.totalMessages, summary: "partial" });
+  });
+
+  it("FIX104 — a failed first extraction trims and says no summary stands in (the web's compaction_notice)", async () => {
+    const ev = events();
+    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: new FakeExtractor(() => ({ ok: false, error: "x" })), log, emit: ev.emit });
+    const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
+    expect(out.compacted).toBe(true);
+    expect(out.summaryStatus).toBe("failed");
+    expect(out.lossNotice).toMatchObject({ summary: "failed", dropped: out.dropped });
+    expect(out.lossNotice!.sent + out.lossNotice!.dropped).toBe(out.lossNotice!.total);
+  });
+
+  it("FIX104 — memory off: nothing is summarised, no stored state is injected, and nothing is announced (the web's temporary chat)", async () => {
+    const ev = events();
+    const store = new MemoryConversationStateStore();
+    store.put({ ...emptyState("c"), current_goal: "from before", message_count_at_summary: 2 });
+    const ex = new FakeExtractor(okReply("g"));
+    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
+    const out = await mgr.compile("c", chainAt(0.9), turn({ memoryEnabled: false }), new AbortController().signal);
+    expect(out.compacted).toBe(true);
+    expect(ex.calls).toHaveLength(0);
+    expect(out.messages.some((m) => typeof m.content === "string" && m.content.includes("from before"))).toBe(false);
+    expect(out.summaryStatus).toBe("off");
+    expect(out.lossNotice).toBeNull();
+    expect(ev.list.map((e) => e.event)).toEqual(["context_budget"]);
+  });
+
+  it("summaryStatusOf is chat-edge's table", () => {
+    expect(summaryStatusOf(false, true, true, false, true, true)).toBe("off");
+    expect(summaryStatusOf(true, false, false, false, false, false)).toBe("off");
+    expect(summaryStatusOf(true, true, true, true, false, false)).toBe("pending");
+    expect(summaryStatusOf(true, true, true, false, false, true)).toBe("partial");
+    expect(summaryStatusOf(true, true, true, false, false, false)).toBe("failed");
+    expect(summaryStatusOf(true, true, false, false, false, true)).toBe("complete");
+    expect(summaryStatusOf(true, true, false, false, false, false)).toBe("failed");
   });
 
   it("a non-JSON reply is a failure, not a wipe", () => {
@@ -224,7 +274,7 @@ describe("ContextManager", () => {
     expect(st.manual_compact_boundary_index).toBe(5);
     expect(st.compaction_instructions).toBe("keep the decisions");
     expect(ex.calls[0]!.instructions).toBe("keep the decisions");
-    const next = await mgr.compile("c", [...msgs, u("q3")], "gpt-5.6-terra", 0, new AbortController().signal);
+    const next = await mgr.compile("c", [...msgs, u("q3")], turn(), new AbortController().signal);
     expect(next.compacted).toBe(true);
     expect(next.messages.map((m) => m.role)).toEqual(["system", "user", "assistant", "user", "assistant", "user"]);
     expect(next.messages[5].content).toBe("q3");
@@ -242,11 +292,34 @@ describe("ContextManager", () => {
 
   it("the meter is hidden below 70 % and shown from 70 % (spec addendum #1)", () => {
     const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: null, log, emit: () => {} });
-    expect(mgr.info("c", chainAt(0.5), "gpt-5.6-terra", 0).show_meter).toBe(false);
-    expect(mgr.info("c", chainAt(0.75), "gpt-5.6-terra", 0).show_meter).toBe(true);
-    const i = mgr.info("c", chainAt(0.75), "gpt-5.6-terra", 0);
+    expect(mgr.info("c", chainAt(0.5), turn()).show_meter).toBe(false);
+    expect(mgr.info("c", chainAt(0.75), turn()).show_meter).toBe(true);
+    const i = mgr.info("c", chainAt(0.75), turn());
     expect(i.used_ratio).toBeGreaterThan(0.7);
     expect(i.est_messages_remaining).toBeGreaterThan(0);
+    expect(i.trimming).toBe(false);
     expect(estimateTokens("ab")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("FIX104 — once trimming, the meter reports what is SENT: ratio ≤ 1, trimming, no countdown (chat-edge's contextMeter)", () => {
+    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: null, log, emit: () => {} });
+    const i = mgr.info("c", chainAt(3), turn()); // loaded history is 3× the budget
+    expect(i.compacted).toBe(true);
+    expect(i.trimming).toBe(true);
+    expect(i.show_meter).toBe(true);
+    expect(i.used_ratio).toBeLessThanOrEqual(1);
+    expect(i.history_tokens).toBeGreaterThan(i.messages_budget); // the FIX33 ratio would have said ~300 %
+    expect(i.sent_tokens).toBeLessThanOrEqual(i.messages_budget);
+    expect(i.over_budget).toBe(false);
+    expect(i.est_messages_remaining).toBe(0);
+    expect(i.messages_sent).toBeLessThan(i.messages_total);
+    expect(i).toMatchObject({ budget_model: "gpt-5.6-terra", budget_window: 128_000, total_budget: 115_000, output_reserve: 16_000 });
+  });
+
+  it("FIX104 — the newest message alone overflowing is over_budget, and the ratio still stops at 1", () => {
+    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: null, log, emit: () => {} });
+    const i = mgr.info("c", [sys(), u("first"), a("hi"), u("x".repeat(600_000))], turn());
+    expect(i.used_ratio).toBe(1);
+    expect(i.over_budget).toBe(true);
   });
 });

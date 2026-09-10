@@ -58,7 +58,9 @@ import {
   type PermissionDecision,
   type PermissionStore,
 } from "./permissions";
-import { compileChain } from "./context-compiler";
+import type { BudgetBasis } from "./context-budget";
+import { CONTEXT_NOTE_RESERVE, compileChain } from "./context-compiler";
+import { ModelWindows } from "./model-windows";
 import type { RunLedgerStore } from "./run-ledger";
 import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
@@ -209,6 +211,10 @@ export interface TurnCoordinatorOptions {
    * Absent (pure tests, probes) → FIX32's compileChain: trim + honest note, no
    * summary. The summarising logic lives THERE, never in this file (§3.6). */
   contextManager?: ContextManager;
+  /** FIX104: the catalogue's context windows, last known (index.ts keeps them
+   * under userData). Absent (tests, probes) → an in-memory copy that starts
+   * empty: the conservative default until the model list has been read. */
+  modelWindows?: ModelWindows;
   /** FIX34 Part A: the quick-ask window's shell hooks (index.ts owns the
    * windows and the host prefs file; the coordinator only relays the page's
    * control-plane ops). Absent (tests, probes) → the ops answer
@@ -249,6 +255,11 @@ const UPDATE_TASK_SCHEDULE_TOOL: GatewayToolDefinition = {
 export const QUICK_ASK_HINT =
   "This reply is for the quick-ask window: a small always-on-top box for short questions. In this window you have NO tools — no file access, no browser, no commands, no code execution, no image generation. Answer directly and concisely. If the request genuinely needs one of those, say so in one sentence and tell the user to open this chat in the main window (there is an \"Open in main window\" button), instead of guessing or describing a result you did not produce.";
 const MAX_OUTPUT_TOKENS = 8192;
+/** chat-edge's IsAutoModel: the router sentinel (or no model at all). */
+function isAutoModel(id: string): boolean {
+  const s = id.trim();
+  return s === "" || s === "auto";
+}
 const KEEP_SCREENSHOTS = 3;
 // FIX27: attached images kept in the chain (chat-edge replays at most 5 history images).
 const KEEP_ATTACHED_IMAGES = 5;
@@ -309,9 +320,11 @@ export class TurnCoordinator {
   // FIX9 §1.1: the models the gateway accepts, cached, for validating the
   // page-supplied model. A page can name any model string; an unknown one is
   // refused rather than passed to the gateway.
-  private acceptedModels: Map<string, { tools: boolean; vision: boolean }> | null = null;
+  private acceptedModels: Map<string, { tools: boolean; vision: boolean; contextWindow?: number }> | null = null;
   private acceptedModelsAt = 0;
   private static readonly MODELS_TTL_MS = 5 * 60_000;
+  /** FIX104 — the windows from the same list, kept past a failed read and a restart. */
+  private readonly modelWindows: ModelWindows;
 
   constructor(
     private readonly bridge: BridgeChannel,
@@ -326,6 +339,7 @@ export class TurnCoordinator {
     private readonly log: Logger,
   ) {
     this.liveMode = new LiveApprovalMode(sidecar, parseApprovalMode(opts.approvalMode), log);
+    this.modelWindows = opts.modelWindows ?? new ModelWindows(null);
   }
 
   waitForTurn(conversationId: string): Promise<void> {
@@ -537,11 +551,21 @@ export class TurnCoordinator {
         try {
           const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
           const model = this.opts.forceModel ?? conversation?.model_id ?? this.opts.defaultModel;
-          const built = await this.buildMessages(conversationId, conversation, "");
-          // buildMessages appends the (empty) user turn; the meter counts history only.
+          // FIX104 — a placeholder turn, not "": an empty text is buildMessages'
+          // REGENERATE shape, which cuts the history at the last user message, so
+          // the meter the page reads after every turn left out the newest
+          // exchange (and failed outright on a chat with no user message yet).
+          const built = await this.buildMessages(conversationId, conversation, " ");
+          // buildMessages appends the placeholder user turn; the meter counts history only.
           const messages = built.messages.slice(0, -1);
-          const tools = await this.toolDefinitions(null, false);
-          this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, model, tools.length));
+          const signal = new AbortController().signal;
+          // The same tool count and budget the next turn will use: a
+          // tools-blind model is sent no tool definitions, so its meter must
+          // not reserve room for them.
+          const memoryEnabled = conversation?.memory_enabled !== false;
+          const tools = (await this.modelSupportsTools(model, signal)) ? await this.toolDefinitions(null, false, false, memoryEnabled) : [];
+          const basis = await this.budgetBasis(conversationId, model, signal);
+          this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled }));
         } catch (err) {
           this.bridge.postHostResult(payload.requestId, false, undefined, `context-info-failed:${(err as Error).message.slice(0, 80)}`);
         }
@@ -940,9 +964,10 @@ export class TurnCoordinator {
       // FIX32 §1.2: the task path gets the same token budget as an interactive
       // turn (an old alarm conversation grows too). The FULL chain persists.
       const taskTools = await this.toolDefinitions(null, false);
+      const taskBasis = await this.budgetBasis(conversationId, model, controller.signal);
       const tcc = this.opts.contextManager
-        ? await this.opts.contextManager.compile(conversationId, built.messages, model, taskTools.length, controller.signal)
-        : compileChain(built.messages, model, taskTools.length);
+        ? await this.opts.contextManager.compile(conversationId, built.messages, { model, basis: taskBasis, numTools: taskTools.length, memoryEnabled: conversation?.memory_enabled !== false }, controller.signal)
+        : compileChain(built.messages, taskBasis, taskTools.length);
       if (tcc.compacted) this.log.info(`CONTEXT COMPILED conv=${conversationId} (task ${task.id}) status=compacted total=${tcc.totalMessages} sent=${tcc.sentMessages} dropped=${tcc.dropped}`);
       const taskChainStart = tcc.messages.length;
       await this.runLoop({
@@ -1227,14 +1252,26 @@ export class TurnCoordinator {
     // FIX33 A-D2: with a context manager the middle is SUMMARISED before it
     // goes (state store + extraction, the state riding as a user-role pair);
     // without one, FIX32's trim + honest note.
+    // FIX104: measured against the catalogue's window for the model that answers.
+    const basis = await this.budgetBasis(conversationId, model, signal);
     const cc = this.opts.contextManager
-      ? await this.opts.contextManager.compile(conversationId, messages, model, tools.length, signal)
-      : compileChain(messages, model, tools.length);
+      ? await this.opts.contextManager.compile(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled }, signal)
+      : compileChain(messages, basis, tools.length);
     const sendMessages = cc.messages;
     if (cc.compacted) {
-      this.emit(conversationId, "compaction_notice", { dropped: cc.dropped, sent: cc.sentMessages, total: cc.totalMessages });
-      this.log.info(`CONTEXT COMPILED conv=${conversationId} status=compacted total=${cc.totalMessages} sent=${cc.sentMessages} dropped=${cc.dropped} hist_tokens=${cc.historyTokens} budget=${cc.budget.messagesRemaining} model=${model}`);
+      // FIX104 (the web's FIX102 Part C): with a context manager the page is
+      // told only when no summary stands in for everything left out; the
+      // meter says "sees N of M" on every trimmed turn. Without one (pure
+      // tests, probes) FIX32's plain notice stays.
+      const notice = "lossNotice" in cc ? cc.lossNotice : { dropped: cc.dropped, sent: cc.sentMessages, total: cc.totalMessages };
+      if (notice) this.emit(conversationId, "compaction_notice", notice);
+      this.log.info(`CONTEXT COMPILED conv=${conversationId} status=compacted total=${cc.totalMessages} sent=${cc.sentMessages} dropped=${cc.dropped} hist_tokens=${cc.historyTokens} budget=${cc.budget.messagesRemaining}/${cc.budget.total} window=${cc.budget.window || "default"}${cc.budget.model ? ` of ${cc.budget.model}` : ""}${"summaryStatus" in cc ? ` summary=${cc.summaryStatus}` : ""} model=${model}`);
     }
+    // FIX104 — chat-edge's applyContextHints: on auto, the router is told what
+    // the compiled request needs, so it cannot pick a model that would refuse it.
+    const routingContext = isAutoModel(model)
+      ? { minContextTokens: cc.budget.system + cc.budget.toolReserve + cc.sentTokens + cc.budget.outputReserve + (cc.compacted ? CONTEXT_NOTE_RESERVE : 0), preferredContextTokens: cc.budget.window }
+      : undefined;
     // FIX9 Part B: image mode (the 🎨 button) — bias the model to call generate_image
     // and offer it this turn. A system hint on the existing message, not a new type.
     //
@@ -1267,6 +1304,7 @@ export class TurnCoordinator {
       maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
       tools,
       memoryEnabled,
+      routingContext,
       parentToolCallId: null,
       onText: (t) => {
         turn.assistantText += t;
@@ -1423,6 +1461,8 @@ export class TurnCoordinator {
      *  dispatch guard can refuse a memory write on every path, including a
      *  sub-agent that inherits it from the chat that spawned it. */
     memoryEnabled?: boolean;
+    /** FIX104 — auto only: what the compiled request needs (routing_hints). */
+    routingContext?: { minContextTokens: number; preferredContextTokens: number };
     parentToolCallId: string | null;
     onText: (t: string) => void;
     /** FIX35 Part B — the gateway named the model that is answering. */
@@ -1474,7 +1514,7 @@ export class TurnCoordinator {
       let sawContent = false;
       let resendWithoutTools = false;
       for await (const ev of this.gateway.streamCompletion(
-        { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: thinkingOff ? "off" : "auto", show_summary: !thinkingOff } },
+        { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: thinkingOff ? "off" : "auto", show_summary: !thinkingOff }, routingContext: run.routingContext },
         signal,
       )) {
         if (signal.aborted) return "cancelled";
@@ -2431,7 +2471,7 @@ export class TurnCoordinator {
     if (this.acceptedModels === null || now - this.acceptedModelsAt >= TurnCoordinator.MODELS_TTL_MS) {
       // A gateway that cannot list (network, or a test double without the
       // method) leaves the last-known map in place — never breaks a turn.
-      let map: Map<string, { tools: boolean; vision: boolean }> | null = null;
+      let map: Map<string, { tools: boolean; vision: boolean; contextWindow?: number }> | null = null;
       try {
         map = await this.gateway.listModels(signal);
       } catch {
@@ -2440,6 +2480,7 @@ export class TurnCoordinator {
       if (map) {
         this.acceptedModels = map;
         this.acceptedModelsAt = now;
+        this.modelWindows.learn([...map].map(([id, e]) => [id, e.contextWindow ?? 0] as [string, number]));
       }
     }
   }
@@ -2469,6 +2510,44 @@ export class TurnCoordinator {
     await this.refreshAcceptedModels(signal);
     const entry = this.acceptedModels?.get(model);
     return entry ? entry.vision : true;
+  }
+
+  /** FIX104 — what this turn's context budget is measured against.
+   *
+   * The window is the gateway catalogue's `context_window`, refreshed with the
+   * model list above; the last known survives a failed read and a restart
+   * (model-windows.ts). A pinned model budgets against itself. `auto` is
+   * chat-edge's budgetModelFor (FIX102 Part A): the router picks the answering
+   * model after this budget is fixed, so the budget follows the model that
+   * answered this conversation's last completed turn, while the catalogue
+   * still lists it, and the router is told what the request needs
+   * (routingContext). No evidence, or a model the catalogue does not know,
+   * budgets at the conservative default. */
+  private async budgetBasis(conversationId: string, model: string, signal: AbortSignal): Promise<BudgetBasis> {
+    await this.refreshAcceptedModels(signal);
+    let budgetModel = model;
+    if (isAutoModel(model)) {
+      const served = await this.lastServedModel(conversationId);
+      budgetModel = served && this.modelWindows.advertised(served) > 0 ? served : "";
+    }
+    return { model: budgetModel, window: budgetModel ? this.modelWindows.advertised(budgetModel) : 0, outputTokens: MAX_OUTPUT_TOKENS };
+  }
+
+  /** chat-edge's lastServedModel: the concrete model on the newest completed
+   * assistant row of the transcript, "" when there is none. */
+  private async lastServedModel(conversationId: string): Promise<string> {
+    try {
+      const rows = await this.chatEdge.listMessages(conversationId);
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const m = rows[i]!;
+        if (m.role !== "assistant" || (m.status && m.status !== "completed")) continue;
+        const id = (m.model_id ?? "").trim();
+        if (id && !isAutoModel(id)) return id;
+      }
+    } catch {
+      /* no transcript → no evidence → the default */
+    }
+    return "";
   }
 
   /** FIX3 §3: the honest first-launch indicator. While the sidecar is not ready,

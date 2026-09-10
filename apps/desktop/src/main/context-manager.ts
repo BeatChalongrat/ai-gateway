@@ -16,8 +16,20 @@
 //   3. re-plan with the refreshed block (it changes the budget) and hand the
 //      coordinator the messages to send + the numbers for the events.
 //
+// FIX104 — what the web learned in FIX102, applied here:
+//   · the budget is measured against a BudgetBasis (the catalogue's window
+//     for the model that answers), not a model id looked up in a local map;
+//   · the meter reports the request the turn SENDS (chat-edge's
+//     contextMeter): used_ratio is sent ÷ budget and never above 1,
+//     `trimming` replaces the percent once older messages are left out;
+//   · a trim is described by a summary status (chat-edge's summaryStatusOf),
+//     and the user is told only when no summary stands in for everything
+//     left out (chat-edge's LossNotice);
+//   · a conversation with memory off keeps no summary, as on the web.
+//
 // No 'electron' import: unit-tested in plain Node with fakes.
 
+import type { BudgetBasis } from "./context-budget";
 import { type CompileOptions, type CompiledChain, compileChain, estimateTokens } from "./context-compiler";
 import {
   COMPACT_TARGET_RATIO,
@@ -37,8 +49,14 @@ import type { GatewayMessage } from "./gateway-client";
 import type { Logger } from "./logger";
 
 export interface ContextBudgetEvent {
+  /** FIX104 (chat-edge FIX102): the SENT history over the budget, clamped to 1. */
   used_ratio: number;
+  /** The newest message alone does not fit; used_ratio was clamped. */
+  over_budget: boolean;
+  /** Older messages are left out of what is sent — the page shows "sees N of M" instead of a percent. */
+  trimming: boolean;
   history_tokens: number;
+  sent_tokens: number;
   messages_budget: number;
   threshold_tokens: number;
   messages_total: number;
@@ -47,9 +65,36 @@ export interface ContextBudgetEvent {
   compacted: boolean;
   dropped: number;
   est_messages_remaining: number;
-  /** The page shows the meter + compact button only when true (≥ 70 %). */
+  /** The page shows the meter + compact button only when true (trimming, or ≥ 70 %). */
   show_meter: boolean;
   meter_show_ratio: number;
+  /** The model the budget was measured against ("" = none known → the default). */
+  budget_model: string;
+  /** Its advertised window from the catalogue (0 = the default was used). */
+  budget_window: number;
+  total_budget: number;
+  output_reserve: number;
+}
+
+/** chat-edge's Summary* values (FIX102 Part C). */
+export type SummaryStatus = "complete" | "partial" | "failed" | "off" | "pending";
+
+/** The `compaction_notice` turn event — the web's CompactionNotice payload. */
+export interface CompactionLossNotice {
+  dropped: number;
+  sent: number;
+  total: number;
+  summary: "failed" | "partial";
+}
+
+/** One turn's inputs to the budget. */
+export interface TurnBudget {
+  /** The chat model — the summariser uses it (unchanged by FIX104). */
+  model: string;
+  basis: BudgetBasis;
+  numTools: number;
+  /** The conversation's memory switch; absent means on. */
+  memoryEnabled?: boolean;
 }
 
 export interface ContextManagerDeps {
@@ -67,6 +112,10 @@ export interface CompiledTurn extends CompiledChain {
   statePresent: boolean;
   extractionRan: boolean;
   budgetEvent: ContextBudgetEvent;
+  /** What stands in for the messages left out; "" when nothing was. */
+  summaryStatus: SummaryStatus | "";
+  /** Non-null when older messages were left out and no summary covers all of them. */
+  lossNotice: CompactionLossNotice | null;
 }
 
 export class ContextManager {
@@ -88,34 +137,43 @@ export class ContextManager {
    * user turn (buildMessages' shape). Returns what to SEND. The stored chain
    * is never touched here.
    */
-  async compile(conversationId: string, messages: GatewayMessage[], model: string, numTools: number, signal: AbortSignal): Promise<CompiledTurn> {
-    let state = this.deps.store.get(conversationId);
+  async compile(conversationId: string, messages: GatewayMessage[], turn: TurnBudget, signal: AbortSignal): Promise<CompiledTurn> {
+    const memoryOn = turn.memoryEnabled !== false;
+    let state = memoryOn ? this.deps.store.get(conversationId) : null;
     const history = messages.slice(1);
-    let plan = this.plan(messages, model, numTools, state);
+    let plan = this.plan(messages, turn, state);
     let extractionRan = false;
+    let extractionOk = false;
 
-    if (plan.compacted && plan.dropEnd > 0 && this.deps.extractor) {
+    if (memoryOn && plan.compacted && plan.dropEnd > 0 && this.deps.extractor) {
       const anchor = Math.min(Math.max(state?.message_count_at_summary ?? 0, 0), history.length);
       if (anchor < plan.dropEnd) {
         extractionRan = true;
+        const coverTo = plan.dropEnd;
         // A-W9 — the pause has a name.
         this.deps.emit(conversationId, "compaction_status", { status: "summarizing" });
-        state = await this.fold(conversationId, model, history, anchor, plan.dropEnd, state, signal);
+        state = await this.fold(conversationId, turn.model, history, anchor, coverTo, state, signal);
+        extractionOk = (state?.message_count_at_summary ?? 0) >= coverTo;
         // The block changed the budget: plan again against it.
-        plan = this.plan(messages, model, numTools, state);
+        plan = this.plan(messages, turn, state);
       }
     }
 
     const statePresent = !isStateEmpty(state);
+    const summaryStatus = plan.compacted ? summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, statePresent) : "";
     const budgetEvent = this.budgetEvent(plan, statePresent);
     this.deps.emit(conversationId, "context_budget", budgetEvent);
-    return { ...plan, statePresent, extractionRan, budgetEvent };
+    const lossNotice: CompactionLossNotice | null =
+      plan.compacted && (summaryStatus === "failed" || summaryStatus === "partial")
+        ? { dropped: plan.dropped, sent: plan.sentMessages, total: plan.totalMessages, summary: summaryStatus }
+        : null;
+    return { ...plan, statePresent, extractionRan, budgetEvent, summaryStatus, lossNotice };
   }
 
   /** Dry run for the page's context.info op — no extraction, no events. */
-  info(conversationId: string, messages: GatewayMessage[], model: string, numTools: number): ContextBudgetEvent {
-    const state = this.deps.store.get(conversationId);
-    const plan = this.plan(messages, model, numTools, state);
+  info(conversationId: string, messages: GatewayMessage[], turn: TurnBudget): ContextBudgetEvent {
+    const state = turn.memoryEnabled !== false ? this.deps.store.get(conversationId) : null;
+    const plan = this.plan(messages, turn, state);
     return this.budgetEvent(plan, !isStateEmpty(state));
   }
 
@@ -150,7 +208,7 @@ export class ContextManager {
   }
 
   // ── internals ──
-  private plan(messages: GatewayMessage[], model: string, numTools: number, state: ConversationStateRecord | null): CompiledChain {
+  private plan(messages: GatewayMessage[], turn: TurnBudget, state: ConversationStateRecord | null): CompiledChain {
     const opts: CompileOptions = {
       triggerRatio: this.trigger,
       targetRatio: this.target,
@@ -158,27 +216,47 @@ export class ContextManager {
       manualBoundaryIndex: state?.manual_compact_boundary_index ?? null,
       summaryPresent: !!state && !isStateEmpty(state),
     };
-    return compileChain(messages, model, numTools, opts);
+    return compileChain(messages, turn.basis, turn.numTools, opts);
   }
 
+  /** chat-edge's contextMeter (handler/conversation.go), on the desktop's plan. */
   private budgetEvent(plan: CompiledChain, statePresent: boolean): ContextBudgetEvent {
     const budget = plan.budget.messagesRemaining;
-    const used = budget > 0 ? plan.historyTokensLoaded / budget : 0;
-    const avg = plan.totalMessages > 0 ? plan.historyTokensLoaded / plan.totalMessages : 0;
-    const est = avg > 0 && plan.thresholdTokens > plan.historyTokensLoaded ? Math.floor((plan.thresholdTokens - plan.historyTokensLoaded) / avg) : 0;
+    let used = budget > 0 ? plan.sentTokens / budget : 0;
+    let overBudget = false;
+    if (used > 1) {
+      used = 1;
+      overBudget = true;
+    }
+    const trimming = plan.compacted;
+    let est = 0;
+    if (!trimming && plan.totalMessages > 0 && plan.thresholdTokens > plan.historyTokensLoaded) {
+      const avg = Math.trunc(plan.historyTokensLoaded / plan.totalMessages);
+      if (avg > 0) est = Math.trunc((plan.thresholdTokens - plan.historyTokensLoaded) / avg);
+    }
     return {
       used_ratio: used,
+      over_budget: overBudget,
+      trimming,
       history_tokens: plan.historyTokensLoaded,
+      sent_tokens: plan.sentTokens,
       messages_budget: budget,
       threshold_tokens: plan.thresholdTokens,
       messages_total: plan.totalMessages,
+      // The conversation's own messages only; the state pair is not counted
+      // (the page's messagesSeen subtracts it when state_injected says so —
+      // this event never counts it in the first place).
       messages_sent: plan.sentMessages,
       state_present: statePresent,
       compacted: plan.compacted,
       dropped: plan.dropped,
       est_messages_remaining: est,
-      show_meter: used >= CONTEXT_METER_SHOW_RATIO,
+      show_meter: trimming || used >= CONTEXT_METER_SHOW_RATIO,
       meter_show_ratio: CONTEXT_METER_SHOW_RATIO,
+      budget_model: plan.budget.model,
+      budget_window: plan.budget.window,
+      total_budget: plan.budget.total,
+      output_reserve: plan.budget.outputReserve,
     };
   }
 
@@ -213,6 +291,21 @@ export class ContextManager {
     }
     return state ?? (existing ? existing : null) ?? null;
   }
+}
+
+/**
+ * chat-edge's summaryStatusOf (context_compiler.go), argument for argument.
+ * memoryEnabled: the conversation's switch; summariser: an extractor is
+ * wired; needed: this plan's drop range was not yet covered; ok: the fold
+ * covered it.
+ */
+export function summaryStatusOf(memoryEnabled: boolean, summariser: boolean, needed: boolean, dryRun: boolean, ok: boolean, statePresent: boolean): SummaryStatus {
+  if (!memoryEnabled || (!summariser && !statePresent)) return "off";
+  if (needed && dryRun) return "pending";
+  if (needed && !ok && statePresent) return "partial";
+  if (needed && !ok) return "failed";
+  if (statePresent) return "complete";
+  return "failed";
 }
 
 function clampRatio(v: number | undefined, dflt: number): number {

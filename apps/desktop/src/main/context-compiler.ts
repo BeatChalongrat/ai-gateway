@@ -5,9 +5,10 @@
 // conversation grew until the provider refused it (measured in the FIX32
 // report — web-chat has had chat-edge's ContextCompiler since S4; the desktop
 // had 22 lines). This is that compiler's shape, ported, not reinvented:
-// the same token heuristic (ASCII/4, Thai-CJK ×2/3), the same conservative
-// per-model windows, the same output/tool reserves, trim-when-over — with the
-// deliberate divergences the report lists:
+// the same token heuristic (ASCII/4, Thai-CJK ×2/3), the same budget rules
+// (context-budget.ts: the catalogue's window with chat-edge's headroom and
+// reserves, pinned against the Go source since FIX104), trim-when-over —
+// with the deliberate divergences the report lists:
 //
 //   1. THE FIRST EXCHANGE ALWAYS SURVIVES. chat-edge trims oldest-first, so
 //      the user's turn-1 standing instruction is the first thing to die; the
@@ -29,24 +30,16 @@
 //
 // No 'electron' import: unit-tested in plain Node.
 
+import { type BudgetBasis, MESSAGES_FLOOR, PER_TOOL_TOKENS, outputReserveForRequest, workingLimitFor } from "./context-budget";
 import type { GatewayMessage } from "./gateway-client";
 
-// The same conservative windows chat-edge budgets against (context_budget.go)
-// for the models the desktop offers; unknown models get the cautious default.
-export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  "gpt-5.6-terra": 120_000,
-  "gpt-5.6-sol": 120_000,
-  "gpt-5.6-luna": 120_000,
-  "gpt-5.2": 120_000,
-  "gpt-5.2-mini": 120_000,
-  auto: 120_000,
-};
-export const DEFAULT_CONTEXT_LIMIT = 100_000;
-const OUTPUT_RESERVE = 16_000;
-const PER_TOOL_TOKENS = 200;
-/** Never trim below this much history budget (chat-edge's floor). */
-const MESSAGES_FLOOR = 2_000;
+// FIX104: the per-model window map that stood here (`auto` and five gpt ids
+// at 120,000, everything else 100,000) is gone. The window is the catalogue's
+// (BudgetBasis, resolved by the turn coordinator); the rules are chat-edge's
+// (context-budget.ts).
 const PER_MESSAGE_OVERHEAD = 4;
+/** The context note joins the system message when compaction happens. */
+export const CONTEXT_NOTE_RESERVE = 160;
 const IMAGE_BLOCK_TOKENS = 500;
 
 /** chat-edge's EstimateTokens, verbatim semantics (token_estimator.go):
@@ -127,8 +120,12 @@ export interface CompiledChain {
   dropped: number;
   totalMessages: number;
   sentMessages: number;
-  /** tokens of the history actually SENT. */
+  /** tokens of the history actually SENT (the conversation's own messages). */
   historyTokens: number;
+  /** historyTokens plus the injected state pair when there is one — chat-edge's SentTokens, the meter's numerator. */
+  sentTokens: number;
+  /** The state pair rides in `messages` (compacted with a preamble). */
+  stateInjected: boolean;
   /** tokens of the history as LOADED (before any trim) — the meter's numerator. */
   historyTokensLoaded: number;
   /** triggerRatio × messagesRemaining — the meter's "compaction at" mark. */
@@ -137,7 +134,8 @@ export interface CompiledChain {
    *  system message) of the dropped middle; both 0 when nothing dropped. */
   dropStart: number;
   dropEnd: number;
-  budget: { total: number; system: number; toolReserve: number; outputReserve: number; messagesRemaining: number };
+  /** model/window: what the budget was measured against (window 0 = the default was used). */
+  budget: { total: number; system: number; toolReserve: number; outputReserve: number; messagesRemaining: number; model: string; window: number };
 }
 
 /** FIX33 knobs. Absent = FIX32 behaviour (compact only on overflow, no preamble). */
@@ -173,14 +171,15 @@ function contextNote(dropped: number, keptRecent: number, summaryPresent: boolea
  * turn (buildMessages' shape). Returns the same array when it fits (no copy),
  * so callers can cheaply detect "untouched".
  */
-export function compileChain(messages: GatewayMessage[], modelId: string, numTools: number, opts: CompileOptions = {}): CompiledChain {
+export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, numTools: number, opts: CompileOptions = {}): CompiledChain {
   const system = messages[0];
   const history = messages.slice(1);
   const sysText = typeof system?.content === "string" ? system.content : "";
   const sysTokens = estimateTokens(sysText) + PER_MESSAGE_OVERHEAD;
-  const total = MODEL_CONTEXT_LIMITS[modelId] ?? DEFAULT_CONTEXT_LIMIT;
+  const total = workingLimitFor(basis);
   const toolReserve = numTools * PER_TOOL_TOKENS;
-  let remaining = total - sysTokens - toolReserve - OUTPUT_RESERVE;
+  const outputReserve = outputReserveForRequest(total, basis.outputTokens);
+  let remaining = total - sysTokens - toolReserve - outputReserve;
   if (remaining < MESSAGES_FLOOR) remaining = MESSAGES_FLOOR;
 
   const trigger = ratio(opts.triggerRatio, 1);
@@ -194,10 +193,10 @@ export function compileChain(messages: GatewayMessage[], modelId: string, numToo
     totalMessages: history.length,
     historyTokensLoaded: historyTokens,
     thresholdTokens,
-    budget: { total, system: sysTokens, toolReserve, outputReserve: OUTPUT_RESERVE, messagesRemaining: remaining },
+    budget: { total, system: sysTokens, toolReserve, outputReserve, messagesRemaining: remaining, model: basis.model, window: basis.window },
   };
   const boundary = typeof opts.manualBoundaryIndex === "number" && opts.manualBoundaryIndex >= 0 && opts.manualBoundaryIndex < history.length ? opts.manualBoundaryIndex : null;
-  const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, dropStart: 0, dropEnd: 0, ...base });
+  const untouched = (): CompiledChain => ({ messages, compacted: false, altered: false, dropped: 0, sentMessages: history.length, historyTokens, sentTokens: historyTokens, stateInjected: false, dropStart: 0, dropEnd: 0, ...base });
 
   const overThreshold = historyTokens >= thresholdTokens;
   if (!overThreshold && boundary === null) return untouched();
@@ -213,7 +212,7 @@ export function compileChain(messages: GatewayMessage[], modelId: string, numToo
   const head = units.slice(0, headCount);
   const headTokens = head.reduce((s, u) => s + u.tokens, 0);
   const headMessages = head.reduce((s, u) => s + u.messages.length, 0);
-  const noteReserve = 160; // the context note joins the system message
+  const noteReserve = CONTEXT_NOTE_RESERVE;
 
   // The tail may not start before the boundary's unit (A-W7) or inside the head.
   let tailFloor = headCount;
@@ -252,13 +251,16 @@ export function compileChain(messages: GatewayMessage[], modelId: string, numToo
   const keptRecent = tail.reduce((s, u) => s + u.messages.length, 0);
   const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped, keptRecent, opts.summaryPresent === true) };
   const out: GatewayMessage[] = [newSystem, ...preamble, ...keptMessages];
+  const keptTokens = keptMessages.reduce((s, m) => s + messageTokens(m), 0);
   return {
     messages: out,
     compacted: true,
     altered: true,
     dropped,
     sentMessages: keptMessages.length,
-    historyTokens: keptMessages.reduce((s, m) => s + messageTokens(m), 0),
+    historyTokens: keptTokens,
+    sentTokens: keptTokens + preambleTokens,
+    stateInjected: preamble.length > 0,
     dropStart: headMessages,
     dropEnd: headMessages + dropped,
     ...base,
