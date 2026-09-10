@@ -705,6 +705,11 @@ Loop:
 			if ev.ImageNotice != nil {
 				writeSSEEvent(w, flusher, "image_notice", ev.ImageNotice)
 			}
+			// FIX102 Part C — older messages left out of this turn without a
+			// summary standing in for all of them. Informational, not an error.
+			if ev.CompactionNotice != nil {
+				writeSSEEvent(w, flusher, "compaction_notice", ev.CompactionNotice)
+			}
 			// FIX74 — the model asked the user a question. The card goes out
 			// as its own frame (recorded in the ledger, so a reattach replays
 			// it), then the run ends on message_paused below.
@@ -1520,6 +1525,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.ImageNotice != nil {
 		writeSSEEvent(w, flusher, "image_notice", snap.ImageNotice)
+	}
+	if snap.CompactionNotice != nil {
+		writeSSEEvent(w, flusher, "compaction_notice", snap.CompactionNotice)
 	}
 	// run_python cards, latest frame each — a refresh in the middle of a
 	// 60s sandbox run must not lose the code the model is running.

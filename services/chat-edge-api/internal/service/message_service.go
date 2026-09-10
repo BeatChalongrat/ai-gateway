@@ -1007,7 +1007,9 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil)
+	// Non-streaming: no frame to carry the notice; the compacted_history
+	// source row persisted with the reply records the same loss.
+	gwReq, _ := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist, false)
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
@@ -1241,6 +1243,10 @@ type StreamUpdate struct {
 	// requested). The handler emits it as a ``reasoning_notice`` SSE
 	// event — informational, never an error.
 	ReasoningNotice *ReasoningNotice
+	// CompactionNotice (FIX102 Part C) — this turn left older messages out
+	// with no summary standing in for all of them. Enqueued before the pump
+	// starts, like ImageNotice; the handler emits ``compaction_notice``.
+	CompactionNotice *CompactionNotice
 
 	// Provider-stall state. chat-edge holds the upstream connection, so
 	// chat-edge is the only layer that can tell "the provider has gone
@@ -1453,7 +1459,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		cb := in.OnCompactionStart
 		onExtractionStart = func() { cb(asstID, userID) }
 	}
-	gwReq := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
@@ -1518,6 +1524,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 	// the user learns their attachment didn't attach. Buffered channel +
 	// pre-pump enqueue guarantees it's the first frame the client sees.
 	emitImageNotice(ch, imgs.failures)
+	emitCompactionNotice(ch, lossNotice)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1796,7 +1803,7 @@ func (s *MessageService) openAssistantStream(
 	ragQuery := lastUserContent(history)
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -1821,6 +1828,7 @@ func (s *MessageService) openAssistantStream(
 	canonState := &CanonicalStreamState{}
 	ch := make(chan StreamUpdate, 16)
 	emitImageNotice(ch, imgs.failures)
+	emitCompactionNotice(ch, lossNotice)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -2065,7 +2073,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	}
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -2090,6 +2098,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	canonState := &CanonicalStreamState{}
 	ch := make(chan StreamUpdate, 16)
 	emitImageNotice(ch, imgs.failures)
+	emitCompactionNotice(ch, lossNotice)
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -3121,7 +3130,7 @@ func (s *MessageService) compileAndBuildRequest(
 	sources *SourcesAccumulator,
 	omittedOlder int,
 	onExtractionStart func(),
-) GatewayChatRequest {
+) (GatewayChatRequest, *CompactionNotice) {
 	// current-turn images drive routing + the compiler budget; the
 	// per-message map drives inline placement in the built request.
 	imageURLs := visionURLs(imgs.current)
@@ -3194,7 +3203,7 @@ func (s *MessageService) compileAndBuildRequest(
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
-		return req
+		return req, nil
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
@@ -3221,7 +3230,7 @@ func (s *MessageService) compileAndBuildRequest(
 		req := buildGatewayRequestWithImages(modelID, history, prefix, imgsByMsg, genNotes, genVision, s.canonicalHistoryEnabled)
 		req.RoutingHints = routingHints
 		attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
-		return req
+		return req, nil
 	}
 	// S7 — flush the compiler's sources (memory + state +
 	// compaction marker) into the per-turn accumulator so the
@@ -3232,7 +3241,12 @@ func (s *MessageService) compileAndBuildRequest(
 	applyContextHints(routingHints, compiled)
 	req.RoutingHints = routingHints
 	attachReasoning(&req, conv, modelID, ragQuery, s.reasoningCheckerFor(ctx))
-	return req
+	notice := compiled.LossNotice()
+	if notice != nil {
+		slog.Warn("context_compacted_without_summary",
+			"conv", conv.ID.String(), "summary", notice.Summary, "dropped", notice.Dropped, "sent", notice.Sent, "total", notice.Total)
+	}
+	return req, notice
 }
 
 // attachReasoning forwards the conversation's reasoning preferences to
@@ -3964,6 +3978,15 @@ func emitImageNotice(ch chan<- StreamUpdate, failures []ImageAttachFailure) {
 		return
 	}
 	ch <- StreamUpdate{ImageNotice: &ImageAttachNotice{Failures: failures}}
+}
+
+// emitCompactionNotice (FIX102 Part C) enqueues the "left out without a
+// summary" notice before the pump starts, so it precedes the reply's text.
+func emitCompactionNotice(ch chan<- StreamUpdate, n *CompactionNotice) {
+	if n == nil {
+		return
+	}
+	ch <- StreamUpdate{CompactionNotice: n}
 }
 
 // SaveSearchSources persists the web_search citations on an assistant

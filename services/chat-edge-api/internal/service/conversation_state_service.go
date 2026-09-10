@@ -220,10 +220,30 @@ func (s *ConversationStateService) GenerateOrUpdateState(
 func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 	ctx context.Context, convID, userID, tenantID uuid.UUID, opts ExtractionOptions,
 ) (*model.ConversationState, int, error) {
+	p, err := s.extractOnce(ctx, convID, userID, tenantID, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	return p.state, len(p.folded), nil
+}
+
+// extractPass is one extraction call's outcome (FIX102 Part C). A failed
+// call and "nothing new to fold" both leave the state untouched and fold
+// nothing, so GenerateOrUpdateStateOpts cannot tell them apart; the
+// coverage check needs to.
+type extractPass struct {
+	state  *model.ConversationState
+	folded []model.Message // the slice the state now covers; nil when nothing was folded
+	failed bool            // there was something to fold and no usable summary came back
+}
+
+func (s *ConversationStateService) extractOnce(
+	ctx context.Context, convID, userID, tenantID uuid.UUID, opts ExtractionOptions,
+) (extractPass, error) {
 	// 1. Existing state (may be nil for first-time extraction).
 	existing, err := s.states.Get(ctx, convID, userID, tenantID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("state lookup: %w", err)
+		return extractPass{}, fmt.Errorf("state lookup: %w", err)
 	}
 
 	batch := opts.BatchLimit
@@ -238,16 +258,16 @@ func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 	}
 	newMessages, err := s.messages.ListAfter(ctx, tenantID, convID, anchor, batch)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list after: %w", err)
+		return extractPass{}, fmt.Errorf("list after: %w", err)
 	}
 	if len(newMessages) == 0 {
-		return existing, 0, nil
+		return extractPass{state: existing}, nil
 	}
 
 	// 3. Build the extraction prompt + call the gateway.
 	conv, err := s.conv.GetByID(ctx, tenantID, convID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("conv lookup: %w", err)
+		return extractPass{}, fmt.Errorf("conv lookup: %w", err)
 	}
 	modelID := s.extractionModel
 	if modelID == "" {
@@ -275,7 +295,7 @@ func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 	if strings.TrimSpace(rawJSON) == "" {
 		// Gateway failed or returned empty — keep existing state
 		// rather than wiping it. Logged inside the LLM caller.
-		return existing, 0, nil
+		return extractPass{state: existing, failed: true}, nil
 	}
 
 	// 4. Parse + merge with existing. A response that is not JSON
@@ -286,7 +306,7 @@ func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 	if !parsed.parsed {
 		slog.Warn("conversation state: extraction response was not JSON — state kept, anchor not advanced",
 			"conv", convID.String(), "len", len(rawJSON))
-		return existing, 0, nil
+		return extractPass{state: existing, failed: true}, nil
 	}
 	merged := mergeExtractionIntoState(existing, parsed, convID, userID, tenantID)
 	if instructions != "" {
@@ -305,9 +325,9 @@ func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 
 	// 6. Persist.
 	if err := s.states.Upsert(ctx, merged); err != nil {
-		return nil, 0, fmt.Errorf("upsert state: %w", err)
+		return extractPass{}, fmt.Errorf("upsert state: %w", err)
 	}
-	return merged, len(newMessages), nil
+	return extractPass{state: merged, folded: newMessages}, nil
 }
 
 // EnsureStateCoversUpTo runs extraction passes, oldest-first, until
@@ -317,39 +337,58 @@ func (s *ConversationStateService) GenerateOrUpdateStateOpts(
 // what manual compact calls with the newest message (A-W7). Returns
 // the final state (possibly the untouched existing one) and whether
 // coverage reached uptoID.
+//
+// FIX102 Part C — "reached" used to mean "the anchor landed EXACTLY on
+// uptoID". A batch folds everything after the anchor, up to 120 messages,
+// so it almost always lands past uptoID, and a successful extraction was
+// reported as incomplete: FIX102's probe logged "state coverage incomplete
+// before trim" 0.03 s after five out of five successful extractions. And a
+// FAILED call looked like "nothing new", so it could be reported as reached.
+// Now reached is true when uptoID is inside a folded batch, when a short
+// batch drained everything after the anchor, or when there was nothing after
+// the anchor to fold — and false when a call failed or the batch bound ran
+// out first.
 func (s *ConversationStateService) EnsureStateCoversUpTo(
 	ctx context.Context, convID, userID, tenantID uuid.UUID, uptoID *uuid.UUID, opts ExtractionOptions,
 ) (*model.ConversationState, bool, error) {
+	batch := opts.BatchLimit
+	if batch <= 0 {
+		batch = extractionBatchLimit
+	}
 	var st *model.ConversationState
 	for i := 0; i < extractionMaxBatches; i++ {
-		next, folded, err := s.GenerateOrUpdateStateOpts(ctx, convID, userID, tenantID, opts)
+		p, err := s.extractOnce(ctx, convID, userID, tenantID, opts)
 		if err != nil {
 			return st, false, err
 		}
-		st = next
-		if folded == 0 {
-			// Nothing new (or the call failed and the anchor did not
-			// move) — stop rather than spin.
-			break
+		st = p.state
+		if p.failed {
+			return st, false, nil
 		}
-		if uptoID != nil && st != nil && st.SummarizedUpToMessageID != nil && *st.SummarizedUpToMessageID == *uptoID {
+		if len(p.folded) == 0 {
+			// Nothing after the anchor: whatever exists is covered.
+			return st, uptoID == nil || (st != nil && st.SummarizedUpToMessageID != nil), nil
+		}
+		if uptoID != nil && containsMessage(p.folded, *uptoID) {
 			return st, true, nil
 		}
-		batch := opts.BatchLimit
-		if batch <= 0 {
-			batch = extractionBatchLimit
-		}
-		if folded < batch {
-			// A short batch means we drained everything that exists.
-			break
+		if len(p.folded) < batch {
+			// A short batch drained everything after the anchor.
+			return st, true, nil
 		}
 	}
-	reached := uptoID == nil || (st != nil && st.SummarizedUpToMessageID != nil && *st.SummarizedUpToMessageID == *uptoID)
-	if !reached && st != nil && st.SummarizedUpToMessageID != nil && uptoID != nil {
-		slog.Warn("conversation state: coverage did not reach the requested message within the batch bound",
-			"conv", convID.String(), "batches", extractionMaxBatches)
+	slog.Warn("conversation state: coverage did not reach the requested message within the batch bound",
+		"conv", convID.String(), "batches", extractionMaxBatches)
+	return st, false, nil
+}
+
+func containsMessage(msgs []model.Message, id uuid.UUID) bool {
+	for i := range msgs {
+		if msgs[i].ID == id {
+			return true
+		}
 	}
-	return st, reached, nil
+	return false
 }
 
 // SetManualCompactBoundary records A-W7's "drop everything at or

@@ -526,7 +526,7 @@ export interface Message {
   /** FIX32 §1.2 (desktop shell) — the host compacted the SENT context this
    *  turn: `dropped` older messages were not sent to the model. The user is
    *  told, the way web-chat's compacted_history source marker tells them. */
-  compaction_notice?: { dropped: number; sent?: number; total?: number } | null;
+  compaction_notice?: { dropped: number; sent?: number; total?: number; summary?: string } | null;
   image_notice?: {
     filenames: string[];
   };

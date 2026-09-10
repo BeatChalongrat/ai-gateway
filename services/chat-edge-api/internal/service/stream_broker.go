@@ -114,6 +114,9 @@ type StreamSnapshot struct {
 	// ImageNotice: sticky like FallbackInfo — a client reattaching after
 	// the one-shot image_notice frame still learns an attachment failed.
 	ImageNotice *ImageAttachNotice
+	// CompactionNotice (FIX102): sticky the same way — a reattaching client
+	// still learns this turn left older messages out without a summary.
+	CompactionNotice *CompactionNotice
 	// CodeExecutions are the run_python cards seen so far, in first-seen
 	// order, each collapsed to its LATEST frame (the "running" frame is
 	// superseded by the terminal one). Replaying them restores the
@@ -144,10 +147,11 @@ type brokerEntry struct {
 	search    string
 	fallback  map[string]any
 	dlpNotice map[string]any // FIX50 P1-C — sticky like fallback
-	served    string // FIX35 Part B — sticky like fallback: a reattaching client learns the model too
+	served    string         // FIX35 Part B — sticky like fallback: a reattaching client learns the model too
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
 	inotice   *ImageAttachNotice
+	cnotice   *CompactionNotice
 	terminal  *StreamUpdate
 	// codeRuns keeps the latest frame per run_python call, plus the
 	// order they first appeared, so the snapshot replays them the way
@@ -199,21 +203,22 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		}
 	}
 	return StreamSnapshot{
-		Content:         e.content.String(),
-		Reasoning:       e.reasoning.String(),
-		AnalysisStatus:  e.analysis,
-		ImageStatus:     e.image,
-		VideoStatus:     e.video,
-		SearchStatus:    e.search,
-		FallbackInfo:    e.fallback,
-		DlpNotice:       e.dlpNotice,
-		ServedModel:     e.served,
-		ReasoningNotice: e.rnotice,
-		ProviderStall:   e.stall,
-		ImageNotice:     e.inotice,
-		CodeExecutions:  runs,
-		ToolActivities:  acts,
-		Terminal:        e.terminal,
+		Content:          e.content.String(),
+		Reasoning:        e.reasoning.String(),
+		AnalysisStatus:   e.analysis,
+		ImageStatus:      e.image,
+		VideoStatus:      e.video,
+		SearchStatus:     e.search,
+		FallbackInfo:     e.fallback,
+		DlpNotice:        e.dlpNotice,
+		ServedModel:      e.served,
+		ReasoningNotice:  e.rnotice,
+		ProviderStall:    e.stall,
+		ImageNotice:      e.inotice,
+		CompactionNotice: e.cnotice,
+		CodeExecutions:   runs,
+		ToolActivities:   acts,
+		Terminal:         e.terminal,
 	}
 }
 
@@ -379,6 +384,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.ImageNotice != nil {
 		e.inotice = ev.ImageNotice
+	}
+	if ev.CompactionNotice != nil {
+		e.cnotice = ev.CompactionNotice
 	}
 	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
 		if e.codeRuns == nil {

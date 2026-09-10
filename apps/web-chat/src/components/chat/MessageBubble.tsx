@@ -29,6 +29,7 @@ import { useI18nStore, useT } from "@/lib/i18n";
 import { fallbackNotice, knownNotRetryable, localizeErrorCode } from "@/lib/errorMessages";
 import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
+import { lossNoticeFromSources } from "@/lib/compaction";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -485,9 +486,7 @@ function MessageBubbleImpl({
 
       {/* FIX32 §1.2 — compaction marker: the host stopped sending the middle
           of a long conversation. Quiet information, not an error. */}
-      {message.compaction_notice && message.compaction_notice.dropped > 0 ? (
-        <CompactionNotice dropped={message.compaction_notice.dropped} />
-      ) : null}
+      <MessageCompactionNotice message={message} />
 
       {/* Image attach notice — one or more attached images couldn't be
           read into the vision request. Same quiet muted line: the person
@@ -874,18 +873,29 @@ function FallbackNotice({
 // user which attached image(s) couldn't be read so the turn's text-only
 // degradation isn't silent. The localized string carries the meaning; only
 // the (user's own) filenames are interpolated, never the server's reason.
-export function CompactionNotice({ dropped }: { dropped: number }) {
+export function CompactionNotice({ dropped, summary }: { dropped: number; summary?: string }) {
   const t = useT();
+  // FIX102 Part C — when no summary stands in for the left-out messages the
+  // line says so; the desktop's routine notice has no `summary`.
+  const key = summary === "failed" ? "thread.compacted.noSummary" : summary === "partial" ? "thread.compacted.partialSummary" : "thread.compacted";
   return (
     <div
       className="my-1 flex items-center gap-1.5 text-xs text-text-muted"
       data-testid="compaction-notice"
+      data-summary={summary}
       role="note"
     >
       <span aria-hidden>📦</span>
-      <span>{t("thread.compacted", { n: String(dropped) })}</span>
+      <span>{t(key, { n: String(dropped) })}</span>
     </div>
   );
+}
+
+/** The live `compaction_notice`, or on reload the same loss read from the persisted compacted_history source. */
+function MessageCompactionNotice({ message }: { message: Message }) {
+  const notice = message.compaction_notice ?? lossNoticeFromSources(message.context_sources);
+  if (!notice || notice.dropped <= 0) return null;
+  return <CompactionNotice dropped={notice.dropped} summary={notice.summary} />;
 }
 
 function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {

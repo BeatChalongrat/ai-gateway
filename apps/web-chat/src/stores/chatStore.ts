@@ -2773,7 +2773,9 @@ async function consumeStream(
         // kind of quiet marker web-chat's compacted_history source shows —
         // the user learns the assistant no longer sees the middle of the
         // conversation, instead of it silently getting worse.
-        const data = evt.data as { dropped?: number; sent?: number; total?: number };
+        // FIX102 Part C — chat-edge sends the same event when this turn left
+        // older messages out WITHOUT a summary; `summary` says which.
+        const data = evt.data as { dropped?: number; sent?: number; total?: number; summary?: string };
         if (typeof data?.dropped === "number" && data.dropped > 0) {
           const id = realAssistantId ?? tempAsstId;
           set((s) => {
@@ -2782,7 +2784,7 @@ async function consumeStream(
               messages: {
                 ...s.messages,
                 [convId]: list.map((m) =>
-                  m.id === id ? { ...m, compaction_notice: { dropped: data.dropped!, sent: data.sent, total: data.total } } : m,
+                  m.id === id ? { ...m, compaction_notice: { dropped: data.dropped!, sent: data.sent, total: data.total, summary: data.summary } } : m,
                 ),
               },
             };

@@ -1280,6 +1280,8 @@ export const en = {
   "thread.stalled": "Still working — this is taking longer than usual.",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "Long conversation — {n} older messages are no longer sent to the assistant (the first exchange and recent messages are kept).",
+  "thread.compacted.noSummary": "Long conversation — {n} older messages were left out of this reply with no summary in their place: the summary could not be written. They are still saved; if the answer seems to be missing something, say what it was.",
+  "thread.compacted.partialSummary": "Long conversation — {n} older messages were left out of this reply, and the summary covers only some of them: this turn's summary could not be written. They are still saved.",
   "thread.waitingConsent": "Waiting for your permission — {tool}",
   "thread.waitingConsentSub": "Waiting for your permission — {tool}, asked by sub-agent “{label}”",
   "consent.subagentTitle": "A sub-agent wants to use a tool",
@@ -2879,6 +2881,8 @@ const th: Record<DictKey, string> = {
   "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "บทสนทนายาวมาก — ข้อความเก่า {n} รายการจะไม่ถูกส่งให้ผู้ช่วยแล้ว (ยังเก็บข้อความแรกและข้อความล่าสุดไว้)",
+  "thread.compacted.noSummary": "บทสนทนายาวมาก — คำตอบนี้ไม่ได้ส่งข้อความเก่า {n} รายการให้ผู้ช่วย และไม่มีบทสรุปแทน เพราะเขียนบทสรุปไม่สำเร็จ ข้อความทั้งหมดยังบันทึกอยู่ ถ้าคำตอบดูขาดอะไรไป บอกได้เลยว่าเรื่องอะไร",
+  "thread.compacted.partialSummary": "บทสนทนายาวมาก — คำตอบนี้ไม่ได้ส่งข้อความเก่า {n} รายการให้ผู้ช่วย และบทสรุปครอบคลุมแค่บางส่วน เพราะรอบนี้เขียนบทสรุปไม่สำเร็จ ข้อความทั้งหมดยังบันทึกอยู่",
   "thread.waitingConsent": "รอการอนุญาตจากคุณ — {tool}",
   "thread.waitingConsentSub": "รอการอนุญาตจากคุณ — {tool} ขอโดย sub-agent “{label}”",
   "consent.subagentTitle": "Sub-agent ต้องการใช้เครื่องมือ",

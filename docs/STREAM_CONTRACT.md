@@ -200,6 +200,7 @@ the existing name wins** — nothing is renamed.
 | files produced | `message_files` | — | chat-edge only |
 | citations | `message_sources` | — | chat-edge only |
 | context was compacted | `compaction_status` (*"summarizing" — in progress*) | `compaction_notice` (*"n messages dropped" — after the fact*) | different events on purpose; both consumed by the page |
+| older messages left out **without a summary** | `compaction_notice` `{dropped, sent, total, summary: "failed"\|"partial"}` — FIX102, sent only on that loss, sticky in the snapshot | `compaction_notice` (no `summary`; every compaction) | same event, same fields; the page words it by `summary`, and on reload reads the same fact from the `compacted_history` source's metadata |
 | step / waiting | — | `status` | desktop only |
 | plan checklist | — | `plan_update` | desktop only |
 | tool result card | — | `tool_output` | desktop only |

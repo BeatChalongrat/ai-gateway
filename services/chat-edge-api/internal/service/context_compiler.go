@@ -40,6 +40,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -218,6 +219,10 @@ type CompiledContext struct {
 	// 0 when the catalogue did not know it (seed map or default).
 	BudgetModel  string
 	BudgetWindow int
+	// SummaryStatus (FIX102 Part C) — what stands in for the messages this
+	// request leaves out: one of the Summary* values when Compacted, ""
+	// otherwise.
+	SummaryStatus string
 }
 
 // Compile is the single entry point for the message-service send
@@ -302,8 +307,9 @@ func (c *ContextCompiler) Compile(
 	// up represented in the <conversation_state> block. Skipped
 	// when the conversation opted out of memory (temporary chats)
 	// or on a dry run; the trim still runs.
-	if c.states != nil && in.Conv.MemoryEnabled && !in.DryRun {
-		var upto *uuid.UUID
+	memoryOn := c.states != nil && in.Conv.MemoryEnabled
+	var upto *uuid.UUID
+	if memoryOn {
 		if plan.dropEnd > 0 {
 			id := in.History[plan.dropEnd-1].ID
 			upto = &id
@@ -314,28 +320,34 @@ func (c *ContextCompiler) Compile(
 			id := in.History[0].ID
 			upto = &id
 		}
-		if upto != nil && c.stateIsStaleForCompaction(existing, in, *upto) {
-			out.ExtractionTriggered = true
-			if in.OnExtractionStart != nil {
-				in.OnExtractionStart()
+	}
+	extractionNeeded := upto != nil && c.stateIsStaleForCompaction(existing, in, *upto)
+	extractionOK := false
+	if extractionNeeded && !in.DryRun {
+		out.ExtractionTriggered = true
+		if in.OnExtractionStart != nil {
+			in.OnExtractionStart()
+		}
+		st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{Trigger: "auto"})
+		if err != nil {
+			slog.Warn("context_compiler: pre-compaction state extraction failed",
+				"conv", in.Conv.ID.String(), "err", err)
+		} else {
+			if !reached {
+				// FIX102 Part C — the trim still proceeds (the stored
+				// history is untouched and the next turn tries again), but
+				// the model and the user are both told; see SummaryStatus.
+				slog.Warn("context_compiler: no summary covers the messages being left out — trimming and saying so",
+					"conv", in.Conv.ID.String())
 			}
-			st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{Trigger: "auto"})
-			if err != nil {
-				slog.Warn("context_compiler: pre-compaction state extraction failed",
-					"conv", in.Conv.ID.String(), "err", err)
-			} else {
-				if !reached {
-					slog.Warn("context_compiler: state coverage incomplete before trim",
-						"conv", in.Conv.ID.String())
-				}
-				out.StatePresent = !isStateEmpty(st)
-				// Re-render the state (the row might be brand-new) and
-				// re-plan: the pair's tokens come off the history target.
-				if in.BuildState != nil {
-					stateBlock, stateSources = in.BuildState()
-				}
-				plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
+			extractionOK = reached
+			out.StatePresent = !isStateEmpty(st)
+			// Re-render the state (the row might be brand-new) and
+			// re-plan: the pair's tokens come off the history target.
+			if in.BuildState != nil {
+				stateBlock, stateSources = in.BuildState()
 			}
+			plan = planHeadPreservingTrim(in.History, in.ImageURLs, target-contextNoteReserve-statePairTokens(), boundary)
 		}
 	}
 
@@ -373,32 +385,122 @@ func (c *ContextCompiler) Compile(
 	// present) carries the honesty sentence too; this note covers the
 	// memory-off case and names the counts.
 	missing := out.Dropped + in.OmittedOlder
-	out.SystemPrefix += compactionContextNote(missing, plan.tailKept, plan.headKept, out.StatePresent)
+	out.SummaryStatus = summaryStatusOf(in.Conv.MemoryEnabled, c.states != nil, extractionNeeded, in.DryRun, extractionOK, out.StatePresent)
+	out.SystemPrefix += compactionContextNote(missing, plan.tailKept, plan.headKept, out.SummaryStatus)
 
 	// S7 — record the compaction event as a source so the UI can
 	// show "📦 Conversation compacted (N messages summarized)"
 	// under the response. The user learns that older context was
 	// folded into the state block instead of being sent raw.
-	out.Sources = append(out.Sources, ContextSource{
-		SourceType:   model.SourceTypeCompactedHistory,
-		DisplayLabel: compactionMarkerLabel(missing, out.StatePresent),
-	})
+	out.Sources = append(out.Sources, compactionMarker(missing, out.SummaryStatus))
 
 	c.logCompiled(in, out, out.SentTokens, "compacted")
 	return out, nil
 }
 
-// compactionMarkerLabel — the user-facing source row copy.
-func compactionMarkerLabel(missing int, statePresent bool) string {
-	if statePresent {
+// What stands in for the messages a compacted request leaves out
+// (FIX102 Part C).
+//
+// Before this, an extraction that failed changed nothing a person or the
+// model could see: the trim proceeded, the marker still said "summarized"
+// whenever an older summary existed, and the note told the model a summary
+// of "the older part" was above when it covered only some of it.
+//
+// The trim still proceeds — refusing the turn would make a summariser
+// failure fatal to a conversation whose chat model can still answer, and
+// the stored history is never touched, so the next turn plans again and
+// retries the summary. What changed is that nothing is left out silently.
+const (
+	SummaryComplete = "complete" // a summary covers every message left out
+	SummaryPartial  = "partial"  // an older summary exists; this turn's could not be written
+	SummaryFailed   = "failed"   // memory is on and no summary stands in at all
+	SummaryOff      = "off"      // memory is off: nothing is summarized, by the user's choice
+	SummaryPending  = "pending"  // dry run: the next real turn will write it
+)
+
+// summaryStatusOf: memoryEnabled is the conversation's own switch;
+// summariser says a state service is wired at all (it is not in some test
+// setups, where a state block can still be supplied).
+func summaryStatusOf(memoryEnabled, summariser, needed, dryRun, ok, statePresent bool) string {
+	switch {
+	case !memoryEnabled || (!summariser && !statePresent):
+		return SummaryOff
+	case needed && dryRun:
+		return SummaryPending
+	case needed && !ok && statePresent:
+		return SummaryPartial
+	case needed && !ok:
+		return SummaryFailed
+	case statePresent:
+		return SummaryComplete
+	default:
+		return SummaryFailed
+	}
+}
+
+// CompactionNotice is the web `compaction_notice` SSE payload — the same
+// event name and fields the desktop host has emitted since FIX32, plus
+// Summary. On the web it is sent only when older messages left WITHOUT a
+// summary standing in for all of them.
+type CompactionNotice struct {
+	Dropped int    `json:"dropped"`
+	Sent    int    `json:"sent"`
+	Total   int    `json:"total"`
+	Summary string `json:"summary"`
+}
+
+// LossNotice is non-nil when this request leaves older messages out and no
+// summary covers all of them while memory is on. Memory off is the user's
+// own choice and the meter states it every turn; a dry run has not tried.
+func (cc *CompiledContext) LossNotice() *CompactionNotice {
+	if cc == nil || !cc.Compacted || (cc.SummaryStatus != SummaryFailed && cc.SummaryStatus != SummaryPartial) {
+		return nil
+	}
+	sent := cc.MessagesSent
+	if cc.StateInjected {
+		sent -= 2
+	}
+	return &CompactionNotice{
+		Dropped: cc.Dropped + cc.OmittedOlder,
+		Sent:    sent,
+		Total:   cc.MessagesTotal + cc.OmittedOlder,
+		Summary: cc.SummaryStatus,
+	}
+}
+
+// compactionMarker is the compacted_history source row. The label is the
+// English fallback; the metadata carries the code, the count and the
+// summary status so the client can say it in the reader's language.
+func compactionMarker(missing int, status string) ContextSource {
+	meta, _ := json.Marshal(map[string]any{
+		"code":    "conversation_compacted",
+		"missing": missing,
+		"summary": status,
+	})
+	return ContextSource{
+		SourceType:   model.SourceTypeCompactedHistory,
+		DisplayLabel: compactionMarkerLabel(missing, status),
+		Metadata:     meta,
+	}
+}
+
+// compactionMarkerLabel — the English fallback for the source row.
+func compactionMarkerLabel(missing int, status string) string {
+	switch status {
+	case SummaryOff:
+		return fmt.Sprintf("Conversation compacted (%d older %s omitted — memory is off, so not summarized)", missing, pluralCompact(missing))
+	case SummaryFailed:
+		return fmt.Sprintf("Conversation compacted (%d older %s left out without a summary — it could not be written)", missing, pluralCompact(missing))
+	case SummaryPartial:
+		return fmt.Sprintf("Conversation compacted (%d older %s left out; the summary does not cover all of them)", missing, pluralCompact(missing))
+	default:
 		return fmt.Sprintf("Conversation compacted (%d older %s summarized)", missing, pluralCompact(missing))
 	}
-	return fmt.Sprintf("Conversation compacted (%d older %s omitted — memory is off, so not summarized)", missing, pluralCompact(missing))
 }
 
 // compactionContextNote is the model-facing note (the desktop's
 // context_note, now on web too).
-func compactionContextNote(missing, tailKept, headKept int, statePresent bool) string {
+func compactionContextNote(missing, tailKept, headKept int, status string) string {
 	s := fmt.Sprintf("\n\n<context_note>\nThis conversation is long: %d earlier %s %s not included verbatim.",
 		missing, pluralCompact(missing), isAre(missing))
 	if headKept > 0 {
@@ -406,9 +508,14 @@ func compactionContextNote(missing, tailKept, headKept int, statePresent bool) s
 	} else {
 		s += fmt.Sprintf(" The most recent %d %s are included verbatim.", tailKept, pluralCompact(tailKept))
 	}
-	if statePresent {
+	switch status {
+	case SummaryComplete, SummaryPending:
 		s += " A summary of the older part is in <conversation_state> above."
-	} else {
+	case SummaryPartial:
+		s += " A summary of part of the older conversation is in <conversation_state> above, but it does not cover the most recent of the messages left out: they could not be summarized this turn."
+	case SummaryFailed:
+		s += " No summary of the older part is available: it could not be written this turn."
+	default:
 		s += " No summary of the older part is available."
 	}
 	s += " If the user refers to something that is in neither the summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.\n</context_note>"

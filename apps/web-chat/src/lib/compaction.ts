@@ -6,7 +6,7 @@
 // Ours is HIDDEN until the conversation has used CONTEXT_METER_SHOW_RATIO of
 // its budget; from there a quiet line + "summarize and continue" appear.
 
-import type { ContextInfo } from "./types";
+import type { ContextInfo, ContextSource } from "./types";
 
 /** Meter + compact button appear from here. */
 export const CONTEXT_METER_SHOW_RATIO = 0.7;
@@ -34,6 +34,24 @@ export function shouldShowMeter(info: ContextInfo | null | undefined): boolean {
 /** Whole-number percent of what will be sent, never above 100 (a desktop build older than FIX102 still sends the loaded ratio). */
 export function meterPercent(info: ContextInfo): number {
   return Math.min(100, Math.max(0, Math.round(info.used_ratio * 100)));
+}
+
+/**
+ * FIX102 Part C — the persisted compacted_history source records whether a
+ * summary stood in for the messages a reply left out. The live
+ * compaction_notice is gone after a reload; this is the same fact from the
+ * database, so the line under the reply survives it.
+ */
+export function lossNoticeFromSources(sources: ContextSource[] | null | undefined): { dropped: number; summary: "failed" | "partial" } | null {
+  for (const s of sources ?? []) {
+    if (s.source_type !== "compacted_history") continue;
+    const summary = s.metadata?.["summary"];
+    const missing = s.metadata?.["missing"];
+    if ((summary === "failed" || summary === "partial") && typeof missing === "number" && missing > 0) {
+      return { dropped: missing, summary };
+    }
+  }
+  return null;
 }
 
 /** Conversation messages the assistant sees this turn — without the injected summary pair — and how many there are. */
