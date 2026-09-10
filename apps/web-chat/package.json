@@ -11,6 +11,7 @@
     "lint:i18n:report": "node scripts/lint-i18n.mjs --report",
     "test": "vitest run",
     "check:classes": "node scripts/check-generated-classes.js",
+    "lint:theme": "node scripts/check-theme-classes.js",
     "test:watch": "vitest",
     "test:e2e": "playwright test"
   },
