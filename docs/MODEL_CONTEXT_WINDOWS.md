@@ -93,3 +93,51 @@ The probe is one `curl` per model. Re-run it when a model is added to the
 box, when the box is re-served with different flags, or when a
 `context_length_exceeded` appears for a model whose catalogue number says
 it should have fitted.
+
+## The desktop's budget as the app runs
+
+FIX105. FIX104's desktop figures came from a harness whose tool service listed
+no tools. Measured again on 2026-09-11:
+
+* The installed app's own `SranDesktop.ToolsSidecar.exe` was running.
+* The owner's app was closed first, because the tool service claims a
+  per-user browser pipe.
+* Numbers come from the desktop host's own `context.info` dry run.
+
+| | Typhoon-S-ThaiLLM-8B-Instruct (16,384) | qwen3.8-27b-fp8 (131,072) |
+| --- | ---: | ---: |
+| Working limit | 14,500 | 117,500 |
+| Reply reserve (the `max_tokens` 8,192 sent, or chat-edge's quarter, whichever is larger) | 8,192 | 16,000 |
+| System prompt (estimated) | 1,855 | 1,855 |
+| Tools offered | 0: tools-blind | 29: 21 from the tool service, 8 host-side |
+| Tool reserve budgeted (200 each) | 0 | 5,800 |
+| Tool definitions actually serialized | none | 19,434 chars ≈ 4,868 tokens |
+| **History budget** | **4,453** | **93,845** |
+| Same, with the tool service stubbed out (FIX104's harness) | 4,453 | 98,045 |
+| The web's history budget, same model | 3,944 | 94,578 |
+| Messages actually sent on a trimmed conversation | 4 of 8 (2,252 tokens) | 54 of 138 (55,958 tokens) |
+
+**Typhoon: nothing changes.** It cannot use tools, so the desktop sends it
+none whether the tool service runs or not. The estimate "14,500 − system −
+~6,000 tools − 8,192 → the 2,000 floor" does not apply.
+
+* Its history budget is 4,453 tokens: two to four Thai messages of the length
+  these probes used.
+* The 8,192-token reply reserve is the largest single item in that budget.
+* Whether the desktop should ask a 16k model for fewer output tokens is a
+  design decision, not made here.
+
+**qwen3.8: the tool service costs 4,200 tokens of history budget.**
+
+* The desktop sits 733 tokens *below* the web's budget, not 3,666 above it as
+  FIX104's table implied.
+* The 200-per-tool reserve covers the definitions actually sent: an estimated
+  4,868 tokens against 5,800 reserved.
+
+**FIX104's parity conclusions.**
+
+* Still true: the meter states, the Thai wording and the wall.
+* No longer true: the "first trimmed turn" comparison on qwen3.8 (web 3,
+  desktop 8). Part of that gap was the stubbed tool service. Most of it was
+  the desktop loading only the newest 100 messages of a web conversation,
+  which FIX105 Part B removed.
