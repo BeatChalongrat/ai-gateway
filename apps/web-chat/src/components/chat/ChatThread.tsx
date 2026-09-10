@@ -14,6 +14,7 @@ import { defaultRangeExtractor, elementScroll, useVirtualizer } from "@tanstack/
 
 import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
+import { knownNotRetryable } from "@/lib/errorMessages";
 import { useChatStore } from "@/stores/chatStore";
 import {
   ANCHOR_PREVIOUS_PEEK_PX,
@@ -984,7 +985,15 @@ function renderRow(m: Message, i: number, props: InnerProps) {
           m.role === "assistant" &&
           i === lastAsstIdx &&
           !anyStreaming &&
-          m.status !== "regenerated"
+          m.status !== "regenerated" &&
+          // FIX100 Part B — Regenerate re-sends the identical request, so
+          // it is only an answer when a retry could work. A failure the
+          // gateway called non-retryable ("change the request before
+          // sending it again") gets the composer instead; see the notice
+          // in MessageBubble. knownNotRetryable is silent — the button
+          // stays — for a code we do not recognise and for a row read back
+          // from the server, which carries no code at all.
+          !knownNotRetryable(m.error_code, m.error_retryable)
         }
         onRegenerate={() => onRegenerate(m.id)}
         onEdit={

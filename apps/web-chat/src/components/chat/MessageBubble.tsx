@@ -16,7 +16,7 @@
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, PenLine } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
@@ -26,7 +26,8 @@ import { toast } from "@/components/ui/Toast";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useI18nStore, useT } from "@/lib/i18n";
-import { fallbackNotice, localizeErrorCode } from "@/lib/errorMessages";
+import { fallbackNotice, knownNotRetryable, localizeErrorCode } from "@/lib/errorMessages";
+import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
@@ -440,6 +441,11 @@ function MessageBubbleImpl({
           attempts={message.error_attempts}
           switchFromModel={message.error_code === "output_limit_reached" ? message.model_id ?? undefined : undefined}
           convId={convId}
+          /* FIX100 Part B — the same test that took the Regenerate button
+             away puts the way forward here, so the turn is never a dead
+             end: the failure is one the person has to change something
+             about, and the place to change it is the composer. */
+          offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
         />
       ) : null}
 
@@ -775,11 +781,13 @@ function ErrorNotice({
   attempts,
   switchFromModel,
   convId,
+  offerNewMessage,
 }: {
   message: string;
   attempts?: FallbackAttempt[];
   switchFromModel?: string;
   convId?: string;
+  offerNewMessage?: boolean;
 }) {
   const t = useT();
   const models = useModelStore((s) => s.models);
@@ -812,6 +820,17 @@ function ErrorNotice({
         >
           <ArrowRightLeft size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 break-words">{t("error.switchModel", { model: alternative.name || alternative.id })}</span>
+        </button>
+      ) : null}
+      {offerNewMessage ? (
+        <button
+          type="button"
+          data-testid="new-message-instead"
+          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline"
+          onClick={() => focusComposer()}
+        >
+          <PenLine size={14} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{t("error.sendNewMessage")}</span>
         </button>
       ) : null}
       {hasAttempts ? (

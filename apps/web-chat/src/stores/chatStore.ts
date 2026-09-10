@@ -2022,7 +2022,7 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
     messages: {
       ...s.messages,
       [convId]: (s.messages[convId] ?? []).map((m) =>
-        m.id === messageId ? { ...m, status: "streaming", isStreaming: true, error_code: undefined, error_message: undefined } : m,
+        m.id === messageId ? { ...m, status: "streaming", isStreaming: true, error_code: undefined, error_retryable: undefined, error_message: undefined } : m,
       ),
     },
   }));
@@ -2850,6 +2850,7 @@ async function consumeStream(
                   ? {
                       ...m,
                       error_code: data?.code,
+                      error_retryable: data?.retryable,
                       error_message: localized,
                       error_attempts: data?.attempts,
                       is_generating_image: false,

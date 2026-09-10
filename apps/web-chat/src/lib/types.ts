@@ -481,6 +481,14 @@ export interface Message {
   error_code?: string;
   error_message?: string;
   error_attempts?: FallbackAttempt[];
+  /** FIX100 Part B — the gateway's own ``retryable`` flag from the same
+   *  error frame. It decides the sentence (localizeErrorCode) and now the
+   *  Regenerate button too, so the two can never disagree: a failure whose
+   *  text says "change the request" must not offer a button that sends the
+   *  same one. Local-only, like the two fields above — a row read back from
+   *  the SERVER after a reload carries neither, and an undefined flag means
+   *  "we do not know", never "do not retry". */
+  error_retryable?: boolean;
   /** B2 — local-only. Set when a fallback model answered, so the UI
    *  can show a small "answered by X" notice under the message. */
   fallback_info?: {

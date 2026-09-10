@@ -692,6 +692,10 @@ export const en = {
   "error.empty_completion": "The model returned an empty answer. Please try again or pick another model.",
   "error.output_limit_reached": "The model reached its output limit before answering or calling a tool. Try again or choose another model for this task.",
   "error.switchModel": "Switch to {model}",
+  // FIX100 Part B — shown in place of Regenerate when the failure is
+  // one that resending the same request cannot fix. Names the action,
+  // not the problem; the sentence above already said the problem.
+  "error.sendNewMessage": "Write a new message instead",
   "error.health_marker_skip": "Skipped — this provider failed a moment ago. Please try again shortly.",
   "error.send_failed": "The message couldn't be sent. Please try again.",
   "error.validation_error": "The request was rejected as invalid. Change the request before sending it again.",
@@ -2300,6 +2304,7 @@ const th: Record<DictKey, string> = {
   "error.empty_completion": "โมเดลตอบกลับมาว่างเปล่า กรุณาลองใหม่หรือเลือกโมเดลอื่น",
   "error.output_limit_reached": "โมเดลใช้โควตาการสร้างคำตอบครบก่อนตอบหรือเรียกเครื่องมือ ลองใหม่หรือเปลี่ยนโมเดลสำหรับงานนี้",
   "error.switchModel": "เปลี่ยนเป็น {model}",
+  "error.sendNewMessage": "พิมพ์ข้อความใหม่แทน",
   "error.health_marker_skip": "ข้ามผู้ให้บริการนี้ เพราะเพิ่งล้มเหลวเมื่อสักครู่ กรุณาลองใหม่อีกสักครู่",
   "error.send_failed": "ส่งข้อความไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
   "error.validation_error": "คำขอนี้ไม่ถูกต้อง กรุณาแก้ไขคำขอก่อนส่งอีกครั้ง",

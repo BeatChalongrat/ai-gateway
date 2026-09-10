@@ -156,6 +156,36 @@ export function isRetryable(code?: string, retryable?: boolean): boolean {
   return !!code && RETRYABLE_CODES.has(code);
 }
 
+/** FIX100 Part B — do we KNOW that sending this same request again cannot
+ *  work? Only then is the Regenerate button wrong to offer.
+ *
+ *  Regenerate re-sends the identical context. The owner's conversation
+ *  e493ca28 failed six times because the button was there whatever the
+ *  failure was: deepseek answered upstream_bad_response, retryable:false,
+ *  with a sentence that says "change the request before sending it again",
+ *  and directly under that sentence sat a button that sent it again.
+ *
+ *  Deliberately three-valued, and the default is to LEAVE THE BUTTON:
+ *
+ *  · the gateway's own flag wins when the frame carried one;
+ *  · else a code this table knows decides, by RETRYABLE_CODES;
+ *  · a code we do not know, or no code at all, returns false.
+ *
+ *  That last line is the one that matters. A message read back from the
+ *  server after a reload has no code — the error frame is live-only — so
+ *  every failed turn in a reloaded thread would otherwise lose its retry.
+ *  Removing a working affordance is a worse failure than offering one that
+ *  will not help, so silence here means "keep it".
+ *
+ *  This is the same input localizeErrorCode() gets, so the sentence and the
+ *  button cannot contradict each other. */
+export function knownNotRetryable(code?: string, retryable?: boolean): boolean {
+  if (typeof retryable === "boolean") return !retryable;
+  if (!code) return false;
+  if (RETRYABLE_CODES.has(code)) return false;
+  return errorDictKey(code) !== undefined;
+}
+
 /** Localized message for a gateway error code (active locale).
  *
  *  ``serverMessage`` is used only for a code this table does not know
