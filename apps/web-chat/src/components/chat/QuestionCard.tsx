@@ -182,7 +182,17 @@ export function QuestionCard({
       // number row to press), so the card itself carries it as a title:
       // the shortcut is never undiscoverable, only unobtrusive.
       title={t("question.keyHint")}
-      className="mx-auto my-2 max-w-xl rounded-xl border border-border bg-bg-surface px-4 py-3 shadow-lg focus:outline-none"
+      // FIX97 Part A — the card fills the message column, so its edges line
+      // up with the assistant's text above it and the composer below it.
+      // FIX96 capped it at max-w-xl to read as "a narrow floating panel";
+      // in the running app that read as detached — everything around it
+      // starts at the column's left edge and the card floated mid-column.
+      // Its parent (MessageBubble's assistant branch) is `flex w-full
+      // flex-col` with no justify/items centring, so a child stretches by
+      // default and removing the cap is all that is needed. `mx-auto` goes
+      // with it: on a stretched child it does nothing, and a class that does
+      // nothing is the FIX92 defect waiting to happen in reverse.
+      className="my-2 rounded-xl border border-border bg-bg-surface px-4 py-3 shadow-lg focus:outline-none"
       data-testid="question-card"
       data-prompt-id={question.promptId}
       data-active-question={activeQi}
