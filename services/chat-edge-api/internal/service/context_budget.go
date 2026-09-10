@@ -95,6 +95,20 @@ var ModelContextLimits = map[string]int{
 	"gemini-1.5-pro":   500000,
 	"gemini-1.5-flash": 500000,
 	"gemini-2.0-flash": 500000,
+
+	// FIX101 Part B — the self-hosted box, MEASURED rather than assumed.
+	// Every number below is workingLimitFrom(the window the provider
+	// stated in its own refusal), recorded so that a gateway-down window
+	// still budgets these correctly instead of falling to the default.
+	// The catalogue carries the same measurements and still wins; see
+	// docs/MODEL_CONTEXT_WINDOWS.md for how each was established.
+	"Typhoon-S-ThaiLLM-8B-Instruct":         14500,  // 16,384
+	"OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2":  14500,  // 16,384
+	"Pathumma-ThaiLLM-qwen3-8b-think-3.0.0": 14500,  // 16,384
+	"THaLLE-0.2-ThaiLLM-8B-fa":              14500,  // 16,384
+	"qwen3.5-9b":                            29000,  // 32,768
+	"qwen3.6-35b-a3b":                       29000,  // 32,768
+	"qwen3.8-27b-fp8":                       117500, // 131,072
 }
 
 // headroomFraction is the 5–10 % convention the map documents, applied
