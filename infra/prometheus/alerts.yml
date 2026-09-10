@@ -44,12 +44,14 @@ groups:
           summary: "Rate limiter denying via conservative outage mode (Redis down)"
 
       # FIX103 — emitted by orchestrator._run_dlp_scan when DLP_ENGINE=rust
-      # and the dlp-sidecar cannot answer (stopped, wedged, or refusing a
-      # scan it cannot finish). Masking continues on the Python registry —
-      # proven live — so this is a warning, not a leak; but while the
-      # sidecar is wedged every request pays the 1 s gRPC timeout first.
+      # and the dlp-sidecar cannot answer (stopped, wedged, RPC error).
+      # Masking continues on the Python registry — proven live — so this is
+      # a warning, not a leak; but while the sidecar is wedged every request
+      # pays the 1 s gRPC timeout first. reason="refused" is excluded: the
+      # sidecar answered and declined an input too large for its regex
+      # engine (routine for English text over ~8,000 characters).
       - alert: DlpSidecarFallingBack
-        expr: sum(rate(sidecar_fallback_total{engine="dlp"}[5m])) > 0
+        expr: sum(rate(sidecar_fallback_total{engine="dlp",reason!="refused"}[5m])) > 0
         for: 2m
         labels:
           severity: warning

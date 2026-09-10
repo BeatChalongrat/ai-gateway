@@ -12,6 +12,7 @@
 //! ``_thai_tax_id_valid``).
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, char_to_byte, Detector, RawMatch};
@@ -125,7 +126,7 @@ impl Detector for ThaiTaxIdDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in NUMBER_RE.captures_iter(text).flatten() {
+        for caps in NUMBER_RE.captures_iter(text).engine_ok() {
             let g = match caps.get(1) {
                 Some(g) => g,
                 None => continue,

@@ -253,6 +253,85 @@ def test_engine_rust_falls_back_on_exception(reset_client, monkeypatch):
     py_registry.scan_messages.assert_called_once()
 
 
+def _fallback_count(reason):
+    from app.observability.metrics import SIDECAR_FALLBACK_TOTAL
+
+    return SIDECAR_FALLBACK_TOTAL.labels(engine="dlp", reason=reason)._value.get()
+
+
+def test_engine_rust_refusal_rescans_on_python_and_is_counted_apart(reset_client, monkeypatch):
+    """FIX103 — the sidecar refusing an input its regex engine cannot finish
+    is not an outage: Python rescans the request in full, and the fallback
+    is counted as reason="refused" so DlpSidecarFallingBack stays quiet."""
+    from app.core.config import settings
+    from app.services.dlp.rust_dlp_client import RustScanRefused
+
+    monkeypatch.setattr(settings, "dlp_engine", "rust")
+
+    class _RefusingClient:
+        async def scan_messages(self, *args, **kwargs):
+            raise RustScanRefused("religion_belief: regex engine error")
+
+    monkeypatch.setattr(RustDlpClient, "instance", classmethod(lambda cls: _RefusingClient()))
+
+    orch, ctx = _orch()
+    py_match = DetectionMatch(
+        detector_name="phone", entity_type="phone_number", category="pii",
+        start=0, end=12, matched_text="081-234-5678", severity=SensitivityLevel.MEDIUM,
+    )
+    py_registry = _stub_python_registry([py_match])
+    refused_before, unavailable_before = _fallback_count("refused"), _fallback_count("unavailable")
+
+    async def _run():
+        result = await orch._run_dlp_scan(
+            py_registry, [], direction="input", scan_system_messages=False, ctx=ctx, session=None,
+        )
+        assert [m.matched_text for m in result.matches] == ["081-234-5678"]
+
+    asyncio.run(_run())
+    py_registry.scan_messages.assert_called_once()
+    assert _fallback_count("refused") == refused_before + 1
+    assert _fallback_count("unavailable") == unavailable_before
+
+
+class _FakeRpcError(Exception):
+    """Stands in for grpc.RpcError: carries code() and details()."""
+
+    def __init__(self, code, details=""):
+        super().__init__(details)
+        self._code, self._details = code, details
+
+    def code(self):
+        return self._code
+
+    def details(self):
+        return self._details
+
+
+def test_client_raises_refused_on_resource_exhausted_and_none_on_outage(reset_client, monkeypatch):
+    import grpc
+    from types import SimpleNamespace
+
+    from app.services.dlp.rust_dlp_client import RustScanRefused
+
+    monkeypatch.setattr(grpc, "RpcError", _FakeRpcError)
+    msgs = [SimpleNamespace(role="user", content="x" * 40_000)]
+
+    def _raising(code, details):
+        async def _scan(*_a, **_k):
+            raise _FakeRpcError(code, details)
+        return _scan
+
+    client = RustDlpClient(address="ignored:1", timeout_seconds=0.1)
+    monkeypatch.setattr(client, "_scan_text_preprocessed", _raising(
+        grpc.StatusCode.RESOURCE_EXHAUSTED, "dlp scan refused: religion_belief: regex engine error"))
+    with pytest.raises(RustScanRefused, match="religion_belief"):
+        asyncio.run(client.scan_messages(msgs))
+
+    monkeypatch.setattr(client, "_scan_text_preprocessed", _raising(grpc.StatusCode.UNAVAILABLE, "connect failed"))
+    assert asyncio.run(client.scan_messages(msgs)) is None
+
+
 def test_engine_shadow_returns_python_and_logs_diff(reset_client, monkeypatch, caplog):
     """Shadow mode returns Python's result and logs the diff."""
     from app.core.config import settings

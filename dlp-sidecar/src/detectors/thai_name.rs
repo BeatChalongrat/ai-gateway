@@ -15,6 +15,7 @@
 //! name. ``seen`` dedups between them.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk, EngineResult};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -152,7 +153,7 @@ impl Detector for ThaiNameDetector {
         let chars = thai_gazetteer::Chars::new(text);
 
         for re in [&*THAI_NAME_RE, &*MIXED_NAME_RE] {
-            for caps in re.captures_iter(text).flatten() {
+            for caps in re.captures_iter(text).engine_ok() {
                 let whole = match caps.get(0) {
                     Some(g) => g,
                     None => continue,
@@ -206,8 +207,7 @@ impl Detector for ThaiNameDetector {
                 // offset 0 of the (trimmed) span.
                 let fp_hit = FALSE_POSITIVE_RE
                     .find(matched)
-                    .ok()
-                    .flatten()
+                    .engine_or(None)
                     .map(|x| x.start() == 0)
                     .unwrap_or(false);
                 if fp_hit {

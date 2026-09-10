@@ -7,6 +7,7 @@
 //! masker — it replaces the value while leaving the label visible.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -68,7 +69,7 @@ impl Detector for PasswordFieldDetector {
             (&*THAI_PASSWORD_RE, "password_in_text"),
             (&*PASSWORD_NOSEP_RE, "password_in_text"),
         ] {
-            for caps in re.captures_iter(text).flatten() {
+            for caps in re.captures_iter(text).engine_ok() {
                 let g = match caps.name("value") {
                     Some(g) => g,
                     None => continue,

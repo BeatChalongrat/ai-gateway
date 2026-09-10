@@ -7,6 +7,7 @@
 //! shorter form is dropped by the dedup, matching Python.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -113,7 +114,7 @@ impl Detector for ApiKeySecretDetector {
 
         // Standalone patterns in Python order
         for sub in STANDALONE.iter() {
-            for m in sub.re.find_iter(text).flatten() {
+            for m in sub.re.find_iter(text).engine_ok() {
                 let s = byte_to_char(text, m.start());
                 let e = byte_to_char(text, m.end());
                 if seen.insert((s, e)) {
@@ -135,7 +136,7 @@ impl Detector for ApiKeySecretDetector {
         // the (start,end) dedup; a short/truncated key in an isolated
         // base64 payload is caught here.
         if from_decoded {
-            for m in DECODED_ANTHROPIC_RE.find_iter(text).flatten() {
+            for m in DECODED_ANTHROPIC_RE.find_iter(text).engine_ok() {
                 let s = byte_to_char(text, m.start());
                 let e = byte_to_char(text, m.end());
                 if seen.insert((s, e)) {
@@ -152,7 +153,7 @@ impl Detector for ApiKeySecretDetector {
         }
 
         // Assignment pattern — emit the value group only
-        for caps in ASSIGN_RE.captures_iter(text).flatten() {
+        for caps in ASSIGN_RE.captures_iter(text).engine_ok() {
             if let Some(g) = caps.name("value") {
                 let s = byte_to_char(text, g.start());
                 let e = byte_to_char(text, g.end());

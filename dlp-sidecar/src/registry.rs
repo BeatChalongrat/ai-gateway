@@ -10,8 +10,58 @@
 //! affects the regex registry composition — Presidio NER lives in the
 //! Python ner-service, not the sidecar.
 
-use crate::detectors::base::{Detector, RawMatch};
+use crate::detectors::base::{take_engine_error, Detector, RawMatch};
 use crate::detectors::*;
+
+/// One match, tagged with the detector metadata the server maps to proto:
+/// (detector name, entity type, category, severity, match).
+pub type Tagged = (String, &'static str, &'static str, u32, RawMatch);
+
+/// Run the registry over one text — or refuse the scan (FIX103).
+///
+/// A detector that hit a regex engine error used to either spin forever (a
+/// swallowed iterator error — the FIX101/FIX102 wedge) or quietly stop
+/// looking, and a detector that panicked was logged and SKIPPED. In every
+/// case the gateway was told the scan succeeded, with whatever that
+/// detector would have found missing.
+///
+/// Now the scan is refused, naming the detector. The gateway's Rust client
+/// gets an RPC error, returns `None`, and `orchestrator._run_dlp_scan`
+/// rescans the whole request on the Python registry — the same detectors,
+/// no backtrack limit. A refusal costs one fallback; a skip cost a mask.
+pub fn run_detectors(
+    text: &str,
+    detectors: &[Box<dyn Detector>],
+    disabled: &[String],
+    from_decoded: bool,
+) -> Result<Vec<Tagged>, String> {
+    let mut out = Vec::new();
+    for det in detectors {
+        let name = det.name();
+        if disabled.iter().any(|d| d == name) {
+            continue;
+        }
+        // A stale error left on this worker thread must not blame this detector.
+        let _ = take_engine_error();
+        let matches = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            det.detect_ctx(text, from_decoded)
+        }))
+        .map_err(|_| format!("{name}: detector panicked"))?;
+        if let Some(err) = take_engine_error() {
+            return Err(format!("{name}: regex engine error ({err})"));
+        }
+        let (entity, category, severity) = (det.entity_type(), det.category(), det.severity());
+        for m in matches {
+            // Per-match entity_type override — api_key_secret /
+            // password_field emit a distinct type per pattern;
+            // ``None`` falls back to the detector's uniform type.
+            let et = m.entity_type.unwrap_or(entity);
+            out.push((name.to_string(), et, category, severity, m));
+        }
+    }
+    out.sort_by_key(|(_, _, _, _, m)| (m.start, m.end));
+    Ok(out)
+}
 
 /// Build the registry for one request. 30 detectors regardless of
 /// ``_ner_enabled`` (kept for API stability + future use).

@@ -6,6 +6,7 @@
 //! category.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -88,7 +89,7 @@ impl Detector for BearerTokenDetector {
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
         for sub in PATTERNS.iter() {
-            for m in sub.re.find_iter(text).flatten() {
+            for m in sub.re.find_iter(text).engine_ok() {
                 out.push(RawMatch {
                     start: byte_to_char(text, m.start()),
                     end: byte_to_char(text, m.end()),

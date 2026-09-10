@@ -6,6 +6,7 @@
 //! match instead of two from overlapping alternations.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk, EngineResult};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -65,7 +66,7 @@ impl Detector for ReligionBeliefDetector {
         let mut found: Vec<RawMatch> = Vec::new();
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
 
-        for m in KEYWORDS_RE.find_iter(text).flatten() {
+        for m in KEYWORDS_RE.find_iter(text).engine_ok() {
             let s_char = byte_to_char(text, m.start());
             let e_char = byte_to_char(text, m.end());
 
@@ -75,7 +76,7 @@ impl Detector for ReligionBeliefDetector {
             let lo_b = crate::detectors::base::char_to_byte(text, lo);
             let hi_b = crate::detectors::base::char_to_byte(text, hi);
             let window = &text[lo_b..hi_b];
-            if !PERSONAL_RE.is_match(window).unwrap_or(false) {
+            if !PERSONAL_RE.is_match(window).engine_or(false) {
                 continue;
             }
             if !seen.insert((s_char, e_char)) {

@@ -5,6 +5,7 @@
 //! requires a phone-context keyword inside the ±25-char window.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk, EngineResult};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -96,13 +97,13 @@ impl Detector for PhoneDetector {
         let text_chars_count = text.chars().count();
         let uuid_spans: Vec<(usize, usize)> = UUID_RE
             .find_iter(text)
-            .flatten()
+            .engine_ok()
             .map(|u| (u.start(), u.end()))
             .collect();
 
         // Branch 1 — formatted numbers, require ≥10 digits + reject
         // credit-card tail.
-        for m in FORMATTED_RE.find_iter(text).flatten() {
+        for m in FORMATTED_RE.find_iter(text).engine_ok() {
             let span_text = m.as_str();
             let digit_count = span_text.chars().filter(|c| is_phone_digit(*c)).count();
             if digit_count < 10 {
@@ -142,7 +143,7 @@ impl Detector for PhoneDetector {
         }
 
         // Branch 1b — Thai landlines
-        for m in THAI_LANDLINE_RE.find_iter(text).flatten() {
+        for m in THAI_LANDLINE_RE.find_iter(text).engine_ok() {
             let span_text = m.as_str();
             let digits_only: String =
                 span_text.chars().filter(|c| is_phone_digit(*c)).collect();
@@ -171,7 +172,7 @@ impl Detector for PhoneDetector {
         // content is isolated, so the keyword gate is dropped — mirrors
         // phone.py's ``if from_decoded: _emit(...)`` relaxation. The
         // all-same-digit reject still applies in both modes.
-        for m in BARE_RE.find_iter(text).flatten() {
+        for m in BARE_RE.find_iter(text).engine_ok() {
             let s_char = byte_to_char(text, m.start());
             let e_char = byte_to_char(text, m.end());
             if seen.contains(&(s_char, e_char)) {
@@ -185,7 +186,7 @@ impl Detector for PhoneDetector {
                 let lo_b = char_to_byte(text, lo);
                 let hi_b = char_to_byte(text, hi);
                 let window = &text[lo_b..hi_b];
-                PHONE_CONTEXT_RE.is_match(window).unwrap_or(false)
+                PHONE_CONTEXT_RE.is_match(window).engine_or(false)
             };
             if inside_uuid(&uuid_spans, m.start(), m.end()) {
                 continue; // FIX27: inside a UUID

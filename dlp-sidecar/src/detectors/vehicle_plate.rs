@@ -4,6 +4,7 @@
 //! Both use a named ``value`` group; matches are deduped by span.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -52,7 +53,7 @@ impl Detector for VehiclePlateDetector {
         let mut out = Vec::new();
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
         for re in [&*KEYWORD_RE, &*PROVINCE_RE] {
-            for caps in re.captures_iter(text).flatten() {
+            for caps in re.captures_iter(text).engine_ok() {
                 if let Some(g) = caps.name("value") {
                     let s = byte_to_char(text, g.start());
                     let e = byte_to_char(text, g.end());

@@ -6,6 +6,7 @@
 //! stages.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk, EngineResult};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -102,14 +103,14 @@ impl Detector for HealthConditionDetector {
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
 
         // Stage 1 — labelled
-        for caps in LABELLED_RE.captures_iter(text).flatten() {
+        for caps in LABELLED_RE.captures_iter(text).engine_ok() {
             let val_m = match caps.name("value") {
                 Some(g) => g,
                 None => continue,
             };
             let raw = val_m.as_str();
             let trimmed = raw.trim();
-            if !CONDITION_RE.is_match(trimmed).unwrap_or(false) {
+            if !CONDITION_RE.is_match(trimmed).engine_or(false) {
                 continue;
             }
             let leading_ws_chars = raw.chars().take_while(|c| c.is_whitespace()).count();
@@ -127,7 +128,7 @@ impl Detector for HealthConditionDetector {
         }
 
         // Stage 2 — keyword + personal-context window
-        for m in KEYWORDS_RE.find_iter(text).flatten() {
+        for m in KEYWORDS_RE.find_iter(text).engine_ok() {
             let s_char = byte_to_char(text, m.start());
             let e_char = byte_to_char(text, m.end());
             let lo = s_char.saturating_sub(CONTEXT_WINDOW);
@@ -135,7 +136,7 @@ impl Detector for HealthConditionDetector {
             let lo_b = char_to_byte(text, lo);
             let hi_b = char_to_byte(text, hi);
             let window = &text[lo_b..hi_b];
-            if !PERSONAL_RE.is_match(window).unwrap_or(false) {
+            if !PERSONAL_RE.is_match(window).engine_or(false) {
                 continue;
             }
             if !seen.insert((s_char, e_char)) {

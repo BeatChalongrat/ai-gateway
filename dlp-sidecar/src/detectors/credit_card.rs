@@ -6,6 +6,7 @@
 //! Luhn — same pattern as ``thai_national_id::is_valid_thai_id``.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -64,7 +65,7 @@ impl Detector for CreditCardDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for m in CARD_RE.find_iter(text).flatten() {
+        for m in CARD_RE.find_iter(text).engine_ok() {
             let raw = m.as_str();
             let digits: String = raw.chars().filter(|c| c.is_ascii_digit()).collect();
             if digits.len() < 13 || digits.len() > 19 {

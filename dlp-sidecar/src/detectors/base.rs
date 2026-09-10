@@ -127,9 +127,98 @@ pub fn has_context_keyword(
         .any(|kw| window_lower.contains(&kw.to_lowercase()))
 }
 
+// ── FIX103 — a regex engine error is never silent ────────────────────────
+//
+// fancy-regex's backtracking VM stops at its backtrack limit and returns an
+// error, and its match iterators return that SAME error again on every
+// `next()` without advancing. Every detector consumed them with
+// `.flatten()`, which discards errors, so a large enough input — about
+// 37,000 ASCII characters for `religion_belief` — turned one scan into a
+// loop that never ends: the 100 % CPU wedge of FIX101 and FIX102.
+// `is_match(..).unwrap_or(false)` and `Ok(Some(m)) => m, _ => break` were
+// silent too: they did not spin, they just stopped looking.
+//
+// Now an engine error ends that iteration and is recorded on this thread.
+// The server takes it after every detector and refuses the whole scan, so
+// the gateway falls back to its Python engine, which has no backtrack limit
+// and scans the same text in well under a second (0.305 s for FIX102's
+// 63,357-character prompt). No span is skipped and nothing is chunked.
+
+use std::cell::RefCell;
+
+thread_local! {
+    static ENGINE_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Record a regex engine error for the detector running on this thread.
+/// The first error wins; later ones in the same detector add nothing.
+pub fn record_engine_error(err: &fancy_regex::Error) {
+    ENGINE_ERROR.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(err.to_string());
+        }
+    });
+}
+
+/// Take and clear the engine error recorded on this thread, if any.
+pub fn take_engine_error() -> Option<String> {
+    ENGINE_ERROR.with(|slot| slot.borrow_mut().take())
+}
+
+fn ok_or_record<T>(r: Result<T, fancy_regex::Error>) -> Option<T> {
+    match r {
+        Ok(v) => Some(v),
+        Err(e) => {
+            record_engine_error(&e);
+            None
+        }
+    }
+}
+
+/// `.engine_ok()` — consume a fancy-regex match iterator, stopping at the
+/// first engine error (recorded) instead of skipping it forever.
+pub trait EngineOk<T>: Iterator<Item = Result<T, fancy_regex::Error>> + Sized {
+    #[allow(clippy::type_complexity)]
+    fn engine_ok(self) -> std::iter::MapWhile<Self, fn(Result<T, fancy_regex::Error>) -> Option<T>> {
+        self.map_while(ok_or_record::<T> as fn(Result<T, fancy_regex::Error>) -> Option<T>)
+    }
+}
+
+impl<T, I: Iterator<Item = Result<T, fancy_regex::Error>>> EngineOk<T> for I {}
+
+/// `.engine_or(default)` — one fancy-regex call; an engine error is recorded
+/// and `default` returned.
+pub trait EngineResult<T> {
+    fn engine_or(self, default: T) -> T;
+}
+
+impl<T> EngineResult<T> for Result<T, fancy_regex::Error> {
+    fn engine_or(self, default: T) -> T {
+        match self {
+            Ok(v) => v,
+            Err(e) => {
+                record_engine_error(&e);
+                default
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_errors_are_recorded_once_and_taken_once() {
+        let _ = take_engine_error();
+        let err = fancy_regex::Error::RuntimeError(fancy_regex::RuntimeError::BacktrackLimitExceeded);
+        assert!(!Err::<bool, _>(err).engine_or(false));
+        assert!(take_engine_error().is_some());
+        assert!(take_engine_error().is_none(), "taking clears the slot");
+        let ok: Result<bool, fancy_regex::Error> = Ok(true);
+        assert!(ok.engine_or(false) && take_engine_error().is_none());
+    }
 
     #[test]
     fn byte_to_char_ascii_is_identity() {

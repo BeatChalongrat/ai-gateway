@@ -47,6 +47,19 @@ class RustDlpUnavailable(RuntimeError):
     """Raised once when grpcio / generated stubs cannot be imported."""
 
 
+class RustScanRefused(RuntimeError):
+    """The sidecar answered and REFUSED a scan it could not finish (FIX103).
+
+    Its regex engine hit fancy-regex's backtrack limit on this input — on
+    English text that is routine from about 8,000 characters. The sidecar
+    no longer spins or silently stops a detector; it returns
+    RESOURCE_EXHAUSTED naming the detector, and the orchestrator rescans the
+    request on the Python registry. Not an outage: counted apart from one
+    (``sidecar_fallback_total{reason="refused"}``) so the fallback alert
+    keeps meaning "the sidecar is not answering".
+    """
+
+
 def _import_stubs() -> tuple[Any, Any, Any]:
     try:
         import grpc as _grpc
@@ -391,9 +404,14 @@ class RustDlpClient:
                     )
                 )
         except grpc.RpcError as exc:  # type: ignore[union-attr]
+            code = getattr(exc, "code", lambda: None)()
+            if code == grpc.StatusCode.RESOURCE_EXHAUSTED:
+                details = (getattr(exc, "details", lambda: "")() or "")[:200]
+                logger.info("dlp_rust_scan_refused", details=details)
+                raise RustScanRefused(details) from exc
             logger.warning(
                 "dlp_rust_rpc_failed",
-                code=getattr(exc, "code", lambda: None)(),
+                code=code,
                 details=str(exc)[:200],
             )
             return None

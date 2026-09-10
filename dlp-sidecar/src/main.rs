@@ -54,41 +54,21 @@ fn nfkc(input: &str) -> String {
 /// raw matches paired with the detector handle (so we can attach
 /// per-detector metadata when mapping to proto). Sorted by
 /// ``(start, end)`` — matches Python's ``DetectionResult`` ordering.
+///
+/// FIX103 — a scan a detector cannot finish (regex engine error, panic) is
+/// REFUSED, never skipped or spun; see ``registry::run_detectors``. The
+/// gateway maps the error to its Python fallback, so the request is still
+/// masked in full.
 fn run_registry(
     text: &str,
     detectors: &[Box<dyn Detector>],
     disabled: &[String],
     from_decoded: bool,
-) -> Vec<(String, &'static str, &'static str, u32, RawMatch)> {
-    let mut out = Vec::new();
-    for det in detectors {
-        let name = det.name();
-        if disabled.iter().any(|d| d == name) {
-            continue;
-        }
-        let raw_matches = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            det.detect_ctx(text, from_decoded)
-        }));
-        match raw_matches {
-            Ok(matches) => {
-                let entity = det.entity_type();
-                let category = det.category();
-                let severity = det.severity();
-                for m in matches {
-                    // Per-match entity_type override — api_key_secret /
-                    // password_field emit a distinct type per pattern;
-                    // ``None`` falls back to the detector's uniform type.
-                    let et = m.entity_type.unwrap_or(entity);
-                    out.push((name.to_string(), et, category, severity, m));
-                }
-            }
-            Err(_) => {
-                warn!(detector = name, "detector panicked, skipping");
-            }
-        }
-    }
-    out.sort_by_key(|(_, _, _, _, m)| (m.start, m.end));
-    out
+) -> Result<Vec<registry::Tagged>, Status> {
+    registry::run_detectors(text, detectors, disabled, from_decoded).map_err(|reason| {
+        warn!(%reason, bytes = text.len(), "scan refused; the gateway falls back to its Python engine");
+        Status::resource_exhausted(format!("dlp scan refused: {reason}"))
+    })
 }
 
 fn to_proto(
@@ -129,7 +109,7 @@ impl DlpService for DlpServer {
             &detectors,
             &req.disabled_detectors,
             req.from_decoded,
-        );
+        )?;
         let matches: Vec<ProtoMatch> = raw
             .into_iter()
             .map(|(n, e, c, s, m)| to_proto(n, e, c, s, m))
@@ -170,7 +150,7 @@ impl DlpService for DlpServer {
         //
         // ``scan_system_messages=false`` skips role="system". Other
         // roles are always scanned.
-        let mut all: Vec<(String, &'static str, &'static str, u32, RawMatch)> = Vec::new();
+        let mut all: Vec<registry::Tagged> = Vec::new();
         for msg in req.messages.iter() {
             if !req.scan_system_messages && msg.role == "system" {
                 continue;
@@ -180,7 +160,7 @@ impl DlpService for DlpServer {
             // wrapper decodes base64 per-message and re-scans each segment
             // via ScanText with from_decoded=true. So from_decoded=false here.
             let per_msg =
-                run_registry(&normalized, &detectors, &req.disabled_detectors, false);
+                run_registry(&normalized, &detectors, &req.disabled_detectors, false)?;
             all.extend(per_msg);
         }
 

@@ -22,6 +22,7 @@
 //! import _thai_id_valid`` pattern).
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -99,7 +100,7 @@ impl Detector for ThaiNationalIdDetector {
         let mut seen: HashSet<(usize, usize)> = HashSet::new();
 
         // Gate 1: checksum-validated
-        for caps in THAI_ID_RE.captures_iter(text).flatten() {
+        for caps in THAI_ID_RE.captures_iter(text).engine_ok() {
             let g = match caps.get(1) {
                 Some(g) => g,
                 None => continue,
@@ -124,7 +125,7 @@ impl Detector for ThaiNationalIdDetector {
         }
 
         // Gate 2: keyword-context (bypasses checksum)
-        for caps in KEYWORD_RE.captures_iter(text).flatten() {
+        for caps in KEYWORD_RE.captures_iter(text).engine_ok() {
             let g = match caps.get(1) {
                 Some(g) => g,
                 None => continue,

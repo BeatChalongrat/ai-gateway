@@ -5,6 +5,7 @@
 //! 15..=34, then run ISO 13616 mod-97 — keep only if residue == 1.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -73,7 +74,7 @@ impl Detector for IbanDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for m in IBAN_RE.find_iter(text).flatten() {
+        for m in IBAN_RE.find_iter(text).engine_ok() {
             let raw = m.as_str();
             let normalized: String = raw.chars().filter(|c| *c != ' ').collect::<String>().to_uppercase();
             if normalized.len() < 15 || normalized.len() > 34 {

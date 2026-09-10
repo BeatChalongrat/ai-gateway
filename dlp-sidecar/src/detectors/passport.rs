@@ -7,6 +7,7 @@
 //! 6-9 digits, OR a bare 9-digit US passport.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -44,7 +45,7 @@ impl Detector for PassportDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in PASSPORT_RE.captures_iter(text).flatten() {
+        for caps in PASSPORT_RE.captures_iter(text).engine_ok() {
             let g = match caps.name("value") {
                 Some(g) => g,
                 None => continue,

@@ -1,6 +1,7 @@
 //! Private-key PEM-header detector — port of ``private_key.py``.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -28,7 +29,7 @@ impl Detector for PrivateKeyDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for m in PEM_RE.find_iter(text).flatten() {
+        for m in PEM_RE.find_iter(text).engine_ok() {
             out.push(RawMatch {
                 start: byte_to_char(text, m.start()),
                 end: byte_to_char(text, m.end()),

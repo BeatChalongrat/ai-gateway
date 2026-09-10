@@ -22,6 +22,7 @@
 //! was masked on output. Keep this regex byte-identical to Python.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -209,7 +210,7 @@ impl Detector for ThaiAddressDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in ADDRESS_RE.captures_iter(text).flatten() {
+        for caps in ADDRESS_RE.captures_iter(text).engine_ok() {
             let g1 = match caps.get(1) {
                 Some(g) => g,
                 None => continue,

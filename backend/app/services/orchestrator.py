@@ -3296,7 +3296,7 @@ class GatewayOrchestrator:
             )
 
         if engine == "rust":
-            from app.services.dlp.rust_dlp_client import RustDlpClient
+            from app.services.dlp.rust_dlp_client import RustDlpClient, RustScanRefused
             try:
                 client = RustDlpClient.instance()
                 rust_result = await client.scan_messages(
@@ -3306,25 +3306,33 @@ class GatewayOrchestrator:
                     ner_enabled=getattr(ctx, "ner_enabled", True),
                     ner_skip_roles=ner_skip_roles,
                 )
-                _rust_exc = False
+                reason = "unavailable"
+            except RustScanRefused:
+                # FIX103 — the sidecar answered and refused an input its regex
+                # engine could not finish; routine for large English text.
+                rust_result = None
+                reason = "refused"
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "dlp_rust_engine_exception", error=str(exc)[:200]
                 )
                 rust_result = None
-                _rust_exc = True
+                reason = "error"
             if rust_result is not None:
                 SIDECAR_REQUEST_TOTAL.labels(
                     engine="dlp", status="success"
                 ).inc()
                 return rust_result
-            # Fail-open to Python (audit H4: count it so a flapping DLP
-            # sidecar is visible, not just logged).
-            SIDECAR_FALLBACK_TOTAL.labels(
-                engine="dlp", reason="error" if _rust_exc else "unavailable"
-            ).inc()
+            # Fail over to Python — the request is still masked in full
+            # (FIX103 Part A, proven live). Audit H4: count it so a flapping
+            # DLP sidecar is visible, not just logged; FIX103 labels a
+            # deliberate refusal apart from an outage.
+            SIDECAR_FALLBACK_TOTAL.labels(engine="dlp", reason=reason).inc()
             SIDECAR_REQUEST_TOTAL.labels(engine="dlp", status="fallback").inc()
-            logger.warning("dlp_rust_fallback_to_python")
+            if reason == "refused":
+                logger.info("dlp_rust_fallback_to_python", reason=reason)
+            else:
+                logger.warning("dlp_rust_fallback_to_python", reason=reason)
             return await _python_scan()
 
         if engine == "shadow":

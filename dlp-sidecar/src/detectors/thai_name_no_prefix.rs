@@ -21,6 +21,7 @@
 //! ``_TRAIL_LABELS`` — a Python test compares them to this file.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineResult};
 use once_cell::sync::Lazy;
 use std::collections::HashSet;
 
@@ -245,16 +246,16 @@ fn detect_gazetteer(text: &str, out: &mut Vec<RawMatch>, seen: &mut HashSet<(usi
     let total_chars = text.chars().count();
     let mut pos_b = 0usize;
     while pos_b < text.len() {
-        let m = match GAZETTEER_RE.find_from_pos(text, pos_b) {
-            Ok(Some(m)) => m,
-            _ => break,
+        let m = match GAZETTEER_RE.find_from_pos(text, pos_b).engine_or(None) {
+            Some(m) => m,
+            None => break,
         };
         let (sb, eb) = (m.start(), m.end());
         let sc = byte_to_char(text, sb);
         let ec = byte_to_char(text, eb);
         let low = crate::detectors::base::char_to_byte(text, sc.saturating_sub(SENSITIVE_WINDOW_CHARS));
         let high = crate::detectors::base::char_to_byte(text, (ec + SENSITIVE_WINDOW_CHARS).min(total_chars));
-        if SENSITIVE_RE.is_match(&text[low..high]).unwrap_or(false) {
+        if SENSITIVE_RE.is_match(&text[low..high]).engine_or(false) {
             push_match(out, seen, text, sb, eb);
         }
         pos_b = if eb > sb { eb } else { sb + 1 };
@@ -263,14 +264,14 @@ fn detect_gazetteer(text: &str, out: &mut Vec<RawMatch>, seen: &mut HashSet<(usi
 
 /// Pass 3 — person list: items must be title-prefixed or gazetteer names.
 fn detect_list(text: &str, out: &mut Vec<RawMatch>, seen: &mut HashSet<(usize, usize)>) {
-    if !LIST_CONTEXT_RE.is_match(text).unwrap_or(false) {
+    if !LIST_CONTEXT_RE.is_match(text).engine_or(false) {
         return;
     }
     let mut pos_b = 0usize;
     while pos_b <= text.len() {
-        let caps = match LIST_ITEM_RE.captures_from_pos(text, pos_b) {
-            Ok(Some(c)) => c,
-            _ => break,
+        let caps = match LIST_ITEM_RE.captures_from_pos(text, pos_b).engine_or(None) {
+            Some(c) => c,
+            None => break,
         };
         let whole = caps.get(0).unwrap();
         let name = caps.name("name").unwrap();
@@ -318,9 +319,9 @@ impl Detector for ThaiNameNoPrefixDetector {
             // instead (the old port) blinded the lookbehind after a
             // one-codepoint reject step, and the next candidate could start
             // MID-WORD (``บอร์ ติดต่อกลับ`` from ``เบอร์ ติดต่อกลับ``).
-            let captures = match NAME_RE.captures_from_pos(text, pos_byte) {
-                Ok(Some(c)) => c,
-                _ => break,
+            let captures = match NAME_RE.captures_from_pos(text, pos_byte).engine_or(None) {
+                Some(c) => c,
+                None => break,
             };
             let g1 = match captures.get(1) {
                 Some(g) => g,
@@ -346,7 +347,7 @@ impl Detector for ThaiNameNoPrefixDetector {
             // not merely somewhere in the window. ``outside`` is kept so the
             // shape of the port still matches Python's window slicing.
             let _ = &outside;
-            let context_ok = PASS1_ANCHOR_RE.is_match(before).unwrap_or(false);
+            let context_ok = PASS1_ANCHOR_RE.is_match(before).engine_or(false);
 
             // One-codepoint step used on every reject (Python ``pos = start + 1``).
             let reject_step = abs_start_b
@@ -368,7 +369,7 @@ impl Detector for ThaiNameNoPrefixDetector {
 
             if TRAIL_LABELS.contains(&w2) {
                 // FIX26: the second token is a field label, never a surname.
-                let label_before = NAME_LABEL_BEFORE_RE.is_match(before).unwrap_or(false);
+                let label_before = NAME_LABEL_BEFORE_RE.is_match(before).engine_or(false);
                 if !is_stop_token(w1) && label_before {
                     let w1_end_b = abs_start_b + w1.len();
                     let w1_end_char = byte_to_char(text, w1_end_b);

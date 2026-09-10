@@ -6,6 +6,7 @@
 //! end ≤ number_start AND start ≥ number_start - 60.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -47,12 +48,12 @@ impl Detector for MedicalRecordDetector {
         // is O(k) over the keyword count, not O(N) over text length.
         let keyword_spans: Vec<(usize, usize)> = KEYWORD_RE
             .find_iter(text)
-            .flatten()
+            .engine_ok()
             .map(|m| (m.start(), m.end()))
             .collect();
 
         let mut out = Vec::new();
-        for caps in NUMBER_RE.captures_iter(text).flatten() {
+        for caps in NUMBER_RE.captures_iter(text).engine_ok() {
             let g = match caps.get(1) {
                 Some(g) => g,
                 None => continue,

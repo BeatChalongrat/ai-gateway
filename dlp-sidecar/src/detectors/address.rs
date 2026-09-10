@@ -6,6 +6,7 @@
 //! inside the captured group doesn't bleed into the match.
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk, EngineResult};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -57,14 +58,14 @@ impl Detector for AddressDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in ADDRESS_RE.captures_iter(text).flatten() {
+        for caps in ADDRESS_RE.captures_iter(text).engine_ok() {
             let val_match = match caps.name("value") {
                 Some(g) => g,
                 None => continue,
             };
             let raw_val = val_match.as_str();
             let stripped = raw_val.trim();
-            if !ADDRESS_LIKE_RE.is_match(stripped).unwrap_or(false) {
+            if !ADDRESS_LIKE_RE.is_match(stripped).engine_or(false) {
                 continue;
             }
 

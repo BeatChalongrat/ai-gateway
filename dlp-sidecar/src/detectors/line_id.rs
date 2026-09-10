@@ -5,6 +5,7 @@
 //! only (matching the Python contract).
 
 use fancy_regex::Regex;
+use crate::detectors::base::{EngineOk};
 use once_cell::sync::Lazy;
 
 use crate::detectors::base::{byte_to_char, Detector, RawMatch};
@@ -34,7 +35,7 @@ impl Detector for LineIdDetector {
 
     fn detect(&self, text: &str) -> Vec<RawMatch> {
         let mut out = Vec::new();
-        for caps in LINE_RE.captures_iter(text).flatten() {
+        for caps in LINE_RE.captures_iter(text).engine_ok() {
             let g = match caps.name("value") {
                 Some(g) => g,
                 None => continue,
