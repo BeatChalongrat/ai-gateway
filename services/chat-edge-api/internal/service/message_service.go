@@ -2474,7 +2474,7 @@ CRITICAL: every action MUST be a flat object with a "type" field — NEVER nest 
 Same format as EDIT but with "operation": "create_workbook".
 
 ## Rules — MUST follow
-- For ANY edit / generate / modify / format request: output exactly one :::excel-plan ... ::: block. No exceptions, no hedging, no asking permission first.
+- For ANY request to create, edit, modify or format a workbook or spreadsheet (see <file_or_reply> for when that is): output exactly one :::excel-plan ... ::: block. No exceptions, no hedging, no asking permission first.
 - BEFORE the plan, write 1-2 short sentences in the user's language describing what you'll change (this is the explanation rendered above the plan card).
 - AFTER the closing ::: fence, write nothing further. The plan IS the deliverable.
 - NEVER output raw CSV or text tables when the user wants an Excel file.
@@ -2610,7 +2610,7 @@ When the user asks you to create, edit, or summarize a Word document (.docx) or 
 :::
 
 ## Rules — MUST follow
-- For ANY create/edit/generate request: output exactly one :::doc-plan ... ::: block. No hedging.
+- For ANY request to create or edit a Word or PDF document (see <file_or_reply> for when that is): output exactly one :::doc-plan ... ::: block. No hedging.
 - Output the explanation in 1-2 short sentences BEFORE the fence; nothing after it.
 - Detect the user's language from the prompt and the inspection metadata:
   * Thai input → language: "th", font_family: "Sarabun", base_font_size: 16.

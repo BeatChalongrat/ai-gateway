@@ -171,6 +171,7 @@ func (pc *PromptCompiler) Build(ctx context.Context, in CompileContext) (string,
 	add(pc.languageRules(in))       // 3
 	add(pc.actionRules(in))         // 4
 	add(pc.outputFormat(in))        // 4b
+	add(pc.fileOrReply(in))         // 4b2
 	add(pc.artifactDialect(in))     // 4c
 	add(pc.capabilityStatement(in)) // 5
 	add(pc.safetyRules(in))         // 6
@@ -322,6 +323,27 @@ var outputFormatBlock = strings.TrimSpace(strings.ReplaceAll(outputFormatRaw, "\
 
 func (pc *PromptCompiler) outputFormat(in CompileContext) string {
 	return outputFormatBlock
+}
+
+// FIX108 Part B — when an answer becomes a file. The Excel, Word/PDF and
+// PowerPoint contracts (message_service.go) go out on every turn, and their
+// rules said "For ANY create/edit/generate request: output exactly one plan
+// block". Asked "เขียนเรียงความเรื่องมือถือในอนาคต", Typhoon answered with an
+// :::excel-plan. This layer states when a file is called for: the user asks
+// for one or names a format, or the content is long, reusable and
+// self-contained (the field's artifact criteria). Everything else is a chat
+// reply. Web only, measured: the desktop has no always-on plan contract (its
+// files come from the sidecar's keyword-triggered skills) and answered the
+// essay in the chat already; with this layer its named-.docx case produced a
+// card 1 of 3 times against 2 of 3 without, so it was not added there.
+//
+//go:embed prompt_file_or_reply.txt
+var fileOrReplyRaw string
+
+var fileOrReplyBlock = strings.TrimSpace(strings.ReplaceAll(fileOrReplyRaw, "\r\n", "\n"))
+
+func (pc *PromptCompiler) fileOrReply(in CompileContext) string {
+	return fileOrReplyBlock
 }
 
 // ---------------------------------------------------------------------------
