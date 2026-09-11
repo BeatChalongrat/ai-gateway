@@ -1,6 +1,11 @@
 // FIX33 — the context meter is QUIET: nothing below 70 % of the budget, a
-// muted line + "Summarize and continue" from 70 % up, and the compact call
-// carries the user's instructions. Spec addendum #1's self-check items.
+// muted line from 70 % up, and the compact call carries the user's
+// instructions. Spec addendum #1's self-check items.
+//
+// FIX107 Part A2 — the row says what the system does (a countdown to an
+// automatic summary, then "summarized automatically"), the counts live in the
+// details, and the manual control is a quiet chevron that opens them instead
+// of a bordered button on the row.
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,6 +46,8 @@ const info = (used_ratio: number, extra: Partial<ContextInfo> = {}): ContextInfo
   ...extra,
 });
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
+const fill = (s: string, v: Record<string, string>) => s.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? `{${k}}`);
+const openDetails = () => fireEvent.click(screen.getByTestId("context-compact-button"));
 
 beforeEach(() => {
   useChatStore.setState({ ...initialState, messages: { c1: [] }, contextBudgetByConv: {} }, true);
@@ -74,51 +81,63 @@ describe("ContextMeter", () => {
     expect(screen.queryByTestId("context-compact-button")).toBeNull();
   });
 
-  it("from 70 %: a muted line with percent + messages left, and the compact button appears WITH it", async () => {
+  it("from 70 %: a countdown to an AUTOMATIC summary; the control is a quiet icon, not a call to action", async () => {
     mockApi.getContextInfo.mockResolvedValue(info(0.74));
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    expect(screen.getByTestId("context-meter")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("74%");
-    expect(screen.getByRole("status").textContent).toContain("12");
-    expect(screen.getByTestId("context-compact-button").textContent).toBe(dictionaries.en["context.compactNow"]);
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toBe(fill(dictionaries.en["context.meter"], { pct: "74", n: "12" }));
+    expect(text).toMatch(/automatically/);
+    const control = screen.getByTestId("context-compact-button");
+    expect(control.textContent).toBe("");
+    expect(control.getAttribute("aria-label")).toBe(dictionaries.en["context.details"]);
+    expect(control.getAttribute("aria-expanded")).toBe("false");
+    openDetails();
+    expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.detail.approaching"], { trigger: "85" }));
+    expect(screen.getByText(dictionaries.en["context.detail.auto"])).toBeTruthy();
   });
 
   // FIX102 — once trimming is routine the old meter read "Context 100% used"
-  // on every turn (the probe measured 340 % underneath). It now says what is
-  // sent, whatever the ratio, and never shows a percent in that state.
-  it("trimming routinely: says what the assistant sees, no percent, even below 70 %", async () => {
+  // on every turn. FIX107 — and then it read like a fault ("sees 5 of 24").
+  it("trimming routinely: a settled line, no percent, no counts on the row; the counts are in the details", async () => {
     mockApi.getContextInfo.mockResolvedValue(
       info(0.72, { compacted: true, state_present: true, state_injected: true, messages_total: 24, messages_would_send: 7, sent_tokens: 2854, messages_budget: 3944, est_messages_remaining: 0 }),
     );
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    const text = screen.getByRole("status").textContent ?? "";
-    expect(text).toBe(dictionaries.en["context.rolling"].replace("{sent}", "5").replace("{total}", "24"));
-    expect(text).not.toContain("%");
-    expect(screen.getByRole("status").getAttribute("title")).toBe("2,854 / 3,944 tokens");
-    expect(screen.getByTestId("context-compact-button")).toBeTruthy();
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe(dictionaries.en["context.label.summarized"]);
+    expect(status.textContent).not.toMatch(/\d/);
+    expect(status.getAttribute("title")).toBe("2,854 / 3,944 tokens");
+    openDetails();
+    expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling"], { sent: "5", total: "24" }));
+    expect(screen.getByText(dictionaries.en["context.detail.auto"])).toBeTruthy();
   });
 
-  it("trimming with no summary (memory off) says the rest are not summarized", async () => {
+  it("trimming with no summary (memory off) says so, and does not claim the system handles it", async () => {
     mockApi.getContextInfo.mockResolvedValue(info(0.3, { compacted: true, state_present: false, messages_total: 30, messages_would_send: 6 }));
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.noSummary"].replace("{sent}", "6").replace("{total}", "30"));
+    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.label.noSummary"]);
+    openDetails();
+    expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling.noSummary"], { sent: "6", total: "30" }));
+    expect(screen.queryByText(dictionaries.en["context.detail.auto"])).toBeNull();
   });
 
   // FIX105 — the first exchange is no longer kept forever; when it is among
-  // what the assistant no longer sees word for word, the meter says so.
+  // what the assistant no longer sees word for word, the details say so.
   it("trimming with the first exchange left out says the start of the conversation is in the summary", async () => {
     mockApi.getContextInfo.mockResolvedValue(info(0.4, { compacted: true, state_present: true, state_injected: true, head_dropped: true, messages_total: 6, messages_would_send: 3 }));
     const { unmount } = render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.headSummarized"].replace("{sent}", "1").replace("{total}", "6"));
+    openDetails();
+    expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling.headSummarized"], { sent: "1", total: "6" }));
     unmount();
     mockApi.getContextInfo.mockResolvedValue(info(0.4, { compacted: true, state_present: false, head_dropped: true, messages_total: 6, messages_would_send: 1 }));
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.rolling.headNoSummary"].replace("{sent}", "1").replace("{total}", "6"));
+    openDetails();
+    expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling.headNoSummary"], { sent: "1", total: "6" }));
     for (const k of ["context.rolling.headSummarized", "context.rolling.headNoSummary", "error.message_too_long"] as const) {
       expect(dictionaries.th[k]).toBeTruthy();
     }
@@ -137,12 +156,12 @@ describe("ContextMeter", () => {
     expect(screen.getByRole("status").textContent).not.toMatch(/\d{3}%/);
   });
 
-  it("'Summarize and continue' sends the user's instructions and reports done", async () => {
+  it("summarize now, from the details: sends the user's instructions and reports done", async () => {
     mockApi.getContextInfo.mockResolvedValue(info(0.8));
     mockApi.compactConversation.mockResolvedValue({ coverage_reached: true, messages_total: 40 });
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    fireEvent.click(screen.getByTestId("context-compact-button"));
+    openDetails();
     const box = screen.getByPlaceholderText(dictionaries.en["context.compact.placeholder"]);
     fireEvent.change(box, { target: { value: "keep the code" } });
     fireEvent.click(screen.getByTestId("context-compact-submit"));
@@ -157,16 +176,23 @@ describe("ContextMeter", () => {
     mockApi.compactConversation.mockRejectedValue(new Error("boom"));
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    fireEvent.click(screen.getByTestId("context-compact-button"));
+    openDetails();
     fireEvent.click(screen.getByTestId("context-compact-submit"));
     await act(tick);
     expect(mockToast).toHaveBeenCalledWith(dictionaries.en["context.compact.failed"]);
   });
 
   it("the Thai and English copy exist for every key (both surfaces read the same dict)", () => {
-    for (const k of ["gen.compacting", "context.meter", "context.meter.full", "context.rolling", "context.rolling.noSummary", "context.compactNow", "context.compact.title", "context.compact.done", "context.compact.failed"] as const) {
+    for (const k of [
+      "gen.compacting", "context.meter", "context.meter.full", "context.rolling", "context.rolling.noSummary", "context.compactNow",
+      "context.compact.title", "context.compact.done", "context.compact.failed", "context.label.summarized", "context.label.noSummary",
+      "context.details", "context.detail.title", "context.detail.auto", "context.detail.approaching",
+    ] as const) {
       expect(dictionaries.en[k]).toBeTruthy();
       expect(dictionaries.th[k]).toBeTruthy();
     }
+    // The Thai row never tells the user something is wrong while the system is doing its job.
+    expect(dictionaries.th["context.label.summarized"]).toContain("อัตโนมัติ");
+    expect(dictionaries.th["context.meter"]).toContain("อัตโนมัติ");
   });
 });

@@ -3,11 +3,16 @@
 // FIX33 A-W6 / A-W7 / A-D5 — the context meter and "summarize and continue".
 //
 // QUIET BY DESIGN (spec addendum #1): renders NOTHING until the conversation
-// has used 70 % of its context budget. From there: one muted line in the
-// header ("Context 74% used · ~12 messages left"), a "summarized" mark once
-// older messages have been folded, and the "Summarize and continue" control
-// with an optional instructions box (Claude's `instructions`). Never a
-// permanent bar, never a number below the threshold.
+// has used 70 % of its context budget. Never a permanent bar, never a number
+// below the threshold.
+//
+// FIX107 Part A2 — the row says what the system does, not what it lacks.
+// Approaching the first trim it counts down to an AUTOMATIC summary; once
+// trimming is routine it says older messages were summarized for you. The
+// numbers ("sees 1 of 18 messages") are still true and still one click away,
+// in the details popover, next to the manual control — which used to sit on
+// the row as the loudest thing there, reading as if the system were waiting
+// for the user when it had already acted.
 //
 // Data: on the web it asks GET /context-info (a dry run of the compiler)
 // when the conversation opens and after each turn ends; in the desktop shell
@@ -16,10 +21,11 @@
 // chatStore.contextBudgetByConv, so this component is the same on both.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, ApiError } from "@/lib/api";
-import { headLeftOut, isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
+import { COMPACT_TRIGGER_RATIO, headLeftOut, isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
 import { hostApi } from "@/lib/hostApi";
 import { useT } from "@/lib/i18n";
 import type { ContextInfo } from "@/lib/types";
@@ -36,7 +42,6 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
   const [open, setOpen] = useState(false);
   const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
-  const boxRef = useRef<HTMLTextAreaElement | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -54,29 +59,37 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
     void refresh();
   }, [refresh, messageCount, streaming]);
 
+  const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (open) boxRef.current?.focus();
+    if (open) panelRef.current?.focus();
   }, [open]);
 
   if (!shouldShowMeter(info)) return null;
   // FIX102 — two states, never a number over what is sent. Approaching the
-  // first trim: a countdown. Trimming routinely: what the assistant sees.
+  // first trim: a countdown to the automatic summary. Trimming routinely: a
+  // short, settled line; the counts live in the details.
   const trimming = isTrimming(info!);
   let label: string;
+  let detail: string;
   let tokensTitle: string | undefined;
   if (trimming) {
     const { sent, total } = messagesSeen(info!);
     // FIX105 — when the start of the conversation is among what is left out, say so.
     const head = headLeftOut(info!);
     const key = info!.state_present ? (head ? "context.rolling.headSummarized" : "context.rolling") : head ? "context.rolling.headNoSummary" : "context.rolling.noSummary";
-    label = t(key, { sent: String(sent), total: String(total) });
+    label = t(info!.state_present ? "context.label.summarized" : "context.label.noSummary");
+    detail = t(key, { sent: String(sent), total: String(total) });
     tokensTitle = typeof info!.sent_tokens === "number" ? `${info!.sent_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens` : undefined;
   } else {
     const pct = meterPercent(info!);
     const n = Math.max(0, info!.est_messages_remaining);
     label = n > 0 && !info!.over_budget ? t("context.meter", { pct: String(pct), n: String(n) }) : t("context.meter.full", { pct: String(pct) });
+    detail = t("context.detail.approaching", { trigger: String(Math.round(COMPACT_TRIGGER_RATIO * 100)) });
     tokensTitle = `${info!.history_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens`;
   }
+  // "Nothing to do" is true whenever the system summarizes on its own; with no
+  // summary (memory off) there is nothing it will do, so it is not said.
+  const automatic = !trimming || info!.state_present;
 
   async function submit() {
     if (busy) return;
@@ -98,7 +111,7 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
   }
 
   return (
-    <div className="relative flex items-center gap-2" data-testid="context-meter">
+    <div className="relative flex items-center gap-1" data-testid="context-meter">
       <span
         className="text-[11px] text-text-muted"
         role="status"
@@ -110,47 +123,57 @@ export function ContextMeter({ conversationId }: { conversationId: string }) {
       </span>
       <button
         type="button"
-        className="focus-ring rounded-md border border-border px-2 py-0.5 text-[11px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
+        className="focus-ring rounded p-0.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-secondary disabled:opacity-50"
         onClick={() => setOpen((v) => !v)}
         disabled={busy || streaming}
         aria-expanded={open}
+        aria-label={t("context.details")}
+        title={t("context.details")}
         data-testid="context-compact-button"
       >
-        {busy ? t("context.compact.working") : t("context.compactNow")}
+        <ChevronDown size={12} aria-hidden="true" className={open ? "rotate-180 transition-transform" : "transition-transform"} />
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-border bg-bg-elevated p-3 shadow-lg"
+          ref={panelRef}
+          tabIndex={-1}
+          className="absolute right-0 top-full z-20 mt-1 w-80 rounded-lg border border-border bg-bg-elevated p-3 shadow-lg outline-none"
           role="dialog"
-          aria-label={t("context.compact.title")}
+          aria-label={t("context.detail.title")}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
         >
-          <p className="text-xs font-medium text-text-primary">{t("context.compact.title")}</p>
-          <p className="mt-1 text-[11px] text-text-muted">{t("context.compact.desc")}</p>
-          <textarea
-            ref={boxRef}
-            className="focus-ring mt-2 w-full resize-none rounded-md border border-border bg-bg-base p-2 text-xs text-text-primary"
-            rows={3}
-            maxLength={2000}
-            placeholder={t("context.compact.placeholder")}
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setOpen(false);
-            }}
-          />
-          <div className="mt-2 flex justify-end gap-2">
-            <button type="button" className="focus-ring rounded-md px-2 py-1 text-xs text-text-muted hover:text-text-primary" onClick={() => setOpen(false)}>
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              className="focus-ring rounded-md bg-accent px-3 py-1 text-xs font-medium text-bg-base disabled:opacity-50"
-              onClick={() => void submit()}
-              disabled={busy}
-              data-testid="context-compact-submit"
-            >
-              {busy ? t("context.compact.working") : t("context.compact.submit")}
-            </button>
+          <p className="text-xs font-medium text-text-primary">{t("context.detail.title")}</p>
+          <p className="mt-1 text-[11px] text-text-secondary" data-testid="context-detail">
+            {detail}
+          </p>
+          {automatic ? <p className="mt-1 text-[11px] text-text-muted">{t("context.detail.auto")}</p> : null}
+          <div className="mt-3 border-t border-border pt-2">
+            <p className="text-[11px] font-medium text-text-secondary">{t("context.compact.title")}</p>
+            <p className="mt-1 text-[11px] text-text-muted">{t("context.compact.desc")}</p>
+            <textarea
+              className="focus-ring mt-2 w-full resize-none rounded-md border border-border bg-bg-base p-2 text-xs text-text-primary"
+              rows={2}
+              maxLength={2000}
+              placeholder={t("context.compact.placeholder")}
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button type="button" className="focus-ring rounded-md px-2 py-1 text-xs text-text-muted hover:text-text-primary" onClick={() => setOpen(false)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="focus-ring rounded-md border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-base hover:text-text-primary disabled:opacity-50"
+                onClick={() => void submit()}
+                disabled={busy}
+                data-testid="context-compact-submit"
+              >
+                {busy ? t("context.compact.working") : t("context.compact.submit")}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

@@ -640,6 +640,20 @@ input {
   max-height: calc(8 * 1.625em);
   overflow: hidden;
 }
+/* FIX107 A1 — lines a terminal drew with box characters (lib/terminalText):
+   monospaced so the columns line up, never wrapped, scrolling sideways inside
+   the bubble. Only these lines: the rest of the message, Thai included, keeps
+   the bubble's own wrapping. */
+.user-msg-terminal {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0.25rem 0;
+}
 .user-msg-toggle {
   display: block;
   margin-top: 4px;

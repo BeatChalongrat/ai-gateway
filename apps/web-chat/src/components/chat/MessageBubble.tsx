@@ -30,6 +30,7 @@ import { fallbackNotice, knownNotRetryable, localizeErrorCode } from "@/lib/erro
 import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { lossNoticeFromSources } from "@/lib/compaction";
+import { splitTerminalBlocks } from "@/lib/terminalText";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -244,8 +245,11 @@ function MessageBubbleImpl({
           ) : null}
 
           {hasText ? (
+            // FIX107 A1 — max-w-full: a line with nowhere to break (a
+            // terminal table's border) used to set the bubble's width and
+            // push it past the column and off the screen.
             <div
-              className="rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
+              className="max-w-full rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
               style={{ borderRadius: "20px" }}
             >
               {editing ? (
@@ -658,6 +662,7 @@ function CollapsibleUserText({ content }: { content: string }) {
   }, [content]);
 
   const collapsed = canCollapse && !expanded;
+  const segments = splitTerminalBlocks(content);
   return (
     <>
       <span
@@ -666,7 +671,17 @@ function CollapsibleUserText({ content }: { content: string }) {
           collapsed ? " is-collapsed" : ""
         }`}
       >
-        {content}
+        {segments.length === 1 && segments[0]!.kind === "text"
+          ? content
+          : segments.map((s, i) =>
+              s.kind === "terminal" ? (
+                <span key={i} className="user-msg-terminal" data-testid="user-msg-terminal">
+                  {s.text}
+                </span>
+              ) : (
+                <span key={i}>{s.text}</span>
+              ),
+            )}
       </span>
       {canCollapse ? (
         <button
