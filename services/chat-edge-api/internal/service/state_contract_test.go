@@ -78,6 +78,9 @@ type stateContract struct {
 		Status   string `json:"status"`
 		Note     string `json:"note"`
 	} `json:"notes"`
+	// FIX108 — the token allowance both sides compute from the note's asset.
+	// A longer note changes it, and this file says so in a red test and a diff.
+	NoteReserve int `json:"note_reserve"`
 }
 
 func TestFIX106_StateContract(t *testing.T) {
@@ -135,6 +138,15 @@ func TestFIX106_StateContract(t *testing.T) {
 		case got != n.Note:
 			t.Errorf("%s: the context note changed:\n--- got ---\n%s\n--- want ---\n%s", n.Name, got, n.Note)
 		}
+	}
+
+	switch {
+	case update:
+		c.NoteReserve = contextNoteReserve
+	case c.NoteReserve == 0:
+		t.Fatal("no note_reserve recorded — run with UPDATE_STATE_CONTRACT=1")
+	case contextNoteReserve != c.NoteReserve:
+		t.Errorf("the context note's reserve changed: %d tokens, recorded %d — the note's size changed; regenerate and look at why", contextNoteReserve, c.NoteReserve)
 	}
 
 	if update {

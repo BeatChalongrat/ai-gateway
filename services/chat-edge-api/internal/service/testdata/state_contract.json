@@ -159,5 +159,6 @@
       "status": "pending",
       "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 12 earlier messages are not included here. You can see only the most recent 3 messages, so the earliest message you can see is not where the conversation began. A summary of the part you cannot see is in <conversation_state> above; it is a summary, not the messages themselves. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
     }
-  ]
+  ],
+  "note_reserve": 232
 }

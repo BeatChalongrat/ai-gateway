@@ -67,7 +67,14 @@ const (
 
 // contextNoteReserve is the token allowance for the <context_note>
 // that joins the system prefix when compaction happens.
-const contextNoteReserve = 120
+//
+// FIX108 — measured from the note itself, not a number somebody typed. It
+// was the constant 120 while FIX107's note measured 184–217 tokens, so a
+// compacted request could run about 100 tokens past its budget. The exact
+// note cannot be measured before the trim: its counts and variant come out
+// of the trim, and the trim needs this reserve. What can be measured is its
+// largest possible size, so that is the reserve (contextNoteWorstCase).
+var contextNoteReserve = contextNoteWorstCase()
 
 // headPinMaxShare (FIX105) — the first exchange is pinned verbatim only
 // while it costs at most this share of the messages budget. A standing
@@ -589,6 +596,29 @@ func compactionContextNote(missing, tailKept, headKept int, status string) strin
 		"{kept_messages}", pluralCompact(tailKept),
 	)
 	return "\n\n" + fill.Replace(strings.Join([]string{p["OPEN"], p[head], p[summary], p["CLOSE"]}, " "))
+}
+
+// contextNoteMaxCount bounds the counts a note can name (messages left out,
+// messages in view): seven digits, more messages than any conversation holds.
+const contextNoteMaxCount = 9_999_999
+
+// contextNoteWorstCase is the largest estimate any rendered note can reach:
+// every head variant and every summary status, with both counts at their
+// widest (plural wording included), plus 1 token because the note is
+// estimated as part of the system prefix, and floor(a/4) + floor(b/4) can
+// fall one short of floor((a+b)/4). EstimateTokens only grows with text, so
+// this bounds every real note. The desktop computes the same number from the
+// same asset (CONTEXT_NOTE_RESERVE); testdata/state_contract.json records it.
+func contextNoteWorstCase() int {
+	worst := 0
+	for _, head := range []int{0, 2} {
+		for _, status := range []string{SummaryComplete, SummaryPartial, SummaryFailed, SummaryOff} {
+			if n := EstimateTokens(compactionContextNote(contextNoteMaxCount, contextNoteMaxCount, head, status)); n > worst {
+				worst = n
+			}
+		}
+	}
+	return worst + 1
 }
 
 func isAre(n int) string {

@@ -11,7 +11,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { BudgetBasis } from "../src/main/context-budget";
-import { compileChain, estimateTokens } from "../src/main/context-compiler";
+import { CONTEXT_NOTE_RESERVE, compileChain, estimateTokens } from "../src/main/context-compiler";
 import { ContextManager, type TurnBudget } from "../src/main/context-manager";
 import { MemoryConversationStateStore } from "../src/main/conversation-state";
 import type { GatewayMessage } from "../src/main/gateway-client";
@@ -40,7 +40,7 @@ describe("FIX105 Part A — the first exchange is pinned only while that cannot 
     expect(cc.messages[1]).toBe(msgs[3]);
     expect(cc.historyTokens).toBeLessThanOrEqual(cc.budget.messagesRemaining);
     // What the provider counts: prompt + max_tokens within the window (estimate).
-    expect(cc.budget.system + cc.sentTokens + 160 + TYPHOON.outputTokens).toBeLessThanOrEqual(TYPHOON.window);
+    expect(cc.budget.system + cc.sentTokens + CONTEXT_NOTE_RESERVE + TYPHOON.outputTokens).toBeLessThanOrEqual(TYPHOON.window);
     const note = cc.messages[0]!.content as string;
     expect(note).toContain("You can see only the most recent 1 message, so the earliest message you can see is not where the conversation began");
     expect(note).not.toContain("first exchange");

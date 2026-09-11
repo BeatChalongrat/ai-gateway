@@ -44,8 +44,6 @@ import type { GatewayMessage } from "./gateway-client";
 // (BudgetBasis, resolved by the turn coordinator); the rules are chat-edge's
 // (context-budget.ts).
 const PER_MESSAGE_OVERHEAD = 4;
-/** The context note joins the system message when compaction happens. */
-export const CONTEXT_NOTE_RESERVE = 160;
 const IMAGE_BLOCK_TOKENS = 500;
 
 /** chat-edge's EstimateTokens, verbatim semantics (token_estimator.go):
@@ -212,6 +210,28 @@ export function renderContextNote(missing: number, keptRecent: number, headKept:
   };
   return "\n\n" + text.replace(/\{missing\}|\{missing_messages\}|\{missing_are\}|\{kept\}|\{kept_messages\}/g, (m) => fill[m]!);
 }
+
+/** chat-edge's contextNoteMaxCount: the widest count a note can name. */
+export const CONTEXT_NOTE_MAX_COUNT = 9_999_999;
+
+/**
+ * The context note joins the system message when compaction happens; this is
+ * its token allowance — chat-edge's contextNoteWorstCase on the same asset.
+ * FIX108: it was the constant 160 (chat-edge's was 120) while the note
+ * measured 184–217 tokens. The exact note can't be measured before the trim
+ * (its counts come out of it), so the reserve is the largest note the asset
+ * can render: every head variant and status, both counts seven digits wide,
+ * plus 1 token for estimating it as part of the system message.
+ */
+export const CONTEXT_NOTE_RESERVE = (() => {
+  let worst = 0;
+  for (const headKept of [false, true]) {
+    for (const status of ["complete", "partial", "failed", "off"] as const) {
+      worst = Math.max(worst, estimateTokens(renderContextNote(CONTEXT_NOTE_MAX_COUNT, CONTEXT_NOTE_MAX_COUNT, headKept, status)));
+    }
+  }
+  return worst + 1;
+})();
 
 /**
  * messages[0] must be the system message; the rest is history + the new user
