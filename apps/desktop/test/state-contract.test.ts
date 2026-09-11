@@ -9,6 +9,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { renderContextNote } from "../src/main/context-compiler";
+import type { SummaryStatus } from "../src/main/context-manager";
 import { type ConversationStateRecord, buildExtractionUserBody, emptyState, renderStateBlock } from "../src/main/conversation-state";
 import type { GatewayMessage } from "../src/main/gateway-client";
 
@@ -26,6 +28,7 @@ interface ContractState {
 interface Contract {
   bodies: { name: string; instructions: string; existing: ContractState | null; messages: { role: "user" | "assistant"; content: string }[]; body: string }[];
   renders: { name: string; state: ContractState; block: string }[];
+  notes: { name: string; missing: number; kept: number; head_kept: boolean; status: SummaryStatus; note: string }[];
 }
 
 const contract = JSON.parse(fs.readFileSync(FILE, "utf8")) as Contract;
@@ -63,6 +66,18 @@ describe("FIX106 — the desktop renders the summary block chat-edge renders", (
     it(`block: ${r.name}`, () => {
       expect(r.block).not.toBe("");
       expect(renderStateBlock(record(r.state)!)).toBe(r.block);
+    });
+  }
+});
+
+describe("FIX107 — the desktop writes the context note chat-edge writes", () => {
+  it("the contract file has note cases", () => {
+    expect(contract.notes.length).toBeGreaterThanOrEqual(5);
+  });
+  for (const n of contract.notes) {
+    it(`note: ${n.name}`, () => {
+      expect(n.note, "run chat-edge's TestFIX106_StateContract with UPDATE_STATE_CONTRACT=1").not.toBe("");
+      expect(renderContextNote(n.missing, n.kept, n.head_kept, n.status)).toBe(n.note);
     });
   }
 });

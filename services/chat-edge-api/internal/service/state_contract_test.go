@@ -68,6 +68,16 @@ type stateContract struct {
 		State contractState `json:"state"`
 		Block string        `json:"block"`
 	} `json:"renders"`
+	// FIX107 Part B1 — the <context_note> appended when older messages are
+	// left out, from the same asset on both sides.
+	Notes []struct {
+		Name     string `json:"name"`
+		Missing  int    `json:"missing"`
+		Kept     int    `json:"kept"`
+		HeadKept bool   `json:"head_kept"`
+		Status   string `json:"status"`
+		Note     string `json:"note"`
+	} `json:"notes"`
 }
 
 func TestFIX106_StateContract(t *testing.T) {
@@ -108,6 +118,22 @@ func TestFIX106_StateContract(t *testing.T) {
 			t.Fatalf("%s: no expected block recorded — run with UPDATE_STATE_CONTRACT=1", r.Name)
 		case got != r.Block:
 			t.Errorf("%s: the rendered state block changed:\n--- got ---\n%s\n--- want ---\n%s", r.Name, got, r.Block)
+		}
+	}
+	for i := range c.Notes {
+		n := &c.Notes[i]
+		headKept := 0
+		if n.HeadKept {
+			headKept = 2
+		}
+		got := compactionContextNote(n.Missing, n.Kept, headKept, n.Status)
+		switch {
+		case update:
+			n.Note = got
+		case n.Note == "":
+			t.Fatalf("%s: no expected note recorded — run with UPDATE_STATE_CONTRACT=1", n.Name)
+		case got != n.Note:
+			t.Errorf("%s: the context note changed:\n--- got ---\n%s\n--- want ---\n%s", n.Name, got, n.Note)
 		}
 	}
 

@@ -89,7 +89,7 @@ describe("compileChain with options (the pure plan)", () => {
     expect(cc.dropStart).toBe(2);
     expect(cc.dropEnd).toBeGreaterThan(2);
     expect(cc.messages[0].content as string).toContain("<context_note>");
-    expect(cc.messages[0].content as string).toContain("do not guess");
+    expect(cc.messages[0].content as string).toContain("say plainly that you can no longer see that part of the conversation");
   });
 
   it("without options the FIX32 behaviour is unchanged (overflow only)", () => {
@@ -108,7 +108,7 @@ describe("compileChain with options (the pure plan)", () => {
     expect(cc.messages[3]).toBe(msgs[1]); // the standing instruction
     // The SUMMARY TEXT never enters the system message (the note only names the tag).
     expect(cc.messages[0].content as string).not.toContain("plan the trip");
-    expect(cc.messages[0].content as string).toContain("A summary of the older part is in <conversation_state>");
+    expect(cc.messages[0].content as string).toContain("A summary of the part you cannot see is in <conversation_state>");
     // FIX104: the pair counts toward what is sent, like chat-edge's SentTokens.
     expect(cc.stateInjected).toBe(true);
     expect(cc.sentTokens).toBeGreaterThan(cc.historyTokens);
@@ -147,7 +147,7 @@ describe("ContextManager", () => {
     expect(out.compacted).toBe(true);
     expect(out.statePresent).toBe(false);
     expect(out.extractionRan).toBe(false);
-    expect(out.messages[0].content as string).toContain("No summary of the older part is available");
+    expect(out.messages[0].content as string).toContain("No summary of that part is available");
     expect(ev.list.map((e) => e.event)).toEqual(["context_budget"]);
     // chat-edge: no summariser and no state is "off" — the meter says so; no loss notice.
     expect(out.summaryStatus).toBe("off");
@@ -226,13 +226,13 @@ describe("ContextManager", () => {
   it("FIX104 — memory off: nothing is summarised, no stored state is injected, and nothing is announced (the web's temporary chat)", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
-    store.put({ ...emptyState("c"), current_goal: "from before", message_count_at_summary: 2 });
+    store.put({ ...emptyState("c"), current_goal: "stored-goal-FIX104", message_count_at_summary: 2 });
     const ex = new FakeExtractor(okReply("g"));
     const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
     const out = await mgr.compile("c", chainAt(0.9), turn({ memoryEnabled: false }), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(ex.calls).toHaveLength(0);
-    expect(out.messages.some((m) => typeof m.content === "string" && m.content.includes("from before"))).toBe(false);
+    expect(out.messages.some((m) => typeof m.content === "string" && m.content.includes("stored-goal-FIX104"))).toBe(false);
     expect(out.summaryStatus).toBe("off");
     expect(out.lossNotice).toBeNull();
     expect(ev.list.map((e) => e.event)).toEqual(["context_budget"]);

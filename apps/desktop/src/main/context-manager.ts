@@ -149,7 +149,7 @@ export class ContextManager {
     const memoryOn = turn.memoryEnabled !== false;
     let state = memoryOn ? this.deps.store.get(conversationId) : null;
     const history = messages.slice(1);
-    let plan = this.plan(messages, turn, state);
+    let plan = this.plan(messages, turn, state, this.noteStatus(memoryOn, false, false, state, turn));
     let extractionRan = false;
     let extractionOk = false;
 
@@ -163,7 +163,7 @@ export class ContextManager {
         state = await this.fold(conversationId, turn.model, history, anchor, coverTo, state, signal);
         extractionOk = (state?.message_count_at_summary ?? 0) >= coverTo;
         // The block changed the budget: plan again against it.
-        plan = this.plan(messages, turn, state);
+        plan = this.plan(messages, turn, state, this.noteStatus(memoryOn, true, extractionOk, state, turn));
       }
     }
 
@@ -219,16 +219,28 @@ export class ContextManager {
   }
 
   // ── internals ──
-  private plan(messages: GatewayMessage[], turn: TurnBudget, state: ConversationStateRecord | null): CompiledChain {
+  private plan(messages: GatewayMessage[], turn: TurnBudget, state: ConversationStateRecord | null, summaryStatus?: SummaryStatus): CompiledChain {
     const opts: CompileOptions = {
       triggerRatio: this.trigger,
       targetRatio: this.target,
       preamble: state && !isStateEmpty(state) ? renderStateMessages(state) : [],
       manualBoundaryIndex: state?.manual_compact_boundary_index ?? null,
       summaryPresent: !!state && !isStateEmpty(state),
+      summaryStatus,
       omittedOlder: turn.omittedOlder,
     };
     return compileChain(messages, turn.basis, turn.numTools, opts);
+  }
+
+  /**
+   * FIX107 — the summary status the context note states, known before the
+   * final plan is built (compile() reports the same value afterwards). The note
+   * used to say only "a summary is above" or "no summary is available"; like
+   * chat-edge's it now also says when the summary is partial or failed.
+   */
+  private noteStatus(memoryOn: boolean, extractionRan: boolean, extractionOk: boolean, state: ConversationStateRecord | null, turn: TurnBudget): SummaryStatus {
+    const status = summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, !isStateEmpty(state));
+    return status === "complete" && Math.trunc(turn.omittedOlder ?? 0) > 0 ? "partial" : status;
   }
 
   /** chat-edge's contextMeter (handler/conversation.go), on the desktop's plan. */

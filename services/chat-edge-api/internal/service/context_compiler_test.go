@@ -143,7 +143,7 @@ func TestCompile_TriggersAtThresholdNotOverflow(t *testing.T) {
 	if out.SentTokens > int(float64(budget)*0.60) {
 		t.Fatalf("sent %d tokens, want ≤ target %d", out.SentTokens, int(float64(budget)*0.60))
 	}
-	if !strings.Contains(out.SystemPrefix, "<context_note>") || !strings.Contains(out.SystemPrefix, "do not guess") {
+	if !strings.Contains(out.SystemPrefix, "<context_note>") || !strings.Contains(out.SystemPrefix, "say plainly that you can no longer see that part") {
 		t.Fatal("the model must be told what is missing, and told not to guess")
 	}
 	found := false
@@ -225,7 +225,7 @@ func TestCompile_MemoryOffStillTrimsAndSaysNoSummary(t *testing.T) {
 	if !out.Compacted || out.ExtractionTriggered {
 		t.Fatal("memory off: trim yes, extraction no")
 	}
-	if !strings.Contains(out.SystemPrefix, "No summary of the older part is available") {
+	if !strings.Contains(out.SystemPrefix, "No summary of that part is available") {
 		t.Fatal("the model must be told there is no summary")
 	}
 }
@@ -268,7 +268,7 @@ func TestCompile_StateInjectedAsUserAssistantPairAtHead(t *testing.T) {
 	if strings.Contains(out.SystemPrefix, "plan the trip") {
 		t.Fatal("the summary text must never enter the system message")
 	}
-	if !strings.Contains(out.SystemPrefix, "A summary of the older part is in <conversation_state>") {
+	if !strings.Contains(out.SystemPrefix, "A summary of the part you cannot see is in <conversation_state>") {
 		t.Fatal("the context note must say a summary exists")
 	}
 	// Budgeted: the pair's tokens are inside the sent total, which stays under target.

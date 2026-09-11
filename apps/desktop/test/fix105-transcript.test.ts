@@ -36,7 +36,7 @@ describe("FIX105 Part B — rows never loaded are counted and said", () => {
     expect(cc.dropped).toBe(0);
     expect(cc.omittedOlder).toBe(150);
     expect([cc.dropStart, cc.dropEnd]).toEqual([0, 0]);
-    expect(cc.messages[0]!.content as string).toContain("150 earlier messages are not included verbatim");
+    expect(cc.messages[0]!.content as string).toContain("150 earlier messages are not included here");
   });
 
   it("the meter and the loss notice count them; a summary of only the loaded part is partial", async () => {

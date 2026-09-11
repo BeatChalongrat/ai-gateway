@@ -156,7 +156,7 @@ func TestFIX102_AnOlderSummaryWithAFailedRefreshIsPartialNotComplete(t *testing.
 	if !out.StateInjected {
 		t.Fatal("the older summary still rides along")
 	}
-	if strings.Contains(out.SystemPrefix, "A summary of the older part is in") || !strings.Contains(out.SystemPrefix, "does not cover the most recent") {
+	if strings.Contains(out.SystemPrefix, "A summary of the part you cannot see is in") || !strings.Contains(out.SystemPrefix, "does not cover the most recent") {
 		t.Fatal("the note must not claim the summary covers everything left out")
 	}
 	n := out.LossNotice()

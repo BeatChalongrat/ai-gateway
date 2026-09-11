@@ -40,9 +40,11 @@ package service
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -520,28 +522,73 @@ func compactionMarkerLabel(missing int, status string) string {
 	}
 }
 
+// FIX107 Part B1 — the model-facing note is ONE text in two trees:
+// prompt_context_note.txt, embedded here and held byte for byte by the desktop
+// (context-note-prompt.ts, pinned by apps/desktop/test/context-note.test.ts),
+// rendered the same way on both (testdata/state_contract.json "notes").
+//
+// The owner asked a chat trimmed to 1 of 18 messages "ข้อความแรกสุดที่ผมพิมพ์ใน
+// แชทนี้คืออะไร" and got his previous message back, stated as the first. The
+// old note said N earlier messages were "not included verbatim" and told the
+// model not to guess when the user "refers to something" missing — but a
+// question about the first message does not look missing: the earliest message
+// in view looks like the answer. The note now says the earliest message in
+// view is not where the conversation began, and what to do when asked about
+// that part. It is scoped to that question so ordinary answers stay plain.
+//
+//go:embed prompt_context_note.txt
+var contextNoteRaw string
+
+var contextNoteParts = parseContextNote(contextNoteRaw)
+
+// parseContextNote splits the asset on its "---NAME---" lines.
+func parseContextNote(raw string) map[string]string {
+	parts := map[string]string{}
+	name := ""
+	var buf []string
+	flush := func() {
+		if name != "" {
+			parts[name] = strings.TrimSpace(strings.Join(buf, "\n"))
+		}
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n") {
+		if len(line) > 6 && strings.HasPrefix(line, "---") && strings.HasSuffix(line, "---") {
+			flush()
+			name = strings.Trim(line, "-")
+			buf = nil
+			continue
+		}
+		buf = append(buf, line)
+	}
+	flush()
+	return parts
+}
+
 // compactionContextNote is the model-facing note (the desktop's
 // context_note, now on web too).
 func compactionContextNote(missing, tailKept, headKept int, status string) string {
-	s := fmt.Sprintf("\n\n<context_note>\nThis conversation is long: %d earlier %s %s not included verbatim.",
-		missing, pluralCompact(missing), isAre(missing))
+	head := "HEAD_DROPPED"
 	if headKept > 0 {
-		s += fmt.Sprintf(" The first exchange and the most recent %d %s are included verbatim.", tailKept, pluralCompact(tailKept))
-	} else {
-		s += fmt.Sprintf(" The most recent %d %s are included verbatim.", tailKept, pluralCompact(tailKept))
+		head = "HEAD_KEPT"
 	}
+	summary := "SUMMARY_OFF"
 	switch status {
 	case SummaryComplete, SummaryPending:
-		s += " A summary of the older part is in <conversation_state> above."
+		summary = "SUMMARY_COMPLETE"
 	case SummaryPartial:
-		s += " A summary of part of the older conversation is in <conversation_state> above, but it does not cover the most recent of the messages left out: they could not be summarized this turn."
+		summary = "SUMMARY_PARTIAL"
 	case SummaryFailed:
-		s += " No summary of the older part is available: it could not be written this turn."
-	default:
-		s += " No summary of the older part is available."
+		summary = "SUMMARY_FAILED"
 	}
-	s += " If the user refers to something that is in neither the summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.\n</context_note>"
-	return s
+	p := contextNoteParts
+	fill := strings.NewReplacer(
+		"{missing}", fmt.Sprint(missing),
+		"{missing_messages}", pluralCompact(missing),
+		"{missing_are}", isAre(missing),
+		"{kept}", fmt.Sprint(tailKept),
+		"{kept_messages}", pluralCompact(tailKept),
+	)
+	return "\n\n" + fill.Replace(strings.Join([]string{p["OPEN"], p[head], p[summary], p["CLOSE"]}, " "))
 }
 
 func isAre(n int) string {

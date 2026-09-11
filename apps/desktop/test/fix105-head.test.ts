@@ -42,8 +42,8 @@ describe("FIX105 Part A — the first exchange is pinned only while that cannot 
     // What the provider counts: prompt + max_tokens within the window (estimate).
     expect(cc.budget.system + cc.sentTokens + 160 + TYPHOON.outputTokens).toBeLessThanOrEqual(TYPHOON.window);
     const note = cc.messages[0]!.content as string;
-    expect(note).toContain("The most recent 1 message is included verbatim");
-    expect(note).not.toContain("The first exchange");
+    expect(note).toContain("You can see only the most recent 1 message, so the earliest message you can see is not where the conversation began");
+    expect(note).not.toContain("first exchange");
     // The summariser is asked to cover the whole first exchange.
     expect([cc.dropStart, cc.dropEnd]).toEqual([0, 2]);
   });
@@ -56,7 +56,7 @@ describe("FIX105 Part A — the first exchange is pinned only while that cannot 
     expect(cc.headDropped).toBe(false);
     expect(cc.messages[1]).toBe(msgs[1]);
     expect(cc.messages[2]).toBe(msgs[2]);
-    expect(cc.messages[0]!.content as string).toContain("The first exchange and the most recent");
+    expect(cc.messages[0]!.content as string).toContain("You can see its first exchange and the most recent");
   });
 
   it("a small head gives way when keeping it leaves no room for the newest message", () => {

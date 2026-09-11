@@ -17,6 +17,7 @@
 
 import type { ChatEdgeClient, ProjectDto } from "./chat-edge-client";
 import type { Logger } from "./logger";
+import { OUTPUT_FORMAT_BLOCK } from "./output-format-prompt";
 import { PROMPT_PART } from "./prompt-guard";
 import type { PromptPart } from "../shared/guardrail-mirror";
 
@@ -176,7 +177,10 @@ ${SHELL_ENVIRONMENT_LINE}`);
 ## Response Style
 - Be concise and direct
 - When using tools, don't narrate every step — just do it and report the result
-- If a tool fails, explain what happened and try an alternative approach`);
+- If a tool fails, explain what happened and try an alternative approach
+
+## Output format
+${OUTPUT_FORMAT_BLOCK}`);
   return parts.join("\n");
 }
 

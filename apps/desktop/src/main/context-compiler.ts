@@ -35,6 +35,8 @@
 // No 'electron' import: unit-tested in plain Node.
 
 import { type BudgetBasis, HEAD_PIN_MAX_SHARE, MESSAGES_FLOOR, PER_TOOL_TOKENS, outputReserveForRequest, workingLimitFor } from "./context-budget";
+import type { SummaryStatus } from "./context-manager";
+import { CONTEXT_NOTE_TEMPLATE } from "./context-note-prompt";
 import type { GatewayMessage } from "./gateway-client";
 
 // FIX104: the per-model window map that stood here (`auto` and five gpt ids
@@ -162,20 +164,53 @@ export interface CompileOptions {
   manualBoundaryIndex?: number | null;
   /** Whether a summary is present (the context note says so). */
   summaryPresent?: boolean;
+  /** FIX107 — what stands in for the messages left out, as the context note states it (chat-edge's SummaryStatus). Without it: summaryPresent ? complete : off. */
+  summaryStatus?: SummaryStatus;
   /** FIX105 Part B: older transcript rows that were never loaded. Like chat-edge's OmittedOlder they make the request compacted and are named in the context note. */
   omittedOlder?: number;
 }
 
-/** The context note the MODEL sees, appended to the system message. */
-function contextNote(dropped: number, keptRecent: number, headKept: boolean, summaryPresent: boolean): string {
-  return (
-    `\n\n<context_note>\nThis conversation is long: ${dropped} earlier message${dropped === 1 ? "" : "s"} ` +
-    `${dropped === 1 ? "is" : "are"} not included verbatim. ${headKept ? "The first exchange and the" : "The"} most recent ${keptRecent} ` +
-    `message${keptRecent === 1 ? " is" : "s are"} included verbatim. ` +
-    (summaryPresent ? "A summary of the older part is in <conversation_state> above. " : "No summary of the older part is available. ") +
-    `If the user refers to something that is in neither the summary nor the visible messages, say you may have lost ` +
-    `that detail and ask them to restate it — do not guess.\n</context_note>`
-  );
+/** FIX107 — the sections of CONTEXT_NOTE_TEMPLATE by name (chat-edge's parseContextNote). */
+export function parseContextNote(raw: string): Record<string, string> {
+  const parts: Record<string, string> = {};
+  let name = "";
+  let buf: string[] = [];
+  const flush = () => {
+    if (name) parts[name] = buf.join("\n").trim();
+  };
+  for (const line of raw.replace(/\r\n/g, "\n").split("\n")) {
+    if (line.length > 6 && line.startsWith("---") && line.endsWith("---")) {
+      flush();
+      name = line.replace(/^-+|-+$/g, "");
+      buf = [];
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return parts;
+}
+
+const CONTEXT_NOTE_PARTS = parseContextNote(CONTEXT_NOTE_TEMPLATE);
+
+/**
+ * The context note the MODEL sees, appended to the system message — chat-edge's
+ * compactionContextNote on the same asset (prompt_context_note.txt). FIX107: it
+ * says the earliest message in view is not where the conversation began when
+ * the first exchange is out of view, and what to do when asked about that part.
+ */
+export function renderContextNote(missing: number, keptRecent: number, headKept: boolean, status: SummaryStatus): string {
+  const p = CONTEXT_NOTE_PARTS;
+  const summary = status === "complete" || status === "pending" ? "SUMMARY_COMPLETE" : status === "partial" ? "SUMMARY_PARTIAL" : status === "failed" ? "SUMMARY_FAILED" : "SUMMARY_OFF";
+  const text = [p["OPEN"], p[headKept ? "HEAD_KEPT" : "HEAD_DROPPED"], p[summary], p["CLOSE"]].join(" ");
+  const fill: Record<string, string> = {
+    "{missing}": String(missing),
+    "{missing_messages}": missing === 1 ? "message" : "messages",
+    "{missing_are}": missing === 1 ? "is" : "are",
+    "{kept}": String(keptRecent),
+    "{kept_messages}": keptRecent === 1 ? "message" : "messages",
+  };
+  return "\n\n" + text.replace(/\{missing\}|\{missing_messages\}|\{missing_are\}|\{kept\}|\{kept_messages\}/g, (m) => fill[m]!);
 }
 
 /**
@@ -280,7 +315,8 @@ export function compileChain(messages: GatewayMessage[], basis: BudgetBasis, num
   if (dropped <= 0 && omittedOlder === 0) return untouched();
 
   const keptRecent = tail.reduce((s, u) => s + u.messages.length, 0);
-  const newSystem: GatewayMessage = { ...system!, content: sysText + contextNote(dropped + omittedOlder, keptRecent, headMessages > 0, opts.summaryPresent === true) };
+  const noteStatus: SummaryStatus = opts.summaryStatus ?? (opts.summaryPresent === true ? "complete" : "off");
+  const newSystem: GatewayMessage = { ...system!, content: sysText + renderContextNote(dropped + omittedOlder, keptRecent, headMessages > 0, noteStatus) };
   const out: GatewayMessage[] = [newSystem, ...preamble, ...keptMessages];
   const keptTokens = keptMessages.reduce((s, m) => s + messageTokens(m), 0);
   return {

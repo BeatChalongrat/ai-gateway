@@ -306,11 +306,19 @@ func (pc *PromptCompiler) actionRules(in CompileContext) string {
 // outputFormatBlock steers the model to pick the right structure for the
 // content instead of defaulting to bullet points for everything (P1 Item
 // 2). Kept short — the rules are simple and every tier follows them.
-const outputFormatBlock = `<output_format>
-- Choose the format that fits the content; do not default to bullet points.
-- Use a markdown table for structured or comparative data — comparisons, test results, feature lists, status updates, anything with 2+ attributes across multiple items.
-- Use a numbered list for sequential steps, prose for explanations and discussion, and code blocks for code.
-</output_format>`
+//
+// FIX107 Part B2 — the canonical copy is prompt_output_format.txt. The
+// desktop had no format rule at all (its "## Response Style" says only "Be
+// concise and direct" and two lines about tools), so the same question on
+// qwen3.8 came back as a table on the web and a numbered list on the desktop.
+// The desktop now sends these bytes too (prompt-assembler.ts
+// OUTPUT_FORMAT_BLOCK, pinned by apps/desktop/test/prompt-output-format.test.ts);
+// the web prompt did not move.
+//
+//go:embed prompt_output_format.txt
+var outputFormatRaw string
+
+var outputFormatBlock = strings.TrimSpace(strings.ReplaceAll(outputFormatRaw, "\r\n", "\n"))
 
 func (pc *PromptCompiler) outputFormat(in CompileContext) string {
 	return outputFormatBlock

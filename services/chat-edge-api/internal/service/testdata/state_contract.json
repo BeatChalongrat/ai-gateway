@@ -117,5 +117,47 @@
       },
       "block": "<conversation_state>\nSummary of this conversation so far (older messages have been compacted):\n\nKey context: - 3. Move the bucket\n- 4. Reopen ingest\n\nThis summary stands in for older messages that are no longer sent verbatim. If the user refers to something that is in neither this summary nor the visible messages, say you may have lost that detail and ask them to restate it — do not guess.\n</conversation_state>\n"
     }
+  ],
+  "notes": [
+    {
+      "name": "the owner's chat: 17 left out, only the newest in view, first exchange gone, summary written",
+      "missing": 17,
+      "kept": 1,
+      "head_kept": false,
+      "status": "complete",
+      "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 17 earlier messages are not included here. You can see only the most recent 1 message, so the earliest message you can see is not where the conversation began. A summary of the part you cannot see is in <conversation_state> above; it is a summary, not the messages themselves. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
+    },
+    {
+      "name": "first exchange kept, summary partial",
+      "missing": 5,
+      "kept": 4,
+      "head_kept": true,
+      "status": "partial",
+      "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 5 earlier messages are not included here. You can see its first exchange and the most recent 4 messages. A summary of part of it is in <conversation_state> above, but it does not cover the most recent of the messages left out: they could not be summarized this turn. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
+    },
+    {
+      "name": "one message left out, summary failed",
+      "missing": 1,
+      "kept": 1,
+      "head_kept": false,
+      "status": "failed",
+      "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 1 earlier message is not included here. You can see only the most recent 1 message, so the earliest message you can see is not where the conversation began. No summary of that part is available: it could not be written this turn. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
+    },
+    {
+      "name": "memory off",
+      "missing": 30,
+      "kept": 6,
+      "head_kept": true,
+      "status": "off",
+      "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 30 earlier messages are not included here. You can see its first exchange and the most recent 6 messages. No summary of that part is available. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
+    },
+    {
+      "name": "dry run: the summary is pending",
+      "missing": 12,
+      "kept": 3,
+      "head_kept": false,
+      "status": "pending",
+      "note": "\n\n<context_note>\nThis conversation is longer than what you can see: 12 earlier messages are not included here. You can see only the most recent 3 messages, so the earliest message you can see is not where the conversation began. A summary of the part you cannot see is in <conversation_state> above; it is a summary, not the messages themselves. If the user asks about that earlier part — what they wrote first, what was said at the start, or anything from before the messages you can see — answer from the summary and say that it comes from a summary. If the summary does not have it, say plainly that you can no longer see that part of the conversation and ask them to paste it. Never present a message you can see as the first one, or as part of that earlier conversation, unless it is. For anything else, answer normally and do not mention this note.\n</context_note>"
+    }
   ]
 }

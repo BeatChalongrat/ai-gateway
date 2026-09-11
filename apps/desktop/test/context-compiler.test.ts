@@ -76,7 +76,7 @@ describe("compileChain", () => {
     const cc = compileChain(chain(300, 5), TERRA, 20);
     expect(String(cc.messages[0]!.content)).toContain("<context_note>");
     expect(String(cc.messages[0]!.content)).toContain(`${cc.dropped} earlier message`);
-    expect(String(cc.messages[0]!.content)).toContain("do not guess");
+    expect(String(cc.messages[0]!.content)).toContain("say plainly that you can no longer see that part of the conversation");
     expect(cc.dropped).toBeGreaterThan(100);
   });
 
