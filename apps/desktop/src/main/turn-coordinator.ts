@@ -40,6 +40,7 @@ import type { Logger } from "./logger";
 import { LiveApprovalMode, parseStoredApprovalMode } from "./approval-mode";
 import { composeUserContent, pruneAttachedImages, resolveAttachments, stripImageBlocks, type ImageEncoder, type ResolvedAttachments } from "./attachments";
 import { appendAssistantReply, roleSequence } from "./chain";
+import { type ChainFreshness, chainFreshness, type LocalChain, nextMarker, parseHistoryFile, serializeHistoryFile, unmarkedFreshness } from "./chain-freshness";
 import {
   applyApprovalMode,
   BROWSER_SITE_PERM,
@@ -260,6 +261,8 @@ const HISTORY_PAGE_SIZE = 100;
 /** FIX105 Part B — how far back the host reads a transcript it has no local chain for. chat-edge's own load
  *  ceiling (MAX_CONTEXT_MESSAGES) is 1,000 by default; rows beyond it are counted and said, never dropped quietly. */
 const HISTORY_LOAD_CEILING = 1000;
+/** FIX109: where a turn's history came from — the local chain or the server transcript. */
+export type HistorySource = "local" | "server";
 /** FIX105 — chat-edge's CodeMessageTooLong and its sentence (message_too_long.go; pinned by context-budget-pin.test.ts). */
 const MESSAGE_TOO_LONG_CODE = "message_too_long";
 const MESSAGE_TOO_LONG_TEXT = "This message alone is too long for this model. Shorten it or split it into parts; the rest of the conversation is unaffected.";
@@ -957,6 +960,7 @@ export class TurnCoordinator {
     let text = "";
     let errored = false;
     let taskMessages: GatewayMessage[] = [];
+    let conversation: ConversationDto | null = null;
     const model = this.opts.forceModel ?? this.opts.defaultModel;
     // FIX8 A1.3: the task's own permission mode governs its run's approvals (a
     // manual-mode task stalls on a tool it lacks permission for). Sequential runs
@@ -966,7 +970,7 @@ export class TurnCoordinator {
     this.taskNeededPermission = [];
     try {
       await this.refreshBrowserConnected();
-      const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
+      conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
       const built = await this.buildMessages(conversationId, conversation, task.prompt);
       taskMessages = built.messages;
       // FIX32 §1.2: the task path gets the same token budget as an interactive
@@ -1003,12 +1007,15 @@ export class TurnCoordinator {
     // locally and its visible transcript to chat-edge, so the alarm-clock
     // conversation shows the prompt and the answer instead of staying empty.
     try {
+      // FIX109 Part A: the same two writes as an interactive turn — the marker
+      // first as if the import fails, then advanced by the rows it inserted.
       if (taskMessages.length > 0) {
         appendAssistantReply(taskMessages, text);
-        this.saveLocalHistory(conversationId, taskMessages.slice(1));
+        this.saveLocalHistory(conversationId, taskMessages.slice(1), nextMarker(conversation?.message_count, 0));
       }
       const taskTurn = { messageId: "asst_" + randomUUID().replace(/-/g, ""), assistantText: text } as RunningTurn;
-      await this.importVisible(conversationId, task.prompt, taskTurn, model, []);
+      const imported = await this.importVisible(conversationId, task.prompt, taskTurn, model, []);
+      if (taskMessages.length > 0) this.saveLocalHistory(conversationId, taskMessages.slice(1), nextMarker(conversation?.message_count, imported));
       this.log.info(`TASK TRANSCRIPT ${task.id} conv=${conversationId}: roles=[${roleSequence(taskMessages).join(",")}]`);
     } catch (err) {
       this.log.warn(`TASK ${task.id}: transcript persist failed: ${(err as Error).message}`);
@@ -1341,8 +1348,15 @@ export class TurnCoordinator {
     // `altered` (FIX33) covers both a trim and an injected state pair: neither
     // may ever enter the stored chain.
     const fullChain = cc.altered ? [...messages, ...appendedChain] : sendMessages;
-    this.saveLocalHistory(conversationId, fullChain.slice(historyStart));
-    await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? []);
+    // FIX109 Part A: the chain is written with the server marker it is current
+    // with — twice. First as if the import fails (the count read at the start
+    // of the turn), then with the rows the import inserted. A crash between
+    // the two leaves a marker the next load reads as "server ahead" — the
+    // direction that re-reads the transcript rather than trusting the file.
+    const chain = fullChain.slice(historyStart);
+    this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, 0));
+    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? []);
+    this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, imported));
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
     // a real message without leaving and re-entering the conversation.
@@ -2618,21 +2632,24 @@ export class TurnCoordinator {
   private historyPath(conversationId: string): string {
     return path.join(this.opts.dataDir, "history", `${conversationId.replace(/[^A-Za-z0-9_-]/g, "_")}.json`);
   }
-  private loadLocalHistory(conversationId: string): GatewayMessage[] | null {
+  /** FIX109 Part A: the chain plus the server marker it was written against
+   *  (null for a pre-FIX109 bare array — see chain-freshness.ts). */
+  private loadLocalHistory(conversationId: string): LocalChain | null {
     try {
       const p = this.historyPath(conversationId);
       if (!fs.existsSync(p)) return null;
-      const parsed = JSON.parse(fs.readFileSync(p, "utf8")) as GatewayMessage[];
-      return Array.isArray(parsed) ? parsed : null;
+      return parseHistoryFile(JSON.parse(fs.readFileSync(p, "utf8")));
     } catch {
       return null;
     }
   }
-  private saveLocalHistory(conversationId: string, messages: GatewayMessage[]): void {
+  /** FIX109 Part A: written with the server's message_count this chain is
+   *  current with, so the next load can tell whether the server moved. */
+  private saveLocalHistory(conversationId: string, messages: GatewayMessage[], serverMessageCount: number | null): void {
     try {
       const p = this.historyPath(conversationId);
       fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, JSON.stringify(messages));
+      fs.writeFileSync(p, serializeHistoryFile(messages, serverMessageCount));
     } catch (err) {
       this.log.warn(`history save failed for ${conversationId}: ${(err as Error).message}`);
     }
@@ -2652,7 +2669,7 @@ export class TurnCoordinator {
     return resolved;
   }
 
-  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string; omittedOlder: number }> {
+  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string; omittedOlder: number; source: HistorySource }> {
     let project = null;
     if (conversation?.project_id) {
       const projects = await this.chatEdge.listProjects();
@@ -2725,11 +2742,25 @@ export class TurnCoordinator {
     });
     const system = assembled.text;
     const messages: GatewayMessage[] = [{ role: "system", content: system }];
-    let history = this.loadLocalHistory(conversationId);
+    const local = this.loadLocalHistory(conversationId);
+    let history: GatewayMessage[] | null = null;
+    let source: HistorySource = "server";
     let omittedOlder = 0;
+    // FIX109 Part A — the local chain is a cache of the server transcript and
+    // is checked against it on every load (chain-freshness.ts). Before this,
+    // the server transcript was read only when no local file existed, so a
+    // turn taken on the web after the first desktop turn reached the page
+    // and never the model.
+    const freshness: ChainFreshness | null = local ? chainFreshness(local, conversation?.message_count) : null;
+    if (local && (freshness === "fresh" || freshness === "unknown")) {
+      history = local.messages;
+      source = "local";
+      if (freshness === "unknown") this.log.info(`HISTORY conv=${conversationId}: server count unknown — local chain kept`);
+    }
     if (history === null) {
-      // No local chain history (a conversation started on the web or before
-      // E4): the visible transcript from chat-edge.
+      // The visible transcript from chat-edge: no local chain (a conversation
+      // started on the web or before E4), a stale one (the server moved since
+      // this host last wrote), or an unmarked one (decided against the rows).
       // FIX105 Part B — all of it, up to a ceiling. This read asked for 200 rows
       // and chat-edge serves at most 100, newest first, so a web conversation
       // opened here silently started from its newest 100: the page showed
@@ -2738,14 +2769,25 @@ export class TurnCoordinator {
       // counted (omittedOlder → the context note, the meter, the loss notice).
       try {
         const loaded = await this.loadServerTranscript(conversationId);
-        if (loaded.hasMore) omittedOlder = Math.max(1, (conversation?.message_count ?? 0) - loaded.rows.length);
-        if (loaded.pages > 1 || loaded.hasMore) this.log.info(`HISTORY conv=${conversationId}: ${loaded.rows.length} transcript rows in ${loaded.pages} page(s)${loaded.hasMore ? `, ~${omittedOlder} older not loaded (ceiling ${HISTORY_LOAD_CEILING})` : ""}`);
-        history = loaded.rows
-          .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0)
-          .map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+        const visible = loaded.rows.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim().length > 0);
+        if (local && freshness === "unmarked" && unmarkedFreshness(local, visible.length + (loaded.hasMore ? 1 : 0)) === "fresh") {
+          // A pre-FIX109 file whose chain holds at least what the server
+          // shows: kept, and the next save marks it.
+          history = local.messages;
+          source = "local";
+          this.log.info(`HISTORY conv=${conversationId}: unmarked local chain covers the server's ${visible.length} visible rows — kept`);
+        } else {
+          if (local) this.log.info(`HISTORY conv=${conversationId}: local chain ${freshness} (server count ${conversation?.message_count ?? "?"}, marker ${local.serverMessageCount ?? "none"}) → server transcript, tool chains not carried`);
+          if (loaded.hasMore) omittedOlder = Math.max(1, (conversation?.message_count ?? 0) - loaded.rows.length);
+          if (loaded.pages > 1 || loaded.hasMore) this.log.info(`HISTORY conv=${conversationId}: ${loaded.rows.length} transcript rows in ${loaded.pages} page(s)${loaded.hasMore ? `, ~${omittedOlder} older not loaded (ceiling ${HISTORY_LOAD_CEILING})` : ""}`);
+          history = visible.map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+        }
       } catch (err) {
-        this.log.warn(`Could not load history for ${conversationId}: ${(err as Error).message}`);
-        history = [];
+        // A transcript that cannot be read leaves the local chain (stale or
+        // not) as the best copy there is; with no local chain, an empty past.
+        this.log.warn(`Could not load history for ${conversationId}: ${(err as Error).message}${local ? " — local chain kept" : ""}`);
+        history = local ? local.messages : [];
+        source = local ? "local" : "server";
       }
     }
     let userText = text;
@@ -2772,7 +2814,7 @@ export class TurnCoordinator {
       if (m.role === "user" && typeof m.content === "string") parts.push({ ...PROMPT_PART.earlierMessage, text: m.content });
     }
     this.promptPartsByConversation.set(conversationId, parts);
-    return { messages, userText, omittedOlder };
+    return { messages, userText, omittedOlder, source };
   }
 
   /** FIX105 Part B — the chat-edge transcript, oldest first, paged back until it
@@ -2812,8 +2854,11 @@ export class TurnCoordinator {
     }
   }
 
-  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<void> {
-    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return;
+  /** Imports this turn's visible rows to chat-edge; returns how many rows the
+   *  server actually inserted (0 on failure or nothing to import) — the
+   *  FIX109 marker is advanced by exactly that. */
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<number> {
+    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return 0;
     const now = new Date().toISOString();
     const items = [];
     // FIX27: file_ids link the uploaded rows to this user message on chat-edge
@@ -2828,6 +2873,7 @@ export class TurnCoordinator {
     const result = await this.chatEdge.importMessages(conversationId, items);
     if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
     else this.log.warn(`TURN PERSIST FAILED conv=${conversationId} (chat-edge import) — local chain history saved`);
+    return result ? result.imported : 0;
   }
 
   private async generateTitle(conversationId: string, firstUser: string, firstReply: string): Promise<void> {
