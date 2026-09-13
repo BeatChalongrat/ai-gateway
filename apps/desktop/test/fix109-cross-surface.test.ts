@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import { chainFreshness, countVisibleRows, HISTORY_FILE_VERSION, nextMarker, parseHistoryFile, serializeHistoryFile, unmarkedFreshness } from "../src/main/chain-freshness";
 import { ContextManager } from "../src/main/context-manager";
-import { MemoryConversationStateStore } from "../src/main/conversation-state";
+import { adoptServerState, emptyState, MemoryConversationStateStore } from "../src/main/conversation-state";
 import type { GatewayMessage } from "../src/main/gateway-client";
 import { HostTools } from "../src/main/host-tools";
 import type { Logger } from "../src/main/logger";
@@ -221,5 +221,101 @@ describe("FIX109 Part A — a stale local chain yields to the server transcript"
     expect(h.priv.loadLocalHistory("c")?.serverMessageCount).toBeNull();
     h.writeHistory(DESKTOP_TURN_1);
     expect(h.priv.loadLocalHistory("c")).toEqual({ messages: DESKTOP_TURN_1, serverMessageCount: null });
+  });
+});
+
+// ── Part B ──
+const SERVER_STATE = {
+  conversation_id: "c",
+  current_goal: "Keep the user's code words",
+  structured_summary: { key_context: "Two code words so far" },
+  confirmed_decisions: [{ decision: "reply OK" }],
+  active_artifacts: [],
+  open_tasks: [],
+  rejected_approaches: [],
+  unresolved_questions: [],
+  summarized_up_to_message_id: "m2",
+  message_count_at_summary: 40, // the server's logical counter — NOT an index
+  summary_token_count: 57,
+  manual_compact_boundary_message_id: null,
+  compaction_instructions: "",
+  created_at: "2026-09-14T00:00:00Z",
+  updated_at: "2026-09-14T01:00:00Z",
+};
+const EMPTY_ENVELOPE = { conversation_id: "c", current_goal: null, structured_summary: {}, confirmed_decisions: [], active_artifacts: [], open_tasks: [], rejected_approaches: [], unresolved_questions: [] };
+const ROW_IDS = SERVER_4.map((r) => r.id);
+
+describe("FIX109 Part B — the server's state, anchored on the transcript", () => {
+  it("maps field for field and translates the id anchor to index + 1 through the row ids", () => {
+    const s = adoptServerState("c", SERVER_STATE, ROW_IDS)!;
+    expect(s).not.toBeNull();
+    expect(s.current_goal).toBe("Keep the user's code words");
+    expect(s.structured_summary).toEqual({ key_context: "Two code words so far" });
+    expect(s.confirmed_decisions).toEqual([{ decision: "reply OK" }]);
+    expect(s.summarized_up_to_message_id).toBe("m2");
+    expect(s.message_count_at_summary).toBe(2); // rows m1, m2 folded; NOT the server's 40
+    expect(s.manual_compact_boundary_index).toBeNull();
+    expect(s.summary_token_count).toBe(57);
+    expect(s.updated_at).toBe("2026-09-14T01:00:00Z");
+  });
+
+  it("an anchor id not among the rows (past the ceiling, another branch, an empty row) becomes 0 — re-fold, never skip", () => {
+    expect(adoptServerState("c", { ...SERVER_STATE, summarized_up_to_message_id: "m999" }, ROW_IDS)!.message_count_at_summary).toBe(0);
+    expect(adoptServerState("c", { ...SERVER_STATE, summarized_up_to_message_id: null }, ROW_IDS)!.message_count_at_summary).toBe(0);
+  });
+
+  it("the manual boundary translates to the row's index, or null when absent", () => {
+    expect(adoptServerState("c", { ...SERVER_STATE, manual_compact_boundary_message_id: "m3" }, ROW_IDS)!.manual_compact_boundary_index).toBe(2);
+    expect(adoptServerState("c", { ...SERVER_STATE, manual_compact_boundary_message_id: "gone" }, ROW_IDS)!.manual_compact_boundary_index).toBeNull();
+  });
+
+  it("the empty envelope (no state row) and malformed blobs adopt nothing / safe defaults", () => {
+    expect(adoptServerState("c", EMPTY_ENVELOPE, ROW_IDS)).toBeNull();
+    expect(adoptServerState("c", null, ROW_IDS)).toBeNull();
+    const odd = adoptServerState("c", { ...SERVER_STATE, structured_summary: "not an object", confirmed_decisions: "nope", open_tasks: [1, "x", { task: "t" }] }, ROW_IDS)!;
+    expect(odd.structured_summary).toEqual({});
+    expect(odd.confirmed_decisions).toEqual([]);
+    expect(odd.open_tasks).toEqual([{ task: "t" }]);
+  });
+
+  it("rebase: adopts the server state; resets a local anchor when the server has none; leaves an empty store alone", () => {
+    const store = new MemoryConversationStateStore();
+    const mgr = new ContextManager({ store, extractor: null, log: quiet, emit: () => {} });
+    expect(mgr.rebase("c", ROW_IDS, EMPTY_ENVELOPE)).toBe("none");
+    expect(store.get("c")).toBeNull();
+
+    store.put({ ...emptyState("c"), current_goal: "local summary", message_count_at_summary: 7, manual_compact_boundary_index: 5 });
+    expect(mgr.rebase("c", ROW_IDS, EMPTY_ENVELOPE)).toBe("reset");
+    expect(store.get("c")).toMatchObject({ current_goal: "local summary", message_count_at_summary: 0, manual_compact_boundary_index: null });
+    expect(mgr.rebase("c", ROW_IDS, null)).toBe("none"); // idempotent
+
+    expect(mgr.rebase("c", ROW_IDS, SERVER_STATE)).toBe("adopted");
+    expect(store.get("c")).toMatchObject({ current_goal: "Keep the user's code words", message_count_at_summary: 2 });
+  });
+
+  it("rebase with memory off adopts nothing but still resets a stale local anchor", () => {
+    const store = new MemoryConversationStateStore();
+    const mgr = new ContextManager({ store, extractor: null, log: quiet, emit: () => {} });
+    store.put({ ...emptyState("c"), current_goal: "local", message_count_at_summary: 3 });
+    expect(mgr.rebase("c", ROW_IDS, SERVER_STATE, false)).toBe("reset");
+    expect(store.get("c")!.current_goal).toBe("local");
+  });
+
+  it("through the host: a stale chain rebuilt from the server adopts the server summary at the translated anchor", async () => {
+    const h = host({ rows: SERVER_4, messageCount: 4, state: SERVER_STATE, withManager: true });
+    h.writeHistory({ v: 2, server_message_count: 2, messages: DESKTOP_TURN_1 });
+    h.store.put({ ...emptyState("c"), current_goal: "desktop summary", message_count_at_summary: 4 }); // indexed the OLD chain
+    const b = await h.build();
+    expect(b.source).toBe("server");
+    expect(h.calls.state).toBe(1);
+    expect(h.store.get("c")).toMatchObject({ current_goal: "Keep the user's code words", message_count_at_summary: 2 });
+  });
+
+  it("through the host: a fresh chain never asks the server for its state", async () => {
+    const h = host({ rows: SERVER_4.slice(0, 2), messageCount: 2, state: SERVER_STATE, withManager: true });
+    h.writeHistory({ v: 2, server_message_count: 2, messages: DESKTOP_TURN_1 });
+    await h.build();
+    expect(h.calls.state).toBe(0);
+    expect(h.store.get("c")).toBeNull();
   });
 });

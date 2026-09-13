@@ -40,6 +40,7 @@ import {
   EXTRACTION_BATCH_LIMIT,
   EXTRACTION_MAX_BATCHES,
   type StateExtractor,
+  adoptServerState,
   emptyState,
   isStateEmpty,
   mergeExtraction,
@@ -179,6 +180,44 @@ export class ContextManager {
         ? { dropped: plan.dropped + plan.omittedOlder, sent: plan.sentMessages, total: plan.totalMessages + plan.omittedOlder, summary: summaryStatus }
         : null;
     return { ...plan, statePresent, extractionRan, budgetEvent, summaryStatus, lossNotice };
+  }
+
+  /**
+   * FIX109 Part B — the chain this conversation's state indexed is gone: the
+   * host is building the turn from the server transcript (no local chain, or
+   * one the server has moved past — Part A). Every anchor here is a chain
+   * index, so on a different chain it names a different message; kept as it
+   * was, a fold would resume PAST rows the summary never covered and the
+   * trim would drop them unsummarised.
+   *
+   *   · the server has a state of its own → adopt it, its anchors translated
+   *     through the transcript's row ids (adoptServerState): exact against
+   *     the very rows now in the chain, and it covers the web turns the
+   *     local summary never saw;
+   *   · otherwise, a local summary stays (it is still true of the
+   *     conversation) with its anchor at 0 and no boundary: re-folded from
+   *     the start on the next compaction, at the price of tokens, never of
+   *     content.
+   *
+   * A memory-off conversation keeps no summary on either surface (FIX104),
+   * so nothing is adopted for one; a stale local anchor is still reset.
+   * Idempotent — the page's context.info dry run may call it before the turn.
+   */
+  rebase(conversationId: string, rowIds: readonly string[], serverState: Record<string, unknown> | null, memoryEnabled = true): "adopted" | "reset" | "none" {
+    const adopted = memoryEnabled ? adoptServerState(conversationId, serverState, rowIds) : null;
+    if (adopted) {
+      this.deps.store.put(adopted);
+      this.deps.log.info(`STATE conv=${conversationId}: adopted the server summary — anchor ${adopted.message_count_at_summary} of ${rowIds.length} rows${adopted.manual_compact_boundary_index !== null ? `, boundary ${adopted.manual_compact_boundary_index}` : ""}`);
+      return "adopted";
+    }
+    const local = this.deps.store.get(conversationId);
+    if (local && ((local.message_count_at_summary ?? 0) > 0 || local.manual_compact_boundary_index !== null)) {
+      local.message_count_at_summary = 0;
+      local.manual_compact_boundary_index = null;
+      this.deps.store.put(local);
+      return "reset";
+    }
+    return "none";
   }
 
   /** Dry run for the page's context.info op — no extraction, no events. */

@@ -2781,6 +2781,15 @@ export class TurnCoordinator {
           if (loaded.hasMore) omittedOlder = Math.max(1, (conversation?.message_count ?? 0) - loaded.rows.length);
           if (loaded.pages > 1 || loaded.hasMore) this.log.info(`HISTORY conv=${conversationId}: ${loaded.rows.length} transcript rows in ${loaded.pages} page(s)${loaded.hasMore ? `, ~${omittedOlder} older not loaded (ceiling ${HISTORY_LOAD_CEILING})` : ""}`);
           history = visible.map((m) => ({ role: m.role as "user" | "assistant", content: m.content as string }));
+          // FIX109 Part B — the chain the summary's anchor indexed is gone;
+          // rebase the state on this transcript (the server's own state when
+          // it has one, translated through the row ids it carries).
+          if (this.opts.contextManager) {
+            const memoryOn = conversation?.memory_enabled !== false;
+            const serverState = memoryOn ? await this.chatEdge.getConversationState(conversationId) : null;
+            const outcome = this.opts.contextManager.rebase(conversationId, visible.map((m) => m.id), serverState, memoryOn);
+            if (outcome !== "none") this.log.info(`STATE conv=${conversationId}: ${outcome === "adopted" ? "server summary adopted" : "local summary anchor reset"} for the server transcript`);
+          }
         }
       } catch (err) {
         // A transcript that cannot be read leaves the local chain (stale or

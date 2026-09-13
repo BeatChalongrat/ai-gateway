@@ -99,6 +99,53 @@ export function emptyState(conversationId: string): ConversationStateRecord {
   };
 }
 
+/**
+ * FIX109 Part B — the server's state row (GET /conversations/{id}/state,
+ * chat.conversation_states) as a desktop record, anchored on the transcript
+ * the host just loaded. The two anchors differ in kind: the server pins the
+ * LAST FOLDED ROW BY ID (summarized_up_to_message_id), the desktop the COUNT
+ * OF CHAIN MESSAGES folded (message_count_at_summary, an index). The
+ * translation is exact when the id is among `rowIds` — the ids of the
+ * visible rows, in the order they become the chain: the row's index + 1.
+ * An id that is not there (a row past the load ceiling, on another branch,
+ * or filtered out as empty) translates to 0: everything is re-folded, at the
+ * price of extraction tokens and never of content. The manual boundary id
+ * translates the same way, to null when absent. The server's own
+ * message_count_at_summary (its logical counter, not an index) is NOT
+ * carried — read as an index it would fold rows the summary never covered.
+ *
+ * Returns null when the server has no state worth adopting (the empty
+ * envelope the handler sends in place of a 404), so a caller never replaces
+ * a local summary with nothing.
+ */
+export function adoptServerState(conversationId: string, dto: Record<string, unknown> | null | undefined, rowIds: readonly string[]): ConversationStateRecord | null {
+  if (!dto || typeof dto !== "object") return null;
+  const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+  const arr = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x)) : []);
+  const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
+  const s: ConversationStateRecord = {
+    ...emptyState(conversationId),
+    current_goal: str(dto["current_goal"]),
+    structured_summary: obj(dto["structured_summary"]),
+    confirmed_decisions: arr(dto["confirmed_decisions"]),
+    active_artifacts: arr(dto["active_artifacts"]),
+    open_tasks: arr(dto["open_tasks"]),
+    rejected_approaches: arr(dto["rejected_approaches"]),
+    unresolved_questions: arr(dto["unresolved_questions"]),
+    summarized_up_to_message_id: str(dto["summarized_up_to_message_id"]),
+    summary_token_count: typeof dto["summary_token_count"] === "number" ? Math.max(0, Math.trunc(dto["summary_token_count"] as number)) : 0,
+    manual_compact_boundary_message_id: str(dto["manual_compact_boundary_message_id"]),
+    compaction_instructions: typeof dto["compaction_instructions"] === "string" ? (dto["compaction_instructions"] as string) : "",
+    updated_at: str(dto["updated_at"]) ?? new Date().toISOString(),
+  };
+  if (isStateEmpty(s)) return null;
+  const upTo = s.summarized_up_to_message_id ? rowIds.indexOf(s.summarized_up_to_message_id) : -1;
+  s.message_count_at_summary = upTo >= 0 ? upTo + 1 : 0;
+  const boundary = s.manual_compact_boundary_message_id ? rowIds.indexOf(s.manual_compact_boundary_message_id) : -1;
+  s.manual_compact_boundary_index = boundary >= 0 ? boundary : null;
+  return s;
+}
+
 export function isStateEmpty(s: ConversationStateRecord | null | undefined): boolean {
   if (!s) return true;
   if (s.current_goal && s.current_goal.trim()) return false;
