@@ -91,7 +91,7 @@ reach and why.
 | `chat.user_memories` / `memory_events` (derived facts) | yes | the user-scoped memory purge (`DELETE /account/purge-memories`) — deliberately separate: a memory may be derived from many conversations, so erasing one conversation must not silently delete facts the user still relies on |
 | Gateway `request_logs` (masked snapshots; raw columns) | raw columns for ≤ the DLP window (90 days), masked snapshots after | time-based: the nightly strip NULLs raw columns; archive + expiry + partition drops age the rows. **Not conversation-addressable** — these rows are keyed by request, not conversation, so per-conversation erasure cannot select them; their lifetime is bounded by the time-based windows instead |
 | `request_logs_archive` (cold storage) | masked only (the pipeline refuses to move rows on a night the strip failed) | the archive-expiry step |
-| Desktop local cache (`conversation-state/*.json`, run ledger, logs) | yes (plaintext) | TTL sweep at launch — `localStateTtlDays`, **30 days by default** (0 disables) — plus the app's immediate **Clear local data** command. Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
+| Desktop local cache (`history/*.json` transcripts with tool results, `conversation-state/*.json`, run ledger, logs) | yes (plaintext) | TTL sweep at launch — `localStateTtlDays`, **30 days by default** (0 disables) — plus the app's immediate **Clear local data** command. Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
 | Streaming resume ledger (Redis) | yes | self-expiring TTL (~10 minutes) |
 | Memory export files | yes | 24-hour link expiry + deleted by the memory purge |
 | `chat.cloud_task_runs`, `chat.compaction_usage` | no (counts/outcomes) | retained — content-free accounting (see exceptions) |
@@ -164,10 +164,14 @@ schedule, like every other change.
 ### Desktop client
 
 `Clear local data` (tray menu, confirmed) removes the local
-conversation-state cache, run ledger and logs — counts reported,
-contents never. A TTL sweep at launch (`localStateTtlDays`, **default
-30 days**; 0 disables it) removes conversation-state files that have
-not been touched inside the window.
+transcript cache (`history/`, the per-conversation chain with tool
+results), the conversation-state cache, run ledger and logs — counts
+reported, contents never. A TTL sweep at launch (`localStateTtlDays`,
+**default 30 days**; 0 disables it) removes history and
+conversation-state files that have not been touched inside the window.
+A swept transcript costs the next desktop turn only its tool results:
+the turn reads the server transcript instead. Until FIX109 neither
+mechanism touched `history/`.
 
 **Why a TTL and not encryption-at-rest.** The cache is written in
 plaintext, and the answer to that is to stop keeping it rather than to

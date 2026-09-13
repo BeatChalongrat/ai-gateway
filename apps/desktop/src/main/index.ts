@@ -35,7 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { BridgeChannel } from "./bridge";
 import { ChatEdgeClient } from "./chat-edge-client";
-import { sweepConversationStateTTL, wipeLocalData } from "./local-data";
+import { sweepConversationStateTTL, sweepHistoryTTL, wipeLocalData } from "./local-data";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
@@ -199,6 +199,9 @@ void app.whenReady().then(async () => {
   if (prefs.localStateTtlDays > 0) {
     const swept = sweepConversationStateTTL(app.getPath("userData"), prefs.localStateTtlDays);
     if (swept > 0) log.info(`local-data TTL sweep removed ${swept} conversation-state file(s) older than ${prefs.localStateTtlDays}d`);
+    // FIX109 Part C: the transcripts (history/) age out under the same window.
+    const sweptHistory = sweepHistoryTTL(app.getPath("userData"), prefs.localStateTtlDays);
+    if (sweptHistory > 0) log.info(`local-data TTL sweep removed ${sweptHistory} history file(s) older than ${prefs.localStateTtlDays}d`);
   }
   log.info(`SRAN Desktop ${app.getVersion()} pid=${process.pid} electron=${process.versions.electron} chrome=${process.versions.chrome} node=${process.versions.node} packaged=${isRelease}`);
   log.info(`userData=${app.getPath("userData")}`);
@@ -1018,18 +1021,18 @@ async function clearLocalDataWithConfirm(): Promise<void> {
     defaultId: 1,
     cancelId: 1,
     title: "Clear local data",
-    message: "Remove locally cached conversation summaries, run records and logs from this computer?",
-    detail: "Your conversations stay on the server and re-sync on next use. This only clears this computer's local cache.",
+    message: "Remove locally cached conversation transcripts, summaries, run records and logs from this computer?",
+    detail: "Your conversations stay on the server and re-sync on next use. This only clears this computer's local cache — the tool results kept with older conversations here are not re-synced.",
   });
   if (response !== 0) return;
   const counts = wipeLocalData(app.getPath("userData"));
   log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
   log.info(
-    `local data cleared: conversation-state=${counts.conversationStateFiles} run-ledger=${counts.runLedgerFiles} logs=${counts.logFiles}`,
+    `local data cleared: history=${counts.historyFiles} conversation-state=${counts.conversationStateFiles} run-ledger=${counts.runLedgerFiles} logs=${counts.logFiles}`,
   );
   new Notification({
     title: "SRAN Desktop",
-    body: `Local data cleared (${counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles} files).`,
+    body: `Local data cleared (${counts.historyFiles + counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles} files).`,
   }).show();
 }
 

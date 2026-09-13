@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { sweepConversationStateTTL, wipeLocalData } from "../src/main/local-data";
+import { sweepConversationStateTTL, sweepHistoryTTL, wipeLocalData } from "../src/main/local-data";
 import { DEFAULT_SHELL_PREFS, sanitizePrefs } from "../src/main/shell-prefs";
 
 let tmp: string | null = null;
@@ -32,8 +32,14 @@ function write(dir: string, name: string, mtime?: Date): string {
 }
 
 describe("wipeLocalData", () => {
-  it("removes conversation-state, run-ledger and logs, reporting counts", () => {
+  it("removes history, conversation-state, run-ledger and logs, reporting counts", () => {
     const ud = mkUserData();
+    // FIX109 Part C — history/ is the transcript with tool chains, the one
+    // directory the wipe used to leave behind (244 files on the owner's
+    // machine, 72 of them for conversations already deleted on the server).
+    write(path.join(ud, "history"), "conv-1.json");
+    write(path.join(ud, "history"), "conv-2.json");
+    write(path.join(ud, "history"), "conv-3.json");
     write(path.join(ud, "conversation-state"), "a.json");
     write(path.join(ud, "conversation-state"), "b.json");
     write(path.join(ud, "run-ledger"), "r1.jsonl");
@@ -43,10 +49,12 @@ describe("wipeLocalData", () => {
 
     const counts = wipeLocalData(ud);
     expect(counts).toEqual({
+      historyFiles: 3,
       conversationStateFiles: 2,
       runLedgerFiles: 1,
       logFiles: 1,
     });
+    expect(fs.existsSync(path.join(ud, "history"))).toBe(false);
     expect(fs.existsSync(path.join(ud, "conversation-state"))).toBe(false);
     expect(fs.existsSync(path.join(ud, "run-ledger"))).toBe(false);
     expect(fs.existsSync(path.join(ud, "logs"))).toBe(false);
@@ -56,6 +64,7 @@ describe("wipeLocalData", () => {
   it("is a clean no-op on an empty profile", () => {
     const ud = mkUserData();
     expect(wipeLocalData(ud)).toEqual({
+      historyFiles: 0,
       conversationStateFiles: 0,
       runLedgerFiles: 0,
       logFiles: 0,
@@ -106,6 +115,29 @@ describe("sweepConversationStateTTL", () => {
     expect(fs.existsSync(path.join(dir, "old.json"))).toBe(false);
     expect(fs.existsSync(path.join(dir, "fresh.json"))).toBe(true);
     expect(fs.existsSync(path.join(dir, "not-json.txt"))).toBe(true);
+  });
+});
+
+describe("sweepHistoryTTL (FIX109 Part C)", () => {
+  it("ages out history files under the same window and leaves fresh ones", () => {
+    const ud = mkUserData();
+    const dir = path.join(ud, "history");
+    const stale = new Date(Date.now() - 45 * 24 * 3600 * 1000);
+    write(dir, "old-conv.json", stale);
+    write(dir, "active-conv.json"); // rewritten on every desktop turn → never stale while in use
+    write(dir, "note.txt", stale);
+    expect(sweepHistoryTTL(ud, DEFAULT_SHELL_PREFS.localStateTtlDays)).toBe(1);
+    expect(fs.existsSync(path.join(dir, "old-conv.json"))).toBe(false);
+    expect(fs.existsSync(path.join(dir, "active-conv.json"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "note.txt"))).toBe(true);
+  });
+
+  it("is off at 0 and a no-op without the directory", () => {
+    const ud = mkUserData();
+    write(path.join(ud, "history"), "old.json", new Date(Date.now() - 90 * 24 * 3600 * 1000));
+    expect(sweepHistoryTTL(ud, 0)).toBe(0);
+    expect(fs.existsSync(path.join(ud, "history", "old.json"))).toBe(true);
+    expect(sweepHistoryTTL(path.join(ud, "nowhere"), 30)).toBe(0);
   });
 });
 
