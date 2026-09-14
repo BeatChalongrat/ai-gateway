@@ -7,6 +7,9 @@
 // meter is hidden below 70 %.
 // FIX104: the budget comes from a BudgetBasis; the meter, the summary status,
 // the loss notice and memory-off follow chat-edge (FIX102).
+// FIX111: the summariser is the SERVER (POST /compact, a full compaction with
+// a boundary); the fake below answers as chat-edge does — a state row, the
+// boundary at its newest row, and the ids of its visible rows.
 import { describe, expect, it } from "vitest";
 
 import type { BudgetBasis } from "../src/main/context-budget";
@@ -16,16 +19,15 @@ import {
   CONTEXT_METER_SHOW_RATIO,
   COMPACT_TARGET_RATIO,
   COMPACT_TRIGGER_RATIO,
-  type ExtractionInput,
-  type ExtractionResult,
   MemoryConversationStateStore,
-  type StateExtractor,
   buildExtractionUserBody,
   emptyState,
   parseExtraction,
   renderStateMessages,
 } from "../src/main/conversation-state";
+import { countVisibleRows } from "../src/main/chain-freshness";
 import type { GatewayMessage } from "../src/main/gateway-client";
+import type { ConversationSummariser, ServerCompaction } from "../src/main/server-summariser";
 
 const log = { info: () => {}, warn: () => {}, error: () => {}, attachFile: () => {} } as unknown as import("../src/main/logger").Logger;
 const TERRA: BudgetBasis = { model: "gpt-5.6-terra", window: 128_000, outputTokens: 8192 };
@@ -45,15 +47,27 @@ function chainAt(ratio: number, basis: BudgetBasis = TERRA): GatewayMessage[] {
   return out;
 }
 
-class FakeExtractor implements StateExtractor {
-  calls: ExtractionInput[] = [];
-  constructor(private readonly reply: (input: ExtractionInput) => ExtractionResult) {}
-  async extract(input: ExtractionInput): Promise<ExtractionResult> {
-    this.calls.push(input);
-    return this.reply(input);
+/** chat-edge behind POST /compact: it holds `serverRows` visible rows (the
+ *  chain's imported rows), folds them all, sets the boundary at the newest. */
+class FakeServer implements ConversationSummariser {
+  calls: { instructions: string }[] = [];
+  constructor(private readonly goal: string | null, private readonly serverRows: () => number) {}
+  async compact(_id: string, instructions: string): Promise<ServerCompaction | null> {
+    this.calls.push({ instructions });
+    if (this.goal === null) return null;
+    const rowIds = Array.from({ length: this.serverRows() }, (_, i) => `r${i + 1}`);
+    const last = rowIds[rowIds.length - 1] ?? null;
+    return {
+      state: { current_goal: this.goal, structured_summary: { key_context: "cat มะขาม 4 yrs; deadline 15 ก.ย." }, summarized_up_to_message_id: last, manual_compact_boundary_message_id: last, compaction_instructions: instructions, message_count_at_summary: 999 },
+      boundaryMessageId: last,
+      coverageReached: true,
+      rowIds,
+      rowsTruncated: false,
+    };
   }
 }
-const okReply = (goal: string) => (): ExtractionResult => ({ ok: true, state: { current_goal: goal, structured_summary: { key_context: "cat มะขาม 4 yrs; deadline 15 ก.ย." } } });
+/** The server holds every row of `msgs` except the newest user message (not imported yet). */
+const serverOf = (msgs: () => GatewayMessage[]) => () => countVisibleRows(msgs().slice(1, -1));
 
 function events() {
   const list: { event: string; data: unknown }[] = [];
@@ -140,9 +154,9 @@ describe("compileChain with options (the pure plan)", () => {
 });
 
 describe("ContextManager", () => {
-  it("no state, no extractor: trims with the honest note and reports the budget — nothing breaks", async () => {
+  it("no state, no summariser: trims with the honest note and reports the budget — nothing breaks", async () => {
     const ev = events();
-    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: null, log, emit: ev.emit });
+    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), summariser: null, log, emit: ev.emit });
     const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(out.statePresent).toBe(false);
@@ -154,56 +168,66 @@ describe("ContextManager", () => {
     expect(out.lossNotice).toBeNull();
   });
 
-  it("crossing the trigger: says 'summarizing' first, folds exactly the range that will be dropped, injects the state as a USER pair, re-plans", async () => {
+  it("crossing the trigger: says 'summarizing' first, asks the server ONCE, places its state on the chain, injects it as a USER pair, re-plans to the boundary", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
-    const ex = new FakeExtractor(okReply("plan the trip"));
-    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
     const msgs = chainAt(0.9);
+    const server = new FakeServer("plan the trip", serverOf(() => msgs));
+    const mgr = new ContextManager({ store, summariser: server, log, emit: ev.emit });
     const out = await mgr.compile("c", msgs, turn(), new AbortController().signal);
     expect(out.extractionRan).toBe(true);
     expect(out.statePresent).toBe(true);
+    expect(server.calls).toHaveLength(1);
+    expect(server.calls[0]!.instructions).toBe(""); // nothing on file → nothing invented
     expect(ev.list[0]!.event).toBe("compaction_status");
     expect((ev.list[0]!.data as { status: string }).status).toBe("summarizing");
     expect(ev.list[ev.list.length - 1]!.event).toBe("context_budget");
-    // Folded from the anchor (0) up to the drop end, in ≤120-message batches.
-    const folded = ex.calls.reduce((n, c) => n + c.messages.length, 0);
-    expect(folded).toBe(store.get("c")!.message_count_at_summary);
-    expect(folded).toBeGreaterThan(0);
-    expect(ex.calls[0]!.messages[0]).toBe(msgs[1]); // starts at the oldest
+    // The server folded everything it holds — every chain message before the new user turn.
+    const st = store.get("c")!;
+    expect(st.message_count_at_summary).toBe(msgs.length - 2);
+    expect(st.manual_compact_boundary_index).toBe(msgs.length - 3);
+    expect(st.message_count_at_summary).not.toBe(999); // the server's logical counter is not carried
     // The state pair rides as user/assistant right after the system message.
     expect(out.messages[1].role).toBe("user");
     expect(out.messages[1].content as string).toContain("<conversation_state>");
     expect(out.messages[1].content as string).toContain("plan the trip");
     expect(out.messages[0].content as string).not.toContain("plan the trip");
-    // Head still survives after the state pair.
+    // Head still survives after the state pair; the newest turn ships; the rest is behind the boundary.
     expect(out.messages[3]).toBe(msgs[1]);
+    expect(out.messages[out.messages.length - 1]).toBe(msgs[msgs.length - 1]);
+    expect(out.messages).toHaveLength(6); // system, state pair, head pair, newest
     expect(out.summaryStatus).toBe("complete");
     expect(out.lossNotice).toBeNull();
   });
 
-  it("an incremental pass resumes from the anchor, not from zero", async () => {
+  it("FIX111 — the server is not asked again until something new was imported; growing past the trigger asks once more", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
-    const ex = new FakeExtractor(okReply("g"));
-    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
-    const msgs = chainAt(0.9);
+    let msgs = chainAt(0.9);
+    const server = new FakeServer("g", serverOf(() => msgs));
+    const mgr = new ContextManager({ store, summariser: server, log, emit: ev.emit });
     await mgr.compile("c", msgs, turn(), new AbortController().signal);
-    const anchor = store.get("c")!.message_count_at_summary;
-    // Grow the conversation past the trigger again.
-    const more = [...msgs, ...chainAt(0.5).slice(3)];
-    ex.calls = [];
-    await mgr.compile("c", more, turn(), new AbortController().signal);
-    if (ex.calls.length > 0) expect(ex.calls[0]!.messages[0]).toBe(more[1 + anchor]);
-    expect(ex.calls.every((c) => c.existing !== null)).toBe(true);
+    expect(server.calls).toHaveLength(1);
+    // The same turn compiled again (the page's dry run, a retry): covered → no request.
+    await mgr.compile("c", msgs, turn(), new AbortController().signal);
+    expect(server.calls).toHaveLength(1);
+    // A few turns later, still under the trigger from the boundary on: no request.
+    msgs = [...msgs, a("r"), u("q")];
+    await mgr.compile("c", msgs, turn(), new AbortController().signal);
+    expect(server.calls).toHaveLength(1);
+    // Past the trigger again from the boundary on: one more request, from the server's own anchor.
+    msgs = [...msgs, a("r"), ...chainAt(0.9).slice(3)];
+    await mgr.compile("c", msgs, turn(), new AbortController().signal);
+    expect(server.calls).toHaveLength(2);
+    expect(store.get("c")!.message_count_at_summary).toBe(msgs.length - 2);
   });
 
-  it("a failed extraction keeps the existing state AND the anchor; the turn still goes out trimmed, and says the summary is partial", async () => {
+  it("FIX111 — the server answering nothing keeps the existing state AND the anchor; the turn still goes out trimmed, and says the summary is partial", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
     store.put({ ...emptyState("c"), current_goal: "keep me", message_count_at_summary: 4 });
-    const ex = new FakeExtractor(() => ({ ok: false, error: "gateway down" }));
-    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
+    const ex = new FakeServer(null, () => 0);
+    const mgr = new ContextManager({ store, summariser: ex, log, emit: ev.emit });
     const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(store.get("c")!.current_goal).toBe("keep me");
@@ -215,7 +239,7 @@ describe("ContextManager", () => {
 
   it("FIX104 — a failed first extraction trims and says no summary stands in (the web's compaction_notice)", async () => {
     const ev = events();
-    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), extractor: new FakeExtractor(() => ({ ok: false, error: "x" })), log, emit: ev.emit });
+    const mgr = new ContextManager({ store: new MemoryConversationStateStore(), summariser: new FakeServer(null, () => 0), log, emit: ev.emit });
     const out = await mgr.compile("c", chainAt(0.9), turn(), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(out.summaryStatus).toBe("failed");
@@ -227,8 +251,8 @@ describe("ContextManager", () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
     store.put({ ...emptyState("c"), current_goal: "stored-goal-FIX104", message_count_at_summary: 2 });
-    const ex = new FakeExtractor(okReply("g"));
-    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
+    const ex = new FakeServer("g", () => 10);
+    const mgr = new ContextManager({ store, summariser: ex, log, emit: ev.emit });
     const out = await mgr.compile("c", chainAt(0.9), turn({ memoryEnabled: false }), new AbortController().signal);
     expect(out.compacted).toBe(true);
     expect(ex.calls).toHaveLength(0);
@@ -253,7 +277,7 @@ describe("ContextManager", () => {
     expect(parseExtraction('```json\n{"current_goal":"g"}\n```')).toEqual({ current_goal: "g" });
   });
 
-  it("the extraction body carries the instructions, the existing state and the messages, tool rows named", () => {
+  it("the extraction body (kept for the summary-recall probe and the cross-tree pin) carries the instructions, the existing state and the messages, tool rows named", () => {
     const body = buildExtractionUserBody({ ...emptyState("c"), current_goal: "old" }, [u("hello <<PHONE_1>>"), { role: "tool", content: "out", tool_call_id: "x" } as GatewayMessage], "keep code");
     expect(body).toContain("USER INSTRUCTIONS");
     expect(body).toContain("keep code");
@@ -262,16 +286,17 @@ describe("ContextManager", () => {
     expect(body).toContain("[tool] out");
   });
 
-  it("manualCompact folds to the newest message, sets the boundary, and the next compile drops up to it", async () => {
+  it("manualCompact asks the server with the user's instructions, takes its boundary, and the next compile drops up to it", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
-    const ex = new FakeExtractor(okReply("g"));
-    const mgr = new ContextManager({ store, extractor: ex, log, emit: ev.emit });
     const msgs = [sys(), u("first"), a("hi"), u("q1"), a("a1"), u("q2"), a("a2")];
+    const ex = new FakeServer("g", () => 6); // every row of msgs.slice(1) is on the server
+    const mgr = new ContextManager({ store, summariser: ex, log, emit: ev.emit });
     const res = await mgr.manualCompact("c", msgs.slice(1), "gpt-5.6-terra", "keep the decisions", new AbortController().signal);
     expect(res.ok).toBe(true);
     const st = store.get("c")!;
     expect(st.manual_compact_boundary_index).toBe(5);
+    expect(st.message_count_at_summary).toBe(6);
     expect(st.compaction_instructions).toBe("keep the decisions");
     expect(ex.calls[0]!.instructions).toBe("keep the decisions");
     const next = await mgr.compile("c", [...msgs, u("q3")], turn(), new AbortController().signal);
@@ -281,10 +306,10 @@ describe("ContextManager", () => {
     expect(next.messages[3].content).toBe("first");
   });
 
-  it("manualCompact with a failing extractor sets NO boundary", async () => {
+  it("manualCompact with a server that answers nothing sets NO boundary", async () => {
     const ev = events();
     const store = new MemoryConversationStateStore();
-    const mgr = new ContextManager({ store, extractor: new FakeExtractor(() => ({ ok: false, error: "x" })), log, emit: ev.emit });
+    const mgr = new ContextManager({ store, summariser: new FakeServer(null, () => 0), log, emit: ev.emit });
     const res = await mgr.manualCompact("c", [u("a"), a("b")], "gpt-5.6-terra", "", new AbortController().signal);
     expect(res.ok).toBe(false);
     expect(store.get("c")).toBeNull();

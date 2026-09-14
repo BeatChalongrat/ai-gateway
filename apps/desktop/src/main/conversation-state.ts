@@ -12,10 +12,15 @@
 // message-build time in the host. A sidecar store would add a host↔sidecar
 // round trip per turn and put summary text in the process that runs tools.
 //
-// EXTRACTOR (A-D2). Behind an interface (StateExtractor) so the
-// implementation can become "ask chat-edge" without touching a call site
-// (§3.6). The gateway implementation makes ONE non-streaming-shaped call
-// with the shared prompt asset as the system message and NO tools.
+// SUMMARISER. FIX111: the server is the one summariser (server-summariser.ts,
+// through POST /compact). The desktop's own extractor (GatewayStateExtractor,
+// FIX33 A-D2) is gone with the fold it served; the state kept here is a
+// COPY of chat.conversation_states, anchored on the local chain by row
+// count (anchorStateOnChain) or, when the host builds from the server
+// transcript, by row id (adoptServerState, FIX109). buildExtractionUserBody,
+// parseExtraction and mergeExtraction stay as the desktop's copy of the
+// extraction contract for scripts/probes/summary-recall and the cross-tree
+// pin (state-contract.test.ts); no desktop code sends that request.
 //
 // DLP (A-D6, read this before touching the injection): the desktop talks to
 // the gateway on the PUBLIC path, where the default policy RESTORES
@@ -34,9 +39,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { COMPACTION_EXTRACTION_PROMPT } from "./compaction-prompt";
+import { chainIndexAfterVisibleRows, countVisibleRows } from "./chain-freshness";
 import { STATE_INJECTION_ASSISTANT_ACK, STATE_INJECTION_USER_PREAMBLE } from "./state-injection-prompt";
-import type { CompletionRequest, GatewayClient, GatewayMessage } from "./gateway-client";
+import type { GatewayMessage } from "./gateway-client";
 import type { Logger } from "./logger";
 
 // ── the numbers both surfaces share (web: chat-edge config + web-chat UI) ──
@@ -146,6 +151,21 @@ export function adoptServerState(conversationId: string, dto: Record<string, unk
   return s;
 }
 
+/**
+ * FIX111 — the same server state, anchored on the LOCAL chain (the one with
+ * tool rows and no ids). `coveredRows` and `boundaryRows` are counts of the
+ * server's visible rows: how many the summary covers and how many sit at or
+ * before the boundary. Both are capped at what the chain itself holds — a
+ * server that is behind (an import that failed) covers less, never more.
+ */
+export function anchorStateOnChain(record: ConversationStateRecord, chain: readonly GatewayMessage[], coveredRows: number, boundaryRows: number): ConversationStateRecord {
+  const total = countVisibleRows(chain);
+  record.message_count_at_summary = chainIndexAfterVisibleRows(chain, Math.min(Math.max(0, coveredRows), total));
+  const b = chainIndexAfterVisibleRows(chain, Math.min(Math.max(0, boundaryRows), total));
+  record.manual_compact_boundary_index = b > 0 ? b - 1 : null;
+  return record;
+}
+
 export function isStateEmpty(s: ConversationStateRecord | null | undefined): boolean {
   if (!s) return true;
   if (s.current_goal && s.current_goal.trim()) return false;
@@ -202,19 +222,6 @@ export class MemoryConversationStateStore implements ConversationStateStore {
 }
 
 // ── extractor ──
-export interface ExtractionInput {
-  conversationId: string;
-  model: string;
-  existing: ConversationStateRecord | null;
-  /** The chain slice to fold (chronological). */
-  messages: readonly GatewayMessage[];
-  instructions: string;
-  signal: AbortSignal;
-}
-export type ExtractionResult =
-  | { ok: true; state: ExtractedState; usage?: { promptTokens: number; outputTokens: number } | null }
-  | { ok: false; error: string };
-
 export interface ExtractedState {
   current_goal?: string;
   structured_summary?: Record<string, unknown>;
@@ -223,10 +230,6 @@ export interface ExtractedState {
   open_tasks?: Record<string, unknown>[];
   rejected_approaches?: Record<string, unknown>[];
   unresolved_questions?: Record<string, unknown>[];
-}
-
-export interface StateExtractor {
-  extract(input: ExtractionInput): Promise<ExtractionResult>;
 }
 
 /**
@@ -364,58 +367,6 @@ export function mergeExtraction(existing: ConversationStateRecord | null, fresh:
   if (q) out.unresolved_questions = q;
   out.summary_token_count = Math.ceil(JSON.stringify(out.structured_summary).length / 4);
   return out;
-}
-
-/**
- * The gateway extractor: one call, the shared prompt as system, NO tools.
- * Consumes the streaming endpoint (the host's only completion path) and
- * concatenates the deltas — the model never sees a tool definition here, so
- * Claude's "called a tool instead of writing the summary" failure cannot
- * happen; the prompt forbids it in words as well (A-W3).
- */
-export class GatewayStateExtractor implements StateExtractor {
-  constructor(
-    private readonly gateway: Pick<GatewayClient, "streamCompletion">,
-    private readonly log: Logger,
-  ) {}
-  async extract(input: ExtractionInput): Promise<ExtractionResult> {
-    const req: CompletionRequest = {
-      model: input.model,
-      messages: [
-        { role: "system", content: COMPACTION_EXTRACTION_PROMPT },
-        { role: "user", content: buildExtractionUserBody(input.existing, input.messages, input.instructions) },
-      ],
-      // A-W3 / A-D2: no tools on the extraction call — ever. (The host's
-      // CompletionRequest carries no temperature; chat-edge pins 0.1 on its
-      // side. The gateway default is fine for a JSON envelope.)
-      max_tokens: 1500,
-      // FIX106 — no thinking, as chat-edge sends (FIX102 Part D): a reasoning
-      // model's thinking shares the 1,500-token cap and can leave no JSON.
-      reasoning: { mode: "off", show_summary: false },
-      // FIX36 Part D — the stored summary must never carry raw PII (A-D6):
-      // ask the gateway to SKIP restoring masked values in THIS reply, so
-      // the state keeps placeholders exactly like the web extractor (which
-      // reads ContentMasked). Normal chat turns are separate requests and
-      // still restore for display.
-      metadata: { dlp_response_restore: "off" },
-    };
-    let text = "";
-    try {
-      for await (const ev of this.gateway.streamCompletion(req, input.signal)) {
-        if (ev.kind === "content_delta") text += ev.delta;
-        else if (ev.kind === "error") return { ok: false, error: `${ev.code}: ${ev.message}` };
-        else if (ev.kind === "done") break;
-      }
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
-    const parsed = parseExtraction(text);
-    if (!parsed) {
-      this.log.warn(`COMPACTION extraction for ${input.conversationId} returned non-JSON (${text.length} chars) — state kept, anchor not advanced`);
-      return { ok: false, error: "non-json" };
-    }
-    return { ok: true, state: parsed };
-  }
 }
 
 // ── renderer: chat-edge's renderStateBlock, byte for byte (testdata/state_contract.json) ──

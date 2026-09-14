@@ -1,22 +1,20 @@
-// FIX106 — the desktop's summary request now matches chat-edge's: it names the
-// conversation's language, cuts each message at chat-edge's 500 UTF-8 bytes on a
-// character boundary, asks with thinking off, and renders a list value instead
-// of dropping the summary. (Byte-level agreement: state-contract.test.ts. The
+// FIX106 — the desktop's copy of the summary request matches chat-edge's: it
+// names the conversation's language, cuts each message at chat-edge's 500
+// UTF-8 bytes on a character boundary, and renders a list value instead of
+// dropping the summary. (Byte-level agreement: state-contract.test.ts. The
 // verbatim form was measured and not shipped: scripts/probes/summary-recall.)
+// FIX111: no desktop code sends this request any more — the server
+// summarises (server-summariser.ts); the body builder stays for the probe.
 import { describe, expect, it } from "vitest";
 
-import { COMPACTION_EXTRACTION_PROMPT } from "../src/main/compaction-prompt";
 import {
-  GatewayStateExtractor,
   buildExtractionUserBody,
   conversationLanguageName,
   detectLanguage,
   emptyState,
   renderStateBlock,
 } from "../src/main/conversation-state";
-import type { CompletionRequest, GatewayMessage } from "../src/main/gateway-client";
-
-const log = { info: () => {}, warn: () => {}, error: () => {}, attachFile: () => {} } as unknown as import("../src/main/logger").Logger;
+import type { GatewayMessage } from "../src/main/gateway-client";
 
 describe("FIX106 — the desktop's summary request", () => {
   it("names the conversation's language, as chat-edge does (the desktop body had no language line)", () => {
@@ -34,21 +32,6 @@ describe("FIX106 — the desktop's summary request", () => {
     const emoji = buildExtractionUserBody(null, [{ role: "user", content: "😀".repeat(200) }], "");
     expect(Array.from(emoji.match(/\[user\] (.*)\.\.\. \[truncated\]/u)![1]!)).toHaveLength(125);
     expect(buildExtractionUserBody(null, [{ role: "user", content: "a".repeat(500) }], "")).not.toContain("[truncated]");
-  });
-
-  it("asks with thinking off and the shared prompt as the system message", async () => {
-    let sent: CompletionRequest | null = null;
-    const gateway = {
-      async *streamCompletion(req: CompletionRequest) {
-        sent = req;
-        yield { kind: "content_delta" as const, delta: '{"current_goal":"g","structured_summary":{"key_context":"k"}}' };
-        yield { kind: "done" as const, finish_reason: "stop" };
-      },
-    };
-    const out = await new GatewayStateExtractor(gateway as never, log).extract({ conversationId: "c", model: "qwen3.8-27b-fp8", existing: null, messages: [{ role: "user", content: "hi" }], instructions: "", signal: new AbortController().signal });
-    expect(out.ok).toBe(true);
-    expect(sent!.reasoning).toEqual({ mode: "off", show_summary: false });
-    expect(sent!.messages[0]!.content).toBe(COMPACTION_EXTRACTION_PROMPT);
   });
 
   it("renders a summary value that is a list instead of dropping it", () => {

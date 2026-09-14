@@ -30,24 +30,23 @@
 // No 'electron' import: unit-tested in plain Node with fakes.
 
 import type { BudgetBasis } from "./context-budget";
-import { type CompileOptions, type CompiledChain, compileChain, estimateTokens } from "./context-compiler";
+import { type CompileOptions, type CompiledChain, compileChain } from "./context-compiler";
 import {
   COMPACT_TARGET_RATIO,
   COMPACT_TRIGGER_RATIO,
   CONTEXT_METER_SHOW_RATIO,
   type ConversationStateRecord,
   type ConversationStateStore,
-  EXTRACTION_BATCH_LIMIT,
-  EXTRACTION_MAX_BATCHES,
-  type StateExtractor,
   adoptServerState,
+  anchorStateOnChain,
   emptyState,
   isStateEmpty,
-  mergeExtraction,
   renderStateMessages,
 } from "./conversation-state";
+import { countVisibleRows } from "./chain-freshness";
 import type { GatewayMessage } from "./gateway-client";
 import type { Logger } from "./logger";
+import type { ConversationSummariser } from "./server-summariser";
 
 export interface ContextBudgetEvent {
   /** FIX104 (chat-edge FIX102): the SENT history over the budget, clamped to 1. */
@@ -108,8 +107,9 @@ export interface TurnBudget {
 
 export interface ContextManagerDeps {
   store: ConversationStateStore;
-  /** null = summarise nothing (trim + honest note only, FIX32 behaviour). */
-  extractor: StateExtractor | null;
+  /** FIX111 — the server, through POST /compact. null = summarise nothing
+   *  (trim + honest note only, FIX32 behaviour; DESKTOP_COMPACTION_SUMMARY=off). */
+  summariser: ConversationSummariser | null;
   log: Logger;
   triggerRatio?: number;
   targetRatio?: number;
@@ -130,6 +130,10 @@ export interface CompiledTurn extends CompiledChain {
 export class ContextManager {
   private readonly trigger: number;
   private readonly target: number;
+  /** FIX111 — the chain's visible-row count at the last server request per
+   *  conversation: a second request with nothing new imported since would
+   *  fold nothing and is not made (requirement: never fire every turn). */
+  private readonly lastCompact = new Map<string, number>();
   constructor(private readonly deps: ContextManagerDeps) {
     this.trigger = clampRatio(deps.triggerRatio, COMPACT_TRIGGER_RATIO);
     this.target = Math.min(clampRatio(deps.targetRatio, COMPACT_TARGET_RATIO), this.trigger);
@@ -154,14 +158,16 @@ export class ContextManager {
     let extractionRan = false;
     let extractionOk = false;
 
-    if (memoryOn && plan.compacted && plan.dropEnd > 0 && this.deps.extractor) {
+    if (memoryOn && plan.compacted && plan.dropEnd > 0 && this.deps.summariser) {
       const anchor = Math.min(Math.max(state?.message_count_at_summary ?? 0, 0), history.length);
       if (anchor < plan.dropEnd) {
         extractionRan = true;
         const coverTo = plan.dropEnd;
         // A-W9 — the pause has a name.
         this.deps.emit(conversationId, "compaction_status", { status: "summarizing" });
-        state = await this.fold(conversationId, turn.model, history, anchor, coverTo, state, signal);
+        // FIX111 — the server folds everything it holds and sets the boundary
+        // there; the re-plan below then drops up to it (server-summariser.ts).
+        state = await this.summarise(conversationId, history, state, state?.compaction_instructions ?? "", signal);
         extractionOk = (state?.message_count_at_summary ?? 0) >= coverTo;
         // The block changed the budget: plan again against it.
         plan = this.plan(messages, turn, state, this.noteStatus(memoryOn, true, extractionOk, state, turn));
@@ -169,7 +175,7 @@ export class ContextManager {
     }
 
     const statePresent = !isStateEmpty(state);
-    let summaryStatus: SummaryStatus | "" = plan.compacted ? summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, statePresent) : "";
+    let summaryStatus: SummaryStatus | "" = plan.compacted ? summaryStatusOf(memoryOn, this.deps.summariser !== null, extractionRan, false, extractionOk, statePresent) : "";
     // FIX105 Part B — rows the host never loaded cannot be in a summary it
     // wrote: a summary that covers everything LOADED is still partial.
     if (summaryStatus === "complete" && plan.omittedOlder > 0) summaryStatus = "partial";
@@ -234,25 +240,25 @@ export class ContextManager {
    * next turn drops up to. A failed summary drops nothing.
    */
   async manualCompact(conversationId: string, history: readonly GatewayMessage[], model: string, instructions: string, signal: AbortSignal): Promise<{ ok: true; state: ConversationStateRecord } | { ok: false; error: string }> {
-    if (!this.deps.extractor) return { ok: false, error: "no-extractor" };
+    void model; // FIX111 — the server picks the summarising model
+    if (!this.deps.summariser) return { ok: false, error: "no-summariser" };
     if (history.length === 0) return { ok: false, error: "empty" };
     const existing = this.deps.store.get(conversationId);
-    const anchor = Math.min(Math.max(existing?.message_count_at_summary ?? 0, 0), history.length);
+    // Requirement 6: the user's instructions, else the ones on file, else nothing — never invented here.
     const instr = instructions.trim() || existing?.compaction_instructions || "";
     this.deps.emit(conversationId, "compaction_status", { status: "summarizing" });
-    let state = existing;
-    if (anchor < history.length) {
-      state = await this.fold(conversationId, model, history, anchor, history.length, existing, signal, instr);
-    }
+    // A manual request is the user's ask: it always goes to the server.
+    this.lastCompact.delete(conversationId);
+    const state = await this.summarise(conversationId, history, existing, instr, signal);
     if (!state || isStateEmpty(state)) return { ok: false, error: "no-summary" };
+    if (state.manual_compact_boundary_index === null) return { ok: false, error: "no-boundary" };
     if ((state.message_count_at_summary ?? 0) < history.length) {
-      // A batch failed part-way: the summary does not cover the newest
-      // messages, so a boundary there would drop un-summarised context.
+      // The server set its boundary but its fold stopped short (batch bound
+      // or a failed pass): the boundary is on file on both surfaces — the
+      // next turn drops to it with a partial summary and says so.
+      this.deps.log.warn(`MANUAL COMPACT conv=${conversationId}: the server's summary covers ${state.message_count_at_summary} of ${history.length} chain messages`);
       return { ok: false, error: "coverage-incomplete" };
     }
-    state.manual_compact_boundary_index = history.length - 1;
-    if (instr) state.compaction_instructions = instr;
-    this.deps.store.put(state);
     this.deps.log.info(`MANUAL COMPACT conv=${conversationId}: boundary=${state.manual_compact_boundary_index} folded_to=${state.message_count_at_summary}`);
     return { ok: true, state };
   }
@@ -278,7 +284,7 @@ export class ContextManager {
    * chat-edge's it now also says when the summary is partial or failed.
    */
   private noteStatus(memoryOn: boolean, extractionRan: boolean, extractionOk: boolean, state: ConversationStateRecord | null, turn: TurnBudget): SummaryStatus {
-    const status = summaryStatusOf(memoryOn, this.deps.extractor !== null, extractionRan, false, extractionOk, !isStateEmpty(state));
+    const status = summaryStatusOf(memoryOn, this.deps.summariser !== null, extractionRan, false, extractionOk, !isStateEmpty(state));
     return status === "complete" && Math.trunc(turn.omittedOlder ?? 0) > 0 ? "partial" : status;
   }
 
@@ -326,36 +332,47 @@ export class ContextManager {
     };
   }
 
-  /** Fold history[from, to) into the state in batches. Never wipes on failure. */
-  private async fold(conversationId: string, model: string, history: readonly GatewayMessage[], from: number, to: number, existing: ConversationStateRecord | null, signal: AbortSignal, instructions?: string): Promise<ConversationStateRecord | null> {
-    let state = existing;
-    let cursor = from;
-    for (let i = 0; i < EXTRACTION_MAX_BATCHES && cursor < to; i++) {
-      const end = Math.min(cursor + EXTRACTION_BATCH_LIMIT, to);
-      const slice = history.slice(cursor, end);
-      const res = await this.deps.extractor!.extract({
-        conversationId,
-        model,
-        existing: state,
-        messages: slice,
-        instructions: instructions ?? state?.compaction_instructions ?? "",
-        signal,
-      });
-      if (!res.ok) {
-        this.deps.log.warn(`COMPACTION extraction failed for ${conversationId} at [${cursor},${end}): ${res.error} — state kept, anchor stays ${cursor}`);
-        break;
-      }
-      const merged = mergeExtraction(state, res.state, conversationId);
-      merged.message_count_at_summary = end;
-      if (instructions) merged.compaction_instructions = instructions;
-      // Carry the manual boundary through a merge.
-      merged.manual_compact_boundary_index = state?.manual_compact_boundary_index ?? merged.manual_compact_boundary_index ?? null;
-      this.deps.store.put(merged);
-      state = merged;
-      cursor = end;
-      this.deps.log.info(`COMPACTION folded conv=${conversationId} [${cursor - slice.length},${cursor}) → state (${estimateTokens(JSON.stringify(state.structured_summary))} summary tokens)${res.usage ? ` cost ${res.usage.promptTokens}+${res.usage.outputTokens} tokens` : ""}`);
+  /**
+   * FIX111 — ask the server to summarise everything it holds (POST /compact),
+   * then place its id-anchored state on this chain by row count. `history`
+   * is the chain as built for the turn: what was imported through the last
+   * turn, plus (in compile) the new user message that is not on the server
+   * yet — the count-based placement never reaches past what the server
+   * folded. Returns the existing state untouched when the server could not
+   * summarise, so a turn goes out trimmed with the honest note rather than
+   * not at all. Never throws.
+   */
+  private async summarise(conversationId: string, history: readonly GatewayMessage[], existing: ConversationStateRecord | null, instructions: string, signal: AbortSignal): Promise<ConversationStateRecord | null> {
+    if (!this.deps.summariser) return existing;
+    const localVisible = countVisibleRows(history);
+    if (this.lastCompact.get(conversationId) === localVisible) {
+      this.deps.log.info(`SUMMARY conv=${conversationId}: server compact not requested — nothing imported since the last request (${localVisible} visible rows)`);
+      return existing;
     }
-    return state ?? (existing ? existing : null) ?? null;
+    this.lastCompact.set(conversationId, localVisible);
+    let res;
+    try {
+      res = await this.deps.summariser.compact(conversationId, instructions, signal);
+    } catch (err) {
+      this.deps.log.warn(`SUMMARY conv=${conversationId}: server compact threw: ${(err as Error).message} — state kept`);
+      return existing;
+    }
+    if (!res) return existing;
+    const adopted = adoptServerState(conversationId, res.state, res.rowIds);
+    if (!adopted) {
+      this.deps.log.warn(`SUMMARY conv=${conversationId}: the server returned no summary — state kept`);
+      return existing;
+    }
+    const upTo = typeof res.state["summarized_up_to_message_id"] === "string" ? (res.state["summarized_up_to_message_id"] as string) : null;
+    // A row past the ceiling is older than everything loaded: the server covers all of it.
+    const rowsUpTo = upTo ? res.rowIds.indexOf(upTo) : -1;
+    const rowsBoundary = res.boundaryMessageId ? res.rowIds.indexOf(res.boundaryMessageId) : -1;
+    const coveredRows = rowsUpTo >= 0 ? rowsUpTo + 1 : upTo && res.rowsTruncated ? res.rowIds.length : 0;
+    const boundaryRows = rowsBoundary >= 0 ? rowsBoundary + 1 : res.boundaryMessageId ? res.rowIds.length : 0;
+    anchorStateOnChain(adopted, history, coveredRows, boundaryRows);
+    this.deps.store.put(adopted);
+    this.deps.log.info(`SUMMARY conv=${conversationId}: server summary adopted — covers ${coveredRows} of ${res.rowIds.length} server rows → chain anchor ${adopted.message_count_at_summary} of ${history.length}, boundary ${adopted.manual_compact_boundary_index ?? "none"}`);
+    return adopted;
   }
 }
 

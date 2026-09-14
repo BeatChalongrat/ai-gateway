@@ -91,6 +91,47 @@ export function countVisibleRows(messages: readonly GatewayMessage[]): number {
   return rows;
 }
 
+/**
+ * FIX111 — where `n` visible rows end in the chain: the index just after the
+ * message that would have been the n-th imported row. The server's state is
+ * anchored by row id; the local chain has no ids, so the anchor is placed by
+ * counting rows the same way importVisible produced them (countVisibleRows).
+ * A user row covers that message alone when the turn went on to import an
+ * assistant row (that row is the n+1-th); a turn's text row, or a user row of
+ * a turn with no text, covers the turn's tool rows too — they were never on
+ * the server, and the summary cannot cover them either way. n ≤ 0 → 0;
+ * n beyond the chain → its length.
+ */
+export function chainIndexAfterVisibleRows(messages: readonly GatewayMessage[], n: number): number {
+  if (n <= 0) return 0;
+  const endOfTurn = (from: number): number => {
+    let j = from + 1;
+    while (j < messages.length && messages[j]!.role !== "user") j++;
+    return j;
+  };
+  let rows = 0;
+  let textThisTurn = false;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (m.role === "user") {
+      rows++;
+      textThisTurn = false;
+      if (rows === n) {
+        for (let j = i + 1; j < messages.length && messages[j]!.role !== "user"; j++) {
+          const x = messages[j]!;
+          if (x.role === "assistant" && typeof x.content === "string" && x.content.trim().length > 0) return i + 1;
+        }
+        return endOfTurn(i);
+      }
+    } else if (m.role === "assistant" && typeof m.content === "string" && m.content.trim().length > 0 && !textThisTurn) {
+      rows++;
+      textThisTurn = true;
+      if (rows === n) return endOfTurn(i);
+    }
+  }
+  return messages.length;
+}
+
 export type ChainFreshness = "fresh" | "stale" | "unmarked" | "unknown";
 
 /** The decision, from the marker and the server's current count. */

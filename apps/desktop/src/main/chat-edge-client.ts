@@ -20,6 +20,17 @@ export interface ProjectDto {
   name?: string | null;
   instructions?: string | null;
 }
+/** FIX111 — POST /compact's answer (chat-edge ManualCompactResult). */
+export interface CompactResultDto {
+  state: Record<string, unknown> | null;
+  boundary_message_id?: string;
+  messages_total?: number;
+  coverage_reached?: boolean;
+}
+/** 8 batches × the server's 90 s extraction budget would be 12 minutes; a
+ *  compaction that is still running after this is treated as no summary. */
+const COMPACT_TIMEOUT_MS = 10 * 60_000;
+
 export interface MessageDto {
   id: string;
   role: string;
@@ -363,10 +374,19 @@ export class ChatEdgeClient {
     return this.get<Record<string, unknown>>(`/api/v1/conversations/${encodeURIComponent(conversationId)}/state`);
   }
 
-  /** FIX33 A-W7 on the server: summarise now + set the boundary (web-side state). */
-  async compactConversation(conversationId: string, instructions: string): Promise<boolean> {
-    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`, { instructions });
-    return res !== null;
+  /** FIX33 A-W7 on the server: summarise now + set the boundary. FIX111 —
+   *  the desktop's summariser (server-summariser.ts): the answer carries
+   *  the state row, the boundary id and whether the fold reached it. Null
+   *  on any failure. The server folds up to 8 batches with a 90 s budget
+   *  each, so this call gets its own timeout. */
+  async compactConversation(conversationId: string, instructions: string): Promise<CompactResultDto | null> {
+    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`, { instructions }, COMPACT_TIMEOUT_MS);
+    if (!res) return null;
+    try {
+      return (await res.json()) as CompactResultDto;
+    } catch {
+      return null;
+    }
   }
 
   private async get<T>(path: string, timeoutMs = this.timeoutMs): Promise<T | null> {
@@ -388,7 +408,7 @@ export class ChatEdgeClient {
     }
   }
 
-  private async send(method: "POST" | "PATCH", path: string, body: unknown): Promise<Response | null> {
+  private async send(method: "POST" | "PATCH", path: string, body: unknown, timeoutMs = this.timeoutMs): Promise<Response | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
@@ -396,7 +416,7 @@ export class ChatEdgeClient {
         method,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) {
         let detail = "";

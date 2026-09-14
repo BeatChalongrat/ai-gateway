@@ -61,7 +61,8 @@ import { SessionStore } from "./session-store";
 import { TurnCoordinator } from "./turn-coordinator";
 import { ContextManager } from "./context-manager";
 import { ModelWindows } from "./model-windows";
-import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, GatewayStateExtractor, JsonConversationStateStore } from "./conversation-state";
+import { COMPACT_TARGET_RATIO, COMPACT_TRIGGER_RATIO, CONTEXT_METER_SHOW_RATIO, JsonConversationStateStore } from "./conversation-state";
+import { ChatEdgeSummariser } from "./server-summariser";
 import { RunLedgerStore } from "./run-ledger";
 import { UpdateNotifier } from "./update-check";
 import { encodeImageForVision } from "./image-encoder";
@@ -331,7 +332,8 @@ void app.whenReady().then(async () => {
   const summaryOff = (process.env["DESKTOP_COMPACTION_SUMMARY"] ?? "").toLowerCase() === "off";
   const contextManager = new ContextManager({
     store: new JsonConversationStateStore(path.join(dataDir, "conversation-state")),
-    extractor: summaryOff ? null : new GatewayStateExtractor(gateway, log),
+    // FIX111 — the server summarises (POST /compact); the file here is a copy.
+    summariser: summaryOff ? null : new ChatEdgeSummariser(chatEdge, log),
     log,
     emit: (c, e, d) => coordinator?.emitTurnEvent(c, e, d),
   });
