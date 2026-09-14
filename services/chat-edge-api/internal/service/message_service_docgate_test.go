@@ -53,7 +53,7 @@ func docxFile() model.ConversationFile {
 
 func TestDocContext_ZeroFiles_InjectsHeaderlessContract(t *testing.T) {
 	s := docGateService(nil, nil)
-	got := s.docContext(context.Background(), uuid.New(), uuid.New())
+	got := s.docContext(context.Background(), uuid.New(), uuid.New(), true)
 
 	if got == "" {
 		t.Fatal("docContext returned empty for a zero-file conversation — from-scratch generation is gated off again")
@@ -68,7 +68,7 @@ func TestDocContext_ZeroFiles_InjectsHeaderlessContract(t *testing.T) {
 
 func TestPptxContext_ZeroFiles_InjectsHeaderlessContract(t *testing.T) {
 	s := docGateService(nil, nil)
-	got := s.pptxContext(context.Background(), uuid.New(), uuid.New())
+	got := s.pptxContext(context.Background(), uuid.New(), uuid.New(), true)
 
 	if got == "" {
 		t.Fatal("pptxContext returned empty for a zero-file conversation")
@@ -83,7 +83,7 @@ func TestPptxContext_ZeroFiles_InjectsHeaderlessContract(t *testing.T) {
 
 func TestDocContext_LookupError_StillInjectsHeaderless(t *testing.T) {
 	s := docGateService(nil, context.DeadlineExceeded)
-	got := s.docContext(context.Background(), uuid.New(), uuid.New())
+	got := s.docContext(context.Background(), uuid.New(), uuid.New(), true)
 	if !strings.Contains(got, ":::doc-plan") {
 		t.Errorf("a failed lookup should degrade to the headerless contract, got:\n%.200s", got)
 	}
@@ -92,7 +92,7 @@ func TestDocContext_LookupError_StillInjectsHeaderless(t *testing.T) {
 func TestDocContext_WithInspectedDocx_UnchangedFullBlock(t *testing.T) {
 	f := docxFile()
 	s := docGateService([]model.ConversationFile{f}, nil)
-	got := s.docContext(context.Background(), uuid.New(), uuid.New())
+	got := s.docContext(context.Background(), uuid.New(), uuid.New(), true)
 
 	if !strings.Contains(got, "## Document Context") {
 		t.Errorf("uploaded-doc path must keep the full structure block:\n%.200s", got)
@@ -114,7 +114,7 @@ func TestDocContext_FilesButNoDoc_KeepsHeaderless(t *testing.T) {
 		OriginalFilename: "photo.png",
 	}
 	s := docGateService([]model.ConversationFile{img}, nil)
-	got := s.docContext(context.Background(), uuid.New(), uuid.New())
+	got := s.docContext(context.Background(), uuid.New(), uuid.New(), true)
 	if !strings.Contains(got, "No document is currently uploaded") {
 		t.Errorf("files-but-no-doc path should still return the headerless prompt:\n%.200s", got)
 	}
@@ -127,7 +127,7 @@ func TestExcelContext_ZeroFiles_InjectsHeaderlessContract(t *testing.T) {
 	// now, so the contract must be advertised (a plan card in an empty
 	// chat executes instead of 404ing).
 	s := docGateService(nil, nil)
-	got := s.excelContext(context.Background(), uuid.New(), uuid.New())
+	got := s.excelContext(context.Background(), uuid.New(), uuid.New(), true)
 
 	if got == "" {
 		t.Fatal("excelContext returned empty for a zero-file conversation — Excel from-scratch is gated off again")
@@ -150,7 +150,7 @@ func TestExcelContext_FilesButNoWorkbook_KeepsHeaderless(t *testing.T) {
 		OriginalFilename: "photo.png",
 	}
 	s := docGateService([]model.ConversationFile{img}, nil)
-	got := s.excelContext(context.Background(), uuid.New(), uuid.New())
+	got := s.excelContext(context.Background(), uuid.New(), uuid.New(), true)
 	if !strings.Contains(got, "No workbook is currently uploaded") {
 		t.Errorf("files-but-no-workbook should return the headerless prompt, got:\n%.300s", got)
 	}
@@ -167,7 +167,7 @@ func TestExcelContext_WithInspectedWorkbook_UnchangedFullBlock(t *testing.T) {
 		InspectionJSON:   &inspection,
 	}
 	s := docGateService([]model.ConversationFile{f}, nil)
-	got := s.excelContext(context.Background(), uuid.New(), uuid.New())
+	got := s.excelContext(context.Background(), uuid.New(), uuid.New(), true)
 
 	if !strings.Contains(got, "You have access to an Excel workbook") {
 		t.Errorf("uploaded-workbook path must keep the full structure block:\n%.300s", got)

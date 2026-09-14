@@ -2282,9 +2282,10 @@ func (s *MessageService) buildSystemPrefix(
 	tenantID, userID uuid.UUID,
 	conv *model.Conversation,
 	ragQuery string,
+	office OfficeIntent,
 	resolvedModel string,
 ) string {
-	text, _ := s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, resolvedModel)
+	text, _ := s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, office, resolvedModel)
 	return text
 }
 
@@ -2299,11 +2300,18 @@ func (s *MessageService) buildSystemPrefix(
 //
 // resolvedModel is the concrete model id chosen for this turn (after
 // auto-resolution); it drives the per-model adapter layer.
+//
+// FIX112 Part B — `office` says which Office plan contracts the user's recent
+// words call for (DetectOfficeIntent over OfficeIntentText). A contract
+// ships when an inspected file of its kind is in the conversation OR the
+// intent names it; neither → nothing, where 8,029 characters used to go out
+// on every turn.
 func (s *MessageService) buildSystemPrefixWithSources(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
 	conv *model.Conversation,
 	ragQuery string,
+	office OfficeIntent,
 	resolvedModel string,
 ) (string, []ContextSource) {
 	in := CompileContext{
@@ -2337,9 +2345,9 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	if conv != nil {
 		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery, projectKB)
 		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
-		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID)
-		in.DocContext = s.docContext(ctx, tenantID, conv.ID)
-		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID)
+		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID, office.Excel)
+		in.DocContext = s.docContext(ctx, tenantID, conv.ID, office.Doc)
+		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID, office.Pptx)
 		in.CanvasContext = s.canvasContext(ctx, tenantID, conv.ID)
 	}
 	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc, s.tempChatReadsMemory)
@@ -2377,7 +2385,7 @@ func (s *MessageService) activeToolNames(conv *model.Conversation) []string {
 // newest version is what the model needs to plan further edits
 // against.
 func (s *MessageService) excelContext(
-	ctx context.Context, tenantID, convID uuid.UUID,
+	ctx context.Context, tenantID, convID uuid.UUID, wanted bool,
 ) string {
 	if s.excelLookup == nil {
 		return ""
@@ -2388,7 +2396,7 @@ func (s *MessageService) excelContext(
 		// contract. ExcelService.ExecutePlan now runs create-from-scratch
 		// when source_file_id is omitted, so "สร้างตาราง Excel สรุปยอดขาย"
 		// in a brand-new chat yields a plan card that actually executes.
-		return excelCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, excelCapabilitiesPromptHeaderless)
 	}
 	// Newest-first — pick the first xlsx with a cached inspection.
 	var latest *model.ConversationFile
@@ -2406,7 +2414,7 @@ func (s *MessageService) excelContext(
 	if latest == nil {
 		// Files exist but none is an inspected workbook — same as the
 		// zero-file case from the model's point of view.
-		return excelCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, excelCapabilitiesPromptHeaderless)
 	}
 	return renderExcelSystemBlock(latest)
 }
@@ -2414,6 +2422,17 @@ func (s *MessageService) excelContext(
 // renderExcelSystemBlock builds the literal text injected at the
 // end of the system prompt. Kept as a free function so unit tests
 // can assert on the snapshot without booting a full MessageService.
+// headerlessIf — FIX112 Part B: the create-from-scratch contract ships only
+// when the user's words asked for that kind of file (office_intent.go);
+// otherwise this kind contributes nothing to the prompt. An inspected file
+// of the kind still gets its full block regardless (the callers).
+func headerlessIf(wanted bool, contract string) string {
+	if wanted {
+		return contract
+	}
+	return ""
+}
+
 func renderExcelSystemBlock(f *model.ConversationFile) string {
 	var b strings.Builder
 	b.WriteString("## Excel File Context\n\n")
@@ -2515,7 +2534,7 @@ const excelCapabilitiesPromptHeaderless = "## Excel File Context\n\n" +
 // inspection JSON + a contract to emit :::doc-plan blocks that the
 // frontend turns into the DocPlanCard.
 func (s *MessageService) docContext(
-	ctx context.Context, tenantID, convID uuid.UUID,
+	ctx context.Context, tenantID, convID uuid.UUID, wanted bool,
 ) string {
 	if s.excelLookup == nil {
 		return ""
@@ -2527,7 +2546,7 @@ func (s *MessageService) docContext(
 		// conversation should still yield a :::doc-plan card. The
 		// generator runs in create mode when source_file_id is omitted,
 		// so the headerless prompt is safe without any uploaded file.
-		return docCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, docCapabilitiesPromptHeaderless)
 	}
 	// docx + pdf only — pptx is owned by pptxContext below so the
 	// two capabilities prompts stay orthogonal (the AI gets a
@@ -2549,7 +2568,7 @@ func (s *MessageService) docContext(
 		// the model can generate from-scratch reports when the user
 		// asks ("create a PDF report about X"). Without the catalog
 		// it would just write prose.
-		return docCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, docCapabilitiesPromptHeaderless)
 	}
 	return renderDocSystemBlock(latest)
 }
@@ -2635,7 +2654,7 @@ const docCapabilitiesPromptHeaderless = "## Document Report Capabilities\n\nNo d
 // headerless capabilities prompt when no pptx is uploaded but the
 // user might still ask for one.
 func (s *MessageService) pptxContext(
-	ctx context.Context, tenantID, convID uuid.UUID,
+	ctx context.Context, tenantID, convID uuid.UUID, wanted bool,
 ) string {
 	if s.excelLookup == nil {
 		return ""
@@ -2645,7 +2664,7 @@ func (s *MessageService) pptxContext(
 		// Same rationale as docContext: a brand-new conversation with
 		// no files must still get the :::pptx-plan contract so
 		// create-from-scratch deck requests produce a plan card.
-		return pptxCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, pptxCapabilitiesPromptHeaderless)
 	}
 	var latest *model.ConversationFile
 	for i := len(files) - 1; i >= 0; i-- {
@@ -2660,7 +2679,7 @@ func (s *MessageService) pptxContext(
 		break
 	}
 	if latest == nil {
-		return pptxCapabilitiesPromptHeaderless
+		return headerlessIf(wanted, pptxCapabilitiesPromptHeaderless)
 	}
 	return renderPptxSystemBlock(latest)
 }
@@ -3190,8 +3209,9 @@ func (s *MessageService) compileAndBuildRequest(
 	// so the closure returns both the prefix text AND the
 	// ContextSource list each block contributed. Compile uses the
 	// MOST RECENT call's sources via CompiledContext.Sources.
+	office := DetectOfficeIntent(OfficeIntentText(history, ragQuery))
 	build := func() (string, []ContextSource) {
-		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, modelID)
+		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, office, modelID)
 	}
 
 	if s.compiler == nil {
@@ -3408,7 +3428,7 @@ func (s *MessageService) InspectContext(
 		// Synthesize a CompiledContext so callers see the same
 		// shape they'd get with the compiler wired — just with no
 		// compaction ever applied.
-		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
+		prefix := s.buildSystemPrefix(ctx, tenantID, userID, conv, ragQuery, DetectOfficeIntent(OfficeIntentText(history, ragQuery)), conv.ModelID)
 		// FIX101 — s.compiler is nil only in tests and misconfiguration,
 		// but the number it reports still has to come from the same place
 		// the real path uses, or /context-info would answer with the seed
@@ -3429,7 +3449,7 @@ func (s *MessageService) InspectContext(
 		History:   history,
 		ImageURLs: imageURLs,
 		BuildPrefix: func() (string, []ContextSource) {
-			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, conv.ModelID)
+			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, DetectOfficeIntent(OfficeIntentText(history, ragQuery)), conv.ModelID)
 		},
 		NumTools:      numTools,
 		OmittedOlder:  s.omittedOlder(ctx, tenantID, convID, len(history)),
