@@ -1,0 +1,2 @@
+The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:
+Do not say 'according to my memory' or mention the memory system.

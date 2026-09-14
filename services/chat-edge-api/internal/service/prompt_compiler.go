@@ -715,11 +715,17 @@ func (pc *PromptCompiler) skillsBlock(in CompileContext) string {
 // has to name what IS kept (the transcript), because a user who reads
 // "temporary" as "this conversation disappears" is being misled by us,
 // not by the model.
-const temporaryChatNotice = `<temporary_chat>
-This is a temporary chat. Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.
-If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.
-The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.
-</temporary_chat>`
+//
+// FIX112 Part A — the three sentences are one asset both surfaces read
+// (prompt_temporary_chat.txt; the desktop holds the same bytes as
+// TEMPORARY_CHAT_BODY, pinned by fix112-prompt-pins.test.ts). Each surface
+// wraps its own envelope: here the XML tag and the "This is a temporary
+// chat." lead-in; the desktop a markdown heading that says the same.
+//
+//go:embed prompt_temporary_chat.txt
+var temporaryChatBodyRaw string
+
+var temporaryChatNotice = "<temporary_chat>\nThis is a temporary chat. " + strings.TrimSpace(strings.ReplaceAll(temporaryChatBodyRaw, "\r\n", "\n")) + "\n</temporary_chat>"
 
 // memoryBlock injects the saved-memory facts. The proactive-save POLICY
 // now lives in the tool policy (Layer 7), so this layer only surfaces

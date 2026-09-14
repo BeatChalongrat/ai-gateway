@@ -71,10 +71,21 @@ const MAX_BLOCK_CHARS = 2000;
  * between them must not be told two different things. The third sentence names
  * what IS kept, because a user who reads "temporary" as "this conversation
  * disappears" has been misled by us, not by the model. */
-const TEMPORARY_CHAT_NOTICE = `\n\n## Temporary chat
-Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.
-If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.
-The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.\n`;
+/** FIX112 Part A — the three sentences are chat-edge's prompt_temporary_chat.txt,
+ *  byte for byte (fix112-prompt-pins.test.ts). The envelope is this side's:
+ *  a heading here, `<temporary_chat>` plus a lead-in sentence on the web. */
+export const TEMPORARY_CHAT_BODY =
+  "Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.\n" +
+  "If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.\n" +
+  "The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.";
+const TEMPORARY_CHAT_NOTICE = `\n\n## Temporary chat\n${TEMPORARY_CHAT_BODY}\n`;
+
+/** FIX112 Part A — the memory frame's two shared sentences: chat-edge's
+ *  prompt_memory_frame.txt, line 1 and line 2 (pinned). The facts sentence
+ *  below is NOT shared — it says "(newest first)" because this side caps and
+ *  orders the list; the web's sentence does not. */
+export const MEMORY_STANDING_LINE = "The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:";
+export const MEMORY_CLOSING_LINE = "Do not say 'according to my memory' or mention the memory system.";
 
 const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 const parseTs = (s: string): number => {
@@ -472,7 +483,7 @@ function renderGlobalBlock(notes: MemoryNote[]): string {
   }
   let out = "\n\n## Memory (global)\n";
   if (instructions.length > 0) {
-    out += "The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:\n";
+    out += MEMORY_STANDING_LINE + "\n";
     for (const line of instructions) out += line;
   }
   if (facts.length > 0) {
@@ -480,7 +491,7 @@ function renderGlobalBlock(notes: MemoryNote[]): string {
     for (const line of facts) out += line;
   }
   if (omitted > 0) out += `(+${omitted} older note(s) omitted)\n`;
-  out += "Do not say 'according to my memory' or mention the memory system.\n";
+  out += MEMORY_CLOSING_LINE + "\n";
   return out;
 }
 

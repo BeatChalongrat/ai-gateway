@@ -16,6 +16,7 @@ package service
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -40,11 +41,11 @@ var (
 	// the user's real value permanently and inject the meaningless
 	// token into every future conversation.
 	ErrMemoryMaskedContent = errors.New("memory: content contains DLP mask placeholders")
-	ErrMemoryDuplicate         = errors.New("memory: identical memory already exists")
-	ErrMemoryInvalidScope      = errors.New("memory: invalid scope_type")
-	ErrMemoryInvalidType       = errors.New("memory: invalid memory_type")
-	ErrMemoryInvalidSource     = errors.New("memory: invalid source_type")
-	ErrMemoryNotFound          = errors.New("memory: not found")
+	ErrMemoryDuplicate     = errors.New("memory: identical memory already exists")
+	ErrMemoryInvalidScope  = errors.New("memory: invalid scope_type")
+	ErrMemoryInvalidType   = errors.New("memory: invalid memory_type")
+	ErrMemoryInvalidSource = errors.New("memory: invalid source_type")
+	ErrMemoryNotFound      = errors.New("memory: not found")
 	// S9 — enforced when the user is at or above the tenant's
 	// max_memories_per_user setting. Message includes the
 	// observed/limit pair so the UI can render a clear hint.
@@ -654,7 +655,8 @@ func renderMemoryBlock(memories []model.Memory) string {
 	sb.WriteString("<saved_user_memory>\n")
 	if len(instructions) > 0 {
 		sb.WriteString("<standing_instructions>\n")
-		sb.WriteString("The user set these standing instructions. Follow them in every response, the same as instructions in the current message, unless the current message explicitly overrides them:\n")
+		sb.WriteString(memoryStandingLine)
+		sb.WriteString("\n")
 		for _, m := range instructions {
 			sb.WriteString("- ")
 			sb.WriteString(m.Content)
@@ -672,10 +674,29 @@ func renderMemoryBlock(memories []model.Memory) string {
 		}
 		sb.WriteString("</known_facts>\n")
 	}
-	sb.WriteString("Do not say 'according to my memory' or mention the memory system.\n")
+	sb.WriteString(memoryClosingLine)
+	sb.WriteString("\n")
 	sb.WriteString("</saved_user_memory>\n")
 	return sb.String()
 }
+
+// FIX112 Part A — the two sentences of the memory frame that the desktop
+// renders word for word (its "## Memory (global)" block) come from one
+// asset: line 1 introduces the standing instructions, line 2 closes the
+// block. The facts sentence is NOT shared: the desktop's says "(newest
+// first)" because it caps and orders its list; the web's does not. It stays
+// in code on each side, deliberately.
+//
+//go:embed prompt_memory_frame.txt
+var memoryFrameRaw string
+
+var memoryStandingLine, memoryClosingLine = func() (string, string) {
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(memoryFrameRaw, "\r\n", "\n")), "\n")
+	if len(lines) < 2 {
+		panic("prompt_memory_frame.txt must hold two lines: the standing-instructions lead and the closing sentence")
+	}
+	return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1])
+}()
 
 // ---------------------------------------------------------------------------
 // Audit log helper
@@ -722,13 +743,14 @@ var prohibitedSubstrings = []string{
 
 // FIX49 Part B (8a) — the DLP mask-token shapes the gateway can emit
 // (backend/app/services/dlp/transformer.py is the source of truth):
-//   <<CATEGORY_N>>  pseudonyms  (<<PERSON_A>>, <<EMAIL_1>>, …)
-//   <rN>            secret-class tokens (<r0>, <r1a>, …)
-//   [CATEGORY_N] / [[CATEGORY_N]]  legacy indexed tokens
-//   CATEGORY_N      bracket-stripped pseudonym residue the model
-//                   sometimes echoes (the "User HEALTH_1" rows of the
-//                   2026-09-03 audit) — matched only for the known
-//                   detector category names, so ordinary words never hit.
+//
+//	<<CATEGORY_N>>  pseudonyms  (<<PERSON_A>>, <<EMAIL_1>>, …)
+//	<rN>            secret-class tokens (<r0>, <r1a>, …)
+//	[CATEGORY_N] / [[CATEGORY_N]]  legacy indexed tokens
+//	CATEGORY_N      bracket-stripped pseudonym residue the model
+//	                sometimes echoes (the "User HEALTH_1" rows of the
+//	                2026-09-03 audit) — matched only for the known
+//	                detector category names, so ordinary words never hit.
 //
 // A memory row is permanent and re-injected into every future
 // conversation; persisting a placeholder destroys the user's real value
