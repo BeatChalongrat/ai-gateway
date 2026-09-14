@@ -39,7 +39,7 @@ marked **FIX112** below.
 | Topic | Web | Desktop | Shared? |
 |---|---|---|---|
 | **Identity** | `<identity>`: "You are SRAN Chat, an AI assistant built by SRAN (sran.ai)…". A tenant can override it. | "You are SRAN Assistant, an AI desktop assistant…", with a separate no-tools sentence. | No. The two names differ. |
-| **Date and time** | "Current date and time: … Asia/Bangkok (UTC+7). Treat this as the present moment…" | None. | Web only |
+| **Date and time** | "Current date and time: … Asia/Bangkok (UTC+7). Treat this as the present moment…" | **FIX113:** the same block, on the machine's clock and zone ("…, Asia/Bangkok (UTC+7). …" on a machine set to Bangkok). | **Pinned since FIX113** (`prompt_date_time.txt`: the lead and the rule; `fix113-date-time.test.ts`, `fix113_test.go`). The zone is each surface's own ON PURPOSE: the server does not know where the user is and fixes Bangkok; the app runs where the user is and knows. On the same machine in Bangkok the two blocks are word for word the same; for a user elsewhere the desktop is right and the web is not — that gap is the server's, not a drift. Measured before the block existed: asked the date, the desktop spent a `run_python` call and reported the sandbox's UTC clock (once with the wrong weekday); with no tools, qwen3.8 returned an empty completion to both the date and the year question |
 | **Language and tone** | `prompt_language_rules.txt` | `LANGUAGE_RULES_BLOCK` | **Pinned** (`prompt-language.test.ts`) |
 | **Deciding and asking** | `<action_rules>`: pick when asked to choose, ask at most one question, prefer doing over asking. Always sent. | "## Asking the user (rare)". One question, uses `ask_user_question`. Only when tools are on. Nothing about deciding for the user. | No; similar wording. **FIX112:** confirmed — the web has five bullets (including "choose when asked" and "prefer doing over asking"), the desktop three with the `ask_user_question` mechanics; the two shared ideas are worded differently. Not pinned; a gap for its own round |
 | **Output format** | `<output_format>`: tables for comparisons, numbered lists for steps, prose for explanations. | "## Response Style" said only "Be concise and direct" and two lines about tools. **FIX107 B2: now also "## Output format" with the web's text.** | **Pinned since FIX107** (`prompt-output-format.test.ts`, `fix107_prompt_assets_test.go`) |
@@ -72,7 +72,6 @@ marked **FIX112** below.
 
 ## Only the web has
 
-- The date and time
 - The CAN / CANNOT capability list
 - Deciding when asked to choose, and preferring doing over asking
 - Per-tool guidance, including not naming tools to the user

@@ -239,19 +239,37 @@ func (pc *PromptCompiler) globalIdentity(in CompileContext) string {
 // parses it unambiguously; the time anchors "this morning"/"tonight"
 // style questions. Without this the model defaults to its training
 // cutoff and answers e.g. "2024" in 2026.
+//
+// FIX113 — the two fixed pieces (the lead and the rule) are one asset both
+// surfaces read (prompt_date_time.txt; the desktop's DATE_TIME_LEAD /
+// DATE_TIME_RULE are the same bytes, pinned by fix113-date-time.test.ts).
+// The date, weekday, time and zone are each surface's own: here Bangkok,
+// because the server does not know where the user is; the desktop uses the
+// machine's zone, because it does (see docs/SYSTEM_PROMPT_COVERAGE.md).
+//
+//go:embed prompt_date_time.txt
+var dateTimeAssetRaw string
+
+var dateTimeLead, dateTimeRule = func() (string, string) {
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(dateTimeAssetRaw, "\r\n", "\n")), "\n")
+	if len(lines) < 2 {
+		panic("prompt_date_time.txt must hold two lines: the lead and the rule")
+	}
+	return strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1])
+}()
+
 func (pc *PromptCompiler) dateTime(in CompileContext) string {
 	now := in.CurrentTime
 	if now.IsZero() {
 		now = time.Now()
 	}
 	now = now.In(bangkokZone)
-	return fmt.Sprintf(
-		"Current date and time: %s (%s) %s, Asia/Bangkok (UTC+7). "+
-			"Treat this as the present moment when answering anything "+
-			"time-relative (today, this year, recent, latest, etc.).",
+	return fmt.Sprintf("%s %s (%s) %s, Asia/Bangkok (UTC+7). %s",
+		dateTimeLead,
 		now.Format("2006-01-02"),
 		now.Format("Monday"),
 		now.Format("15:04"),
+		dateTimeRule,
 	)
 }
 

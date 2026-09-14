@@ -54,6 +54,9 @@ export interface PromptInputs {
   /** FIX29 §3.2: the browser bridge (Chrome extension) is not connected this
    * turn — the browser_* tools are withheld and the model must say so. */
   browserUnavailable?: boolean;
+  /** FIX113: the present moment for the date/time block; tests pass one,
+   * the app leaves it out and gets the machine clock. */
+  now?: Date;
 }
 
 const SERVER_MEMORY_TTL_MS = 60_000;
@@ -71,6 +74,33 @@ const MAX_BLOCK_CHARS = 2000;
  * between them must not be told two different things. The third sentence names
  * what IS kept, because a user who reads "temporary" as "this conversation
  * disappears" has been misled by us, not by the model. */
+/** FIX113 — the date/time block's fixed pieces: chat-edge's prompt_date_time.txt,
+ *  line 1 and line 2, byte for byte (fix113-date-time.test.ts). The block is
+ *  "<lead> <date> (<weekday>) <time>, <zone> (UTC<offset>). <rule>" on both
+ *  surfaces; the web fills Bangkok, this side the machine's zone — the app
+ *  runs where the user is and knows it, the server does not. */
+export const DATE_TIME_LEAD = "Current date and time:";
+export const DATE_TIME_RULE = "Treat this as the present moment when answering anything time-relative (today, this year, recent, latest, etc.).";
+
+/** "UTC+7", "UTC-4", "UTC+5:30" for the machine's offset at `now`. */
+export function utcOffsetLabel(now: Date): string {
+  const minutes = -now.getTimezoneOffset();
+  const sign = minutes < 0 ? "-" : "+";
+  const abs = Math.abs(minutes);
+  const h = Math.floor(abs / 60);
+  const m = abs % 60;
+  return `UTC${sign}${h}${m ? `:${String(m).padStart(2, "0")}` : ""}`;
+}
+
+/** The web's dateTime layer, on the machine's clock and zone. */
+export function dateTimeBlock(now: Date): string {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long" });
+  const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  return `${DATE_TIME_LEAD} ${date} (${weekday}) ${time}, ${zone} (${utcOffsetLabel(now)}). ${DATE_TIME_RULE}`;
+}
+
 /** FIX112 Part A — the three sentences are chat-edge's prompt_temporary_chat.txt,
  *  byte for byte (fix112-prompt-pins.test.ts). The envelope is this side's:
  *  a heading here, `<temporary_chat>` plus a lead-in sentence on the web. */
@@ -313,6 +343,12 @@ export class PromptAssembler {
   async buildSystemPromptParts(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
     const parts: PromptPart[] = [];
     let prompt = baseSystemPrompt(inputs.homeDirectory, inputs.toolsAvailable, inputs.grantedFolders ?? []);
+    // FIX113 — the web's layer 2. Measured before this existed: asked the
+    // date, the desktop spent a run_python call and reported the sandbox's
+    // UTC clock (once with the wrong weekday); with no tools, qwen3.8
+    // returned an empty completion to both "what date is it" and "what
+    // year is it".
+    prompt += `\n\n${dateTimeBlock(inputs.now ?? new Date())}`;
     prompt += ARTIFACT_INSTRUCTION_WEBCHAT;
 
     if (inputs.activeProject) {
