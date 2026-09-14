@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react";
 
-import { Download } from "lucide-react";
+import { Download, Eye } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { downloadFromObjectUrl, formatBytes, isImageMime } from "@/lib/fileUtil";
@@ -21,7 +21,7 @@ import type { FileAttachment } from "@/lib/types";
 import { openLightbox } from "@/components/ui/ImageLightbox";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { AuthedImage } from "./AuthedImage";
-import { useFilePreviewOpener } from "./FilePreviewModal";
+import { previewKindFor, useFilePreviewOpener } from "./FilePreviewModal";
 import { VideoPlayer } from "./VideoPlayer";
 
 interface Props {
@@ -144,6 +144,14 @@ function ImageThumb({ file }: { file: FileAttachment }) {
 // download affordance). Download rides the cookie-authed blob fetch
 // (api.downloadFile), whose 401 → refresh → retry survives
 // portal_access_token expiry where a bare <a download> could not.
+//
+// FIX110 — the name has opened the preview since Phase 10, but nothing
+// said so: no label, no icon, and the hover tint was shared with the
+// download button, so "download only" was a fair reading of the card.
+// The size line now ends with "· Open" (an eye) for a file the viewer can
+// show; for one it cannot (previewKindFor → unsupported) the name simply
+// downloads — no affordance that leads to "no preview for this type".
+// Same height either way: the second line already existed.
 function FileCard({
   file,
   onPreview,
@@ -151,15 +159,26 @@ function FileCard({
   file: FileAttachment;
   onPreview: () => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
+  const previewable = previewKindFor(file) !== "unsupported";
+  const download = async () => {
+    setBusy(true);
+    try {
+      await api.downloadFile(file.id, file.filename);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="flex w-full max-w-[300px] items-center gap-1 rounded-lg border border-border bg-bg-secondary pr-1 transition-colors hover:border-border-strong hover:bg-bg-elevated">
+    <div className="group flex w-full max-w-[300px] items-center gap-1 rounded-lg border border-border bg-bg-secondary pr-1 transition-colors hover:border-border-strong hover:bg-bg-elevated">
       <button
         type="button"
-        onClick={onPreview}
-        data-testid="file-card-preview"
+        onClick={previewable ? onPreview : () => void download()}
+        disabled={!previewable && busy}
+        data-testid={previewable ? "file-card-preview" : "file-card-name-download"}
         className="focus-ring flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
-        title={file.filename}
+        title={previewable ? `${t("common.open")} · ${file.filename}` : file.filename}
       >
         <FileTypeBadge
           filename={file.filename}
@@ -173,6 +192,15 @@ function FileCard({
           </span>
           <span className="block text-xs text-text-muted">
             {formatBytes(file.file_size_bytes)}
+            {previewable ? (
+              <span
+                data-testid="file-card-open-hint"
+                className="ml-1.5 inline-flex items-center gap-0.5 text-text-secondary group-hover:text-text-primary"
+              >
+                · <Eye className="h-3 w-3" aria-hidden />
+                {t("common.open")}
+              </span>
+            ) : null}
           </span>
         </span>
       </button>
@@ -181,14 +209,7 @@ function FileCard({
         disabled={busy}
         aria-label={`Download ${file.filename}`}
         data-testid="file-card-download"
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await api.downloadFile(file.id, file.filename);
-          } finally {
-            setBusy(false);
-          }
-        }}
+        onClick={() => void download()}
         className="focus-ring shrink-0 rounded-md p-2 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary disabled:opacity-60"
       >
         <Download className="h-4 w-4" aria-hidden />
