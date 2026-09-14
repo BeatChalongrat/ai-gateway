@@ -1169,6 +1169,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const tempUserId = tmpId("tmp-user");
     const tempAsstId = tmpId("tmp-asst");
 
+    // FIX114 — one streaming row per conversation, and this path owns it.
+    // A send while the previous turn is still open used to leave that
+    // turn's row streaming for good: the desktop host cancels the old run
+    // and, by its own rule, writes it no terminal ("SUPERSEDED — no
+    // terminal from the old run"); the bridge closes the old sink; nothing
+    // on this side ever told the row. Measured on the owner's e48: the
+    // superseded row kept its "Working…" under the finished answer that
+    // replaced it. The row is retired here as cancelled — it keeps what it
+    // had and says it was cut short — before the new rows are added.
+    const inflight = get().streamingAssistantId[convId];
+    if (inflight) finalizeMessage(set, get, convId, inflight, "cancelled");
+
     // Auto-title heuristic: if this is the first message in the
     // conversation we'll PATCH a generated title once the stream
     // completes successfully (handled below in the try block).
@@ -1391,6 +1403,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         window.clearTimeout(imageTimeout);
       }
       set((s) => {
+        // FIX114 — only this send's own slot: a superseded turn's reader
+        // exits after the next turn has taken the slot, and used to delete
+        // the live turn's controller (its Stop) on the way out.
+        if (s.abortControllers[convId] !== ctrl) return {};
         const aborts = { ...s.abortControllers };
         delete aborts[convId];
         const sids = { ...s.streamingAssistantId };
@@ -1683,6 +1699,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ctrl.abort();
         return;
       }
+      // FIX114 — the frames that advanced the cursor may be a NEW turn the
+      // user just sent (typing right after opening the chat). That turn owns
+      // the slot; a probe row beside it was the "Working…" left under a
+      // finished answer (measured on e48: one indicator after a normal turn
+      // when the send landed inside this 700 ms window).
+      if (get().streamingAssistantId[convId]) {
+        ctrl.abort();
+        return;
+      }
       // A turn replayed. Materialize the streaming row and consume the
       // buffered stream from the top (the replayed message_start renames the
       // temp id to the host's assistant id).
@@ -1720,10 +1745,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // button for good — seen on the installed e19 build.
         set((s) => {
           const aborts = { ...s.abortControllers };
-          if (aborts[convId] === ctrl) delete aborts[convId];
+          const mine = aborts[convId] === ctrl;
+          if (mine) delete aborts[convId];
           const sids = { ...s.streamingAssistantId };
-          delete sids[convId];
-          return { abortControllers: aborts, streamingAssistantId: sids };
+          // FIX114 — only the probe's own slot; a send that took over keeps its Stop.
+          if (mine) delete sids[convId];
+          // A probe row that never received a replayed turn (no message_start
+          // swapped its temporary id, no content) was never a turn at all:
+          // drop it rather than show an empty error or a spinner for it.
+          const list = s.messages[convId] ?? [];
+          const probeRow = list.find((m) => m.id === tempAsstId);
+          const messages = probeRow && probeRow.content.length === 0 ? { ...s.messages, [convId]: list.filter((m) => m.id !== tempAsstId) } : s.messages;
+          return { abortControllers: aborts, streamingAssistantId: sids, messages };
         });
       }
     })();
@@ -2090,6 +2123,11 @@ async function consumeStream(
   tempUserId?: string,
 ) {
   let realAssistantId: string | null = null;
+  // FIX114 — whether message_complete / error / cancelled arrived. A stream
+  // that closes without one (the host closed the sink, a proxy cut the
+  // connection) used to leave the row streaming — a "Working…" nobody
+  // would ever clear. It is now finished as an error that says so.
+  let sawTerminal = false;
   // FIX33 A-W9 — the assistant row currently marked "organizing…"; cleared by the first content delta.
   let compactingAsst: string | null = null;
   // Wall-clock turn duration for the per-message metadata line
@@ -2594,6 +2632,7 @@ async function consumeStream(
           };
         });
       } else if (evt.event === "message_complete") {
+        sawTerminal = true;
         // Flush any buffered tail BEFORE writing the terminal state
         // so the final content paint includes every token.
         if (rafHandle != null) {
@@ -2815,6 +2854,7 @@ async function consumeStream(
           });
         }
       } else if (evt.event === "cancelled") {
+        sawTerminal = true;
         // FIX41 — the run was stopped by a person (this tab, another tab,
         // or the desktop host). Everything produced so far stands; the
         // answer is simply partial. Before this event existed, a viewer
@@ -2831,6 +2871,7 @@ async function consumeStream(
         finalizeMessage(set, get, convId, data?.message_id ?? id, "cancelled");
         clearStreamCursor(convId);
       } else if (evt.event === "error") {
+        sawTerminal = true;
         // B1 — terminal stream error. Attach the code + localized
         // message + per-model attempts to the message so the bubble
         // renders a styled error (red) instead of a blank reply.
@@ -2864,6 +2905,23 @@ async function consumeStream(
               ),
             },
           };
+        });
+        finalizeMessage(set, get, convId, id, "error");
+        get().setError(localized);
+      }
+    }
+    if (!sawTerminal && !signal.aborted) {
+      // FIX114 — the stream ended and nothing said how. If the row is still
+      // streaming (a superseded turn was already retired by sendMessage and
+      // is not), end it as an error rather than leave it spinning.
+      flush();
+      const id = realAssistantId ?? tempAsstId;
+      const row = (get().messages[convId] ?? []).find((m) => m.id === id);
+      if (row?.isStreaming) {
+        const localized = tOutside("error.networkStream");
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, error_code: "stream_ended_early", error_retryable: true, error_message: localized } : m)) } };
         });
         finalizeMessage(set, get, convId, id, "error");
         get().setError(localized);
@@ -2971,7 +3029,23 @@ function finalizeMessage(
           // nothing left to wait on. A card left behind after Stop was being
           // answered into a prompt the host had already expired ("consent.respond
           // for unknown/expired prompt — ignored").
-          m.id === messageId ? { ...m, status, isStreaming: false, pending_consent: null, pending_question: null, agent_wait: null } : m,
+          // FIX114 — and no tool of it can still be running: a row the host
+          // never finished is closed as failed, so the card stops spinning
+          // and says the call did not complete.
+          m.id === messageId
+            ? {
+                ...m,
+                status,
+                isStreaming: false,
+                pending_consent: null,
+                pending_question: null,
+                agent_wait: null,
+                tool_activities:
+                  status === "completed"
+                    ? m.tool_activities
+                    : m.tool_activities?.map((a) => (a.phase === "started" ? { ...a, phase: "finished" as const, success: false } : a)),
+              }
+            : m,
         ),
       },
     };
