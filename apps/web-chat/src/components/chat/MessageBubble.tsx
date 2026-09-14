@@ -357,7 +357,10 @@ function MessageBubbleImpl({
       {(message.reasoning_content || message.is_thinking) ? (
         <ThinkingBlock
           content={message.reasoning_content ?? ""}
-          isStreaming={message.is_thinking ?? false}
+          // FIX116 — "Thinking…" only while the ROW is still streaming.
+          // is_thinking alone is a flag the stream flips; a row that
+          // ended before analysis_status: completed still carries it.
+          thinking={message.isStreaming === true && (message.is_thinking ?? false)}
           durationMs={message.thinking_duration_ms}
         />
       ) : null}

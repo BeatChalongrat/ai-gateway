@@ -3037,6 +3037,12 @@ function finalizeMessage(
                 ...m,
                 status,
                 isStreaming: false,
+                // FIX116 — a finished row is never still thinking. The
+                // header reads "Thinking…" straight off this flag; a
+                // turn cut short (Stop, error, superseded) before the
+                // host's analysis_status: completed kept it on for good.
+                // The reasoning text it received stays.
+                is_thinking: false,
                 pending_consent: null,
                 pending_question: null,
                 agent_wait: null,

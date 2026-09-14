@@ -31,9 +31,11 @@ interface ThinkingBlockProps {
   /** Accumulated thinking text. Streams in via the SSE
    *  ``reasoning_delta`` event handler in chatStore. */
   content: string;
-  /** True while the chat-edge is still forwarding reasoning
-   *  fragments (bracketed by ``analysis_status`` started/completed). */
-  isStreaming: boolean;
+  /** True while the model is still reasoning on a LIVE row — the
+   *  header reads "Thinking…"; false → "Analyzed". FIX116: renamed from
+   *  ``isStreaming``, which it never was (it was ``is_thinking``, and a
+   *  finished row could still carry that flag). */
+  thinking: boolean;
   /** Total analysis duration in ms — captured between the
    *  ``analysis_status: started`` and ``completed`` events.
    *  Undefined while still streaming. */
@@ -42,7 +44,7 @@ interface ThinkingBlockProps {
 
 export function ThinkingBlock({
   content,
-  isStreaming,
+  thinking: isStreaming,
   durationMs,
 }: ThinkingBlockProps) {
   const t = useT();

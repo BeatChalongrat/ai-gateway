@@ -425,19 +425,33 @@ class BridgeClient {
     postCancelOnAbort: boolean,
   ): ReadableStream<Uint8Array> {
     this.closeSink(conversationId); // one turn per conversation at a time
+    // FIX116 — every path below ends THIS sink, never whichever sink the
+    // conversation holds at the time. A newer openSink replaces this one
+    // (that is the rule above); an abort that arrives afterwards — the
+    // resume probe standing down because a send took the slot (FIX114),
+    // an image-generation timeout of a superseded turn — used to look the
+    // sink up by id and close the newer turn's stream, and the submit
+    // path would also have posted turn.cancel for a run that was no
+    // longer its own. Measured on e48: a send within ~700 ms of opening a
+    // conversation ended in "Network error during streaming." with the
+    // answer never rendered until a reload.
+    let mine: TurnSink | null = null;
+    const endMine = (cancelHost: boolean) => {
+      if (mine === null || this.sinks.get(conversationId) !== mine) return; // replaced already: not ours to end
+      if (cancelHost) this.cancelTurn(conversationId);
+      this.closeSink(conversationId);
+    };
     return new ReadableStream<Uint8Array>({
       start: (controller) => {
-        this.sinks.set(conversationId, { controller, closed: false });
+        mine = { controller, closed: false };
+        this.sinks.set(conversationId, mine);
         if (signal) {
-          if (signal.aborted) this.closeSink(conversationId);
-          else signal.addEventListener("abort", () => {
-            if (postCancelOnAbort) this.cancelTurn(conversationId);
-            this.closeSink(conversationId);
-          }, { once: true });
+          if (signal.aborted) endMine(false);
+          else signal.addEventListener("abort", () => endMine(postCancelOnAbort), { once: true });
         }
       },
       cancel: () => {
-        this.closeSink(conversationId);
+        endMine(false);
       },
     });
   }

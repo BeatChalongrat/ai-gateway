@@ -38,7 +38,7 @@ describe("waiting indicator label", () => {
 
 describe("ThinkingBlock keeps the reasoning label", () => {
   it("shows reasoning.thinking while real reasoning streams", () => {
-    render(<ThinkingBlock content="step one…" isStreaming />);
+    render(<ThinkingBlock content="step one…" thinking />);
     expect(
       screen.getByText(dictionaries.en["reasoning.thinking"]),
     ).toBeInTheDocument();
@@ -46,7 +46,7 @@ describe("ThinkingBlock keeps the reasoning label", () => {
 
   it("renders nothing when there is no reasoning at all", () => {
     const { container } = render(
-      <ThinkingBlock content="" isStreaming={false} />,
+      <ThinkingBlock content="" thinking={false} />,
     );
     expect(container.firstChild).toBeNull();
   });
