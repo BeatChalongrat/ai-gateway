@@ -31,6 +31,7 @@ import type { DocExecuteResponse } from "@/lib/types";
 import {
   CardShell,
   DownloadButton,
+  OpenPreviewButton,
   ErrorLine,
   MetadataRow,
   PlanList,
@@ -187,7 +188,10 @@ export function DocResultCard({ result }: { result: DocExecuteResponse }) {
       headerTitle={file.filename}
       metadata={file.version ? `v${file.version}` : undefined}
       footer={
-        <DownloadButton fileId={file.id} filename={file.filename} />
+        <>
+          <OpenPreviewButton file={file} />
+          <DownloadButton fileId={file.id} filename={file.filename} />
+        </>
       }
     >
       <MetadataRow>

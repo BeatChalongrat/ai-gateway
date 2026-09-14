@@ -1353,6 +1353,7 @@ export const en = {
 
   // ── Phase-3 i18n cleanup — common ───────────────────────────
   "common.download": "Download",
+  "common.open": "Open",
   "common.retry": "Retry",
   "common.close": "Close",
   "common.dismiss": "Dismiss",
@@ -2966,6 +2967,7 @@ const th: Record<DictKey, string> = {
 
   // ── Phase-3 i18n cleanup — common ───────────────────────────
   "common.download": "ดาวน์โหลด",
+  "common.open": "เปิดดู",
   "common.retry": "ลองใหม่",
   "common.close": "ปิด",
   "common.dismiss": "ปิดข้อความ",

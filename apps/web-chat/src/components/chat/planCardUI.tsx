@@ -20,6 +20,7 @@ import type { ReactNode } from "react";
 import {
   AlertTriangle,
   Download,
+  Eye,
   Loader2,
   Play,
   XCircle,
@@ -28,6 +29,8 @@ import {
 import { StatusBadge } from "@/components/ui/FileTypeBadge";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import type { FileAttachment } from "@/lib/types";
+import { previewKindFor, useFilePreviewOpener } from "./FilePreviewModal";
 
 interface CardShellProps {
   headerIcon: ReactNode;
@@ -200,6 +203,33 @@ export function DownloadButton({
       <Download className="h-4 w-4" />
       <span>{label ?? t("common.download")}</span>
     </button>
+  );
+}
+
+// FIX110 — "Open" beside Download on a result card: the file the plan
+// produced opens in the same viewer a user-attached file gets (the docked
+// pane on the conversation page, the modal elsewhere). Rendered only for
+// a type the viewer reads (xlsx/docx/pptx/pdf all are; previewKindFor
+// decides) — a button that ends in "no preview" is worse than none.
+// Verified before this existed: preview-data answered 200 with a sheet,
+// a document and a deck for files made by the execute routes.
+export function OpenPreviewButton({ file }: { file: FileAttachment }) {
+  const t = useT();
+  const { open, overlay } = useFilePreviewOpener();
+  if (previewKindFor(file) === "unsupported") return null;
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="plan-result-open"
+        onClick={() => open(file)}
+        className="focus-ring inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-surface"
+      >
+        <Eye className="h-4 w-4" />
+        <span>{t("common.open")}</span>
+      </button>
+      {overlay}
+    </>
   );
 }
 

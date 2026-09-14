@@ -28,6 +28,7 @@ import type {
 import {
   CardShell,
   DownloadButton,
+  OpenPreviewButton,
   ErrorLine,
   MetadataRow,
   PlanList,
@@ -177,7 +178,12 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
       headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
       headerTitle={file.filename}
       metadata={file.version ? `v${file.version}` : undefined}
-      footer={<DownloadButton fileId={file.id} filename={file.filename} />}
+      footer={
+        <>
+          <OpenPreviewButton file={file} />
+          <DownloadButton fileId={file.id} filename={file.filename} />
+        </>
+      }
     >
       <MetadataRow>
         <span>PPTX</span>

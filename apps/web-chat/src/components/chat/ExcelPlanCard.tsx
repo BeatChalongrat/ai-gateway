@@ -33,6 +33,7 @@ import type { ExcelExecuteResponse } from "@/lib/types";
 import {
   CardShell,
   DownloadButton,
+  OpenPreviewButton,
   ErrorLine,
   MetadataRow,
   PlanList,
@@ -167,7 +168,10 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
       headerTitle={file.filename}
       metadata={file.version ? `v${file.version}` : undefined}
       footer={
-        <DownloadButton fileId={file.id} filename={file.filename} />
+        <>
+          <OpenPreviewButton file={file} />
+          <DownloadButton fileId={file.id} filename={file.filename} />
+        </>
       }
     >
       <MetadataRow>

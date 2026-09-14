@@ -34,7 +34,7 @@
 // This mirrors the Canvas C1 posture (a static frame gets NO
 // capabilities) and must not be loosened.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Download, X } from "lucide-react";
 
@@ -319,6 +319,35 @@ function DownloadButton({ file }: { file: FileAttachment }) {
       <span className="hidden sm:inline">{t("preview.download")}</span>
     </button>
   );
+}
+
+/**
+ * FIX110 — the one way any card opens a file in place: the docked side pane
+ * when the page hosts the slot (the conversation page, on the web and in the
+ * desktop shell, which loads the same page), else this modal. Until FIX110
+ * only MessageAttachments knew this; the Excel/Word/PowerPoint result cards
+ * offered Download alone, for files the same viewer already read when a
+ * user attached them.
+ */
+export function useFilePreviewOpener(): {
+  open: (file: FileAttachment) => void;
+  /** Render this next to the trigger — the modal fallback, when in use. */
+  overlay: ReactNode;
+} {
+  const hostMounted = useSidePaneStore((s) => s.hostMounted);
+  const openPane = useSidePaneStore((s) => s.open);
+  const [previewing, setPreviewing] = useState<FileAttachment | null>(null);
+  const open = useCallback(
+    (f: FileAttachment) => {
+      if (hostMounted) openPane({ kind: "preview", file: f });
+      else setPreviewing(f);
+    },
+    [hostMounted, openPane],
+  );
+  const overlay = previewing ? (
+    <FilePreviewModal file={previewing} onClose={() => setPreviewing(null)} />
+  ) : null;
+  return { open, overlay };
 }
 
 /** The centred modal — the FALLBACK frame, used only where no page hosts
