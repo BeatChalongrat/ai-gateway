@@ -62,12 +62,12 @@ describe("FIX111 — placing a row-counted anchor on the local chain", () => {
 
 type Row = { id: string; role: string; content: string | null; status: string };
 function client(opts: { compact?: unknown | null; rows?: Row[]; failPage?: boolean; throwOnCompact?: boolean }) {
-  const calls: { compact: { id: string; instructions: string }[]; pages: number } = { compact: [], pages: 0 };
+  const calls: { compact: { id: string; instructions: string; trigger?: string }[]; pages: number } = { compact: [], pages: 0 };
   const rows = opts.rows ?? [];
   return {
     calls,
-    async compactConversation(id: string, instructions: string) {
-      calls.compact.push({ id, instructions });
+    async compactConversation(id: string, instructions: string, trigger: string) {
+      calls.compact.push({ id, instructions, trigger });
       if (opts.throwOnCompact) throw new Error("boom");
       return opts.compact === undefined ? null : (opts.compact as never);
     },
@@ -92,8 +92,8 @@ const SERVER_STATE = { conversation_id: "c", current_goal: "compute things", str
 describe("FIX111 — ChatEdgeSummariser", () => {
   it("compacts, then reads the server's visible rows oldest first (errored rows left out) and reports the boundary", async () => {
     const c = client({ compact: { state: SERVER_STATE, boundary_message_id: "m5", coverage_reached: true, messages_total: 5 }, rows: ROWS });
-    const res = await new ChatEdgeSummariser(c, quiet).compact("c", "keep numbers", new AbortController().signal);
-    expect(c.calls.compact).toEqual([{ id: "c", instructions: "keep numbers" }]);
+    const res = await new ChatEdgeSummariser(c, quiet).compact("c", "keep numbers", "manual", new AbortController().signal);
+    expect(c.calls.compact).toEqual([{ id: "c", instructions: "keep numbers", trigger: "manual" }]);
     expect(res).not.toBeNull();
     expect(res!.rowIds).toEqual(["m1", "m2", "m4", "m5"]);
     expect(res!.boundaryMessageId).toBe("m5");
@@ -104,13 +104,13 @@ describe("FIX111 — ChatEdgeSummariser", () => {
 
   it("the server refusing (null), an empty state, a page that cannot be read, or a throw → null, never a throw", async () => {
     const sig = new AbortController().signal;
-    expect(await new ChatEdgeSummariser(client({}), quiet).compact("c", "", sig)).toBeNull();
-    expect(await new ChatEdgeSummariser(client({ compact: { state: null } }), quiet).compact("c", "", sig)).toBeNull();
-    expect(await new ChatEdgeSummariser(client({ compact: { state: SERVER_STATE }, rows: ROWS, failPage: true }), quiet).compact("c", "", sig)).toBeNull();
+    expect(await new ChatEdgeSummariser(client({}), quiet).compact("c", "", "auto", sig)).toBeNull();
+    expect(await new ChatEdgeSummariser(client({ compact: { state: null } }), quiet).compact("c", "", "auto", sig)).toBeNull();
+    expect(await new ChatEdgeSummariser(client({ compact: { state: SERVER_STATE }, rows: ROWS, failPage: true }), quiet).compact("c", "", "auto", sig)).toBeNull();
     const aborted = new AbortController();
     aborted.abort();
     const c = client({ compact: { state: SERVER_STATE }, rows: ROWS });
-    expect(await new ChatEdgeSummariser(c, quiet).compact("c", "", aborted.signal)).toBeNull();
+    expect(await new ChatEdgeSummariser(c, quiet).compact("c", "", "auto", aborted.signal)).toBeNull();
     expect(c.calls.compact).toHaveLength(0); // an aborted turn asks for nothing
   });
 });

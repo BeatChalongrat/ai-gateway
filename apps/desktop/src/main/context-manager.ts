@@ -46,6 +46,7 @@ import {
 import { countVisibleRows } from "./chain-freshness";
 import type { GatewayMessage } from "./gateway-client";
 import type { Logger } from "./logger";
+import type { CompactionTrigger } from "./chat-edge-client";
 import type { ConversationSummariser } from "./server-summariser";
 
 export interface ContextBudgetEvent {
@@ -167,7 +168,7 @@ export class ContextManager {
         this.deps.emit(conversationId, "compaction_status", { status: "summarizing" });
         // FIX111 — the server folds everything it holds and sets the boundary
         // there; the re-plan below then drops up to it (server-summariser.ts).
-        state = await this.summarise(conversationId, history, state, state?.compaction_instructions ?? "", signal);
+        state = await this.summarise(conversationId, history, state, state?.compaction_instructions ?? "", "auto", signal);
         extractionOk = (state?.message_count_at_summary ?? 0) >= coverTo;
         // The block changed the budget: plan again against it.
         plan = this.plan(messages, turn, state, this.noteStatus(memoryOn, true, extractionOk, state, turn));
@@ -249,7 +250,7 @@ export class ContextManager {
     this.deps.emit(conversationId, "compaction_status", { status: "summarizing" });
     // A manual request is the user's ask: it always goes to the server.
     this.lastCompact.delete(conversationId);
-    const state = await this.summarise(conversationId, history, existing, instr, signal);
+    const state = await this.summarise(conversationId, history, existing, instr, "manual", signal);
     if (!state || isStateEmpty(state)) return { ok: false, error: "no-summary" };
     if (state.manual_compact_boundary_index === null) return { ok: false, error: "no-boundary" };
     if ((state.message_count_at_summary ?? 0) < history.length) {
@@ -342,7 +343,7 @@ export class ContextManager {
    * summarise, so a turn goes out trimmed with the honest note rather than
    * not at all. Never throws.
    */
-  private async summarise(conversationId: string, history: readonly GatewayMessage[], existing: ConversationStateRecord | null, instructions: string, signal: AbortSignal): Promise<ConversationStateRecord | null> {
+  private async summarise(conversationId: string, history: readonly GatewayMessage[], existing: ConversationStateRecord | null, instructions: string, trigger: CompactionTrigger, signal: AbortSignal): Promise<ConversationStateRecord | null> {
     if (!this.deps.summariser) return existing;
     const localVisible = countVisibleRows(history);
     if (this.lastCompact.get(conversationId) === localVisible) {
@@ -352,7 +353,7 @@ export class ContextManager {
     this.lastCompact.set(conversationId, localVisible);
     let res;
     try {
-      res = await this.deps.summariser.compact(conversationId, instructions, signal);
+      res = await this.deps.summariser.compact(conversationId, instructions, trigger, signal);
     } catch (err) {
       this.deps.log.warn(`SUMMARY conv=${conversationId}: server compact threw: ${(err as Error).message} — state kept`);
       return existing;

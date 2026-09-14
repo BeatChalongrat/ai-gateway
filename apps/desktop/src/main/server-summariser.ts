@@ -28,7 +28,7 @@
 //
 // No 'electron' import: unit-tested in plain Node with a fake client.
 
-import type { ChatEdgeClient, MessageDto } from "./chat-edge-client";
+import type { ChatEdgeClient, CompactionTrigger, MessageDto } from "./chat-edge-client";
 import type { Logger } from "./logger";
 
 /** The transcript loader's ceiling (turn-coordinator.ts HISTORY_LOAD_CEILING). */
@@ -54,7 +54,7 @@ export interface ConversationSummariser {
    *  Null when it could not (unreachable, refused, no summary produced) —
    *  the turn then goes out trimmed with the honest note, as it does
    *  without a summariser at all. Never throws. */
-  compact(conversationId: string, instructions: string, signal: AbortSignal): Promise<ServerCompaction | null>;
+  compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal): Promise<ServerCompaction | null>;
 }
 
 /** Rows the model would see on the server: user/assistant with text. */
@@ -68,10 +68,10 @@ export class ChatEdgeSummariser implements ConversationSummariser {
     private readonly log: Logger,
   ) {}
 
-  async compact(conversationId: string, instructions: string, signal: AbortSignal): Promise<ServerCompaction | null> {
+  async compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal): Promise<ServerCompaction | null> {
     if (signal.aborted) return null;
     const startedAt = Date.now();
-    const res = await this.chatEdge.compactConversation(conversationId, instructions);
+    const res = await this.chatEdge.compactConversation(conversationId, instructions, trigger);
     if (!res || !res.state || typeof res.state !== "object") {
       this.log.warn(`SUMMARY conv=${conversationId}: server compact returned nothing after ${Date.now() - startedAt} ms — no summary this turn`);
       return null;

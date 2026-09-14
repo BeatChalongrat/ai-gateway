@@ -20,6 +20,8 @@ export interface ProjectDto {
   name?: string | null;
   instructions?: string | null;
 }
+/** FIX113 — what a client may write on a compaction_usage row (chat-edge CompactionTriggerFromClient). */
+export type CompactionTrigger = "auto" | "manual";
 /** FIX111 — POST /compact's answer (chat-edge ManualCompactResult). */
 export interface CompactResultDto {
   state: Record<string, unknown> | null;
@@ -379,8 +381,10 @@ export class ChatEdgeClient {
    *  the state row, the boundary id and whether the fold reached it. Null
    *  on any failure. The server folds up to 8 batches with a 90 s budget
    *  each, so this call gets its own timeout. */
-  async compactConversation(conversationId: string, instructions: string): Promise<CompactResultDto | null> {
-    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`, { instructions }, COMPACT_TIMEOUT_MS);
+  async compactConversation(conversationId: string, instructions: string, trigger: CompactionTrigger): Promise<CompactResultDto | null> {
+    // FIX113 — the ledger row says who asked: "auto" for the desktop's own
+    // threshold, "manual" for the page's button. Unset used to mean "manual".
+    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`, { instructions, trigger }, COMPACT_TIMEOUT_MS);
     if (!res) return null;
     try {
       return (await res.json()) as CompactResultDto;

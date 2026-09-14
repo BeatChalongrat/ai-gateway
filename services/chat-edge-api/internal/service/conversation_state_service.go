@@ -86,11 +86,37 @@ type CompactionUsage struct {
 	UserID         uuid.UUID
 	TenantID       uuid.UUID
 	ModelID        string
-	Trigger        string // "auto" | "manual" | "background"
+	// Trigger: CompactionTriggerAuto | CompactionTriggerManual |
+	// CompactionTriggerBackground. FIX113: rows written between FIX111
+	// (d1a4223, the desktop started compacting through POST /compact) and
+	// FIX113 carry "manual" for the desktop's AUTOMATIC compactions too —
+	// the endpoint had no way to say otherwise. Those rows are history, not
+	// corrected; see docs/DATA_RETENTION_PLAN.md (chat.compaction_usage).
+	Trigger        string
 	PromptTokens   int
 	OutputTokens   int
 	CostUSD        float64
 	MessagesFolded int
+}
+
+// The trigger vocabulary of a compaction_usage row.
+const (
+	CompactionTriggerAuto       = "auto"       // the compiler, or a client compacting on its own trigger
+	CompactionTriggerManual     = "manual"     // a person pressed "summarise and continue"
+	CompactionTriggerBackground = "background" // the async threshold extraction
+)
+
+// CompactionTriggerFromClient maps what a client sent on POST /compact to
+// the ledger vocabulary. FIX113: only "auto" and "manual" may come from a
+// client; anything else — unknown, empty, or "background", which no client
+// causes — is "manual", the value the endpoint always recorded before.
+func CompactionTriggerFromClient(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case CompactionTriggerAuto:
+		return CompactionTriggerAuto
+	default:
+		return CompactionTriggerManual
+	}
 }
 
 // CompactionUsageRecorder persists CompactionUsage rows. Optional;

@@ -3597,8 +3597,12 @@ type ManualCompactResult struct {
 // everything at or before it (the first exchange still survives).
 // Nothing is dropped when the summary could not be produced: the
 // boundary is set after coverage, never before.
+//
+// FIX113 — `trigger` labels the usage rows: CompactionTriggerManual for the
+// button, CompactionTriggerAuto when a client (the desktop, FIX111) compacts
+// on its own threshold. The handler restricts it to those two.
 func (s *MessageService) ManualCompact(
-	ctx context.Context, convID, userID, tenantID uuid.UUID, instructions string,
+	ctx context.Context, convID, userID, tenantID uuid.UUID, instructions, trigger string,
 ) (*ManualCompactResult, error) {
 	if s.stateSvc == nil {
 		return nil, errors.New("conversation state service not configured")
@@ -3625,7 +3629,7 @@ func (s *MessageService) ManualCompact(
 	}
 	last := latest[len(latest)-1].ID
 	st, reached, err := s.stateSvc.EnsureStateCoversUpTo(ctx, convID, userID, tenantID, &last, ExtractionOptions{
-		Instructions: instructions, Trigger: "manual",
+		Instructions: instructions, Trigger: CompactionTriggerFromClient(trigger),
 	})
 	if err != nil {
 		return nil, err
@@ -3641,7 +3645,7 @@ func (s *MessageService) ManualCompact(
 		return nil, err
 	}
 	total, _ := s.messages.CountMessages(ctx, tenantID, convID)
-	slog.Info("manual_compact", "conv", convID.String(), "boundary", last.String(), "reached", reached, "messages_total", total)
+	slog.Info("manual_compact", "conv", convID.String(), "trigger", CompactionTriggerFromClient(trigger), "boundary", last.String(), "reached", reached, "messages_total", total)
 	return &ManualCompactResult{State: st, BoundaryID: last, MessagesTotal: total, CoverageReached: reached}, nil
 }
 

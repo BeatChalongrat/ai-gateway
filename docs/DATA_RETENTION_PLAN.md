@@ -94,7 +94,7 @@ reach and why.
 | Desktop local cache (`history/*.json` transcripts with tool results, `conversation-state/*.json`, run ledger, logs) | yes (plaintext) | TTL sweep at launch — `localStateTtlDays`, **30 days by default** (0 disables) — plus the app's immediate **Clear local data** command. Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
 | Streaming resume ledger (Redis) | yes | self-expiring TTL (~10 minutes) |
 | Memory export files | yes | 24-hour link expiry + deleted by the memory purge |
-| `chat.cloud_task_runs`, `chat.compaction_usage` | no (counts/outcomes) | retained — content-free accounting (see exceptions) |
+| `chat.cloud_task_runs`, `chat.compaction_usage` | no (counts/outcomes) | retained — content-free accounting (see exceptions). **Label caveat (FIX113):** `compaction_usage.trigger` rows written between FIX111 (`d1a4223`, when the desktop began compacting through `POST /compact`) and the FIX113 Part B commit say `manual` for the desktop's AUTOMATIC compactions as well — the endpoint could not say otherwise. From FIX113 Part B the desktop sends `auto` and the button `manual`; the earlier rows are left as written, not corrected, and a per-trigger reconciliation over that window must not read `manual` as "a person pressed the button" |
 
 A structural guard keeps this table honest: a coverage test derives
 the list of conversation-linked tables from the database schema

@@ -722,6 +722,10 @@ func (h *ConversationHandler) Compact(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Instructions string `json:"instructions"`
+		// FIX113: "auto" when a client compacts on its own threshold (the
+		// desktop), "manual" or absent for the button. Anything else is
+		// read as "manual" (service.CompactionTriggerFromClient).
+		Trigger string `json:"trigger"`
 	}
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&body) // an empty body is a valid "compact with defaults"
@@ -730,7 +734,7 @@ func (h *ConversationHandler) Compact(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "instructions too long (max 2000 characters)")
 		return
 	}
-	res, err := h.messages.ManualCompact(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions)
+	res, err := h.messages.ManualCompact(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions, service.CompactionTriggerFromClient(body.Trigger))
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrMessageConversationNotFound):

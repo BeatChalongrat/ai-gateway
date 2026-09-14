@@ -50,10 +50,10 @@ function chainAt(ratio: number, basis: BudgetBasis = TERRA): GatewayMessage[] {
 /** chat-edge behind POST /compact: it holds `serverRows` visible rows (the
  *  chain's imported rows), folds them all, sets the boundary at the newest. */
 class FakeServer implements ConversationSummariser {
-  calls: { instructions: string }[] = [];
+  calls: { instructions: string; trigger: string }[] = [];
   constructor(private readonly goal: string | null, private readonly serverRows: () => number) {}
-  async compact(_id: string, instructions: string): Promise<ServerCompaction | null> {
-    this.calls.push({ instructions });
+  async compact(_id: string, instructions: string, trigger: string): Promise<ServerCompaction | null> {
+    this.calls.push({ instructions, trigger });
     if (this.goal === null) return null;
     const rowIds = Array.from({ length: this.serverRows() }, (_, i) => `r${i + 1}`);
     const last = rowIds[rowIds.length - 1] ?? null;
@@ -179,6 +179,7 @@ describe("ContextManager", () => {
     expect(out.statePresent).toBe(true);
     expect(server.calls).toHaveLength(1);
     expect(server.calls[0]!.instructions).toBe(""); // nothing on file → nothing invented
+    expect(server.calls[0]!.trigger).toBe("auto"); // FIX113 — the ledger row says the desktop compacted on its own
     expect(ev.list[0]!.event).toBe("compaction_status");
     expect((ev.list[0]!.data as { status: string }).status).toBe("summarizing");
     expect(ev.list[ev.list.length - 1]!.event).toBe("context_budget");
@@ -299,6 +300,7 @@ describe("ContextManager", () => {
     expect(st.message_count_at_summary).toBe(6);
     expect(st.compaction_instructions).toBe("keep the decisions");
     expect(ex.calls[0]!.instructions).toBe("keep the decisions");
+    expect(ex.calls[0]!.trigger).toBe("manual"); // FIX113 — the button stays "manual"
     const next = await mgr.compile("c", [...msgs, u("q3")], turn(), new AbortController().signal);
     expect(next.compacted).toBe(true);
     expect(next.messages.map((m) => m.role)).toEqual(["system", "user", "assistant", "user", "assistant", "user"]);
