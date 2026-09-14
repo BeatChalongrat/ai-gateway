@@ -57,6 +57,13 @@ class RequestContext:
     # admin/tenant keys. Copied onto RequestRecord.user_id at log time
     # (migration 062).
     user_id: Optional[str] = None
+    # FIX119 — the TURN id the caller sent as X-Request-Id (chat-edge's
+    # run_id for a web turn, the desktop's run id for a desktop turn). One
+    # turn makes several gateway requests (tool rounds, retries), each with
+    # its own ``request_id``; this is the id that joins them, the id every
+    # layer logs, and the id the person sees on a failed turn's card.
+    # None when the caller sent nothing usable.
+    turn_id: Optional[str] = None
 
 
 @dataclass

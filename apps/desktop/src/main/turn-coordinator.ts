@@ -67,7 +67,7 @@ import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import { checkRemoteTarget } from "./remote-target";
-import { endingForOutcome, normalizeHostError, type HostErrorFrame, type TerminalCause, type TurnEnding } from "./terminal-cause";
+import { endingForOutcome, normalizeHostError, stopReasonFor, type HostErrorFrame, type StopReason, type TerminalCause, type TurnEnding } from "./terminal-cause";
 
 /** The hostname of a user-typed URL for a log line — never the query. */
 function hostnameOf(raw: string): string {
@@ -110,6 +110,8 @@ interface RunningTurn {
    *  linked to the assistant row at import (file_ids). */
   attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
   messageId: string;
+  /** FIX119 — the run id of the turn's run (beginRun), for the import. */
+  runId?: string;
   assistantText: string;
   /** FIX35 Part B — the model the gateway said actually answered (an
    *  "auto" turn names the router's pick). Persisted as the assistant
@@ -118,6 +120,9 @@ interface RunningTurn {
   /** FIX118 — what the run's terminal error frame said (cause + code), so
    *  the imported assistant row records the same ending the page saw. */
   errored?: { cause?: TerminalCause; errorCode?: string };
+  /** FIX119 — why the model stopped on the last round (closed set), from
+   *  the gateway's final chunk. "" when nothing was said. */
+  stopReason?: StopReason | "";
 }
 interface PendingConsent {
   conversationId: string;
@@ -1201,6 +1206,7 @@ export class TurnCoordinator {
     const turnNo = ++this.turnCounter;
     const runId = this.beginRun(conversationId);
     this.log.info(`TURN RUN conv=${conversationId} run=${runId}`);
+    turn.runId = runId;
     this.emit(conversationId, "message_start", { message_id: turn.messageId, conversation_id: conversationId });
 
     let conversation: ConversationDto | null = null;
@@ -1353,6 +1359,10 @@ export class TurnCoordinator {
       onEnding: (e) => {
         turn.errored = e;
       },
+      onStopReason: (r) => {
+        turn.stopReason = r;
+      },
+      runId,
     });
     const elapsed = Date.now() - startedAt;
     // FIX118 — how this turn ended, as the imported assistant row will say
@@ -1382,7 +1392,7 @@ export class TurnCoordinator {
     // direction that re-reads the transcript rather than trusting the file.
     const chain = fullChain.slice(historyStart);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, 0));
-    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? [], ending);
+    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? [], ending, runId);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, imported));
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
@@ -1390,7 +1400,10 @@ export class TurnCoordinator {
     const ids = await this.persistedIds(conversationId, turn);
     // FIX35 Part B — message_complete repeats the served model (an auto
     // turn's page-side meta line names the router's pick).
-    const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}) };
+    // FIX119 — why the model stopped rides message_complete, so the page can
+    // say "the answer was cut off" instead of presenting a max_tokens cut as
+    // finished.
+    const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}), ...(turn.stopReason ? { stop_reason: turn.stopReason } : {}) };
 
     // A turn that has been SUPERSEDED (the user sent again, which aborts the
     // old one) must not write a terminal: the page has already moved on to
@@ -1407,7 +1420,7 @@ export class TurnCoordinator {
       // a stopped turn indistinguishable from a finished one for anything
       // reading the stream rather than the button.
       this.emit(conversationId, "cancelled", { ...completeData, partial: true, cause: "stopped_by_user" });
-      this.log.info(`TURN CANCELLED conv=${conversationId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
+      this.log.info(`TURN CANCELLED conv=${conversationId} run=${runId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
       return;
     }
     if (outcome === "paused") {
@@ -1420,7 +1433,7 @@ export class TurnCoordinator {
     }
     if (isFirstTurn && turn.assistantText.length > 0) void this.generateTitle(conversationId, userText, turn.assistantText);
     this.emit(conversationId, "message_complete", completeData);
-    this.log.info(`TURN DONE conv=${conversationId} in ${elapsed} ms, ${turn.assistantText.length} chars`);
+    this.log.info(`TURN DONE conv=${conversationId} run=${runId} in ${elapsed} ms, ${turn.assistantText.length} chars, stop_reason=${turn.stopReason || "-"}`);
   }
 
   /** FIX11 §3: a hosted EDIT is a server-authoritative fork. Rather than run the
@@ -1524,6 +1537,11 @@ export class TurnCoordinator {
     /** FIX118 — called once when the run ends on an error frame, with the
      *  cause and code the frame carried. */
     onEnding?: (e: { cause?: TerminalCause; errorCode: string }) => void;
+    /** FIX119 — called on every `done` with the closed-set stop reason of
+     *  that round ("" when nothing was said); the last one is the turn's. */
+    onStopReason?: (r: StopReason | "") => void;
+    /** FIX119 — the turn's run id, sent to the gateway as X-Request-Id. */
+    runId?: string;
     onTrace?: (entry: string) => void;
     /** nested: consent prompts are attributed to this conversation on the page */
     consentConversationId?: string;
@@ -1573,6 +1591,7 @@ export class TurnCoordinator {
       for await (const ev of this.gateway.streamCompletion(
         { model: run.model, messages: run.messages, max_tokens: MAX_OUTPUT_TOKENS, tools: run.tools.length ? run.tools : undefined, tool_choice: run.tools.length ? "auto" : undefined, reasoning: { mode: thinkingOff ? "off" : "auto", show_summary: !thinkingOff }, routingContext: run.routingContext },
         signal,
+        { requestId: run.runId },
       )) {
         if (signal.aborted) return "cancelled";
         switch (ev.kind) {
@@ -1667,7 +1686,7 @@ export class TurnCoordinator {
               this.log.warn(`IMAGES: gateway refused images for ${run.model} but the fresh model list still says it sees (or nothing to strip) — surfacing the error`);
             }
             errored = true;
-            this.log.error(`TURN ERROR conv=${conversationId}: ${ev.code} ${ev.message}`);
+            this.log.error(`TURN ERROR conv=${conversationId} run=${run.runId ?? "-"}: ${ev.code} ${ev.message}${ev.details && typeof ev.details["gateway_request_id"] === "string" ? ` gateway_request_id=${ev.details["gateway_request_id"]}` : ""}`);
             // FIX22 §1b: a guardrail 403 names no cause. Explain it AFTER the
             // fact from the labelled parts of the prompt we sent — diagnostic
             // only (the turn is already refused), appended to the error the
@@ -1690,9 +1709,15 @@ export class TurnCoordinator {
             else run.onText(`\n[error: ${ev.message}]`);
             break;
           }
-          case "done":
+          case "done": {
             sawDone = true;
+            // FIX119 — why the model stopped. Read here rather than thrown
+            // away: a max_tokens cut used to look exactly like a clean finish.
+            const reason = stopReasonFor(ev.stop_reason, ev.finish_reason);
+            run.onStopReason?.(reason);
+            if (reason === "max_tokens") this.log.warn(`TURN OUTPUT LIMIT conv=${conversationId} run=${run.runId ?? "-"}: the answer was cut at max_tokens (${ev.provider_request_id ? `provider_request_id=${ev.provider_request_id}` : "no provider request id"})`);
             break;
+          }
         }
         if (errored || resendWithoutTools) break;
       }
@@ -2900,7 +2925,7 @@ export class TurnCoordinator {
   /** Imports this turn's visible rows to chat-edge; returns how many rows the
    *  server actually inserted (0 on failure or nothing to import) — the
    *  FIX109 marker is advanced by exactly that. */
-  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = [], ending?: TurnEnding): Promise<number> {
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = [], ending?: TurnEnding, runId?: string): Promise<number> {
     if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return 0;
     const now = new Date().toISOString();
     const items = [];
@@ -2916,12 +2941,20 @@ export class TurnCoordinator {
     // the pre-FIX118 shape. A failed turn with NO text still leaves an
     // (empty) errored assistant row, as a failed web turn does, so the
     // transcript shows the failure on every surface.
-    const endingFields = ending && ending.status !== "completed" ? { status: ending.status, terminal_cause: ending.cause, ...(ending.errorCode ? { error_code: ending.errorCode } : {}) } : {};
-    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields });
+    // FIX119 — the ending is ALWAYS said, `completed` included: the server
+    // records NULL for an item that says nothing (the e48 wire), so a new
+    // desktop must say it. The run id and the stop reason ride along.
+    const endingFields = ending
+      ? ending.status !== "completed"
+        ? { status: ending.status, terminal_cause: ending.cause, ...(ending.errorCode ? { error_code: ending.errorCode } : {}) }
+        : { status: "completed" as const, ...(turn.stopReason ? { stop_reason: turn.stopReason } : {}) }
+      : {};
+    const runFields = runId ? { run_id: runId } : {};
+    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields });
     void chain;
-    const result = await this.chatEdge.importMessages(conversationId, items);
-    if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
-    else this.log.warn(`TURN PERSIST FAILED conv=${conversationId} (chat-edge import) — local chain history saved`);
+    const result = await this.chatEdge.importMessages(conversationId, items, runId);
+    if (result) this.log.info(`TURN PERSISTED conv=${conversationId} run=${runId ?? "-"}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
+    else this.log.warn(`TURN PERSIST FAILED conv=${conversationId} run=${runId ?? "-"} (chat-edge import) — local chain history saved`);
     return result ? result.imported : 0;
   }
 

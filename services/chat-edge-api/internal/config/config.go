@@ -30,6 +30,12 @@ type Config struct {
 
 	// HTTP listener.
 	Port string `env:"PORT" envDefault:"4000"`
+	// FIX119 Part C2 — a caller whose email matches this pattern is a
+	// test account: identity.users.is_test is set when the user row is
+	// provisioned, every conversation and message it creates or imports
+	// copies the flag, and the admin analytics exclude those rows unless
+	// asked (include_test=1). The probe accounts all end in "@local".
+	TestAccountEmailPattern string `env:"TEST_ACCOUNT_EMAIL_PATTERN" envDefault:"@local$"`
 
 	// PostgreSQL connection (pgx-compatible DSN).
 	DatabaseURL string `env:"DATABASE_URL,required"`

@@ -109,12 +109,12 @@ describe("FIX118 — the desktop imports the ending with the row", () => {
     expect(r.assistant).not.toHaveProperty("error_code");
   });
 
-  it("a normal turn imports the pre-FIX118 item shape", async () => {
+  it("a normal turn says status completed explicitly (FIX119: the server keeps NULL for an item that says nothing)", async () => {
     const r = await host(normalStream).run();
     expect(r.terminal?.event).toBe("message_complete");
-    expect(r.assistant).toMatchObject({ role: "assistant", content: "fine" });
-    expect(r.assistant).not.toHaveProperty("status");
+    expect(r.assistant).toMatchObject({ role: "assistant", content: "fine", status: "completed" });
     expect(r.assistant).not.toHaveProperty("terminal_cause");
+    expect(r.assistant).not.toHaveProperty("error_code");
   });
 
   it("a gateway error frame with no text still leaves an errored row carrying the gateway's code, and the frame keeps the verdict", async () => {

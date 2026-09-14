@@ -66,8 +66,10 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
 			 status, model_id, token_usage_input, token_usage_output, secure_trace_id,
-			 parent_id, branch_index, is_active)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			 parent_id, branch_index, is_active,
+			 run_id, is_test)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+		        $14, COALESCE((SELECT c.is_test FROM chat.conversations c WHERE c.id = $1), false))
 		RETURNING id, created_at
 	`
 	// Defaults so callers don't have to set them for the common
@@ -79,6 +81,7 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
 		m.Status, m.ModelID, m.TokenUsageInput, m.TokenUsageOutput, m.SecureTraceID,
 		m.ParentID, m.BranchIndex, m.IsActive,
+		m.RunID,
 	).Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create message: %w", err)
@@ -114,8 +117,9 @@ func (r *MessageRepo) CreateImported(
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
 			 status, model_id, client_id, created_at, is_active,
-			 terminal_cause, error_code)
-		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11)
+			 terminal_cause, error_code, run_id, stop_reason, is_test)
+		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11, $12, $13,
+		        COALESCE((SELECT c.is_test FROM chat.conversations c WHERE c.id = $1), false))
 		ON CONFLICT (conversation_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
 		RETURNING id
@@ -123,7 +127,7 @@ func (r *MessageRepo) CreateImported(
 	var id uuid.UUID
 	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
-		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode,
+		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode, m.RunID, m.StopReason,
 	).Scan(&id)
 	if err == nil {
 		return id, true, nil
@@ -222,7 +226,7 @@ func (r *MessageRepo) ListByConversation(
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
 		       reasoning_content, search_sources, client_id,
-		       terminal_cause, error_code` + extraCols + `
+		       terminal_cause, error_code, run_id, stop_reason` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -249,7 +253,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
-			&m.TerminalCause, &m.ErrorCode,
+			&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason,
 		}
 		if r.displayLifecycle {
 			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
@@ -1032,16 +1036,24 @@ func (r *MessageRepo) MarkInterrupted(ctx context.Context, msgID uuid.UUID) erro
 // empty cause writes NULL (a parked turn has not ended); an empty code
 // writes NULL (the turn did not fail). Called by every finish callback
 // after the content/status write, and by the pre-stream failure paths.
-func (r *MessageRepo) SetTerminal(ctx context.Context, msgID uuid.UUID, cause, errorCode string) error {
-	var c, e *string
+//
+// FIX119: stopReason (why the MODEL stopped, closed set) rides along; ""
+// writes NULL (a failed run, a user row, a provider that said nothing and
+// a caller that did not ask are all NULL — `unknown` is written only when
+// the gateway itself said unknown).
+func (r *MessageRepo) SetTerminal(ctx context.Context, msgID uuid.UUID, cause, errorCode, stopReason string) error {
+	var c, e, sr *string
 	if cause != "" {
 		c = &cause
 	}
 	if errorCode != "" {
 		e = &errorCode
 	}
-	const q = `UPDATE chat.messages_masked SET terminal_cause = $2, error_code = $3 WHERE id = $1`
-	if _, err := r.db.Exec(ctx, q, msgID, c, e); err != nil {
+	if stopReason != "" {
+		sr = &stopReason
+	}
+	const q = `UPDATE chat.messages_masked SET terminal_cause = $2, error_code = $3, stop_reason = $4 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, c, e, sr); err != nil {
 		return fmt.Errorf("set message terminal: %w", err)
 	}
 	return nil

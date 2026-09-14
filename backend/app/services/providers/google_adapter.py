@@ -17,6 +17,8 @@ Differences from OpenAI schema we handle:
 
 from __future__ import annotations
 
+import dataclasses
+
 import json
 import re
 from typing import TYPE_CHECKING, AsyncIterator
@@ -29,6 +31,8 @@ from app.services.providers.base import BaseProviderAdapter
 from app.services.providers.base_urls import effective_base_url
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.http_client import get_provider_client
+from app.services.providers.request_ids import provider_request_id_of, tag_first_chunk, with_provider_request_id
+from app.services.providers.stop_reason import normalize_stop_reason
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -125,6 +129,7 @@ def _parse_response(data: dict) -> ProviderResponse:
     content = ""
     reasoning_text = ""
     finish_reason = "stop"
+    stop_reason = "unknown"  # FIX119 — no candidate finishReason is `unknown`
     if candidates:
         first = candidates[0]
         parts = (first.get("content") or {}).get("parts") or []
@@ -144,6 +149,7 @@ def _parse_response(data: dict) -> ProviderResponse:
             first.get("finishReason", "STOP"),
             first.get("finishReason", "stop").lower(),
         )
+        stop_reason = normalize_stop_reason("google", first.get("finishReason"), provider="google")
 
     usage = None
     meta = data.get("usageMetadata") or {}
@@ -165,6 +171,7 @@ def _parse_response(data: dict) -> ProviderResponse:
         content=content,
         model=data.get("modelVersion", "") or "",
         finish_reason=finish_reason,
+        stop_reason=stop_reason,
         usage=usage,
         raw=data,
         reasoning_content=reasoning_text or None,
@@ -177,6 +184,7 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
     delta = ""
     reasoning_delta = ""
     finish_reason: str | None = None
+    stop_reason: str | None = None
     if candidates:
         first = candidates[0]
         parts = (first.get("content") or {}).get("parts") or []
@@ -197,6 +205,7 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
         raw_finish = first.get("finishReason")
         if raw_finish:
             finish_reason = _FINISH_MAP.get(raw_finish, raw_finish.lower())
+            stop_reason = normalize_stop_reason("google", raw_finish, provider="google")
 
     usage = None
     meta = data.get("usageMetadata") or {}
@@ -218,6 +227,7 @@ def _parse_stream_chunk(data: dict) -> ProviderStreamChunk | None:
     return ProviderStreamChunk(
         delta=delta,
         finish_reason=finish_reason,
+        stop_reason=stop_reason,
         model=data.get("modelVersion", "") or "",
         usage=usage,
         reasoning_delta=reasoning_delta or None,
@@ -318,7 +328,8 @@ class GoogleAIAdapter(BaseProviderAdapter):
         )
         data = resp.json()
 
-        return _parse_response(data)
+        parsed = _parse_response(data)
+        return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     async def stream_chat(
         self,
@@ -351,6 +362,7 @@ class GoogleAIAdapter(BaseProviderAdapter):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
+            _prid = provider_request_id_of(resp)  # FIX119
             async for line in resp.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -363,4 +375,7 @@ class GoogleAIAdapter(BaseProviderAdapter):
                     continue
                 chunk = _parse_stream_chunk(data)
                 if chunk is not None:
+                    if _prid:
+                        chunk = with_provider_request_id(chunk, _prid)
+                        _prid = None
                     yield chunk

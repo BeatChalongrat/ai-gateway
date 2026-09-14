@@ -17,6 +17,8 @@
 package middleware
 
 import (
+	"regexp"
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -58,11 +60,21 @@ func (r *statusRecorder) Flush() {
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rid := r.Header.Get("X-Request-Id")
+		// FIX119 — one id per turn. A client-supplied X-Request-Id is
+		// honoured when it has a safe shape (the desktop sends its run id;
+		// the page sends nothing), otherwise one is minted here — ONCE.
+		// The handlers read it back from the context (RequestIDFrom) and
+		// use it as the run id on every frame and as the X-Request-Id sent
+		// upstream, so the http_request line below, the stream envelope,
+		// the gateway's and the backend's logs and the row all carry the
+		// same value. Before this the handler minted a second, different
+		// uuid whenever the client sent none.
+		rid := SanitizeRequestID(r.Header.Get("X-Request-Id"))
 		if rid == "" {
 			rid = uuid.NewString()
 		}
 		w.Header().Set("X-Request-Id", rid)
+		r = r.WithContext(WithRequestID(r.Context(), rid))
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
@@ -108,4 +120,34 @@ func extractPathID(path, resource string) string {
 		}
 	}
 	return ""
+}
+
+type requestIDKey struct{}
+
+// requestIDShape bounds a client-supplied id: it is logged on every line,
+// echoed on a header, stored on the row and shown to a person, so it may
+// not carry anything but a plain token. Anything else is replaced by a
+// minted uuid, never rewritten.
+var requestIDShape = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
+
+// SanitizeRequestID returns the id when it has the allowed shape, "" otherwise.
+func SanitizeRequestID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if requestIDShape.MatchString(raw) {
+		return raw
+	}
+	return ""
+}
+
+// WithRequestID stores the request id on the context.
+func WithRequestID(ctx context.Context, rid string) context.Context {
+	return context.WithValue(ctx, requestIDKey{}, rid)
+}
+
+// RequestIDFrom returns the request id the Logging middleware minted or
+// honoured for this request ("" outside the middleware, e.g. in a test
+// that calls a handler directly).
+func RequestIDFrom(ctx context.Context) string {
+	v, _ := ctx.Value(requestIDKey{}).(string)
+	return v
 }

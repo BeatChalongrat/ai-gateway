@@ -526,7 +526,7 @@ def _mock_provider_key_service(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _mock_adapter_stream_chat(monkeypatch):
+def _mock_adapter_stream_chat(request, monkeypatch):
     """Auto-stub ``adapter.stream_chat`` for OpenAI + Anthropic adapters.
 
     Before this fixture existed, streaming tests relied on individual
@@ -556,6 +556,9 @@ def _mock_adapter_stream_chat(monkeypatch):
             model=resolved_model or "stub",
         )
 
+    if request.node.get_closest_marker("real_adapter"):
+        # FIX119 — a test that exercises the REAL stream path (fake transport) opts out.
+        return
     monkeypatch.setattr(AnthropicAdapter, "stream_chat", _stub_stream_chat)
     monkeypatch.setattr(OpenAIAdapter, "stream_chat", _stub_stream_chat)
 

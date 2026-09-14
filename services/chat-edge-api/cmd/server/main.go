@@ -20,6 +20,8 @@
 package main
 
 import (
+	"strings"
+	"regexp"
 	"context"
 	"errors"
 	"log/slog"
@@ -243,6 +245,14 @@ func main() {
 	}
 	feedbackSvc := service.NewFeedbackService(feedbackRepo, messages, conversations)
 	provisionSvc := service.NewProvisionService(pool)
+	// FIX119 Part C2 — which callers are test accounts.
+	if p := strings.TrimSpace(cfg.TestAccountEmailPattern); p != "" {
+		if re, err := regexp.Compile(p); err != nil {
+			slog.Warn("TEST_ACCOUNT_EMAIL_PATTERN is not a valid regexp — no account will be labelled as test", "pattern", p, "err", err.Error())
+		} else {
+			provisionSvc.SetTestAccountPattern(re)
+		}
+	}
 
 	// Blob storage — backed by either the local filesystem (default)
 	// or any S3-compatible service. Both file uploads + KB documents

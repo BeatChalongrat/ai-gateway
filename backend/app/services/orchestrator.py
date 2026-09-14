@@ -17,6 +17,8 @@ DLP can be disabled globally via DLP_ENABLED=false in settings.
 
 from __future__ import annotations
 
+import dataclasses
+
 import asyncio
 import re
 import time
@@ -340,7 +342,12 @@ class GatewayOrchestrator:
         session: "AsyncSession | None" = None,
         out_meta: dict | None = None,
         _preflight_done: bool = False,
+        turn_id: str | None = None,
     ) -> ChatCompletionsResponse:
+        # ``request_id`` is THIS gateway request's id (the request_logs
+        # primary key); ``turn_id`` (FIX119) is the caller's id for the
+        # whole turn, which may span several such requests. Both are bound
+        # into every log line below so a grep for either finds the other.
         request_id = f"req_{uuid.uuid4().hex}"
         t_start = time.perf_counter()
 
@@ -360,12 +367,19 @@ class GatewayOrchestrator:
                 request_id=request_id,
                 policy_profile_override=payload.policy_profile_id,
             )
+            if turn_id:
+                ctx = dataclasses.replace(ctx, turn_id=turn_id)
 
         log = logger.bind(
             request_id=request_id,
+            turn_id=turn_id,
             tenant_id=ctx.tenant_id,
             project_id=ctx.project_id,
         )
+        if turn_id:
+            # FIX119 — the one line that joins the caller's turn id to this
+            # request's id; every later line carries both.
+            log.info("turn_request_bound", turn_id=turn_id, request_id=request_id)
 
         # Inject project-level routing config (migration 044). Caller-
         # supplied ``payload.metadata`` keys WIN — project config is the
@@ -1298,6 +1312,10 @@ class GatewayOrchestrator:
             provider=route.provider_name,
             model=provider_response.model,
             finish_reason=provider_response.finish_reason,
+            # FIX119 — the closed-set reason and the provider's own request
+            # id, so the turn can be chased to the provider's side.
+            stop_reason=provider_response.stop_reason,
+            provider_request_id=provider_response.provider_request_id,
             provider_ms=provider_ms,
             fallback_used=fallback_result is not None,
             fallback_attempt=(
@@ -2221,6 +2239,8 @@ class GatewayOrchestrator:
             from app.domain.observability import served_model_name as _served_hdr
 
             out_meta["provider_used"] = route.provider_name
+            out_meta["provider_request_id"] = provider_response.provider_request_id
+            out_meta["stop_reason"] = provider_response.stop_reason
             # FIX35 Part B — X-Gateway-Model names the model that ran, never
             # a meta-router id.
             out_meta["model_used"] = _served_hdr(
@@ -2308,6 +2328,11 @@ class GatewayOrchestrator:
                             # field doesn't appear on the wire then.
                             tool_calls=response_tool_calls,
                         ),
+                        # FIX119 — the provider's finish reason used to be dropped
+                        # here (the schema default "stop" answered for every
+                        # non-streaming request, a max_tokens cut included).
+                        finish_reason=provider_response.finish_reason or "stop",
+                        stop_reason=provider_response.stop_reason or "unknown",
                     )
                 ],
                 usage=usage,
@@ -3164,6 +3189,7 @@ class GatewayOrchestrator:
         auth: ResolvedApiKey,
         payload: ChatCompletionsRequest,
         session: "AsyncSession | None" = None,
+        turn_id: str | None = None,
     ) -> RequestContext:
         """Resolve project context for a streaming request.
 
@@ -3188,6 +3214,8 @@ class GatewayOrchestrator:
             request_id=request_id,
             policy_profile_override=payload.policy_profile_id,
         )
+        if turn_id:
+            ctx = dataclasses.replace(ctx, turn_id=turn_id)  # FIX119
         # Preflight parity with the non-streaming path (1b-1d): rate
         # limit + daily quota + budget + portal credit ALL run here,
         # BEFORE DLP / router / provider work, so a streaming request
@@ -3198,6 +3226,7 @@ class GatewayOrchestrator:
         if session is not None:
             stream_log = logger.bind(
                 request_id=request_id,
+                turn_id=turn_id,
                 tenant_id=ctx.tenant_id,
                 project_id=ctx.project_id,
             )

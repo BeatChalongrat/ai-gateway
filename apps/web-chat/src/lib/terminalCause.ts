@@ -22,3 +22,28 @@ export function isTerminalCause(s: unknown): s is TerminalCause {
  *  that no mapper knew and no other surface used. */
 export const EOF_WITHOUT_TERMINAL_CODE = "stream_interrupted";
 export const EOF_WITHOUT_TERMINAL_CAUSE: TerminalCause = "eof_without_terminal";
+
+// ── FIX119 — why the MODEL stopped ────────────────────────────────────────
+//
+// Distinct from the terminal cause: a completed turn can carry
+// `max_tokens` — the answer is cut off — and the page must say so instead
+// of presenting the cut as a finished answer. The gateway maps each
+// provider's native value into this set; the page reads it from
+// message_complete (live) and from the row (reload). `unknown` means the
+// provider said nothing; the page shows nothing for it.
+export const STOP_REASONS = ["end_turn", "max_tokens", "tool_use", "stop_sequence", "content_filter", "refusal", "context_window_exceeded", "unknown"] as const;
+export type StopReason = (typeof STOP_REASONS)[number];
+
+export function isStopReason(s: unknown): s is StopReason {
+  return typeof s === "string" && (STOP_REASONS as readonly string[]).includes(s);
+}
+
+/** The stop reasons the page tells the person about, and the dictionary
+ *  key for each. end_turn / tool_use / unknown say nothing. */
+export const STOP_REASON_NOTICE_KEY = {
+  max_tokens: "msg.stopMaxTokens",
+  refusal: "msg.stopRefusal",
+  content_filter: "msg.stopContentFilter",
+  context_window_exceeded: "msg.stopContextWindow",
+  stop_sequence: "msg.stopSequence",
+} as const;

@@ -19,6 +19,8 @@ Design notes:
 
 from __future__ import annotations
 
+import dataclasses
+
 import json
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -35,6 +37,7 @@ from app.services.providers.openai_adapter import (
     _parse_sse_line,
 )
 from app.services.providers.parsers import parse_openai_response
+from app.services.providers.request_ids import provider_request_id_of, tag_first_chunk, with_provider_request_id
 from app.services.providers.reasoning_strategies import (
     STRATEGIES_WITH_EFFORT_KNOB,
     STRATEGIES_WITH_ENABLE_THINKING_OFF,
@@ -230,7 +233,8 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         )
         data = resp.json()
 
-        return parse_openai_response(data)
+        parsed = parse_openai_response(data)
+        return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     # ------------------------------------------------------------------
     # Streaming
@@ -267,7 +271,11 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
+            _prid = provider_request_id_of(resp)
             async for line in resp.aiter_lines():
                 chunk = _parse_sse_line(line, provider_name=self.provider_name)
                 if chunk is not None:
+                    if _prid:
+                        chunk = with_provider_request_id(chunk, _prid)
+                        _prid = None
                     yield chunk

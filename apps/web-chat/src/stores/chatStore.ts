@@ -22,7 +22,7 @@ import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
-import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE } from "@/lib/terminalCause";
+import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
 import type { TurnScrollRequest } from "@/lib/turnAnchor";
@@ -2267,7 +2267,9 @@ async function consumeStream(
             messages: {
               ...s.messages,
               [convId]: list.map((m) =>
-                m.id === tempAsstId ? renamed(m, data.message_id) : m,
+                // FIX119 — the run id lands on the row the moment the run is
+                // announced, so a failure later has it to show.
+                m.id === tempAsstId ? { ...renamed(m, data.message_id), ...(data.run_id ? { run_id: data.run_id } : {}) } : m,
               ),
             },
             streamingAssistantId: {
@@ -2681,6 +2683,10 @@ async function consumeStream(
                       // FIX35 Part B — the model that actually answered
                       // (an Auto turn names the router's pick).
                       model_id: data.model_id ?? m.model_id,
+                      // FIX119 — why the model stopped; the bubble tells the person
+                      // when it is max_tokens / refusal / content_filter.
+                      ...(isStopReason(data.stop_reason) ? { stop_reason: data.stop_reason } : {}),
+                      ...(typeof data.run_id === "string" && data.run_id ? { run_id: data.run_id } : {}),
                       response_time_ms: Date.now() - streamStartedAt,
                     }
                   : m,
@@ -2898,6 +2904,7 @@ async function consumeStream(
                       error_message: localized,
                       error_attempts: data?.attempts,
                       terminal_cause: typeof data?.cause === "string" ? data.cause : "error",
+                      ...(typeof data?.run_id === "string" && data.run_id ? { run_id: data.run_id } : {}),
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,

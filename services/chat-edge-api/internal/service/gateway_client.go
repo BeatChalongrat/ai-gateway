@@ -409,6 +409,12 @@ type StreamEvent struct {
 	Delta        string
 	FinishReason string
 	Usage        *GatewayChatUsage
+	// FIX119 — why the model stopped (the gateway's closed set), the
+	// provider's own request id and the gateway's request id, all from
+	// the chunk that carried them; "" elsewhere.
+	StopReason        string
+	ProviderRequestID string
+	GatewayRequestID  string
 	// FIX35 Part B — the model that is actually answering, as the gateway
 	// names it: from a typed ``model_resolved`` frame (a meta-router route
 	// such as auto / openrouter/auto, announced before the first content
@@ -488,6 +494,11 @@ type StreamProviderError struct {
 	// Retryable is the gateway's verdict on whether the same request can
 	// succeed again (app.core.error_catalog); nil when it did not say.
 	Retryable *bool `json:"retryable,omitempty"`
+	// FIX119 — the ids the backend put on the frame: its own request id
+	// and the turn id it was handed. Forwarded on the terminal error's
+	// details so the person's card and the logs name the same thing.
+	RequestID string `json:"request_id,omitempty"`
+	TurnID    string `json:"turn_id,omitempty"`
 }
 
 // StreamToolCallDelta is one fragment from a tool_calls[] stream
@@ -526,7 +537,23 @@ func (g *GatewayClient) SendChatCompletionStream(
 		resp.Body.Close()
 		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
 	}
-	return &StreamReader{body: resp.Body, scanner: bufio.NewScanner(resp.Body)}, nil
+	// FIX119 — the backend answers with its own request id (the
+	// request_logs key). One log line joins it to the run id we sent, so
+	// a grep for either finds the other. The backend can carry TWO
+	// X-Request-Id values (its middleware echoes ours as well); the
+	// backend's own starts with "req_".
+	gatewayRequestID := ""
+	for _, v := range resp.Header.Values("X-Request-Id") {
+		if strings.HasPrefix(v, "req_") {
+			gatewayRequestID = v
+			break
+		}
+	}
+	slog.Info("gateway_stream_opened",
+		"run_id", callCtx.RequestID, "conversation_id", callCtx.ConversationID.String(),
+		"gateway_request_id", gatewayRequestID, "gateway_provider", resp.Header.Get("X-Gateway-Provider"),
+		"gateway_model", resp.Header.Get("X-Gateway-Model"))
+	return &StreamReader{body: resp.Body, scanner: bufio.NewScanner(resp.Body), GatewayRequestID: gatewayRequestID}, nil
 }
 
 // StreamReader wraps the gateway's SSE body. “Next“ blocks until
@@ -534,6 +561,9 @@ func (g *GatewayClient) SendChatCompletionStream(
 type StreamReader struct {
 	body    io.ReadCloser
 	scanner *bufio.Scanner
+	// GatewayRequestID (FIX119) — the backend's own id for the call this
+	// stream answers ("" when the response carried none).
+	GatewayRequestID string
 }
 
 func (s *StreamReader) Close() error { return s.body.Close() }
@@ -621,8 +651,16 @@ type streamChunk struct {
 			} `json:"tool_calls,omitempty"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
+		// FIX119 — the gateway's closed-set stop reason, beside the
+		// OpenAI-shaped finish_reason, on the final chunk.
+		StopReason *string `json:"stop_reason"`
 	} `json:"choices"`
 	Usage *GatewayChatUsage `json:"usage"`
+	// FIX119 — the gateway's own request id (its request_logs key) rides
+	// every chunk as the OpenAI "id"; the provider's request id rides the
+	// final chunk when the provider sent one.
+	ID                string `json:"id,omitempty"`
+	ProviderRequestID string `json:"provider_request_id,omitempty"`
 	// FIX35 Part B — every chunk names the model that is actually
 	// answering (the gateway resolves a meta-router id to the provider-
 	// reported model before the first content frame).
@@ -733,12 +771,15 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		return nil, err
 	}
-	ev := &StreamEvent{Usage: c.Usage, ServedModel: c.Model}
+	ev := &StreamEvent{Usage: c.Usage, ServedModel: c.Model, ProviderRequestID: c.ProviderRequestID, GatewayRequestID: c.ID}
 	if len(c.Choices) > 0 {
 		choice := c.Choices[0]
 		ev.Delta = choice.Delta.Content
 		if choice.FinishReason != nil {
 			ev.FinishReason = *choice.FinishReason
+		}
+		if choice.StopReason != nil {
+			ev.StopReason = *choice.StopReason
 		}
 		if len(choice.Delta.ToolCalls) > 0 {
 			ev.ToolCallDeltas = make([]StreamToolCallDelta, 0, len(choice.Delta.ToolCalls))

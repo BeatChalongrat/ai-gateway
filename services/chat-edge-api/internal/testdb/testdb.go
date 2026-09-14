@@ -27,13 +27,31 @@
 //
 //	services/chat-edge-api/scripts/make_test_template.sh
 //
-// Tests skip loudly when the database or the template is absent, the
-// same contract the older per-file pool helpers used.
+// FIX119 Part C1 — fail-closed. Until FIX119 seven test files opened
+// their own pool with a default DSN that named the LIVE database
+// (sran_ai) and fell back to it whenever CHAT_EDGE_TEST_DSN was unset —
+// which is every developer's machine. FIX118 counted the result: 176
+// fixture rows in the production table. Now:
+//
+//   - Fresh is the only way a test gets a database
+//     (internal/testhygiene fails the build on any other pgxpool.New in
+//     a _test.go);
+//   - the server DSN's own database segment is ignored — Fresh always
+//     connects to the maintenance database `postgres` and to the clone
+//     it created — and a DSN that names a live database is refused
+//     outright (LiveDatabases), so misconfiguration cannot point a test
+//     at production;
+//   - an unreachable server or a missing template FAILS the test
+//     (t.Fatalf), it does not skip: a lane that quietly ran zero
+//     database tests reported green for months. Set
+//     CHAT_EDGE_TEST_DB_OPTIONAL=1 on a machine that has no Postgres at
+//     all to turn that failure into a loud skip.
 package testdb
 
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -47,16 +65,59 @@ import (
 // from. Built by scripts/make_test_template.sh.
 const TemplateDB = "chat_test_template"
 
-const defaultDSN = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
+// MaintenanceDB is the database Fresh connects to in order to create
+// and drop clones. It is never written to.
+const MaintenanceDB = "postgres"
+
+// defaultServerDSN names the SERVER only. The database segment is
+// deliberately the maintenance database, never a live one.
+const defaultServerDSN = "postgres://chatedge:chatedge_pass@localhost:5433/postgres?sslmode=disable"
+
+// LiveDatabases are names a test must never be allowed to connect to,
+// whatever the environment says.
+var LiveDatabases = map[string]bool{"sran_ai": true, "ai_gateway": true}
 
 var unsafeName = regexp.MustCompile(`[^a-z0-9_]+`)
 
-// dsn returns the base DSN tests connect with.
+// dsn returns the server DSN tests connect with.
 func dsn() string {
 	if v := os.Getenv("CHAT_EDGE_TEST_DSN"); v != "" {
 		return v
 	}
-	return defaultDSN
+	return defaultServerDSN
+}
+
+// optional reports whether an absent database turns into a skip
+// instead of a failure (CHAT_EDGE_TEST_DB_OPTIONAL=1).
+func optional() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("CHAT_EDGE_TEST_DB_OPTIONAL")))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+// DatabaseName returns the database segment of a DSN ("" when absent).
+func DatabaseName(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		if i := strings.LastIndex(base, "/"); i >= 0 {
+			rest := base[i+1:]
+			if j := strings.Index(rest, "?"); j >= 0 {
+				rest = rest[:j]
+			}
+			return rest
+		}
+		return ""
+	}
+	return strings.TrimPrefix(u.Path, "/")
+}
+
+// GuardDSN refuses a server DSN that names a live database. It is the
+// code-level fence the card asked for: even a CHAT_EDGE_TEST_DSN that
+// points at production cannot make a test connect to it.
+func GuardDSN(base string) error {
+	if name := DatabaseName(base); LiveDatabases[name] {
+		return fmt.Errorf("testdb: refusing DSN that names the live database %q — tests only ever connect to %q and to their own clones", name, MaintenanceDB)
+	}
+	return nil
 }
 
 // withDatabase rewrites the database segment of a DSN.
@@ -80,6 +141,17 @@ func dbNameFor(t *testing.T) string {
 	return fmt.Sprintf("t_%s_%d", strings.Trim(name, "_"), time.Now().UnixNano()%1e9)
 }
 
+// absent ends the test when no test database can be had: a failure by
+// default, a skip only when the machine declares it has no Postgres.
+func absent(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if optional() {
+		t.Skipf("skipping (CHAT_EDGE_TEST_DB_OPTIONAL=1): "+format, args...)
+		return
+	}
+	t.Fatalf("no test database (set CHAT_EDGE_TEST_DB_OPTIONAL=1 to skip instead): "+format, args...)
+}
+
 // Fresh returns a pool connected to a private database for this test,
 // cloned from the template. The database is dropped when the test
 // finishes — tests need no cleanup of their own.
@@ -92,23 +164,27 @@ func Fresh(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 	base := dsn()
+	if err := GuardDSN(base); err != nil {
+		t.Fatal(err)
+	}
 
-	admin, err := pgxpool.New(ctx, withDatabase(base, "postgres"))
+	admin, err := pgxpool.New(ctx, withDatabase(base, MaintenanceDB))
 	if err != nil {
-		t.Skipf("skipping: cannot reach the database server: %v", err)
+		absent(t, "cannot reach the database server: %v", err)
+		return nil
 	}
 	defer admin.Close()
 	if err := admin.Ping(ctx); err != nil {
-		t.Skipf("skipping: database unreachable (%v)", err)
+		absent(t, "database server unreachable (%v)", err)
+		return nil
 	}
 
 	var exists bool
 	if err := admin.QueryRow(ctx,
 		"SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)", TemplateDB,
 	).Scan(&exists); err != nil || !exists {
-		t.Skipf(
-			"skipping: template database %q is missing — run "+
-				"services/chat-edge-api/scripts/make_test_template.sh", TemplateDB)
+		absent(t, "template database %q is missing — run services/chat-edge-api/scripts/make_test_template.sh", TemplateDB)
+		return nil
 	}
 
 	name := dbNameFor(t)
@@ -122,7 +198,7 @@ func Fresh(t *testing.T) *pgxpool.Pool {
 	t.Cleanup(func() {
 		dropCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cleaner, err := pgxpool.New(dropCtx, withDatabase(base, "postgres"))
+		cleaner, err := pgxpool.New(dropCtx, withDatabase(base, MaintenanceDB))
 		if err != nil {
 			t.Logf("test database %s left behind: %v", name, err)
 			return

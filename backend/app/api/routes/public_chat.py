@@ -18,12 +18,13 @@ generator below — see event_generator).
 
 import asyncio
 import json
+import re
 import orjson
 import time
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -298,6 +299,21 @@ def _sse_dumps(obj, ensure_ascii: bool = False) -> str:
     return orjson.dumps(obj).decode("utf-8")
 
 
+
+_TURN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
+
+
+def _turn_id_from(request: Request) -> str | None:
+    """FIX119 — the caller's turn id (X-Request-Id), or None.
+
+    chat-edge sends its run_id, the desktop its run id. Bounded to a
+    safe shape because the value is logged on every line and echoed on
+    a header; anything else is treated as absent, never rewritten.
+    """
+    raw = request.headers.get("x-request-id") or ""
+    raw = raw.strip()
+    return raw if _TURN_ID_RE.match(raw) else None
+
 @router.post(
     "/chat/completions",
     response_model=ChatCompletionsResponse,
@@ -321,6 +337,7 @@ def _sse_dumps(obj, ensure_ascii: bool = False) -> str:
 async def chat_completions(
     payload: ChatCompletionsRequest,
     response: Response,
+    request: Request,
     auth: ResolvedApiKey = Depends(get_resolved_api_key),
     session: AsyncSession = Depends(get_async_db),
 ):
@@ -367,7 +384,7 @@ async def chat_completions(
 
     try:
         result = await asyncio.wait_for(
-            _chat_completions_impl(payload, response, auth, session),
+            _chat_completions_impl(payload, response, auth, session, turn_id=_turn_id_from(request)),
             timeout=hard_s,
         )
     except asyncio.TimeoutError:
@@ -415,8 +432,13 @@ async def _chat_completions_impl(
     response: Response,
     auth: ResolvedApiKey,
     session: AsyncSession,
+    turn_id: str | None = None,
 ):
     orchestrator = GatewayOrchestrator()
+    if turn_id:
+        # FIX119 — echoed so a caller that sent a turn id gets it back
+        # on the same response it sent it with.
+        response.headers["X-Turn-Id"] = turn_id
 
     if not payload.stream:
         # Phase-2 fallback metadata is surfaced through ``out_meta`` —
@@ -430,7 +452,11 @@ async def _chat_completions_impl(
             payload=payload,
             session=session,
             out_meta=out_meta,
+            turn_id=turn_id,
         )
+        # FIX119 — the provider's own id, when it sent one, beside ours.
+        if out_meta.get("provider_request_id"):
+            response.headers["X-Provider-Request-Id"] = str(out_meta["provider_request_id"])
         if out_meta.get("provider_used"):
             response.headers["X-Gateway-Provider"] = str(
                 out_meta["provider_used"]
@@ -477,14 +503,19 @@ async def _chat_completions_impl(
     # released before the stream body; the end-of-stream log persist runs
     # on its own short-lived session.
     ctx = await orchestrator.resolve_streaming_context(
-        auth=auth, payload=payload, session=session,
+        auth=auth, payload=payload, session=session, turn_id=turn_id,
     )
 
     log = logger.bind(
         request_id=ctx.request_id,
+        turn_id=ctx.turn_id,
         tenant_id=ctx.tenant_id,
         project_id=ctx.project_id,
     )
+    if ctx.turn_id:
+        # FIX119 — the one line that joins the caller's turn id to this
+        # request's id; every later line of this stream carries both.
+        log.info("turn_request_bound", turn_id=ctx.turn_id, request_id=ctx.request_id)
 
     profile_id = ctx.policy_profile_id or settings.dlp_default_profile
     profile = (
@@ -1363,6 +1394,8 @@ async def _chat_completions_impl(
         # orchestrator path).
         _stream_outbound_span_map: dict[str, str] = {}
         final_finish_reason: str | None = None
+        final_stop_reason: str | None = None  # FIX119
+        final_provider_request_id: str | None = None  # FIX119
         # FIX35 Part B — until the provider's first chunk names the model,
         # a meta-router route is reported as the router's public id
         # (``openrouter/auto``), never as the bare ``"auto"`` sentinel.
@@ -1778,7 +1811,12 @@ async def _chat_completions_impl(
                 "code": code,
                 "message": message or info.message,
                 "retryable": info.retryable,
+                # FIX119 — the ids a person can quote and a log can be
+                # grepped for: this request's, and the turn's when known.
+                "request_id": ctx.request_id,
             }
+            if ctx.turn_id:
+                err["turn_id"] = ctx.turn_id
             if details:
                 err["details"] = details
             if attempts:
@@ -2574,6 +2612,12 @@ async def _chat_completions_impl(
                         # top of the loop — FIX35 Part B.)
                         if chunk.finish_reason is not None:
                             final_finish_reason = chunk.finish_reason
+                        # FIX119 — the closed-set reason rides the same chunk;
+                        # the provider's request id rides the first one.
+                        if chunk.stop_reason:
+                            final_stop_reason = chunk.stop_reason
+                        if chunk.provider_request_id and not final_provider_request_id:
+                            final_provider_request_id = chunk.provider_request_id
                         if chunk.usage is not None:
                             provider_usage = chunk.usage
                     # Stream completed successfully — clear the health
@@ -3135,6 +3179,8 @@ async def _chat_completions_impl(
                 provider=route.provider_name,
                 model=route.model_name,
                 finish_reason=final_finish_reason,
+                stop_reason=final_stop_reason or "unknown",
+                provider_request_id=final_provider_request_id,
                 completion_tokens=provider_usage.completion_tokens if provider_usage else None,
                 reasoning_observed=bool(_reasoning_text_total),
             )
@@ -3197,8 +3243,24 @@ async def _chat_completions_impl(
                 "index": 0,
                 "delta": {},
                 "finish_reason": final_finish_reason,
+                # FIX119 — why the model stopped, in the closed set. A
+                # provider that said nothing is `unknown`; a cut-off answer
+                # is `max_tokens` and the clients tell the person so.
+                "stop_reason": final_stop_reason or "unknown",
             }],
         }
+        if final_provider_request_id:
+            _final_frame["provider_request_id"] = final_provider_request_id
+        if ctx.turn_id:
+            _final_frame["turn_id"] = ctx.turn_id
+        log.info(
+            "stream_provider_complete",
+            provider=route.provider_name,
+            model=final_model,
+            finish_reason=final_finish_reason,
+            stop_reason=final_stop_reason or "unknown",
+            provider_request_id=final_provider_request_id,
+        )
         if _reasoning_text_total:
             provider_reasoning_tok = (
                 provider_usage.reasoning_tokens
@@ -3275,6 +3337,8 @@ async def _chat_completions_impl(
     _stream_headers = {
         "Cache-Control": "no-cache",
         "X-Request-Id": ctx.request_id or "",
+        # FIX119 — the caller's turn id, echoed (empty when none was sent).
+        "X-Turn-Id": ctx.turn_id or "",
         "X-Gateway-Provider": route.provider_name,
         "X-Gateway-Model": route.model_name,
         "X-Gateway-Attempt": str(_stream_attempt_number),

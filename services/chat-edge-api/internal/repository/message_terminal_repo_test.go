@@ -36,14 +36,14 @@ func TestMessageRepo_TerminalCauseRoundTrip(t *testing.T) {
 	if err := mr.UpdateContent(ctx, failed.ID, "half", "error", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := mr.SetTerminal(ctx, failed.ID, "eof_without_terminal", "stream_interrupted"); err != nil {
+	if err := mr.SetTerminal(ctx, failed.ID, "eof_without_terminal", "stream_interrupted", ""); err != nil {
 		t.Fatalf("set terminal: %v", err)
 	}
 	ok := mk("assistant", "streaming")
 	if err := mr.UpdateContent(ctx, ok.ID, "fine", "completed", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := mr.SetTerminal(ctx, ok.ID, "completed", ""); err != nil {
+	if err := mr.SetTerminal(ctx, ok.ID, "completed", "", "end_turn"); err != nil {
 		t.Fatal(err)
 	}
 	orphan := mk("assistant", "streaming")
@@ -79,7 +79,7 @@ func TestMessageRepo_TerminalCauseRoundTrip(t *testing.T) {
 		t.Fatalf("interrupted row: status=%s cause=%s code=%s", r.Status, str(r.TerminalCause), str(r.ErrorCode))
 	}
 	// A value outside the closed set is refused by the database itself.
-	if err := mr.SetTerminal(ctx, ok.ID, "failed", ""); err == nil {
+	if err := mr.SetTerminal(ctx, ok.ID, "failed", "", ""); err == nil {
 		t.Fatal("terminal_cause outside the closed set must be refused by the CHECK constraint")
 	}
 }

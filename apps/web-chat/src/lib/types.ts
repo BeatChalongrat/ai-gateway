@@ -489,6 +489,15 @@ export interface Message {
    *  docs/contracts/terminal_cause.json (server rows and desktop-imported
    *  rows; absent on rows written before migration 043). */
   terminal_cause?: string;
+  /** FIX119 — the id of this turn's generation: on every frame of the
+   *  stream (chat-edge run_id / the desktop's run id), on the row
+   *  (migration 044), in every layer's logs. Shown on a failed turn's
+   *  card so a person can quote it. */
+  run_id?: string;
+  /** FIX119 — why the model stopped (closed set, terminalCause.ts
+   *  STOP_REASONS). `max_tokens` = the answer is cut off. Absent on user
+   *  rows, failed runs and rows written before migration 044. */
+  stop_reason?: string;
   /** FIX100 Part B — the gateway's own ``retryable`` flag from the same
    *  error frame. It decides the sentence (localizeErrorCode) and now the
    *  Regenerate button too, so the two can never disagree: a failure whose
@@ -747,6 +756,8 @@ export interface MemoryEventListResponse {
 export interface SSEMessageStart {
   message_id: UUID;
   conversation_id: UUID;
+  /** FIX119 — the generation's run id (the envelope splices it onto every frame). */
+  run_id?: string;
 }
 
 export interface SSEContentDelta {
@@ -781,6 +792,11 @@ export interface SSEMessageComplete {
   /** FIX35 Part B — the model that actually answered (an "auto"
    *  conversation's reply names the model the router picked). */
   model_id?: string;
+  /** FIX119 — why the model stopped (closed set); absent on an older server. */
+  stop_reason?: string;
+  /** FIX119 — the backend's request id for the call that answered. */
+  gateway_request_id?: string;
+  run_id?: string;
 }
 
 /** FIX35 Part B — emitted as soon as the gateway names the model that is
@@ -978,6 +994,8 @@ export interface SSEError {
   /** FIX118 — why the run ended (docs/contracts/terminal_cause.json);
    *  absent on frames from older builds. */
   cause?: string;
+  /** FIX119 — the run id (spliced by the envelope; present on every frame). */
+  run_id?: string;
   /** Structured payload (provider / upstream status). */
   details?: Record<string, unknown>;
   /** Per-model failure log when the whole chain failed (B3). */

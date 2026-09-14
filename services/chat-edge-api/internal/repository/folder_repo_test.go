@@ -2,7 +2,6 @@ package repository_test
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
@@ -10,42 +9,23 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 // These are INTEGRATION tests — they run against the real postgres-webchat
 // schema (chat.folders / chat.conversations). They skip cleanly when the DB
 // is unreachable so CI without a database stays green.
 //
-//	CHAT_EDGE_TEST_DSN overrides the connection string; the default targets
+//	(FIX119) each test gets a private clone of the test template via internal/testdb;
 //	the host-published postgres-webchat (docker-compose.webchat.yml :5433).
 //
 // Apply migrations first: services/chat-edge-api/scripts/apply_migrations.sh
 
-const defaultTestDSN = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = defaultTestDSN
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("skipping folder integration tests: cannot create pool: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skipping folder integration tests: DB unreachable (%v)", err)
-	}
-	// Verify the migration is applied so a missing table fails as a SKIP,
-	// not a confusing scan error.
-	var reg *string
-	if err := pool.QueryRow(ctx, "SELECT to_regclass('chat.folders')::text").Scan(&reg); err != nil || reg == nil {
-		pool.Close()
-		t.Skip("skipping: chat.folders not present — run apply_migrations.sh")
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }
 
 // newConv inserts a throwaway conversation for the given owner and registers

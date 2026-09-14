@@ -66,6 +66,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 const probePortalSecret = "fix41-probe-portal-secret-not-a-real-key"
@@ -240,19 +241,9 @@ func (probeModels) ModelIDs() []string       { return []string{"gpt-4o-mini"} }
 
 func probePool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Skipf("FIX41 probe: no pool: %v", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("FIX41 probe: DB unreachable: %v", err)
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }
 
 func mintProbeToken(userID uuid.UUID, tenantID string) string {

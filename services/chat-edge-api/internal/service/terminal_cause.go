@@ -91,6 +91,9 @@ type TerminalInfo struct {
 	// ErrorCode is the catalogue code of the terminal error frame, "" when
 	// the turn did not fail.
 	ErrorCode string
+	// StopReason (FIX119) is why the model stopped, one of StopReasons,
+	// "" when the gateway said nothing. Persisted only on a completed run.
+	StopReason string
 }
 
 // StreamFailure is a classified transport-level failure.
@@ -194,4 +197,65 @@ func CauseForStatus(status string) string {
 	default:
 		return "" // waiting_user (parked) has not ended; pending/streaming are not terminal
 	}
+}
+
+// ── FIX119 — why the MODEL stopped ────────────────────────────────────────
+//
+// Distinct from the terminal cause above (why the RUN ended): a run that
+// completed can carry stop_reason max_tokens — the answer is cut off. The
+// gateway maps each provider family's native value into this closed set
+// (backend/app/services/providers/stop_reason.py, the one table); chat-edge
+// only carries it. docs/contracts/terminal_cause.json → stop_reasons is the
+// source of truth, pinned by terminal_cause_test.go.
+const (
+	StopReasonEndTurn               = "end_turn"
+	StopReasonMaxTokens             = "max_tokens"
+	StopReasonToolUse               = "tool_use"
+	StopReasonStopSequence          = "stop_sequence"
+	StopReasonContentFilter         = "content_filter"
+	StopReasonRefusal               = "refusal"
+	StopReasonContextWindowExceeded = "context_window_exceeded"
+	StopReasonUnknown               = "unknown"
+)
+
+// StopReasons lists the closed set in contract order.
+var StopReasons = []string{
+	StopReasonEndTurn, StopReasonMaxTokens, StopReasonToolUse, StopReasonStopSequence,
+	StopReasonContentFilter, StopReasonRefusal, StopReasonContextWindowExceeded, StopReasonUnknown,
+}
+
+// IsStopReason reports whether s is one of the closed set.
+func IsStopReason(s string) bool {
+	for _, r := range StopReasons {
+		if r == s {
+			return true
+		}
+	}
+	return false
+}
+
+// openAIFinishToStopReason is the fallback for a gateway built before
+// FIX119, which sends only the OpenAI-shaped finish_reason. It is the
+// `openai` row of the contract's stop_reason_map, nothing more: a value
+// it does not name is `unknown`, never end_turn.
+var openAIFinishToStopReason = map[string]string{
+	"stop":           StopReasonEndTurn,
+	"length":         StopReasonMaxTokens,
+	"tool_calls":     StopReasonToolUse,
+	"function_call":  StopReasonToolUse,
+	"content_filter": StopReasonContentFilter,
+}
+
+// StopReasonFromFinish maps an OpenAI-shaped finish_reason to the closed
+// set (used only when the gateway sent no stop_reason of its own). An
+// empty finish reason is "" — the caller records nothing, not unknown,
+// because nothing was said at all.
+func StopReasonFromFinish(finish string) string {
+	if finish == "" {
+		return ""
+	}
+	if v, ok := openAIFinishToStopReason[finish]; ok {
+		return v
+	}
+	return StopReasonUnknown
 }

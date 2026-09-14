@@ -307,6 +307,11 @@ class ChatCompletionsChoice(BaseModel):
     index: int
     message: Message
     finish_reason: str = "stop"
+    # FIX119 — why the model stopped, in the gateway's closed set
+    # (docs/contracts/terminal_cause.json → stop_reasons). Additive beside
+    # the OpenAI-shaped finish_reason; `unknown` when the provider said
+    # nothing, never a guessed clean finish.
+    stop_reason: str = "unknown"
 
 
 class GatewayMetadata(BaseModel):

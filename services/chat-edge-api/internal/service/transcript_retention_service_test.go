@@ -15,7 +15,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -24,31 +23,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
-
-const retentionTestDSN = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
 
 func retentionTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = retentionTestDSN
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Skipf("skip: cannot create pool: %v", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("skip: DB unreachable (%v)", err)
-	}
-	var reg *string
-	if err := pool.QueryRow(context.Background(),
-		"SELECT to_regclass('chat.tenant_retention_settings')::text").Scan(&reg); err != nil || reg == nil {
-		pool.Close()
-		t.Skip("skip: migration 040 not applied")
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }
 
 type fakeEraseStore struct{ deleted []string }

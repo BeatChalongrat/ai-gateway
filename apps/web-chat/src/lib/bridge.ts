@@ -232,7 +232,11 @@ class BridgeClient {
         }
         // Re-encode as one SSE frame; parseSSE splits on the blank line. seq
         // stays on the envelope — the renderer never sees it.
-        const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        // FIX119 — the host's run id is spliced into the data the way
+        // chat-edge's envelope splices its own, so the store reads one shape
+        // for both surfaces (run_id on the row, on the card, in the logs).
+        const withRun = runId && data && typeof data === "object" && !Array.isArray(data) && !("run_id" in (data as Record<string, unknown>)) ? { ...(data as Record<string, unknown>), run_id: runId } : data;
+        const frame = `event: ${event}\ndata: ${JSON.stringify(withRun)}\n\n`;
         try {
           sink.controller.enqueue(encoder.encode(frame));
         } catch {

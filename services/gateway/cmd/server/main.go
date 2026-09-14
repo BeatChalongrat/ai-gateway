@@ -114,6 +114,9 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
 	r.Use(chimw.RealIP)
+	// FIX119 — one access line per request, with the request id this
+	// layer propagates, so a grep for a turn's id finds the gateway too.
+	r.Use(gwmw.AccessLog(logger))
 	r.Use(chimw.Recoverer)
 	r.Use(metrics.Middleware)
 

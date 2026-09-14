@@ -85,6 +85,10 @@ export interface ImportMessageItem {
   status?: "completed" | "error" | "cancelled";
   terminal_cause?: string;
   error_code?: string;
+  /** FIX119 — the turn's run id (the id every frame carried and the
+   *  gateway was sent) and why the model stopped (closed set). */
+  run_id?: string;
+  stop_reason?: string;
 }
 /** POST /api/v1/code/run response (FIX80: rows carry the persisted
  *  ConversationFile id when a conversation was named). */
@@ -198,8 +202,10 @@ export class ChatEdgeClient {
     }
   }
 
-  async importMessages(conversationId: string, messages: ImportMessageItem[]): Promise<{ imported: number; skipped: number } | null> {
-    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages/import`, { messages });
+  async importMessages(conversationId: string, messages: ImportMessageItem[], runId?: string): Promise<{ imported: number; skipped: number } | null> {
+    // FIX119 — the import request itself carries the run id, so chat-edge's
+    // http_request line for it joins the desktop turn to the rows.
+    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages/import`, { messages }, this.timeoutMs, runId ? { "X-Request-Id": runId } : undefined);
     if (!res) return null;
     return (await res.json()) as { imported: number; skipped: number };
   }
@@ -523,13 +529,13 @@ export class ChatEdgeClient {
     }
   }
 
-  private async send(method: "POST" | "PATCH", path: string, body: unknown, timeoutMs = this.timeoutMs): Promise<Response | null> {
+  private async send(method: "POST" | "PATCH", path: string, body: unknown, timeoutMs = this.timeoutMs, extraHeaders?: Record<string, string>): Promise<Response | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json", ...(extraHeaders ?? {}) },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
       });

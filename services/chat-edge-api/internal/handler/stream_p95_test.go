@@ -56,10 +56,6 @@ func TestFix41TurnP95(t *testing.T) {
 	if os.Getenv("FIX41_P95") != "1" {
 		t.Skip("set FIX41_P95=1 to measure per-turn latency")
 	}
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
 	ctx := context.Background()
 	// Own database per test, dropped when the test ends — no
 	// cleanup code, so none can silently fail (internal/testdb).

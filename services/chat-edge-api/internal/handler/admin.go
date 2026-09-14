@@ -172,19 +172,21 @@ func (h *AdminHandler) Usage(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "unsupported period")
 		return
 	}
+	// FIX119 Part C2 — test accounts' rows are out unless asked for.
+	includeTest := r.URL.Query().Get("include_test") == "1"
 
 	ctx := r.Context()
-	totals, err := h.fetchTotals(ctx, since)
+	totals, err := h.fetchTotals(ctx, since, includeTest)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	daily, err := h.fetchDaily(ctx, since)
+	daily, err := h.fetchDaily(ctx, since, includeTest)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	byModel, err := h.fetchByModel(ctx, since)
+	byModel, err := h.fetchByModel(ctx, since, includeTest)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
@@ -227,22 +229,24 @@ func periodSince(period string) (time.Time, bool) {
 	}
 }
 
-func (h *AdminHandler) fetchTotals(ctx context.Context, since time.Time) (analyticsTotals, error) {
+func (h *AdminHandler) fetchTotals(ctx context.Context, since time.Time, includeTest bool) (analyticsTotals, error) {
+	// FIX119 Part C2 — $2 = include test traffic. `(is_test = false OR $2)`
+	// keeps the predicate a parameter rather than two query strings.
 	const q = `
 		WITH msgs AS (
 			SELECT id, conversation_id, user_id, role, token_usage_input, token_usage_output, created_at
 			FROM chat.messages_masked
-			WHERE created_at >= $1
+			WHERE created_at >= $1 AND (is_test = false OR $2)
 		)
 		SELECT
-			(SELECT COUNT(*) FROM chat.conversations WHERE updated_at >= $1 AND is_deleted = false),
+			(SELECT COUNT(*) FROM chat.conversations WHERE updated_at >= $1 AND is_deleted = false AND (is_test = false OR $2)),
 			(SELECT COUNT(*) FROM msgs),
 			(SELECT COALESCE(SUM(COALESCE(token_usage_input,0) + COALESCE(token_usage_output,0)), 0) FROM msgs),
 			(SELECT COUNT(DISTINCT user_id) FROM msgs),
 			(SELECT COUNT(*) FROM chat.conversation_files WHERE created_at >= $1)
 	`
 	var t analyticsTotals
-	err := h.pool.QueryRow(ctx, q, since).Scan(
+	err := h.pool.QueryRow(ctx, q, since, includeTest).Scan(
 		&t.Conversations, &t.Messages, &t.TokensUsed, &t.ActiveUsers, &t.FilesUploaded,
 	)
 	if err != nil {
@@ -251,7 +255,7 @@ func (h *AdminHandler) fetchTotals(ctx context.Context, since time.Time) (analyt
 	return t, nil
 }
 
-func (h *AdminHandler) fetchDaily(ctx context.Context, since time.Time) ([]analyticsDailyRow, error) {
+func (h *AdminHandler) fetchDaily(ctx context.Context, since time.Time, includeTest bool) ([]analyticsDailyRow, error) {
 	const q = `
 		SELECT
 			to_char(date_trunc('day', m.created_at), 'YYYY-MM-DD') AS day,
@@ -260,11 +264,11 @@ func (h *AdminHandler) fetchDaily(ctx context.Context, since time.Time) ([]analy
 			COALESCE(SUM(COALESCE(m.token_usage_input,0) + COALESCE(m.token_usage_output,0)), 0) AS tokens,
 			COUNT(DISTINCT m.user_id) AS users
 		FROM chat.messages_masked m
-		WHERE m.created_at >= $1
+		WHERE m.created_at >= $1 AND (m.is_test = false OR $2)
 		GROUP BY day
 		ORDER BY day ASC
 	`
-	rows, err := h.pool.Query(ctx, q, since)
+	rows, err := h.pool.Query(ctx, q, since, includeTest)
 	if err != nil {
 		return nil, fmt.Errorf("daily: %w", err)
 	}
@@ -280,7 +284,7 @@ func (h *AdminHandler) fetchDaily(ctx context.Context, since time.Time) ([]analy
 	return out, rows.Err()
 }
 
-func (h *AdminHandler) fetchByModel(ctx context.Context, since time.Time) ([]analyticsByModelRow, error) {
+func (h *AdminHandler) fetchByModel(ctx context.Context, since time.Time, includeTest bool) ([]analyticsByModelRow, error) {
 	const q = `
 		SELECT
 			COALESCE(model_id, 'unknown'),
@@ -289,11 +293,11 @@ func (h *AdminHandler) fetchByModel(ctx context.Context, since time.Time) ([]ana
 			COALESCE(SUM(COALESCE(token_usage_input,0)), 0) AS input_tokens,
 			COALESCE(SUM(COALESCE(token_usage_output,0)), 0) AS output_tokens
 		FROM chat.messages_masked
-		WHERE created_at >= $1
+		WHERE created_at >= $1 AND (is_test = false OR $2)
 		GROUP BY model_id
 		ORDER BY messages DESC
 	`
-	rows, err := h.pool.Query(ctx, q, since)
+	rows, err := h.pool.Query(ctx, q, since, includeTest)
 	if err != nil {
 		return nil, fmt.Errorf("by model: %w", err)
 	}

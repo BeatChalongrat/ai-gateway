@@ -1175,6 +1175,12 @@ type StreamUpdate struct {
 	FinishReason string
 	Usage        *GatewayChatUsage
 	Err          error
+	// FIX119 — on the Done update: why the model stopped (closed set), the
+	// provider's own request id and the gateway's request id for the call
+	// that answered, so the terminal frame and the row can say all three.
+	StopReason        string
+	ProviderRequestID string
+	GatewayRequestID  string
 
 	// FIX74 — the model asked the user a question: the card payload, then
 	// Parked ends the stream (the turn waits in the database, not here).
@@ -1444,6 +1450,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		ContentMasked:  "",
 		Status:         asstStatus,
 		ModelID:        &conv.ModelID,
+		RunID:          runIDPtr(in.RunID), // FIX119
 		ParentID:       userMsg.ParentID,
 		BranchIndex:    userMsg.BranchIndex,
 		IsActive:       true,
@@ -1806,6 +1813,7 @@ func (s *MessageService) openAssistantStream(
 		ContentMasked:  "",
 		Status:         "streaming",
 		ModelID:        &conv.ModelID,
+		RunID:          runIDPtr(requestID), // FIX119
 		ParentID:       parentID,
 		BranchIndex:    branchIndex,
 		IsActive:       true,
@@ -1905,7 +1913,7 @@ func (s *MessageService) openAssistantStream(
 		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
-	events, runID := s.teeStream(asstMsg.ID, "", ch)
+	events, runID := s.teeStream(asstMsg.ID, requestID, ch) // FIX119 — one id per turn
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
@@ -2071,6 +2079,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		ContentMasked:  "",
 		Status:         "streaming",
 		ModelID:        &conv.ModelID,
+		RunID:          runIDPtr(requestID), // FIX119
 		ParentID:       parentID,
 		BranchIndex:    branchIndex,
 		IsActive:       true,
@@ -2168,7 +2177,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		s.persistSources(persistCtx, asstMsg.ID, userID, conv.TenantID, conv.ID, sourcesAcc)
 	}
 
-	events, runID := s.teeStream(asstMsg.ID, "", ch)
+	events, runID := s.teeStream(asstMsg.ID, requestID, ch) // FIX119 — one id per turn
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
@@ -4428,7 +4437,7 @@ func (s *MessageService) directImageStream(
 		final.Status = status
 		s.finalizeConversation(persistCtx, conv, userMsg, &final)
 	}
-	events, runID := s.teeStream(asstMsg.ID, "", ch)
+	events, runID := s.teeStream(asstMsg.ID, in.RunID, ch) // FIX119 — one id per turn
 	return &StreamHandle{
 		UserMessage:    userMsg,
 		AssistantID:    asstMsg.ID,
@@ -4977,6 +4986,9 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	for outerIter := in.startIter; outerIter < maxToolIterations; outerIter++ {
 		var acc []GatewayToolCall
 		finishReason := ""
+		stopReason := ""    // FIX119 — the closed-set reason from the gateway's final chunk
+		providerReqID := "" // FIX119 — the provider's own request id, when it sent one
+		gatewayReqID := ""  // FIX119 — the backend's request id, from any chunk's "id"
 		isToolCallStream := false
 		// FIX118 — a stream that closes after an error frame is the gateway
 		// finishing its own error path (it never sends [DONE] after one), so
@@ -5025,6 +5037,15 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.FinishReason != "" {
 				finishReason = ev.FinishReason
+			}
+			if ev.StopReason != "" {
+				stopReason = ev.StopReason
+			}
+			if ev.ProviderRequestID != "" && providerReqID == "" {
+				providerReqID = ev.ProviderRequestID
+			}
+			if ev.GatewayRequestID != "" && gatewayReqID == "" {
+				gatewayReqID = ev.GatewayRequestID
 			}
 			if ev.Delta != "" {
 				contentSoFar.WriteString(ev.Delta)
@@ -5096,7 +5117,21 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 					isToolCallStream = true
 					break
 				}
-				in.out <- StreamUpdate{Done: true, Usage: ev.Usage}
+				// FIX119 — the finish reason and the closed-set stop reason
+				// ride the Done, so the handler and the row can say why the
+				// model stopped. Before this they died here: the gateway's
+				// terminal chunk has an empty delta and only delta-bearing
+				// chunks were forwarded, so a max_tokens cut looked like a
+				// clean finish everywhere downstream.
+				if stopReason == "" {
+					stopReason = StopReasonFromFinish(finishReason) // an older gateway
+				}
+				slog.Info("gateway_stream_done",
+					"run_id", in.callCtx.RequestID, "conversation_id", in.callCtx.ConversationID.String(),
+					"gateway_request_id", gatewayReqID, "provider_request_id", providerReqID,
+					"finish_reason", finishReason, "stop_reason", stopReason)
+				in.out <- StreamUpdate{Done: true, Usage: ev.Usage, FinishReason: finishReason, StopReason: stopReason,
+					ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
 				_ = current.Close()
 				return
 			}
@@ -5117,7 +5152,10 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			// Stream ended after an error frame, or after a finish reason
 			// with the [DONE] line missing — emit a synthetic Done so the
 			// handler's terminator fires with what it already knows.
-			in.out <- StreamUpdate{Done: true, Usage: lastUsage}
+			if stopReason == "" {
+				stopReason = StopReasonFromFinish(finishReason)
+			}
+			in.out <- StreamUpdate{Done: true, Usage: lastUsage, FinishReason: finishReason, StopReason: stopReason, ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
 			return
 		}
 
@@ -5311,8 +5349,14 @@ func (s *MessageService) persistTerminal(ctx context.Context, msgID uuid.UUID, s
 	if status != "error" {
 		code = ""
 	}
-	if err := s.messages.SetTerminal(ctx, msgID, cause, code); err != nil {
-		slog.Warn("terminal cause not persisted", "message_id", msgID.String(), "cause", cause, "error_code", code, "err", err.Error())
+	// FIX119 — the stop reason is a fact about a run that produced its
+	// answer; a failed or stopped run has none worth keeping.
+	stop := term.StopReason
+	if status != "completed" || !IsStopReason(stop) {
+		stop = ""
+	}
+	if err := s.messages.SetTerminal(ctx, msgID, cause, code, stop); err != nil {
+		slog.Warn("terminal cause not persisted", "message_id", msgID.String(), "cause", cause, "error_code", code, "stop_reason", stop, "err", err.Error())
 	}
 }
 
@@ -5327,4 +5371,13 @@ func preStreamErrorCode(err error) string {
 		}
 	}
 	return "send_failed"
+}
+
+// runIDPtr is the run id as the row stores it: nil for "" (a handler test
+// that calls the service without the middleware), the id otherwise.
+func runIDPtr(runID string) *string {
+	if runID == "" {
+		return nil
+	}
+	return &runID
 }

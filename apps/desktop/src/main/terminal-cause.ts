@@ -133,3 +133,35 @@ export function endingForOutcome(outcome: "done" | "cancelled" | "error" | "paus
       return { status: "completed", cause: "completed" };
   }
 }
+
+// ── FIX119 — why the MODEL stopped ────────────────────────────────────────
+//
+// Distinct from the terminal cause: a run that completed can carry
+// stop_reason max_tokens — the answer is cut off, and the page says so.
+// The gateway maps each provider family's native value into this closed
+// set and sends it as `stop_reason` on the final chunk; the host only
+// carries it. An older gateway sends only the OpenAI-shaped finish_reason,
+// for which STOP_REASON_FROM_FINISH is the contract's `openai` row.
+export const STOP_REASONS = ["end_turn", "max_tokens", "tool_use", "stop_sequence", "content_filter", "refusal", "context_window_exceeded", "unknown"] as const;
+export type StopReason = (typeof STOP_REASONS)[number];
+
+export function isStopReason(s: unknown): s is StopReason {
+  return typeof s === "string" && (STOP_REASONS as readonly string[]).includes(s);
+}
+
+export const STOP_REASON_FROM_FINISH: Readonly<Record<string, StopReason>> = {
+  stop: "end_turn",
+  length: "max_tokens",
+  tool_calls: "tool_use",
+  function_call: "tool_use",
+  content_filter: "content_filter",
+};
+
+/** The closed-set reason for a chunk: the gateway's own when it sent one,
+ *  else the OpenAI row of the table, else `unknown`. `null`/"" → "" (nothing
+ *  was said; the caller records nothing). */
+export function stopReasonFor(stopReason: unknown, finishReason: string | null | undefined): StopReason | "" {
+  if (isStopReason(stopReason)) return stopReason;
+  if (!finishReason) return "";
+  return STOP_REASON_FROM_FINISH[finishReason] ?? "unknown";
+}

@@ -6,6 +6,8 @@ canonical ProviderResponse.  Supports both blocking and streaming modes.
 
 from __future__ import annotations
 
+import dataclasses
+
 import json
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -19,6 +21,8 @@ from app.services.providers.base_urls import effective_base_url
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.parsers import parse_openai_response
+from app.services.providers.request_ids import provider_request_id_of, tag_first_chunk, with_provider_request_id
+from app.services.providers.stop_reason import normalize_stop_reason
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -492,7 +496,8 @@ class OpenAIAdapter(BaseProviderAdapter):
             max_retries=settings.provider_max_retries,
         )
         resp.raise_for_status()
-        return _parse_responses_response(resp.json())
+        parsed = _parse_responses_response(resp.json())
+        return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     async def chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
@@ -539,7 +544,8 @@ class OpenAIAdapter(BaseProviderAdapter):
         )
         data = resp.json()
 
-        return parse_openai_response(data)
+        parsed = parse_openai_response(data)
+        return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     async def stream_chat(
         self, payload, messages: list[Message], *, resolved_model: str | None = None, api_key: str | None = None
@@ -584,9 +590,12 @@ class OpenAIAdapter(BaseProviderAdapter):
                     # Per-stream tool-call bookkeeping (item_id → dense
                     # downstream index) owned here, not in the parser.
                     sse_state: dict = {}
+                    _prid = provider_request_id_of(resp)
                     async for line in resp.aiter_lines():
                         chunk = _parse_responses_sse_line(line, sse_state)
                         if chunk is not None:
+                            if _prid and not yielded:
+                                chunk = with_provider_request_id(chunk, _prid)
                             yielded = True
                             yield chunk
                 return
@@ -614,9 +623,13 @@ class OpenAIAdapter(BaseProviderAdapter):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
+            _prid = provider_request_id_of(resp)
             async for line in resp.aiter_lines():
                 chunk = _parse_sse_line(line, provider_name=self.provider_name)
                 if chunk is not None:
+                    if _prid:
+                        chunk = with_provider_request_id(chunk, _prid)
+                        _prid = None
                     yield chunk
 
 
@@ -726,9 +739,12 @@ def _parse_sse_line(
     # upstream uses; ``reasoning_content`` wins when both are present.
     reasoning_raw = delta.get("reasoning_content") or delta.get("reasoning")
     reasoning_delta = reasoning_raw if isinstance(reasoning_raw, str) and reasoning_raw else None
+    _finish = choices[0].get("finish_reason")
     return ProviderStreamChunk(
         delta=delta.get("content") or "",
-        finish_reason=choices[0].get("finish_reason"),
+        finish_reason=_finish,
+        # FIX119 — the closed-set value rides the same chunk as finish_reason.
+        stop_reason=normalize_stop_reason("openai", _finish, provider=provider_name) if _finish else None,
         model=data.get("model", ""),
         usage=usage,
         tool_calls=tool_calls,
@@ -807,6 +823,7 @@ def _parse_responses_response(data: dict) -> ProviderResponse:
         content="".join(text_parts),
         model=data.get("model", ""),
         finish_reason="tool_calls" if tool_calls else "stop",
+        stop_reason="tool_use" if tool_calls else "end_turn",
         usage=_responses_usage(data.get("usage")),
         raw=data,
         reasoning_content=reasoning_text,
@@ -881,6 +898,7 @@ def _parse_responses_sse_line(
         return ProviderStreamChunk(
             delta="",
             finish_reason="length",
+            stop_reason="max_tokens",
             model=resp_obj.get("model", "") if isinstance(resp_obj, dict) else "",
             usage=_responses_usage(
                 resp_obj.get("usage") if isinstance(resp_obj, dict) else None
@@ -930,6 +948,7 @@ def _parse_responses_sse_line(
         return ProviderStreamChunk(
             delta="",
             finish_reason="tool_calls" if saw_tools else "stop",
+            stop_reason="tool_use" if saw_tools else "end_turn",
             model=resp_obj.get("model", "") if isinstance(resp_obj, dict) else "",
             usage=_responses_usage(
                 resp_obj.get("usage") if isinstance(resp_obj, dict) else None

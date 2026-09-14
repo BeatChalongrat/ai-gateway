@@ -13,7 +13,7 @@
 //     is never retried once it has begun (partial output must not repeat).
 
 import type { Logger } from "./logger";
-import { classifyStreamFailure, eofWithoutTerminal, isTerminalCause, type TerminalCause } from "./terminal-cause";
+import { classifyStreamFailure, eofWithoutTerminal, isStopReason, isTerminalCause, type StopReason, type TerminalCause } from "./terminal-cause";
 
 /** FIX66 Part 4 — map a failed /v1/images/generations response into one
  *  truthful sentence for the model to relay. The desktop calls the image
@@ -177,7 +177,11 @@ export type StreamEvent =
    *  the stream (docs/contracts/terminal_cause.json); `details` carries
    *  the gateway's structured payload or the host's transport text. */
   | { kind: "error"; code: string; message: string; retryable?: boolean; cause?: TerminalCause; details?: Record<string, unknown> }
-  | { kind: "done"; finish_reason: string | null };
+  /** FIX119 — `stop_reason` is the gateway's closed-set reason from the
+   *  final chunk (absent on [DONE] and on an older gateway);
+   *  `provider_request_id` / `gateway_request_id` are the ids of the call
+   *  that answered, when the chunk named them. */
+  | { kind: "done"; finish_reason: string | null; stop_reason?: StopReason; provider_request_id?: string; gateway_request_id?: string };
 
 export interface KeyStore {
   load(): string | null;
@@ -464,8 +468,12 @@ export class GatewayClient {
     }
   }
 
-  /** Stream a completion. Yields parsed events; ends with `done` or `error`. */
-  async *streamCompletion(request: CompletionRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
+  /** Stream a completion. Yields parsed events; ends with `done` or `error`.
+   *  FIX119: `opts.requestId` (the turn's run id) is sent as X-Request-Id so
+   *  the gateway's and the backend's logs carry the same id the page shows;
+   *  the backend's own request id comes back on the response header and is
+   *  logged beside it. */
+  async *streamCompletion(request: CompletionRequest, signal: AbortSignal, opts: { requestId?: string } = {}): AsyncGenerator<StreamEvent> {
     const key = await this.getOrProvisionKey();
     if (!key) {
       yield { kind: "error", code: "no_agent_key", message: "The app could not obtain a gateway key for this account." };
@@ -494,10 +502,14 @@ export class GatewayClient {
       if (request.metadata) body["metadata"] = request.metadata;
       const res = await fetch(`${this.gatewayUrl}/v1/chat/completions`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "text/event-stream" },
+        headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", Accept: "text/event-stream", ...(opts.requestId ? { "X-Request-Id": opts.requestId } : {}) },
         body: JSON.stringify(body),
         signal: watchdog.signal,
       });
+      // FIX119 — the one line that joins the run id to the backend's own
+      // request id (the backend may echo ours too; its own starts "req_").
+      const gatewayRequestId = (res.headers.get("x-request-id") ?? "").split(",").map((s) => s.trim()).find((s) => s.startsWith("req_")) ?? null;
+      this.log.info(`GATEWAY stream opened run=${opts.requestId ?? "-"} status=${res.status} gateway_request_id=${gatewayRequestId ?? "-"} provider=${res.headers.get("x-gateway-provider") ?? "-"} model=${res.headers.get("x-gateway-model") ?? "-"}`);
       // FIX21 §2: 401 and 403 are DIFFERENT failures and must not share a
       // story. 401 = the agent key really is invalid / the session expired →
       // drop the key and re-provision. 403 = a policy or guardrail REFUSAL of
@@ -610,6 +622,9 @@ export function parseChunk(data: string): StreamEvent[] {
     if (typeof e["retryable"] === "boolean") frame.retryable = e["retryable"];
     if (isTerminalCause(e["cause"])) frame.cause = e["cause"];
     if (e["details"] && typeof e["details"] === "object") frame.details = e["details"] as Record<string, unknown>;
+    // FIX119 — the backend's request id for the failed call rides details
+    // so the page's card and the logs name the same thing.
+    if (typeof e["request_id"] === "string" && e["request_id"]) frame.details = { ...(frame.details ?? {}), gateway_request_id: e["request_id"] };
     out.push(frame);
     return out;
   }
@@ -669,6 +684,13 @@ export function parseChunk(data: string): StreamEvent[] {
     }
   }
   const finish = choice["finish_reason"];
-  if (typeof finish === "string" && finish) out.push({ kind: "done", finish_reason: finish });
+  if (typeof finish === "string" && finish) {
+    // FIX119 — the closed-set reason and the ids ride the final chunk.
+    const done: Extract<StreamEvent, { kind: "done" }> = { kind: "done", finish_reason: finish };
+    if (isStopReason(choice["stop_reason"])) done.stop_reason = choice["stop_reason"];
+    if (typeof root["provider_request_id"] === "string" && root["provider_request_id"]) done.provider_request_id = root["provider_request_id"];
+    if (typeof root["id"] === "string" && root["id"].startsWith("req_")) done.gateway_request_id = root["id"];
+    out.push(done);
+  }
   return out;
 }

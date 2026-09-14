@@ -73,6 +73,17 @@ class ProviderResponse:
     model: str
     finish_reason: str = "stop"
     usage: ProviderUsage | None = None
+    # FIX119 — why the model stopped, in the gateway's own closed set
+    # (app.services.providers.stop_reason; docs/contracts/terminal_cause.json).
+    # ``finish_reason`` above stays OpenAI-shaped for API compatibility;
+    # this one says refusal / stop_sequence / unknown where that vocabulary
+    # cannot. ``unknown`` is the honest default, never end_turn.
+    stop_reason: str = "unknown"
+    # FIX119 — the provider's own request id from its response headers
+    # (OpenAI ``x-request-id``, Anthropic ``request-id``); None when the
+    # provider sent none. Logged beside the gateway's id so a failure can
+    # be chased to the provider's side.
+    provider_request_id: str | None = None
     raw: dict = field(default_factory=dict)
     # Function-calling: populated by the provider parser when the model
     # invoked a tool. Each entry mirrors the OpenAI schema
@@ -119,6 +130,12 @@ class ProviderStreamChunk:
     finish_reason: str | None = None
     model: str = ""
     usage: ProviderUsage | None = None
+    # FIX119 — set on the chunk that carries ``finish_reason``: the closed
+    # set value (see ProviderResponse.stop_reason). None on other chunks.
+    stop_reason: str | None = None
+    # FIX119 — the provider's own request id, set once on the first chunk
+    # the adapter yields after the response headers arrived.
+    provider_request_id: str | None = None
     # Tool-call delta fragments streamed by OpenAI when the model is
     # invoking a function. The first chunk carries
     # ``[{index, id, type, function:{name, arguments:""}}]`` and

@@ -16,7 +16,7 @@
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightLeft, PenLine } from "lucide-react";
+import { ArrowRightLeft, Copy, PenLine } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
@@ -31,6 +31,7 @@ import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { lossNoticeFromSources } from "@/lib/compaction";
 import { splitTerminalBlocks } from "@/lib/terminalText";
+import { STOP_REASON_NOTICE_KEY } from "@/lib/terminalCause";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -447,6 +448,7 @@ function MessageBubbleImpl({
         <ErrorNotice
           message={message.error_message}
           attempts={message.error_attempts}
+          referenceId={message.run_id}
           switchFromModel={message.error_code === "output_limit_reached" ? message.model_id ?? undefined : undefined}
           convId={convId}
           /* FIX100 Part B — the same test that took the Regenerate button
@@ -474,9 +476,16 @@ function MessageBubbleImpl({
            has partial text shows its reason under the text. */
         <ErrorNotice
           message={message.error_code ? localizeErrorCode(message.error_code, undefined, message.error_retryable) : t("msg.turnFailedReload")}
+          referenceId={message.run_id}
           convId={convId}
           offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
         />
+      ) : null}
+
+      {/* FIX119 — why the model stopped, when it matters to the person: a
+          max_tokens cut used to render exactly like a finished answer. */}
+      {message.status === "completed" && !message.isStreaming && message.stop_reason && message.stop_reason in STOP_REASON_NOTICE_KEY ? (
+        <StopReasonNotice reason={message.stop_reason as keyof typeof STOP_REASON_NOTICE_KEY} />
       ) : null}
 
       {/* B2 — fallback notice. A small line under the reply when a
@@ -802,18 +811,37 @@ function MessageMeta({ message }: { message: Message }) {
 // the whole fallback chain failed, the per-model attempt log is shown
 // in a collapsible list so the user (and support) can see what was
 // tried and why each failed.
+/** FIX119 — a completed answer that stopped for a reason the person should
+ *  know about (cut off, refused, filtered). Not an error: the text stands. */
+function StopReasonNotice({ reason }: { reason: keyof typeof STOP_REASON_NOTICE_KEY }) {
+  const t = useT();
+  return (
+    <div
+      role="note"
+      data-testid="stop-reason-notice"
+      data-stop-reason={reason}
+      className="mt-1 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-secondary"
+    >
+      {t(STOP_REASON_NOTICE_KEY[reason])}
+    </div>
+  );
+}
+
 function ErrorNotice({
   message,
   attempts,
   switchFromModel,
   convId,
   offerNewMessage,
+  referenceId,
 }: {
   message: string;
   attempts?: FallbackAttempt[];
   switchFromModel?: string;
   convId?: string;
   offerNewMessage?: boolean;
+  /** FIX119 — the run id a person can quote to support; copyable. */
+  referenceId?: string;
 }) {
   const t = useT();
   const models = useModelStore((s) => s.models);
@@ -858,6 +886,24 @@ function ErrorNotice({
           <PenLine size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 break-words">{t("error.sendNewMessage")}</span>
         </button>
+      ) : null}
+      {referenceId ? (
+        <div className="mt-1.5 flex max-w-full items-center gap-1.5 pl-6 text-[11px] text-status-danger/80" data-testid="error-reference">
+          <span>{t("error.referenceId")}</span>
+          <code className="min-w-0 select-all break-all font-mono">{referenceId}</code>
+          <button
+            type="button"
+            aria-label={t("error.copyReference")}
+            title={t("error.copyReference")}
+            className="inline-flex shrink-0 items-center rounded p-0.5 hover:bg-status-danger/10"
+            onClick={async () => {
+              const ok = await copyTextToClipboard(referenceId);
+              toast(t(ok ? "error.referenceCopied" : "toast.copyFailed"));
+            }}
+          >
+            <Copy size={12} aria-hidden="true" />
+          </button>
+        </div>
       ) : null}
       {hasAttempts ? (
         <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">

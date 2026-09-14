@@ -1,5 +1,5 @@
 {
-  "_comment": "FIX118 — how a turn ended, one closed set for chat-edge (Go), the desktop host (TS) and the web page (TS). Each tree has a test that reads this file; change it here first. `transport_codes` says which catalogue error code a client mints when the failure has no gateway code of its own (backend/app/core/error_catalog.py is the catalogue; GENERATION_INTERRUPTED is chat-edge's own resume code, known to the web dictionary).",
+  "_comment": "FIX118/FIX119 — how a turn ended, one closed set for chat-edge (Go), the desktop host (TS), the web page (TS) and the backend (Python). Each tree has a test that reads this file; change it here first. `transport_codes` says which catalogue error code a client mints when the failure has no gateway code of its own (backend/app/core/error_catalog.py is the catalogue; GENERATION_INTERRUPTED is chat-edge's own resume code, known to the web dictionary). `stop_reasons` (FIX119) is WHY THE MODEL STOPPED, distinct from terminal_cause (why the run ended): a run that completed can still carry stop_reason max_tokens. `stop_reason_map` is the one table that turns each provider family's native value into the closed set; a value missing from its family's table maps to `unknown` and is logged with the provider and the raw value. A missing value is `unknown`, never end_turn.",
   "causes": [
     "completed",
     "stopped_by_user",
@@ -10,13 +10,13 @@
     "interrupted"
   ],
   "cause_meaning": {
-    "completed": "the run produced its answer and said so (message_complete / [DONE])",
+    "completed": "the run produced its answer and said so (message_complete / [DONE] / a finish reason)",
     "stopped_by_user": "a person pressed Stop (cancelled)",
     "error": "a terminal error frame named the failure; error_code says which",
-    "timeout": "nobody spoke for too long: an idle watchdog or a deadline ended the run",
-    "disconnected": "the connection to the provider broke before it said it was done (reset, unexpected EOF, transport throw)",
-    "eof_without_terminal": "the provider closed the stream cleanly without [DONE], an error frame or a finish reason",
-    "interrupted": "the process that owned the run died; found later by a resume or a ledger replay"
+    "timeout": "nobody spoke for too long: an idle watchdog or a deadline ended the run while the connection was still up",
+    "disconnected": "the connection to the provider BROKE while the run was live: a reset, a torn body, an unexpected EOF, a transport throw. The process that owned the run was alive and saw the break happen.",
+    "eof_without_terminal": "the connection to the provider closed CLEANLY while the run was live, but nothing said the answer was done: no [DONE], no error frame, no finish reason. The process that owned the run was alive and saw the clean close.",
+    "interrupted": "the PROCESS that owned the run died (chat-edge restart, the desktop app closed) before any ending was seen. Nobody was there to observe how the connection ended; the ending is written later, by a resume, a ledger replay or an orphan sweep, and always after the fact."
   },
   "transport_codes": {
     "eof_without_terminal": { "code": "stream_interrupted", "retryable": true },
@@ -33,5 +33,62 @@
     "disconnected": "error",
     "eof_without_terminal": "error",
     "interrupted": "error"
+  },
+  "stop_reasons": [
+    "end_turn",
+    "max_tokens",
+    "tool_use",
+    "stop_sequence",
+    "content_filter",
+    "refusal",
+    "context_window_exceeded",
+    "unknown"
+  ],
+  "stop_reason_meaning": {
+    "end_turn": "the model finished its answer on its own",
+    "max_tokens": "the model hit the output-token limit; the answer is cut off and can be continued",
+    "tool_use": "the model stopped to call a tool; the run continues with the tool result",
+    "stop_sequence": "a caller-supplied stop sequence ended the answer",
+    "content_filter": "the provider's content filter ended the answer",
+    "refusal": "the model declined to answer; this is not a system failure",
+    "context_window_exceeded": "the provider stopped because the context window was exceeded during generation",
+    "unknown": "the provider sent no stop reason, or one no table names"
+  },
+  "stop_reason_map": {
+    "openai": {
+      "stop": "end_turn",
+      "length": "max_tokens",
+      "tool_calls": "tool_use",
+      "function_call": "tool_use",
+      "content_filter": "content_filter"
+    },
+    "anthropic": {
+      "end_turn": "end_turn",
+      "max_tokens": "max_tokens",
+      "stop_sequence": "stop_sequence",
+      "tool_use": "tool_use",
+      "refusal": "refusal",
+      "pause_turn": "end_turn",
+      "model_context_window_exceeded": "context_window_exceeded"
+    },
+    "google": {
+      "STOP": "end_turn",
+      "MAX_TOKENS": "max_tokens",
+      "SAFETY": "content_filter",
+      "RECITATION": "content_filter",
+      "BLOCKLIST": "content_filter",
+      "PROHIBITED_CONTENT": "content_filter",
+      "SPII": "content_filter",
+      "MALFORMED_FUNCTION_CALL": "unknown",
+      "OTHER": "unknown",
+      "FINISH_REASON_UNSPECIFIED": "unknown"
+    }
+  },
+  "stop_reason_wire": {
+    "gateway_final_chunk": "choices[0].stop_reason beside the OpenAI-shaped finish_reason; provider_request_id at the chunk top level when the provider returned one",
+    "gateway_nonstream": "choices[0].stop_reason beside finish_reason",
+    "chat_edge_message_complete": "stop_reason",
+    "desktop_message_complete": "stop_reason",
+    "row": "chat.messages_masked.stop_reason (migration 044); NULL for user rows, pre-044 rows and failed runs"
   }
 }

@@ -364,3 +364,80 @@ accepts `status` (`completed | error | cancelled`), `terminal_cause` and
 outside the sets are `422`. Before FIX118 every imported row was
 `completed` by SQL literal.
 
+---
+
+## 11. One id per turn, and why the model stopped (FIX119)
+
+### 11.1 The turn id
+
+`run_id` (§2) is now also the request id. For a web turn the chat-edge
+Logging middleware mints it once (or honours a client-supplied
+`X-Request-Id` of the shape `[A-Za-z0-9._-]{8,64}`), and that one value is:
+
+* the `X-Request-Id` on chat-edge's response and in its `http_request` line;
+* `run_id` on every frame of the run (the envelope, §2);
+* the `X-Request-Id` chat-edge sends the gateway on every call the turn
+  makes (each tool round included);
+* `request_id` in the gateway front's `http_request` line;
+* `turn_id` on every backend log line of that request, joined to the
+  backend's own `request_id` (`req_…`, the `request_logs` key) by one
+  `turn_request_bound` line — the backend keeps minting `req_…` per call
+  because one turn makes several calls;
+* `chat.messages_masked.run_id` on the assistant row (migration 044),
+  and `run_id` on the message list wire.
+
+For a desktop turn the host's `runId` plays the same part: it is sent to
+the gateway as `X-Request-Id`, to chat-edge as `X-Request-Id` on the
+import and as `run_id` on the imported item, and the bridge splices it
+into every frame's data so the page reads one shape for both surfaces.
+
+The backend's `req_…` comes back on the stream response header
+(`X-Request-Id`, the value starting `req_`) and on error frames
+(`request_id`); chat-edge logs it beside the run id
+(`gateway_stream_opened`, `gateway_stream_done`) and forwards it under
+`details.gateway_request_id` on a terminal `error`. The provider's own
+request id, when the provider returned one (`x-request-id`,
+`request-id`, `cf-ray`), rides the backend's final chunk as
+`provider_request_id` and is logged in `stream_provider_complete` /
+`provider_complete`.
+
+**On the page** a failed turn's card shows the run id as a reference the
+person can copy. `grep <run_id>` across the four logs finds the turn.
+
+### 11.2 Stop reason
+
+`stop_reason` is why the MODEL stopped — distinct from `terminal_cause`
+(§10, why the RUN ended). A completed run can carry
+`stop_reason: max_tokens`: the answer stands, cut off. Closed set
+(`docs/contracts/terminal_cause.json → stop_reasons`):
+
+`end_turn | max_tokens | tool_use | stop_sequence | content_filter | refusal | context_window_exceeded | unknown`
+
+* The backend maps each provider family's native value into the set in
+  ONE table (`app/services/providers/stop_reason.py`, pinned to the
+  contract). A value the table does not name is `unknown` and logged
+  (`stop_reason_unmapped provider= value=`); a provider that said nothing
+  is `unknown`, never `end_turn`.
+* Wire: beside the OpenAI-shaped `finish_reason` (which stays, for API
+  compatibility) as `choices[0].stop_reason` on the final streaming chunk
+  and on the non-streaming choice — where `finish_reason` itself used to
+  be dropped for `"stop"`.
+* chat-edge forwards it on the Done, `message_complete` carries
+  `stop_reason`, the row stores it (migration 044) for a completed run,
+  and the list wire returns it. An older gateway that sends only
+  `finish_reason` is read through the contract's `openai` row.
+* The desktop host reads it from the final chunk (same fallback) and puts
+  it on `message_complete` and on the imported item.
+* The page tells the person when it matters: `max_tokens` ("the answer
+  is not finished"), `refusal` (not a system error), `content_filter`,
+  `context_window_exceeded`, `stop_sequence`. `end_turn`, `tool_use` and
+  `unknown` say nothing.
+
+### 11.3 Test traffic
+
+Rows written by a test account (email matching chat-edge's
+`TEST_ACCOUNT_EMAIL_PATTERN`, default `@local$`) carry `is_test = true`
+on `identity.users`, `chat.conversations` and `chat.messages_masked`
+(migration 045), set once at provisioning and inherited at insert. The
+admin analytics exclude them unless asked (`include_test=1`).
+

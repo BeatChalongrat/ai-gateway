@@ -95,4 +95,15 @@ type Message struct {
 	// failed instead of only that it did.
 	TerminalCause *string
 	ErrorCode     *string
+
+	// FIX119 (migration 044) — RunID is the generation id every frame of
+	// this turn carried and every layer logged (STREAM_CONTRACT §2 run_id);
+	// StopReason is why the MODEL stopped (closed set,
+	// docs/contracts/terminal_cause.json → stop_reasons), distinct from
+	// TerminalCause. Both nil for user rows and pre-044 rows.
+	RunID      *string
+	StopReason *string
+	// FIX119 (migration 045) — copied from the conversation at insert: the
+	// row belongs to a test account and is excluded from analytics.
+	IsTest bool
 }

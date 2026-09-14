@@ -11,6 +11,8 @@ Messages API, which differs from OpenAI in several ways:
 
 from __future__ import annotations
 
+import dataclasses
+
 import json
 import re
 from typing import TYPE_CHECKING, AsyncIterator
@@ -28,6 +30,8 @@ from app.services.providers.base_urls import effective_base_url
 from app.services.providers.http_client import get_provider_client
 from app.services.providers.error_handler import call_with_retry, map_provider_error
 from app.services.providers.parsers import parse_anthropic_response
+from app.services.providers.request_ids import provider_request_id_of, tag_first_chunk, with_provider_request_id
+from app.services.providers.stop_reason import normalize_stop_reason
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -429,7 +433,8 @@ class AnthropicAdapter(BaseProviderAdapter):
         )
         data = resp.json()
 
-        return parse_anthropic_response(data)
+        parsed = parse_anthropic_response(data)
+        return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     async def stream_chat(
         self,
@@ -479,8 +484,9 @@ class AnthropicAdapter(BaseProviderAdapter):
                     resp.raise_for_status()
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
-            async for chunk in self._process_sse_stream(
-                resp.aiter_lines(), initial_model=initial_model
+            async for chunk in tag_first_chunk(
+                self._process_sse_stream(resp.aiter_lines(), initial_model=initial_model),
+                provider_request_id_of(resp),
             ):
                 yield chunk
 
@@ -530,6 +536,7 @@ class AnthropicAdapter(BaseProviderAdapter):
         cache_creation = 0
         final_model = initial_model
         final_stop: str | None = None
+        final_stop_reason: str | None = None  # FIX119 — closed-set value from the RAW stop_reason
         # Per-response set of content-block indices we've seen
         # registered as tool_use. Lets the input_json_delta branch
         # safely distinguish "this fragment belongs to a tool call"
@@ -687,6 +694,7 @@ class AnthropicAdapter(BaseProviderAdapter):
                 if "stop_reason" in delta and delta["stop_reason"]:
                     raw_stop = delta["stop_reason"]
                     final_stop = _STOP_REASON_MAP.get(raw_stop, raw_stop)
+                    final_stop_reason = normalize_stop_reason("anthropic", raw_stop, provider=self.provider_name)
                 usage = data.get("usage") or {}
                 if "output_tokens" in usage:
                     output_tokens = int(usage["output_tokens"] or 0)
@@ -702,6 +710,8 @@ class AnthropicAdapter(BaseProviderAdapter):
                 yield ProviderStreamChunk(
                     delta="",
                     finish_reason=final_stop or "stop",
+                    # FIX119 — no message_delta stop_reason at all is `unknown`.
+                    stop_reason=final_stop_reason or "unknown",
                     model=final_model,
                     usage=ProviderUsage(
                         prompt_tokens=full_prompt,

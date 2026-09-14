@@ -89,12 +89,16 @@ type messageResponse struct {
 	// failed turn, so a reload shows the same sentence the live frame did
 	// instead of "this answer failed" with no reason. Omitted on user rows
 	// and rows written before migration 043.
-	TerminalCause *string        `json:"terminal_cause,omitempty"`
-	ErrorCode     *string        `json:"error_code,omitempty"`
-	Files         []fileResponse `json:"files,omitempty"`
-	BranchIndex   int            `json:"branch_index"`
-	BranchCount   int            `json:"branch_count"`
-	HasBranches   bool           `json:"has_branches"`
+	TerminalCause *string `json:"terminal_cause,omitempty"`
+	ErrorCode     *string `json:"error_code,omitempty"`
+	// FIX119 — the run id every frame of the turn carried (the reference
+	// the person quotes) and why the model stopped.
+	RunID       *string        `json:"run_id,omitempty"`
+	StopReason  *string        `json:"stop_reason,omitempty"`
+	Files       []fileResponse `json:"files,omitempty"`
+	BranchIndex int            `json:"branch_index"`
+	BranchCount int            `json:"branch_count"`
+	HasBranches bool           `json:"has_branches"`
 	// S7 — populated only on assistant messages that have at least
 	// one context source recorded. Empty / nil for user messages
 	// and for assistants that drew on no special context (memory,
@@ -172,6 +176,12 @@ func messageToWire(m *model.Message) messageResponse {
 	}
 	if m.ErrorCode != nil && *m.ErrorCode != "" {
 		r.ErrorCode = m.ErrorCode
+	}
+	if m.RunID != nil && *m.RunID != "" {
+		r.RunID = m.RunID
+	}
+	if m.StopReason != nil && *m.StopReason != "" {
+		r.StopReason = m.StopReason
 	}
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent
@@ -361,7 +371,7 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 		UserID:         caller.UserID,
 		ConversationID: convID,
 		Content:        req.Content,
-		RequestID:      r.Header.Get("X-Request-Id"),
+		RequestID:      middleware.RequestIDFrom(r.Context()),
 		ImageMode:      req.ImageMode,
 	}
 	if in.RequestID == "" {
@@ -457,6 +467,12 @@ type streamDrainResult struct {
 	// FIX118 — the transport error text, kept OUT of the message the
 	// person reads and shipped under details.transport instead.
 	transport string
+	// FIX119 — why the model stopped (closed set) and the ids of the call
+	// that answered, from the Done update; the backend's request id on a
+	// provider error frame.
+	stopReason        string
+	providerRequestID string
+	gatewayRequestID  string
 	// FIX74 — the run ended because the turn parked on a question.
 	parked         bool
 	parkedPromptID string
@@ -472,7 +488,7 @@ func (res streamDrainResult) terminalInfo() service.TerminalInfo {
 	if res.err == nil {
 		code = ""
 	}
-	return service.TerminalInfo{Cause: res.cause, ErrorCode: code}
+	return service.TerminalInfo{Cause: res.cause, ErrorCode: code, StopReason: res.stopReason}
 }
 
 // terminalErrorPayload builds the terminal “error“ frame's data from
@@ -501,6 +517,21 @@ func (res streamDrainResult) terminalErrorPayload() map[string]any {
 			d = map[string]any{}
 		}
 		d["transport"] = res.transport
+		out["details"] = d
+	}
+	if res.gatewayRequestID != "" || res.providerRequestID != "" {
+		// FIX119 — the backend's and the provider's ids for the call that
+		// failed, so support can walk from the card to the logs.
+		d, _ := out["details"].(map[string]any)
+		if d == nil {
+			d = map[string]any{}
+		}
+		if res.gatewayRequestID != "" {
+			d["gateway_request_id"] = res.gatewayRequestID
+		}
+		if res.providerRequestID != "" {
+			d["provider_request_id"] = res.providerRequestID
+		}
 		out["details"] = d
 	}
 	if res.errAttempts != nil {
@@ -734,6 +765,9 @@ Loop:
 					res.errAttempts = ev.ProviderError.Attempts
 				}
 				res.errRetryable = ev.ProviderError.Retryable
+				if ev.ProviderError.RequestID != "" {
+					res.gatewayRequestID = ev.ProviderError.RequestID
+				}
 			}
 			// B2: a fallback notice — which model actually answered.
 			if ev.FallbackInfo != nil {
@@ -783,6 +817,15 @@ Loop:
 			if ev.FinishReason != "" {
 				res.finishReason = ev.FinishReason
 			}
+			if ev.StopReason != "" {
+				res.stopReason = ev.StopReason
+			}
+			if ev.ProviderRequestID != "" {
+				res.providerRequestID = ev.ProviderRequestID
+			}
+			if ev.GatewayRequestID != "" {
+				res.gatewayRequestID = ev.GatewayRequestID
+			}
 			if ev.Usage != nil {
 				res.usage = ev.Usage
 			}
@@ -810,7 +853,15 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	// FIX41 — the run id is minted HERE, not in the service, because the
 	// early-open path below writes frames before SendStream returns. One
 	// id, one seq counter, one ledger for the whole run.
-	runID := uuid.NewString()
+	//
+	// FIX119 — and it IS the request id: the one the Logging middleware
+	// minted or honoured, the one on this response's X-Request-Id header,
+	// the one sent upstream as X-Request-Id, the one the row stores.
+	runID := in.RequestID
+	if runID == "" {
+		runID = uuid.NewString()
+		in.RequestID = runID
+	}
 	in.RunID = runID
 	rw := newRunWriter(w, runID, nil)
 	// Whatever happens below, the run ends on a terminal frame. A `return`
@@ -975,6 +1026,14 @@ func (h *MessageHandler) finishStream(
 		completeWithModel(data, res.servedModel)
 		if tokens != nil {
 			data["token_usage"] = tokens
+		}
+		// FIX119 — why the model stopped, so the page can say "the answer
+		// was cut off" instead of presenting a max_tokens cut as finished.
+		if res.stopReason != "" {
+			data["stop_reason"] = res.stopReason
+		}
+		if res.gatewayRequestID != "" {
+			data["gateway_request_id"] = res.gatewayRequestID
 		}
 		writeSSEEvent(rw, flusher, "message_complete", data)
 	}
@@ -1231,12 +1290,12 @@ func (h *MessageHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) 
 		ConversationID: convID,
 		PromptID:       promptID,
 		Answer:         service.QuestionAnswer{Outcome: body.Outcome, Answers: body.Answers, Response: body.Response},
-		RequestID:      r.Header.Get("X-Request-Id"),
-		RunID:          uuid.NewString(),
+		RequestID:      middleware.RequestIDFrom(r.Context()),
 	}
 	if in.RequestID == "" {
 		in.RequestID = uuid.NewString()
 	}
+	in.RunID = in.RequestID // FIX119 — one id per turn
 	stream, err := h.messages.ResumeQuestion(r.Context(), in)
 	if err != nil {
 		switch {
@@ -1653,7 +1712,7 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 		UserID:         caller.UserID,
 		ConversationID: convID,
 		MessageID:      msgID,
-		RequestID:      r.Header.Get("X-Request-Id"),
+		RequestID:      middleware.RequestIDFrom(r.Context()),
 	})
 	if err != nil {
 		h.writeRegenerateError(w, err)
@@ -1744,7 +1803,7 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 		ConversationID: convID,
 		MessageID:      msgID,
 		NewContent:     req.Content,
-		RequestID:      r.Header.Get("X-Request-Id"),
+		RequestID:      middleware.RequestIDFrom(r.Context()),
 	})
 	if err != nil {
 		h.writeEditError(w, err)

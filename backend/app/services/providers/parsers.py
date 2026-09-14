@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 from app.domain.providers import ProviderResponse, ProviderUsage
+from app.services.providers.stop_reason import normalize_stop_reason
 
 
 def parse_openai_response(data: dict) -> ProviderResponse:
@@ -65,6 +66,9 @@ def parse_openai_response(data: dict) -> ProviderResponse:
         content=message.get("content", ""),
         model=data.get("model", ""),
         finish_reason=choice.get("finish_reason", "stop"),
+        # FIX119 — the closed-set value beside the OpenAI one; a missing
+        # finish_reason is `unknown`, not a clean stop.
+        stop_reason=normalize_stop_reason("openai", choice.get("finish_reason"), provider="openai-compatible"),
         usage=usage,
         raw=data,
         # OpenAI returns tool_calls on the assistant message when the
@@ -152,6 +156,10 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
         ]
 
     stop_reason = data.get("stop_reason", "end_turn")
+    # FIX119 — the closed-set value from the RAW stop_reason (None when
+    # Anthropic sent none → unknown; refusal / stop_sequence survive here
+    # where the OpenAI vocabulary below collapses them).
+    normalized_stop = normalize_stop_reason("anthropic", data.get("stop_reason"), provider="anthropic")
     _finish_map = {
         "end_turn": "stop",
         "max_tokens": "length",
@@ -191,6 +199,7 @@ def parse_anthropic_response(data: dict) -> ProviderResponse:
         content=content,
         model=data.get("model", ""),
         finish_reason=finish_reason,
+        stop_reason=normalized_stop,
         usage=usage,
         raw=data,
         tool_calls=tool_calls,

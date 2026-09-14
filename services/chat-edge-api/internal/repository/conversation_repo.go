@@ -32,8 +32,8 @@ func (r *ConversationRepo) WithTx(tx pgx.Tx) *ConversationRepo {
 // “model_id“ only; everything else is server-side.
 func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*model.Conversation, error) {
 	const q = `
-		INSERT INTO chat.conversations (tenant_id, user_id, model_id)
-		VALUES ($1, $2, $3)
+		INSERT INTO chat.conversations (tenant_id, user_id, model_id, is_test)
+		VALUES ($1, $2, $3, COALESCE((SELECT u.is_test FROM identity.users u WHERE u.id = $2), false))
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
 		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
 	`
@@ -60,8 +60,9 @@ func (r *ConversationRepo) CreateImported(
 ) (bool, error) {
 	const q = `
 		INSERT INTO chat.conversations
-			(tenant_id, user_id, model_id, title, client_id, origin, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, 'desktop_agent', COALESCE($6, NOW()), COALESCE($6, NOW()))
+			(tenant_id, user_id, model_id, title, client_id, origin, created_at, updated_at, is_test)
+		VALUES ($1, $2, $3, $4, $5, 'desktop_agent', COALESCE($6, NOW()), COALESCE($6, NOW()),
+		        COALESCE((SELECT u.is_test FROM identity.users u WHERE u.id = $2), false))
 		ON CONFLICT (tenant_id, user_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at,

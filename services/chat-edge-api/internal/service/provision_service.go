@@ -15,6 +15,7 @@
 package service
 
 import (
+	"regexp"
 	"context"
 	"fmt"
 	"strings"
@@ -30,6 +31,9 @@ import (
 // after parsing a Portal JWT.
 type ProvisionService struct {
 	pool *pgxpool.Pool
+	// testAccount (FIX119) — an email matching it is provisioned with
+	// is_test = true. nil means nothing is a test account.
+	testAccount *regexp.Regexp
 
 	// cache marks (userID, tenantID) pairs that have been provisioned
 	// during this process. Membership doesn't expire — once a row is
@@ -117,13 +121,14 @@ func (s *ProvisionService) EnsureUserExists(
 	// already carried on the request context.
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO identity.users
-		   (id, tenant_id, email, name, password_hash, role, is_active, provisioned_from)
-		 VALUES ($1, $2, LOWER($3), $4, '', 'user', TRUE, 'portal')
+		   (id, tenant_id, email, name, password_hash, role, is_active, provisioned_from, is_test)
+		 VALUES ($1, $2, LOWER($3), $4, '', 'user', TRUE, 'portal', $5)
 		 ON CONFLICT (id) DO UPDATE
 		   SET tenant_id = EXCLUDED.tenant_id,
 		       email     = EXCLUDED.email,
+		       is_test   = EXCLUDED.is_test,
 		       updated_at = NOW()`,
-		userID, effectiveTenant, displayName, displayName,
+		userID, effectiveTenant, displayName, displayName, s.IsTestAccount(email),
 	); err != nil {
 		return uuid.Nil, fmt.Errorf("provision: user upsert: %w", err)
 	}
@@ -166,4 +171,13 @@ func deriveTenantName(email string, userID uuid.UUID) string {
 func deriveTenantSlug(userID uuid.UUID) string {
 	// Slug only needs to be unique + URL-safe. UUID hex is both.
 	return "u-" + strings.ReplaceAll(userID.String(), "-", "")[:24]
+}
+
+// SetTestAccountPattern installs the FIX119 test-account matcher
+// (config TEST_ACCOUNT_EMAIL_PATTERN). nil disables labelling.
+func (s *ProvisionService) SetTestAccountPattern(re *regexp.Regexp) { s.testAccount = re }
+
+// IsTestAccount reports whether an email belongs to a test account.
+func (s *ProvisionService) IsTestAccount(email string) bool {
+	return s.testAccount != nil && s.testAccount.MatchString(strings.ToLower(strings.TrimSpace(email)))
 }

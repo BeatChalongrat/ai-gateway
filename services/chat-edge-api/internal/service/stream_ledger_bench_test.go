@@ -27,6 +27,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -337,19 +339,7 @@ func benchRedis(t *testing.T) *redis.Client {
 
 func benchPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Logf("pg: %v", err)
-		return nil
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		t.Logf("pg unreachable: %v", err)
-		pool.Close()
-		return nil
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }

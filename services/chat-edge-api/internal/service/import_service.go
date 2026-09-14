@@ -49,6 +49,10 @@ const (
 // catalogue code has (letters, digits, underscore; short).
 var importErrorCodeRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
+// importRunIDRe bounds an imported run id to the same shape the request
+// id middleware accepts (middleware.SanitizeRequestID).
+var importRunIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{8,64}$`)
+
 type ImportService struct {
 	pool          *pgxpool.Pool
 	conversations *repository.ConversationRepo
@@ -185,6 +189,11 @@ type ImportMessageInput struct {
 	Status        string
 	TerminalCause string
 	ErrorCode     string
+	// FIX119 — the desktop's run id for the turn (the same id its frames
+	// carried and it sent the gateway as X-Request-Id) and why the model
+	// stopped (closed set). Assistant rows only.
+	RunID      string
+	StopReason string
 }
 
 // ImportMessages appends historical messages to an owned conversation in
@@ -238,6 +247,12 @@ func (s *ImportService) ImportMessages(
 		if e := items[i].ErrorCode; e != "" && !importErrorCodeRe.MatchString(e) {
 			return 0, 0, fmt.Errorf("%w: message %d: error_code must be a short identifier", ErrImportInvalid, i)
 		}
+		if sr := items[i].StopReason; sr != "" && !IsStopReason(sr) {
+			return 0, 0, fmt.Errorf("%w: message %d: stop_reason is not one of %s", ErrImportInvalid, i, strings.Join(StopReasons, "|"))
+		}
+		if rid := items[i].RunID; rid != "" && !importRunIDRe.MatchString(rid) {
+			return 0, 0, fmt.Errorf("%w: message %d: run_id must be a short identifier", ErrImportInvalid, i)
+		}
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -266,24 +281,35 @@ func (s *ImportService) ImportMessages(
 		if items[i].Role == "assistant" {
 			// FIX118 — the client says how its turn ended; the row keeps
 			// it. A user row is always completed and never carries a cause.
+			cause := ""
 			if items[i].Status != "" {
 				row.Status = items[i].Status
+				cause = items[i].TerminalCause
+				if cause == "" {
+					cause = CauseForStatus(row.Status)
+				}
+				switch row.Status {
+				case "completed":
+					cause = TerminalCauseCompleted
+				case "cancelled":
+					cause = TerminalCauseStoppedByUser
+				}
 			}
-			cause := items[i].TerminalCause
-			if cause == "" {
-				cause = CauseForStatus(row.Status)
-			}
-			switch row.Status {
-			case "completed":
-				cause = TerminalCauseCompleted
-			case "cancelled":
-				cause = TerminalCauseStoppedByUser
-			}
+			// FIX119 Part C3 — an item that says nothing about its ending
+			// (the pre-FIX118 desktop wire, e48) keeps terminal_cause NULL:
+			// what was not said is unknown, never "completed". FIX118 wrote
+			// `completed` here; a new desktop says status explicitly.
 			if cause != "" {
 				row.TerminalCause = &cause
 			}
 			if code := items[i].ErrorCode; code != "" && row.Status == "error" {
 				row.ErrorCode = &code
+			}
+			if sr := items[i].StopReason; sr != "" && row.Status == "completed" {
+				row.StopReason = &sr
+			}
+			if rid := items[i].RunID; rid != "" {
+				row.RunID = &rid
 			}
 		}
 		msgID, inserted, err := msgs.CreateImported(ctx, row, strings.TrimSpace(items[i].ClientID), items[i].CreatedAt)

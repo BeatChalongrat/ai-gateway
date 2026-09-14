@@ -67,6 +67,9 @@ type importMessageItem struct {
 	Status        string `json:"status,omitempty"`
 	TerminalCause string `json:"terminal_cause,omitempty"`
 	ErrorCode     string `json:"error_code,omitempty"`
+	// FIX119 — the desktop's run id and why the model stopped.
+	RunID      string `json:"run_id,omitempty"`
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -186,6 +189,8 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 			Status:        m.Status,
 			TerminalCause: m.TerminalCause,
 			ErrorCode:     m.ErrorCode,
+			RunID:         m.RunID,
+			StopReason:    m.StopReason,
 		})
 	}
 

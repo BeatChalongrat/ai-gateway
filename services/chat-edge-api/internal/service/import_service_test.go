@@ -28,8 +28,8 @@ type memFile struct{ *bytes.Reader }
 func (memFile) Close() error { return nil }
 
 // importPool hands each test a private database cloned from the test
-// template (internal/testdb). FIX118: this used to open the LIVE sran_ai
-// database by default (CHAT_EDGE_TEST_DSN unset), apply migrations 026/027
+// template (internal/testdb). FIX118: this used to open the LIVE database
+// by default (no test DSN set), apply migrations 026/027
 // to it from inside the test, and rely on a by-tenant DELETE for cleanup —
 // which is how repository tests left 175 fixture rows behind in the
 // production table. The template carries every migration on disk, so the

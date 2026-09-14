@@ -10,7 +10,6 @@ package service
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -19,32 +18,14 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func skillToolPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("skip: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skip: DB unreachable %v", err)
-	}
-	if b, err := os.ReadFile("../../migrations/034_create_user_skills.sql"); err == nil {
-		_, _ = pool.Exec(ctx, string(b))
-	}
-	var reg *string
-	if err := pool.QueryRow(ctx, "SELECT to_regclass('chat.user_skills')::text").Scan(&reg); err != nil || reg == nil {
-		pool.Close()
-		t.Skip("skip: chat.user_skills not present — run apply_migrations.sh")
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }
 
 func TestExecUseSkill_ReturnsInstructionsAndScoped(t *testing.T) {

@@ -17,7 +17,6 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 func intptr(i int) *int { return &i }
@@ -85,32 +85,9 @@ func TestCloudTaskRepo_Create_Validation(t *testing.T) {
 
 func cloudTaskPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = defaultTestDSN
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Skipf("skip: cannot create pool: %v", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skip: DB unreachable (%v)", err)
-	}
-	// Migrations 035 + 036 are idempotent — apply so a fresh test DB has the
-	// tables AND the FIX16 lease columns (locked_at/locked_by).
-	for _, m := range []string{"035_create_cloud_tasks.sql", "036_cloud_task_lease.sql"} {
-		if b, err := os.ReadFile("../../migrations/" + m); err == nil {
-			_, _ = pool.Exec(ctx, string(b))
-		}
-	}
-	var reg *string
-	if err := pool.QueryRow(ctx, "SELECT to_regclass('chat.cloud_scheduled_tasks')::text").Scan(&reg); err != nil || reg == nil {
-		pool.Close()
-		t.Skip("skip: chat.cloud_scheduled_tasks not present — run apply_migrations.sh")
-	}
-	return pool
+	// FIX119 Part C1 — a private clone of the test template, never the
+	// live database (internal/testdb refuses it and fails without a DB).
+	return testdb.Fresh(t)
 }
 
 func TestCloudTaskRepo_ScopingAndDueScan(t *testing.T) {
