@@ -90,9 +90,14 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 // “ON CONFLICT (conversation_id, client_id) DO NOTHING“ makes replays of
 // the same import batch no-ops — the caller counts skips via the returned
 // bool. “createdAt“ is the desktop's historical timestamp, preserved
-// verbatim (never re-stamped to NOW()). status is always 'completed'; the
-// canonical fields keep their 'legacy' defaults so imported content is
-// excluded from canonical-history replay.
+// verbatim (never re-stamped to NOW()). The canonical fields keep their
+// 'legacy' defaults so imported content is excluded from canonical-history
+// replay.
+//
+// FIX118: status, terminal_cause and error_code come from the caller — the
+// desktop knows how its turn ended and says so. Before this the column was
+// the literal 'completed', so a turn that failed on the desktop became a
+// success the moment it was imported.
 //
 // Returns the row's SERVER message id in both outcomes (FIX 10): the
 // freshly-inserted id, or — on a conflict replay — the existing row's id
@@ -101,11 +106,16 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 func (r *MessageRepo) CreateImported(
 	ctx context.Context, m *model.Message, clientID string, createdAt time.Time,
 ) (uuid.UUID, bool, error) {
+	status := m.Status
+	if status == "" {
+		status = "completed"
+	}
 	const q = `
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
-			 status, model_id, client_id, created_at, is_active)
-		VALUES ($1, $2, $3, $4, $5, 'completed', $6, $7, $8, true)
+			 status, model_id, client_id, created_at, is_active,
+			 terminal_cause, error_code)
+		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11)
 		ON CONFLICT (conversation_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
 		RETURNING id
@@ -113,7 +123,7 @@ func (r *MessageRepo) CreateImported(
 	var id uuid.UUID
 	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
-		m.ModelID, clientID, createdAt,
+		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode,
 	).Scan(&id)
 	if err == nil {
 		return id, true, nil
@@ -211,7 +221,8 @@ func (r *MessageRepo) ListByConversation(
 		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
-		       reasoning_content, search_sources, client_id` + extraCols + `
+		       reasoning_content, search_sources, client_id,
+		       terminal_cause, error_code` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -238,6 +249,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
+			&m.TerminalCause, &m.ErrorCode,
 		}
 		if r.displayLifecycle {
 			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
@@ -999,13 +1011,38 @@ func (r *MessageRepo) UpdateContent(
 // mid-generation (Phase 5 stream resume). Guarded: only flips a row
 // that is still in a non-terminal state, so it can never clobber a
 // completed/cancelled/error status written by a live finish callback.
+//
+// FIX118: the row also says WHY — terminal_cause 'interrupted' and the
+// resume code the replay ends on — so a reload distinguishes "the process
+// died" from a provider error.
 func (r *MessageRepo) MarkInterrupted(ctx context.Context, msgID uuid.UUID) error {
 	const q = `
-		UPDATE chat.messages_masked SET status = 'error'
+		UPDATE chat.messages_masked
+		SET status = 'error', terminal_cause = 'interrupted', error_code = 'GENERATION_INTERRUPTED'
 		WHERE id = $1 AND status IN ('streaming', 'pending')
 	`
 	if _, err := r.db.Exec(ctx, q, msgID); err != nil {
 		return fmt.Errorf("mark interrupted: %w", err)
+	}
+	return nil
+}
+
+// SetTerminal records how a turn ended (FIX118, migration 043): the
+// closed-set cause and, for a failed turn, the catalogue error code. An
+// empty cause writes NULL (a parked turn has not ended); an empty code
+// writes NULL (the turn did not fail). Called by every finish callback
+// after the content/status write, and by the pre-stream failure paths.
+func (r *MessageRepo) SetTerminal(ctx context.Context, msgID uuid.UUID, cause, errorCode string) error {
+	var c, e *string
+	if cause != "" {
+		c = &cause
+	}
+	if errorCode != "" {
+		e = &errorCode
+	}
+	const q = `UPDATE chat.messages_masked SET terminal_cause = $2, error_code = $3 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, c, e); err != nil {
+		return fmt.Errorf("set message terminal: %w", err)
 	}
 	return nil
 }

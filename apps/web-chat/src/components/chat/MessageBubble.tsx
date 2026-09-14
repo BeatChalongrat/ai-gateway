@@ -466,8 +466,17 @@ function MessageBubbleImpl({
       {!message.error_message &&
       message.status === "error" &&
       !message.isStreaming &&
-      !message.content.trim() ? (
-        <ErrorNotice message={t("msg.turnFailedReload")} />
+      (!message.content.trim() || !!message.error_code) ? (
+        /* FIX118 — the server now keeps the code of the terminal error
+           frame (migration 043), so a reloaded row can say the same thing
+           the live frame said instead of the generic line. A pre-FIX118
+           row (no code) keeps the generic line; a failed row that still
+           has partial text shows its reason under the text. */
+        <ErrorNotice
+          message={message.error_code ? localizeErrorCode(message.error_code, undefined, message.error_retryable) : t("msg.turnFailedReload")}
+          convId={convId}
+          offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
+        />
       ) : null}
 
       {/* B2 — fallback notice. A small line under the reply when a

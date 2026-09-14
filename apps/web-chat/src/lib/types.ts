@@ -476,11 +476,19 @@ export interface Message {
    *  message_complete). Shown in the per-message metadata line; absent
    *  after a page reload (not persisted). */
   response_time_ms?: number;
-  /** B1 — local-only. Set when the stream failed; drives the error
-   *  bubble styling + localized message in MessageBubble. */
+  /** B1 — set when the stream failed; drives the error bubble styling +
+   *  localized message in MessageBubble. FIX118: ``error_code`` is no
+   *  longer local-only — a row read back from the server (migration 043)
+   *  carries the catalogue code of its terminal error frame, so a reload
+   *  shows the same sentence the live frame did. ``error_message`` and
+   *  ``error_attempts`` stay live-only. */
   error_code?: string;
   error_message?: string;
   error_attempts?: FallbackAttempt[];
+  /** FIX118 — how the turn ended, from the closed set in
+   *  docs/contracts/terminal_cause.json (server rows and desktop-imported
+   *  rows; absent on rows written before migration 043). */
+  terminal_cause?: string;
   /** FIX100 Part B — the gateway's own ``retryable`` flag from the same
    *  error frame. It decides the sentence (localizeErrorCode) and now the
    *  Regenerate button too, so the two can never disagree: a failure whose
@@ -967,6 +975,9 @@ export interface FallbackAttempt {
 export interface SSEError {
   code: string;
   message: string;
+  /** FIX118 — why the run ended (docs/contracts/terminal_cause.json);
+   *  absent on frames from older builds. */
+  cause?: string;
   /** Structured payload (provider / upstream status). */
   details?: Record<string, unknown>;
   /** Per-model failure log when the whole chain failed (B3). */

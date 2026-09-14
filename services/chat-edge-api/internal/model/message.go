@@ -84,4 +84,15 @@ type Message struct {
 	// correlate a server row back to its local copy (dedup + tool-chain
 	// re-attachment) when reading the server-authoritative transcript.
 	ClientID *string
+
+	// FIX118 (migration 043) — how the turn ENDED, next to its status.
+	// TerminalCause is one of the closed set in
+	// docs/contracts/terminal_cause.json (completed | stopped_by_user |
+	// error | timeout | disconnected | eof_without_terminal | interrupted);
+	// nil for user rows, pre-FIX118 rows and a parked row. ErrorCode is the
+	// catalogue code the terminal error frame carried; nil when the turn
+	// did not fail. Both ride the list wire so a reload can say WHY a turn
+	// failed instead of only that it did.
+	TerminalCause *string
+	ErrorCode     *string
 }

@@ -58,6 +58,15 @@ type importMessageItem struct {
 	// FileIDs are server file ids already uploaded to this conversation,
 	// to link to this message (FIX 10 — desktop attachment sync).
 	FileIDs []string `json:"file_ids,omitempty"`
+	// FIX118 — how the turn ended on the client (assistant rows only).
+	// status: completed | error | cancelled (absent = completed, the
+	// pre-FIX118 wire); terminal_cause: the closed set in
+	// docs/contracts/terminal_cause.json; error_code: the catalogue code of
+	// the failure. Before these the endpoint stored every row as
+	// completed, so a failed desktop turn became a success on import.
+	Status        string `json:"status,omitempty"`
+	TerminalCause string `json:"terminal_cause,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -168,12 +177,15 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 			fileIDs = append(fileIDs, id)
 		}
 		items = append(items, service.ImportMessageInput{
-			ClientID:  m.ClientID,
-			Role:      m.Role,
-			Content:   m.Content,
-			ModelID:   m.ModelID,
-			CreatedAt: ts,
-			FileIDs:   fileIDs,
+			ClientID:      m.ClientID,
+			Role:          m.Role,
+			Content:       m.Content,
+			ModelID:       m.ModelID,
+			CreatedAt:     ts,
+			FileIDs:       fileIDs,
+			Status:        m.Status,
+			TerminalCause: m.TerminalCause,
+			ErrorCode:     m.ErrorCode,
 		})
 	}
 

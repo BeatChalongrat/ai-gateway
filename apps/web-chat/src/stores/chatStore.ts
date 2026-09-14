@@ -22,6 +22,7 @@ import { clearDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
+import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE } from "@/lib/terminalCause";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
 import type { TurnScrollRequest } from "@/lib/turnAnchor";
@@ -2896,6 +2897,7 @@ async function consumeStream(
                       error_retryable: data?.retryable,
                       error_message: localized,
                       error_attempts: data?.attempts,
+                      terminal_cause: typeof data?.cause === "string" ? data.cause : "error",
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,
@@ -2918,10 +2920,14 @@ async function consumeStream(
       const id = realAssistantId ?? tempAsstId;
       const row = (get().messages[convId] ?? []).find((m) => m.id === id);
       if (row?.isStreaming) {
-        const localized = tOutside("error.networkStream");
+        // FIX118 — the same code chat-edge and the desktop host mint for
+        // this ending (stream_interrupted / eof_without_terminal), so the
+        // sentence is the catalogue's, not a page-private one, and the
+        // Regenerate gate reads a code every mapper knows.
+        const localized = localizeErrorCode(EOF_WITHOUT_TERMINAL_CODE, undefined, true);
         set((s) => {
           const list = s.messages[convId] ?? [];
-          return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, error_code: "stream_ended_early", error_retryable: true, error_message: localized } : m)) } };
+          return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, error_code: EOF_WITHOUT_TERMINAL_CODE, error_retryable: true, error_message: localized, terminal_cause: EOF_WITHOUT_TERMINAL_CAUSE } : m)) } };
         });
         finalizeMessage(set, get, convId, id, "error");
         get().setError(localized);

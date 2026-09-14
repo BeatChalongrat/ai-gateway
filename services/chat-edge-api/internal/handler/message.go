@@ -84,11 +84,17 @@ type messageResponse struct {
 	// the desktop import endpoints (FIX 9). The desktop uses it to
 	// correlate a server row back to its local copy; nil / omitted for
 	// native chat-edge rows so the web wire is unchanged.
-	ClientID    *string        `json:"client_id,omitempty"`
-	Files       []fileResponse `json:"files,omitempty"`
-	BranchIndex int            `json:"branch_index"`
-	BranchCount int            `json:"branch_count"`
-	HasBranches bool           `json:"has_branches"`
+	ClientID *string `json:"client_id,omitempty"`
+	// FIX118 — how the turn ended (closed set) and the catalogue code of a
+	// failed turn, so a reload shows the same sentence the live frame did
+	// instead of "this answer failed" with no reason. Omitted on user rows
+	// and rows written before migration 043.
+	TerminalCause *string        `json:"terminal_cause,omitempty"`
+	ErrorCode     *string        `json:"error_code,omitempty"`
+	Files         []fileResponse `json:"files,omitempty"`
+	BranchIndex   int            `json:"branch_index"`
+	BranchCount   int            `json:"branch_count"`
+	HasBranches   bool           `json:"has_branches"`
 	// S7 — populated only on assistant messages that have at least
 	// one context source recorded. Empty / nil for user messages
 	// and for assistants that drew on no special context (memory,
@@ -160,6 +166,12 @@ func messageToWire(m *model.Message) messageResponse {
 		BranchIndex: m.BranchIndex,
 		BranchCount: 1,
 		ClientID:    m.ClientID,
+	}
+	if m.TerminalCause != nil && *m.TerminalCause != "" {
+		r.TerminalCause = m.TerminalCause
+	}
+	if m.ErrorCode != nil && *m.ErrorCode != "" {
+		r.ErrorCode = m.ErrorCode
 	}
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent
@@ -438,9 +450,29 @@ type streamDrainResult struct {
 	errAttempts any
 	// errRetryable is the gateway's retryable verdict, forwarded as-is.
 	errRetryable *bool
+	// FIX118 — why the run ended, from the closed set
+	// (service.TerminalCauses). "" until the drain learned it; the finish
+	// callback derives one from the status when it is still empty.
+	cause string
+	// FIX118 — the transport error text, kept OUT of the message the
+	// person reads and shipped under details.transport instead.
+	transport string
 	// FIX74 — the run ended because the turn parked on a question.
 	parked         bool
 	parkedPromptID string
+}
+
+// terminalInfo is what the handler tells the service's finish callback
+// about the ending (FIX118): the cause and, on a failed run, the code.
+func (res streamDrainResult) terminalInfo() service.TerminalInfo {
+	code := res.errCode
+	if res.err != nil && code == "" {
+		code = CodeInternalError
+	}
+	if res.err == nil {
+		code = ""
+	}
+	return service.TerminalInfo{Cause: res.cause, ErrorCode: code}
 }
 
 // terminalErrorPayload builds the terminal “error“ frame's data from
@@ -453,13 +485,23 @@ func (res streamDrainResult) terminalErrorPayload() map[string]any {
 	}
 	if msg == "" {
 		msg = "the stream ended without a result"
-		if res.err != nil {
-			msg = fmt.Sprintf("stream error: %v", res.err)
-		}
 	}
 	out := map[string]any{"code": code, "message": msg}
+	if res.cause != "" {
+		out["cause"] = res.cause
+	}
 	if res.errDetails != nil {
 		out["details"] = res.errDetails
+	}
+	if res.transport != "" {
+		// FIX118 — the Go error text is diagnostic, not a sentence for a
+		// person; it rides details so a log reader can still see it.
+		d, _ := out["details"].(map[string]any)
+		if d == nil {
+			d = map[string]any{}
+		}
+		d["transport"] = res.transport
+		out["details"] = d
 	}
 	if res.errAttempts != nil {
 		out["attempts"] = res.errAttempts
@@ -581,8 +623,28 @@ Loop:
 				// all — a user pressing Stop arrives on this same branch
 				// as "context canceled", and reporting that to every
 				// other viewer as an internal error was P3's finding.
+				//
+				// FIX118 — a transport-level failure is classified into a
+				// catalogue code + terminal cause HERE, so the terminal
+				// frame carries the same code the non-streaming path would
+				// and never the raw Go error text as its message. A user
+				// cancel also lands here (context canceled); finishStream
+				// asks the registration first and takes the `cancelled`
+				// branch, so the classification below is only what a
+				// stream that ended by itself gets.
 				res.err = ev.Err
-				res.errMessage = fmt.Sprintf("stream error: %v", ev.Err)
+				res.transport = ev.Err.Error()
+				f := service.ClassifyStreamError(ev.Err)
+				res.errCode = f.Code
+				res.errMessage = f.Message
+				res.cause = f.Cause
+				retry := f.Retryable
+				res.errRetryable = &retry
+				if f.Unmapped {
+					slog.Warn("stream_error_unmapped",
+						"err_type", fmt.Sprintf("%T", ev.Err), "err", ev.Err.Error(),
+						"code", f.Code, "cause", f.Cause)
+				}
 				break Loop
 			}
 			if ev.Delta != "" {
@@ -664,6 +726,7 @@ Loop:
 				res.err = fmt.Errorf("provider error: %s", ev.ProviderError.Code)
 				res.errCode = ev.ProviderError.Code
 				res.errMessage = ev.ProviderError.Message
+				res.cause = service.TerminalCauseError
 				if ev.ProviderError.Details != nil {
 					res.errDetails = ev.ProviderError.Details
 				}
@@ -834,7 +897,7 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	// FIX35 Part B — attribute the row to the model that answered.
 	if res.servedModel != "" {
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
@@ -876,6 +939,10 @@ func (h *MessageHandler) finishStream(
 		}
 	}
 
+	// FIX118 — a person's Stop is a cause of its own, never an error.
+	if stream.UserCancelled() {
+		res.cause = service.TerminalCauseStoppedByUser
+	}
 	switch {
 	case res.parked:
 		// FIX74 — the turn is waiting for the user's answer, in the
@@ -894,6 +961,7 @@ func (h *MessageHandler) finishStream(
 		data := map[string]any{
 			"message_id": stream.AssistantID.String(),
 			"partial":    true,
+			"cause":      service.TerminalCauseStoppedByUser,
 		}
 		completeWithModel(data, res.servedModel)
 		if tokens != nil {
@@ -1208,7 +1276,7 @@ func (h *MessageHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) 
 	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	if res.servedModel != "" {
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
@@ -1614,7 +1682,7 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
@@ -1700,7 +1768,7 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	if res.err != nil && persistFinishReason == "" {
 		persistFinishReason = "error"
 	}
-	stream.Finish(res.content, res.reasoning, persistFinishReason, res.usage)
+	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}

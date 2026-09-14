@@ -10,7 +10,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
 )
 
 // memFile adapts a bytes.Reader to multipart.File for upload tests.
@@ -27,36 +27,16 @@ type memFile struct{ *bytes.Reader }
 
 func (memFile) Close() error { return nil }
 
+// importPool hands each test a private database cloned from the test
+// template (internal/testdb). FIX118: this used to open the LIVE sran_ai
+// database by default (CHAT_EDGE_TEST_DSN unset), apply migrations 026/027
+// to it from inside the test, and rely on a by-tenant DELETE for cleanup —
+// which is how repository tests left 175 fixture rows behind in the
+// production table. The template carries every migration on disk, so the
+// schema checks below are no longer needed.
 func importPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CHAT_EDGE_TEST_DSN")
-	if dsn == "" {
-		dsn = "postgres://chatedge:chatedge_pass@localhost:5433/sran_ai?sslmode=disable"
-	}
-	p, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Skipf("skip: %v", err)
-	}
-	if err := p.Ping(context.Background()); err != nil {
-		p.Close()
-		t.Skipf("skip: DB unreachable %v", err)
-	}
-	// Migrations 026 + 027 are fully idempotent (IF NOT EXISTS everywhere).
-	if b, err := os.ReadFile("../../migrations/026_desktop_import.sql"); err == nil {
-		_, _ = p.Exec(context.Background(), string(b))
-	}
-	if b, err := os.ReadFile("../../migrations/027_conversation_files_client_id.sql"); err == nil {
-		_, _ = p.Exec(context.Background(), string(b))
-	}
-	var col *string
-	_ = p.QueryRow(context.Background(),
-		"SELECT column_name FROM information_schema.columns WHERE table_schema='chat' AND table_name='conversations' AND column_name='client_id'",
-	).Scan(&col)
-	if col == nil {
-		p.Close()
-		t.Skip("skip: migration 026 not applied")
-	}
-	return p
+	return testdb.Fresh(t)
 }
 
 // importTestModels satisfies ModelChecker for the ownership service —

@@ -301,3 +301,66 @@ non-zero value pages someone is open — OPEN_DECISIONS #40.
    never as "the answer is finished".
 6. End the stream on any of the three terminal events — all three, not
    just `message_complete` and `error`.
+
+---
+
+## 10. Terminal cause — however it ends, it is written down (FIX118)
+
+§3 made every run end on exactly one terminal frame. FIX118 makes the
+*reason* a fact both surfaces record the same way, and closes the one
+ending §3 did not name: the provider closing the stream without saying
+anything.
+
+### 10.1 The closed set
+
+`docs/contracts/terminal_cause.json` is the source of truth. chat-edge
+(`internal/service/terminal_cause.go`), the desktop host
+(`apps/desktop/src/main/terminal-cause.ts`) and the page
+(`apps/web-chat/src/lib/terminalCause.ts`) each carry a copy pinned to
+that file by a test.
+
+| cause | meaning | row status |
+|---|---|---|
+| `completed` | the run produced its answer and said so (`message_complete` / `[DONE]`) | `completed` |
+| `stopped_by_user` | a person pressed Stop | `cancelled` |
+| `error` | a terminal `error` frame named the failure; `error_code` says which | `error` |
+| `timeout` | nobody spoke for too long — an idle watchdog or a deadline ended the run | `error` |
+| `disconnected` | the connection to the provider broke before it said it was done (reset, unexpected EOF, a transport throw) | `error` |
+| `eof_without_terminal` | the provider closed the stream cleanly with no `[DONE]`, no error frame and no finish reason | `error` |
+| `interrupted` | the process that owned the run died; found later by a resume or a ledger replay | `error` |
+
+### 10.2 On the wire
+
+* `error` carries `cause` (one of the set) beside `code`, `message`,
+  `retryable`, `details`. A transport-level failure — one with no
+  gateway code — is classified by the side that saw it into a **catalogue
+  code** (`backend/app/core/error_catalog.py`): `stream_interrupted` for
+  `disconnected` and `eof_without_terminal`, `provider_timeout` for
+  `timeout`, `GENERATION_INTERRUPTED` for `interrupted`, and
+  `unclassified_error` when nothing could name it (the side logs the raw
+  error type and text when that happens, so the missing code is visible).
+  The raw transport text never rides `message`; it rides
+  `details.transport`.
+* `cancelled` carries `cause: "stopped_by_user"`.
+* **EOF is not a terminal.** A stream that closes with no `[DONE]`, no
+  error frame and no finish reason ends on `error` /
+  `stream_interrupted` / `eof_without_terminal`. Before FIX118 both the
+  chat-edge pump and the desktop reader synthesised a success there, so a
+  cut stream persisted as `completed` with half an answer.
+* The desktop host rewrites its own former codes before they leave
+  (`network` → `stream_interrupted`, `host_exception` / `no_result` →
+  `unclassified_error`, `generation_interrupted` → `GENERATION_INTERRUPTED`),
+  keeping the original under `details.host_code`, so the page shows one
+  sentence for one cause whichever surface produced it.
+
+### 10.3 In the database
+
+`chat.messages_masked.terminal_cause` and `.error_code` (migration 043)
+are written by every finish path and by `MarkInterrupted`. They ride the
+message list wire (`terminal_cause`, `error_code`) so a reload shows the
+same sentence the live frame did. `POST /conversations/{id}/messages/import`
+accepts `status` (`completed | error | cancelled`), `terminal_cause` and
+`error_code` on assistant items; a user item's are ignored; values
+outside the sets are `422`. Before FIX118 every imported row was
+`completed` by SQL literal.
+

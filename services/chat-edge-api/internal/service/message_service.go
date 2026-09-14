@@ -1132,7 +1132,7 @@ type StreamHandle struct {
 	RunID string
 
 	Events <-chan StreamUpdate
-	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage)
+	finish func(content string, reasoning string, finishReason string, usage *GatewayChatUsage, term TerminalInfo)
 	cancel func()
 	// cancelled (FIX41) reports whether POST /cancel fired for this run.
 	// The handler needs it to pick the right terminal event: a person
@@ -1413,7 +1413,14 @@ func (h *StreamHandle) Cancel() { h.cancel() }
 // when reasoning was off / no reasoning frames arrived — the
 // persist path skips the reasoning_content write in that case.
 func (h *StreamHandle) Finish(content, reasoning, finishReason string, usage *GatewayChatUsage) {
-	h.finish(content, reasoning, finishReason, usage)
+	h.finish(content, reasoning, finishReason, usage, TerminalInfo{})
+}
+
+// FinishWith is Finish plus what the handler learned about the ending
+// (FIX118): the terminal cause and the error code of the terminal frame,
+// so the row records the same ending the stream reported.
+func (h *StreamHandle) FinishWith(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
+	h.finish(content, reasoning, finishReason, usage, term)
 }
 
 func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamHandle, error) {
@@ -1506,6 +1513,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		cancel()
 		// Persist as error so the timeline reflects the failed turn.
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -1550,7 +1558,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 
 	// finish closes the message lifecycle. Caller invokes exactly
 	// once after consuming the events channel.
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		// Always free the active-stream slot so a future POST /cancel
 		// for the same conversation doesn't dangle.
 		s.activeStreams.Delete(conv.ID)
@@ -1590,6 +1598,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			slog.Warn("empty completion with no finish reason persisted as error",
 				"conversation_id", conv.ID.String(), "message_id", asstMsg.ID.String())
 			status = "error"
+			if term.ErrorCode == "" {
+				term.ErrorCode = "empty_completion"
+			}
 		}
 		var tokInput, tokOutput *int
 		if usage != nil {
@@ -1606,6 +1617,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			persistCtx, asstMsg.ID, content, status, tokInput, tokOutput,
 			canonState, status == "completed",
 		)
+		s.persistTerminal(persistCtx, asstMsg.ID, status, term)
 		// T4: persist reasoning summary if the model produced one.
 		// Skipped for empty / cancelled / error turns — the message
 		// has no useful reasoning to surface and we'd just clutter
@@ -1820,6 +1832,7 @@ func (s *MessageService) openAssistantStream(
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -1852,7 +1865,7 @@ func (s *MessageService) openAssistantStream(
 		canon: canonState,
 	})
 
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
 		status := "completed"
@@ -1872,6 +1885,7 @@ func (s *MessageService) openAssistantStream(
 			tokInput, tokOutput = &ti, &to
 		}
 		s.persistFinishContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput, canonState, status == "completed")
+		s.persistTerminal(persistCtx, asstMsg.ID, status, term)
 		// T4: persist reasoning summary (regenerate path).
 		if reasoning != "" && status == "completed" {
 			_ = s.messages.SetReasoningContent(persistCtx, asstMsg.ID, reasoning)
@@ -2090,6 +2104,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -2122,7 +2137,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		canon: canonState,
 	})
 
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
 		status := "completed"
@@ -2142,6 +2157,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			tokInput, tokOutput = &ti, &to
 		}
 		s.persistFinishContent(persistCtx, asstMsg.ID, content, status, tokInput, tokOutput, canonState, status == "completed")
+		s.persistTerminal(persistCtx, asstMsg.ID, status, term)
 		// T4: persist reasoning summary (edit-message path).
 		if reasoning != "" && status == "completed" {
 			_ = s.messages.SetReasoningContent(persistCtx, asstMsg.ID, reasoning)
@@ -4392,7 +4408,7 @@ func (s *MessageService) directImageStream(
 		ch <- StreamUpdate{Delta: res.Message}
 		ch <- StreamUpdate{Done: true}
 	}()
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		cancel()
 		persistCtx := context.Background()
@@ -4406,6 +4422,7 @@ func (s *MessageService) directImageStream(
 			status = "error"
 		}
 		s.persistDisplayOnly(persistCtx, asstMsg.ID, content, status, nil, nil)
+		s.persistTerminal(persistCtx, asstMsg.ID, status, term)
 		final := *asstMsg
 		final.ContentMasked = content
 		final.Status = status
@@ -4961,6 +4978,12 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 		var acc []GatewayToolCall
 		finishReason := ""
 		isToolCallStream := false
+		// FIX118 — a stream that closes after an error frame is the gateway
+		// finishing its own error path (it never sends [DONE] after one), so
+		// the handler already holds the code and the EOF is expected. A
+		// stream that closes with NO error frame, NO [DONE] and NO finish
+		// reason ended without a terminal, and that is reported as one.
+		sawProviderError := false
 
 		for {
 			ev, err := current.Next()
@@ -5047,6 +5070,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 					current = retried
 					continue
 				}
+				sawProviderError = true
 				in.out <- StreamUpdate{ProviderError: messageTooLongOr(ev.ProviderError, req.NewestMessageOverBudget)}
 			}
 			if ev.FallbackInfo != nil {
@@ -5080,8 +5104,19 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 		_ = current.Close()
 
 		if !isToolCallStream {
-			// Stream ended without a Done event (EOF path) — emit a
-			// synthetic Done so the handler's terminator fires.
+			if !sawProviderError && finishReason == "" {
+				// FIX118 — EOF with nothing said: not a Done. Before this the
+				// pump synthesised a Done here, so a cut stream terminated
+				// message_complete and persisted `completed` (with whatever
+				// text had arrived), and a report over status counted it as
+				// an answer. The handler classifies this as
+				// stream_interrupted / eof_without_terminal.
+				in.out <- StreamUpdate{Err: ErrStreamEOFWithoutTerminal}
+				return
+			}
+			// Stream ended after an error frame, or after a finish reason
+			// with the [DONE] line missing — emit a synthetic Done so the
+			// handler's terminator fires with what it already knows.
 			in.out <- StreamUpdate{Done: true, Usage: lastUsage}
 			return
 		}
@@ -5250,4 +5285,46 @@ func (s *MessageService) executeToolCalls(
 		})
 	}
 	return asstMsg, results
+}
+
+// persistTerminal writes how the turn ended next to its status (FIX118,
+// migration 043). The handler's TerminalInfo wins when it named a cause;
+// otherwise the cause follows the status. Best-effort like the other
+// finish-time writes: a failed UPDATE is logged, never raised into the
+// finish path.
+func (s *MessageService) persistTerminal(ctx context.Context, msgID uuid.UUID, status string, term TerminalInfo) {
+	cause := term.Cause
+	if cause == "" || !IsTerminalCause(cause) {
+		cause = CauseForStatus(status)
+	}
+	// A status the handler's cause contradicts is resolved in favour of
+	// the status: the row's status is what every reader filters on.
+	switch status {
+	case "completed":
+		cause = TerminalCauseCompleted
+	case "cancelled":
+		cause = TerminalCauseStoppedByUser
+	case model.MessageStatusWaitingUser:
+		cause = ""
+	}
+	code := term.ErrorCode
+	if status != "error" {
+		code = ""
+	}
+	if err := s.messages.SetTerminal(ctx, msgID, cause, code); err != nil {
+		slog.Warn("terminal cause not persisted", "message_id", msgID.String(), "cause", cause, "error_code", code, "err", err.Error())
+	}
+}
+
+// preStreamErrorCode names a send that failed before the stream opened:
+// the gateway's own envelope code when it answered with one, else
+// chat-edge's send_failed (the same code sendErrorFrame puts on the wire).
+func preStreamErrorCode(err error) string {
+	var ue *GatewayUnavailableError
+	if errors.As(err, &ue) {
+		if env, ok := ue.Envelope(); ok && env.Code != "" {
+			return env.Code
+		}
+	}
+	return "send_failed"
 }

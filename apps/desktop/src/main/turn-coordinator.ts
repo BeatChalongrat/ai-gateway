@@ -67,6 +67,7 @@ import type { ContextManager } from "./context-manager";
 import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import { checkRemoteTarget } from "./remote-target";
+import { endingForOutcome, normalizeHostError, type HostErrorFrame, type TerminalCause, type TurnEnding } from "./terminal-cause";
 
 /** The hostname of a user-typed URL for a log line — never the query. */
 function hostnameOf(raw: string): string {
@@ -114,6 +115,9 @@ interface RunningTurn {
    *  "auto" turn names the router's pick). Persisted as the assistant
    *  row's model_id and repeated on message_complete. */
   servedModel?: string;
+  /** FIX118 — what the run's terminal error frame said (cause + code), so
+   *  the imported assistant row records the same ending the page saw. */
+  errored?: { cause?: TerminalCause; errorCode?: string };
 }
 interface PendingConsent {
   conversationId: string;
@@ -1102,7 +1106,20 @@ export class TurnCoordinator {
     const log = this.logs.get(conversationId);
     if (!log || log.terminal || log.events.length === 0) return;
     this.log.warn(`TURN had no terminal event conv=${conversationId} run=${log.runId} — emitting ${err.code}`);
-    this.emit(conversationId, "error", err);
+    this.emitError(conversationId, err);
+  }
+
+  /** FIX118 — every terminal `error` frame leaves through here. A host
+   *  code that has a catalogue equivalent is rewritten to it (the original
+   *  rides details.host_code); a code nothing maps is passed through AND
+   *  logged, so a missing code is visible in the log rather than invented
+   *  on the wire. The page maps by code; both surfaces then show the same
+   *  sentence for the same cause. */
+  private emitError(conversationId: string, frame: HostErrorFrame): number {
+    const { frame: out, mapped } = normalizeHostError(frame);
+    if (mapped) this.log.info(`TURN ERROR conv=${conversationId}: host code ${frame.code} → ${out.code} (cause ${out.cause})`);
+    else if (!/^[a-z_]+$/.test(frame.code) || frame.code.startsWith("edit_") || frame.code === "model_not_accepted") this.log.warn(`TURN ERROR conv=${conversationId}: code ${frame.code} is not in the shared catalogue — passed through unmapped`);
+    return this.emit(conversationId, "error", out);
   }
 
   /** FIX41 — start a new run for this conversation.
@@ -1157,9 +1174,12 @@ export class TurnCoordinator {
         terminal: null,
       });
       this.log.warn(`RUN INTERRUPTED conv=${run.conversationId} run=${run.runId} — ${run.events.length} frame(s) recovered, closing it`);
-      this.emit(run.conversationId, "error", {
+      // FIX118 — the same code chat-edge's resume replay ends on, so a
+      // page reading either surface shows the same sentence.
+      this.emitError(run.conversationId, {
         code: "generation_interrupted",
         message: "This turn was interrupted when the app closed. What had been written is kept; send again to continue.",
+        cause: "interrupted",
       });
       settled++;
     }
@@ -1197,7 +1217,7 @@ export class TurnCoordinator {
     // turn somewhere nobody reviewed.
     if (!(await this.isModelAccepted(model, signal))) {
       this.log.warn(`TURN #${turnNo} conv=${conversationId}: REFUSED unknown model "${model}"`);
-      this.emit(conversationId, "error", { code: "model_not_accepted", message: `The selected model “${model}” is not available. Pick a model from the list and try again.` });
+      this.emitError(conversationId, { code: "model_not_accepted", message: `The selected model “${model}” is not available. Pick a model from the list and try again.` });
       return;
     }
 
@@ -1220,7 +1240,7 @@ export class TurnCoordinator {
       omittedOlder = built.omittedOlder;
     } catch (err) {
       this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
-      this.emit(conversationId, "error", { code: "host_exception", message: "The turn could not be prepared." });
+      this.emitError(conversationId, { code: "host_exception", message: "The turn could not be prepared." });
       return;
     }
     // FIX3 §3: if the sidecar is still starting (first launch pays ~6 s of native
@@ -1330,8 +1350,15 @@ export class TurnCoordinator {
       onServedModel: (m) => {
         turn.servedModel = m;
       },
+      onEnding: (e) => {
+        turn.errored = e;
+      },
     });
     const elapsed = Date.now() - startedAt;
+    // FIX118 — how this turn ended, as the imported assistant row will say
+    // it. Before, a failed or stopped turn was imported as a plain row and
+    // became `completed` on the server.
+    const ending = endingForOutcome(outcome, turn.errored ?? null);
     this.lastReply.set(conversationId, turn.assistantText);
 
     // FIX28 §5.1: the assistant's final answer joins the chain — this chain is
@@ -1355,7 +1382,7 @@ export class TurnCoordinator {
     // direction that re-reads the transcript rather than trusting the file.
     const chain = fullChain.slice(historyStart);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, 0));
-    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? []);
+    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? [], ending);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, imported));
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
@@ -1379,7 +1406,7 @@ export class TurnCoordinator {
       // FIX41 — a person pressed Stop. Saying `message_complete` here made
       // a stopped turn indistinguishable from a finished one for anything
       // reading the stream rather than the button.
-      this.emit(conversationId, "cancelled", { ...completeData, partial: true });
+      this.emit(conversationId, "cancelled", { ...completeData, partial: true, cause: "stopped_by_user" });
       this.log.info(`TURN CANCELLED conv=${conversationId} after ${elapsed} ms, ${turn.assistantText.length} chars kept`);
       return;
     }
@@ -1494,6 +1521,9 @@ export class TurnCoordinator {
     onText: (t: string) => void;
     /** FIX35 Part B — the gateway named the model that is answering. */
     onServedModel?: (model: string) => void;
+    /** FIX118 — called once when the run ends on an error frame, with the
+     *  cause and code the frame carried. */
+    onEnding?: (e: { cause?: TerminalCause; errorCode: string }) => void;
     onTrace?: (entry: string) => void;
     /** nested: consent prompts are attributed to this conversation on the page */
     consentConversationId?: string;
@@ -1652,7 +1682,11 @@ export class TurnCoordinator {
             if (ev.code === "gateway_forbidden" && /guardrail/i.test(ev.message)) {
               message += PromptGuard.explain403(this.promptPartsByConversation.get(run.conversationId) ?? []);
             }
-            if (!run.parentToolCallId) this.emit(eventConv, "error", { code, message });
+            // FIX118 — the frame carries the gateway's own verdict and the
+            // terminal cause; the row imported for this turn records both.
+            const cause: TerminalCause = ev.cause ?? "error";
+            run.onEnding?.({ cause, errorCode: code });
+            if (!run.parentToolCallId) this.emitError(eventConv, { code, message, ...(ev.retryable === undefined ? {} : { retryable: ev.retryable }), cause, ...(ev.details ? { details: ev.details } : {}) });
             else run.onText(`\n[error: ${ev.message}]`);
             break;
           }
@@ -2866,7 +2900,7 @@ export class TurnCoordinator {
   /** Imports this turn's visible rows to chat-edge; returns how many rows the
    *  server actually inserted (0 on failure or nothing to import) — the
    *  FIX109 marker is advanced by exactly that. */
-  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = []): Promise<number> {
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = [], ending?: TurnEnding): Promise<number> {
     if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return 0;
     const now = new Date().toISOString();
     const items = [];
@@ -2877,7 +2911,13 @@ export class TurnCoordinator {
     // to the ASSISTANT row, so they render under the reply after a reload
     // and on the web view, exactly like web run_python attachments.
     const asstFileIds = (turn.attachedFiles ?? []).map((f) => f.id);
-    if (turn.assistantText.length > 0 || asstFileIds.length > 0) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}) });
+    // FIX118 — a turn that did not complete says so on its row (status +
+    // closed-set cause + the code of the failure); a completed one sends
+    // the pre-FIX118 shape. A failed turn with NO text still leaves an
+    // (empty) errored assistant row, as a failed web turn does, so the
+    // transcript shows the failure on every surface.
+    const endingFields = ending && ending.status !== "completed" ? { status: ending.status, terminal_cause: ending.cause, ...(ending.errorCode ? { error_code: ending.errorCode } : {}) } : {};
+    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields });
     void chain;
     const result = await this.chatEdge.importMessages(conversationId, items);
     if (result) this.log.info(`TURN PERSISTED conv=${conversationId}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);

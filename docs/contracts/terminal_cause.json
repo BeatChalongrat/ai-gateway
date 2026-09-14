@@ -1,0 +1,37 @@
+{
+  "_comment": "FIX118 — how a turn ended, one closed set for chat-edge (Go), the desktop host (TS) and the web page (TS). Each tree has a test that reads this file; change it here first. `transport_codes` says which catalogue error code a client mints when the failure has no gateway code of its own (backend/app/core/error_catalog.py is the catalogue; GENERATION_INTERRUPTED is chat-edge's own resume code, known to the web dictionary).",
+  "causes": [
+    "completed",
+    "stopped_by_user",
+    "error",
+    "timeout",
+    "disconnected",
+    "eof_without_terminal",
+    "interrupted"
+  ],
+  "cause_meaning": {
+    "completed": "the run produced its answer and said so (message_complete / [DONE])",
+    "stopped_by_user": "a person pressed Stop (cancelled)",
+    "error": "a terminal error frame named the failure; error_code says which",
+    "timeout": "nobody spoke for too long: an idle watchdog or a deadline ended the run",
+    "disconnected": "the connection to the provider broke before it said it was done (reset, unexpected EOF, transport throw)",
+    "eof_without_terminal": "the provider closed the stream cleanly without [DONE], an error frame or a finish reason",
+    "interrupted": "the process that owned the run died; found later by a resume or a ledger replay"
+  },
+  "transport_codes": {
+    "eof_without_terminal": { "code": "stream_interrupted", "retryable": true },
+    "disconnected": { "code": "stream_interrupted", "retryable": true },
+    "timeout": { "code": "provider_timeout", "retryable": true },
+    "interrupted": { "code": "GENERATION_INTERRUPTED", "retryable": true },
+    "unclassified": { "code": "unclassified_error", "retryable": false }
+  },
+  "message_status_by_cause": {
+    "completed": "completed",
+    "stopped_by_user": "cancelled",
+    "error": "error",
+    "timeout": "error",
+    "disconnected": "error",
+    "eof_without_terminal": "error",
+    "interrupted": "error"
+  }
+}

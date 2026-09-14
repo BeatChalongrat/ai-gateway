@@ -79,6 +79,12 @@ export interface ImportMessageItem {
   model_id: string | null;
   created_at: string;
   file_ids?: string[];
+  /** FIX118 — how the turn ended (assistant rows). Absent = completed,
+   *  the pre-FIX118 wire; the server stores the row with this status and
+   *  the closed-set cause (docs/contracts/terminal_cause.json). */
+  status?: "completed" | "error" | "cancelled";
+  terminal_cause?: string;
+  error_code?: string;
 }
 /** POST /api/v1/code/run response (FIX80: rows carry the persisted
  *  ConversationFile id when a conversation was named). */

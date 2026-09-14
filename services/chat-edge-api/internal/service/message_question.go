@@ -331,7 +331,7 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 	})
 	msgID := q.MessageID
 	prefix, rprefix := state.ContentPrefix, state.ReasoningPrefix
-	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
 		status := "completed"
@@ -359,6 +359,7 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 		// persisted display-only (canonical unavailable → never replayed
 		// as provider history by the canonical path, the legacy text is).
 		s.persistDisplayOnly(persistCtx, msgID, full, status, tokInput, tokOutput)
+		s.persistTerminal(persistCtx, msgID, status, term)
 		if r := rprefix + reasoning; r != "" && status == "completed" {
 			_ = s.messages.SetReasoningContent(persistCtx, msgID, r)
 		}

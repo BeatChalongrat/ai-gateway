@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ const (
 	// cap (FileService Knobs.MaxFilesPerMessage default).
 	importMaxFilesPerMessage = 5
 )
+
+// importErrorCodeRe bounds an imported error_code to the shape every
+// catalogue code has (letters, digits, underscore; short).
+var importErrorCodeRe = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
 
 type ImportService struct {
 	pool          *pgxpool.Pool
@@ -170,6 +175,16 @@ type ImportMessageInput struct {
 	// attachment shows under its message bubble on web. Idempotent:
 	// already-linked files are left untouched.
 	FileIDs []uuid.UUID
+	// FIX118 — how the turn ended on the client that produced it. Status
+	// is completed | error | cancelled ("" = completed, the pre-FIX118
+	// wire). TerminalCause is one of the closed set (see
+	// service.TerminalCauses) or ""; ErrorCode is the catalogue code of the
+	// failure or "". Only assistant rows carry them; a user row's are
+	// ignored. Without these a turn that failed on the desktop was
+	// imported as a success.
+	Status        string
+	TerminalCause string
+	ErrorCode     string
 }
 
 // ImportMessages appends historical messages to an owned conversation in
@@ -211,6 +226,18 @@ func (s *ImportService) ImportMessages(
 			return 0, 0, fmt.Errorf("%w: message %d: at most %d file_ids per message",
 				ErrImportInvalid, i, importMaxFilesPerMessage)
 		}
+		// FIX118 — the ending must be one the row can hold.
+		switch items[i].Status {
+		case "", "completed", "error", "cancelled":
+		default:
+			return 0, 0, fmt.Errorf("%w: message %d: status must be completed, error or cancelled", ErrImportInvalid, i)
+		}
+		if c := items[i].TerminalCause; c != "" && !IsTerminalCause(c) {
+			return 0, 0, fmt.Errorf("%w: message %d: terminal_cause is not one of %s", ErrImportInvalid, i, strings.Join(TerminalCauses, "|"))
+		}
+		if e := items[i].ErrorCode; e != "" && !importErrorCodeRe.MatchString(e) {
+			return 0, 0, fmt.Errorf("%w: message %d: error_code must be a short identifier", ErrImportInvalid, i)
+		}
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -227,14 +254,39 @@ func (s *ImportService) ImportMessages(
 		if m := strings.TrimSpace(items[i].ModelID); m != "" {
 			modelID = &m
 		}
-		msgID, inserted, err := msgs.CreateImported(ctx, &model.Message{
+		row := &model.Message{
 			ConversationID: convID,
 			TenantID:       tenantID,
 			UserID:         userID,
 			Role:           items[i].Role,
 			ContentMasked:  items[i].Content,
 			ModelID:        modelID,
-		}, strings.TrimSpace(items[i].ClientID), items[i].CreatedAt)
+			Status:         "completed",
+		}
+		if items[i].Role == "assistant" {
+			// FIX118 — the client says how its turn ended; the row keeps
+			// it. A user row is always completed and never carries a cause.
+			if items[i].Status != "" {
+				row.Status = items[i].Status
+			}
+			cause := items[i].TerminalCause
+			if cause == "" {
+				cause = CauseForStatus(row.Status)
+			}
+			switch row.Status {
+			case "completed":
+				cause = TerminalCauseCompleted
+			case "cancelled":
+				cause = TerminalCauseStoppedByUser
+			}
+			if cause != "" {
+				row.TerminalCause = &cause
+			}
+			if code := items[i].ErrorCode; code != "" && row.Status == "error" {
+				row.ErrorCode = &code
+			}
+		}
+		msgID, inserted, err := msgs.CreateImported(ctx, row, strings.TrimSpace(items[i].ClientID), items[i].CreatedAt)
 		if err != nil {
 			return 0, 0, err
 		}

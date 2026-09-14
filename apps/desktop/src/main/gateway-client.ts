@@ -13,6 +13,7 @@
 //     is never retried once it has begun (partial output must not repeat).
 
 import type { Logger } from "./logger";
+import { classifyStreamFailure, eofWithoutTerminal, isTerminalCause, type TerminalCause } from "./terminal-cause";
 
 /** FIX66 Part 4 — map a failed /v1/images/generations response into one
  *  truthful sentence for the model to relay. The desktop calls the image
@@ -171,7 +172,11 @@ export type StreamEvent =
    *  content on an auto route). */
   | { kind: "model_resolved"; model: string }
   | { kind: "reasoning_notice"; model: string | null; reason: string | null }
-  | { kind: "error"; code: string; message: string }
+  /** FIX118 — `retryable` is the gateway's verdict (forwarded, never
+   *  invented); `cause` is the terminal cause when the host itself ended
+   *  the stream (docs/contracts/terminal_cause.json); `details` carries
+   *  the gateway's structured payload or the host's transport text. */
+  | { kind: "error"; code: string; message: string; retryable?: boolean; cause?: TerminalCause; details?: Record<string, unknown> }
   | { kind: "done"; finish_reason: string | null };
 
 export interface KeyStore {
@@ -566,16 +571,19 @@ export class GatewayClient {
           if (finished) break;
         }
       }
-      if (!finished) yield { kind: "done", finish_reason: null };
+      // FIX118 Part B — the socket closed and nothing said the answer was
+      // done: no [DONE], no finish_reason, no error frame. Before this line
+      // read `yield { kind: "done" }`, so a cut stream became a completed
+      // turn with half an answer (or none). It is an interrupted stream.
+      if (!finished) yield { kind: "error", ...eofWithoutTerminal() };
     } catch (err) {
       if (signal.aborted) return; // caller cancelled — the coordinator emits the terminal event
-      const e = err as Error;
       const stalled = watchdog.signal.aborted && (watchdog.signal.reason as Error | undefined)?.message === "stream_stalled";
-      yield {
-        kind: "error",
-        code: stalled ? "stream_stalled" : "network",
-        message: stalled ? `The gateway connection stalled (no data for ${IDLE_TIMEOUT_MS / 1000}s).` : e.message,
-      };
+      // FIX118 Part A — a throw out of the read is classified into a
+      // catalogue code (stream_stalled keeps FIX80's declared code); the
+      // raw error text rides details.transport, never the message. Before,
+      // code "network" carried e.message and the page showed "fetch failed".
+      yield { kind: "error", ...classifyStreamFailure(err, { stalled, idleSeconds: IDLE_TIMEOUT_MS / 1000 }) };
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
       signal.removeEventListener("abort", onAbort);
@@ -596,7 +604,13 @@ export function parseChunk(data: string): StreamEvent[] {
   const error = root["error"];
   if (error && typeof error === "object") {
     const e = error as Record<string, unknown>;
-    out.push({ kind: "error", code: typeof e["code"] === "string" ? e["code"] : "gateway_error", message: typeof e["message"] === "string" ? e["message"] : "Gateway error" });
+    const frame: Extract<StreamEvent, { kind: "error" }> = { kind: "error", code: typeof e["code"] === "string" ? e["code"] : "gateway_error", message: typeof e["message"] === "string" ? e["message"] : "Gateway error" };
+    // FIX118 — the gateway's own verdict and payload were dropped here
+    // before; the page's Regenerate gate reads `retryable`.
+    if (typeof e["retryable"] === "boolean") frame.retryable = e["retryable"];
+    if (isTerminalCause(e["cause"])) frame.cause = e["cause"];
+    if (e["details"] && typeof e["details"] === "object") frame.details = e["details"] as Record<string, unknown>;
+    out.push(frame);
     return out;
   }
   const choices = root["choices"];

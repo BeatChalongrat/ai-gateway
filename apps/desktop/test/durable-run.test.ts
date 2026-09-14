@@ -175,7 +175,13 @@ describe("FIX41 D2 — however it ends, it says so", () => {
 
     const last = posted[posted.length - 1];
     expect(last.event).toBe("error");
-    expect((last.data as { code: string }).code).toBe("host_exception");
+    // FIX118 — the host's own code goes out as the catalogue code the page
+    // knows; the original is kept under details for the ledger.
+    const data = last.data as { code: string; cause: string; retryable: boolean; details: { host_code: string } };
+    expect(data.code).toBe("unclassified_error");
+    expect(data.cause).toBe("error");
+    expect(data.retryable).toBe(false);
+    expect(data.details.host_code).toBe("host_exception");
   });
 
   it("it does NOT append a second terminal to a run that ended properly", () => {
@@ -289,7 +295,9 @@ describe("FIX41 P5 — the app is killed mid-turn", () => {
     const events = second.posted.map((p) => p.event);
     expect(events[events.length - 1]).toBe("error");
     const err = second.posted[second.posted.length - 1];
-    expect((err.data as { code: string }).code).toBe("generation_interrupted");
+    // FIX118 — the same code chat-edge's resume replay ends on.
+    expect((err.data as { code: string; cause: string }).code).toBe("GENERATION_INTERRUPTED");
+    expect((err.data as { code: string; cause: string }).cause).toBe("interrupted");
     expect(err.runId).toBe(runId);
     // seq continues from where the interrupted run stopped, so a page that
     // had rendered up to 2 does not re-render them.

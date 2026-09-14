@@ -208,5 +208,11 @@ describe("FIX114 — busy indicators after each turn shape", () => {
     const b = busy("c1");
     expect(b.streaming_rows).toBe(0);
     expect(b.statuses).toEqual(["error"]);
+    // FIX118 — the ending is named with the code every surface uses for
+    // it (stream_interrupted / eof_without_terminal), not a page-private one.
+    const row = useChatStore.getState().messages.c1.find((m) => m.role === "assistant");
+    expect(row).toMatchObject({ error_code: "stream_interrupted", error_retryable: true, terminal_cause: "eof_without_terminal" });
+    expect(row?.error_message).toBeTruthy();
+    expect(row?.error_message).not.toMatch(/network/i);
   });
 });

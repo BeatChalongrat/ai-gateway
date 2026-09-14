@@ -88,6 +88,25 @@ describe("failed turn on reload (FIX49 Part A)", () => {
     expect(screen.getByText(dictionaries.en["msg.turnFailedReload"])).toBeTruthy();
   });
 
+  it("FIX118: a reloaded failed row that carries its error_code says why, in the active language", () => {
+    useI18nStore.setState({ locale: "th" });
+    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "", error_code: "stream_interrupted", terminal_cause: "eof_without_terminal" })} />);
+    expect(screen.getByRole("alert").textContent).toContain(dictionaries.th["error.stream_interrupted"]);
+    expect(screen.queryByText(dictionaries.th["msg.turnFailedReload"])).toBeNull();
+    useI18nStore.setState({ locale: "en" });
+  });
+
+  it("FIX118: a reloaded failed row with partial text and a code shows the reason under the text", () => {
+    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "half an answer", error_code: "provider_timeout" })} />);
+    expect(screen.getByRole("alert").textContent).toContain(dictionaries.en["error.provider_timeout"]);
+  });
+
+  it("FIX118: a dead-end code on a reloaded row offers a new message instead of a retry", () => {
+    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "", error_code: "unclassified_error" })} />);
+    expect(screen.getByRole("alert").textContent).toContain(dictionaries.en["error.unclassified_error"]);
+    expect(screen.getByTestId("new-message-instead")).toBeTruthy();
+  });
+
   it("a live error frame keeps its own message — no duplicate generic notice", () => {
     render(
       <MessageBubble
