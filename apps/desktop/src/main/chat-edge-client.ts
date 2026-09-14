@@ -29,6 +29,16 @@ export interface CompactResultDto {
   messages_total?: number;
   coverage_reached?: boolean;
 }
+/** FIX117 — one compaction_progress frame from the server, raw counts:
+ *  `folded` of `total` messages so far; `total` is null when the server
+ *  could not count (the client must not invent one); `done` is the last
+ *  report and `reached` says whether coverage got to the requested row. */
+export interface CompactionProgressDto {
+  folded: number;
+  total: number | null;
+  done: boolean;
+  reached: boolean;
+}
 /** 8 batches × the server's 90 s extraction budget would be 12 minutes; a
  *  compaction that is still running after this is treated as no summary. */
 const COMPACT_TIMEOUT_MS = 10 * 60_000;
@@ -391,6 +401,101 @@ export class ChatEdgeClient {
     } catch {
       return null;
     }
+  }
+
+  /** FIX117 — the same POST /compact, asked for as text/event-stream: the
+   *  server sends compaction_progress after every batch, then compact_result
+   *  (the very JSON compactConversation gets) or error. `onProgress` is told
+   *  each report as it arrives. A server that does not stream (pre-FIX117)
+   *  answers with JSON and that is returned as-is, so either side can be
+   *  older than the other. Same COMPACT_TIMEOUT_MS as the JSON call — the
+   *  fold itself is what takes time, not the reading. */
+  async compactConversationStream(
+    conversationId: string,
+    instructions: string,
+    trigger: CompactionTrigger,
+    onProgress: (p: CompactionProgressDto) => void,
+  ): Promise<CompactResultDto | null> {
+    const token = this.accessToken();
+    if (!token) return null;
+    const path = `/api/v1/conversations/${encodeURIComponent(conversationId)}/compact`;
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ instructions, trigger }),
+        signal: AbortSignal.timeout(COMPACT_TIMEOUT_MS),
+      });
+    } catch (err) {
+      this.log.warn(`chat-edge POST ${path} (stream) failed: ${(err as Error).message}`);
+      return null;
+    }
+    if (!res.ok) {
+      let detail = "";
+      try {
+        detail = (await res.text()).slice(0, 200);
+      } catch {
+        /* ignore */
+      }
+      this.log.warn(`chat-edge POST ${path} (stream) → HTTP ${res.status} ${detail}`);
+      return null;
+    }
+    if (!/text\/event-stream/i.test(res.headers.get("content-type") ?? "")) {
+      // An older server: the one JSON body, no reports.
+      try {
+        return (await res.json()) as CompactResultDto;
+      } catch {
+        return null;
+      }
+    }
+    if (!res.body) return null;
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let result: CompactResultDto | null = null;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i: number;
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const frame = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let event = "";
+          let data = "";
+          for (const line of frame.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) data += line.slice(5).trim();
+          }
+          if (!event) continue;
+          if (event === "compaction_progress") {
+            try {
+              const p = JSON.parse(data) as Partial<CompactionProgressDto>;
+              if (typeof p.folded === "number") {
+                onProgress({ folded: p.folded, total: typeof p.total === "number" ? p.total : null, done: p.done === true, reached: p.reached === true });
+              }
+            } catch {
+              /* a malformed report is dropped; the fold is unaffected */
+            }
+          } else if (event === "compact_result") {
+            try {
+              result = JSON.parse(data) as CompactResultDto;
+            } catch {
+              result = null;
+            }
+          } else if (event === "error") {
+            this.log.warn(`chat-edge POST ${path} (stream) → error frame ${data.slice(0, 200)}`);
+            return null;
+          }
+        }
+      }
+    } catch (err) {
+      this.log.warn(`chat-edge POST ${path} (stream) read failed: ${(err as Error).message}`);
+      return null;
+    }
+    return result;
   }
 
   private async get<T>(path: string, timeoutMs = this.timeoutMs): Promise<T | null> {

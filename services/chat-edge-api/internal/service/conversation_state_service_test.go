@@ -34,7 +34,8 @@ func (f *fakeStates) Upsert(_ context.Context, s *model.ConversationState) error
 }
 
 type fakeMessages struct {
-	all []model.Message
+	all      []model.Message
+	countErr error
 }
 
 func (f *fakeMessages) ListAfter(_ context.Context, _, _, after uuid.UUID, limit int) ([]model.Message, error) {
@@ -58,6 +59,40 @@ func (f *fakeMessages) ListAfter(_ context.Context, _, _, after uuid.UUID, limit
 }
 func (f *fakeMessages) CountMessages(_ context.Context, _, _ uuid.UUID) (int, error) {
 	return len(f.all), nil
+}
+
+// countErr (FIX117) makes CountAfterUpTo fail, so a test can prove the
+// progress reports say "unknown" instead of inventing a total.
+func (f *fakeMessages) CountAfterUpTo(_ context.Context, _, _, after uuid.UUID, upto *uuid.UUID) (int, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	start := 0
+	if after != uuid.Nil {
+		for i := range f.all {
+			if f.all[i].ID == after {
+				start = i + 1
+				break
+			}
+		}
+	}
+	end := len(f.all)
+	if upto != nil {
+		end = -1
+		for i := range f.all {
+			if f.all[i].ID == *upto {
+				end = i + 1
+				break
+			}
+		}
+		if end < 0 {
+			return 0, errors.New("upto not in conversation")
+		}
+	}
+	if end < start {
+		return 0, nil
+	}
+	return end - start, nil
 }
 
 type fakeConvs struct{}

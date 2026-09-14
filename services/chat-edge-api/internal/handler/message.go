@@ -798,6 +798,12 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 		openStream(assistantID, userMessageID)
 		writeSSEEvent(rw, flusher, "compaction_status", map[string]any{"status": "summarizing"})
 	}
+	// FIX117 — after every extraction batch, raw counts; compaction_status
+	// above is untouched, so a client that only knows that frame sees
+	// exactly what it saw before.
+	in.OnCompactionProgress = func(p service.ExtractionProgress) {
+		writeSSEEvent(rw, flusher, "compaction_progress", compactionProgressPayload(p))
+	}
 
 	stream, err := h.messages.SendStream(r.Context(), in)
 	if err != nil {

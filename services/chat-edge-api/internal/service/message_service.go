@@ -977,6 +977,11 @@ type SendInput struct {
 	// can open the response and show "organising the conversation…"
 	// during the pause instead of nothing. Nil on non-stream sends.
 	OnCompactionStart func(assistantID, userMessageID uuid.UUID)
+	// OnCompactionProgress (FIX117) — told after every extraction batch of
+	// the pre-trim compaction, raw counts (ExtractionProgress). The
+	// streaming handler turns each into a compaction_progress frame. Nil
+	// on non-stream sends.
+	OnCompactionProgress func(ExtractionProgress)
 	// RunID (FIX41) — the id the HANDLER already minted for this
 	// generation. The handler needs it before SendStream returns, because
 	// the OnCompactionStart early-open writes frames first; passing it in
@@ -1009,7 +1014,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	sourcesAcc := NewSourcesAccumulator()
 	// Non-streaming: no frame to carry the notice; the compacted_history
 	// source row persisted with the reply records the same loss.
-	gwReq, _ := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil)
+	gwReq, _ := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist, false)
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
@@ -1459,7 +1464,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		cb := in.OnCompactionStart
 		onExtractionStart = func() { cb(asstID, userID) }
 	}
-	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart, in.OnCompactionProgress)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
@@ -1803,7 +1808,7 @@ func (s *MessageService) openAssistantStream(
 	ragQuery := lastUserContent(history)
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -2073,7 +2078,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	}
 	imgs := s.resolveUserImages(ctx, conv.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
-	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil)
+	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
@@ -3149,6 +3154,7 @@ func (s *MessageService) compileAndBuildRequest(
 	sources *SourcesAccumulator,
 	omittedOlder int,
 	onExtractionStart func(),
+	onExtractionProgress func(ExtractionProgress),
 ) (GatewayChatRequest, *CompactionNotice) {
 	// current-turn images drive routing + the compiler budget; the
 	// per-message map drives inline placement in the built request.
@@ -3227,17 +3233,18 @@ func (s *MessageService) compileAndBuildRequest(
 	}
 
 	compiled, err := s.compiler.Compile(ctx, CompileInputs{
-		Conv:              conv,
-		UserID:            userID,
-		TenantID:          tenantID,
-		History:           history,
-		ImageURLs:         imageURLs,
-		BuildPrefix:       build,
-		NumTools:          numTools,
-		OmittedOlder:      omittedOlder,
-		OnExtractionStart: onExtractionStart,
-		BuildState:        s.stateBlockBuilder(ctx, conv, userID, tenantID),
-		BudgetModelID:     s.budgetModelFor(ctx, conv, history),
+		Conv:                 conv,
+		UserID:               userID,
+		TenantID:             tenantID,
+		History:              history,
+		ImageURLs:            imageURLs,
+		BuildPrefix:          build,
+		NumTools:             numTools,
+		OmittedOlder:         omittedOlder,
+		OnExtractionStart:    onExtractionStart,
+		OnExtractionProgress: onExtractionProgress,
+		BuildState:           s.stateBlockBuilder(ctx, conv, userID, tenantID),
+		BudgetModelID:        s.budgetModelFor(ctx, conv, history),
 	})
 	if err != nil || compiled == nil {
 		// Defensive fallback — should never happen since Compile
@@ -3604,6 +3611,16 @@ type ManualCompactResult struct {
 func (s *MessageService) ManualCompact(
 	ctx context.Context, convID, userID, tenantID uuid.UUID, instructions, trigger string,
 ) (*ManualCompactResult, error) {
+	return s.ManualCompactWithProgress(ctx, convID, userID, tenantID, instructions, trigger, nil)
+}
+
+// ManualCompactWithProgress (FIX117) is ManualCompact with a progress sink:
+// told after every extraction batch in raw counts. A caller that does not
+// want reports passes nil and gets exactly the pre-FIX117 behaviour.
+func (s *MessageService) ManualCompactWithProgress(
+	ctx context.Context, convID, userID, tenantID uuid.UUID, instructions, trigger string,
+	onProgress func(ExtractionProgress),
+) (*ManualCompactResult, error) {
 	if s.stateSvc == nil {
 		return nil, errors.New("conversation state service not configured")
 	}
@@ -3629,7 +3646,7 @@ func (s *MessageService) ManualCompact(
 	}
 	last := latest[len(latest)-1].ID
 	st, reached, err := s.stateSvc.EnsureStateCoversUpTo(ctx, convID, userID, tenantID, &last, ExtractionOptions{
-		Instructions: instructions, Trigger: CompactionTriggerFromClient(trigger),
+		Instructions: instructions, Trigger: CompactionTriggerFromClient(trigger), OnProgress: onProgress,
 	})
 	if err != nil {
 		return nil, err

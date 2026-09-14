@@ -52,9 +52,12 @@ function chainAt(ratio: number, basis: BudgetBasis = TERRA): GatewayMessage[] {
 class FakeServer implements ConversationSummariser {
   calls: { instructions: string; trigger: string }[] = [];
   constructor(private readonly goal: string | null, private readonly serverRows: () => number) {}
-  async compact(_id: string, instructions: string, trigger: string): Promise<ServerCompaction | null> {
+  async compact(_id: string, instructions: string, trigger: string, _signal?: AbortSignal, onProgress?: (p: { folded: number; total: number | null; done: boolean; reached: boolean }) => void): Promise<ServerCompaction | null> {
     this.calls.push({ instructions, trigger });
     if (this.goal === null) return null;
+    // FIX117 — a server reports as it folds; the manager forwards each report.
+    onProgress?.({ folded: 0, total: 4, done: false, reached: false });
+    onProgress?.({ folded: 4, total: 4, done: true, reached: true });
     const rowIds = Array.from({ length: this.serverRows() }, (_, i) => `r${i + 1}`);
     const last = rowIds[rowIds.length - 1] ?? null;
     return {
@@ -183,6 +186,9 @@ describe("ContextManager", () => {
     expect(ev.list[0]!.event).toBe("compaction_status");
     expect((ev.list[0]!.data as { status: string }).status).toBe("summarizing");
     expect(ev.list[ev.list.length - 1]!.event).toBe("context_budget");
+    // FIX117 — the server's reports reach the page between the two, raw counts, in order.
+    expect(ev.list.slice(1, 3).map((e) => e.event)).toEqual(["compaction_progress", "compaction_progress"]);
+    expect(ev.list.slice(1, 3).map((e) => e.data)).toEqual([{ folded: 0, total: 4, done: false, reached: false }, { folded: 4, total: 4, done: true, reached: true }]);
     // The server folded everything it holds — every chain message before the new user turn.
     const st = store.get("c")!;
     expect(st.message_count_at_summary).toBe(msgs.length - 2);

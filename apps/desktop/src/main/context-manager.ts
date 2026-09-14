@@ -353,7 +353,9 @@ export class ContextManager {
     this.lastCompact.set(conversationId, localVisible);
     let res;
     try {
-      res = await this.deps.summariser.compact(conversationId, instructions, trigger, signal);
+      // FIX117 — the server's progress reports travel to the page on the
+      // same channel as compaction_status / context_budget, raw counts.
+      res = await this.deps.summariser.compact(conversationId, instructions, trigger, signal, (p) => this.deps.emit(conversationId, "compaction_progress", p));
     } catch (err) {
       this.deps.log.warn(`SUMMARY conv=${conversationId}: server compact threw: ${(err as Error).message} — state kept`);
       return existing;

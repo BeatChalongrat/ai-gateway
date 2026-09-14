@@ -182,6 +182,9 @@ type CompileInputs struct {
 	// open the SSE response and tell the user the pause is the
 	// conversation being organised, not a hang. Nil = no-op.
 	OnExtractionStart func()
+	// OnExtractionProgress (FIX117) — told after every extraction batch,
+	// raw counts; see ExtractionProgress. Nil = no reports.
+	OnExtractionProgress func(ExtractionProgress)
 	// BuildState (FIX33.1 Part 2) renders the <conversation_state> block
 	// + its ContextSource (the prompt compiler's former layer 12). Called
 	// AFTER extraction; when it returns a block and compaction happened,
@@ -358,7 +361,7 @@ func (c *ContextCompiler) Compile(
 		}
 		// FIX102 Part D — the summariser falls back to the model that
 		// answers: for "auto" that is BudgetModelID, not the sentinel.
-		st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{Trigger: "auto", ChatModel: in.BudgetModelID})
+		st, reached, err := c.states.EnsureStateCoversUpTo(ctx, in.Conv.ID, in.UserID, in.TenantID, upto, ExtractionOptions{OnProgress: in.OnExtractionProgress, Trigger: "auto", ChatModel: in.BudgetModelID})
 		if err != nil {
 			slog.Warn("context_compiler: pre-compaction state extraction failed",
 				"conv", in.Conv.ID.String(), "err", err)

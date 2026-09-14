@@ -570,6 +570,42 @@ func (r *MessageRepo) CountMessagesBefore(
 	return n, nil
 }
 
+// CountAfterUpTo — FIX117: the denominator of compaction progress. Counts the
+// active messages that sit after afterMessageID (exclusive; uuid.Nil = from
+// the start) up to and including uptoID (nil = everything after the anchor),
+// in the same (created_at, id) order ListAfter folds them. An uptoID that
+// names no row is an error, never a silent zero: the caller reports "unknown"
+// rather than a made-up total.
+func (r *MessageRepo) CountAfterUpTo(
+	ctx context.Context, tenantID, convID, afterMessageID uuid.UUID, uptoID *uuid.UUID,
+) (int, error) {
+	var upto any
+	if uptoID != nil {
+		upto = *uptoID
+	}
+	const q = `
+		WITH anchor AS (
+			SELECT created_at FROM chat.messages_masked WHERE id = $3 AND tenant_id = $2
+		), upto AS (
+			SELECT created_at, id FROM chat.messages_masked WHERE id = $4::uuid AND tenant_id = $2 AND conversation_id = $1
+		)
+		SELECT
+			(SELECT COUNT(*)::int FROM chat.messages_masked m
+			 WHERE m.conversation_id = $1 AND m.tenant_id = $2 AND m.is_active = true
+			   AND m.created_at > COALESCE((SELECT created_at FROM anchor), 'epoch'::timestamptz)
+			   AND ($4::uuid IS NULL OR (m.created_at, m.id) <= (SELECT created_at, id FROM upto))),
+			(SELECT COUNT(*)::int FROM upto)
+	`
+	var n, found int
+	if err := r.db.QueryRow(ctx, q, convID, tenantID, afterMessageID, upto).Scan(&n, &found); err != nil {
+		return 0, fmt.Errorf("count messages after up to: %w", err)
+	}
+	if uptoID != nil && found == 0 {
+		return 0, fmt.Errorf("count messages after up to: message %s not in conversation", uptoID.String())
+	}
+	return n, nil
+}
+
 func (r *MessageRepo) CountMessages(
 	ctx context.Context, tenantID, convID uuid.UUID,
 ) (int, error) {

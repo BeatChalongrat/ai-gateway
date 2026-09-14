@@ -28,7 +28,7 @@
 //
 // No 'electron' import: unit-tested in plain Node with a fake client.
 
-import type { ChatEdgeClient, CompactionTrigger, MessageDto } from "./chat-edge-client";
+import type { ChatEdgeClient, CompactionProgressDto, CompactionTrigger, MessageDto } from "./chat-edge-client";
 import type { Logger } from "./logger";
 
 /** The transcript loader's ceiling (turn-coordinator.ts HISTORY_LOAD_CEILING). */
@@ -54,7 +54,10 @@ export interface ConversationSummariser {
    *  Null when it could not (unreachable, refused, no summary produced) —
    *  the turn then goes out trimmed with the honest note, as it does
    *  without a summariser at all. Never throws. */
-  compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal): Promise<ServerCompaction | null>;
+  /** FIX117 — `onProgress`, when given, is told every compaction_progress
+   *  report the server sends while it folds (raw counts). Optional: a
+   *  summariser that cannot report simply never calls it. */
+  compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal, onProgress?: (p: CompactionProgressDto) => void): Promise<ServerCompaction | null>;
 }
 
 /** Rows the model would see on the server: user/assistant with text. */
@@ -64,14 +67,29 @@ export function isVisibleRow(m: MessageDto): boolean {
 
 export class ChatEdgeSummariser implements ConversationSummariser {
   constructor(
-    private readonly chatEdge: Pick<ChatEdgeClient, "compactConversation" | "listMessagesPage">,
+    private readonly chatEdge: Pick<ChatEdgeClient, "compactConversation" | "listMessagesPage"> & Partial<Pick<ChatEdgeClient, "compactConversationStream">>,
     private readonly log: Logger,
   ) {}
 
-  async compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal): Promise<ServerCompaction | null> {
+  async compact(conversationId: string, instructions: string, trigger: CompactionTrigger, signal: AbortSignal, onProgress?: (p: CompactionProgressDto) => void): Promise<ServerCompaction | null> {
     if (signal.aborted) return null;
     const startedAt = Date.now();
-    const res = await this.chatEdge.compactConversation(conversationId, instructions, trigger);
+    // FIX117 — with a listener, ask for the streamed form and pass every
+    // report through; the sequence is logged once at the end so the shell
+    // log shows what the page was told. Without one (or on a client that
+    // cannot stream) the one-JSON call is unchanged.
+    const seen: string[] = [];
+    const res = onProgress && this.chatEdge.compactConversationStream
+      ? await this.chatEdge.compactConversationStream(conversationId, instructions, trigger, (p) => {
+          seen.push(`${p.folded}/${p.total ?? "?"}${p.done ? (p.reached ? " done" : " done(not reached)") : ""}`);
+          try {
+            onProgress(p);
+          } catch (err) {
+            this.log.warn(`SUMMARY conv=${conversationId}: progress listener threw: ${(err as Error).message} — fold continues`);
+          }
+        })
+      : await this.chatEdge.compactConversation(conversationId, instructions, trigger);
+    if (seen.length > 0) this.log.info(`SUMMARY conv=${conversationId}: server progress ${seen.join(" → ")}`);
     if (!res || !res.state || typeof res.state !== "object") {
       this.log.warn(`SUMMARY conv=${conversationId}: server compact returned nothing after ${Date.now() - startedAt} ms — no summary this turn`);
       return null;

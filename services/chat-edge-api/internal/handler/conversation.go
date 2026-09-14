@@ -734,24 +734,91 @@ func (h *ConversationHandler) Compact(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "instructions too long (max 2000 characters)")
 		return
 	}
-	res, err := h.messages.ManualCompact(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions, service.CompactionTriggerFromClient(body.Trigger))
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrMessageConversationNotFound):
-			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
-		case errors.Is(err, service.ErrMessageMemoryOff):
-			WriteError(w, http.StatusBadRequest, CodeBadRequest, "memory is off for this conversation, so there is nowhere to keep a summary")
-		case errors.Is(err, service.ErrMessageEmptyContent):
-			WriteError(w, http.StatusBadRequest, CodeBadRequest, "nothing to compact yet")
-		case errors.Is(err, service.ErrCompactNoSummary):
-			WriteError(w, http.StatusConflict, CodeBadRequest, "the summary could not be produced, so nothing was compacted")
-		default:
-			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+	trigger := service.CompactionTriggerFromClient(body.Trigger)
+	// FIX117 — a caller that asks for text/event-stream gets the same
+	// compaction as frames: compaction_progress after every batch, then
+	// compact_result (the JSON body below, verbatim) or error. Every other
+	// caller — the installed desktop sends Accept: application/json — gets
+	// the one JSON body exactly as before. Same URL, same auth, same body:
+	// the Accept header is the only switch, so nothing that exists today
+	// changes its shape.
+	if wantsEventStream(r) {
+		if flusher, ok := w.(http.Flusher); ok {
+			writeCompactStream(w, flusher, func(onProgress func(service.ExtractionProgress)) (*service.ManualCompactResult, error) {
+				return h.messages.ManualCompactWithProgress(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions, trigger, onProgress)
+			})
+			return
 		}
+	}
+	res, err := h.messages.ManualCompact(r.Context(), convID, caller.UserID, caller.TenantUUID, body.Instructions, trigger)
+	if err != nil {
+		status, code, msg := compactErrorStatus(err)
+		WriteError(w, status, code, msg)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+// compactErrorStatus maps a ManualCompact error to the HTTP status, error
+// code and message the JSON path has always sent; the stream path sends
+// the same code and message in its error frame.
+func compactErrorStatus(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, service.ErrMessageConversationNotFound):
+		return http.StatusNotFound, CodeNotFound, "conversation not found"
+	case errors.Is(err, service.ErrMessageMemoryOff):
+		return http.StatusBadRequest, CodeBadRequest, "memory is off for this conversation, so there is nowhere to keep a summary"
+	case errors.Is(err, service.ErrMessageEmptyContent):
+		return http.StatusBadRequest, CodeBadRequest, "nothing to compact yet"
+	case errors.Is(err, service.ErrCompactNoSummary):
+		return http.StatusConflict, CodeBadRequest, "the summary could not be produced, so nothing was compacted"
+	default:
+		return http.StatusInternalServerError, CodeInternalError, "internal error"
+	}
+}
+
+// wantsEventStream — FIX117: only an explicit text/event-stream in Accept
+// selects the streamed compaction. Absent, */* or application/json keep
+// the JSON body.
+func wantsEventStream(r *http.Request) bool {
+	return strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
+}
+
+// compactionProgressPayload — FIX117: the wire shape of a progress report.
+// Raw counts only; "total" is null when the server could not count, so a
+// client never sees an invented denominator.
+func compactionProgressPayload(p service.ExtractionProgress) map[string]any {
+	var total any
+	if p.TotalKnown {
+		total = p.Total
+	}
+	return map[string]any{"folded": p.Folded, "total": total, "done": p.Done, "reached": p.Reached}
+}
+
+// writeCompactStream — FIX117: runs a compaction with its progress reports
+// written as SSE frames, then the result or the error as the last frame.
+// The response is committed (200) before the work starts, so a failure is
+// reported inside the stream, as the turn stream does.
+func writeCompactStream(
+	w http.ResponseWriter, flusher http.Flusher,
+	run func(onProgress func(service.ExtractionProgress)) (*service.ManualCompactResult, error),
+) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	res, err := run(func(p service.ExtractionProgress) {
+		writeSSEEvent(w, flusher, "compaction_progress", compactionProgressPayload(p))
+	})
+	if err != nil {
+		_, code, msg := compactErrorStatus(err)
+		writeSSEEvent(w, flusher, "error", map[string]any{"code": code, "message": msg})
+		return
+	}
+	writeSSEEvent(w, flusher, "compact_result", res)
 }
 
 // ---------------------------------------------------------------------------

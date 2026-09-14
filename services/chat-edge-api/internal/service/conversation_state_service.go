@@ -68,6 +68,9 @@ type stateStore interface {
 type stateMessageSource interface {
 	ListAfter(ctx context.Context, tenantID, convID, afterMessageID uuid.UUID, limit int) ([]model.Message, error)
 	CountMessages(ctx context.Context, tenantID, convID uuid.UUID) (int, error)
+	// CountAfterUpTo (FIX117) — how many messages a compaction has to fold:
+	// after the anchor, up to and including uptoID.
+	CountAfterUpTo(ctx context.Context, tenantID, convID, afterMessageID uuid.UUID, uptoID *uuid.UUID) (int, error)
 }
 
 type stateConvSource interface {
@@ -169,10 +172,29 @@ func (s *ConversationStateService) SetCompactionUsageRecorder(r CompactionUsageR
 }
 
 // ExtractionOptions tunes one extraction pass (FIX33).
+// ExtractionProgress (FIX117) — what EnsureStateCoversUpTo has folded so
+// far, in raw counts: the client works out a percentage (or shows the
+// counts). Total is the number of messages the run has to fold, known
+// before the first batch from CountAfterUpTo; TotalKnown is false when
+// that count failed — then Total is meaningless and the client must not
+// invent one. Done is set exactly once, on the last report; Reached says
+// whether coverage got to the requested message. Folded never decreases
+// and never equals Total before Done.
+type ExtractionProgress struct {
+	Folded     int
+	Total      int
+	TotalKnown bool
+	Done       bool
+	Reached    bool
+}
+
 type ExtractionOptions struct {
 	// BatchLimit caps how many new messages one gateway call folds.
 	// 0 = extractionBatchLimit.
 	BatchLimit int
+	// OnProgress (FIX117) is told after every batch, best-effort: a sink
+	// that panics never changes what gets folded. Nil = no reports.
+	OnProgress func(ExtractionProgress)
 	// Instructions is the user's compaction guidance (A-W7). Empty =
 	// use the instructions already stored on the state row, if any.
 	Instructions string
@@ -428,31 +450,106 @@ func (s *ConversationStateService) EnsureStateCoversUpTo(
 	if batch <= 0 {
 		batch = extractionBatchLimit
 	}
+	// FIX117 — progress in raw counts. The denominator is read once, before
+	// the first batch; a count that fails makes every report say "unknown"
+	// rather than a guess. Reports are best-effort: the sink can never
+	// break the fold.
+	progress := newExtractionProgress(ctx, s.messages, s.states, convID, userID, tenantID, uptoID, opts.OnProgress)
+	progress.report(false, false)
 	var st *model.ConversationState
 	for i := 0; i < extractionMaxBatches; i++ {
 		p, err := s.extractOnce(ctx, convID, userID, tenantID, opts)
 		if err != nil {
+			progress.report(true, false)
 			return st, false, err
 		}
 		st = p.state
 		if p.failed {
+			progress.report(true, false)
 			return st, false, nil
 		}
 		if len(p.folded) == 0 {
-			// Nothing after the anchor: whatever exists is covered.
-			return st, uptoID == nil || (st != nil && st.SummarizedUpToMessageID != nil), nil
+			reached := uptoID == nil || (st != nil && st.SummarizedUpToMessageID != nil)
+			progress.report(true, reached)
+			return st, reached, nil
 		}
+		progress.folded += len(p.folded)
 		if uptoID != nil && containsMessage(p.folded, *uptoID) {
+			progress.report(true, true)
 			return st, true, nil
 		}
 		if len(p.folded) < batch {
-			// A short batch drained everything after the anchor.
+			progress.report(true, true)
 			return st, true, nil
 		}
+		progress.report(false, false)
 	}
 	slog.Warn("conversation state: coverage did not reach the requested message within the batch bound",
 		"conv", convID.String(), "batches", extractionMaxBatches)
+	progress.report(true, false)
 	return st, false, nil
+}
+
+// extractionProgress carries the counts between batches and guards the
+// sink. See ExtractionProgress for the contract.
+type extractionProgress struct {
+	sink       func(ExtractionProgress)
+	folded     int
+	total      int
+	totalKnown bool
+	lastSent   int
+	done       bool
+}
+
+func newExtractionProgress(
+	ctx context.Context, messages stateMessageSource, states stateStore,
+	convID, userID, tenantID uuid.UUID, uptoID *uuid.UUID, sink func(ExtractionProgress),
+) *extractionProgress {
+	p := &extractionProgress{sink: sink}
+	if sink == nil {
+		return p
+	}
+	anchor := uuid.Nil
+	if existing, err := states.Get(ctx, convID, userID, tenantID); err == nil && existing != nil && existing.SummarizedUpToMessageID != nil {
+		anchor = *existing.SummarizedUpToMessageID
+	}
+	total, err := messages.CountAfterUpTo(ctx, tenantID, convID, anchor, uptoID)
+	if err != nil {
+		slog.Warn("conversation state: progress total unknown — reporting counts without a denominator",
+			"conv", convID.String(), "err", err)
+		return p
+	}
+	p.total, p.totalKnown = total, true
+	return p
+}
+
+// report sends one ExtractionProgress. Folded is clamped so it never goes
+// backwards and never equals the total before done; done is sent once.
+func (p *extractionProgress) report(done, reached bool) {
+	if p == nil || p.sink == nil || p.done {
+		return
+	}
+	folded := p.folded
+	if p.totalKnown {
+		if done && reached {
+			folded = p.total
+		} else if folded >= p.total && p.total > 0 {
+			folded = p.total - 1
+		}
+	}
+	if folded < p.lastSent {
+		folded = p.lastSent
+	}
+	p.lastSent = folded
+	if done {
+		p.done = true
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Warn("conversation state: progress sink panicked — fold continues", "panic", fmt.Sprint(r))
+		}
+	}()
+	p.sink(ExtractionProgress{Folded: folded, Total: p.total, TotalKnown: p.totalKnown, Done: done, Reached: reached})
 }
 
 func containsMessage(msgs []model.Message, id uuid.UUID) bool {
