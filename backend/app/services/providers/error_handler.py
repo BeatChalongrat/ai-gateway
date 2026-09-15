@@ -18,6 +18,7 @@ from app.core.exceptions import (
     ProviderUnavailableError,
     RateLimitExceededError,
     UpstreamBadResponseError,
+    GatewayError,
 )
 
 # HTTP status codes that are retryable. 504 (upstream LB/gateway
@@ -94,6 +95,22 @@ def _provider_message(body: dict | str) -> str:
         if isinstance(error, dict) and isinstance(error.get("message"), str):
             return error["message"][:500]
     return str(body)[:500]
+
+
+def normalise_transport_error(exc: BaseException, provider_name: str) -> BaseException:
+    """FIX120 — the streaming adapters map HTTP status errors only; a
+    connection failure or a timeout raised by ``client.stream()`` reaches
+    the stream handler as a raw httpx exception, which the handler could
+    only call ``unclassified_error`` (not retryable, never a fallback). The
+    non-streaming path has always mapped the same exception to
+    ``provider_unavailable`` / ``provider_timeout``. Same table, both paths:
+    a gateway error passes through untouched, a raw transport error is
+    mapped, anything else is returned as it came."""
+    if isinstance(exc, GatewayError):
+        return exc
+    if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError)):
+        return map_provider_error(exc, provider_name)
+    return exc
 
 
 def map_provider_error(exc: Exception, provider_name: str) -> Exception:

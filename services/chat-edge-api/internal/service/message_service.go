@@ -815,6 +815,33 @@ func (s *MessageService) SetServedModel(ctx context.Context, msgID uuid.UUID, mo
 	return s.messages.SetModelID(ctx, msgID, modelID)
 }
 
+// SetFallbackFrom records, on the assistant row, the model the turn asked
+// for when a fallback model answered (FIX120). Best-effort like
+// SetServedModel; "" and a from equal to the served model write nothing.
+func (s *MessageService) SetFallbackFrom(ctx context.Context, msgID uuid.UUID, from string) error {
+	from = strings.TrimSpace(from)
+	if from == "" || msgID == uuid.Nil {
+		return nil
+	}
+	return s.messages.SetFallbackFrom(ctx, msgID, from)
+}
+
+// FallbackFromInfo reads the requested / answering pair out of a gateway
+// ``fallback_info`` frame. Returns ("", "") unless both are non-empty
+// strings and differ — a frame naming the same model twice is not a swap.
+func FallbackFromInfo(info map[string]any) (requested, actual string) {
+	if info == nil {
+		return "", ""
+	}
+	req, _ := info["requested_model"].(string)
+	act, _ := info["actual_model"].(string)
+	req, act = strings.TrimSpace(req), strings.TrimSpace(act)
+	if req == "" || act == "" || req == act {
+		return "", ""
+	}
+	return req, act
+}
+
 func (s *MessageService) SetReasoningCapabilityChecker(fn func(ctx context.Context, modelID string) bool) {
 	s.reasoningCapable = fn
 }

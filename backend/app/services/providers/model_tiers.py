@@ -4,9 +4,15 @@ A *tier* groups models with comparable cost / latency / capability so a
 failure on the primary candidate can be answered by another vendor's
 model of the same class instead of dropping the request.
 
-``TIERS`` is the authoritative table. ``get_tier`` resolves a model to
-its tier name; ``get_fallback_chain`` produces an ordered list of
-``{"provider", "model"}`` candidates for the FallbackOrchestrator.
+FIX120 — the two tables this module used to hold as Python literals
+(``CURATED_FALLBACKS`` and ``TIERS``) now live in
+``docs/contracts/fallback_policy.json`` → ``chains.curated`` /
+``chains.tiers`` and are read through :mod:`app.services.gateway.fallback_policy`.
+The module-level names are kept (read-only views of the shipped file) so
+every existing import and test still works; the lookup rules below are
+unchanged. ``get_fallback_chain`` reads the SHIPPED tables;
+``chain_from_tables`` is the same walk over any tables (an effective
+policy with overrides hands its own in).
 
 The chain is deliberately small — at most four candidates per tier so
 a single inbound failure cannot fan out into a wide rescue sweep.
@@ -16,6 +22,8 @@ from __future__ import annotations
 
 import re
 from typing import Iterable
+
+from app.services.gateway.fallback_policy import base_policy
 
 # Providers ship dated/versioned model ids (Anthropic ``-YYYYMMDD``,
 # OpenAI ``-YYYY-MM-DD``) while the tier table is keyed by the stable
@@ -60,63 +68,16 @@ def _alias(model: str) -> str:
 # the primary).
 #
 # FIX51 Part 4 (P1-F) — chains must span ACCOUNTS, not just vendors.
-# The original table sent every hop through the OpenRouter adapter
-# ("the provider holding a live key"), which made both rescue hops die
-# together the day that one account ran dry — the "cross-provider" rule
-# had quietly become cross-MODEL on a single account. Every chain now
-# carries at least one hop on a different account (DeepSeek direct or
-# OpenAI direct); ``test_fallback_orchestrator.py`` fails any chain
-# that collapses back to a single provider.
+# Every chain carries at least one hop on a different account (DeepSeek
+# direct or OpenAI direct); ``test_fallback_orchestrator.py`` fails any
+# chain that collapses back to a single provider.
+#
+# FIX120 — the table itself is data: docs/contracts/fallback_policy.json.
 # ---------------------------------------------------------------------------
-_OR = "openrouter"
-_DS = "deepseek"
-_OA = "openai"
-
-
-def _c(provider: str, model: str) -> dict[str, str]:
-    return {"provider": provider, "model": model}
-
-
-# Cross-account rescue hops: DeepSeek direct is the second account in
-# this deployment. v4-pro stands in for the standard/premium class,
-# v4-flash for the budget/fast class (down, never up).
-_DS_STD = _c(_DS, "deepseek-v4-pro")
-_DS_FAST = _c(_DS, "deepseek-v4-flash")
-
-CURATED_FALLBACKS: dict[str, list[dict[str, str]]] = {
-    # Standard / flagship tier — peers stay standard; hop 2 crosses to
-    # the DeepSeek account.
-    "claude-sonnet-4": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
-    "claude-sonnet-4.5": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
-    "gpt-4o": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
-    "gemini-2.5-pro": [_c(_OR, "anthropic/claude-sonnet-4"), _DS_STD],
-    "deepseek-r1": [_c(_OR, "openai/gpt-4o"), _DS_STD],
-    # Premium → premium/standard (down, never up).
-    "claude-opus-4.1": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
-    "claude-opus-4": [_c(_OR, "anthropic/claude-sonnet-4.5"), _DS_STD],
-    # Reasoning peers fall back to another reasoning model first, then
-    # cross accounts (v4-pro answers without thinking — a downgrade the
-    # fallback notice already reports, same as any vendor swap).
-    "o3-mini": [_c(_OR, "deepseek/deepseek-r1"), _DS_STD],
-    "o4-mini": [_c(_OR, "deepseek/deepseek-r1"), _DS_STD],
-    # Budget / fast tier — peers stay budget/fast (no upgrade).
-    "claude-3.5-haiku": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
-    "gpt-4o-mini": [_c(_OR, "anthropic/claude-3.5-haiku"), _DS_FAST],
-    "gemini-2.5-flash": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
-    "deepseek-chat": [_c(_OR, "openai/gpt-4o-mini"), _DS_FAST],
-    "llama-3.3-70b-instruct": [_DS_FAST, _c(_OR, "openai/gpt-4o-mini")],
-    # The DeepSeek-direct primaries themselves rescue AWAY from the
-    # DeepSeek account (OpenRouter, then OpenAI direct as the third
-    # account).
-    "deepseek-v4-pro": [_c(_OR, "openai/gpt-4o"), _c(_OA, "gpt-4o-mini")],
-    "deepseek-v4-flash": [
-        _c(_OR, "meta-llama/llama-3.3-70b-instruct"),
-        _c(_OA, "gpt-4o-mini"),
-    ],
-}
+CURATED_FALLBACKS: dict[str, list[dict[str, str]]] = base_policy()["chains"]["curated"]
 
 # ---------------------------------------------------------------------------
-# Tier table — premium / standard / fast.
+# Tier table — premium / standard / fast (data: fallback_policy.json).
 #
 # ``models``        : list of canonical model names that live in this tier.
 # ``fallback_chain``: ordered preference of providers to try when the
@@ -127,153 +88,15 @@ CURATED_FALLBACKS: dict[str, list[dict[str, str]]] = {
 #                     answer with. ``"auto"`` is a sentinel honoured by
 #                     OpenRouter's adapter.
 # ---------------------------------------------------------------------------
-TIERS: dict[str, dict] = {
-    "premium": {
-        "models": [
-            "gpt-4o",
-            "claude-opus-4",
-            "claude-opus-4-5",
-            "gemini-1.5-pro",
-            "gpt-4-turbo",
-        ],
-        "fallback_chain": ["openai", "anthropic", "google", "openrouter"],
-        "model_map": {
-            "gpt-4o": {
-                "anthropic": "claude-opus-4",
-                "google": "gemini-1.5-pro",
-                "openrouter": "auto",
-            },
-            "claude-opus-4": {
-                "openai": "gpt-4o",
-                "google": "gemini-1.5-pro",
-                "openrouter": "auto",
-            },
-            "claude-opus-4-5": {
-                "openai": "gpt-4o",
-                "google": "gemini-1.5-pro",
-                "openrouter": "auto",
-            },
-            "gemini-1.5-pro": {
-                "openai": "gpt-4o",
-                "anthropic": "claude-opus-4",
-                "openrouter": "auto",
-            },
-            "gpt-4-turbo": {
-                "anthropic": "claude-opus-4",
-                "google": "gemini-1.5-pro",
-                "openrouter": "auto",
-            },
-        },
-    },
-    "standard": {
-        "models": [
-            "gpt-4o-mini",
-            "claude-sonnet-4",
-            "claude-sonnet-4-5",
-            "gemini-1.5-flash",
-            "llama-3.1-70b",
-            "llama-3.1-70b-versatile",
-        ],
-        "fallback_chain": [
-            "openai",
-            "anthropic",
-            "google",
-            "groq",
-            "openrouter",
-        ],
-        "model_map": {
-            "gpt-4o-mini": {
-                "anthropic": "claude-sonnet-4",
-                "google": "gemini-1.5-flash",
-                "groq": "llama-3.1-70b-versatile",
-                "openrouter": "auto",
-            },
-            "claude-sonnet-4": {
-                "openai": "gpt-4o-mini",
-                "google": "gemini-1.5-flash",
-                "groq": "llama-3.1-70b-versatile",
-                "openrouter": "auto",
-            },
-            "claude-sonnet-4-5": {
-                "openai": "gpt-4o-mini",
-                "google": "gemini-1.5-flash",
-                "groq": "llama-3.1-70b-versatile",
-                "openrouter": "auto",
-            },
-            "gemini-1.5-flash": {
-                "openai": "gpt-4o-mini",
-                "anthropic": "claude-sonnet-4",
-                "groq": "llama-3.1-70b-versatile",
-                "openrouter": "auto",
-            },
-            # Llama on Groq is the primary; the chain rescues to a
-            # mid-cost vendor when Groq has an incident. The canonical
-            # short name (``llama-3.1-70b``) and the Groq-specific
-            # long name (``-versatile``) both map to the same chain so
-            # callers that route by either name get equivalent rescue.
-            "llama-3.1-70b": {
-                "openai": "gpt-4o-mini",
-                "anthropic": "claude-sonnet-4",
-                "google": "gemini-1.5-flash",
-                "openrouter": "auto",
-            },
-            "llama-3.1-70b-versatile": {
-                "openai": "gpt-4o-mini",
-                "anthropic": "claude-sonnet-4",
-                "google": "gemini-1.5-flash",
-                "openrouter": "auto",
-            },
-        },
-    },
-    "fast": {
-        "models": [
-            "gpt-3.5-turbo",
-            "claude-haiku-4-5",
-            "claude-haiku-3",
-            "gemini-flash",
-            "llama-3.1-8b",
-            "llama-3.1-8b-instant",
-        ],
-        "fallback_chain": ["groq", "openai", "anthropic", "openrouter"],
-        "model_map": {
-            "gpt-3.5-turbo": {
-                "anthropic": "claude-haiku-4-5",
-                "groq": "llama-3.1-8b-instant",
-                "openrouter": "auto",
-            },
-            "claude-haiku-4-5": {
-                "openai": "gpt-3.5-turbo",
-                "groq": "llama-3.1-8b-instant",
-                "openrouter": "auto",
-            },
-            "claude-haiku-3": {
-                "openai": "gpt-3.5-turbo",
-                "groq": "llama-3.1-8b-instant",
-                "openrouter": "auto",
-            },
-            "gemini-flash": {
-                "openai": "gpt-3.5-turbo",
-                "anthropic": "claude-haiku-4-5",
-                "groq": "llama-3.1-8b-instant",
-                "openrouter": "auto",
-            },
-            # Fast-tier Llama: same dual-name convention as the
-            # standard-tier 70b entry — the short canonical name and
-            # the Groq-specific ``-instant`` long name both wire to
-            # the same cross-vendor rescue list.
-            "llama-3.1-8b": {
-                "openai": "gpt-3.5-turbo",
-                "anthropic": "claude-haiku-4-5",
-                "openrouter": "auto",
-            },
-            "llama-3.1-8b-instant": {
-                "openai": "gpt-3.5-turbo",
-                "anthropic": "claude-haiku-4-5",
-                "openrouter": "auto",
-            },
-        },
-    },
-}
+TIERS: dict[str, dict] = base_policy()["chains"]["tiers"]
+
+
+def _tier_of(model: str, tiers: dict) -> str | None:
+    canon = canonical_model(model)
+    for tier_name, tier in tiers.items():
+        if model in tier["models"] or canon in tier["models"]:
+            return tier_name
+    return None
 
 
 def get_tier(model: str) -> str | None:
@@ -285,44 +108,31 @@ def get_tier(model: str) -> str | None:
     provider-prefixed name still get ``None`` — fallback only applies to
     concrete, registered models.
     """
-    canon = canonical_model(model)
-    for tier_name, tier in TIERS.items():
-        if model in tier["models"] or canon in tier["models"]:
-            return tier_name
-    return None
+    return _tier_of(model, TIERS)
 
 
-def get_fallback_chain(
-    model: str, original_provider: str
+def chain_from_tables(
+    model: str,
+    original_provider: str,
+    *,
+    curated: dict[str, list[dict[str, str]]],
+    tiers: dict[str, dict],
 ) -> list[dict[str, str]]:
-    """Return ordered fallback candidates for ``(model, original_provider)``.
+    """The chain walk over the given tables (the rules of ``get_fallback_chain``).
 
-    Each entry is ``{"provider": str, "model": str}``. The original
-    provider is filtered out so the chain is purely *cross-provider*.
-    Providers without an entry in the tier's ``model_map[model]`` are
-    skipped — the registry only lists vendor pairings that have been
-    vetted as equivalent-class, so a missing entry means "don't try
-    that vendor for this model".
-
-    Returns ``[]`` when:
-      * ``model`` is not in any tier, or
-      * ``model`` has no ``model_map`` entries (the tier knows about it
-        but no fallbacks have been wired yet).
+    Curated chains apply ONLY to models the tier table does not own — the
+    OpenRouter ``vendor/model`` chat ids and newer models. Legacy bare
+    names (``gpt-4o``, ``claude-sonnet-4``) keep their generic tier
+    behaviour. A self-hop (same provider + same alias) is dropped so the
+    curated chain stays a pure alternative list.
     """
-    # B2: curated chains apply ONLY to models the legacy tier table does
-    # not already own — the OpenRouter ``vendor/model`` chat ids and newer
-    # models (deepseek-r1, gemini-2.5-*, claude-3.5-haiku, o-mini, …).
-    # Legacy bare names (``gpt-4o``, ``claude-sonnet-4``) keep their
-    # generic tier behavior so the existing tier contract is unchanged.
-    # A self-hop (same provider + same alias) is dropped so the curated
-    # chain stays a pure alternative list.
-    if get_tier(model) is None:
+    if _tier_of(model, tiers) is None:
         alias = _alias(model)
-        curated = CURATED_FALLBACKS.get(alias)
-        if curated:
+        curated_hops = curated.get(alias)
+        if curated_hops:
             out = [
                 dict(c)
-                for c in curated
+                for c in curated_hops
                 if not (
                     c["provider"] == original_provider
                     and _alias(c["model"]) == alias
@@ -331,11 +141,11 @@ def get_fallback_chain(
             if out:
                 return out
 
-    tier_name = get_tier(model)
+    tier_name = _tier_of(model, tiers)
     if tier_name is None:
         return []
 
-    tier = TIERS[tier_name]
+    tier = tiers[tier_name]
     # Match the model_map by exact id first, then date-stripped alias,
     # so dated provider ids share the alias's wired fallbacks.
     model_map: dict[str, str] = (
@@ -356,3 +166,24 @@ def get_fallback_chain(
             continue
         candidates.append({"provider": provider, "model": fallback_model})
     return candidates
+
+
+def get_fallback_chain(
+    model: str, original_provider: str
+) -> list[dict[str, str]]:
+    """Return ordered fallback candidates for ``(model, original_provider)``
+    from the SHIPPED tables.
+
+    Each entry is ``{"provider": str, "model": str}``. The original
+    provider is filtered out so the chain is purely *cross-provider*.
+    Providers without an entry in the tier's ``model_map[model]`` are
+    skipped — the registry only lists vendor pairings that have been
+    vetted as equivalent-class, so a missing entry means "don't try
+    that vendor for this model".
+
+    Returns ``[]`` when:
+      * ``model`` is not in any tier and has no curated chain, or
+      * ``model`` has no ``model_map`` entries (the tier knows about it
+        but no fallbacks have been wired yet).
+    """
+    return chain_from_tables(model, original_provider, curated=CURATED_FALLBACKS, tiers=TIERS)

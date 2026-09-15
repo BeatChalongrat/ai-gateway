@@ -2687,6 +2687,12 @@ async function consumeStream(
                       // when it is max_tokens / refusal / content_filter.
                       ...(isStopReason(data.stop_reason) ? { stop_reason: data.stop_reason } : {}),
                       ...(typeof data.run_id === "string" && data.run_id ? { run_id: data.run_id } : {}),
+                      // FIX120 — the requested model of a rescued turn, as the
+                      // row will carry it; the bubble derives the notice from
+                      // it after a reload exactly as from the live frame.
+                      ...(typeof data.fallback_from === "string" && data.fallback_from
+                        ? { fallback_from: data.fallback_from }
+                        : {}),
                       response_time_ms: Date.now() - streamStartedAt,
                     }
                   : m,

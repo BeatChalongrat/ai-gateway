@@ -103,6 +103,11 @@ type Message struct {
 	// TerminalCause. Both nil for user rows and pre-044 rows.
 	RunID      *string
 	StopReason *string
+	// FIX120 (migration 046) — FallbackFrom is the model the turn ASKED
+	// for when ModelID names a different one: the gateway's fallback chain
+	// answered, and the row says so after a reload as the live frame did.
+	// nil when the requested model answered, on user rows and pre-046 rows.
+	FallbackFrom *string
 	// FIX119 (migration 045) — copied from the conversation at insert: the
 	// row belongs to a test account and is excluded from analytics.
 	IsTest bool

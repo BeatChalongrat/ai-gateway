@@ -194,6 +194,9 @@ type ImportMessageInput struct {
 	// stopped (closed set). Assistant rows only.
 	RunID      string
 	StopReason string
+	// FIX120 — the requested model when a fallback model answered
+	// (assistant rows only; stored only when it differs from ModelID).
+	FallbackFrom string
 }
 
 // ImportMessages appends historical messages to an owned conversation in
@@ -310,6 +313,9 @@ func (s *ImportService) ImportMessages(
 			}
 			if rid := items[i].RunID; rid != "" {
 				row.RunID = &rid
+			}
+			if from := strings.TrimSpace(items[i].FallbackFrom); from != "" && (row.ModelID == nil || from != *row.ModelID) {
+				row.FallbackFrom = &from
 			}
 		}
 		msgID, inserted, err := msgs.CreateImported(ctx, row, strings.TrimSpace(items[i].ClientID), items[i].CreatedAt)

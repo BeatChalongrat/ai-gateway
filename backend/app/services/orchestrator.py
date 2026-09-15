@@ -1258,7 +1258,12 @@ class GatewayOrchestrator:
         except Exception as exc:  # noqa: BLE001
             from app.core.exceptions import GatewayError as _GwErr
 
-            if isinstance(exc, _GwErr) and is_fallback_eligible(exc):
+            # FIX120 — the decision is the policy table's, under this
+            # tenant's effective policy (opt-in chains, overrides).
+            from app.services.gateway import fallback_policy as _fb_policy_mod
+
+            _fb_policy = _fb_policy_mod.effective_policy(ctx.tenant_id)
+            if isinstance(exc, _GwErr) and is_fallback_eligible(exc, _fb_policy):
                 # Tag the primary (provider, model) as unhealthy so the
                 # next streaming request bypasses it via the Redis
                 # pre-check — FIX49 Part C: scoped to the pair, so one
@@ -1267,6 +1272,7 @@ class GatewayOrchestrator:
                     original_provider,
                     original_model,
                     error_code=getattr(exc, "code", None),
+                    policy=_fb_policy,
                 )
                 log.warning(
                     "primary_dispatch_failed_attempting_fallback",

@@ -10,6 +10,7 @@ runs a single aggregate over ``request_logs`` restricted to the rule's
 Metrics (aligned 1:1 with ``AlertType``):
     - ``dlp_block_spike``    — count of ``policy_action='block'`` rows
     - ``provider_failure``   — count of ``status='error'`` rows
+    - ``fallback_spike``     — count of ``fallback_used=true`` rows (FIX120)
     - ``budget_threshold``   — sum of ``estimated_cost_usd`` rows
     - ``quota_exhausted``    — count of any rows
 
@@ -50,6 +51,8 @@ logger = structlog.get_logger(__name__)
 _METRIC_TO_TYPE: dict[str, AlertType] = {
     "dlp_block_spike": AlertType.DLP_BLOCK_SPIKE,
     "provider_failure": AlertType.PROVIDER_FAILURE,
+    # FIX120 — count of rows where a fallback model answered (fallback_used)
+    "fallback_spike": AlertType.FALLBACK_SPIKE,
     "budget_threshold": AlertType.BUDGET_THRESHOLD,
     "quota_exhausted": AlertType.QUOTA_EXHAUSTED,
 }
@@ -238,6 +241,10 @@ class AlertEvaluator:
         elif rule.metric == "provider_failure":
             stmt = select(func.count()).select_from(RequestLogORM).where(
                 *filters, RequestLogORM.status == "error"
+            )
+        elif rule.metric == "fallback_spike":
+            stmt = select(func.count()).select_from(RequestLogORM).where(
+                *filters, RequestLogORM.fallback_used.is_(True)
             )
         elif rule.metric == "budget_threshold":
             stmt = select(func.coalesce(func.sum(RequestLogORM.estimated_cost_usd), 0.0)).where(

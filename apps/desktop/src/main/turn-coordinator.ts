@@ -117,6 +117,12 @@ interface RunningTurn {
    *  "auto" turn names the router's pick). Persisted as the assistant
    *  row's model_id and repeated on message_complete. */
   servedModel?: string;
+  /** FIX120 — the model the turn ASKED for when the gateway's fallback chain
+   *  answered with a different one (servedModel). Persisted on the imported
+   *  row as fallback_from and repeated on message_complete, so the page's
+   *  "answered by X" notice survives a reload. Before this the desktop kept
+   *  attributing a rescued turn to the requested model. */
+  fallbackFrom?: string;
   /** FIX118 — what the run's terminal error frame said (cause + code), so
    *  the imported assistant row records the same ending the page saw. */
   errored?: { cause?: TerminalCause; errorCode?: string };
@@ -1356,6 +1362,13 @@ export class TurnCoordinator {
       onServedModel: (m) => {
         turn.servedModel = m;
       },
+      onFallback: (from, actual) => {
+        // FIX120 — the answering model is the row's model; the requested
+        // one is kept beside it. A later model_resolved may still refine
+        // servedModel (a router id → the concrete model).
+        turn.fallbackFrom = from;
+        turn.servedModel = actual;
+      },
       onEnding: (e) => {
         turn.errored = e;
       },
@@ -1403,7 +1416,7 @@ export class TurnCoordinator {
     // FIX119 — why the model stopped rides message_complete, so the page can
     // say "the answer was cut off" instead of presenting a max_tokens cut as
     // finished.
-    const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}), ...(turn.stopReason ? { stop_reason: turn.stopReason } : {}) };
+    const completeData = { message_id: turn.messageId, ...ids, ...(turn.servedModel ? { model_id: turn.servedModel } : {}), ...(turn.stopReason ? { stop_reason: turn.stopReason } : {}), ...(turn.fallbackFrom ? { fallback_from: turn.fallbackFrom } : {}) };
 
     // A turn that has been SUPERSEDED (the user sent again, which aborts the
     // old one) must not write a terminal: the page has already moved on to
@@ -1534,6 +1547,8 @@ export class TurnCoordinator {
     onText: (t: string) => void;
     /** FIX35 Part B — the gateway named the model that is answering. */
     onServedModel?: (model: string) => void;
+    /** FIX120 — the gateway's fallback chain answered: (requested, actual). */
+    onFallback?: (requestedModel: string, actualModel: string) => void;
     /** FIX118 — called once when the run ends on an error frame, with the
      *  cause and code the frame carried. */
     onEnding?: (e: { cause?: TerminalCause; errorCode: string }) => void;
@@ -1615,6 +1630,8 @@ export class TurnCoordinator {
             if (!run.parentToolCallId) this.emit(eventConv, "analysis_status", { status: ev.status });
             break;
           case "fallback_info":
+            // FIX120 — attribute the turn to the model that answered.
+            if (ev.requested_model && ev.actual_model && ev.requested_model !== ev.actual_model) run.onFallback?.(ev.requested_model, ev.actual_model);
             if (!run.parentToolCallId) this.emit(eventConv, "fallback_info", { requested_model: ev.requested_model, actual_model: ev.actual_model, reason: ev.reason });
             break;
           case "dlp_notice":
@@ -2950,7 +2967,9 @@ export class TurnCoordinator {
         : { status: "completed" as const, ...(turn.stopReason ? { stop_reason: turn.stopReason } : {}) }
       : {};
     const runFields = runId ? { run_id: runId } : {};
-    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields });
+    // FIX120 — the requested model of a rescued turn rides the import.
+    const fallbackFields = turn.fallbackFrom ? { fallback_from: turn.fallbackFrom } : {};
+    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields, ...fallbackFields });
     void chain;
     const result = await this.chatEdge.importMessages(conversationId, items, runId);
     if (result) this.log.info(`TURN PERSISTED conv=${conversationId} run=${runId ?? "-"}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);

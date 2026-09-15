@@ -117,8 +117,8 @@ func (r *MessageRepo) CreateImported(
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
 			 status, model_id, client_id, created_at, is_active,
-			 terminal_cause, error_code, run_id, stop_reason, is_test)
-		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11, $12, $13,
+			 terminal_cause, error_code, run_id, stop_reason, fallback_from, is_test)
+		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11, $12, $13, $14,
 		        COALESCE((SELECT c.is_test FROM chat.conversations c WHERE c.id = $1), false))
 		ON CONFLICT (conversation_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
@@ -127,7 +127,7 @@ func (r *MessageRepo) CreateImported(
 	var id uuid.UUID
 	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
-		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode, m.RunID, m.StopReason,
+		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode, m.RunID, m.StopReason, m.FallbackFrom,
 	).Scan(&id)
 	if err == nil {
 		return id, true, nil
@@ -226,7 +226,7 @@ func (r *MessageRepo) ListByConversation(
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
 		       reasoning_content, search_sources, client_id,
-		       terminal_cause, error_code, run_id, stop_reason` + extraCols + `
+		       terminal_cause, error_code, run_id, stop_reason, fallback_from` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -253,7 +253,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
-			&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason,
+			&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason, &m.FallbackFrom,
 		}
 		if r.displayLifecycle {
 			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
@@ -728,6 +728,20 @@ func (r *MessageRepo) SetModelID(ctx context.Context, msgID uuid.UUID, modelID s
 	const q = `UPDATE chat.messages_masked SET model_id = $2 WHERE id = $1`
 	if _, err := r.db.Exec(ctx, q, msgID, modelID); err != nil {
 		return fmt.Errorf("set message model_id: %w", err)
+	}
+	return nil
+}
+
+// SetFallbackFrom records the model a rescued turn asked for (FIX120,
+// migration 046). "" clears it.
+func (r *MessageRepo) SetFallbackFrom(ctx context.Context, msgID uuid.UUID, from string) error {
+	var v *string
+	if from != "" {
+		v = &from
+	}
+	const q = `UPDATE chat.messages_masked SET fallback_from = $2 WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, v); err != nil {
+		return fmt.Errorf("set message fallback_from: %w", err)
 	}
 	return nil
 }

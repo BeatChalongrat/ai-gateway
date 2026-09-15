@@ -1,0 +1,290 @@
+{
+  "_comment": "FIX120 — what the gateway does when the model it was asked for cannot answer. One file, read as data by the backend (app/services/gateway/fallback_policy.py keeps a byte-identical packaged copy, pinned by a test; change it HERE first) and pinned by tests in chat-edge (Go), the web page and the desktop host. Every row is a signal → one action from `actions`. Nothing in this file is decided by code: the eligibility sets, the failure scopes, the chains, the ceilings, the breaker, the cost cap and the kill switch all read from here. The shipped values reproduce the behaviour of f042040 exactly (tests pin that); `proposals` is NOT read by the loader.",
+  "version": 1,
+  "actions": [
+    "retry_same",
+    "cooldown_then_next",
+    "next_in_chain",
+    "context_window_chain",
+    "content_policy_chain",
+    "give_up"
+  ],
+  "action_meaning": {
+    "retry_same": "send the same request to the same model again (the adapter stage: exponential backoff with equal jitter, a provider Retry-After header is honoured, sleep capped at 10 s, at most settings.provider_max_retries retries)",
+    "cooldown_then_next": "mark the (provider, model) pair unhealthy for `health_marker.cooldown_s` (and the whole provider when the code is in `provider_wide_codes`), then walk the model's chain; the marker makes the next request skip the pair before its first byte",
+    "next_in_chain": "walk the model's chain without marking anything (no default row uses it; reachable through an override)",
+    "context_window_chain": "the request was rejected for being too long: walk the model's `chains.context_window` list (models with a larger window) — only when the tenant opted in (`opt_in.context_window_fallback`), otherwise give_up",
+    "content_policy_chain": "the provider's content policy rejected the request before any answer: walk `chains.content_policy` — only when the tenant opted in (`opt_in.content_policy_fallback`), otherwise give_up. A REFUSAL (stop_reason) is an answer, never this",
+    "give_up": "surface this failure as it is; no other model is tried"
+  },
+  "decision_table": {
+    "_comment": "Four signal kinds. `http_status` is the adapter stage (before a gateway error code exists). `error_code` is the gateway's catalogue code (backend/app/core/error_catalog.py) once the adapter gave up. `terminal_cause` and `stop_reason` are the FIX118/FIX119 closed sets (docs/contracts/terminal_cause.json): a terminal cause other than `error` is observed by chat-edge or the desktop after the backend is done, and a stop reason describes an answer that WAS delivered — so those rows are give_up by nature, and the two clients pin that they never re-run a turn on their own.",
+    "http_status": {
+      "429": "retry_same",
+      "500": "retry_same",
+      "502": "retry_same",
+      "503": "retry_same",
+      "504": "retry_same"
+    },
+    "error_code": {
+      "provider_timeout": "cooldown_then_next",
+      "provider_5xx": "cooldown_then_next",
+      "provider_error": "cooldown_then_next",
+      "provider_rate_limited": "cooldown_then_next",
+      "provider_at_capacity": "cooldown_then_next",
+      "rate_limit_exceeded": "cooldown_then_next",
+      "provider_model_not_found": "cooldown_then_next",
+      "provider_unavailable": "cooldown_then_next",
+      "provider_no_credit": "cooldown_then_next",
+      "provider_auth_error": "cooldown_then_next",
+      "context_length_exceeded": "context_window_chain",
+      "content_policy_blocked": "content_policy_chain",
+      "all_models_failed": "give_up",
+      "internal_error": "give_up",
+      "stream_interrupted": "give_up",
+      "empty_completion": "give_up",
+      "output_limit_reached": "give_up",
+      "health_marker_skip": "give_up",
+      "validation_error": "give_up",
+      "model_no_tool_support": "give_up",
+      "model_no_vision_support": "give_up",
+      "no_capable_model": "give_up",
+      "upstream_bad_response": "give_up",
+      "quota_exceeded": "give_up",
+      "insufficient_credits": "give_up",
+      "credit_ceiling": "give_up",
+      "provider_key_missing": "give_up",
+      "provider_not_implemented": "give_up",
+      "authentication_error": "give_up",
+      "authorization_error": "give_up",
+      "policy_violation": "give_up",
+      "dlp_violation": "give_up",
+      "guardrail_blocked": "give_up",
+      "moderation_flagged": "give_up",
+      "provider_keys_stale": "give_up",
+      "model_not_served": "give_up",
+      "raw_egress_blocked": "give_up",
+      "search_not_enabled": "give_up",
+      "search_unavailable": "give_up",
+      "search_query_blocked": "give_up",
+      "not_found": "give_up",
+      "conflict": "give_up",
+      "gateway_error": "give_up",
+      "unclassified_error": "give_up"
+    },
+    "error_code_default": "give_up",
+    "terminal_cause": {
+      "completed": "give_up",
+      "stopped_by_user": "give_up",
+      "error": "by_error_code",
+      "timeout": "give_up",
+      "disconnected": "give_up",
+      "eof_without_terminal": "give_up",
+      "interrupted": "give_up"
+    },
+    "stop_reason": {
+      "end_turn": "give_up",
+      "max_tokens": "give_up",
+      "tool_use": "give_up",
+      "stop_sequence": "give_up",
+      "content_filter": "give_up",
+      "refusal": "give_up",
+      "context_window_exceeded": "give_up",
+      "unknown": "give_up"
+    }
+  },
+  "hard_forbidden": {
+    "_comment": "Rows no override — deployment or tenant — may change. The loader refuses an override that names any of them.",
+    "terminal_cause": ["stopped_by_user", "completed", "disconnected", "eof_without_terminal", "interrupted", "timeout"],
+    "stop_reason": ["refusal", "content_filter", "end_turn", "max_tokens", "tool_use", "stop_sequence", "context_window_exceeded", "unknown"],
+    "error_code": [
+      "authentication_error",
+      "authorization_error",
+      "validation_error",
+      "quota_exceeded",
+      "insufficient_credits",
+      "credit_ceiling",
+      "policy_violation",
+      "dlp_violation",
+      "guardrail_blocked",
+      "moderation_flagged",
+      "raw_egress_blocked",
+      "search_query_blocked",
+      "model_no_tool_support",
+      "model_no_vision_support",
+      "no_capable_model"
+    ],
+    "why": {
+      "stopped_by_user": "the person ended the turn; anything after that is unwanted",
+      "refusal": "a refusal is the answer, not a failure; shopping for a model that will comply walks around the safety policy. content_policy_chain exists for a provider that REJECTED the request outright, and only with a tenant's explicit opt-in",
+      "authentication_error / authorization_error / validation_error": "the request is wrong the same way for every model",
+      "quota_exceeded / insufficient_credits / credit_ceiling": "the tenant's own allowance is spent; another model would spend more of it",
+      "policy_violation / dlp_violation / guardrail_blocked / moderation_flagged / raw_egress_blocked / search_query_blocked": "the gateway's own policy blocked the request; no provider changes that",
+      "provider_auth_error / provider_no_credit stay eligible": "these are the PROVIDER ACCOUNT's credential or balance, not the caller's — a different account can answer, and the failure scope keeps the walk off the dead account (FIX51, FIX57)"
+    }
+  },
+  "boundary": {
+    "_comment": "Data boundary. A fallback candidate whose provider is outside the request's allowed set is never tried, and no setting can permit it — the only way to reach another provider is to widen the allowed set itself. Sources today: projects.allowed_providers (already applied to the PRIMARY route via request metadata; before FIX120 the chain walk ignored it) and a tenant override's `allowed_providers` (this file's tenant policy). A request with no allowed set has no boundary — that is today's behaviour, unchanged. There is NO tenant-level boundary column in the schema today: tenants.region and region_service.py define per-region blocked providers but nothing enforces them anywhere — reported, not invented.",
+    "rule": "deny_outside_allowed_set",
+    "overridable": false,
+    "sources": ["request.metadata.allowed_providers (projects.allowed_providers)", "tenant override allowed_providers"]
+  },
+  "failure_scope": {
+    "_comment": "How far a failure reaches, which decides how deep the chain walks (FIX51): `request` stops the walk (every provider refuses it the same way), `account` rules out the failed provider's other models for this request, `model` keeps walking. Codes first, then the mapped HTTP status; anything else is `model`.",
+    "request": [
+      "context_length_exceeded",
+      "validation_error",
+      "upstream_bad_response",
+      "content_policy_blocked",
+      "moderation_flagged",
+      "guardrail_blocked",
+      "dlp_violation",
+      "policy_violation"
+    ],
+    "account": [
+      "provider_auth_error",
+      "provider_no_credit",
+      "provider_unavailable",
+      "provider_timeout",
+      "provider_at_capacity",
+      "provider_rate_limited",
+      "rate_limit_exceeded",
+      "provider_5xx"
+    ],
+    "model": ["provider_model_not_found"],
+    "by_status": { "401": "account", "402": "account", "403": "account", "404": "model", "5xx": "account" },
+    "default": "model"
+  },
+  "health_marker": {
+    "_comment": "The cooldown behind cooldown_then_next: one eligible failure marks the (provider, model) pair for cooldown_s; a success clears it. Codes in provider_wide_codes also mark the whole provider (the box is unreachable, not one model).",
+    "cooldown_s": 60,
+    "provider_wide_codes": ["provider_unavailable", "provider_timeout", "provider_no_credit"]
+  },
+  "breaker": {
+    "_comment": "Per-model circuit breaker (LiteLLM allowed_fails + cooldown). OFF by default: with enabled=false the health marker above behaves exactly as before (every eligible failure marks the pair at once). With enabled=true a pair is marked only after allowed_fails eligible failures inside window_s, for cooldown_s.",
+    "enabled": false,
+    "allowed_fails": 3,
+    "window_s": 60,
+    "cooldown_s": 60
+  },
+  "limits": {
+    "_comment": "Two ceilings per turn: attempts and wall-clock. The time ceiling matters more to the person waiting. non_stream values are the ones that shipped in FIX51; the streaming path had an attempt ceiling only, so its total_budget_s ships as null (= unchanged) and the proposed value is in `proposals`.",
+    "non_stream": {
+      "max_candidates": 2,
+      "attempt_timeout_s": 10.0,
+      "total_budget_s": 25.0,
+      "min_attempt_runway_s": 2.0
+    },
+    "stream": {
+      "max_candidates": 2,
+      "total_budget_s": null,
+      "min_attempt_runway_s": 2.0
+    }
+  },
+  "cost_cap": {
+    "_comment": "Where a spend ceiling plugs in. OFF by default. max_cost_ratio_vs_requested: a candidate whose input-token price exceeds the requested model's price × ratio is skipped (1.0 = never a dearer model). tenant_daily_usd: a tenant whose estimated spend over the last 24 h (request_logs.estimated_cost_usd) is at or above this figure gets no fallback attempts at all. Either may be set per tenant.",
+    "enabled": false,
+    "max_cost_ratio_vs_requested": null,
+    "tenant_daily_usd": null
+  },
+  "opt_in": {
+    "_comment": "Chains that exist only when a tenant asks for them. Both off = both actions resolve to give_up.",
+    "context_window_fallback": false,
+    "content_policy_fallback": false
+  },
+  "kill_switch": {
+    "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy.",
+    "setting_key": "fallback_enabled",
+    "default": true
+  },
+  "overrides": {
+    "_comment": "Policy per deployment and per tenant, stored as JSON in system_settings (`fallback_policy` for the deployment, `fallback_policy:tenant:<tenant_id>` for a tenant). A tenant override wins over the deployment override, which wins over this file. Only the keys in `overridable` may appear; `hard_forbidden` rows and `boundary.rule` cannot be changed by any override.",
+    "deployment_setting_key": "fallback_policy",
+    "tenant_setting_key_prefix": "fallback_policy:tenant:",
+    "overridable": [
+      "chains.curated",
+      "chains.context_window",
+      "chains.content_policy",
+      "limits",
+      "breaker",
+      "cost_cap",
+      "opt_in",
+      "allowed_providers",
+      "decision_table.error_code"
+    ]
+  },
+  "chains": {
+    "_comment": "The chains that ship. `curated` is keyed by the bare model alias (vendor prefix and date suffix stripped) and applies to models the legacy `tiers` table does not own; `tiers` is the legacy per-tier table (kept verbatim from model_tiers.py, its lookup rules unchanged). Every hop is {provider, model}. A model that appears in neither has NO chain: the admin route GET /admin/fallback/chains and `python -m app.services.gateway.fallback_policy --coverage` list which.",
+    "curated": {
+      "claude-sonnet-4": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "claude-sonnet-4.5": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "gpt-4o": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "gemini-2.5-pro": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "deepseek-r1": [{"provider": "openrouter", "model": "openai/gpt-4o"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "claude-opus-4.1": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "claude-opus-4": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "o3-mini": [{"provider": "openrouter", "model": "deepseek/deepseek-r1"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "o4-mini": [{"provider": "openrouter", "model": "deepseek/deepseek-r1"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
+      "claude-3.5-haiku": [{"provider": "openrouter", "model": "openai/gpt-4o-mini"}, {"provider": "deepseek", "model": "deepseek-v4-flash"}],
+      "gpt-4o-mini": [{"provider": "openrouter", "model": "anthropic/claude-3.5-haiku"}, {"provider": "deepseek", "model": "deepseek-v4-flash"}],
+      "gemini-2.5-flash": [{"provider": "openrouter", "model": "openai/gpt-4o-mini"}, {"provider": "deepseek", "model": "deepseek-v4-flash"}],
+      "deepseek-chat": [{"provider": "openrouter", "model": "openai/gpt-4o-mini"}, {"provider": "deepseek", "model": "deepseek-v4-flash"}],
+      "llama-3.3-70b-instruct": [{"provider": "deepseek", "model": "deepseek-v4-flash"}, {"provider": "openrouter", "model": "openai/gpt-4o-mini"}],
+      "deepseek-v4-pro": [{"provider": "openrouter", "model": "openai/gpt-4o"}, {"provider": "openai", "model": "gpt-4o-mini"}],
+      "deepseek-v4-flash": [{"provider": "openrouter", "model": "meta-llama/llama-3.3-70b-instruct"}, {"provider": "openai", "model": "gpt-4o-mini"}]
+    },
+    "context_window": {},
+    "content_policy": {},
+    "tiers": {
+      "premium": {
+        "models": ["gpt-4o", "claude-opus-4", "claude-opus-4-5", "gemini-1.5-pro", "gpt-4-turbo"],
+        "fallback_chain": ["openai", "anthropic", "google", "openrouter"],
+        "model_map": {
+          "gpt-4o": {"anthropic": "claude-opus-4", "google": "gemini-1.5-pro", "openrouter": "auto"},
+          "claude-opus-4": {"openai": "gpt-4o", "google": "gemini-1.5-pro", "openrouter": "auto"},
+          "claude-opus-4-5": {"openai": "gpt-4o", "google": "gemini-1.5-pro", "openrouter": "auto"},
+          "gemini-1.5-pro": {"openai": "gpt-4o", "anthropic": "claude-opus-4", "openrouter": "auto"},
+          "gpt-4-turbo": {"anthropic": "claude-opus-4", "google": "gemini-1.5-pro", "openrouter": "auto"}
+        }
+      },
+      "standard": {
+        "models": ["gpt-4o-mini", "claude-sonnet-4", "claude-sonnet-4-5", "gemini-1.5-flash", "llama-3.1-70b", "llama-3.1-70b-versatile"],
+        "fallback_chain": ["openai", "anthropic", "google", "groq", "openrouter"],
+        "model_map": {
+          "gpt-4o-mini": {"anthropic": "claude-sonnet-4", "google": "gemini-1.5-flash", "groq": "llama-3.1-70b-versatile", "openrouter": "auto"},
+          "claude-sonnet-4": {"openai": "gpt-4o-mini", "google": "gemini-1.5-flash", "groq": "llama-3.1-70b-versatile", "openrouter": "auto"},
+          "claude-sonnet-4-5": {"openai": "gpt-4o-mini", "google": "gemini-1.5-flash", "groq": "llama-3.1-70b-versatile", "openrouter": "auto"},
+          "gemini-1.5-flash": {"openai": "gpt-4o-mini", "anthropic": "claude-sonnet-4", "groq": "llama-3.1-70b-versatile", "openrouter": "auto"},
+          "llama-3.1-70b": {"openai": "gpt-4o-mini", "anthropic": "claude-sonnet-4", "google": "gemini-1.5-flash", "openrouter": "auto"},
+          "llama-3.1-70b-versatile": {"openai": "gpt-4o-mini", "anthropic": "claude-sonnet-4", "google": "gemini-1.5-flash", "openrouter": "auto"}
+        }
+      },
+      "fast": {
+        "models": ["gpt-3.5-turbo", "claude-haiku-4-5", "claude-haiku-3", "gemini-flash", "llama-3.1-8b", "llama-3.1-8b-instant"],
+        "fallback_chain": ["groq", "openai", "anthropic", "openrouter"],
+        "model_map": {
+          "gpt-3.5-turbo": {"anthropic": "claude-haiku-4-5", "groq": "llama-3.1-8b-instant", "openrouter": "auto"},
+          "claude-haiku-4-5": {"openai": "gpt-3.5-turbo", "groq": "llama-3.1-8b-instant", "openrouter": "auto"},
+          "claude-haiku-3": {"openai": "gpt-3.5-turbo", "groq": "llama-3.1-8b-instant", "openrouter": "auto"},
+          "gemini-flash": {"openai": "gpt-3.5-turbo", "anthropic": "claude-haiku-4-5", "groq": "llama-3.1-8b-instant", "openrouter": "auto"},
+          "llama-3.1-8b": {"openai": "gpt-3.5-turbo", "anthropic": "claude-haiku-4-5", "openrouter": "auto"},
+          "llama-3.1-8b-instant": {"openai": "gpt-3.5-turbo", "anthropic": "claude-haiku-4-5", "openrouter": "auto"}
+        }
+      }
+    }
+  },
+  "proposals": {
+    "_comment": "DRAFT — NOT READ BY THE LOADER (a test proves it). Chains the owner may enable by putting them under `chains.curated` (or in a deployment / tenant override through PUT /admin/fallback/overrides/...). Chosen from what exists in the catalogue with a valid key today (deepseek 1, openai 1, openrouter 1, sranai 2) and from what can be measured (a model that still answers), NOT from answer quality — nothing here was measured for quality. The self-hosted box (sranai) is the only in-house destination; every other hop sends the prompt to a third party, which a tenant whose data must stay in-house must not get — that tenant needs an allowed_providers boundary before any of these is switched on.",
+    "chains": {
+      "qwen3.8-27b-fp8": {
+        "hops": [{"provider": "sranai", "model": "qwen3.6-35b-a3b"}],
+        "why": "stays on the same in-house box, so the boundary question does not arise; the only other sranai model with a comparable window. It has no tool or vision support, so a tool-bearing turn (every desktop turn, most web turns) is skipped by the capability gate and gets NO rescue — an honest limit, not a bug. A cross-provider hop (deepseek-v4-pro has tools and a valid key) would rescue those turns but sends the prompt outside; owner's call."
+      },
+      "gpt-5.6-luna": {"hops": [{"provider": "openai", "model": "gpt-5.6-sol"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}], "why": "same account first (a model-scoped failure), then the second valid account; both support tools"},
+      "gpt-5.6-sol": {"hops": [{"provider": "openai", "model": "gpt-5.6-luna"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}], "why": "as above"},
+      "gpt-5.6-terra": {"hops": [{"provider": "openai", "model": "gpt-5.6-sol"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}], "why": "as above; sol is the cheaper sibling (never a dearer hop)"},
+      "deepseek-v4-pro (current chain)": {"hops": "keep", "why": "already shipped; crosses to openrouter then openai, both with a valid key"},
+      "stream.total_budget_s": {"value": 25.0, "why": "the same wall-clock ceiling the non-streaming path has had since FIX51; today a streaming turn can spend the primary's full timeout plus two more before it fails"}
+    }
+  }
+}

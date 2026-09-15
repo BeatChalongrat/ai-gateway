@@ -95,6 +95,9 @@ type messageResponse struct {
 	// the person quotes) and why the model stopped.
 	RunID       *string        `json:"run_id,omitempty"`
 	StopReason  *string        `json:"stop_reason,omitempty"`
+	// FIX120 — the requested model when a fallback model answered
+	// (model_id names the one that did). Omitted otherwise.
+	FallbackFrom *string `json:"fallback_from,omitempty"`
 	Files       []fileResponse `json:"files,omitempty"`
 	BranchIndex int            `json:"branch_index"`
 	BranchCount int            `json:"branch_count"`
@@ -182,6 +185,9 @@ func messageToWire(m *model.Message) messageResponse {
 	}
 	if m.StopReason != nil && *m.StopReason != "" {
 		r.StopReason = m.StopReason
+	}
+	if m.FallbackFrom != nil && *m.FallbackFrom != "" {
+		r.FallbackFrom = m.FallbackFrom
 	}
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent
@@ -448,6 +454,10 @@ type streamDrainResult struct {
 	// servedModel (FIX35 Part B) — the model that actually answered, as
 	// the gateway named it; "" when the stream never said.
 	servedModel string
+	// fallbackFrom (FIX120) — the model the turn asked for when the gateway's
+	// fallback_info frame named a different answering model; persisted on
+	// the row, repeated on message_complete as ``fallback_from``.
+	fallbackFrom string
 	// FIX41 — what to put in the TERMINAL error frame. The drain no
 	// longer writes its own error frame: a failed run has to END on
 	// ``error``, and it cannot if the drain spends that event mid-stream
@@ -549,6 +559,14 @@ func (res streamDrainResult) terminalErrorPayload() map[string]any {
 func completeWithModel(completeData map[string]any, servedModel string) {
 	if servedModel != "" {
 		completeData["model_id"] = servedModel
+	}
+}
+
+// completeWithFallback (FIX120) — the requested model when a fallback
+// answered, beside model_id on the terminal events.
+func completeWithFallback(completeData map[string]any, fallbackFrom string) {
+	if fallbackFrom != "" {
+		completeData["fallback_from"] = fallbackFrom
 	}
 }
 
@@ -772,6 +790,15 @@ Loop:
 			// B2: a fallback notice — which model actually answered.
 			if ev.FallbackInfo != nil {
 				writeSSEEvent(w, flusher, "fallback_info", ev.FallbackInfo)
+				// FIX120 — keep the requested model for the row so a reload
+				// shows the same notice; the answering model reaches
+				// servedModel through the chunks' own ``model``.
+				if from, actual := service.FallbackFromInfo(ev.FallbackInfo); from != "" {
+					res.fallbackFrom = from
+					if res.servedModel == "" {
+						res.servedModel = actual
+					}
+				}
 			}
 			// FIX50 P1-C: the question was partially masked before the
 			// model read it — counts only, never values.
@@ -953,6 +980,9 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	if res.servedModel != "" {
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
+	if res.fallbackFrom != "" { // FIX120
+		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
+	}
 	h.finishStream(rw, flusher, r.Context(), in.TenantID, stream, res)
 }
 
@@ -1015,6 +1045,7 @@ func (h *MessageHandler) finishStream(
 			"cause":      service.TerminalCauseStoppedByUser,
 		}
 		completeWithModel(data, res.servedModel)
+		completeWithFallback(data, res.fallbackFrom)
 		if tokens != nil {
 			data["token_usage"] = tokens
 		}
@@ -1024,6 +1055,7 @@ func (h *MessageHandler) finishStream(
 	default:
 		data := map[string]any{"message_id": stream.AssistantID.String()}
 		completeWithModel(data, res.servedModel)
+		completeWithFallback(data, res.fallbackFrom)
 		if tokens != nil {
 			data["token_usage"] = tokens
 		}
@@ -1338,6 +1370,9 @@ func (h *MessageHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) 
 	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	if res.servedModel != "" {
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
+	if res.fallbackFrom != "" { // FIX120
+		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
 	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
@@ -1745,6 +1780,9 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
 	}
+	if res.fallbackFrom != "" { // FIX120
+		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
+	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
 
@@ -1830,6 +1868,9 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	stream.FinishWith(res.content, res.reasoning, persistFinishReason, res.usage, res.terminalInfo())
 	if res.servedModel != "" { // FIX35 Part B
 		_ = h.messages.SetServedModel(context.Background(), stream.AssistantID, res.servedModel)
+	}
+	if res.fallbackFrom != "" { // FIX120
+		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
 	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }

@@ -498,6 +498,12 @@ export interface Message {
    *  STOP_REASONS). `max_tokens` = the answer is cut off. Absent on user
    *  rows, failed runs and rows written before migration 044. */
   stop_reason?: string;
+  /** FIX120 — the model the turn ASKED for when a different one answered
+   *  (``model_id`` names the one that did): the gateway's fallback chain
+   *  rescued the turn. On the row (migration 046) and on
+   *  ``message_complete``, so the "answered by X" notice survives a
+   *  reload. Absent when the requested model answered. */
+  fallback_from?: string;
   /** FIX100 Part B — the gateway's own ``retryable`` flag from the same
    *  error frame. It decides the sentence (localizeErrorCode) and now the
    *  Regenerate button too, so the two can never disagree: a failure whose
@@ -797,6 +803,8 @@ export interface SSEMessageComplete {
   /** FIX119 — the backend's request id for the call that answered. */
   gateway_request_id?: string;
   run_id?: string;
+  /** FIX120 — the requested model when a fallback model answered. */
+  fallback_from?: string;
 }
 
 /** FIX35 Part B — emitted as soon as the gateway names the model that is

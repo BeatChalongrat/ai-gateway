@@ -489,11 +489,12 @@ function MessageBubbleImpl({
       ) : null}
 
       {/* B2 — fallback notice. A small line under the reply when a
-          different model answered than the one requested. */}
-      {message.fallback_info ? (
+          different model answered than the one requested. FIX120 — also
+          from the row (fallback_from + model_id), so a reload keeps it. */}
+      {fallbackNoticeFor(message) ? (
         <FallbackNotice
-          requestedModel={message.fallback_info.requested_model}
-          actualModel={message.fallback_info.actual_model}
+          requestedModel={fallbackNoticeFor(message)!.requested_model}
+          actualModel={fallbackNoticeFor(message)!.actual_model}
         />
       ) : null}
 
@@ -936,10 +937,34 @@ function FallbackNotice({
   actualModel: string;
 }) {
   return (
-    <div className="mt-0.5 text-[11px] text-text-muted">
+    <div
+      className="mt-0.5 text-[11px] text-text-muted"
+      data-testid="fallback-notice"
+      data-requested-model={requestedModel}
+      data-actual-model={actualModel}
+      role="note"
+    >
       {fallbackNotice(requestedModel, actualModel)}
     </div>
   );
+}
+
+/** FIX120 — the (requested, actual) pair behind the fallback notice: the
+ *  live frame's local ``fallback_info`` first, else the row's
+ *  ``fallback_from`` + ``model_id`` (migration 046) — the same notice
+ *  after a reload. Nothing when the requested model answered. */
+export function fallbackNoticeFor(
+  message: Pick<Message, "fallback_info" | "fallback_from" | "model_id">,
+): { requested_model: string; actual_model: string } | null {
+  if (message.fallback_info) {
+    return { requested_model: message.fallback_info.requested_model, actual_model: message.fallback_info.actual_model };
+  }
+  const from = message.fallback_from;
+  const actual = message.model_id;
+  if (typeof from === "string" && from && typeof actual === "string" && actual && from !== actual) {
+    return { requested_model: from, actual_model: actual };
+  }
+  return null;
 }
 
 // Image attach failure notice. Same muted single-line surface — tells the

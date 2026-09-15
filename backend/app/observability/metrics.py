@@ -364,6 +364,51 @@ REPLICATE_API_ERRORS_TOTAL = Counter(
     registry=metrics_registry,
 )
 
+# ---------------------------------------------------------------------------
+# FIX120 — model fallback. A working fallback hides a broken primary: nobody
+# complains, so these are the only way the primary's failure stays visible.
+#
+# ``fallback_turns_total``: one per turn whose primary failed with a
+#   fallback-eligible code (the walk started, or was refused). outcome ∈
+#   {rescued, exhausted, no_chain, disabled, forbidden, budget_exhausted,
+#   cost_capped}. ``requested_model`` is the model the caller asked for.
+# ``fallback_attempts_total``: one per candidate the walk touched. outcome
+#   ∈ {success, failed, timeout, skipped}; ``candidate_model`` names the hop.
+# ``fallback_time_seconds``: wall-clock a turn spent between the primary's
+#   failure and the walk's end (rescued or not).
+# ``fallback_decisions_total``: which action the policy table produced for
+#   a failed primary (retry_same is the adapter's own stage and not counted
+#   here).
+# ---------------------------------------------------------------------------
+FALLBACK_TURNS_TOTAL = Counter(
+    "fallback_turns_total",
+    "Turns whose primary model failed with a fallback-eligible code, by what happened next.",
+    labelnames=("requested_model", "outcome", "path"),
+    registry=metrics_registry,
+)
+
+FALLBACK_ATTEMPTS_TOTAL = Counter(
+    "fallback_attempts_total",
+    "Fallback candidates touched, by outcome.",
+    labelnames=("requested_model", "candidate_model", "outcome", "path"),
+    registry=metrics_registry,
+)
+
+FALLBACK_TIME_SECONDS = Histogram(
+    "fallback_time_seconds",
+    "Wall-clock spent walking the fallback chain per turn.",
+    labelnames=("outcome", "path"),
+    buckets=(0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 25.0, 40.0, 60.0),
+    registry=metrics_registry,
+)
+
+FALLBACK_DECISIONS_TOTAL = Counter(
+    "fallback_decisions_total",
+    "Policy-table action chosen for a failed primary.",
+    labelnames=("action", "error_code"),
+    registry=metrics_registry,
+)
+
 
 def render_prometheus_exposition() -> tuple[bytes, str]:
     """Serialize the registry into the Prometheus text exposition format.

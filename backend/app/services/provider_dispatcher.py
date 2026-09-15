@@ -222,11 +222,32 @@ class ProviderDispatcher:
             is_fallback_eligible,
         )
 
+        # FIX120 — the kill switch turns the Layer-1 hops off too (the
+        # primary alone is tried); a hop outside the request's allowed
+        # providers (the project's boundary) is never a candidate.
+        from app.services.gateway import fallback_policy as _fb_policy_mod
+
+        _hops = list(getattr(route, "fallbacks", None) or [])
+        if _hops and not _fb_policy_mod.is_enabled():
+            logger.warning("fallback_disabled", reason="kill_switch", path="layer1", hops=len(_hops))
+            _hops = []
+        _meta = getattr(payload, "metadata", None)
+        _allowed = _fb_policy_mod.allowed_set(
+            None, _meta.get("allowed_providers") if isinstance(_meta, dict) else None
+        )
+        if _allowed is not None:
+            _outside = [(p, m) for (p, m) in _hops if _fb_policy_mod.outside_boundary(p, _allowed)]
+            for p, m in _outside:
+                logger.info(
+                    "dispatch_candidate_skipped",
+                    candidate_provider=p,
+                    candidate_model=m,
+                    reason="outside_boundary",
+                )
+            _hops = [(p, m) for (p, m) in _hops if not _fb_policy_mod.outside_boundary(p, _allowed)]
         attempts: list[tuple[str, str]] = [
             (route.provider_name, route.model_name)
-        ] + [
-            (p, m) for (p, m) in (getattr(route, "fallbacks", None) or [])
-        ]
+        ] + [(p, m) for (p, m) in _hops]
 
         last_error: Exception | None = None
         hop_index = 0  # 0 = primary, 1.. = Layer-1 hops

@@ -70,6 +70,9 @@ type importMessageItem struct {
 	// FIX119 — the desktop's run id and why the model stopped.
 	RunID      string `json:"run_id,omitempty"`
 	StopReason string `json:"stop_reason,omitempty"`
+	// FIX120 — the requested model when a fallback model answered the
+	// desktop turn (model_id is the one that did).
+	FallbackFrom string `json:"fallback_from,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -191,6 +194,7 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 			ErrorCode:     m.ErrorCode,
 			RunID:         m.RunID,
 			StopReason:    m.StopReason,
+			FallbackFrom:  m.FallbackFrom,
 		})
 	}
 

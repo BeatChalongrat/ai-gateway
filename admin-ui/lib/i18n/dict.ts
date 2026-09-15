@@ -23,6 +23,7 @@
 import * as chatadmin from "./chatadmin";
 import * as common from "./common";
 import * as dashboard from "./dashboard";
+import * as fallback from "./fallback";
 import * as infra from "./infra";
 import * as nav from "./nav";
 import * as observability from "./observability";
@@ -42,6 +43,7 @@ export const en = {
   ...portaladmin.en,
   ...observability.en,
   ...chatadmin.en,
+  ...fallback.en,
 };
 
 export const th: Record<keyof typeof en, string> = {
@@ -54,6 +56,7 @@ export const th: Record<keyof typeof en, string> = {
   ...portaladmin.th,
   ...observability.th,
   ...chatadmin.th,
+  ...fallback.th,
 };
 
 export type DictKey = keyof typeof en;

@@ -1154,9 +1154,26 @@ async def _chat_completions_impl(
         clear_provider_health as _clear_health,
         is_fallback_eligible as _is_fallback_eligible,
         is_provider_unhealthy as _is_unhealthy,
+        log_attempt as _fb_log_attempt,
+        log_outcome as _fb_log_outcome,
         mark_provider_unhealthy as _mark_unhealthy,
+        record_decision as _fb_record_decision,
     )
+    from app.services.gateway import fallback_policy as _fb_policy_mod
     from datetime import datetime as _dt, timezone as _tz
+
+    # FIX120 — the effective policy for this tenant (file ← deployment ←
+    # tenant override), the request's provider boundary (the project's
+    # allowed_providers, as the router already saw it), the streaming
+    # ceilings, and the dispatch clock the time ceiling is measured from.
+    _fb_policy = _fb_policy_mod.effective_policy(ctx.tenant_id)
+    _fb_allowed_meta = (
+        payload.metadata.get("allowed_providers")
+        if isinstance(payload.metadata, dict)
+        else None
+    )
+    _fb_stream_limits = _fb_policy_mod.limits("stream", _fb_policy)
+    _fb_dispatch_t0 = time.perf_counter()
 
     _stream_original_provider = route.provider_name
     _stream_original_model = route.model_name
@@ -1170,19 +1187,31 @@ async def _chat_completions_impl(
 
     _stream_required_caps = detect_required_capabilities(payload)
 
-    if await _is_unhealthy(route.provider_name, route.model_name):
+    if _fb_policy_mod.is_enabled() and await _is_unhealthy(
+        route.provider_name, route.model_name
+    ):
         fb_runner = orchestrator._get_fallback_orchestrator()
         # The chat hot-path ``session`` is an AsyncSession, so use the async
         # selector (awaits get_api_key_async). Passing the async session to
         # the SYNC ``select_streaming_candidate`` made AsyncSession.execute()
         # return an un-awaited coroutine -> "'coroutine' object has no
         # attribute 'scalars'" 500s whenever the provider was unhealthy.
+        _fb_skipped: list[dict] = []
         fb_candidate = await fb_runner.select_streaming_candidate_async(
             original_provider=_stream_original_provider,
             original_model=_stream_original_model,
             session=session,
             required=_stream_required_caps,
+            policy=_fb_policy,
+            allowed_providers=_fb_allowed_meta,
+            skipped=_fb_skipped,
         )
+        for _sk in _fb_skipped:
+            _fb_log_attempt(
+                log, path="stream", requested_model=_stream_original_model, attempt=2,
+                provider=_sk["provider"], model=_sk["model"], outcome="skipped",
+                reason=_sk["reason"], elapsed_ms=0.0,
+            )
         # A candidate can name a provider with model_configs rows but no
         # registered adapter (e.g. a seeded custom provider mid-rollout);
         # a bare ``adapters[...]`` index would KeyError here. Skip the
@@ -1224,6 +1253,13 @@ async def _chat_completions_impl(
                     "latency_ms": 0.0,
                     "attempted_at": _dt.now(_tz.utc).isoformat(),
                 }
+            )
+            # FIX120 — the primary was passed over, the candidate is up next.
+            _fb_log_attempt(
+                log, path="stream", requested_model=_stream_original_model, attempt=1,
+                provider=_stream_original_provider, model=_stream_original_model,
+                outcome="skipped", error_code="health_marker_skip",
+                reason="health_marker_skip", elapsed_ms=0.0,
             )
 
     # Phase 4A.2.6.2 — SECURE CALCULATOR streaming short-circuit. The result is
@@ -1949,7 +1985,12 @@ async def _chat_completions_impl(
         # the provider's other models stay viable unless the failure was
         # infrastructure-class (then skip_providers gets the provider too).
         skip_pairs: set[tuple[str, str]] = set()
-        MAX_STREAMING_FALLBACKS = 2
+        # FIX120 — ``limits.stream`` in the policy file (an override can
+        # change both without a deploy). ``total_budget_s`` ships as null =
+        # the pre-FIX120 behaviour (attempt ceiling only).
+        MAX_STREAMING_FALLBACKS = int(_fb_stream_limits["max_candidates"])
+        _fb_stream_budget_s = _fb_stream_limits.get("total_budget_s")
+        _fb_stream_min_runway_s = float(_fb_stream_limits.get("min_attempt_runway_s", 2.0))
 
         # Local refs we may rebind on fallback. ``adapter`` /
         # ``provider_api_key`` come from the enclosing scope; we keep
@@ -2146,6 +2187,31 @@ async def _chat_completions_impl(
                 _stream_fallback_attempts_list: list[dict] | None = (
                     _stream_fallback_attempts if _stream_fallback_attempts else None
                 )
+                # FIX120 — the turn's fallback outcome, once, with the model
+                # that answered. Only turns where a swap happened land here
+                # (the no-swap exits logged their outcome where they gave up).
+                # A walk that ended in a terminal error frame already wrote its
+                # outcome where it gave up; this records the rescued and the
+                # disconnected-mid-rescue shapes only.
+                if _stream_fallback_used and not _terminal_error:
+                    _fb_rescued = reason == "completed" and not client_disconnected
+                    _fb_log_attempt(
+                        log, path="stream", requested_model=_stream_original_model,
+                        attempt=_stream_attempt_number, provider=route.provider_name,
+                        model=route.model_name,
+                        outcome="success" if _fb_rescued else "failed",
+                        error_code=None if _fb_rescued else (_terminal_error.get("code") or reason),
+                        elapsed_ms=(time.perf_counter() - _fb_dispatch_t0) * 1000,
+                    )
+                    _fb_log_outcome(
+                        log, path="stream", requested_model=_stream_original_model,
+                        outcome="rescued" if _fb_rescued else "exhausted",
+                        attempts=_stream_attempt_number,
+                        time_spent_s=time.perf_counter() - _fb_dispatch_t0,
+                        served_model=route.model_name if _fb_rescued else None,
+                        served_provider=route.provider_name if _fb_rescued else None,
+                        reason=None if _fb_rescued else (_terminal_error.get("code") or reason),
+                    )
 
                 log_session = log_session_factory()
                 try:
@@ -2643,6 +2709,17 @@ async def _chat_completions_impl(
                     # are logged separately, and the class rides the error
                     # frame's details so the failure is nameable from the
                     # transcript alone.
+                    # FIX120 — a raw transport failure (the box unreachable, a
+                    # connect / read timeout) arrives here unmapped on the
+                    # streaming path. Map it through the adapters' own table
+                    # first, so the decision table reads provider_unavailable
+                    # / provider_timeout and not unclassified_error. Found
+                    # live: connection refused → unclassified → no fallback.
+                    from app.services.providers.error_handler import (
+                        normalise_transport_error as _normalise_transport,
+                    )
+
+                    stream_exc = _normalise_transport(stream_exc, route.provider_name)
                     _stream_code = getattr(stream_exc, "code", None)
                     _unclassified = _stream_code is None
                     if _unclassified:
@@ -2699,8 +2776,33 @@ async def _chat_completions_impl(
                     # can't route around, etc.) is terminal; emit an error
                     # frame instead of raising (which, post-headers, would just
                     # truncate the stream into a blank screen). B1.
-                    if not isinstance(stream_exc, _GwErr) or not _is_fallback_eligible(
-                        stream_exc
+                    # FIX120 — the decision table names the action; the kill
+                    # switch and a non-walking action both end here with the
+                    # primary's own error, and say so in the log.
+                    _fb_decision = _fb_policy_mod.decide(
+                        error_code=_stream_code if isinstance(stream_exc, _GwErr) else None,
+                        policy=_fb_policy,
+                    )
+                    if isinstance(stream_exc, _GwErr):
+                        _fb_record_decision(_fb_decision)
+                    _fb_switch_on = _fb_policy_mod.is_enabled()
+                    if isinstance(stream_exc, _GwErr) and _fb_decision.walks and not _fb_switch_on:
+                        log.warning("fallback_disabled", reason="kill_switch", error_code=_stream_code)
+                        _fb_log_outcome(
+                            log, path="stream", requested_model=_stream_original_model,
+                            outcome="disabled", attempts=len(_stream_fallback_attempts),
+                            time_spent_s=0.0, reason="kill_switch",
+                        )
+                    elif isinstance(stream_exc, _GwErr) and not _fb_decision.walks:
+                        _fb_log_outcome(
+                            log, path="stream", requested_model=_stream_original_model,
+                            outcome="forbidden", attempts=len(_stream_fallback_attempts),
+                            time_spent_s=0.0, reason=_fb_decision.reason,
+                        )
+                    if (
+                        not isinstance(stream_exc, _GwErr)
+                        or not _fb_decision.walks
+                        or not _fb_switch_on
                     ):
                         # Log the REAL upstream error (status/provider/body from
                         # exc.details — the same detail already shipped in the
@@ -2744,14 +2846,20 @@ async def _chat_completions_impl(
                     # infrastructure-class failure (timeout/unreachable)
                     # still rules out the provider's other models.
                     await _mark_unhealthy(
-                        failed_provider, route.model_name, error_code=_failed_code
+                        failed_provider, route.model_name, error_code=_failed_code,
+                        policy=_fb_policy,
                     )
                     skip_pairs.add((failed_provider, route.model_name))
-                    from app.services.gateway.fallback_orchestrator import (
-                        _PROVIDER_WIDE_CODES as _PW_CODES,
-                    )
+                    _PW_CODES = _fb_policy_mod.provider_wide_codes(_fb_policy)
                     if _failed_code in _PW_CODES:
                         skip_providers.add(failed_provider)
+                    _fb_elapsed_ms = (time.perf_counter() - _fb_dispatch_t0) * 1000
+                    _fb_log_attempt(
+                        log, path="stream", requested_model=_stream_original_model,
+                        attempt=_stream_attempt_number, provider=failed_provider,
+                        model=route.model_name, outcome="failed", error_code=_failed_code,
+                        reason=f"action={_fb_decision.action}", elapsed_ms=_fb_elapsed_ms,
+                    )
 
                     if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
                         # B3: the fallback chain is exhausted. Emit an
@@ -2763,6 +2871,34 @@ async def _chat_completions_impl(
                             "stream_all_models_failed",
                             attempts=len(_stream_fallback_attempts),
                             reason="max_streaming_fallbacks_exceeded",
+                        )
+                        _fb_log_outcome(
+                            log, path="stream", requested_model=_stream_original_model,
+                            outcome="exhausted", attempts=len(_stream_fallback_attempts),
+                            time_spent_s=_fb_elapsed_ms / 1000.0,
+                            reason="max_streaming_fallbacks_exceeded",
+                        )
+                        yield _emit_error(
+                            code="all_models_failed",
+                            attempts=list(_stream_fallback_attempts),
+                        )
+                        return
+
+                    # FIX120 — the wall-clock ceiling (null = off, as before):
+                    # no new attempt is opened when the turn has already
+                    # used its budget; the person is owed the error now.
+                    if _fb_stream_budget_s is not None and (
+                        float(_fb_stream_budget_s) - _fb_elapsed_ms / 1000.0
+                    ) < _fb_stream_min_runway_s:
+                        log.warning(
+                            "fallback_budget_exhausted",
+                            budget_s=_fb_stream_budget_s,
+                            attempts=len(_stream_fallback_attempts),
+                        )
+                        _fb_log_outcome(
+                            log, path="stream", requested_model=_stream_original_model,
+                            outcome="budget_exhausted", attempts=len(_stream_fallback_attempts),
+                            time_spent_s=_fb_elapsed_ms / 1000.0,
                         )
                         yield _emit_error(
                             code="all_models_failed",
@@ -2782,6 +2918,7 @@ async def _chat_completions_impl(
                     # rather than cascading async into the selector.
                     from app.core.db import SessionLocal as _SyncSessionLocal
                     _lookup_session = _SyncSessionLocal()
+                    _fb_skipped_in: list[dict] = []
                     try:
                         fb_candidate = fb_runner.select_streaming_candidate(
                             original_provider=_stream_original_provider,
@@ -2790,13 +2927,31 @@ async def _chat_completions_impl(
                             skip_providers=skip_providers,
                             skip_pairs=skip_pairs,
                             required=_stream_required_caps,
+                            policy=_fb_policy,
+                            action=_fb_decision.action,
+                            allowed_providers=_fb_allowed_meta,
+                            skipped=_fb_skipped_in,
                         )
                     finally:
                         _lookup_session.close()
+                    for _sk in _fb_skipped_in:
+                        _fb_log_attempt(
+                            log, path="stream", requested_model=_stream_original_model,
+                            attempt=_stream_attempt_number + 1, provider=_sk["provider"],
+                            model=_sk["model"], outcome="skipped", reason=_sk["reason"],
+                            elapsed_ms=_fb_elapsed_ms,
+                        )
 
                     if fb_candidate is None:
                         # No further cross-provider candidate — chain exhausted.
                         # B3: emit ``all_models_failed`` with the attempt log.
+                        _fb_log_outcome(
+                            log, path="stream", requested_model=_stream_original_model,
+                            outcome="no_chain" if _stream_attempt_number == 1 and not _fb_skipped_in else "exhausted",
+                            attempts=len(_stream_fallback_attempts),
+                            time_spent_s=_fb_elapsed_ms / 1000.0,
+                            reason="no_fallback_candidate",
+                        )
                         log.warning(
                             "stream_all_models_failed",
                             attempts=len(_stream_fallback_attempts),

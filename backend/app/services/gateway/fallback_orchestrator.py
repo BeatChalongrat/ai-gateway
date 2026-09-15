@@ -5,8 +5,10 @@ When ``ProviderDispatcher.dispatch`` fails with a fallback-eligible
 orchestrator hands control to :class:`FallbackOrchestrator`. The
 fallback runner:
 
-1. Looks up the model's tier and the ordered cross-provider chain
-   via :mod:`app.services.providers.model_tiers`.
+1. Looks up the model's chain (``fallback_policy.chain_for_action``: the
+   curated table, then the legacy tier table — both data in
+   ``docs/contracts/fallback_policy.json``, plus any deployment / tenant
+   override).
 2. Walks at most ``max_candidates`` candidates (default 2 → 3 total
    attempts including the original).
 3. For each candidate, resolves an API key via
@@ -20,6 +22,17 @@ fallback runner:
 5. If every candidate fails, the *last* GatewayError is re-raised so
    the original orchestrator's error path still maps it to a 502 /
    504 / 429 response.
+
+FIX120 — every rule this module used to hold as a Python set now reads
+from the policy file through :mod:`app.services.gateway.fallback_policy`:
+which codes walk (``decide``), how far a failure reaches
+(``failure_scope_for``), which codes mark a whole provider, the cooldown,
+the two ceilings. The module-level names (``FALLBACK_ELIGIBLE_ERRORS``,
+``_PROVIDER_WIDE_CODES``, ``FALLBACK_TOTAL_BUDGET_S`` …) are kept as
+read-only views of the shipped file. New, each off or empty by default:
+the kill switch, the data boundary, the cost cap, the circuit breaker, a
+``fallback_attempt`` log line per candidate carrying the turn id, and the
+Prometheus counters.
 
 The orchestrator is intentionally narrow: it does not run DLP, does
 not touch the request_log queue, and does not build a public response
@@ -41,7 +54,18 @@ import structlog
 
 from app.core.exceptions import GatewayError, ProviderError
 from app.domain.entities import RouteDecision
+from app.services.gateway import fallback_policy as policy_mod
 from app.services.providers.model_tiers import get_fallback_chain
+from app.services.gateway.fallback_policy import (
+    WALK_ACTIONS,
+    allowed_set,
+    breaker_allows_marking,
+    chain_for_action,
+    cost_blocks_candidate,
+    cost_blocks_tenant,
+    decide,
+    outside_boundary,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -67,7 +91,7 @@ logger = structlog.get_logger(__name__)
 # response. Instead we use a short-TTL Redis key as a *health hint*:
 #
 #   * Every fallback-eligible failure SETs ``provider:health:{name}``
-#     with a 60-second TTL.
+#     with a 60-second TTL (``health_marker.cooldown_s`` in the policy).
 #   * Every success DELs the same key.
 #
 # Before a streaming request invokes ``adapter.stream_chat()`` the
@@ -83,26 +107,15 @@ logger = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 _HEALTH_KEY_PREFIX = "provider:health:"
-_HEALTH_TTL_SECONDS = 60
+_HEALTH_TTL_SECONDS = policy_mod.health_cooldown_s()
 
-# FIX49 Part C — marker scope. The old marker was per PROVIDER: one
-# model failing (a 404 on a pulled id, a 402 on one oversized request)
-# dabbed the whole provider for 60 s, and with 11 of 14 usable models
-# living on one aggregator that meant "one bad model = the whole
-# system down for a minute" (measured live in the 2026-09-03 audit:
-# healthy models skipped with error_code=health_marker_skip).
-#
-# Markers are now per (provider, model). Only error codes that mean
-# "the provider's infrastructure itself is down" still set the
-# provider-wide key — a timeout or connection failure says nothing
-# about one model, it says the box is unreachable.
-#
-# FIX51 Part 4 (P1-F) — ``provider_no_credit`` joins the set: an account
-# with no credits fails every model it serves, so scoping that marker to
-# one pair let the chain walk sibling models on the same dead account.
-_PROVIDER_WIDE_CODES = frozenset(
-    {"provider_unavailable", "provider_timeout", "provider_no_credit"}
-)
+# FIX49 Part C — marker scope. Markers are per (provider, model). Only
+# error codes that mean "the provider's infrastructure itself is down"
+# still set the provider-wide key — a timeout or connection failure says
+# nothing about one model, it says the box is unreachable.
+# FIX51 Part 4 (P1-F) — ``provider_no_credit`` joins the set.
+# FIX120 — the set is ``health_marker.provider_wide_codes`` in the policy.
+_PROVIDER_WIDE_CODES = policy_mod.provider_wide_codes()
 
 
 # ---------------------------------------------------------------------------
@@ -121,40 +134,14 @@ _PROVIDER_WIDE_CODES = frozenset(
 #
 # Unknown shapes default to "model" (keep walking) so a new error code
 # degrades to the old behavior, never to a dead stop.
+# FIX120 — the lists are ``failure_scope`` in the policy file.
 # ---------------------------------------------------------------------------
 
-_REQUEST_SCOPED_CODES = frozenset(
-    {
-        "context_length_exceeded",
-        "validation_error",
-        "upstream_bad_response",
-        "content_policy_blocked",
-        "moderation_flagged",
-        "guardrail_blocked",
-        "dlp_violation",
-        "policy_violation",
-    }
-)
-
-_ACCOUNT_SCOPED_CODES = frozenset(
-    {
-        # FIX57 — a rejected credential is the ACCOUNT's, so the walk must
-        # not try this provider's other models with the same dead key.
-        # 401/403 already classified this way via ``details['status']``;
-        # naming the code keeps it true if the status is ever dropped.
-        "provider_auth_error",
-        "provider_no_credit",
-        "provider_unavailable",
-        "provider_timeout",
-        "provider_at_capacity",
-        "provider_rate_limited",
-        "rate_limit_exceeded",
-        "provider_5xx",
-    }
-)
+_REQUEST_SCOPED_CODES = frozenset(policy_mod.base_policy()["failure_scope"]["request"])
+_ACCOUNT_SCOPED_CODES = frozenset(policy_mod.base_policy()["failure_scope"]["account"])
 
 
-def classify_failure_scope(exc: Exception) -> str:
+def classify_failure_scope(exc: Exception, policy: dict | None = None) -> str:
     """``"model"`` | ``"account"`` | ``"request"`` for a dispatch failure.
 
     Codes carry most of the signal; for the generic ``provider_error``
@@ -162,17 +149,8 @@ def classify_failure_scope(exc: Exception) -> str:
     the account's credentials or balance; >=500 = the account's infra).
     """
     code = getattr(exc, "code", None)
-    if code in _REQUEST_SCOPED_CODES:
-        return "request"
     details = getattr(exc, "details", None) or {}
-    status = details.get("status")
-    if code == "provider_model_not_found" or status == 404:
-        return "model"
-    if code in _ACCOUNT_SCOPED_CODES:
-        return "account"
-    if isinstance(status, int) and (status in (401, 402, 403) or status >= 500):
-        return "account"
-    return "model"
+    return policy_mod.failure_scope_for(code, details.get("status"), policy)
 
 
 def _health_key(provider: str, model: str | None = None) -> str:
@@ -182,29 +160,42 @@ def _health_key(provider: str, model: str | None = None) -> str:
 
 
 async def mark_provider_unhealthy(
-    provider: str, model: str | None = None, *, error_code: str | None = None
+    provider: str,
+    model: str | None = None,
+    *,
+    error_code: str | None = None,
+    policy: dict | None = None,
 ) -> None:
-    """Set the health marker with a 60s TTL.
+    """Set the health marker with the policy's cooldown TTL.
 
     With ``model`` the marker is scoped to that (provider, model) pair;
     the provider-wide key is ALSO set when ``error_code`` is an
     infrastructure-class failure (``_PROVIDER_WIDE_CODES``). Without
     ``model`` (legacy callers) the provider-wide key is set as before.
     Idempotent — repeated calls refresh the TTL.
+
+    FIX120 — with the circuit breaker enabled (off by default) the marker
+    is set only once ``allowed_fails`` failures landed inside the window.
     """
     if not provider:
         return
     try:
+        should_mark, ttl = await breaker_allows_marking(provider, model, policy)
+        if not should_mark:
+            logger.info(
+                "fallback_breaker_below_threshold",
+                provider=provider,
+                model=model,
+                error_code=error_code,
+            )
+            return
         from app.services._redis_pool import get_async_redis
 
         client = get_async_redis()
-        await client.set(
-            _health_key(provider, model), "unhealthy", ex=_HEALTH_TTL_SECONDS
-        )
-        if model and error_code in _PROVIDER_WIDE_CODES:
-            await client.set(
-                _health_key(provider), "unhealthy", ex=_HEALTH_TTL_SECONDS
-            )
+        await client.set(_health_key(provider, model), "unhealthy", ex=ttl)
+        wide = policy_mod.provider_wide_codes(policy) if policy else _PROVIDER_WIDE_CODES
+        if model and error_code in wide:
+            await client.set(_health_key(provider), "unhealthy", ex=ttl)
     except Exception:  # noqa: BLE001
         # Health hint is best-effort — Redis outage must not break
         # the request path.
@@ -287,11 +278,13 @@ async def is_provider_unhealthy(provider: str, model: str | None = None) -> bool
 # Per-attempt timeout. The primary dispatch has its own ~30s upstream
 # timeout; the fallback shrinks the budget so a slow second vendor
 # doesn't extend the user's wait past the original SLA.
-FALLBACK_ATTEMPT_TIMEOUT_S = 10.0
+# FIX120 — the values are ``limits.non_stream`` in the policy file.
+_NS_LIMITS = policy_mod.limits("non_stream")
+FALLBACK_ATTEMPT_TIMEOUT_S = float(_NS_LIMITS["attempt_timeout_s"])
 
 # Maximum number of fallback candidates to try after the primary.
 # Spec calls for 2 (so up to 3 total attempts including the original).
-MAX_FALLBACK_CANDIDATES = 2
+MAX_FALLBACK_CANDIDATES = int(_NS_LIMITS["max_candidates"])
 
 # FIX51 Part 4 (P1-F) — the ceiling users feel is TIME, not attempt
 # count. Total turn budget (primary + all fallback attempts) before the
@@ -300,12 +293,12 @@ MAX_FALLBACK_CANDIDATES = 2
 # the user gets the error at ~30s instead of ~50s. The budget never
 # aborts an attempt already in flight beyond its own shrunken timeout,
 # so a slow-but-succeeding rescue is not killed retroactively.
-FALLBACK_TOTAL_BUDGET_S = 25.0
+FALLBACK_TOTAL_BUDGET_S = float(_NS_LIMITS["total_budget_s"])
 
 # Don't bother opening an attempt with less than this much runway — a
 # real completion can't finish, and the doomed try only delays the
 # error the user is already owed.
-_MIN_ATTEMPT_RUNWAY_S = 2.0
+_MIN_ATTEMPT_RUNWAY_S = float(_NS_LIMITS["min_attempt_runway_s"])
 
 
 @dataclass(frozen=True)
@@ -393,6 +386,116 @@ def merge_auto_candidates(
     return merged
 
 
+# ---------------------------------------------------------------------------
+# FIX120 — one line per candidate the walk touches, one line per turn's
+# outcome, both carrying the turn id (FIX119) so ``grep <run_id>`` shows
+# every attempt. Prometheus counters ride the same two events.
+# ---------------------------------------------------------------------------
+
+
+def _metrics():
+    from app.observability import metrics as m
+
+    return m
+
+
+def log_attempt(
+    log,
+    *,
+    path: str,
+    requested_model: str,
+    attempt: int,
+    provider: str,
+    model: str,
+    outcome: str,
+    error_code: str | None = None,
+    reason: str | None = None,
+    latency_ms: float | None = None,
+    elapsed_ms: float | None = None,
+) -> None:
+    """``fallback_attempt`` — the per-candidate record. ``outcome`` ∈
+    success | failed | timeout | skipped. ``attempt`` counts the primary
+    as 1. ``path`` ∈ non_stream | stream | layer1."""
+    log.info(
+        "fallback_attempt",
+        path=path,
+        requested_model=requested_model,
+        attempt=attempt,
+        candidate_provider=provider,
+        candidate_model=model,
+        outcome=outcome,
+        error_code=error_code,
+        reason=reason,
+        latency_ms=int(latency_ms) if latency_ms is not None else None,
+        elapsed_ms=int(elapsed_ms) if elapsed_ms is not None else None,
+    )
+    try:
+        _metrics().FALLBACK_ATTEMPTS_TOTAL.labels(
+            requested_model=requested_model, candidate_model=model, outcome=outcome, path=path
+        ).inc()
+    except Exception:  # noqa: BLE001 — metrics never break a turn
+        pass
+
+
+def log_outcome(
+    log,
+    *,
+    path: str,
+    requested_model: str,
+    outcome: str,
+    attempts: int,
+    time_spent_s: float | None,
+    served_model: str | None = None,
+    served_provider: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """``fallback_outcome`` — the per-turn record. ``outcome`` ∈ rescued |
+    exhausted | no_chain | disabled | forbidden | budget_exhausted |
+    cost_capped."""
+    log.info(
+        "fallback_outcome",
+        path=path,
+        requested_model=requested_model,
+        outcome=outcome,
+        attempts=attempts,
+        time_spent_ms=int(time_spent_s * 1000) if time_spent_s is not None else None,
+        served_provider=served_provider,
+        served_model=served_model,
+        reason=reason,
+    )
+    try:
+        m = _metrics()
+        m.FALLBACK_TURNS_TOTAL.labels(requested_model=requested_model, outcome=outcome, path=path).inc()
+        if time_spent_s is not None:
+            m.FALLBACK_TIME_SECONDS.labels(outcome=outcome, path=path).observe(max(0.0, time_spent_s))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def record_decision(decision) -> None:
+    try:
+        _metrics().FALLBACK_DECISIONS_TOTAL.labels(
+            action=decision.action, error_code=decision.value or "-"
+        ).inc()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _spend_reader(session):
+    """A ``tenant_id -> usd`` reader bound to ``session`` (sync or async).
+
+    The non-streaming path holds an AsyncSession; the daily-spend query is
+    a short aggregate, so it runs on a fresh sync session either way."""
+
+    def _read(tenant_id: str) -> float:
+        from app.core.db import SessionLocal
+
+        with SessionLocal() as s:
+            return policy_mod.tenant_daily_spend_usd(s, tenant_id)
+
+    return _read
+
+
 class FallbackOrchestrator:
     """Cross-provider fallback runner. Stateless, safe to share."""
 
@@ -401,13 +504,28 @@ class FallbackOrchestrator:
         dispatcher: "ProviderDispatcher",
         key_service: "ProviderKeyService",
         *,
-        max_candidates: int = MAX_FALLBACK_CANDIDATES,
-        attempt_timeout_s: float = FALLBACK_ATTEMPT_TIMEOUT_S,
+        max_candidates: int | None = None,
+        attempt_timeout_s: float | None = None,
     ) -> None:
         self.dispatcher = dispatcher
         self.key_service = key_service
-        self.max_candidates = max_candidates
-        self.attempt_timeout_s = attempt_timeout_s
+        # FIX120 — an explicit constructor value wins (tests, callers that
+        # know better); otherwise the effective policy's limits apply per
+        # run so a tenant override can change them without a restart.
+        self._explicit_max = max_candidates
+        self._explicit_timeout = attempt_timeout_s
+        self.max_candidates = MAX_FALLBACK_CANDIDATES if max_candidates is None else max_candidates
+        self.attempt_timeout_s = (
+            FALLBACK_ATTEMPT_TIMEOUT_S if attempt_timeout_s is None else attempt_timeout_s
+        )
+
+    def _limits(self, policy: dict, kind: str) -> dict:
+        lim = policy_mod.limits(kind, policy)
+        if self._explicit_max is not None:
+            lim["max_candidates"] = self._explicit_max
+        if self._explicit_timeout is not None and kind == "non_stream":
+            lim["attempt_timeout_s"] = self._explicit_timeout
+        return lim
 
     async def run(
         self,
@@ -433,18 +551,64 @@ class FallbackOrchestrator:
             tenant_id=ctx.tenant_id,
             project_id=ctx.project_id,
             request_id=ctx.request_id,
+            # FIX119/FIX120 — the turn id on every attempt line.
+            turn_id=getattr(ctx, "turn_id", None),
             original_provider=original_provider,
             original_model=original_model,
         )
+        t_walk = time.perf_counter()
+        path = "non_stream"
 
-        chain = get_fallback_chain(original_model, original_provider)
+        # FIX120 — the kill switch. Off = the original error, untouched.
+        if not policy_mod.is_enabled():
+            log.warning("fallback_disabled", reason="kill_switch")
+            log_outcome(log, path=path, requested_model=original_model, outcome="disabled",
+                        attempts=0, time_spent_s=0.0, reason="kill_switch")
+            if original_error is not None:
+                raise original_error
+            raise ProviderError(
+                "Fallback is switched off for this deployment.",
+                details={"original_provider": original_provider, "original_model": original_model},
+            )
+
+        policy = policy_mod.effective_policy(ctx.tenant_id)
+        lim = self._limits(policy, "non_stream")
+        max_candidates = int(lim["max_candidates"])
+        attempt_timeout_s = float(lim["attempt_timeout_s"])
+        total_budget_s = lim.get("total_budget_s")
+        min_runway_s = float(lim.get("min_attempt_runway_s", _MIN_ATTEMPT_RUNWAY_S))
+
+        # The decision table names the action; only a walking action gets
+        # a chain. A caller that hands in no error walks the ordinary chain
+        # (pre-FIX120 contract).
+        action = "cooldown_then_next"
+        if original_error is not None:
+            decision = decide(error_code=getattr(original_error, "code", None), policy=policy)
+            record_decision(decision)
+            if not decision.walks:
+                log.info("fallback_forbidden", action=decision.action, reason=decision.reason,
+                         error_code=decision.value)
+                log_outcome(log, path=path, requested_model=original_model, outcome="forbidden",
+                            attempts=0, time_spent_s=0.0, reason=decision.reason)
+                raise original_error
+            action = decision.action
+
+        # The shipped tables go through ``get_fallback_chain`` (a module name
+        # tests patch); a policy with overrides walks its own tables.
+        if policy is policy_mod.base_policy() and action in ("cooldown_then_next", "next_in_chain"):
+            chain = get_fallback_chain(original_model, original_provider)
+        else:
+            chain = chain_for_action(action, original_model, original_provider, policy=policy)
         # FIX35 Part C step 4 — an auto-routed request carries the router's
         # own ORDERED list (already key-valid, tier-capped, task-ranked).
         # Those come first; the static cross-provider tier chain follows.
         # An explicit request never has this metadata, so its behaviour is
         # unchanged.
-        _auto = (getattr(request, "metadata", None) or {}).get("auto_candidates") or []
-        if _auto:
+        _meta = getattr(request, "metadata", None)
+        if not isinstance(_meta, dict):
+            _meta = {}
+        _auto = _meta.get("auto_candidates") or []
+        if _auto and action in ("cooldown_then_next", "next_in_chain"):
             from app.services.providers.model_registry import resolve_provider
 
             merged = merge_auto_candidates(
@@ -456,24 +620,12 @@ class FallbackOrchestrator:
                 chain = merged
         if not chain:
             log.info("fallback_no_chain")
+            log_outcome(log, path=path, requested_model=original_model, outcome="no_chain",
+                        attempts=0, time_spent_s=0.0)
             # FIX98 — when there is no chain we never attempted a fallback, so
             # the ORIGINAL error is what happened and the only thing worth
             # telling the caller. Replacing it announces our routing
-            # configuration instead of the event: a request that died on a
-            # provider timeout was surfacing as "No fallback chain registered
-            # for model 'qwen3.8-27b-fp8'", which names neither the timeout
-            # nor anything the user can act on. Measured: a non-streaming
-            # 8 KB-prompt request to a self-hosted model fails at 91.6-92.1 s
-            # (3 of 3) and every one of them reported the wrong event.
-            #
-            # This widens a rule that was already here for exactly one code.
-            # Batch A had kept provider_at_capacity intact so a shed request
-            # keeps its 503 + Retry-After rather than reading as "provider
-            # broken" — the same argument applies to every code, so the
-            # special case becomes the general one.
-            #
-            # The generic error below is kept for the case it was written
-            # for: no chain AND no original error to report.
+            # configuration instead of the event.
             if original_error is not None:
                 raise original_error
             raise ProviderError(
@@ -483,6 +635,18 @@ class FallbackOrchestrator:
                     "original_model": original_model,
                 },
             )
+
+        # FIX120 — the data boundary and the tenant-level cost cap gate the
+        # whole walk before a single candidate is looked at.
+        allowed = allowed_set(policy, _meta.get("allowed_providers"))
+        cost_reason = cost_blocks_tenant(policy, ctx.tenant_id, _spend_reader(session))
+        if cost_reason:
+            log.warning("fallback_cost_capped", reason=cost_reason)
+            log_outcome(log, path=path, requested_model=original_model, outcome="cost_capped",
+                        attempts=0, time_spent_s=0.0, reason=cost_reason)
+            if original_error is not None:
+                raise original_error
+            raise ProviderError("Fallback refused by the tenant's cost cap.", details={"reason": cost_reason})
 
         from app.services.capability_detection import (
             detect_required_capabilities,
@@ -496,6 +660,7 @@ class FallbackOrchestrator:
         attempts: list[FallbackAttempt] = []
         last_error: GatewayError | None = None
         tried = 0
+        touched = 0  # every candidate the walk looked at (for the attempt index)
 
         # FIX51 Part 4 (P1-F) — failure scope + time budget.
         #
@@ -511,19 +676,31 @@ class FallbackOrchestrator:
         # covers the fallback walk alone.
         dead_accounts: set[str] = set()
         if original_error is not None and (
-            classify_failure_scope(original_error) == "account"
+            classify_failure_scope(original_error, policy) == "account"
         ):
             dead_accounts.add(original_provider)
-        deadline = (
-            started_at if started_at is not None else time.perf_counter()
-        ) + FALLBACK_TOTAL_BUDGET_S
+        t_origin = started_at if started_at is not None else time.perf_counter()
+        deadline = (t_origin + float(total_budget_s)) if total_budget_s is not None else None
+
+        def _elapsed_ms() -> float:
+            return (time.perf_counter() - t_origin) * 1000
 
         for candidate in chain:
-            if tried >= self.max_candidates:
+            if tried >= max_candidates:
                 break
 
             provider = candidate["provider"]
             model = candidate["model"]
+            touched += 1
+            attempt_no = 1 + touched
+
+            # FIX120 — boundary gate: never outside the allowed providers,
+            # and no setting can permit it. Does not consume a slot.
+            if outside_boundary(provider, allowed):
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            reason="outside_boundary", elapsed_ms=_elapsed_ms())
+                continue
 
             # Account-scope gate — this provider already failed at the
             # account level during THIS request (or the primary did).
@@ -535,6 +712,9 @@ class FallbackOrchestrator:
                     candidate_model=model,
                     reason="account_failed_this_request",
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            reason="account_failed_this_request", elapsed_ms=_elapsed_ms())
                 continue
 
             # Capability gate — skip a candidate that lacks a required
@@ -548,6 +728,17 @@ class FallbackOrchestrator:
                     candidate_model=model,
                     reason="capability_mismatch",
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            reason="capability_mismatch", elapsed_ms=_elapsed_ms())
+                continue
+
+            # FIX120 — cost-cap gate (price ratio). Off by default.
+            cost_reason = cost_blocks_candidate(policy, original_model, model)
+            if cost_reason:
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            reason=f"cost_cap: {cost_reason}", elapsed_ms=_elapsed_ms())
                 continue
 
             # Key check first — a missing key is recorded but does NOT
@@ -580,18 +771,26 @@ class FallbackOrchestrator:
                     candidate_model=model,
                     reason="no_api_key",
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            error_code="no_api_key", reason="no_api_key", elapsed_ms=_elapsed_ms())
                 continue
 
             # Time-budget gate — opening an attempt with (almost) no
             # runway only delays the error the user is already owed.
-            remaining_s = deadline - time.perf_counter()
-            if remaining_s < _MIN_ATTEMPT_RUNWAY_S:
+            remaining_s = (deadline - time.perf_counter()) if deadline is not None else attempt_timeout_s
+            if remaining_s < min_runway_s:
                 log.warning(
                     "fallback_budget_exhausted",
-                    budget_s=FALLBACK_TOTAL_BUDGET_S,
+                    budget_s=total_budget_s,
                     attempts=len(attempts),
                     tried=tried,
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="skipped",
+                            reason="budget_exhausted", elapsed_ms=_elapsed_ms())
+                log_outcome(log, path=path, requested_model=original_model, outcome="budget_exhausted",
+                            attempts=tried, time_spent_s=time.perf_counter() - t_walk)
                 break
 
             tried += 1
@@ -605,7 +804,7 @@ class FallbackOrchestrator:
                         messages=messages,
                         api_key=api_key,
                     ),
-                    timeout=min(self.attempt_timeout_s, remaining_s),
+                    timeout=min(attempt_timeout_s, remaining_s),
                 )
             except asyncio.TimeoutError as exc:
                 latency_ms = (time.perf_counter() - t0) * 1000
@@ -629,7 +828,7 @@ class FallbackOrchestrator:
                 # pair + provider-wide health keys for later requests.
                 dead_accounts.add(provider)
                 await mark_provider_unhealthy(
-                    provider, model, error_code="provider_timeout"
+                    provider, model, error_code="provider_timeout", policy=policy
                 )
                 log.warning(
                     "fallback_candidate_failed",
@@ -639,12 +838,15 @@ class FallbackOrchestrator:
                     failure_scope="account",
                     latency_ms=int(latency_ms),
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="timeout",
+                            error_code="provider_timeout", latency_ms=latency_ms, elapsed_ms=_elapsed_ms())
                 continue
             except GatewayError as exc:
                 latency_ms = (time.perf_counter() - t0) * 1000
                 last_error = exc
                 code = getattr(exc, "code", "provider_error")
-                scope = classify_failure_scope(exc)
+                scope = classify_failure_scope(exc, policy)
                 attempts.append(
                     FallbackAttempt(
                         provider=provider,
@@ -655,10 +857,10 @@ class FallbackOrchestrator:
                         attempted_at=datetime.now(timezone.utc),
                     )
                 )
-                if is_fallback_eligible(exc):
+                if is_fallback_eligible(exc, policy):
                     # Pair-scoped marker (FIX49 Part C); widens to the
                     # provider automatically for _PROVIDER_WIDE_CODES.
-                    await mark_provider_unhealthy(provider, model, error_code=code)
+                    await mark_provider_unhealthy(provider, model, error_code=code, policy=policy)
                 log.warning(
                     "fallback_candidate_failed",
                     candidate_provider=provider,
@@ -667,6 +869,10 @@ class FallbackOrchestrator:
                     failure_scope=scope,
                     latency_ms=int(latency_ms),
                 )
+                log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                            provider=provider, model=model, outcome="failed",
+                            error_code=code, reason=f"scope={scope}", latency_ms=latency_ms,
+                            elapsed_ms=_elapsed_ms())
                 if scope == "request":
                     # The request itself is doomed (too long, rejected,
                     # policy) — every further vendor refuses it the same
@@ -683,6 +889,7 @@ class FallbackOrchestrator:
             # Success — attempt_number counts the primary as 1, so the
             # first fallback that succeeds is 2.
             attempt_number = 1 + len(attempts) + 1
+            latency_ms = (time.perf_counter() - t0) * 1000
             log.info(
                 "fallback_candidate_success",
                 candidate_provider=provider,
@@ -690,6 +897,12 @@ class FallbackOrchestrator:
                 attempt_number=attempt_number,
                 prior_attempts=len(attempts),
             )
+            log_attempt(log, path=path, requested_model=original_model, attempt=attempt_no,
+                        provider=provider, model=model, outcome="success",
+                        latency_ms=latency_ms, elapsed_ms=_elapsed_ms())
+            log_outcome(log, path=path, requested_model=original_model, outcome="rescued",
+                        attempts=tried, time_spent_s=time.perf_counter() - t_walk,
+                        served_model=model, served_provider=provider)
             return FallbackResult(
                 response=response,
                 provider_used=provider,
@@ -709,6 +922,8 @@ class FallbackOrchestrator:
             attempts=len(attempts),
             tried=tried,
         )
+        log_outcome(log, path=path, requested_model=original_model, outcome="exhausted",
+                    attempts=tried, time_spent_s=time.perf_counter() - t_walk)
         if last_error is not None:
             raise last_error
         raise ProviderError(
@@ -719,6 +934,30 @@ class FallbackOrchestrator:
             },
         )
 
+    def _streaming_walk(
+        self,
+        *,
+        original_provider: str,
+        original_model: str,
+        policy: dict | None,
+        action: str,
+        allowed_providers: Iterable[str] | None,
+        skipped: list[dict] | None,
+    ) -> tuple[list[dict[str, str]], int, frozenset[str] | None, dict]:
+        """Shared prologue of the two streaming selectors: the chain for
+        the action, the attempt ceiling, the boundary and the policy."""
+        pol = policy or policy_mod.base_policy()
+        if pol is policy_mod.base_policy() and action in ("cooldown_then_next", "next_in_chain"):
+            chain = get_fallback_chain(original_model, original_provider)
+        else:
+            chain = chain_for_action(action, original_model, original_provider, policy=pol)
+        lim = self._limits(pol, "stream")
+        return chain, int(lim["max_candidates"]), allowed_set(pol, allowed_providers), pol
+
+    @staticmethod
+    def _skip(skipped: list[dict] | None, provider: str, model: str, reason: str) -> None:
+        if skipped is not None:
+            skipped.append({"provider": provider, "model": model, "reason": reason})
 
     def select_streaming_candidate(
         self,
@@ -729,6 +968,10 @@ class FallbackOrchestrator:
         skip_providers: set[str] | None = None,
         skip_pairs: "set[tuple[str, str]] | None" = None,
         required: "RequiredCapabilities | None" = None,
+        policy: dict | None = None,
+        action: str = "cooldown_then_next",
+        allowed_providers: Iterable[str] | None = None,
+        skipped: list[dict] | None = None,
     ) -> dict | None:
         """Pick the first viable streaming fallback for a primary.
 
@@ -746,29 +989,42 @@ class FallbackOrchestrator:
           3. Is NOT in ``skip_providers`` (used by the in-generator
              error path to avoid re-trying a candidate that just
              failed this same request).
+          4. FIX120 — is inside the request's allowed providers and the
+             cost cap; the kill switch returns ``None`` before any of it.
 
         Returns ``None`` when the chain is exhausted — callers should
         treat that as "stay with the primary and let the existing
-        error path fire".
+        error path fire". ``skipped`` (when given) collects every
+        candidate passed over, with the reason, for the attempt log.
         """
         if session is None:
+            return None
+        if not policy_mod.is_enabled():
             return None
 
         skip = skip_providers or set()
         pairs = skip_pairs or set()
-        chain = get_fallback_chain(original_model, original_provider)
+        chain, max_candidates, allowed, pol = self._streaming_walk(
+            original_provider=original_provider, original_model=original_model,
+            policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
+        )
         tried = 0
 
         for candidate in chain:
-            if tried >= self.max_candidates:
+            if tried >= max_candidates:
                 break
             provider = candidate["provider"]
             model = candidate["model"]
+            if outside_boundary(provider, allowed):
+                self._skip(skipped, provider, model, "outside_boundary")
+                continue
             if provider in skip:
+                self._skip(skipped, provider, model, "account_failed_this_request")
                 continue
             # FIX49 Part C — a pair that already failed THIS request is
             # out; the provider's other models stay in the running.
             if (provider, model) in pairs:
+                self._skip(skipped, provider, model, "pair_failed_this_request")
                 continue
 
             # Capability gate — don't stream a vision/tools request from
@@ -777,12 +1033,19 @@ class FallbackOrchestrator:
                 from app.services.capability_detection import model_meets
 
                 if not model_meets(required, model):
+                    self._skip(skipped, provider, model, "capability_mismatch")
                     continue
+
+            cost_reason = cost_blocks_candidate(pol, original_model, model)
+            if cost_reason:
+                self._skip(skipped, provider, model, f"cost_cap: {cost_reason}")
+                continue
 
             api_key = self.key_service.get_api_key(session, provider, model=model)
             if not api_key:
                 # No key → skip without consuming a real attempt slot,
                 # mirroring the run() loop's defensive contract.
+                self._skip(skipped, provider, model, "no_api_key")
                 continue
 
             adapter = self.dispatcher.adapters.get(provider)
@@ -790,6 +1053,7 @@ class FallbackOrchestrator:
                 # Adapter exists but can't stream — keep walking the
                 # chain so we don't fall back from streaming to
                 # buffered + a header lie.
+                self._skip(skipped, provider, model, "adapter_cannot_stream")
                 continue
 
             tried += 1
@@ -808,6 +1072,10 @@ class FallbackOrchestrator:
         session: "AsyncSession | None",
         skip_providers: set[str] | None = None,
         required: "RequiredCapabilities | None" = None,
+        policy: dict | None = None,
+        action: str = "cooldown_then_next",
+        allowed_providers: Iterable[str] | None = None,
+        skipped: list[dict] | None = None,
     ) -> dict | None:
         """Async twin of :meth:`select_streaming_candidate`.
 
@@ -823,17 +1091,26 @@ class FallbackOrchestrator:
         """
         if session is None:
             return None
+        if not policy_mod.is_enabled():
+            return None
 
         skip = skip_providers or set()
-        chain = get_fallback_chain(original_model, original_provider)
+        chain, max_candidates, allowed, pol = self._streaming_walk(
+            original_provider=original_provider, original_model=original_model,
+            policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
+        )
         tried = 0
 
         for candidate in chain:
-            if tried >= self.max_candidates:
+            if tried >= max_candidates:
                 break
             provider = candidate["provider"]
             model = candidate["model"]
+            if outside_boundary(provider, allowed):
+                self._skip(skipped, provider, model, "outside_boundary")
+                continue
             if provider in skip:
+                self._skip(skipped, provider, model, "account_failed_this_request")
                 continue
 
             # FIX49 Part C — never fall back INTO a (provider, model)
@@ -843,22 +1120,31 @@ class FallbackOrchestrator:
             # (or a provider-wide infra marker) is skipped; a healthy
             # sibling model on the same provider stays viable.
             if await is_provider_unhealthy(provider, model):
+                self._skip(skipped, provider, model, "health_marker")
                 continue
 
             if required is not None:
                 from app.services.capability_detection import model_meets
 
                 if not model_meets(required, model):
+                    self._skip(skipped, provider, model, "capability_mismatch")
                     continue
+
+            cost_reason = cost_blocks_candidate(pol, original_model, model)
+            if cost_reason:
+                self._skip(skipped, provider, model, f"cost_cap: {cost_reason}")
+                continue
 
             api_key = await self.key_service.get_api_key_async(
                 session, provider, model=model
             )
             if not api_key:
+                self._skip(skipped, provider, model, "no_api_key")
                 continue
 
             adapter = self.dispatcher.adapters.get(provider)
             if adapter is None or not getattr(adapter, "supports_streaming", False):
+                self._skip(skipped, provider, model, "adapter_cannot_stream")
                 continue
 
             tried += 1
@@ -875,39 +1161,23 @@ class FallbackOrchestrator:
 # ---------------------------------------------------------------------------
 
 # Error codes that the gateway orchestrator treats as fallback-eligible.
+# FIX120 — derived from the policy table: every code whose row is a
+# walking action under the SHIPPED policy (opt-in chains off). Kept as a
+# name because three modules and the request_log docstring refer to it.
 # Note: ``rate_limit_exceeded`` is the upstream provider's 429 mapped
 # by ``error_handler.map_provider_error``. The gateway's own per-key
 # rate-limit (raised earlier in the pipeline) shares the class but
 # never reaches the dispatch block, so this set is safe in context.
-FALLBACK_ELIGIBLE_ERRORS: set[str] = {
-    "provider_timeout",
-    "provider_5xx",
-    "provider_error",
-    "provider_rate_limited",
-    # Bulkhead full (per-provider concurrency cap) — shed to the next
-    # candidate instead of queuing on a saturated box.
-    "provider_at_capacity",
-    "rate_limit_exceeded",
-    "provider_model_not_found",
-    "provider_unavailable",
-    # FIX51 Part 4 — a bare 402: THIS account is out of credits, but a
-    # different account can still answer. The scope classifier keeps the
-    # walk off the dead account's other models.
-    "provider_no_credit",
-    # FIX57 Part 4 — a 401/403 used to arrive here as the generic
-    # "provider_error" and was fallback-eligible by accident of sharing
-    # that code. It has its own code now so the USER gets told it is a key
-    # problem; it stays in this set on purpose, because routing around a
-    # rejected credential to a provider whose key works is exactly what
-    # the chain is for. The scope classifier keeps the walk off the rest
-    # of the same account.
-    "provider_auth_error",
-}
+FALLBACK_ELIGIBLE_ERRORS: set[str] = set(policy_mod.eligible_error_codes())
 
 
-def is_fallback_eligible(exc: GatewayError) -> bool:
-    """Return True if ``exc`` should trigger the fallback chain."""
+def is_fallback_eligible(exc: GatewayError, policy: dict | None = None) -> bool:
+    """Return True if ``exc`` should trigger the fallback chain.
+
+    FIX120 — the answer is the policy table's: a walking action for the
+    exception's code under ``policy`` (the shipped file when ``None``).
+    """
     code = getattr(exc, "code", None)
     if not code:
         return False
-    return code in FALLBACK_ELIGIBLE_ERRORS
+    return decide(error_code=code, policy=policy).walks

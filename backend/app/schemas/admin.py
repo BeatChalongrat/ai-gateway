@@ -280,6 +280,7 @@ ALERT_METRICS = (
     "provider_failure",
     "budget_threshold",
     "quota_exhausted",
+    "fallback_spike",
 )
 ALERT_SCOPES = ("global", "tenant", "project")
 

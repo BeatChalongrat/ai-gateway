@@ -89,6 +89,9 @@ export interface ImportMessageItem {
    *  gateway was sent) and why the model stopped (closed set). */
   run_id?: string;
   stop_reason?: string;
+  /** FIX120 — the requested model when a fallback model answered (model_id
+   *  is the one that did). */
+  fallback_from?: string;
 }
 /** POST /api/v1/code/run response (FIX80: rows carry the persisted
  *  ConversationFile id when a conversation was named). */

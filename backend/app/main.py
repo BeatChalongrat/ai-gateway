@@ -862,6 +862,9 @@ app.include_router(portal_connectors_router, prefix="/portal/connectors", tags=[
 # Admin views over portal data
 app.include_router(admin_portal_users_router, prefix="/admin/portal-users", tags=["admin-portal"])
 app.include_router(admin_system_settings_router, prefix="/admin/system-settings", tags=["admin-settings"])
+from app.api.routes.admin_fallback import router as admin_fallback_router  # noqa: E402
+
+app.include_router(admin_fallback_router, prefix="/admin/fallback", tags=["admin-fallback"])
 app.include_router(admin_token_packs_router, prefix="/admin/token-packs", tags=["admin-packs"])
 from app.api.routes.admin_search import router as admin_search_router  # noqa: E402
 app.include_router(admin_search_router, prefix="/admin", tags=["admin-search"])

@@ -52,6 +52,9 @@ class AlertType(str, Enum):
     QUOTA_EXHAUSTED = "quota_exhausted"
     PROVIDER_FAILURE = "provider_failure"
     DLP_BLOCK_SPIKE = "dlp_block_spike"
+    # FIX120 — the primary keeps failing but the fallback keeps answering,
+    # so nobody complains: the count of rescued turns is the only alarm.
+    FALLBACK_SPIKE = "fallback_spike"
     KEY_REVOKED = "key_revoked"
     SENSITIVE_ACTION = "sensitive_action"
 
