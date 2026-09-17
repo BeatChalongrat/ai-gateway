@@ -73,6 +73,37 @@ export function sharedRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+// FIX121 C3 — may the page send X-Request-Id?
+//
+// A custom request header on a cross-origin call is preflighted, and a
+// header the server does not list in Access-Control-Allow-Headers does not
+// degrade the request: the browser refuses to send it AT ALL. A chat-edge
+// older than FIX121 does not list X-Request-Id, so sending it blindly would
+// turn every send into a network error the moment this page is deployed
+// ahead of the server. The page therefore asks once: a GET of the server's
+// health endpoint carrying the header. It succeeds ⇒ the header is allowed
+// (or the call is same-origin, where no preflight exists). It fails ⇒ the
+// page sends exactly what it sent before FIX121, no key, no protection, no
+// outage. One request per page load, its answer shared by every send.
+let requestIdProbe: Promise<boolean> | null = null;
+export function requestIdAllowed(): Promise<boolean> {
+  if (requestIdProbe) return requestIdProbe;
+  requestIdProbe = (async () => {
+    try {
+      const health = new URL("/health", new URL(API_BASE, typeof window !== "undefined" ? window.location.href : "http://localhost")).toString();
+      const res = await fetch(health, { method: "GET", headers: { "X-Request-Id": "capability-probe-0001" }, signal: AbortSignal.timeout(2000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  })();
+  return requestIdProbe;
+}
+/** Test seam: forget the probe's answer. */
+export function resetRequestIdProbeForTest(): void {
+  requestIdProbe = null;
+}
+
 class ApiClient {
   // -----------------------------------------------------------
   // Low-level fetch. Cookie-authenticated, with 401 → refresh → retry.
@@ -439,6 +470,7 @@ class ApiClient {
     imageMode?: boolean,
     videoMode?: boolean,
     modelId?: string | null,
+    requestId?: string,
   ): Promise<Response> {
     // Hosted mode: submit the turn to the native host over the bridge and
     // render the events it streams back. The page never POSTs /messages here
@@ -459,9 +491,18 @@ class ApiClient {
     // Sprint 2A — 🎬 video mode: biases a tool-capable model to call
     // generate_video (chat-edge appends a system hint).
     if (videoMode) body.video_mode = true;
+    // FIX121 C3 — the send names itself. The id was minted BEFORE this
+    // request left, once for the user's action; chat-edge uses it as the run
+    // id and as the idempotency key, so a repeat of this request (raw()'s
+    // own retry after a 401 refresh is one) is answered with the first turn
+    // instead of running a second one. Only sent when the server is known to
+    // allow the header cross-origin — see requestIdAllowed.
+    const headers: Record<string, string> = {};
+    if (requestId && (await requestIdAllowed())) headers["X-Request-Id"] = requestId;
     return this.raw(`/conversations/${convId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),
+      headers,
       signal,
     });
   }

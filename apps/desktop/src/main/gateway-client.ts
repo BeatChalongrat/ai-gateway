@@ -176,7 +176,7 @@ export type StreamEvent =
    *  invented); `cause` is the terminal cause when the host itself ended
    *  the stream (docs/contracts/terminal_cause.json); `details` carries
    *  the gateway's structured payload or the host's transport text. */
-  | { kind: "error"; code: string; message: string; retryable?: boolean; cause?: TerminalCause; details?: Record<string, unknown> }
+  | { kind: "error"; code: string; message: string; retryable?: boolean; cause?: TerminalCause; details?: Record<string, unknown>; attempts?: unknown[] }
   /** FIX119 — `stop_reason` is the gateway's closed-set reason from the
    *  final chunk (absent on [DONE] and on an older gateway);
    *  `provider_request_id` / `gateway_request_id` are the ids of the call
@@ -536,7 +536,7 @@ export class GatewayClient {
       }
       if (!res.ok) {
         let detail = "";
-        let parsed: { error?: { code?: string; message?: string; details?: Record<string, unknown> } } | null = null;
+        let parsed: { error?: { code?: string; message?: string; details?: Record<string, unknown>; attempts?: unknown } } | null = null;
         try {
           detail = (await res.text()).slice(0, 600);
           parsed = JSON.parse(detail);
@@ -550,7 +550,7 @@ export class GatewayClient {
           yield { kind: "error", code, message };
           return;
         }
-        yield { kind: "error", code: err?.code ?? `http_${res.status}`, message: err?.message || detail || `Gateway returned HTTP ${res.status}.` };
+        yield { kind: "error", code: err?.code ?? `http_${res.status}`, message: err?.message || detail || `Gateway returned HTTP ${res.status}.`, ...(Array.isArray(err?.attempts) && err.attempts.length > 0 ? { attempts: err.attempts as unknown[] } : {}) };
         return;
       }
       if (!res.body) {
@@ -625,6 +625,10 @@ export function parseChunk(data: string): StreamEvent[] {
     // FIX119 — the backend's request id for the failed call rides details
     // so the page's card and the logs name the same thing.
     if (typeof e["request_id"] === "string" && e["request_id"]) frame.details = { ...(frame.details ?? {}), gateway_request_id: e["request_id"] };
+    // FIX121 — the per-model attempt log of an exhausted fallback walk. It is
+    // a SIBLING of code/message on the gateway's frame, and it was dropped
+    // here: the desktop never showed "Connection attempts" and never kept it.
+    if (Array.isArray(e["attempts"]) && e["attempts"].length > 0) frame.attempts = e["attempts"] as unknown[];
     out.push(frame);
     return out;
   }

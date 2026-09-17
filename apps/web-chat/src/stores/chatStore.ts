@@ -115,6 +115,11 @@ interface ChatState {
   activeConversationId: string | null;
   /** message lists keyed by conversation id. */
   messages: Record<string, Message[]>;
+  /** FIX121 C3 — per conversation, the send that has left the page and has
+   *  not yet got its response: its id and what it said. Not rendered by
+   *  anything; it lives here so that it flips synchronously (zustand's set
+   *  is synchronous) and resets with the store. */
+  sendsOpening: Record<string, { requestId: string; signature: string } | undefined>;
   turnScrollRequests: Record<string, TurnScrollRequest | undefined>;
   /** True once loadMessages has completed for a conversation —
    *  success or failure. Lets the page distinguish three states
@@ -358,6 +363,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversationsSearchLoading: false,
   activeConversationId: null,
   messages: {},
+  sendsOpening: {},
   turnScrollRequests: {},
   messagesLoaded: {},
   streamingAssistantId: {},
@@ -1167,8 +1173,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
       return;
     }
+    // FIX121 C3 — one user action is one send. Enter and a click (or two
+    // clicks) inside one React commit both pass the composer's `canSend`,
+    // because `streaming` is derived state that only turns true a commit
+    // later; each call then POSTed its own turn and BOTH persisted — the
+    // supersede below only relabels the first row, it never stopped the
+    // first request. An IDENTICAL send (same text, same files) for this
+    // conversation while the first has no response yet is the same keystroke
+    // arriving twice, and is dropped here, where it cannot cost a turn. A
+    // different message is a different action and goes through as before.
+    const signature = `${trimmed}\u0000${(fileIds ?? []).join(",")}`;
+    if (get().sendsOpening[convId]?.signature === signature) return;
     const tempUserId = tmpId("tmp-user");
     const tempAsstId = tmpId("tmp-asst");
+    // The id of THIS send, minted before anything leaves the page: the run
+    // id on every frame and row, and the server's idempotency key.
+    const requestId = crypto.randomUUID();
+    set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: { requestId, signature } } }));
 
     // FIX114 — one streaming row per conversation, and this path owns it.
     // A send while the previous turn is still open used to leave that
@@ -1304,7 +1325,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         imageMode,
         videoMode,
         convModelId, // FIX9 Part B: carry the selected model into the hosted turn
+        requestId,
       );
+      if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } })); // the response is back: `streaming` gates the composer from here
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -1400,6 +1423,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().setError(tOutside("error.networkStream"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
+      // FIX121 — a send that never got a response (network error, abort)
+      // must not leave the conversation refusing the next one.
+      if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } }));
       if (imageTimeout != null) {
         window.clearTimeout(imageTimeout);
       }

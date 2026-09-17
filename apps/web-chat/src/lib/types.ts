@@ -480,8 +480,10 @@ export interface Message {
    *  localized message in MessageBubble. FIX118: ``error_code`` is no
    *  longer local-only — a row read back from the server (migration 043)
    *  carries the catalogue code of its terminal error frame, so a reload
-   *  shows the same sentence the live frame did. ``error_message`` and
-   *  ``error_attempts`` stay live-only. */
+   *  shows the same sentence the live frame did. FIX121: ``error_attempts``
+   *  is persisted too (migration 047, list wire field of the same name), so
+   *  "Connection attempts" survives a reload and shows on rows the desktop
+   *  imported. ``error_message`` stays live-only. */
   error_code?: string;
   error_message?: string;
   error_attempts?: FallbackAttempt[];

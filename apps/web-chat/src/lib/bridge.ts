@@ -42,7 +42,10 @@ type HostToPage =
  *  `manual` at start and says so once. Informational; nothing to click. */
 export type HostNotice =
   | { kind: "update-available"; latest: string; current: string }
-  | { kind: "approval-mode-reset"; from: string; to: string };
+  | { kind: "approval-mode-reset"; from: string; to: string }
+  // FIX121 C4 — the host could not mirror a turn to the server (the import
+  // was refused, or the server named items it would not store).
+  | { kind: "turn-not-saved"; conversationId: string; runId?: string; reason: "failed" | "rejected"; status?: number; detail?: string };
 
 /** The closed set of host.query operations (Phase 5 §2.2). Mirrors the host's
  *  HostQueryOp enum; the host drops anything outside it. */
@@ -272,6 +275,8 @@ class BridgeClient {
           if (typeof p.latest !== "string" || !p.latest || typeof p.current !== "string") return;
         } else if (p.kind === "approval-mode-reset") {
           if (typeof p.from !== "string" || !p.from || typeof p.to !== "string" || !p.to) return;
+        } else if (p.kind === "turn-not-saved") {
+          if (typeof p.conversationId !== "string" || !p.conversationId || (p.reason !== "failed" && p.reason !== "rejected")) return;
         } else return;
         this.noticeHandlers.forEach((h) => h(p));
         return;

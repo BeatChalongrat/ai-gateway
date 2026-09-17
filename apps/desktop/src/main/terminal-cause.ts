@@ -54,6 +54,9 @@ export interface HostErrorFrame {
   retryable?: boolean;
   cause?: TerminalCause;
   details?: Record<string, unknown>;
+  /** FIX121 — the gateway's per-model attempt log, passed through as the
+   *  page reads it off a web error frame (`attempts`). */
+  attempts?: unknown[];
 }
 
 /** The status + cause + code a turn's assistant row is imported with. */
@@ -61,6 +64,8 @@ export interface TurnEnding {
   status: "completed" | "error" | "cancelled";
   cause: TerminalCause;
   errorCode?: string;
+  /** FIX121 — rides the imported error row as `error_attempts`. */
+  attempts?: unknown[];
 }
 
 /** The upstream stream closed without [DONE], an error frame or a finish
@@ -118,17 +123,18 @@ export function normalizeHostError(frame: HostErrorFrame): { frame: HostErrorFra
       retryable: frame.retryable ?? m.retryable,
       cause: frame.cause ?? m.cause,
       details: { ...(frame.details ?? {}), host_code: frame.code, host_message: frame.message },
+      ...(frame.attempts ? { attempts: frame.attempts } : {}),
     },
   };
 }
 
 /** The ending a run's outcome implies for the imported assistant row. */
-export function endingForOutcome(outcome: "done" | "cancelled" | "error" | "paused" | "denied", errored: { cause?: TerminalCause; errorCode?: string } | null): TurnEnding {
+export function endingForOutcome(outcome: "done" | "cancelled" | "error" | "paused" | "denied", errored: { cause?: TerminalCause; errorCode?: string; attempts?: unknown[] } | null): TurnEnding {
   switch (outcome) {
     case "cancelled":
       return { status: "cancelled", cause: "stopped_by_user" };
     case "error":
-      return { status: "error", cause: errored?.cause ?? "error", ...(errored?.errorCode ? { errorCode: errored.errorCode } : {}) };
+      return { status: "error", cause: errored?.cause ?? "error", ...(errored?.errorCode ? { errorCode: errored.errorCode } : {}), ...(errored?.attempts?.length ? { attempts: errored.attempts } : {}) };
     default:
       return { status: "completed", cause: "completed" };
   }

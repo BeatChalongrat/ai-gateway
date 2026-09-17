@@ -16,6 +16,7 @@ import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
 import { Sidebar } from "@/components/chat/Sidebar";
 import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
+import { TurnNotSavedBanner } from "@/components/chat/TurnNotSavedBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
 import { Spinner } from "@/components/ui/Spinner";
 import {
@@ -235,6 +236,8 @@ export default function ChatLayout({
         <UpdateBanner />
         {/* FIX25 §1c.3 — "permissions were reset from Never-asks" (desktop, once per launch). */}
         <ModeResetBanner />
+        {/* FIX121 C4 — "this turn was not saved to the server" (desktop only). */}
+        <TurnNotSavedBanner />
 
         {children}
 

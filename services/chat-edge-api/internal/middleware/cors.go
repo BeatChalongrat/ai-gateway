@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+// CORSAllowHeaders is the request-header allow-list of a cross-origin call.
+const CORSAllowHeaders = "Authorization, Content-Type, X-CSRF-Token, X-Request-Id"
+
 // CORS returns a middleware enforcing the allow-list.
 //
 // “allowOrigins“ is a comma-separated env value (e.g.
@@ -33,7 +36,13 @@ func CORS(allowOrigins string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-CSRF-Token")
+				// FIX121 — X-Request-Id: the page now names its own send (the
+				// idempotency key, STREAM_CONTRACT §12.1). A header outside this
+				// list fails the browser's preflight, i.e. EVERY cross-origin send.
+				w.Header().Set("Access-Control-Allow-Headers", CORSAllowHeaders)
+				// Readable by the page: the run id the server settled on, and
+				// whether this response is the replay of an earlier request.
+				w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, Idempotent-Replayed")
 				w.Header().Set("Access-Control-Max-Age", "600")
 			}
 			if r.Method == http.MethodOptions {

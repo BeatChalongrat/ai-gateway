@@ -30,7 +30,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { BridgeChannel } from "./bridge";
-import type { ChatEdgeClient, ConversationDto, MessageDto } from "./chat-edge-client";
+import type { ChatEdgeClient, ConversationDto, ImportMessageItem, MessageDto } from "./chat-edge-client";
 import type { ConnectorOAuth } from "./connector-oauth";
 import type { ConnectorTools } from "./connector-mcp";
 import type { GatewayClient, GatewayContentBlock, GatewayMessage, GatewayToolCall, GatewayToolDefinition } from "./gateway-client";
@@ -125,7 +125,7 @@ interface RunningTurn {
   fallbackFrom?: string;
   /** FIX118 — what the run's terminal error frame said (cause + code), so
    *  the imported assistant row records the same ending the page saw. */
-  errored?: { cause?: TerminalCause; errorCode?: string };
+  errored?: { cause?: TerminalCause; errorCode?: string; attempts?: unknown[] };
   /** FIX119 — why the model stopped on the last round (closed set), from
    *  the gateway's final chunk. "" when nothing was said. */
   stopReason?: StopReason | "";
@@ -290,6 +290,9 @@ const KEEP_SCREENSHOTS = 3;
 // FIX27: attached images kept in the chain (chat-edge replays at most 5 history images).
 const KEEP_ATTACHED_IMAGES = 5;
 const SCREENSHOT_MARKER = "[Screenshot from";
+
+/** chat-edge accepts at most this many items per import request. */
+const IMPORT_BATCH_MAX = 200;
 
 export class TurnCoordinator {
   private readonly logs = new Map<string, ConversationLog>();
@@ -1551,7 +1554,7 @@ export class TurnCoordinator {
     onFallback?: (requestedModel: string, actualModel: string) => void;
     /** FIX118 — called once when the run ends on an error frame, with the
      *  cause and code the frame carried. */
-    onEnding?: (e: { cause?: TerminalCause; errorCode: string }) => void;
+    onEnding?: (e: { cause?: TerminalCause; errorCode: string; attempts?: unknown[] }) => void;
     /** FIX119 — called on every `done` with the closed-set stop reason of
      *  that round ("" when nothing was said); the last one is the turn's. */
     onStopReason?: (r: StopReason | "") => void;
@@ -1721,8 +1724,10 @@ export class TurnCoordinator {
             // FIX118 — the frame carries the gateway's own verdict and the
             // terminal cause; the row imported for this turn records both.
             const cause: TerminalCause = ev.cause ?? "error";
-            run.onEnding?.({ cause, errorCode: code });
-            if (!run.parentToolCallId) this.emitError(eventConv, { code, message, ...(ev.retryable === undefined ? {} : { retryable: ev.retryable }), cause, ...(ev.details ? { details: ev.details } : {}) });
+            // FIX121 — and the per-model attempt log: on the frame for the
+            // page's "Connection attempts", on the row for the day after.
+            run.onEnding?.({ cause, errorCode: code, ...(ev.attempts ? { attempts: ev.attempts } : {}) });
+            if (!run.parentToolCallId) this.emitError(eventConv, { code, message, ...(ev.retryable === undefined ? {} : { retryable: ev.retryable }), cause, ...(ev.details ? { details: ev.details } : {}), ...(ev.attempts ? { attempts: ev.attempts } : {}) });
             else run.onText(`\n[error: ${ev.message}]`);
             break;
           }
@@ -2939,6 +2944,11 @@ export class TurnCoordinator {
     }
   }
 
+  /** FIX121 — import rows chat-edge has not confirmed, per conversation,
+   *  resent ahead of the next turn's rows. In memory only: a restart
+   *  forgets them (the local chain file still has the turn). */
+  private readonly unsavedImports = new Map<string, ImportMessageItem[]>();
+
   /** Imports this turn's visible rows to chat-edge; returns how many rows the
    *  server actually inserted (0 on failure or nothing to import) — the
    *  FIX109 marker is advanced by exactly that. */
@@ -2969,12 +2979,44 @@ export class TurnCoordinator {
     const runFields = runId ? { run_id: runId } : {};
     // FIX120 — the requested model of a rescued turn rides the import.
     const fallbackFields = turn.fallbackFrom ? { fallback_from: turn.fallbackFrom } : {};
-    if (turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error") items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields, ...fallbackFields });
+    const attemptFields = ending?.status === "error" && ending.attempts?.length ? { error_attempts: ending.attempts } : {};
+    // FIX121 — every turn leaves an assistant row. A Stop before the first
+    // character used to leave none (only text, files or an ERROR made one),
+    // so the web showed a question with no answer and no "stopped" label —
+    // while a web turn stopped at the same moment has always had its row.
+    const leavesARow = turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error" || ending?.status === "cancelled";
+    if (leavesARow) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields, ...fallbackFields, ...attemptFields });
     void chain;
-    const result = await this.chatEdge.importMessages(conversationId, items, runId);
-    if (result) this.log.info(`TURN PERSISTED conv=${conversationId} run=${runId ?? "-"}: ${result.imported} imported, ${result.skipped} skipped (chat-edge transcript); local chain history saved`);
-    else this.log.warn(`TURN PERSIST FAILED conv=${conversationId} run=${runId ?? "-"} (chat-edge import) — local chain history saved`);
-    return result ? result.imported : 0;
+    // FIX121 — rows an earlier import of this conversation could not deliver
+    // go first (the endpoint dedupes on client_id, so resending is safe).
+    const owed = this.unsavedImports.get(conversationId) ?? [];
+    const batch = [...owed, ...items].slice(-IMPORT_BATCH_MAX);
+    const result = await this.chatEdge.importMessages(conversationId, batch, runId);
+    if (result && !("failed" in result)) {
+      this.unsavedImports.delete(conversationId);
+      this.log.info(`TURN PERSISTED conv=${conversationId} run=${runId ?? "-"}: ${result.imported} imported, ${result.skipped} skipped${owed.length ? ` (${owed.length} owed from earlier)` : ""} (chat-edge transcript); local chain history saved`);
+      if (result.rejected?.length) {
+        const why = result.rejected.map((r) => `${r.client_id ?? "#" + r.index}: ${r.reason}`).join("; ").slice(0, 300);
+        this.log.warn(`TURN PARTLY PERSISTED conv=${conversationId} run=${runId ?? "-"}: ${result.rejected.length} item(s) rejected — ${why}`);
+        this.notifyNotSaved(conversationId, runId, "rejected", { detail: why });
+      }
+      return result.imported;
+    }
+    const failure: { status?: number; detail?: string } = result && "failed" in result ? result : {};
+    this.unsavedImports.set(conversationId, batch);
+    this.log.warn(`TURN PERSIST FAILED conv=${conversationId} run=${runId ?? "-"} (chat-edge import${failure.status ? ` HTTP ${failure.status}` : ""}) — local chain history saved; ${batch.length} row(s) will be resent with the next turn`);
+    this.notifyNotSaved(conversationId, runId, "failed", failure);
+    return 0;
+  }
+
+  /** FIX121 — a turn that did not reach the server is SAID, not only logged.
+   *  The person was looking at a normal answer while the web, the other
+   *  device and the server-side summary never had the turn. `host.notice`
+   *  rather than a turn event: an errored turn has already written its
+   *  terminal by the time the import runs, and the page drops turn events
+   *  that arrive with no open sink. */
+  private notifyNotSaved(conversationId: string, runId: string | undefined, reason: "failed" | "rejected", info: { status?: number; detail?: string }): void {
+    this.bridge.post("host.notice", { kind: "turn-not-saved", conversationId, ...(runId ? { runId } : {}), reason, ...(info.status ? { status: info.status } : {}), ...(info.detail ? { detail: info.detail.slice(0, 300) } : {}) });
   }
 
   private async generateTitle(conversationId: string, firstUser: string, firstReply: string): Promise<void> {

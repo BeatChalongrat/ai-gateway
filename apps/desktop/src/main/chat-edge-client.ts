@@ -72,6 +72,18 @@ export interface FileRowDto {
   extraction_status: string;
   message_id?: string;
 }
+/** FIX121 — one item chat-edge did not store, and why. */
+export interface ImportRejection {
+  index: number;
+  client_id?: string;
+  reason: string;
+}
+
+/** What an import came to. `null` (a fake, or no session) and `failed` both
+ *  mean nothing is known to be stored; a success may still name items the
+ *  server rejected. */
+export type ImportOutcome = { imported: number; skipped: number; rejected?: ImportRejection[] } | { failed: true; status?: number; detail?: string } | null;
+
 export interface ImportMessageItem {
   client_id: string;
   role: "user" | "assistant";
@@ -92,6 +104,9 @@ export interface ImportMessageItem {
   /** FIX120 — the requested model when a fallback model answered (model_id
    *  is the one that did). */
   fallback_from?: string;
+  /** FIX121 — the gateway's per-model attempt log of a turn that failed
+   *  (assistant error rows only); chat-edge stores a bounded copy. */
+  error_attempts?: unknown[];
 }
 /** POST /api/v1/code/run response (FIX80: rows carry the persisted
  *  ConversationFile id when a conversation was named). */
@@ -205,12 +220,15 @@ export class ChatEdgeClient {
     }
   }
 
-  async importMessages(conversationId: string, messages: ImportMessageItem[], runId?: string): Promise<{ imported: number; skipped: number } | null> {
+  async importMessages(conversationId: string, messages: ImportMessageItem[], runId?: string): Promise<ImportOutcome> {
     // FIX119 — the import request itself carries the run id, so chat-edge's
     // http_request line for it joins the desktop turn to the rows.
-    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages/import`, { messages }, this.timeoutMs, runId ? { "X-Request-Id": runId } : undefined);
-    if (!res) return null;
-    return (await res.json()) as { imported: number; skipped: number };
+    // FIX121 — and a refusal comes back WITH its status: the caller tells
+    // the person the turn was not saved, which a bare null could not do.
+    const failure: { status?: number; detail?: string } = {};
+    const res = await this.send("POST", `/api/v1/conversations/${encodeURIComponent(conversationId)}/messages/import`, { messages }, this.timeoutMs, runId ? { "X-Request-Id": runId } : undefined, failure);
+    if (!res) return { failed: true, ...failure };
+    return (await res.json()) as { imported: number; skipped: number; rejected?: ImportRejection[] };
   }
 
   /** POST /api/v1/conversations/{id}/files/generated — FIX81: the one
@@ -532,7 +550,7 @@ export class ChatEdgeClient {
     }
   }
 
-  private async send(method: "POST" | "PATCH", path: string, body: unknown, timeoutMs = this.timeoutMs, extraHeaders?: Record<string, string>): Promise<Response | null> {
+  private async send(method: "POST" | "PATCH", path: string, body: unknown, timeoutMs = this.timeoutMs, extraHeaders?: Record<string, string>, failure?: { status?: number; detail?: string }): Promise<Response | null> {
     const token = this.accessToken();
     if (!token) return null;
     try {
@@ -550,11 +568,16 @@ export class ChatEdgeClient {
           /* ignore */
         }
         this.log.warn(`chat-edge ${method} ${path} → HTTP ${res.status} ${detail}`);
+        if (failure) {
+          failure.status = res.status;
+          failure.detail = detail;
+        }
         return null;
       }
       return res;
     } catch (err) {
       this.log.warn(`chat-edge ${method} ${path} failed: ${(err as Error).message}`);
+      if (failure) failure.detail = (err as Error).message;
       return null;
     }
   }
