@@ -98,6 +98,10 @@ type messageResponse struct {
 	// FIX120 — the requested model when a fallback model answered
 	// (model_id names the one that did). Omitted otherwise.
 	FallbackFrom *string `json:"fallback_from,omitempty"`
+	// FIX121 — the per-model attempt log of a failed turn (migration 047),
+	// under the name the page already reads off the live error frame's
+	// row (Message.error_attempts), so a reload renders the same list.
+	ErrorAttempts json.RawMessage `json:"error_attempts,omitempty"`
 	Files       []fileResponse `json:"files,omitempty"`
 	BranchIndex int            `json:"branch_index"`
 	BranchCount int            `json:"branch_count"`
@@ -188,6 +192,9 @@ func messageToWire(m *model.Message) messageResponse {
 	}
 	if m.FallbackFrom != nil && *m.FallbackFrom != "" {
 		r.FallbackFrom = m.FallbackFrom
+	}
+	if len(m.Attempts) > 0 && string(m.Attempts) != "null" {
+		r.ErrorAttempts = m.Attempts
 	}
 	if m.ReasoningContent != nil && *m.ReasoningContent != "" {
 		r.ReasoningContent = m.ReasoningContent
@@ -394,11 +401,71 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 			in.FileIDs = append(in.FileIDs, id)
 		}
 	}
+	// FIX121 — an X-Request-Id the CLIENT chose is this send's idempotency
+	// key: a repeat is answered with the turn the first one produced, never
+	// run again. No supplied id, no key, no change.
+	if key := middleware.SuppliedRequestIDFrom(r.Context()); key != "" {
+		in.IdempotencyKey = key
+		if h.replayIfRepeated(w, r, in, req.Stream) {
+			return
+		}
+	}
 	if req.Stream {
 		h.sendStream(w, r, in)
 		return
 	}
 	h.sendNonStream(w, r, in)
+}
+
+// Wire codes of the send path's idempotency contract (409).
+const (
+	CodeIdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED"
+	CodeRequestInProgress    = "REQUEST_IN_PROGRESS"
+)
+
+// replayIfRepeated answers a send whose idempotency key this conversation
+// has already seen, and reports whether it did. The contract is the one
+// payment APIs made familiar:
+//
+//	same key, same content      → the first turn again, marked
+//	                              ``Idempotent-Replayed: true``
+//	same key, different content → 409 IDEMPOTENCY_KEY_REUSED
+//	same key, no answer row yet → 409 REQUEST_IN_PROGRESS (retry)
+//
+// A streaming caller is attached to the first turn through the resume path:
+// the recorded frames replayed verbatim with their original seq, then the
+// live tail if the run is still going — the same bytes the first response
+// carried, so nothing is generated, charged or written twice.
+func (h *MessageHandler) replayIfRepeated(w http.ResponseWriter, r *http.Request, in service.SendInput, stream bool) bool {
+	replay, err := h.messages.FindSendReplay(
+		r.Context(), in.TenantID, in.UserID, in.ConversationID, in.IdempotencyKey, in.Content,
+	)
+	switch {
+	case errors.Is(err, service.ErrIdempotencyKeyReused):
+		WriteError(w, http.StatusConflict, CodeIdempotencyKeyReused,
+			"this X-Request-Id was already used for a different message in this conversation")
+		return true
+	case errors.Is(err, service.ErrSendInProgress):
+		WriteError(w, http.StatusConflict, CodeRequestInProgress,
+			"a request with this X-Request-Id is still being accepted; retry shortly")
+		return true
+	case err != nil:
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return true
+	case replay == nil:
+		return false
+	}
+	w.Header().Set("Idempotent-Replayed", "true")
+	if stream {
+		h.serveResume(w, r, in.TenantID, in.UserID, in.ConversationID,
+			replay.AssistantMessage.ID, replay.UserMessage.ID, 0)
+		return true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"message": messageToWire(replay.AssistantMessage),
+	})
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -407,6 +474,15 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 
 func (h *MessageHandler) sendNonStream(w http.ResponseWriter, r *http.Request, in service.SendInput) {
 	res, err := h.messages.SendNonStream(r.Context(), in)
+	if errors.Is(err, service.ErrSendDuplicate) {
+		// FIX121 — another copy of this request inserted its user row
+		// between our lookup and our insert (migration 047's index said so).
+		if !h.replayIfRepeated(w, r, in, false) {
+			WriteError(w, http.StatusConflict, CodeRequestInProgress,
+				"a request with this X-Request-Id is still being accepted; retry shortly")
+		}
+		return
+	}
 	if err != nil {
 		h.writeSendError(w, err)
 		return
@@ -947,6 +1023,14 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	}
 
 	stream, err := h.messages.SendStream(r.Context(), in)
+	if errors.Is(err, service.ErrSendDuplicate) && !started {
+		// FIX121 — lost the user-row insert to another copy of this request.
+		if !h.replayIfRepeated(w, r, in, true) {
+			WriteError(w, http.StatusConflict, CodeRequestInProgress,
+				"a request with this X-Request-Id is still being accepted; retry shortly")
+		}
+		return
+	}
 	if err != nil {
 		if started {
 			// The response is already an open SSE stream: the error must
@@ -982,6 +1066,9 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	}
 	if res.fallbackFrom != "" { // FIX120
 		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
+	}
+	if res.errAttempts != nil { // FIX121 — a failed turn keeps what was tried
+		_ = h.messages.SetAttempts(context.Background(), stream.AssistantID, res.errAttempts)
 	}
 	h.finishStream(rw, flusher, r.Context(), in.TenantID, stream, res)
 }
@@ -1374,6 +1461,9 @@ func (h *MessageHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) 
 	if res.fallbackFrom != "" { // FIX120
 		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
 	}
+	if res.errAttempts != nil { // FIX121 — a failed turn keeps what was tried
+		_ = h.messages.SetAttempts(context.Background(), stream.AssistantID, res.errAttempts)
+	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
 
@@ -1408,12 +1498,6 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message id")
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
-		return
-	}
-
 	// FIX41 / STREAM_CONTRACT section 4 - starting_after is the client's
 	// cursor: replay only what it has not already rendered. Absent (or 0)
 	// keeps the pre-FIX41 behaviour of replaying the whole run, so a
@@ -1427,9 +1511,24 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		}
 		startingAfter = n
 	}
+	h.serveResume(w, r, caller.TenantUUID, caller.UserID, convID, msgID, uuid.Nil, startingAfter)
+}
 
+// serveResume attaches this response to a generation and replays what the
+// caller has not seen. Two callers: ResumeStream (a viewer reattaching) and,
+// since FIX121, a repeated send (replayIfRepeated), which names the user row
+// too so the replayed message_start can hand the client its persisted id.
+func (h *MessageHandler) serveResume(
+	w http.ResponseWriter, r *http.Request,
+	tenantID, userID, convID, msgID, userMsgID uuid.UUID, startingAfter int64,
+) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
 	att, err := h.messages.ResumeAttachFrom(
-		r.Context(), caller.TenantUUID, caller.UserID, convID, msgID, startingAfter,
+		r.Context(), tenantID, userID, convID, msgID, startingAfter,
 	)
 	if err != nil {
 		switch {
@@ -1476,10 +1575,14 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 	rw.started = true
 	defer rw.ensureTerminal(flusher)
 
-	writeSSEEvent(rw, flusher, "message_start", map[string]any{
+	startPayload := map[string]any{
 		"message_id":      msgID.String(),
 		"conversation_id": convID.String(),
-	})
+	}
+	if userMsgID != uuid.Nil {
+		startPayload["user_message_id"] = userMsgID.String()
+	}
+	writeSSEEvent(rw, flusher, "message_start", startPayload)
 	h.writeResumeSnapshot(rw, flusher, att.Snapshot)
 
 	if att.Events != nil {
@@ -1504,8 +1607,8 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() == nil {
 			time.Sleep(250 * time.Millisecond)
 		}
-		h.writeMessageFiles(rw, flusher, r.Context(), caller.TenantUUID, msgID)
-		h.writeMessageSources(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+		h.writeMessageFiles(rw, flusher, r.Context(), tenantID, msgID)
+		h.writeMessageSources(rw, flusher, r.Context(), tenantID, msgID)
 		if res.err != nil {
 			writeSSEEvent(rw, flusher, "error", res.terminalErrorPayload())
 			return
@@ -1532,8 +1635,8 @@ func (h *MessageHandler) ResumeStream(w http.ResponseWriter, r *http.Request) {
 	if t := att.Snapshot.Terminal; t != nil && t.Err != nil {
 		interrupted = true
 	}
-	h.writeMessageFiles(rw, flusher, r.Context(), caller.TenantUUID, msgID)
-	h.writeMessageSources(rw, flusher, r.Context(), caller.TenantUUID, msgID)
+	h.writeMessageFiles(rw, flusher, r.Context(), tenantID, msgID)
+	h.writeMessageSources(rw, flusher, r.Context(), tenantID, msgID)
 	if interrupted {
 		// FIX41: an interrupted generation ENDS on error. Before, this
 		// wrote error and then message_complete, so the last thing a
@@ -1783,6 +1886,9 @@ func (h *MessageHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
 	if res.fallbackFrom != "" { // FIX120
 		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
 	}
+	if res.errAttempts != nil { // FIX121 — a failed turn keeps what was tried
+		_ = h.messages.SetAttempts(context.Background(), stream.AssistantID, res.errAttempts)
+	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }
 
@@ -1871,6 +1977,9 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 	}
 	if res.fallbackFrom != "" { // FIX120
 		_ = h.messages.SetFallbackFrom(context.Background(), stream.AssistantID, res.fallbackFrom)
+	}
+	if res.errAttempts != nil { // FIX121 — a failed turn keeps what was tried
+		_ = h.messages.SetAttempts(context.Background(), stream.AssistantID, res.errAttempts)
 	}
 	h.finishStream(rw, flusher, r.Context(), caller.TenantUUID, stream, res)
 }

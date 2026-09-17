@@ -70,11 +70,18 @@ func Logging(next http.Handler) http.Handler {
 		// same value. Before this the handler minted a second, different
 		// uuid whenever the client sent none.
 		rid := SanitizeRequestID(r.Header.Get("X-Request-Id"))
+		supplied := rid != ""
 		if rid == "" {
 			rid = uuid.NewString()
 		}
 		w.Header().Set("X-Request-Id", rid)
 		r = r.WithContext(WithRequestID(r.Context(), rid))
+		if supplied {
+			// FIX121 — an id the CLIENT chose names one request; the send
+			// path treats it as that request's idempotency key. A minted
+			// id is unique by construction and is never a key.
+			r = r.WithContext(context.WithValue(r.Context(), requestIDSuppliedKey{}, true))
+		}
 
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
@@ -142,6 +149,18 @@ func SanitizeRequestID(raw string) string {
 // WithRequestID stores the request id on the context.
 func WithRequestID(ctx context.Context, rid string) context.Context {
 	return context.WithValue(ctx, requestIDKey{}, rid)
+}
+
+type requestIDSuppliedKey struct{}
+
+// SuppliedRequestIDFrom returns the request id only when the CLIENT sent it
+// (a well-formed X-Request-Id), "" when the middleware minted one. FIX121:
+// this is the send path's idempotency key.
+func SuppliedRequestIDFrom(ctx context.Context) string {
+	if ok, _ := ctx.Value(requestIDSuppliedKey{}).(bool); !ok {
+		return ""
+	}
+	return RequestIDFrom(ctx)
 }
 
 // RequestIDFrom returns the request id the Logging middleware minted or

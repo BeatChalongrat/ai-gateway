@@ -73,6 +73,9 @@ type importMessageItem struct {
 	// FIX120 — the requested model when a fallback model answered the
 	// desktop turn (model_id is the one that did).
 	FallbackFrom string `json:"fallback_from,omitempty"`
+	// FIX121 — the per-model attempt log of a turn that failed on the
+	// desktop (the gateway error frame's attempts); stored bounded.
+	ErrorAttempts []any `json:"error_attempts,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -82,7 +85,13 @@ type importMessagesRequest struct {
 type importMessagesResponse struct {
 	Imported int `json:"imported"`
 	Skipped  int `json:"skipped"`
+	// FIX121 — items that were NOT stored, each with its reason. Absent when
+	// every item was stored or deduped, so an older client sees no change.
+	Rejected []service.ImportRejection `json:"rejected,omitempty"`
 }
+
+// CodeRequestTooLarge is the transport ceiling's refusal (413).
+const CodeRequestTooLarge = "REQUEST_TOO_LARGE"
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -158,31 +167,42 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
 		return
 	}
+	// FIX121 — the one size limit on an import is on the REQUEST, and it is
+	// said out loud: 413 with a code, not a 422 about one message's bytes.
+	r.Body = http.MaxBytesReader(w, r.Body, service.ImportMaxBodyBytes)
 	var req importMessagesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			WriteError(w, http.StatusRequestEntityTooLarge, CodeRequestTooLarge,
+				"import request exceeds "+strconv.FormatInt(service.ImportMaxBodyBytes, 10)+" bytes; send the messages in smaller batches")
+			return
+		}
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
 
 	items := make([]service.ImportMessageInput, 0, len(req.Messages))
-	for i, m := range req.Messages {
+	for _, m := range req.Messages {
+		// A per-item problem found here rejects that ITEM (the service
+		// reports it); it no longer refuses the whole batch.
+		invalid := ""
 		ts, err := time.Parse(time.RFC3339, m.CreatedAt)
 		if err != nil {
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
-				"messages["+strconv.Itoa(i)+"].created_at must be RFC3339")
-			return
+			ts = time.Time{}
 		}
 		var fileIDs []uuid.UUID
 		for _, s := range m.FileIDs {
 			id, err := uuid.Parse(s)
 			if err != nil {
-				WriteError(w, http.StatusUnprocessableEntity, CodeValidationError,
-					"messages["+strconv.Itoa(i)+"].file_ids must be UUIDs")
-				return
+				invalid = "file_ids must be UUIDs"
+				break
 			}
 			fileIDs = append(fileIDs, id)
 		}
 		items = append(items, service.ImportMessageInput{
+			Invalid:       invalid,
+			Attempts:      anyList(m.ErrorAttempts),
 			ClientID:      m.ClientID,
 			Role:          m.Role,
 			Content:       m.Content,
@@ -198,7 +218,7 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	imported, skipped, err := h.imports.ImportMessages(
+	imported, skipped, rejected, err := h.imports.ImportMessages(
 		r.Context(), caller.TenantUUID, caller.UserID, convID, items,
 	)
 	if err != nil {
@@ -217,5 +237,15 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(importMessagesResponse{
 		Imported: imported,
 		Skipped:  skipped,
+		Rejected: rejected,
 	})
+}
+
+// anyList hands a decoded JSON array to the service as the any its
+// normaliser takes; nil stays nil (no list on the item).
+func anyList(v []any) any {
+	if v == nil {
+		return nil
+	}
+	return v
 }

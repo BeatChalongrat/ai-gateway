@@ -184,7 +184,7 @@ func TestFallbackFrom_RidesTheRowAndTheImport(t *testing.T) {
 		{ClientID: "a2", Role: "assistant", Content: "b", ModelID: "gpt-5.6-luna", CreatedAt: now.Add(2 * time.Millisecond), Status: "completed", FallbackFrom: "gpt-5.6-luna"},
 		{ClientID: "a3", Role: "assistant", Content: "c", ModelID: "gpt-5.6-luna", CreatedAt: now.Add(3 * time.Millisecond), Status: "completed"},
 	}
-	if _, _, err := imp.ImportMessages(ctx, tenant, user, ic.ID, items); err != nil {
+	if _, _, _, err := imp.ImportMessages(ctx, tenant, user, ic.ID, items); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	want := map[string]*string{"u1": nil, "a1": strp("gpt-5.6-luna"), "a2": nil, "a3": nil}

@@ -982,6 +982,11 @@ type SendInput struct {
 	ConversationID uuid.UUID
 	Content        string
 	RequestID      string
+	// IdempotencyKey (FIX121) is the request id when the CLIENT supplied
+	// it, "" when the middleware minted one. When set, the user row records
+	// it as run_id so a repeat of the same request finds the first turn
+	// (send_idempotency.go); when empty the send is exactly what it was.
+	IdempotencyKey string
 	// FileIDs is the (optional) list of conversation_files row ids
 	// the user attached to this send. Each id is patched onto the
 	// new user message + their extracted text is folded into the
@@ -1117,6 +1122,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		ModelID:          &conv.ModelID,
 		TokenUsageInput:  tokInput,
 		TokenUsageOutput: tokOutput,
+		RunID:            runIDPtr(in.IdempotencyKey), // FIX121 — lets a repeat find this answer
 	})
 	if err != nil {
 		return nil, err
@@ -2971,8 +2977,12 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 		ParentID:       parentID,
 		BranchIndex:    branchIndex,
 		IsActive:       true,
+		RunID:          runIDPtr(in.IdempotencyKey), // FIX121 — nil unless the client chose the id
 	})
 	if err != nil {
+		if errors.Is(err, repository.ErrDuplicateRun) {
+			return nil, nil, nil, ErrSendDuplicate
+		}
 		return nil, nil, nil, err
 	}
 
@@ -3176,6 +3186,7 @@ func (s *MessageService) persistError(
 		Status:         "error",
 		ModelID:        &conv.ModelID,
 		IsActive:       true,
+		RunID:          runIDPtr(in.IdempotencyKey), // FIX121 — a repeat replays the failure too
 	})
 	return err
 }

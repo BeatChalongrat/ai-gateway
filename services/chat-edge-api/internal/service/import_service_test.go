@@ -122,7 +122,7 @@ func TestImportServiceE2E(t *testing.T) {
 	}
 
 	t.Run("MessagesImportPreservesTimestamps", func(t *testing.T) {
-		imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
+		imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
 		if err != nil {
 			t.Fatalf("import messages: %v", err)
 		}
@@ -148,7 +148,7 @@ func TestImportServiceE2E(t *testing.T) {
 	})
 
 	t.Run("ExactReplayImportsZero", func(t *testing.T) {
-		imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
+		imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
 		if err != nil {
 			t.Fatalf("replay: %v", err)
 		}
@@ -171,7 +171,7 @@ func TestImportServiceE2E(t *testing.T) {
 		mixed := append(batch[1:],
 			ImportMessageInput{ClientID: "m3", Role: "user", Content: "next turn",
 				CreatedAt: time.Date(2026, 1, 2, 4, 0, 0, 0, time.UTC)})
-		imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, mixed)
+		imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, mixed)
 		if err != nil {
 			t.Fatalf("mixed import: %v", err)
 		}
@@ -188,7 +188,7 @@ func TestImportServiceE2E(t *testing.T) {
 	})
 
 	t.Run("ToolRoleRejectedBeforeDB", func(t *testing.T) {
-		_, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, []ImportMessageInput{
+		_, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, []ImportMessageInput{
 			{ClientID: "t1", Role: "tool", Content: "result", CreatedAt: ts1},
 		})
 		if !errors.Is(err, ErrImportInvalid) {
@@ -197,7 +197,7 @@ func TestImportServiceE2E(t *testing.T) {
 	})
 
 	t.Run("EmptyBatchRejected", func(t *testing.T) {
-		_, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, nil)
+		_, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, nil)
 		if !errors.Is(err, ErrImportInvalid) {
 			t.Fatalf("want ErrImportInvalid for empty batch, got %v", err)
 		}
@@ -208,14 +208,14 @@ func TestImportServiceE2E(t *testing.T) {
 		for i := range big {
 			big[i] = ImportMessageInput{ClientID: uuid.NewString(), Role: "user", Content: "x", CreatedAt: ts1}
 		}
-		_, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, big)
+		_, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, big)
 		if !errors.Is(err, ErrImportInvalid) {
 			t.Fatalf("want ErrImportInvalid for oversized batch, got %v", err)
 		}
 	})
 
 	t.Run("CrossUserIsNotFound", func(t *testing.T) {
-		_, _, err := svc.ImportMessages(ctx, tenantID, otherUser, conv.ID, batch)
+		_, _, _, err := svc.ImportMessages(ctx, tenantID, otherUser, conv.ID, batch)
 		if !errors.Is(err, ErrConversationNotFound) {
 			t.Fatalf("want ErrConversationNotFound, got %v", err)
 		}
@@ -241,7 +241,7 @@ func TestImportServiceE2E(t *testing.T) {
 			CreatedAt: time.Date(2026, 1, 2, 5, 0, 0, 0, time.UTC),
 			FileIDs:   []uuid.UUID{row.ID},
 		}}
-		if _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item); err != nil {
+		if _, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item); err != nil {
 			t.Fatalf("import with file_ids: %v", err)
 		}
 		var linkedTo *uuid.UUID
@@ -260,7 +260,7 @@ func TestImportServiceE2E(t *testing.T) {
 			t.Fatalf("file linked to wrong message: client_id=%q err=%v", clientOfMsg, err)
 		}
 		// Replay: message dedups (skipped), link survives, no error.
-		imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item)
+		imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, item)
 		if err != nil || imported != 0 || skipped != 1 {
 			t.Fatalf("replay: want 0/1 nil, got %d/%d %v", imported, skipped, err)
 		}
@@ -340,7 +340,7 @@ func TestImportServiceE2E(t *testing.T) {
 		// The message-import path sees a deleted conversation as not-found
 		// (ownership gate filters is_deleted) — the desktop treats that 404
 		// as "deleted remotely" and drops its local copy.
-		_, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
+		_, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
 		if !errors.Is(err, ErrConversationNotFound) {
 			t.Fatalf("want ErrConversationNotFound for deleted conversation, got %v", err)
 		}

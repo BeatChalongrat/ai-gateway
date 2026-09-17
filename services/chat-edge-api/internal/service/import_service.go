@@ -38,8 +38,17 @@ var ErrImportConversationGone = errors.New("import: conversation deleted")
 const (
 	// importMaxBatch caps one message-import request.
 	importMaxBatch = 200
-	// importMaxContentBytes caps a single message's content (128 KB).
-	importMaxContentBytes = 128 * 1024
+	// ImportMaxBodyBytes caps one import REQUEST (32 MiB) — a transport
+	// ceiling, enforced by the handler before the body is decoded.
+	//
+	// FIX121 — there is no ceiling on a message's content. Until now one
+	// message above 128 KiB (about 43,000 Thai characters: three bytes each)
+	// failed the whole batch with 422, so a long desktop turn — question AND
+	// answer — never reached the server while the person saw a normal reply.
+	// An import mirrors a turn that has already happened; refusing to keep
+	// it protects nothing. The web send path never had a content ceiling
+	// either, so the same message sent from the page was always kept.
+	ImportMaxBodyBytes = 32 << 20
 	// importMaxFilesPerMessage mirrors the send path's files-per-message
 	// cap (FileService Knobs.MaxFilesPerMessage default).
 	importMaxFilesPerMessage = 5
@@ -197,70 +206,106 @@ type ImportMessageInput struct {
 	// FIX120 — the requested model when a fallback model answered
 	// (assistant rows only; stored only when it differs from ModelID).
 	FallbackFrom string
+	// FIX121 — the per-model attempt log of a failed desktop turn, as the
+	// gateway's error frame carried it. Assistant rows that ended in error
+	// only; stored as the bounded copy NormalizeAttempts makes.
+	Attempts any
+	// Invalid is a reason the HANDLER already found this item unusable
+	// (an unparsable file id); it is rejected like any other bad item.
+	Invalid string
+}
+
+// ImportRejection names one item of a batch that was not stored, and why.
+type ImportRejection struct {
+	Index    int    `json:"index"`
+	ClientID string `json:"client_id,omitempty"`
+	Reason   string `json:"reason"`
+}
+
+// importItemProblem returns why an item cannot be stored, or "".
+func importItemProblem(it *ImportMessageInput) string {
+	if it.Invalid != "" {
+		return it.Invalid
+	}
+	// Only user/assistant ever reach the DB — a "tool"/"system" role is
+	// rejected here, well before the messages_masked role CHECK.
+	if it.Role != "user" && it.Role != "assistant" {
+		return "role must be user or assistant"
+	}
+	if strings.TrimSpace(it.ClientID) == "" {
+		return "client_id is required"
+	}
+	if it.CreatedAt.IsZero() {
+		return "created_at is required (RFC3339)"
+	}
+	if len(it.FileIDs) > importMaxFilesPerMessage {
+		return fmt.Sprintf("at most %d file_ids per message", importMaxFilesPerMessage)
+	}
+	// FIX118 — the ending must be one the row can hold.
+	switch it.Status {
+	case "", "completed", "error", "cancelled":
+	default:
+		return "status must be completed, error or cancelled"
+	}
+	if c := it.TerminalCause; c != "" && !IsTerminalCause(c) {
+		return "terminal_cause is not one of " + strings.Join(TerminalCauses, "|")
+	}
+	if e := it.ErrorCode; e != "" && !importErrorCodeRe.MatchString(e) {
+		return "error_code must be a short identifier"
+	}
+	if sr := it.StopReason; sr != "" && !IsStopReason(sr) {
+		return "stop_reason is not one of " + strings.Join(StopReasons, "|")
+	}
+	if rid := it.RunID; rid != "" && !importRunIDRe.MatchString(rid) {
+		return "run_id must be a short identifier"
+	}
+	return ""
 }
 
 // ImportMessages appends historical messages to an owned conversation in
 // ONE transaction, deduping by (conversation_id, client_id). Returns
-// (imported, skipped) where skipped = conflict-deduped rows. Never
+// (imported, skipped, rejected) where skipped = conflict-deduped rows and
+// rejected = items that could not be stored, each with its reason. Never
 // generates anything; supplied timestamps are preserved.
+//
+// FIX121 — one bad item no longer fails its neighbours. The old pre-flight
+// loop returned on the first problem, before the transaction opened, so a
+// batch was all or nothing and the caller learned only "422". Now every
+// storable item is stored and every other one is named in rejected; the
+// request is refused as a whole (ErrImportInvalid) only when it is malformed
+// as a whole: empty, over the batch size, or with no storable item at all.
 func (s *ImportService) ImportMessages(
 	ctx context.Context,
 	tenantID, userID, convID uuid.UUID,
 	items []ImportMessageInput,
-) (imported, skipped int, err error) {
+) (imported, skipped int, rejected []ImportRejection, err error) {
 	// Ownership first — same non-leaking 404 semantics as every other route.
 	if _, err := s.ownership.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
-		return 0, 0, err
+		return 0, 0, nil, err
 	}
 
 	if len(items) == 0 {
-		return 0, 0, fmt.Errorf("%w: messages must be a non-empty array", ErrImportInvalid)
+		return 0, 0, nil, fmt.Errorf("%w: messages must be a non-empty array", ErrImportInvalid)
 	}
 	if len(items) > importMaxBatch {
-		return 0, 0, fmt.Errorf("%w: at most %d messages per request", ErrImportInvalid, importMaxBatch)
+		return 0, 0, nil, fmt.Errorf("%w: at most %d messages per request", ErrImportInvalid, importMaxBatch)
 	}
+	storable := make([]bool, len(items))
+	anyStorable := false
 	for i := range items {
-		// Only user/assistant ever reach the DB — a "tool"/"system" role is
-		// rejected here, well before the messages_masked role CHECK.
-		if items[i].Role != "user" && items[i].Role != "assistant" {
-			return 0, 0, fmt.Errorf("%w: message %d: role must be user or assistant", ErrImportInvalid, i)
+		if why := importItemProblem(&items[i]); why != "" {
+			rejected = append(rejected, ImportRejection{Index: i, ClientID: strings.TrimSpace(items[i].ClientID), Reason: why})
+			continue
 		}
-		if strings.TrimSpace(items[i].ClientID) == "" {
-			return 0, 0, fmt.Errorf("%w: message %d: client_id is required", ErrImportInvalid, i)
-		}
-		if len(items[i].Content) > importMaxContentBytes {
-			return 0, 0, fmt.Errorf("%w: message %d: content exceeds %d bytes", ErrImportInvalid, i, importMaxContentBytes)
-		}
-		if items[i].CreatedAt.IsZero() {
-			return 0, 0, fmt.Errorf("%w: message %d: created_at is required", ErrImportInvalid, i)
-		}
-		if len(items[i].FileIDs) > importMaxFilesPerMessage {
-			return 0, 0, fmt.Errorf("%w: message %d: at most %d file_ids per message",
-				ErrImportInvalid, i, importMaxFilesPerMessage)
-		}
-		// FIX118 — the ending must be one the row can hold.
-		switch items[i].Status {
-		case "", "completed", "error", "cancelled":
-		default:
-			return 0, 0, fmt.Errorf("%w: message %d: status must be completed, error or cancelled", ErrImportInvalid, i)
-		}
-		if c := items[i].TerminalCause; c != "" && !IsTerminalCause(c) {
-			return 0, 0, fmt.Errorf("%w: message %d: terminal_cause is not one of %s", ErrImportInvalid, i, strings.Join(TerminalCauses, "|"))
-		}
-		if e := items[i].ErrorCode; e != "" && !importErrorCodeRe.MatchString(e) {
-			return 0, 0, fmt.Errorf("%w: message %d: error_code must be a short identifier", ErrImportInvalid, i)
-		}
-		if sr := items[i].StopReason; sr != "" && !IsStopReason(sr) {
-			return 0, 0, fmt.Errorf("%w: message %d: stop_reason is not one of %s", ErrImportInvalid, i, strings.Join(StopReasons, "|"))
-		}
-		if rid := items[i].RunID; rid != "" && !importRunIDRe.MatchString(rid) {
-			return 0, 0, fmt.Errorf("%w: message %d: run_id must be a short identifier", ErrImportInvalid, i)
-		}
+		storable[i] = true
+		anyStorable = true
 	}
-
+	if !anyStorable {
+		return 0, 0, nil, fmt.Errorf("%w: message %d: %s", ErrImportInvalid, rejected[0].Index, rejected[0].Reason)
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return 0, 0, fmt.Errorf("import messages: begin tx: %w", err)
+		return 0, 0, nil, fmt.Errorf("import messages: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -268,6 +313,9 @@ func (s *ImportService) ImportMessages(
 	convs := s.conversations.WithTx(tx)
 	filesTx := s.files.WithTx(tx)
 	for i := range items {
+		if !storable[i] {
+			continue
+		}
 		var modelID *string
 		if m := strings.TrimSpace(items[i].ModelID); m != "" {
 			modelID = &m
@@ -317,10 +365,14 @@ func (s *ImportService) ImportMessages(
 			if from := strings.TrimSpace(items[i].FallbackFrom); from != "" && (row.ModelID == nil || from != *row.ModelID) {
 				row.FallbackFrom = &from
 			}
+			// FIX121 — the attempt log belongs to a turn that failed.
+			if row.Status == "error" {
+				row.Attempts = NormalizeAttempts(items[i].Attempts)
+			}
 		}
 		msgID, inserted, err := msgs.CreateImported(ctx, row, strings.TrimSpace(items[i].ClientID), items[i].CreatedAt)
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 		if inserted {
 			imported++
@@ -334,7 +386,7 @@ func (s *ImportService) ImportMessages(
 		if len(items[i].FileIDs) > 0 {
 			if _, err := filesTx.AttachToMessage(
 				ctx, tenantID, convID, msgID, items[i].FileIDs); err != nil {
-				return 0, 0, err
+				return 0, 0, nil, err
 			}
 		}
 	}
@@ -342,11 +394,11 @@ func (s *ImportService) ImportMessages(
 	// conflict-skipped replays must not inflate the count.
 	if imported > 0 {
 		if err := convs.IncrementMessageCount(ctx, convID, imported); err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, fmt.Errorf("import messages: commit: %w", err)
+		return 0, 0, nil, fmt.Errorf("import messages: commit: %w", err)
 	}
-	return imported, skipped, nil
+	return imported, skipped, rejected, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
@@ -84,9 +85,46 @@ func (r *MessageRepo) Create(ctx context.Context, m *model.Message) (*model.Mess
 		m.RunID,
 	).Scan(&m.ID, &m.CreatedAt)
 	if err != nil {
+		// FIX121 — migration 047: one user row per (conversation, run id)
+		// on the native send path. Losing that insert means another copy
+		// of the same request got there first.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == userRunUniqueIndex {
+			return nil, ErrDuplicateRun
+		}
 		return nil, fmt.Errorf("create message: %w", err)
 	}
 	return m, nil
+}
+
+// userRunUniqueIndex is the unique index of migration 047.
+const userRunUniqueIndex = "messages_masked_user_run_uidx"
+
+// ErrDuplicateRun — a user row for this (conversation, run id) exists.
+var ErrDuplicateRun = errors.New("message: a user row for this run id already exists")
+
+// FindByRun returns the native (non-imported) row of one role that a run id
+// produced in a conversation: the newest one, should an older database hold
+// several. ErrNotFound when there is none. FIX121 — the send path's
+// idempotency lookup.
+func (r *MessageRepo) FindByRun(
+	ctx context.Context, tenantID, convID uuid.UUID, runID, role string,
+) (*model.Message, error) {
+	const q = `
+		SELECT id FROM chat.messages_masked
+		WHERE conversation_id = $1 AND tenant_id = $2 AND run_id = $3 AND role = $4
+		  AND client_id IS NULL
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`
+	var id uuid.UUID
+	if err := r.db.QueryRow(ctx, q, convID, tenantID, runID, role).Scan(&id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("find message by run: %w", err)
+	}
+	return r.GetByID(ctx, tenantID, id)
 }
 
 // CreateImported inserts a desktop-imported message (migration 026).
@@ -117,8 +155,8 @@ func (r *MessageRepo) CreateImported(
 		INSERT INTO chat.messages_masked
 			(conversation_id, tenant_id, user_id, role, content_masked,
 			 status, model_id, client_id, created_at, is_active,
-			 terminal_cause, error_code, run_id, stop_reason, fallback_from, is_test)
-		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11, $12, $13, $14,
+			 terminal_cause, error_code, run_id, stop_reason, fallback_from, attempts, is_test)
+		VALUES ($1, $2, $3, $4, $5, $9, $6, $7, $8, true, $10, $11, $12, $13, $14, $15::jsonb,
 		        COALESCE((SELECT c.is_test FROM chat.conversations c WHERE c.id = $1), false))
 		ON CONFLICT (conversation_id, client_id) WHERE client_id IS NOT NULL
 		DO NOTHING
@@ -128,6 +166,7 @@ func (r *MessageRepo) CreateImported(
 	err := r.db.QueryRow(ctx, q,
 		m.ConversationID, m.TenantID, m.UserID, m.Role, m.ContentMasked,
 		m.ModelID, clientID, createdAt, status, m.TerminalCause, m.ErrorCode, m.RunID, m.StopReason, m.FallbackFrom,
+		jsonOrNull(m.Attempts),
 	).Scan(&id)
 	if err == nil {
 		return id, true, nil
@@ -226,7 +265,7 @@ func (r *MessageRepo) ListByConversation(
 		       status, model_id, token_usage_input, token_usage_output,
 		       secure_trace_id, created_at, parent_id, branch_index, is_active,
 		       reasoning_content, search_sources, client_id,
-		       terminal_cause, error_code, run_id, stop_reason, fallback_from` + extraCols + `
+		       terminal_cause, error_code, run_id, stop_reason, fallback_from, attempts` + extraCols + `
 		FROM chat.messages_masked
 		WHERE conversation_id = $1
 		  AND tenant_id = $2
@@ -253,7 +292,7 @@ func (r *MessageRepo) ListByConversation(
 			&m.TokenUsageInput, &m.TokenUsageOutput, &m.SecureTraceID,
 			&m.CreatedAt, &m.ParentID, &m.BranchIndex, &m.IsActive,
 			&m.ReasoningContent, &m.SearchSources, &m.ClientID,
-			&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason, &m.FallbackFrom,
+			&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason, &m.FallbackFrom, &m.Attempts,
 		}
 		if r.displayLifecycle {
 			dest = append(dest, &m.ContentCanonical, &m.CanonicalStatus, &m.DisplayState)
@@ -1071,6 +1110,25 @@ func (r *MessageRepo) SetTerminal(ctx context.Context, msgID uuid.UUID, cause, e
 		return fmt.Errorf("set message terminal: %w", err)
 	}
 	return nil
+}
+
+// SetAttempts records a failed turn's per-model attempt log (FIX121,
+// migration 047). raw is already bounded by service.NormalizeAttempts.
+func (r *MessageRepo) SetAttempts(ctx context.Context, msgID uuid.UUID, raw json.RawMessage) error {
+	const q = `UPDATE chat.messages_masked SET attempts = $2::jsonb WHERE id = $1`
+	if _, err := r.db.Exec(ctx, q, msgID, jsonOrNull(raw)); err != nil {
+		return fmt.Errorf("set message attempts: %w", err)
+	}
+	return nil
+}
+
+// jsonOrNull hands a JSON value to a ``$n::jsonb`` parameter as text, and an
+// empty one as SQL NULL (never the JSON literal null).
+func jsonOrNull(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	return string(raw)
 }
 
 // CanonicalWrite carries the canonical artifact metadata persisted

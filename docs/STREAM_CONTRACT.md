@@ -441,3 +441,58 @@ on `identity.users`, `chat.conversations` and `chat.messages_masked`
 (migration 045), set once at provisioning and inherited at insert. The
 admin analytics exclude them unless asked (`include_test=1`).
 
+
+## 12. Every turn leaves a row, and a row keeps what happened (FIX121)
+
+### 12.1 A send that arrives twice is one turn
+
+No model provider de-duplicates a request for us: their request ids exist
+to find a request afterwards, not to refuse a repeat. The server that
+writes the row is the only place this can be decided, and the key is the
+id the turn already has (§11.1) — there is no second id.
+
+An `X-Request-Id` the **client** chose (well-formed per §11.1) is the
+idempotency key of `POST /conversations/{id}/messages`. An id chat-edge
+minted is not a key, and such a send behaves exactly as it always did.
+
+| The key in this conversation | Answer |
+|---|---|
+| never seen | The turn runs. The user row records the key as `run_id`. |
+| seen, same `content` | `200`, header `Idempotent-Replayed: true`, and the **first** turn: a streaming caller is attached through §4 (recorded frames verbatim, then the live tail if the run is still going); a non-streaming caller gets the stored answer row. Nothing is generated, charged or written twice. |
+| seen, different `content` | `409 IDEMPOTENCY_KEY_REUSED`. The key names one request. |
+| seen, no answer row yet (two copies raced) | `409 REQUEST_IN_PROGRESS`; retry and get the replay. |
+
+Two copies arriving in the same instant are arbitrated by the database
+(migration 047: one native user row per `(conversation_id, run_id)`); the
+loser is answered as the repeat it is. Imported desktop rows stay outside
+that index — they are idempotent on `(conversation_id, client_id)`.
+
+A client that wants this protection mints the id **before** the request
+leaves, once per user action, and reuses it only to retry that same action.
+
+### 12.2 The attempt log of a failed turn
+
+The terminal `error` frame of a turn whose fallback walk was exhausted
+carries `attempts` (one entry per model tried). chat-edge stores a bounded
+copy on the row (`attempts`, migration 047: at most 12 entries, the keys
+`provider model error_code error_message status attempted_at latency_ms`,
+text cut at 300 characters) and returns it on the list wire as
+`error_attempts` — the field the page already renders for the live frame,
+so a reload, another device and the desktop all show the same list. The
+desktop host forwards the frame's list to the page and sends it on the
+imported item as `error_attempts`.
+
+### 12.3 The import mirrors a turn that already happened
+
+`POST /conversations/{id}/messages/import`:
+
+* There is **no ceiling on a message's content**. The one size limit is on
+  the request: 32 MiB, answered `413 REQUEST_TOO_LARGE`.
+* An item that cannot be stored is **named, not fatal**: the response is
+  `200 {imported, skipped, rejected: [{index, client_id, reason}]}` and its
+  storable neighbours are stored. `rejected` is absent when there is
+  nothing to report. The request is refused as a whole (`422`) only when
+  it is malformed as a whole: empty, more than 200 items, or no storable
+  item at all.
+* A client that receives `rejected` (or any non-2xx) must tell the person
+  the turn was not saved; a log line is not telling anyone.

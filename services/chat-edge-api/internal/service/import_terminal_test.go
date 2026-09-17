@@ -46,7 +46,7 @@ func TestImport_CarriesStatusCauseAndCode(t *testing.T) {
 		// FIX119 — a new desktop says completed explicitly and carries the run id + why the model stopped
 		{ClientID: "a5", Role: "assistant", Content: "cut off he", CreatedAt: at.Add(9 * time.Second), Status: "completed", RunID: "8f1d2c3b-4e5f-4a6b-9c7d-0e1f2a3b4c5d", StopReason: "max_tokens"},
 	}
-	imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
+	imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch)
 	if err != nil || imported != 10 || skipped != 0 {
 		t.Fatalf("import: imported=%d skipped=%d err=%v", imported, skipped, err)
 	}
@@ -93,7 +93,7 @@ func TestImport_CarriesStatusCauseAndCode(t *testing.T) {
 		t.Fatalf("a5 lost its run id / stop reason: %v %v", runID, stop)
 	}
 	// A replay of the same batch is still a no-op.
-	if imported, skipped, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch); err != nil || imported != 0 || skipped != 10 {
+	if imported, skipped, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, batch); err != nil || imported != 0 || skipped != 10 {
 		t.Fatalf("replay: imported=%d skipped=%d err=%v", imported, skipped, err)
 	}
 
@@ -104,7 +104,7 @@ func TestImport_CarriesStatusCauseAndCode(t *testing.T) {
 		"stop reason outside the set": {ClientID: "b4", Role: "assistant", Content: "x", CreatedAt: at, Status: "completed", StopReason: "length"},
 		"run id with a bad shape":     {ClientID: "b5", Role: "assistant", Content: "x", CreatedAt: at, Status: "completed", RunID: "run id with spaces"},
 	} {
-		if _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, []ImportMessageInput{bad}); !errors.Is(err, ErrImportInvalid) {
+		if _, _, _, err := svc.ImportMessages(ctx, tenantID, userID, conv.ID, []ImportMessageInput{bad}); !errors.Is(err, ErrImportInvalid) {
 			t.Fatalf("%s: want ErrImportInvalid, got %v", name, err)
 		}
 	}

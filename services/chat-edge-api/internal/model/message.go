@@ -108,6 +108,11 @@ type Message struct {
 	// answered, and the row says so after a reload as the live frame did.
 	// nil when the requested model answered, on user rows and pre-046 rows.
 	FallbackFrom *string
+	// FIX121 (migration 047) — Attempts is the per-model attempt log of a
+	// failed turn ([{provider, model, error_code, …}]), a bounded copy of
+	// what the terminal error frame carried (service.NormalizeAttempts).
+	// nil when the turn did not fail that way, on user rows and pre-047 rows.
+	Attempts json.RawMessage
 	// FIX119 (migration 045) — copied from the conversation at insert: the
 	// row belongs to a test account and is excluded from analytics.
 	IsTest bool
