@@ -476,6 +476,9 @@ function MessageBubbleImpl({
            has partial text shows its reason under the text. */
         <ErrorNotice
           message={message.error_code ? localizeErrorCode(message.error_code, undefined, message.error_retryable) : t("msg.turnFailedReload")}
+          /* FIX121 C5 — the attempt log is on the row now (migration 047),
+             so the reloaded card lists what was tried, as the live one does. */
+          attempts={message.error_attempts}
           referenceId={message.run_id}
           convId={convId}
           offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
