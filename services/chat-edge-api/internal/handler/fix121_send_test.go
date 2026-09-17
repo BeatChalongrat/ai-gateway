@@ -408,3 +408,96 @@ func TestFix121_AttemptsOfAFailedTurnAreOnTheRowAndTheListWire(t *testing.T) {
 		t.Fatalf("no assistant row on the list wire")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// C3 — a repeat of a turn that ENDED BADLY is answered with that ending.
+// Found live (FIX121 side stack): the first send was refused before its
+// stream opened; the repeat went through resume, which has no ledger for a
+// run that never opened and said GENERATION_INTERRUPTED instead.
+// ---------------------------------------------------------------------------
+
+func TestFix121_RepeatOfARefusedSendGetsTheSameCodeNotInterrupted(t *testing.T) {
+	var calls atomic.Int64
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") {
+			calls.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, `{"error":{"code":"provider_unavailable","message":"No API key configured for provider 'google'.","retryable":false}}`)
+	}))
+	t.Cleanup(gw.Close)
+	st := newFix121Stack(t, gw.URL+"/v1")
+	const rid = "fix121-idem-0004"
+
+	code, _, first := postSend(t, st, fix121Body, rid)
+	if code == http.StatusOK || !strings.Contains(first, "provider_unavailable") {
+		t.Fatalf("the first send must be refused with the gateway's code, got %d: %s", code, first)
+	}
+	settle(t, st, "error")
+
+	code, hdr, second := postSend(t, st, fix121Body, rid)
+	if code != http.StatusOK || hdr.Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("repeat: %d replayed=%q body=%s", code, hdr.Get("Idempotent-Replayed"), second)
+	}
+	fs := parseFrames(second)
+	if last := lastEvent(fs); last != "error" {
+		t.Fatalf("the repeat of a failed turn ends on error, got %q (%s)", last, second)
+	}
+	if strings.Contains(second, "GENERATION_INTERRUPTED") || !strings.Contains(second, `"code":"provider_unavailable"`) {
+		t.Fatalf("the repeat must carry the first failure's own code: %s", second)
+	}
+	if !strings.Contains(second, rid) {
+		t.Fatalf("the replay must carry the run id %q: %s", rid, second)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("a repeat must not reach the gateway again (calls=%d)", got)
+	}
+	if u, a := rowCounts(t, st); u != 1 || a != 1 {
+		t.Fatalf("want 1 user + 1 answer row, got %d / %d", u, a)
+	}
+}
+
+func TestFix121_RepeatOfAStoppedTurnSaysCancelled(t *testing.T) {
+	hold := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-hold:
+		default:
+			close(hold)
+		}
+	})
+	gw, calls := countingGateway(t, &gwScript{chunks: []string{contentChunk("HALF "), contentChunk("REST")}, hold: hold, holdAfter: 0})
+	st := newFix121Stack(t, gw.URL+"/v1")
+	const rid = "fix121-idem-0005"
+
+	a, code := openSSEWithID(t, st, fix121Body, rid)
+	if code != http.StatusOK {
+		t.Fatalf("first send returned %d", code)
+	}
+	if !waitFor(func() bool { return strings.Contains(a.raw(), "HALF") }, 10*time.Second) {
+		t.Fatalf("first chunk never arrived")
+	}
+	cancel, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/conversations/%s/cancel", st.srv.URL, st.convID), nil)
+	cancel.Header.Set("Authorization", "Bearer "+st.token)
+	if resp, err := http.DefaultClient.Do(cancel); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("cancel: %v %v", resp, err)
+	}
+	settle(t, st, "cancelled")
+	a.close()
+
+	_, hdr, second := postSend(t, st, fix121Body, rid)
+	if hdr.Get("Idempotent-Replayed") != "true" {
+		t.Fatalf("not a replay: %s", second)
+	}
+	fs := parseFrames(second)
+	if last := lastEvent(fs); last != "cancelled" {
+		t.Fatalf("the repeat of a stopped turn ends on cancelled, got %q (%s)", last, second)
+	}
+	if got := concatDeltas(fs); got != "HALF " {
+		t.Fatalf("the repeat shows what the stopped turn kept, got %q", got)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("calls=%d", got)
+	}
+}

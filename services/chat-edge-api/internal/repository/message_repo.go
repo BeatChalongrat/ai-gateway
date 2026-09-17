@@ -110,21 +110,31 @@ var ErrDuplicateRun = errors.New("message: a user row for this run id already ex
 func (r *MessageRepo) FindByRun(
 	ctx context.Context, tenantID, convID uuid.UUID, runID, role string,
 ) (*model.Message, error) {
+	// The ending columns are read too: a repeat of a turn that FAILED is
+	// answered with that failure's own code and attempt log.
 	const q = `
-		SELECT id FROM chat.messages_masked
+		SELECT id, conversation_id, tenant_id, user_id, role, content_masked,
+		       status, model_id, created_at,
+		       terminal_cause, error_code, run_id, stop_reason, fallback_from, attempts
+		FROM chat.messages_masked
 		WHERE conversation_id = $1 AND tenant_id = $2 AND run_id = $3 AND role = $4
 		  AND client_id IS NULL
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
 	`
-	var id uuid.UUID
-	if err := r.db.QueryRow(ctx, q, convID, tenantID, runID, role).Scan(&id); err != nil {
+	m := &model.Message{}
+	err := r.db.QueryRow(ctx, q, convID, tenantID, runID, role).Scan(
+		&m.ID, &m.ConversationID, &m.TenantID, &m.UserID, &m.Role, &m.ContentMasked,
+		&m.Status, &m.ModelID, &m.CreatedAt,
+		&m.TerminalCause, &m.ErrorCode, &m.RunID, &m.StopReason, &m.FallbackFrom, &m.Attempts,
+	)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("find message by run: %w", err)
 	}
-	return r.GetByID(ctx, tenantID, id)
+	return m, nil
 }
 
 // CreateImported inserts a desktop-imported message (migration 026).

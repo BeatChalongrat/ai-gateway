@@ -459,6 +459,7 @@ minted is not a key, and such a send behaves exactly as it always did.
 |---|---|
 | never seen | The turn runs. The user row records the key as `run_id`. |
 | seen, same `content` | `200`, header `Idempotent-Replayed: true`, and the **first** turn: a streaming caller is attached through §4 (recorded frames verbatim, then the live tail if the run is still going); a non-streaming caller gets the stored answer row. Nothing is generated, charged or written twice. |
+| seen, same `content`, that turn **failed or was stopped** | `200`, `Idempotent-Replayed: true`, answered **from the row**: `message_start`, the text it kept, then its own terminal — `error` with the row's `error_code`, `cause` and `attempts`, or `cancelled`. Not through §4: a send refused before its stream opened has no recorded frames, and §4's snapshot would call it `GENERATION_INTERRUPTED`. The HTTP status of such a refusal is not stored, so the repeat carries the same **code** on a stream frame rather than the same status. |
 | seen, different `content` | `409 IDEMPOTENCY_KEY_REUSED`. The key names one request. |
 | seen, no answer row yet (two copies raced) | `409 REQUEST_IN_PROGRESS`; retry and get the replay. |
 

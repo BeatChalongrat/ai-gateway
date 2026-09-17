@@ -417,6 +417,66 @@ func (h *MessageHandler) Send(w http.ResponseWriter, r *http.Request) {
 	h.sendNonStream(w, r, in)
 }
 
+// replayEndedRow answers a repeated streaming send whose turn ended in error
+// or was stopped, from the stored row: message_start, the text the row kept,
+// and the row's own terminal — the same code, cause and attempt log for a
+// failure; ``cancelled`` for a stop.
+//
+// One thing is not reproduced: a send refused BEFORE its stream opened was
+// answered with an HTTP status and a JSON body, and that status is not stored.
+// The repeat gets the same code on a stream error frame; clients render both
+// by code (STREAM_CONTRACT §12.1).
+func (h *MessageHandler) replayEndedRow(w http.ResponseWriter, convID uuid.UUID, replay *service.SendReplay) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "streaming not supported by transport")
+		return
+	}
+	asst := replay.AssistantMessage
+	runID := "replay-" + uuid.NewString()
+	if asst.RunID != nil && *asst.RunID != "" {
+		runID = *asst.RunID
+	}
+	rw := newReplayWriter(w, runID)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	rw.started = true
+	writeSSEEvent(rw, flusher, "message_start", map[string]any{
+		"message_id":      asst.ID.String(),
+		"user_message_id": replay.UserMessage.ID.String(),
+		"conversation_id": convID.String(),
+	})
+	if asst.ContentMasked != "" {
+		writeSSEEvent(rw, flusher, "content_delta", map[string]any{"delta": asst.ContentMasked})
+	}
+	if asst.Status == "cancelled" {
+		writeSSEEvent(rw, flusher, "cancelled", map[string]any{
+			"message_id": asst.ID.String(),
+			"partial":    true,
+			"cause":      service.TerminalCauseStoppedByUser,
+		})
+		return
+	}
+	code := "send_failed"
+	if asst.ErrorCode != nil && *asst.ErrorCode != "" {
+		code = *asst.ErrorCode
+	}
+	frame := map[string]any{
+		"code":    code,
+		"message": "This request already ran and did not produce an answer.",
+	}
+	if asst.TerminalCause != nil && *asst.TerminalCause != "" {
+		frame["cause"] = *asst.TerminalCause
+	}
+	if len(asst.Attempts) > 0 && string(asst.Attempts) != "null" {
+		frame["attempts"] = asst.Attempts
+	}
+	writeSSEEvent(rw, flusher, "error", frame)
+}
+
 // Wire codes of the send path's idempotency contract (409).
 const (
 	CodeIdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED"
@@ -457,8 +517,18 @@ func (h *MessageHandler) replayIfRepeated(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Idempotent-Replayed", "true")
 	if stream {
-		h.serveResume(w, r, in.TenantID, in.UserID, in.ConversationID,
-			replay.AssistantMessage.ID, replay.UserMessage.ID, 0)
+		switch replay.AssistantMessage.Status {
+		case "error", "cancelled":
+			// An ended-badly turn is answered from its ROW. The resume path
+			// cannot do it: a send refused before its stream opened has no
+			// recorded frames, and resume's snapshot fallback calls every
+			// errored row GENERATION_INTERRUPTED — a different answer from
+			// the one the first request got.
+			h.replayEndedRow(w, in.ConversationID, replay)
+		default:
+			h.serveResume(w, r, in.TenantID, in.UserID, in.ConversationID,
+				replay.AssistantMessage.ID, replay.UserMessage.ID, 0)
+		}
 		return true
 	}
 	w.Header().Set("Content-Type", "application/json")
