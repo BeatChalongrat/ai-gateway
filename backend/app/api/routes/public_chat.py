@@ -1172,6 +1172,15 @@ async def _chat_completions_impl(
         if isinstance(payload.metadata, dict)
         else None
     )
+    # FIX121 — the Auto router's ranked alternatives (orchestrator sets them
+    # beside the pick). The non-streaming walk always merged them into the
+    # chain; this path dropped them, so an Auto turn had no next candidate.
+    # An explicit request carries none and walks exactly as before.
+    _fb_auto_meta = (
+        payload.metadata.get("auto_candidates")
+        if isinstance(payload.metadata, dict)
+        else None
+    )
     _fb_stream_limits = _fb_policy_mod.limits("stream", _fb_policy)
     _fb_dispatch_t0 = time.perf_counter()
 
@@ -1205,6 +1214,7 @@ async def _chat_completions_impl(
             policy=_fb_policy,
             allowed_providers=_fb_allowed_meta,
             skipped=_fb_skipped,
+            auto_candidates=_fb_auto_meta,
         )
         for _sk in _fb_skipped:
             _fb_log_attempt(
@@ -2931,6 +2941,7 @@ async def _chat_completions_impl(
                             action=_fb_decision.action,
                             allowed_providers=_fb_allowed_meta,
                             skipped=_fb_skipped_in,
+                            auto_candidates=_fb_auto_meta,
                         )
                     finally:
                         _lookup_session.close()

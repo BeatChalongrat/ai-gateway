@@ -386,6 +386,41 @@ def merge_auto_candidates(
     return merged
 
 
+#: The actions under which the router's list joins the chain. A pinned
+#: opt-in action (context_window / content_policy) names its own chain.
+_AUTO_MERGE_ACTIONS = ("cooldown_then_next", "next_in_chain")
+
+
+def chain_with_auto_candidates(
+    chain: list[dict[str, str]],
+    auto_models: list | None,
+    *,
+    action: str,
+    original_provider: str,
+    original_model: str,
+) -> tuple[list[dict[str, str]], bool]:
+    """The one place the Auto router's list joins a fallback chain.
+
+    FIX121 — the non-streaming walk merged ``metadata.auto_candidates`` and
+    the two streaming selectors did not, so an Auto turn on the streaming
+    path (every web and desktop turn) died with ``no_fallback_candidate``
+    while the router's ranked alternatives sat unused in the request. All
+    three now call this. Returns ``(chain, merged)``; an explicit request
+    carries no list and gets its chain back untouched.
+    """
+    if not auto_models or action not in _AUTO_MERGE_ACTIONS:
+        return chain, False
+    from app.services.providers.model_registry import resolve_provider
+
+    merged = merge_auto_candidates(
+        auto_models, chain, original_provider=original_provider,
+        original_model=original_model, resolve=resolve_provider,
+    )
+    if not merged:
+        return chain, False
+    return merged, True
+
+
 # ---------------------------------------------------------------------------
 # FIX120 — one line per candidate the walk touches, one line per turn's
 # outcome, both carrying the turn id (FIX119) so ``grep <run_id>`` shows
@@ -607,17 +642,12 @@ class FallbackOrchestrator:
         _meta = getattr(request, "metadata", None)
         if not isinstance(_meta, dict):
             _meta = {}
-        _auto = _meta.get("auto_candidates") or []
-        if _auto and action in ("cooldown_then_next", "next_in_chain"):
-            from app.services.providers.model_registry import resolve_provider
-
-            merged = merge_auto_candidates(
-                _auto, chain, original_provider=original_provider,
-                original_model=original_model, resolve=resolve_provider,
-            )
-            if merged:
-                log.info("fallback_auto_candidates", candidates=[f"{e['provider']}:{e['model']}" for e in merged[:5]])
-                chain = merged
+        chain, _auto_merged = chain_with_auto_candidates(
+            chain, _meta.get("auto_candidates"), action=action,
+            original_provider=original_provider, original_model=original_model,
+        )
+        if _auto_merged:
+            log.info("fallback_auto_candidates", candidates=[f"{e['provider']}:{e['model']}" for e in chain[:5]])
         if not chain:
             log.info("fallback_no_chain")
             log_outcome(log, path=path, requested_model=original_model, outcome="no_chain",
@@ -943,14 +973,20 @@ class FallbackOrchestrator:
         action: str,
         allowed_providers: Iterable[str] | None,
         skipped: list[dict] | None,
+        auto_candidates: list | None = None,
     ) -> tuple[list[dict[str, str]], int, frozenset[str] | None, dict]:
         """Shared prologue of the two streaming selectors: the chain for
-        the action, the attempt ceiling, the boundary and the policy."""
+        the action (with the Auto router's list ahead of it, FIX121), the
+        attempt ceiling, the boundary and the policy."""
         pol = policy or policy_mod.base_policy()
         if pol is policy_mod.base_policy() and action in ("cooldown_then_next", "next_in_chain"):
             chain = get_fallback_chain(original_model, original_provider)
         else:
             chain = chain_for_action(action, original_model, original_provider, policy=pol)
+        chain, _ = chain_with_auto_candidates(
+            chain, auto_candidates, action=action,
+            original_provider=original_provider, original_model=original_model,
+        )
         lim = self._limits(pol, "stream")
         return chain, int(lim["max_candidates"]), allowed_set(pol, allowed_providers), pol
 
@@ -972,6 +1008,7 @@ class FallbackOrchestrator:
         action: str = "cooldown_then_next",
         allowed_providers: Iterable[str] | None = None,
         skipped: list[dict] | None = None,
+        auto_candidates: list | None = None,
     ) -> dict | None:
         """Pick the first viable streaming fallback for a primary.
 
@@ -1007,6 +1044,7 @@ class FallbackOrchestrator:
         chain, max_candidates, allowed, pol = self._streaming_walk(
             original_provider=original_provider, original_model=original_model,
             policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
+            auto_candidates=auto_candidates,
         )
         tried = 0
 
@@ -1076,6 +1114,7 @@ class FallbackOrchestrator:
         action: str = "cooldown_then_next",
         allowed_providers: Iterable[str] | None = None,
         skipped: list[dict] | None = None,
+        auto_candidates: list | None = None,
     ) -> dict | None:
         """Async twin of :meth:`select_streaming_candidate`.
 
@@ -1098,6 +1137,7 @@ class FallbackOrchestrator:
         chain, max_candidates, allowed, pol = self._streaming_walk(
             original_provider=original_provider, original_model=original_model,
             policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
+            auto_candidates=auto_candidates,
         )
         tried = 0
 
