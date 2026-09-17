@@ -16,11 +16,14 @@
 #      debug from an operator's laptop still works; the public NIC does
 #      not reach them.
 #
-#   3. backend / admin-ui / portal bind 127.0.0.1 too. The assumption is
-#      a reverse proxy (nginx / caddy) on the host fronts them with TLS
-#      (gateway-api.sran.net). If a service should be public WITHOUT a
-#      reverse proxy, switch its bind back to 0.0.0.0 here — never in
-#      the base file.
+#   3. gateway / backend / admin-ui / portal / prometheus / grafana bind
+#      127.0.0.1 too. The assumption is a reverse proxy fronts the public
+#      ones with TLS (gateway-api.sran.net): the bundled nginx (profile
+#      "desktop", the ONE service published on all interfaces, 80/443) or
+#      nginx / caddy on the host. The gateway owns host :8080; the backend
+#      is internal and keeps only a loopback debug door on :8081. If a
+#      service should be public WITHOUT a reverse proxy, switch its bind
+#      back to 0.0.0.0 here — never in the base file.
 #
 #   4. Redis runs --requirepass ${REDIS_PASSWORD}. The backend reads
 #      REDIS_PASSWORD (config.py) and folds it into redis_url. Both ends
@@ -112,8 +115,34 @@ services:
       # both hold the SAME value). Without it the service-JWT path is
       # dormant and validate_secrets() refuses to start (chat-edge is wired).
       SERVICE_JWT_SECRET: ${SERVICE_JWT_SECRET:?SERVICE_JWT_SECRET must be set for prod (openssl rand -hex 32) and MUST match the chat-edge service}
+    # Host 8081, not 8080: since the Go gateway took :8080 (base file), the
+    # backend is an internal service — gateway, prometheus and nginx all
+    # reach it as backend:8080 on the compose network. This line used to say
+    # 127.0.0.1:8080:8080, written when the backend WAS the public API; with
+    # the gateway also publishing 8080 the two collided and the engine
+    # refuses the second bind ("port is already allocated"). 8081 on
+    # loopback is the same debug door the base file gives dev.
+    ports: !override
+      - "127.0.0.1:8081:8080"
+    restart: always
+
+  # The public API. Loopback here (same as the base file) because a reverse
+  # proxy fronts it: the bundled nginx reaches it as gateway:8080 on the
+  # compose network, a host-level proxy reaches it on 127.0.0.1:8080.
+  gateway:
     ports: !override
       - "127.0.0.1:8080:8080"
+    restart: always
+
+  # Metrics and dashboards: operators only, through an SSH tunnel.
+  prometheus:
+    ports: !override
+      - "127.0.0.1:9091:9090"
+    restart: always
+
+  grafana:
+    ports: !override
+      - "127.0.0.1:3100:3000"
     restart: always
 
   admin-ui:
