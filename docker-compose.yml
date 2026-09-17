@@ -85,7 +85,7 @@ services:
     image: ai-gateway-mock-provider:latest
     container_name: ai-gateway-mock-provider
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     environment:
       # DLP instrument (docs/DLP_INSTRUMENT_REPORT.md): when set, the mock
       # appends every completion request (full raw body + redacted headers)
@@ -140,7 +140,7 @@ services:
       NER_SCORE_THRESHOLD_EN: ${NER_SCORE_THRESHOLD_EN:-0.7}
       NER_SCORE_THRESHOLD_TH: ${NER_SCORE_THRESHOLD_TH:-0.85}
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     deploy:
       resources:
         limits:
@@ -182,7 +182,7 @@ services:
     # gRPC 50051 is internal-only (backend reaches it via the docker
     # network). Metrics port stays published for local Prometheus.
     ports:
-      - "9102:9102"
+      - "127.0.0.1:9102:9102"
     deploy:
       resources:
         limits:
@@ -213,7 +213,7 @@ services:
     # gRPC 50053 is internal-only (reached via the docker network by the
     # backend). Metrics port stays published for local Prometheus.
     ports:
-      - "9101:9101"
+      - "127.0.0.1:9101:9101"
     deploy:
       resources:
         limits:
@@ -253,7 +253,7 @@ services:
     # gRPC 50052 is internal-only (backend reaches it via the docker
     # network). Metrics port stays published for local Prometheus.
     ports:
-      - "9100:9100"
+      - "127.0.0.1:9100:9100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -291,7 +291,7 @@ services:
       GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-26214400}
       APP_ENV: ${APP_ENV:-development}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -347,7 +347,7 @@ services:
     volumes:
       - chat_edge_uploads:/app/data/uploads
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -395,7 +395,7 @@ services:
       # Slack workspace id for the slack connector (deployment-level).
       MCP_SLACK_TEAM_ID: ${MCP_SLACK_TEAM_ID:-}
     ports:
-      - "3200:3200"
+      - "127.0.0.1:3200:3200"
     volumes:
       - mcp_workspace:/data/workspace
     healthcheck:
@@ -606,7 +606,7 @@ services:
       # container bind stays 8080; the host publish moved to 8081 so you
       # can still curl Python directly for debugging during the
       # migration. External clients should hit the gateway on :8080.
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -645,7 +645,7 @@ services:
       CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       backend:
         condition: service_healthy
@@ -684,7 +684,7 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     depends_on:
       backend:
         condition: service_healthy
@@ -703,7 +703,7 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=15d"
     ports:
-      - "9091:9090"
+      - "127.0.0.1:9091:9090"
     depends_on:
       - gateway
       - backend
@@ -719,7 +719,7 @@ services:
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
       # 3100 on the host — 3000/3001 are admin-ui/portal.
-      - "3100:3000"
+      - "127.0.0.1:3100:3000"
     depends_on:
       - prometheus
     restart: unless-stopped
@@ -755,7 +755,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "${PGBOUNCER_PORT:-6432}:6432"
+      - "127.0.0.1:${PGBOUNCER_PORT:-6432}:6432"
     depends_on:
       postgres:
         condition: service_healthy

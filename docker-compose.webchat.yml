@@ -30,10 +30,17 @@ services:
       dockerfile: Dockerfile
     container_name: ai-gateway-chat-edge-api
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     environment:
-      - DATABASE_URL=postgres://chatedge:chatedge_pass@postgres-webchat:5432/sran_ai?sslmode=disable
-      - REDIS_URL=redis://redis-webchat:6379/1
+      # The three WEBCHAT_* secrets come from .env (gitignored). The defaults
+      # are the published dev values: fine for a fresh clone whose ports are
+      # loopback-only, never for a machine that holds real conversations.
+      # They go into URLs unescaped, so generate them as hex
+      # (`openssl rand -hex 24`). POSTGRES_PASSWORD below only applies when
+      # the volume is first created — on an existing volume rotate with
+      # ALTER ROLE first, then change .env, then recreate.
+      - DATABASE_URL=postgres://chatedge:${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}@postgres-webchat:5432/sran_ai?sslmode=disable
+      - REDIS_URL=redis://:${WEBCHAT_REDIS_PASSWORD:-}@redis-webchat:6379/1
       # Existing gateway-api runs on host port 8080; route via
       # host.docker.internal so chat-edge can reach it across the
       # two compose stacks. ``extra_hosts`` below makes the alias
@@ -221,11 +228,11 @@ services:
     image: pgvector/pgvector:pg16
     container_name: ai-gateway-postgres-webchat
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_DB: sran_ai
       POSTGRES_USER: chatedge
-      POSTGRES_PASSWORD: chatedge_pass
+      POSTGRES_PASSWORD: ${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}
     volumes:
       - pgdata-webchat:/var/lib/postgresql/data
       # Mount migrations into the postgres initdb hook directory so
@@ -243,32 +250,40 @@ services:
     image: redis:7-alpine
     container_name: ai-gateway-redis-webchat
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
+    # Empty password = no auth (the fresh-clone default). redis-cli reads
+    # REDISCLI_AUTH; the grep matters because `redis-cli ping` exits 0 on a
+    # NOAUTH reply, so a bare ping reports a locked-out server as healthy.
+    command: ["redis-server", "--requirepass", "${WEBCHAT_REDIS_PASSWORD:-}"]
+    environment:
+      REDISCLI_AUTH: ${WEBCHAT_REDIS_PASSWORD:-}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # MinIO — S3-compatible object storage for local dev. Optional
-  # service: nothing pulls it up unless the operator runs it
-  # explicitly via ``docker compose ... up minio`` or starts the
-  # whole stack with STORAGE_BACKEND=s3 set on chat-edge-api.
+  # MinIO — S3-compatible object storage for local dev. Optional, and
+  # behind the ``minio`` profile so a plain ``up`` does not start it:
+  # chat-edge defaults to STORAGE_BACKEND=local and never talks to it.
+  # To use it: set STORAGE_BACKEND=s3 (+ the S3_* values) and run
+  #   docker compose -p ai-gateway -f docker-compose.webchat.yml --profile minio up -d
   #
-  # The dev credentials below are intentionally weak (``minioadmin
-  # / minioadmin123``) — production deployments must override them via
-  # secrets / env files. The same credentials are baked into the
-  # init container that creates the bucket.
+  # The default credentials below are intentionally weak (``minioadmin
+  # / minioadmin123``) — set WEBCHAT_MINIO_ROOT_USER / _PASSWORD in .env
+  # on any machine that keeps real files. The init container that
+  # creates the bucket reads the same two values.
   minio:
+    profiles: ["minio"]
     image: minio/minio:latest
     container_name: ai-gateway-minio
     command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console (login at http://localhost:9001)
+      - "127.0.0.1:9000:9000"   # S3 API
+      - "127.0.0.1:9001:9001"   # Web console (login at http://localhost:9001)
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin123
+      MINIO_ROOT_USER: ${WEBCHAT_MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${WEBCHAT_MINIO_ROOT_PASSWORD:-minioadmin123}
     volumes:
       - minio-data:/data
     healthcheck:
@@ -283,6 +298,7 @@ services:
   # compose graph; subsequent ``up`` invocations just re-run it
   # quickly and the bucket-create command is a no-op once it exists.
   minio-init:
+    profiles: ["minio"]
     image: minio/mc:latest
     container_name: ai-gateway-minio-init
     depends_on:
@@ -293,7 +309,7 @@ services:
       - -c
       - |
         set -e
-        mc alias set local http://minio:9000 minioadmin minioadmin123
+        mc alias set local http://minio:9000 ${WEBCHAT_MINIO_ROOT_USER:-minioadmin} ${WEBCHAT_MINIO_ROOT_PASSWORD:-minioadmin123}
         mc mb --ignore-existing local/${S3_BUCKET:-sran-chat-files}
         mc anonymous set download local/${S3_BUCKET:-sran-chat-files}
         echo "MinIO bucket ready: ${S3_BUCKET:-sran-chat-files}"
@@ -332,7 +348,7 @@ services:
         # serves the browser and the Electron app.)
     container_name: ai-gateway-web-chat
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     environment:
       - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
       - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
