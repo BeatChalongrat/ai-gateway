@@ -216,6 +216,18 @@ def explicit_without_chain_rule(policy: dict | None = None) -> str:
     return str((pol.get("explicit_without_chain") or {}).get("rule", GIVE_UP))
 
 
+RESCUE_ORDER_CLOSEST = "closest_to_requested"
+
+
+def rescue_order(policy: dict | None = None) -> tuple[str, str]:
+    """FIX124 A1 — ``(rule, requested_price_unknown_band)`` for ordering the
+    Auto alternatives and an explicit model's rescue list. A policy without
+    the row keeps the router's ranking (the order before the row existed)."""
+    pol = policy or base_policy()
+    row = pol.get("rescue_order") or {}
+    return str(row.get("rule", "router_ranking")), str(row.get("requested_price_unknown_band", "low"))
+
+
 def limits(kind: str, policy: dict | None = None) -> dict:
     """``kind`` is ``non_stream`` or ``stream``."""
     pol = policy or base_policy()
@@ -432,6 +444,18 @@ def validate_override(data: Any, *, is_tenant: bool) -> dict:
             for k, v in value.items():
                 if k not in ("context_window_fallback", "content_policy_fallback") or not isinstance(v, bool):
                     raise ValueError(f"opt_in.{k} must be a boolean flag named in the file")
+        elif key == "rescue_order":
+            if key not in overridable or not isinstance(value, dict) or not value:
+                raise ValueError("rescue_order must be a non-empty object")
+            for k, v in value.items():
+                if k == "rule":
+                    if v not in base["rescue_order"]["rules"]:
+                        raise ValueError(f"rescue_order.rule: unknown rule '{v}'")
+                elif k == "requested_price_unknown_band":
+                    if v not in base["rescue_order"]["bands"]:
+                        raise ValueError(f"rescue_order.{k}: unknown band '{v}'")
+                else:
+                    raise ValueError(f"rescue_order.{k} is not a known field")
         elif key == "explicit_without_chain":
             if key not in overridable or not isinstance(value, dict) or set(value) != {"rule"}:
                 raise ValueError("explicit_without_chain must be an object carrying only `rule`")

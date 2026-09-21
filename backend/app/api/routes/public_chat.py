@@ -1158,6 +1158,7 @@ async def _chat_completions_impl(
         log_outcome as _fb_log_outcome,
         mark_provider_unhealthy as _mark_unhealthy,
         record_decision as _fb_record_decision,
+        fallback_billing as _fb_billing,
         rule_out_after_failure as _fb_rule_out,
     )
     from app.services.gateway import fallback_policy as _fb_policy_mod
@@ -1954,6 +1955,9 @@ async def _chat_completions_impl(
                                     "status": "success",
                                 }
                             ],
+                            # FIX124 A2 — the turn is charged at the answering
+                            # model's price; the notice says so.
+                            "billing": _fb_billing(_stream_original_model, route.model_name),
                         },
                     },
                     ensure_ascii=False,

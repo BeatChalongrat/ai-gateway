@@ -530,6 +530,35 @@ def chain_with_rescue_candidates(
     return list(chain or []) + extra, True
 
 
+def usd_per_1m(candidate) -> dict[str, float] | None:
+    """A catalogue row's price as USD per 1M tokens, or ``None`` when the
+    catalogue has none (0 is "free" for the in-house box and "never entered"
+    for others — it is not a price either way)."""
+    if candidate is None:
+        return None
+    cost_in = float(getattr(candidate, "cost_per_input_token", 0.0) or 0.0)
+    cost_out = float(getattr(candidate, "cost_per_output_token", 0.0) or 0.0)
+    if cost_in <= 0 and cost_out <= 0:
+        return None
+    return {"input": round(cost_in * 1_000_000, 4), "output": round(cost_out * 1_000_000, 4)}
+
+
+def fallback_billing(requested_model: str, answering_model: str) -> dict:
+    """FIX124 A2 (owner's decision) — a rescued turn is charged at the price
+    of the model that ANSWERED, and the person is told. This rides the
+    ``fallback_info`` frame so the notice can say it next to the model's
+    name; the clients own the wording."""
+    from app.services.providers import model_registry
+
+    return {
+        "rule": "answering_model",
+        "billed_model": answering_model,
+        "requested_model": requested_model,
+        "billed_usd_per_1m": usd_per_1m(model_registry.get_candidate(answering_model)),
+        "requested_usd_per_1m": usd_per_1m(model_registry.get_candidate(requested_model)),
+    }
+
+
 # ---------------------------------------------------------------------------
 # FIX120 — one line per candidate the walk touches, one line per turn's
 # outcome, both carrying the turn id (FIX119) so ``grep <run_id>`` shows

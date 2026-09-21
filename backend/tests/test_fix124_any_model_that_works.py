@@ -659,7 +659,6 @@ async def test_the_walks_marked_pairs_are_read_once_for_the_in_stream_selection(
 
 E2E_PRIMARY = ("deepseek", "deepseek-coder")
 E2E_ROUTER = ["gpt-4o-mini", "gpt-4o", "claude-3-haiku-20240307"]
-_E2E_PAIRS = [E2E_PRIMARY, ("openai", "gpt-4o-mini"), ("openai", "gpt-4o"), ("anthropic", "claude-3-haiku-20240307")]
 _HEADERS = {"Authorization": "Bearer demo-key"}
 
 
@@ -696,39 +695,24 @@ def _five_hundred():
 
 @pytest.fixture
 def chat(monkeypatch):
-    """The real route with a stubbed Auto router and clean markers."""
+    """The real route with a stubbed Auto router (conftest keeps Redis a
+    per-run fake and drops health markers around every test)."""
     from fastapi.testclient import TestClient
 
     from app.main import app
     from app.services.orchestrator import GatewayOrchestrator
     from app.services.providers.model_registry import get_candidate
 
-    def _clear():
-        # A sync client of its own: the pooled async one is bound to whichever
-        # event loop used it first, and a clear that half-works leaves the
-        # marker (or its strike count) in the Redis the lane shares.
-        try:
-            import redis
-
-            from app.core.config import settings as _settings
-
-            client = redis.Redis.from_url(_settings.redis_url, socket_timeout=1.0, socket_connect_timeout=1.0)
-            keys = [k for provider, model in _E2E_PAIRS for k in (
-                fo._health_key(provider, model), fo._strikes_key(provider, model), fo._health_key(provider),
-            )]
-            client.delete(*keys)
-            client.close()
-        except Exception:  # noqa: BLE001 — no Redis here is not a failure
-            pass
-
     async def fake_route(self, ctx, payload, dict_messages, session, log, *, reasoning_requested=False):
         return _plan([get_candidate(m) for m in E2E_ROUTER])
 
     monkeypatch.setattr(GatewayOrchestrator, "_auto_route", fake_route)
-    store: dict[str, str] = {}
+    # These tests are about the WALK; the stub's ranking is kept as the order
+    # so each one can say which model comes next (the closeness order has its
+    # own file, test_fix124_rescue_order.py).
+    store: dict[str, str] = {"fallback_policy": json.dumps({"rescue_order": {"rule": "router_ranking"}})}
     monkeypatch.setattr(fp, "_read_setting", lambda key: store.get(key))
     fp.clear_cache()
-    _clear()
     client = TestClient(app, raise_server_exceptions=False)
 
     def post(stream: bool):
@@ -739,8 +723,8 @@ def chat(monkeypatch):
         })
 
     post.settings = store
+    post.client = client
     yield post
-    _clear()
     fp.clear_cache()
 
 
@@ -752,6 +736,7 @@ def test_stream_explicit_chainless_model_is_answered_by_another_model(chat, monk
     monkeypatch.setattr(DeepSeekAdapter, "stream_chat", dead)
     monkeypatch.setattr(OpenAIAdapter, "stream_chat", alive)
 
+    client_get = lambda path: chat.client.get(path, headers=_HEADERS)  # noqa: E731
     resp = chat(stream=True)
     events = _parse_sse(resp.content)
     assert not [e for e in events if "error" in e], events
@@ -780,6 +765,45 @@ def test_stream_explicit_chainless_model_is_answered_by_another_model(chat, monk
         assert (row.original_provider, row.original_model) == E2E_PRIMARY
         assert (row.provider, row.model) == ("openai", "gpt-4o-mini")
         assert [a["model"] for a in row.fallback_attempts] == ["deepseek-coder"]
+        charged = row.estimated_cost_usd
+
+    # A2 — the person is told whose price the turn is charged at ...
+    from app.services.providers.model_registry import get_candidate
+
+    billed = get_candidate("gpt-4o-mini")
+    assert info["billing"] == {
+        "rule": "answering_model",
+        "billed_model": "gpt-4o-mini",
+        "requested_model": "deepseek-coder",
+        "billed_usd_per_1m": {
+            "input": round(billed.cost_per_input_token * 1_000_000, 4),
+            "output": round(billed.cost_per_output_token * 1_000_000, 4),
+        },
+        "requested_usd_per_1m": fo.usd_per_1m(get_candidate("deepseek-coder")),
+    }
+    # ... and the admin can look the same turn up: asked, answered, charged
+    detail = client_get(f"/admin/requests/{request_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert (body["original_provider"], body["original_model"]) == E2E_PRIMARY
+    assert (body["provider"], body["model"], body["fallback_used"]) == ("openai", "gpt-4o-mini", True)
+    assert body["estimated_cost_usd"] == charged
+    assert [a["model"] for a in body["fallback_attempts"]] == ["deepseek-coder"]
+
+
+def test_a_price_the_catalogue_does_not_have_is_said_as_unknown_not_as_zero(monkeypatch):
+    priced = _c("deepseek", "deepseek-v4-flash", price=0.14)
+    free = _c("sranai", "qwen3.8-27b-fp8", price=0.0)
+    monkeypatch.setattr(
+        "app.services.providers.model_registry.get_candidate",
+        lambda model: {priced.model: priced, free.model: free}.get(model),
+    )
+    note = fo.fallback_billing("qwen3.8-27b-fp8", "deepseek-v4-flash")
+    assert note["rule"] == "answering_model" and note["billed_model"] == "deepseek-v4-flash"
+    assert note["billed_usd_per_1m"]["input"] == 0.14
+    # 0 in the catalogue is "free" for one model and "never entered" for others
+    assert note["requested_usd_per_1m"] is None
+    assert fo.fallback_billing("qwen3.8-27b-fp8", "not-in-the-catalogue")["billed_usd_per_1m"] is None
 
 
 def test_stream_rate_limited_account_is_left_for_another_provider(chat, monkeypatch):

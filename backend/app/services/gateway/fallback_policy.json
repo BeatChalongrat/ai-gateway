@@ -184,7 +184,7 @@
     }
   },
   "cost_cap": {
-    "_comment": "Where a spend ceiling plugs in. OFF by default. max_cost_ratio_vs_requested: a candidate whose input-token price exceeds the requested model's price × ratio is skipped (1.0 = never a dearer model). tenant_daily_usd: a tenant whose estimated spend over the last 24 h (request_logs.estimated_cost_usd) is at or above this figure gets no fallback attempts at all. Either may be set per tenant.",
+    "_comment": "Where a spend ceiling plugs in. OFF by default. FIX124 - KEEP OFF until a price-0 requested model is handled: the ratio rule compares against the requested model's catalogue price, and for the free in-house models (and every model whose price was never entered) that price is 0, so `candidate_price > 0 x ratio` refuses EVERY priced rescue - the explicit-model rescue would silently stop working for exactly the models that need it. Turning this on needs a rule for price 0 first (e.g. compare against a named floor band). max_cost_ratio_vs_requested: a candidate whose input-token price exceeds the requested model's price × ratio is skipped (1.0 = never a dearer model). tenant_daily_usd: a tenant whose estimated spend over the last 24 h (request_logs.estimated_cost_usd) is at or above this figure gets no fallback attempts at all. Either may be set per tenant.",
     "enabled": false,
     "max_cost_ratio_vs_requested": null,
     "tenant_daily_usd": null
@@ -198,6 +198,13 @@
     "_comment": "FIX124 - what an EXPLICITLY chosen model falls back to when its own chain is empty or ran out with attempts left. `auto_candidates` = the list the Auto router would offer for the same request (same tools / vision needs, same key-validity rule, health markers respected, spread over providers), walked AFTER the model's own chain, inside the same boundary, ceilings, cost cap and kill switch as any other candidate; the answer names the model that gave it (fallback_info / X-Gateway-Model / request_logs.original_model). `give_up` = the behaviour before FIX124: a model with no chain gets one attempt.",
     "rule": "auto_candidates",
     "rules": ["auto_candidates", "give_up"]
+  },
+  "rescue_order": {
+    "_comment": "FIX124 A1 (owner's decision 2026-09-21) - the order of the models that may rescue a turn: an Auto turn's alternatives (closest to the router's pick) and an explicit model's rescue list (closest to the model the person picked). A rescue is charged at the price of the model that ANSWERS, so `closest_to_requested` orders the candidates the router already found capable (tools / vision / window - unchanged) by: 1. distance between price bands (auto_router/tiers.py: low <= $0.50, medium <= $3, high <= $10, xhigh <= $30, max; USD per 1M input tokens), 2. distance between prices inside the band (log ratio), 3. the faster latency_tier, 4. the router's own ranking (it carries the tenant's 7-day success rates). One model per provider still comes before any provider's second model. The catalogue cannot tell a FREE model from one whose price was never entered (both are 0): a requested model with no price is placed by a cost_tier that says something (budget / premium), else in `requested_price_unknown_band`, cheapest candidate nearest - the cheap side, because the person pays the rescuer's price. `router_ranking` = the order before this row existed.",
+    "rule": "closest_to_requested",
+    "rules": ["closest_to_requested", "router_ranking"],
+    "requested_price_unknown_band": "low",
+    "bands": ["low", "medium", "high", "xhigh", "max"]
   },
   "kill_switch": {
     "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy.",
@@ -217,6 +224,7 @@
       "cost_cap",
       "opt_in",
       "explicit_without_chain",
+      "rescue_order",
       "allowed_providers",
       "decision_table.error_code"
     ]

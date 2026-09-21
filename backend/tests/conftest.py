@@ -11,6 +11,14 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+# FIX124 — before anything imports the app: every Redis client a test can
+# build lands on an in-process fake, and a real connection refuses to open.
+# The lane's settings resolve to the RUNNING stack's Redis; a test once left
+# a 15-minute health marker there that the live gateway honoured.
+from tests import _redis_isolation
+
+_redis_isolation.install()
+
 
 def pytest_configure(config):
     """Register custom markers so `pytest --strict-markers` works."""
@@ -688,26 +696,19 @@ def _isolate_stateful_redis_services(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_marker_escalation_in_the_shared_redis(request, monkeypatch):
-    """FIX124 — health markers written by tests keep the base cooldown.
+def _no_inherited_health_markers_anywhere():
+    """FIX124 — a health marker never outlives the test that set it.
 
-    Tests that fail a primary on purpose mark real pairs (openai/gpt-4o-mini
-    above all) in the Redis the lane shares, and nothing clears them but the
-    TTL. At 60 s that already made results depend on test order (FIX57); with
-    the escalating cooldown three such tests would pass the pair over for 15
-    minutes, for every file that runs after them. The escalation's own tests
-    count strikes in a fake Redis (their ``fake_redis`` fixture) and are exempt.
+    Tests fail a primary on purpose, which marks real pairs
+    (openai/gpt-4o-mini above all). The markers used to sit in a shared Redis
+    until their TTL ran out, so a later test's route depended on how long the
+    tests before it had taken (FIX57), and the escalating cooldown would have
+    stretched that to 15 minutes. They now live in the run's own fake server
+    and are dropped around every test.
     """
-    if "test_fix124_any_model_that_works" in request.node.nodeid and "fake_redis" in request.fixturenames:
-        yield
-        return
-    from app.services.gateway import fallback_orchestrator as _fo
-
-    async def _base_cooldown(client, provider, model, base_ttl, policy):
-        return base_ttl
-
-    monkeypatch.setattr(_fo, "_escalated_cooldown_s", _base_cooldown)
+    _redis_isolation.clear_health_keys()
     yield
+    _redis_isolation.clear_health_keys()
 
 
 @pytest.fixture()

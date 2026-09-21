@@ -887,6 +887,10 @@ def get_request(
             (r.dlp_input_findings or 0) + (r.dlp_output_findings or 0),
         ),
         dlp_findings=dlp_findings,
+        fallback_used=bool(r.fallback_used),
+        original_provider=r.original_provider,
+        original_model=r.original_model,
+        fallback_attempts=r.fallback_attempts if isinstance(r.fallback_attempts, list) else None,
     )
 
 

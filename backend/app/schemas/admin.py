@@ -78,6 +78,13 @@ class RequestLogDetail(BaseModel):
     output_raw: Optional[str] = None
     output_final: Optional[str] = None
     dlp_findings: Optional[List[dict]] = None
+    # FIX124 A2 — a rescued turn is charged at the answering model's price
+    # (``provider`` / ``model`` / ``estimated_cost_usd`` above); these say
+    # which model was ASKED for and which ones failed on the way.
+    fallback_used: bool = False
+    original_provider: Optional[str] = None
+    original_model: Optional[str] = None
+    fallback_attempts: Optional[List[dict]] = None
 
 
 class UsageSummary(BaseModel):

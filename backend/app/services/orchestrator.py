@@ -2852,13 +2852,63 @@ class GatewayOrchestrator:
             return None
         if plan is None:
             return None
-        from app.services.auto_router import router as _auto_router_mod
+        from app.services.providers import model_registry as _registry_mod
 
-        # The router's pick is an alternative like the rest here; the walk
-        # drops the failed model itself and applies every gate per hop.
-        models = [c.model for c in _auto_router_mod.provider_diverse(plan.ordered, _AUTO_ALTERNATIVES)]
+        # The router's pick is an alternative like the rest here. Ordered by
+        # closeness to the model the person PICKED (A1): the rescue is charged
+        # at the price of the model that answers.
+        models = self._ordered_alternatives(
+            [c for c in plan.ordered if c.model != payload.model],
+            _registry_mod.get_candidate(payload.model), policy,
+        )
         log.info("explicit_rescue_candidates", requested_model=payload.model, candidates=models)
         return models or None
+
+    @staticmethod
+    def _closest_to_hint(plan, closest_to, ctx, log):
+        """FIX124 — ``metadata.closest_to`` on an Auto request: "any model that
+        works, nearest to THIS one". chat-edge sends it when the model that
+        answered a turn could not also name the chat: the title is then
+        written by the closest working model (the A1 order), not by whatever
+        the router ranks first. The named model itself is left out — it was
+        just asked. An unknown name, or a policy that orders by the router's
+        ranking, leaves the plan as it is."""
+        if not isinstance(closest_to, str) or not closest_to.strip():
+            return plan
+        from dataclasses import replace
+
+        from app.services.auto_router import router as _auto_router_mod
+        from app.services.gateway import fallback_policy as _fb_policy_mod
+        from app.services.providers import model_registry as _registry_mod
+
+        try:
+            rule, unknown_band = _fb_policy_mod.rescue_order(_fb_policy_mod.effective_policy(getattr(ctx, "tenant_id", None)))
+            requested = _registry_mod.get_candidate(closest_to.strip())
+        except Exception:  # noqa: BLE001 — a hint never breaks routing
+            return plan
+        if requested is None or rule != _fb_policy_mod.RESCUE_ORDER_CLOSEST:
+            return plan
+        pool = [c for c in [plan.primary, *plan.fallbacks] if c.model != requested.model]
+        if not pool:
+            return plan
+        ranked = _auto_router_mod.closest_to_requested(pool, requested, unknown_band=unknown_band)
+        log.info("auto_route_closest_to", closest_to=requested.model, selected_model=ranked[0].model, was=plan.primary.model)
+        return replace(plan, primary=ranked[0], fallbacks=ranked[1:], reason=f"closest_to:{requested.model}")
+
+    @staticmethod
+    def _ordered_alternatives(ranked, requested, policy: dict | None) -> list[str]:
+        """FIX124 — the models handed to the fallback walk, for an Auto turn
+        (closest to the router's pick) and for an explicit model's rescue
+        (closest to the model the person picked): the policy's
+        ``rescue_order`` rule, then one model per provider before any
+        provider's second, at most ``_AUTO_ALTERNATIVES``."""
+        from app.services.auto_router import router as _auto_router_mod
+        from app.services.gateway import fallback_policy as _fb_policy_mod
+
+        rule, unknown_band = _fb_policy_mod.rescue_order(policy)
+        if rule == _fb_policy_mod.RESCUE_ORDER_CLOSEST:
+            ranked = _auto_router_mod.closest_to_requested(ranked, requested, unknown_band=unknown_band)
+        return [c.model for c in _auto_router_mod.provider_diverse(ranked, _AUTO_ALTERNATIVES)]
 
     async def _smart_select(self, payload, session, log):
         """Provider-agnostic model selection for ``auto`` + routing_hints.
@@ -3045,16 +3095,22 @@ class GatewayOrchestrator:
                 "routing. Configure at least one provider key.",
                 details={"reason": "no_usable_providers"},
             )
-        payload.model = plan.primary.model
         if payload.metadata is None:
             payload.metadata = {}
+        plan = self._closest_to_hint(plan, payload.metadata.get("closest_to"), ctx, log)
+        payload.model = plan.primary.model
         payload.metadata["auto_task"] = plan.task
         payload.metadata["auto_tier"] = plan.tier
-        # FIX124 — five alternatives, spread over providers (the first five of
-        # the ranking were one rate-limited account's models).
-        from app.services.auto_router import router as _auto_router_mod
+        # FIX124 — five alternatives, closest to the pick first and spread
+        # over providers (the first five of the ranking were one rate-limited
+        # account's models). A policy that cannot be read keeps the file's.
+        from app.services.gateway import fallback_policy as _fb_policy_mod
 
-        _alternatives = [c.model for c in _auto_router_mod.provider_diverse(plan.fallbacks, _AUTO_ALTERNATIVES)]
+        try:
+            _order_policy = _fb_policy_mod.effective_policy(getattr(ctx, "tenant_id", None))
+        except Exception:  # noqa: BLE001 — ordering never breaks routing
+            _order_policy = None
+        _alternatives = self._ordered_alternatives(plan.fallbacks, plan.primary, _order_policy)
         payload.metadata["auto_candidates"] = _alternatives
         log.info(
             "auto_route",

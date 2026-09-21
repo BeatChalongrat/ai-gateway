@@ -44,6 +44,7 @@ cannot do the job is not "answering").
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterable, Optional, Sequence
@@ -296,6 +297,65 @@ def provider_diverse(ordered: Sequence["ModelCandidate"], limit: int) -> list["M
             seen.add(c.provider)
             firsts.append(c)
     return (firsts + rest)[: max(0, limit)]
+
+
+_LATENCY_RANK = {"fast": 0, "standard": 1, "slow": 2}
+
+
+def closest_to_requested(
+    ordered: Sequence["ModelCandidate"],
+    requested: Optional["ModelCandidate"],
+    *,
+    unknown_band: str = "low",
+) -> list["ModelCandidate"]:
+    """FIX124 A1 — ``ordered`` (the router's ranking, already capable of the
+    request) re-ordered by closeness to the model the person picked.
+
+    A rescue is charged at the price of the model that answers, so a person
+    who picked the free in-house model must not be answered by an opus-class
+    one while something cheap works. Closeness, in order: the distance
+    between price bands (``tiers``), the distance between prices inside it
+    (log ratio, so $1 vs $2 is as far as $2 vs $4), the faster
+    ``latency_tier``, then the router's own position — which already carries
+    the tenant's 7-day success rates.
+
+    What the catalogue cannot say: a price of 0 is "free" for the in-house
+    box and "never entered" for a dozen paid models, with nothing to tell
+    them apart. A CANDIDATE without a price keeps the catalogue's convention
+    (band from ``cost_tier``, else medium) and loses every price comparison;
+    a REQUESTED model without one is placed by a ``cost_tier`` that says
+    something (budget / premium), else in ``unknown_band`` (policy:
+    ``rescue_order.requested_price_unknown_band``) with the cheapest
+    candidate nearest — when the price is not known, err to the cheap side.
+    ``requested=None`` (not in the catalogue) keeps the router's ranking.
+    """
+    if requested is None:
+        return list(ordered)
+    req_price = float(getattr(requested, "cost_per_input_token", 0.0) or 0.0)
+    legacy = (getattr(requested, "cost_tier", "") or "").lower()
+    if req_price > 0 or legacy not in ("", "standard"):
+        req_band = tiers.band_for_candidate(requested)
+    else:
+        req_band = unknown_band
+    req_rank = tiers.tier_rank(req_band)
+
+    def _key(item: tuple[int, "ModelCandidate"]):
+        index, cand = item
+        price = float(getattr(cand, "cost_per_input_token", 0.0) or 0.0)
+        if price <= 0:
+            price_gap = math.inf
+        elif req_price > 0:
+            price_gap = abs(math.log(price / req_price))
+        else:
+            price_gap = price
+        return (
+            abs(tiers.tier_rank(tiers.band_for_candidate(cand)) - req_rank),
+            price_gap,
+            _LATENCY_RANK.get(getattr(cand, "latency_tier", "standard"), 1),
+            index,
+        )
+
+    return [cand for _, cand in sorted(enumerate(ordered), key=_key)]
 
 
 def default_plan(candidates: Sequence["ModelCandidate"], preferred: Sequence[str], reason: str) -> Optional[RoutePlan]:
