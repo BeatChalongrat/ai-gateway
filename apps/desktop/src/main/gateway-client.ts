@@ -190,6 +190,14 @@ export interface KeyStore {
 }
 
 const IDLE_TIMEOUT_MS = 60_000;
+// FIX124 — while a stream is open the host asks, on a tick, whether the
+// machine still has a network. Offline AND nothing received for
+// OFFLINE_QUIET_MS ends the stream as disconnected instead of waiting out the
+// idle timeout. The silence is required: a link that blinks for a second
+// under a stream that keeps delivering has lost nothing, and ending it would
+// throw away (and bill) a generation that was fine.
+const OFFLINE_CHECK_MS = 2_000;
+const OFFLINE_QUIET_MS = 10_000;
 const KEY_NAME = "SRAN Desktop Agent";
 const FALLBACK_PROJECT_NAME = "SRAN Desktop";
 
@@ -202,7 +210,25 @@ export class GatewayClient {
     private readonly portalAccessToken: () => string | null,
     private readonly keyStore: KeyStore,
     private readonly log: Logger,
+    /** FIX124 — `isOnline` is Electron's net.isOnline, injected (index.ts) so
+     *  this module stays free of Electron; absent means online, which is
+     *  every test and non-Electron context before this option existed. */
+    private readonly options: { isOnline?: () => boolean } = {},
   ) {}
+
+  /** FIX124 — true when the machine reports no network AND that says
+   *  something about this gateway. A gateway on this machine (loopback, the
+   *  dev stack) is reachable with every adapter down, so the network's state
+   *  is no evidence about it. A probe that throws is read as online: it must
+   *  never be the thing that ends a turn. */
+  private machineOffline(): boolean {
+    if (!this.options.isOnline || isLoopbackUrl(this.gatewayUrl)) return false;
+    try {
+      return this.options.isOnline() === false;
+    } catch {
+      return false;
+    }
+  }
 
   /** FIX5 §2: a legible " (account you@example.com)" for the out-of-credits
    * message, so the user knows WHICH account is dry — the desktop signs in as its
@@ -483,10 +509,17 @@ export class GatewayClient {
     const onAbort = () => watchdog.abort();
     signal.addEventListener("abort", onAbort, { once: true });
     let idleTimer: NodeJS.Timeout | null = null;
+    let lastDataAt = Date.now();
     const kick = () => {
+      lastDataAt = Date.now();
       if (idleTimer) clearTimeout(idleTimer);
       idleTimer = setTimeout(() => watchdog.abort(new Error("stream_stalled")), IDLE_TIMEOUT_MS);
     };
+    // FIX124 — the second watchdog: see OFFLINE_QUIET_MS.
+    const offlineTick = setInterval(() => {
+      if (Date.now() - lastDataAt >= OFFLINE_QUIET_MS && this.machineOffline()) watchdog.abort(new Error("offline"));
+    }, OFFLINE_CHECK_MS);
+    offlineTick.unref?.();
     try {
       kick();
       // FIX3 §1: on `auto`, send routing_hints so the gateway takes the
@@ -595,11 +628,29 @@ export class GatewayClient {
       // catalogue code (stream_stalled keeps FIX80's declared code); the
       // raw error text rides details.transport, never the message. Before,
       // code "network" carried e.message and the page showed "fetch failed".
-      yield { kind: "error", ...classifyStreamFailure(err, { stalled, idleSeconds: IDLE_TIMEOUT_MS / 1000 }) };
+      // FIX124 — and whichever way it ended (the offline tick, the idle
+      // timeout, a read the OS tore), a machine with no network lost its
+      // CONNECTION: never stream_stalled's "the model stalled", never
+      // unclassified. Nothing is re-sent — the gateway cancelled (and billed)
+      // the generation when the stream died; the person retries.
+      const offline = this.machineOffline();
+      if (offline) this.log.warn(`GATEWAY stream lost run=${opts.requestId ?? "-"}: the machine is offline (${stalled ? "idle timeout" : (err as Error)?.message ?? "read failed"})`);
+      yield { kind: "error", ...classifyStreamFailure(err, { stalled, offline, idleSeconds: IDLE_TIMEOUT_MS / 1000 }) };
     } finally {
+      clearInterval(offlineTick);
       if (idleTimer) clearTimeout(idleTimer);
       signal.removeEventListener("abort", onAbort);
     }
+  }
+}
+
+/** FIX124 — a gateway URL that names this machine (see machineOffline). */
+function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127(\.\d{1,3}){3}$/.test(host);
+  } catch {
+    return false;
   }
 }
 

@@ -20,6 +20,7 @@ import {
   globalShortcut,
   Menu,
   nativeImage,
+  net,
   Notification,
   powerMonitor,
   safeStorage,
@@ -257,7 +258,10 @@ void app.whenReady().then(async () => {
   // coordinator is the only thing that speaks to the gateway for turns.
   bridge = new BridgeChannel(config.policy.allowedOrigins, log);
   const keyStore = new SafeKeyStore(path.join(app.getPath("userData"), "agent-key.bin"));
-  const gateway = new GatewayClient(config.gatewayUrl, () => ctl.currentAccessToken(), keyStore, log);
+  // FIX124 — the client asks Electron whether the machine has a network, so a
+  // stream lost to Wi-Fi going away is said as a lost connection and not as
+  // a stalled model (gateway-client.ts machineOffline).
+  const gateway = new GatewayClient(config.gatewayUrl, () => ctl.currentAccessToken(), keyStore, log, { isOnline: () => net.isOnline() });
   const chatEdge = new ChatEdgeClient(config.chatEdgeUrl, () => ctl.currentAccessToken(), log);
   chatEdgeRef = chatEdge;
   const assembler = new PromptAssembler(chatEdge, log, {

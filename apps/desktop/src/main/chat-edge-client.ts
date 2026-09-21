@@ -107,6 +107,10 @@ export interface ImportMessageItem {
   /** FIX121 — the gateway's per-model attempt log of a turn that failed
    *  (assistant error rows only); chat-edge stores a bounded copy. */
   error_attempts?: unknown[];
+  /** FIX124 — a regenerated answer names the assistant row it takes the
+   *  place of, by that row's client_id (assistant rows only). A row written
+   *  on the web has no client id, and then the field is absent. */
+  replaces_client_id?: string;
 }
 /** POST /api/v1/code/run response (FIX80: rows carry the persisted
  *  ConversationFile id when a conversation was named). */

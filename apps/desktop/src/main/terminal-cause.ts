@@ -78,8 +78,18 @@ export function eofWithoutTerminal(): HostErrorFrame {
 /** A throw out of the stream read: the idle watchdog (stalled) or the
  *  transport (reset, DNS, TLS, a torn body). The Go/Node error text is
  *  diagnostic and rides `details.transport`; it is never the message. */
-export function classifyStreamFailure(err: unknown, opts: { stalled: boolean; idleSeconds?: number }): HostErrorFrame {
+export function classifyStreamFailure(err: unknown, opts: { stalled: boolean; offline?: boolean; idleSeconds?: number }): HostErrorFrame {
   const text = err instanceof Error ? err.message : String(err);
+  if (opts.offline) {
+    // FIX124 — the machine has no network. A dropped link sends no reset, so
+    // the read just goes quiet and the idle watchdog used to end it as
+    // stream_stalled / timeout, whose sentence blames the model. It is the
+    // connection: the same code and cause as a torn read (the cause set is
+    // closed — docs/contracts/terminal_cause.json), and `details.offline`
+    // says why for the log and the ledger.
+    const d = TRANSPORT_CODES.disconnected;
+    return { code: d.code, message: catalogueMessage(d.code), retryable: d.retryable, cause: "disconnected", details: { transport: text, offline: true } };
+  }
   if (opts.stalled) {
     // FIX80's code, declared by the web dictionary with its own sentence.
     return {

@@ -102,6 +102,12 @@ interface ConversationLog {
 /** FIX41 — the three events that END a run (docs/STREAM_CONTRACT.md §3).
  *  Exactly one of them is sent, and it is always the last frame. */
 const TERMINAL_TURN_EVENTS = new Set(["message_complete", "error", "cancelled"]);
+/** FIX124 — a turn that answers the last user message AGAIN (Regenerate, or
+ *  Retry of a failed turn): it imports no user row, and names the assistant
+ *  row it replaces when the server knows that row by a client id. */
+interface RegenerateTarget {
+  replacesClientId?: string;
+}
 interface RunningTurn {
   controller: AbortController;
   done: Promise<void>;
@@ -1240,6 +1246,15 @@ export class TurnCoordinator {
     let userText = payload.text;
     let omittedOlder = 0;
     let attached: ResolvedAttachments | null = null;
+    // FIX124 — the page sends Regenerate, and Retry of a failed turn, as a
+    // submit with EMPTY text and nothing attached. buildMessages recovers the
+    // question from the history so the model is asked it again; the flag is
+    // decided HERE, from what the page sent, because after that line
+    // `userText` is non-empty and nothing downstream can tell a regenerate
+    // from a person typing the same words. It was imported as a second user
+    // row (U, A1, U', A2) on every Regenerate.
+    const isRegenerate = payload.text.length === 0 && payload.attachmentHandles.length === 0;
+    let regenerate: RegenerateTarget | null = null;
     // FIX29 §3.2: know whether the browser bridge is up BEFORE the prompt is
     // built, so the prompt can say "browser access is unavailable" instead of
     // the model improvising a tab list from a screenshot.
@@ -1253,6 +1268,7 @@ export class TurnCoordinator {
       messages = built.messages;
       userText = built.userText;
       omittedOlder = built.omittedOlder;
+      if (isRegenerate) regenerate = await this.regenerateTarget(conversationId);
     } catch (err) {
       this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
       this.emitError(conversationId, { code: "host_exception", message: "The turn could not be prepared." });
@@ -1407,12 +1423,12 @@ export class TurnCoordinator {
     // direction that re-reads the transcript rather than trusting the file.
     const chain = fullChain.slice(historyStart);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, 0));
-    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? [], ending, runId);
+    const imported = await this.importVisible(conversationId, userText, turn, model, appendedChain, attached?.fileIds ?? [], ending, runId, regenerate);
     this.saveLocalHistory(conversationId, chain, nextMarker(conversation?.message_count, imported));
     // FIX28 §2 (F3): the page renders both rows under client ids; hand it the
     // persisted chat-edge ids so Edit (fork), regenerate and feedback can name
     // a real message without leaving and re-entering the conversation.
-    const ids = await this.persistedIds(conversationId, turn);
+    const ids = await this.persistedIds(conversationId, turn, regenerate !== null);
     // FIX35 Part B — message_complete repeats the served model (an auto
     // turn's page-side meta line names the router's pick).
     // FIX119 — why the model stopped rides message_complete, so the page can
@@ -2933,7 +2949,7 @@ export class TurnCoordinator {
   /** FIX28 §2: the chat-edge row ids of this turn's user + assistant messages
    * (matched by the client ids importVisible sent). Best-effort: absent ids
    * just mean the page keeps its client ids, as before. */
-  private async persistedIds(conversationId: string, turn: RunningTurn): Promise<{ user_message_id?: string; assistant_message_id?: string }> {
+  private async persistedIds(conversationId: string, turn: RunningTurn, regenerate = false): Promise<{ user_message_id?: string; assistant_message_id?: string }> {
     try {
       const rows = await this.chatEdge.listMessages(conversationId);
       const userClient = "u_" + turn.messageId.slice(5);
@@ -2942,7 +2958,33 @@ export class TurnCoordinator {
         if (r.client_id === userClient) out.user_message_id = r.id;
         else if (r.client_id === turn.messageId) out.assistant_message_id = r.id;
       }
+      // FIX124 — a regenerate imported no user row, so no row carries this
+      // turn's user client id: the question it answered is the transcript's
+      // last user row, which already has its id.
+      if (regenerate && !out.user_message_id) {
+        const asked = [...rows].reverse().find((r) => r.role === "user");
+        if (asked) out.user_message_id = asked.id;
+      }
       return out;
+    } catch {
+      return {};
+    }
+  }
+
+  /** FIX124 — which assistant row a regenerate replaces, by the client id the
+   *  server knows it under. A row this host wrote carries its `asst_…` id; a
+   *  row written on the web has none, and then nothing is named (the server
+   *  cannot be told about a row by an id it never had). Rows still owed to
+   *  the server are newer than anything it lists, so they are looked at
+   *  first. Best-effort: a transcript that cannot be read names nothing. */
+  private async regenerateTarget(conversationId: string): Promise<RegenerateTarget> {
+    const owed = [...(this.unsavedImports.get(conversationId) ?? [])].reverse().find((i) => i.role === "assistant");
+    if (owed) return { replacesClientId: owed.client_id };
+    try {
+      const rows = await this.chatEdge.listMessages(conversationId);
+      const asked = rows.map((r) => r.role).lastIndexOf("user");
+      const answer = asked < 0 ? undefined : [...rows.slice(asked + 1)].reverse().find((r) => r.role === "assistant");
+      return typeof answer?.client_id === "string" && answer.client_id.length > 0 ? { replacesClientId: answer.client_id } : {};
     } catch {
       return {};
     }
@@ -2956,13 +2998,15 @@ export class TurnCoordinator {
   /** Imports this turn's visible rows to chat-edge; returns how many rows the
    *  server actually inserted (0 on failure or nothing to import) — the
    *  FIX109 marker is advanced by exactly that. */
-  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = [], ending?: TurnEnding, runId?: string): Promise<number> {
-    if (userText.length === 0 && turn.assistantText.length === 0 && fileIds.length === 0 && !turn.attachedFiles?.length) return 0;
+  private async importVisible(conversationId: string, userText: string, turn: RunningTurn, model: string, chain: GatewayMessage[], fileIds: string[] = [], ending?: TurnEnding, runId?: string, regenerate: RegenerateTarget | null = null): Promise<number> {
     const now = new Date().toISOString();
-    const items = [];
+    const items: ImportMessageItem[] = [];
     // FIX27: file_ids link the uploaded rows to this user message on chat-edge
     // (the web view shows the chips; a web continuation replays the images).
-    if (userText.length > 0 || fileIds.length > 0) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now, ...(fileIds.length ? { file_ids: fileIds } : {}) });
+    // FIX124 — not on a regenerate: there `userText` is the question recovered
+    // for the model, not something the person sent, and it already is a row.
+    // A new client id made it a second one.
+    if (!regenerate && (userText.length > 0 || fileIds.length > 0)) items.push({ client_id: "u_" + turn.messageId.slice(5), role: "user" as const, content: userText, model_id: null, created_at: now, ...(fileIds.length ? { file_ids: fileIds } : {}) });
     // FIX80 — files the turn's tools persisted (run_python artifacts) link
     // to the ASSISTANT row, so they render under the reply after a reload
     // and on the web view, exactly like web run_python attachments.
@@ -2984,13 +3028,21 @@ export class TurnCoordinator {
     // FIX120 — the requested model of a rescued turn rides the import.
     const fallbackFields = turn.fallbackFrom ? { fallback_from: turn.fallbackFrom } : {};
     const attemptFields = ending?.status === "error" && ending.attempts?.length ? { error_attempts: ending.attempts } : {};
+    // FIX124 — the answer this one takes the place of, so the server can stop
+    // showing both as the active answer to one question.
+    const replacesFields = regenerate?.replacesClientId ? { replaces_client_id: regenerate.replacesClientId } : {};
     // FIX121 — every turn leaves an assistant row. A Stop before the first
     // character used to leave none (only text, files or an ERROR made one),
     // so the web showed a question with no answer and no "stopped" label —
     // while a web turn stopped at the same moment has always had its row.
     const leavesARow = turn.assistantText.length > 0 || asstFileIds.length > 0 || ending?.status === "error" || ending?.status === "cancelled";
-    if (leavesARow) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields, ...fallbackFields, ...attemptFields });
+    if (leavesARow) items.push({ client_id: turn.messageId, role: "assistant" as const, content: turn.assistantText, model_id: turn.servedModel ?? model, created_at: new Date(Date.now() + 1).toISOString(), ...(asstFileIds.length ? { file_ids: asstFileIds } : {}), ...endingFields, ...runFields, ...fallbackFields, ...attemptFields, ...replacesFields });
     void chain;
+    // FIX124 — nothing to import is decided on the ITEMS. It was decided on
+    // the strings (no user text, no answer, no files) before any item was
+    // built, which a regenerate that failed before its first character would
+    // have matched — and FIX121's errored row would not have been written.
+    if (items.length === 0) return 0;
     // FIX121 — rows an earlier import of this conversation could not deliver
     // go first (the endpoint dedupes on client_id, so resending is safe).
     const owed = this.unsavedImports.get(conversationId) ?? [];
