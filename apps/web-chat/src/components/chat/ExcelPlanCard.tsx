@@ -28,7 +28,7 @@ import {
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
-import type { ExcelExecuteResponse } from "@/lib/types";
+import type { ExcelExecuteResponse, FileAttachment } from "@/lib/types";
 
 import {
   CardShell,
@@ -41,7 +41,13 @@ import {
   PrimaryButton,
   ValidationBadge,
   humanSize,
+  linkedGeneratedFile,
+  serverMessageId,
 } from "./planCardUI";
+
+/** FIX126 F4 — a restored card has no validator report. */
+export type ExcelResult = Pick<ExcelExecuteResponse, "file" | "changes"> &
+  Partial<Pick<ExcelExecuteResponse, "validation">>;
 
 interface ExcelPlanAction {
   type?: string;
@@ -87,9 +93,12 @@ function actionIcon(type?: string): ReactNode {
 interface Props {
   convId: string;
   plan: ExcelPlan;
+  /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
+  messageId?: string;
+  files?: FileAttachment[];
 }
 
-export function ExcelPlanCard({ convId, plan }: Props) {
+export function ExcelPlanCard({ convId, plan, messageId, files }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +116,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
         source_file_id: plan.source_file_id || undefined,
         output_filename: plan.output_filename,
         plan,
+        message_id: serverMessageId(messageId),
       });
       setResult(res);
       setStatus("done");
@@ -119,6 +129,12 @@ export function ExcelPlanCard({ convId, plan }: Props) {
 
   if (status === "done" && result) {
     return <ExcelResultCard result={result} />;
+  }
+  // FIX126 F4 — the workbook this plan produced, read back after a reload.
+  const linked =
+    status === "idle" ? linkedGeneratedFile(files, ["xlsx"], plan.output_filename) : undefined;
+  if (linked) {
+    return <ExcelResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
 
   const actions = plan.actions ?? [];
@@ -155,7 +171,7 @@ export function ExcelPlanCard({ convId, plan }: Props) {
   );
 }
 
-export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
+export function ExcelResultCard({ result }: { result: ExcelResult }) {
   const t = useT();
   const { file, validation, changes } = result;
   const sheets = validation?.stats?.sheets;
@@ -202,16 +218,18 @@ export function ExcelResultCard({ result }: { result: ExcelExecuteResponse }) {
           ))}
         </PlanList>
       ) : null}
-      <ValidationBadge
-        valid={validation?.valid ?? false}
-        warnings={validation?.warnings ?? []}
-        errors={validation?.issues ?? []}
-        okMessage={
-          brokenCount === 0
-            ? t("plan.validation.okNoFormulas")
-            : t("plan.validation.ok")
-        }
-      />
+      {validation ? (
+        <ValidationBadge
+          valid={validation.valid ?? false}
+          warnings={validation.warnings ?? []}
+          errors={validation.issues ?? []}
+          okMessage={
+            brokenCount === 0
+              ? t("plan.validation.okNoFormulas")
+              : t("plan.validation.ok")
+          }
+        />
+      ) : null}
     </CardShell>
   );
 }

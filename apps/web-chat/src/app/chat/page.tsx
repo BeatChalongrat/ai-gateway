@@ -8,6 +8,14 @@
 // their first file. Click "+ New chat" and walk away → nothing in
 // the sidebar (the conversation list view filters empties).
 //
+// FIX126 F2 — an attach creates the conversation (the upload endpoint is
+// POST /conversations/{id}/files, and starting the upload at attach time is
+// what lets the server read a long document while the person types). If
+// nothing is sent, that row is DELETED: when the person leaves this page,
+// when the tab is closed or reloaded (keepalive request), and when they
+// remove every attachment. A send marks the draft as used first, so the
+// conversation it went to is never touched.
+//
 // Note: we deliberately do NOT auto-redirect to the most recent
 // existing conversation. The redesigned UX wants a clean landing
 // surface (matches ChatGPT's "Where should we begin?" + Claude's
@@ -17,6 +25,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
+import { api } from "@/lib/api";
 import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { toast } from "@/components/ui/Toast";
@@ -29,6 +38,10 @@ import { useModelStore } from "@/stores/modelStore";
 export default function ChatLanding() {
   const router = useRouter();
   const createConversation = useChatStore((s) => s.createConversation);
+  const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const draftChipCount = useChatStore(
+    (s) => s.pendingFiles[DRAFT_CONV_KEY]?.length ?? 0,
+  );
   const sendMessage = useChatStore((s) => s.sendMessage);
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const selectGlobalModel = useModelStore((s) => s.selectModel);
@@ -65,6 +78,65 @@ export default function ChatLanding() {
   // ChatInput mounts on the conv page with the real id.
   const draftConvIdRef = useRef<string | null>(null);
   const creatingRef = useRef<Promise<string | null> | null>(null);
+  // FIX126 F2 — set the instant a send starts: from then on the draft
+  // conversation belongs to that message and is never discarded.
+  const sentRef = useRef(false);
+
+  // Delete the eager-created conversation if nothing was sent into it. Waits
+  // for a create still in flight so a row that lands after the person left
+  // is removed too. Idempotent: the ref is cleared before the request.
+  const discardDraftConv = useCallback(async () => {
+    if (sentRef.current) return;
+    if (creatingRef.current) {
+      try {
+        await creatingRef.current;
+      } catch {
+        /* create failed → nothing to delete */
+      }
+    }
+    if (sentRef.current) return;
+    const id = draftConvIdRef.current;
+    if (!id) return;
+    draftConvIdRef.current = null;
+    try {
+      await deleteConversation(id);
+    } catch {
+      /* best effort — the sidebar hides a conversation with no messages */
+    }
+  }, [deleteConversation]);
+
+  // Every attachment removed without sending → the conversation they were
+  // uploaded into goes too. (A send also empties the bucket, after sentRef.)
+  const prevChipCountRef = useRef(draftChipCount);
+  useEffect(() => {
+    const prev = prevChipCountRef.current;
+    prevChipCountRef.current = draftChipCount;
+    if (prev > 0 && draftChipCount === 0) void discardDraftConv();
+  }, [draftChipCount, discardDraftConv]);
+
+  // Leaving the page (in-app navigation → unmount; tab close / reload →
+  // pagehide) without sending discards the draft and its chips.
+  const discardRef = useRef(discardDraftConv);
+  discardRef.current = discardDraftConv;
+  useEffect(() => {
+    const onPageHide = () => {
+      if (sentRef.current) return;
+      const id = draftConvIdRef.current;
+      if (!id) return;
+      draftConvIdRef.current = null;
+      api.deleteConversationOnExit(id);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      if (sentRef.current) return;
+      if (!draftConvIdRef.current && !creatingRef.current) return;
+      // The chips point at the conversation being deleted; do not let
+      // the next new-chat page offer them again.
+      useChatStore.getState().clearPendingFiles(DRAFT_CONV_KEY);
+      void discardRef.current();
+    };
+  }, []);
 
   // ensureConv — single source of truth for "the conversation this
   // landing page is editing". Reuses an existing draft, otherwise
@@ -112,12 +184,17 @@ export default function ChatLanding() {
       toast(tOutside("chat.toast.pickModel"));
       return;
     }
+    // FIX126 F2 — synchronous, before the composer clears its chips.
+    sentRef.current = true;
     // Attaching a file already created the draft conv; reuse it so
     // the upload + the send target the same row. When the user
     // types-and-sends without attaching, this falls through to a
     // fresh create at first send (the original "lazy" behaviour).
     const id = await ensureConv();
-    if (!id) return;
+    if (!id) {
+      sentRef.current = false;
+      return;
+    }
     // Kick off the stream BEFORE navigating so the assistant
     // placeholder mounts inside chatStore by the time the
     // conversation page renders. The page sees messages already
@@ -130,19 +207,19 @@ export default function ChatLanding() {
     <AttachmentDropZone
       className="flex flex-1 flex-col overflow-hidden"
       enabled
-      onFiles={async (filesRaw) => {
+      onFiles={(filesRaw) => {
         // W3 — gate BEFORE ensureConv so a rejected image-only drop
         // never eager-creates an empty conversation row.
         const files = gateImagesForVision(filesRaw, selectedModelId);
         if (files.length === 0) return;
-        const id = await ensureConv();
-        if (!id) return;
         // Chip bucket is DRAFT_CONV_KEY so the dropped-file chip
         // appears in the landing-page ChatInput (which renders
         // from that bucket because conversationId is null here).
-        // Network target is the eager-created conv id.
+        // FIX126 F1 — uploadFiles applies the per-message cap and stages
+        // the chips BEFORE it asks ensureConv for the network target, so
+        // a drop that is entirely over the limit creates nothing.
         void uploadFiles(
-          id,
+          ensureConv,
           files,
           {
             addPendingFile,

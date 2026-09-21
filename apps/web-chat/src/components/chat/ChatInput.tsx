@@ -8,7 +8,7 @@ import { useDismissable } from "@/hooks/useDismissable";
 
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { loadSkillTemplates, skillSlashCommands } from "@/lib/skillTemplates";
 import {
@@ -21,11 +21,11 @@ import {
 import type { ExtractionStatus } from "@/lib/fileExtraction";
 import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
+  admitFilesForMessage,
   FILE_PICKER_ACCEPT,
   FILE_PICKER_ACCEPT_NO_IMAGES,
   isImageFile,
-  MAX_FILES_PER_MESSAGE,
-  validateFile,
+  uploadErrorMessage,
 } from "@/lib/fileUtil";
 import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch } from "@/lib/visionGate";
 import { detectImageIntent } from "@/lib/imageIntent";
@@ -933,8 +933,8 @@ export function ChatInput({
         setFileExtractionStatus(chipBucket, pendingId, status),
       );
     } catch (err) {
-      const msg =
-        err instanceof ApiError ? err.message : tOutside("file.err.uploadFailed");
+      // FIX126 F5 — the chip speaks the UI's language, not the transport's.
+      const msg = uploadErrorMessage(err);
       markFileError(chipBucket, pendingId, msg);
       toast(msg);
     }
@@ -950,30 +950,16 @@ export function ChatInput({
       activeModelIdRef.current ?? null,
     );
     if (filesRaw.length === 0) return;
-    // Per-message cap. Count rows already in the render bucket; we
-    // re-read the selector value because closures see the snapshot
-    // captured at render time and that's exactly what the user
-    // sees right now.
-    const existing = pendingFiles.filter((p) => p.status !== "error").length;
-    const slots = Math.max(0, MAX_FILES_PER_MESSAGE - existing);
-    if (slots === 0) {
-      toast(tOutside("input.toast.maxFiles", { max: String(MAX_FILES_PER_MESSAGE) }));
-      return;
-    }
-
-    const accepted: File[] = [];
-    for (const f of filesRaw) {
-      if (accepted.length === slots) {
-        toast(tOutside("input.toast.slotsLeft", { n: String(slots) }));
-        break;
-      }
-      const v = validateFile(f);
-      if (!v.ok) {
-        toast(`${f.name}: ${v.reason}`);
-        continue;
-      }
-      accepted.push(f);
-    }
+    // FIX126 F1 — the shared per-message gate. The live chip count is read
+    // from the STORE at this instant, not from the render closure: the
+    // paste listener is bound once and used to see the mount-time count.
+    const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
+    const { accepted } = admitFilesForMessage(
+      filesRaw,
+      liveChipCount(stagingBucket),
+      undefined,
+      toast,
+    );
     if (accepted.length === 0) return;
 
     // Phase 1 — stage every accepted file IMMEDIATELY at the
@@ -986,7 +972,6 @@ export function ChatInput({
     // of the chip bucket; the backend tags returned serverIds to
     // the real conv, and the submit() path forwards those serverIds
     // through onSend so the message lands correctly.
-    const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
     const pendingIds = accepted.map((f) => addPendingFile(stagingBucket, f));
     // FIX34 Part D: the paste-as-file undo needs the chip id of what it staged.
     lastStagedRef.current = { bucket: stagingBucket, ids: pendingIds };
@@ -1001,11 +986,7 @@ export function ChatInput({
       // turned red. The toast inside ensureConvId already surfaced
       // the root cause.
       for (const pid of pendingIds) {
-        markFileError(
-          stagingBucket,
-          pid,
-          "Couldn't create conversation for upload",
-        );
+        markFileError(stagingBucket, pid, tOutside("file.err.noConversation"));
       }
       return;
     }
@@ -1061,6 +1042,10 @@ export function ChatInput({
   // Claude chat app, which is what the owner compared against, does not. There
   // is nothing to undo because nothing happens to the text.
   const lastStagedRef = useRef<{ bucket: string; ids: string[] } | null>(null);
+  // The listener below binds once; it calls the CURRENT handleFiles so a
+  // paste sees this render's conversation id (FIX126 F1).
+  const handleFilesRef = useRef(handleFiles);
+  handleFilesRef.current = handleFiles;
   useEffect(() => {
     if (typeof window === "undefined") return;
     const el = taRef.current;
@@ -1078,7 +1063,7 @@ export function ChatInput({
       }
       if (images.length > 0) {
         e.preventDefault();
-        void handleFiles(images);
+        void handleFilesRef.current(images);
       }
       // Text of any length: the browser's own paste, untouched.
     };
@@ -1590,15 +1575,29 @@ export function ChatInput({
 // instance is rendering from.
 export { DRAFT_CONV_KEY };
 
+/** Live (non-error) chips in a composer bucket, read from the store now.
+ *  FIX126 F1 — every entry path counts against this, not a render snapshot. */
+function liveChipCount(bucket: string): number {
+  return (useChatStore.getState().pendingFiles[bucket] ?? []).filter(
+    (p) => p.status !== "error",
+  ).length;
+}
+
 // Imperative API for the drag-and-drop wrapper. The conversation
 // page's drop handler calls this directly rather than re-implementing
 // validation. `chipBucket` controls where the visible PendingFile
 // rows live in chatStore — defaults to netConvId, but the landing
 // page passes DRAFT_CONV_KEY so the chips render in the same place
-// the landing's ChatInput is reading from. `netConvId` is always
-// the real conversation id (uploads go there on the backend).
+// the landing's ChatInput is reading from.
+//
+// `conv` is the real conversation id (uploads go there on the backend),
+// or — on the new-chat page — a resolver that creates it. FIX126 F1: the
+// drop is gated by the same per-message cap as the picker and paste, and
+// the chips are staged synchronously BEFORE the resolver runs, so a drop
+// whose files are all rejected never creates a conversation and two quick
+// drops cannot both see the same free slots.
 export async function uploadFiles(
-  netConvId: string,
+  conv: string | (() => Promise<string | null>),
   files: File[],
   store: {
     addPendingFile: (id: string, f: File) => string;
@@ -1618,15 +1617,33 @@ export async function uploadFiles(
       extractionStatus: ExtractionStatus,
     ) => void;
   },
-  chipBucket: string = netConvId,
+  chipBucket: string = typeof conv === "string" ? conv : DRAFT_CONV_KEY,
 ): Promise<void> {
-  for (const f of files) {
-    const v = validateFile(f);
-    if (!v.ok) {
-      toast(`${f.name}: ${v.reason}`);
-      continue;
+  const { accepted } = admitFilesForMessage(
+    files,
+    liveChipCount(chipBucket),
+    undefined,
+    toast,
+  );
+  if (accepted.length === 0) return;
+  const staged = accepted.map((f) => ({ f, pid: store.addPendingFile(chipBucket, f) }));
+  let netConvId: string | null;
+  if (typeof conv === "string") {
+    netConvId = conv;
+  } else {
+    try {
+      netConvId = await conv();
+    } catch {
+      netConvId = null;
     }
-    const pid = store.addPendingFile(chipBucket, f);
+  }
+  if (!netConvId) {
+    for (const { pid } of staged) {
+      store.markFileError(chipBucket, pid, tOutside("file.err.noConversation"));
+    }
+    return;
+  }
+  for (const { f, pid } of staged) {
     try {
       const row = await api.uploadFile(netConvId, f, {
         onProgress: (p) => store.updateFileProgress(chipBucket, pid, p),
@@ -1634,12 +1651,13 @@ export async function uploadFiles(
       store.markFileReady(chipBucket, pid, row.id, row.extraction_status);
       const onStatus = store.setFileExtractionStatus;
       if (onStatus) {
-        watchExtraction(netConvId, row.id, row.extraction_status, (status) =>
+        const target = netConvId;
+        watchExtraction(target, row.id, row.extraction_status, (status) =>
           onStatus(chipBucket, pid, status),
         );
       }
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Upload failed.";
+      const msg = uploadErrorMessage(err);
       store.markFileError(chipBucket, pid, msg);
       toast(msg);
     }

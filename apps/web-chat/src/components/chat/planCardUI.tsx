@@ -329,3 +329,41 @@ export function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
 }
+
+// ── FIX126 F4 — a plan that already produced its file ─────────────────
+//
+// chat-edge links the file an execute produced to the assistant message
+// that wrote the plan, so GET /messages returns it on that message's
+// `files` with is_generated=true. The card then opens in its done state
+// from that file instead of offering to generate the document again.
+
+/** The generated file on this message that belongs to a plan of the given
+ *  formats. A file whose name equals the plan's output_filename wins;
+ *  otherwise the first generated file with a matching extension. */
+export function linkedGeneratedFile(
+  files: FileAttachment[] | undefined,
+  extensions: readonly string[],
+  outputFilename?: string,
+): FileAttachment | undefined {
+  if (!files || files.length === 0) return undefined;
+  const wanted = new Set(extensions.map((e) => e.toLowerCase()));
+  const matches = files.filter((f) => {
+    if (f.is_generated !== true) return false;
+    const i = f.filename.lastIndexOf(".");
+    return i >= 0 && wanted.has(f.filename.slice(i + 1).toLowerCase());
+  });
+  if (matches.length === 0) return undefined;
+  if (outputFilename) {
+    const named = matches.find((f) => f.filename === outputFilename);
+    if (named) return named;
+  }
+  return matches[0];
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The message id to send with an execute, or undefined while the row still
+ *  carries a client-side temporary id ("asst-<uuid>"). */
+export function serverMessageId(id: string | undefined): string | undefined {
+  return id && UUID_RE.test(id) ? id : undefined;
+}

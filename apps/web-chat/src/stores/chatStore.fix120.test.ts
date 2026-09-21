@@ -8,7 +8,12 @@ import type { Conversation } from "@/lib/types";
 const { mockApi, mockBridge } = vi.hoisted(() => ({
   mockApi: {
     openMessageStream: vi.fn(),
-    openResumeStream: vi.fn(),
+    // O9 — loadMessages under HOSTED_MODE fires hostedResumeProbe, which
+    // awaits this. The real api.openResumeStream always resolves to a
+    // Response (or throws); a bare vi.fn() resolved to undefined and the
+    // probe's `res.ok` escaped as an unhandled rejection after the test
+    // ended. No live turn on the host → a non-ok Response.
+    openResumeStream: vi.fn(async () => ({ ok: false, status: 204 }) as unknown as Response),
     getConversation: vi.fn(),
     generateTitle: vi.fn(async () => ({ title: "t" })),
     listMessages: vi.fn(async () => ({ messages: [] })),

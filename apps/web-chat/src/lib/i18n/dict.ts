@@ -63,6 +63,7 @@ export const en = {
   // Same phase, shown on the attachment chip itself. The chip stays
   // sendable while this is up — extraction no longer blocks the turn.
   "file.reading": "Reading…",
+  "file.unreadable": "Couldn't read this file — it may be damaged or password-protected",
   "input.attach": "Attach files",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "Attach files (this model can't read images)",
@@ -645,6 +646,7 @@ export const en = {
   "chat.toast.kbChangeFailed": "Couldn't change knowledge base.",
   "input.toast.maxFiles": "At most {max} files per message.",
   "input.toast.slotsLeft": "Only {n} more file(s) can attach to this message.",
+  "input.toast.filesCapped": "At most {max} files per message — added {added}, left out {leftOut}.",
   "kb.toast.deleted": "Knowledge base deleted",
   "kb.toast.deleteFailed": "Couldn't delete knowledge base.",
   "kb.toast.created": 'Created "{name}"',
@@ -657,7 +659,13 @@ export const en = {
 
   // ── Phase-2 i18n sweep — file validation ────────────────────
   "file.err.empty": "Empty file",
-  "file.err.tooLarge": "File is larger than 25 MB",
+  "file.err.tooLarge": "File is larger than 200 MB",
+  "file.err.network": "Network error — check your connection",
+  "file.err.cancelled": "Upload cancelled",
+  "file.err.timeout": "The server took too long to read this file",
+  "file.err.sessionExpired": "Session expired — sign in again",
+  "file.err.convNotFound": "This conversation no longer exists",
+  "file.err.noConversation": "Couldn't create a conversation for this file",
   "file.err.unsupported": "Unsupported file type",
   "file.err.uploadFailed": "Upload failed. Try again.",
 
@@ -723,6 +731,7 @@ export const en = {
   "error.model_no_tool_support": "This model can't use tools. Pick a model that supports tools, or turn the tools off.",
   "error.model_no_vision_support": "This model can't read images. Pick a model that supports images, or remove the image.",
   "error.no_capable_model": "No model available to you can do what this message needs (tools or images). Pick a model that can, or remove the tools/image.",
+  "error.no_allowed_provider": "None of the allowed providers can serve this model, so nothing was sent. Pick another model or change the allowed providers.",
   "error.context_length_exceeded": "This conversation is too long for the model. Shorten it or start a new chat.",
   "error.message_too_long": "This message alone is too long for the model. Shorten it or split it into parts; the rest of the conversation is fine.",
   "error.upstream_bad_response": "The AI provider rejected this request. Change the message or the model before sending again.",
@@ -916,6 +925,8 @@ export const en = {
     "The reply was interrupted before it finished.",
   "error.tooManyMessages": "Too many messages — slow down for a minute.",
   "error.conversationBusy": "This chat is already answering in another tab — wait for it to finish, then send again",
+  "error.tooManyFiles": "At most {max} files per message — this one has {n}. Remove some and send again",
+  "error.tooManyFilesNoCount": "At most {max} files per message — remove some and send again",
   "error.serviceUnavailable": "AI service is temporarily unavailable.",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
@@ -1625,6 +1636,7 @@ export const en = {
   "file.uploading": "Uploading",
   "file.remove": "Remove file",
   "file.retryUpload": "Retry upload",
+  "file.retry": "Retry",
   "file.downloadTitle": "Download {name}",
   "convfiles.aria": "Conversation files ({n})",
   "convfiles.header": "Files in this conversation",
@@ -1746,6 +1758,7 @@ const th: Record<DictKey, string> = {
   "input.placeholder.uploading": "กำลังอัปโหลด…",
   "input.placeholder.reading": "กำลังอ่านเอกสาร…",
   "file.reading": "กำลังอ่าน…",
+  "file.unreadable": "อ่านไฟล์ไม่ได้ — ไฟล์อาจเสียหายหรือมีรหัสผ่าน",
   "input.attach": "แนบไฟล์",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "แนบไฟล์ (โมเดลนี้อ่านรูปภาพไม่ได้)",
@@ -2305,6 +2318,7 @@ const th: Record<DictKey, string> = {
   "chat.toast.kbChangeFailed": "เปลี่ยนคลังความรู้ไม่สำเร็จ",
   "input.toast.maxFiles": "แนบได้สูงสุด {max} ไฟล์ต่อข้อความ",
   "input.toast.slotsLeft": "แนบไฟล์เพิ่มได้อีก {n} ไฟล์เท่านั้น",
+  "input.toast.filesCapped": "แนบได้สูงสุด {max} ไฟล์ต่อข้อความ — เพิ่ม {added} ไฟล์ ไม่ได้เพิ่ม {leftOut} ไฟล์",
   "kb.toast.deleted": "ลบคลังความรู้แล้ว",
   "kb.toast.deleteFailed": "ลบคลังความรู้ไม่สำเร็จ",
   "kb.toast.created": 'สร้าง "{name}" แล้ว',
@@ -2317,7 +2331,13 @@ const th: Record<DictKey, string> = {
 
   // ── Phase-2 i18n sweep — file validation ────────────────────
   "file.err.empty": "ไฟล์ว่างเปล่า",
-  "file.err.tooLarge": "ไฟล์ใหญ่เกิน 25 MB",
+  "file.err.tooLarge": "ไฟล์ใหญ่เกิน 200 MB",
+  "file.err.network": "เครือข่ายขัดข้อง — ตรวจสอบการเชื่อมต่อ",
+  "file.err.cancelled": "ยกเลิกการอัปโหลดแล้ว",
+  "file.err.timeout": "เซิร์ฟเวอร์ใช้เวลาอ่านไฟล์นี้นานเกินไป",
+  "file.err.sessionExpired": "เซสชันหมดอายุ — กรุณาเข้าสู่ระบบอีกครั้ง",
+  "file.err.convNotFound": "ไม่พบบทสนทนานี้แล้ว",
+  "file.err.noConversation": "สร้างบทสนทนาสำหรับไฟล์นี้ไม่สำเร็จ",
   "file.err.unsupported": "ชนิดไฟล์ไม่รองรับ",
   "file.err.uploadFailed": "อัปโหลดไม่สำเร็จ กรุณาลองใหม่",
 
@@ -2376,6 +2396,7 @@ const th: Record<DictKey, string> = {
   "error.model_no_tool_support": "โมเดลนี้ใช้เครื่องมือไม่ได้ กรุณาเลือกโมเดลที่รองรับเครื่องมือ หรือปิดเครื่องมือก่อน",
   "error.model_no_vision_support": "โมเดลนี้อ่านรูปภาพไม่ได้ กรุณาเลือกโมเดลที่รองรับรูปภาพ หรือเอารูปออก",
   "error.no_capable_model": "ไม่มีโมเดลในสิทธิ์ของคุณที่ทำสิ่งที่ข้อความนี้ต้องการได้ (เครื่องมือหรือรูปภาพ) กรุณาเลือกโมเดลที่รองรับ หรือเอาเครื่องมือ/รูปออก",
+  "error.no_allowed_provider": "ไม่มีผู้ให้บริการที่อนุญาตรายใดให้บริการโมเดลนี้ได้ จึงยังไม่ได้ส่งข้อความ กรุณาเลือกโมเดลอื่นหรือเปลี่ยนผู้ให้บริการที่อนุญาต",
   "error.context_length_exceeded": "บทสนทนานี้ยาวเกินกว่าที่โมเดลรับได้ กรุณาย่อบทสนทนา หรือเริ่มแชทใหม่",
   "error.message_too_long": "ข้อความนี้ยาวเกินกว่าที่โมเดลรับได้ในครั้งเดียว กรุณาย่อหรือแบ่งเป็นหลายส่วน ส่วนอื่นของบทสนทนายังใช้ต่อได้ตามปกติ",
   "error.upstream_bad_response": "ผู้ให้บริการ AI ปฏิเสธคำขอนี้ กรุณาแก้ไขข้อความหรือเปลี่ยนโมเดลก่อนส่งอีกครั้ง",
@@ -2557,6 +2578,8 @@ const th: Record<DictKey, string> = {
   "error.generationInterrupted": "คำตอบถูกขัดจังหวะก่อนจะเสร็จสมบูรณ์",
   "error.tooManyMessages": "ส่งข้อความถี่เกินไป กรุณารอสักครู่",
   "error.conversationBusy": "แชทนี้กำลังตอบอยู่ในอีกหน้าต่าง — รอให้ตอบเสร็จก่อนแล้วส่งใหม่",
+  "error.tooManyFiles": "ส่งได้สูงสุด {max} ไฟล์ต่อข้อความ — ข้อความนี้มี {n} ไฟล์ นำไฟล์ออกบางส่วนแล้วส่งใหม่",
+  "error.tooManyFilesNoCount": "ส่งได้สูงสุด {max} ไฟล์ต่อข้อความ — นำไฟล์ออกบางส่วนแล้วส่งใหม่",
   "error.serviceUnavailable": "บริการ AI ไม่พร้อมใช้งานชั่วคราว",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
@@ -3258,6 +3281,7 @@ const th: Record<DictKey, string> = {
   "file.uploading": "กำลังอัปโหลด",
   "file.remove": "นำไฟล์ออก",
   "file.retryUpload": "อัปโหลดใหม่",
+  "file.retry": "ลองใหม่",
   "file.downloadTitle": "ดาวน์โหลด {name}",
   "convfiles.aria": "ไฟล์ในบทสนทนา ({n})",
   "convfiles.header": "ไฟล์ในบทสนทนานี้",

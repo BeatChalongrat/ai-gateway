@@ -84,6 +84,8 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   model_no_tool_support: "error.model_no_tool_support",
   model_no_vision_support: "error.model_no_vision_support",
   no_capable_model: "error.no_capable_model",
+  // FIX126 O4 — an allow-list that matches no provider is refused.
+  no_allowed_provider: "error.no_allowed_provider",
   context_length_exceeded: "error.context_length_exceeded",
   // FIX105 — ONE message is over the budget on its own (chat-edge
   // message_too_long.go; the desktop host names the same case). The advice

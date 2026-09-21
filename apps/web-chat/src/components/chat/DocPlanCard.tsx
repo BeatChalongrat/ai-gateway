@@ -26,7 +26,7 @@ import {
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { api, ApiError } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
-import type { DocExecuteResponse } from "@/lib/types";
+import type { DocExecuteResponse, FileAttachment } from "@/lib/types";
 
 import {
   CardShell,
@@ -39,8 +39,15 @@ import {
   PrimaryButton,
   ValidationBadge,
   humanSize,
+  linkedGeneratedFile,
+  serverMessageId,
   truncate,
 } from "./planCardUI";
+
+/** What a result card needs. A card restored from a reloaded message has
+ *  the file and its change log but no validator report (FIX126 F4). */
+export type DocResult = Pick<DocExecuteResponse, "file" | "changes"> &
+  Partial<Pick<DocExecuteResponse, "validation" | "generation">>;
 
 interface DocAction {
   type?: string;
@@ -96,9 +103,12 @@ function actionIcon(type?: string): ReactNode {
 interface Props {
   convId: string;
   plan: DocPlan;
+  /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
+  messageId?: string;
+  files?: FileAttachment[];
 }
 
-export function DocPlanCard({ convId, plan }: Props) {
+export function DocPlanCard({ convId, plan, messageId, files }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
@@ -117,6 +127,7 @@ export function DocPlanCard({ convId, plan }: Props) {
         output_filename: plan.output_filename,
         format,
         plan,
+        message_id: serverMessageId(messageId),
       });
       setResult(res);
       setStatus("done");
@@ -129,6 +140,15 @@ export function DocPlanCard({ convId, plan }: Props) {
 
   if (status === "done" && result) {
     return <DocResultCard result={result} />;
+  }
+  // FIX126 F4 — this plan already produced its file (read back after a
+  // reload): show the result, not the generate button again.
+  const linked =
+    status === "idle"
+      ? linkedGeneratedFile(files, [plan.format === "pdf" ? "pdf" : "docx"], plan.output_filename)
+      : undefined;
+  if (linked) {
+    return <DocResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
 
   const format = (plan.format || "docx").toUpperCase();
@@ -170,7 +190,7 @@ export function DocPlanCard({ convId, plan }: Props) {
   );
 }
 
-export function DocResultCard({ result }: { result: DocExecuteResponse }) {
+export function DocResultCard({ result }: { result: DocResult }) {
   const t = useT();
   const { file, validation, changes } = result;
   const fileTypeLabel = (file.content_type || "").includes("pdf") ? "PDF" : "DOCX";
@@ -228,11 +248,13 @@ export function DocResultCard({ result }: { result: DocExecuteResponse }) {
           </ul>
         </details>
       ) : null}
-      <ValidationBadge
-        valid={validation?.valid ?? false}
-        warnings={validation?.warnings ?? []}
-        errors={validation?.errors ?? []}
-      />
+      {validation ? (
+        <ValidationBadge
+          valid={validation.valid ?? false}
+          warnings={validation.warnings ?? []}
+          errors={validation.errors ?? []}
+        />
+      ) : null}
     </CardShell>
   );
 }

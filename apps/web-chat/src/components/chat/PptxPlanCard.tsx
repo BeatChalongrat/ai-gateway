@@ -22,6 +22,7 @@ import { api, ApiError } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
 import type {
   DocExecuteResponse,
+  FileAttachment,
   PptxGenerationReport,
 } from "@/lib/types";
 
@@ -36,8 +37,11 @@ import {
   PrimaryButton,
   ValidationBadge,
   humanSize,
+  linkedGeneratedFile,
+  serverMessageId,
   truncate,
 } from "./planCardUI";
+import type { DocResult } from "./DocPlanCard";
 
 interface PptxSlide {
   type?: string;
@@ -94,9 +98,12 @@ function slideIcon(type?: string): ReactNode {
 interface Props {
   convId: string;
   plan: PptxPlan;
+  /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
+  messageId?: string;
+  files?: FileAttachment[];
 }
 
-export function PptxPlanCard({ convId, plan }: Props) {
+export function PptxPlanCard({ convId, plan, messageId, files }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
@@ -114,6 +121,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
         output_filename: plan.output_filename,
         format: "pptx",
         plan,
+        message_id: serverMessageId(messageId),
       });
       setResult(res);
       setStatus("done");
@@ -126,6 +134,12 @@ export function PptxPlanCard({ convId, plan }: Props) {
 
   if (status === "done" && result) {
     return <PptxResultCard result={result} />;
+  }
+  // FIX126 F4 — the deck this plan produced, read back after a reload.
+  const linked =
+    status === "idle" ? linkedGeneratedFile(files, ["pptx"], plan.output_filename) : undefined;
+  if (linked) {
+    return <PptxResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
 
   const settings = plan.presentation_settings || {};
@@ -165,7 +179,7 @@ export function PptxPlanCard({ convId, plan }: Props) {
   );
 }
 
-export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
+export function PptxResultCard({ result }: { result: DocResult }) {
   const t = useT();
   const { file, validation, generation, changes } = result;
   const pptxGen = generation as unknown as PptxGenerationReport | undefined;
@@ -247,12 +261,14 @@ export function PptxResultCard({ result }: { result: DocExecuteResponse }) {
           </ul>
         </details>
       ) : null}
-      <ValidationBadge
-        valid={validation?.valid ?? false}
-        warnings={validation?.warnings ?? []}
-        errors={validation?.errors ?? []}
-        okMessage={t("plan.validation.okPresentation")}
-      />
+      {validation ? (
+        <ValidationBadge
+          valid={validation.valid ?? false}
+          warnings={validation.warnings ?? []}
+          errors={validation.errors ?? []}
+          okMessage={t("plan.validation.okPresentation")}
+        />
+      ) : null}
     </CardShell>
   );
 }

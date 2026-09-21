@@ -1,6 +1,6 @@
 {
   "generated": "manual",
-  "count": 106,
+  "count": 105,
   "keys": [
     "src/app/chat/knowledge/page.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: title=\"Delete\"",
     "src/app/chat/knowledge/page.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: title=\"Reindex\"",
@@ -61,7 +61,6 @@
     "src/components/chat/EmptyState.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: alt=\"SRAN Chat\"",
     "src/components/chat/ExcelPlanCard.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span>Excel</span>",
     "src/components/chat/ExportMenu.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: title=\"Conversation actions\"",
-    "src/components/chat/FilePreviewCard.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <button\n          type=\"button\"\n          aria-label={t(\"file.retryUpload\")}\n          onClick={(e) => {\n            e.stopPropagation();\n            onRetry();\n          }}\n          className=\"focus-ring absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border bg-bg-surface px-2 text-[10px] font-medium text-text-secondary backdrop-blur-sm transition-colors hover:bg-bg-surface hover:text-text-primary\"\n        >\n          <RotateCw className=\"h-3 w-3\" aria-hidden />\n          Retry\n        </button>",
     "src/components/chat/MessageBubble.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <button\n            type=\"button\"\n            data-testid=\"continue-button\"\n            onClick={() => void useChatStore.getState().sendMessage(convId, \"continue\")}\n            className=\"focus-ring ml-auto rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated\"\n          >\n            Continue\n          </button>",
     "src/components/chat/MessageBubble.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: <span>Paused at the step limit.</span>",
     "src/components/chat/MessageBubble.tsx::i18next/no-literal-string::User-visible string must go through t() — see src/lib/i18n/dict.ts: a.model ?? a.provider ?? \"model\"",

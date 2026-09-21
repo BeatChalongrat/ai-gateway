@@ -410,6 +410,22 @@ class ApiClient {
   deleteConversation(id: string) {
     return this.raw(`/conversations/${id}`, { method: "DELETE" });
   }
+  /** FIX126 F2 — best-effort delete while the page is going away (tab
+   *  closed or reloaded on the new-chat page with files attached but
+   *  nothing sent). `keepalive` lets the request outlive the document; no
+   *  refresh-and-retry is possible here, so a lapsed session just leaves
+   *  the row (the sidebar hides a conversation with no messages). */
+  deleteConversationOnExit(id: string): void {
+    try {
+      void fetch(`${API_BASE}/conversations/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+        keepalive: true,
+      }).catch(() => undefined);
+    } catch {
+      /* the page is unloading; nothing to report to */
+    }
+  }
   cancelGeneration(convId: string) {
     // Hosted mode: the host owns the turn — tell it to cancel over the bridge
     // and do NOT POST /cancel (which would 404 the bridge-only turn and,
@@ -687,7 +703,14 @@ class ApiClient {
    *  workbook from scratch, the same contract executeDocumentPlan has. */
   executeExcelPlan(
     convId: string,
-    body: { source_file_id?: string; output_filename?: string; plan: unknown },
+    body: {
+      source_file_id?: string;
+      output_filename?: string;
+      plan: unknown;
+      /** FIX126 F4 — the assistant message that wrote the plan; the
+       *  server links the generated file to it. */
+      message_id?: string;
+    },
   ) {
     return this.json<import("./types").ExcelExecuteResponse>(
       `/conversations/${convId}/excel/execute`,
@@ -751,6 +774,8 @@ class ApiClient {
       output_filename?: string;
       format: "docx" | "pdf" | "pptx";
       plan: unknown;
+      /** FIX126 F4 — see executeExcelPlan. */
+      message_id?: string;
     },
   ) {
     return this.json<import("./types").DocExecuteResponse>(

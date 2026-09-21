@@ -20,7 +20,7 @@ import { ArrowRightLeft, Copy, PenLine } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
-import type { FallbackAttempt, Message } from "@/lib/types";
+import type { FallbackAttempt, FileAttachment, Message } from "@/lib/types";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { toast } from "@/components/ui/Toast";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
@@ -54,6 +54,7 @@ import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
 import { MessageAttachments } from "./MessageAttachments";
 import { PptxPlanCard } from "./PptxPlanCard";
+import { linkedGeneratedFile } from "./planCardUI";
 import type { PptxPlan } from "./PptxPlanCard";
 import { ThinkingBlock } from "./ThinkingBlock";
 import { ConsentCard } from "./ConsentCard";
@@ -591,9 +592,12 @@ function MessageBubbleImpl({
         <VideoGeneratingPlaceholder />
       ) : null}
 
-      {message.files && message.files.length > 0 ? (
-        <MessageAttachments files={message.files} />
-      ) : null}
+      {(() => {
+        // FIX126 F4 — a generated file a plan card already shows as its
+        // result is not listed a second time under the message.
+        const shown = attachmentsBesidePlanCards(message);
+        return shown.length > 0 ? <MessageAttachments files={shown} /> : null;
+      })()}
 
       {/* Web-search citation chips — the sources the assistant cited.
           Live via message_sources, hydrated from the API on reload. */}
@@ -1271,14 +1275,17 @@ function AssistantContentBody({
   return (
     <>
       {segments.map((seg, i) => {
+        // FIX126 F4 — the cards get the message's files (a plan that
+        // already produced its file opens in the done state) and its id
+        // (sent with execute so the server links the file to it).
         if (seg.kind === "excel-plan") {
-          return <ExcelPlanCard key={i} convId={convId} plan={seg.plan} />;
+          return <ExcelPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
         }
         if (seg.kind === "doc-plan") {
-          return <DocPlanCard key={i} convId={convId} plan={seg.plan} />;
+          return <DocPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
         }
         if (seg.kind === "pptx-plan") {
-          return <PptxPlanCard key={i} convId={convId} plan={seg.plan} />;
+          return <PptxPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
         }
         return (
           <Markdown key={i} citations>
@@ -1335,6 +1342,28 @@ function parsePlanSegments(content: string): PlanSegment[] {
   const tail = content.slice(last);
   if (tail.trim() || out.length === 0) out.push({ kind: "text", text: tail });
   return out;
+}
+
+/** FIX126 F4 — the message's files minus the generated ones a plan card in
+ *  its content renders as a result card (same pick as the cards). */
+function attachmentsBesidePlanCards(message: Message): FileAttachment[] {
+  const files = message.files ?? [];
+  if (files.length === 0 || message.isStreaming || !files.some((f) => f.is_generated)) {
+    return files;
+  }
+  const claimed = new Set<string>();
+  for (const seg of parsePlanSegments(message.content || "")) {
+    let f: FileAttachment | undefined;
+    if (seg.kind === "excel-plan") {
+      f = linkedGeneratedFile(files, ["xlsx"], seg.plan.output_filename);
+    } else if (seg.kind === "doc-plan") {
+      f = linkedGeneratedFile(files, [seg.plan.format === "pdf" ? "pdf" : "docx"], seg.plan.output_filename);
+    } else if (seg.kind === "pptx-plan") {
+      f = linkedGeneratedFile(files, ["pptx"], seg.plan.output_filename);
+    }
+    if (f) claimed.add(f.id);
+  }
+  return claimed.size === 0 ? files : files.filter((f) => !claimed.has(f.id));
 }
 
 function tryParseJson(raw: string): unknown {

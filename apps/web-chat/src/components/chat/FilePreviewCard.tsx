@@ -24,7 +24,7 @@ import { AlertTriangle, ImageIcon, Loader2, RotateCw, X } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { useT } from "@/lib/i18n";
-import { isExtracting } from "@/lib/fileExtraction";
+import { isExtracting, isUnreadable } from "@/lib/fileExtraction";
 import type { PendingFile } from "@/stores/chatStore";
 import {
   fileExtension,
@@ -48,6 +48,7 @@ function CardShell({
   size,
   status,
   extracting,
+  unreadable,
   progress,
   errorMsg,
   onRemove,
@@ -62,6 +63,8 @@ function CardShell({
    *  state does NOT block sending, so it gets a quiet inline label
    *  rather than the blocking dim-and-spin overlay. */
   extracting?: boolean;
+  /** FIX126 F3 — stored, but the server could not read its text. */
+  unreadable?: boolean;
   /** 0..100 from the XHR upload-progress event. Phase 7: this was
    *  already being measured and stored per pending file but never
    *  surfaced — the card showed a bare spinner, so a large upload
@@ -76,6 +79,7 @@ function CardShell({
   const isUploading = status === "uploading";
   const pct = Math.max(0, Math.min(100, Math.round(progress ?? 0)));
   const isExtracting = Boolean(extracting) && !isUploading && !isError;
+  const isUnreadable = Boolean(unreadable) && !isUploading && !isError && !isExtracting;
   return (
     <div
       className={`group relative flex flex-col overflow-hidden rounded-xl border transition-colors ${
@@ -98,6 +102,15 @@ function CardShell({
           <p className="mt-0.5 flex items-center gap-1 text-[11px] text-text-muted">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
             <span>{t("file.reading")}</span>
+          </p>
+        ) : isUnreadable ? (
+          <p
+            className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-status-warning"
+            data-testid="file-unreadable"
+            title={t("file.unreadable")}
+          >
+            <AlertTriangle className="mt-px h-3 w-3 flex-shrink-0" aria-hidden />
+            <span className="line-clamp-2">{t("file.unreadable")}</span>
           </p>
         ) : (
           <p className="mt-0.5 text-[11px] text-text-muted">
@@ -170,7 +183,7 @@ function CardShell({
           className="focus-ring absolute bottom-2 right-2 inline-flex h-6 items-center gap-1 rounded-full border border-border bg-bg-surface px-2 text-[10px] font-medium text-text-secondary backdrop-blur-sm transition-colors hover:bg-bg-surface hover:text-text-primary"
         >
           <RotateCw className="h-3 w-3" aria-hidden />
-          Retry
+          {t("file.retry")}
         </button>
       ) : null}
     </div>
@@ -195,6 +208,7 @@ function ImagePreviewCard({ pending, onRemove, onRetry }: Props) {
       status={pending.status}
       progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
+      unreadable={isUnreadable(pending.extractionStatus, pending.file.name)}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}
@@ -230,6 +244,7 @@ function DocumentPreviewCard({ pending, onRemove, onRetry }: Props) {
       status={pending.status}
       progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
+      unreadable={isUnreadable(pending.extractionStatus, pending.file.name)}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}

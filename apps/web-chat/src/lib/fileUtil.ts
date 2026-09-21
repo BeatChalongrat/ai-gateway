@@ -43,6 +43,82 @@ export const ALLOWED_FILE_EXTENSIONS: ReadonlySet<string> = new Set([
 export const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024; // 200 MiB
 export const MAX_FILES_PER_MESSAGE = 5;
 
+/** FIX126 F1 — the ONE gate every way a file enters the composer goes
+ *  through (picker, drag-and-drop on the conversation page and on the
+ *  new-chat hero, clipboard paste, chip retry). Only the picker used to
+ *  cap: a drop of 20 files attached all 20, and a second paste read a
+ *  stale count and went past the limit.
+ *
+ *  Invalid files (empty, too large, unsupported) are toasted one by one
+ *  and do not take a slot. Valid files fill the free slots in the order
+ *  given; the rest are left out, and ONE toast says how many were added
+ *  and how many were not. `existing` is the number of live (non-error)
+ *  chips already on the message, read by the caller from the store at
+ *  the moment of staging — never from a render closure. */
+export function admitFilesForMessage(
+  files: File[],
+  existing: number,
+  max: number = MAX_FILES_PER_MESSAGE,
+  notify: (msg: string) => void = () => {},
+): { accepted: File[]; leftOut: number } {
+  const slots = Math.max(0, max - existing);
+  const accepted: File[] = [];
+  let leftOut = 0;
+  for (const f of files) {
+    const v = validateFile(f);
+    if (!v.ok) {
+      notify(`${f.name}: ${v.reason}`);
+      continue;
+    }
+    if (accepted.length < slots) accepted.push(f);
+    else leftOut += 1;
+  }
+  if (leftOut > 0) {
+    notify(
+      tOutside("input.toast.filesCapped", {
+        max: String(max),
+        added: String(accepted.length),
+        leftOut: String(leftOut),
+      }),
+    );
+  }
+  return { accepted, leftOut };
+}
+
+/** FIX126 F5 — the sentence an upload chip shows when its upload failed,
+ *  in the active locale. The transport's own messages ("Network error",
+ *  "Upload cancelled", the server's English validation text) used to be
+ *  shown as-is in the Thai UI. Reads `code` / `status` by duck typing so
+ *  it works for any ApiError-shaped value (tests mock the api module). */
+export function uploadErrorMessage(err: unknown): string {
+  const e = (err ?? {}) as { code?: unknown; status?: unknown };
+  const code = typeof e.code === "string" ? e.code : "";
+  const status = typeof e.status === "number" ? e.status : -1;
+  switch (code) {
+    case "NETWORK_ERROR":
+      return tOutside("file.err.network");
+    case "ABORTED":
+      return tOutside("file.err.cancelled");
+    case "UPLOAD_TIMEOUT":
+      return tOutside("file.err.timeout");
+    case "UNAUTHORIZED":
+      return tOutside("file.err.sessionExpired");
+  }
+  switch (status) {
+    case 401:
+      return tOutside("file.err.sessionExpired");
+    case 404:
+      return tOutside("file.err.convNotFound");
+    case 413:
+      return tOutside("file.err.tooLarge");
+    case 415:
+      return tOutside("file.err.unsupported");
+    case 422:
+      return tOutside("file.err.empty");
+  }
+  return tOutside("file.err.uploadFailed");
+}
+
 export function formatBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;

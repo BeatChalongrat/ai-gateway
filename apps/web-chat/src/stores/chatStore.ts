@@ -18,7 +18,7 @@ import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
 import { HOSTED_MODE } from "@/lib/auth";
 import { bridge, usingBridgeTransport } from "@/lib/bridge";
-import { clearDraft } from "@/lib/draftStore";
+import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStore";
 import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outboxPut } from "@/lib/sendOutbox";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
@@ -3071,8 +3071,21 @@ async function consumeStream(
         }
         flush();
         const data = evt.data as SSEError;
-        const localized = localizeErrorCode(data?.code, data?.message, data?.retryable);
         const id = realAssistantId ?? tempAsstId;
+        if (data?.code === "TOO_MANY_FILES") {
+          // FIX126 F1 — the same refusal as the 422, arriving as a frame
+          // (hosted turns): withdraw this send the same way. The user row
+          // is the one just before this reply (its id may have been swapped
+          // to the server's by message_start).
+          const list = get().messages[convId] ?? [];
+          const at = list.findIndex((m) => m.id === id);
+          const userRow = at > 0 && list[at - 1].role === "user" ? list[at - 1] : undefined;
+          withdrawRefusedSend(set, convId, userRow?.id ?? tempUserId, id, userRow?.content, true);
+          clearStreamCursor(convId);
+          get().setError(tooManyFilesNotice(data?.message));
+          continue;
+        }
+        const localized = localizeErrorCode(data?.code, data?.message, data?.retryable);
         set((s) => {
           const list = s.messages[convId] ?? [];
           return {
@@ -3172,6 +3185,15 @@ async function handleStreamPreError(
     get().handleConversationGone(convId);
     return;
   }
+  if (code === "TOO_MANY_FILES" && tempUserId) {
+    // FIX126 F1 — the server refused a message with more files than it
+    // takes (422). Nothing was sent: same shape as CONVERSATION_BUSY below —
+    // this send's rows go, the text is back in the composer, and a localized
+    // notice says what to do.
+    withdrawRefusedSend(set, convId, tempUserId, tempAsstId, sentText);
+    get().setError(tooManyFilesNotice(msg));
+    return;
+  }
   if (res.status === 409 && code === "CONVERSATION_BUSY" && tempUserId) {
     // FIX125 M5 — another tab (or window) already has a turn in flight in
     // this conversation, and the server refused this send. Nothing was
@@ -3213,6 +3235,45 @@ async function handleStreamPreError(
     get().setError(msg);
   }
   finalizeMessage(set, get, convId, tempAsstId, "error");
+}
+
+/** FIX126 F1 — take back a send the server refused before answering: its
+ *  optimistic user + assistant rows go (no error bubble, no duplicate
+ *  question) and its text is handed back to the composer. `saveToDraft` is
+ *  for the error-frame path, where the outbox entry was already dropped
+ *  (the server had accepted the request) so nothing else saves it. */
+function withdrawRefusedSend(
+  set: Set,
+  convId: string,
+  userId: string | undefined,
+  asstId: string,
+  text: string | undefined,
+  saveToDraft = false,
+): void {
+  set((s) => {
+    const list = s.messages[convId] ?? [];
+    const turnScroll = s.turnScrollRequests[convId];
+    // The send's own finally releases its streaming slot.
+    return {
+      messages: { ...s.messages, [convId]: list.filter((m) => m.id !== userId && m.id !== asstId) },
+      turnScrollRequests:
+        turnScroll && turnScroll.id === asstId
+          ? { ...s.turnScrollRequests, [convId]: undefined }
+          : s.turnScrollRequests,
+    };
+  });
+  if (!text) return;
+  if (saveToDraft && loadDraft(convId) === null) saveDraft(convId, text);
+  set((s) => ({ returnedDrafts: { ...s.returnedDrafts, [convId]: { id: crypto.randomUUID(), text } } }));
+}
+
+/** The localized TOO_MANY_FILES notice. The count comes from the server's
+ *  sentence ("… (this message has N)") when it carries one. */
+function tooManyFilesNotice(serverMessage?: string): string {
+  const n = /has (\d+)/.exec(serverMessage ?? "")?.[1];
+  return n
+    ? tOutside("error.tooManyFiles", { max: "5", n })
+    : tOutside("error.tooManyFilesNoCount", { max: "5" });
 }
 
 // ─── Pure helpers used by selectors ───────────────────────────

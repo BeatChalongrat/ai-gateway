@@ -43,6 +43,26 @@ export function isExtracting(status: ExtractionStatus | undefined): boolean {
   return status === "pending" || status === "processing";
 }
 
+// Documents the server is expected to read. For these, "unsupported" can
+// only mean the reader gave up (older rows used it before "failed" existed);
+// for an image it is the normal answer — the model looks at the picture.
+const READABLE_DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set([
+  "pdf", "docx", "xlsx", "pptx",
+]);
+
+/** FIX126 F3 — the server stored the file but could not read its text (a
+ *  corrupt or password-protected PDF): "failed", or "unsupported" on a
+ *  PDF/Office file. The model will not see its contents. */
+export function isUnreadable(
+  status: ExtractionStatus | undefined,
+  filename: string,
+): boolean {
+  if (status === "failed") return true;
+  if (status !== "unsupported") return false;
+  const i = filename.lastIndexOf(".");
+  return i >= 0 && READABLE_DOCUMENT_EXTENSIONS.has(filename.slice(i + 1).toLowerCase());
+}
+
 interface Watcher {
   fileId: string;
   expiresAt: number;
