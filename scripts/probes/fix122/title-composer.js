@@ -22,6 +22,7 @@ const STOP = '[data-testid="stop-button"], button[aria-label*="Stop"], button[ar
 const COMPOSER = 'textarea[data-shortcut="composer"]';
 const QWEN = "qwen3.8-27b-fp8";
 const DEEPSEEK = process.env.DEEPSEEK || "deepseek-v4-flash";
+const CDP = PAGE.startsWith("cdp:");
 
 const tapLines = () => (fs.existsSync(TAP) ? fs.readFileSync(TAP, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 const waitEnd = async (page, ms) => { const t0 = Date.now(); await wait(1500); while (Date.now() - t0 < ms) { if (!(await page.locator(STOP).count())) return Math.round((Date.now() - t0) / 1000); await wait(500); } return null; };
@@ -50,11 +51,13 @@ async function runCase(ctx, tok, name) {
   if (name === "fail") fs.writeFileSync(FAIL_FLAG, "1"); else if (fs.existsSync(FAIL_FLAG)) fs.unlinkSync(FAIL_FLAG);
   const tapBefore = tapLines().length;
 
-  const page = await ctx.newPage();
+  // desktop (cdp): the app has ONE window — reuse its page
+  const page = CDP ? ctx.pages()[0] : await ctx.newPage();
+  const base = CDP ? new URL(page.url()).origin : PAGE;
   const titleCalls = [];
   page.on("response", async (r) => { if (r.url().includes("/generate-title")) { const t = r.request().timing(); titleCalls.push({ status: r.status(), ms: Math.round(t.responseEnd > 0 ? t.responseEnd : -1), body: await r.text().catch(() => "") }); } });
   if (name === "sendfail") await page.route(/\/conversations\/[^/]+\/messages$/, (route) => (route.request().method() === "POST" ? route.abort("connectionfailed") : route.continue()));
-  await page.goto(`${PAGE}/chat/${convId}`, { waitUntil: "domcontentloaded" }); // the link
+  await page.goto(`${base}/chat/${convId}`, { waitUntil: "domcontentloaded" }); // the link
   await page.waitForSelector(COMPOSER, { timeout: 60000 });
   await wait(1500);
 
@@ -74,7 +77,7 @@ async function runCase(ctx, tok, name) {
     out.draftInStorage = await page.evaluate((id) => { try { return JSON.parse(localStorage.getItem("sran-webchat-composer-drafts") || "{}")[id]?.t ?? null; } catch { return null; } }, convId);
     out.outboxInStorage = await page.evaluate(() => localStorage.getItem("sran-webchat-send-outbox"));
     s.off();
-    await page.close();
+    if (CDP) await page.unroute(/\/conversations\/[^/]+\/messages$/); else await page.close();
     return out;
   }
 
@@ -108,7 +111,8 @@ async function runCase(ctx, tok, name) {
   out.generateTitleCalls = titleCalls;
   out.gatewayRequests = tapLines().slice(tapBefore).map((l) => ({ model: l.model, served: l.served ?? null, isTitle: l.isTitle, stream: l.stream, tools: l.tools, max_tokens: l.max_tokens, reasoning: l.reasoning?.mode ?? null, bodyBytes: l.bodyBytes, status: l.status, ms: l.ms, usage: l.usage ?? null, content: l.isTitle ? l.content ?? null : undefined, injected: l.injected ?? false }));
   if (fs.existsSync(FAIL_FLAG)) fs.unlinkSync(FAIL_FLAG);
-  await page.close();
+  page.removeAllListeners("response");
+  if (!CDP) await page.close();
   return out;
 }
 
@@ -117,7 +121,9 @@ async function runCase(ctx, tok, name) {
   const cases = (list || "qwen,deepseek,rename,fail,temporary,sendfail").split(",");
   fs.mkdirSync(OUT, { recursive: true });
   const tok = token();
-  const { browser, ctx } = await openContext(tok);
+  let browser, ctx;
+  if (CDP) { browser = await chromium.connectOverCDP(`http://127.0.0.1:${PAGE.slice(4)}`); ctx = browser.contexts()[0]; }
+  else ({ browser, ctx } = await openContext(tok));
   const results = [];
   for (const c of cases) {
     try { const r = await runCase(ctx, tok, c); results.push(r); console.log(JSON.stringify(r)); }

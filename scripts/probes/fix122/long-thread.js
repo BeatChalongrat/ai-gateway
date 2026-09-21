@@ -83,7 +83,8 @@ function trackLandmark(text) {
 
 async function measure(page, convId) {
   const out = { convId };
-  await page.goto(`${PAGE}/chat/${convId}`, { waitUntil: "domcontentloaded" });
+  const base = PAGE.startsWith("cdp:") ? new URL(page.url()).origin : PAGE;
+  await page.goto(`${base}/chat/${convId}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="turn-spacer"]', { timeout: 60000, state: "attached" });
   await wait(2500);
   const frames = await page.evaluate(() => window.__lt.frames);
