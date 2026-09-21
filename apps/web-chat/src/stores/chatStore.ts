@@ -1231,10 +1231,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const inflight = get().streamingAssistantId[convId];
     if (inflight) finalizeMessage(set, get, convId, inflight, "cancelled");
 
-    // Auto-title heuristic: if this is the first message in the
-    // conversation we'll PATCH a generated title once the stream
-    // completes successfully (handled below in the try block).
+    // The first message of a conversation asks the server for its name —
+    // only once its reply has completed (see the `finally` below).
     const isFirstMessage = (get().messages[convId] ?? []).length === 0;
+    let firstReplyCompleted = false;
 
     // Capture the conversation's currently bound model at send time
     // and stamp it on the assistant placeholder. The server-side
@@ -1368,6 +1368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // turn's story (its row, its error card), not the composer's.
       outboxAccepted(convId, requestId);
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId, tempUserId);
+      firstReplyCompleted = replyCompleted(get, convId, get().streamingAssistantId[convId] ?? tempAsstId);
     } catch (err) {
       // consumeStream may have swapped the placeholder id for the
       // persisted row id (message_start). Finalize whichever id is
@@ -1433,13 +1434,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return { abortControllers: aborts, streamingAssistantId: sids };
         });
         await get().resumeStream(convId, streamingId);
+        firstReplyCompleted = replyCompleted(get, convId, streamingId);
         return;
       }
       get().setError(tOutside("error.networkStream"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
-      // FIX122 — the first turn is over, however it ended: ask for the name.
-      if (isFirstMessage) void nameConversationOnce(set, get, convId);
+      // FIX122 — the first turn is over: ask for the name, but only when it
+      // was answered. A refused or failed send, or a Stop, asks nothing: the
+      // server already wrote the first words when it took the message, and
+      // it never names a chat after its first turn.
+      if (isFirstMessage && firstReplyCompleted) void nameConversationOnce(set, get, convId);
       // FIX121 — a send that never got a response (network error, abort)
       // must not leave the conversation refusing the next one.
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } }));
@@ -3072,6 +3077,9 @@ function giveBackToComposer(set: Set, convId: string, requestId?: string): void 
  *  keeps the screen from contradicting it for a moment).
  *  A temporary chat is not sent for a name at all. */
 const userRenames = new Map<string, number>();
+function replyCompleted(get: Get, convId: string, replyId: string): boolean {
+  return (get().messages[convId] ?? []).some((m) => m.id === replyId && m.status === "completed");
+}
 async function nameConversationOnce(set: Set, get: Get, convId: string): Promise<void> {
   const conv = get().conversations.find((c) => c.id === convId);
   if (!conv || conv.memory_enabled === false) return;

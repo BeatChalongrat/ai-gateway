@@ -217,13 +217,38 @@ describe("FIX122 Part B — the page asks for a name once and never renames", ()
     expect(titleOf("c1")).toBe("New conversation");
   });
 
-  it("a first turn that failed still asks (the server answers with the first words, no model)", async () => {
+  it("a first turn that was not answered never asks (the server wrote the first words when it took the message)", async () => {
+    const cases: Array<[string, () => void]> = [
+      ["refused", () => mockApi.openMessageStream.mockResolvedValueOnce(refused(502, "PROVIDER_UNAVAILABLE"))],
+      ["request died", () => mockApi.openMessageStream.mockRejectedValueOnce(new TypeError("Failed to fetch"))],
+      ["stopped", () => mockApi.openMessageStream.mockRejectedValueOnce(Object.assign(new Error("aborted"), { name: "AbortError" }))],
+    ];
+    for (const [, arrange] of cases) {
+      seed("c1");
+      arrange();
+      await useChatStore.getState().sendMessage("c1", "สวัสดี");
+      await tick();
+    }
+    // …and a turn the server took that then ended in an error
     seed("c1");
-    mockApi.generateTitle.mockResolvedValueOnce({ title: "สวัสดี", source: "fallback" });
-    mockApi.openMessageStream.mockResolvedValueOnce(refused(502, "PROVIDER_UNAVAILABLE"));
-    await useChatStore.getState().sendMessage("c1", "สวัสดี");
+    const a = makeStream();
+    mockApi.openMessageStream.mockResolvedValueOnce(a.response);
+    const sending = useChatStore.getState().sendMessage("c1", "สวัสดี");
+    await tick();
+    a.push("message_start", { message_id: "m1", conversation_id: "c1" });
+    a.push("error", { message_id: "m1", code: "all_models_failed", message: "x" });
+    a.close();
+    await sending;
+    await tick();
+    expect(mockApi.generateTitle).not.toHaveBeenCalled();
+  });
+
+  it("a first turn that was answered asks exactly once", async () => {
+    seed("c1");
+    await completeFirstTurn();
     await tick();
     expect(mockApi.generateTitle).toHaveBeenCalledTimes(1);
+    expect(mockApi.generateTitle).toHaveBeenCalledWith("c1");
   });
 
   it("a temporary chat is never sent for a name", async () => {
