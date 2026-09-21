@@ -10,11 +10,14 @@ to AI tools in commit messages, MR descriptions, or anywhere else in the repo.
 
 `qwen3.8-27b-fp8` (self-hosted, free) is fine for smoke tests of plain text,
 streaming, and one isolated tool call. It is a reasoning model: its thinking
-shares the 8,192-token output budget the clients send, and the length of that
-thinking is not stable across identical requests. FIX71 measured the
+shares the turn's output budget, and the length of that thinking is not stable
+across identical requests. The budget differs by client: the desktop sends
+`max_tokens: 8192`; the web sends none, and chat-edge reserves up to 16,000
+tokens of the context for the answer (one web turn reasoned 13,831 tokens
+before failing). FIX71 measured the
 desktop-shaped 35-tool request "เข้า youtube ที หาข่าว ตำเฟดเฟ" (a name the model
 does not know): 2/3 runs called browser_navigate after 342 to 4,906 reasoning
-tokens, 1/3 spent all 8,192 tokens thinking and returned nothing
+tokens, 1/3 spent all 8,192 tokens (a desktop-shaped request) thinking and returned nothing
 (output_limit_reached). With one tool it failed 2/3, with no tools 2/3 (thinking
 ended with no answer). The same request with a word it knows ("หาข่าว Fed")
 called the tool 3/3 in under 6 s. So a qwen pass or fail on a browser,
