@@ -245,7 +245,9 @@ async def test_unknown_provider_still_rejected():
     svc = ProviderKeyService()
     result = await svc.test_key("nonsense", "whatever-key-123456")
     assert result["valid"] is False
-    assert "Unknown provider" in result["error"]
+    # FIX126 O8 — the structured key-test result (841604a) words it
+    # "unknown provider: <name>"; the rejection is what matters, not the case.
+    assert "unknown provider" in result["error"].lower()
 
 
 # ---------------------------------------------------------------------------

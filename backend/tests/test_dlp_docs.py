@@ -14,6 +14,15 @@ from app.domain.policy import PolicyProfile
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent.parent / "examples"
 
+# FIX126 O8-1 — examples/ lives at the repo root; the backend lane container
+# mounts backend/ (+ docs/) only, so these read a directory that is not
+# there. Quarantined only where it is missing; a full checkout runs them.
+_QUARANTINE_NO_EXAMPLES = pytest.mark.quarantine(
+    reason="environment: repo-root examples/ is not mounted in the backend lane container",
+    ticket="FIX126-O8-1",
+    condition=not EXAMPLES_DIR.is_dir(),
+)
+
 _POLICY_FILES = [
     "policy_default.json",
     "policy_strict.json",
@@ -21,6 +30,7 @@ _POLICY_FILES = [
 ]
 
 
+@_QUARANTINE_NO_EXAMPLES
 class TestExampleProfilesExist:
     @pytest.mark.parametrize("filename", _POLICY_FILES)
     def test_file_exists(self, filename):
@@ -28,6 +38,7 @@ class TestExampleProfilesExist:
         assert path.exists(), f"Missing example: {path}"
 
 
+@_QUARANTINE_NO_EXAMPLES
 class TestExampleProfilesParse:
     @pytest.mark.parametrize("filename", _POLICY_FILES)
     def test_valid_json(self, filename):
@@ -64,6 +75,7 @@ class TestExampleProfilesParse:
             )
 
 
+@_QUARANTINE_NO_EXAMPLES
 class TestExampleProfilesConstructible:
     """Verify each example can construct a valid PolicyProfile."""
 
@@ -102,6 +114,7 @@ class TestOutdatedSampleRemoved:
         )
 
 
+@_QUARANTINE_NO_EXAMPLES
 class TestSpecificProfileBehavior:
     """Spot-check that the example profiles encode the intended policies."""
 

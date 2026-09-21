@@ -50,10 +50,20 @@ class TestRoutingE2EAuto:
         body = resp.json()
         assert body["provider"] == "openai"
 
-    def test_auto_coding_returns_anthropic(self):
+    def test_auto_coding_is_served_by_a_concrete_model(self):
+        # FIX126 O8 — was ``test_auto_coding_returns_anthropic``. FIX35
+        # made the Auto router provider-agnostic: ``use_case`` "coding" is
+        # a task override (code_generate), it no longer pins a vendor, so
+        # "anthropic" was an obsolete expectation (the reasoning test
+        # below was updated the same way).
+        from app.services.providers.model_registry import get_candidate
+
         resp = _chat(model="auto", metadata={"use_case": "coding"})
         assert resp.status_code == 200
-        assert resp.json()["provider"] == "anthropic"
+        body = resp.json()
+        assert body["model"] != "auto"
+        cand = get_candidate(body["model"])
+        assert cand is not None and cand.provider == body["provider"], body
 
     def test_auto_reasoning_is_served_by_a_reasoning_capable_model(self):
         # FIX35 Part C — the Auto router is provider-agnostic: ``use_case``

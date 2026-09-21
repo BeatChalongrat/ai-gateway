@@ -362,6 +362,14 @@ class TestHTTPExceptionPassthrough:
 
 
 class TestRegression:
+    @pytest.mark.quarantine(
+        reason=(
+            "environment: asserts /health status 'ok', which needs a live "
+            "Postgres/Redis/sidecars; the unit-lane container answers 503 by "
+            "design. Belongs in the integration lane."
+        ),
+        ticket="FIX126-O8-5",
+    )
     def test_health_still_works(self):
         resp = client.get("/health")
         assert resp.status_code == 200

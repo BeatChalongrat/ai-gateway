@@ -1,4 +1,8 @@
+import time as _startup_time
 from contextlib import asynccontextmanager
+
+# FIX126 O3 — when this module started importing (≈ the whole app import).
+_MODULE_IMPORT_T0 = _startup_time.perf_counter()
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -69,6 +73,20 @@ async def lifespan(app: FastAPI):
     import concurrent.futures
     import os as _os
 
+    # FIX126 O3 — per-step startup timing. /ready cannot answer before this
+    # function yields, so these numbers ARE the in-process part of "how long
+    # until the backend is ready"; one line at the end says where it went.
+    _life_t0 = _startup_time.perf_counter()
+    _import_ms = int((_life_t0 - _MODULE_IMPORT_T0) * 1000)
+    _steps: list[tuple[str, int]] = []
+
+    async def _timed(name: str, awaitable):
+        t = _startup_time.perf_counter()
+        try:
+            return await awaitable
+        finally:
+            _steps.append((name, int((_startup_time.perf_counter() - t) * 1000)))
+
     # Debug-only memory profiling. Inert unless ENABLE_TRACEMALLOC=true; when
     # on, start tracing AS EARLY AS POSSIBLE so baseline snapshots capture the
     # warm import set. Snapshots are taken via the gated internal_debug router.
@@ -98,7 +116,7 @@ async def lifespan(app: FastAPI):
     # refuse to start with a named, actionable error (prod). Runs in a
     # thread — it uses the sync engine + Alembic's sync command API.
     from app.core.schema_guard import run_schema_guard
-    await asyncio.to_thread(run_schema_guard)
+    await _timed("schema_guard", asyncio.to_thread(run_schema_guard))
 
     # Service-JWT wiring visibility (FIX 1b) — make a DORMANT decoupling loud
     # in every env. validate_secrets() already REFUSES to start in prod when
@@ -112,13 +130,13 @@ async def lifespan(app: FastAPI):
               "verified against SERVICE_JWT_SECRET).", flush=True)
 
     # Seed admin user (runs blocking bcrypt in thread)
-    await asyncio.to_thread(_seed_admin_user)
+    await _timed("seed_admin_user", asyncio.to_thread(_seed_admin_user))
 
     # Seed provider keys / endpoints from env — ONCE per provider, ever.
     # See app/services/provider_env_seed.py for the rule and for why the gate
     # is a marker rather than a row count. Editing an env var on a running
     # system deliberately does nothing.
-    await asyncio.to_thread(_seed_provider_config_from_env)
+    await _timed("seed_provider_config", asyncio.to_thread(_seed_provider_config_from_env))
 
     # Per-worker NER pre-load. ``ner_status`` module-level state is
     # process-local — a ``PATCH /admin/settings`` call routes to one
@@ -128,7 +146,7 @@ async def lifespan(app: FastAPI):
     # ``PresidioDetector`` silently no-ops for them. We fix that here:
     # each worker checks ``org_settings.ner_enabled`` on boot and loads
     # its own analyzer when the DB flag is on.
-    await asyncio.to_thread(_maybe_preload_ner)
+    await _timed("ner_preload", asyncio.to_thread(_maybe_preload_ner))
 
     # Start event loop lag monitor — logs when loop is blocked > 100ms
     monitor_task = asyncio.create_task(_loop_monitor())
@@ -191,7 +209,7 @@ async def lifespan(app: FastAPI):
     # refreshes ``model_configs`` daily. Failures here are logged
     # and swallowed — the seed snapshot is a valid fallback and
     # the gateway must still serve requests on a cold DB.
-    await asyncio.to_thread(_initial_registry_reload)
+    await _timed("model_registry_reload", asyncio.to_thread(_initial_registry_reload))
     _start_model_discovery_scheduler()
 
     # Sprint 6: admin-configurable custom DLP detectors. Build the initial
@@ -209,7 +227,7 @@ async def lifespan(app: FastAPI):
         custom_detector_loader = CustomDetectorLoader(
             get_async_redis(), get_async_session_factory()
         )
-        await custom_detector_loader.start()
+        await _timed("custom_detector_loader", custom_detector_loader.start())
         set_global_custom_provider(custom_detector_loader.get_cached_detectors)
         app.state.custom_detector_loader = custom_detector_loader
     except Exception as exc:  # noqa: BLE001 — additive feature, never block boot
@@ -221,12 +239,16 @@ async def lifespan(app: FastAPI):
     # synchronous persist on the caller's session, so requests served
     # during the startup window still get logged correctly.
     from app.services import request_log_queue
-    await request_log_queue.start_worker()
+    await _timed("request_log_queue", request_log_queue.start_worker())
 
     # Re-audit H5: probe active sidecars at boot and log their status, so
     # a misconfigured DLP_ENGINE=rust against a down sidecar is visible in
     # the boot log (it would otherwise silently fail open per request).
-    await asyncio.to_thread(_log_sidecar_status_at_boot)
+    # FIX126 O3 — it only LOGS (serving never depends on it: each request
+    # probes/falls back on its own and /ready checks the DLP engine), and it
+    # spent up to 0.5 s per sidecar serially on the startup path. It now
+    # runs beside startup instead of in front of it.
+    sidecar_log_task = asyncio.create_task(asyncio.to_thread(_log_sidecar_status_at_boot))
 
     # Track A: pre-warm the async engine + one pooled connection at startup.
     # ``get_async_engine`` builds lazily on first use; without this, the
@@ -234,14 +256,24 @@ async def lifespan(app: FastAPI):
     # + cold pool fill, which the A.6 benchmark caught as a thundering-herd
     # (first tier: ~14s latency + timeouts). One warm connection here makes
     # the engine + pool ready before the first request lands.
-    try:
-        from sqlalchemy import text as _text
-        from app.core.db import get_async_session_factory
+    async def _prewarm_async_engine() -> None:
+        try:
+            from sqlalchemy import text as _text
+            from app.core.db import get_async_session_factory
 
-        async with get_async_session_factory()() as _warm:
-            await _warm.execute(_text("SELECT 1"))
-    except Exception as exc:  # noqa: BLE001 — best-effort warm-up
-        print(f"async_engine_prewarm_skipped error={exc}", flush=True)
+            async with get_async_session_factory()() as _warm:
+                await _warm.execute(_text("SELECT 1"))
+        except Exception as exc:  # noqa: BLE001 — best-effort warm-up
+            print(f"async_engine_prewarm_skipped error={exc}", flush=True)
+
+    await _timed("async_engine_prewarm", _prewarm_async_engine())
+
+    _life_ms = int((_startup_time.perf_counter() - _life_t0) * 1000)
+    print(
+        f"[startup] ready: import={_import_ms}ms lifespan={_life_ms}ms "
+        + " ".join(f"{n}={ms}ms" for n, ms in _steps),
+        flush=True,
+    )
 
     yield
 
@@ -268,6 +300,7 @@ async def lifespan(app: FastAPI):
     partition_task.cancel()
     generation_job_task.cancel()
     pool_task.cancel()
+    sidecar_log_task.cancel()
     # Sprint 6: stop the custom-detector loader + clear the global provider.
     try:
         from app.services.dlp.detectors.registry import set_global_custom_provider

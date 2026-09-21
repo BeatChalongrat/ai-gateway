@@ -137,12 +137,85 @@ def _alembic_config():
     return Config(str(ini_path))
 
 
-def _code_head_and_revs(cfg) -> tuple[str | None, set[str]]:
+def _load_code_head_and_revs(cfg) -> tuple[str | None, set[str]]:
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(cfg)
     head = script.get_current_head()
     known = {rev.revision for rev in script.walk_revisions()}
+    return head, known
+
+
+def _versions_dir(cfg) -> pathlib.Path | None:
+    """The single migrations/versions directory, or None when the layout is
+    one this cache does not understand (then nothing is cached)."""
+    if cfg.get_main_option("version_locations"):
+        return None
+    loc = cfg.get_main_option("script_location")
+    if not loc:
+        return None
+    # Resolved the way Alembic resolves it: a relative location is relative
+    # to the working directory, not to the ini file.
+    versions = pathlib.Path(loc).resolve() / "versions"
+    # A package resource spec ("pkg:dir") resolves to no directory here.
+    return versions if versions.is_dir() else None
+
+
+def _versions_fingerprint(versions: pathlib.Path) -> str:
+    import hashlib
+    import os
+
+    rows = sorted(
+        f"{e.name}:{e.stat().st_mtime_ns}:{e.stat().st_size}"
+        for e in os.scandir(versions)
+        if e.is_file() and e.name.endswith(".py")
+    )
+    return hashlib.sha256("\n".join(rows).encode()).hexdigest()
+
+
+def _code_head_and_revs(cfg) -> tuple[str | None, set[str]]:
+    """Code head + every known revision, cached by the migration files.
+
+    FIX126 O3 — Alembic answers this by loading all ~90 migration modules,
+    which took ~1.5 s of every start and every ``--reload`` on the dev bind
+    mount (85% of the startup hooks' time) — just after the container
+    command's own ``alembic upgrade head`` had done the same. The answer
+    depends only on the files in ``migrations/versions``, so it is cached
+    in the temp dir keyed by their names + mtimes + sizes: any added,
+    removed or edited migration misses the cache and is read from scratch.
+    Any cache problem falls back to the full read.
+    """
+    import json
+    import tempfile
+
+    try:
+        versions = _versions_dir(cfg)
+    except Exception:  # noqa: BLE001 — a cache must never break the guard
+        versions = None
+    if versions is None:
+        return _load_code_head_and_revs(cfg)
+    try:
+        import hashlib
+
+        fp = _versions_fingerprint(versions)
+        key = hashlib.sha256(str(versions.resolve()).encode()).hexdigest()[:16]
+        cache = pathlib.Path(tempfile.gettempdir()) / f"ai-gateway-alembic-heads-{key}.json"
+        if cache.is_file():
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if data.get("fingerprint") == fp and isinstance(data.get("known"), list):
+                return data.get("head"), set(data["known"])
+    except Exception:  # noqa: BLE001
+        return _load_code_head_and_revs(cfg)
+    head, known = _load_code_head_and_revs(cfg)
+    try:
+        tmp = cache.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps({"fingerprint": fp, "head": head, "known": sorted(known)}),
+            encoding="utf-8",
+        )
+        tmp.replace(cache)
+    except Exception:  # noqa: BLE001 — uncached next time, still correct
+        pass
     return head, known
 
 

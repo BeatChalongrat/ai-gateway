@@ -49,6 +49,7 @@
       "model_no_tool_support": "give_up",
       "model_no_vision_support": "give_up",
       "no_capable_model": "give_up",
+      "no_allowed_provider": "give_up",
       "upstream_bad_response": "give_up",
       "quota_exceeded": "give_up",
       "insufficient_credits": "give_up",
@@ -112,7 +113,8 @@
       "search_query_blocked",
       "model_no_tool_support",
       "model_no_vision_support",
-      "no_capable_model"
+      "no_capable_model",
+      "no_allowed_provider"
     ],
     "why": {
       "stopped_by_user": "the person ended the turn; anything after that is unwanted",

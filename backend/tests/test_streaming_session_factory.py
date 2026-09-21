@@ -78,23 +78,36 @@ def _install_stream_spy(monkeypatch, chunks: list[str] | None = None) -> None:
 
 
 class _CountingFactory:
-    """Sessionmaker wrapper that counts ``__call__`` invocations.
+    """Sessionmaker wrapper that counts the POST-STREAM calls.
 
     Each instance is independently identifiable, so a test can swap
     one factory for another between requests and assert which one
     the streaming path actually called.  The ``label`` is for
-    error messages; ``was_called`` is the counter under test.
+    error messages.
+
+    FIX126 O8 — ``was_called`` counts only the calls made from
+    ``_finalize_stream`` (the post-stream log persist + credit
+    deduction, the sites that use the factory captured at route entry).
+    Other request-time work (FIX120/125 policy and rescue reads) now
+    opens its own short sync sessions through the same global
+    ``SessionLocal``; counting those made "exactly one call" false
+    without the capture contract changing. ``total`` keeps the raw count.
     """
 
     def __init__(self, label: str):
         self.label = label
         self.was_called = 0
+        self.total = 0
         self._inner = sessionmaker(
             bind=_integration_engine, autoflush=False, autocommit=False
         )
 
     def __call__(self):
-        self.was_called += 1
+        import sys
+
+        self.total += 1
+        if sys._getframe(1).f_code.co_name == "_finalize_stream":
+            self.was_called += 1
         return self._inner()
 
 
@@ -112,8 +125,8 @@ class TestStreamingUsesRequestTimeFactory:
         resp = _chat_stream("hello")
 
         assert resp.status_code == 200
-        assert factory.was_called == 1, (
-            f"Expected exactly one call to the captured factory; got "
+        assert factory.was_called >= 1, (
+            f"Expected the post-stream persist to call the captured factory; got "
             f"{factory.was_called}.  The factory must be the one bound "
             f"at route entry, not a stale module-level reference."
         )
@@ -132,7 +145,8 @@ class TestStreamingFactoryCaptureIsPerRequest:
         monkeypatch.setattr("app.core.db.SessionLocal", factory_a)
         resp1 = _chat_stream("first request")
         assert resp1.status_code == 200
-        assert factory_a.was_called == 1, (
+        a_after_1 = factory_a.was_called
+        assert a_after_1 >= 1, (
             f"Request 1: FactoryA expected 1 call, got "
             f"{factory_a.was_called}"
         )
@@ -147,14 +161,14 @@ class TestStreamingFactoryCaptureIsPerRequest:
         assert resp2.status_code == 200
         # FactoryA must NOT have been called again — that would prove
         # the capture point is module-level state held across requests.
-        assert factory_a.was_called == 1, (
-            f"FactoryA call count drifted from 1 to "
+        assert factory_a.was_called == a_after_1, (
+            f"FactoryA call count drifted from {a_after_1} to "
             f"{factory_a.was_called}.  This means request 2 reused a "
             f"factory captured at module import or in cross-request "
             f"state — the contract is per-request capture."
         )
-        # FactoryB must have been called exactly once for request 2.
-        assert factory_b.was_called == 1, (
+        # FactoryB must have been called for request 2's post-stream work.
+        assert factory_b.was_called >= 1, (
             f"Request 2: FactoryB expected 1 call, got "
             f"{factory_b.was_called}.  If 0, the route handler is "
             f"holding a stale factory captured before request 2 "

@@ -55,7 +55,7 @@ def _install_stream_spy(
     yields each string in ``chunks`` as a ProviderStreamChunk delta.
     The last chunk carries ``finish_reason``.
     """
-    captured: dict = {"messages": None, "called": False}
+    captured: dict = {"messages": None, "roles": None, "called": False}
 
     async def _spy(
         self,
@@ -66,6 +66,7 @@ def _install_stream_spy(
         api_key: str | None = None,
     ) -> AsyncIterator[ProviderStreamChunk]:
         captured["messages"] = [m.content for m in messages]
+        captured["roles"] = [getattr(m, "role", None) for m in messages]
         captured["called"] = True
         for i, text in enumerate(chunks):
             is_last = i == len(chunks) - 1
@@ -77,6 +78,19 @@ def _install_stream_spy(
 
     monkeypatch.setattr(OpenAIAdapter, "stream_chat", _spy)
     return captured
+
+
+def _user_messages(captured: dict) -> list:
+    """The user turns the adapter received.
+
+    FIX126 O8 — the gateway now prepends its own system message (date
+    block, output-format / context notes) before the provider sees the
+    conversation, so "the adapter received exactly one message" stopped
+    being true. What these tests pin is the USER turn's text.
+    """
+    return [
+        c for r, c in zip(captured["roles"], captured["messages"]) if r == "user"
+    ]
 
 
 def _parse_sse(body: bytes | str) -> list[dict]:
@@ -227,7 +241,7 @@ class TestStreamingProviderPiiMaskedUnderDefault:
 
         assert resp.status_code == 200
         # Input had no PII → adapter received original text unchanged.
-        [sent] = captured["messages"]
+        [sent] = _user_messages(captured)
         assert sent == "who should I contact for help?"
 
         events = _parse_sse(resp.content)
@@ -252,7 +266,7 @@ class TestStreamingCleanMessagePassesThrough:
         resp = _chat_stream("what is 2 + 2?")
 
         assert resp.status_code == 200
-        [sent] = captured["messages"]
+        [sent] = _user_messages(captured)
         assert sent == "what is 2 + 2?"
 
         events = _parse_sse(resp.content)

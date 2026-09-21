@@ -49,38 +49,15 @@
 # Verified 2026-09-05: three consecutive lanes on one tree produced these
 # 24 names and no others, byte-identical.
 
-# ── environment: the dev container has no examples/ mount and no live
-#    desktop/chat-edge trees for the cross-service inventory checks ──
-tests/test_dlp_egress_invariant.py::test_every_outbound_http_module_is_classified  # 2026-09-01 cross-service source scan needs the sibling service trees mounted
-tests/test_dlp_egress_invariant.py::test_chat_edge_embeddings_voice_route_through_gateway_not_openai  # 2026-09-01 same scan
-tests/test_dlp_egress_invariant.py::test_code_interpreter_egress_is_go_side_and_network_locked  # 2026-09-01 same scan
-tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_desktop_registry_scan_is_alive  # 2026-09-01 reads the desktop tool registry from a path not present in this container
-tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_chat_edge_registry_scan_is_alive  # 2026-09-01 same
-tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_desktop_tool_is_classified  # 2026-09-01 same
-tests/test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_chat_edge_tool_is_classified  # 2026-09-01 same
-
-# ── deployment shape: assertions about a compose file / proxy this box
-#    does not run ──
-tests/test_service_jwt_wiring.py::test_compose_feeds_service_jwt_to_both_services  # 2026-09-01 asserts compose contents that differ from this deployment's overrides
-tests/test_service_jwt_wiring.py::test_prod_compose_hard_requires_service_jwt_on_backend  # 2026-09-01 same
-tests/test_body_limit.py::TestBodySizeLimit::test_oversized_request_rejected  # 2026-09-01 limit lives in the fronting proxy, absent in-process
-tests/test_body_limit.py::TestBodySizeLimit::test_error_has_standard_envelope  # 2026-09-01 same
-tests/test_pilot_readiness.py::TestPR05BodySizeLimit::test_oversized_request_rejected  # 2026-09-01 same
-
-# ── schema drift: the ORM carries columns migration 002 never added ──
-tests/test_tenant_model.py::TestTenantSchema::test_tenants_columns  # 2026-09-01 ORM has columns migration 002 never added
-tests/test_tenant_model.py::TestMigration002::test_migration_columns_match_orm  # 2026-09-01 same
-
-# ── depends on which providers this box can actually reach / has seeded ──
-tests/test_routing_e2e.py::TestRoutingE2EAuto::test_auto_coding_returns_anthropic  # 2026-09-01 anthropic is not reachable from this box; auto answers from a live provider
-tests/test_sranai_provider.py::test_unknown_provider_still_rejected  # 2026-09-01 depends on the provider registry seeded in this deployment
-tests/test_async_provider_key_service.py::test_get_api_key_async_resolves_db_key  # 2026-09-01 seeded key rows are stored in a legacy encoding this build no longer decodes
-
-# ── needs a live streaming provider ──
-tests/test_streaming_dlp.py::TestStreamingProviderPiiMaskedUnderDefault::test_streaming_provider_pii_is_masked_by_default  # 2026-09-01 needs a live streaming provider
-tests/test_streaming_dlp.py::TestStreamingCleanMessagePassesThrough::test_streaming_clean_message_passes_through  # 2026-09-01 same
-tests/test_streaming_session_factory.py::TestStreamingUsesRequestTimeFactory::test_streaming_uses_request_time_session_factory  # 2026-09-01 same
-tests/test_streaming_session_factory.py::TestStreamingFactoryCaptureIsPerRequest::test_streaming_factory_capture_is_per_request  # 2026-09-01 same
+# ── FIX126 O8 (2026-09-22): the 21 names that stood here are gone from
+#    the ledger. Each one was classified (backend/tests/QUARANTINE.md):
+#    the obsolete assertions and broken test setups were fixed (body limit
+#    x3, tenant columns x2, routing auto-coding, sranai wording, async key
+#    fixture, streaming DLP x2, streaming session factory x2); the rest are
+#    quarantined with @pytest.mark.quarantine(reason, ticket) — they still
+#    run and read "xfailed", not FAILED — so they no longer belong here.
+#    A quarantined test that fails is not a new failure; a quarantined test
+#    that passes reads XPASS and should be released.
 
 # ── the shared rate-limit window (FIX55). These tests spend real requests
 #    against one process-wide limiter, so whichever of them runs after the

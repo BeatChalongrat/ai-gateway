@@ -61,6 +61,9 @@ _ENTRIES: tuple[ErrorInfo, ...] = (
     ErrorInfo("model_no_tool_support", "The selected model cannot use tools. Pick a model that supports tools, or turn the tools off.", False),
     ErrorInfo("model_no_vision_support", "The selected model cannot read images. Pick a model that supports images, or remove the image.", False),
     ErrorInfo("no_capable_model", "No available model can do what this request needs (tools or images) with your current access.", False),
+    # FIX126 O4 — an allow-list that matches no provider is refused, never
+    # routed to the default provider.
+    ErrorInfo("no_allowed_provider", "None of the allowed providers can serve this model, so nothing was sent. Pick another model or change the allowed providers.", False),
     ErrorInfo("context_length_exceeded", "The conversation is too long for this model. Shorten it or start a new one.", False),
     ErrorInfo("upstream_bad_response", "The AI provider rejected the request. Change the request before sending it again.", False),
     ErrorInfo("quota_exceeded", "The usage quota has been reached. Contact your administrator.", False),

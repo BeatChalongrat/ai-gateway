@@ -26,6 +26,7 @@ from app.services.search.base import (
     SearchUnavailableError,
 )
 from app.services.search.providers import get_adapter
+from app.services.search.url_resolve import resolve_results
 
 logger = structlog.get_logger(__name__)
 
@@ -85,6 +86,13 @@ class SearchService:
                 )
                 latency = int((time.monotonic() - start) * 1000)
                 await self._record_success(session, cfg, latency)
+                # FIX126 U1 — news.google.com redirect links become the
+                # publisher's URL (bounded, cached, never raises; the
+                # provider's latency above excludes it).
+                try:
+                    results = await resolve_results(results)
+                except Exception as exc:  # noqa: BLE001 — links stay as given
+                    logger.warning("search_url_resolve_error", error=str(exc)[:200])
                 logger.info(
                     "search_completed",
                     provider=cfg.provider,

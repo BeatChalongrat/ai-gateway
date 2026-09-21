@@ -1042,6 +1042,12 @@ async def _chat_completions_impl(
     route = orchestrator.routing_service.select_route(
         ctx=ctx, payload=payload, policy_decision=input_enforcement
     )
+    # FIX126 O4 — fail-closed provider boundary (request + tenant): a
+    # primary outside it is a 400 no_allowed_provider before the stream
+    # starts; nothing is dispatched.
+    from app.services.routing_service import enforce_provider_boundary
+
+    await enforce_provider_boundary(route, payload, getattr(ctx, "tenant_id", None))
     # Auto Thinking Mode: enable adaptive reasoning when the resolved
     # model can think and the caller didn't opt out. Must run before
     # ``_show_reasoning`` is computed below so the SSE emitter knows to

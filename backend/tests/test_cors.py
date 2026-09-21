@@ -38,8 +38,11 @@ class TestCORS:
         assert resp.headers.get("access-control-allow-credentials") == "true"
 
     def test_actual_request_has_cors_header(self):
+        # FIX126 O8 — /live, not /health: /health answers 503 whenever the
+        # test container cannot reach Postgres, which says nothing about
+        # CORS. /live always answers 200 from the process itself.
         resp = client.get(
-            "/health",
+            "/live",
             headers={"Origin": "http://localhost:3000"},
         )
         assert resp.status_code == 200

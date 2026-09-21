@@ -32,6 +32,8 @@ from __future__ import annotations
 import pathlib
 import re
 
+import pytest
+
 from app.services.dlp.tool_arg_policy import TOOL_ARG_POLICY
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -76,7 +78,24 @@ def _chat_edge_tool_names() -> set[str]:
     return set(_GO_NAME_RE.findall(text))
 
 
+# FIX126 O8-2 — the registries live in sibling trees (SranDesktop/,
+# services/chat-edge-api/) that the backend lane container does not mount.
+# Quarantined only where the tree is missing: with a full checkout this
+# stays the hard parity gate it was written to be.
+_Q_DESKTOP = pytest.mark.quarantine(
+    reason="environment: SranDesktop/ tree is not mounted in the backend lane container",
+    ticket="FIX126-O8-2",
+    condition=not DESKTOP_TOOLS_DIR.is_dir(),
+)
+_Q_CHAT_EDGE = pytest.mark.quarantine(
+    reason="environment: services/chat-edge-api/ tree is not mounted in the backend lane container",
+    ticket="FIX126-O8-2",
+    condition=not CHAT_EDGE_TOOLS_GO.is_file(),
+)
+
+
 class TestToolPolicyParity:
+    @_Q_DESKTOP
     def test_desktop_registry_scan_is_alive(self):
         # Guard against regex/layout rot silently emptying the sweep —
         # an empty registry set would make the parity test pass while
@@ -91,6 +110,7 @@ class TestToolPolicyParity:
         assert "read_file" in names
         assert "web_fetch" in names
 
+    @_Q_CHAT_EDGE
     def test_chat_edge_registry_scan_is_alive(self):
         names = _chat_edge_tool_names()
         assert len(names) >= 5, (
@@ -100,6 +120,7 @@ class TestToolPolicyParity:
         )
         assert "web_search" in names
 
+    @_Q_DESKTOP
     def test_every_desktop_tool_is_classified(self):
         unclassified = _desktop_tool_names() - set(TOOL_ARG_POLICY)
         assert not unclassified, (
@@ -112,6 +133,7 @@ class TestToolPolicyParity:
             "free text off the machine is external_egress."
         )
 
+    @_Q_CHAT_EDGE
     def test_every_chat_edge_tool_is_classified(self):
         unclassified = _chat_edge_tool_names() - set(TOOL_ARG_POLICY)
         assert not unclassified, (

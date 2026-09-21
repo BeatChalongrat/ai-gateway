@@ -10,6 +10,8 @@ Verifies:
 
 import pytest
 
+from app.core.exceptions import NoAllowedProviderError
+
 from app.domain.routing import RoutingRequest, RoutingResult
 from app.services.routing_service import RoutingService
 
@@ -153,16 +155,16 @@ class TestExplicitSwapCompatibility:
         # openai, which does NOT own the model. The helper must log
         # the gap explicitly and return a clearly-explained fallback
         # rather than silently sending the request somewhere doomed.
-        result = svc.route(RoutingRequest(
-            requested_model="claude-3-5-sonnet-20241022",
-            allowed_providers=frozenset(["openai"]),
-        ))
-        # Fallback is openai per the helper contract, but the reasons
-        # list now explains that openai does not own this model.
-        assert result.provider == "openai"
-        joined = " ".join(result.reasons)
-        assert "claude-3-5-sonnet" in joined
-        assert "openai" in joined.lower()
+        # FIX126 O4 — fail-closed: no allowed provider owns the model, so
+        # the route is refused (it used to fall back to openai and send
+        # the request somewhere doomed — and somewhere excluded).
+        with pytest.raises(NoAllowedProviderError) as ei:
+            svc.route(RoutingRequest(
+                requested_model="claude-3-5-sonnet-20241022",
+                allowed_providers=frozenset(["openai"]),
+            ))
+        assert "claude-3-5-sonnet" in ei.value.message
+        assert ei.value.details["allowed_providers"] == ["openai"]
 
     def test_swap_uses_compatible_owner_when_present(self, svc):
         # gpt-4o canonical owner is openai. Block openai but include
@@ -170,12 +172,13 @@ class TestExplicitSwapCompatibility:
         # → fallback to openai with WARNING (verified deterministically
         # — sorted iteration means anthropic is considered before
         # google, both rejected because neither owns gpt-4o).
-        result = svc.route(RoutingRequest(
-            requested_model="gpt-4o",
-            allowed_providers=frozenset(["anthropic", "google"]),
-        ))
-        assert result.provider == "openai"
-        assert any("anthropic" in r and "google" in r for r in result.reasons)
+        # FIX126 O4 — refused, never routed to the excluded openai.
+        with pytest.raises(NoAllowedProviderError) as ei:
+            svc.route(RoutingRequest(
+                requested_model="gpt-4o",
+                allowed_providers=frozenset(["anthropic", "google"]),
+            ))
+        assert ei.value.details["allowed_providers"] == ["anthropic", "google"]
 
     def test_preferred_provider_wins_when_compatible(self, svc):
         # openai/gpt-4o resolves to openrouter via the openai/ prefix.
@@ -202,9 +205,13 @@ class TestExplicitSwapCompatibility:
             requested_model="claude-3-5-sonnet-20241022",
             allowed_providers=frozenset({"deepseek", "anthropic_blocked", "groq"}),
         )
-        # Neither set contains anthropic (canonical owner), so both
-        # fall through to the openai literal — deterministically.
-        assert svc.route(req_a).provider == svc.route(req_b).provider == "openai"
+        # Neither set contains anthropic (canonical owner), so both are
+        # refused (FIX126 O4) — deterministically, with the same sorted list.
+        with pytest.raises(NoAllowedProviderError) as ea:
+            svc.route(req_a)
+        with pytest.raises(NoAllowedProviderError) as eb:
+            svc.route(req_b)
+        assert ea.value.details == eb.value.details
 
 
 class TestFindCompatibleProvider:
@@ -229,12 +236,13 @@ class TestFindCompatibleProvider:
         assert provider == "google"
         assert "sorted(allowed_providers)" in reason
 
-    def test_no_compatible_falls_back_to_openai(self, svc):
-        # Claude family does not live on these providers.
-        provider, reason = svc._find_compatible_provider(
-            "claude-3-5-sonnet-20241022",
-            frozenset({"openai", "groq"}),
-            preferred_provider=None,
-        )
-        assert provider == "openai"
-        assert "No provider in allowed set" in reason
+    def test_no_compatible_is_refused(self, svc):
+        # Claude family does not live on these providers. FIX126 O4: the
+        # helper raises instead of falling back to openai.
+        with pytest.raises(NoAllowedProviderError) as ei:
+            svc._find_compatible_provider(
+                "claude-3-5-sonnet-20241022",
+                frozenset({"openai", "groq"}),
+                preferred_provider=None,
+            )
+        assert "No provider in allowed set" in ei.value.message

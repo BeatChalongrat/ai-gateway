@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import structlog
 
+from app.core.exceptions import NoAllowedProviderError
 from app.domain.entities import RequestContext, RouteDecision
 from app.domain.routing import (
     ModelCandidate,
@@ -134,10 +135,10 @@ class RoutingService:
            deterministic) and return the first provider whose registry
            entry matches ``model_name``.
         3. If no provider in the allowed set owns the model, log a
-           ``routing_no_compatible_provider`` warning and fall back to
-           ``"openai"`` so the existing error path at the adapter
-           continues to fire — but now with explicit operator
-           visibility instead of a silent 404.
+           ``routing_no_compatible_provider`` warning and raise
+           :class:`NoAllowedProviderError` (FIX126 O4, fail-closed). It
+           used to fall back to ``"openai"`` — a provider the caller had
+           excluded — so the request body left for it anyway.
 
         Returns ``(provider, reason)`` so callers can fold the
         explanation into the ``RoutingResult.reasons`` trace.
@@ -167,11 +168,16 @@ class RoutingService:
             allowed=sorted(allowed_providers),
             preferred=preferred_provider,
             canonical=canonical,
+            action="rejected",
         )
-        return "openai", (
+        raise NoAllowedProviderError(
             f"No provider in allowed set {sorted(allowed_providers)} "
-            f"owns model '{model_name}' — falling back to 'openai' "
-            f"(request will likely 404 at the adapter)."
+            f"owns model '{model_name}'.",
+            details={
+                "model": model_name,
+                "allowed_providers": sorted(allowed_providers),
+                "model_provider": canonical,
+            },
         )
 
     def route(self, request: RoutingRequest) -> RoutingResult:
@@ -394,6 +400,28 @@ class RoutingService:
                 constrained_by_policy=True,
             )
 
+        # FIX126 O4 — nothing survived AND the preferred default lies
+        # outside a non-empty allow-list: returning it would send the
+        # request to a provider the caller excluded. Refuse instead.
+        if request.allowed_providers is not None and (
+            preferred.provider not in request.allowed_providers
+        ):
+            logger.warning(
+                "routing_no_compatible_provider",
+                model=preferred.model,
+                allowed=sorted(request.allowed_providers),
+                use_case=request.use_case,
+                action="rejected",
+            )
+            raise NoAllowedProviderError(
+                f"No model on the allowed providers "
+                f"{sorted(request.allowed_providers)} can serve this request.",
+                details={
+                    "model": request.requested_model,
+                    "allowed_providers": sorted(request.allowed_providers),
+                },
+            )
+
         # Nothing available — return preferred anyway with warning
         return RoutingResult(
             selected=preferred,
@@ -484,3 +512,57 @@ class RoutingService:
             # dispatcher applies its own ``max_hops`` cap as a belt-and-braces.
             fallbacks=[(c.provider, c.model) for c in result.fallbacks],
         )
+
+
+async def effective_provider_boundary(payload, tenant_id: str | None) -> frozenset[str] | None:
+    """FIX126 O4 — the providers this request may reach at all: the
+    request's ``metadata.allowed_providers`` (the project's, injected into
+    metadata) intersected with the tenant override's ``allowed_providers``
+    (FIX120 fallback policy). ``None`` = no boundary (unchanged behaviour).
+    A tenant policy that cannot be read counts as "no tenant boundary" —
+    the request's own list still applies."""
+    from app.services.gateway import fallback_policy as _fb_policy_mod
+
+    meta = getattr(payload, "metadata", None)
+    request_allowed = meta.get("allowed_providers") if isinstance(meta, dict) else None
+    try:
+        policy = await _fb_policy_mod.effective_policy_async(tenant_id)
+    except Exception as exc:  # noqa: BLE001 — an unreadable policy never opens the request's own list
+        logger.warning("provider_boundary_policy_unreadable", error=str(exc)[:200])
+        policy = None
+    return _fb_policy_mod.allowed_set(policy, request_allowed)
+
+
+async def enforce_provider_boundary(route: RouteDecision, payload, tenant_id: str | None) -> None:
+    """FIX126 O4 — refuse a route whose PRIMARY provider lies outside the
+    request's boundary, and drop Layer-1 hops outside it.
+
+    The routing engine already refuses an allow-list that matches nothing
+    (``_find_compatible_provider``); this is the last check before any
+    provider is called, and the one place the tenant-level boundary meets
+    the primary route. Raises :class:`NoAllowedProviderError`; nothing is
+    dispatched.
+    """
+    allowed = await effective_provider_boundary(payload, tenant_id)
+    if allowed is None:
+        return
+    if route.provider_name not in allowed:
+        logger.warning(
+            "routing_no_compatible_provider",
+            model=route.model_name,
+            provider=route.provider_name,
+            allowed=sorted(allowed),
+            stage="boundary",
+            action="rejected",
+        )
+        raise NoAllowedProviderError(
+            f"No provider in allowed set {sorted(allowed)} can serve "
+            f"model '{route.model_name}'.",
+            details={
+                "model": route.model_name,
+                "allowed_providers": sorted(allowed),
+                "model_provider": route.provider_name,
+            },
+        )
+    if route.fallbacks:
+        route.fallbacks = [(p, m) for (p, m) in route.fallbacks if p in allowed]

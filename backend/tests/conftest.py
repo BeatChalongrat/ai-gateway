@@ -40,6 +40,17 @@ def pytest_configure(config):
         "`pytest -m 'not integration'` is the gate that must stay green; "
         "`pytest -m integration` runs them against a full stack.",
     )
+    config.addinivalue_line(
+        "markers",
+        "quarantine(reason, ticket): FIX126 O8 — a test that fails for a "
+        "known, documented cause (see tests/QUARANTINE.md). It still RUNS in "
+        "every lane, as xfail(strict=False): a failure reads 'xfailed', and "
+        "a quarantined test that starts passing reads 'XPASS' so it can be "
+        "released. reason= and ticket= are required; condition= (optional, "
+        "default True) limits the quarantine to where its cause holds. "
+        "`pytest -m quarantine` runs only them; `-m 'not quarantine'` leaves "
+        "them out.",
+    )
 
 
 # C3 — modules that require a live environment (see the ``integration``
@@ -106,6 +117,26 @@ def pytest_collection_modifyitems(config, items):
             or module_name in _INTEGRATION_MODULES
         ):
             item.add_marker(_pytest.mark.integration)
+
+        # FIX126 O8 — quarantined tests run as non-strict xfail with their
+        # ticket in the reason, so the default lane (`-m "not integration"`,
+        # unchanged) is green on a documented baseline and still reports
+        # them. A quarantine without a reason or a ticket is refused.
+        q = item.get_closest_marker("quarantine")
+        if q is not None:
+            reason = q.kwargs.get("reason") or (q.args[0] if q.args else "")
+            ticket = q.kwargs.get("ticket") or (q.args[1] if len(q.args) > 1 else "")
+            if not reason or not ticket:
+                raise _pytest.UsageError(
+                    f"{item.nodeid}: @pytest.mark.quarantine needs reason= and ticket="
+                )
+            # ``condition=`` (optional): quarantine only where the cause
+            # holds — e.g. a cross-tree gate is quarantined only when the
+            # sibling tree is not mounted, and stays a hard gate where it is.
+            if q.kwargs.get("condition", True):
+                item.add_marker(
+                    _pytest.mark.xfail(strict=False, reason=f"quarantined [{ticket}]: {reason}")
+                )
 
 
 @pytest.fixture(autouse=True)

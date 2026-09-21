@@ -83,7 +83,9 @@ class TestPR05BodySizeLimit:
     def test_oversized_request_rejected(self):
         resp = client.post(
             "/v1/chat/completions",
-            headers={**_HEADERS, "Content-Length": "2000000"},
+            # FIX126 O8 — the chat route's limit is 20 MB (vision payloads,
+            # app/main.py); 2 MB is now a legal chat body.
+            headers={**_HEADERS, "Content-Length": str(20 * 1024 * 1024 + 1)},
             content="x" * 100,
         )
         assert resp.status_code == 413

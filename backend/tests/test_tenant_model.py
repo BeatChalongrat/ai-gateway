@@ -45,6 +45,19 @@ class TestTenantSchema:
             "ner_enabled",  # added by migration 019
             "dlp_engine",  # added by migration 043 (Phase-3c Rust DLP sidecar)
             "credit_markup",  # added by migration 054 (cost-based credit billing)
+            # FIX126 O8 — columns later migrations added; the list had not
+            # been kept up with them (the ORM and the migrations agree).
+            "search_enabled",  # 055 (web search)
+            "search_credit_cost",  # 055
+            "dlp_media_gen_mask_identity",  # 056 (generation jobs)
+            "monthly_video_quota",  # 056
+            "monthly_audio_quota",  # 056
+            "max_daily_spend_usd",  # 058 (tenant daily spend cap)
+            "search_pii_egress",  # 064 (tenant PII egress policy)
+            "media_pii_egress",  # 064
+            "kb_pii_egress",  # 065 (KB / voice egress policy)
+            "voice_pii_egress",  # 065
+            "auto_routing_tier",  # 079 (auto router tenant tier)
             "created_at",
             "updated_at",
         }
@@ -267,6 +280,13 @@ class TestMigration002:
             "ner_enabled",  # added in migration 019
             "dlp_engine",   # added in migration 043 (Phase-3c)
             "credit_markup",  # added in migration 054 (cost-based billing)
+            # FIX126 O8 — added by later migrations; kept in step with the ORM.
+            "search_enabled", "search_credit_cost",  # 055
+            "dlp_media_gen_mask_identity", "monthly_video_quota", "monthly_audio_quota",  # 056
+            "max_daily_spend_usd",  # 058
+            "search_pii_egress", "media_pii_egress",  # 064
+            "kb_pii_egress", "voice_pii_egress",  # 065
+            "auto_routing_tier",  # 079
         }
         assert migration_cols == (orm_cols - post_002)
         engine.dispose()

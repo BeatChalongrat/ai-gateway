@@ -879,6 +879,11 @@ class GatewayOrchestrator:
                 payload=payload,
                 policy_decision=input_enforcement,
             )
+            # FIX126 O4 — fail-closed provider boundary (request + tenant):
+            # a primary outside it is refused before any provider call.
+            from app.services.routing_service import enforce_provider_boundary
+
+            await enforce_provider_boundary(route, payload, getattr(ctx, "tenant_id", None))
             # Auto Thinking Mode: enable adaptive reasoning when the
             # resolved model can think and the caller didn't opt out.
             self._maybe_enable_adaptive_reasoning(payload, route.model_name)
@@ -2732,9 +2737,15 @@ class GatewayOrchestrator:
         # Policy constraints the caller / policy layer put on the request
         # (pre-FIX35 contract, kept): allowed providers and blocked models.
         _meta = payload.metadata or {}
-        _allowed = _meta.get("allowed_providers")
-        if _allowed:
-            narrowed = [c for c in candidates if c.provider in set(_allowed)]
+        # FIX126 O4 — the boundary is the request's list AND the tenant's
+        # (fallback-policy override). With no candidate inside it the pool
+        # is kept and the route is refused (no_allowed_provider) at the
+        # boundary check after select_route — never dispatched outside.
+        from app.services.routing_service import effective_provider_boundary
+
+        _allowed = await effective_provider_boundary(payload, getattr(ctx, "tenant_id", None))
+        if _allowed is not None:
+            narrowed = [c for c in candidates if c.provider in _allowed]
             if narrowed:
                 candidates = narrowed
         _blocked = set(_meta.get("blocked_models") or ())

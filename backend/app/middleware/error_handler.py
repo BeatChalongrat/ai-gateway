@@ -20,6 +20,7 @@ from app.core.exceptions import (
     ConflictError,
     ContextLengthExceededError,
     DLPViolationError,
+    NoAllowedProviderError,
     NoCapableModelError,
     GatewayError,
     InternalServiceError,
@@ -72,6 +73,8 @@ _STATUS_MAP: dict[type[GatewayError], int] = {
     # 400, not 502: the request is the client's to fix (trim + retry).
     ContextLengthExceededError: 400,
     NoCapableModelError: 400,
+    # FIX126 O4 — the caller's own allow-list excludes every candidate.
+    NoAllowedProviderError: 400,
     InternalServiceError: 500,
 }
 

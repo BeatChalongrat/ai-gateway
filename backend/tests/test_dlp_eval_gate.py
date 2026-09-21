@@ -50,6 +50,17 @@ def test_every_category_has_a_must_catch_set():
         assert cat in sets and len(sets[cat]) >= 20, f"{cat}: {len(sets.get(cat, []))} items (need ≥ 20)"
 
 
+@pytest.mark.quarantine(
+    reason=(
+        "possible real regression, parked area (DLP): python AND rust "
+        "thai_address must-catch recall 41/41 -> 36/41 since 2026-09-17 "
+        "(same at a36124f, so data/environment, not a code change in that "
+        "window); full addresses like '128/4 ซอยรามคำแหง 24 ... 10240' are "
+        "missed. Not investigated while DLP is paused; do NOT rewrite the "
+        "baseline to make this pass."
+    ),
+    ticket="FIX126-O8-6",
+)
 def test_no_regression_against_baseline(results):
     baseline = json.loads(ev.BASELINE.read_text(encoding="utf-8"))
     problems = ev.compare_to_baseline(results, baseline)

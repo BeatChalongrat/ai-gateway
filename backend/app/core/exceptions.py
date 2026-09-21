@@ -22,6 +22,7 @@ GatewayError                       (base for all gateway domain errors)
 ├── UpstreamBadResponseError       (upstream returned unparseable response)
 ├── ContextLengthExceededError     (request exceeds the model's context window)
 ├── NoCapableModelError            (auto routing: no model can serve a hard need)
+├── NoAllowedProviderError         (the provider allow-list matches no candidate)
 └── InternalServiceError           (unexpected internal failure)
 """
 
@@ -291,6 +292,26 @@ class NoCapableModelError(GatewayError):
     message = (
         "No available model supports what this request needs "
         "(tools or images)."
+    )
+
+
+class NoAllowedProviderError(GatewayError):
+    """FIX126 O4 — the request's provider allow-list (``metadata.allowed_providers``,
+    the project's, the region's, or the tenant's fallback-policy boundary)
+    is non-empty and no provider in it can serve the request.
+
+    Before this the router logged ``routing_no_compatible_provider`` and
+    dispatched to the default provider (openai) anyway — the request body
+    left for a provider the caller had excluded. Fail-closed: nothing is
+    dispatched. Not retryable and not fallback-eligible — the same
+    allow-list will match nothing again. ``details`` names the model and
+    the allow-list.
+    """
+
+    code = "no_allowed_provider"
+    message = (
+        "No provider in the request's allowed providers can serve this "
+        "model. Nothing was sent to any provider."
     )
 
 

@@ -6,7 +6,6 @@ and round-robin across the resolved candidate list — all on an
 ``AsyncSession`` over the seeded integration DB.
 """
 
-import base64
 import uuid
 
 import pytest
@@ -18,7 +17,13 @@ import app.models  # noqa: F401
 
 
 def _enc(raw: str) -> str:
-    return base64.b64encode(raw.encode()).decode()
+    # FIX126 O8 — stored keys are AES-256-GCM (the resolve path refuses a
+    # plain base64 blob as "not an AES-GCM encrypted value"). Encode the
+    # fixture the way the service does, not the legacy way.
+    from app.core.config import settings
+    from app.core.security import encrypt_provider_key
+
+    return encrypt_provider_key(raw, settings.effective_master_key)
 
 
 @pytest.mark.asyncio

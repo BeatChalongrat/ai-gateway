@@ -32,15 +32,17 @@ class TestRegionEnforcement:
         assert route.provider_name != "openrouter"
 
     def test_eu_region_explicit_openrouter_model_still_blocked(self):
+        # OpenRouter model — but EU blocks the openrouter provider, and no
+        # provider the region allows owns the model. FIX126 O4: refused
+        # (fail-closed). It used to "fall back" to openai, which does not
+        # serve this model — the request left for a 404, and the region
+        # boundary held only by accident.
+        from app.core.exceptions import NoAllowedProviderError
+
         svc = RoutingService()
-        route = svc.select_route(_ctx("eu"), _payload("meta-llama/llama-3-70b"), None)
-        # OpenRouter model — but EU blocks openrouter provider
-        # The route should fall back or still use openrouter if no alternative
-        # Since explicit model routing falls through to registry which returns "openrouter",
-        # but the bridge constrains allowed_providers, the route method will
-        # resolve to openrouter but the bridge adds provider constraints
-        # Let's verify the constraint is applied
-        assert route.provider_name in {"openai", "anthropic"}
+        with pytest.raises(NoAllowedProviderError) as ei:
+            svc.select_route(_ctx("eu"), _payload("meta-llama/llama-3-70b"), None)
+        assert "openrouter" not in ei.value.details["allowed_providers"]
 
     def test_us_region_no_restrictions(self):
         svc = RoutingService()
