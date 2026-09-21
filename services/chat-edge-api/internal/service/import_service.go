@@ -210,6 +210,12 @@ type ImportMessageInput struct {
 	// gateway's error frame carried it. Assistant rows that ended in error
 	// only; stored as the bounded copy NormalizeAttempts makes.
 	Attempts any
+	// FIX124 — the client id of the assistant row this one replaces (a
+	// desktop Regenerate / Retry). That row is retired as status=regenerated
+	// in the same transaction, as the web's Regenerate does; without it the
+	// old answer stayed an active second answer in every later context.
+	// Assistant rows only; an id that names no row is ignored.
+	ReplacesClientID string
 	// Invalid is a reason the HANDLER already found this item unusable
 	// (an unparsable file id); it is rejected like any other bad item.
 	Invalid string
@@ -312,6 +318,7 @@ func (s *ImportService) ImportMessages(
 	msgs := s.messages.WithTx(tx)
 	convs := s.conversations.WithTx(tx)
 	filesTx := s.files.WithTx(tx)
+	userRowInserted := false
 	for i := range items {
 		if !storable[i] {
 			continue
@@ -376,8 +383,16 @@ func (s *ImportService) ImportMessages(
 		}
 		if inserted {
 			imported++
+			if items[i].Role == "user" {
+				userRowInserted = true
+			}
 		} else {
 			skipped++
+		}
+		if replaces := strings.TrimSpace(items[i].ReplacesClientID); replaces != "" && items[i].Role == "assistant" && replaces != strings.TrimSpace(items[i].ClientID) {
+			if _, err := msgs.MarkRegeneratedByClientID(ctx, tenantID, convID, replaces); err != nil {
+				return 0, 0, nil, err
+			}
 		}
 		// Link uploaded attachments to the message (FIX 10) — same repo
 		// path the send handler uses. Tenant+conversation scoped, and it
@@ -396,6 +411,12 @@ func (s *ImportService) ImportMessages(
 		if err := convs.IncrementMessageCount(ctx, convID, imported); err != nil {
 			return 0, 0, nil, err
 		}
+	}
+	// FIX124 — a desktop chat has a name from its first message too. The
+	// import path never wrote one, so a desktop chat whose first answers
+	// failed stayed "New conversation" (the owner's 66b0122a).
+	if userRowInserted {
+		writePlaceholderTitle(ctx, convs, msgs, tenantID, convID)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, nil, fmt.Errorf("import messages: commit: %w", err)

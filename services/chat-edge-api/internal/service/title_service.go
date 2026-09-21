@@ -11,22 +11,19 @@
 // with an unconditional rename, so a title the person had typed in the
 // meantime was replaced.
 //
-// The rules now:
-//   - the model is the one on the first assistant row — the SERVED model,
-//     so an Auto chat that fell back is named by whoever really answered;
-//   - the call may not leave that model's provider: allowed_providers
-//     names it and nothing else, so no fallback hop reaches a provider the
-//     person did not pick. (A list naming NO provider does not mean "this
-//     model or nothing": the gateway applies the list to the primary route
-//     too, finds no compatible provider and falls through to its default —
-//     measured, a qwen title request went to openai and 404'd.);
-//   - the request is small: two short messages, no tools, thinking off, a
-//     low output cap;
-//   - no answer on the first turn, a failed call, an empty completion → the
-//     first words of the person's own message. Never an error to the page;
-//   - only a title a machine put there is replaced ("New conversation" or
-//     the first-message truncation), only on the first turn, and the write
-//     is compare-and-set against the title that was read;
+// The rules now (FIX122, FIX124):
+//   - a chat is named after the first turn that was ANSWERED, whichever turn
+//     that is; until then it carries the first words of its first message,
+//     never "New conversation";
+//   - the model that answered is asked first (the SERVED model, so an Auto
+//     chat that fell back is named by whoever really answered); when it
+//     cannot, any model that works is — the gateway's router and its own
+//     fallback list, the same a chat turn gets — inside 20 s in total;
+//   - the request is small: two short messages, no tools, thinking off;
+//   - when no model can, the first words stand. Never an error to the page;
+//   - only a title a machine put there is replaced, and the write is
+//     compare-and-set against the title that was read: a rename is never
+//     overwritten, and a chat is named once;
 //   - a temporary chat (memory off) is never sent anywhere for a title.
 package service
 
@@ -67,6 +64,12 @@ const titleMaxTokens = 512
 // worth waiting for — the first words of the message are already there.
 const titleTimeout = 20 * time.Second
 
+// titleFirstAttempt is the share of titleTimeout the model that answered the
+// turn gets before any model that works is asked instead. A live model
+// titles in about a second (measured 0.8–1.9 s); the rest is the second
+// request's.
+const titleFirstAttempt = 8 * time.Second
+
 // titleUserMaxRunes / assistantSnippetMaxRunes cap what is sent. The topic
 // is in the opening lines; a pasted document is not title material.
 const titleUserMaxRunes = 500
@@ -106,16 +109,32 @@ type TitleResult struct {
 	Source string
 	// Reason says why a title was kept or fell back; "" for a model title.
 	Reason string
-	// Model is the model that was asked; "" when none was.
+	// Model is the model that wrote the title, or the last one asked; ""
+	// when none was.
 	Model string
+	// FallbackUsed: the model that answered the turn could not name it and
+	// another one was asked.
+	FallbackUsed bool
+}
+
+// titleConvStore / titleMsgStore are the two reads and one write naming
+// needs. Interfaces so the whole decision — not just its pure half — can be
+// tested without a database.
+type titleConvStore interface {
+	GetByID(ctx context.Context, tenantID, convID uuid.UUID) (*model.Conversation, error)
+	UpdateTitleIfCurrent(ctx context.Context, tenantID, convID uuid.UUID, current, title string) (bool, error)
+}
+
+type titleMsgStore interface {
+	GetTitleSeed(ctx context.Context, tenantID, convID uuid.UUID) (*repository.TitleSeed, error)
 }
 
 // TitleService is the title-generation entry point, driven by the
 // generate-title HTTP endpoint via the ConversationHandler.
 type TitleService struct {
 	gateway       *GatewayClient
-	conversations *repository.ConversationRepo
-	messages      *repository.MessageRepo
+	conversations titleConvStore
+	messages      titleMsgStore
 }
 
 func NewTitleService(g *GatewayClient) *TitleService {
@@ -134,57 +153,83 @@ func (s *TitleService) SetRepos(conv *repository.ConversationRepo, msg *reposito
 // as a table.
 type titlePlan struct {
 	// action: "keep" (touch nothing), "fallback" (first words, no model
-	// call) or "ask" (call model, fall back to first words if it fails).
+	// call) or "ask" (call a model, first words only if none can).
 	action string
 	reason string
-	model  string
+	// model is who answered the first successful turn — asked first. ""
+	// when the row does not say: the router's pick is asked straight away.
+	model string
 	// requested is the conversation's own model when it is the same model
 	// under its catalogue id: the row stores the name the provider served
 	// under ("deepseek-flash" for deepseek-v4-flash, measured), which the
 	// catalogue may not list. Only when the turn did not fall back and the
 	// person picked a model — after a fallback, or on Auto, the conversation's
-	// model is not who answered, and it is never asked.
+	// model is not who answered.
 	requested string
 }
 
-// planTitle decides what to do for a conversation and the head of its
-// history (oldest first).
-func planTitle(conv *model.Conversation, history []model.Message) titlePlan {
-	firstUser, firstAsst := firstUserAndAssistant(history)
-	if firstUser == nil {
+// planTitle decides what to do for a conversation.
+//
+// FIX124 — the rule is the STATE of the title, not the number of the turn. A
+// chat is named after the first turn that was answered, whichever turn that
+// is: FIX122 refused anything after turn one ("not_first_turn"), so a chat
+// whose first answer failed stayed "New conversation" however many answers
+// followed (the owner's 66b0122a: two failed turns, a third answered, no
+// name). What stops a second name is the title itself — once it is not a
+// machine title (a model wrote it, or the person did), nothing here runs.
+func planTitle(conv *model.Conversation, seed *repository.TitleSeed) titlePlan {
+	if seed == nil || seed.FirstUser == nil {
 		return titlePlan{action: "keep", reason: "no_messages"}
 	}
-	if !isMachineTitle(conv.Title, firstUser.ContentMasked) {
+	if !isMachineTitle(conv.Title, seed.FirstUser.ContentMasked) {
 		return titlePlan{action: "keep", reason: "title_already_set"}
-	}
-	users := 0
-	for i := range history {
-		if history[i].Role == "user" {
-			users++
-		}
-	}
-	if users > 1 {
-		return titlePlan{action: "keep", reason: "not_first_turn"}
 	}
 	if !conv.MemoryEnabled {
 		return titlePlan{action: "keep", reason: "temporary_chat"}
 	}
-	if firstAsst == nil || firstAsst.Status != "completed" {
-		return titlePlan{action: "fallback", reason: "first_turn_unanswered"}
+	if seed.Answer == nil {
+		// Nothing has been answered yet. The first words are the name until
+		// something is (and they are normally already there: the message
+		// paths write them when they take the first message).
+		return titlePlan{action: "fallback", reason: "no_turn_answered"}
 	}
-	if firstAsst.ModelID == nil || strings.TrimSpace(*firstAsst.ModelID) == "" {
-		return titlePlan{action: "fallback", reason: "served_model_unknown"}
+	plan := titlePlan{action: "ask"}
+	if seed.Answer.ModelID != nil {
+		plan.model = strings.TrimSpace(*seed.Answer.ModelID)
 	}
-	plan := titlePlan{action: "ask", model: strings.TrimSpace(*firstAsst.ModelID)}
-	if requested := strings.TrimSpace(conv.ModelID); firstAsst.FallbackFrom == nil && requested != "" && !IsAutoModel(requested) && requested != plan.model {
+	if requested := strings.TrimSpace(conv.ModelID); seed.Answer.FallbackFrom == nil && requested != "" && !IsAutoModel(requested) && requested != plan.model {
 		plan.requested = requested
 	}
 	return plan
 }
 
+// PlaceholderTitle is the name a chat carries until a model has named it:
+// the first words of its first message. "" when the message has no text (a
+// files-only send) — the creation placeholder then stands.
+func PlaceholderTitle(firstUserMessage string) string {
+	return makeTitleFrom(firstUserMessage)
+}
+
+// writePlaceholderTitle gives a conversation that still carries the creation
+// placeholder the first words of its FIRST user message — not of the message
+// being taken now: naming later recognises a machine title by comparing it
+// with the first message's words, and a placeholder cut from a later message
+// would read as a name somebody chose and never be replaced. Compare-and-set
+// on the creation placeholder, so a rename is safe; best-effort, a failure
+// leaves the placeholder for the next message.
+func writePlaceholderTitle(ctx context.Context, convs *repository.ConversationRepo, msgs *repository.MessageRepo, tenantID, convID uuid.UUID) {
+	text, err := msgs.FirstUserText(ctx, tenantID, convID)
+	if err != nil {
+		return
+	}
+	if placeholder := PlaceholderTitle(text); placeholder != "" {
+		_, _ = convs.UpdateTitleIfCurrent(ctx, tenantID, convID, defaultConversationTitle, placeholder)
+	}
+}
+
 // isMachineTitle reports whether nobody chose this title: the creation
 // placeholder, or one of the truncations of the first message that the
-// server (finalizeConversation, this file's fallback) writes.
+// server writes.
 func isMachineTitle(title, firstUserMessage string) bool {
 	t := strings.TrimSpace(title)
 	if t == "" || t == defaultConversationTitle {
@@ -195,8 +240,11 @@ func isMachineTitle(title, firstUserMessage string) bool {
 }
 
 // buildTitleRequest is the whole request: two short messages and the
-// switches that keep it cheap and keep it home.
-func buildTitleRequest(modelID, provider, userMsg, asstSnippet string) GatewayChatRequest {
+// switches that keep it cheap. No provider boundary of its own any more
+// (FIX124, owner's policy: any model that works) — a tenant's or project's
+// allowed_providers is applied by the gateway from its own settings, to this
+// call as to a chat turn.
+func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest {
 	return GatewayChatRequest{
 		Model: modelID,
 		Messages: []GatewayMessage{
@@ -205,19 +253,16 @@ func buildTitleRequest(modelID, provider, userMsg, asstSnippet string) GatewayCh
 		},
 		MaxTokens: titleMaxTokens,
 		// Thinking shares the output cap on a reasoning model: with it on,
-		// 64 tokens are all thought and the title comes back empty.
+		// the cap is all thought and the title comes back empty.
 		Reasoning: &GatewayReasoningConfig{Mode: "off"},
-		// The boundary of every fallback layer (dispatcher hops, the
-		// orchestrator's chain): the provider that already has this
-		// conversation, and no other.
-		Metadata: map[string]any{"allowed_providers": []string{provider}, "purpose": titlePurpose},
+		Metadata:  map[string]any{"purpose": titlePurpose},
 	}
 }
 
 // Generate names the conversation if it is still unnamed, and reports
-// what it did. A model failure is not an error: the result is then the
-// first words of the user's message. Errors are reserved for "not yours",
-// "nothing to name" and the database.
+// what it did. A model failure is not an error: another model is asked, and
+// when none can the result is the first words of the user's message. Errors
+// are reserved for "not yours", "nothing to name" and the database.
 func (s *TitleService) Generate(
 	ctx context.Context,
 	tenantID, userID, convID uuid.UUID,
@@ -237,11 +282,11 @@ func (s *TitleService) Generate(
 		return TitleResult{}, ErrTitleConversationNotFound
 	}
 
-	history, err := s.messages.ListContextByConversation(ctx, tenantID, convID, 20)
+	seed, err := s.messages.GetTitleSeed(ctx, tenantID, convID)
 	if err != nil {
-		return TitleResult{}, fmt.Errorf("title: load history: %w", err)
+		return TitleResult{}, fmt.Errorf("title: load seed: %w", err)
 	}
-	plan := planTitle(conv, history)
+	plan := planTitle(conv, seed)
 	if plan.action == "keep" {
 		if plan.reason == "no_messages" {
 			return TitleResult{}, ErrTitleNoMessages
@@ -250,22 +295,24 @@ func (s *TitleService) Generate(
 		return TitleResult{Title: conv.Title, Source: TitleSourceKept, Reason: plan.reason}, nil
 	}
 
-	firstUser, firstAsst := firstUserAndAssistant(history)
-	chosen, source, reason := cleanTitle(fallbackTitleFromMessage(firstUser.ContentMasked)), TitleSourceFallback, plan.reason
+	res := TitleResult{Title: PlaceholderTitle(seed.FirstUser.ContentMasked), Source: TitleSourceFallback, Reason: plan.reason, Model: plan.model}
 	if plan.action == "ask" {
-		if t, why := s.askModel(ctx, tenantID, userID, convID, plan, firstUser, firstAsst); t != "" {
-			chosen, source, reason = t, TitleSourceModel, ""
+		asked := s.askModels(ctx, tenantID, userID, convID, plan, seed.Question, seed.Answer)
+		res.Model, res.FallbackUsed = asked.model, asked.fallbackUsed
+		if asked.title != "" {
+			res.Title, res.Source, res.Reason = asked.title, TitleSourceModel, ""
 		} else {
-			reason = why
+			res.Reason = asked.why
 		}
 	}
-	if chosen == "" || chosen == conv.Title {
-		if chosen == "" {
-			source, reason = TitleSourceKept, "nothing_to_title_with"
+	if res.Title == "" || res.Title == conv.Title {
+		if res.Title == "" {
+			res.Source, res.Reason = TitleSourceKept, "nothing_to_title_with"
 		}
-		return TitleResult{Title: conv.Title, Source: source, Reason: reason, Model: plan.model}, nil
+		res.Title = conv.Title
+		return res, nil
 	}
-	written, err := s.conversations.UpdateTitleIfCurrent(ctx, tenantID, convID, conv.Title, chosen)
+	written, err := s.conversations.UpdateTitleIfCurrent(ctx, tenantID, convID, conv.Title, res.Title)
 	if err != nil {
 		return TitleResult{}, err
 	}
@@ -276,54 +323,88 @@ func (s *TitleService) Generate(
 			current = fresh.Title
 		}
 		slog.Info("title: kept", "conv", convID.String(), "reason", "renamed_meanwhile")
-		return TitleResult{Title: current, Source: TitleSourceKept, Reason: "renamed_meanwhile", Model: plan.model}, nil
+		return TitleResult{Title: current, Source: TitleSourceKept, Reason: "renamed_meanwhile", Model: res.Model, FallbackUsed: res.FallbackUsed}, nil
 	}
-	slog.Info("title: written", "conv", convID.String(), "source", source, "reason", reason, "model", plan.model)
-	return TitleResult{Title: chosen, Source: source, Reason: reason, Model: plan.model}, nil
+	slog.Info("title: written", "conv", convID.String(), "source", res.Source, "reason", res.Reason, "model", res.Model, "fallback_used", res.FallbackUsed)
+	return res, nil
 }
 
-// askModel makes the one small call. Returns the cleaned title, or "" and
-// why there is none. Logs what the call cost either way.
-func (s *TitleService) askModel(
+// titleAsked is what askModels came back with.
+type titleAsked struct {
+	title        string
+	why          string // why there is no title; "" when there is one
+	model        string // the model that wrote it, or the last one asked
+	fallbackUsed bool   // the model that answered the turn did not write it
+}
+
+// askModels asks the model that answered the turn, and when it cannot, any
+// model that works — inside titleTimeout in total.
+//
+// "Any model that works" is not a list kept here: the second request names
+// the Auto sentinel, so the gateway's router picks (skipping what its health
+// markers call dead, inside the tenant's allowed providers) and walks its
+// own alternatives — the list a chat turn gets. The first request is cut at
+// titleFirstAttempt rather than left to the provider's own timeout: a dead
+// box holds a request for 30 s (measured on qwen), which alone is longer
+// than the whole allowance.
+func (s *TitleService) askModels(
 	ctx context.Context, tenantID, userID, convID uuid.UUID,
-	plan titlePlan, firstUser, firstAsst *model.Message,
-) (string, string) {
-	started := time.Now()
-	callCtx, cancel := context.WithTimeout(ctx, titleTimeout)
+	plan titlePlan, question, answer *model.Message,
+) titleAsked {
+	overall, cancel := context.WithTimeout(ctx, titleTimeout)
 	defer cancel()
-	// Without the provider there is no boundary to draw, and a call with no
-	// boundary is the old behaviour. No provider, no call.
-	modelID, provider := s.catalogueEntry(callCtx, plan.model, plan.requested)
-	if provider == "" {
-		modelID = plan.model
-		slog.Warn("title: served model is not in the catalogue, using the first words", "conv", convID.String(), "model", modelID)
-		return "", "served_model_not_in_catalogue"
+	userMsg := truncateRunes(strings.TrimSpace(question.ContentMasked), titleUserMaxRunes)
+	snippet := assistantSnippet(answer)
+	call := GatewayCallContext{TenantID: tenantID, UserID: userID, ConversationID: convID}
+
+	out := titleAsked{why: "served_model_not_in_catalogue"}
+	if first, _ := s.catalogueEntry(overall, plan.model, plan.requested); first != "" {
+		attempt, cancelFirst := context.WithTimeout(overall, titleFirstAttempt)
+		out.model = first
+		out.title, out.why, _ = s.ask(attempt, call, first, userMsg, snippet)
+		cancelFirst()
+		if out.title != "" {
+			return out
+		}
 	}
-	resp, err := s.gateway.SendChatCompletion(callCtx, GatewayCallContext{
-		TenantID:       tenantID,
-		UserID:         userID,
-		ConversationID: convID,
-	}, buildTitleRequest(modelID, provider, truncateRunes(strings.TrimSpace(firstUser.ContentMasked), titleUserMaxRunes), assistantSnippet(firstAsst)))
+	if overall.Err() != nil {
+		return out
+	}
+	out.fallbackUsed = true
+	out.model = AutoModelID
+	title, why, served := s.ask(overall, call, AutoModelID, userMsg, snippet)
+	if served != "" {
+		out.model = served
+	}
+	out.title, out.why = title, why
+	return out
+}
+
+// ask makes one small call. Returns the cleaned title, or "" and why there
+// is none, and the model the gateway says served it. Logs what the call cost
+// either way.
+func (s *TitleService) ask(ctx context.Context, call GatewayCallContext, modelID, userMsg, snippet string) (title, why, served string) {
+	started := time.Now()
+	resp, err := s.gateway.SendChatCompletion(ctx, call, buildTitleRequest(modelID, userMsg, snippet))
 	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
-		slog.Warn("title: model call failed, using the first words",
-			"conv", convID.String(), "model", modelID, "ms", elapsed, "err", err)
-		return "", "model_call_failed"
+		slog.Warn("title: model call failed", "conv", call.ConversationID.String(), "model", modelID, "ms", elapsed, "err", err)
+		return "", "model_call_failed", ""
 	}
-	title := cleanTitle(parseTitleCompletion(extractContent(resp)))
-	prompt, completion, thinking, served := 0, 0, 0, ""
+	title = cleanTitle(parseTitleCompletion(extractContent(resp)))
+	prompt, completion, thinking := 0, 0, 0
 	if resp != nil {
 		served = resp.Model
 		if resp.Usage != nil {
 			prompt, completion, thinking = resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.ReasoningTokens
 		}
 	}
-	slog.Info("title: model answered", "conv", convID.String(), "model", modelID, "served", served, "ms", elapsed,
+	slog.Info("title: model answered", "conv", call.ConversationID.String(), "model", modelID, "served", served, "ms", elapsed,
 		"prompt_tokens", prompt, "completion_tokens", completion, "reasoning_tokens", thinking, "empty", title == "")
 	if title == "" {
-		return "", "model_returned_nothing"
+		return "", "model_returned_nothing", served
 	}
-	return title, ""
+	return title, "", served
 }
 
 // catalogueEntry returns the first of the candidate ids the gateway's
@@ -423,26 +504,6 @@ func parseTitleCompletion(raw string) string {
 func looksLikeTitleEnvelope(s string) bool {
 	t := strings.TrimSpace(s)
 	return strings.HasPrefix(t, "{") || strings.Contains(t, `"title"`)
-}
-
-// firstUserAndAssistant returns the earliest user message and the
-// earliest assistant message in chronological order. Either may be
-// nil. The slice argument is assumed to be oldest-first.
-func firstUserAndAssistant(history []model.Message) (*model.Message, *model.Message) {
-	var u, a *model.Message
-	for i := range history {
-		m := &history[i]
-		if u == nil && m.Role == "user" {
-			u = m
-		}
-		if a == nil && m.Role == "assistant" && strings.TrimSpace(m.ContentMasked) != "" {
-			a = m
-		}
-		if u != nil && a != nil {
-			break
-		}
-	}
-	return u, a
 }
 
 // assistantSnippet returns the assistant text trimmed to the first

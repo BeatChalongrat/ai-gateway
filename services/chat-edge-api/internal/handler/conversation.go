@@ -527,7 +527,10 @@ func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"title": res.Title, "source": res.Source, "reason": res.Reason})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"title": res.Title, "source": res.Source, "reason": res.Reason,
+		"model": res.Model, "fallback_used": res.FallbackUsed,
+	})
 }
 
 // ---------------------------------------------------------------------------

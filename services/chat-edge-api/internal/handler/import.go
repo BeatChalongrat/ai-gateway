@@ -76,6 +76,9 @@ type importMessageItem struct {
 	// FIX121 — the per-model attempt log of a turn that failed on the
 	// desktop (the gateway error frame's attempts); stored bounded.
 	ErrorAttempts []any `json:"error_attempts,omitempty"`
+	// FIX124 — client id of the assistant row this one replaces (desktop
+	// Regenerate / Retry); that row is retired as status=regenerated.
+	ReplacesClientID string `json:"replaces_client_id,omitempty"`
 }
 
 type importMessagesRequest struct {
@@ -201,20 +204,21 @@ func (h *ImportHandler) ImportMessages(w http.ResponseWriter, r *http.Request) {
 			fileIDs = append(fileIDs, id)
 		}
 		items = append(items, service.ImportMessageInput{
-			Invalid:       invalid,
-			Attempts:      anyList(m.ErrorAttempts),
-			ClientID:      m.ClientID,
-			Role:          m.Role,
-			Content:       m.Content,
-			ModelID:       m.ModelID,
-			CreatedAt:     ts,
-			FileIDs:       fileIDs,
-			Status:        m.Status,
-			TerminalCause: m.TerminalCause,
-			ErrorCode:     m.ErrorCode,
-			RunID:         m.RunID,
-			StopReason:    m.StopReason,
-			FallbackFrom:  m.FallbackFrom,
+			Invalid:          invalid,
+			Attempts:         anyList(m.ErrorAttempts),
+			ReplacesClientID: m.ReplacesClientID,
+			ClientID:         m.ClientID,
+			Role:             m.Role,
+			Content:          m.Content,
+			ModelID:          m.ModelID,
+			CreatedAt:        ts,
+			FileIDs:          fileIDs,
+			Status:           m.Status,
+			TerminalCause:    m.TerminalCause,
+			ErrorCode:        m.ErrorCode,
+			RunID:            m.RunID,
+			StopReason:       m.StopReason,
+			FallbackFrom:     m.FallbackFrom,
 		})
 	}
 

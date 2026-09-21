@@ -627,6 +627,7 @@ type streamDrainResult struct {
 	// that answered, from the Done update; the backend's request id on a
 	// provider error frame.
 	stopReason        string
+	toolLimit         int // FIX124 — tool rounds run when the turn ended at the cap unanswered
 	providerRequestID string
 	gatewayRequestID  string
 	// FIX74 — the run ended because the turn parked on a question.
@@ -993,6 +994,9 @@ Loop:
 			if ev.StopReason != "" {
 				res.stopReason = ev.StopReason
 			}
+			if ev.ToolLimit > 0 {
+				res.toolLimit = ev.ToolLimit
+			}
 			if ev.ProviderRequestID != "" {
 				res.providerRequestID = ev.ProviderRequestID
 			}
@@ -1220,6 +1224,12 @@ func (h *MessageHandler) finishStream(
 		// was cut off" instead of presenting a max_tokens cut as finished.
 		if res.stopReason != "" {
 			data["stop_reason"] = res.stopReason
+		}
+		// FIX124 — the turn stopped at the tool-round cap with no answer:
+		// stop_reason is tool_use, and this is how many rounds ran, for the
+		// page's "stopped after N tool steps".
+		if res.toolLimit > 0 {
+			data["tool_rounds"] = res.toolLimit
 		}
 		if res.gatewayRequestID != "" {
 			data["gateway_request_id"] = res.gatewayRequestID

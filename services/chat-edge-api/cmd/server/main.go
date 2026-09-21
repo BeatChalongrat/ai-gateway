@@ -204,6 +204,7 @@ func main() {
 	messageSvc := service.NewMessageService(
 		conversations, messages, gateway, titles, cfg, cfg.MaxContextMessages,
 	)
+	service.SetMaxToolIterations(cfg.MaxToolIterations)
 	messageSvc.SetImageGenerationTimeout(time.Duration(cfg.ChatEdgeImageTimeoutSeconds) * time.Second)
 	// FIX41 — the run ledger. In-process memory is the READ path for a
 	// live process (measured 8 us per turn); Redis is a mirror written by

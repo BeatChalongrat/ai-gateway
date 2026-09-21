@@ -145,6 +145,11 @@ type Config struct {
 	// the repo layer still hard-caps the DB load (see message_repo.go).
 	MaxContextMessages int `env:"MAX_CONTEXT_MESSAGES" envDefault:"1000"`
 
+	// FIX124 — how many tool rounds a web turn may run before the answer
+	// round (tool_choice none). Each round re-sends the whole context, so
+	// this is a cost knob; 5 is what it has always been.
+	MaxToolIterations int `env:"MAX_TOOL_ITERATIONS" envDefault:"5"`
+
 	// FIX33 A-W2 — auto-compact fires at a THRESHOLD, not on overflow
 	// (Claude: compaction at 150K of a bigger window). When the loaded
 	// history reaches TriggerRatio × the messages budget, the compiler

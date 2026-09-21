@@ -1091,6 +1091,12 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 			})
 			gwReq.Messages = append(gwReq.Messages, tcMsg)
 			gwReq.Messages = append(gwReq.Messages, results...)
+			// FIX124 — the call after the last allowed round is the answer
+			// round: with tools still callable it came back as one more
+			// tool_calls message, whose (empty) content was then saved.
+			if iter+1 >= maxToolIterations {
+				gwReq.ToolChoice = toolChoiceNone
+			}
 			next, err := s.gateway.SendChatCompletion(ctx, gatewayCallContext(in, conv), gwReq)
 			if err != nil {
 				_ = s.persistError(ctx, in, conv, "")
@@ -1203,8 +1209,12 @@ func (h *StreamHandle) UserCancelled() bool {
 // AnalysisStatus) on a given update — the pump never combines
 // them so the handler can route to the right event verb cleanly.
 type StreamUpdate struct {
-	Delta        string
-	Done         bool
+	Delta string
+	// ToolLimit (FIX124), on the Done update: the turn ended at the tool-round
+	// cap WITHOUT an answer — this many rounds ran and the answer round after
+	// them wrote nothing. 0 on every other ending.
+	ToolLimit int
+	Done      bool
 	FinishReason string
 	Usage        *GatewayChatUsage
 	Err          error
@@ -2986,6 +2996,15 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 		return nil, nil, nil, err
 	}
 
+	// FIX124 — the chat has a name from the moment it has a message. The first
+	// words used to be written only when the first turn FINISHED well
+	// (finalizeConversation), so a chat whose first answer failed showed "New
+	// conversation" for good. Compare-and-set on the creation placeholder: a
+	// rename, or any later message, leaves the title alone.
+	if conv.Title == defaultConversationTitle {
+		writePlaceholderTitle(ctx, s.conversations, s.messages, in.TenantID, conv.ID)
+	}
+
 	// Link any attached files to the new user message. Non-fatal:
 	// if the linker isn't wired (tests) or the SQL fails, the user
 	// message persists and the file just doesn't show up in the
@@ -4183,7 +4202,25 @@ func makeTitleFrom(content string) string {
 // asking for tools can't run away. After this many rounds the loop
 // closes the stream and lets the model's last partial text (if any)
 // stand as the final answer.
-const maxToolIterations = 5
+//
+// FIX124 — a variable, set once at start-up from MAX_TOOL_ITERATIONS
+// (SetMaxToolIterations). 5 is low next to agent modes that run tens of
+// steps (the desktop host allows 100), but every round re-sends the whole
+// context, so raising it is a cost decision; what makes any value safe is
+// that reaching it is no longer silent (see the answer round in the pump).
+var maxToolIterations = 5
+
+// SetMaxToolIterations sets the tool-round cap; values below 1 are ignored.
+func SetMaxToolIterations(n int) {
+	if n >= 1 {
+		maxToolIterations = n
+	}
+}
+
+// toolChoiceNone closes the tool loop: the tools stay in the request (some
+// providers refuse a history of tool calls when `tools` is absent) and the
+// model is told it may not call them.
+const toolChoiceNone = "none"
 
 // attachTools mutates the request to expose the per-conversation
 // tool set. The executor's ToolDefs(conv) already gates each tool
@@ -5024,7 +5061,20 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	var contentSoFar, reasoningSoFar strings.Builder
 	contentSoFar.WriteString(in.contentPrefix)
 	reasoningSoFar.WriteString(in.reasoningPrefix)
-	for outerIter := in.startIter; outerIter < maxToolIterations; outerIter++ {
+	// FIX124 — the round after the last tool round is the ANSWER round, and it
+	// is read. The loop used to be bounded by the cap itself: after the last
+	// round's tools it opened one more stream and fell out of the loop, which
+	// closed that stream unread and emitted a bare Done — the row was saved
+	// `completed` holding whatever preamble the model had written before its
+	// first tool call (measured: five run_python rounds, then "0 tokens").
+	// Now that stream goes out with tool_choice "none" and is read like any
+	// other. If it writes text, the turn ends as any turn does. If it writes
+	// nothing, or asks for tools all the same, the turn ends saying so
+	// (ToolLimit), never as a plain finished answer.
+	toolRounds := 0
+	answerRound := false
+	for outerIter := in.startIter; ; outerIter++ {
+		roundStart := contentSoFar.Len()
 		var acc []GatewayToolCall
 		finishReason := ""
 		stopReason := ""    // FIX119 — the closed-set reason from the gateway's final chunk
@@ -5167,11 +5217,18 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				if stopReason == "" {
 					stopReason = StopReasonFromFinish(finishReason) // an older gateway
 				}
+				// FIX124 — the answer round ran and wrote nothing: the turn
+				// stopped at the tool-round cap, and says so.
+				toolLimit := 0
+				if answerRound && contentSoFar.Len() == roundStart {
+					toolLimit, stopReason = toolRounds, StopReasonToolUse
+					slog.Warn("tool_limit_reached", "conversation_id", in.callCtx.ConversationID.String(), "run_id", in.callCtx.RequestID, "tool_rounds", toolRounds, "answer_round", "empty")
+				}
 				slog.Info("gateway_stream_done",
 					"run_id", in.callCtx.RequestID, "conversation_id", in.callCtx.ConversationID.String(),
 					"gateway_request_id", gatewayReqID, "provider_request_id", providerReqID,
 					"finish_reason", finishReason, "stop_reason", stopReason)
-				in.out <- StreamUpdate{Done: true, Usage: ev.Usage, FinishReason: finishReason, StopReason: stopReason,
+				in.out <- StreamUpdate{Done: true, Usage: ev.Usage, FinishReason: finishReason, StopReason: stopReason, ToolLimit: toolLimit,
 					ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
 				_ = current.Close()
 				return
@@ -5197,6 +5254,14 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				stopReason = StopReasonFromFinish(finishReason)
 			}
 			in.out <- StreamUpdate{Done: true, Usage: lastUsage, FinishReason: finishReason, StopReason: stopReason, ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
+			return
+		}
+
+		// The answer round asked for tools anyway: nothing more is run.
+		if answerRound {
+			slog.Warn("tool_limit_reached", "conversation_id", in.callCtx.ConversationID.String(), "run_id", in.callCtx.RequestID, "tool_rounds", toolRounds, "answer_round", "tool_calls")
+			in.out <- StreamUpdate{Done: true, Usage: lastUsage, FinishReason: "tool_calls", StopReason: StopReasonToolUse, ToolLimit: toolRounds,
+				ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
 			return
 		}
 
@@ -5254,6 +5319,11 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			req.Messages = append(req.Messages, results...)
 		}
 
+		toolRounds++
+		if outerIter+1 >= maxToolIterations {
+			answerRound = true
+			req.ToolChoice = toolChoiceNone
+		}
 		// Opening the next round IS waiting on the provider (this call
 		// blocks until the upstream response headers arrive).
 		stall.BeginAwait()
@@ -5265,9 +5335,6 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 		current = next
 	}
 
-	// Hit the iteration cap — close the current stream and emit Done.
-	_ = current.Close()
-	in.out <- StreamUpdate{Done: true, Usage: lastUsage}
 }
 
 // hasToolCalls reports whether a non-stream gateway response wants
