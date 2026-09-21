@@ -243,6 +243,22 @@ describe("FIX122 Part B — the page asks for a name once and never renames", ()
     expect(mockApi.generateTitle).not.toHaveBeenCalled();
   });
 
+  it("desktop: a reply the host renames to the server's row id at message_complete still asks once", async () => {
+    seed("c1");
+    const a = makeStream();
+    mockApi.openMessageStream.mockResolvedValueOnce(a.response);
+    const sending = useChatStore.getState().sendMessage("c1", "สวัสดี");
+    await tick();
+    a.push("message_start", { message_id: "asst_local1", conversation_id: "c1" });
+    a.push("content_delta", { delta: "ok" });
+    a.push("message_complete", { message_id: "asst_local1", assistant_message_id: "srv-row-1" });
+    a.close();
+    await sending;
+    await tick();
+    expect(useChatStore.getState().messages.c1.some((m) => m.id === "srv-row-1" && m.status === "completed")).toBe(true);
+    expect(mockApi.generateTitle).toHaveBeenCalledTimes(1);
+  });
+
   it("a first turn that was answered asks exactly once", async () => {
     seed("c1");
     await completeFirstTurn();

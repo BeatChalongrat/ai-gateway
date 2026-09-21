@@ -1368,7 +1368,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // turn's story (its row, its error card), not the composer's.
       outboxAccepted(convId, requestId);
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId, tempUserId);
-      firstReplyCompleted = replyCompleted(get, convId, get().streamingAssistantId[convId] ?? tempAsstId);
+      firstReplyCompleted = firstReplyEndedCompleted(get, convId);
     } catch (err) {
       // consumeStream may have swapped the placeholder id for the
       // persisted row id (message_start). Finalize whichever id is
@@ -1434,7 +1434,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return { abortControllers: aborts, streamingAssistantId: sids };
         });
         await get().resumeStream(convId, streamingId);
-        firstReplyCompleted = replyCompleted(get, convId, streamingId);
+        firstReplyCompleted = firstReplyEndedCompleted(get, convId);
         return;
       }
       get().setError(tOutside("error.networkStream"));
@@ -3077,8 +3077,11 @@ function giveBackToComposer(set: Set, convId: string, requestId?: string): void 
  *  keeps the screen from contradicting it for a moment).
  *  A temporary chat is not sent for a name at all. */
 const userRenames = new Map<string, number>();
-function replyCompleted(get: Get, convId: string, replyId: string): boolean {
-  return (get().messages[convId] ?? []).some((m) => m.id === replyId && m.status === "completed");
+/** A first turn's rows are the only rows, so its reply is the last assistant
+ *  row — found by role, not id: the desktop host renames the row to the
+ *  server's id at message_complete, after the stream slot was keyed. */
+function firstReplyEndedCompleted(get: Get, convId: string): boolean {
+  return (get().messages[convId] ?? []).filter((m) => m.role === "assistant").at(-1)?.status === "completed";
 }
 async function nameConversationOnce(set: Set, get: Get, convId: string): Promise<void> {
   const conv = get().conversations.find((c) => c.id === convId);
