@@ -7,9 +7,11 @@ services:
   backend:
     # Override the image CMD so uvicorn runs with --reload against the
     # mounted source tree. Migrations still run once on container start.
+    # FIX126 O3 — `exec` makes uvicorn PID 1, so SIGTERM reaches it and a
+    # restart does not wait out Docker's 10 s stop timeout.
     command: >-
       sh -c "python -m alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-dir /app/app"
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-dir /app/app"
     volumes:
       - ./backend:/app
       # Read-only mount so test_*_docs.py tests that read ../docs/*.md

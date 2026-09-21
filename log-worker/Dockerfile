@@ -52,4 +52,14 @@ USER nonroot
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \
     CMD ["/healthcheck"]
 
+# FIX126 O6 - provenance: every build carries the commit it was built from.
+# compose passes REVISION/CREATED as build args (`REVISION=$(git rev-parse
+# --short HEAD) docker compose ... build`); scripts/build-images.sh sets both
+# and builds from a clean `git archive` of that commit. Declared at the END
+# of the final stage so a new revision never busts the cached layers above.
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.revision=$REVISION \
+      org.opencontainers.image.created=$CREATED
+
 ENTRYPOINT ["/usr/local/bin/log-worker"]

@@ -28,6 +28,12 @@ services:
     build:
       context: ./services/chat-edge-api
       dockerfile: Dockerfile
+      # FIX126 O6: stamped as org.opencontainers.image.revision/.created.
+      # `REVISION=$(git rev-parse --short HEAD) docker compose ... build`,
+      # or scripts/build-images.sh (clean git-archive build) for releases.
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     container_name: ai-gateway-chat-edge-api
     restart: unless-stopped
     ports:
@@ -220,6 +226,17 @@ services:
         condition: service_healthy
       redis-webchat:
         condition: service_healthy
+    # FIX126 O2. GET /health at the router root (NOT /api/v1/health) answers
+    # 200 {"status":"ok"}. BusyBox wget ships in the alpine runtime image;
+    # 127.0.0.1 rather than localhost so a ::1-first resolver cannot turn a
+    # healthy IPv4-only listener into "unhealthy". Same cadence as the
+    # base file's chat-edge-api healthcheck.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   postgres-webchat:
     # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
@@ -349,6 +366,11 @@ services:
         # (FIX20 §6.5: the desktop shell's hosted mode is detected at RUNTIME
         # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
         # serves the browser and the Electron app.)
+        # FIX126 O6: build stamp for the update prompt (/api/version). Empty
+        # = the Dockerfile's default, the epoch second of the build.
+        NEXT_PUBLIC_BUILD_ID: ${NEXT_PUBLIC_BUILD_ID:-}
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     container_name: ai-gateway-web-chat
     restart: unless-stopped
     ports:
@@ -361,6 +383,18 @@ services:
       - PORT=3002
     depends_on:
       - chat-edge-api
+    # FIX126 O2. /api/version is a static route handler (no upstream calls),
+    # so this says "the Next server answers", not "chat-edge is up".
+    # BusyBox wget is in node:20-alpine. 127.0.0.1, NOT localhost: the
+    # server binds HOSTNAME=0.0.0.0 (IPv4 only) and in this image localhost
+    # resolves to ::1 first, so `wget http://localhost:3002/…` is refused
+    # (measured on the live container).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3002/api/version || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   pgdata-webchat:

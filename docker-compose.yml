@@ -82,6 +82,13 @@ services:
   mock-provider:
     build:
       context: ./mock
+      # FIX126 O6: every service build here takes REVISION/CREATED and
+      # stamps org.opencontainers.image.revision/.created (see the Dockerfile
+      # tails). `REVISION=$(git rev-parse --short HEAD) docker compose ...
+      # build`; releases: scripts/build-images.sh (clean git-archive build).
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     image: ai-gateway-mock-provider:latest
     container_name: ai-gateway-mock-provider
     ports:
@@ -126,6 +133,9 @@ services:
     build:
       context: ./backend
       dockerfile: ner_service/Dockerfile
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     image: ai-gateway-ner-service:latest
     environment:
       NER_WORKERS: ${NER_WORKERS:-2}
@@ -175,6 +185,9 @@ services:
   dlp-sidecar:
     build:
       context: ./dlp-sidecar
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     image: ai-gateway-dlp-sidecar:latest
     environment:
       GRPC_PORT: "50051"
@@ -203,6 +216,9 @@ services:
   rate-limiter:
     build:
       context: ./rate-limiter
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     image: ai-gateway-rate-limiter:latest
     environment:
       # REDIS_PASSWORD required (redis --requirepass). Folded into the
@@ -242,6 +258,9 @@ services:
   log-worker:
     build:
       context: ./log-worker
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     image: ai-gateway-log-worker:latest
     environment:
       POSTGRES_DSN: "host=postgres port=5432 dbname=${POSTGRES_DB:-ai_gateway} user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres} sslmode=disable"
@@ -279,6 +298,9 @@ services:
   gateway:
     build:
       context: ./services/gateway
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       PORT: "8080"
       # Python's container bind is unchanged (gunicorn -b 0.0.0.0:8080);
@@ -320,6 +342,9 @@ services:
     build:
       context: ./services/chat-edge-api
       dockerfile: Dockerfile
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_EDGE_DB:-sran_chat}?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2
@@ -381,6 +406,9 @@ services:
   mcp-gateway:
     build:
       context: ./services/mcp-gateway
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       # Dev: catalog advertises http://localhost:3200/mcp/servers/{id}.
       # Prod: set MCP_PUBLIC_BASE=https://sran.yourcompany.com and
@@ -410,6 +438,9 @@ services:
   backend:
     build:
       context: ./backend
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       # Pin UTF-8 everywhere so Thai-language request bodies, mask
       # tokens, and the ฿ symbol travel through Python stdout / SQL
@@ -634,6 +665,8 @@ services:
       context: ./admin-ui
       args:
         NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
       # Server-side base URL the chat-edge proxy uses to validate the
@@ -667,6 +700,8 @@ services:
         # The three allowlist sites take .origin of this value, so the /chat
         # suffix the dashboard link wants is harmless to them.
         NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
       NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
@@ -767,6 +802,9 @@ services:
     profiles: ["scaling"]
     build:
       context: ./backend
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
     command: ["python", "-m", "worker"]
     environment:
       POSTGRES_HOST: postgres

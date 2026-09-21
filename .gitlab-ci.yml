@@ -14,6 +14,7 @@
 #   gateway-test            -> gateway-test (services/gateway)
 #   mcp-gateway-test        -> mcp-gateway-test
 #   secret-leak-guard       -> secret-leak-guard
+#   (none — GitLab only)    -> gitleaks (FIX126: commit-range secret scan)
 #   security-audit          -> audit:pip / audit:npm / audit:go / audit:cargo
 #   desktop-test (Windows)  -> desktop-test (tags:[windows], manual+allow_failure)
 
@@ -197,6 +198,71 @@ secret-leak-guard:
         exit 1
       fi
       echo "OK: no NEXT_PUBLIC_ secret leaks in tracked files."
+
+# ─────────────────────────────────────────────────────────────────────────
+# gitleaks (FIX126 O5) — scan the commits this pipeline brings in for
+# secrets (gitleaks default ruleset) and FAIL on any finding. GitLab-only:
+# the GitHub workflow has no equivalent lane yet.
+#
+# What is scanned:
+#   MR pipeline   -> the MR's own commits: $CI_MERGE_REQUEST_DIFF_BASE_SHA..HEAD
+#   push to main  -> the pushed range:     $CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA
+#   fallback      -> the pushed tip commit only, with a warning, when the
+#                    "before" SHA is all zeros (branch created by this push)
+#                    or not in the clone (a force push rewrote it). NOT the
+#                    whole history: measured in FIX126, the full history has
+#                    82 findings (97 across all branches) — almost all DLP
+#                    test fixtures (fake keys the detectors must catch), a
+#                    few in files since deleted — so a full-history fallback
+#                    would be red every time until those are triaged into
+#                    .gitleaksignore. Commits that came through an MR were
+#                    already scanned by that MR's pipeline.
+# Every commit in the range is read — a secret added in one commit and
+# deleted in the next still fails the job (it is in the history).
+#
+# --redact keeps secret values out of the job log and the report artifact.
+# A finding that is a known false positive goes into .gitleaksignore (its
+# Fingerprint line from the report), with a reason in the commit message.
+#
+# NOTE: the GitLab project has had zero runners so far (no pipeline has ever
+# run), so this job has never executed on GitLab; the script was exercised
+# locally in this image against a clone of the repo (FIX126).
+# ─────────────────────────────────────────────────────────────────────────
+gitleaks:
+  stage: test
+  image:
+    name: ghcr.io/gitleaks/gitleaks:v8.30.1
+    # The image's ENTRYPOINT is gitleaks itself; the runner needs a shell.
+    entrypoint: [""]
+  variables:
+    # Full history, so both ends of the range exist in the clone.
+    GIT_DEPTH: "0"
+  script:
+    - |
+      set -eu
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      ZERO=0000000000000000000000000000000000000000
+      RANGE=""
+      if [ "$CI_PIPELINE_SOURCE" = "merge_request_event" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+        RANGE="$CI_MERGE_REQUEST_DIFF_BASE_SHA..$CI_COMMIT_SHA"
+      elif [ -n "${CI_COMMIT_BEFORE_SHA:-}" ] && [ "$CI_COMMIT_BEFORE_SHA" != "$ZERO" ] \
+           && git cat-file -e "${CI_COMMIT_BEFORE_SHA}^{commit}" 2>/dev/null; then
+        RANGE="$CI_COMMIT_BEFORE_SHA..$CI_COMMIT_SHA"
+      fi
+      if [ -n "$RANGE" ]; then
+        echo "gitleaks: scanning $(git rev-list --count "$RANGE") commit(s) in $RANGE"
+        LOG_OPTS="$RANGE"
+      else
+        echo "WARNING gitleaks: no usable base SHA (before='${CI_COMMIT_BEFORE_SHA:-}') — scanning only the tip commit $CI_COMMIT_SHA"
+        LOG_OPTS="-1 $CI_COMMIT_SHA"
+      fi
+      gitleaks git --log-opts="$LOG_OPTS" --redact --verbose --no-banner \
+        --exit-code 1 --report-format json --report-path gitleaks-report.json .
+  artifacts:
+    when: on_failure
+    paths:
+      - gitleaks-report.json
+    expire_in: 7 days
 
 # ─────────────────────────────────────────────────────────────────────────
 # web-e2e (Playwright) — NON-BLOCKING, mirrors GitHub continue-on-error: true

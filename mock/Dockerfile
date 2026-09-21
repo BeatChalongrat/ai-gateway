@@ -29,6 +29,16 @@ COPY server.py latency_profile.yaml /app/
 
 EXPOSE 9090
 
+# FIX126 O6 - provenance: every build carries the commit it was built from.
+# compose passes REVISION/CREATED as build args (`REVISION=$(git rev-parse
+# --short HEAD) docker compose ... build`); scripts/build-images.sh sets both
+# and builds from a clean `git archive` of that commit. Declared at the END
+# of the final stage so a new revision never busts the cached layers above.
+ARG REVISION=unknown
+ARG CREATED=unknown
+LABEL org.opencontainers.image.revision=$REVISION \
+      org.opencontainers.image.created=$CREATED
+
 # uvloop + httptools runtime; 4 workers to match the Windows-host
 # saturation fix. The CMD is explicit rather than shell-expanded so
 # signals propagate cleanly (no sh wrapper).
