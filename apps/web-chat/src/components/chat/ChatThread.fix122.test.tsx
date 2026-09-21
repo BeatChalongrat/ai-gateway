@@ -92,7 +92,7 @@ beforeEach(() => {
   // the virtualizer reads the viewport from offsetWidth/Height when it attaches
   Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get() { return isScroller(this) ? VIEW_H : 0; } });
   Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get() { return isScroller(this) ? 800 : 0; } });
-  Element.prototype.scrollTo = function (arg?: ScrollToOptions | number) {
+  Element.prototype.scrollTo = function (this: Element, arg?: ScrollToOptions | number) {
     if (isScroller(this) && typeof arg === "object" && typeof arg.top === "number") scrollWrites.push(arg.top);
   } as typeof Element.prototype.scrollTo;
 });
