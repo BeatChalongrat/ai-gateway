@@ -108,10 +108,10 @@ func TestToolLimit_AnswerRoundIsReadAndCannotCallTools(t *testing.T) {
 			t.Errorf("call %d: tools must stay in the request (a history of tool calls without them is refused by some providers)", i)
 		}
 	}
-	// the answer round sees the last round's tool results
+	// the answer round sees the last round's tool results (then the notice)
 	msgs := bodies[maxToolIterations]["messages"].([]any)
-	if last := msgs[len(msgs)-1].(map[string]any); last["role"] != "tool" {
-		t.Errorf("the answer round's last message is %v, want the last tool result", last["role"])
+	if prev := msgs[len(msgs)-2].(map[string]any); prev["role"] != "tool" {
+		t.Errorf("before the notice comes %v, want the last tool result", prev["role"])
 	}
 }
 
@@ -146,6 +146,63 @@ func TestToolLimit_AnswerRoundStillAskingForTools(t *testing.T) {
 	}
 	if len(bodies) != maxToolIterations+1 {
 		t.Fatalf("gateway calls = %d: the loop must stop after the answer round", len(bodies))
+	}
+}
+
+// Measured live on deepseek-v4-flash: forbidden to call tools, the model wrote
+// its next tool call out as TEXT. That is not an answer: none of it reaches
+// the client, and the turn ends as the limit.
+func TestToolLimit_ToolCallWrittenAsTextIsNotAnAnswer(t *testing.T) {
+	for _, markup := range []string{
+		"<｜｜DSML｜｜ calls>\n<｜｜DSML｜｜ invoke name=\"run_python\">\n<｜｜DSML｜｜ parameter name=\"code\">print(6**3)",
+		"<tool_call>\n{\"name\": \"run_python\"}\n</tool_call>",
+		"  <function_calls><invoke name=\"run_python\"></invoke></function_calls>",
+	} {
+		updates, _ := runToolTurn(t, func(n int) string {
+			if n < maxToolIterations {
+				preamble := ""
+				if n == 0 {
+					preamble = "Let me work on it. "
+				}
+				return sseToolRound(preamble, "call_"+string(rune('a'+n)))
+			}
+			return sseText(markup)
+		})
+		text, _, _, _ := summarise(updates)
+		done := lastDone(t, updates)
+		if text != "Let me work on it. " {
+			t.Errorf("markup reached the client: %q", text)
+		}
+		if done.ToolLimit != maxToolIterations || done.StopReason != StopReasonToolUse {
+			t.Errorf("want the tool-limit ending, got %+v", done)
+		}
+	}
+}
+
+// The answer round's request ends with the app's notice (never stored), and a
+// SHORT real answer — shorter than the probe window — still arrives whole.
+func TestToolLimit_AnswerRoundNoticeAndShortAnswer(t *testing.T) {
+	updates, bodies := runToolTurn(t, func(n int) string {
+		if n < maxToolIterations {
+			return sseToolRound("", "call_"+string(rune('a'+n)))
+		}
+		return sseText("216")
+	})
+	text, _, _, _ := summarise(updates)
+	if done := lastDone(t, updates); text != "216" || done.ToolLimit != 0 {
+		t.Fatalf("text=%q done=%+v", text, done)
+	}
+	msgs := bodies[maxToolIterations]["messages"].([]any)
+	last := msgs[len(msgs)-1].(map[string]any)
+	if last["role"] != "user" || !strings.Contains(last["content"].(string), "tool-step limit") {
+		t.Errorf("answer round must end with the notice, got %v", last)
+	}
+	for i := 0; i < maxToolIterations; i++ {
+		for _, m := range bodies[i]["messages"].([]any) {
+			if c, _ := m.(map[string]any)["content"].(string); strings.Contains(c, "tool-step limit") {
+				t.Errorf("call %d carries the notice; only the answer round may", i)
+			}
+		}
 	}
 }
 

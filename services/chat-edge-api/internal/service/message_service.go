@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -1096,6 +1098,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 			// tool_calls message, whose (empty) content was then saved.
 			if iter+1 >= maxToolIterations {
 				gwReq.ToolChoice = toolChoiceNone
+				gwReq.Messages = append(gwReq.Messages, GatewayMessage{Role: "user", Content: toolLimitNotice})
 			}
 			next, err := s.gateway.SendChatCompletion(ctx, gatewayCallContext(in, conv), gwReq)
 			if err != nil {
@@ -4217,6 +4220,25 @@ func SetMaxToolIterations(n int) {
 	}
 }
 
+// toolLimitNotice is the last message of the answer round's REQUEST (it is
+// never stored: history comes from the rows). tool_choice "none" alone is
+// not enough — measured live on deepseek-v4-flash: forbidden to call tools,
+// it wrote its next tool call out as TEXT in its own markup, which arrived as
+// content and was saved as the answer. A user-role line, not a second system
+// message: a system message after the first fails on qwen's chat template.
+const toolLimitNotice = "[notice from the app, not from the user] The tool-step limit for this turn has been reached. Do not call any more tools. Using the tool results above, write the final answer now, in the language the user wrote in. If the task is unfinished, say what is done and what is left."
+
+// toolCallMarkupPrefix recognises an answer round that is a tool call written
+// out as text (deepseek "<｜｜DSML｜｜ calls>", qwen/hermes "<tool_call>",
+// anthropic-style "<function_calls>" / "<invoke"): not an answer, and never
+// shown as one.
+var toolCallMarkupPrefix = regexp.MustCompile(`^\s*<\s*(?:[｜|]|tool_call|function_calls|invoke\b)`)
+
+// answerRoundProbeRunes is how much of the answer round is held back before
+// it is forwarded, to decide whether it is markup. A real answer clears it in
+// the first frame or two.
+const answerRoundProbeRunes = 24
+
 // toolChoiceNone closes the tool loop: the tools stay in the request (some
 // providers refuse a history of tool calls when `tools` is absent) and the
 // model is told it may not call them.
@@ -5075,6 +5097,10 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	answerRound := false
 	for outerIter := in.startIter; ; outerIter++ {
 		roundStart := contentSoFar.Len()
+		// Answer round only: deltas held back until they are known not to be
+		// tool-call markup, and whether the round turned out to be markup.
+		var held strings.Builder
+		holding, markup := answerRound, false
 		var acc []GatewayToolCall
 		finishReason := ""
 		stopReason := ""    // FIX119 — the closed-set reason from the gateway's final chunk
@@ -5138,12 +5164,25 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			if ev.GatewayRequestID != "" && gatewayReqID == "" {
 				gatewayReqID = ev.GatewayRequestID
 			}
-			if ev.Delta != "" {
-				contentSoFar.WriteString(ev.Delta)
-				in.out <- StreamUpdate{
-					Delta:        ev.Delta,
-					Usage:        ev.Usage,
-					FinishReason: ev.FinishReason,
+			if ev.Delta != "" && !markup {
+				delta := ev.Delta
+				if holding {
+					held.WriteString(delta)
+					if utf8.RuneCountInString(held.String()) < answerRoundProbeRunes {
+						delta = ""
+					} else if toolCallMarkupPrefix.MatchString(held.String()) {
+						markup, delta = true, ""
+					} else {
+						holding, delta = false, held.String()
+					}
+				}
+				if delta != "" {
+					contentSoFar.WriteString(delta)
+					in.out <- StreamUpdate{
+						Delta:        delta,
+						Usage:        ev.Usage,
+						FinishReason: ev.FinishReason,
+					}
 				}
 			}
 			// T4 reasoning frames — forwarded as separate updates so
@@ -5217,8 +5256,20 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				if stopReason == "" {
 					stopReason = StopReasonFromFinish(finishReason) // an older gateway
 				}
-				// FIX124 — the answer round ran and wrote nothing: the turn
-				// stopped at the tool-round cap, and says so.
+				// A short answer still held back when the stream ended is an
+				// answer (unless it is markup): it goes out now.
+				if holding && !markup && held.Len() > 0 {
+					if toolCallMarkupPrefix.MatchString(held.String()) {
+						markup = true
+					} else {
+						contentSoFar.WriteString(held.String())
+						in.out <- StreamUpdate{Delta: held.String()}
+					}
+					holding = false
+				}
+				// FIX124 — the answer round ran and wrote nothing (or wrote a
+				// tool call as text): the turn stopped at the tool-round cap,
+				// and says so.
 				toolLimit := 0
 				if answerRound && contentSoFar.Len() == roundStart {
 					toolLimit, stopReason = toolRounds, StopReasonToolUse
@@ -5253,7 +5304,17 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			if stopReason == "" {
 				stopReason = StopReasonFromFinish(finishReason)
 			}
-			in.out <- StreamUpdate{Done: true, Usage: lastUsage, FinishReason: finishReason, StopReason: stopReason, ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
+			// Same ending rules as the [DONE] path above: a held-back short
+			// answer goes out, an empty or markup answer round is the limit.
+			toolLimit := 0
+			if holding && !markup && held.Len() > 0 && !toolCallMarkupPrefix.MatchString(held.String()) {
+				contentSoFar.WriteString(held.String())
+				in.out <- StreamUpdate{Delta: held.String()}
+			}
+			if answerRound && contentSoFar.Len() == roundStart {
+				toolLimit, stopReason = toolRounds, StopReasonToolUse
+			}
+			in.out <- StreamUpdate{Done: true, Usage: lastUsage, FinishReason: finishReason, StopReason: stopReason, ToolLimit: toolLimit, ProviderRequestID: providerReqID, GatewayRequestID: gatewayReqID}
 			return
 		}
 
@@ -5323,6 +5384,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 		if outerIter+1 >= maxToolIterations {
 			answerRound = true
 			req.ToolChoice = toolChoiceNone
+			req.Messages = append(req.Messages, GatewayMessage{Role: "user", Content: toolLimitNotice})
 		}
 		// Opening the next round IS waiting on the provider (this call
 		// blocks until the upstream response headers arrive).
