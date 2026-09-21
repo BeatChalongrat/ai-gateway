@@ -16,6 +16,36 @@ from app.services.media_gen import destinations as media_dest
 from app.services.media_gen.image_backends import registered_image_providers
 from app.services.providers.base_urls import SELF_HOSTED_PROVIDERS
 from app.services.providers.model_registry import get_all_candidates
+from app.services.providers.reasoning_strategies import (
+    STRATEGIES_WITH_ENABLE_THINKING_OFF,
+    STRATEGY_GEMINI_THINKING,
+)
+
+def _reasoning_can_turn_off(candidate) -> bool:
+    """FIX125 M3 — whether ``reasoning.mode == "off"`` really stops thinking.
+
+    * ``openai_compatible_enable_thinking`` (Qwen/vLLM): the adapter sends
+      ``chat_template_kwargs.enable_thinking=false`` — measured (FIX72).
+    * Anthropic: thinking exists only when the adapter sends a
+      ``thinking`` block, and it sends none on "off".
+    * Gemini (``gemini_thinking_level``): left as it was — "off" omits
+      ``thinkingConfig``, and whether the model then thinks is the model's
+      own default, which is not recorded per row.
+
+    Everything else (DeepSeek / Groq ``openai_compatible_reasoning``, the
+    OpenAI Responses rows, parse-only ``openai_compatible_reasoning_content``
+    boxes, OpenRouter) thinks anyway when "off" is sent: the adapter only
+    stops asking for more.
+    """
+    strategy = getattr(candidate, "reasoning_strategy", None) or "none"
+    if strategy in STRATEGIES_WITH_ENABLE_THINKING_OFF:
+        return True
+    if candidate.provider == "anthropic":
+        return True
+    if strategy == STRATEGY_GEMINI_THINKING or candidate.provider == "google":
+        return True
+    return False
+
 
 router = APIRouter()
 
@@ -96,9 +126,15 @@ async def get_models(
             # ``modes`` is the same closed set as ``ReasoningConfig.mode``
             # — kept hardcoded here rather than imported from the
             # Literal so the wire contract stays explicit.
+            # FIX125 M3 — "off" is listed only where the adapter can make
+            # it true (``_reasoning_can_turn_off``); elsewhere an "off"
+            # request still thinks, so offering it was a lie.
+            _modes = ["auto", "low", "medium", "high"]
+            if _reasoning_can_turn_off(c):
+                _modes.insert(0, "off")
             reasoning_block = ReasoningCapability(
                 supported=True,
-                modes=["off", "auto", "low", "medium", "high"],
+                modes=_modes,
                 default_mode=c.default_reasoning_mode or "auto",
                 summary_supported=True,
             )

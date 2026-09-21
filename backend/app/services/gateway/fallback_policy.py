@@ -32,6 +32,7 @@ more than the file says.
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import threading
@@ -512,6 +513,41 @@ def effective_policy(tenant_id: str | None) -> dict:
     if not dep and not ten:
         return base_policy()
     return apply_overrides(base_policy(), dep, ten)
+
+
+# ---------------------------------------------------------------------------
+# Async entry points (FIX125 M7)
+# ---------------------------------------------------------------------------
+#
+# ``is_enabled`` / ``effective_policy`` read ``system_settings`` through a SYNC
+# session on a cache miss. Called straight from a coroutine that read blocks
+# the event loop — every other request on the worker stalls behind it (3.7 s
+# measured). The async forms return the memoised value inline when it is
+# fresh and otherwise do the identical sync read on a worker thread, so the
+# result (identity included: no override = the shipped policy object) is the
+# same as the sync call's.
+
+
+def _fresh(key: str) -> bool:
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        return hit is not None and now - hit[0] < _TTL_SECONDS
+
+
+async def is_enabled_async() -> bool:
+    if _fresh("kill_switch"):
+        return is_enabled()
+    return await asyncio.to_thread(is_enabled)
+
+
+async def effective_policy_async(tenant_id: str | None) -> dict:
+    keys = [f"override:{_override_setting_key(None)}"]
+    if tenant_id:
+        keys.append(f"override:{_override_setting_key(tenant_id)}")
+    if all(_fresh(k) for k in keys):
+        return effective_policy(tenant_id)
+    return await asyncio.to_thread(effective_policy, tenant_id)
 
 
 # ---------------------------------------------------------------------------

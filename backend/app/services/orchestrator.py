@@ -1267,7 +1267,8 @@ class GatewayOrchestrator:
             # tenant's effective policy (opt-in chains, overrides).
             from app.services.gateway import fallback_policy as _fb_policy_mod
 
-            _fb_policy = _fb_policy_mod.effective_policy(ctx.tenant_id)
+            # FIX125 M7 — a settings-cache miss is read off the event loop.
+            _fb_policy = await _fb_policy_mod.effective_policy_async(ctx.tenant_id)
             if isinstance(exc, _GwErr) and is_fallback_eligible(exc, _fb_policy):
                 # Tag the primary (provider, model) as unhealthy so the
                 # next streaming request bypasses it via the Redis
@@ -2839,7 +2840,7 @@ class GatewayOrchestrator:
             return None
         if _fb_policy_mod.explicit_without_chain_rule(policy) != _fb_policy_mod.EXPLICIT_RESCUE_RULE:
             return None
-        if not _fb_policy_mod.is_enabled():
+        if not await _fb_policy_mod.is_enabled_async():
             return None
         try:
             _reasoning_cfg = getattr(payload, "reasoning", None)
@@ -2865,7 +2866,7 @@ class GatewayOrchestrator:
         return models or None
 
     @staticmethod
-    def _closest_to_hint(plan, closest_to, ctx, log):
+    def _closest_to_hint(plan, closest_to, ctx, log, policy: dict | None = None):
         """FIX124 — ``metadata.closest_to`` on an Auto request: "any model that
         works, nearest to THIS one". chat-edge sends it when the model that
         answered a turn could not also name the chat: the title is then
@@ -2882,7 +2883,10 @@ class GatewayOrchestrator:
         from app.services.providers import model_registry as _registry_mod
 
         try:
-            rule, unknown_band = _fb_policy_mod.rescue_order(_fb_policy_mod.effective_policy(getattr(ctx, "tenant_id", None)))
+            rule, unknown_band = _fb_policy_mod.rescue_order(
+                policy if policy is not None
+                else _fb_policy_mod.effective_policy(getattr(ctx, "tenant_id", None))
+            )
             requested = _registry_mod.get_candidate(closest_to.strip())
         except Exception:  # noqa: BLE001 — a hint never breaks routing
             return plan
@@ -3097,19 +3101,22 @@ class GatewayOrchestrator:
             )
         if payload.metadata is None:
             payload.metadata = {}
-        plan = self._closest_to_hint(plan, payload.metadata.get("closest_to"), ctx, log)
-        payload.model = plan.primary.model
-        payload.metadata["auto_task"] = plan.task
-        payload.metadata["auto_tier"] = plan.tier
         # FIX124 — five alternatives, closest to the pick first and spread
         # over providers (the first five of the ranking were one rate-limited
         # account's models). A policy that cannot be read keeps the file's.
+        # FIX125 M7 — read once, off the event loop, for both uses.
         from app.services.gateway import fallback_policy as _fb_policy_mod
 
         try:
-            _order_policy = _fb_policy_mod.effective_policy(getattr(ctx, "tenant_id", None))
+            _order_policy = await _fb_policy_mod.effective_policy_async(getattr(ctx, "tenant_id", None))
         except Exception:  # noqa: BLE001 — ordering never breaks routing
             _order_policy = None
+        plan = self._closest_to_hint(
+            plan, payload.metadata.get("closest_to"), ctx, log, policy=_order_policy,
+        )
+        payload.model = plan.primary.model
+        payload.metadata["auto_task"] = plan.task
+        payload.metadata["auto_tier"] = plan.tier
         _alternatives = self._ordered_alternatives(plan.fallbacks, plan.primary, _order_policy)
         payload.metadata["auto_candidates"] = _alternatives
         log.info(

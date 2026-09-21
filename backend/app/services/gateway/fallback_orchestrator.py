@@ -737,7 +737,9 @@ class FallbackOrchestrator:
         path = "non_stream"
 
         # FIX120 — the kill switch. Off = the original error, untouched.
-        if not policy_mod.is_enabled():
+        # FIX125 M7 — the kill switch, the policy and the spend read below
+        # touch the DB on a cache miss: off the event loop.
+        if not await policy_mod.is_enabled_async():
             log.warning("fallback_disabled", reason="kill_switch")
             log_outcome(log, path=path, requested_model=original_model, outcome="disabled",
                         attempts=0, time_spent_s=0.0, reason="kill_switch")
@@ -748,7 +750,7 @@ class FallbackOrchestrator:
                 details={"original_provider": original_provider, "original_model": original_model},
             )
 
-        policy = policy_mod.effective_policy(ctx.tenant_id)
+        policy = await policy_mod.effective_policy_async(ctx.tenant_id)
         lim = self._limits(policy, "non_stream")
         max_candidates = int(lim["max_candidates"])
         attempt_timeout_s = float(lim["attempt_timeout_s"])
@@ -821,7 +823,9 @@ class FallbackOrchestrator:
         # FIX120 — the data boundary and the tenant-level cost cap gate the
         # whole walk before a single candidate is looked at.
         allowed = allowed_set(policy, _meta.get("allowed_providers"))
-        cost_reason = cost_blocks_tenant(policy, ctx.tenant_id, _spend_reader(session))
+        cost_reason = await asyncio.to_thread(
+            cost_blocks_tenant, policy, ctx.tenant_id, _spend_reader(session)
+        )
         if cost_reason:
             log.warning("fallback_cost_capped", reason=cost_reason)
             log_outcome(log, path=path, requested_model=original_model, outcome="cost_capped",
@@ -1339,7 +1343,7 @@ class FallbackOrchestrator:
         """
         if session is None:
             return None
-        if not policy_mod.is_enabled():
+        if not await policy_mod.is_enabled_async():
             return None
 
         skip = skip_providers or set()

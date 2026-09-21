@@ -12,6 +12,7 @@ orchestrator AFTER this method exhausts.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import structlog
 from typing import TYPE_CHECKING, Callable
@@ -166,8 +167,14 @@ class ProviderDispatcher:
                 ):
                     raise
                 tried.add(key)
-                invalidate_key(provider, key)
-                next_key = key_resolver(provider, model) if key_resolver else None
+                # FIX125 M7 — both are sync DB work (a short-lived sync
+                # session each); run them on a worker thread so a key
+                # rotation never stalls the event loop.
+                await asyncio.to_thread(invalidate_key, provider, key)
+                next_key = (
+                    await asyncio.to_thread(key_resolver, provider, model)
+                    if key_resolver else None
+                )
                 if not next_key or next_key in tried:
                     logger.warning(
                         "dispatch_auth_pool_exhausted",
@@ -228,7 +235,7 @@ class ProviderDispatcher:
         from app.services.gateway import fallback_policy as _fb_policy_mod
 
         _hops = list(getattr(route, "fallbacks", None) or [])
-        if _hops and not _fb_policy_mod.is_enabled():
+        if _hops and not await _fb_policy_mod.is_enabled_async():
             logger.warning("fallback_disabled", reason="kill_switch", path="layer1", hops=len(_hops))
             _hops = []
         _meta = getattr(payload, "metadata", None)
@@ -275,8 +282,10 @@ class ProviderDispatcher:
             if attempt_pos == 0:
                 attempt_key = api_key
             else:
+                # FIX125 M7 — the resolver opens a sync DB session; off the loop.
                 attempt_key = (
-                    key_resolver(provider, model) if key_resolver else None
+                    await asyncio.to_thread(key_resolver, provider, model)
+                    if key_resolver else None
                 )
                 if not attempt_key:
                     logger.info(

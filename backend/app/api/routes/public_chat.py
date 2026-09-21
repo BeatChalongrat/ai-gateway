@@ -1168,7 +1168,9 @@ async def _chat_completions_impl(
     # tenant override), the request's provider boundary (the project's
     # allowed_providers, as the router already saw it), the streaming
     # ceilings, and the dispatch clock the time ceiling is measured from.
-    _fb_policy = _fb_policy_mod.effective_policy(ctx.tenant_id)
+    # FIX125 M7 — a settings-cache miss reads the DB on a worker thread,
+    # never on the event loop.
+    _fb_policy = await _fb_policy_mod.effective_policy_async(ctx.tenant_id)
     _fb_allowed_meta = (
         payload.metadata.get("allowed_providers")
         if isinstance(payload.metadata, dict)
@@ -1205,7 +1207,7 @@ async def _chat_completions_impl(
 
     _stream_required_caps = detect_required_capabilities(payload)
 
-    if _fb_policy_mod.is_enabled() and await _is_unhealthy(
+    if await _fb_policy_mod.is_enabled_async() and await _is_unhealthy(
         route.provider_name, route.model_name
     ):
         fb_runner = orchestrator._get_fallback_orchestrator()
@@ -2340,6 +2342,46 @@ async def _chat_completions_impl(
                 finally:
                     log_session.close()
 
+                # FIX125 M1 — a turn that produced no answer is not charged.
+                # "Answered" = the person got answer text, or the turn made
+                # tool calls (a normal agentic step). Reasoning alone, an
+                # error frame, an exhausted fallback walk, or a Stop before
+                # any text reached the wire is NOT an answer: the provider's
+                # real cost stays on the request_log row (estimated_cost_usd
+                # above is untouched) and is reported once as
+                # ``cost_absorbed`` for the admin; the ledger is not touched.
+                # A Stop / mid-stream error AFTER some text still bills that
+                # partial text below (unchanged).
+                _answered = bool(full_text.strip()) or bool(_streaming_tool_call_args)
+                if not _answered:
+                    _term_code = _terminal_error.get("code")
+                    if _term_code == "all_models_failed":
+                        _absorb_reason = "all_models_failed"
+                    elif (
+                        _term_code in ("empty_completion", "output_limit_reached")
+                        or reason in ("empty_completion", "output_limit_reached")
+                        or (reason == "completed" and not _term_code and not client_disconnected)
+                    ):
+                        _absorb_reason = "empty_completion"
+                    elif client_disconnected and not _term_code:
+                        _absorb_reason = "disconnected_no_text"
+                    else:
+                        _absorb_reason = "error"
+                    log.info(
+                        "cost_absorbed",
+                        request_id=ctx.request_id or "",
+                        turn_id=getattr(ctx, "turn_id", None),
+                        model=route.model_name,
+                        provider=route.provider_name,
+                        prompt_tokens=int(usage.prompt_tokens or 0),
+                        completion_tokens=int(usage.completion_tokens or 0),
+                        reasoning_tokens=int(_stream_reasoning_tok or 0),
+                        estimated_cost_usd=float(usage.estimated_cost_usd or 0.0),
+                        reason=_absorb_reason,
+                        error_code=_term_code,
+                    )
+                    return
+
                 # Portal credit deduction — cost-based, mirrors the non-stream
                 # orchestrator hook (10b): real USD cost × tenant markup ×
                 # USAGE_CREDITS_PER_USD (min 1 credit). Debits the key's owning
@@ -2816,7 +2858,7 @@ async def _chat_completions_impl(
                     )
                     if isinstance(stream_exc, _GwErr):
                         _fb_record_decision(_fb_decision)
-                    _fb_switch_on = _fb_policy_mod.is_enabled()
+                    _fb_switch_on = await _fb_policy_mod.is_enabled_async()
                     if isinstance(stream_exc, _GwErr) and _fb_decision.walks and not _fb_switch_on:
                         log.warning("fallback_disabled", reason="kill_switch", error_code=_stream_code)
                         _fb_log_outcome(
@@ -2979,27 +3021,35 @@ async def _chat_completions_impl(
                     # SYNC session for this rare streaming-fallback key lookup
                     # (the sync engine is retained for admin/portal/background)
                     # rather than cascading async into the selector.
+                    # FIX125 M7 — the sync selector (key reads, kill switch)
+                    # runs on a worker thread: on the event loop its DB
+                    # reads stalled every other request on this worker.
                     from app.core.db import SessionLocal as _SyncSessionLocal
-                    _lookup_session = _SyncSessionLocal()
                     _fb_skipped_in: list[dict] = []
-                    try:
-                        fb_candidate = fb_runner.select_streaming_candidate(
-                            original_provider=_stream_original_provider,
-                            original_model=_stream_original_model,
-                            session=_lookup_session,
-                            skip_providers=skip_providers,
-                            skip_pairs=skip_pairs,
-                            required=_stream_required_caps,
-                            policy=_fb_policy,
-                            action=_fb_decision.action,
-                            allowed_providers=_fb_allowed_meta,
-                            skipped=_fb_skipped_in,
-                            auto_candidates=_fb_auto_meta,
-                            rescue_candidates=_fb_rescue_models,
-                            unhealthy=_fb_marked,
-                        )
-                    finally:
-                        _lookup_session.close()
+                    _fb_sel_action = _fb_decision.action
+
+                    def _select_off_loop():
+                        _lookup_session = _SyncSessionLocal()
+                        try:
+                            return fb_runner.select_streaming_candidate(
+                                original_provider=_stream_original_provider,
+                                original_model=_stream_original_model,
+                                session=_lookup_session,
+                                skip_providers=skip_providers,
+                                skip_pairs=skip_pairs,
+                                required=_stream_required_caps,
+                                policy=_fb_policy,
+                                action=_fb_sel_action,
+                                allowed_providers=_fb_allowed_meta,
+                                skipped=_fb_skipped_in,
+                                auto_candidates=_fb_auto_meta,
+                                rescue_candidates=_fb_rescue_models,
+                                unhealthy=_fb_marked,
+                            )
+                        finally:
+                            _lookup_session.close()
+
+                    fb_candidate = await asyncio.to_thread(_select_off_loop)
                     for _sk in _fb_skipped_in:
                         _fb_log_attempt(
                             log, path="stream", requested_model=_stream_original_model,
@@ -3055,6 +3105,11 @@ async def _chat_completions_impl(
                         return
                     route.provider_name = fb_candidate["provider"]
                     route.model_name = fb_candidate["model"]
+                    # FIX125 M1 — usage belongs to the attempt that reported
+                    # it; the rescued turn is billed on the answering
+                    # model's usage (or its estimate), never on the failed
+                    # attempt's.
+                    provider_usage = None
                     stream_adapter = _fb_stream_adapter
                     stream_api_key = fb_candidate["api_key"]
                     _stream_fallback_used = True
