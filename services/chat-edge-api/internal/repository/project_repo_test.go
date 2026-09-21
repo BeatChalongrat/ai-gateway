@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func projectPool(t *testing.T) *pgxpool.Pool {
@@ -21,7 +22,7 @@ func projectPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.QueryRow(context.Background(),
 		"SELECT to_regclass('chat.projects')::text").Scan(&reg); err != nil || reg == nil {
 		pool.Close()
-		t.Skip("skipping: chat.projects not present — apply migration 029")
+		testdeps.Missing(t, "skipping: chat.projects not present — apply migration 029")
 	}
 	return pool
 }

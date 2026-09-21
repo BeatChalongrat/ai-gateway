@@ -23,6 +23,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func archivePool(t *testing.T) *pgxpool.Pool {
@@ -34,7 +35,7 @@ func archivePool(t *testing.T) *pgxpool.Pool {
 		 WHERE table_schema='chat' AND table_name='conversations'
 		   AND column_name='is_archived'`).Scan(&col); err != nil || col == nil {
 		pool.Close()
-		t.Skip("skipping: conversations.is_archived not present — apply migration 032")
+		testdeps.Missing(t, "skipping: conversations.is_archived not present — apply migration 032")
 	}
 	return pool
 }

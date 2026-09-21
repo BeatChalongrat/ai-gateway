@@ -34,10 +34,31 @@ import (
 type ExcelHandler struct {
 	excel *service.ExcelService
 	files *repository.FileRepo
+	// owners (FIX126 F4) names the message a generated workbook belongs
+	// to. nil = unlinked (message_id NULL), as before.
+	owners *service.PlanOwnerResolver
 }
 
 func NewExcelHandler(excel *service.ExcelService, files *repository.FileRepo) *ExcelHandler {
 	return &ExcelHandler{excel: excel, files: files}
+}
+
+// SetPlanOwnerResolver wires FIX126 F4's plan → message link.
+func (h *ExcelHandler) SetPlanOwnerResolver(r *service.PlanOwnerResolver) { h.owners = r }
+
+// parseOptionalMessageID reads an execute body's optional message_id. An
+// absent id is uuid.Nil; a malformed one is a 400 (ok=false, answered).
+func parseOptionalMessageID(w http.ResponseWriter, raw string) (uuid.UUID, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return uuid.Nil, true
+	}
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid message_id")
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +126,9 @@ type executePlanRequest struct {
 	// Plan is the raw object the LLM emitted inside :::excel-plan.
 	// Forwarded verbatim to excel_executor.py.
 	Plan any `json:"plan"`
+	// MessageID (FIX126 F4, optional) is the assistant message whose plan
+	// card is being executed. Absent → the server finds it by the fence.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 type executePlanResponse struct {
@@ -144,6 +168,13 @@ func (h *ExcelHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		srcID = parsed
 	}
 
+	requested, ok := parseOptionalMessageID(w, req.MessageID)
+	if !ok {
+		return
+	}
+	owner := h.owners.Resolve(r.Context(), caller.TenantUUID, caller.UserID, convID, requested,
+		service.PlanFenceForFormat("excel"), req.OutputFilename)
+
 	row, validation, err := h.excel.ExecutePlan(r.Context(), service.PlannedExecution{
 		TenantID:       caller.TenantUUID,
 		ConversationID: convID,
@@ -151,6 +182,7 @@ func (h *ExcelHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		SourceFileID:   srcID,
 		Plan:           req.Plan,
 		OutputFilename: req.OutputFilename,
+		MessageID:      owner,
 	})
 	if err != nil {
 		switch {

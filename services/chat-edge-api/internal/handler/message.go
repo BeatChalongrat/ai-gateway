@@ -489,6 +489,25 @@ const (
 
 const conversationBusyMessage = "this conversation is already answering a message; wait for it to finish or stop it"
 
+// CodeTooManyFiles (FIX126 F1) — a send named more file ids than one message
+// may carry (MAX_FILES_PER_MESSAGE, default 5). Nothing was written.
+const CodeTooManyFiles = "TOO_MANY_FILES"
+
+// writeTooManyFiles answers a send refused by the files-per-message cap.
+// False when err is not that refusal.
+func writeTooManyFiles(w http.ResponseWriter, err error) bool {
+	var tm *service.TooManyFilesError
+	if !errors.As(err, &tm) {
+		return false
+	}
+	WriteError(w, http.StatusUnprocessableEntity, CodeTooManyFiles, tooManyFilesMessage(tm))
+	return true
+}
+
+func tooManyFilesMessage(tm *service.TooManyFilesError) string {
+	return fmt.Sprintf("at most %d files per message (this message has %d)", tm.Max, tm.Got)
+}
+
 // writeConversationBusy answers a turn refused by the per-conversation
 // in-flight guard. False when err is not that refusal.
 func writeConversationBusy(w http.ResponseWriter, err error) bool {
@@ -1361,6 +1380,10 @@ func sendErrorFrame(err error) map[string]any {
 	if errors.Is(err, service.ErrConversationBusy) {
 		return map[string]any{"code": CodeConversationBusy, "message": conversationBusyMessage}
 	}
+	var tm *service.TooManyFilesError
+	if errors.As(err, &tm) {
+		return map[string]any{"code": CodeTooManyFiles, "message": tooManyFilesMessage(tm)}
+	}
 	if _, env, ok := gatewayEnvelope(err); ok {
 		out := map[string]any{"code": env.Code, "message": env.Message}
 		if env.Retryable != nil {
@@ -1402,6 +1425,9 @@ func sendErrorMessage(err error) string {
 
 func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
 	if writeConversationBusy(w, err) {
+		return
+	}
+	if writeTooManyFiles(w, err) {
 		return
 	}
 	switch {

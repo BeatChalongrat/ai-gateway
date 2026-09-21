@@ -14,6 +14,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 const legacySentinel = "SECRET-SENTINEL-LEGACY-0812345678"
@@ -50,7 +51,7 @@ func TestSearchService_LegacyRedacted_CanonicalTokenized(t *testing.T) {
 	defer pool.Exec(ctx, "DELETE FROM chat.conversations WHERE tenant_id=$1", tenantID)
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 
 	// Legacy row: content_masked holds restored RAW (the sentinel). Create
@@ -84,7 +85,7 @@ func TestSearchService_LegacyRedacted_CanonicalTokenized(t *testing.T) {
 		t.Fatalf("search: %v", err)
 	}
 	if len(res) == 0 {
-		t.Skipf("no search hits (tsvector trigger absent in this DB?) — skipping")
+		testdeps.Missing(t, "no search hits (tsvector trigger absent in this DB?) — skipping")
 	}
 	sawLegacyRedacted, sawCanon := false, false
 	for _, r := range res {

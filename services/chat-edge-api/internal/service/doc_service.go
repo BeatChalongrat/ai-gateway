@@ -294,6 +294,9 @@ type DocExecution struct {
 	Plan           any
 	Format         string // "docx" | "pdf"
 	OutputFilename string
+	// MessageID (FIX126 F4) is the assistant message whose plan card this
+	// executes (PlanOwnerResolver). nil = unlinked, as before.
+	MessageID *uuid.UUID
 }
 
 // ExecutePlan runs the appropriate generator inside a temp dir,
@@ -472,6 +475,7 @@ func (s *DocService) ExecutePlan(
 
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
+		MessageID:        in.MessageID, // FIX126 F4
 		TenantID:         in.TenantID,
 		UserID:           in.UserID,
 		Filename:         storageName,

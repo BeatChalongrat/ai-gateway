@@ -23,6 +23,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func TestFIX100_SupersededRowsLeaveTheContext(t *testing.T) {
@@ -36,7 +37,7 @@ func TestFIX100_SupersededRowsLeaveTheContext(t *testing.T) {
 
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 
 	add := func(role, content, status string) *model.Message {

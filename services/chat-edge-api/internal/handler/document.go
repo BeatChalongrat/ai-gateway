@@ -34,7 +34,13 @@ type DocumentHandler struct {
 	files *repository.FileRepo
 	excel *service.ExcelService // for xlsx → InspectWorkbook
 	docs  *service.DocService   // for docx/pdf → Inspect+Execute
+	// owners (FIX126 F4) names the message a generated file belongs to.
+	// nil = files stay unlinked (message_id NULL), as before.
+	owners *service.PlanOwnerResolver
 }
+
+// SetPlanOwnerResolver wires FIX126 F4's plan → message link.
+func (h *DocumentHandler) SetPlanOwnerResolver(r *service.PlanOwnerResolver) { h.owners = r }
 
 func NewDocumentHandler(
 	files *repository.FileRepo, excel *service.ExcelService, docs *service.DocService,
@@ -116,6 +122,9 @@ type executeDocRequest struct {
 	OutputFilename string `json:"output_filename"`
 	// Plan is the raw object the LLM emitted inside :::doc-plan.
 	Plan any `json:"plan"`
+	// MessageID (FIX126 F4, optional) is the assistant message whose plan
+	// card is being executed. Absent → the server finds it by the fence.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 type executeDocResponse struct {
@@ -154,6 +163,12 @@ func (h *DocumentHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		}
 		srcID = parsed
 	}
+	requested, ok := parseOptionalMessageID(w, req.MessageID)
+	if !ok {
+		return
+	}
+	owner := h.owners.Resolve(r.Context(), caller.TenantUUID, caller.UserID, convID, requested,
+		service.PlanFenceForFormat(req.Format), req.OutputFilename)
 
 	row, validation, generation, err := h.docs.ExecutePlan(r.Context(), service.DocExecution{
 		TenantID:       caller.TenantUUID,
@@ -163,6 +178,7 @@ func (h *DocumentHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		Plan:           req.Plan,
 		Format:         req.Format,
 		OutputFilename: req.OutputFilename,
+		MessageID:      owner,
 	})
 	if err != nil {
 		switch {

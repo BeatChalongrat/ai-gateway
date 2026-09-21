@@ -314,9 +314,12 @@ func main() {
 	// /conversations/{id}/state read endpoint. Uses the gateway
 	// client for its extraction calls (low-temperature JSON).
 	stateSvc := service.NewConversationStateService(statesRepo, messages, conversations, gateway)
-	// FIX102 Part D — an operator-chosen summariser; empty keeps the chat model.
-	stateSvc.SetExtractionModel(cfg.ContextSummaryModel)
-	slog.Info("context summariser", "model", cfg.ContextSummaryModel, "fallback", "the conversation's chat model")
+	// FIX102 Part D — an operator-chosen summariser; FIX126 O1 — else the
+	// background model (BACKGROUND_TASK_MODEL). Either way the chat model is
+	// the fallback.
+	summariserModel, backgroundModel := service.BackgroundModels(cfg.ContextSummaryModel, cfg.BackgroundTaskModel)
+	stateSvc.SetExtractionModel(summariserModel)
+	slog.Info("context summariser", "model", summariserModel, "fallback", "the conversation's chat model")
 	compactionUsageRepo := repository.NewCompactionUsageRepo(pool)
 
 	// Phase 4 — Excel Smart Workspace (Session 1) +
@@ -471,6 +474,8 @@ func main() {
 	// kicks in after the same pattern is observed in 3+
 	// conversations.
 	prefExtractor := service.NewPreferenceExtractor(memorySvc, memoriesRepo, messages, conversations, gateway)
+	prefExtractor.SetExtractionModel(backgroundModel) // FIX126 O1
+	slog.Info("preference extractor", "model", backgroundModel, "fallback", "the conversation's chat model")
 	messageSvc.SetPreferenceExtractor(prefExtractor)
 
 	// FIX12 Item 3 — user skills. The reader preloads enabled skills into
@@ -607,6 +612,14 @@ func main() {
 	// reasoning model is a data change, not a chat-edge release.
 	messageSvc.SetReasoningCapabilityChecker(modelHandler.ReasoningCapable)
 
+	// FIX126 F4 — a file made from a plan card is linked to the message
+	// that wrote the plan, so a reload shows it on that message.
+	planOwners := service.NewPlanOwnerResolver(messages)
+	excelHandler := handler.NewExcelHandler(excelSvc, filesRepo)
+	excelHandler.SetPlanOwnerResolver(planOwners)
+	documentHandler := handler.NewDocumentHandler(filesRepo, excelSvc, docSvc)
+	documentHandler.SetPlanOwnerResolver(planOwners)
+
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Usage:          usageHandler,
@@ -623,8 +636,8 @@ func main() {
 		Admin:          adminHandler,
 		Knowledge:      handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
 		Voice:          handler.NewVoiceHandler(gateway),
-		Excel:          handler.NewExcelHandler(excelSvc, filesRepo),
-		Document:       handler.NewDocumentHandler(filesRepo, excelSvc, docSvc),
+		Excel:          excelHandler,
+		Document:       documentHandler,
 		Workspace:      handler.NewWorkspaceHandler(filesRepo, workspaceSvc),
 		Memory:         handler.NewMemoryHandler(memorySvc),
 		Search:         handler.NewSearchHandler(searchSvc),

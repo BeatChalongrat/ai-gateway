@@ -11,6 +11,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 // FIX74 — the parked-turn store. One pending question per conversation is
@@ -24,7 +25,7 @@ func TestPendingQuestionRepo_OnePerConversation_ClaimFirstWins(t *testing.T) {
 	tenantID, userID := uuid.New(), uuid.New()
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 	asst, err := mr.Create(ctx, &model.Message{ConversationID: conv.ID, TenantID: tenantID, UserID: userID, Role: "assistant", Status: "streaming"})
 	if err != nil {

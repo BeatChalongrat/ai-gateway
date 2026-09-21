@@ -22,6 +22,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func memoryPool(t *testing.T) *pgxpool.Pool {
@@ -31,7 +32,7 @@ func memoryPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.QueryRow(context.Background(),
 		"SELECT to_regclass('chat.user_memories')::text").Scan(&reg); err != nil || reg == nil {
 		pool.Close()
-		t.Skip("skipping: chat.user_memories not present — run apply_migrations.sh")
+		testdeps.Missing(t, "skipping: chat.user_memories not present — run apply_migrations.sh")
 	}
 	return pool
 }

@@ -1332,3 +1332,28 @@ func (r *MessageRepo) MarkRegeneratedByClientID(ctx context.Context, tenantID, c
 	}
 	return tag.RowsAffected() > 0, nil
 }
+
+// FindPlanOwner (FIX126 F4) is the assistant message that wrote a plan card:
+// the newest active assistant row of the conversation (owned by the user)
+// whose text carries the ":::<fence>" block. When hint is non-empty, a row
+// whose text also contains it (the plan's output filename) wins over a newer
+// one that does not. ErrNotFound when no row carries the fence.
+func (r *MessageRepo) FindPlanOwner(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, fence, hint string,
+) (uuid.UUID, error) {
+	const q = `SELECT id FROM chat.messages_masked
+	           WHERE conversation_id = $1 AND tenant_id = $2 AND user_id = $3
+	             AND role = 'assistant' AND is_active = true
+	             AND strpos(content_masked, $4) > 0
+	           ORDER BY ($5 <> '' AND strpos(content_masked, $5) > 0) DESC, created_at DESC
+	           LIMIT 1`
+	var id uuid.UUID
+	err := r.db.QueryRow(ctx, q, convID, tenantID, userID, ":::"+fence, hint).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("find plan owner: %w", err)
+	}
+	return id, nil
+}

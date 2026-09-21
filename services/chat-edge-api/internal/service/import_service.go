@@ -49,9 +49,9 @@ const (
 	// it protects nothing. The web send path never had a content ceiling
 	// either, so the same message sent from the page was always kept.
 	ImportMaxBodyBytes = 32 << 20
-	// importMaxFilesPerMessage mirrors the send path's files-per-message
-	// cap (FileService Knobs.MaxFilesPerMessage default).
-	importMaxFilesPerMessage = 5
+	// importMaxFilesPerMessage is the send path's files-per-message cap
+	// (FIX126 F1 — one named constant, DefaultMaxFilesPerMessage).
+	importMaxFilesPerMessage = DefaultMaxFilesPerMessage
 )
 
 // importErrorCodeRe bounds an imported error_code to the shape every

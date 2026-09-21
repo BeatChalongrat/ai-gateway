@@ -40,6 +40,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 const askArgs = `{"questions":[{"question":"Which format?","header":"Format","options":[{"label":"Summary","description":"Brief"},{"label":"Detailed","description":"Full"}]}]}`
@@ -125,7 +126,7 @@ func newQuestionFixture(t *testing.T, script func(n int, body map[string]any) st
 	tenantID, userID := uuid.New(), uuid.New()
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 	if _, err := mr.Create(ctx, &model.Message{ConversationID: conv.ID, TenantID: tenantID, UserID: userID, Role: "user", ContentMasked: "make a logo", Status: "completed"}); err != nil {
 		t.Fatal(err)

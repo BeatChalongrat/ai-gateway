@@ -12,6 +12,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func TestMessageRepo_TerminalCauseRoundTrip(t *testing.T) {
@@ -22,7 +23,7 @@ func TestMessageRepo_TerminalCauseRoundTrip(t *testing.T) {
 	tenantID, userID := uuid.New(), uuid.New()
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 	mk := func(role, status string) *model.Message {
 		m, err := mr.Create(ctx, &model.Message{ConversationID: conv.ID, TenantID: tenantID, UserID: userID, Role: role, Status: status})
@@ -92,7 +93,7 @@ func TestMessageRepo_CreateImportedCarriesTheEnding(t *testing.T) {
 	tenantID, userID := uuid.New(), uuid.New()
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 	cause, code := "disconnected", "stream_interrupted"
 	at := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)

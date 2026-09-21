@@ -59,6 +59,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 // TemplateDB is the prepared database every test database is cloned
@@ -143,9 +145,12 @@ func dbNameFor(t *testing.T) string {
 
 // absent ends the test when no test database can be had: a failure by
 // default, a skip only when the machine declares it has no Postgres.
-func absent(t *testing.T, format string, args ...any) {
+//
+// FIX126 O7 — on CI (CI=true) or with CHAT_EDGE_REQUIRE_DEPS=1 the database
+// is never optional: CHAT_EDGE_TEST_DB_OPTIONAL is ignored and it fails.
+func absent(t testing.TB, format string, args ...any) {
 	t.Helper()
-	if optional() {
+	if optional() && !testdeps.Required() {
 		t.Skipf("skipping (CHAT_EDGE_TEST_DB_OPTIONAL=1): "+format, args...)
 		return
 	}

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -26,12 +27,12 @@ func testRedis(t *testing.T) *redis.Client {
 	}
 	opts, err := redis.ParseURL(url)
 	if err != nil {
-		t.Skipf("bad redis url: %v", err)
+		testdeps.Missing(t, "bad redis url: %v", err)
 	}
 	c := redis.NewClient(opts)
 	if err := c.Ping(context.Background()).Err(); err != nil {
 		_ = c.Close()
-		t.Skipf("redis unreachable: %v", err)
+		testdeps.Missing(t, "redis unreachable: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c

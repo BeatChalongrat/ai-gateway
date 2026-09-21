@@ -69,6 +69,10 @@ func TestOptional_DefaultsToFailClosed(t *testing.T) {
 func TestFresh_SkipsOnlyWhenDeclaredOptional(t *testing.T) {
 	t.Setenv("CHAT_EDGE_TEST_DSN", "postgres://u:p@127.0.0.1:1/postgres?sslmode=disable&connect_timeout=1")
 	t.Setenv("CHAT_EDGE_TEST_DB_OPTIONAL", "1")
+	// FIX126 O7 — the opt-in skip is a local convenience; on CI it fails
+	// (TestFresh_RequiredDepsIgnoreTheOptionalSkip).
+	t.Setenv("CI", "")
+	t.Setenv("CHAT_EDGE_REQUIRE_DEPS", "")
 	skipped := false
 	t.Run("inner", func(inner *testing.T) {
 		inner.Cleanup(func() { skipped = inner.Skipped() })
@@ -78,3 +82,33 @@ func TestFresh_SkipsOnlyWhenDeclaredOptional(t *testing.T) {
 		t.Fatal("with CHAT_EDGE_TEST_DB_OPTIONAL=1 an absent server must skip, not fail")
 	}
 }
+
+// FIX126 O7 — with CHAT_EDGE_REQUIRE_DEPS=1 (or CI=true) an absent database
+// fails even when CHAT_EDGE_TEST_DB_OPTIONAL=1 asks for a skip; without it the
+// opt-in skip still works.
+func TestAbsent_RequiredDepsIgnoreTheOptionalSkip(t *testing.T) {
+	t.Setenv("CHAT_EDGE_TEST_DB_OPTIONAL", "1")
+	t.Setenv("CI", "")
+	t.Setenv("CHAT_EDGE_REQUIRE_DEPS", "1")
+	rec := &recordingTB{TB: t}
+	absent(rec, "server unreachable")
+	if !rec.failed || rec.skipped {
+		t.Fatalf("required: failed=%v skipped=%v, want a failure", rec.failed, rec.skipped)
+	}
+	t.Setenv("CHAT_EDGE_REQUIRE_DEPS", "")
+	rec = &recordingTB{TB: t}
+	absent(rec, "server unreachable")
+	if rec.failed || !rec.skipped {
+		t.Fatalf("optional, not required: failed=%v skipped=%v, want a skip", rec.failed, rec.skipped)
+	}
+}
+
+// recordingTB records Fatalf/Skipf instead of ending the test.
+type recordingTB struct {
+	testing.TB
+	failed, skipped bool
+}
+
+func (r *recordingTB) Helper()               {}
+func (r *recordingTB) Fatalf(string, ...any) { r.failed = true }
+func (r *recordingTB) Skipf(string, ...any)  { r.skipped = true }

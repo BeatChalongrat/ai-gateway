@@ -31,6 +31,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 // eraseKindToTable — cascade kind name → actual table name.
@@ -194,7 +195,7 @@ func TestHardDeleteConversation_CascadesAndAuditsAtomically(t *testing.T) {
 	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 	if reg := regclass(t, ctx, pool, "chat.deletion_audit"); !reg {
-		t.Skip("skipping: chat.deletion_audit not present — run apply_migrations.sh")
+		testdeps.Missing(t, "skipping: chat.deletion_audit not present — run apply_migrations.sh")
 	}
 
 	tenantA, userA := uuid.New(), uuid.New()
@@ -282,7 +283,7 @@ func TestRetentionSettings_FloorAndDefaults(t *testing.T) {
 	t.Cleanup(pool.Close) // registered FIRST -> runs LAST, after row cleanup
 	ctx := context.Background()
 	if reg := regclass(t, ctx, pool, "chat.tenant_retention_settings"); !reg {
-		t.Skip("skipping: chat.tenant_retention_settings not present")
+		testdeps.Missing(t, "skipping: chat.tenant_retention_settings not present")
 	}
 
 	repo := repository.NewTenantRetentionSettingsRepo(pool)

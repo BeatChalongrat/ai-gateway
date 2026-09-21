@@ -95,10 +95,10 @@ func NewPreferenceExtractor(
 }
 
 // SetExtractionModel pins the extraction model regardless of which
-// model the conversation chose. Optional — main.go can wire this
-// from a config knob later.
+// model the conversation chose (FIX126 O1: BACKGROUND_TASK_MODEL). The
+// conversation's model is the fallback when it produces nothing.
 func (e *PreferenceExtractor) SetExtractionModel(modelID string) {
-	e.extractionModel = modelID
+	e.extractionModel = strings.TrimSpace(modelID)
 }
 
 // ---------------------------------------------------------------------------
@@ -141,15 +141,20 @@ func (e *PreferenceExtractor) ExtractPreferences(
 	known := e.knownContents(ctx, userID, tenantID)
 
 	prompt := e.buildExtractionPrompt(msgs, known)
-	modelID := e.extractionModel
-	if modelID == "" {
-		modelID = conv.ModelID
+	// FIX126 O1 — the background model (BACKGROUND_TASK_MODEL) first; the
+	// conversation's model when it produced nothing (not served, not usable
+	// by the tenant, failed).
+	raw := ""
+	for _, modelID := range backgroundModelOrder(e.extractionModel, conv.ModelID) {
+		raw = e.callLLM(ctx, modelID, prompt, GatewayCallContext{
+			TenantID:       tenantID,
+			UserID:         userID,
+			ConversationID: convID,
+		})
+		if strings.TrimSpace(raw) != "" {
+			break
+		}
 	}
-	raw := e.callLLM(ctx, modelID, prompt, GatewayCallContext{
-		TenantID:       tenantID,
-		UserID:         userID,
-		ConversationID: convID,
-	})
 	if raw == "" {
 		return 0, nil
 	}

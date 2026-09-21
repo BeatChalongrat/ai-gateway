@@ -272,6 +272,9 @@ type PlannedExecution struct {
 	// OutputFilename is the user-friendly filename for the new
 	// file. When empty we derive "<original>_edited.xlsx".
 	OutputFilename string
+	// MessageID (FIX126 F4) is the assistant message whose plan card this
+	// executes (PlanOwnerResolver). nil = unlinked, as before.
+	MessageID *uuid.UUID
 }
 
 // ExecutePlan runs the executor against a fresh copy of the source,
@@ -440,6 +443,7 @@ func (s *ExcelService) ExecutePlan(
 	changeLog := strings.Join(execResult.Changes, "\n")
 	row, err := s.files.Create(ctx, &model.ConversationFile{
 		ConversationID:   in.ConversationID,
+		MessageID:        in.MessageID, // FIX126 F4
 		TenantID:         in.TenantID,
 		UserID:           in.UserID,
 		Filename:         storageName,

@@ -16,6 +16,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func TestCanonicalInvalidationDB(t *testing.T) {
@@ -33,7 +34,7 @@ func TestCanonicalInvalidationDB(t *testing.T) {
 
 	conv, err := cr.Create(ctx, &model.Conversation{TenantID: tenantID, UserID: userID, ModelID: "m"})
 	if err != nil {
-		t.Skipf("conv create (schema?): %v", err)
+		testdeps.Missing(t, "conv create (schema?): %v", err)
 	}
 	asst, err := mr.Create(ctx, &model.Message{
 		ConversationID: conv.ID, TenantID: tenantID, UserID: userID,

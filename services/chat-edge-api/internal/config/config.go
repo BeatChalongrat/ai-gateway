@@ -170,6 +170,15 @@ type Config struct {
 	// goes through the gateway as the conversation's own tenant and user.
 	ContextSummaryModel string `env:"CONTEXT_SUMMARY_MODEL"`
 
+	// BackgroundTaskModel (FIX126 O1) — the model background work calls:
+	// the conversation-state summariser (unless CONTEXT_SUMMARY_MODEL is
+	// set) and the preference extractor. Each falls back to the
+	// conversation's own model when this one produces nothing. "off"
+	// restores the conversation's model for both. Title generation is not
+	// affected (FIX124: the model that answered names the chat).
+	// Keep the default equal to service.DefaultBackgroundTaskModel.
+	BackgroundTaskModel string `env:"BACKGROUND_TASK_MODEL" envDefault:"deepseek-v4-flash"`
+
 	// TemporaryChatReadsMemory — what a temporary chat (a conversation
 	// with memory switched off) does with the memories already on file.
 	//

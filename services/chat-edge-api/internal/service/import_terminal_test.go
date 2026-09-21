@@ -18,6 +18,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdb"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func TestImport_CarriesStatusCauseAndCode(t *testing.T) {
@@ -30,7 +31,7 @@ func TestImport_CarriesStatusCauseAndCode(t *testing.T) {
 	tenantID, userID := uuid.New(), uuid.New()
 	conv, _, err := svc.ImportConversation(ctx, ImportConversationInput{TenantID: tenantID, UserID: userID, ClientID: "desk-" + uuid.NewString(), Title: "t", ModelID: "m"})
 	if err != nil {
-		t.Skipf("import conversation (schema?): %v", err)
+		testdeps.Missing(t, "import conversation (schema?): %v", err)
 	}
 	at := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
 	batch := []ImportMessageInput{

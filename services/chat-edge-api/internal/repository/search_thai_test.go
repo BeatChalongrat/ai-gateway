@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func trigramPool(t *testing.T) *pgxpool.Pool {
@@ -25,7 +26,7 @@ func trigramPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.QueryRow(context.Background(),
 		"SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'").Scan(&ext); err != nil || ext == nil {
 		pool.Close()
-		t.Skip("skipping: pg_trgm not installed — apply migration 028")
+		testdeps.Missing(t, "skipping: pg_trgm not installed — apply migration 028")
 	}
 	return pool
 }

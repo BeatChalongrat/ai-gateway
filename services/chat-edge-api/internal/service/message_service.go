@@ -201,6 +201,10 @@ type MessageService struct {
 	// turns (FIX125 M5) — the one in-flight turn per conversation; see
 	// conversation_turns.go. map[uuid.UUID]*turnClaim.
 	turns sync.Map
+	// bgWaitPoll / bgWaitMax (FIX126 O1) — how a background task waits
+	// for the conversation's turn to end (background_tasks.go). Zero =
+	// the defaults; tests shorten them.
+	bgWaitPoll, bgWaitMax time.Duration
 
 	// FIX74 — parked web turns (ask_user_question). Nil ⇒ the tool is
 	// never offered. questionClock is test-only (expiry).
@@ -3041,6 +3045,11 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 	if strings.TrimSpace(in.Content) == "" && len(in.FileIDs) == 0 {
 		return nil, nil, nil, release, ErrMessageEmptyContent
 	}
+	// FIX126 F1 — more files than one message may carry is refused before
+	// anything is written.
+	if err = s.checkFilesPerMessage(in); err != nil {
+		return nil, nil, nil, release, err
+	}
 	conv, err = s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -3220,8 +3229,8 @@ func (s *MessageService) maybeUpdateConversationState(
 	}
 
 	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
-	safeGo("conversation-state-extraction", func() {
-		bg := context.Background()
+	// FIX126 O1 — runs once the conversation has no turn in flight.
+	s.runWhenTurnIdle("conversation-state-extraction", convID, func(bg context.Context) {
 		if _, err := s.stateSvc.GenerateOrUpdateState(bg, convID, userID, tenantID); err != nil {
 			slog.Warn("conversation state: auto-extraction failed",
 				"conv", convID.String(), "err", err)
@@ -3283,8 +3292,8 @@ func (s *MessageService) maybeExtractPreferences(
 	}
 
 	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
-	safeGo("preference-extraction", func() {
-		bg := context.Background()
+	// FIX126 O1 — runs once the conversation has no turn in flight.
+	s.runWhenTurnIdle("preference-extraction", convID, func(bg context.Context) {
 		if _, err := s.prefExtractor.ExtractPreferences(bg, convID, userID, tenantID); err != nil {
 			slog.Warn("preference extraction failed",
 				"conv", convID.String(), "err", err)

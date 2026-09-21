@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 // migrationSQL loads the real migration file so the test can never drift
@@ -56,7 +57,7 @@ func mergePool(t *testing.T) *pgxpool.Pool {
 		if err := pool.QueryRow(context.Background(),
 			"SELECT to_regclass($1)::text", table).Scan(&reg); err != nil || reg == nil {
 			pool.Close()
-			t.Skipf("skipping: %s not present — apply migrations 022 + 029", table)
+			testdeps.Missing(t, "skipping: %s not present — apply migrations 022 + 029", table)
 		}
 	}
 	return pool

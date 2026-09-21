@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/testdeps"
 )
 
 func canvasArtifactPool(t *testing.T) *pgxpool.Pool {
@@ -21,7 +22,7 @@ func canvasArtifactPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.QueryRow(context.Background(),
 		"SELECT to_regclass('chat.canvas_artifacts')::text").Scan(&reg); err != nil || reg == nil {
 		pool.Close()
-		t.Skip("skipping: chat.canvas_artifacts not present — apply migration 030")
+		testdeps.Missing(t, "skipping: chat.canvas_artifacts not present — apply migration 030")
 	}
 	return pool
 }
