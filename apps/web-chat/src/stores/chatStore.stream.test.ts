@@ -158,6 +158,9 @@ describe("sendMessage / consumeStream", () => {
     // observes generateTitle's update rather than this merge.
     mockApi.getConversation.mockRejectedValue(new Error("offline"));
     seedConversation("c1");
+    // FIX124 — a NEW chat: only a title nobody chose is sent for a name (the
+    // fixture's "T" would be somebody's).
+    useChatStore.setState((st) => ({ conversations: st.conversations.map((c) => ({ ...c, title: "New conversation" })) }));
 
     const done = useChatStore.getState().sendMessage("c1", "  hi there  ");
     await tick();
