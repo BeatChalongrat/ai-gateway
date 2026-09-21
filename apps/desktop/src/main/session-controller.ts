@@ -13,7 +13,8 @@
 //            error → retry in 1 min; 401/403 → clear → signed-out view.
 //   redirect the page bounced to the portal (refused by the navigation
 //            guard) → single-flight refresh → re-inject → reload; refresh
-//            rejected → interactive sign-in; 3 redirects/120 s → give up.
+//            rejected → interactive sign-in; 3 redirects/120 s → give up
+//            (the stored session is kept — the refreshes worked).
 //   logout   host (tray) → revoke + clear + blank + signed-out view.
 //            page (its own POST /portal/auth/logout observed, then the portal
 //            bounce) → recognised as LOGOUT intent, not re-auth → same clear.
@@ -388,10 +389,16 @@ export class SessionController {
       return;
     }
     if (this.tripsLoopGuard()) {
-      this.log.error(`RE-AUTH LOOP: ${LOOP_GUARD_MAX} portal redirects within ${LOOP_GUARD_WINDOW_MS / 1000}s despite successful refreshes — giving up to the signed-out view`);
-      await this.clearLocal();
+      // The refreshes SUCCEEDED, so the session is not what is broken — the
+      // page is (FIX122: a page origin the gateway's CORS refuses bounced
+      // three times and this used to wipe the owner's valid stored session).
+      // Stop the loop, keep the session: the view's Sign-in retries the
+      // restore first (signInFromView), and so does the next launch.
+      this.log.error(`RE-AUTH LOOP: ${LOOP_GUARD_MAX} portal redirects within ${LOOP_GUARD_WINDOW_MS / 1000}s despite successful refreshes — stopping; the stored session is kept`);
+      this.recentRedirects = [];
+      this.stopRotation();
       await this.surface.blankPage();
-      this.surface.showView("signed-out", "The session could not be repaired. Sign in again.");
+      this.surface.showView("signed-out", "The page kept asking to sign in although the session is valid. Your sign-in is kept — try again.");
       return;
     }
     this.log.info(`PORTAL REDIRECT INTERCEPTED: ${url} — raising host-side re-auth`);
