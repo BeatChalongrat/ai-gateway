@@ -8,7 +8,7 @@
 // the same auto-scroll behaviour, and the same "↓ New messages" /
 // scroll-to-bottom pills.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { defaultRangeExtractor, elementScroll, useVirtualizer } from "@tanstack/react-virtual";
 
@@ -19,6 +19,9 @@ import { useChatStore } from "@/stores/chatStore";
 import {
   ANCHOR_PREVIOUS_PEEK_PX,
   anchorTarget,
+  landmarkCorrection,
+  pickReadingLandmark,
+  type RowBox,
   shouldResumeFollow,
   spacerNeeded,
 } from "@/lib/turnAnchor";
@@ -83,7 +86,23 @@ export function ChatThread({
   );
   const stalled = byteStalled || providerStalled;
   const retryStalledStream = useChatStore((s) => s.retryStalledStream);
-  const scrollerRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // FIX122 Part A — the scroller as STATE as well as a ref. The virtualized
+  // list is a child of the scroller div, and React attaches a host node's ref
+  // AFTER its children's layout effects have run: the virtualizer, asking for
+  // its scroll element in its own layout effect, got null, attached to
+  // nothing and rendered no rows — a blank thread for every conversation of
+  // VIRTUALIZE_THRESHOLD rows or more. (StrictMode's second effect pass finds
+  // the ref set, so `next dev` never showed it; the production bundle always
+  // did.) The first re-render — the person's first wheel tick — then attached
+  // it, and attaching scrolls to the virtualizer's initial offset, 0: the
+  // oldest message. Set from the ref callback, this state re-renders before
+  // paint, and the list below is only mounted with the element in hand.
+  const [scrollerEl, setScrollerEl] = useState<HTMLDivElement | null>(null);
+  const attachScroller = useCallback((node: HTMLDivElement | null) => {
+    scrollerRef.current = node;
+    setScrollerEl(node);
+  }, []);
   const [autoStick, setAutoStick] = useState(true);
   /** FIX88 Part D — the follow state as a ref, for the ResizeObserver
    *  below (its closure is created once; React state would be stale).
@@ -165,13 +184,16 @@ export function ChatThread({
 
   function rememberReader(el: HTMLElement) {
     const edge = el.getBoundingClientRect().top + el.clientTop;
-    const row = Array.from(el.querySelectorAll<HTMLElement>("[data-msg-index]")).find(
-      (item) => item.getBoundingClientRect().bottom > edge + 1,
-    );
-    const message = row ? messagesRef.current[Number(row.dataset.msgIndex)] : null;
-    readingLandmark.current = row && message
-      ? { key: rowKey(message), offset: row.getBoundingClientRect().top - edge }
-      : null;
+    const boxes: RowBox[] = [];
+    for (const item of el.querySelectorAll<HTMLElement>("[data-msg-index]")) {
+      const message = messagesRef.current[Number(item.dataset.msgIndex)];
+      if (!message) continue;
+      const box = item.getBoundingClientRect();
+      boxes.push({ key: rowKey(message), top: box.top - edge, bottom: box.bottom - edge });
+    }
+    // DOM order is index order in both render modes (the virtualizer's
+    // preserved row is sorted into place), which pickReadingLandmark needs.
+    readingLandmark.current = pickReadingLandmark(boxes, el.clientHeight);
   }
 
   function releaseHold() {
@@ -400,9 +422,8 @@ export function ChatThread({
         }
         if (row) {
           const offset = row.getBoundingClientRect().top - el.getBoundingClientRect().top - el.clientTop;
-          if (Math.abs(offset - landmark.offset) > 1) {
-            snapTo(el, Math.max(0, Math.min(geometry(el).bottom, el.scrollTop + offset - landmark.offset)));
-          }
+          const corrected = landmarkCorrection(el.scrollTop, landmark.offset, offset, geometry(el).bottom);
+          if (corrected !== null) snapTo(el, corrected);
         }
       }
       rememberReader(el);
@@ -468,7 +489,9 @@ export function ChatThread({
       else setConsentPill(geometry(el).contentEnd > el.scrollTop + el.clientHeight + 1);
     }
     reconcile(newContent);
-  }, [messages, scrollRequest, convId]);
+    // scrollerEl: the virtualized list mounts one commit after the scroller
+    // (see attachScroller) — that commit positions the view too.
+  }, [messages, scrollRequest, convId, scrollerEl]);
 
   const anyStreaming = messages.some((m) => m.isStreaming);
 
@@ -655,7 +678,19 @@ export function ChatThread({
 
   const lastAsstIdx = useMemo(() => lastAssistantIndex(messages), [messages]);
 
-  const shouldVirtualize = messages.length >= VIRTUALIZE_THRESHOLD;
+  // FIX122 Part A — the render mode changes only between turns. Crossing the
+  // threshold swaps one list component for another, which remounts every
+  // row; a send is exactly what crosses it (48 rows + the new pair), and the
+  // swap then landed in the middle of the send's anchor jump, under the row
+  // that had just started streaming.
+  const wantVirtual = messages.length >= VIRTUALIZE_THRESHOLD;
+  const virtualMode = useRef(wantVirtual);
+  const modeConv = useRef(convId);
+  if (modeConv.current !== convId || !anyStreaming) {
+    modeConv.current = convId;
+    virtualMode.current = wantVirtual;
+  }
+  const shouldVirtualize = virtualMode.current;
 
   return (
     <div className="relative flex-1 overflow-hidden">
@@ -666,7 +701,7 @@ export function ChatThread({
         {announcement}
       </div>
       <div
-        ref={scrollerRef}
+        ref={attachScroller}
         onScroll={onScroll}
         onWheel={onWheel}
         onTouchMove={markUserIntent}
@@ -690,10 +725,15 @@ export function ChatThread({
                 loading={!!loadingOlder}
                 onClick={handleLoadEarlier}
               />
-              {shouldVirtualize ? (
+              {shouldVirtualize ? scrollerEl && (
                 <VirtualMessageList
-                  scrollerRef={scrollerRef}
+                  scrollerEl={scrollerEl}
+                  // A thread opens at its newest message, and a list that
+                  // turns virtual between turns does so under a reader who
+                  // is either following or reading somewhere — keep both.
+                  startAtEnd={followRef.current || anchorActive.current}
                   preservedKey={readingLandmark.current?.key ?? null}
+                  onLayout={() => reconcileRef.current()}
                   onScrollWrite={() => {
                     const el = scrollerRef.current;
                     if (el) lastScrollTop.current = el.scrollTop;
@@ -887,16 +927,33 @@ function PlainMessageList(props: InnerProps) {
 
 function VirtualMessageList(
   props: InnerProps & {
-    scrollerRef: React.RefObject<HTMLDivElement>;
+    /** The mounted scroller. Never null: see ChatThread's attachScroller. */
+    scrollerEl: HTMLDivElement;
+    /** Where the list starts: at the newest row, or where the scroller is. */
+    startAtEnd: boolean;
     preservedKey: string | null;
+    /** Called in the layout phase of every render of the list — i.e. every
+     *  time row positions may have moved — so the thread's one position
+     *  keeper (reconcile) runs in the same commit, before paint. */
+    onLayout: () => void;
     onScrollWrite: () => void;
   },
 ) {
-  const { scrollerRef, messages } = props;
+  const { scrollerEl, messages } = props;
   const preservedIndex = messages.findIndex((m) => rowKey(m) === props.preservedKey);
+  // Read once: these seed the FIRST render, before the virtualizer has
+  // observed anything. Without a rect it renders no rows until its
+  // ResizeObserver reports; without an offset it starts — and, on attaching,
+  // scrolls the element — at 0.
+  const initial = useRef({
+    rect: { width: scrollerEl.clientWidth, height: scrollerEl.clientHeight },
+    offset: virtualInitialOffset(props.startAtEnd, scrollerEl.scrollTop),
+  }).current;
   const virtualizer = useVirtualizer({
     count: messages.length,
-    getScrollElement: () => scrollerRef.current,
+    getScrollElement: () => scrollerEl,
+    initialRect: initial.rect,
+    initialOffset: initial.offset,
     estimateSize: () => 200,
     overscan: 5,
     getItemKey: (index) => rowKey(messages[index]),
@@ -919,6 +976,22 @@ function VirtualMessageList(
       // tolerates it but a measured pixel value is preferable.
       return element?.getBoundingClientRect().height ?? 0;
     },
+  });
+  // FIX122 Part A — ONE keeper of the reader's position. A row above the
+  // viewport that turns out taller than its 200 px estimate moves
+  // everything under it; the virtualizer answers that by rewriting
+  // scrollTop from ITS cached offset, and the thread answers it by putting
+  // the row the person is reading back where it was (reconcile's landmark).
+  // After a page of older messages both fired, the virtualizer's from an
+  // offset the thread had just replaced: measured on the real page, the row
+  // being read was up to 155 px out of place for a frame (19 px with this
+  // off). The landmark is the one that knows what the person is looking at
+  // (and the follow / send-anchor states the virtualizer has no idea of), so
+  // it is the one that stays.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = neverAdjust;
+  const onLayout = props.onLayout;
+  useLayoutEffect(() => {
+    onLayout();
   });
 
   const items = virtualizer.getVirtualItems();
@@ -952,6 +1025,17 @@ function VirtualMessageList(
     </div>
   );
 }
+
+/** The offset a freshly mounted virtual list starts from. "The end" is a
+ *  number past any real content: the virtualizer maps it to its last rows and
+ *  the browser clamps the scroll write to the real bottom — no estimate of
+ *  the total height is involved, so a wrong row estimate cannot land the
+ *  first frame somewhere in the middle. */
+export function virtualInitialOffset(startAtEnd: boolean, currentScrollTop: number): number {
+  return startAtEnd ? VIRTUAL_END_OFFSET : Math.max(0, currentScrollTop);
+}
+const VIRTUAL_END_OFFSET = 1e9;
+const neverAdjust = () => false;
 
 function renderRow(m: Message, i: number, props: InnerProps) {
   const {

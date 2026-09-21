@@ -70,3 +70,67 @@ export function shouldResumeFollow(
 ): boolean {
   return contentHeight >= scrollTop + viewportHeight - 1;
 }
+
+// ─── FIX122 Part A — the reader's landmark ─────────────────────────────
+//
+// When the thread is neither following the bottom nor holding a sent turn,
+// the person is READING something, and whatever happens above it — a page of
+// older messages arriving, a virtualized row turning out taller than its
+// estimate — must not move it. The thread remembers one row and how far its
+// top is from the viewport's top, and after every layout change puts it back
+// (Telegram Web's MessageList does the same with getBoundingClientRect).
+// Doing it by hand, not with the browser's overflow-anchor: CSS Scroll
+// Anchoring §2.1 selects no anchor at scroll offset 0, and the top edge is
+// exactly where older messages are loaded from.
+
+/** A rendered row, in viewport coordinates (0 = the scroller's top edge). */
+export interface RowBox {
+  key: string;
+  top: number;
+  bottom: number;
+}
+
+export interface ReadingLandmark {
+  key: string;
+  /** The row's top, relative to the viewport top, when it was remembered. */
+  offset: number;
+}
+
+/**
+ * The row to hold still: the first row whose TOP is inside the viewport.
+ *
+ * Not the first row that merely reaches into it. A row is pinned by its top,
+ * so a row cut by the viewport's top edge that then GROWS (its first real
+ * measurement, an image loading) grows downward and pushes everything the
+ * person can see, while the pin — off-screen — reports that nothing moved.
+ * That was the measured jump after loading older messages: 141–388 px.
+ * A row that starts inside the viewport has all of its "above" out of sight.
+ * Only when no row starts in view (one message taller than the window) is
+ * the cut row the landmark: it is all there is to look at.
+ */
+export function pickReadingLandmark(rows: readonly RowBox[], viewportHeight: number): ReadingLandmark | null {
+  let cut: RowBox | null = null;
+  for (const row of rows) {
+    if (row.bottom <= 1) continue; // wholly above
+    if (row.top >= viewportHeight) break; // wholly below — and so is the rest
+    if (row.top >= -1) return { key: row.key, offset: row.top };
+    cut ??= row;
+  }
+  return cut ? { key: cut.key, offset: cut.top } : null;
+}
+
+/**
+ * The scrollTop that puts the landmark back: it was `saved` px below the
+ * viewport top, it is now `current` px below it. Clamped to what the content
+ * can reach; null when it has not moved (within a pixel) — no write, no
+ * scroll event.
+ */
+export function landmarkCorrection(
+  scrollTop: number,
+  saved: number,
+  current: number,
+  maxScrollTop: number,
+): number | null {
+  if (Math.abs(current - saved) <= 1) return null;
+  return Math.max(0, Math.min(maxScrollTop, scrollTop + current - saved));
+}
