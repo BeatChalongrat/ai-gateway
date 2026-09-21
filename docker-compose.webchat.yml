@@ -228,6 +228,7 @@ services:
     # works unchanged (same Postgres 16 binary underneath).
     image: pgvector/pgvector:pg16
     container_name: ai-gateway-postgres-webchat
+    restart: unless-stopped
     ports:
       - "127.0.0.1:5433:5432"
     environment:
@@ -250,6 +251,7 @@ services:
   redis-webchat:
     image: redis:7-alpine
     container_name: ai-gateway-redis-webchat
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6380:6379"
     # Empty password = no auth (the fresh-clone default). redis-cli reads
