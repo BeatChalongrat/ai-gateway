@@ -128,6 +128,10 @@ interface ChatState {
    *  what a composer that mounts later reads. */
   returnedDrafts: Record<string, { id: string; text: string } | undefined>;
   consumeReturnedDraft: (convId: string, id: string) => void;
+  /** FIX124 R2 — "load the answer": read the conversation from the server
+   *  (the row that stopped waiting is replaced by what really happened) and
+   *  reattach if the turn is still being written. */
+  reloadAnswer: (convId: string) => Promise<void>;
   turnScrollRequests: Record<string, TurnScrollRequest | undefined>;
   /** True once loadMessages has completed for a conversation —
    *  success or failure. Lets the page distinguish three states
@@ -373,6 +377,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   sendsOpening: {},
   returnedDrafts: {},
+  async reloadAnswer(convId) {
+    if (get().streamingAssistantId[convId]) return;
+    if (!(await adoptServerRows(set, convId))) {
+      get().setError(tOutside("error.offline"));
+      return;
+    }
+    const last = (get().messages[convId] ?? []).at(-1);
+    if (last && last.role === "assistant" && last.status === "streaming") void get().resumeStream(convId, last.id);
+  },
   consumeReturnedDraft(convId, id) {
     if (get().returnedDrafts[convId]?.id !== id) return;
     set((s) => ({ returnedDrafts: { ...s.returnedDrafts, [convId]: undefined } }));
@@ -1231,10 +1244,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const inflight = get().streamingAssistantId[convId];
     if (inflight) finalizeMessage(set, get, convId, inflight, "cancelled");
 
-    // The first message of a conversation asks the server for its name —
-    // only once its reply has completed (see the `finally` below).
-    const isFirstMessage = (get().messages[convId] ?? []).length === 0;
-    let firstReplyCompleted = false;
+    // FIX124 — a chat is named after the first turn that is ANSWERED, which
+    // need not be the first turn: asking only after turn one left a chat whose
+    // first answer failed as "New conversation" for good.
+    const answeredBefore = hasAnsweredTurn(get, convId);
+    let replyCompleted = false;
+    showPlaceholderTitle(set, get, convId, trimmed);
 
     // Capture the conversation's currently bound model at send time
     // and stamp it on the assistant placeholder. The server-side
@@ -1368,7 +1383,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // turn's story (its row, its error card), not the composer's.
       outboxAccepted(convId, requestId);
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId, tempUserId);
-      firstReplyCompleted = firstReplyEndedCompleted(get, convId);
+      replyCompleted = lastReplyEndedCompleted(get, convId);
     } catch (err) {
       // consumeStream may have swapped the placeholder id for the
       // persisted row id (message_start). Finalize whichever id is
@@ -1434,17 +1449,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return { abortControllers: aborts, streamingAssistantId: sids };
         });
         await get().resumeStream(convId, streamingId);
-        firstReplyCompleted = firstReplyEndedCompleted(get, convId);
+        replyCompleted = lastReplyEndedCompleted(get, convId);
         return;
       }
       get().setError(tOutside("error.networkStream"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
-      // FIX122 — the first turn is over: ask for the name, but only when it
-      // was answered. A refused or failed send, or a Stop, asks nothing: the
-      // server already wrote the first words when it took the message, and
-      // it never names a chat after its first turn.
-      if (isFirstMessage && firstReplyCompleted) void nameConversationOnce(set, get, convId);
+      // FIX122/FIX124 — the turn is over: ask for the name when this is the
+      // first turn that was answered. A refused or failed send, or a Stop,
+      // asks nothing — the chat keeps the first words the server wrote when
+      // it took the first message — and the next answered turn asks.
+      if (!answeredBefore && replyCompleted) void nameConversationOnce(set, get, convId);
+
       // FIX121 — a send that never got a response (network error, abort)
       // must not leave the conversation refusing the next one.
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } }));
@@ -1564,10 +1580,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const messageState = () =>
       (get().messages[convId] ?? []).find((m) => m.id === messageId);
 
+    // FIX124 R2 — a network drop is not an answer that failed. The server
+    // keeps generating when this page goes away (and keeps the finished run
+    // for the ledger's 600 s), so giving up after the quick retries — 7 s —
+    // turned every drop of 10 s or more into a red "failed" card over an
+    // answer that was sitting complete on the server. After the quick retries
+    // the row now WAITS: it says the connection was lost, and tries again
+    // when the browser says it is back online, when the tab comes back, and
+    // every RESUME_WAIT.pollMs — until RESUME_WAIT.capMs, just inside the
+    // ledger's retention. Past that the server's row is read once; only if
+    // that cannot be reached either does the row stop waiting, and then it
+    // offers "load the answer", not a failure. The desktop keeps the quick
+    // retries only: there the run lives in the host, across a local bridge.
+    const startedAt = Date.now();
+    const setReconnecting = (on: boolean) =>
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [convId]: (s.messages[convId] ?? []).map((m) =>
+            m.id === messageId && Boolean(m.reconnecting) !== on ? { ...m, reconnecting: on || undefined } : m,
+          ),
+        },
+      }));
+
     try {
-      for (let attempt = 0; attempt < RESUME_RETRY_DELAYS.length; attempt++) {
-        if (RESUME_RETRY_DELAYS[attempt] > 0) {
-          await abortableSleep(RESUME_RETRY_DELAYS[attempt], ctrl.signal);
+      for (let attempt = 0; ; attempt++) {
+        if (attempt < RESUME_RETRY_DELAYS.length) {
+          if (RESUME_RETRY_DELAYS[attempt] > 0) {
+            await abortableSleep(RESUME_RETRY_DELAYS[attempt], ctrl.signal);
+          }
+        } else {
+          if (HOSTED_MODE || Date.now() - startedAt >= RESUME_WAIT.capMs) break;
+          setReconnecting(true);
+          await waitForWake(RESUME_WAIT.pollMs, ctrl.signal);
+          if (typeof navigator !== "undefined" && navigator.onLine === false) continue;
         }
         // FIX41 — with a cursor the server sends only what was missed, so
         // the bubble must be KEPT. Resetting it here (which is right when
@@ -1575,7 +1621,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // server has no intention of sending again.
         const cursor = streamCursorFor(convId);
         const startingAfter = cursor?.seq ?? 0;
-        if (startingAfter === 0) resetBubble();
         let res: Response;
         try {
           res = await api.openResumeStream(convId, messageId, ctrl.signal, startingAfter);
@@ -1602,6 +1647,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
         if (!res.ok) continue;
+        // FIX124 — the bubble is emptied only once there is a stream to fill
+        // it again. It used to be emptied before the request: every refused
+        // attempt, and now a wait that can last minutes, showed an empty
+        // bubble where the person had half an answer.
+        if (startingAfter === 0) resetBubble();
+        setReconnecting(false);
         try {
           await consumeStream(res, ctrl.signal, set, get, convId, messageId);
         } catch (err) {
@@ -1618,9 +1669,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
         return;
       }
-      // Every attempt failed — surface the P1 error card.
-      get().setError(tOutside("error.resumeLost"));
-      finalizeMessage(set, get, convId, messageId, "error");
+      if (HOSTED_MODE) {
+        // Every attempt failed — surface the P1 error card.
+        get().setError(tOutside("error.resumeLost"));
+        finalizeMessage(set, get, convId, messageId, "error");
+        return;
+      }
+      // The wait is over. What the server has is the truth: a finished row
+      // replaces this one, a failed row shows its own failure.
+      if (await adoptServerRows(set, convId)) return;
+      // The server cannot be reached either. Not a failure of the answer —
+      // nobody knows yet how it ended.
+      awaitReload(set, convId, messageId);
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         finalizeMessage(set, get, convId, messageId, "cancelled");
@@ -1815,6 +1875,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const existing = get().messages[convId] ?? [];
     const idx = existing.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
+    // FIX124 — Retry of a failed turn is this path too: when it is the first
+    // turn to be answered, it is the one that names the chat.
+    const answeredBefore = hasAnsweredTurn(get, convId);
 
     const convModelId =
       get().conversations.find((c) => c.id === convId)?.model_id ?? null;
@@ -1856,6 +1919,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return;
       }
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
+      if (!answeredBefore && lastReplyEndedCompleted(get, convId)) void nameConversationOnce(set, get, convId);
     } catch (err) {
       // Same stale-id guard as sendMessage: message_start may have
       // swapped the temp id for the persisted one.
@@ -2016,6 +2080,69 @@ type Get = () => ChatState;
 // network blip reattaches fast without hammering the server.
 // Exported ONLY so tests can zero the delays (mutate + restore).
 export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
+
+/** FIX124 R2 — after the quick retries: how often a waiting row tries again
+ *  on its own, and for how long. The cap sits just inside chat-edge's run
+ *  ledger retention (STREAM_LEDGER_TTL_SECONDS = 600): inside it a resume
+ *  replays what was missed; past it the row is simply read from the API.
+ *  Mutable so tests can shorten it (the RESUME_RETRY_DELAYS pattern). */
+export const RESUME_WAIT = { pollMs: 15_000, capMs: 540_000 };
+
+/** Sleeps up to `ms`, or until the browser reports the network back, or the
+ *  tab becomes visible again — whichever is first. */
+function waitForWake(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new DOMException("Aborted", "AbortError"));
+    const done = (fn: () => void) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      if (typeof window !== "undefined") window.removeEventListener("online", onWake);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+      fn();
+    };
+    const onWake = () => done(resolve);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") done(resolve);
+    };
+    const onAbort = () => done(() => reject(new DOMException("Aborted", "AbortError")));
+    const timer = setTimeout(onWake, ms);
+    signal.addEventListener("abort", onAbort);
+    if (typeof window !== "undefined") window.addEventListener("online", onWake);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+  });
+}
+
+/** Replaces the conversation's rows with the server's. Returns false — and
+ *  touches nothing — when the server cannot be reached: loadMessages would
+ *  seed an empty thread on failure, which is not what a page that has just
+ *  lost its network should show. */
+async function adoptServerRows(set: Set, convId: string): Promise<boolean> {
+  try {
+    const res = await api.listMessages(convId, { limit: 50 });
+    if (!res?.messages) return false;
+    clearStreamCursor(convId);
+    set((s) => ({
+      messages: { ...s.messages, [convId]: res.messages },
+      hasMoreMessages: { ...s.hasMoreMessages, [convId]: res.has_more ?? false },
+    }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The row stops waiting without a verdict: not streaming, not failed —
+ *  the bubble offers to load the answer (MessageBubble). */
+function awaitReload(set: Set, convId: string, messageId: string): void {
+  set((s) => ({
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === messageId ? { ...m, isStreaming: false, is_thinking: false, reconnecting: undefined, awaiting_reload: true } : m,
+      ),
+    },
+  }));
+}
 
 // T2 — stream idle watchdog thresholds, in ONE place. The server
 // heartbeats every ~15s (chat-edge handler heartbeatInterval), so a
@@ -2734,6 +2861,8 @@ async function consumeStream(
                       // FIX119 — why the model stopped; the bubble tells the person
                       // when it is max_tokens / refusal / content_filter.
                       ...(isStopReason(data.stop_reason) ? { stop_reason: data.stop_reason } : {}),
+                      // FIX124 — the turn stopped at the tool-round cap unanswered.
+                      ...(typeof data.tool_rounds === "number" && data.tool_rounds > 0 ? { tool_rounds: data.tool_rounds } : {}),
                       ...(typeof data.run_id === "string" && data.run_id ? { run_id: data.run_id } : {}),
                       // FIX120 — the requested model of a rescued turn, as the
                       // row will carry it; the bubble derives the notice from
@@ -3077,15 +3206,43 @@ function giveBackToComposer(set: Set, convId: string, requestId?: string): void 
  *  keeps the screen from contradicting it for a moment).
  *  A temporary chat is not sent for a name at all. */
 const userRenames = new Map<string, number>();
-/** A first turn's rows are the only rows, so its reply is the last assistant
- *  row — found by role, not id: the desktop host renames the row to the
- *  server's id at message_complete, after the stream slot was keyed. */
-function firstReplyEndedCompleted(get: Get, convId: string): boolean {
+/** The turn's reply is the last assistant row — found by role, not id: the
+ *  desktop host renames the row to the server's id at message_complete,
+ *  after the stream slot was keyed. */
+function lastReplyEndedCompleted(get: Get, convId: string): boolean {
   return (get().messages[convId] ?? []).filter((m) => m.role === "assistant").at(-1)?.status === "completed";
+}
+/** Whether any turn of this conversation has been answered yet (a completed
+ *  assistant row with text). Read BEFORE a send adds its rows. */
+function hasAnsweredTurn(get: Get, convId: string): boolean {
+  return (get().messages[convId] ?? []).some((m) => m.role === "assistant" && m.status === "completed" && m.content.trim() !== "");
+}
+/** FIX124 — the sidebar never shows "New conversation" for a chat that has a
+ *  message: the first words stand in at once, locally, the same cut the
+ *  server makes (first 100 characters) when it takes the message. No request:
+ *  the turn-end refresh brings the server's title. */
+const DEFAULT_TITLE = "New conversation";
+export function placeholderTitle(text: string): string {
+  const chars = Array.from(text.trim());
+  return chars.length <= 100 ? chars.join("") : `${chars.slice(0, 100).join("")}…`;
+}
+function showPlaceholderTitle(set: Set, get: Get, convId: string, text: string): void {
+  const conv = get().conversations.find((c) => c.id === convId);
+  const title = placeholderTitle(text);
+  if (!conv || conv.title !== DEFAULT_TITLE || !title) return;
+  set((s) => ({ conversations: s.conversations.map((c) => (c.id === convId && c.title === DEFAULT_TITLE ? { ...c, title } : c)) }));
 }
 async function nameConversationOnce(set: Set, get: Get, convId: string): Promise<void> {
   const conv = get().conversations.find((c) => c.id === convId);
   if (!conv || conv.memory_enabled === false) return;
+  // FIX124 — a title somebody chose is not sent for a name at all (the server
+  // would refuse it; this saves the request). Recognised the way the server
+  // does: anything but the creation placeholder or the first message's first
+  // words. With older rows still unloaded the first message is unknown here,
+  // and the server decides.
+  const firstUser = (get().messages[convId] ?? []).find((m) => m.role === "user");
+  const machineTitle = conv.title === DEFAULT_TITLE || (firstUser !== undefined && conv.title === placeholderTitle(firstUser.content));
+  if (!machineTitle && !get().hasMoreMessages[convId]) return;
   const renamesWhenAsked = userRenames.get(convId) ?? 0;
   try {
     const res = await api.generateTitle(convId);

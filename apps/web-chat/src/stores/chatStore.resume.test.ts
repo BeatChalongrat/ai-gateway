@@ -42,7 +42,7 @@ vi.mock("@/hooks/useUsage", () => ({
 }));
 
 import { dictionaries } from "@/lib/i18n/dict";
-import { RESUME_RETRY_DELAYS, useChatStore } from "./chatStore";
+import { RESUME_RETRY_DELAYS, RESUME_WAIT, useChatStore } from "./chatStore";
 
 const initialState = useChatStore.getState();
 const originalDelays = [...RESUME_RETRY_DELAYS];
@@ -125,6 +125,8 @@ function fireRaf() {
 beforeEach(() => {
   useChatStore.setState({ ...initialState }, true);
   vi.clearAllMocks();
+  // No waiting phase here (FIX124 — chatStore.fix124.test.ts covers it).
+  RESUME_WAIT.capMs = 0;
   // Zero the backoff so retry tests run instantly (restored below).
   RESUME_RETRY_DELAYS.splice(
     0,
@@ -312,11 +314,16 @@ describe("stream resume", () => {
     expect(useChatStore.getState().streamingAssistantId["c1"]).toBeUndefined();
   });
 
-  it("gives up after all attempts fail and shows the localized error card", async () => {
-    mockApi.listMessages.mockResolvedValue({
+  // FIX124 R2 — this used to be "gives up after all attempts fail and shows
+  // the localized error card". A connection that cannot be re-opened says
+  // nothing about the answer: see chatStore.fix124.test.ts for what the row
+  // does now. What is pinned here is what it must NOT do any more.
+  it("attempts that all fail do not turn the row into a failed answer", async () => {
+    mockApi.listMessages.mockResolvedValueOnce({
       messages: [userMsg("u1"), streamingAsst("m1")],
       has_more: false,
     });
+    mockApi.listMessages.mockRejectedValue(new TypeError("refused")); // the server stays out of reach
     mockApi.openResumeStream.mockRejectedValue(new TypeError("refused"));
 
     await useChatStore.getState().loadMessages("c1");
@@ -327,8 +334,9 @@ describe("stream resume", () => {
     expect(mockApi.openResumeStream).toHaveBeenCalledTimes(
       RESUME_RETRY_DELAYS.length,
     );
-    expect(messagesOf("c1")[1].status).toBe("error");
-    expect(useChatStore.getState().errorBanner).toBe(
+    expect(messagesOf("c1")[1].status).not.toBe("error");
+    expect(messagesOf("c1")[1].awaiting_reload).toBe(true);
+    expect(useChatStore.getState().errorBanner).not.toBe(
       dictionaries.en["error.resumeLost"],
     );
   });

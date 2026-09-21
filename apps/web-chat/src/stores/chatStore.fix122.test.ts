@@ -189,8 +189,13 @@ describe("FIX122 Part B — the page asks for a name once and never renames", ()
     expect(titleOf("c1")).toBe("ทักทายกัน");
   });
 
-  it("later turns never ask", async () => {
-    seed("c1", [{ id: "u0", role: "user", content: "ก่อนหน้า", status: "completed", created_at: "2026-09-21T00:00:00Z" } as Message]);
+  // FIX124 — "later" means after a turn that was ANSWERED; a lone user row
+  // (its answer failed) is not one: see chatStore.fix124.test.ts.
+  it("turns after an answered one never ask", async () => {
+    seed("c1", [
+      { id: "u0", role: "user", content: "ก่อนหน้า", status: "completed", created_at: "2026-09-21T00:00:00Z" } as Message,
+      { id: "a0", role: "assistant", content: "ตอบแล้ว", status: "completed", created_at: "2026-09-21T00:00:01Z" } as Message,
+    ]);
     await completeFirstTurn("ต่อ");
     await tick();
     expect(mockApi.generateTitle).not.toHaveBeenCalled();

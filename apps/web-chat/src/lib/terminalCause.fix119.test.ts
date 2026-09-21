@@ -23,7 +23,10 @@ describe("FIX119 — stop reasons on the page", () => {
       expect(dictionaries.en[key]).toBeTruthy();
       expect(dictionaries.th[key]).toBeTruthy();
     }
-    for (const silent of ["end_turn", "tool_use", "unknown"]) expect(silent in STOP_REASON_NOTICE_KEY).toBe(false);
+    // FIX124 — tool_use is no longer silent: on a finished row it means the
+    // turn ended while the model still wanted tools (the tool-step limit).
+    for (const silent of ["end_turn", "unknown"]) expect(silent in STOP_REASON_NOTICE_KEY).toBe(false);
+    expect(STOP_REASON_NOTICE_KEY.tool_use).toBe("msg.stopToolLimit");
     expect(dictionaries.th["msg.stopMaxTokens"]).toContain("ยังไม่จบ");
   });
 

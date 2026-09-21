@@ -496,6 +496,18 @@ export interface Message {
    *  (migration 044), in every layer's logs. Shown on a failed turn's
    *  card so a person can quote it. */
   run_id?: string;
+  /** FIX124 R2 — client-only. `reconnecting`: the stream was lost and the row
+   *  is waiting for the network to come back (it is still streaming, the
+   *  server is still — or already done — writing it). `awaiting_reload`: the
+   *  wait ended with the server still out of reach; nobody knows how the turn
+   *  ended, and the bubble offers to load it. Neither is a failure. */
+  reconnecting?: boolean;
+  awaiting_reload?: boolean;
+  /** FIX124 R3 — how many tool rounds ran when the turn stopped at the
+   *  tool-round cap without an answer (stop_reason tool_use). From
+   *  message_complete; absent after a reload, where the notice drops the
+   *  number. */
+  tool_rounds?: number;
   /** FIX119 — why the model stopped (closed set, terminalCause.ts
    *  STOP_REASONS). `max_tokens` = the answer is cut off. Absent on user
    *  rows, failed runs and rows written before migration 044. */
@@ -796,6 +808,9 @@ export interface SSEImageGenerating {
 
 export interface SSEMessageComplete {
   message_id: UUID;
+  /** FIX124 — tool rounds run when the turn stopped at the tool-round cap
+   *  without an answer (stop_reason is then tool_use). */
+  tool_rounds?: number;
   token_usage?: TokenUsage & { reasoning?: number };
   /** FIX35 Part B — the model that actually answered (an "auto"
    *  conversation's reply names the model the router picked). */

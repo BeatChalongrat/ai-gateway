@@ -233,7 +233,8 @@ describe("sendMessage / consumeStream", () => {
   it("accumulates reasoning_delta into reasoning_content and tracks analysis_status thinking window", async () => {
     const s = makeStream();
     mockApi.openMessageStream.mockResolvedValue(s.response);
-    seedConversation("c1", [userMsg("u0")]); // not first message → no title gen
+    // an answered turn already exists → no title gen (FIX124: a lone user row would not do)
+    seedConversation("c1", [userMsg("u0"), { id: "a0", role: "assistant", content: "earlier", status: "completed", created_at: "2026-01-01T00:00:00Z" } as Message]);
 
     const done = useChatStore.getState().sendMessage("c1", "think");
     await tick();

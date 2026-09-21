@@ -487,8 +487,33 @@ function MessageBubbleImpl({
 
       {/* FIX119 — why the model stopped, when it matters to the person: a
           max_tokens cut used to render exactly like a finished answer. */}
+      {/* FIX124 R2 — a lost connection is a state of the LINK, not of the
+          answer: the row waits (reconnecting) or offers to be loaded
+          (awaiting_reload). Neither is a failure card. */}
+      {message.reconnecting ? (
+        <div role="status" data-testid="reconnecting-notice" className="mt-1 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+          {t("msg.reconnecting")}
+        </div>
+      ) : null}
+      {message.awaiting_reload ? (
+        <div role="status" data-testid="awaiting-reload-notice" className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+          <span>{t("msg.awaitingReload")}</span>
+          <button
+            type="button"
+            data-testid="load-answer-button"
+            onClick={() => void useChatStore.getState().reloadAnswer(convId)}
+            className="focus-ring ml-auto rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+          >
+            {t("msg.loadAnswer")}
+          </button>
+        </div>
+      ) : null}
       {message.status === "completed" && !message.isStreaming && message.stop_reason && message.stop_reason in STOP_REASON_NOTICE_KEY ? (
-        <StopReasonNotice reason={message.stop_reason as keyof typeof STOP_REASON_NOTICE_KEY} />
+        <StopReasonNotice
+          reason={message.stop_reason as keyof typeof STOP_REASON_NOTICE_KEY}
+          toolRounds={message.tool_rounds}
+          onContinue={showRegenerate ? () => void useChatStore.getState().sendMessage(convId, t("msg.continuePrompt")) : undefined}
+        />
       ) : null}
 
       {/* B2 — fallback notice. A small line under the reply when a
@@ -626,8 +651,11 @@ function MessageBubbleImpl({
           ) : null}
         </div>
         {message.status === "error" ? (
-          <span className="ml-2 text-[11px] text-status-danger">
-            {t("msg.aiError")}
+          // FIX124 R2 — a turn that ended because the LINK broke (cause
+          // disconnected: the desktop's network loss, a cut stream) is not
+          // the AI service failing, and is not labelled as if it were.
+          <span className="ml-2 text-[11px] text-status-danger" data-testid="error-label">
+            {message.terminal_cause === "disconnected" ? t("msg.connectionLost") : t("msg.aiError")}
           </span>
         ) : null}
         {message.status === "cancelled" ? (
@@ -817,16 +845,34 @@ function MessageMeta({ message }: { message: Message }) {
 // tried and why each failed.
 /** FIX119 — a completed answer that stopped for a reason the person should
  *  know about (cut off, refused, filtered). Not an error: the text stands. */
-function StopReasonNotice({ reason }: { reason: keyof typeof STOP_REASON_NOTICE_KEY }) {
+/** FIX124 R3 — a turn that stopped at the tool-step limit says so and offers
+ *  to carry on; "Continue" is an ordinary message (the history is the
+ *  server's, so the model sees its own tool results). Offered on the last
+ *  reply only — the same gate as Regenerate. */
+function StopReasonNotice({ reason, toolRounds, onContinue }: { reason: keyof typeof STOP_REASON_NOTICE_KEY; toolRounds?: number; onContinue?: () => void }) {
   const t = useT();
+  const text =
+    reason === "tool_use"
+      ? toolRounds ? t("msg.stopToolLimit", { n: String(toolRounds) }) : t("msg.stopToolLimitNoCount")
+      : t(STOP_REASON_NOTICE_KEY[reason]);
   return (
     <div
       role="note"
       data-testid="stop-reason-notice"
       data-stop-reason={reason}
-      className="mt-1 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-secondary"
+      className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-secondary"
     >
-      {t(STOP_REASON_NOTICE_KEY[reason])}
+      <span>{text}</span>
+      {reason === "tool_use" && onContinue ? (
+        <button
+          type="button"
+          data-testid="continue-button"
+          onClick={onContinue}
+          className="focus-ring ml-auto rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+        >
+          {t("msg.continue")}
+        </button>
+      ) : null}
     </div>
   );
 }

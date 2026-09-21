@@ -39,8 +39,11 @@ export function isStopReason(s: unknown): s is StopReason {
 }
 
 /** The stop reasons the page tells the person about, and the dictionary
- *  key for each. end_turn / tool_use / unknown say nothing. */
+ *  key for each. end_turn / unknown say nothing. FIX124 — tool_use on a
+ *  FINISHED row means the turn ended while the model still wanted tools: the
+ *  tool-step limit. It used to say nothing, and the row looked answered. */
 export const STOP_REASON_NOTICE_KEY = {
+  tool_use: "msg.stopToolLimit",
   max_tokens: "msg.stopMaxTokens",
   refusal: "msg.stopRefusal",
   content_filter: "msg.stopContentFilter",
