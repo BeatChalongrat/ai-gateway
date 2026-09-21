@@ -29,6 +29,7 @@ services:
       context: ./services/chat-edge-api
       dockerfile: Dockerfile
     container_name: ai-gateway-chat-edge-api
+    restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
     environment:
@@ -347,6 +348,7 @@ services:
         # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
         # serves the browser and the Electron app.)
     container_name: ai-gateway-web-chat
+    restart: unless-stopped
     ports:
       - "127.0.0.1:3002:3002"
     environment:
