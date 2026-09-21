@@ -190,6 +190,32 @@ def health_cooldown_s(policy: dict | None = None) -> int:
     return int(pol["health_marker"].get("cooldown_s", 60))
 
 
+def health_cooldown_steps(policy: dict | None = None) -> list[int]:
+    """FIX124 — the marker's cooldown per consecutive failure of one pair
+    (``health_marker.cooldown_escalation_s``; the last value is the cap).
+    A policy without the list keeps the single cooldown."""
+    pol = policy or base_policy()
+    steps = [int(s) for s in pol["health_marker"].get("cooldown_escalation_s") or () if int(s) > 0]
+    return steps or [health_cooldown_s(pol)]
+
+
+def health_escalation_memory_s(policy: dict | None = None) -> int:
+    """How long a pair's failure count is remembered without a new failure."""
+    pol = policy or base_policy()
+    return int(pol["health_marker"].get("escalation_memory_s", 3600))
+
+
+EXPLICIT_RESCUE_RULE = "auto_candidates"
+
+
+def explicit_without_chain_rule(policy: dict | None = None) -> str:
+    """FIX124 — what an explicitly chosen model walks when its own chain is
+    empty or ran out: ``auto_candidates`` or ``give_up``. A policy without
+    the row gives up, which is the behaviour before the row existed."""
+    pol = policy or base_policy()
+    return str((pol.get("explicit_without_chain") or {}).get("rule", GIVE_UP))
+
+
 def limits(kind: str, policy: dict | None = None) -> dict:
     """``kind`` is ``non_stream`` or ``stream``."""
     pol = policy or base_policy()
@@ -406,6 +432,11 @@ def validate_override(data: Any, *, is_tenant: bool) -> dict:
             for k, v in value.items():
                 if k not in ("context_window_fallback", "content_policy_fallback") or not isinstance(v, bool):
                     raise ValueError(f"opt_in.{k} must be a boolean flag named in the file")
+        elif key == "explicit_without_chain":
+            if key not in overridable or not isinstance(value, dict) or set(value) != {"rule"}:
+                raise ValueError("explicit_without_chain must be an object carrying only `rule`")
+            if value["rule"] not in base["explicit_without_chain"]["rules"]:
+                raise ValueError(f"explicit_without_chain.rule: unknown rule '{value['rule']}'")
         else:
             raise ValueError(f"'{key}' is not overridable")
     return data

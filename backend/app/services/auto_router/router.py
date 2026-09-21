@@ -278,6 +278,26 @@ def _explore(
     return reordered, True
 
 
+def provider_diverse(ordered: Sequence["ModelCandidate"], limit: int) -> list["ModelCandidate"]:
+    """FIX124 — the alternatives handed to the fallback walk, at most ``limit``.
+
+    The first five of the ranking were five models of ONE provider whose
+    account was rate-limited, so the walk had nowhere to go. The ranking is
+    kept, but each provider's best model comes first and the rest fill the
+    remaining places — a provider-wide or account-wide failure still leaves
+    a candidate."""
+    firsts: list = []
+    rest: list = []
+    seen: set[str] = set()
+    for c in ordered:
+        if c.provider in seen:
+            rest.append(c)
+        else:
+            seen.add(c.provider)
+            firsts.append(c)
+    return (firsts + rest)[: max(0, limit)]
+
+
 def default_plan(candidates: Sequence["ModelCandidate"], preferred: Sequence[str], reason: str) -> Optional[RoutePlan]:
     """The default set: admin preference that is routable, else cheapest.
     Used when classification / ranking / anything else in the pipeline

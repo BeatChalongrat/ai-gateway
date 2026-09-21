@@ -1158,6 +1158,7 @@ async def _chat_completions_impl(
         log_outcome as _fb_log_outcome,
         mark_provider_unhealthy as _mark_unhealthy,
         record_decision as _fb_record_decision,
+        rule_out_after_failure as _fb_rule_out,
     )
     from app.services.gateway import fallback_policy as _fb_policy_mod
     from datetime import datetime as _dt, timezone as _tz
@@ -1181,6 +1182,13 @@ async def _chat_completions_impl(
         if isinstance(payload.metadata, dict)
         else None
     )
+    # FIX124 — an EXPLICIT model with no chain of its own (or one that runs
+    # out) continues with what the Auto router would offer for this request.
+    # The list is planned at most once per turn, and only once the primary is
+    # known to be in trouble: here when the pre-check finds it marked, else in
+    # the generator on the first failure. ``None`` = nothing to add.
+    _fb_rescue_models: list | None = None
+    _fb_rescue_planned = False
     _fb_stream_limits = _fb_policy_mod.limits("stream", _fb_policy)
     _fb_dispatch_t0 = time.perf_counter()
 
@@ -1205,6 +1213,10 @@ async def _chat_completions_impl(
         # the SYNC ``select_streaming_candidate`` made AsyncSession.execute()
         # return an un-awaited coroutine -> "'coroutine' object has no
         # attribute 'scalars'" 500s whenever the provider was unhealthy.
+        _fb_rescue_models = await orchestrator.explicit_rescue_candidates(
+            ctx, payload, dict_messages, session, log, policy=_fb_policy,
+        )
+        _fb_rescue_planned = True
         _fb_skipped: list[dict] = []
         fb_candidate = await fb_runner.select_streaming_candidate_async(
             original_provider=_stream_original_provider,
@@ -1215,6 +1227,7 @@ async def _chat_completions_impl(
             allowed_providers=_fb_allowed_meta,
             skipped=_fb_skipped,
             auto_candidates=_fb_auto_meta,
+            rescue_candidates=_fb_rescue_models,
         )
         for _sk in _fb_skipped:
             _fb_log_attempt(
@@ -1369,6 +1382,7 @@ async def _chat_completions_impl(
         # request_log persist block below. Pre-check fallback (above)
         # runs in the enclosing function so it doesn't need nonlocal.
         nonlocal _stream_fallback_used, _stream_attempt_number
+        nonlocal _fb_rescue_models, _fb_rescue_planned
         # Phase 3.5 Commits 30-31 — incremental DLP streaming.
         # Phase 2C (C13) closed P0-7 by buffering the whole response,
         # running DLP on the full body, then emitting as a single
@@ -2372,6 +2386,9 @@ async def _chat_completions_impl(
 
         try:
             while True:
+                # FIX124 — a failed attempt is stored with the time it took
+                # (it was a hard-coded 0.0).
+                _attempt_t0 = time.perf_counter()
                 try:
                     # Per-provider bulkhead (Batch A): the slot is held
                     # for the whole stream (that IS the in-flight
@@ -2845,7 +2862,7 @@ async def _chat_completions_impl(
                             "model": route.model_name,
                             "error_code": _failed_code,
                             "error_message": str(stream_exc)[:200],
-                            "latency_ms": 0.0,
+                            "latency_ms": round((time.perf_counter() - _attempt_t0) * 1000, 2),
                             "attempted_at": _dt.now(_tz.utc).isoformat(),
                         }
                     )
@@ -2855,20 +2872,27 @@ async def _chat_completions_impl(
                     # dead model into a system-wide outage. Only an
                     # infrastructure-class failure (timeout/unreachable)
                     # still rules out the provider's other models.
+                    # FIX124 — and so does an ACCOUNT-scoped one (rate limit,
+                    # no credit, auth): the rule is the non-streaming walk's
+                    # own, where before only the provider-wide codes counted
+                    # and the next hop was the same rate-limited account.
                     await _mark_unhealthy(
                         failed_provider, route.model_name, error_code=_failed_code,
                         policy=_fb_policy,
                     )
-                    skip_pairs.add((failed_provider, route.model_name))
-                    _PW_CODES = _fb_policy_mod.provider_wide_codes(_fb_policy)
-                    if _failed_code in _PW_CODES:
-                        skip_providers.add(failed_provider)
+                    _fb_scope = _fb_rule_out(
+                        stream_exc, failed_provider, route.model_name,
+                        skip_providers=skip_providers, skip_pairs=skip_pairs,
+                        policy=_fb_policy,
+                    )
                     _fb_elapsed_ms = (time.perf_counter() - _fb_dispatch_t0) * 1000
                     _fb_log_attempt(
                         log, path="stream", requested_model=_stream_original_model,
                         attempt=_stream_attempt_number, provider=failed_provider,
                         model=route.model_name, outcome="failed", error_code=_failed_code,
-                        reason=f"action={_fb_decision.action}", elapsed_ms=_fb_elapsed_ms,
+                        reason=f"action={_fb_decision.action} scope={_fb_scope}",
+                        latency_ms=_stream_fallback_attempts[-1]["latency_ms"],
+                        elapsed_ms=_fb_elapsed_ms,
                     )
 
                     if len(_stream_fallback_attempts) > MAX_STREAMING_FALLBACKS:
@@ -2917,6 +2941,31 @@ async def _chat_completions_impl(
                         return
 
                     fb_runner = orchestrator._get_fallback_orchestrator()
+                    # FIX124 — plan the explicit model's rescue list now (once),
+                    # on a session of its own: the request's is closed by the
+                    # time the generator runs. Then read which of the walk's
+                    # candidates a health marker covers; the selector below is
+                    # sync and cannot.
+                    if not _fb_rescue_planned:
+                        _fb_rescue_planned = True
+                        try:
+                            from app.core import db as _db_mod
+
+                            async with _db_mod.get_async_session_factory()() as _rescue_session:
+                                _fb_rescue_models = await orchestrator.explicit_rescue_candidates(
+                                    ctx, payload, dict_messages, _rescue_session, log,
+                                    policy=_fb_policy,
+                                )
+                        except Exception as _rescue_exc:  # noqa: BLE001 — no list = the walk as before
+                            log.warning("explicit_rescue_candidates_failed", error=str(_rescue_exc)[:200])
+                    _fb_marked = await fb_runner.marked_in_streaming_walk(
+                        original_provider=_stream_original_provider,
+                        original_model=_stream_original_model,
+                        policy=_fb_policy,
+                        action=_fb_decision.action,
+                        auto_candidates=_fb_auto_meta,
+                        rescue_candidates=_fb_rescue_models,
+                    )
                     # Mint a fresh session for the key lookup — the
                     # dependency-injected ``session`` is already closed by
                     # the time the generator runs (FastAPI's
@@ -2942,6 +2991,8 @@ async def _chat_completions_impl(
                             allowed_providers=_fb_allowed_meta,
                             skipped=_fb_skipped_in,
                             auto_candidates=_fb_auto_meta,
+                            rescue_candidates=_fb_rescue_models,
+                            unhealthy=_fb_marked,
                         )
                     finally:
                         _lookup_session.close()

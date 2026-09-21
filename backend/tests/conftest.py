@@ -687,6 +687,29 @@ def _isolate_stateful_redis_services(request, monkeypatch):
         monkeypatch.setattr(CacheService, "set_async", _async_noop)
 
 
+@pytest.fixture(autouse=True)
+def _no_marker_escalation_in_the_shared_redis(request, monkeypatch):
+    """FIX124 — health markers written by tests keep the base cooldown.
+
+    Tests that fail a primary on purpose mark real pairs (openai/gpt-4o-mini
+    above all) in the Redis the lane shares, and nothing clears them but the
+    TTL. At 60 s that already made results depend on test order (FIX57); with
+    the escalating cooldown three such tests would pass the pair over for 15
+    minutes, for every file that runs after them. The escalation's own tests
+    count strikes in a fake Redis (their ``fake_redis`` fixture) and are exempt.
+    """
+    if "test_fix124_any_model_that_works" in request.node.nodeid and "fake_redis" in request.fixturenames:
+        yield
+        return
+    from app.services.gateway import fallback_orchestrator as _fo
+
+    async def _base_cooldown(client, provider, model, base_ttl, policy):
+        return base_ttl
+
+    monkeypatch.setattr(_fo, "_escalated_cooldown_s", _base_cooldown)
+    yield
+
+
 @pytest.fixture()
 def sqlite_engine():
     """Create an in-memory SQLite engine with all tables from ORM metadata.

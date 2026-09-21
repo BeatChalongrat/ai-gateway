@@ -138,6 +138,11 @@ logger = structlog.get_logger(__name__)
 # the tiny per-chunk streaming scan stays inline (sub-ms 120-char window).
 _DLP_SCAN_SEMAPHORE = asyncio.Semaphore(8)
 
+# How many of the Auto router's ranked models ride with a request as
+# fallback alternatives (``metadata.auto_candidates``, and an explicit
+# request's rescue list, FIX124).
+_AUTO_ALTERNATIVES = 5
+
 # Categories whose tokens MUST NEVER be restored on outbound — even
 # if a (mis)configured policy profile maps them to RESTORE. This is
 # the defense-in-depth layer paired with the
@@ -1284,6 +1289,11 @@ class GatewayOrchestrator:
                 from app.observability.metrics import (
                     LLM_PROVIDER_LATENCY as _LLM_LAT,
                 )
+                # FIX124 — an explicit model with no chain of its own (or one
+                # that runs out) continues with the Auto router's list.
+                _rescue_models = await self.explicit_rescue_candidates(
+                    ctx, payload, dict_messages, session, log, policy=_fb_policy,
+                )
                 with record_phase("provider_fallback"):
                     fallback_result = await fallback.run(
                         original_provider=original_provider,
@@ -1296,6 +1306,7 @@ class GatewayOrchestrator:
                         # FIX51 Part 4 — the time budget covers the
                         # whole dispatch, so the primary's burn counts.
                         started_at=t_provider,
+                        rescue_candidates=_rescue_models,
                     )
                 provider_response = fallback_result.response
                 # Rewrite the route so DLP scan, request_log row, and
@@ -2807,6 +2818,48 @@ class GatewayOrchestrator:
                 details={"missing": exc.missing, "pool_size": exc.pool_size},
             ) from exc
 
+    async def explicit_rescue_candidates(
+        self, ctx, payload, dict_messages, session, log, *, policy: dict,
+    ) -> list[str] | None:
+        """FIX124 — the models an EXPLICIT request may fall back to when its
+        own chain is empty or runs out: what the Auto router would offer for
+        this very request (its tools / images, its allowed providers, the
+        key-valid pool, the health markers, the router's ordering), spread
+        over providers like an Auto turn's alternatives.
+
+        ``None`` = nothing to add: an Auto turn (it carries its own list),
+        the policy's ``explicit_without_chain`` rule switched off, the kill
+        switch, or a router that has nothing — the walk then ends exactly as
+        it did before, with the primary's own error. Never raises.
+        """
+        from app.services.gateway import fallback_policy as _fb_policy_mod
+
+        _meta = payload.metadata if isinstance(payload.metadata, dict) else {}
+        if _meta.get("auto_candidates"):
+            return None
+        if _fb_policy_mod.explicit_without_chain_rule(policy) != _fb_policy_mod.EXPLICIT_RESCUE_RULE:
+            return None
+        if not _fb_policy_mod.is_enabled():
+            return None
+        try:
+            _reasoning_cfg = getattr(payload, "reasoning", None)
+            plan = await self._auto_route(
+                ctx, payload, dict_messages, session, log,
+                reasoning_requested=bool(_reasoning_cfg is not None and _reasoning_cfg.mode != "off"),
+            )
+        except Exception as exc:  # noqa: BLE001 — a rescue that cannot be planned is no rescue
+            log.warning("explicit_rescue_candidates_failed", error=str(exc)[:200])
+            return None
+        if plan is None:
+            return None
+        from app.services.auto_router import router as _auto_router_mod
+
+        # The router's pick is an alternative like the rest here; the walk
+        # drops the failed model itself and applies every gate per hop.
+        models = [c.model for c in _auto_router_mod.provider_diverse(plan.ordered, _AUTO_ALTERNATIVES)]
+        log.info("explicit_rescue_candidates", requested_model=payload.model, candidates=models)
+        return models or None
+
     async def _smart_select(self, payload, session, log):
         """Provider-agnostic model selection for ``auto`` + routing_hints.
 
@@ -2997,7 +3050,12 @@ class GatewayOrchestrator:
             payload.metadata = {}
         payload.metadata["auto_task"] = plan.task
         payload.metadata["auto_tier"] = plan.tier
-        payload.metadata["auto_candidates"] = [c.model for c in plan.fallbacks[:5]]
+        # FIX124 — five alternatives, spread over providers (the first five of
+        # the ranking were one rate-limited account's models).
+        from app.services.auto_router import router as _auto_router_mod
+
+        _alternatives = [c.model for c in _auto_router_mod.provider_diverse(plan.fallbacks, _AUTO_ALTERNATIVES)]
+        payload.metadata["auto_candidates"] = _alternatives
         log.info(
             "auto_route",
             selected_model=plan.primary.model,
@@ -3009,7 +3067,7 @@ class GatewayOrchestrator:
             used_ranking=plan.used_ranking,
             reason=plan.reason,
             signals=plan.signals,
-            fallbacks=[c.model for c in plan.fallbacks[:5]],
+            fallbacks=_alternatives,
             hints=hints.model_dump(exclude_defaults=True) if hints is not None else None,
             candidates_count=plan.candidates_count,
             filtered_count=plan.filtered_count,

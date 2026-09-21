@@ -11,7 +11,7 @@
   ],
   "action_meaning": {
     "retry_same": "send the same request to the same model again (the adapter stage: exponential backoff with equal jitter, a provider Retry-After header is honoured, sleep capped at 10 s, at most settings.provider_max_retries retries)",
-    "cooldown_then_next": "mark the (provider, model) pair unhealthy for `health_marker.cooldown_s` (and the whole provider when the code is in `provider_wide_codes`), then walk the model's chain; the marker makes the next request skip the pair before its first byte",
+    "cooldown_then_next": "mark the (provider, model) pair unhealthy for `health_marker.cooldown_s`, longer on a repeat (`health_marker.cooldown_escalation_s`) (and the whole provider when the code is in `provider_wide_codes`), then walk the model's chain; the marker makes the next request skip the pair before its first byte",
     "next_in_chain": "walk the model's chain without marking anything (no default row uses it; reachable through an override)",
     "context_window_chain": "the request was rejected for being too long: walk the model's `chains.context_window` list (models with a larger window) — only when the tenant opted in (`opt_in.context_window_fallback`), otherwise give_up",
     "content_policy_chain": "the provider's content policy rejected the request before any answer: walk `chains.content_policy` — only when the tenant opted in (`opt_in.content_policy_fallback`), otherwise give_up. A REFUSAL (stop_reason) is an answer, never this",
@@ -156,8 +156,10 @@
     "default": "model"
   },
   "health_marker": {
-    "_comment": "The cooldown behind cooldown_then_next: one eligible failure marks the (provider, model) pair for cooldown_s; a success clears it. Codes in provider_wide_codes also mark the whole provider (the box is unreachable, not one model).",
+    "_comment": "The cooldown behind cooldown_then_next: one eligible failure marks the (provider, model) pair for cooldown_s; a success clears it. Codes in provider_wide_codes also mark the whole provider (the box is unreachable, not one model). FIX124 - a pair that keeps failing is passed over for longer: the Nth strike (a failure AFTER the previous cooldown ran out - the pair was tried again and was still dead; failures while it is still marked, such as a burst of concurrent turns, do not count again; counted per pair, forgotten after escalation_memory_s without a failure, reset by the first success) marks it for the Nth value of cooldown_escalation_s, the last value being the cap. A dead box used to come back into the Auto pool every 60 s while the 7-day ranking still put it first. The provider-wide key always uses cooldown_s. With the breaker enabled the breaker's cooldown_s stands and nothing escalates.",
     "cooldown_s": 60,
+    "cooldown_escalation_s": [60, 300, 900],
+    "escalation_memory_s": 3600,
     "provider_wide_codes": ["provider_unavailable", "provider_timeout", "provider_no_credit"]
   },
   "breaker": {
@@ -192,6 +194,11 @@
     "context_window_fallback": false,
     "content_policy_fallback": false
   },
+  "explicit_without_chain": {
+    "_comment": "FIX124 - what an EXPLICITLY chosen model falls back to when its own chain is empty or ran out with attempts left. `auto_candidates` = the list the Auto router would offer for the same request (same tools / vision needs, same key-validity rule, health markers respected, spread over providers), walked AFTER the model's own chain, inside the same boundary, ceilings, cost cap and kill switch as any other candidate; the answer names the model that gave it (fallback_info / X-Gateway-Model / request_logs.original_model). `give_up` = the behaviour before FIX124: a model with no chain gets one attempt.",
+    "rule": "auto_candidates",
+    "rules": ["auto_candidates", "give_up"]
+  },
   "kill_switch": {
     "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy.",
     "setting_key": "fallback_enabled",
@@ -209,12 +216,13 @@
       "breaker",
       "cost_cap",
       "opt_in",
+      "explicit_without_chain",
       "allowed_providers",
       "decision_table.error_code"
     ]
   },
   "chains": {
-    "_comment": "The chains that ship. `curated` is keyed by the bare model alias (vendor prefix and date suffix stripped) and applies to models the legacy `tiers` table does not own; `tiers` is the legacy per-tier table (kept verbatim from model_tiers.py, its lookup rules unchanged). Every hop is {provider, model}. A model that appears in neither has NO chain: the admin route GET /admin/fallback/chains and `python -m app.services.gateway.fallback_policy --coverage` list which.",
+    "_comment": "The chains that ship. `curated` is keyed by the bare model alias (vendor prefix and date suffix stripped) and applies to models the legacy `tiers` table does not own; `tiers` is the legacy per-tier table (kept verbatim from model_tiers.py, its lookup rules unchanged). Every hop is {provider, model}. A model that appears in neither has NO chain of its own (FIX124: `explicit_without_chain` decides what it walks instead): the admin route GET /admin/fallback/chains and `python -m app.services.gateway.fallback_policy --coverage` list which.",
     "curated": {
       "claude-sonnet-4": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],
       "claude-sonnet-4.5": [{"provider": "openrouter", "model": "anthropic/claude-sonnet-4"}, {"provider": "deepseek", "model": "deepseek-v4-pro"}],

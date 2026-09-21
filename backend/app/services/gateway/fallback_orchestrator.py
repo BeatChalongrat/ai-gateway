@@ -34,6 +34,13 @@ the kill switch, the data boundary, the cost cap, the circuit breaker, a
 ``fallback_attempt`` log line per candidate carrying the turn id, and the
 Prometheus counters.
 
+FIX124 — "any model that works": an explicit model whose own chain is
+empty or runs out continues with the Auto router's list
+(``chain_with_rescue_candidates``, the policy's ``explicit_without_chain``
+rule), the streaming walk rules out a failed ACCOUNT the way ``run`` does
+(``rule_out_after_failure``), and a pair that keeps failing is marked for
+longer (``health_marker.cooldown_escalation_s``).
+
 The orchestrator is intentionally narrow: it does not run DLP, does
 not touch the request_log queue, and does not build a public response
 shape. Those concerns stay in :mod:`app.services.orchestrator`, which
@@ -153,10 +160,67 @@ def classify_failure_scope(exc: Exception, policy: dict | None = None) -> str:
     return policy_mod.failure_scope_for(code, details.get("status"), policy)
 
 
+def rule_out_after_failure(
+    exc: Exception,
+    provider: str,
+    model: str,
+    *,
+    skip_providers: set[str],
+    skip_pairs: "set[tuple[str, str]]",
+    policy: dict | None = None,
+) -> str:
+    """What a failed streaming attempt rules out for the rest of the turn.
+
+    FIX124 — the streaming walk only knew ``provider_wide_codes``, so after
+    ``rate_limit_exceeded`` its next hop was the same account's next model
+    (seen live: two openai models, both 429, walk over). The scope is the one
+    :meth:`FallbackOrchestrator.run` acts on: the pair is always out, and an
+    account-scoped failure takes the provider with it. Returns the scope.
+    """
+    skip_pairs.add((provider, model))
+    scope = classify_failure_scope(exc, policy)
+    wide = policy_mod.provider_wide_codes(policy) if policy else _PROVIDER_WIDE_CODES
+    if scope == "account" or getattr(exc, "code", None) in wide:
+        skip_providers.add(provider)
+    return scope
+
+
 def _health_key(provider: str, model: str | None = None) -> str:
     if model:
         return f"{_HEALTH_KEY_PREFIX}{provider}:{model}"
     return f"{_HEALTH_KEY_PREFIX}{provider}"
+
+
+# FIX124 — consecutive failures of one pair. A box that stays dead used to
+# return to the Auto pool every 60 s (the 7-day ranking still put it first),
+# so each strike lengthens the pair's cooldown along
+# ``health_marker.cooldown_escalation_s``; the first success deletes the count.
+_STRIKES_KEY_PREFIX = "provider:strikes:"
+
+
+def _strikes_key(provider: str, model: str) -> str:
+    return f"{_STRIKES_KEY_PREFIX}{provider}:{model}"
+
+
+async def _escalated_cooldown_s(client, provider: str, model: str, base_ttl: int, policy: dict | None) -> int:
+    """The pair's cooldown for this strike; any counting trouble = ``base_ttl``.
+
+    A strike is a failure AFTER a cooldown ran out (the pair was given
+    another chance and was still dead). A failure while the marker is still
+    set — a burst of concurrent turns, a walk that had nothing better than a
+    marked pair — renews the current step and does not count again.
+    """
+    try:
+        steps = policy_mod.health_cooldown_steps(policy)
+        key = _strikes_key(provider, model)
+        if await client.exists(_health_key(provider, model)):
+            strikes = int(await client.get(key) or 1)
+        else:
+            strikes = int(await client.incr(key))
+        await client.expire(key, max(policy_mod.health_escalation_memory_s(policy), steps[-1]))
+        return max(base_ttl, steps[min(strikes, len(steps)) - 1])
+    except Exception:  # noqa: BLE001 — the marker matters more than its length
+        return base_ttl
 
 
 async def mark_provider_unhealthy(
@@ -192,7 +256,15 @@ async def mark_provider_unhealthy(
         from app.services._redis_pool import get_async_redis
 
         client = get_async_redis()
-        await client.set(_health_key(provider, model), "unhealthy", ex=ttl)
+        # FIX124 — a repeat offender is passed over for longer; the
+        # provider-wide key below keeps the base cooldown (one model's
+        # history says nothing about its siblings). With the breaker on,
+        # the breaker's own cooldown is the operator's word and stands.
+        _breaker_on = bool(((policy or policy_mod.base_policy()).get("breaker") or {}).get("enabled"))
+        pair_ttl = ttl
+        if model and not _breaker_on:
+            pair_ttl = await _escalated_cooldown_s(client, provider, model, ttl, policy)
+        await client.set(_health_key(provider, model), "unhealthy", ex=pair_ttl)
         wide = policy_mod.provider_wide_codes(policy) if policy else _PROVIDER_WIDE_CODES
         if model and error_code in wide:
             await client.set(_health_key(provider), "unhealthy", ex=ttl)
@@ -218,6 +290,8 @@ async def clear_provider_health(provider: str, model: str | None = None) -> None
         client = get_async_redis()
         if model:
             await client.delete(_health_key(provider, model))
+            # FIX124 — the pair answered: its next failure is a first strike.
+            await client.delete(_strikes_key(provider, model))
         await client.delete(_health_key(provider))
     except Exception:  # noqa: BLE001
         pass
@@ -421,6 +495,41 @@ def chain_with_auto_candidates(
     return merged, True
 
 
+def chain_with_rescue_candidates(
+    chain: list[dict[str, str]],
+    rescue_models: list | None,
+    *,
+    action: str,
+    original_provider: str,
+    original_model: str,
+) -> tuple[list[dict[str, str]], bool]:
+    """FIX124 — an EXPLICIT model's walk continues with the Auto router's list.
+
+    A model with no chain (the in-house one, pinned in a fifth of the
+    conversations) got one attempt and an error card. ``rescue_models`` is
+    what the router would offer for the same request
+    (``GatewayOrchestrator.explicit_rescue_candidates``, gated by the policy's
+    ``explicit_without_chain`` rule); it goes AFTER the model's own chain —
+    the chain is what somebody chose for this model — other providers first.
+    Every gate of the walk applies to these hops like to any other.
+    """
+    if not rescue_models or action not in _AUTO_MERGE_ACTIONS:
+        return chain, False
+    from app.services.providers.model_registry import resolve_provider
+
+    seen = {(e["provider"], e["model"]) for e in chain or []}
+    extra = [
+        e for e in merge_auto_candidates(
+            rescue_models, [], original_provider=original_provider,
+            original_model=original_model, resolve=resolve_provider,
+        )
+        if (e["provider"], e["model"]) not in seen
+    ]
+    if not extra:
+        return chain, False
+    return list(chain or []) + extra, True
+
+
 # ---------------------------------------------------------------------------
 # FIX120 — one line per candidate the walk touches, one line per turn's
 # outcome, both carrying the turn id (FIX119) so ``grep <run_id>`` shows
@@ -573,6 +682,7 @@ class FallbackOrchestrator:
         ctx: "RequestContext",
         original_error: Exception | None = None,
         started_at: float | None = None,
+        rescue_candidates: list | None = None,
     ) -> FallbackResult:
         """Run the fallback chain. Raises the last error if every try fails.
 
@@ -581,6 +691,9 @@ class FallbackOrchestrator:
         already happened upstream. The same masked payload is sent to
         every candidate so the per-vendor responses share the same
         token-space for the gateway's outbound DLP pass.
+
+        ``rescue_candidates`` (FIX124) is the Auto router's list for an
+        explicit request; it is walked after the model's own chain.
         """
         log = logger.bind(
             tenant_id=ctx.tenant_id,
@@ -648,6 +761,16 @@ class FallbackOrchestrator:
         )
         if _auto_merged:
             log.info("fallback_auto_candidates", candidates=[f"{e['provider']}:{e['model']}" for e in chain[:5]])
+        # FIX124 — an explicit model whose own chain is empty (or runs out
+        # with attempts left) continues with the router's list.
+        _own_hops = len(chain)
+        chain, _rescue_added = chain_with_rescue_candidates(
+            chain, rescue_candidates, action=action,
+            original_provider=original_provider, original_model=original_model,
+        )
+        if _rescue_added:
+            log.info("fallback_explicit_rescue_candidates", own_chain=_own_hops,
+                     candidates=[f"{e['provider']}:{e['model']}" for e in chain[_own_hops:]])
         if not chain:
             log.info("fallback_no_chain")
             log_outcome(log, path=path, requested_model=original_model, outcome="no_chain",
@@ -913,8 +1036,9 @@ class FallbackOrchestrator:
                 continue
 
             # Success — clear any stale health marker on this provider
-            # so the streaming pre-check doesn't keep skipping it.
-            await clear_provider_health(provider)
+            # so the streaming pre-check doesn't keep skipping it (FIX124:
+            # the pair too, which also resets its strike count).
+            await clear_provider_health(provider, model)
 
             # Success — attempt_number counts the primary as 1, so the
             # first fallback that succeeds is 2.
@@ -974,10 +1098,12 @@ class FallbackOrchestrator:
         allowed_providers: Iterable[str] | None,
         skipped: list[dict] | None,
         auto_candidates: list | None = None,
+        rescue_candidates: list | None = None,
     ) -> tuple[list[dict[str, str]], int, frozenset[str] | None, dict]:
         """Shared prologue of the two streaming selectors: the chain for
-        the action (with the Auto router's list ahead of it, FIX121), the
-        attempt ceiling, the boundary and the policy."""
+        the action (with the Auto router's list ahead of it, FIX121, or an
+        explicit model's rescue list behind it, FIX124), the attempt
+        ceiling, the boundary and the policy."""
         pol = policy or policy_mod.base_policy()
         if pol is policy_mod.base_policy() and action in ("cooldown_then_next", "next_in_chain"):
             chain = get_fallback_chain(original_model, original_provider)
@@ -987,8 +1113,40 @@ class FallbackOrchestrator:
             chain, auto_candidates, action=action,
             original_provider=original_provider, original_model=original_model,
         )
+        chain, _ = chain_with_rescue_candidates(
+            chain, rescue_candidates, action=action,
+            original_provider=original_provider, original_model=original_model,
+        )
         lim = self._limits(pol, "stream")
         return chain, int(lim["max_candidates"]), allowed_set(pol, allowed_providers), pol
+
+    async def marked_in_streaming_walk(
+        self,
+        *,
+        original_provider: str,
+        original_model: str,
+        policy: dict | None,
+        action: str,
+        auto_candidates: list | None,
+        rescue_candidates: list | None,
+    ) -> "set[tuple[str, str]]":
+        """The walk's candidates a health marker covers right now.
+
+        FIX124 — the in-stream selector is sync (its session is) and never
+        looked at markers, so a swap could land on a pair marked dead a
+        minute ago. The chat route reads them here, once, and hands the set
+        to :meth:`select_streaming_candidate` as ``unhealthy``.
+        """
+        chain, _, _, _ = self._streaming_walk(
+            original_provider=original_provider, original_model=original_model,
+            policy=policy, action=action, allowed_providers=None, skipped=None,
+            auto_candidates=auto_candidates, rescue_candidates=rescue_candidates,
+        )
+        marked: set[tuple[str, str]] = set()
+        for hop in chain:
+            if await is_provider_unhealthy(hop["provider"], hop["model"]):
+                marked.add((hop["provider"], hop["model"]))
+        return marked
 
     @staticmethod
     def _skip(skipped: list[dict] | None, provider: str, model: str, reason: str) -> None:
@@ -1009,6 +1167,8 @@ class FallbackOrchestrator:
         allowed_providers: Iterable[str] | None = None,
         skipped: list[dict] | None = None,
         auto_candidates: list | None = None,
+        rescue_candidates: list | None = None,
+        unhealthy: "set[tuple[str, str]] | None" = None,
     ) -> dict | None:
         """Pick the first viable streaming fallback for a primary.
 
@@ -1028,6 +1188,10 @@ class FallbackOrchestrator:
              failed this same request).
           4. FIX120 — is inside the request's allowed providers and the
              cost cap; the kill switch returns ``None`` before any of it.
+          5. FIX124 — is not in ``unhealthy`` (the pairs a health marker
+             covers, read by :meth:`marked_in_streaming_walk`). A marker
+             is a hint: when nothing unmarked is viable, the first marked
+             candidate that passed every other gate is returned.
 
         Returns ``None`` when the chain is exhausted — callers should
         treat that as "stay with the primary and let the existing
@@ -1044,9 +1208,11 @@ class FallbackOrchestrator:
         chain, max_candidates, allowed, pol = self._streaming_walk(
             original_provider=original_provider, original_model=original_model,
             policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
-            auto_candidates=auto_candidates,
+            auto_candidates=auto_candidates, rescue_candidates=rescue_candidates,
         )
         tried = 0
+        marked = unhealthy or set()
+        reserve: dict | None = None
 
         for candidate in chain:
             if tried >= max_candidates:
@@ -1094,13 +1260,26 @@ class FallbackOrchestrator:
                 self._skip(skipped, provider, model, "adapter_cannot_stream")
                 continue
 
+            # FIX124 — a marked pair is passed over while anything unmarked
+            # is left; the first one is kept in case nothing is.
+            if (provider, model) in marked:
+                self._skip(skipped, provider, model, "health_marker")
+                if reserve is None:
+                    reserve = {"provider": provider, "model": model, "api_key": api_key}
+                continue
+
             tried += 1
             return {
                 "provider": provider,
                 "model": model,
                 "api_key": api_key,
             }
-        return None
+        if reserve is not None and skipped is not None:
+            skipped[:] = [
+                s for s in skipped
+                if (s["provider"], s["model"], s["reason"]) != (reserve["provider"], reserve["model"], "health_marker")
+            ]
+        return reserve
 
     async def select_streaming_candidate_async(
         self,
@@ -1115,6 +1294,7 @@ class FallbackOrchestrator:
         allowed_providers: Iterable[str] | None = None,
         skipped: list[dict] | None = None,
         auto_candidates: list | None = None,
+        rescue_candidates: list | None = None,
     ) -> dict | None:
         """Async twin of :meth:`select_streaming_candidate`.
 
@@ -1137,7 +1317,7 @@ class FallbackOrchestrator:
         chain, max_candidates, allowed, pol = self._streaming_walk(
             original_provider=original_provider, original_model=original_model,
             policy=policy, action=action, allowed_providers=allowed_providers, skipped=skipped,
-            auto_candidates=auto_candidates,
+            auto_candidates=auto_candidates, rescue_candidates=rescue_candidates,
         )
         tried = 0
 
