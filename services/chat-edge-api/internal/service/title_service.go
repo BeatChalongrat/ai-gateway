@@ -245,6 +245,18 @@ func isMachineTitle(title, firstUserMessage string) bool {
 // allowed_providers is applied by the gateway from its own settings, to this
 // call as to a chat turn.
 func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest {
+	return buildTitleRequestNear(modelID, "", userMsg, asstSnippet)
+}
+
+// buildTitleRequestNear is buildTitleRequest for the router's pick: closestTo
+// names the model that answered the turn, and the gateway orders "any model
+// that works" by closeness to it (its rescue order — tier and price first),
+// so a chat answered by a small model is not named by a large one.
+func buildTitleRequestNear(modelID, closestTo, userMsg, asstSnippet string) GatewayChatRequest {
+	meta := map[string]any{"purpose": titlePurpose}
+	if closestTo != "" {
+		meta["closest_to"] = closestTo
+	}
 	return GatewayChatRequest{
 		Model: modelID,
 		Messages: []GatewayMessage{
@@ -255,7 +267,7 @@ func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest 
 		// Thinking shares the output cap on a reasoning model: with it on,
 		// the cap is all thought and the title comes back empty.
 		Reasoning: &GatewayReasoningConfig{Mode: "off"},
-		Metadata:  map[string]any{"purpose": titlePurpose},
+		Metadata:  meta,
 	}
 }
 
@@ -361,7 +373,7 @@ func (s *TitleService) askModels(
 	if first, _ := s.catalogueEntry(overall, plan.model, plan.requested); first != "" {
 		attempt, cancelFirst := context.WithTimeout(overall, titleFirstAttempt)
 		out.model = first
-		out.title, out.why, _ = s.ask(attempt, call, first, userMsg, snippet)
+		out.title, out.why, _ = s.ask(attempt, call, first, userMsg, snippet, "")
 		cancelFirst()
 		if out.title != "" {
 			return out
@@ -372,7 +384,7 @@ func (s *TitleService) askModels(
 	}
 	out.fallbackUsed = true
 	out.model = AutoModelID
-	title, why, served := s.ask(overall, call, AutoModelID, userMsg, snippet)
+	title, why, served := s.ask(overall, call, AutoModelID, userMsg, snippet, firstNonEmpty(plan.requested, plan.model))
 	if served != "" {
 		out.model = served
 	}
@@ -383,9 +395,9 @@ func (s *TitleService) askModels(
 // ask makes one small call. Returns the cleaned title, or "" and why there
 // is none, and the model the gateway says served it. Logs what the call cost
 // either way.
-func (s *TitleService) ask(ctx context.Context, call GatewayCallContext, modelID, userMsg, snippet string) (title, why, served string) {
+func (s *TitleService) ask(ctx context.Context, call GatewayCallContext, modelID, userMsg, snippet, closestTo string) (title, why, served string) {
 	started := time.Now()
-	resp, err := s.gateway.SendChatCompletion(ctx, call, buildTitleRequest(modelID, userMsg, snippet))
+	resp, err := s.gateway.SendChatCompletion(ctx, call, buildTitleRequestNear(modelID, closestTo, userMsg, snippet))
 	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
 		slog.Warn("title: model call failed", "conv", call.ConversationID.String(), "model", modelID, "ms", elapsed, "err", err)

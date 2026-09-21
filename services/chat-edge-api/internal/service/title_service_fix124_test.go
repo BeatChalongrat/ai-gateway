@@ -264,6 +264,45 @@ func TestGenerate_TitleModelDeadAnotherModelNamesIt(t *testing.T) {
 	}
 }
 
+// The router's pick is asked for the model NEAREST the one that answered
+// (the gateway's rescue order), so a small model's chat is not named by a
+// large one: the second request carries metadata.closest_to.
+func TestGenerate_SecondAskNamesTheModelToStayCloseTo(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"data":[{"id":"qwen3.8-27b-fp8","provider":"sranai"}]}`)
+			return
+		}
+		var req map[string]any
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &req)
+		bodies = append(bodies, req)
+		if req["model"] == AutoModelID {
+			titleOK("deepseek-v4-flash", "สรุปรายงานไตรมาส")(w)
+			return
+		}
+		titleDown(w)
+	}))
+	t.Cleanup(srv.Close)
+	conv := titleConv("New conversation", "qwen3.8-27b-fp8", true)
+	conv.UserID = titleUser
+	seed := &repository.TitleSeed{FirstUser: titleUserRow(titleQ), Question: titleUserRow(titleQ), Answer: titleAnswerRow("qwen3.8-27b-fp8", nil)}
+	s := &TitleService{gateway: NewGatewayClient(srv.URL, "test-key", "", time.Minute, ""), conversations: &fakeTitleConvs{conv: conv}, messages: &fakeTitleMsgs{seed: seed}}
+	if res := generate(t, s); res.Source != TitleSourceModel || !res.FallbackUsed {
+		t.Fatalf("got %+v", res)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("calls = %d", len(bodies))
+	}
+	if _, ok := bodies[0]["metadata"].(map[string]any)["closest_to"]; ok {
+		t.Error("the first ask names its model; it has nothing to be close to")
+	}
+	if got := bodies[1]["metadata"].(map[string]any)["closest_to"]; got != "qwen3.8-27b-fp8" {
+		t.Errorf("second ask closest_to = %v", got)
+	}
+}
+
 // A served name the catalogue does not list (and no pick to resolve it
 // through) goes straight to the router — it is not a reason to give up.
 func TestGenerate_UnknownServedModelGoesToTheRouter(t *testing.T) {

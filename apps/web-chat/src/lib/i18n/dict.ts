@@ -901,7 +901,7 @@ export const en = {
   "update.newVersion": "A new version is available",
   "update.refresh": "Refresh",
   "update.dismiss": "Dismiss update notice",
-  "error.fallbackNotice": "Answered by {actual} ({requested} temporarily unavailable)",
+  "error.fallbackNotice": "{requested} couldn't answer, so {actual} answered · credits are charged at {actual}'s rate",
   "chat.imageAttachFailed":
     "Couldn’t read the attached image ({files}) — answered without it",
   "chat.media.madeBy": "Made by {model}",
@@ -2541,7 +2541,7 @@ const th: Record<DictKey, string> = {
   "update.newVersion": "มีเวอร์ชันใหม่ — รีเฟรชเพื่ออัปเดต",
   "update.refresh": "รีเฟรช",
   "update.dismiss": "ปิดการแจ้งเตือนอัปเดต",
-  "error.fallbackNotice": "ตอบโดย {actual} ({requested} ไม่พร้อมใช้งานชั่วคราว)",
+  "error.fallbackNotice": "{requested} ตอบไม่ได้ จึงให้ {actual} ตอบแทน · เครดิตคิดตามอัตราของ {actual}",
   "chat.imageAttachFailed":
     "อ่านรูปภาพที่แนบมาไม่ได้ ({files}) — ตอบโดยไม่ใช้รูปนั้น",
   "chat.media.madeBy": "สร้างโดย {model}",

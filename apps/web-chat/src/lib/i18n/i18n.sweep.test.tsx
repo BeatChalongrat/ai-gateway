@@ -83,11 +83,13 @@ describe("locale gating (non-hook path)", () => {
 
   it("fallbackNotice substitutes models in the active locale", () => {
     useI18nStore.setState({ locale: "en" });
+    // FIX124 A2 — the notice also says whose rate the credits follow; the
+    // answering model is named twice, so BOTH occurrences must be filled.
     expect(fallbackNotice("claude-sonnet-4", "GPT-4o")).toBe(
-      "Answered by GPT-4o (claude-sonnet-4 temporarily unavailable)",
+      "claude-sonnet-4 couldn't answer, so GPT-4o answered · credits are charged at GPT-4o's rate",
     );
     useI18nStore.setState({ locale: "th" });
-    expect(fallbackNotice("claude-sonnet-4", "GPT-4o")).toContain("ตอบโดย GPT-4o");
+    expect(fallbackNotice("claude-sonnet-4", "GPT-4o")).toBe("claude-sonnet-4 ตอบไม่ได้ จึงให้ GPT-4o ตอบแทน · เครดิตคิดตามอัตราของ GPT-4o");
   });
 
   it("tOutside interpolates {vars}", () => {

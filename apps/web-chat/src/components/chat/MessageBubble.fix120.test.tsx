@@ -19,7 +19,7 @@ function msg(over: Partial<Message>): Message {
 }
 
 const expected = (locale: "th" | "en") =>
-  dictionaries[locale]["error.fallbackNotice"].replace("{actual}", "qwen3.8-27b-fp8").replace("{requested}", "gpt-5.6-luna");
+  dictionaries[locale]["error.fallbackNotice"].replaceAll("{actual}", "qwen3.8-27b-fp8").replaceAll("{requested}", "gpt-5.6-luna");
 
 beforeEach(() => useI18nStore.setState({ locale: "th" }));
 afterEach(cleanup);
