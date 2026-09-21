@@ -488,16 +488,20 @@ func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // Generate title — POST /conversations/{id}/generate-title
 // ---------------------------------------------------------------------------
 
-// GenerateTitle asks the gateway to summarize the conversation's
-// first turn into a 3-6 word sidebar title and persists the result.
-// The frontend fires this once after the first assistant stream
-// completes; the response carries the new title so the client can
-// update the sidebar without an extra round-trip.
+// GenerateTitle names the conversation after its first turn and returns
+// the title it now carries. Both clients fire this once, when the first
+// turn ends — however it ended.
 //
-// Response shape: { "title": "..." } on success, standard
-// errorEnvelope on failure. 404 when the conversation isn't owned
-// by the caller; 409 when the conversation has no messages yet;
-// 502 when the upstream gateway is unreachable.
+// FIX122 — the decision is the server's (service.TitleService): which
+// model, whether at all, and what stands when the model has nothing. A
+// model that fails is not this endpoint's failure: the answer is then the
+// first words of the user's message, 200. It used to be a 502, and the
+// page answered that by renaming the chat itself — over whatever title
+// the person had typed.
+//
+// Response: { "title": "...", "source": "model"|"fallback"|"kept",
+// "reason": "..." }. 404 when the conversation isn't the caller's; 409
+// when it has no messages yet.
 func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Request) {
 	if h.titles == nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "title service not configured")
@@ -510,7 +514,7 @@ func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	title, err := h.titles.Generate(r.Context(), caller.TenantUUID, caller.UserID, convID)
+	res, err := h.titles.Generate(r.Context(), caller.TenantUUID, caller.UserID, convID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTitleConversationNotFound):
@@ -518,25 +522,12 @@ func (h *ConversationHandler) GenerateTitle(w http.ResponseWriter, r *http.Reque
 		case errors.Is(err, service.ErrTitleNoMessages):
 			WriteError(w, http.StatusConflict, CodeConflict, "conversation has no messages yet")
 		default:
-			var ue *service.GatewayUnavailableError
-			if errors.As(err, &ue) {
-				WriteError(w, http.StatusBadGateway, "PROVIDER_UNAVAILABLE", "title generation upstream unavailable")
-				return
-			}
 			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		}
 		return
 	}
-	if err := h.conversations.Rename(r.Context(), caller.TenantUUID, caller.UserID, convID, title); err != nil {
-		// Title generation succeeded but the persist write failed —
-		// surface 500 so the client knows the sidebar is stale, but
-		// still return the title so a retry isn't strictly required
-		// for display purposes.
-		WriteError(w, http.StatusInternalServerError, CodeInternalError, "couldn't persist title")
-		return
-	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"title": title})
+	_ = json.NewEncoder(w).Encode(map[string]any{"title": res.Title, "source": res.Source, "reason": res.Reason})
 }
 
 // ---------------------------------------------------------------------------

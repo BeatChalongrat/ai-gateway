@@ -399,6 +399,25 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uui
 	return nil
 }
 
+// UpdateTitleIfCurrent (FIX122) writes ``title`` only while the row still
+// carries ``current`` — the title the caller read before it went off to
+// ask a model. A rename that landed in between (the person's, another
+// device's) makes this a no-op and reports false: a generated title never
+// replaces one somebody chose. Bumps ``updated_at`` exactly as UpdateTitle
+// does, so whatever follows that column sees both kinds of rename alike.
+func (r *ConversationRepo) UpdateTitleIfCurrent(ctx context.Context, tenantID, convID uuid.UUID, current, title string) (bool, error) {
+	const q = `
+		UPDATE chat.conversations
+		SET title = $4, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false AND title = $3
+	`
+	tag, err := r.db.Exec(ctx, q, convID, tenantID, current, title)
+	if err != nil {
+		return false, fmt.Errorf("update title if current: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
 // UpdateModel changes the conversation's default model_id and
 // bumps “updated_at“. Tenant-scoped via the WHERE clause so a
 // wrong tenant_id can't reassign someone else's conversation.

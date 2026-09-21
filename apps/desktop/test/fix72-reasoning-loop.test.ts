@@ -6,8 +6,7 @@
 //           exact browser-batch contract text (latent today — neither qwen nor
 //           deepseek emits >1 tool block per round, measured 0/148 rounds —
 //           so this is forward-correctness).
-//   Part F  a chat is NEVER left silently untitled: deriveTitle falls back to
-//           the user's own first words when the model returns nothing.
+//   Part F  (titling) moved to chat-edge in FIX122 — see title_service.go.
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,7 +17,7 @@ import { HostTools } from "../src/main/host-tools";
 import type { Logger } from "../src/main/logger";
 import { PermissionStore } from "../src/main/permissions";
 import { GrantStore } from "../src/main/grants";
-import { TurnCoordinator, deriveTitle, toolResultErrored, NOT_EXECUTED_AFTER_FAILURE } from "../src/main/turn-coordinator";
+import { TurnCoordinator, toolResultErrored, NOT_EXECUTED_AFTER_FAILURE } from "../src/main/turn-coordinator";
 
 const lines: string[] = [];
 const log: Logger = { info: (m: string) => { lines.push(m); }, warn: (m: string) => { lines.push(m); }, error: (m: string) => { lines.push(m); }, filePath: null, attachFile: () => {}, lines: [] };
@@ -153,17 +152,5 @@ describe("FIX72 Part D/F helpers", () => {
     expect(toolResultErrored(msgs, "a")).toBe(true);
     expect(toolResultErrored(msgs, "b")).toBe(false);
     expect(toolResultErrored(msgs, "missing")).toBe(false);
-  });
-
-  it("deriveTitle never returns empty when the user wrote something", () => {
-    expect(deriveTitle("A Nice Title", "hello there")).toBe("A Nice Title");
-    expect(deriveTitle('"Quoted Title."', "x")).toBe("Quoted Title");
-    // model empty → fall back to the user's own words, in their language
-    expect(deriveTitle("", "Please summarize the quarterly report for me")).toBe("Please summarize the quarterly report for me");
-    expect(deriveTitle("   ", "เข้า youtube ที หาข่าว")).toBe("เข้า youtube ที หาข่าว");
-    // nothing at all → null (only case that leaves a chat untitled)
-    expect(deriveTitle("", "   ")).toBeNull();
-    // over-long model output is rejected in favour of the user words
-    expect(deriveTitle("x".repeat(200), "short prompt")).toBe("short prompt");
   });
 });

@@ -1,19 +1,29 @@
-// TitleService computes a short, descriptive conversation title from
-// the first user/assistant turn by asking the Gateway for a one-line
-// summary. The result is stripped of quotes/trailing punctuation and
-// capped so it fits the sidebar without truncation.
+// TitleService names a conversation once, after its first turn, by asking
+// the model that ANSWERED that turn for a one-line summary.
 //
-// Why use the LLM: the local heuristic (truncate the first user
-// message at 50 chars) produces terrible titles for short prompts
-// ("ไง", "hi", "?") and for prompts that are themselves a long
-// question. A 3-6 word summary captures intent without the prompt's
-// exact wording leaking into the sidebar.
+// FIX122 — what this used to do, and why it stopped. The request went to a
+// hard-coded "gpt-4o-mini" whatever the person had picked. When that id
+// failed at the primary, the gateway's fallback chain carried the first
+// user message (and a snippet of the answer) to whichever external
+// provider answered — measured: gpt-5.6-luna, deepseek-v4-flash,
+// glm-5.3-flash — for a chat the person had opened on a self-hosted model.
+// When the walk ran dry the page got a 502. And the result was written
+// with an unconditional rename, so a title the person had typed in the
+// meantime was replaced.
 //
-// Failure mode: title generation is fire-and-forget from the
-// frontend's perspective. When the gateway is down or returns an
-// empty completion, the conversation keeps whatever title it already
-// has (typically the default "New conversation" placeholder) and the
-// API returns the unchanged title — no error surfaced to the user.
+// The rules now:
+//   - the model is the one on the first assistant row — the SERVED model,
+//     so an Auto chat that fell back is named by whoever really answered;
+//   - the call may not leave that model: ``allowed_providers`` names no
+//     provider, which puts every fallback hop outside the boundary;
+//   - the request is small: two short messages, no tools, thinking off, a
+//     low output cap;
+//   - no answer on the first turn, a failed call, an empty completion → the
+//     first words of the person's own message. Never an error to the page;
+//   - only a title a machine put there is replaced ("New conversation" or
+//     the first-message truncation), only on the first turn, and the write
+//     is compare-and-set against the title that was read;
+//   - a temporary chat (memory off) is never sent anywhere for a title.
 package service
 
 import (
@@ -21,7 +31,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -29,50 +41,32 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 )
 
-// titleModelID is the model used for title generation. Hard-coded to
-// a small/fast model so title generation doesn't burn premium tokens
-// on a 6-word completion. Always available in the default gateway
-// model list; if it's ever de-listed we fall back to the
-// conversation's own model.
-const titleModelID = "gpt-4o-mini"
+// defaultConversationTitle is the placeholder a new row carries.
+const defaultConversationTitle = "New conversation"
 
-// titleSystemPrompt frames the request so the model returns just a
-// title, not a sentence-style answer. The language-mirror clause is
-// load-bearing: without it gpt-4o-mini reliably defaults to English
-// even when the user prompt is Thai/Japanese/etc., which produces
-// sidebar titles in the wrong script.
-const titleSystemPrompt = "Generate a short conversation title (3-6 words) based on this exchange. The title MUST be in the same language as the user's message. If the user writes in Thai, the title must be in Thai. If in English, title in English. Reply with just the title, no quotes, no punctuation at the end."
+// titleSystemPrompt is the whole instruction. The language clause is
+// load-bearing: without it small models title Thai chats in English.
+const titleSystemPrompt = "Write a title of 3 to 6 words for this conversation, in the same language the user wrote in. Reply with the title only: no quotes, no explanation, no punctuation at the end."
 
-// titleResponseFormat pins the completion to a strict OpenAI
-// Structured-Outputs json_schema: a single object {"title": string}
-// with no additional properties. Small models (gpt-4o-mini) tend to
-// preamble in English on short prompts ("Sure, here's a title: …");
-// with the schema there is nowhere to preamble, so the wrong-language
-// leading text can't leak into the sidebar. Forwarded verbatim to
-// OpenAI's chat-completions API via the backend openai_adapter.
-var titleResponseFormat = map[string]any{
-	"type": "json_schema",
-	"json_schema": map[string]any{
-		"name":   "conversation_title",
-		"strict": true,
-		"schema": map[string]any{
-			"type":                 "object",
-			"additionalProperties": false,
-			"required":             []string{"title"},
-			"properties": map[string]any{
-				"title": map[string]any{
-					"type":        "string",
-					"description": "Short 3-6 word conversation title in the user's language.",
-				},
-			},
-		},
-	},
-}
+// titleMaxTokens caps the completion. Six words of Thai are ~30 tokens;
+// the rest is slack for a model that leaks a little preamble.
+const titleMaxTokens = 64
 
-// assistantSnippetMaxRunes caps the assistant text we feed the title
-// model. The full reply is irrelevant for naming — the first sentence
-// or two carries the topic; longer payloads just waste tokens.
+// titleTimeout bounds the call. A title that is not back by then is not
+// worth waiting for — the first words of the message are already there.
+const titleTimeout = 20 * time.Second
+
+// titleUserMaxRunes / assistantSnippetMaxRunes cap what is sent. The topic
+// is in the opening lines; a pasted document is not title material.
+const titleUserMaxRunes = 500
 const assistantSnippetMaxRunes = 200
+
+// titleNoFallbackBoundary is sent as ``metadata.allowed_providers``. The
+// gateway never applies that list to the model a request names, only to
+// the candidates of a fallback walk (dispatcher hops, the orchestrator's
+// chain, the streaming pre-check) — so a list that names no provider
+// means "this model or nothing".
+var titleNoFallbackBoundary = []string{"none:title-generation"}
 
 // titleMaxRunes is the final cap applied to whatever the model
 // returns. The DB column is TEXT; this cap is a UX guard so the
@@ -90,10 +84,26 @@ var (
 	ErrTitleNoMessages = errors.New("title: conversation has no messages")
 )
 
-// TitleService is the title-generation entry point. The MessageService
-// holds a reference too but only ever uses TitleService for future
-// auto-title work; the generate-title HTTP endpoint drives it
-// directly via the ConversationHandler.
+// Title sources, reported to the caller and logged.
+const (
+	TitleSourceModel    = "model"    // the serving model wrote it
+	TitleSourceFallback = "fallback" // first words of the user's message
+	TitleSourceKept     = "kept"     // nothing was changed
+)
+
+// TitleResult is what Generate decided. Title is always the title the
+// conversation carries when Generate returns.
+type TitleResult struct {
+	Title  string
+	Source string
+	// Reason says why a title was kept or fell back; "" for a model title.
+	Reason string
+	// Model is the model that was asked; "" when none was.
+	Model string
+}
+
+// TitleService is the title-generation entry point, driven by the
+// generate-title HTTP endpoint via the ConversationHandler.
 type TitleService struct {
 	gateway       *GatewayClient
 	conversations *repository.ConversationRepo
@@ -112,82 +122,178 @@ func (s *TitleService) SetRepos(conv *repository.ConversationRepo, msg *reposito
 	s.messages = msg
 }
 
-// Generate produces a fresh title for the conversation by asking the
-// gateway to summarize the first user/assistant turn. Returns the
-// new title; the caller is responsible for persisting it (typically
-// via ConversationService.Rename so the same length/whitespace rules
-// apply as on user-driven renames).
-//
-// When the conversation has only a user message (assistant hasn't
-// replied yet), the user prompt alone is fed to the title model —
-// the user message is the dominant signal anyway.
+// titlePlan is the decision, separate from the I/O so it can be tested
+// as a table.
+type titlePlan struct {
+	// action: "keep" (touch nothing), "fallback" (first words, no model
+	// call) or "ask" (call model, fall back to first words if it fails).
+	action string
+	reason string
+	model  string
+}
+
+// planTitle decides what to do for a conversation and the head of its
+// history (oldest first).
+func planTitle(conv *model.Conversation, history []model.Message) titlePlan {
+	firstUser, firstAsst := firstUserAndAssistant(history)
+	if firstUser == nil {
+		return titlePlan{action: "keep", reason: "no_messages"}
+	}
+	if !isMachineTitle(conv.Title, firstUser.ContentMasked) {
+		return titlePlan{action: "keep", reason: "title_already_set"}
+	}
+	users := 0
+	for i := range history {
+		if history[i].Role == "user" {
+			users++
+		}
+	}
+	if users > 1 {
+		return titlePlan{action: "keep", reason: "not_first_turn"}
+	}
+	if !conv.MemoryEnabled {
+		return titlePlan{action: "keep", reason: "temporary_chat"}
+	}
+	if firstAsst == nil || firstAsst.Status != "completed" {
+		return titlePlan{action: "fallback", reason: "first_turn_unanswered"}
+	}
+	if firstAsst.ModelID == nil || strings.TrimSpace(*firstAsst.ModelID) == "" {
+		return titlePlan{action: "fallback", reason: "served_model_unknown"}
+	}
+	return titlePlan{action: "ask", model: strings.TrimSpace(*firstAsst.ModelID)}
+}
+
+// isMachineTitle reports whether nobody chose this title: the creation
+// placeholder, or one of the truncations of the first message that the
+// server (finalizeConversation, this file's fallback) writes.
+func isMachineTitle(title, firstUserMessage string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" || t == defaultConversationTitle {
+		return true
+	}
+	return t == makeTitleFrom(firstUserMessage) ||
+		t == cleanTitle(fallbackTitleFromMessage(firstUserMessage))
+}
+
+// buildTitleRequest is the whole request: two short messages and the
+// switches that keep it cheap and keep it home.
+func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest {
+	return GatewayChatRequest{
+		Model: modelID,
+		Messages: []GatewayMessage{
+			{Role: "system", Content: titleSystemPrompt},
+			{Role: "user", Content: buildTitlePrompt(userMsg, asstSnippet)},
+		},
+		MaxTokens: titleMaxTokens,
+		// Thinking shares the output cap on a reasoning model: with it on,
+		// 64 tokens are all thought and the title comes back empty.
+		Reasoning: &GatewayReasoningConfig{Mode: "off"},
+		Metadata:  map[string]any{"allowed_providers": titleNoFallbackBoundary},
+	}
+}
+
+// Generate names the conversation if it is still unnamed, and reports
+// what it did. A model failure is not an error: the result is then the
+// first words of the user's message. Errors are reserved for "not yours",
+// "nothing to name" and the database.
 func (s *TitleService) Generate(
 	ctx context.Context,
 	tenantID, userID, convID uuid.UUID,
-) (string, error) {
+) (TitleResult, error) {
 	if s.conversations == nil || s.messages == nil {
-		return "", errors.New("title: service not wired (repos missing)")
+		return TitleResult{}, errors.New("title: service not wired (repos missing)")
 	}
 	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return "", ErrTitleConversationNotFound
+			return TitleResult{}, ErrTitleConversationNotFound
 		}
-		return "", err
+		return TitleResult{}, err
 	}
 	if conv.UserID != userID {
 		// Don't leak existence to other users of the same tenant.
-		return "", ErrTitleConversationNotFound
+		return TitleResult{}, ErrTitleConversationNotFound
 	}
 
-	// Pull the chronological history. The repo caps at 200 already;
-	// we only need the first user + first assistant entry, so a
-	// small limit keeps the round trip cheap.
 	history, err := s.messages.ListContextByConversation(ctx, tenantID, convID, 20)
 	if err != nil {
-		return "", fmt.Errorf("title: load history: %w", err)
+		return TitleResult{}, fmt.Errorf("title: load history: %w", err)
 	}
-	firstUser, firstAsst := firstUserAndAssistant(history)
-	if firstUser == nil {
-		return "", ErrTitleNoMessages
+	plan := planTitle(conv, history)
+	if plan.action == "keep" {
+		if plan.reason == "no_messages" {
+			return TitleResult{}, ErrTitleNoMessages
+		}
+		slog.Info("title: kept", "conv", convID.String(), "reason", plan.reason)
+		return TitleResult{Title: conv.Title, Source: TitleSourceKept, Reason: plan.reason}, nil
 	}
 
-	prompt := buildTitlePrompt(firstUser.ContentMasked, assistantSnippet(firstAsst))
-	chosenModel := titleModelID
-	gwReq := GatewayChatRequest{
-		Model: chosenModel,
-		Messages: []GatewayMessage{
-			{Role: "system", Content: titleSystemPrompt},
-			{Role: "user", Content: prompt},
-		},
-		ResponseFormat: titleResponseFormat,
+	firstUser, firstAsst := firstUserAndAssistant(history)
+	chosen, source, reason := cleanTitle(fallbackTitleFromMessage(firstUser.ContentMasked)), TitleSourceFallback, plan.reason
+	if plan.action == "ask" {
+		if t, why := s.askModel(ctx, tenantID, userID, convID, plan.model, firstUser, firstAsst); t != "" {
+			chosen, source, reason = t, TitleSourceModel, ""
+		} else {
+			reason = why
+		}
 	}
-	resp, err := s.gateway.SendChatCompletion(ctx, GatewayCallContext{
+	if chosen == "" || chosen == conv.Title {
+		if chosen == "" {
+			source, reason = TitleSourceKept, "nothing_to_title_with"
+		}
+		return TitleResult{Title: conv.Title, Source: source, Reason: reason, Model: plan.model}, nil
+	}
+	written, err := s.conversations.UpdateTitleIfCurrent(ctx, tenantID, convID, conv.Title, chosen)
+	if err != nil {
+		return TitleResult{}, err
+	}
+	if !written {
+		// Renamed while the model was writing. Theirs stands.
+		current := conv.Title
+		if fresh, ferr := s.conversations.GetByID(ctx, tenantID, convID); ferr == nil {
+			current = fresh.Title
+		}
+		slog.Info("title: kept", "conv", convID.String(), "reason", "renamed_meanwhile")
+		return TitleResult{Title: current, Source: TitleSourceKept, Reason: "renamed_meanwhile", Model: plan.model}, nil
+	}
+	slog.Info("title: written", "conv", convID.String(), "source", source, "reason", reason, "model", plan.model)
+	return TitleResult{Title: chosen, Source: source, Reason: reason, Model: plan.model}, nil
+}
+
+// askModel makes the one small call. Returns the cleaned title, or "" and
+// why there is none. Logs what the call cost either way.
+func (s *TitleService) askModel(
+	ctx context.Context, tenantID, userID, convID uuid.UUID,
+	modelID string, firstUser, firstAsst *model.Message,
+) (string, string) {
+	started := time.Now()
+	callCtx, cancel := context.WithTimeout(ctx, titleTimeout)
+	defer cancel()
+	resp, err := s.gateway.SendChatCompletion(callCtx, GatewayCallContext{
 		TenantID:       tenantID,
 		UserID:         userID,
 		ConversationID: convID,
-	}, gwReq)
+	}, buildTitleRequest(modelID, truncateRunes(strings.TrimSpace(firstUser.ContentMasked), titleUserMaxRunes), assistantSnippet(firstAsst)))
+	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
-		// Retry once with the conversation's own model — covers the
-		// edge case where the deployment has removed gpt-4o-mini from
-		// the allow-list. If that also fails, bubble the gateway
-		// error so the handler maps to 502.
-		gwReq.Model = conv.ModelID
-		resp, err = s.gateway.SendChatCompletion(ctx, GatewayCallContext{
-			TenantID:       tenantID,
-			UserID:         userID,
-			ConversationID: convID,
-		}, gwReq)
-		if err != nil {
-			return "", err
+		slog.Warn("title: model call failed, using the first words",
+			"conv", convID.String(), "model", modelID, "ms", elapsed, "err", err)
+		return "", "model_call_failed"
+	}
+	title := cleanTitle(parseTitleCompletion(extractContent(resp)))
+	prompt, completion, thinking, served := 0, 0, 0, ""
+	if resp != nil {
+		served = resp.Model
+		if resp.Usage != nil {
+			prompt, completion, thinking = resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.ReasoningTokens
 		}
 	}
-	raw := extractContent(resp)
-	title := resolveTitle(raw, firstUser.ContentMasked)
+	slog.Info("title: model answered", "conv", convID.String(), "model", modelID, "served", served, "ms", elapsed,
+		"prompt_tokens", prompt, "completion_tokens", completion, "reasoning_tokens", thinking, "empty", title == "")
 	if title == "" {
-		return "", errors.New("title: gateway returned empty completion")
+		return "", "model_returned_nothing"
 	}
-	return title, nil
+	return title, ""
 }
 
 // resolveTitle turns a title-model completion into the final sidebar title.
@@ -330,6 +436,9 @@ func cleanTitle(raw string) string {
 	// marks. Leaves intra-title punctuation alone (e.g. "API rate
 	// limits: how to debug").
 	s = strings.TrimRight(s, ".,;!?。、！？")
+	// `"Title".` — the full stop sat outside the quotes, so they are only
+	// reachable now.
+	s = strings.TrimSpace(strings.Trim(s, "\"'“”‘’`"))
 	runes := []rune(s)
 	if len(runes) > titleMaxRunes {
 		s = string(runes[:titleMaxRunes]) + "…"

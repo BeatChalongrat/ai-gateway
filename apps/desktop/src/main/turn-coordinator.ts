@@ -1267,7 +1267,6 @@ export class TurnCoordinator {
     // is fixed for the turn, so it cannot flap if the bridge drops mid-turn.
     await this.refreshBrowserConnected();
 
-    const isFirstTurn = messages.length === 2;
     const historyStart = 1; // everything after the system message is persisted
     this.log.info(`TURN START #${turnNo} conv=${conversationId} model=${model} msgId=${turn.messageId} textLen=${payload.text.length} attachments=${payload.attachmentHandles.length}${attached && payload.attachmentHandles.length ? ` (${attached.imageBlocks.length} image, ${attached.attached.length - attached.imageBlocks.length} document, ${attached.failures.length} failed → on the user message)` : ""}`);
     if (attached && attached.failures.length > 0) {
@@ -1447,7 +1446,12 @@ export class TurnCoordinator {
       this.log.info(`TURN PAUSED conv=${conversationId} after ${elapsed} ms`);
       return;
     }
-    if (isFirstTurn && turn.assistantText.length > 0) void this.generateTitle(conversationId, userText, turn.assistantText);
+    // FIX122 — the host no longer names the chat. It asked `defaultModel`
+    // (not the model that answered) and renamed unconditionally, over a
+    // title the person had typed; and the page was ALSO asking chat-edge, so
+    // every first turn was titled twice. chat-edge's generate-title is the
+    // one place now: the page calls it when this terminal arrives, after the
+    // import above has put the rows (and the served model) on the server.
     this.emit(conversationId, "message_complete", completeData);
     this.log.info(`TURN DONE conv=${conversationId} run=${runId} in ${elapsed} ms, ${turn.assistantText.length} chars, stop_reason=${turn.stopReason || "-"}`);
   }
@@ -3018,69 +3022,6 @@ export class TurnCoordinator {
   private notifyNotSaved(conversationId: string, runId: string | undefined, reason: "failed" | "rejected", info: { status?: number; detail?: string }): void {
     this.bridge.post("host.notice", { kind: "turn-not-saved", conversationId, ...(runId ? { runId } : {}), reason, ...(info.status ? { status: info.status } : {}), ...(info.detail ? { detail: info.detail.slice(0, 300) } : {}) });
   }
-
-  private async generateTitle(conversationId: string, firstUser: string, firstReply: string): Promise<void> {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20_000);
-      let title = "";
-      for await (const ev of this.gateway.streamCompletion(
-        {
-          model: this.opts.defaultModel,
-          messages: [
-            { role: "system", content: "Generate a very short title (3-6 words, no quotes, no trailing period, same language as the conversation) for this chat. Reply with the title only." },
-            { role: "user", content: `User: ${truncate(firstUser, 500)}\n\nAssistant: ${truncate(firstReply, 500)}` },
-          ],
-          // FIX72 — a title needs no thinking, and a reasoning model spending
-          // its budget thinking (measured on qwen3.8-27b-fp8: 30 tokens all
-          // went to reasoning, content came back empty, the chat was left
-          // silently untitled) is the exact failure this closes. Thinking off
-          // (a no-op for a model whose box has no off-switch) plus a slightly
-          // larger budget than the old 30 so a little leaked thinking still
-          // leaves room for the six words.
-          max_tokens: 64,
-          reasoning: { mode: "off", show_summary: false },
-        },
-        controller.signal,
-      )) {
-        if (ev.kind === "content_delta") title += ev.delta;
-        else if (ev.kind === "error") {
-          clearTimeout(timer);
-          // Even a model error must not leave the chat silently untitled — a
-          // title derived from the user's first words is better than none.
-          const fb = deriveTitle("", firstUser);
-          if (fb && (await this.chatEdge.renameConversation(conversationId, fb))) this.log.info(`TURN TITLE conv=${conversationId} (fallback, model errored): ${fb}`);
-          return;
-        }
-      }
-      clearTimeout(timer);
-      const chosen = deriveTitle(title, firstUser);
-      if (!chosen) {
-        this.log.warn(`TURN TITLE conv=${conversationId}: model returned no title and no user text to fall back to — chat left untitled`);
-        return;
-      }
-      const fromModel = title.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
-      if (await this.chatEdge.renameConversation(conversationId, chosen)) {
-        this.log.info(`TURN TITLE conv=${conversationId}: ${chosen}${chosen === fromModel ? "" : " (fallback from user text — model returned empty)"}`);
-      }
-    } catch (err) {
-      this.log.info(`Title generation skipped for ${conversationId}: ${(err as Error).message}`);
-    }
-  }
-}
-
-/** FIX72 — turn a model's title output into a title that is NEVER silently
- * empty. The model's text wins when it is a sane length; otherwise fall back
- * to the first words of the user's own message (already in the user's
- * language). Returns null only when there is nothing at all to title with. */
-export function deriveTitle(modelOutput: string, firstUser: string): string | null {
-  const cleaned = modelOutput.trim().replace(/^["“”']+|["“”'.]+$/g, "").trim();
-  if (cleaned.length > 0 && cleaned.length <= 80) return cleaned;
-  // Fallback: first few words (space-separated languages) capped by characters
-  // (Thai and other space-less scripts fall through to the char cap).
-  const words = firstUser.trim().split(/\s+/).filter(Boolean).slice(0, 8).join(" ");
-  const fb = words.slice(0, 60).trim();
-  return fb.length > 0 ? fb : null;
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
