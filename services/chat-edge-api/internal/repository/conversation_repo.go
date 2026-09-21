@@ -399,11 +399,11 @@ func (r *ConversationRepo) UpdateTitle(ctx context.Context, tenantID, convID uui
 	return nil
 }
 
-// UpdateTitleIfCurrent (FIX122) writes ``title`` only while the row still
-// carries ``current`` — the title the caller read before it went off to
+// UpdateTitleIfCurrent (FIX122) writes title only while the row still
+// carries current — the title the caller read before it went off to
 // ask a model. A rename that landed in between (the person's, another
 // device's) makes this a no-op and reports false: a generated title never
-// replaces one somebody chose. Bumps ``updated_at`` exactly as UpdateTitle
+// replaces one somebody chose. Bumps updated_at exactly as UpdateTitle
 // does, so whatever follows that column sees both kinds of rename alike.
 func (r *ConversationRepo) UpdateTitleIfCurrent(ctx context.Context, tenantID, convID uuid.UUID, current, title string) (bool, error) {
 	const q = `

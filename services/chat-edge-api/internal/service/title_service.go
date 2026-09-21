@@ -14,8 +14,12 @@
 // The rules now:
 //   - the model is the one on the first assistant row — the SERVED model,
 //     so an Auto chat that fell back is named by whoever really answered;
-//   - the call may not leave that model: ``allowed_providers`` names no
-//     provider, which puts every fallback hop outside the boundary;
+//   - the call may not leave that model's provider: allowed_providers
+//     names it and nothing else, so no fallback hop reaches a provider the
+//     person did not pick. (A list naming NO provider does not mean "this
+//     model or nothing": the gateway applies the list to the primary route
+//     too, finds no compatible provider and falls through to its default —
+//     measured, a qwen title request went to openai and 404'd.);
 //   - the request is small: two short messages, no tools, thinking off, a
 //     low output cap;
 //   - no answer on the first turn, a failed call, an empty completion → the
@@ -45,12 +49,19 @@ import (
 const defaultConversationTitle = "New conversation"
 
 // titleSystemPrompt is the whole instruction. The language clause is
-// load-bearing: without it small models title Thai chats in English.
-const titleSystemPrompt = "Write a title of 3 to 6 words for this conversation, in the same language the user wrote in. Reply with the title only: no quotes, no explanation, no punctuation at the end."
+// load-bearing, and so is spelling Thai out: with only "the same language
+// the user wrote in", qwen titled a Thai question "Why the sky is blue"
+// (measured) — the instruction itself is English and a short message gives
+// the model little to outweigh it.
+const titleSystemPrompt = "Write a title of 3 to 6 words for this conversation. The title MUST be in the same language as the user's message: if the user writes in Thai, the title must be in Thai; if in English, in English. Reply with the title only: no quotes, no explanation, no punctuation at the end."
 
-// titleMaxTokens caps the completion. Six words of Thai are ~30 tokens;
-// the rest is slack for a model that leaks a little preamble.
-const titleMaxTokens = 64
+// titleMaxTokens caps the completion, thinking included. A model whose
+// thinking can be switched off (qwen) stops after the six words — measured 6
+// completion tokens — so the cap costs it nothing. A model with no off-switch
+// thinks first: at 64, deepseek-v4-flash spent the whole cap thinking and the
+// gateway answered output_limit_reached (measured). The cap is what such a
+// model may spend before the first words of the message are used instead.
+const titleMaxTokens = 512
 
 // titleTimeout bounds the call. A title that is not back by then is not
 // worth waiting for — the first words of the message are already there.
@@ -61,12 +72,9 @@ const titleTimeout = 20 * time.Second
 const titleUserMaxRunes = 500
 const assistantSnippetMaxRunes = 200
 
-// titleNoFallbackBoundary is sent as ``metadata.allowed_providers``. The
-// gateway never applies that list to the model a request names, only to
-// the candidates of a fallback walk (dispatcher hops, the orchestrator's
-// chain, the streaming pre-check) — so a list that names no provider
-// means "this model or nothing".
-var titleNoFallbackBoundary = []string{"none:title-generation"}
+// titlePurpose rides metadata.purpose so the call can be told from a
+// chat turn in the gateway's logs. The gateway ignores keys it does not know.
+const titlePurpose = "title-generation"
 
 // titleMaxRunes is the final cap applied to whatever the model
 // returns. The DB column is TEXT; this cap is a UX guard so the
@@ -130,6 +138,13 @@ type titlePlan struct {
 	action string
 	reason string
 	model  string
+	// requested is the conversation's own model when it is the same model
+	// under its catalogue id: the row stores the name the provider served
+	// under ("deepseek-flash" for deepseek-v4-flash, measured), which the
+	// catalogue may not list. Only when the turn did not fall back and the
+	// person picked a model — after a fallback, or on Auto, the conversation's
+	// model is not who answered, and it is never asked.
+	requested string
 }
 
 // planTitle decides what to do for a conversation and the head of its
@@ -160,7 +175,11 @@ func planTitle(conv *model.Conversation, history []model.Message) titlePlan {
 	if firstAsst.ModelID == nil || strings.TrimSpace(*firstAsst.ModelID) == "" {
 		return titlePlan{action: "fallback", reason: "served_model_unknown"}
 	}
-	return titlePlan{action: "ask", model: strings.TrimSpace(*firstAsst.ModelID)}
+	plan := titlePlan{action: "ask", model: strings.TrimSpace(*firstAsst.ModelID)}
+	if requested := strings.TrimSpace(conv.ModelID); firstAsst.FallbackFrom == nil && requested != "" && !IsAutoModel(requested) && requested != plan.model {
+		plan.requested = requested
+	}
+	return plan
 }
 
 // isMachineTitle reports whether nobody chose this title: the creation
@@ -177,7 +196,7 @@ func isMachineTitle(title, firstUserMessage string) bool {
 
 // buildTitleRequest is the whole request: two short messages and the
 // switches that keep it cheap and keep it home.
-func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest {
+func buildTitleRequest(modelID, provider, userMsg, asstSnippet string) GatewayChatRequest {
 	return GatewayChatRequest{
 		Model: modelID,
 		Messages: []GatewayMessage{
@@ -188,7 +207,10 @@ func buildTitleRequest(modelID, userMsg, asstSnippet string) GatewayChatRequest 
 		// Thinking shares the output cap on a reasoning model: with it on,
 		// 64 tokens are all thought and the title comes back empty.
 		Reasoning: &GatewayReasoningConfig{Mode: "off"},
-		Metadata:  map[string]any{"allowed_providers": titleNoFallbackBoundary},
+		// The boundary of every fallback layer (dispatcher hops, the
+		// orchestrator's chain): the provider that already has this
+		// conversation, and no other.
+		Metadata: map[string]any{"allowed_providers": []string{provider}, "purpose": titlePurpose},
 	}
 }
 
@@ -231,7 +253,7 @@ func (s *TitleService) Generate(
 	firstUser, firstAsst := firstUserAndAssistant(history)
 	chosen, source, reason := cleanTitle(fallbackTitleFromMessage(firstUser.ContentMasked)), TitleSourceFallback, plan.reason
 	if plan.action == "ask" {
-		if t, why := s.askModel(ctx, tenantID, userID, convID, plan.model, firstUser, firstAsst); t != "" {
+		if t, why := s.askModel(ctx, tenantID, userID, convID, plan, firstUser, firstAsst); t != "" {
 			chosen, source, reason = t, TitleSourceModel, ""
 		} else {
 			reason = why
@@ -264,16 +286,24 @@ func (s *TitleService) Generate(
 // why there is none. Logs what the call cost either way.
 func (s *TitleService) askModel(
 	ctx context.Context, tenantID, userID, convID uuid.UUID,
-	modelID string, firstUser, firstAsst *model.Message,
+	plan titlePlan, firstUser, firstAsst *model.Message,
 ) (string, string) {
 	started := time.Now()
 	callCtx, cancel := context.WithTimeout(ctx, titleTimeout)
 	defer cancel()
+	// Without the provider there is no boundary to draw, and a call with no
+	// boundary is the old behaviour. No provider, no call.
+	modelID, provider := s.catalogueEntry(callCtx, plan.model, plan.requested)
+	if provider == "" {
+		modelID = plan.model
+		slog.Warn("title: served model is not in the catalogue, using the first words", "conv", convID.String(), "model", modelID)
+		return "", "served_model_not_in_catalogue"
+	}
 	resp, err := s.gateway.SendChatCompletion(callCtx, GatewayCallContext{
 		TenantID:       tenantID,
 		UserID:         userID,
 		ConversationID: convID,
-	}, buildTitleRequest(modelID, truncateRunes(strings.TrimSpace(firstUser.ContentMasked), titleUserMaxRunes), assistantSnippet(firstAsst)))
+	}, buildTitleRequest(modelID, provider, truncateRunes(strings.TrimSpace(firstUser.ContentMasked), titleUserMaxRunes), assistantSnippet(firstAsst)))
 	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
 		slog.Warn("title: model call failed, using the first words",
@@ -294,6 +324,27 @@ func (s *TitleService) askModel(
 		return "", "model_returned_nothing"
 	}
 	return title, ""
+}
+
+// catalogueEntry returns the first of the candidate ids the gateway's
+// catalogue lists, with its provider; "", "" when the catalogue cannot be
+// read or lists none of them.
+func (s *TitleService) catalogueEntry(ctx context.Context, candidates ...string) (string, string) {
+	models, err := s.gateway.ListModels(ctx)
+	if err != nil {
+		return "", ""
+	}
+	for _, id := range candidates {
+		if id == "" {
+			continue
+		}
+		for _, m := range models {
+			if m.ID == id {
+				return id, strings.TrimSpace(m.Provider)
+			}
+		}
+	}
+	return "", ""
 }
 
 // resolveTitle turns a title-model completion into the final sidebar title.

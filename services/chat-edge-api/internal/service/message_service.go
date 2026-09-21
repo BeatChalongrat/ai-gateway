@@ -3031,7 +3031,10 @@ func (s *MessageService) finalizeConversation(
 	// message_count before this call was 0 → 2 after.
 	if conv.MessageCount == 0 && conv.Title == "New conversation" {
 		title := makeTitleFrom(userMsg.ContentMasked)
-		_ = s.conversations.UpdateTitle(ctx, conv.TenantID, conv.ID, title)
+		// FIX122 — conv was read when the turn began. A rename made while the
+		// answer was streaming is the person's, and an unconditional write
+		// here replaced it; the write now lands only on the placeholder.
+		_, _ = s.conversations.UpdateTitleIfCurrent(ctx, conv.TenantID, conv.ID, conv.Title, title)
 	}
 
 	// S3 — kick the state-extraction trigger. Runs async so the

@@ -313,7 +313,7 @@ type GatewayChatRequest struct {
 	// forwarded verbatim by the backend openai_adapter when present.
 	ResponseFormat any `json:"response_format,omitempty"`
 	// Metadata (FIX122) is the gateway's own extension dict. Omitted by
-	// every caller but title generation, which uses ``allowed_providers``
+	// every caller but title generation, which uses allowed_providers
 	// to keep a failed title call from walking the fallback chain.
 	Metadata map[string]any `json:"metadata,omitempty"`
 	// NewestMessageOverBudget (FIX105) is never sent. The compiler sets it
