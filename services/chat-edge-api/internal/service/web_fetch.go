@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -108,6 +109,7 @@ type WebFetcher struct {
 	client  *http.Client
 	maxBody int64
 	guard   dialGuard
+	gnews   *googleNewsResolver
 }
 
 func NewWebFetcher() *WebFetcher {
@@ -130,7 +132,7 @@ func newWebFetcherWithGuard(guard dialGuard, maxBody int64) *WebFetcher {
 		// the target). web_fetch therefore never uses one.
 		Proxy: nil,
 	}
-	return &WebFetcher{
+	f := &WebFetcher{
 		client: &http.Client{
 			Timeout:   webFetchTimeout,
 			Transport: transport,
@@ -147,6 +149,10 @@ func newWebFetcherWithGuard(guard dialGuard, maxBody int64) *WebFetcher {
 		maxBody: maxBody,
 		guard:   guard,
 	}
+	// FIX126 U1 — Google News redirects resolve through this same
+	// guarded client (same dialer, redirect policy, no proxy).
+	f.gnews = newGoogleNewsResolver(f.client)
+	return f
 }
 
 type WebFetchResult struct {
@@ -174,34 +180,19 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string, maxChars int) (*W
 		maxChars = webFetchMaxChars
 	}
 
-	u, err := url.Parse(strings.TrimSpace(rawURL))
+	u, err := f.checkURL(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, err
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, fmt.Errorf("unsupported scheme %q — only http and https are allowed", u.Scheme)
-	}
-	if u.Hostname() == "" {
-		return nil, errors.New("URL has no host")
-	}
-	// Fast-fail literal-IP targets (and obvious loopback names) before
-	// any network work — via the SAME guard the dialer applies, so the
-	// policy has a single source of truth (tests inject a permissive
-	// guard; production uses defaultDialGuard).
-	if ip := net.ParseIP(u.Hostname()); ip != nil {
-		port := u.Port()
-		if port == "" {
-			if u.Scheme == "https" {
-				port = "443"
-			} else {
-				port = "80"
+	// FIX126 U1 — a single news.google.com/rss/articles/… link is a
+	// Google redirect: read the publisher's page instead. A link that
+	// cannot be resolved is fetched as asked.
+	if f.gnews != nil && gnewsEnabled() && googleNewsID(u.String()) != "" {
+		if target := f.gnews.resolveAll(ctx, []string{u.String()})[u.String()]; target != "" {
+			if tu, terr := f.checkURL(target); terr == nil {
+				u = tu
 			}
 		}
-		if err := f.guard("tcp", net.JoinHostPort(ip.String(), port)); err != nil {
-			return nil, err
-		}
-	} else if strings.EqualFold(u.Hostname(), "localhost") && f.isDefaultGuard() {
-		return nil, errors.New("blocked address: loopback address")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -235,9 +226,20 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string, maxChars int) (*W
 	}
 
 	raw := string(body)
+	finalURL := resp.Request.URL.String()
+	isHTML := ct == "text/html" || ct == "application/xhtml+xml"
+	// FIX126 U1 — a Google News feed's item links are Google redirects;
+	// hand the model the publisher articles. Never fails the fetch.
+	if !isHTML && f.gnews != nil && gnewsEnabled() && isGoogleNewsFeed(finalURL, raw) {
+		out, items, resolved, site := f.gnews.rewriteGoogleNewsFeed(ctx, raw)
+		raw = out
+		slog.Info("web_fetch_gnews_feed",
+			"items", items, "resolved", resolved, "source_site", site,
+			"kept_redirect", items-resolved-site)
+	}
 	title := ""
 	text := raw
-	if ct == "text/html" || ct == "application/xhtml+xml" {
+	if isHTML {
 		if m := titleRe.FindStringSubmatch(raw); len(m) == 2 {
 			title = strings.Join(strings.Fields(m[1]), " ")
 		}
@@ -250,10 +252,46 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string, maxChars int) (*W
 
 	return &WebFetchResult{
 		Title:     title,
-		FinalURL:  resp.Request.URL.String(),
+		FinalURL:  finalURL,
 		Text:      text,
 		Truncated: truncated,
 	}, nil
+}
+
+// checkURL parses rawURL and applies the pre-dial checks: scheme
+// allowlist, host present, literal-IP guard. Split out so a resolved
+// Google News target is held to the same checks as the model's URL.
+func (f *WebFetcher) checkURL(rawURL string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported scheme %q — only http and https are allowed", u.Scheme)
+	}
+	if u.Hostname() == "" {
+		return nil, errors.New("URL has no host")
+	}
+	// Fast-fail literal-IP targets (and obvious loopback names) before
+	// any network work — via the SAME guard the dialer applies, so the
+	// policy has a single source of truth (tests inject a permissive
+	// guard; production uses defaultDialGuard).
+	if ip := net.ParseIP(u.Hostname()); ip != nil {
+		port := u.Port()
+		if port == "" {
+			if u.Scheme == "https" {
+				port = "443"
+			} else {
+				port = "80"
+			}
+		}
+		if err := f.guard("tcp", net.JoinHostPort(ip.String(), port)); err != nil {
+			return nil, err
+		}
+	} else if strings.EqualFold(u.Hostname(), "localhost") && f.isDefaultGuard() {
+		return nil, errors.New("blocked address: loopback address")
+	}
+	return u, nil
 }
 
 // isDefaultGuard lets the "localhost" name fast-path apply only under
@@ -270,6 +308,8 @@ func allowedContentType(ct string) bool {
 	case ct == "application/xhtml+xml",
 		ct == "application/json",
 		ct == "application/xml",
+		ct == "application/rss+xml",
+		ct == "application/atom+xml",
 		ct == "": // some text pages omit the header; body cap still applies
 		return true
 	}
