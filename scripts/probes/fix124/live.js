@@ -134,27 +134,59 @@ const CASES = {
     return { id, before, after, userRowsBefore: before.filter((r) => r.role === "user").length, userRowsAfter: after.filter((r) => r.role === "user").length };
   },
 };
+// A REAL cut. Playwright's context.setOffline does not end a fetch stream
+// that is already open (measured: the answer kept growing while "offline"),
+// so it proves nothing about a drop. The page's chat-edge traffic is sent
+// through a TCP proxy in this process instead (route.continue with the port
+// rewritten — same origin for CORS, same cookies); "the network goes away"
+// = every proxied socket is destroyed and new connections are refused for N
+// seconds. chat-edge itself never notices anything but a client going away.
+const net = require("node:net");
+function startCutProxy(listenPort, targetPort) {
+  const sockets = new Set();
+  let down = false;
+  const server = net.createServer((c) => {
+    if (down) return c.destroy();
+    const u = net.connect(targetPort, "127.0.0.1");
+    sockets.add(c); sockets.add(u);
+    const drop = () => { c.destroy(); u.destroy(); sockets.delete(c); sockets.delete(u); };
+    c.on("error", drop); u.on("error", drop); c.on("close", drop); u.on("close", drop);
+    c.pipe(u); u.pipe(c);
+  });
+  return new Promise((resolve) => server.listen(listenPort, "127.0.0.1", () => resolve({
+    cut() { down = true; for (const s of [...sockets]) s.destroy(); sockets.clear(); },
+    restore() { down = false; },
+    close() { for (const s of [...sockets]) s.destroy(); server.close(); },
+  })));
+}
 for (const n of [5, 30, 60]) {
   CASES[`drop${n}`] = async (ctx, tok) => {
+    const apiPort = Number(new URL(process.env.API).port);
+    const proxy = await startCutProxy(apiPort + 1, apiPort);
     const id = await newChat(tok, MODEL, false);
     const page = await open(ctx, id);
-    await send(page, "[FIX124] drop: เขียนเรียงความภาษาไทยประมาณ 500 คำ เรื่องประวัติการรถไฟไทย แบ่งเป็น 5 ย่อหน้า");
-    // wait until text is really streaming
-    for (let i = 0; i < 120; i++) { const r = await lastReply(page); if (r && r.chars > 250) break; await wait(500); }
-    const atDrop = await lastReply(page);
-    const seen = [];
-    await ctx.setOffline(true);
-    const t0 = Date.now();
-    while (Date.now() - t0 < n * 1000) { await wait(1000); const r = await lastReply(page); seen.push({ t: Math.round((Date.now() - t0) / 1000), label: r?.errorLabel ?? null, reconnecting: r?.reconnecting ?? false, awaiting: r?.awaitingReload ?? false, chars: r?.chars ?? 0 }); }
-    await ctx.setOffline(false);
-    const back = Date.now();
-    let settled = null;
-    for (let i = 0; i < 240; i++) { await wait(1000); const r = await lastReply(page); const streaming = await page.locator(STOP).count(); seen.push({ t: `back+${Math.round((Date.now() - back) / 1000)}`, label: r?.errorLabel ?? null, reconnecting: r?.reconnecting ?? false, awaiting: r?.awaitingReload ?? false, chars: r?.chars ?? 0 }); if (!streaming && !r?.reconnecting) { settled = Math.round((Date.now() - back) / 1000); break; } }
-    await wait(1500);
-    const reply = await lastReply(page);
-    const server = await serverRows(tok, id);
-    const serverChars = server.filter((r) => r.role === "assistant").at(-1)?.chars ?? 0;
-    return { id, offlineSeconds: n, charsAtDrop: atDrop?.chars ?? 0, settledSecondsAfterBack: settled, failedEverShown: seen.some((s) => s.label), reconnectingShown: seen.some((s) => s.reconnecting), reply, serverChars, server, timeline: seen.filter((_, i) => i % 5 === 0) };
+    await page.route(`http://localhost:${apiPort}/**`, (route) => route.continue({ url: route.request().url().replace(`:${apiPort}/`, `:${apiPort + 1}/`) }));
+    try {
+      await send(page, "[FIX124] drop: เขียนเรียงความภาษาไทยประมาณ 900 คำ เรื่องประวัติการรถไฟไทย แบ่งเป็น 8 ย่อหน้า ละเอียดทุกยุค");
+      for (let i = 0; i < 120; i++) { const r = await lastReply(page); if (r && r.chars > 250) break; await wait(500); }
+      const atDrop = await lastReply(page);
+      const seen = [];
+      const sample = async (t) => { const r = await lastReply(page); seen.push({ t, label: r?.errorLabel ?? null, reconnecting: r?.reconnecting ?? false, awaiting: r?.awaitingReload ?? false, chars: r?.chars ?? 0 }); return r; };
+      proxy.cut();
+      const t0 = Date.now();
+      while (Date.now() - t0 < n * 1000) { await wait(1000); await sample(Math.round((Date.now() - t0) / 1000)); }
+      const serverAtRestore = (await serverRows(tok, id)).filter((r) => r.role === "assistant").at(-1);
+      proxy.restore();
+      const back = Date.now();
+      let settled = null;
+      for (let i = 0; i < 300; i++) { await wait(1000); const r = await sample(`back+${Math.round((Date.now() - back) / 1000)}`); const streaming = await page.locator(STOP).count(); if (!streaming && !r?.reconnecting) { settled = Math.round((Date.now() - back) / 1000); break; } }
+      await wait(1500);
+      const reply = await lastReply(page);
+      const server = await serverRows(tok, id);
+      const last = server.filter((r) => r.role === "assistant").at(-1);
+      const during = seen.filter((s) => typeof s.t === "number");
+      return { id, cutSeconds: n, charsAtCut: atDrop?.chars ?? 0, charsGrewDuringCut: during.length ? Math.max(...during.map((s) => s.chars)) - (atDrop?.chars ?? 0) : null, serverStatusAtRestore: serverAtRestore?.status ?? null, settledSecondsAfterBack: settled, failedEverShown: seen.some((s) => s.label), reconnectingShown: seen.some((s) => s.reconnecting), awaitingReloadShown: seen.some((s) => s.awaiting), reply, serverChars: last?.chars ?? 0, serverStatus: last?.status ?? null, timeline: seen.filter((_, i) => i % 4 === 0).map((s) => `${s.t}:${s.chars}${s.reconnecting ? "R" : ""}${s.awaiting ? "A" : ""}${s.label ? "!" : ""}`).join(" ") };
+    } finally { proxy.close(); await page.unroute(`http://localhost:${apiPort}/**`).catch(() => {}); }
   };
 }
 

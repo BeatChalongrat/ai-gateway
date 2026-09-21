@@ -63,6 +63,22 @@ describe("R2 — a lost connection", () => {
     expect(screen.queryByTestId("error-label")).toBeNull();
   });
 
+  // The bubble is memoized field by field. These states change on a row whose
+  // content and status do not move, so a fresh render (the tests above)
+  // cannot show what the live page did: the notice set and never drawn.
+  it("appears and disappears on a MOUNTED bubble whose content and status did not change", () => {
+    const base = msg({ status: "streaming", isStreaming: true, content: "half an answer" });
+    const { rerender } = render(<MessageBubble convId="c1" message={base} />);
+    expect(screen.queryByTestId("reconnecting-notice")).toBeNull();
+    rerender(<MessageBubble convId="c1" message={{ ...base, reconnecting: true }} />);
+    expect(screen.getByTestId("reconnecting-notice")).toBeTruthy();
+    rerender(<MessageBubble convId="c1" message={{ ...base, isStreaming: false, awaiting_reload: true }} />);
+    expect(screen.queryByTestId("reconnecting-notice")).toBeNull();
+    expect(screen.getByTestId("awaiting-reload-notice")).toBeTruthy();
+    rerender(<MessageBubble convId="c1" message={base} />);
+    expect(screen.queryByTestId("awaiting-reload-notice")).toBeNull();
+  });
+
   it("the wait ran out: 'load the answer' calls reloadAnswer; still no error label", () => {
     const reloadAnswer = vi.fn(async () => {});
     useChatStore.setState({ reloadAnswer });

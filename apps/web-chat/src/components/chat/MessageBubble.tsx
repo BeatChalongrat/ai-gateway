@@ -1426,6 +1426,17 @@ function areEqual(prev: Props, next: Props): boolean {
     a.fallback_info === b.fallback_info &&
     a.image_notice === b.image_notice &&
     a.compaction_notice === b.compaction_notice &&
+    // FIX124 — the connection states change ALONE, on a row whose content
+    // and status stand still (that is the point of them): without these the
+    // memo kept the bubble as it was, and "reconnecting" / "load the answer"
+    // were set in the store and never drawn — found on the live page, where
+    // a 30 s cut showed a frozen bubble and no notice. The stop fields ride
+    // a status change today; listed so they do not depend on it.
+    a.reconnecting === b.reconnecting &&
+    a.awaiting_reload === b.awaiting_reload &&
+    a.stop_reason === b.stop_reason &&
+    a.tool_rounds === b.tool_rounds &&
+    a.terminal_cause === b.terminal_cause &&
     prev.showFeedback === next.showFeedback &&
     prev.showRegenerate === next.showRegenerate &&
     handlersEqual(prev, next)
