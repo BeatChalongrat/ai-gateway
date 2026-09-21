@@ -1376,7 +1376,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // except when the conversation itself is gone (nowhere to send it).
         if (res.status === 404 || res.status === 410) outboxAccepted(convId, requestId);
         else giveBackToComposer(set, convId, requestId);
-        await handleStreamPreError(res, set, get, convId, tempAsstId, tempUserId);
+        await handleStreamPreError(res, set, get, convId, tempAsstId, tempUserId, trimmed);
         return;
       }
       // The server took it. What happens to the turn from here is the
@@ -3148,6 +3148,8 @@ async function handleStreamPreError(
   tempAsstId: string,
   /** The send path's optimistic user row — only a plain send passes it. */
   tempUserId?: string,
+  /** The text of that send — only a plain send passes it. */
+  sentText?: string,
 ) {
   const text = await res.text();
   let msg = res.statusText;
@@ -3188,6 +3190,12 @@ async function handleStreamPreError(
             : s.turnScrollRequests,
       };
     });
+    // The outbox holds one entry per conversation and every tab of it shares
+    // that storage, so the other tab's send may already have replaced this
+    // one's entry — the give-back above then finds nothing. Hand this send's
+    // own text back directly. (No reload here: loadMessages' outbox recovery
+    // would hand the OTHER tab's still-pending text to this composer.)
+    if (sentText) set((s) => ({ returnedDrafts: { ...s.returnedDrafts, [convId]: { id: crypto.randomUUID(), text: sentText } } }));
     get().setError(tOutside("error.conversationBusy"));
     return;
   }

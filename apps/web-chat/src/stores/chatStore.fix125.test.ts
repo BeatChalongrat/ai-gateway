@@ -31,7 +31,7 @@ vi.mock("@/hooks/useUsage", () => ({ bumpUsageVersion: vi.fn() }));
 
 import { clearDraftStore, loadDraft } from "@/lib/draftStore";
 import { tOutside } from "@/lib/i18n";
-import { clearOutbox, outboxPeek } from "@/lib/sendOutbox";
+import { clearOutbox, outboxPeek, outboxPut } from "@/lib/sendOutbox";
 
 import { useChatStore } from "./chatStore";
 
@@ -77,6 +77,22 @@ describe("FIX125 M5 — 409 CONVERSATION_BUSY", () => {
     expect(s.errorBanner).not.toBe("conversation busy");
     // The conversation is not left "streaming".
     expect(s.streamingAssistantId.c1).toBeUndefined();
+  });
+
+  it("two tabs: the other tab's send replaced the outbox entry — this send still gets ITS text back, never the other tab's", async () => {
+    // The other tab of the same chat writes the shared outbox while this request is out.
+    mockApi.openMessageStream.mockImplementationOnce(async () => {
+      outboxPut("c1", "other-tab-request", "ข้อความของอีกแท็บ");
+      return refused(409, "CONVERSATION_BUSY");
+    });
+    await useChatStore.getState().sendMessage("c1", "ข้อความของแท็บนี้");
+    await Promise.resolve();
+
+    const s = useChatStore.getState();
+    expect(s.returnedDrafts.c1?.text).toBe("ข้อความของแท็บนี้");
+    expect(s.errorBanner).toBe(tOutside("error.conversationBusy"));
+    // the other tab's pending entry is left for the other tab
+    expect(outboxPeek("c1")).toMatchObject({ requestId: "other-tab-request" });
   });
 
   it("another 409 code still takes the ordinary refused path (error row kept)", async () => {
