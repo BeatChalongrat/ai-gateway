@@ -165,6 +165,7 @@ export const en = {
   "input.reasoning.on": "Thinking mode on — the model reasons before answering",
   "input.reasoning.off": "Thinking mode off — turn on for harder questions",
   "input.reasoning.unsupported": "This model doesn't support thinking mode — pick another model to use it",
+  "input.reasoning.alwaysOn": "This model always thinks — thinking can't be turned off",
   "project.new": "New project",
   "project.rename": "Rename",
   "project.delete": "Delete project",
@@ -914,6 +915,7 @@ export const en = {
   "error.generationInterrupted":
     "The reply was interrupted before it finished.",
   "error.tooManyMessages": "Too many messages — slow down for a minute.",
+  "error.conversationBusy": "This chat is already answering in another tab — wait for it to finish, then send again",
   "error.serviceUnavailable": "AI service is temporarily unavailable.",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
@@ -1843,6 +1845,7 @@ const th: Record<DictKey, string> = {
   "input.reasoning.on": "เปิดโหมดคิดลึก — โมเดลจะคิดก่อนตอบ",
   "input.reasoning.off": "ปิดโหมดคิดลึก — เปิดเมื่อเจอคำถามยาก",
   "input.reasoning.unsupported": "โมเดลนี้ไม่รองรับโหมดคิดลึก — เลือกโมเดลอื่นเพื่อใช้งาน",
+  "input.reasoning.alwaysOn": "โมเดลนี้คิดทุกครั้ง ปิดโหมดคิดไม่ได้",
   "project.new": "สร้างโปรเจกต์ใหม่",
   "project.rename": "เปลี่ยนชื่อ",
   "project.delete": "ลบโปรเจกต์",
@@ -2553,6 +2556,7 @@ const th: Record<DictKey, string> = {
     "การเชื่อมต่อหลุดและไม่สามารถกลับเข้าสตรีมคำตอบได้ รีเฟรชหน้าเพื่อดูส่วนที่บันทึกไว้",
   "error.generationInterrupted": "คำตอบถูกขัดจังหวะก่อนจะเสร็จสมบูรณ์",
   "error.tooManyMessages": "ส่งข้อความถี่เกินไป กรุณารอสักครู่",
+  "error.conversationBusy": "แชทนี้กำลังตอบอยู่ในอีกหน้าต่าง — รอให้ตอบเสร็จก่อนแล้วส่งใหม่",
   "error.serviceUnavailable": "บริการ AI ไม่พร้อมใช้งานชั่วคราว",
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────

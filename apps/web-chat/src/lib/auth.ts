@@ -54,11 +54,49 @@ export function detectHostedMode(win: unknown = typeof window === "undefined" ? 
 
 export const HOSTED_MODE: boolean = detectHostedMode();
 
-/** Bounce to the Portal login with Web Chat as the post-login return target. */
+/**
+ * FIX125 M6 — the post-login return target: the page the person is ON
+ * (pathname + search), not a hard-coded `/chat`. Bouncing to `/chat`
+ * dropped `/chat/<id>`, so after re-login the next send opened a NEW
+ * conversation on the default model with default settings.
+ *
+ * Same-origin only: the path must be a single-slash absolute path, and
+ * resolving it against this origin must stay on this origin (rejects
+ * `//evil.example`, `/\evil.example`, `https://…`, `javascript:` and the
+ * like). Anything else falls back to `${origin}/chat`.
+ */
+export function portalReturnTarget(
+  origin: string,
+  pathAndSearch: string | null | undefined,
+): string {
+  const fallback = `${origin}/chat`;
+  if (typeof pathAndSearch !== "string" || pathAndSearch.length === 0) return fallback;
+  if (!pathAndSearch.startsWith("/")) return fallback;
+  if (pathAndSearch.startsWith("//") || pathAndSearch.startsWith("/\\")) return fallback;
+  // Control characters (incl. tab/newline, which URL parsing strips) have no
+  // place in a return path.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(pathAndSearch)) return fallback;
+  let resolved: URL;
+  try {
+    resolved = new URL(pathAndSearch, origin);
+  } catch {
+    return fallback;
+  }
+  if (resolved.origin !== origin) return fallback;
+  return `${resolved.origin}${resolved.pathname}${resolved.search}`;
+}
+
+/** The Portal login URL that brings the person back to `loc` afterwards. */
+export function portalLoginUrl(loc: Pick<Location, "origin" | "pathname" | "search">): string {
+  const ret = encodeURIComponent(portalReturnTarget(loc.origin, `${loc.pathname}${loc.search}`));
+  return `${PORTAL_URL}/login?redirect=${ret}`;
+}
+
+/** Bounce to the Portal login with the current Web Chat page as the post-login return target. */
 export function redirectToPortalLogin(): void {
   if (typeof window === "undefined") return;
-  const ret = encodeURIComponent(`${window.location.origin}/chat`);
-  window.location.href = `${PORTAL_URL}/login?redirect=${ret}`;
+  window.location.href = portalLoginUrl(window.location);
 }
 
 /** The session user as the chat app needs it (derived from /portal/me). */
@@ -103,25 +141,38 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
 }
 
 /**
+ * FIX125 M6 — what a refresh attempt found:
+ *   "ok"          the gateway rotated the cookies;
+ *   "rejected"    the gateway answered 401/403 — the session is really over;
+ *   "unreachable" no answer we can trust (network error, 5xx during a
+ *                 redeploy, any other status) — the session may be fine.
+ * Only "rejected" may send the person to the login page; "unreachable"
+ * keeps the page and lets the next tick/focus/request try again.
+ */
+export type RefreshOutcome = "ok" | "rejected" | "unreachable";
+
+/**
  * Rotate the session via the gateway refresh endpoint. The refresh token
  * rides the HttpOnly cookie; on success the gateway sets fresh access +
- * refresh cookies. Returns true on success.
+ * refresh cookies.
  */
-export async function refreshSession(): Promise<boolean> {
+export async function refreshSession(): Promise<RefreshOutcome> {
   // Hosted mode: refusing here (rather than only in auth-refresh.ts)
   // also covers api.ts's 401→refresh path, so EVERY page-side 401
   // escalates straight to redirectToPortalLogin() — which the shell
   // cancels and answers with a host-side refresh. One holder rotates.
-  if (HOSTED_MODE) return false;
+  if (HOSTED_MODE) return "rejected";
   try {
     const res = await fetch(`${GATEWAY_URL}/portal/auth/refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json; charset=utf-8" },
     });
-    return res.ok;
+    if (res.ok) return "ok";
+    if (res.status === 401 || res.status === 403) return "rejected";
+    return "unreachable";
   } catch {
-    return false;
+    return "unreachable";
   }
 }
 

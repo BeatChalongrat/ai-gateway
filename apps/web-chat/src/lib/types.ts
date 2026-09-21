@@ -26,8 +26,9 @@ export type ModelCategory =
  *  whose chat-edge entry advertises reasoning support. The frontend
  *  uses ``supported`` to show the reasoning badge in the model picker.
  *  Thinking itself is automatic (Auto Thinking Mode — no user toggle);
- *  ``modes`` is retained for the API contract. Absent (undefined) for
- *  non-reasoning models. */
+ *  ``modes`` lists "off" ONLY when the model can really stop thinking
+ *  (FIX125 M3): without it the composer's toggle shows always-on and
+ *  cannot be switched off. Absent (undefined) for non-reasoning models. */
 export interface ReasoningCapability {
   supported: boolean;
   modes: string[];

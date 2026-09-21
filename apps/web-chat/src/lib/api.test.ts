@@ -44,7 +44,7 @@ describe("ApiClient 401 → refresh → retry", () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(401, { error: { code: "unauthorized" } }))
       .mockResolvedValueOnce(jsonResponse(200, { models: [] }));
-    mockRefreshSession.mockResolvedValue(true);
+    mockRefreshSession.mockResolvedValue("ok");
 
     const res = await api.models();
 
@@ -59,13 +59,13 @@ describe("ApiClient 401 → refresh → retry", () => {
 
   it("coalesces concurrent 401s into exactly ONE refresh (single-flight)", async () => {
     let refreshed = false;
-    let releaseRefresh!: (ok: boolean) => void;
+    let releaseRefresh!: (outcome: "ok" | "rejected") => void;
     mockRefreshSession.mockImplementation(
       () =>
-        new Promise<boolean>((resolve) => {
-          releaseRefresh = (ok) => {
-            refreshed = ok;
-            resolve(ok);
+        new Promise<string>((resolve) => {
+          releaseRefresh = (outcome) => {
+            refreshed = outcome === "ok";
+            resolve(outcome);
           };
         }),
     );
@@ -78,7 +78,7 @@ describe("ApiClient 401 → refresh → retry", () => {
     const inFlight = Promise.all([api.models(), api.models(), api.models()]);
     // Let all three hit the 401 and pile onto sharedRefresh.
     await new Promise((r) => setTimeout(r, 0));
-    releaseRefresh(true);
+    releaseRefresh("ok");
     const results = await inFlight;
 
     expect(results).toEqual([{ models: [] }, { models: [] }, { models: [] }]);
@@ -89,7 +89,7 @@ describe("ApiClient 401 → refresh → retry", () => {
 
   it("redirects to the Portal login when refresh fails, and surfaces the 401", async () => {
     fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: "unauthorized", message: "expired" } }));
-    mockRefreshSession.mockResolvedValue(false);
+    mockRefreshSession.mockResolvedValue("rejected");
 
     await expect(api.models()).rejects.toMatchObject({
       status: 401,
@@ -98,6 +98,16 @@ describe("ApiClient 401 → refresh → retry", () => {
     expect(mockRefreshSession).toHaveBeenCalledTimes(1);
     expect(mockRedirect).toHaveBeenCalledTimes(1);
     // No replay after a failed refresh.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("FIX125 M6: a refresh that could not reach the gateway (502) keeps the page — no login redirect", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: "unauthorized", message: "expired" } }));
+    mockRefreshSession.mockResolvedValue("unreachable");
+
+    await expect(api.models()).rejects.toMatchObject({ status: 401 });
+    expect(mockRefreshSession).toHaveBeenCalledTimes(1);
+    expect(mockRedirect).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -115,7 +125,7 @@ describe("ApiClient 401 → refresh → retry", () => {
 
   it("a retried request that 401s again is NOT retried a second time (no loop)", async () => {
     fetchMock.mockResolvedValue(jsonResponse(401, { error: { code: "unauthorized" } }));
-    mockRefreshSession.mockResolvedValue(true);
+    mockRefreshSession.mockResolvedValue("ok");
 
     await expect(api.models()).rejects.toMatchObject({ status: 401 });
     // original + exactly one replay.
@@ -124,7 +134,7 @@ describe("ApiClient 401 → refresh → retry", () => {
   });
 
   it("sharedRefresh resets after settling so a later 401 can refresh again", async () => {
-    mockRefreshSession.mockResolvedValue(true);
+    mockRefreshSession.mockResolvedValue("ok");
     await sharedRefresh();
     await sharedRefresh();
     expect(mockRefreshSession).toHaveBeenCalledTimes(2);

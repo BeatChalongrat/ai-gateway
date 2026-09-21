@@ -72,7 +72,7 @@ describe("api.mediaJobOutputObjectUrl (authed media playback)", () => {
           status: 200,
         }),
       );
-    mockRefreshSession.mockResolvedValue(true);
+    mockRefreshSession.mockResolvedValue("ok");
 
     const url = await api.mediaJobOutputObjectUrl("j2");
 

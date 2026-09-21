@@ -11,8 +11,10 @@
 //     don't all refresh at once (the gateway's 30s grace makes a race
 //     safe; this just avoids the noise).
 //
-// A refresh that fails (refresh token expired/revoked/version-bumped)
-// means the session is genuinely over → bounce to the Portal login.
+// A refresh the gateway REJECTS (401/403: refresh token expired/revoked/
+// version-bumped) means the session is genuinely over → bounce to the
+// Portal login. A refresh that could not reach the gateway (network error,
+// 5xx) keeps the page and retries on the next tick or focus (FIX125 M6).
 
 import { HOSTED_MODE, redirectToPortalLogin, refreshSession } from "./auth";
 
@@ -25,12 +27,19 @@ let lastRefresh = 0;
 let channel: BroadcastChannel | null = null;
 
 async function refreshOnce(): Promise<boolean> {
-  const ok = await refreshSession();
-  if (ok) {
+  const outcome = await refreshSession();
+  if (outcome === "ok") {
     lastRefresh = Date.now();
     return true;
   }
-  // A failed proactive refresh is the one legitimate "log in again".
+  if (outcome === "unreachable") {
+    // FIX125 M6 — the gateway could not be reached (network error, 5xx
+    // during a redeploy). That says nothing about the session: keep the
+    // page, leave lastRefresh alone so the next tick or focus tries again.
+    return false;
+  }
+  // The gateway REJECTED the refresh token: the one legitimate "log in
+  // again". The login page brings the person back to this same page.
   stopSilentRefresh();
   redirectToPortalLogin();
   return false;

@@ -1376,7 +1376,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         // except when the conversation itself is gone (nowhere to send it).
         if (res.status === 404 || res.status === 410) outboxAccepted(convId, requestId);
         else giveBackToComposer(set, convId, requestId);
-        await handleStreamPreError(res, set, get, convId, tempAsstId);
+        await handleStreamPreError(res, set, get, convId, tempAsstId, tempUserId);
         return;
       }
       // The server took it. What happens to the turn from here is the
@@ -3146,6 +3146,8 @@ async function handleStreamPreError(
   get: Get,
   convId: string,
   tempAsstId: string,
+  /** The send path's optimistic user row — only a plain send passes it. */
+  tempUserId?: string,
 ) {
   const text = await res.text();
   let msg = res.statusText;
@@ -3168,6 +3170,27 @@ async function handleStreamPreError(
     get().handleConversationGone(convId);
     return;
   }
+  if (res.status === 409 && code === "CONVERSATION_BUSY" && tempUserId) {
+    // FIX125 M5 — another tab (or window) already has a turn in flight in
+    // this conversation, and the server refused this send. Nothing was
+    // sent: the text is already back in the composer (the outbox give-back
+    // ran before this), so this send's optimistic user + assistant rows go
+    // away — no error bubble, no duplicate question — and a notice says
+    // why and what to do.
+    set((s) => {
+      const list = s.messages[convId] ?? [];
+      const turnScroll = s.turnScrollRequests[convId];
+      return {
+        messages: { ...s.messages, [convId]: list.filter((m) => m.id !== tempUserId && m.id !== tempAsstId) },
+        turnScrollRequests:
+          turnScroll && turnScroll.id === tempAsstId
+            ? { ...s.turnScrollRequests, [convId]: undefined }
+            : s.turnScrollRequests,
+      };
+    });
+    get().setError(tOutside("error.conversationBusy"));
+    return;
+  }
   if (res.status === 402 || code === "INSUFFICIENT_CREDITS") {
     // Credit balance exhausted — chat-edge already localized the
     // message; localizeErrorCode keeps a fallback if it didn't.
@@ -3176,6 +3199,8 @@ async function handleStreamPreError(
     get().setError(tOutside("error.tooManyMessages"));
   } else if (res.status === 502) {
     get().setError(tOutside("error.serviceUnavailable"));
+  } else if (code === "CONVERSATION_BUSY") {
+    get().setError(tOutside("error.conversationBusy"));
   } else if (res.status !== 401) {
     get().setError(msg);
   }

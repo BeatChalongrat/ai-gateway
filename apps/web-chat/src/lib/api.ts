@@ -42,7 +42,7 @@ import type {
   UserPreferences,
 } from "./types";
 import type { PreviewData } from "./previewData";
-import { redirectToPortalLogin, refreshSession } from "./auth";
+import { redirectToPortalLogin, refreshSession, type RefreshOutcome } from "./auth";
 import { bridge, usingBridgeTransport } from "./bridge";
 
 const API_BASE =
@@ -63,8 +63,8 @@ const UPLOAD_TIMEOUT_MS = 300_000;
 // page-mount fetches + an in-flight stream must not stampede the gateway;
 // the backend has a 30s rotation grace window too, but coalescing keeps
 // it clean and avoids redundant rotations).
-let refreshInFlight: Promise<boolean> | null = null;
-export function sharedRefresh(): Promise<boolean> {
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+export function sharedRefresh(): Promise<RefreshOutcome> {
   if (!refreshInFlight) {
     refreshInFlight = refreshSession().finally(() => {
       refreshInFlight = null;
@@ -126,12 +126,15 @@ class ApiClient {
     if (res.status === 401 && !_retried) {
       // Try a silent refresh before giving up — a single transient 401
       // (access token just lapsed) must NOT log the user out.
-      const refreshed = await sharedRefresh();
-      if (refreshed) {
+      const outcome = await sharedRefresh();
+      if (outcome === "ok") {
         return this.raw(path, init, true);
       }
-      // Refresh failed → the session is genuinely over. Bounce to login.
-      redirectToPortalLogin();
+      // FIX125 M6 — only a refresh the gateway REJECTED means the session
+      // is over. One that could not reach it (network error, 5xx during a
+      // redeploy) keeps the page: the caller sees this 401 as an error and
+      // the next request or the silent-refresh tick tries again.
+      if (outcome === "rejected") redirectToPortalLogin();
     }
     return res;
   }
@@ -1135,14 +1138,15 @@ class ApiClient {
         if (xhr.status === 401) {
           // Silent refresh → retry once before bouncing to login.
           if (!_retried) {
-            sharedRefresh().then((ok) => {
-              if (ok) {
+            sharedRefresh().then((outcome) => {
+              if (outcome === "ok") {
                 this.uploadKBDocument(kbId, file, opts, true).then(
                   resolve,
                   reject,
                 );
               } else {
-                redirectToPortalLogin();
+                // FIX125 M6 — only a rejected refresh leaves the page.
+                if (outcome === "rejected") redirectToPortalLogin();
                 reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
               }
             });
@@ -1240,14 +1244,15 @@ class ApiClient {
         if (xhr.status === 401) {
           // Same refresh-then-retry contract as the JSON path.
           if (!_retried) {
-            sharedRefresh().then((ok) => {
-              if (ok) {
+            sharedRefresh().then((outcome) => {
+              if (outcome === "ok") {
                 this.uploadFile(convId, file, opts, true).then(
                   resolve,
                   reject,
                 );
               } else {
-                redirectToPortalLogin();
+                // FIX125 M6 — only a rejected refresh leaves the page.
+                if (outcome === "rejected") redirectToPortalLogin();
                 reject(new ApiError("UNAUTHORIZED", "Session expired", 401));
               }
             });

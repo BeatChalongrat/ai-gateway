@@ -179,7 +179,9 @@ describe("Thinking-Mode toggle", () => {
   const reasoningModel = model({
     id: "o3",
     name: "o3",
-    reasoning: { supported: true, modes: ["auto"], default_mode: "auto", summary_supported: true },
+    // FIX125 M3 — "off" is listed only for a model that can really stop
+    // thinking; this fixture is one (the toggle can switch it off).
+    reasoning: { supported: true, modes: ["auto", "off"], default_mode: "auto", summary_supported: true },
   });
 
   it("appears for a reasoning-capable model and calls the store action", async () => {

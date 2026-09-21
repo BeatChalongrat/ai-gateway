@@ -342,10 +342,18 @@ export function ChatInput({
   // reply is gone. Auto stays buttonless: the router may land on either
   // kind, so the toggle has nothing truthful to say there.
   const canReason = Boolean(activeModel?.reasoning?.supported);
+  // FIX125 M3 — the server lists "off" in reasoning.modes ONLY for a model
+  // that can really stop thinking. A reasoning model without it thinks on
+  // every turn whatever the conversation's flag says, so the toggle must not
+  // offer an OFF state: it shows on, disabled, and says why.
+  const reasoningModes = activeModel?.reasoning?.modes;
+  const alwaysThinks =
+    canReason && !(Array.isArray(reasoningModes) && reasoningModes.includes("off"));
+  const canToggleReasoning = canReason && !alwaysThinks;
   const conversation = useChatStore((s) =>
     conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
   );
-  const reasoningOn = Boolean(conversation?.reasoning_enabled);
+  const reasoningOn = alwaysThinks || Boolean(conversation?.reasoning_enabled);
   const setConversationReasoning = useChatStore((s) => s.setConversationReasoning);
   // FIX36 Part B — the per-conversation cost ceiling stays server-side
   // (conversation.routing_tier + PATCH endpoint), but the composer no longer
@@ -1399,20 +1407,29 @@ export function ChatInput({
               {!isAutoModel && activeModel && conversationId && !streaming ? (
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    if (!canToggleReasoning) return;
                     void setConversationReasoning(conversationId, {
                       reasoning_enabled: !reasoningOn,
-                    })
+                    });
+                  }}
+                  aria-label={
+                    alwaysThinks
+                      ? t("input.reasoning.alwaysOn")
+                      : canReason
+                        ? t("input.reasoning")
+                        : t("input.reasoning.unsupported")
                   }
-                  aria-label={canReason ? t("input.reasoning") : t("input.reasoning.unsupported")}
                   title={
-                    canReason
-                      ? t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")
-                      : t("input.reasoning.unsupported")
+                    alwaysThinks
+                      ? t("input.reasoning.alwaysOn")
+                      : canReason
+                        ? t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")
+                        : t("input.reasoning.unsupported")
                   }
                   aria-pressed={reasoningOn}
-                  aria-disabled={!canReason || undefined}
-                  disabled={disabled || !canReason}
+                  aria-disabled={!canToggleReasoning || undefined}
+                  disabled={disabled || !canToggleReasoning}
                   data-testid="reasoning-toggle"
                   className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                     reasoningOn
