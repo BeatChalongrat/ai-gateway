@@ -175,6 +175,28 @@ export function ChatInput({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey, conversationId]);
 
+  // FIX122 Part C — a send that failed before the server took it hands its
+  // text back (chatStore.returnedDrafts; lib/sendOutbox has already put it
+  // in this conversation's draft, which is what a composer that mounts
+  // later restores). Into an EMPTY box only: what the person has typed
+  // since is theirs.
+  const returnedDraft = useChatStore((s) =>
+    conversationId ? s.returnedDrafts[conversationId] : undefined,
+  );
+  const consumeReturnedDraft = useChatStore((s) => s.consumeReturnedDraft);
+  useEffect(() => {
+    if (!returnedDraft || !conversationId) return;
+    consumeReturnedDraft(conversationId, returnedDraft.id);
+    if (textRef.current.trim()) return;
+    setText(returnedDraft.text);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta) return;
+      const end = ta.value.length;
+      ta.setSelectionRange(end, end);
+    });
+  }, [returnedDraft, conversationId, consumeReturnedDraft]);
+
   // Debounced (~1s) save while typing; the effect cleanup doubles as
   // the per-keystroke debounce reset. saveDraft with empty text deletes
   // the entry, so clearing the composer clears the draft too.
@@ -694,6 +716,14 @@ export function ChatInput({
     );
     onSend(t2, readyFileIds, imageMode, videoMode);
     setText("");
+    // FIX122 Part C — and the mirror, NOW. In an empty conversation the send
+    // swaps the page's layout (centred hero → thread), which unmounts this
+    // composer in the very commit that would have rendered it empty: the
+    // render that refreshes textRef never happens, and the unmount flush
+    // below wrote the just-sent text back as a draft — after clearDraft —
+    // for the next composer to restore. The box came back full, and Enter
+    // asked the same thing again.
+    textRef.current = "";
     // FIX88 Part B — the caret comes back to the composer after a send,
     // however the send was fired. A mouse click on Send leaves focus on
     // that button (which then becomes Stop), and the stream-end restore

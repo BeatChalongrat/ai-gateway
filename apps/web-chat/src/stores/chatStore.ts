@@ -19,6 +19,7 @@ import { api, ApiError } from "@/lib/api";
 import { HOSTED_MODE } from "@/lib/auth";
 import { bridge, usingBridgeTransport } from "@/lib/bridge";
 import { clearDraft } from "@/lib/draftStore";
+import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outboxPut } from "@/lib/sendOutbox";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
@@ -120,6 +121,13 @@ interface ChatState {
    *  anything; it lives here so that it flips synchronously (zustand's set
    *  is synchronous) and resets with the store. */
   sendsOpening: Record<string, { requestId: string; signature: string } | undefined>;
+  /** FIX122 Part C — per conversation, the text of a send that failed
+   *  before the server took it, on its way back to the composer. ChatInput
+   *  puts it in the box (when the box is empty) and consumes it. The same
+   *  text is already in the conversation's draft (lib/sendOutbox), which is
+   *  what a composer that mounts later reads. */
+  returnedDrafts: Record<string, { id: string; text: string } | undefined>;
+  consumeReturnedDraft: (convId: string, id: string) => void;
   turnScrollRequests: Record<string, TurnScrollRequest | undefined>;
   /** True once loadMessages has completed for a conversation —
    *  success or failure. Lets the page distinguish three states
@@ -364,6 +372,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   activeConversationId: null,
   messages: {},
   sendsOpening: {},
+  returnedDrafts: {},
+  consumeReturnedDraft(convId, id) {
+    if (get().returnedDrafts[convId]?.id !== id) return;
+    set((s) => ({ returnedDrafts: { ...s.returnedDrafts, [convId]: undefined } }));
+  },
   turnScrollRequests: {},
   messagesLoaded: {},
   streamingAssistantId: {},
@@ -669,6 +682,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async renameConversation(id, title) {
+    // FIX122 — a rename is the person's; a name still being generated for
+    // this conversation must not be shown over it (nameConversationOnce).
+    userRenames.set(id, (userRenames.get(id) ?? 0) + 1);
     const updated = await api.renameConversation(id, title);
     set((s) => ({
       conversations: s.conversations.map((c) =>
@@ -1088,6 +1104,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           [convId]: res?.has_more ?? false,
         },
       }));
+      // FIX122 Part C — a send the page died under (reload, crash) before
+      // the server answered it: if the server never got it, the text goes
+      // back to the composer; if it did, the entry is simply dropped. Never
+      // while a send of THIS page is still opening — that entry is live.
+      const interrupted = outboxPeek(convId);
+      if (interrupted && !get().sendsOpening[convId]) {
+        if (outboxIsUndelivered(interrupted, res?.messages ?? [])) giveBackToComposer(set, convId);
+        else outboxAccepted(convId, interrupted.requestId);
+      }
       // Phase 5 — the last assistant row still says "streaming": the
       // generation is (probably) alive server-side and this client
       // just wasn't attached (refresh mid-stream / reopened tab).
@@ -1190,6 +1215,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // id on every frame and row, and the server's idempotency key.
     const requestId = crypto.randomUUID();
     set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: { requestId, signature } } }));
+    // FIX122 Part C — on the machine before it is on the wire: the composer
+    // is already empty, so until the server answers this is the only copy.
+    outboxPut(convId, requestId, trimmed);
 
     // FIX114 — one streaming row per conversation, and this path owns it.
     // A send while the previous turn is still open used to leave that
@@ -1329,43 +1357,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } })); // the response is back: `streaming` gates the composer from here
       if (!res.ok) {
+        // Refused: the server has no such message. Back to the composer —
+        // except when the conversation itself is gone (nowhere to send it).
+        if (res.status === 404 || res.status === 410) outboxAccepted(convId, requestId);
+        else giveBackToComposer(set, convId, requestId);
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
       }
+      // The server took it. What happens to the turn from here is the
+      // turn's story (its row, its error card), not the composer's.
+      outboxAccepted(convId, requestId);
       await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId, tempUserId);
-      // Stream completed cleanly. If this was the conversation's
-      // first turn, ask the backend to AI-generate a title from the
-      // user/assistant pair. Fire-and-forget — failure here falls
-      // back to the local truncation heuristic so the sidebar
-      // doesn't stay "New conversation" if the gateway round-trip
-      // stutters (offline, 5xx, etc.).
-      if (isFirstMessage) {
-        void api
-          .generateTitle(convId)
-          .then((res) => {
-            if (!res?.title) return;
-            set((s) => ({
-              conversations: s.conversations.map((c) =>
-                c.id === convId ? { ...c, title: res.title } : c,
-              ),
-            }));
-          })
-          .catch(() => {
-            const fallback = makeAutoTitle(trimmed);
-            if (!fallback) return;
-            void get()
-              .renameConversation(convId, fallback)
-              .catch(() => {
-                /* non-fatal */
-              });
-          });
-      }
     } catch (err) {
       // consumeStream may have swapped the placeholder id for the
       // persisted row id (message_start). Finalize whichever id is
       // CURRENT — finalizing the stale temp id would leave the message
       // stuck in status "streaming" after a cancel/error.
       const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
+      // FIX122 Part C — the request died with no answer (the entry is still
+      // there; an accepted send has dropped it): a failed send, and the text
+      // returns to the composer. A Stop is not a failure — the server
+      // usually has the message by then and keeps the stopped turn's row —
+      // so that entry is dropped.
+      if ((err as Error).name === "AbortError") outboxAccepted(convId, requestId);
+      else giveBackToComposer(set, convId, requestId);
       if ((err as Error).name === "AbortError") {
         if (imageTimedOut) {
           const localized = localizeErrorCode("image_timeout");
@@ -1423,6 +1438,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       get().setError(tOutside("error.networkStream"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
+      // FIX122 — the first turn is over, however it ended: ask for the name.
+      if (isFirstMessage) void nameConversationOnce(set, get, convId);
       // FIX121 — a send that never got a response (network error, abort)
       // must not leave the conversation refusing the next one.
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } }));
@@ -3033,28 +3050,43 @@ async function handleStreamPreError(
 
 // ─── Pure helpers used by selectors ───────────────────────────
 
-// Derive a sidebar-friendly title from the user's first prompt:
-// strip markdown formatting, collapse whitespace, truncate to 50
-// chars at the last word boundary, append an ellipsis when cut.
-function makeAutoTitle(raw: string): string {
-  let s = raw
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/(\*\*|__)(.*?)\1/g, "$2")
-    .replace(/(\*|_)(.*?)\1/g, "$2")
-    .replace(/~~(.*?)~~/g, "$1")
-    .replace(/^>\s+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!s) return "";
-  if (s.length <= 50) return s;
-  const truncated = s.slice(0, 50);
-  const lastSpace = truncated.lastIndexOf(" ");
-  const cut = lastSpace > 20 ? lastSpace : 50;
-  return `${s.slice(0, cut).trim()}…`;
+/** FIX122 Part C — a send that failed before the server took it: its text
+ *  leaves the outbox for the conversation's draft, and the mounted composer
+ *  is told. No-op when the entry is gone (the send was accepted) or belongs
+ *  to another send. */
+function giveBackToComposer(set: Set, convId: string, requestId?: string): void {
+  const text = outboxGiveBack(convId, requestId);
+  if (text === null) return;
+  set((s) => ({ returnedDrafts: { ...s.returnedDrafts, [convId]: { id: crypto.randomUUID(), text } } }));
+}
+
+/** FIX122 — a chat is named once, by the server, after its first turn.
+ *  The server decides everything (which model — the one that answered —
+ *  whether at all, and the first words of the message when the model has
+ *  nothing); this only asks and shows the answer. It used to rename the
+ *  chat ITSELF when the request failed, over whatever the person had typed
+ *  in the meantime. Now a failure changes nothing, and the answer — the
+ *  title the conversation carries on the server, which is the person's own
+ *  if they had already renamed it — is shown unless they renamed it HERE
+ *  while the request was out (the server refuses that write too; this only
+ *  keeps the screen from contradicting it for a moment).
+ *  A temporary chat is not sent for a name at all. */
+const userRenames = new Map<string, number>();
+async function nameConversationOnce(set: Set, get: Get, convId: string): Promise<void> {
+  const conv = get().conversations.find((c) => c.id === convId);
+  if (!conv || conv.memory_enabled === false) return;
+  const renamesWhenAsked = userRenames.get(convId) ?? 0;
+  try {
+    const res = await api.generateTitle(convId);
+    if (!res?.title || (userRenames.get(convId) ?? 0) !== renamesWhenAsked) return;
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        c.id === convId ? { ...c, title: res.title } : c,
+      ),
+    }));
+  } catch {
+    /* the title it has stands */
+  }
 }
 
 function finalizeMessage(
