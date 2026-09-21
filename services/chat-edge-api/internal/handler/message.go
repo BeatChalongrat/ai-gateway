@@ -481,7 +481,23 @@ func (h *MessageHandler) replayEndedRow(w http.ResponseWriter, convID uuid.UUID,
 const (
 	CodeIdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED"
 	CodeRequestInProgress    = "REQUEST_IN_PROGRESS"
+	// CodeConversationBusy (FIX125 M5) — the conversation already has a
+	// turn in flight (another tab, another device). Nothing was written;
+	// the client retries once that turn has ended.
+	CodeConversationBusy = "CONVERSATION_BUSY"
 )
+
+const conversationBusyMessage = "this conversation is already answering a message; wait for it to finish or stop it"
+
+// writeConversationBusy answers a turn refused by the per-conversation
+// in-flight guard. False when err is not that refusal.
+func writeConversationBusy(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, service.ErrConversationBusy) {
+		return false
+	}
+	WriteError(w, http.StatusConflict, CodeConversationBusy, conversationBusyMessage)
+	return true
+}
 
 // replayIfRepeated answers a send whose idempotency key this conversation
 // has already seen, and reports whether it did. The contract is the one
@@ -1342,6 +1358,9 @@ func gatewayEnvelope(err error) (status int, env service.GatewayErrorEnvelope, o
 // sendErrorFrame is the code + message for an "error" frame on a send
 // that failed before the stream produced anything.
 func sendErrorFrame(err error) map[string]any {
+	if errors.Is(err, service.ErrConversationBusy) {
+		return map[string]any{"code": CodeConversationBusy, "message": conversationBusyMessage}
+	}
 	if _, env, ok := gatewayEnvelope(err); ok {
 		out := map[string]any{"code": env.Code, "message": env.Message}
 		if env.Retryable != nil {
@@ -1382,6 +1401,9 @@ func sendErrorMessage(err error) string {
 }
 
 func (h *MessageHandler) writeSendError(w http.ResponseWriter, err error) {
+	if writeConversationBusy(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrMessageConversationNotFound):
 		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
@@ -2065,6 +2087,9 @@ func (h *MessageHandler) Edit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *MessageHandler) writeEditError(w http.ResponseWriter, err error) {
+	if writeConversationBusy(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrMessageConversationNotFound):
 		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
@@ -2144,6 +2169,9 @@ func (h *MessageHandler) SwitchBranch(w http.ResponseWriter, r *http.Request) {
 // the pre-stream phase. Once SSE headers are out we can't change
 // status, so only callers BEFORE the first frame use this.
 func (h *MessageHandler) writeRegenerateError(w http.ResponseWriter, err error) {
+	if writeConversationBusy(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, service.ErrMessageConversationNotFound):
 		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")

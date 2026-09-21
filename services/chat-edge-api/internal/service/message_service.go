@@ -198,6 +198,10 @@ type MessageService struct {
 	// Phase 1; the second concurrent send would race the first).
 	activeStreams sync.Map // map[uuid.UUID]*streamRegistration
 
+	// turns (FIX125 M5) — the one in-flight turn per conversation; see
+	// conversation_turns.go. map[uuid.UUID]*turnClaim.
+	turns sync.Map
+
 	// FIX74 — parked web turns (ask_user_question). Nil ⇒ the tool is
 	// never offered. questionClock is test-only (expiry).
 	pendingQuestions PendingQuestionStore
@@ -1039,10 +1043,12 @@ type SendResult struct {
 }
 
 func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*SendResult, error) {
-	conv, userMsg, history, err := s.prepareSend(ctx, in)
+	conv, userMsg, history, release, err := s.prepareSend(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	// FIX125 M5 — the turn is over when this returns, however it returns.
+	defer release()
 
 	imgs := s.resolveUserImages(ctx, in.TenantID, history)
 	sourcesAcc := NewSourcesAccumulator()
@@ -1121,6 +1127,12 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 		tokInput, tokOutput = &ti, &to
 	}
 
+	// FIX125 M2 — deleted while the answer was being produced: the answer
+	// is not written into it and the conversation is not finalized.
+	if s.conversationGone(ctx, conv) {
+		return nil, ErrMessageConversationNotFound
+	}
+
 	asstMsg, err := s.messages.Create(ctx, &model.Message{
 		ConversationID:   conv.ID,
 		TenantID:         in.TenantID,
@@ -1181,6 +1193,10 @@ type StreamHandle struct {
 	// pressing Stop must not be reported to the other viewers of the same
 	// generation as a crash, and then as a success (docs/fix41 P3).
 	cancelled func() bool
+	// release (FIX125 M5) frees the conversation's turn claim. Called by
+	// Finish/FinishWith AFTER the finish callback has written the row, so
+	// the next send sees this turn's final state. nil-safe.
+	release func()
 }
 
 // UserCancelled reports whether this generation was stopped by a person
@@ -1465,6 +1481,7 @@ func (h *StreamHandle) Cancel() { h.cancel() }
 // when reasoning was off / no reasoning frames arrived — the
 // persist path skips the reasoning_content write in that case.
 func (h *StreamHandle) Finish(content, reasoning, finishReason string, usage *GatewayChatUsage) {
+	defer h.releaseTurn()
 	h.finish(content, reasoning, finishReason, usage, TerminalInfo{})
 }
 
@@ -1472,14 +1489,28 @@ func (h *StreamHandle) Finish(content, reasoning, finishReason string, usage *Ga
 // (FIX118): the terminal cause and the error code of the terminal frame,
 // so the row records the same ending the stream reported.
 func (h *StreamHandle) FinishWith(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
+	defer h.releaseTurn()
 	h.finish(content, reasoning, finishReason, usage, term)
 }
 
-func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamHandle, error) {
-	conv, userMsg, history, err := s.prepareSend(ctx, in)
+func (h *StreamHandle) releaseTurn() {
+	if h.release != nil {
+		h.release()
+	}
+}
+
+func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *StreamHandle, retErr error) {
+	conv, userMsg, history, release, err := s.prepareSend(ctx, in)
 	if err != nil {
 		return nil, err
 	}
+	// FIX125 M5 — every error return below ends the turn here; a returned
+	// handle carries the release to its Finish.
+	defer func() {
+		if retErr != nil {
+			release()
+		}
+	}()
 	// FIX74 — a new message while a question card is pending supersedes the
 	// question (its turn is closed as cancelled; nothing is answered for
 	// the user). The new turn's history holds both texts.
@@ -1552,7 +1583,9 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 			"tools_attached", toolsAttached,
 		)
 		cancel()
-		return s.directImageStream(imageCtx, imageCancel, reg, conv, userMsg, asstMsg, in), nil
+		h := s.directImageStream(imageCtx, imageCancel, reg, conv, userMsg, asstMsg, in)
+		h.release = release
+		return h, nil
 	}
 	// FIX63 — the Phase D branch that used to sit here ("reject when the
 	// model lacks tools, else apply the image-mode hint") was unreachable:
@@ -1620,6 +1653,13 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		// disconnect) so the persist write completes even if the
 		// browser dropped the connection or external cancel fired.
 		persistCtx := context.Background()
+
+		// FIX125 M2 — the conversation was deleted while this turn ran:
+		// write nothing into it and finalize nothing (no title, state or
+		// preference calls).
+		if s.conversationGone(persistCtx, conv) {
+			return
+		}
 
 		// Status precedence:
 		//   userCancelled  → "cancelled"  (POST /cancel was hit)
@@ -1700,6 +1740,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (*StreamH
 		finish:         finish,
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
+		release:        release,
 	}, nil
 }
 
@@ -1766,7 +1807,7 @@ type RegenerateInput struct {
 // and opens a fresh streaming generation off the same context that
 // produced it (i.e. all messages BEFORE the target). Returns a
 // StreamHandle that the handler consumes identically to SendStream.
-func (s *MessageService) Regenerate(ctx context.Context, in RegenerateInput) (*StreamHandle, error) {
+func (s *MessageService) Regenerate(ctx context.Context, in RegenerateInput) (_ *StreamHandle, retErr error) {
 	conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -1794,6 +1835,18 @@ func (s *MessageService) Regenerate(ctx context.Context, in RegenerateInput) (*S
 	if target.Role != "assistant" {
 		return nil, ErrMessageNotAssistant
 	}
+
+	// FIX125 M5 — one turn per conversation; claimed before the old row is
+	// marked regenerated so a refused regenerate changes nothing.
+	release, err := s.claimTurn(conv.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			release()
+		}
+	}()
 
 	// Mark the old assistant message superseded. Status flip lives
 	// in its own UPDATE so the rest of the row (token usage,
@@ -1826,7 +1879,12 @@ func (s *MessageService) Regenerate(ctx context.Context, in RegenerateInput) (*S
 	// counted so a regenerate in a >1000-message conversation still shows
 	// the compaction marker (A-W1's rule: nothing goes missing silently).
 	omitted := s.omittedBefore(ctx, in.TenantID, conv.ID, target.CreatedAt, len(history))
-	return s.openAssistantStream(ctx, conv, userMsg, history, omitted, in.RequestID, in.UserID)
+	h, err := s.openAssistantStream(ctx, conv, userMsg, history, omitted, in.RequestID, in.UserID)
+	if err != nil {
+		return nil, err
+	}
+	h.release = release
+	return h, nil
 }
 
 // openAssistantStream is the shared streaming-open helper used by
@@ -1922,6 +1980,9 @@ func (s *MessageService) openAssistantStream(
 	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
+		if s.conversationGone(persistCtx, conv) { // FIX125 M2
+			return
+		}
 		status := "completed"
 		switch {
 		case reg.isUserCancelled():
@@ -2000,7 +2061,7 @@ type EditInput struct {
 //
 // Returns a StreamHandle the HTTP handler consumes identically to
 // SendStream (same SSE event format).
-func (s *MessageService) EditMessage(ctx context.Context, in EditInput) (*StreamHandle, error) {
+func (s *MessageService) EditMessage(ctx context.Context, in EditInput) (_ *StreamHandle, retErr error) {
 	if strings.TrimSpace(in.NewContent) == "" {
 		return nil, ErrMessageEmptyContent
 	}
@@ -2032,6 +2093,18 @@ func (s *MessageService) EditMessage(ctx context.Context, in EditInput) (*Stream
 	if target.Role != "user" {
 		return nil, ErrEditWrongRole
 	}
+
+	// FIX125 M5 — one turn per conversation; claimed before the fork is
+	// written so a refused edit changes nothing.
+	release, err := s.claimTurn(conv.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			release()
+		}
+	}()
 
 	// fork_root: the marker id every sibling + descendant shares.
 	// If this is the first edit at this point, the target becomes
@@ -2097,10 +2170,15 @@ func (s *MessageService) EditMessage(ctx context.Context, in EditInput) (*Stream
 		return nil, err
 	}
 
-	return s.openAssistantStreamWithBranch(
+	h, err := s.openAssistantStreamWithBranch(
 		ctx, conv, newUser, history, in.RequestID, in.UserID,
 		&forkRoot, newBranchIndex,
 	)
+	if err != nil {
+		return nil, err
+	}
+	h.release = release
+	return h, nil
 }
 
 // openAssistantStreamWithBranch is openAssistantStream's branched
@@ -2195,6 +2273,9 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
+		if s.conversationGone(persistCtx, conv) { // FIX125 M2
+			return
+		}
 		status := "completed"
 		switch {
 		case reg.isUserCancelled():
@@ -2935,9 +3016,21 @@ var _ time.Duration
 // prepareSend runs the gating checks shared by stream + non-stream:
 // validate input, verify conversation ownership, persist the user
 // message, build the gateway-context history.
+//
+// FIX125 M5 — it also claims the conversation for this turn (after the
+// ownership check, before anything is written). The returned release must
+// be called when the turn ends; on an error return it has already been
+// released (and is a no-op func, never nil).
 func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
-	*model.Conversation, *model.Message, []model.Message, error,
+	conv *model.Conversation, userMsg *model.Message, history []model.Message, release func(), err error,
 ) {
+	release = func() {}
+	defer func() {
+		if err != nil {
+			release()
+			release = func() {}
+		}
+	}()
 	// "Empty content" is only invalid when the user ALSO didn't
 	// attach any files. A file-only send (e.g. drag a PDF in, hit
 	// Send without typing anything) is a legitimate flow — Claude
@@ -2946,25 +3039,32 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 	// request time so the upstream provider gets a non-empty user
 	// turn even though the persisted message bubble stays empty.
 	if strings.TrimSpace(in.Content) == "" && len(in.FileIDs) == 0 {
-		return nil, nil, nil, ErrMessageEmptyContent
+		return nil, nil, nil, release, ErrMessageEmptyContent
 	}
-	conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
+	conv, err = s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, nil, nil, ErrMessageConversationNotFound
+			return nil, nil, nil, release, ErrMessageConversationNotFound
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, release, err
 	}
 	if conv.UserID != in.UserID {
-		return nil, nil, nil, ErrMessageConversationNotFound
+		return nil, nil, nil, release, ErrMessageConversationNotFound
 	}
 	// Model-allowed gate. The conversation's model_id could
 	// have been recorded BEFORE an admin removed that model from
 	// the allow-list; we treat a now-disallowed model as a
 	// hard reject so the user can't keep using it.
 	if !s.models.ModelAllowed(conv.ModelID) {
-		return nil, nil, nil, ErrMessageModelNotAllowed
+		return nil, nil, nil, release, ErrMessageModelNotAllowed
 	}
+	// FIX125 M5 — one turn per conversation, claimed before the user row
+	// is written so a refused second send leaves no trace.
+	claimRelease, err := s.claimTurn(conv.ID, in.IdempotencyKey)
+	if err != nil {
+		return nil, nil, nil, release, err
+	}
+	release = claimRelease
 
 	// If the conversation already has a fork group, new messages
 	// inherit the currently-active branch so they stay on the same
@@ -2979,7 +3079,7 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 		}
 	}
 
-	userMsg, err := s.messages.Create(ctx, &model.Message{
+	userMsg, err = s.messages.Create(ctx, &model.Message{
 		ConversationID: conv.ID,
 		TenantID:       in.TenantID,
 		UserID:         in.UserID,
@@ -2994,9 +3094,9 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateRun) {
-			return nil, nil, nil, ErrSendDuplicate
+			return nil, nil, nil, release, ErrSendDuplicate
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, release, err
 	}
 
 	// FIX124 — the chat has a name from the moment it has a message. The first
@@ -3026,14 +3126,14 @@ func (s *MessageService) prepareSend(ctx context.Context, in SendInput) (
 
 	// History includes the just-saved user message — that becomes
 	// the final "user" turn in the gateway request.
-	history, err := s.messages.ListContextByConversation(
+	history, err = s.messages.ListContextByConversation(
 		ctx, in.TenantID, conv.ID, s.maxContext,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, release, err
 	}
 
-	return conv, userMsg, history, nil
+	return conv, userMsg, history, release, nil
 }
 
 // finalizeConversation runs the post-message housekeeping:
@@ -3377,14 +3477,18 @@ func (s *MessageService) compileAndBuildRequest(
 //   - ReasoningEnabled == true  -> forward the user's chosen effort
 //     (ReasoningMode: auto / low / medium / high). This is an explicit
 //     "think at this depth" request.
-//   - ReasoningEnabled == false -> forward mode="auto" (Auto Thinking
-//     Mode, the established default). The Gateway's per-adapter gate +
-//     reasoning-aware router still engage native thinking ONLY on a
-//     model that supports it, so this never alters a non-reasoning turn.
-//     We deliberately do NOT send "off" here: "toggle off" returns to
-//     automatic behaviour, it does not suppress thinking on a model the
-//     router already picked for its reasoning. (A literal off would
-//     require the composer to persist ReasoningMode="off".)
+//   - ReasoningEnabled == false on a PINNED model (FIX125 M3) -> forward
+//     mode="off". The toggle said "no thinking" and the person chose
+//     this model themselves; sending "auto" here was the lie the
+//     2026-09-18 parity audit measured (the toggle showed OFF while the
+//     model kept thinking). Whether "off" can really stop the model is
+//     the gateway's per-strategy business (enable_thinking switch,
+//     Anthropic thinking block omitted, ...) — chat-edge only has to
+//     stop asking for thinking. This also covers the P1-4 trivial-turn
+//     gate that used to live here, which fired only in this state.
+//   - ReasoningEnabled == false on an AUTO conversation -> forward
+//     mode="auto" (unchanged). The router picks the model; "toggle off"
+//     returns to automatic behaviour there.
 //   - ShowReasoningSummary controls whether the reasoning channel is
 //     surfaced to the browser; honored as stored (default true).
 //
@@ -3407,15 +3511,17 @@ func attachReasoning(req *GatewayChatRequest, conv *model.Conversation, modelID,
 			// Explicit persisted opt-out (not currently set by the
 			// composer, but honor it if a future client does).
 			mode = "off"
+		} else if !conv.ReasoningEnabled && !IsAutoModel(conv.ModelID) {
+			// FIX125 M3 — thinking toggled off on a model the person
+			// pinned: say "off", not "auto". The gateway respects
+			// mode="off" (it never force-re-enables an explicit opt-out).
+			mode = "off"
 		} else if !IsAutoModel(conv.ModelID) && capable(modelID) && isTrivialQuery(message) {
 			// P1-4 — the user PINNED a concrete reasoning-capable model (not
 			// Auto) and this turn is trivial (e.g. "ไง"). Suppress thinking so
-			// a greeting doesn't burn a full thinking budget. The model is
-			// unchanged; only the effort drops to "off". Non-trivial / complex
-			// turns keep "auto". Auto-model turns are unaffected — the router
-			// already routes trivial turns to a non-reasoning model where the
-			// gateway omits thinking anyway. The gateway respects mode="off"
-			// (it never force-re-enables an explicit opt-out).
+			// a greeting doesn't burn a full thinking budget. Since FIX125
+			// the toggle-off case is handled above; this branch remains for
+			// a pinned row whose toggle is on with no persisted mode.
 			mode = "off"
 		}
 		showSummary = conv.ShowReasoningSummary
@@ -3827,6 +3933,11 @@ func buildGatewayRequestWithImages(
 	}
 
 	skippedAssistant := false
+	// lastFromHistory is the history index of the entry at the tail of
+	// msgs when that entry is a real history row (not the system prefix
+	// and not an Approach B synthetic image turn); -1 otherwise. FIX125
+	// needs it to know which user turn a failed blank row answered.
+	lastFromHistory := -1
 	for i, m := range history {
 		var content any = m.ContentMasked
 		if m.Role == "assistant" {
@@ -3860,6 +3971,29 @@ func buildGatewayRequestWithImages(
 			}
 			if blank {
 				skippedAssistant = true
+				// FIX125 M4 — a turn that FAILED (error) or was STOPPED
+				// (cancelled) before it produced a word leaves its question
+				// behind with no answer. Merged into the next user turn by
+				// normalizeRoleSequence it came back as "Q_failed + Q_new",
+				// and the next turn answered the abandoned question too.
+				// The person asked again (or asked something else); the
+				// abandoned question goes with its blank answer.
+				//
+				// Narrow on purpose: only a blank row (a row with text is
+				// something the person saw and stays — FIX100), only error /
+				// cancelled (a blank "completed" row is a provider oddity,
+				// not an abandoned question), only when the entry right
+				// before it is the real user row it answered, and never the
+				// final user turn — the question being asked now.
+				// Regenerate loads history strictly BEFORE the failed row,
+				// so its question is the final user turn and is kept.
+				if (m.Status == "error" || m.Status == "cancelled") &&
+					lastFromHistory >= 0 && lastFromHistory != lastUserIdx &&
+					history[lastFromHistory].Role == "user" &&
+					len(msgs) > 0 && msgs[len(msgs)-1].Role == "user" {
+					msgs = msgs[:len(msgs)-1]
+					lastFromHistory = -1
+				}
 				continue
 			}
 			// Phase 4A.2.2.1 (H1) — canonical-only provider history with
@@ -3914,6 +4048,7 @@ func buildGatewayRequestWithImages(
 			}
 		}
 		msgs = append(msgs, GatewayMessage{Role: m.Role, Content: content})
+		lastFromHistory = i
 
 		// Approach B — replay this assistant turn's generated images as
 		// a synthetic user message right after it (label + image per
@@ -3930,6 +4065,7 @@ func buildGatewayRequestWithImages(
 					Text: "[Reference: the AI-generated image(s) from the assistant's reply above, attached so you can see what the user received. This is not a new user request.]",
 				})
 				msgs = append(msgs, GatewayMessage{Role: "user", Content: blocks})
+				lastFromHistory = -1
 			}
 		}
 	}
@@ -4521,6 +4657,9 @@ func (s *MessageService) directImageStream(
 		s.activeStreams.Delete(conv.ID)
 		cancel()
 		persistCtx := context.Background()
+		if s.conversationGone(persistCtx, conv) { // FIX125 M2
+			return
+		}
 		status := "completed"
 		switch {
 		case reg != nil && reg.isUserCancelled():

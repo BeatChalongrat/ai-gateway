@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,6 +48,23 @@ type ConversationHandler struct {
 	// future UI debug panel) can see the budget breakdown without
 	// actually sending a request.
 	messages *service.MessageService
+	// Optional (FIX125 M2). Stops the conversation's running turn when
+	// the conversation is deleted, exactly as POST /cancel does. Nil ⇒
+	// delete does not touch streams (the finish-side guard still keeps
+	// the answer out of the deleted conversation).
+	streams StreamCanceller
+}
+
+// StreamCanceller is the slice of MessageService that DELETE needs:
+// Stop's stream half. (Stop's other half, closing a parked question, is
+// done by the soft delete itself — ConversationRepo.SoftDelete.)
+type StreamCanceller interface {
+	CancelStream(convID uuid.UUID) bool
+}
+
+// SetStreamCanceller wires the Stop path into DELETE (FIX125 M2).
+func (h *ConversationHandler) SetStreamCanceller(c StreamCanceller) {
+	h.streams = c
 }
 
 func NewConversationHandler(c *service.ConversationService) *ConversationHandler {
@@ -480,6 +498,16 @@ func (h *ConversationHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
+	}
+	// FIX125 M2 — a conversation deleted while it streams used to keep
+	// generating (and billing) and then write its answer into the deleted
+	// conversation. Stop it the way Stop does. AFTER the soft delete, so
+	// the finish callback the cancel triggers already sees is_deleted and
+	// writes nothing. Ownership was proved by the delete itself.
+	if h.streams != nil {
+		if h.streams.CancelStream(convID) {
+			slog.Info("conversation_deleted_stream_cancelled", "conversation_id", convID.String())
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -4,6 +4,11 @@ package service
 // reasoning-capable model (not Auto), a trivial turn ("ไง") should not burn a
 // thinking budget: attachReasoning sends mode="off". Complex turns and explicit
 // user modes are unaffected; Auto-model turns are unaffected.
+//
+// FIX125 M3 — a pinned model with the toggle OFF now always sends "off"
+// (fix125_reasoning_off_test.go). The P1-4 gate below therefore only
+// decides for a pinned row whose toggle is ON with no persisted mode, so
+// these fixtures set ReasoningEnabled: true and leave ReasoningMode empty.
 
 import (
 	"testing"
@@ -58,7 +63,7 @@ func TestIsTrivialQuery(t *testing.T) {
 // --- attachReasoning gate --------------------------------------------------
 
 func TestPinnedThinkingModelTrivialTurnIsOff(t *testing.T) {
-	conv := &model.Conversation{ModelID: reasoningModel}
+	conv := &model.Conversation{ModelID: reasoningModel, ReasoningEnabled: true}
 	for _, msg := range []string{"ไง", "หวัดดี", "hi"} {
 		if mode := reasoningMode(conv, reasoningModel, msg); mode != "off" {
 			t.Errorf("pinned thinking model + %q: mode=%q, want off", msg, mode)
@@ -67,7 +72,7 @@ func TestPinnedThinkingModelTrivialTurnIsOff(t *testing.T) {
 }
 
 func TestPinnedThinkingModelComplexTurnIsAuto(t *testing.T) {
-	conv := &model.Conversation{ModelID: reasoningModel}
+	conv := &model.Conversation{ModelID: reasoningModel, ReasoningEnabled: true}
 	if mode := reasoningMode(conv, reasoningModel, "วิเคราะห์ code นี้ให้หน่อย"); mode != "auto" {
 		t.Errorf("pinned thinking model + complex: mode=%q, want auto", mode)
 	}
@@ -86,7 +91,7 @@ func TestExplicitUserModeWins(t *testing.T) {
 func TestPinnedNonThinkingModelUnchanged(t *testing.T) {
 	// Non-reasoning pin: gate does not apply; mode stays the auto default
 	// (the gateway omits the thinking block downstream for a plain model).
-	conv := &model.Conversation{ModelID: plainModel}
+	conv := &model.Conversation{ModelID: plainModel, ReasoningEnabled: true}
 	if mode := reasoningMode(conv, plainModel, "ไง"); mode != "auto" {
 		t.Errorf("pinned plain model + trivial: mode=%q, want auto", mode)
 	}
@@ -118,7 +123,7 @@ func TestGateFollowsInjectedCatalog(t *testing.T) {
 	dbModel := "deepseek/deepseek-r1" // in model_configs, never in the static set
 	catalog := func(id string) bool { return id == dbModel }
 
-	conv := &model.Conversation{ModelID: dbModel}
+	conv := &model.Conversation{ModelID: dbModel, ReasoningEnabled: true}
 	if mode := reasoningModeWith(conv, dbModel, "ไง", catalog); mode != "off" {
 		t.Errorf("catalog-known reasoning model, trivial turn: mode=%q, want off", mode)
 	}
@@ -127,7 +132,7 @@ func TestGateFollowsInjectedCatalog(t *testing.T) {
 		t.Errorf("static fallback should not know %s: mode=%q, want auto", dbModel, mode)
 	}
 	// Catalog says the pinned model does NOT reason -> gate never fires.
-	convStatic := &model.Conversation{ModelID: reasoningModel}
+	convStatic := &model.Conversation{ModelID: reasoningModel, ReasoningEnabled: true}
 	no := func(string) bool { return false }
 	if mode := reasoningModeWith(convStatic, reasoningModel, "ไง", no); mode != "auto" {
 		t.Errorf("catalog-declined model: mode=%q, want auto", mode)

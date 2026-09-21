@@ -1062,17 +1062,31 @@ func (r *MessageRepo) UpdateContent(
 	content, status string,
 	tokenInput, tokenOutput *int,
 ) error {
+	// FIX125 M2 — never into a deleted conversation (liveConversationGuard).
 	const q = `
-		UPDATE chat.messages_masked
+		UPDATE chat.messages_masked AS m
 		SET content_masked = $2, status = $3,
 		    token_usage_input = $4, token_usage_output = $5
-		WHERE id = $1
-	`
+		WHERE m.id = $1` + liveConversationGuard
 	if _, err := r.db.Exec(ctx, q, msgID, content, status, tokenInput, tokenOutput); err != nil {
 		return fmt.Errorf("update message content: %w", err)
 	}
 	return nil
 }
+
+// liveConversationGuard (FIX125 M2) is appended to the WHERE clause of the
+// finish-time content writes (UPDATE chat.messages_masked AS m ...). A
+// conversation deleted while its answer was still streaming must not have
+// that answer written into it afterwards: the delete is the person's, and
+// the row is on the erasure queue (TranscriptRetentionService). The
+// service's finish callbacks check first; this closes the window between
+// that check and the write. Zero rows affected is not an error — there is
+// nothing to write to.
+const liveConversationGuard = `
+		  AND NOT EXISTS (
+		      SELECT 1 FROM chat.conversations c
+		      WHERE c.id = m.conversation_id AND c.is_deleted
+		  )`
 
 // MarkInterrupted settles a row that a process restart orphaned
 // mid-generation (Phase 5 stream resume). Guarded: only flips a row
@@ -1191,7 +1205,7 @@ func (r *MessageRepo) UpdateContentAndCanonical(
 		set += `, display_state = $13`
 		args = append(args, ds)
 	}
-	q := `UPDATE chat.messages_masked SET ` + set + ` WHERE id = $1`
+	q := `UPDATE chat.messages_masked AS m SET ` + set + ` WHERE m.id = $1` + liveConversationGuard
 	if _, err := r.db.Exec(ctx, q, args...); err != nil {
 		return fmt.Errorf("update message content+canonical: %w", err)
 	}
@@ -1229,7 +1243,7 @@ func (r *MessageRepo) UpdateContentInvalidateCanonical(
 		set += `, display_state = $8`
 		args = append(args, ds)
 	}
-	q := `UPDATE chat.messages_masked SET ` + set + ` WHERE id = $1`
+	q := `UPDATE chat.messages_masked AS m SET ` + set + ` WHERE m.id = $1` + liveConversationGuard
 	if _, err := r.db.Exec(ctx, q, args...); err != nil {
 		return fmt.Errorf("update message content (invalidate canonical): %w", err)
 	}

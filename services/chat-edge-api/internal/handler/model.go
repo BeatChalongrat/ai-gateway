@@ -74,9 +74,10 @@ func NewModelHandler(cfg *config.Config, gateway *service.GatewayClient) *ModelH
 // known reasoning-capable model so the frontend can render the
 // ReasoningToggle and the mode picker without an extra call.
 //
-// “Modes“ lists every value the Gateway's ReasoningConfig.mode
-// Literal accepts so a new mode added Gateway-side requires only
-// a single-line change here.
+// “Modes“ lists the ReasoningConfig.mode values that mean something
+// for THIS model. FIX125 M3: "off" appears only where the model's
+// strategy can really stop thinking (see staticReasoningModes); the
+// Gateway's own list is passed through untouched.
 type reasoningCapability struct {
 	Supported        bool     `json:"supported"`
 	Modes            []string `json:"modes"`
@@ -149,6 +150,28 @@ var reasoningCapableModels = map[string]struct{}{
 	// DeepSeek / Groq R1 distill — openai_compatible_reasoning.
 	"deepseek-reasoner":             {},
 	"deepseek-r1-distill-llama-70b": {},
+}
+
+// reasoningModesWithoutOff is the mode list for a reasoning model whose
+// thinking cannot be switched off, or whose strategy chat-edge cannot see.
+func reasoningModesWithoutOff() []string {
+	return []string{"auto", "low", "medium", "high"}
+}
+
+// staticReasoningModes is the static fallback's (Gateway unreachable) mode
+// list for one model. FIX125 M3 — "off" is offered only where the provider
+// strategy really turns thinking off, the same rule the Gateway applies:
+// Anthropic (the thinking block is simply omitted) and the Qwen/vLLM
+// enable_thinking switch. The static catalogue carries no strategy, so a
+// self-hosted model is never guessed into the second group; OpenAI
+// o-series (effort floor "low"), DeepSeek R1 and Gemini thinking models
+// cannot be told not to think, and advertising "off" for them was a
+// promise the wire could not keep.
+func staticReasoningModes(id, provider string) []string {
+	if strings.EqualFold(provider, "anthropic") || strings.HasPrefix(strings.ToLower(id), "claude-") {
+		return []string{"off", "auto", "low", "medium", "high"}
+	}
+	return reasoningModesWithoutOff()
 }
 
 // modelMeta is the static display-metadata shape. The map below is
@@ -412,9 +435,13 @@ func (h *ModelHandler) buildFromGateway(gw []service.GatewayModelInfo) ([]modelR
 		}
 		var rb *reasoningCapability
 		if m.Reasoning != nil && m.Reasoning.Supported {
+			// FIX125 M3 — the Gateway knows each model's reasoning
+			// strategy; chat-edge does not. Its modes list is passed
+			// through as sent. When it sends none, "off" is NOT invented:
+			// only a strategy that can really stop thinking may offer it.
 			modes := m.Reasoning.Modes
 			if len(modes) == 0 {
-				modes = []string{"off", "auto", "low", "medium", "high"}
+				modes = reasoningModesWithoutOff()
 			}
 			defaultMode := m.Reasoning.DefaultMode
 			if defaultMode == "" {
@@ -730,7 +757,7 @@ func (h *ModelHandler) configCatalog() []modelResponse {
 		if reasoning {
 			rb = &reasoningCapability{
 				Supported:        true,
-				Modes:            []string{"off", "auto", "low", "medium", "high"},
+				Modes:            staticReasoningModes(m.ID, m.Provider),
 				DefaultMode:      "auto",
 				SummarySupported: true,
 			}

@@ -691,6 +691,22 @@ func (r *ConversationRepo) SoftDelete(ctx context.Context, tenantID, convID uuid
 	return nil
 }
 
+// IsDeleted reports whether the conversation is gone for the purposes of a
+// turn that is finishing (FIX125 M2): soft-deleted, or no longer there at
+// all (hard-purged). Deliberately not tenant-scoped — the caller is a
+// finish callback that already proved ownership when the turn began.
+func (r *ConversationRepo) IsDeleted(ctx context.Context, convID uuid.UUID) (bool, error) {
+	var deleted bool
+	err := r.db.QueryRow(ctx, `SELECT is_deleted FROM chat.conversations WHERE id = $1`, convID).Scan(&deleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return true, nil
+		}
+		return false, fmt.Errorf("conversation is_deleted: %w", err)
+	}
+	return deleted, nil
+}
+
 // IncrementMessageCount bumps “message_count“ by “delta“ (can
 // be negative if a regenerate flow needs to retract). Also touches
 // “updated_at“ so the sidebar sort surfaces the active

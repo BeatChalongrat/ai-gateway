@@ -530,6 +530,8 @@ func main() {
 	conversationHandler.SetTitleService(titles)
 	conversationHandler.SetConversationStateService(stateSvc)
 	conversationHandler.SetMessageService(messageSvc)
+	// FIX125 M2 — DELETE stops the conversation's running turn.
+	conversationHandler.SetStreamCanceller(messageSvc)
 
 	messageHandler := handler.NewMessageHandler(messageSvc)
 	// FIX22 §1a — custom instructions + skill instructions are prompt sources too.

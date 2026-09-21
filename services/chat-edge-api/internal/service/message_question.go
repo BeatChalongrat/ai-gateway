@@ -216,7 +216,7 @@ func (s *MessageService) CancelPendingQuestion(ctx context.Context, tenantID, us
 // ResumeQuestion claims the parked turn and opens its continuation. The
 // returned handle streams exactly like SendStream's; the handler runs it
 // through the same drain/finish path.
-func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionInput) (*StreamHandle, error) {
+func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionInput) (_ *StreamHandle, retErr error) {
 	if s.pendingQuestions == nil {
 		return nil, ErrQuestionNotFound
 	}
@@ -259,6 +259,17 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 	if err := json.Unmarshal(q.Questions, &questions); err != nil {
 		return nil, fmt.Errorf("parked questions unreadable: %w", err)
 	}
+	// FIX125 M5 — the continuation is a turn like any other: one per
+	// conversation, claimed before the question is.
+	release, err := s.claimTurn(conv.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if retErr != nil {
+			release()
+		}
+	}()
 	// The claim is the two-tabs rule: one conditional UPDATE, first wins.
 	claimStatus := model.PendingQuestionAnswered
 	if in.Answer.Outcome == "skipped" {
@@ -334,6 +345,9 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 	finish := func(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 		s.activeStreams.Delete(conv.ID)
 		persistCtx := context.Background()
+		if s.conversationGone(persistCtx, conv) { // FIX125 M2
+			return
+		}
 		status := "completed"
 		switch {
 		case reg.isUserCancelled():
@@ -376,5 +390,6 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 		finish:         finish,
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
+		release:        release,
 	}, nil
 }
