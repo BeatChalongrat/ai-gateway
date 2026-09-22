@@ -168,10 +168,18 @@ describe("FIX124 T — named after the first turn that was answered", () => {
   });
 
   it("temporary chat: no title request on any turn", async () => {
-    seed([], { memory_enabled: false });
+    // FIX127 B1 — temporary = started as temporary (is_temporary).
+    seed([], { is_temporary: true, memory_enabled: false });
     await turn("one", "error");
     await turn("two", "completed");
     expect(mockApi.generateTitle).not.toHaveBeenCalled();
+  });
+
+  it("FIX127 B1 — memory off on an ordinary chat is not temporary: it is still named", async () => {
+    seed([], { memory_enabled: false });
+    await turn("one", "completed");
+    await settle(3);
+    expect(mockApi.generateTitle).toHaveBeenCalledTimes(1);
   });
 
   it("Retry of a failed first turn that now answers names the chat", async () => {

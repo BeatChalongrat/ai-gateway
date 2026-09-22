@@ -116,6 +116,27 @@ describe("composer focus after a stream ends", () => {
     expect(document.activeElement).toBe(textarea);
   });
 
+  it("FIX127 D3 — does NOT take focus while the person holds a text selection", () => {
+    const { textarea, finishStream } = mount(true);
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    const p = document.createElement("p");
+    p.textContent = "an answer worth quoting";
+    document.body.appendChild(p);
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const sel = window.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+    expect(sel.isCollapsed).toBe(false);
+
+    finishStream();
+
+    expect(document.activeElement).not.toBe(textarea);
+    expect(window.getSelection()!.isCollapsed).toBe(false);
+    sel.removeAllRanges();
+    p.remove();
+  });
+
   it("does NOT move focus the user placed in another field", () => {
     const { textarea, finishStream } = mount(true);
     const other = document.createElement("input");
@@ -151,9 +172,14 @@ describe("composer focus after a stream ends", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  it("does not fire on mount when streaming is already false", () => {
+  it("FIX127 D4 — on a pointer device the composer has focus when the chat opens", () => {
     const { textarea } = mount(false);
+    expect(document.activeElement).toBe(textarea);
+  });
 
+  it("FIX127 D4 — on a touch device nothing is focused on open (no keyboard pop)", () => {
+    pointerFine = false;
+    const { textarea } = mount(false);
     expect(document.activeElement).not.toBe(textarea);
     expect(document.activeElement).toBe(document.body);
   });

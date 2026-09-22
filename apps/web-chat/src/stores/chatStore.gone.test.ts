@@ -171,7 +171,8 @@ describe("sendMessage into a deleted conversation", () => {
     expect(s.conversations).toHaveLength(0);
     expect(s.activeConversationId).toBeNull();
     expect(s.messages.c1).toBeUndefined();
-    expect(s.errorBanner).toBe(dictionaries.en["error.conversationDeleted"]);
+    // FIX127 A3 — a send with text says the text was kept (see chatStore.fix127.stranded.test.ts).
+    expect(s.errorBanner).toBe(dictionaries.en["error.conversationDeletedKeptText"]);
   });
 
   it("410 Gone behaves identically to 404", async () => {
@@ -191,7 +192,7 @@ describe("sendMessage into a deleted conversation", () => {
 
     const s = useChatStore.getState();
     expect(s.conversations).toHaveLength(0);
-    expect(s.errorBanner).toBe(dictionaries.en["error.conversationDeleted"]);
+    expect(s.errorBanner).toBe(dictionaries.en["error.conversationDeletedKeptText"]);
   });
 
   it("does not disturb the credits (402) error path", async () => {

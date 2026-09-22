@@ -245,4 +245,10 @@ export const hostApi = {
   compactContext: async (conversationId: string, instructions: string) =>
     unwrap<{ ok: boolean }>(await bridge.hostQuery("context.compact", { conversationId, instructions }, 120_000)),
   deleteGlobalNote: (noteId: string) => bridge.hostQuery("globalNotes.delete", { noteId }),
+  /** FIX127 C3 — the new-chat page abandons the conversation it created for
+   *  an attachment. Fire-and-forget on pagehide: the request crosses the IPC
+   *  before the renderer goes, and the host deletes only a 0-message chat. */
+  discardEmptyConversation: (conversationId: string) => {
+    void bridge.hostQuery("conversation.discardEmpty", { conversationId }).catch(() => {});
+  },
 };

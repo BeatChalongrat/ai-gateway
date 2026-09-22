@@ -8,7 +8,8 @@ import { useDismissable } from "@/hooks/useDismissable";
 
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { beginUpload, endUpload } from "@/lib/uploadRegistry";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { loadSkillTemplates, skillSlashCommands } from "@/lib/skillTemplates";
 import {
@@ -496,6 +497,7 @@ export function ChatInput({
   const markFileError = useChatStore((s) => s.markFileError);
   const setFileExtractionStatus = useChatStore((s) => s.setFileExtractionStatus);
   const removePendingFile = useChatStore((s) => s.removePendingFile);
+  const enqueueMessage = useChatStore((s) => s.enqueueMessage);
   const clearPendingFiles = useChatStore((s) => s.clearPendingFiles);
   const stageOutgoingFiles = useChatStore((s) => s.stageOutgoingFiles);
 
@@ -619,10 +621,33 @@ export function ChatInput({
         active === document.body ||
         !document.contains(active);
       if (!focusLost) return;
+      // FIX127 D3 — a person holding a text selection in the answer has
+      // focus on <body> too; taking it would collapse their selection.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) return;
       ta.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(raf);
   }, [streaming]);
+
+  // FIX127 D4 — the composer has focus when a chat opens on a device with a
+  // pointer (the desktop app, a laptop): typing can start at once. Phones
+  // are left alone (focusing pops the keyboard). Focus placed anywhere
+  // else by the person — or by a dialog — is never taken; only <body> and
+  // the layout's route-change landing on <main> count as "nobody's".
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia("(pointer: fine)").matches) return;
+    const raf = requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (!ta || disabled) return;
+      const active = document.activeElement;
+      const nobody = active === null || active === document.body || (active instanceof HTMLElement && active.tagName === "MAIN");
+      if (!nobody) return;
+      ta.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   const startVoice = () => {
     // Optional haptic on mobile — supported on Android Chrome.
@@ -676,6 +701,22 @@ export function ChatInput({
     (text.trim().length > 0 || readyFileIds.length > 0);
 
   function submit() {
+    // FIX127 D1 — Enter while an answer streams used to do nothing. The
+    // message now waits in the queue above the composer (editable,
+    // removable, "send now"), and is sent as its own turn when the answer
+    // finishes. Ready attachments travel with it; one still uploading
+    // stays in the composer for the next message.
+    if (streaming && !disabled && conversationId && (text.trim().length > 0 || readyFileIds.length > 0)) {
+      enqueueMessage(conversationId, text.trim(), readyFileIds);
+      setText("");
+      textRef.current = "";
+      clearDraft(draftKey);
+      for (const p of pendingFiles) {
+        if (p.status === "ready" && p.serverId) removePendingFile(renderBucket, p.id, { keepFile: true });
+      }
+      refocusAfterSend();
+      return;
+    }
     if (!canSend) return;
     // W3 — a user who attached an image and THEN switched to a
     // non-vision model keeps the attachment; the send is blocked with
@@ -921,10 +962,18 @@ export function ChatInput({
     pendingId: string,
     file: File,
   ) {
+    // FIX127 A1 — a chip removed while it waited its turn is skipped; one
+    // removed mid-transfer is aborted; the id travels as client_id so the
+    // server row can be taken back even before the response is seen.
+    const ctrl = beginUpload(pendingId, netConvId);
+    if (!ctrl) return;
     try {
       const row = await api.uploadFile(netConvId, file, {
+        signal: ctrl.signal,
+        clientId: pendingId,
         onProgress: (p) => updateFileProgress(chipBucket, pendingId, p),
       });
+      endUpload(pendingId);
       markFileReady(chipBucket, pendingId, row.id, row.extraction_status);
       // The upload call now returns before the server has finished
       // reading the document, so follow the row until extraction lands.
@@ -933,6 +982,9 @@ export function ChatInput({
         setFileExtractionStatus(chipBucket, pendingId, status),
       );
     } catch (err) {
+      endUpload(pendingId);
+      // The user removed the chip: nothing to report, the chip is gone.
+      if (err instanceof ApiError && err.code === "ABORTED") return;
       // FIX126 F5 — the chip speaks the UI's language, not the transport's.
       const msg = uploadErrorMessage(err);
       markFileError(chipBucket, pendingId, msg);
@@ -1644,10 +1696,15 @@ export async function uploadFiles(
     return;
   }
   for (const { f, pid } of staged) {
+    const ctrl = beginUpload(pid, netConvId); // FIX127 A1
+    if (!ctrl) continue;
     try {
       const row = await api.uploadFile(netConvId, f, {
+        signal: ctrl.signal,
+        clientId: pid,
         onProgress: (p) => store.updateFileProgress(chipBucket, pid, p),
       });
+      endUpload(pid);
       store.markFileReady(chipBucket, pid, row.id, row.extraction_status);
       const onStatus = store.setFileExtractionStatus;
       if (onStatus) {
@@ -1657,6 +1714,8 @@ export async function uploadFiles(
         );
       }
     } catch (err) {
+      endUpload(pid);
+      if (err instanceof ApiError && err.code === "ABORTED") continue;
       const msg = uploadErrorMessage(err);
       store.markFileError(chipBucket, pid, msg);
       toast(msg);

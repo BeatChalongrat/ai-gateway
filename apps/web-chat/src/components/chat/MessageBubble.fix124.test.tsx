@@ -90,12 +90,16 @@ describe("R2 — a lost connection", () => {
   });
 
   it("a turn that ended because the link broke (desktop) is labelled 'connection lost', not 'AI service error'", () => {
-    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "half", terminal_cause: "disconnected", error_code: "stream_interrupted" })} />);
+    // FIX127 A4 — the row has a code, so the red notice names the reason and
+    // the action-row label steps aside: one reason per card. A row WITHOUT a
+    // code keeps the link-broke label.
+    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "half", terminal_cause: "disconnected" })} />);
     expect(screen.getByTestId("error-label").textContent).toBe(dictionaries.th["msg.connectionLost"]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("a real failure keeps its label", () => {
-    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "", terminal_cause: "error", error_code: "all_models_failed" })} />);
+    render(<MessageBubble convId="c1" message={msg({ status: "error", content: "half", terminal_cause: "error" })} />);
     expect(screen.getByTestId("error-label").textContent).toBe(dictionaries.th["msg.aiError"]);
   });
 });

@@ -274,7 +274,8 @@ describe("FIX122 Part B — the page asks for a name once and never renames", ()
 
   it("a temporary chat is never sent for a name", async () => {
     seed("c1");
-    useChatStore.setState((s) => ({ conversations: s.conversations.map((c) => ({ ...c, memory_enabled: false })) }));
+    // FIX127 B1 — temporary = is_temporary; memory off alone still gets a name.
+    useChatStore.setState((s) => ({ conversations: s.conversations.map((c) => ({ ...c, is_temporary: true, memory_enabled: false })) }));
     await completeFirstTurn();
     await tick();
     expect(mockApi.generateTitle).not.toHaveBeenCalled();

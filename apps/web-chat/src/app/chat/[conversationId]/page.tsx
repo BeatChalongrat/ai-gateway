@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ChatInput, uploadFiles } from "@/components/chat/ChatInput";
@@ -10,6 +10,7 @@ import { ConversationFiles } from "@/components/chat/ConversationFiles";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { ExportMenu } from "@/components/chat/ExportMenu";
 import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
+import { MessageQueue } from "@/components/chat/MessageQueue";
 import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
 import { ShareModal } from "@/components/chat/ShareModal";
@@ -173,6 +174,26 @@ export default function ConversationPage() {
   // Once messagesLoaded[convId] flips to true the page falls through
   // to the empty-vs-thread branch below — even if the load failed,
   // because the errorBanner already surfaces the failure.
+  // FIX127 D4 — a message deep link: /chat/<id>#msg-<messageId> opens the
+  // chat on that message (centred, briefly highlighted). Once per hash,
+  // after the rows exist.
+  const jumpedHashRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined" || !messagesLoaded || !messages?.length) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith("#msg-") || jumpedHashRef.current === hash) return;
+    const el = document.getElementById(hash.slice(1));
+    if (!el) return;
+    jumpedHashRef.current = hash;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("deep-link-target");
+    const t = window.setTimeout(() => el.classList.remove("deep-link-target"), 2000);
+    return () => window.clearTimeout(t);
+  }, [messagesLoaded, messages]);
+
+  // FIX127 D4 — regenerated answers are branches (see the thread prop below).
+  // Before the early return: a hook.
+  const visibleMessages = useMemo(() => (messages ?? []).filter((m) => m.status !== "regenerated"), [messages]);
   if (!messagesLoaded || messages === undefined) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -250,6 +271,7 @@ export default function ConversationPage() {
   const composerBlock = (
     <>
       <TemporaryChatBanner conversationId={convId} />
+      <MessageQueue conversationId={convId} />
       {composer}
     </>
   );
@@ -316,7 +338,10 @@ export default function ConversationPage() {
             <ErrorBoundary resetKey={convId}>
               <ChatThread
                 convId={convId}
-                messages={messages}
+                // FIX127 D4 — an answer that was regenerated is a branch the
+                // server keeps (the navigator shows it after a reload); live,
+                // it used to stay stacked above the new answer.
+                messages={visibleMessages}
                 hasMoreOlder={hasMoreOlder ?? false}
                 loadingOlder={loadingOlder ?? false}
                 onLoadEarlier={() => loadOlderMessages(convId)}

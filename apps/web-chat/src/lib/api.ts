@@ -267,10 +267,13 @@ class ApiClient {
     const q = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
     return this.json<ConversationListResponse>(`/conversations${q}`);
   }
-  createConversation(model_id: string) {
+  createConversation(model_id: string, opts?: { temporary?: boolean }) {
+    // FIX127 B1 — a chat started as temporary says so at creation
+    // (is_temporary); the server starts it with memory off and never names
+    // it. Memory off alone no longer means temporary.
     return this.json<Conversation>("/conversations", {
       method: "POST",
-      body: JSON.stringify({ model_id }),
+      body: JSON.stringify(opts?.temporary ? { model_id, is_temporary: true } : { model_id }),
     });
   }
   getConversation(id: string) {
@@ -601,6 +604,15 @@ class ApiClient {
   }
   deleteFile(fileId: string) {
     return this.raw(`/files/${fileId}`, { method: "DELETE" });
+  }
+  /** FIX127 A1 — delete an upload the page knows only by the client_id it
+   *  sent with the body (the chip was removed before the server answered).
+   *  The server removes unattached rows only; 404 when there is none. */
+  deleteFileByClientId(convId: string, clientId: string) {
+    return this.raw(
+      `/conversations/${convId}/files/by-client/${encodeURIComponent(clientId)}`,
+      { method: "DELETE" },
+    );
   }
   /** Absolute URL for the download endpoint. Auth rides on the
    *  ``portal_access_token`` cookie — cookies aren't scoped by port
@@ -1252,6 +1264,9 @@ class ApiClient {
     opts?: {
       signal?: AbortSignal;
       onProgress?: (percent: number) => void;
+      /** FIX127 A1 — the chip's id, sent as the multipart `client_id` so a
+       *  removed chip can be deleted on the server before its id is known. */
+      clientId?: string;
     },
     _retried = false,
   ): Promise<FileAttachment> {
@@ -1345,6 +1360,7 @@ class ApiClient {
       }
       const form = new FormData();
       form.append("file", file);
+      if (opts?.clientId) form.append("client_id", opts.clientId);
       xhr.send(form);
     });
   }

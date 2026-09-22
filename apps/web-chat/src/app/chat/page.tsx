@@ -26,9 +26,13 @@ import { useRouter } from "next/navigation";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { api } from "@/lib/api";
+import { HOSTED_MODE } from "@/lib/auth";
+import { hostApi } from "@/lib/hostApi";
 import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
 import { toast } from "@/components/ui/Toast";
+import { SEND_STRANDED_EVENT } from "@/components/ui/ErrorBanner";
+import { clearDraft, NEW_CHAT_DRAFT_KEY } from "@/lib/draftStore";
 import { consumeQueryPrefill } from "@/lib/deepLinkParams";
 import { tOutside } from "@/lib/i18n";
 import { gateImagesForVision } from "@/lib/visionGate";
@@ -124,7 +128,10 @@ export default function ChatLanding() {
       const id = draftConvIdRef.current;
       if (!id) return;
       draftConvIdRef.current = null;
-      api.deleteConversationOnExit(id);
+      // FIX127 C3 — Electron refuses the keepalive cross-origin DELETE
+      // while the renderer is torn down; the host does it over IPC.
+      if (HOSTED_MODE) hostApi.discardEmptyConversation(id);
+      else api.deleteConversationOnExit(id);
     };
     window.addEventListener("pagehide", onPageHide);
     return () => {
@@ -174,6 +181,24 @@ export default function ChatLanding() {
     return promise;
   }, [createConversation, selectedModelId]);
 
+  // FIX127 A3 — the banner's "send in a new chat": the text of a send that
+  // was refused because its conversation had been deleted elsewhere. The
+  // draft is already in the composer; this sends it without retyping.
+  const handleSendRef = useRef<(t: string, f: string[]) => Promise<void>>(async () => {});
+  useEffect(() => {
+    const onStranded = () => {
+      const st = useChatStore.getState();
+      const text = st.strandedSend?.text;
+      if (!text) return;
+      st.clearStrandedSend();
+      st.setError(null);
+      clearDraft(NEW_CHAT_DRAFT_KEY);
+      void handleSendRef.current(text, []);
+    };
+    window.addEventListener(SEND_STRANDED_EVENT, onStranded);
+    return () => window.removeEventListener(SEND_STRANDED_EVENT, onStranded);
+  }, []);
+
   async function handleSend(
     text: string,
     fileIds: string[],
@@ -202,6 +227,7 @@ export default function ChatLanding() {
     void sendMessage(id, text, fileIds, imageMode, videoMode);
     router.push(`/chat/${id}`);
   }
+  handleSendRef.current = handleSend;
 
   return (
     <AttachmentDropZone

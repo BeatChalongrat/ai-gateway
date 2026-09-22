@@ -94,6 +94,9 @@ export interface Conversation {
    *  predate the field flow through as `undefined` which the UI
    *  treats as "memory on". */
   memory_enabled?: boolean;
+  /** FIX127 B1 — the user started this chat as temporary. The only flag
+   *  that means "temporary" (no title, memory off from the start). */
+  is_temporary?: boolean;
   /** T4 — Thinking Mode. ``reasoning_enabled`` is the master
    *  toggle; ``reasoning_mode`` mirrors the public ReasoningConfig
    *  modes (off/auto/low/medium/high); ``show_reasoning_summary``

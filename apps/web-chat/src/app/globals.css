@@ -710,6 +710,8 @@ input {
 
 /* Entrance + polish animations. */
 .fade-in-up      { animation: fadeInUp 240ms ease-out; }
+/* FIX127 D4 — the row a deep link (#msg-<id>) landed on, for two seconds. */
+.deep-link-target { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 0.75rem; transition: outline-color 600ms ease-out; }
 .message-enter   { animation: messageSlideIn 200ms ease-out; }
 .popover-appear  { animation: popoverIn 150ms ease-out; transform-origin: top right; }
 /* Toast-specific entrance: opacity only. The toast centers itself with

@@ -74,7 +74,9 @@ export type HostQueryOp =
   | "context.info" | "context.compact"
   // FIX34 Part A: host-owned shell prefs (quick-ask hotkey, tray click) and the
   // quick-ask window's two hand-offs (close, open this chat in the main window).
-  | "shell.prefs.get" | "shell.prefs.set" | "quick.close" | "quick.openInMain";
+  | "shell.prefs.get" | "shell.prefs.set" | "quick.close" | "quick.openInMain"
+  // FIX127 C3: delete an attached-then-abandoned 0-message chat via the host.
+  | "conversation.discardEmpty";
 
 export interface HostResult<T = unknown> {
   ok: boolean;

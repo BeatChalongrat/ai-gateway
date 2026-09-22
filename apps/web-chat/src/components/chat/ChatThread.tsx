@@ -357,16 +357,26 @@ export function ChatThread({
   useLayoutEffect(() => {
     releaseHold();
     cancelScrollAnimation();
-    setFollow(true);
     setPendingNew(false);
-    setFarFromBottom(false);
     setConsentPill(false);
     readingLandmark.current = null;
     lastConsentId.current = null;
     lastLen.current = -1;
     lastLastContent.current = "\u0000";
     const el = scrollerRef.current;
-    if (el) snapTo(el, geometry(el).bottom);
+    // FIX127 D2 — a chat the person had scrolled away from the bottom of
+    // opens where they left it (this session); every other chat opens at
+    // the bottom, as before.
+    const remembered = scrollMemory.get(convId);
+    if (remembered && remembered.far) {
+      setFollow(false);
+      setFarFromBottom(true);
+      if (el) snapTo(el, remembered.top);
+    } else {
+      setFollow(true);
+      setFarFromBottom(false);
+      if (el) snapTo(el, geometry(el).bottom);
+    }
     return () => {
       turnEpoch.current += 1;
       cancelScrollAnimation();
@@ -605,6 +615,8 @@ export function ChatThread({
     const top = el.scrollTop;
     lastScrollTop.current = top;
     refreshAffordance(el);
+    // FIX127 D2 — where this chat is being read, for the next visit.
+    rememberScroll(convId, top, geometry(el).contentEnd > top + el.clientHeight + SCROLL_TOLERANCE_PX);
     if ((autoScrolling.current || animating.current) && !userIntent.current) return;
     // Native clamping after a shrink is geometry, not a request to stop reading.
     const clamped = Math.min(prevTop, Math.max(0, el.scrollHeight - el.clientHeight));
@@ -1031,6 +1043,21 @@ function VirtualMessageList(
  *  the browser clamps the scroll write to the real bottom — no estimate of
  *  the total height is involved, so a wrong row estimate cannot land the
  *  first frame somewhere in the middle. */
+/** FIX127 D2 — per-conversation scroll memory for this page session. Only
+ *  a position AWAY from the bottom is worth keeping: a chat read to the
+ *  end opens at the end (where new answers arrive). */
+const scrollMemory = new Map<string, { top: number; far: boolean }>();
+export function rememberScroll(convId: string, top: number, far: boolean): void {
+  if (!convId) return;
+  scrollMemory.set(convId, { top, far });
+}
+export function rememberedScrollFor(convId: string): { top: number; far: boolean } | undefined {
+  return scrollMemory.get(convId);
+}
+export function _resetScrollMemory(): void {
+  scrollMemory.clear();
+}
+
 export function virtualInitialOffset(startAtEnd: boolean, currentScrollTop: number): number {
   return startAtEnd ? VIRTUAL_END_OFFSET : Math.max(0, currentScrollTop);
 }
@@ -1055,7 +1082,8 @@ function renderRow(m: Message, i: number, props: InnerProps) {
     // render modes (getBoundingClientRect, so the virtualizer's
     // translateY is included). Keyed by rowKey so the id swap after
     // message_start never re-creates the bubble.
-    <div key={rowKey(m)} className={extraGap} data-msg-index={i}>
+    // FIX127 D4 — id="msg-<id>" is the deep-link anchor (/chat/<conv>#msg-<id>).
+    <div key={rowKey(m)} id={`msg-${m.id}`} className={extraGap} data-msg-index={i}>
       <MessageBubble
         convId={convId}
         message={m}

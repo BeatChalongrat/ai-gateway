@@ -18,7 +18,8 @@ import { bumpUsageVersion } from "@/hooks/useUsage";
 import { api, ApiError } from "@/lib/api";
 import { HOSTED_MODE } from "@/lib/auth";
 import { bridge, usingBridgeTransport } from "@/lib/bridge";
-import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStore";
+import { clearDraft, loadDraft, migrateDraft, NEW_CHAT_DRAFT_KEY, saveDraft } from "@/lib/draftStore";
+import { discardUpload, forgetUpload } from "@/lib/uploadRegistry";
 import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outboxPut } from "@/lib/sendOutbox";
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
@@ -74,6 +75,13 @@ const HOSTED_RESUME_PROBE_MS = 700;
 // which made every later map-by-id update touch BOTH placeholder rows.
 // crypto.randomUUID() is available in all target browsers and jsdom.
 const tmpId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
+/** FIX127 D1 — one message waiting for the current answer to finish. */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  fileIds: string[];
+}
 
 export interface PendingFile {
   /** Client-only id used to address the card before the server
@@ -185,10 +193,32 @@ interface ChatState {
   outgoingFiles: Record<string, FileAttachment>;
   errorBanner: string | null;
   setError: (msg: string | null) => void;
+  /** FIX127 A3 — a message sent into a conversation that was deleted
+   *  elsewhere. The text is already in the new-chat draft; this is the
+   *  banner's "send in a new chat" hand-off. */
+  strandedSend: { text: string } | null;
+  clearStrandedSend: () => void;
+
+  /** FIX127 D1 — messages typed while an answer streams wait here, per
+   *  conversation, in order. Each one is sent as its OWN turn when the
+   *  current answer finishes (one turn in flight per chat — M5 — is kept:
+   *  the queue drains one message per finished turn, never in parallel).
+   *  They are sent one by one, not merged into a single prompt as Open
+   *  WebUI does: merging would put words in the transcript the person
+   *  never composed, and every turn's rescue, charge and title logic is
+   *  per message. */
+  queuedMessages: Record<string, QueuedMessage[]>;
+  enqueueMessage: (convId: string, text: string, fileIds?: string[]) => string;
+  updateQueuedMessage: (convId: string, id: string, text: string) => void;
+  removeQueuedMessage: (convId: string, id: string) => void;
+  /** Stop the current answer, then send this queued message. */
+  sendQueuedNow: (convId: string, id: string) => Promise<void>;
 
   // ── pending-file ops ─────────────────────────────────────
   addPendingFile: (convId: string, file: File) => string;
-  removePendingFile: (convId: string, pendingId: string) => void;
+  /** `keepFile`: the chip leaves the composer but the upload stays on the
+   *  server — it now belongs to a queued message (FIX127 D1). */
+  removePendingFile: (convId: string, pendingId: string, opts?: { keepFile?: boolean }) => void;
   updateFileProgress: (convId: string, pendingId: string, progress: number) => void;
   markFileReady: (
     convId: string,
@@ -405,6 +435,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingFiles: {},
   outgoingFiles: {},
   errorBanner: null,
+  strandedSend: null,
+  queuedMessages: {},
   nextConversationTemporary: false,
   setNextConversationTemporary(v) {
     set({ nextConversationTemporary: v });
@@ -435,7 +467,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
     return id;
   },
-  removePendingFile(convId, pendingId) {
+  removePendingFile(convId, pendingId, opts) {
+    // FIX127 A1 — removing the chip removes the file: abort the transfer
+    // and take the server row back (lib/uploadRegistry). Until FIX127 this
+    // was a pure filter and the removed file stayed in the model's context.
+    const entry = (get().pendingFiles[convId] ?? []).find(
+      (p) => p.id === pendingId,
+    );
     set((s) => ({
       pendingFiles: {
         ...s.pendingFiles,
@@ -444,6 +482,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         ),
       },
     }));
+    if (!entry) return;
+    if (opts?.keepFile) forgetUpload(entry.id);
+    else discardUpload({ id: entry.id, serverId: entry.serverId });
   },
   updateFileProgress(convId, pendingId, progress) {
     set((s) => ({
@@ -501,6 +542,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
   },
   clearPendingFiles(convId) {
+    // The chips are being SENT (or the bucket is torn down): keep the files,
+    // drop the upload bookkeeping only.
+    for (const p of get().pendingFiles[convId] ?? []) forgetUpload(p.id);
     set((s) => {
       const next = { ...s.pendingFiles };
       delete next[convId];
@@ -516,6 +560,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
   },
 
+  clearStrandedSend() {
+    set({ strandedSend: null });
+  },
+
+  // ── FIX127 D1 — the message queue ──
+  enqueueMessage(convId, text, fileIds = []) {
+    const id = `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    set((s) => ({ queuedMessages: { ...s.queuedMessages, [convId]: [...(s.queuedMessages[convId] ?? []), { id, text, fileIds }] } }));
+    return id;
+  },
+  updateQueuedMessage(convId, id, text) {
+    set((s) => ({ queuedMessages: { ...s.queuedMessages, [convId]: (s.queuedMessages[convId] ?? []).map((q) => (q.id === id ? { ...q, text } : q)) } }));
+  },
+  removeQueuedMessage(convId, id) {
+    set((s) => ({ queuedMessages: { ...s.queuedMessages, [convId]: (s.queuedMessages[convId] ?? []).filter((q) => q.id !== id) } }));
+  },
+  async sendQueuedNow(convId, id) {
+    const q = (get().queuedMessages[convId] ?? []).find((x) => x.id === id);
+    if (!q) return;
+    get().removeQueuedMessage(convId, id);
+    if (get().abortControllers[convId] || get().streamingAssistantId[convId]) {
+      await get().cancelGeneration(convId);
+    }
+    await get().sendMessage(convId, q.text, q.fileIds);
+  },
   setError(msg) {
     set({ errorBanner: msg });
   },
@@ -642,7 +711,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   async createConversation(modelId, opts) {
-    let c = await api.createConversation(modelId);
+    const wantTemp = opts?.temporary === true || get().nextConversationTemporary;
+    let c = await api.createConversation(modelId, { temporary: wantTemp });
     // S1 — temporary chat. Two trigger paths land here: the explicit
     // opts.temporary flag (called from /chat landing when the user
     // clicked the temp-chat launcher) or the persisted
@@ -650,8 +720,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // before navigation, consumed on the next create). Either way
     // we PATCH memory_enabled=false on the fresh row so the very
     // first send already skips memory + tools.
-    const wantTemp = opts?.temporary === true || get().nextConversationTemporary;
-    if (wantTemp) {
+    if (wantTemp && c.memory_enabled !== false) {
+      // The server already starts a temporary chat with memory off
+      // (FIX127 B1); this PATCH only covers a row that came back otherwise.
       try {
         c = await api.setConversationMemory(c.id, false);
       } catch {
@@ -1077,6 +1148,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ────────────────────────────────────────────────────────
   handleConversationGone(convId) {
+    // FIX127 A3 — never lose what the user typed: a draft under the dead
+    // id moves to the new-chat composer, which is where the page lands.
+    migrateDraft(convId, NEW_CHAT_DRAFT_KEY);
     set((s) => {
       const nextMessages = { ...s.messages };
       delete nextMessages[convId];
@@ -1432,6 +1506,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
         finalizeMessage(set, get, convId, streamingId, "error");
         get().handleConversationGone(convId);
+        strandSend(set, trimmed);
         return;
       }
       // Phase 5 — a mid-stream network drop no longer kills the
@@ -1489,6 +1564,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch {
         /* non-fatal */
       }
+      drainQueue(get, convId);
     }
   },
 
@@ -1938,6 +2014,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         delete sids[convId];
         return { abortControllers: aborts, streamingAssistantId: sids };
       });
+      drainQueue(get, convId);
     }
   },
 
@@ -2112,6 +2189,49 @@ function waitForWake(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** FIX127 C4 — the desktop's auto-resume. The host ended the turn because
+ *  the machine went offline (terminal `error`, cause `disconnected`); the
+ *  generation is gone with it, so "resume" here means: when the network is
+ *  back, retry the turn the way the Retry button does (regenerate), without
+ *  the person having to notice. Bounded like the web's wait (RESUME_WAIT:
+ *  wake on `online`/visibility, poll every 15 s, give up after 9 min) and to
+ *  HOSTED_RETRY_MAX attempts per row, so a network that keeps flapping does
+ *  not retry forever. It stands down the moment the row is no longer the
+ *  last, failed, disconnected reply, or a turn is already in flight. */
+export const HOSTED_RETRY_MAX = 3;
+const hostedRetries = new Map<string, number>();
+export const hostedRetrySchedule = { waitFor: waitForWake };
+async function retryWhenBackOnline(set: Set, get: Get, convId: string, messageId: string): Promise<void> {
+  const tries = (hostedRetries.get(messageId) ?? 0) + 1;
+  if (tries > HOSTED_RETRY_MAX) return;
+  hostedRetries.set(messageId, tries);
+  const ctrl = new AbortController();
+  const startedAt = Date.now();
+  const stillWaiting = () => {
+    const list = get().messages[convId] ?? [];
+    const last = list[list.length - 1];
+    return !!last && last.id === messageId && last.status === "error" && last.terminal_cause === "disconnected" && !get().abortControllers[convId];
+  };
+  set((s) => ({ messages: { ...s.messages, [convId]: (s.messages[convId] ?? []).map((m) => (m.id === messageId ? { ...m, reconnecting: true } : m)) } }));
+  try {
+    while (Date.now() - startedAt < RESUME_WAIT.capMs) {
+      await hostedRetrySchedule.waitFor(RESUME_WAIT.pollMs, ctrl.signal);
+      if (!stillWaiting()) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) continue;
+      set((s) => ({ messages: { ...s.messages, [convId]: (s.messages[convId] ?? []).map((m) => (m.id === messageId ? { ...m, reconnecting: undefined } : m)) } }));
+      await get().regenerate(convId, messageId);
+      return;
+    }
+  } finally {
+    set((s) => ({ messages: { ...s.messages, [convId]: (s.messages[convId] ?? []).map((m) => (m.id === messageId && m.reconnecting ? { ...m, reconnecting: undefined } : m)) } }));
+  }
+}
+
+/** Test seam. */
+export function _resetHostedRetries(): void {
+  hostedRetries.clear();
+}
+
 /** Replaces the conversation's rows with the server's. Returns false — and
  *  touches nothing — when the server cannot be reached: loadMessages would
  *  seed an empty thread on failure, which is not what a page that has just
@@ -2280,6 +2400,12 @@ function swapMessageId(set: Set, convId: string, fromId: string | undefined, toI
   set((s) => {
     const list = s.messages[convId] ?? [];
     if (!list.some((m) => m.id === fromId)) return {};
+    // FIX127 C2 — the persisted id is already in the list (the row came
+    // from the server transcript and a replay painted it again): one row,
+    // the server's — it carries the files a frame-built row never has.
+    if (list.some((m) => m.id === toId)) {
+      return { messages: { ...s.messages, [convId]: list.filter((m) => m.id !== fromId) } };
+    }
     return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? renamed(m, toId) : m)) } };
   });
 }
@@ -3113,6 +3239,10 @@ async function consumeStream(
         });
         finalizeMessage(set, get, convId, id, "error");
         get().setError(localized);
+        // FIX127 C4 — on the desktop a lost network ends the run in the host
+        // (there is no server-side run to reconnect to, unlike the web's
+        // resumeStream). The row waits for the network and retries itself.
+        if (HOSTED_MODE && data?.cause === "disconnected") void retryWhenBackOnline(set, get, convId, id);
       }
     }
     if (!sawTerminal && !signal.aborted) {
@@ -3153,6 +3283,37 @@ async function consumeStream(
   }
 }
 
+/** FIX127 D1 — a turn just ended: send the next queued message, one per
+ *  finished turn. Nothing is sent while a turn is still in flight (M5), and
+ *  a Stop by the person leaves the queue waiting — it shows above the
+ *  composer with its own "send now"; only a finished or failed answer
+ *  releases the next message on its own. */
+function drainQueue(get: Get, convId: string): void {
+  const s = get();
+  if (s.abortControllers[convId] || s.streamingAssistantId[convId]) return;
+  const head = (s.queuedMessages[convId] ?? [])[0];
+  if (!head) return;
+  const list = s.messages[convId] ?? [];
+  const last = list[list.length - 1];
+  if (last?.role === "assistant" && last.status === "cancelled") return;
+  s.removeQueuedMessage(convId, head.id);
+  void s.sendMessage(convId, head.text, head.fileIds);
+}
+
+/** FIX127 A3 — the text of a send refused because its conversation was
+ *  deleted stays with the user: it becomes the new-chat draft (the page is
+ *  about to land on /chat) and the banner offers to send it there. Until
+ *  FIX127 the 404 path dropped the outbox entry and the composer was empty. */
+function strandSend(set: Set, text: string): void {
+  const t = text.trim();
+  if (!t) return;
+  saveDraft(NEW_CHAT_DRAFT_KEY, t);
+  set({
+    strandedSend: { text: t },
+    errorBanner: tOutside("error.conversationDeletedKeptText"),
+  });
+}
+
 async function handleStreamPreError(
   res: Response,
   set: Set,
@@ -3183,6 +3344,7 @@ async function handleStreamPreError(
     // of echoing the server's raw 404 envelope message.
     finalizeMessage(set, get, convId, tempAsstId, "error");
     get().handleConversationGone(convId);
+    if (sentText) strandSend(set, sentText);
     return;
   }
   if (code === "TOO_MANY_FILES" && tempUserId) {
@@ -3328,7 +3490,9 @@ function showPlaceholderTitle(set: Set, get: Get, convId: string, text: string):
 }
 async function nameConversationOnce(set: Set, get: Get, convId: string): Promise<void> {
   const conv = get().conversations.find((c) => c.id === convId);
-  if (!conv || conv.memory_enabled === false) return;
+  // FIX127 B1 — only a chat STARTED as temporary goes unnamed; memory off on
+  // an ordinary chat still gets its title (R3 read memory-off as temporary).
+  if (!conv || conv.is_temporary === true) return;
   // FIX124 — a title somebody chose is not sent for a name at all (the server
   // would refuse it; this saves the request). Recognised the way the server
   // does: anything but the creation placeholder or the first message's first

@@ -768,6 +768,8 @@ export const en = {
     "Something went wrong while the reply was being received, and we could not identify what. Write a new message to continue.",
   "error.stream_stalled": "The model stopped sending data mid-reply (nothing arrived for 60 seconds), so this turn was ended. Sending again usually works; if it keeps happening, try another model.",
   "error.conversationDeleted": "This conversation was deleted.",
+  "error.conversationDeletedKeptText": "This conversation was deleted. Your message is still in the composer.",
+  "error.sendInNewChat": "Send in a new chat",
   "error.conversationLoadFailed": "Couldn't load this conversation. Please try again.",
   "a11y.responseComplete": "Response complete.",
   "tool.save_memory": "Saving a memory…",
@@ -1363,6 +1365,11 @@ export const en = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "AI service error",
   "msg.stopped": "stopped",
+  "queue.waiting": "Waiting to send when the answer finishes",
+  "queue.edit": "Edit queued message",
+  "queue.delete": "Remove from queue",
+  "queue.sendNow": "Send now",
+  "queue.sendNowHint": "Stops the current answer, then sends this message",
   // FIX47.6 Part D — visible failures for the message action buttons.
   "msg.copyFailed": "Couldn't copy — select the text and press Ctrl+C",
   // FIX49 Part A — a failed turn hydrated from the server has no live
@@ -2426,6 +2433,8 @@ const th: Record<DictKey, string> = {
     "เกิดข้อผิดพลาดระหว่างรับคำตอบ และเรายังระบุไม่ได้ว่าเป็นเรื่องอะไร กรุณาพิมพ์ข้อความใหม่เพื่อคุยต่อครับ",
   "error.stream_stalled": "โมเดลหยุดส่งข้อมูลกลางคำตอบ (ไม่มีข้อมูลเข้ามาเกิน 60 วินาที) รอบนี้จึงถูกหยุด — ส่งใหม่อีกครั้งมักได้ผล ถ้าเกิดซ้ำลองเปลี่ยนโมเดลดูครับ",
   "error.conversationDeleted": "ห้องสนทนานี้ถูกลบไปแล้ว",
+  "error.conversationDeletedKeptText": "ห้องสนทนานี้ถูกลบไปแล้ว ข้อความของคุณยังอยู่ในช่องพิมพ์",
+  "error.sendInNewChat": "ส่งในแชทใหม่",
   "error.conversationLoadFailed": "โหลดห้องสนทนานี้ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
   "a11y.responseComplete": "ตอบเสร็จแล้ว",
   "tool.save_memory": "กำลังบันทึกความจำ…",
@@ -3012,6 +3021,11 @@ const th: Record<DictKey, string> = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "บริการ AI ขัดข้อง",
   "msg.stopped": "หยุดแล้ว",
+  "queue.waiting": "รอส่งเมื่อคำตอบเสร็จ",
+  "queue.edit": "แก้ไขข้อความที่รอส่ง",
+  "queue.delete": "ลบออกจากคิว",
+  "queue.sendNow": "ส่งตอนนี้",
+  "queue.sendNowHint": "หยุดคำตอบปัจจุบันแล้วส่งข้อความนี้",
   // FIX47.6 Part D — ปุ่มบนข้อความต้องไม่ล้มเหลวแบบเงียบ
   "msg.copyFailed": "คัดลอกไม่สำเร็จ — เลือกข้อความแล้วกด Ctrl+C แทน",
   // FIX49 Part A — เทิร์นที่ล้มเหลวหลังรีเฟรชต้องมีคำอธิบาย ไม่ใช่ฟองว่าง

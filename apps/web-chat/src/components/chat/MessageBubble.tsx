@@ -349,6 +349,16 @@ function MessageBubbleImpl({
   // Assistant messages render the body directly — no avatar, no model
   // label. The active model is shown only in the composer's model
   // selector, never per-message.
+  //
+  // FIX127 A4 — the failed-turn card carries exactly one reason. The two
+  // notices are mutually exclusive by construction; the action-row label
+  // (below) yields to either of them.
+  const liveFailureNotice = !!message.error_message;
+  const reloadedFailureNotice =
+    !message.error_message &&
+    message.status === "error" &&
+    !message.isStreaming &&
+    (!message.content.trim() || !!message.error_code);
   return (
     <div className="group message-enter flex w-full flex-col gap-1.5">
       {/* T4 — Thinking Mode. Renders ABOVE the body so the user
@@ -466,10 +476,7 @@ function MessageBubbleImpl({
           bubble with only the tiny status label — an unexplained empty
           message. Same red notice surface, generic localized text, and
           the regenerate button on the row is the retry. */}
-      {!message.error_message &&
-      message.status === "error" &&
-      !message.isStreaming &&
-      (!message.content.trim() || !!message.error_code) ? (
+      {reloadedFailureNotice ? (
         /* FIX118 — the server now keeps the code of the terminal error
            frame (migration 043), so a reloaded row can say the same thing
            the live frame said instead of the generic line. A pre-FIX118
@@ -654,10 +661,14 @@ function MessageBubbleImpl({
             </ActionButton>
           ) : null}
         </div>
-        {message.status === "error" ? (
+        {message.status === "error" && !liveFailureNotice && !reloadedFailureNotice ? (
           // FIX124 R2 — a turn that ended because the LINK broke (cause
           // disconnected: the desktop's network loss, a cut stream) is not
           // the AI service failing, and is not labelled as if it were.
+          // FIX127 A4 — one reason per card: when the red notice above
+          // already says what happened ("message too long"), this label
+          // does not add a second, generic one ("AI service error"). It
+          // remains for a failed row that has partial text and no code.
           <span className="ml-2 text-[11px] text-status-danger" data-testid="error-label">
             {message.terminal_cause === "disconnected" ? t("msg.connectionLost") : t("msg.aiError")}
           </span>
@@ -1241,7 +1252,35 @@ function AssistantContentBody({
   convId: string;
 }) {
   const hasContent = message.content.length > 0;
-  const isStreaming = message.isStreaming;
+  // FIX127 D3 — a selection the person is holding in this reply survives
+  // the end of the stream. The completed tree (segments + <Markdown>) is a
+  // different element tree from the streaming one, so React would replace
+  // the DOM nodes the selection lives in the moment isStreaming flips —
+  // and the selection with them. While a selection intersects this body,
+  // the streaming renderer is kept (with the final text); the swap happens
+  // when the selection is released. Plan cards mount on that swap, as
+  // before — a fence is not what anyone selects mid-answer.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [holdForSelection, setHoldForSelection] = useState(false);
+  const wasStreaming = useRef(message.isStreaming);
+  // Decided DURING render — an effect would run after the commit that has
+  // already replaced the nodes. (Render-phase state for derived state is
+  // the documented React pattern.)
+  if (wasStreaming.current && !message.isStreaming && !holdForSelection && selectionInside(bodyRef.current)) {
+    setHoldForSelection(true);
+  }
+  useEffect(() => {
+    wasStreaming.current = message.isStreaming;
+  }, [message.isStreaming]);
+  useEffect(() => {
+    if (!holdForSelection) return;
+    const onChange = () => {
+      if (!selectionInside(bodyRef.current)) setHoldForSelection(false);
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, [holdForSelection]);
+  const isStreaming = message.isStreaming || holdForSelection;
 
   if (!hasContent && isStreaming) {
     // While an image is generating, the ImageGeneratingPlaceholder
@@ -1263,7 +1302,11 @@ function AssistantContentBody({
     // are intentionally NOT segmented here — they only mount on the
     // terminal "complete" event so the user doesn't see a half-parsed
     // plan flicker into a card; until then the fence shows as text.
-    return <StreamingMarkdown content={message.content} />;
+    return (
+      <div ref={bodyRef} data-testid="assistant-body" data-held-for-selection={holdForSelection || undefined}>
+        <StreamingMarkdown content={message.content} />
+      </div>
+    );
   }
 
   // Split the completed content into prose / plan segments. Each
@@ -1273,7 +1316,7 @@ function AssistantContentBody({
   // to the shared <Markdown> component.
   const segments = parsePlanSegments(message.content || "");
   return (
-    <>
+    <div ref={bodyRef} data-testid="assistant-body">
       {segments.map((seg, i) => {
         // FIX126 F4 — the cards get the message's files (a plan that
         // already produced its file opens in the done state) and its id
@@ -1293,8 +1336,17 @@ function AssistantContentBody({
           </Markdown>
         );
       })}
-    </>
+    </div>
   );
+}
+
+/** Whether the document's current selection is non-empty and touches `el`. */
+export function selectionInside(el: HTMLElement | null): boolean {
+  if (!el || typeof window === "undefined") return false;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return false;
+  const range = sel.getRangeAt(0);
+  return el.contains(range.startContainer) || el.contains(range.endContainer) || range.intersectsNode(el);
 }
 
 // :::excel-plan / :::doc-plan / :::pptx-plan detection. The fences

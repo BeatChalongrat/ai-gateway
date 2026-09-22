@@ -27,7 +27,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { dictionaries } from "@/lib/i18n/dict";
 import { ANCHOR_PREVIOUS_PEEK_PX } from "@/lib/turnAnchor";
 
-import { ChatThread } from "./ChatThread";
+import { _resetScrollMemory, ChatThread } from "./ChatThread";
 
 const VIEW_H = 300;
 let heights: Record<number, number> = {};
@@ -60,6 +60,7 @@ const origGBCR = HTMLElement.prototype.getBoundingClientRect;
 
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
+  _resetScrollMemory();
   heights = {};
   useChatStore.setState({ turnScrollRequests: {} });
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
@@ -263,7 +264,7 @@ describe("send-time turn anchoring", () => {
 
   // ── Rule 3: opening or switching a conversation lands at the bottom ──
 
-  it("switching conversations lands at the bottom, not a remembered spot", () => {
+  it("FIX127 D2 — a chat opens at the bottom; coming BACK to a chat read partway up lands where the person was", () => {
     const { scroller, rerender } = mount(seed(8));
 
     // The user reads partway up conversation c1...
@@ -271,14 +272,21 @@ describe("send-time turn anchoring", () => {
     fireEvent.scroll(scroller);
     expect(scroller.scrollTop).toBe(200);
 
-    // ...switches to c2, then back to c1. Both must land at the newest turn.
+    // ...switches to c2 (never visited): the newest turn.
     rerender(seed(8), "c2");
     expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
 
+    // ...and back to c1: where they were, with the jump-to-latest affordance.
     rerender(seed(8), "c1");
-    expect(scroller.scrollTop).toBe(
-      scroller.scrollHeight - VIEW_H,
-      );
+    expect(scroller.scrollTop).toBe(200);
+  });
+
+  it("FIX127 D2 — a chat left at the bottom opens at the bottom again", () => {
+    const { scroller, rerender } = mount(seed(8));
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
+    rerender(seed(8), "c2");
+    rerender(seed(8), "c1");
+    expect(scroller.scrollTop).toBe(scroller.scrollHeight - VIEW_H);
   });
 
   it("switching after scrolling up restores follow, so no pill is left behind", () => {
