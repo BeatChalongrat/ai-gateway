@@ -335,6 +335,28 @@ export class ChatEdgeClient {
     return res !== null;
   }
 
+  /** FIX127 C3 — delete a conversation the page abandoned before sending
+   *  anything. The caller checks message_count first; this is the request. */
+  async deleteConversation(conversationId: string): Promise<boolean> {
+    const token = this.accessToken();
+    if (!token) return false;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/conversations/${encodeURIComponent(conversationId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!res.ok && res.status !== 404) {
+        this.log.warn(`chat-edge DELETE conversation ${conversationId} → HTTP ${res.status}`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      this.log.warn(`chat-edge DELETE conversation failed: ${(err as Error).message}`);
+      return false;
+    }
+  }
+
   /** FIX3 §4: upload raw bytes (a scanned PDF the sidecar read + handed over) to
    * chat-edge for OCR. The host holds the session; the sidecar never does. Returns
    * the server file id, or null on failure. */

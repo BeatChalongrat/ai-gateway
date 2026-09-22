@@ -37,6 +37,11 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     // FIX6: the approved-site list is control-plane. The page may list and revoke;
     // there is NO sites.add — a site is approved only through the consent prompt.
     "sites.list", "sites.revoke",
+    // FIX127 C3 — the new-chat page's abandoned draft conversation. Electron
+    // refuses the web's keepalive cross-origin DELETE during teardown, so the
+    // page asks the host, which deletes ONLY a 0-message chat (server count,
+    // no turn in flight). Page-only; the model has no tool for it.
+    "conversation.discardEmpty",
   ];
 
   // Host↔sidecar INTERNAL ops (a leading _): never in the page's vocabulary, never tools.

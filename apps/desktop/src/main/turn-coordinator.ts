@@ -496,7 +496,19 @@ export class TurnCoordinator {
       const sameRun = !payload.runId || payload.runId === log.runId;
       const from = sameRun ? payload.lastSeq : 0;
       const replay = log.events.filter((e) => e.seq > from);
-      if (replay.length === 0) this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: page at seq ${payload.lastSeq}, nothing to replay`);
+      // FIX127 C2 — a run that has already ENDED is not replayed to a page
+      // that was not following it (a fresh page after a hard navigation,
+      // F5, re-auth, a deep link: no cursor, or another run's). The import
+      // ran before the terminal, so that page reads the finished answer
+      // from the server transcript; replaying it as well painted the same
+      // answer twice — the second copy built from frames alone, without
+      // the row's files (the C1 "Generate Document is back" card). A page
+      // that WAS following this run (same run id) still gets the tail it
+      // missed, terminal included.
+      const followingThisRun = !!payload.runId && payload.runId === log.runId;
+      if (log.terminal && !followingThisRun) {
+        this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: run already ended (${log.terminal}); the page reads the server transcript — nothing replayed`);
+      } else if (replay.length === 0) this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: page at seq ${payload.lastSeq}, nothing to replay`);
       else {
         this.log.info(`RESUME conv=${payload.conversationId} run=${log.runId}: replaying ${replay.length} event(s) from seq ${from + 1} (page was at ${payload.lastSeq}${sameRun ? "" : " of another run"})`);
         for (const e of replay) this.bridge.postTurnEvent(payload.conversationId, e.seq, e.event, e.data, log.runId);
@@ -547,6 +559,33 @@ export class TurnCoordinator {
         const r = this.opts.shell.prefsSet(payload.args ?? {});
         this.log.info(`SHELL PREFS set → ${JSON.stringify(r.prefs)}${r.ok ? "" : ` (refused: ${r.error})`}`);
         this.bridge.postHostResult(payload.requestId, r.ok, r.prefs, r.error);
+        return;
+      }
+      // ── FIX127 C3: the new-chat page's abandoned draft conversation ──
+      case "conversation.discardEmpty": {
+        const conversationId = payload.args?.["conversationId"];
+        if (typeof conversationId !== "string" || !conversationId) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "conversationId-missing");
+          return;
+        }
+        // Never delete a chat that has a message, whatever the page says:
+        // the server's count is the truth, and a turn in flight counts too.
+        if (this.turns.has(conversationId)) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "turn-in-flight");
+          return;
+        }
+        const conversation = await this.chatEdge.getConversation(conversationId).catch(() => null);
+        if (!conversation) {
+          this.bridge.postHostResult(payload.requestId, true, { deleted: false, reason: "not-found" });
+          return;
+        }
+        if ((conversation.message_count ?? 0) > 0) {
+          this.bridge.postHostResult(payload.requestId, false, undefined, "conversation-has-messages");
+          return;
+        }
+        const deleted = await this.chatEdge.deleteConversation(conversationId);
+        this.log.info(`DISCARD EMPTY conv=${conversationId} deleted=${deleted}`);
+        this.bridge.postHostResult(payload.requestId, deleted, { deleted });
         return;
       }
       case "quick.close": {

@@ -85,6 +85,12 @@ export const HOST_QUERY_OPS = Object.freeze([
   // quick.close hides the quick-ask window (the page's Esc); quick.openInMain
   // hands a quick-ask conversation to the main window. Page-only, all four.
   "shell.prefs.get", "shell.prefs.set", "quick.close", "quick.openInMain",
+  // FIX127 C3: the new-chat page abandons a conversation it created for an
+  // attachment and never sent into. On the web a keepalive DELETE does it on
+  // pagehide; Electron refuses that cross-origin request while the renderer
+  // is torn down, so the page asks the host, which deletes it ONLY if the
+  // server still says it has no messages. Page-only, never a tool.
+  "conversation.discardEmpty",
 ] as const);
 export type HostQueryOp = (typeof HOST_QUERY_OPS)[number];
 export const E3_SUPPORTED_OPS: readonly HostQueryOp[] = Object.freeze(["session.logout", "diag.reportRendererError"]);
