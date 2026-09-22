@@ -78,6 +78,9 @@ export function ConversationItem({
       <div
         role="button"
         tabIndex={0}
+        // FIX127 — the row is addressable by id (probes and tests select a
+        // chat by id, never by its title).
+        data-conversation-id={conv.id}
         onClick={() => {
           if (renaming || confirmingDelete) return;
           onSelect();
