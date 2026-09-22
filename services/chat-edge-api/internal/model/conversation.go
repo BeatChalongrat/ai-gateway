@@ -44,6 +44,14 @@ type Conversation struct {
 	//     gateway request's tool list
 	MemoryEnabled bool
 
+	// IsTemporary (FIX127 B1 — migration 048) marks a chat the user
+	// explicitly started as temporary (sidebar "temporary chat", the quick
+	// window, the memory page). It is the ONLY thing that makes a chat
+	// temporary: a user who turns memory off on an ordinary chat still gets
+	// a title. Until FIX127 the title service treated memory-off as
+	// temporary, so that user's chat stayed "New conversation" for good.
+	IsTemporary bool
+
 	// T4 — Thinking Mode (migration 019). ReasoningEnabled is the
 	// master toggle; when true the message-build path adds the
 	// ``reasoning`` block to the Gateway request and the SSE pump

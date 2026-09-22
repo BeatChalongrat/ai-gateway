@@ -56,6 +56,8 @@ type CreateInput struct {
 	UserID   uuid.UUID
 	TenantID uuid.UUID
 	ModelID  string
+	// IsTemporary — FIX127 B1: the user started the chat as temporary.
+	IsTemporary bool
 }
 
 func (s *ConversationService) Create(ctx context.Context, in CreateInput) (*model.Conversation, error) {
@@ -66,9 +68,10 @@ func (s *ConversationService) Create(ctx context.Context, in CreateInput) (*mode
 		return nil, ErrConversationBadModel
 	}
 	return s.conversations.Create(ctx, &model.Conversation{
-		TenantID: in.TenantID,
-		UserID:   in.UserID,
-		ModelID:  in.ModelID,
+		TenantID:    in.TenantID,
+		UserID:      in.UserID,
+		ModelID:     in.ModelID,
+		IsTemporary: in.IsTemporary,
 	})
 }
 

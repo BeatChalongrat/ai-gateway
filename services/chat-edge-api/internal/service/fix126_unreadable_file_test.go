@@ -25,6 +25,7 @@ type fix126FileFixture struct {
 	fs     *FileService
 	files  *repository.FileRepo
 	cr     *repository.ConversationRepo
+	mr     *repository.MessageRepo
 	gw     *fix125Gateway
 	tenant uuid.UUID
 	user   uuid.UUID
@@ -44,7 +45,7 @@ func newFix126FileFixture(t *testing.T) *fix126FileFixture {
 	gw := newFix125Gateway(t)
 	s := NewMessageService(cr, mr, NewGatewayClient(gw.server.URL, "test-key", "", time.Minute, ""), nil, allowAllModels{}, 50)
 	s.SetFileLinker(fs)
-	return &fix126FileFixture{s: s, fs: fs, files: files, cr: cr, gw: gw, tenant: uuid.New(), user: uuid.New()}
+	return &fix126FileFixture{s: s, fs: fs, files: files, cr: cr, mr: mr, gw: gw, tenant: uuid.New(), user: uuid.New()}
 }
 
 func (f *fix126FileFixture) conv(t *testing.T) *model.Conversation {
@@ -143,6 +144,14 @@ func TestFIX126_ReadableFileContextIsUnchanged(t *testing.T) {
 	f := newFix126FileFixture(t)
 	conv := f.conv(t)
 	good := f.file(t, conv, "notes.txt", "text/plain", "completed", strp("GOOD FILE BODY"))
+	// FIX127 A1 — only a file of a SENT message reaches the context; attach it.
+	msg, err := f.mr.Create(context.Background(), &model.Message{ConversationID: conv.ID, TenantID: f.tenant, UserID: f.user, Role: "user", ContentMasked: "อ่านไฟล์", Status: "completed", IsActive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := f.files.AttachToMessage(context.Background(), f.tenant, conv.ID, msg.ID, []uuid.UUID{good.ID}); err != nil || n != 1 {
+		t.Fatalf("attach: %d %v", n, err)
+	}
 	block, err := f.fs.BuildContextBlock(context.Background(), f.tenant, conv.ID)
 	if err != nil {
 		t.Fatalf("context block: %v", err)

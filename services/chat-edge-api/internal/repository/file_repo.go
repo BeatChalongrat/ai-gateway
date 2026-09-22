@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -146,6 +147,37 @@ func (r *FileRepo) ListByConversation(
 		var f model.ConversationFile
 		if err := scanFile(rows, &f); err != nil {
 			return nil, fmt.Errorf("list files scan: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// ListForModelContext returns the files the MODEL may see for a
+// conversation: rows linked to a sent message (message_id set by
+// AttachToMessage or the import path) and rows the chat produced itself
+// (is_generated). A row whose message_id is still NULL was uploaded but
+// never sent — a chip the user removed, an abandoned draft, an upload
+// whose response never reached the client — and it must never reach the
+// prompt, whatever the client claims (FIX127 A1). This is the rule; the
+// context builders (file, Excel, doc, pptx) all read through it.
+func (r *FileRepo) ListForModelContext(
+	ctx context.Context, tenantID, convID uuid.UUID,
+) ([]model.ConversationFile, error) {
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE conversation_id = $1 AND tenant_id = $2
+	        AND (message_id IS NOT NULL OR is_generated)
+	      ORDER BY created_at ASC`
+	rows, err := r.db.Query(ctx, q, convID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list files for model context: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.ConversationFile, 0)
+	for rows.Next() {
+		var f model.ConversationFile
+		if err := scanFile(rows, &f); err != nil {
+			return nil, fmt.Errorf("list files for model context scan: %w", err)
 		}
 		out = append(out, f)
 	}
@@ -447,6 +479,86 @@ func (r *FileRepo) Delete(ctx context.Context, tenantID, fileID uuid.UUID) error
 		return ErrNotFound
 	}
 	return nil
+}
+
+// UnattachedTotal is one account's share of the unattached uploads older
+// than a cutoff — the dry-run report of the FIX127 A2 sweep.
+type UnattachedTotal struct {
+	TenantID uuid.UUID
+	UserID   uuid.UUID
+	Count    int
+	Bytes    int64
+}
+
+// unattachedWhere is the sweep's definition of an orphan: uploaded by a
+// user, never linked to a sent message, older than the cutoff. Generated
+// files are excluded — the chat made them, they belong to the transcript
+// even when the planning row's id was not stamped on them (pre-FIX126).
+const unattachedWhere = `message_id IS NULL AND is_generated = false AND created_at < $1`
+
+// SummarizeUnattachedOlderThan groups the sweep's candidates per account.
+// Read-only; the dry-run report and the live pass both start here.
+func (r *FileRepo) SummarizeUnattachedOlderThan(
+	ctx context.Context, cutoff time.Time,
+) ([]UnattachedTotal, error) {
+	const q = `SELECT tenant_id, user_id, COUNT(*), COALESCE(SUM(file_size_bytes), 0)
+	           FROM chat.conversation_files
+	           WHERE ` + unattachedWhere + `
+	           GROUP BY tenant_id, user_id
+	           ORDER BY COUNT(*) DESC`
+	rows, err := r.db.Query(ctx, q, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("summarize unattached files: %w", err)
+	}
+	defer rows.Close()
+	out := make([]UnattachedTotal, 0)
+	for rows.Next() {
+		var t UnattachedTotal
+		if err := rows.Scan(&t.TenantID, &t.UserID, &t.Count, &t.Bytes); err != nil {
+			return nil, fmt.Errorf("summarize unattached files scan: %w", err)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// ListUnattachedOlderThan returns up to limit sweep candidates, oldest
+// first, so a bounded pass always makes progress on the backlog.
+func (r *FileRepo) ListUnattachedOlderThan(
+	ctx context.Context, cutoff time.Time, limit int,
+) ([]model.ConversationFile, error) {
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files
+	      WHERE ` + unattachedWhere + `
+	      ORDER BY created_at ASC
+	      LIMIT $2`
+	rows, err := r.db.Query(ctx, q, cutoff, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unattached files: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.ConversationFile, 0)
+	for rows.Next() {
+		var f model.ConversationFile
+		if err := scanFile(rows, &f); err != nil {
+			return nil, fmt.Errorf("list unattached files scan: %w", err)
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// DeleteIfStillUnattached removes one sweep candidate — but only if it is
+// STILL unattached at delete time. A send that linked the row between the
+// list and the delete (the user pressed send at the 48-hour mark) keeps
+// it. Returns false when the row was linked or already gone.
+func (r *FileRepo) DeleteIfStillUnattached(ctx context.Context, fileID uuid.UUID) (bool, error) {
+	const q = `DELETE FROM chat.conversation_files
+	           WHERE id = $1 AND message_id IS NULL AND is_generated = false`
+	tag, err := r.db.Exec(ctx, q, fileID)
+	if err != nil {
+		return false, fmt.Errorf("delete unattached file: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }
 
 // SumSizeForConversation returns the total bytes used by all files

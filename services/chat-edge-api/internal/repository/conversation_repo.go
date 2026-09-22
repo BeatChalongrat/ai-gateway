@@ -28,19 +28,21 @@ func (r *ConversationRepo) WithTx(tx pgx.Tx) *ConversationRepo {
 
 // Create inserts a new conversation. “message_count“ defaults to
 // 0 via the column default; the title defaults to "New conversation"
-// likewise. Callers should populate “tenant_id“, “user_id“,
-// “model_id“ only; everything else is server-side.
+// likewise. Callers populate “tenant_id“, “user_id“, “model_id“ and,
+// for a chat the user explicitly started as temporary, “is_temporary“
+// (FIX127 B1, migration 048) — which also starts it with memory off.
+// Everything else is server-side.
 func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*model.Conversation, error) {
 	const q = `
-		INSERT INTO chat.conversations (tenant_id, user_id, model_id, is_test)
-		VALUES ($1, $2, $3, COALESCE((SELECT u.is_test FROM identity.users u WHERE u.id = $2), false))
+		INSERT INTO chat.conversations (tenant_id, user_id, model_id, is_test, is_temporary, memory_enabled)
+		VALUES ($1, $2, $3, COALESCE((SELECT u.is_test FROM identity.users u WHERE u.id = $2), false), $4, NOT $4)
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 	`
-	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID).Scan(
+	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID, c.IsTemporary).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
@@ -67,12 +69,12 @@ func (r *ConversationRepo) CreateImported(
 		DO NOTHING
 		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at,
 		          knowledge_base_id, memory_enabled, reasoning_enabled, reasoning_mode,
-		          show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		          show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 	`
 	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID, c.Title, clientID, createdAt).Scan(
 		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
 		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -92,7 +94,7 @@ func (r *ConversationRepo) GetByClientID(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 		FROM chat.conversations
 		WHERE tenant_id = $1 AND user_id = $2 AND client_id = $3
 	`
@@ -101,7 +103,7 @@ func (r *ConversationRepo) GetByClientID(
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -136,7 +138,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 		FROM chat.conversations
 		WHERE id = $1 AND tenant_id = $2 AND is_deleted = false
 	`
@@ -145,7 +147,7 @@ func (r *ConversationRepo) GetByID(ctx context.Context, tenantID, convID uuid.UU
 		&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 		&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 		&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -212,7 +214,7 @@ func (r *ConversationRepo) ListByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -238,7 +240,7 @@ func (r *ConversationRepo) ListByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 		); err != nil {
 			return nil, uuid.Nil, fmt.Errorf("list scan: %w", err)
 		}
@@ -277,7 +279,7 @@ func (r *ConversationRepo) SearchByUser(
 	const q = `
 		SELECT id, tenant_id, user_id, title, model_id, message_count,
 		       is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
-		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
 		FROM chat.conversations
 		WHERE tenant_id = $1
 		  AND user_id = $2
@@ -298,7 +300,7 @@ func (r *ConversationRepo) SearchByUser(
 			&c.ID, &c.TenantID, &c.UserID, &c.Title, &c.ModelID,
 			&c.MessageCount, &c.IsDeleted, &c.DeletedAt,
 			&c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
-			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier,
+			&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
 		); err != nil {
 			return nil, fmt.Errorf("search scan: %w", err)
 		}

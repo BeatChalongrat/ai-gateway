@@ -151,6 +151,21 @@ func main() {
 		}
 		slog.Info("dlp display lifecycle enabled; migration 025 verified")
 	}
+	// FIX127 B1 — every conversation read names is_temporary (migration
+	// 048). A binary started against a database without it would fail every
+	// conversation query; refuse to start instead, the way 024/025 do.
+	{
+		chkCtx, chkCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		var col *string
+		_ = pool.QueryRow(chkCtx,
+			"SELECT column_name FROM information_schema.columns WHERE table_schema='chat' AND table_name='conversations' AND column_name='is_temporary'",
+		).Scan(&col)
+		chkCancel()
+		if col == nil {
+			slog.Error("migration 048 (conversations.is_temporary) not applied; refusing to start — apply migrations first")
+			os.Exit(1)
+		}
+	}
 	feedbackRepo := repository.NewFeedbackRepo(pool)
 	filesRepo := repository.NewFileRepo(pool)
 	prefsRepo := repository.NewPreferencesRepo(pool)
@@ -698,6 +713,18 @@ func main() {
 	// enables it and then, after reading the dry-run numbers, turns
 	// dry_run off. No boot-time pass: the deletion hour is fixed.
 	go transcriptRetention.StartBackground(bgCtx)
+
+	// FIX127 A2 — uploads never attached to a sent message expire after
+	// UNATTACHED_FILE_TTL (48 h). dry_run by default: the first pass on a
+	// live system is the per-account report the owner reads before
+	// setting UNATTACHED_FILE_SWEEP_MODE=delete.
+	unattachedSweep := service.NewUnattachedFileSweep(
+		filesRepo, storageBackend, deletionAuditRepo,
+		cfg.UnattachedFileTTL, cfg.UnattachedFileSweepMode, cfg.UnattachedFileSweepInterval,
+	)
+	slog.Info("unattached file sweep", "mode", unattachedSweep.Mode,
+		"ttl", unattachedSweep.TTL.String(), "interval", unattachedSweep.Interval.String())
+	go unattachedSweep.StartBackground(bgCtx)
 
 	// FIX16 — cloud scheduled tasks: the always-on firing goroutine. OFF
 	// unless CLOUD_SCHEDULER_ENABLED=true. The runner authorizes EVERY fire

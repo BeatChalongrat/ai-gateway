@@ -121,6 +121,9 @@ func (h *ConversationHandler) SetExportSources(
 
 type createConversationRequest struct {
 	ModelID string `json:"model_id"`
+	// IsTemporary — FIX127 B1: set by the "temporary chat" entry points.
+	// A temporary chat starts with memory off and is never titled.
+	IsTemporary bool `json:"is_temporary,omitempty"`
 }
 
 type conversationResponse struct {
@@ -155,6 +158,9 @@ type conversationResponse struct {
 	// hides archived chats; the archive view lists only these. Archiving
 	// is reversible and does NOT delete anything.
 	IsArchived bool `json:"is_archived"`
+	// IsTemporary — FIX127 B1: started as a temporary chat. The only flag
+	// that means "temporary"; memory_enabled is a separate switch.
+	IsTemporary bool `json:"is_temporary"`
 	// ProjectID is the project membership (migration 029). null when the
 	// conversation is not in a project.
 	ProjectID *string `json:"project_id"`
@@ -178,6 +184,7 @@ func toResponse(c *model.Conversation) conversationResponse {
 		RoutingTier:          c.RoutingTier,
 		IsPinned:             c.IsPinned,
 		IsArchived:           c.IsArchived,
+		IsTemporary:          c.IsTemporary,
 	}
 	if c.KnowledgeBaseID != nil {
 		s := c.KnowledgeBaseID.String()
@@ -210,9 +217,10 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := h.conversations.Create(r.Context(), service.CreateInput{
-		UserID:   caller.UserID,
-		TenantID: caller.TenantUUID,
-		ModelID:  req.ModelID,
+		UserID:      caller.UserID,
+		TenantID:    caller.TenantUUID,
+		ModelID:     req.ModelID,
+		IsTemporary: req.IsTemporary,
 	})
 	if err != nil {
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())

@@ -1033,6 +1033,44 @@ func (s *FileService) Delete(
 	return nil
 }
 
+// DeleteByClientID removes an upload the client knows only by the
+// client_id it sent with the multipart body (FIX127 A1): the composer's
+// chip was removed while the upload was in flight, so the client never
+// received the server id. Only a row that is NOT attached to a sent
+// message can be deleted this way — a sent attachment is part of the
+// transcript and is not the composer's to take back. ErrFileNotFound
+// when no such unattached row exists (the upload never landed, or
+// already went).
+func (s *FileService) DeleteByClientID(
+	ctx context.Context, tenantID, userID, convID uuid.UUID, clientID string,
+) error {
+	clientID = strings.TrimSpace(clientID)
+	if clientID == "" {
+		return ErrFileNotFound
+	}
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrFileNotFound
+		}
+		return err
+	}
+	if conv.UserID != userID {
+		return ErrFileNotFound
+	}
+	f, err := s.files.GetByClientID(ctx, tenantID, convID, clientID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrFileNotFound
+		}
+		return err
+	}
+	if f.MessageID != nil || f.UserID != userID {
+		return ErrFileNotFound
+	}
+	return s.Delete(ctx, tenantID, userID, f.ID)
+}
+
 // ---------------------------------------------------------------------------
 // Attach (called by the message handler on Send)
 // ---------------------------------------------------------------------------
@@ -1112,7 +1150,13 @@ func (s *FileService) waitForExtraction(
 	deadline := time.Now().Add(extractionWaitTimeout)
 	waited := false
 	for {
-		files, err := s.files.ListByConversation(ctx, tenantID, convID)
+		// FIX127 A1 — the model sees only files of SENT messages (and
+		// files the chat generated). The send path links this turn's
+		// ids (AttachToMessage) before it gets here, so the current
+		// turn's own files are in; a chip the user removed, or any
+		// upload the client never sent, is out — whatever the client
+		// says. Rule: repository.FileRepo.ListForModelContext.
+		files, err := s.files.ListForModelContext(ctx, tenantID, convID)
 		if err != nil {
 			return nil, err
 		}

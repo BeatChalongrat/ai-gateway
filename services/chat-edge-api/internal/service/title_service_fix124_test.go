@@ -29,6 +29,11 @@ func titleConv(title, modelID string, memory bool) *model.Conversation {
 	return &model.Conversation{Title: title, ModelID: modelID, MemoryEnabled: memory}
 }
 
+// titleTempConv — FIX127 B1: a chat the user STARTED as temporary.
+func titleTempConv(title, modelID string) *model.Conversation {
+	return &model.Conversation{Title: title, ModelID: modelID, MemoryEnabled: false, IsTemporary: true}
+}
+
 func titleUserRow(text string) *model.Message {
 	return &model.Message{Role: "user", ContentMasked: text, Status: "completed"}
 }
@@ -62,9 +67,14 @@ func TestPlanTitle(t *testing.T) {
 		{"a title a model already wrote is kept: one name per chat", titleConv("สรุปรายงานไตรมาส", "auto", true),
 			&repository.TitleSeed{FirstUser: titleUserRow(titleQ), Question: titleUserRow(titleQ), Answer: titleAnswerRow("qwen3.8-27b-fp8", nil)},
 			titlePlan{action: "keep", reason: "title_already_set"}},
-		{"temporary chat is sent nowhere", titleConv("New conversation", "auto", false),
+		{"temporary chat is sent nowhere", titleTempConv("New conversation", "auto"),
 			&repository.TitleSeed{FirstUser: titleUserRow(titleQ), Question: titleUserRow(titleQ), Answer: titleAnswerRow("qwen3.8-27b-fp8", nil)},
 			titlePlan{action: "keep", reason: "temporary_chat"}},
+		// FIX127 B1 — memory off on an ordinary chat is not "temporary": the
+		// chat is named like any other. (R3 read memory-off as temporary.)
+		{"memory off is still named", titleConv("New conversation", "auto", false),
+			&repository.TitleSeed{FirstUser: titleUserRow(titleQ), Question: titleUserRow(titleQ), Answer: titleAnswerRow("qwen3.8-27b-fp8", nil)},
+			titlePlan{action: "ask", model: "qwen3.8-27b-fp8"}},
 		{"nothing answered yet: the first words, no model", titleConv("New conversation", "auto", true),
 			&repository.TitleSeed{FirstUser: titleUserRow(titleQ)},
 			titlePlan{action: "fallback", reason: "no_turn_answered"}},
@@ -332,7 +342,7 @@ func TestGenerate_RenameAndTemporaryAskNothing(t *testing.T) {
 	seed := &repository.TitleSeed{FirstUser: titleUserRow(titleQ), Question: titleUserRow(titleQ), Answer: titleAnswerRow("qwen3.8-27b-fp8", nil)}
 	for name, conv := range map[string]*model.Conversation{
 		"rename":    titleConv("ชื่อที่ตั้งเอง", "auto", true),
-		"temporary": titleConv("New conversation", "auto", false),
+		"temporary": titleTempConv("New conversation", "auto"),
 	} {
 		s, convs, gw := newTitleService(t, conv, seed, map[string]func(http.ResponseWriter){"qwen3.8-27b-fp8": titleOK("qwen3.8-27b-fp8", "x")})
 		before := conv.Title

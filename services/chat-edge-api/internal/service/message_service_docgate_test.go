@@ -31,7 +31,7 @@ type stubExcelLookup struct {
 	err   error
 }
 
-func (s stubExcelLookup) ListByConversation(
+func (s stubExcelLookup) ListForModelContext(
 	_ context.Context, _, _ uuid.UUID,
 ) ([]model.ConversationFile, error) {
 	return s.files, s.err

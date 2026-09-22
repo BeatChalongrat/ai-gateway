@@ -225,6 +225,16 @@ type Config struct {
 	MaxFilesPerMessage  int    `env:"MAX_FILES_PER_MESSAGE" envDefault:"5"`
 	ExtractPythonBinary string `env:"EXTRACT_PYTHON_BINARY" envDefault:"python3"`
 
+	// FIX127 A2 — uploads never attached to a sent message expire.
+	// UNATTACHED_FILE_TTL is the age after which such a row (and its blob)
+	// is removed; UNATTACHED_FILE_SWEEP_MODE is dry_run (count + audit,
+	// delete nothing — the default until the owner has read the first
+	// report), delete, or off. The pass runs at boot and every
+	// UNATTACHED_FILE_SWEEP_INTERVAL.
+	UnattachedFileTTL           time.Duration `env:"UNATTACHED_FILE_TTL" envDefault:"48h"`
+	UnattachedFileSweepMode     string        `env:"UNATTACHED_FILE_SWEEP_MODE" envDefault:"dry_run"`
+	UnattachedFileSweepInterval time.Duration `env:"UNATTACHED_FILE_SWEEP_INTERVAL" envDefault:"1h"`
+
 	// Phase 13 Part A — hardened code-interpreter sandbox. When
 	// SANDBOX_ENABLED=1 the plan-executor (excel) + doc generators run
 	// inside a locked-down `docker run` of SANDBOX_IMAGE instead of

@@ -24,7 +24,7 @@
 //   - only a title a machine put there is replaced, and the write is
 //     compare-and-set against the title that was read: a rename is never
 //     overwritten, and a chat is named once;
-//   - a temporary chat (memory off) is never sent anywhere for a title.
+//   - a chat the user STARTED as temporary (is_temporary — FIX127 B1) is never sent anywhere for a title; memory off alone does not stop a title.
 package service
 
 import (
@@ -184,7 +184,11 @@ func planTitle(conv *model.Conversation, seed *repository.TitleSeed) titlePlan {
 	if !isMachineTitle(conv.Title, seed.FirstUser.ContentMasked) {
 		return titlePlan{action: "keep", reason: "title_already_set"}
 	}
-	if !conv.MemoryEnabled {
+	// FIX127 B1 — only a chat the user STARTED as temporary goes unnamed.
+	// Memory off is a separate switch: until FIX127 it was read as
+	// "temporary" here, and an ordinary chat whose owner had turned memory
+	// off stayed "New conversation" for good.
+	if conv.IsTemporary {
 		return titlePlan{action: "keep", reason: "temporary_chat"}
 	}
 	if seed.Answer == nil {

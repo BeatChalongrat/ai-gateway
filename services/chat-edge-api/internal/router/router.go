@@ -284,6 +284,10 @@ func New(
 			// fall back to /text.
 			r.Get("/files/{fileID}/preview-data", h.File.PreviewData)
 			r.Delete("/files/{fileID}", h.File.Delete)
+			// FIX127 A1 — a chip removed while its upload was still in
+			// flight: the client has no server id yet, only the client_id
+			// it sent with the body. Unattached rows only.
+			r.Delete("/conversations/{id}/files/by-client/{clientID}", h.File.DeleteByClientID)
 
 			// User preferences (custom instructions).
 			r.Get("/user/preferences", h.Preferences.Get)

@@ -324,3 +324,30 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// DeleteByClientID — FIX127 A1. 204 when an unattached upload with that
+// client_id was removed; 404 when there is none (never uploaded, already
+// gone, or attached to a sent message — the composer cannot take back a
+// sent attachment).
+func (h *FileHandler) DeleteByClientID(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	convID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid conversation id")
+		return
+	}
+	clientID := chi.URLParam(r, "clientID")
+	if len(clientID) == 0 || len(clientID) > 128 {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid client id")
+		return
+	}
+	if err := h.files.DeleteByClientID(r.Context(), caller.TenantUUID, caller.UserID, convID, clientID); err != nil {
+		if errors.Is(err, service.ErrFileNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "file not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
