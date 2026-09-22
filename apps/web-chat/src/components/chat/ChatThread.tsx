@@ -114,6 +114,8 @@ export function ChatThread({
   };
   const [farFromBottom, setFarFromBottom] = useState(false);
   const [pendingNew, setPendingNew] = useState(false);
+  /** FIX127 D2 — a remembered scrollTop not yet applied (content still mounting). */
+  const pendingRestore = useRef<number | null>(null);
   const lastLen = useRef(0);
   const lastLastContent = useRef("");
   const autoScrolling = useRef(false);
@@ -371,8 +373,12 @@ export function ChatThread({
     if (remembered && remembered.far) {
       setFollow(false);
       setFarFromBottom(true);
+      // The rows mount one commit after the scroller (attachScroller), so
+      // the position is applied by reconcile() once the content is there.
+      pendingRestore.current = remembered.top;
       if (el) snapTo(el, remembered.top);
     } else {
+      pendingRestore.current = null;
       setFollow(true);
       setFarFromBottom(false);
       if (el) snapTo(el, geometry(el).bottom);
@@ -420,6 +426,21 @@ export function ChatThread({
       const bottom = geometry(el).bottom;
       if (!animating.current && Math.abs(el.scrollTop - bottom) > 1) snapTo(el, bottom);
     } else {
+      // FIX127 D2 — a remembered position waits for the content to be tall
+      // enough, then is applied once; a chat that got shorter meanwhile
+      // lands at its end.
+      if (pendingRestore.current !== null) {
+        const target = pendingRestore.current;
+        const bottom = geometry(el).bottom;
+        if (bottom >= target - 1) {
+          pendingRestore.current = null;
+          if (Math.abs(el.scrollTop - target) > 1) snapTo(el, target);
+        } else if (currentMessages.length > 0 && bottom > 0 && Math.abs(el.scrollTop - bottom) > 1) {
+          snapTo(el, bottom);
+        }
+        refreshAffordance(el, newContent);
+        return;
+      }
       const landmark = readingLandmark.current;
       if (landmark) {
         const idx = currentMessages.findIndex((m) => rowKey(m) === landmark.key);
@@ -626,6 +647,7 @@ export function ChatThread({
       return;
     }
     userIntent.current = false;
+    pendingRestore.current = null;
     cancelScrollAnimation();
     releaseHold();
     const bottom = geometry(el).bottom;
