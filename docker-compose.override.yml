@@ -23,6 +23,16 @@ services:
       # missing path, which is why the file sat in pyproject's --ignore
       # list rather than being fixed.
       - ./examples:/examples:ro
+      # FIX127 E2 — the cross-tree gates (tool-policy parity with the desktop
+      # and chat-edge tool registries, the egress invariant that reads Go
+      # source, the service-JWT compose wiring) are quarantined ONLY while
+      # the sibling tree is absent (tests/QUARANTINE.md O8-2/3/4). Mounted
+      # read-only here, they are hard gates in the dev lane too, not just in
+      # CI. Source only: bin/obj under SranDesktop are ignored by the tests.
+      - ./services/chat-edge-api:/services/chat-edge-api:ro
+      - ./SranDesktop/src:/SranDesktop/src:ro
+      - ./docker-compose.yml:/docker-compose.yml:ro
+      - ./docker-compose.prod.yml:/docker-compose.prod.yml:ro
     environment:
       # Schema-drift guard (FIX 3): dev hot-reloads source, so code can
       # advance past a long-lived container's schema — the container's own
