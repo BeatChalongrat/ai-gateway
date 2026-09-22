@@ -10,17 +10,17 @@ Model: qwen primary. Switches to deepseek-v4-flash logged here with time + reaso
 - [x] A3 strandSend(): text → NEW_CHAT draft + strandedSend + banner "ห้องสนทนานี้ถูกลบไปแล้ว ข้อความของคุณยังอยู่ในช่องพิมพ์" + button "ส่งในแชทใหม่" (ErrorBanner → landing page listener); handleConversationGone migrates the typed draft. vitest red 3/3 → green (gone.test 2 pins updated).
 - [x] A4 MessageBubble: action-row label yields to either ErrorNotice (liveFailureNotice/reloadedFailureNotice). vitest red 2/3 → green; FIX124 pins updated to the one-reason rule.
 - [x] B1 REAL BUG: memory_enabled=false was the only "temporary" marker (title_service.go planTitle + web nameConversationOnce). Added chat.conversations.is_temporary (migration 048, additive; test template rebuilt; LIVE NOT APPLIED — needs owner approval), POST /conversations {is_temporary:true} (memory off from creation), wire is_temporary, planTitle keys on IsTemporary; web create sends it, title skip keys on it. Go red (memory off is still named: got keep/temporary_chat) → green; web red 1 → green; 4 old pins updated.
-- [ ] B2 auto-title live proof
-- [ ] B3 auto skips dead model (test-only provider)
+- [~] B2 memory-off chat titled by the model live (b1 case); fail→succeed and dead title model = Go tests only
+- [ ] B3 NOT DONE: no tenant-scoped model in the data model (provider_keys global, router ignores show_in_chat) — owner decision
 - [x] C2 host onUiReady: a run with a terminal is not replayed to a page that was not following it (no/other run cursor); page swapMessageId collapses an id collision. desktop vitest red 2/4 → green 4/4. C1 = symptom of C2 (replayed row has no files) — verify live.
 - [x] C3 chose HOST IPC: op conversation.discardEmpty (page pagehide in HOSTED_MODE → host GET message_count==0 → DELETE). Why not a server sweep: immediate, no 24–48 h window with an orphan row, and the host re-checks the server count so the page can never delete a used chat; a server sweep would also delete legitimately empty new chats a user still has open. Tests 5/5 (new capability).
 - [x] C4 retryWhenBackOnline(): HOSTED_MODE + cause=disconnected → row reconnecting, waits online/visibility/15 s poll (RESUME_WAIT), regenerate when back; ≤3 attempts/row; stands down if the row moved on. vitest 4/4 (new capability).
-- [ ] D1-D4 polish
-- [ ] E1 runner proposal, E2 quarantine list
-- [ ] gate · deploy · live test · push · report
+- [x] D1 queue (one per turn) · D2 scroll memory (deferred restore) · D3 selection hold + refocus yields · D4 regenerated hidden, #msg deep link, composer focus, data-conversation-id; NOT: 360px, keyboard nav, artifact versions
+- [x] E1 docs/ops/GITLAB_RUNNER_PROPOSAL.md · E2 mounts (chat-edge, compose files); SranDesktop mount fails the parity scan (25<30) → finding, not mounted
+- [x] gate green (backend 1 fail only with the SranDesktop mount, reverted) · 048 applied (approved) · deployed be5b269 · e53 installed · live web A1/A3/A4/B1/D1/D2 PASS, desktop C2/C3/C4 PASS · PUSHED be5b269 · FIX127_REPORT.md
 
 ## Model switches
-(none yet)
+None manual. Automatic rescue: A1 turn qwen failed → meta-llama/llama-3.3-70b-instruct (FIX124). C4: 2 regenerated rows before the completed one (20 s cut).
 
 ## Shared-state changes
-(none yet)
+048 on live DB; 17 [FIX127] chats deleted by id; 26 [R3] never-sent uploads deleted by id (31.5 MB); +805 retention_dry_run audit rows; backend recreated 2×; chat-edge/web-chat 5×; e53 over e52.
