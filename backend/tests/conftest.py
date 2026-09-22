@@ -19,6 +19,13 @@ from tests import _redis_isolation
 
 _redis_isolation.install()
 
+# FIX128 B — the same for Postgres: a unit test that opens a real Postgres
+# connection (the live DB, from the container's settings) fails instead of
+# writing. The sqlite fixtures are untouched.
+from tests import _pg_isolation
+
+_pg_isolation.install()
+
 
 def pytest_configure(config):
     """Register custom markers so `pytest --strict-markers` works."""

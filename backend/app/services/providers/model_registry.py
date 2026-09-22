@@ -513,6 +513,7 @@ class ModelRegistry:
             reasoning_strategy=getattr(row, "reasoning_strategy", "none"),
             default_reasoning_mode=getattr(row, "default_reasoning_mode", "auto") or "auto",
             show_in_chat=getattr(row, "show_in_chat", True),
+            endpoint=_served_endpoint(getattr(row, "served_by_keys", None)),
         )
 
     def get_candidate(self, model: str) -> ModelCandidate | None:
@@ -524,6 +525,14 @@ class ModelRegistry:
     def model_map_snapshot(self) -> dict[str, ModelCandidate]:
         """Return a copy of ``_model_map`` for back-compat consumers."""
         return dict(self._model_map)
+
+
+def _served_endpoint(served) -> str:
+    """FIX128 — the endpoints in ``served_by_keys``, sorted and joined; "" if none."""
+    if not isinstance(served, dict) or not served:
+        return ""
+    eps = sorted({((v or {}).get("base_url") or "").rstrip("/") or "-" for v in served.values()})
+    return ",".join(eps)
 
 
 _registry = ModelRegistry()

@@ -42,6 +42,12 @@ class ModelCandidate:
     # FIX47 Part C — offered in the chat picker (migration 080). Routing
     # ignores it: a hidden model is still callable and still a fallback.
     show_in_chat: bool = True
+    # FIX128 — the endpoint(s) that serve this model (``served_by_keys``,
+    # FIX85), joined and sorted; "" when unrecorded. Two models of one
+    # provider served by different keys at different endpoints are two
+    # ACCOUNTS: one dying must not take the other out (fallback_orchestrator
+    # ``account_of``).
+    endpoint: str = ""
 
 
 @dataclass(frozen=True)

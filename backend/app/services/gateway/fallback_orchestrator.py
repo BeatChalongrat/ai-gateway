@@ -181,8 +181,36 @@ def rule_out_after_failure(
     scope = classify_failure_scope(exc, policy)
     wide = policy_mod.provider_wide_codes(policy) if policy else _PROVIDER_WIDE_CODES
     if scope == "account" or getattr(exc, "code", None) in wide:
-        skip_providers.add(provider)
+        skip_providers.add(account_of(provider, model))
     return scope
+
+
+def account_of(provider: str, model: str | None) -> str:
+    """FIX128 — the ACCOUNT a (provider, model) pair belongs to.
+
+    Since FIX85 the endpoint belongs to the key and each model names the
+    endpoints that serve it (``served_by_keys``). An account-scoped failure
+    (connection refused, auth, quota) is a fact about ONE key/endpoint, not
+    about every model of the provider: measured on the test stack, a dead
+    ``sranai`` key took qwen (another key, another endpoint, working) out of
+    the same turn's rescue ("account_failed_this_request") and out of the
+    next Auto turn (provider-wide marker). A model with a recorded endpoint
+    is its own account ``provider@endpoint``; an unrecorded one keeps the old
+    provider-wide identity.
+    """
+    if not provider:
+        return provider
+    if model:
+        try:
+            from app.services.providers.model_registry import get_candidate
+
+            cand = get_candidate(model)
+            ep = getattr(cand, "endpoint", "") if cand is not None and cand.provider == provider else ""
+        except Exception:  # noqa: BLE001 — identity lookup must never break a turn
+            ep = ""
+        if ep:
+            return f"{provider}@{ep}"
+    return provider
 
 
 def _health_key(provider: str, model: str | None = None) -> str:
@@ -267,7 +295,7 @@ async def mark_provider_unhealthy(
         await client.set(_health_key(provider, model), "unhealthy", ex=pair_ttl)
         wide = policy_mod.provider_wide_codes(policy) if policy else _PROVIDER_WIDE_CODES
         if model and error_code in wide:
-            await client.set(_health_key(provider), "unhealthy", ex=ttl)
+            await client.set(_health_key(account_of(provider, model)), "unhealthy", ex=ttl)
     except Exception:  # noqa: BLE001
         # Health hint is best-effort — Redis outage must not break
         # the request path.
@@ -292,7 +320,7 @@ async def clear_provider_health(provider: str, model: str | None = None) -> None
             await client.delete(_health_key(provider, model))
             # FIX124 — the pair answered: its next failure is a first strike.
             await client.delete(_strikes_key(provider, model))
-        await client.delete(_health_key(provider))
+        await client.delete(_health_key(account_of(provider, model)))
     except Exception:  # noqa: BLE001
         pass
 
@@ -321,7 +349,14 @@ async def unhealthy_pairs(
         client = get_async_redis()
         pipe = client.pipeline(transaction=False)
         for provider, model in unique:
-            pipe.exists(_health_key(provider, model))
+            # FIX128 — the pair's own marker, or its ACCOUNT's (provider@endpoint):
+            # every model on a dead endpoint leaves the pool; models of the
+            # same provider on another endpoint stay.
+            keys = [_health_key(provider, model)]
+            acct = account_of(provider, model)
+            if acct != provider:
+                keys.append(_health_key(acct))
+            pipe.exists(*keys)
         flags = await pipe.execute()
         return {pair for pair, flag in zip(unique, flags) if flag}
     except Exception:  # noqa: BLE001
@@ -343,7 +378,7 @@ async def is_provider_unhealthy(provider: str, model: str | None = None) -> bool
         if model:
             if await client.exists(_health_key(provider, model)):
                 return True
-        exists = await client.exists(_health_key(provider))
+        exists = await client.exists(_health_key(account_of(provider, model)))
         return bool(exists)
     except Exception:  # noqa: BLE001
         return False
@@ -864,7 +899,7 @@ class FallbackOrchestrator:
         if original_error is not None and (
             classify_failure_scope(original_error, policy) == "account"
         ):
-            dead_accounts.add(original_provider)
+            dead_accounts.add(account_of(original_provider, original_model))
         t_origin = started_at if started_at is not None else time.perf_counter()
         deadline = (t_origin + float(total_budget_s)) if total_budget_s is not None else None
 
@@ -891,7 +926,7 @@ class FallbackOrchestrator:
             # Account-scope gate — this provider already failed at the
             # account level during THIS request (or the primary did).
             # Does not consume an attempt slot.
-            if provider in dead_accounts:
+            if account_of(provider, model) in dead_accounts:
                 log.info(
                     "fallback_candidate_skipped",
                     candidate_provider=provider,
@@ -1012,7 +1047,7 @@ class FallbackOrchestrator:
                 # A timeout is account-scoped (the box, not one model):
                 # skip this provider's other candidates and mark the
                 # pair + provider-wide health keys for later requests.
-                dead_accounts.add(provider)
+                dead_accounts.add(account_of(provider, model))
                 await mark_provider_unhealthy(
                     provider, model, error_code="provider_timeout", policy=policy
                 )
@@ -1065,7 +1100,7 @@ class FallbackOrchestrator:
                     # way. Stop and surface this error now.
                     break
                 if scope == "account":
-                    dead_accounts.add(provider)
+                    dead_accounts.add(account_of(provider, model))
                 continue
 
             # Success — clear any stale health marker on this provider
@@ -1255,7 +1290,7 @@ class FallbackOrchestrator:
             if outside_boundary(provider, allowed):
                 self._skip(skipped, provider, model, "outside_boundary")
                 continue
-            if provider in skip:
+            if provider in skip or account_of(provider, model) in skip:
                 self._skip(skipped, provider, model, "account_failed_this_request")
                 continue
             # FIX49 Part C — a pair that already failed THIS request is
@@ -1362,7 +1397,7 @@ class FallbackOrchestrator:
             if outside_boundary(provider, allowed):
                 self._skip(skipped, provider, model, "outside_boundary")
                 continue
-            if provider in skip:
+            if provider in skip or account_of(provider, model) in skip:
                 self._skip(skipped, provider, model, "account_failed_this_request")
                 continue
 
