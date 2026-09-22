@@ -191,7 +191,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
           <Sparkles width={12} height={12} className="shrink-0 text-text-muted" aria-hidden />
         ) : null}
         <span
-          className="block max-w-[9rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
+          className="block max-w-[6rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
           data-testid="model-trigger-label"
         >
           {triggerLabel}

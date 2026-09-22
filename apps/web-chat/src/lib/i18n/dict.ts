@@ -1365,6 +1365,7 @@ export const en = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "AI service error",
   "msg.stopped": "stopped",
+  "a11y.skipToComposer": "Skip to the message box",
   "queue.waiting": "Waiting to send when the answer finishes",
   "queue.edit": "Edit queued message",
   "queue.delete": "Remove from queue",
@@ -3021,6 +3022,7 @@ const th: Record<DictKey, string> = {
   // ── Phase-2 i18n sweep — message bubble / code / boundary ───
   "msg.aiError": "บริการ AI ขัดข้อง",
   "msg.stopped": "หยุดแล้ว",
+  "a11y.skipToComposer": "ข้ามไปที่ช่องพิมพ์ข้อความ",
   "queue.waiting": "รอส่งเมื่อคำตอบเสร็จ",
   "queue.edit": "แก้ไขข้อความที่รอส่ง",
   "queue.delete": "ลบออกจากคิว",

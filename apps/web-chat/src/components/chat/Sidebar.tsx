@@ -1153,6 +1153,7 @@ function ConversationsArea({
     <nav
       ref={ref}
       onScroll={onScroll}
+      onKeyDown={moveBetweenChats}
       className="scrollbar-thin mt-3 flex-1 overflow-y-auto px-2 pb-2"
     >
       {useVirtual ? (
@@ -1514,4 +1515,26 @@ function groupByTime(items: Conversation[]): Group[] {
     else groups[4].items.push(c);
   }
   return groups;
+}
+
+/** FIX128 D4 — keyboard-only navigation of the chat list: ArrowDown/ArrowUp
+ *  move focus to the next/previous chat row, Home/End to the first/last.
+ *  Enter/Space still open it (ConversationItem). A key pressed inside a row's
+ *  rename box or menu is left alone. */
+export function moveBetweenChats(e: React.KeyboardEvent<HTMLElement>): void {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+  const target = e.target as HTMLElement;
+  if (target.closest("input, textarea, [role='menu']")) return;
+  const rows = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("[data-conversation-id]"));
+  if (rows.length === 0) return;
+  const at = rows.findIndex((r) => r === target || r.contains(target));
+  let next = at;
+  if (e.key === "ArrowDown") next = at < 0 ? 0 : Math.min(rows.length - 1, at + 1);
+  else if (e.key === "ArrowUp") next = at < 0 ? 0 : Math.max(0, at - 1);
+  else if (e.key === "Home") next = 0;
+  else next = rows.length - 1;
+  if (next === at) return;
+  e.preventDefault();
+  rows[next].focus();
+  rows[next].scrollIntoView({ block: "nearest" });
 }

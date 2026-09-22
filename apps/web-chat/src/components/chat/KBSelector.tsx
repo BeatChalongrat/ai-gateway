@@ -81,7 +81,9 @@ export function KBSelector({
         }`}
       >
         <BookIcon />
-        <span className="truncate">{label}</span>
+        {/* FIX128 D4 — icon-only below sm: at 360 px the label pushed the
+            send button out of the composer. The name stays in aria-label/title. */}
+        <span className="hidden truncate sm:inline">{label}</span>
       </button>
       {open ? (
         <div className="popover-appear absolute bottom-10 right-0 z-30 w-64 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">

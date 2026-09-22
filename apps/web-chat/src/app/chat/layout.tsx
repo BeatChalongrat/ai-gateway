@@ -185,6 +185,20 @@ export default function ChatLayout({
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-base">
+      {/* FIX128 D4 — the first Tab stop: jump straight to the composer. */}
+      <a
+        href="#composer"
+        data-testid="skip-to-composer"
+        onClick={(e) => {
+          const ta = document.querySelector<HTMLTextAreaElement>('textarea[data-shortcut="composer"]');
+          if (!ta) return;
+          e.preventDefault();
+          ta.focus();
+        }}
+        className="focus-ring sr-only z-50 rounded-md bg-bg-elevated px-3 py-2 text-sm text-text-primary focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+      >
+        {t("a11y.skipToComposer")}
+      </a>
       <Sidebar
         activeId={activeId}
         open={sidebarOpen}

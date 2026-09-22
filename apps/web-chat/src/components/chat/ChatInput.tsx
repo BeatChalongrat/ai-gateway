@@ -1399,8 +1399,11 @@ export function ChatInput({
               ) : null}
             </div>
 
-            {/* Right — KB selector + model selector pill + send/stop. */}
-            <div className="flex items-center gap-1.5">
+            {/* Right — KB selector + model selector pill + send/stop.
+                FIX128 D4 — min-w-0 lets this group give way on a 360 px
+                screen (the model label truncates) instead of pushing the
+                send button past the composer's clipped edge. */}
+            <div className="flex min-w-0 items-center gap-1.5">
               {onKBPick ? (
                 <KBSelector
                   conversationId={conversationId}
