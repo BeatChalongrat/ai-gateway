@@ -28,11 +28,12 @@ services:
       # the service-JWT compose wiring) are quarantined ONLY while the
       # sibling tree is absent (tests/QUARANTINE.md O8-2/3/4). Mounted
       # read-only here, they are hard gates in the dev lane too, not just in
-      # CI. SranDesktop/ is deliberately NOT mounted: its parity scan reads
-      # the retired WPF tree (25 tools) and asserts >= 30, so mounting it
-      # fails the lane; the scan has to be pointed at apps/desktop first
-      # (recorded in FIX127, not done there).
+      # CI. FIX128: the desktop parity scan reads the tools sidecar
+      # (SranDesktop/src) AND the Electron host's tools (apps/desktop/src),
+      # so both are mounted and the desktop gate is a hard gate here too.
       - ./services/chat-edge-api:/services/chat-edge-api:ro
+      - ./SranDesktop/src:/SranDesktop/src:ro
+      - ./apps/desktop/src:/apps/desktop/src:ro
       - ./docker-compose.yml:/docker-compose.yml:ro
       - ./docker-compose.prod.yml:/docker-compose.prod.yml:ro
     environment:

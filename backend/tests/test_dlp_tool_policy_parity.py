@@ -40,6 +40,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DESKTOP_TOOLS_DIR = (
     REPO_ROOT / "SranDesktop" / "src" / "SranDesktop.Infrastructure" / "Mcp" / "Tools"
 )
+# FIX128 — the Electron desktop's tool list is the .NET tools sidecar (the
+# directory above, still what the sidecar serves) PLUS the host-side tools the
+# Electron main process defines itself. Until FIX128 only the sidecar was
+# scanned, against a >= 30 floor written for the retired WPF shell (39 tools):
+# the sidecar alone has 25, so a full checkout failed the liveness check.
+_DESKTOP_MAIN = REPO_ROOT / "apps" / "desktop" / "src" / "main"
+# Files that declare host tools: definitions (``name: "…"``) in the first two,
+# the question tool's constant in the third.
+DESKTOP_HOST_TOOL_FILES = [_DESKTOP_MAIN / "host-tools.ts", _DESKTOP_MAIN / "turn-coordinator.ts"]
+DESKTOP_ASK_USER_TS = _DESKTOP_MAIN / "ask-user.ts"
 CHAT_EDGE_TOOLS_GO = (
     REPO_ROOT / "services" / "chat-edge-api" / "internal" / "service" / "tools.go"
 )
@@ -54,6 +64,10 @@ _CS_TOOLNAME_CONST_RE = re.compile(
 # GatewayFunction defs in chat-edge tools.go. The [a-z0-9_] class keeps
 # this scoped to tool names (Go field names / camelCase values no-match).
 _GO_NAME_RE = re.compile(r'Name:\s*"([a-z0-9_]+)"')
+# Tool definitions in the Electron host: ``name: "read_clipboard",``.
+_TS_NAME_RE = re.compile(r'(?<![A-Za-z_.])name:\s*"([a-z0-9_]+)"')
+# The question tool is declared by constant in the turn coordinator.
+_TS_ASK_RE = re.compile(r'ASK_USER_TOOL\s*=\s*"([a-z0-9_]+)"')
 
 
 def _desktop_tool_names() -> set[str]:
@@ -66,6 +80,11 @@ def _desktop_tool_names() -> set[str]:
         text = cs.read_text(encoding="utf-8-sig", errors="replace")
         names.update(_CS_NAME_RE.findall(text))
         names.update(_CS_TOOLNAME_CONST_RE.findall(text))
+    for ts in DESKTOP_HOST_TOOL_FILES:
+        if ts.is_file():
+            names.update(_TS_NAME_RE.findall(ts.read_text(encoding="utf-8", errors="replace")))
+    if DESKTOP_ASK_USER_TS.is_file():
+        names.update(_TS_ASK_RE.findall(DESKTOP_ASK_USER_TS.read_text(encoding="utf-8", errors="replace")))
     return names
 
 

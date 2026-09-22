@@ -132,6 +132,12 @@ TOOL_ARG_POLICY: dict[str, str] = {
     "read_clipboard": LOCAL_EXECUTION,
     "write_clipboard": LOCAL_EXECUTION,
     "update_plan": LOCAL_EXECUTION,
+    # FIX128 — the desktop's self-reschedule tool (offered only while a
+    # scheduled task is firing): cron + prompt go to the LOCAL sidecar's task
+    # store (tasks._reschedule); nothing leaves the machine. The prompt is
+    # sent later as an ordinary turn, which DLP governs then. Unclassified
+    # until the parity scan learned to read the Electron host's tools.
+    "update_task_schedule": LOCAL_EXECUTION,
     "remember": LOCAL_EXECUTION,
     "use_skill": LOCAL_EXECUTION,
     "run_subagent": LOCAL_EXECUTION,
