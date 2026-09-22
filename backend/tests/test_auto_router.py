@@ -28,7 +28,11 @@ from app.services.auto_router import ranking, router, taxonomy, tiers
 
 BACKEND = Path(__file__).resolve().parents[1]
 # In the container /app IS the backend dir; on a checkout the repo root sits above it.
-REPO = BACKEND.parent if (BACKEND.parent / "services").exists() else BACKEND
+# FIX128 — the repo root is the parent only when it IS a checkout (.git: a
+# file in a worktree, a dir otherwise). In the lane container backend/ is /app,
+# and the read-only /services/chat-edge-api mount (FIX127 E2) made "/services"
+# exist, so this test rglob'd the whole filesystem and died in /proc.
+REPO = BACKEND.parent if (BACKEND.parent / ".git").exists() else BACKEND
 ASSET = BACKEND / "app" / "services" / "auto_router" / "task_taxonomy.json"
 
 
