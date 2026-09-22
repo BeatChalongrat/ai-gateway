@@ -127,6 +127,12 @@ services:
       # through the bundled MinIO service below (env vars wire in
       # automatically from .env or shell exports).
       - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      # FIX127/128 A — uploads never attached to a sent message expire after
+      # UNATTACHED_FILE_TTL. The mode defaults to dry_run (count + one audit
+      # summary when the numbers change, delete nothing); a deployment that
+      # has read its dry-run report sets UNATTACHED_FILE_SWEEP_MODE=delete in .env.
+      - UNATTACHED_FILE_SWEEP_MODE=${UNATTACHED_FILE_SWEEP_MODE:-dry_run}
+      - UNATTACHED_FILE_TTL=${UNATTACHED_FILE_TTL:-48h}
       - S3_BUCKET=${S3_BUCKET:-sran-chat-files}
       - S3_REGION=${S3_REGION:-us-east-1}
       - S3_ENDPOINT=${S3_ENDPOINT:-}

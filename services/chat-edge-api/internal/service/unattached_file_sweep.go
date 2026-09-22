@@ -66,7 +66,18 @@ type unattachedStore interface {
 
 type auditSink interface {
 	Insert(ctx context.Context, e *model.DeletionAuditEntry) error
+	ListByTenant(ctx context.Context, tenantID uuid.UUID, action string, limit int) ([]model.DeletionAuditEntry, error)
 }
+
+// SweepAuditTenant — FIX128: the sweep writes ONE summary row per run under
+// this system tenant id (the nil UUID), with per-tenant counts in details,
+// instead of one row per account. Until FIX128 a dry run wrote a row per
+// tenant on every process start: 966 rows in a day, ~160 of them per start
+// for synthetic test tenants.
+var SweepAuditTenant = uuid.Nil
+
+// sweepAuditActor is the actor on every row this sweep writes.
+const sweepAuditActor = "system:unattached_file_sweep"
 
 type UnattachedFileSweep struct {
 	files    unattachedStore
@@ -76,10 +87,6 @@ type UnattachedFileSweep struct {
 	Mode     string
 	Interval time.Duration
 	now      func() time.Time
-	// dryRunAudited — the dry-run report is audited once per process (the
-	// numbers are also logged on every pass); hourly rows per account would
-	// only bury the audit trail.
-	dryRunAudited bool
 }
 
 // NewUnattachedFileSweep — mode is normalised; anything but "delete" or
@@ -144,9 +151,10 @@ func (s *UnattachedFileSweep) RunOnce(ctx context.Context) UnattachedSweepStats 
 				"tenant_id", a.TenantID.String(), "user_id", a.UserID.String(),
 				"files", a.Count, "bytes", a.Bytes, "ttl", s.TTL.String())
 		}
-		if !s.dryRunAudited {
-			s.dryRunAudited = true
-			s.auditAccounts(ctx, perTenant(accounts), model.AuditActionRetentionDryRun, "unattached_upload_dry_run", cutoff, 0)
+		// Audited only when the numbers moved since the last dry-run row:
+		// a restart, or an hour with nothing new, writes nothing.
+		if s.dryRunChanged(ctx, stats.Candidates, stats.Bytes) {
+			s.auditSummary(ctx, model.AuditActionRetentionDryRun, "unattached_upload_dry_run", cutoff, stats.Candidates, stats.Bytes, perTenant(accounts), 0)
 		}
 		return stats
 	}
@@ -158,6 +166,7 @@ func (s *UnattachedFileSweep) RunOnce(ctx context.Context) UnattachedSweepStats 
 		return stats
 	}
 	deletedPer := map[[2]uuid.UUID]int{}
+	var deletedBytes int64
 	for i := range rows {
 		f := &rows[i]
 		ok, err := s.files.DeleteIfStillUnattached(ctx, f.ID)
@@ -178,13 +187,16 @@ func (s *UnattachedFileSweep) RunOnce(ctx context.Context) UnattachedSweepStats 
 			}
 		}
 		stats.Deleted++
+		deletedBytes += f.FileSizeBytes
 		deletedPer[[2]uuid.UUID{f.TenantID, f.UserID}]++
 	}
 	var done []repository.UnattachedTotal
 	for k, n := range deletedPer {
 		done = append(done, repository.UnattachedTotal{TenantID: k[0], UserID: k[1], Count: n})
 	}
-	s.auditAccounts(ctx, done, model.AuditActionFileDeleted, "unattached_upload_expired", cutoff, stats.Kept)
+	if stats.Deleted > 0 {
+		s.auditSummary(ctx, model.AuditActionFileDeleted, "unattached_upload_expired", cutoff, stats.Deleted, deletedBytes, perTenant(done), stats.Kept)
+	}
 	slog.Info("unattached file sweep: pass complete",
 		"candidates", stats.Candidates, "deleted", stats.Deleted,
 		"kept", stats.Kept, "errors", stats.Errors, "ttl", s.TTL.String())
@@ -210,36 +222,52 @@ func perTenant(accounts []repository.UnattachedTotal) []repository.UnattachedTot
 	return out
 }
 
-func (s *UnattachedFileSweep) auditAccounts(
-	ctx context.Context, accounts []repository.UnattachedTotal,
-	action, rule string, cutoff time.Time, kept int,
+// auditSummary writes the run's one audit row: counts only, never content;
+// per-tenant file counts ride in details (capped).
+func (s *UnattachedFileSweep) auditSummary(
+	ctx context.Context, action, rule string, cutoff time.Time,
+	files int, bytes int64, tenants []repository.UnattachedTotal, kept int,
 ) {
 	if s.audit == nil {
 		return
 	}
-	for _, a := range accounts {
-		var uid *uuid.UUID
-		if a.UserID != uuid.Nil {
-			u := a.UserID
-			uid = &u
+	per := map[string]int{}
+	for i, t := range tenants {
+		if i >= 500 {
+			break
 		}
-		entry := &model.DeletionAuditEntry{
-			TenantID: a.TenantID,
-			UserID:   uid,
-			Actor:    "system:unattached_file_sweep",
-			Action:   action,
-			Scope:    "file",
-			Rule:     rule,
-			Counts:   map[string]int{"files": a.Count},
-			Details: map[string]any{
-				"bytes": a.Bytes, "ttl": s.TTL.String(),
-				"cutoff": cutoff.UTC().Format(time.RFC3339), "kept": kept,
-			},
-		}
-		if err := s.audit.Insert(ctx, entry); err != nil {
-			slog.Warn("unattached file sweep: audit write failed", "err", err)
-		}
+		per[t.TenantID.String()] = t.Count
 	}
+	entry := &model.DeletionAuditEntry{
+		TenantID: SweepAuditTenant,
+		Actor:    sweepAuditActor,
+		Action:   action,
+		Scope:    "file",
+		Rule:     rule,
+		Counts:   map[string]int{"files": files, "tenants": len(tenants)},
+		Details: map[string]any{
+			"bytes": bytes, "ttl": s.TTL.String(),
+			"cutoff": cutoff.UTC().Format(time.RFC3339), "kept": kept,
+			"per_tenant": per,
+		},
+	}
+	if err := s.audit.Insert(ctx, entry); err != nil {
+		slog.Warn("unattached file sweep: audit write failed", "err", err)
+	}
+}
+
+// dryRunChanged reports whether the dry-run totals differ from the last
+// dry-run summary on record (true when there is none or it cannot be read).
+func (s *UnattachedFileSweep) dryRunChanged(ctx context.Context, files int, bytes int64) bool {
+	if s.audit == nil {
+		return false
+	}
+	last, err := s.audit.ListByTenant(ctx, SweepAuditTenant, model.AuditActionRetentionDryRun, 1)
+	if err != nil || len(last) == 0 {
+		return true
+	}
+	prevBytes, _ := last[0].Details["bytes"].(float64)
+	return last[0].Counts["files"] != files || int64(prevBytes) != bytes
 }
 
 // StartBackground runs a pass now and then every Interval. The first pass

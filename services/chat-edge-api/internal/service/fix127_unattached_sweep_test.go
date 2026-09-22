@@ -91,9 +91,41 @@ func TestFIX127_UnattachedSweep_DryRunCountsAndDeletesNothing(t *testing.T) {
 			t.Fatalf("dry run removed the blob of %s", r.OriginalFilename)
 		}
 	}
-	entries, _ := f.audit.ListByTenant(context.Background(), f.tenant, "", 10)
+	// FIX128 — one summary row under the system tenant, per-tenant counts in details.
+	entries, _ := f.audit.ListByTenant(context.Background(), SweepAuditTenant, "", 10)
 	if len(entries) != 1 || entries[0].Action != model.AuditActionRetentionDryRun || entries[0].Counts["files"] != 1 {
 		t.Fatalf("audit = %+v", entries)
+	}
+	if per, _ := entries[0].Details["per_tenant"].(map[string]any); per[f.tenant.String()] == nil {
+		t.Fatalf("per-tenant count missing: %+v", entries[0].Details)
+	}
+	if own, _ := f.audit.ListByTenant(context.Background(), f.tenant, "", 10); len(own) != 0 {
+		t.Fatalf("a per-account row was written: %+v", own)
+	}
+}
+
+// FIX128 — the dry-run audit is written only when the numbers move: the same
+// pass again, or a restart (a new sweep), writes nothing; a new candidate
+// writes one more summary.
+func TestFIX128_DryRunAuditOnlyWhenTheNumbersChange(t *testing.T) {
+	f := newSweepFixture(t)
+	ctx := context.Background()
+	f.row(t, "old.txt", 72*time.Hour, false)
+	count := func() int {
+		e, _ := f.audit.ListByTenant(ctx, SweepAuditTenant, model.AuditActionRetentionDryRun, 100)
+		return len(e)
+	}
+	sw := NewUnattachedFileSweep(f.files, f.be, f.audit, 48*time.Hour, "dry_run", time.Hour)
+	sw.RunOnce(ctx)
+	sw.RunOnce(ctx)
+	NewUnattachedFileSweep(f.files, f.be, f.audit, 48*time.Hour, "dry_run", time.Hour).RunOnce(ctx) // a restart
+	if n := count(); n != 1 {
+		t.Fatalf("unchanged numbers wrote %d dry-run rows, want 1", n)
+	}
+	f.row(t, "old2.txt", 72*time.Hour, false)
+	sw.RunOnce(ctx)
+	if n := count(); n != 2 {
+		t.Fatalf("a new candidate wrote %d rows in total, want 2", n)
 	}
 }
 
@@ -129,8 +161,8 @@ func TestFIX127_UnattachedSweep_DeleteRemovesOnlyOldUnattachedUploads(t *testing
 			t.Fatalf("%s blob was deleted", keep.OriginalFilename)
 		}
 	}
-	entries, _ := f.audit.ListByTenant(ctx, f.tenant, "", 10)
-	if len(entries) != 1 || entries[0].Action != model.AuditActionFileDeleted || entries[0].Rule != "unattached_upload_expired" {
+	entries, _ := f.audit.ListByTenant(ctx, SweepAuditTenant, "", 10)
+	if len(entries) != 1 || entries[0].Action != model.AuditActionFileDeleted || entries[0].Rule != "unattached_upload_expired" || entries[0].Counts["files"] != 1 {
 		t.Fatalf("audit = %+v", entries)
 	}
 	// A second pass finds nothing and writes no audit row.
