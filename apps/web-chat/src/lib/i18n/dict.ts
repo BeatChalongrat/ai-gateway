@@ -1713,6 +1713,11 @@ export const en = {
   "projects.personal.loadFailed": "Couldn't load your instructions.",
   "projects.personal.toast.saved": "Instructions saved.",
   "projects.personal.toast.saveFailed": "Couldn't save instructions.",
+  // ── FIX130 C3.1 — the session check could not reach the gateway ──
+  "session.unreachable.title": "Can't reach SRAN Chat right now",
+  "session.unreachable.body": "The sign-in service did not answer, so the chat could not open. You have not been signed out — this is a connection problem. Try again in a moment.",
+  "session.unreachable.retry": "Try again",
+  "session.unreachable.checking": "Checking…",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -3364,6 +3369,11 @@ const th: Record<DictKey, string> = {
   "projects.personal.loadFailed": "โหลดคำสั่งของคุณไม่สำเร็จ",
   "projects.personal.toast.saved": "บันทึกคำสั่งแล้ว",
   "projects.personal.toast.saveFailed": "บันทึกคำสั่งไม่สำเร็จ",
+  // ── FIX130 C3.1 ──
+  "session.unreachable.title": "ตอนนี้เชื่อมต่อ SRAN Chat ไม่ได้",
+  "session.unreachable.body": "ระบบยืนยันตัวตนไม่ตอบกลับ จึงยังเปิดแชทไม่ได้ คุณยังไม่ได้ถูกออกจากระบบ — เป็นปัญหาการเชื่อมต่อ ลองใหม่อีกครั้งในอีกสักครู่",
+  "session.unreachable.retry": "ลองใหม่",
+  "session.unreachable.checking": "กำลังตรวจสอบ…",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

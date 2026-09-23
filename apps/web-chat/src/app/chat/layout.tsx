@@ -5,7 +5,7 @@ import {
   useRouter,
   useSelectedLayoutSegments,
 } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -19,6 +19,7 @@ import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
 import { TurnNotSavedBanner } from "@/components/chat/TurnNotSavedBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
 import { Spinner } from "@/components/ui/Spinner";
+import { SessionUnreachable } from "@/components/ui/SessionUnreachable";
 import {
   useKeyboardShortcuts,
   useNewChatHandler,
@@ -76,19 +77,30 @@ export default function ChatLayout({
           : t("a11y.pageChat");
 
   const [isReady, setIsReady] = useState(false);
+  // FIX130 C3.1 — the session check got no trustworthy answer: a retry
+  // screen, never the login bounce (which revokes the tokens).
+  const [unreachable, setUnreachable] = useState(false);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  const [authChecking, setAuthChecking] = useState(false);
+  const retryAuth = useCallback(() => setAuthAttempt((n) => n + 1), []);
 
   useEffect(() => {
     let alive = true;
     // Cookie-based auth: we can't read the token in JS, so resolve the
-    // session via /portal/me (cookie-authenticated). No session →
-    // bounce to the Portal login.
+    // session via /portal/me (cookie-authenticated). A session the gateway
+    // refused → bounce to the Portal login.
     void (async () => {
+      setAuthChecking(true);
       await useAuthStore.getState().checkAuth();
       if (!alive) return;
-      if (!useAuthStore.getState().user) {
-        redirectToPortalLogin();
+      setAuthChecking(false);
+      const { user, status } = useAuthStore.getState();
+      if (!user) {
+        if (status === "rejected") redirectToPortalLogin();
+        else setUnreachable(true);
         return;
       }
+      setUnreachable(false);
       // Seed the model catalog now that we know the user is
       // authenticated, so the picker isn't empty wherever they land
       // inside this layout.
@@ -100,7 +112,7 @@ export default function ChatLayout({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [authAttempt]);
 
   // Lock body scroll while the mobile slide-over is open.
   useEffect(() => {
@@ -175,6 +187,9 @@ export default function ChatLayout({
     },
   });
 
+  if (!isReady && unreachable) {
+    return <SessionUnreachable onRetry={retryAuth} checking={authChecking} />;
+  }
   if (!isReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary">
