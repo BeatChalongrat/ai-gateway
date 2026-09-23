@@ -93,10 +93,51 @@ export function portalLoginUrl(loc: Pick<Location, "origin" | "pathname" | "sear
   return `${PORTAL_URL}/login?redirect=${ret}`;
 }
 
-/** Bounce to the Portal login with the current Web Chat page as the post-login return target. */
+/**
+ * Bounce to the Portal login with the current Web Chat page as the post-login
+ * return target.
+ *
+ * FIX129 B2 — this runs when the session is really over (a rejected refresh).
+ * The Portal's middleware treats a PRESENT cookie as "signed in" and sends
+ * anyone on /login straight back to the ?redirect= target, so a device that
+ * still holds a revoked access cookie (signed out elsewhere) would loop
+ * login → chat → login. Expire the stale HttpOnly cookies through the
+ * gateway's logout first (its Set-Cookie clears them; JS cannot), bounded to
+ * 1.5 s and best effort, then navigate. Hosted mode keeps the synchronous
+ * navigation the shell intercepts as its re-auth signal.
+ */
 export function redirectToPortalLogin(): void {
   if (typeof window === "undefined") return;
-  window.location.href = portalLoginUrl(window.location);
+  const go = () => {
+    window.location.href = portalLoginUrl(window.location);
+  };
+  if (HOSTED_MODE) {
+    go();
+    return;
+  }
+  void clearSessionCookies().then(go, go);
+}
+
+/** Expire the session cookies on this device via the gateway (best effort, ≤1.5 s). */
+export function clearSessionCookies(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 1500);
+    let p: Promise<unknown>;
+    try {
+      p = fetch(`${GATEWAY_URL}/portal/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        keepalive: true,
+      });
+    } catch {
+      p = Promise.resolve();
+    }
+    p.catch(() => undefined).then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 /** The session user as the chat app needs it (derived from /portal/me). */

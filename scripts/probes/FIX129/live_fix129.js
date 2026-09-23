@@ -9,7 +9,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const lib = require("../NIGHT2/results/lib.js");
-const { API, USER, token, api, openContext, wait } = lib;
+const { API, USER, TENANT, api, openContext, wait } = lib;
+
+// lib.token() mints without a `jti`; a token without one cannot be revoked
+// individually (the backend's own tokens always carry one), so mint here.
+function token() {
+  const crypto = require("node:crypto");
+  const env = execFileSync("docker", ["exec", "ai-gateway-chat-edge-api", "env"], { encoding: "utf8" });
+  const secret = env.match(/^PORTAL_JWT_SECRET=(.+)$/m)[1].trim();
+  const tv = Number(execFileSync("docker", ["exec", "ai-gateway-postgres-1", "psql", "-U", "postgres", "-d", "ai_gateway", "-tA", "-c",
+    `select token_version from portal_users where id='${USER}'`], { encoding: "utf8" }).trim() || 0);
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const d = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ sub: USER, email: "owner@local", type: "portal", token_use: "access", tenant_id: TENANT, tenant_role: "owner", token_version: tv, iat: now, exp: now + 7200, jti: crypto.randomUUID() })}`;
+  return `${d}.${crypto.createHmac("sha256", secret).update(d).digest("base64url")}`;
+}
 const GATEWAY = "http://localhost:8080";
 const MODEL = process.env.MODEL || "deepseek-v4-flash";
 const OUT = path.join(__dirname, "results", "live");
