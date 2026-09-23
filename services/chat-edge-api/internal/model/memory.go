@@ -54,6 +54,11 @@ const (
 	MemoryStatusPendingConfirmation = "pending_confirmation"
 	MemoryStatusSuperseded          = "superseded"
 	MemoryStatusDeleted             = "deleted"
+	// MemoryStatusRejected (FIX130 A1f) — a suggestion the user declined.
+	// Never listed, never injected; its content is kept (evidence dropped)
+	// only so the extractor's do-not-repeat list and dedup gate can refuse
+	// to suggest it again. status is a free VARCHAR(20) (migration 014).
+	MemoryStatusRejected = "rejected"
 
 	MemorySensitivityNormal     = "normal"
 	MemorySensitivityRestricted = "restricted"
@@ -101,6 +106,12 @@ type Memory struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// FIX130 A3c — where the memory came from, resolved per list request
+	// (not columns): the source chat's title while it exists, and whether
+	// it has since been deleted. Both empty for a memory the user added.
+	SourceConversationTitle   string `json:"source_conversation_title,omitempty"`
+	SourceConversationDeleted bool   `json:"source_conversation_deleted,omitempty"`
 }
 
 // MemoryEvent is one row from chat.memory_events.

@@ -487,6 +487,8 @@ func (h *ConversationHandler) writeUpdateError(w http.ResponseWriter, err error)
 		WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")
 	case errors.Is(err, service.ErrConversationBadModel):
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, "model not allowed")
+	case errors.Is(err, service.ErrConversationTemporaryMemory):
+		WriteError(w, http.StatusConflict, CodeConflict, "memory cannot be turned on in a temporary chat")
 	default:
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 	}

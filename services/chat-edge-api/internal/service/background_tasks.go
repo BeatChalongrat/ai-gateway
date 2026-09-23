@@ -93,6 +93,12 @@ func (s *MessageService) waitTurnIdle(ctx context.Context, convID uuid.UUID, pol
 // turn in flight, on its own goroutine; skipped (logged by the caller's
 // name) when the conversation stays busy past backgroundWaitMax.
 func (s *MessageService) runWhenTurnIdle(name string, convID uuid.UUID, fn func(ctx context.Context)) {
+	s.runWhenTurnIdleOr(name, convID, fn, nil)
+}
+
+// runWhenTurnIdleOr is runWhenTurnIdle with a callback for the skip (FIX130:
+// the memory extractor releases its in-flight claim there).
+func (s *MessageService) runWhenTurnIdleOr(name string, convID uuid.UUID, fn func(ctx context.Context), onSkip func()) {
 	poll, maxWait := s.bgWaitPoll, s.bgWaitMax
 	if poll <= 0 {
 		poll = backgroundWaitPoll
@@ -104,6 +110,9 @@ func (s *MessageService) runWhenTurnIdle(name string, convID uuid.UUID, fn func(
 		bg := context.Background()
 		if !s.waitTurnIdle(bg, convID, poll, maxWait) {
 			logBackgroundSkipped(name, convID, maxWait)
+			if onSkip != nil {
+				onSkip()
+			}
 			return
 		}
 		fn(bg)

@@ -187,23 +187,14 @@ type Config struct {
 	// Keep the default equal to service.DefaultBackgroundTaskModel.
 	BackgroundTaskModel string `env:"BACKGROUND_TASK_MODEL" envDefault:"deepseek-v4-flash"`
 
-	// TemporaryChatReadsMemory — what a temporary chat (a conversation
-	// with memory switched off) does with the memories already on file.
-	//
-	// true (default): it reads them and writes none. "Don't record this"
-	// is what the user is asking for; making the assistant also forget
-	// their language, stack and standing instructions turns the mode
-	// into something people avoid, and a privacy switch nobody uses
-	// protects nobody.
-	//
-	// false: it reads nothing either — the stricter, older behaviour,
-	// kept as a setting because an organisation may want the seal to run
-	// in both directions and that is a policy call, not ours.
-	//
-	// The write side does not consult this flag and cannot be turned on
-	// by it: memory tools, conversation-state extraction and preference
-	// extraction are each gated on the conversation's own memory flag.
-	TemporaryChatReadsMemory bool `env:"TEMPORARY_CHAT_READS_MEMORY" envDefault:"true"`
+	// TemporaryChatReadsMemory — RETIRED in FIX130 (A2). FIX56.1 let a
+	// memory-off / temporary chat read the saved memories; NIGHT2 found
+	// answers quoting them in chats the user had switched memory off for.
+	// Memory off now means off, in both directions, with no setting to
+	// undo it. The variable is still PARSED — as a string, so no value an
+	// old .env carries can stop the server booting — only so main.go can
+	// warn that it is ignored.
+	TemporaryChatReadsMemory string `env:"TEMPORARY_CHAT_READS_MEMORY" envDefault:""`
 
 	// JSON-encoded list of models exposed to the chat UI. Phase 1
 	// keeps this list flat (no per-tenant restriction; admin features

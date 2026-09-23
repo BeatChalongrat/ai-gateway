@@ -102,3 +102,15 @@ type Conversation struct {
 	// project's instructions + knowledge base at prompt-compile time.
 	ProjectID *uuid.UUID
 }
+
+// MemoryActive reports whether this conversation may read or write the
+// user's memory (FIX130 A2): memory switched on AND not a temporary chat.
+// Every memory gate asks this one question — the saved-memory block, the
+// memory tools (offered and executed), the preference extractor and the
+// conversation-state extractor — so "memory off" and "temporary" mean the
+// same thing everywhere: nothing read, nothing written. A temporary chat
+// stays sealed even if its memory_enabled flag says otherwise (a row
+// switched on before the server refused that).
+func (c *Conversation) MemoryActive() bool {
+	return c != nil && c.MemoryEnabled && !c.IsTemporary
+}

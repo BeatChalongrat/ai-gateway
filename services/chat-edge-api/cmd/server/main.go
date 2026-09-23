@@ -416,10 +416,12 @@ func main() {
 	// system-prompt block + the save_memory / list_memories AI tools
 	// on every conversation where memory_enabled = true.
 	messageSvc.SetMemoryService(memorySvc)
-	// FIX56.1 — a temporary chat reads the saved memories but writes
-	// none. Reversible: TEMPORARY_CHAT_READS_MEMORY=false restores the
-	// stricter "reads nothing either" behaviour. Only the read moves.
-	messageSvc.SetTemporaryChatReadsMemory(cfg.TemporaryChatReadsMemory)
+	// FIX130 A2 — memory-off and temporary chats read no memory; the
+	// FIX56.1 switch that let them is gone. An old value is ignored, loudly.
+	if v := strings.TrimSpace(cfg.TemporaryChatReadsMemory); v != "" {
+		slog.Warn("TEMPORARY_CHAT_READS_MEMORY is retired and ignored: memory-off and temporary chats never read memory",
+			"value", v)
+	}
 	// S3 — wire the conversation-state layer. Adds the
 	// <conversation_state> system-prompt block + the
 	// update_conversation_state tool + the auto-extraction trigger
@@ -494,14 +496,16 @@ func main() {
 	// lands. The message-list handler hydrates them inline via
 	// the same repo.
 	messageSvc.SetResponseSourceRepo(sourcesRepo)
-	// S8 — wire the background preference-pattern learner. Fires
-	// from finalizeConversation once per qualifying conversation
-	// (20+ messages, memory enabled, no prior extraction). Pending
-	// suggestions surface in Settings → Memory; auto-promotion
-	// kicks in after the same pattern is observed in 3+
-	// conversations.
+	// S8 — wire the background memory learner (facts + preferences,
+	// FIX130). Fires from finalizeConversation after two user turns and
+	// then every two more, over the new messages only, in chats whose
+	// memory is active. Pending suggestions surface on the Memory page;
+	// repeated preferences are consolidated after 3+ conversations.
 	prefExtractor := service.NewPreferenceExtractor(memorySvc, memoriesRepo, messages, conversations, gateway)
 	prefExtractor.SetExtractionModel(backgroundModel) // FIX126 O1
+	// FIX130 A1e — the per-conversation watermark and in-flight claim live in
+	// Redis, so replicas agree and a restart does not re-read old messages.
+	prefExtractor.SetRedis(rdb)
 	slog.Info("preference extractor", "model", backgroundModel, "fallback", "the conversation's chat model")
 	messageSvc.SetPreferenceExtractor(prefExtractor)
 
@@ -647,6 +651,12 @@ func main() {
 	documentHandler := handler.NewDocumentHandler(filesRepo, excelSvc, docSvc)
 	documentHandler.SetPlanOwnerResolver(planOwners)
 
+	// Phase 3 — desktop agent-conversation backup mirror (migration 026).
+	// FIX130 A1 — an import that adds messages kicks the memory extractor,
+	// the desktop's only route to it (its turns bypass the send path).
+	importSvc := service.NewImportService(pool, conversations, messages, filesRepo, conversationSvc)
+	importSvc.SetAfterImport(messageSvc.AfterImport)
+
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Usage:          usageHandler,
@@ -686,9 +696,7 @@ func main() {
 		// Phase 3 — desktop agent-conversation backup mirror (migration 026).
 		// filesRepo: FIX 10 — imported user messages can link uploaded
 		// attachments via file_ids.
-		Import: handler.NewImportHandler(
-			service.NewImportService(pool, conversations, messages, filesRepo, conversationSvc),
-		),
+		Import: handler.NewImportHandler(importSvc),
 	}
 
 	// Phase 13 Part B — the /code/run endpoint is ALWAYS registered so the

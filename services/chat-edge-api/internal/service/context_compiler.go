@@ -297,7 +297,7 @@ func (c *ContextCompiler) Compile(
 	// A-W7 — a pending manual compact boundary on the state row.
 	var boundary *uuid.UUID
 	var existing *model.ConversationState
-	if c.states != nil && in.Conv.MemoryEnabled {
+	if c.states != nil && in.Conv.MemoryActive() {
 		if st, err := c.states.Get(ctx, in.Conv.ID, in.UserID, in.TenantID); err == nil && st != nil {
 			existing = st
 			boundary = st.ManualCompactBoundaryMessageID
@@ -338,7 +338,7 @@ func (c *ContextCompiler) Compile(
 	// up represented in the <conversation_state> block. Skipped
 	// when the conversation opted out of memory (temporary chats)
 	// or on a dry run; the trim still runs.
-	memoryOn := c.states != nil && in.Conv.MemoryEnabled
+	memoryOn := c.states != nil && in.Conv.MemoryActive()
 	var upto *uuid.UUID
 	if memoryOn {
 		if plan.dropEnd > 0 {
@@ -419,7 +419,7 @@ func (c *ContextCompiler) Compile(
 	// present) carries the honesty sentence too; this note covers the
 	// memory-off case and names the counts.
 	missing := out.Dropped + in.OmittedOlder
-	out.SummaryStatus = summaryStatusOf(in.Conv.MemoryEnabled, c.states != nil, extractionNeeded, in.DryRun, extractionOK, out.StatePresent)
+	out.SummaryStatus = summaryStatusOf(in.Conv.MemoryActive(), c.states != nil, extractionNeeded, in.DryRun, extractionOK, out.StatePresent)
 	out.SystemPrefix += compactionContextNote(missing, plan.tailKept, plan.headKept, out.SummaryStatus)
 
 	// S7 — record the compaction event as a source so the UI can

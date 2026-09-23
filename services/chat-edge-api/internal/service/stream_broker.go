@@ -117,6 +117,11 @@ type StreamSnapshot struct {
 	// CompactionNotice (FIX102): sticky the same way — a reattaching client
 	// still learns this turn left older messages out without a summary.
 	CompactionNotice *CompactionNotice
+	// MemoryUsed / MemorySaved (FIX130 A3): sticky — a reattaching client
+	// still learns the answer used memory, and every save made so far
+	// (items accumulated in first-seen order).
+	MemoryUsed  *MemoryUsedNotice
+	MemorySaved *MemorySavedNotice
 	// CodeExecutions are the run_python cards seen so far, in first-seen
 	// order, each collapsed to its LATEST frame (the "running" frame is
 	// superseded by the terminal one). Replaying them restores the
@@ -152,6 +157,8 @@ type brokerEntry struct {
 	stall     *ProviderStallNotice
 	inotice   *ImageAttachNotice
 	cnotice   *CompactionNotice
+	mused     *MemoryUsedNotice  // FIX130 A3a — sticky
+	msaved    *MemorySavedNotice // FIX130 A3b — items accumulate
 	terminal  *StreamUpdate
 	// codeRuns keeps the latest frame per run_python call, plus the
 	// order they first appeared, so the snapshot replays them the way
@@ -216,6 +223,8 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		ProviderStall:    e.stall,
 		ImageNotice:      e.inotice,
 		CompactionNotice: e.cnotice,
+		MemoryUsed:       e.mused,
+		MemorySaved:      e.msaved,
 		CodeExecutions:   runs,
 		ToolActivities:   acts,
 		Terminal:         e.terminal,
@@ -387,6 +396,12 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.CompactionNotice != nil {
 		e.cnotice = ev.CompactionNotice
+	}
+	if ev.MemoryUsed != nil {
+		e.mused = ev.MemoryUsed
+	}
+	if ev.MemorySaved != nil {
+		e.msaved = mergeMemorySaved(e.msaved, ev.MemorySaved)
 	}
 	if ev.CodeExecution != nil && ev.CodeExecution.ID != "" {
 		if e.codeRuns == nil {

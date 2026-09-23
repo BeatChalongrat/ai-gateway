@@ -24,6 +24,11 @@ const (
 	SourceTypePastConversation  = "past_conversation"
 	SourceTypeFileContext       = "file_context"
 	SourceTypeCompactedHistory  = "compacted_history"
+	// SourceTypeMemorySaved (FIX130 A3b) — save_memory succeeded during
+	// this answer; source_id is the memory, metadata.status says whether it
+	// is active or a pending suggestion. No schema change: source_type is a
+	// free VARCHAR(30) (migration 017).
+	SourceTypeMemorySaved = "memory_saved"
 )
 
 type ResponseContextSource struct {

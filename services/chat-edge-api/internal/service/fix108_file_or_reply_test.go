@@ -24,7 +24,7 @@ func TestFIX108_TheFileOrReplyLayerStatesTheCriteriaAndKeepsRequestedFiles(t *te
 }
 
 func TestFIX108_TheWebPromptCarriesItRightAfterTheFormatRule(t *testing.T) {
-	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil, true)
+	pc := newPromptCompiler(stubPrefsReader{block: ""}, nil, nil)
 	out, _ := pc.Build(context.Background(), CompileContext{})
 	f, o := strings.Index(out, "<file_or_reply>"), strings.Index(out, "<output_format>")
 	if f < 0 || o < 0 || f < o {

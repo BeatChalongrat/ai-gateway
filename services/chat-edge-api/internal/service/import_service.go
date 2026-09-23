@@ -68,6 +68,15 @@ type ImportService struct {
 	messages      *repository.MessageRepo
 	files         *repository.FileRepo
 	ownership     *ConversationService
+	// afterImport (FIX130 A1) — called once an import added messages, so a
+	// desktop chat feeds the memory extractor the way a web turn does
+	// (MessageService.AfterImport). nil = nothing (tests, legacy wiring).
+	afterImport func(ctx context.Context, tenantID, convID uuid.UUID)
+}
+
+// SetAfterImport wires the FIX130 post-import hook (main.go).
+func (s *ImportService) SetAfterImport(fn func(ctx context.Context, tenantID, convID uuid.UUID)) {
+	s.afterImport = fn
 }
 
 func NewImportService(
@@ -420,6 +429,9 @@ func (s *ImportService) ImportMessages(
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, nil, fmt.Errorf("import messages: commit: %w", err)
+	}
+	if imported > 0 && s.afterImport != nil {
+		s.afterImport(ctx, tenantID, convID)
 	}
 	return imported, skipped, rejected, nil
 }

@@ -338,6 +338,9 @@ type GatewayCallContext struct {
 type GatewayChatChoice struct {
 	Index   int            `json:"index"`
 	Message GatewayMessage `json:"message"`
+	// FinishReason (FIX130) — read by the memory extractor to tell an answer
+	// cut off at max_tokens ("length") from an empty one.
+	FinishReason string `json:"finish_reason,omitempty"`
 }
 
 type GatewayChatUsage struct {
