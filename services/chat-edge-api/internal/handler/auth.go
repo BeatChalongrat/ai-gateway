@@ -63,3 +63,11 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	gone(w, "Logout is handled by the SRAN Portal. Clearing the portal_access_token cookie also signs you out of Chat.")
 }
+
+// Session — FIX129 B2 — is the one live route on this handler: a cheap
+// "is my session still valid" heartbeat. It sits behind RequireAuth, so
+// the answer is 204 while the token is good and 401 once the Portal has
+// revoked it (sign-out) or it has expired. The web client polls it.
+func (h *AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}

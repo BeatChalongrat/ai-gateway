@@ -40,6 +40,14 @@ type Config struct {
 	// PostgreSQL connection (pgx-compatible DSN).
 	DatabaseURL string `env:"DATABASE_URL,required"`
 
+	// FIX129 A1 — server-side session timeouts every pooled connection
+	// carries (internal/db). On 2026-09-22 an abandoned FOR UPDATE idled
+	// in its transaction for 34 minutes with all three at 0 and every
+	// later writer queued behind its row lock. 0 = not enforced.
+	PGStatementTimeoutMS         int `env:"PG_STATEMENT_TIMEOUT_MS" envDefault:"30000"`
+	PGLockTimeoutMS              int `env:"PG_LOCK_TIMEOUT_MS" envDefault:"5000"`
+	PGIdleInTransactionTimeoutMS int `env:"PG_IDLE_IN_TRANSACTION_TIMEOUT_MS" envDefault:"30000"`
+
 	// Redis connection. Database number is part of the URL
 	// (``redis://host:6379/1`` selects DB 1) so test code can
 	// isolate state by pointing at a different DB.

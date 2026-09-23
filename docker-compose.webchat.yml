@@ -243,6 +243,11 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    # FIX129 A3: the base file's `autoheal` service restarts this container
+    # when the healthcheck above reports "unhealthy" (same daemon, same
+    # label; the two files share the compose project `ai-gateway`).
+    labels:
+      autoheal: "true"
 
   postgres-webchat:
     # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
@@ -252,6 +257,15 @@ services:
     image: pgvector/pgvector:pg16
     container_name: ai-gateway-postgres-webchat
     restart: unless-stopped
+    # FIX129 A1 — same server-level safety nets as the base `postgres`
+    # (docker-compose.yml): the 2026-09-22 incident (NIGHT2) was one
+    # abandoned FOR UPDATE transaction holding a row lock for 34 minutes
+    # with every timeout at 0. A session idle in an open transaction for
+    # 60 s is terminated; a statement waiting more than 30 s for a lock
+    # fails (55P03) instead of queueing forever. No statement_timeout here
+    # on purpose (pg_dump / maintenance); chat-edge sets its own per
+    # connection.
+    command: ["postgres", "-c", "idle_in_transaction_session_timeout=120000", "-c", "lock_timeout=30000"]
     ports:
       - "127.0.0.1:5433:5432"
     environment:
@@ -401,6 +415,67 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    # FIX129 A3: restarted by the base file's `autoheal` when unhealthy.
+    labels:
+      autoheal: "true"
+
+  # FIX129 A5 — real backups (docs/ops/backups.md). Before this there was
+  # no scheduled backup at all and scripts/backup-db.sh covered only the
+  # gateway DB. This service lives in THIS file because this file owns
+  # postgres-webchat and the uploads volume; it reaches the base project's
+  # `postgres` by service name over the shared ai-gateway_default network.
+  #
+  # Default (no command): a loop that sleeps until BACKUP_AT (in TZ) and
+  # then dumps both databases (pg_dump -Fc) + tars the uploads volume into
+  # /backups/<YYYYMMDD_HHMMSS>/, writes manifest.json (sizes, sha256, row
+  # counts of the key tables), restores every dump into a scratch database
+  # on the same server and compares the counts (the DRILL: a backup that
+  # was never restored is a hope, not a backup), prunes directories older
+  # than BACKUP_KEEP_DAYS and notifies (ntfy and/or Resend e-mail — both
+  # optional, failure = high priority, success only if
+  # BACKUP_NOTIFY_SUCCESS=1). Run one now:
+  #   docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now
+  # /backups defaults to ../ai-gateway-backups/daily — OUTSIDE the repo
+  # checkout, so a `git clean`, a re-clone or a worktree removal never eats
+  # the backups. Point BACKUP_DIR at another disk on a real deployment.
+  backup:
+    build:
+      context: ./infra/backup
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-backup:latest
+    container_name: ai-gateway-backup
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Bangkok}
+      BACKUP_AT: ${BACKUP_AT:-03:15}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_NOTIFY_SUCCESS: ${BACKUP_NOTIFY_SUCCESS:-0}
+      # Gateway DB (base project's `postgres`).
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_gateway}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Chat DB (this file's `postgres-webchat`; db/user are fixed above).
+      WEBCHAT_POSTGRES_HOST: postgres-webchat
+      WEBCHAT_POSTGRES_DB: sran_ai
+      WEBCHAT_POSTGRES_USER: chatedge
+      WEBCHAT_POSTGRES_PASSWORD: ${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}
+      # Alerts — all optional. ALERT_NTFY_URL is a full topic URL
+      # (https://ntfy.sh/<topic> or a self-hosted one); the e-mail path needs
+      # RESEND_API_KEY + ALERT_EMAIL_TO (ALERT_EMAIL_FROM defaults to
+      # no-reply@sran.ai). Nothing secret is ever put in a message.
+      ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-no-reply@sran.ai}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    volumes:
+      - chat_edge_uploads:/uploads:ro
+      - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups
+    depends_on:
+      postgres-webchat:
+        condition: service_healthy
 
 volumes:
   pgdata-webchat:

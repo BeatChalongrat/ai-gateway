@@ -86,6 +86,12 @@ EGRESS_CLASSIFICATION: dict[str, str] = {
     "services/discovery/pricing_fetcher.py": "no_user_content",
     "services/discovery/provider_discovery.py": "no_user_content",
     "services/webhook_service.py": "no_user_content",        # alert metadata
+    # FIX129 — alert delivery (rule name, counts, pids), the logout
+    # revocation call to chat-edge (a token id), the ops watcher (container
+    # names, disk/memory numbers): none carries user-authored content.
+    "services/alert_channels.py": "no_user_content",
+    "services/portal/chat_edge_revoke.py": "no_user_content",
+    "ops/watch.py": "no_user_content",
     "services/provider_key_service.py": "no_user_content",   # key probes
     "services/portal/oauth_flow_service.py": "no_user_content",
     "services/portal/connector_oauth_service.py": "no_user_content",

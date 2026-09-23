@@ -51,7 +51,7 @@ func newFix121ImportStack(t *testing.T) *fix121ImportStack {
 	ih := NewImportHandler(service.NewImportService(pool, cr, mr, repository.NewFileRepo(pool), service.NewConversationService(cr, probeModels{})))
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(probePortalSecret, prov))
+		r.Use(middleware.RequireAuth(probePortalSecret, prov, nil))
 		r.Post("/conversations/{id}/messages/import", ih.ImportMessages)
 	})
 	srv := httptest.NewServer(r)

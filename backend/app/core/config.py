@@ -324,6 +324,32 @@ class Settings(BaseSettings):
     chat_inflight_limit: int = 64
     chat_admit_timeout_seconds: float = 5.0
     readiness_timeout_seconds: float = 3.0
+    # FIX129 A2 — the credit deduction's own transaction limits (SET LOCAL,
+    # tighter than the connection-wide DB_*_TIMEOUT_MS in core/db.py) and
+    # the point at which one deduction is logged as slow.
+    credit_deduction_lock_timeout_ms: int = 5000
+    credit_deduction_idle_timeout_ms: int = 15000
+    credit_deduction_slow_seconds: float = 2.0
+    # FIX129 A2/A3 — pg_stat_activity sampler: how often it looks, and the
+    # transaction age (idle in transaction, or waiting on a lock) at which
+    # /ready goes red and the "transaction stuck" alert rule fires.
+    pg_activity_sample_seconds: float = 15.0
+    pg_stuck_transaction_seconds: float = 60.0
+    # FIX129 A4 — where alerts go, on top of a rule's own webhook_url.
+    # ntfy: any topic URL (https://ntfy.sh/<topic>); the owner subscribes to
+    # it in the ntfy app. Email needs RESEND_API_KEY (production) — in
+    # development the email sender only logs. Empty = channel off.
+    alert_ntfy_url: str = ""
+    alert_ntfy_token: str = ""
+    alert_email_to: str = ""
+    alert_webhook_url: str = ""
+    # Seed the three baseline rules (no successful turn, error rate,
+    # stuck transaction) when no rule with that metric exists yet.
+    alert_default_rules_enabled: bool = True
+    # FIX129 B2 — chat-edge's internal base URL, so logout can revoke the
+    # access token there too (POST /internal/auth/revoke, gated by
+    # INTERNAL_SERVICE_SECRET on both sides). Empty = chat-edge is not told.
+    chat_edge_internal_url: str = ""
     image_generation_timeout_seconds: float = 180.0
     openai_image_timeout_seconds: float = 180.0
     # Ceiling for /v1/voice/* (transcribe + synthesize). Audio work on a

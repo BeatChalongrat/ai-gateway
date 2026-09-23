@@ -5,7 +5,7 @@
   "name": "sran-test",
   "services": {
     "postgres": {
-      "command": "postgres -c max_connections=250 -c shared_buffers=256MB -c synchronous_commit=off -c wal_writer_delay=200ms -c checkpoint_completion_target=0.9 -c effective_cache_size=512MB\n",
+      "command": "postgres -c max_connections=250 -c shared_buffers=256MB -c synchronous_commit=off -c wal_writer_delay=200ms -c checkpoint_completion_target=0.9 -c effective_cache_size=512MB -c idle_in_transaction_session_timeout=120000 -c lock_timeout=30000\n",
       "environment": {
         "POSTGRES_DB": "${POSTGRES_DB:-ai_gateway}",
         "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}",
@@ -36,7 +36,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\infra\\postgres\\init-chat-edge-db.sh",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\infra\\postgres\\init-chat-edge-db.sh",
           "target": "/docker-entrypoint-initdb.d/02-chat-edge.sh",
           "type": "bind"
         },
@@ -45,7 +45,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\services\\chat-edge-api\\migrations",
           "target": "/chat-edge-migrations",
           "type": "bind"
         }
@@ -273,6 +273,10 @@
         }
       },
       "environment": {
+        "ALERT_EMAIL_TO": "${ALERT_EMAIL_TO:-}",
+        "ALERT_NTFY_TOKEN": "${ALERT_NTFY_TOKEN:-}",
+        "ALERT_NTFY_URL": "${ALERT_NTFY_URL:-}",
+        "ALERT_WEBHOOK_URL": "${ALERT_WEBHOOK_URL:-}",
         "ALLOWED_EMAIL_DOMAINS": "${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}",
         "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY:-}",
         "APP_ENV": "development",
@@ -284,9 +288,13 @@
         "AUDIT_LOG_RETENTION_DAYS": "${AUDIT_LOG_RETENTION_DAYS:-365}",
         "AUTH_COOKIE_DOMAIN": "${AUTH_COOKIE_DOMAIN:-}",
         "AUTH_COOKIE_SAMESITE": "${AUTH_COOKIE_SAMESITE:-lax}",
+        "CHAT_EDGE_INTERNAL_URL": "${CHAT_EDGE_INTERNAL_URL:-http://chat-edge-api:4000}",
         "CORS_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002",
         "DB_ASYNC_MAX_OVERFLOW": "${DB_ASYNC_MAX_OVERFLOW:-15}",
         "DB_ASYNC_POOL_SIZE": "${DB_ASYNC_POOL_SIZE:-10}",
+        "DB_IDLE_IN_TRANSACTION_TIMEOUT_MS": "${DB_IDLE_IN_TRANSACTION_TIMEOUT_MS:-}",
+        "DB_LOCK_TIMEOUT_MS": "${DB_LOCK_TIMEOUT_MS:-}",
+        "DB_STATEMENT_TIMEOUT_MS": "${DB_STATEMENT_TIMEOUT_MS:-}",
         "DB_SYNC_MAX_OVERFLOW": "${DB_SYNC_MAX_OVERFLOW:-5}",
         "DB_SYNC_POOL_SIZE": "${DB_SYNC_POOL_SIZE:-5}",
         "DLP_ENGINE": "${DLP_ENGINE:-python}",
@@ -353,6 +361,10 @@
         ],
         "timeout": "5s"
       },
+      "labels": {
+        "autoheal": "true",
+        "sran.test-stack": "true"
+      },
       "networks": {
         "default": null
       },
@@ -360,10 +372,7 @@
       "image": "ai-gateway-backend:${TS_BACKEND_TAG:-latest}",
       "ports": [
         "127.0.0.1:18081:8080"
-      ],
-      "labels": {
-        "sran.test-stack": "true"
-      }
+      ]
     },
     "gateway": {
       "depends_on": {
@@ -403,6 +412,10 @@
         ],
         "timeout": "3s"
       },
+      "labels": {
+        "autoheal": "true",
+        "sran.test-stack": "true"
+      },
       "networks": {
         "default": null
       },
@@ -410,12 +423,16 @@
       "image": "ai-gateway-gateway:${TS_GATEWAY_TAG:-latest}",
       "ports": [
         "127.0.0.1:18080:8080"
-      ],
-      "labels": {
-        "sran.test-stack": "true"
-      }
+      ]
     },
     "postgres-webchat": {
+      "command": [
+        "postgres",
+        "-c",
+        "idle_in_transaction_session_timeout=120000",
+        "-c",
+        "lock_timeout=30000"
+      ],
       "environment": {
         "POSTGRES_DB": "sran_ai",
         "POSTGRES_PASSWORD": "${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}",
@@ -446,7 +463,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\services\\chat-edge-api\\migrations",
           "target": "/docker-entrypoint-initdb.d",
           "type": "bind"
         }
@@ -558,6 +575,10 @@
         ],
         "timeout": "5s"
       },
+      "labels": {
+        "autoheal": "true",
+        "sran.test-stack": "true"
+      },
       "networks": {
         "default": null
       },
@@ -572,6 +593,50 @@
       "image": "ai-gateway-chat-edge-api:${TS_CHAT_EDGE_TAG:-latest}",
       "ports": [
         "127.0.0.1:14000:4000"
+      ]
+    },
+    "backup": {
+      "depends_on": {
+        "postgres-webchat": {
+          "condition": "service_healthy",
+          "required": true
+        }
+      },
+      "environment": {
+        "ALERT_EMAIL_FROM": "${ALERT_EMAIL_FROM:-no-reply@sran.ai}",
+        "ALERT_EMAIL_TO": "${ALERT_EMAIL_TO:-}",
+        "ALERT_NTFY_URL": "${ALERT_NTFY_URL:-}",
+        "BACKUP_AT": "${BACKUP_AT:-03:15}",
+        "BACKUP_KEEP_DAYS": "${BACKUP_KEEP_DAYS:-14}",
+        "BACKUP_NOTIFY_SUCCESS": "${BACKUP_NOTIFY_SUCCESS:-0}",
+        "POSTGRES_DB": "${POSTGRES_DB:-ai_gateway}",
+        "POSTGRES_HOST": "postgres",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}",
+        "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
+        "RESEND_API_KEY": "${RESEND_API_KEY:-}",
+        "TZ": "${TZ:-Asia/Bangkok}",
+        "WEBCHAT_POSTGRES_DB": "sran_ai",
+        "WEBCHAT_POSTGRES_HOST": "postgres-webchat",
+        "WEBCHAT_POSTGRES_PASSWORD": "${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}",
+        "WEBCHAT_POSTGRES_USER": "chatedge"
+      },
+      "image": "ai-gateway-backup:latest",
+      "networks": {
+        "default": null
+      },
+      "restart": "on-failure",
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "ts_chat_edge_uploads",
+          "target": "/uploads",
+          "read_only": true
+        },
+        {
+          "type": "volume",
+          "source": "ts_backups",
+          "target": "/backups"
+        }
       ],
       "labels": {
         "sran.test-stack": "true"
@@ -581,6 +646,7 @@
   "volumes": {
     "ts_postgres_data": {},
     "ts_pgdata_webchat": {},
-    "ts_chat_edge_uploads": {}
+    "ts_chat_edge_uploads": {},
+    "ts_backups": {}
   }
 }

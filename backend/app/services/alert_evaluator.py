@@ -55,7 +55,20 @@ _METRIC_TO_TYPE: dict[str, AlertType] = {
     "fallback_spike": AlertType.FALLBACK_SPIKE,
     "budget_threshold": AlertType.BUDGET_THRESHOLD,
     "quota_exhausted": AlertType.QUOTA_EXHAUSTED,
+    # FIX129 A4 — the baseline rules. ``no_successful_turn`` = requests were
+    # attempted in the window and none succeeded (a quiet night is not an
+    # outage); ``error_rate`` = % of non-success, non-blocked rows once at
+    # least ERROR_RATE_MIN_SAMPLE requests are in the window;
+    # ``stuck_transaction`` = the pg_stat_activity sampler's oldest idle /
+    # lock-blocked transaction age in seconds (no request_logs query).
+    "no_successful_turn": AlertType.NO_SUCCESSFUL_TURN,
+    "error_rate": AlertType.ERROR_RATE,
+    "stuck_transaction": AlertType.STUCK_TRANSACTION,
 }
+
+ERROR_RATE_MIN_SAMPLE = 10
+# A DLP block is a policy outcome, not a failure of the system.
+_NON_ERROR_STATUSES = ("success", "blocked")
 
 
 class AlertEvaluator:
@@ -252,6 +265,35 @@ class AlertEvaluator:
             )
         elif rule.metric == "quota_exhausted":
             stmt = select(func.count()).select_from(RequestLogORM).where(*filters)
+        elif rule.metric == "stuck_transaction":
+            from app.services import pg_activity
+
+            return float(pg_activity.stuck_age_seconds())
+        elif rule.metric in ("no_successful_turn", "error_rate"):
+            total = int(
+                session.execute(
+                    select(func.count()).select_from(RequestLogORM).where(*filters)
+                ).scalar() or 0
+            )
+            successes = int(
+                session.execute(
+                    select(func.count()).select_from(RequestLogORM).where(
+                        *filters, RequestLogORM.status == "success"
+                    )
+                ).scalar() or 0
+            )
+            if rule.metric == "no_successful_turn":
+                return float(total) if total >= 1 and successes == 0 else 0.0
+            errors = int(
+                session.execute(
+                    select(func.count()).select_from(RequestLogORM).where(
+                        *filters, RequestLogORM.status.notin_(_NON_ERROR_STATUSES)
+                    )
+                ).scalar() or 0
+            )
+            if total < ERROR_RATE_MIN_SAMPLE:
+                return 0.0
+            return round(100.0 * errors / total, 2)
         else:
             return 0.0
 
@@ -269,21 +311,47 @@ class AlertEvaluator:
         else:
             severity = AlertSeverity.WARNING
 
+        details = {
+            "rule_id": rule.id,
+            "metric": rule.metric,
+            "metric_value": value,
+            "threshold": rule.threshold,
+            "window_minutes": rule.window_minutes,
+        }
+        # FIX129 — say what happened in words a phone notification can show.
+        if rule.metric == "no_successful_turn":
+            message = (
+                f"{rule.name}: {int(value)} request(s) in the last "
+                f"{rule.window_minutes} min, none succeeded"
+            )
+        elif rule.metric == "error_rate":
+            message = (
+                f"{rule.name}: {value:.1f} % of requests failed in the last "
+                f"{rule.window_minutes} min (limit {rule.threshold:g} %)"
+            )
+        elif rule.metric == "stuck_transaction":
+            from app.services import pg_activity
+
+            sample = pg_activity.last_sample()
+            message = (
+                f"{rule.name}: a database transaction has been stuck for "
+                f"{value:.0f} s (limit {rule.threshold:g} s)"
+            )
+            if sample is not None:
+                details["stuck_age_s"] = round(sample.stuck_age_s, 1)
+                details["sessions"] = sample.worst[:5]
+        else:
+            message = (
+                f"{rule.name}: {rule.metric} threshold {rule.threshold} "
+                f"exceeded (observed {value})"
+            )
+
         return Alert(
             alert_type=alert_type,
             severity=severity,
             tenant_id=rule.scope_id if rule.scope == "tenant" else "",
             project_id=rule.scope_id if rule.scope == "project" else "",
-            message=(
-                f"{rule.name}: {rule.metric} threshold {rule.threshold} "
-                f"exceeded (observed {value})"
-            ),
-            details={
-                "rule_id": rule.id,
-                "metric": rule.metric,
-                "metric_value": value,
-                "threshold": rule.threshold,
-                "window_minutes": rule.window_minutes,
-            },
+            message=message,
+            details=details,
             timestamp=datetime.now(timezone.utc),
         )

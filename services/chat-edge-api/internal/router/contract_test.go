@@ -97,7 +97,7 @@ func buildRouteTable(t *testing.T) map[routeKey]bool {
 		CloudTasks: &handler.CloudTaskHandler{},
 	}
 
-	mux := router.New(&config.Config{}, h, "", nil, nil)
+	mux := router.New(&config.Config{}, h, "", nil, nil, nil)
 	routes, ok := mux.(chi.Routes)
 	if !ok {
 		t.Fatalf("router.New no longer returns a chi router — contract test needs chi.Walk")

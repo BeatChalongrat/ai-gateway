@@ -197,6 +197,14 @@ async def lifespan(app: FastAPI):
     # enabled-rules SELECT + window aggregates off the request hot path.
     alert_task = asyncio.create_task(_alert_evaluation_sweep())
 
+    # FIX129 A4 — the baseline alert rules exist on every deployment
+    # (alert_rules was empty through the 2026-09-22 outage).
+    await _timed("alert_default_rules", asyncio.to_thread(_seed_default_alert_rules))
+
+    # FIX129 A2/A3 — pg_stat_activity sampler: the stuck-transaction gauge,
+    # the /ready red condition and the alert rule all read its last sample.
+    pg_activity_task = asyncio.create_task(_pg_activity_sampler())
+
     # Web-search provider health monitor: probes every enabled search
     # provider across all tenants every 5 minutes, updating health /
     # latency / uptime in the DB and logging outage/recovery transitions.
@@ -300,6 +308,7 @@ async def lifespan(app: FastAPI):
     partition_task.cancel()
     generation_job_task.cancel()
     pool_task.cancel()
+    pg_activity_task.cancel()
     sidecar_log_task.cancel()
     # Sprint 6: stop the custom-detector loader + clear the global provider.
     try:
@@ -741,6 +750,38 @@ async def _alert_evaluation_sweep() -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"[alert-sweep] loop error: {exc}")
         await asyncio.sleep(interval)
+
+
+def _seed_default_alert_rules() -> None:
+    """FIX129 A4 — insert the baseline alert rules when their metric has none."""
+    if not getattr(settings, "alert_default_rules_enabled", True):
+        return
+    from app.core.db import SessionLocal
+    from app.services.alert_defaults import ensure_default_rules
+
+    session = SessionLocal()
+    try:
+        added = ensure_default_rules(session)
+        session.commit()
+        if added:
+            print(f"[alert-rules] added default rules: {added}", flush=True)
+    except Exception as exc:  # noqa: BLE001 — never block boot
+        session.rollback()
+        print(f"[alert-rules] default rule seed skipped: {exc}", flush=True)
+    finally:
+        session.close()
+
+
+async def _pg_activity_sampler() -> None:
+    """FIX129 A2/A3 — sample pg_stat_activity on the sync engine."""
+    from app.core.db import SessionLocal
+    from app.services.pg_activity import sampler_loop
+
+    await sampler_loop(
+        SessionLocal,
+        interval_s=float(getattr(settings, "pg_activity_sample_seconds", 15.0)),
+        stuck_after_s=float(getattr(settings, "pg_stuck_transaction_seconds", 60.0)),
+    )
 
 
 def _run_partition_maintenance_once() -> None:

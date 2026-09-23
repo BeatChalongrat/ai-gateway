@@ -14,6 +14,11 @@ import { startSilentRefresh, stopSilentRefresh } from "./auth-refresh";
 
 const FIFTY_MIN = 50 * 60 * 1000;
 
+// FIX129 B2 added a 5 s session heartbeat on the same timer module; these
+// tests count only the refresh calls.
+const refreshCalls = (fetchMock: ReturnType<typeof vi.fn>) =>
+  fetchMock.mock.calls.filter((c) => String(c[0]).includes("/portal/auth/refresh"));
+
 describe("FIX125 M6 silent refresh", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
@@ -32,14 +37,14 @@ describe("FIX125 M6 silent refresh", () => {
     fetchMock.mockResolvedValue(new Response("bad gateway", { status: 502 }));
     startSilentRefresh();
     await vi.advanceTimersByTimeAsync(FIFTY_MIN);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refreshCalls(fetchMock)).toHaveLength(1);
     expect(mockRedirect).not.toHaveBeenCalled();
 
     // Focus retries (lastRefresh was not advanced by the failed tick).
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
     document.dispatchEvent(new Event("visibilitychange"));
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(refreshCalls(fetchMock)).toHaveLength(2);
     expect(mockRedirect).not.toHaveBeenCalled();
   });
 

@@ -76,7 +76,7 @@ func newFix125Stack(t *testing.T, gatewayURL string) *fix125Stack {
 	r := chi.NewRouter()
 	r.Use(middleware.Logging)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(probePortalSecret, prov))
+		r.Use(middleware.RequireAuth(probePortalSecret, prov, nil))
 		r.Delete("/conversations/{id}", ch.Delete)
 		r.Get("/conversations/{id}/messages", h.List)
 		r.Post("/conversations/{id}/messages", h.Send)

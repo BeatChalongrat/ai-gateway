@@ -55,6 +55,10 @@ class AlertType(str, Enum):
     # FIX120 — the primary keeps failing but the fallback keeps answering,
     # so nobody complains: the count of rescued turns is the only alarm.
     FALLBACK_SPIKE = "fallback_spike"
+    # FIX129 A4 — the three baseline rules (alert_defaults.py).
+    NO_SUCCESSFUL_TURN = "no_successful_turn"
+    ERROR_RATE = "error_rate"
+    STUCK_TRANSACTION = "stuck_transaction"
     KEY_REVOKED = "key_revoked"
     SENSITIVE_ACTION = "sensitive_action"
 
@@ -125,18 +129,50 @@ class AlertService:
             delivery_status=("pending" if webhook_url else "log_only"),
         )
 
+        results: list[bool] = []
         if webhook_url:
             delivery = await self._webhook_service.deliver(
                 webhook_url, self.build_payload(alert)
             )
-            event.delivery_status = (
-                "delivered"
-                if delivery.status == DeliveryStatus.DELIVERED
-                else "failed"
+            results.append(delivery.status == DeliveryStatus.DELIVERED)
+
+        # FIX129 A4 — every fired rule also goes to the configured channels
+        # (ntfy / email / webhook), not only to the rule's own webhook_url.
+        from app.services import alert_channels
+
+        if alert_channels.configured_channels():
+            outcomes = await alert_channels.deliver_async(
+                alert_channels.Notification(
+                    title=alert.message[:120],
+                    message=self._notification_text(alert),
+                    severity=alert.severity.value,
+                    source="alert-rule",
+                    tags=(alert.alert_type.value,),
+                    details={k: v for k, v in alert.details.items() if k != "sessions"},
+                )
             )
+            results.extend(outcomes.values())
+
+        if results:
+            event.delivery_status = "delivered" if any(results) else "failed"
             session.flush()
 
         return event
+
+    @staticmethod
+    def _notification_text(alert: Alert) -> str:
+        lines = [alert.message]
+        for k in ("window_minutes", "metric_value", "threshold", "attempts", "successes",
+                  "errors", "total", "stuck_age_s"):
+            if k in alert.details:
+                lines.append(f"{k}: {alert.details[k]}")
+        sessions = alert.details.get("sessions") or []
+        for s in sessions[:3]:
+            lines.append(
+                f"pid {s.get('pid')} {s.get('state')} {s.get('application_name') or '-'} "
+                f"{s.get('xact_age_s')}s: {str(s.get('query', ''))[:80]}"
+            )
+        return "\n".join(lines)
 
     @staticmethod
     def build_payload(alert: Alert) -> dict:

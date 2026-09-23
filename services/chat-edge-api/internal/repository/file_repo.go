@@ -114,10 +114,26 @@ func (r *FileRepo) GetByClientID(
 	return f, nil
 }
 
+// conversationLive is the predicate every single-file read carries
+// (FIX129 B1): a file whose conversation is soft-deleted does not exist
+// to a reader. DELETE /conversations/{id} only flips is_deleted, and
+// before this predicate /files/{id}/download and /text kept serving the
+// deleted chat's attachments. It is a join rather than a purge so that
+// restoring the conversation (ConversationRepo.Restore) brings the files
+// back; the retention program is what actually erases rows and blobs,
+// and it lists a deleted conversation's files through ListByConversation,
+// which deliberately does NOT carry this predicate.
+const conversationLive = `NOT EXISTS (
+	SELECT 1 FROM chat.conversations c
+	WHERE c.id = f.conversation_id AND c.is_deleted
+)`
+
 // GetByID returns a single file row, tenant-scoped so an attacker
-// can't read another tenant's upload metadata by guessing IDs.
+// can't read another tenant's upload metadata by guessing IDs, and
+// only while the file's conversation is not deleted (conversationLive).
 func (r *FileRepo) GetByID(ctx context.Context, tenantID, fileID uuid.UUID) (*model.ConversationFile, error) {
-	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files WHERE id = $1 AND tenant_id = $2`
+	q := `SELECT ` + fileColumns + ` FROM chat.conversation_files f
+	      WHERE f.id = $1 AND f.tenant_id = $2 AND ` + conversationLive
 	f := &model.ConversationFile{}
 	if err := scanFile(r.db.QueryRow(ctx, q, fileID, tenantID), f); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -310,8 +326,8 @@ func (r *FileRepo) ListVersions(
 			JOIN descendants d ON cf.parent_file_id = d.id
 		)
 		SELECT ` + fileColumns + `
-		FROM descendants
-		WHERE tenant_id = $2
+		FROM descendants f
+		WHERE f.tenant_id = $2 AND ` + conversationLive + `
 		ORDER BY version ASC, created_at ASC
 	`
 	rows, err := r.db.Query(ctx, q, fileID, tenantID)

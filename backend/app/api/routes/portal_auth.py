@@ -548,15 +548,33 @@ def logout(
     response: Response,
     redis_client=Depends(_portal_redis_client),
 ):
-    """Real logout: blacklist the refresh token's jti + clear cookies.
+    """Real logout: revoke both tokens + clear cookies.
 
     The refresh token's ``jti`` is added to the Redis rotation blacklist
     so it can never mint another access token, then both HttpOnly cookies
     are expired. Idempotent — a missing cookie still returns 200.
+
+    FIX129 B2: the ACCESS token (cookie or Bearer) is revoked as well —
+    ``deps.get_portal_user`` refuses it from now on — and chat-edge is
+    told (``POST /internal/auth/revoke``), so a copied token dies on
+    every surface within seconds instead of living out its 60 minutes.
     """
     token = request.cookies.get(REFRESH_COOKIE)
     if token:
         auth_service.revoke_refresh_token(token, redis_client=redis_client)
+
+    access = request.cookies.get(ACCESS_COOKIE)
+    if not access:
+        header = request.headers.get("authorization") or ""
+        if header.startswith("Bearer "):
+            access = header.removeprefix("Bearer ").strip()
+    revoked = auth_service.revoke_access_token(access, redis_client=redis_client) if access else None
+    if revoked:
+        from app.services.portal.chat_edge_revoke import revoke_on_chat_edge
+
+        revoke_on_chat_edge(
+            jti=revoked["jti"], exp=revoked["exp"], sub=revoked.get("sub")
+        )
     clear_auth_cookies(response)
     return {"message": "ok"}
 

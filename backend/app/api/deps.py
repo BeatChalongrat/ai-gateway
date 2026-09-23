@@ -555,6 +555,16 @@ def get_portal_user(
     if not user_id:
         raise AuthenticationError("Invalid token payload")
 
+    # FIX129 B2 — a signed-out access token is refused for the rest of its
+    # life (logout writes the jti to Redis; see auth_service).
+    from app.services.portal.auth_service import is_access_token_revoked
+
+    if is_access_token_revoked(payload.get("jti")):
+        raise AuthenticationError(
+            "Session has been signed out. Please log in again.",
+            code="token_revoked",
+        )
+
     user = session.get(PortalUserORM, user_id)
     if user is None:
         raise AuthenticationError("User not found")

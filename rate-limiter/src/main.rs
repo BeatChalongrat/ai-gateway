@@ -33,6 +33,79 @@ fn env_or(key: &str, fallback: &str) -> String {
     env::var(key).unwrap_or_else(|_| fallback.into())
 }
 
+/// FIX129 B3 — the form of a URL that is safe to log.
+///
+/// `REDIS_URL` is `redis://:<password>@redis:6379` (compose folds
+/// `REDIS_PASSWORD` into it) and the boot line used to print it whole,
+/// so every `docker logs` of this container showed the Redis password.
+/// The password between `://[user]:` and the first `@` becomes `***`;
+/// a URL without credentials is returned unchanged.
+fn redact_url(url: &str) -> String {
+    // scheme://[userinfo@]host...  — userinfo is everything between "://"
+    // and the first '@' that comes before any '/', '?' or '#'.
+    let Some(scheme_end) = url.find("://") else {
+        return url.to_string();
+    };
+    let rest = &url[scheme_end + 3..];
+    let authority_end = rest
+        .find(|c| c == '/' || c == '?' || c == '#')
+        .unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    let Some(at) = authority.rfind('@') else {
+        return url.to_string(); // no credentials
+    };
+    let userinfo = &authority[..at];
+    let Some(colon) = userinfo.find(':') else {
+        return url.to_string(); // user only, no password
+    };
+    let mut out = String::with_capacity(url.len());
+    out.push_str(&url[..scheme_end + 3]);
+    out.push_str(&userinfo[..colon]);
+    out.push_str(":***");
+    out.push_str(&rest[at..]);
+    out
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::redact_url;
+
+    #[test]
+    fn password_only_is_masked() {
+        assert_eq!(redact_url("redis://:secret@h:6379"), "redis://:***@h:6379");
+    }
+
+    #[test]
+    fn user_and_password_keeps_user() {
+        assert_eq!(redact_url("redis://u:p@h"), "redis://u:***@h");
+    }
+
+    #[test]
+    fn no_credentials_unchanged() {
+        assert_eq!(redact_url("redis://h:6379"), "redis://h:6379");
+    }
+
+    #[test]
+    fn empty_unchanged() {
+        assert_eq!(redact_url(""), "");
+    }
+
+    #[test]
+    fn user_without_password_unchanged() {
+        assert_eq!(redact_url("redis://u@h:6379/2"), "redis://u@h:6379/2");
+    }
+
+    #[test]
+    fn password_with_at_and_path() {
+        // the last '@' of the authority ends the password (a raw '@' inside
+        // the password is masked with it); the host/path after it are kept
+        assert_eq!(
+            redact_url("redis://:p%40ss@redis:6379/2"),
+            "redis://:***@redis:6379/2"
+        );
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
@@ -49,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let metrics_port: u16 = env_or("METRICS_PORT", "9101").parse()?;
 
     info!(
-        redis_url = %redis_url,
+        redis_url = %redact_url(&redis_url),
         grpc_port,
         metrics_port,
         "rate-limiter booting"

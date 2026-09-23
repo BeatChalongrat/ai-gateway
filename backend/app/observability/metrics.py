@@ -198,6 +198,70 @@ ASYNC_DB_POOL_CHECKOUT_TIMEOUTS = Counter(
     registry=metrics_registry,
 )
 
+# FIX129 A2 — the credit deduction is the transaction that wedged the live
+# system on 2026-09-22 (a ``FOR UPDATE`` on portal_users left idle in
+# transaction). It could not be reproduced, so it is instrumented instead:
+# how many are open right now, how long each took, how long the row lock
+# took to acquire, and how each one ended.
+CREDIT_DEDUCTION_INFLIGHT = Gauge(
+    "credit_deduction_inflight",
+    "Credit deductions currently between their FOR UPDATE and their return "
+    "(the caller still owns the commit). Stays >0 when one is stuck.",
+    registry=metrics_registry,
+)
+
+_DEDUCTION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0)
+
+CREDIT_DEDUCTION_SECONDS = Histogram(
+    "credit_deduction_seconds",
+    "Wall time of one portal credit deduction (lock + update + ledger row).",
+    buckets=_DEDUCTION_BUCKETS,
+    registry=metrics_registry,
+)
+
+CREDIT_DEDUCTION_LOCK_WAIT_SECONDS = Histogram(
+    "credit_deduction_lock_wait_seconds",
+    "Time the SELECT ... FOR UPDATE on portal_users waited for the row lock.",
+    buckets=_DEDUCTION_BUCKETS,
+    registry=metrics_registry,
+)
+
+CREDIT_DEDUCTION_TOTAL = Counter(
+    "credit_deduction_total",
+    "Credit deductions by outcome: ok | lock_timeout | cancelled | error | slow "
+    "(slow is counted in addition to the outcome).",
+    labelnames=("outcome",),
+    registry=metrics_registry,
+)
+
+# FIX129 A2 — pg_stat_activity sampler (services/pg_activity.py). The
+# wedge was visible there for 34 minutes while every health check was
+# green; these gauges put it on /metrics and under an alert rule.
+PG_IDLE_IN_TRANSACTION_SESSIONS = Gauge(
+    "pg_idle_in_transaction_sessions",
+    "Sessions in state 'idle in transaction' on this database.",
+    registry=metrics_registry,
+)
+
+PG_IDLE_IN_TRANSACTION_MAX_AGE_SECONDS = Gauge(
+    "pg_idle_in_transaction_max_age_seconds",
+    "Age of the oldest 'idle in transaction' session (0 when none).",
+    registry=metrics_registry,
+)
+
+PG_LOCK_WAITERS = Gauge(
+    "pg_lock_waiters",
+    "Sessions currently waiting on a lock on this database.",
+    registry=metrics_registry,
+)
+
+PG_STUCK_TRANSACTION_AGE_SECONDS = Gauge(
+    "pg_stuck_transaction_age_seconds",
+    "Age of the oldest transaction that is idle or blocked on a lock — the "
+    "number the 'transaction stuck' alert rule reads.",
+    registry=metrics_registry,
+)
+
 # Sidecar fail-open / fallback visibility. A flapping sidecar previously
 # only showed up in logs; ``sidecar_fallback_total`` makes degradation
 # alertable. ``engine`` ∈ {dlp, rate_limiter, log_worker};

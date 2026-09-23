@@ -9,6 +9,10 @@
 // then upserts a shadow row in chat-edge's identity tables so chat
 // FKs hold. Subsequent requests in the same process hit a sync.Map
 // cache and skip the upsert.
+//
+// FIX129 B2 — a token the Portal has revoked (sign-out) is refused
+// with 401 even though its signature and expiry are still good; see
+// auth.Revocations.
 package middleware
 
 import (
@@ -21,7 +25,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/auth"
-	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
 // Caller is the resolved-user view downstream handlers see.
@@ -73,19 +76,29 @@ func UserIDFrom(ctx context.Context) uuid.UUID {
 	return MustCaller(ctx).UserID
 }
 
+// UserProvisioner is the slice of service.ProvisionService the
+// middleware needs: the shadow-row upsert. An interface so the
+// middleware is testable without a database.
+type UserProvisioner interface {
+	EnsureUserExists(ctx context.Context, userID uuid.UUID, email, tenantRole, portalTenantID string) (uuid.UUID, error)
+}
+
 // RequireAuth produces middleware that:
 //
 //  1. Parses Portal JWT from “Authorization: Bearer <jwt>“ (or
 //     the “portal_access_token“ cookie for browser navigations).
-//  2. Ensures a matching shadow row exists in identity.users /
+//  2. Refuses a token the Portal has revoked (FIX129 B2) — nil
+//     “revocations“ means no check, as before.
+//  3. Ensures a matching shadow row exists in identity.users /
 //     identity.tenants (idempotent upsert).
-//  3. Stuffs a Caller into the request context.
+//  4. Stuffs a Caller into the request context.
 //
 // “portalSecret“ MUST match FastAPI “portal_jwt_secret“.
 // “provision“ is the ProvisionService instance from main.go.
 func RequireAuth(
 	portalSecret string,
-	provision *service.ProvisionService,
+	provision UserProvisioner,
+	revocations auth.Revocations,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +111,28 @@ func RequireAuth(
 			if err != nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
+			}
+
+			// FIX129 B2 — a token the Portal has revoked is refused even
+			// though its signature and expiry are good. A store error
+			// serves the request (availability first — the Portal makes
+			// the same choice for its refresh blacklist) and is logged;
+			// the token's own expiry bounds that window.
+			if revocations != nil {
+				revoked, rerr := revocations.IsRevoked(
+					r.Context(), parsed.JTI, parsed.PortalUserID.String(), parsed.IssuedAt,
+				)
+				switch {
+				case rerr != nil:
+					slog.Warn("auth_revocation_check_failed",
+						slog.String("error", rerr.Error()),
+						slog.String("user_id", parsed.PortalUserID.String()),
+						slog.String("path", r.URL.Path),
+					)
+				case revoked:
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
 			}
 
 			tenantUUID, err := provision.EnsureUserExists(

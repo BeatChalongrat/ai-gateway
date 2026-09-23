@@ -93,7 +93,7 @@ func TestFix41TurnP95(t *testing.T) {
 	prov := service.NewProvisionService(pool)
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(p95Secret, prov))
+		r.Use(middleware.RequireAuth(p95Secret, prov, nil))
 		r.Post("/conversations/{id}/messages", h.Send)
 	})
 	srv := httptest.NewServer(r)

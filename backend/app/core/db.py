@@ -80,7 +80,50 @@ print(
 _is_postgres = settings.database_url.startswith(
     ("postgres://", "postgresql://", "postgresql+")
 )
-_connect_args = {"client_encoding": "utf8"} if _is_postgres else {}
+
+# FIX129 A1 — every connection carries its own time limits. On 2026-09-22
+# one abandoned ``SELECT … FOR UPDATE`` sat ``idle in transaction`` for 34
+# minutes and every later credit deduction queued behind it; the server had
+# statement_timeout = lock_timeout = idle_in_transaction_session_timeout = 0,
+# so nothing ever broke the wait. These are per-service (this process), set
+# through libpq ``options`` so they apply to the sync AND async engine, and
+# tunable per deployment. ``application_name`` names the service in
+# pg_stat_activity so the next incident report can say who held the lock.
+# The server keeps a wider safety net in docker-compose (idle 60 s / lock
+# 30 s, no global statement_timeout so pg_dump and maintenance stay free).
+_DEFAULT_STATEMENT_TIMEOUT_MS = 60_000
+_DEFAULT_LOCK_TIMEOUT_MS = 10_000
+_DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS = 30_000
+
+
+def pg_timeouts() -> dict[str, int]:
+    """The effective per-connection Postgres time limits (ms; 0 = off)."""
+    return {
+        "statement_timeout": _env_int(
+            "DB_STATEMENT_TIMEOUT_MS", _DEFAULT_STATEMENT_TIMEOUT_MS
+        ),
+        "lock_timeout": _env_int("DB_LOCK_TIMEOUT_MS", _DEFAULT_LOCK_TIMEOUT_MS),
+        "idle_in_transaction_session_timeout": _env_int(
+            "DB_IDLE_IN_TRANSACTION_TIMEOUT_MS",
+            _DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+        ),
+    }
+
+
+def pg_connect_args(url: str, *, application_name: str) -> dict:
+    """libpq connect kwargs for a Postgres DSN; ``{}`` for anything else
+    (the sqlite test engines reject these keys)."""
+    if not url.startswith(("postgres://", "postgresql://", "postgresql+")):
+        return {}
+    options = " ".join(f"-c {k}={v}" for k, v in pg_timeouts().items())
+    return {
+        "client_encoding": "utf8",
+        "application_name": application_name,
+        "options": options,
+    }
+
+
+_connect_args = pg_connect_args(settings.database_url, application_name="sran-backend")
 
 engine = create_engine(
     settings.database_url,
@@ -219,6 +262,11 @@ def get_async_engine():
                 max_overflow=_async_max_overflow,
                 pool_timeout=_ASYNC_POOL_TIMEOUT,
                 pool_recycle=300,
+                # FIX129 A1 — same time limits as the sync engine; its own
+                # application_name so the two pools are distinguishable.
+                connect_args=pg_connect_args(
+                    async_url, application_name="sran-backend-async"
+                ),
             )
         # SQLite async (tests) uses a NullPool implicitly; no pool args.
         _async_engine = create_async_engine(async_url, **kwargs)

@@ -64,6 +64,13 @@ services:
       WATCHFILES_FORCE_POLLING: "true"
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
 
+  # FIX129 — the ops watcher runs the same checkout the dev backend runs
+  # (read-only), so a change to app/ops/watch.py is live on its next
+  # restart without an image build. Prod runs it from the image.
+  ops-watch:
+    volumes:
+      - ./backend:/app:ro
+
   admin-ui:
     # Run next dev out of a plain node image against the bind-mounted
     # source tree. The Dockerfile's prod multi-stage build is bypassed

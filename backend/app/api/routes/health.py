@@ -244,6 +244,28 @@ async def ready():
     if snap.stuck:
         failures.append("stuck_requests")
 
+    # FIX129 A3 — the 2026-09-22 wedge was one transaction idle in
+    # transaction holding a row lock; the engines answered, so every
+    # engine check above stayed green. The pg_stat_activity sampler
+    # (services/pg_activity.py) keeps its last sample in memory; a
+    # transaction idle or lock-blocked past ``pg_stuck_transaction_seconds``
+    # turns readiness red, and the last completed turn's age is reported
+    # so "ready" can be read against "actually answering".
+    from app.core import turn_pulse
+    from app.services import pg_activity
+
+    stuck_tx_after = float(getattr(settings, "pg_stuck_transaction_seconds", 60.0))
+    sample = pg_activity.last_sample()
+    checks["pg_activity"] = sample.as_dict() if sample is not None else {"sampled": False}
+    # A sample the sampler stopped refreshing (task dead, DB unreachable —
+    # the engine check above reports that) must not hold readiness red.
+    sample_fresh = sample is not None and (time.time() - sample.at) <= 8 * float(
+        getattr(settings, "pg_activity_sample_seconds", 15.0)
+    )
+    if sample_fresh and sample.stuck_age_s >= stuck_tx_after:
+        failures.append("stuck_transaction")
+    checks["turns"] = turn_pulse.snapshot()
+
     status = "ready" if not failures else "not-ready"
     # FIX103 — ready but running on a fallback is said, not hidden in a string.
     degraded = [k for k, v in checks.items() if isinstance(v, str) and v.startswith("degraded")]

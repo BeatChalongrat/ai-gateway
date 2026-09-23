@@ -205,6 +205,15 @@ class _RequestLogQueue:
         ``fallback_session`` when one is provided, otherwise on a
         fresh ``SessionLocal``.
         """
+        # FIX129 A3 — /ready reports the age of the last attempt / success
+        # in this worker; every record passes through here.
+        try:
+            from app.core import turn_pulse
+
+            turn_pulse.mark(str(getattr(record, "status", "") or ""))
+        except Exception:  # noqa: BLE001 — telemetry never breaks logging
+            pass
+
         if settings.log_worker_engine == "go":
             # Schedule the gRPC call on the running loop without
             # blocking the caller. If there is no running loop (sync

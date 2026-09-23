@@ -32,11 +32,16 @@ Both hooks take the raw ``api_key_id`` plus the optional trusted
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 
-from sqlalchemy import select
+import structlog
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+
+_log = structlog.get_logger(__name__)
 
 from app.core.exceptions import AuthorizationError, QuotaExceededError
 from app.models.api_key import ApiKeyORM
@@ -149,12 +154,149 @@ def deduct_portal_credit(
         return
     markup = _tenant_markup(session, tenant_id)
     credits = credit_service.credits_for_cost(cost_usd, markup)
-    credit_service.deduct_credits(
-        session,
-        user_id=user.id,
-        tokens_used=credits,
-        request_id=request_id,
-    )
+    # FIX129 A2 — this is the variant every STREAMED chat turn takes
+    # (public_chat's stream finaliser, on its own short session); the
+    # async one below serves the non-streaming path. Both are observed the
+    # same way — see _DeductionSpan.
+    with _DeductionSpan(request_id, str(user.id)) as span:
+        _set_transaction_limits_sync(session)
+        span.lock_start()
+        tx = credit_service.deduct_credits(
+            session,
+            user_id=user.id,
+            tokens_used=credits,
+            request_id=request_id,
+        )
+        span.lock_done()
+        span.credits = -int(tx.amount) if tx is not None else 0
+
+
+# ---------------------------------------------------------------------------
+# FIX129 A2 — instrumentation shared by both deduction variants.
+#
+# The credit deduction is the transaction that held the live system for 34
+# minutes (2026-09-22): a ``SELECT … FROM portal_users … FOR UPDATE`` was
+# taken and the session then sat idle in transaction, never committing,
+# never rolling back. 135 deliberate client aborts did not reproduce it,
+# so the deduction is instrumented rather than "fixed": its own lock and
+# idle limits (SET LOCAL — they die with the transaction), an in-flight
+# gauge, a duration and a lock-wait histogram, and one log line per
+# deduction carrying the request id so the next occurrence names itself.
+# ---------------------------------------------------------------------------
+
+
+class _DeductionSpan:
+    def __init__(self, request_id: str, user_id: str) -> None:
+        self.request_id = request_id
+        self.user_id = user_id
+        self.credits = 0
+        self.outcome = "error"
+        self._t0 = 0.0
+        self._t_lock = 0.0
+        self.lock_wait = 0.0
+
+    def lock_start(self) -> None:
+        self._t_lock = time.perf_counter()
+
+    def lock_done(self) -> None:
+        self.lock_wait = time.perf_counter() - self._t_lock
+
+    def __enter__(self) -> "_DeductionSpan":
+        from app.observability.metrics import CREDIT_DEDUCTION_INFLIGHT
+
+        self._t0 = time.perf_counter()
+        CREDIT_DEDUCTION_INFLIGHT.inc()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        from app.core.config import settings as _settings
+        from app.observability.metrics import (
+            CREDIT_DEDUCTION_INFLIGHT,
+            CREDIT_DEDUCTION_LOCK_WAIT_SECONDS,
+            CREDIT_DEDUCTION_SECONDS,
+            CREDIT_DEDUCTION_TOTAL,
+        )
+
+        if exc is None:
+            self.outcome = "ok"
+        elif isinstance(exc, asyncio.CancelledError):
+            self.outcome = "cancelled"
+        elif _is_lock_timeout(exc):
+            self.outcome = "lock_timeout"
+        else:
+            self.outcome = "error"
+        elapsed = time.perf_counter() - self._t0
+        CREDIT_DEDUCTION_INFLIGHT.dec()
+        CREDIT_DEDUCTION_SECONDS.observe(elapsed)
+        CREDIT_DEDUCTION_LOCK_WAIT_SECONDS.observe(self.lock_wait)
+        CREDIT_DEDUCTION_TOTAL.labels(outcome=self.outcome).inc()
+        slow_after = float(getattr(_settings, "credit_deduction_slow_seconds", 2.0))
+        slow = elapsed >= slow_after
+        if slow:
+            CREDIT_DEDUCTION_TOTAL.labels(outcome="slow").inc()
+        emit = _log.warning if (slow or self.outcome != "ok") else _log.info
+        emit(
+            "credit_deduction",
+            request_id=self.request_id,
+            user_id=self.user_id,
+            outcome=self.outcome,
+            credits=self.credits,
+            elapsed_ms=round(elapsed * 1000, 1),
+            lock_wait_ms=round(self.lock_wait * 1000, 1),
+            slow=slow,
+            slow_after_s=slow_after,
+            error=(f"{type(exc).__name__}: {str(exc)[:120]}" if exc is not None else None),
+        )
+        return False  # never swallow
+
+
+def _limits_sql() -> list[str]:
+    """The SET LOCAL statements: values from settings, never request data.
+
+    Deliberately tighter than the connection-wide limits in ``core/db.py``:
+    a deduction that waits 5 s for the row lock is already a symptom, and
+    a session that sits idle for 15 s after taking it is exactly the
+    failure mode.
+    """
+    from app.core.config import settings as _settings
+
+    lock_ms = int(getattr(_settings, "credit_deduction_lock_timeout_ms", 5000))
+    idle_ms = int(getattr(_settings, "credit_deduction_idle_timeout_ms", 15000))
+    return [
+        f"SET LOCAL lock_timeout = {lock_ms}",
+        f"SET LOCAL idle_in_transaction_session_timeout = {idle_ms}",
+    ]
+
+
+def _dialect_is_postgres(session) -> bool:
+    try:
+        return session.get_bind().dialect.name == "postgresql"
+    except Exception:  # noqa: BLE001 — no bind (unit tests), not Postgres
+        return False
+
+
+def _set_transaction_limits_sync(session: Session) -> None:
+    if not _dialect_is_postgres(session):
+        return
+    for stmt in _limits_sql():
+        session.execute(text(stmt))
+
+
+async def _set_transaction_limits(session: AsyncSession) -> None:
+    """Per-transaction limits for the async deduction (Postgres only).
+    ``SET LOCAL`` scopes them to the open transaction, so they cannot leak
+    into the pooled connection's next user."""
+    if not _dialect_is_postgres(session):
+        return
+    for stmt in _limits_sql():
+        await session.execute(text(stmt))
+
+
+def _is_lock_timeout(exc: BaseException) -> bool:
+    """psycopg raises ``LockNotAvailable`` (SQLSTATE 55P03) on lock_timeout."""
+    orig = getattr(exc, "orig", exc)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return sqlstate == "55P03" or type(orig).__name__ == "LockNotAvailable"
 
 
 # ----------------------------------------------------------------------
@@ -248,33 +390,39 @@ async def deduct_portal_credit_async(
         markup = await _tenant_markup_async(session, tenant_id)
         credits = credit_service.credits_for_cost(cost_usd, markup)
 
-    locked = (
-        await session.execute(
-            select(PortalUserORM)
-            .where(PortalUserORM.id == user.id)
-            .with_for_update()
+    # FIX129 A2 — observed the same way as the sync variant (_DeductionSpan).
+    with _DeductionSpan(request_id, str(user.id)) as span:
+        await _set_transaction_limits(session)
+        span.lock_start()
+        locked = (
+            await session.execute(
+                select(PortalUserORM)
+                .where(PortalUserORM.id == user.id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        span.lock_done()
+        if locked is None:
+            return
+
+        actual = min(int(credits), int(locked.credit_balance))
+        locked.credit_balance = int(locked.credit_balance) - actual
+        locked.credit_used = int(locked.credit_used) + actual
+        await session.flush()
+
+        tx = CreditTransactionORM(
+            id=str(uuid.uuid4()),
+            user_id=locked.id,
+            amount=-actual,
+            balance_after=int(locked.credit_balance),
+            type="usage",
+            description=description,
+            request_id=request_id,
+            created_by=None,
         )
-    ).scalar_one_or_none()
-    if locked is None:
-        return
-
-    actual = min(int(credits), int(locked.credit_balance))
-    locked.credit_balance = int(locked.credit_balance) - actual
-    locked.credit_used = int(locked.credit_used) + actual
-    await session.flush()
-
-    tx = CreditTransactionORM(
-        id=str(uuid.uuid4()),
-        user_id=locked.id,
-        amount=-actual,
-        balance_after=int(locked.credit_balance),
-        type="usage",
-        description=description,
-        request_id=request_id,
-        created_by=None,
-    )
-    session.add(tx)
-    await session.flush()
+        session.add(tx)
+        await session.flush()
+        span.credits = actual
 
 
 # ---------------------------------------------------------------------------

@@ -14,12 +14,18 @@
 //	  "iat": ..., "exp": ..., "jti": "..."
 //	}
 //
-// Chat Edge does NOT validate “token_version“ — that's FastAPI's
-// responsibility on the Portal side. We trust the signature + expiry
-// + the “type=="portal"“ + “token_use=="access"“ markers. A stale
-// token that survived a Portal-side bump will fail when the user
-// next hits the Portal; in the meantime, Chat Edge happily serves
-// the cached identity. That's the documented contract.
+// What Chat Edge checks: the signature, the expiry, and the
+// “type=="portal"“ + “token_use=="access"“ markers. It does NOT
+// validate “token_version“ — that's FastAPI's responsibility on the
+// Portal side.
+//
+// Revocation (FIX129 B2): the parser hands “jti“ and “iat“ back in
+// Parsed, and middleware.RequireAuth asks a Revocations store (Redis,
+// see revocation.go) whether that token, or every token of that user
+// issued before some instant, has been revoked. The Portal calls
+// POST /internal/auth/revoke on logout, so signing out ends the
+// session here too instead of leaving the access token good for the
+// rest of its 60 minutes.
 package auth
 
 import (
@@ -55,6 +61,11 @@ type Parsed struct {
 	Email        string
 	TenantID     string // raw Portal tenant id; may be a UUID or slug
 	TenantRole   string // "owner" | "member"
+	// JTI is the token's own id ("jti"); empty when the token has none.
+	// IssuedAt is "iat"; zero when the token has none. Both feed the
+	// revocation check (FIX129 B2).
+	JTI      string
+	IssuedAt time.Time
 }
 
 // ParsePortalToken verifies a Bearer token from the Portal and
@@ -97,10 +108,15 @@ func ParsePortalToken(secret, raw string) (*Parsed, error) {
 	if role == "" {
 		role = "member"
 	}
-	return &Parsed{
+	p := &Parsed{
 		PortalUserID: userID,
 		Email:        claims.Email,
 		TenantID:     claims.TenantID,
 		TenantRole:   role,
-	}, nil
+		JTI:          claims.ID,
+	}
+	if claims.IssuedAt != nil {
+		p.IssuedAt = claims.IssuedAt.Time
+	}
+	return p, nil
 }

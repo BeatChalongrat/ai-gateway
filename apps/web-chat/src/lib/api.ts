@@ -50,6 +50,9 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_URL
     : "http://localhost:4000/api/v1";
 
+/** FIX129 B2 — the chat-edge base for the session heartbeat (auth-refresh.ts). */
+export const CHAT_API_BASE = API_BASE;
+
 // Ceiling for a file upload. Shared by both upload paths, which now
 // differ in what they wait for: a KB document is still extracted inside
 // the request (OCR for a scanned PDF, up to the server's 240 s wall),

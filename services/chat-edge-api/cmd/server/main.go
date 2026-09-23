@@ -32,11 +32,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/auth"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/db"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/router"
@@ -71,9 +71,17 @@ func main() {
 
 	// PostgreSQL — bounded pool sized for the expected concurrent
 	// SSE streams plus headroom for short-lived auth/CRUD calls.
+	// FIX129 A1 — every session carries statement / lock / idle-in-
+	// transaction timeouts (internal/db), so an abandoned transaction
+	// can no longer hold a row lock for the rest of the day.
+	pgTimeouts := db.Timeouts{
+		StatementMS:         cfg.PGStatementTimeoutMS,
+		LockMS:              cfg.PGLockTimeoutMS,
+		IdleInTransactionMS: cfg.PGIdleInTransactionTimeoutMS,
+	}
 	pgCtx, pgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer pgCancel()
-	pool, err := pgxpool.New(pgCtx, cfg.DatabaseURL)
+	pool, err := db.NewPool(pgCtx, cfg.DatabaseURL, pgTimeouts)
 	if err != nil {
 		slog.Error("postgres connect failed", "err", err)
 		os.Exit(1)
@@ -83,7 +91,11 @@ func main() {
 		slog.Error("postgres ping failed", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("postgres connected")
+	slog.Info("postgres connected",
+		"statement_timeout_ms", pgTimeouts.StatementMS,
+		"lock_timeout_ms", pgTimeouts.LockMS,
+		"idle_in_transaction_timeout_ms", pgTimeouts.IdleInTransactionMS,
+	)
 
 	// Redis — go-redis v9 parses the URL form (incl. DB number).
 	redisOpts, err := redis.ParseURL(cfg.RedisURL)
@@ -694,7 +706,17 @@ func main() {
 		corsOrigins = "http://localhost:3002"
 	}
 
-	r := router.New(cfg, handlers, corsOrigins, rdb, provisionSvc)
+	// FIX129 B2 — sign-out ends the session here too: the Portal posts the
+	// logged-out token to /internal/auth/revoke (gated by
+	// INTERNAL_SERVICE_SECRET) and the auth middleware refuses it from
+	// then on. Redis holds the marks; a Redis error on the read side
+	// serves the request and logs auth_revocation_check_failed.
+	revocations := auth.NewRedisRevocations(rdb)
+	if cfg.InternalServiceSecret == "" {
+		slog.Warn("INTERNAL_SERVICE_SECRET is empty: POST /internal/auth/revoke is not registered, so a Portal sign-out cannot end a chat-edge session before the token expires")
+	}
+
+	r := router.New(cfg, handlers, corsOrigins, rdb, provisionSvc, revocations)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,

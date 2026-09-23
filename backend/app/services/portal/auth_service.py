@@ -15,6 +15,7 @@ from typing import Literal
 
 import bcrypt
 import jwt
+import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,8 @@ from app.services.portal import credit_service
 
 _ALGORITHM = "HS256"
 _BCRYPT_COST = 12
+
+logger = structlog.get_logger(__name__)
 
 
 def _hash_password(password: str) -> str:
@@ -582,6 +585,71 @@ def refresh(db: Session, refresh_token: str, *, redis_client=None) -> dict:
         _refresh_grace_set(redis_client, jti, tokens)
 
     return tokens
+
+
+# ---------------------------------------------------------------------------
+# FIX129 B2 — access-token revocation. Logout used to blacklist only the
+# refresh token; the access token (60 min) kept working on the Portal and
+# on chat-edge. Now logout revokes the access token's ``jti`` here (the
+# Portal's own Redis, checked in ``deps.get_portal_user``) and tells
+# chat-edge (``portal/chat_edge_revoke.py``).
+# ---------------------------------------------------------------------------
+
+_ACCESS_REVOKED_PREFIX = "portal_access_revoked:"
+
+_revocation_redis_client = None
+
+
+def get_revocation_redis():
+    """Lazy process-wide sync Redis client for the revocation checks.
+
+    Tests replace ``_revocation_redis_client`` with a fakeredis instance.
+    """
+    global _revocation_redis_client
+    if _revocation_redis_client is None:
+        from app.services.admin.session_service import _build_redis_client
+
+        _revocation_redis_client = _build_redis_client()
+    return _revocation_redis_client
+
+
+def revoke_access_token(access_token: str, *, redis_client=None) -> dict | None:
+    """Blacklist an access token's ``jti`` until its ``exp``.
+
+    Returns ``{"jti", "exp", "sub"}`` for the chat-edge call, or ``None``
+    when the token is missing / already invalid / carries no jti. Best
+    effort on Redis — a failure is logged, never raised.
+    """
+    if not access_token:
+        return None
+    try:
+        payload = verify_portal_token(access_token)
+    except AuthenticationError:
+        return None
+    jti = payload.get("jti")
+    if not jti:
+        return None
+    if redis_client is None:
+        redis_client = get_revocation_redis()
+    ttl = _seconds_until_exp(payload)
+    try:
+        redis_client.set(_ACCESS_REVOKED_PREFIX + jti, "1", ex=ttl)
+    except Exception as exc:  # noqa: BLE001 — logout must still clear cookies
+        logger.error("access_token_revoke_failed", jti=jti, error=str(exc)[:120])
+    return {"jti": jti, "exp": int(payload.get("exp", 0)), "sub": payload.get("sub")}
+
+
+def is_access_token_revoked(jti: str | None, *, redis_client=None) -> bool:
+    """True when logout revoked this jti. Fails open on a Redis outage."""
+    if not jti:
+        return False
+    if redis_client is None:
+        redis_client = get_revocation_redis()
+    try:
+        return bool(redis_client.exists(_ACCESS_REVOKED_PREFIX + jti))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("access_token_revocation_check_failed", error=str(exc)[:120])
+        return False
 
 
 def revoke_refresh_token(refresh_token: str, *, redis_client=None) -> None:

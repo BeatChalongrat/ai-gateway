@@ -278,7 +278,7 @@ func bringUp(t *testing.T, pool *pgxpool.Pool, gatewayURL string) (*service.Mess
 
 	r := chi.NewRouter()
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(middleware.RequireAuth(probePortalSecret, prov))
+		r.Use(middleware.RequireAuth(probePortalSecret, prov, nil))
 		r.Post("/conversations/{id}/messages", h.Send)
 		r.Post("/conversations/{id}/cancel", h.Cancel)
 		r.Get("/conversations/{id}/messages/{messageID}/stream", h.ResumeStream)

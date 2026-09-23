@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/auth"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
@@ -114,12 +115,17 @@ type Handlers struct {
 // middleware uses to lazily insert identity rows the first time a
 // Portal user hits chat-edge. Threaded through here rather than via
 // Handlers because it's middleware-only.
+//
+// “revocations“ (FIX129 B2) is the store the auth middleware asks
+// before honouring a token, and the store POST /internal/auth/revoke
+// writes. nil = no revocation check and no revoke route.
 func New(
 	cfg *config.Config,
 	h Handlers,
 	corsOrigins string,
 	rdb *redis.Client,
-	provision *service.ProvisionService,
+	provision middleware.UserProvisioner,
+	revocations auth.Revocations,
 ) http.Handler {
 	r := chi.NewRouter()
 
@@ -140,6 +146,14 @@ func New(
 			"run_ledger_overflow_drops": service.RunLedgerOverflowDrops(),
 		})
 	})
+
+	// FIX129 B2 — the Portal's sign-out hook, OUTSIDE /api/v1 and outside
+	// the user-auth group: gated by X-Internal-Service-Secret, not by a
+	// user token. Registered only when INTERNAL_SERVICE_SECRET is set (and
+	// a store exists), so with the feature off the path answers 404.
+	if internalAuth := handler.NewInternalAuthHandler(cfg.InternalServiceSecret, revocations); internalAuth.Enabled() {
+		r.Post("/internal/auth/revoke", internalAuth.Revoke)
+	}
 
 	// Rate-limit middleware shared across the high-cost endpoints.
 	// Constructed once so the closure captures rdb + the configured
@@ -162,7 +176,12 @@ func New(
 		// edge issues no tokens of its own (see handler/auth.go which
 		// returns 410 Gone on /auth/* for any leftover clients).
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireAuth(cfg.PortalJWTSecret, provision))
+			r.Use(middleware.RequireAuth(cfg.PortalJWTSecret, provision, revocations))
+
+			// FIX129 B2 — session heartbeat: 204 while the token is
+			// good, 401 once revoked or expired. The web client polls
+			// it so a sign-out elsewhere ends the chat session promptly.
+			r.Get("/auth/session", h.Auth.Session)
 
 			// Conversations.
 			r.Get("/conversations", h.Conversation.List)
