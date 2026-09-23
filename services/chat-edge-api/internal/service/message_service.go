@@ -5363,6 +5363,11 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			// delta, even a bare usage frame — is proof it is alive, and
 			// clears a stall notice if one went out.
 			stall.Activity()
+			if ev.Keepalive {
+				// FIX130 — the model is thinking where the person cannot
+				// see it: alive, and nothing to forward.
+				continue
+			}
 			if ev.Usage != nil {
 				lastUsage = ev.Usage
 			}

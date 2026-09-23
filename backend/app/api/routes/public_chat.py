@@ -87,6 +87,18 @@ def _safe_exc(exc: BaseException, code: str) -> dict[str, str]:
     return {"error_code": code, "exception_type": type(exc).__name__}
 
 
+# FIX130 — reasoning the client does not see (show_summary off, or mode
+# "off" on a row whose box cannot actually stop thinking) produced no frame
+# at all, so a model thinking longer than the stream idle guard
+# (``stream_idle_timeout_seconds``, 60 s) was closed as idle in the middle of
+# a thought — live, qwen3.5-9b: 8,723 reasoning tokens, then
+# ``chat_stream_timeout kind=idle`` and no answer. An SSE comment every
+# HIDDEN_REASONING_KEEPALIVE_S of hidden thinking keeps the stream alive;
+# chat-edge counts exactly this comment as model activity (its own
+# no-progress guard). It carries no text — the reasoning stays hidden.
+HIDDEN_REASONING_KEEPALIVE_S = 10.0
+HIDDEN_REASONING_KEEPALIVE_FRAME = ": thinking\n\n"
+
 router = APIRouter()
 
 
@@ -1546,6 +1558,7 @@ async def _chat_completions_impl(
         _reasoning_started = False
         _reasoning_completed = False
         _reasoning_text_total = ""
+        _hidden_reasoning_keepalive_at = 0.0
         # T3: rolling-window DLP buffer for reasoning text — mirrors
         # the content-channel ``tail_masked`` pattern but is its own
         # independent buffer because the two channels stream
@@ -2604,6 +2617,13 @@ async def _chat_completions_impl(
                                             yield _emit_reasoning_chunk(r_safe)
                                     else:
                                         _reasoning_tail_masked = r_masked_window
+                            else:
+                                # FIX130 — hidden thinking still proves the
+                                # model is alive (module note above).
+                                _ka_now = time.monotonic()
+                                if _ka_now - _hidden_reasoning_keepalive_at >= HIDDEN_REASONING_KEEPALIVE_S:
+                                    _hidden_reasoning_keepalive_at = _ka_now
+                                    yield HIDDEN_REASONING_KEEPALIVE_FRAME
                         # Analysis-status transition: any non-reasoning
                         # signal (content delta / tool_calls / finish)
                         # arriving after reasoning started flips us into

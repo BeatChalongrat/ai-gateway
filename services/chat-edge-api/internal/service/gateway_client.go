@@ -466,6 +466,11 @@ func (g *GatewayClient) SendChatCompletion(
 // helps the message-service decide between status=completed and
 // status=cancelled.
 type StreamEvent struct {
+	// Keepalive (FIX130) — the gateway's ": thinking" comment: the model is
+	// thinking where the person cannot see it (public_chat.py
+	// HIDDEN_REASONING_KEEPALIVE_S). No text; the pump counts it as model
+	// activity for the no-progress guard and moves on.
+	Keepalive    bool
 	Delta        string
 	FinishReason string
 	Usage        *GatewayChatUsage
@@ -704,6 +709,11 @@ func (s *StreamReader) Next() (*StreamEvent, error) {
 			continue
 		}
 		if strings.HasPrefix(line, ":") {
+			// FIX130 — the gateway's hidden-thinking keepalive is model
+			// activity; any other comment (a proxy's ping) is not.
+			if strings.TrimSpace(line[1:]) == "thinking" {
+				return &StreamEvent{Keepalive: true}, nil
+			}
 			continue
 		}
 		if strings.HasPrefix(line, "event: ") {
