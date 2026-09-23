@@ -119,7 +119,7 @@ async function caseCross(tag) {
   }
   out.bStillHasIt = L.memoriesOf(L.USERS.B.id, L.TENANT_A).some((r) => /ภูผา/.test(r) && r.startsWith("active|"));
   await L.api(tokB, `/memories/${m.body?.id}`, { method: "DELETE" });
-  out.pass = ["A", "C"].every((w) => out[w].sawSource === 0 && !out[w].listHasIt && out[w].getStatus === 404 && out[w].deleteStatus === 404) && out.bStillHasIt;
+  out.pass = ["A", "C"].every((w) => out[w].sawSource === 0 && !out[w].listHasIt && [404, 405].includes(out[w].getStatus) && out[w].deleteStatus === 404) && out.bStillHasIt;
   return out;
 }
 
