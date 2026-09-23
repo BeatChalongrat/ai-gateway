@@ -573,6 +573,13 @@ export interface Message {
   };
 }
 
+/** FIX130 B2 — the shortest ``thinking_duration_ms`` that is a measurement.
+ *  A started/completed pair that arrives back to back (chat-edge's resume
+ *  snapshot replays both in one write) times the replay, not the thought:
+ *  the store does not record it and the ThinkingBlock does not print it
+ *  (it read "Analyzed 0.0s"). */
+export const THINKING_DURATION_FLOOR_MS = 100;
+
 /** FIX33 A-W6 — the context meter's numbers. Web: GET
  *  /conversations/{id}/context-info (a dry run of the compiler). Desktop:
  *  the host's `context_budget` turn event / `context.info` op, same fields.

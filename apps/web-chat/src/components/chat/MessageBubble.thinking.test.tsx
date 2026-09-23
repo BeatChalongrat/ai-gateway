@@ -2,7 +2,7 @@
 // flag that nothing cleared. A cancelled or failed turn whose is_thinking
 // was left on must read "Analyzed", never "Thinking…"; the reasoning text
 // it already received stays on screen.
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -51,6 +51,9 @@ describe("FIX116 Part B — thinking header on a finished row", () => {
     );
     expect(screen.queryByText(THINKING)).toBeNull();
     expect(screen.getByText(ANALYZED)).toBeTruthy();
+    // FIX130 B2 — a finished row mounts collapsed; the text is kept
+    // behind the header, one click away.
+    fireEvent.click(screen.getByText(ANALYZED).closest("button") as HTMLButtonElement);
     expect(screen.getByText("step one")).toBeTruthy();
   });
 
