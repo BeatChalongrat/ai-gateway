@@ -91,6 +91,11 @@ async function modeB2() {
 async function modeHeartbeat() {
   const tok = token();
   const { browser, ctx } = await openContext(tok);
+  // lib.openContext routes /portal/** through node fetch with the ORIGINAL
+  // token and drops Set-Cookie, so the gateway's logout could never clear the
+  // jar. The page origin is :3002 (in the gateway's CORS list) — use the real
+  // browser requests and the real cookie jar.
+  await ctx.unroute(`${GATEWAY}/**`);
   const page = await ctx.newPage();
   const beats = [];
   page.on("response", (r) => { if (r.url().endsWith("/auth/session")) beats.push({ t: Date.now(), status: r.status() }); });
@@ -98,11 +103,14 @@ async function modeHeartbeat() {
   await wait(11_000);
   log("heartbeats in 11 s:", beats.length, beats.map((b) => b.status).join(","));
   const t0 = Date.now();
+  let leftAt = null;   // the tab asked for the Portal login page (it left)
+  page.on("request", (r) => { if (leftAt === null && r.url().includes("/login") && r.isNavigationRequest()) leftAt = Date.now() - t0; });
   await fetch(GATEWAY + "/portal/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" } });
-  let redirectedAt = null;
-  for (let i = 0; i < 80; i++) { await wait(100); if (page.url().includes("/login")) { redirectedAt = Date.now() - t0; break; } }
-  log(`sign-out elsewhere → open tab on the login page after ${redirectedAt} ms (url ${page.url()})`);
-  log("HEARTBEAT", redirectedAt !== null && redirectedAt <= 5000 && beats.length >= 2 ? "PASS" : "FAIL");
+  let redirectedAt = null; // the login page committed (includes the Portal dev server's page build)
+  for (let i = 0; i < 120; i++) { await wait(100); if (page.url().includes("/login")) { redirectedAt = Date.now() - t0; break; } }
+  await wait(1500);
+  log(`sign-out elsewhere → tab left for the login page after ${leftAt} ms, login page shown after ${redirectedAt} ms, and it STAYS there: ${page.url().includes("/login")} (url ${page.url()})`);
+  log("HEARTBEAT", leftAt !== null && leftAt <= 5500 && page.url().includes("/login") && beats.length >= 2 ? "PASS" : "FAIL");
   await browser.close();
 }
 
