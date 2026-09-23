@@ -67,6 +67,7 @@ from app.schemas.public import (
     FeedbackResponse,
 )
 from app.services.dlp.stream_guard import CredentialStreamGuard
+from app.services import pre_provider_log
 from app.services.orchestrator import GatewayOrchestrator
 from app.services.policy.profile_service import (
     get_runtime_profile,
@@ -382,6 +383,10 @@ async def chat_completions(
             released = True
             reg.release(key)
 
+    # FIX130 E3 — a turn that fails before any provider is called writes its
+    # one request_logs row here (pre_provider_log module doc); the ledger
+    # knows whether the pipeline already wrote one or reached a provider.
+    _turn_token = pre_provider_log.begin_turn(payload.model, bool(payload.stream))
     try:
         result = await asyncio.wait_for(
             _chat_completions_impl(payload, response, auth, session, turn_id=_turn_id_from(request)),
@@ -390,6 +395,10 @@ async def chat_completions(
     except asyncio.TimeoutError:
         _release()
         logger.error("chat_request_hard_timeout", timeout_s=hard_s, model=payload.model, stream=bool(payload.stream))
+        await pre_provider_log.record_failure(
+            model=payload.model, exc=None, error_code="upstream_timeout"
+        )
+        pre_provider_log.end_turn(_turn_token)
         return _ArmourResponse(
             status_code=504,
             content={"error": {"type": "upstream_timeout", "message": (
@@ -397,9 +406,18 @@ async def chat_completions(
                 "Please retry; if this repeats, the gateway is unhealthy."
             )}},
         )
+    except Exception as exc:
+        _release()
+        await pre_provider_log.record_failure(
+            model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc)
+        )
+        pre_provider_log.end_turn(_turn_token)
+        raise
     except BaseException:
         _release()
+        pre_provider_log.end_turn(_turn_token)
         raise
+    pre_provider_log.end_turn(_turn_token)
 
     if isinstance(result, StreamingResponse):
         inner = result.body_iterator

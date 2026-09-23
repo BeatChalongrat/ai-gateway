@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.domain.observability import RequestRecord
 from app.models.request_log import RequestLogORM
+# FIX130 E3 — every row written marks the chat turn's ledger (a no-op
+# outside a chat request) so the pre-provider row is never a second row.
+from app.services.pre_provider_log import note_row_written
 
 
 def _build_request_log_orm(record: RequestRecord) -> RequestLogORM:
@@ -66,6 +69,7 @@ class RequestLogService:
         log = _build_request_log_orm(record)
         session.add(log)
         session.flush()
+        note_row_written()
 
     async def persist_async(
         self, session: AsyncSession, record: RequestRecord
@@ -80,6 +84,7 @@ class RequestLogService:
         log = _build_request_log_orm(record)
         session.add(log)
         await session.flush()
+        note_row_written()
 
     def list_recent(
         self, session: Session, limit: int = 100

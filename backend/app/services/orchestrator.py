@@ -90,6 +90,7 @@ from app.services.provider_dispatcher import ProviderDispatcher
 from app.services.query_classifier import QueryComplexity, classify_query_complexity
 from app.services.routing_service import RoutingService
 from app.services.audit_service import AuditService
+from app.services import pre_provider_log
 from app.services.request_log_service import RequestLogService
 from app.services.usage_service import (
     UsageService,
@@ -374,6 +375,9 @@ class GatewayOrchestrator:
             )
             if turn_id:
                 ctx = dataclasses.replace(ctx, turn_id=turn_id)
+            # FIX130 E3 — from here a pre-provider failure has a tenant to
+            # write its request_logs row under.
+            pre_provider_log.note_context(ctx)
 
         log = logger.bind(
             request_id=request_id,
@@ -1173,6 +1177,9 @@ class GatewayOrchestrator:
         # the request dependency commits again at the end.
         if session is not None:
             await session.commit()
+        # FIX130 E3 — a failure from here on reached a provider: it is not
+        # a pre-provider row (pre_provider_log module doc).
+        pre_provider_log.note_provider_call()
         t_provider = time.perf_counter()
         # Layer-1 fallback key resolver. ``dispatch_with_fallback``
         # calls this (synchronously) for each fallback hop's provider.
@@ -3381,6 +3388,7 @@ class GatewayOrchestrator:
         )
         if turn_id:
             ctx = dataclasses.replace(ctx, turn_id=turn_id)  # FIX119
+        pre_provider_log.note_context(ctx)  # FIX130 E3
         # Preflight parity with the non-streaming path (1b-1d): rate
         # limit + daily quota + budget + portal credit ALL run here,
         # BEFORE DLP / router / provider work, so a streaming request

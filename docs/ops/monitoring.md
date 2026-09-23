@@ -139,13 +139,25 @@ The alerts the backend cannot raise about itself, every `OPS_WATCH_INTERVAL`
 | `transaction stuck N s on gateway|chat` | `pg_stat_activity` on both databases (`OPS_WATCH_PG_DSNS`) | `OPS_WATCH_PG_STUCK_S` (60) |
 | `no successful turn in 5 min` / `N % of turns failed (5 min)` | `chat.messages_masked` assistant rows `completed` / `error` on the chat database (the `chat` DSN) | ≥ 1 turn and 0 completed; ≥ `OPS_WATCH_TURN_MIN_SAMPLE` (10) turns and more than `OPS_WATCH_TURN_ERROR_PCT` (5) % failed |
 
-Why the turn rules live here as well as in `alert_rules`: the gateway's
-`request_logs` only records requests that reached a provider. On the test
-stack, 12 turns with every model dead produced 12 failed assistant rows in
-the chat database and **0** `request_logs` rows — so the backend's
+Why the turn rules live here as well as in `alert_rules`: until FIX130 the
+gateway's `request_logs` only recorded requests that reached a provider. On
+the test stack, 12 turns with every model dead produced 12 failed assistant
+rows in the chat database and **0** `request_logs` rows — so the backend's
 `no_successful_turn` / `error_rate` rules would have stayed silent. The chat
 database is where a turn's outcome is truthfully recorded (web and desktop),
 and the ops watcher reads it from outside the backend.
+
+Since FIX130 E3 a turn that fails before any provider is called writes one
+`request_logs` row too: `status = 'pre_provider_error'`, `provider = ''`,
+`error_code` = the error's code (`model_not_served`, `no_capable_model`,
+`no_allowed_provider`, `provider_key_missing`, `upstream_timeout`,
+`internal_error`, …), zero tokens and cost. `error_rate` and
+`no_successful_turn` count it; `provider_failure` (`status = 'error'`) does
+not. Admission and access refusals (`rate_limit_exceeded`,
+`quota_exceeded`, `authentication_error`, `authorization_error`) write no row
+— the system worked and each has its own ledger — and policy blocks keep
+their single `blocked` row (`app/services/pre_provider_log.py`). Failures
+AFTER a provider was called on the non-streaming path still write no row.
 
 It runs from the backend image with the docker socket read-only; it is not
 part of the test stack. `python -m app.ops.watch once` runs a single tick
