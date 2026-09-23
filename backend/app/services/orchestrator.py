@@ -1428,6 +1428,32 @@ class GatewayOrchestrator:
         #
         # streaming DLP restore handled in public_chat.py
         response_content = provider_response.content
+        # FIX130 — verbatim system-prompt text never reaches the user, in
+        # the answer or the reasoning it may be shown (prompt_echo_guard
+        # module doc; the streaming twin runs in public_chat.py). Raw text,
+        # before the empty check, so an answer that was nothing but the
+        # prompt is an empty completion here exactly as it is on the
+        # stream. ``output_raw`` below still records what the model sent.
+        from app.services.model_identity import inject_model_identity
+        from app.services.prompt_echo_guard import build_echo_fingerprints, scrub_echo
+
+        _echo_fp = build_echo_fingerprints(
+            inject_model_identity(messages_to_send, route.model_name, route.provider_name)
+        )
+        response_content, _echo_chars, _echo_runs = scrub_echo(_echo_fp, response_content)
+        _shown_reasoning, _echo_r_chars, _echo_r_runs = scrub_echo(
+            _echo_fp, provider_response.reasoning_content or ""
+        )
+        if _echo_chars or _echo_r_chars:
+            log.warning(
+                "system_prompt_echo_suppressed",
+                request_id=request_id,
+                model=route.model_name,
+                answer_chars=_echo_chars,
+                answer_runs=_echo_runs,
+                reasoning_chars=_echo_r_chars,
+                reasoning_runs=_echo_r_runs,
+            )
 
         # FIX49 Part A — the non-streaming twin of the stream's
         # empty-completion guard: a reply with no text and no tool call
@@ -1465,7 +1491,7 @@ class GatewayOrchestrator:
         # DLP trace snapshot 3/4: provider response BEFORE any output DLP
         # work — captures exactly what the model returned, even if a
         # later mask/restore step rewrites it.
-        output_raw = response_content
+        output_raw = provider_response.content
         # Output sanitizer pass — runs BEFORE the outbound DLP scan +
         # the inbound restore. Some models (gpt-4o-mini in particular)
         # ignore the system prompt's "do not invent bracketed tokens"
@@ -2310,9 +2336,10 @@ class GatewayOrchestrator:
                 and _reasoning_cfg_resp.show_summary
                 and _reasoning_cfg_resp.mode != "off"
             )
+            # FIX130 — the echo-scrubbed text (section 8), never the raw.
             response_reasoning_content = (
-                provider_response.reasoning_content
-                if _show_summary_resp and provider_response.reasoning_content
+                _shown_reasoning
+                if _show_summary_resp and _shown_reasoning.strip()
                 else None
             )
             # T3: ``usage.reasoning_tokens`` was already resolved at

@@ -2436,6 +2436,21 @@ async def _chat_completions_impl(
         if _dlp_notice_frame is not None:
             yield _dlp_notice_frame
 
+        # FIX130 — verbatim system-prompt text is removed from the answer
+        # and from the reasoning shown to the user, BEFORE the credential
+        # guard / DLP window see it (prompt_echo_guard module doc).
+        # Fingerprinted once, from what the provider is about to receive
+        # (identity line included); a request with no system text builds
+        # no guard and both channels pass through untouched.
+        from app.services.model_identity import inject_model_identity as _identity_for_echo
+        from app.services.prompt_echo_guard import EchoGuard, build_echo_fingerprints
+
+        _echo_fp = build_echo_fingerprints(
+            _identity_for_echo(messages_to_send, route.model_name, route.provider_name)
+        )
+        _content_echo_guard = EchoGuard(_echo_fp)
+        _reasoning_echo_guard = EchoGuard(_echo_fp)
+
         try:
             while True:
                 # FIX124 — a failed attempt is stored with the time it took
@@ -2521,8 +2536,16 @@ async def _chat_completions_impl(
                                 # channel's OWN guard instance (the two
                                 # channels stream interleaved fragments and
                                 # must not share hold state).
-                                _r_released = _reasoning_cred_guard.feed(
+                                # FIX130 — the system-prompt echo guard
+                                # runs first, on raw text (the prompt was
+                                # sent unmasked).
+                                _r_echo_released = _reasoning_echo_guard.feed(
                                     chunk.reasoning_delta
+                                )
+                                _r_released = (
+                                    _reasoning_cred_guard.feed(_r_echo_released)
+                                    if _r_echo_released
+                                    else ""
                                 )
                                 if _r_released:
                                     r_window = _reasoning_tail_masked + _r_released
@@ -2594,9 +2617,15 @@ async def _chat_completions_impl(
                         # header kept — see stream_guard module doc). May
                         # return "" while holding; the audit trail above
                         # (``cumulative_raw``) still sees every raw byte.
-                        _released_delta = (
-                            _stream_cred_guard.feed(chunk.delta)
+                        # FIX130 — the system-prompt echo guard runs first.
+                        _echo_released = (
+                            _content_echo_guard.feed(chunk.delta)
                             if chunk.delta
+                            else ""
+                        )
+                        _released_delta = (
+                            _stream_cred_guard.feed(_echo_released)
+                            if _echo_released
                             else ""
                         )
                         if _released_delta:
@@ -3141,7 +3170,12 @@ async def _chat_completions_impl(
         # the usual sanitize + restore + orphan-redact passes before
         # anything reaches the wire. Runs BEFORE ``_finalize_stream`` so
         # the extra findings land in the persisted DLP summary.
-        _guard_rest = _stream_cred_guard.flush()
+        # FIX130 — whatever the echo guard still holds (a suffix that could
+        # have grown into an echo) goes the same way, ahead of it.
+        _echo_rest = _content_echo_guard.flush()
+        _guard_rest = (
+            _stream_cred_guard.feed(_echo_rest) if _echo_rest else ""
+        ) + _stream_cred_guard.flush()
         if _guard_rest:
             _final_window = tail_masked + _guard_rest
             _final_masked, _final_actions = await _dlp_scan_and_mask(_final_window)
@@ -3153,7 +3187,10 @@ async def _chat_completions_impl(
         # usual place after the content flush, so frame ordering on the
         # wire is unchanged.
         if _show_reasoning:
-            _r_guard_rest = _reasoning_cred_guard.flush()
+            _r_echo_rest = _reasoning_echo_guard.flush()
+            _r_guard_rest = (
+                _reasoning_cred_guard.feed(_r_echo_rest) if _r_echo_rest else ""
+            ) + _reasoning_cred_guard.flush()
             if _r_guard_rest:
                 _r_final_masked, _r_final_actions = await _dlp_scan_and_mask(
                     _reasoning_tail_masked + _r_guard_rest
@@ -3161,6 +3198,18 @@ async def _chat_completions_impl(
                 if _r_final_actions:
                     accumulated_outbound_actions.extend(_r_final_actions)
                 _reasoning_tail_masked = _r_final_masked
+        # FIX130 — one line per turn that had system-prompt text removed;
+        # counts only, never the text.
+        if _content_echo_guard.removed_chars or _reasoning_echo_guard.removed_chars:
+            log.warning(
+                "system_prompt_echo_suppressed",
+                request_id=ctx.request_id,
+                model=final_model,
+                answer_chars=_content_echo_guard.removed_chars,
+                answer_runs=_content_echo_guard.removed_runs,
+                reasoning_chars=_reasoning_echo_guard.removed_chars,
+                reasoning_runs=_reasoning_echo_guard.removed_runs,
+            )
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.
