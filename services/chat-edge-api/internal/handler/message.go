@@ -1016,6 +1016,13 @@ Loop:
 			if ev.CompactionNotice != nil {
 				writeSSEEvent(w, flusher, "compaction_notice", ev.CompactionNotice)
 			}
+			// FIX130 A3 — the answer used saved memories / saved one.
+			if ev.MemoryUsed != nil {
+				writeSSEEvent(w, flusher, "memory_used", ev.MemoryUsed)
+			}
+			if ev.MemorySaved != nil {
+				writeSSEEvent(w, flusher, "memory_saved", ev.MemorySaved)
+			}
 			// FIX74 — the model asked the user a question. The card goes out
 			// as its own frame (recorded in the ledger, so a reattach replays
 			// it), then the run ends on message_paused below.
@@ -1927,6 +1934,12 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	if snap.CompactionNotice != nil {
 		writeSSEEvent(w, flusher, "compaction_notice", snap.CompactionNotice)
+	}
+	if snap.MemoryUsed != nil { // FIX130 A3 — sticky, like compaction_notice
+		writeSSEEvent(w, flusher, "memory_used", snap.MemoryUsed)
+	}
+	if snap.MemorySaved != nil {
+		writeSSEEvent(w, flusher, "memory_saved", snap.MemorySaved)
 	}
 	// run_python cards, latest frame each — a refresh in the middle of a
 	// 60s sandbox run must not lose the code the model is running.

@@ -8,7 +8,7 @@
 //
 // DTO field names are camelCase to match the host's JsonSerializerDefaults.Web.
 
-import { bridge, type HostResult } from "./bridge";
+import { bridge, usingBridgeTransport, type HostResult } from "./bridge";
 
 export interface SkillDto {
   id: string;
@@ -136,6 +136,15 @@ export interface GlobalNoteDto {
   id: string;
   content: string;
   createdAt: string;
+}
+
+/** FIX130 A4b — tell the desktop host that the saved memories changed (edit,
+ *  delete, accept, reject, add, clear), so its next turn reads them again
+ *  instead of answering from its cached copy. Fire-and-forget; a no-op in the
+ *  browser, where every turn already reads memory on the server. */
+export function notifyHostMemoriesChanged(): void {
+  if (!usingBridgeTransport) return;
+  void bridge.hostQuery("memory.changed", {}, 5_000).catch(() => {});
 }
 
 /** Unwrap a HostResult, throwing on refusal so screen code can try/catch. */

@@ -40,45 +40,52 @@ beforeEach(() => useI18nStore.setState({ locale: "en" }));
 afterEach(cleanup);
 
 describe("TemporaryChatBanner", () => {
-  it("shows the strip when memory is off for the chat", () => {
+  // FIX130 A2 — two states, two sentences. Memory switched off on an
+  // ordinary chat and a temporary chat both neither USE nor SAVE memory now
+  // (the FIX56.1 "your saved memories are still used" read is gone, server
+  // and strip together); what differs is whether memory can come back on.
+  it("memory off on an ordinary chat: says it neither uses nor saves memory, and offers to turn it back on", () => {
     seed(conv({ id: "c1", memory_enabled: false }));
     render(<TemporaryChatBanner conversationId="c1" />);
+    expect(screen.getByText(dictionaries.en["memory.banner.offTitle"])).toBeTruthy();
+    const detail = screen.getByText(dictionaries.en["memory.banner.offDetail"]).textContent ?? "";
+    expect(detail).toMatch(/neither uses your saved memories nor saves/i);
+    expect(detail).toMatch(/stays in your history/i);
+    expect(screen.getByRole("button", { name: dictionaries.en["memory.banner.turnOn"] })).toBeTruthy();
+  });
+
+  it("a temporary chat: neither uses nor saves memory, cannot be switched on, kept in history without an AI-made name", () => {
+    seed(conv({ id: "c1", memory_enabled: false, is_temporary: true }));
+    render(<TemporaryChatBanner conversationId="c1" />);
     expect(screen.getByText(dictionaries.en["memory.banner.title"])).toBeTruthy();
-    expect(screen.getByText(dictionaries.en["memory.banner.detail"])).toBeTruthy();
+    const detail = screen.getByText(dictionaries.en["memory.banner.detail"]).textContent ?? "";
+    expect(detail).toMatch(/neither uses nor saves memory/i);
+    expect(detail).toMatch(/can't be turned on/i);
+    expect(detail).toMatch(/stays in your history/i);
+    expect(detail).toMatch(/first words/i);
+    expect(screen.queryByRole("button", { name: dictionaries.en["memory.banner.turnOn"] })).toBeNull();
   });
 
-  // FIX56.1 1.3 — the strip has to say BOTH things. "Temporary" reads to
-  // most people as "this conversation disappears"; the transcript is in
-  // fact kept, and only the remembering is off. A strip that mentions
-  // only the memory half lets the product imply a deletion it never does.
-  it("says the chat is kept AND that nothing new is remembered, in both languages", () => {
-    for (const [locale, dict] of [
-      ["en", dictionaries.en],
-      ["th", dictionaries.th],
-    ] as const) {
-      useI18nStore.setState({ locale });
-      seed(conv({ id: "c1", memory_enabled: false }));
-      render(<TemporaryChatBanner conversationId="c1" />);
-      const detail = screen.getByText(dict["memory.banner.detail"]).textContent ?? "";
-      const kept = locale === "en" ? /saved to your history/i : /บันทึกในประวัติ/;
-      const notRemembered = locale === "en" ? /nothing new is remembered/i : /ไม่มีการจดจำอะไรใหม่/;
-      const stillUses = locale === "en" ? /still used/i : /ยังใช้ความจำเดิม/;
-      expect(kept.test(detail), `${locale}: says the chat is kept`).toBe(true);
-      expect(notRemembered.test(detail), `${locale}: says nothing new is remembered`).toBe(true);
-      expect(stillUses.test(detail), `${locale}: says saved memories are still used`).toBe(true);
-      cleanup();
-    }
+  it("is temporary even if its memory flag says on (a row switched on before the server refused that)", () => {
+    seed(conv({ id: "c1", memory_enabled: true, is_temporary: true }));
+    render(<TemporaryChatBanner conversationId="c1" />);
+    expect(screen.getByText(dictionaries.en["memory.banner.title"])).toBeTruthy();
   });
 
-  // The strict wording exists for a deployment that set
-  // TEMPORARY_CHAT_READS_MEMORY=false. It must differ from the default
-  // in exactly the "are still used" clause — if the two ever converge,
-  // one of the two deployments is being told the wrong thing.
-  it("keeps a distinct sentence for the read-nothing deployment", () => {
+  it("the Thai sentences say the same things, and no sentence still promises that saved memories are used", () => {
+    const d = dictionaries.th;
+    expect(d["memory.banner.offDetail"]).toMatch(/ไม่ใช้/);
+    expect(d["memory.banner.offDetail"]).toMatch(/ไม่บันทึก/);
+    expect(d["memory.banner.offDetail"]).toMatch(/ประวัติ/);
+    expect(d["memory.banner.detail"]).toMatch(/ไม่ใช้และไม่บันทึกความจำ/);
+    expect(d["memory.banner.detail"]).toMatch(/เปิดความจำ.*ไม่ได้/);
+    expect(d["memory.banner.detail"]).toMatch(/ประวัติ/);
     for (const dict of [dictionaries.en, dictionaries.th]) {
-      expect(dict["memory.banner.detailStrict"]).not.toBe(dict["memory.banner.detail"]);
-      expect(dict["memory.banner.detailStrict"]).toBeTruthy();
+      for (const key of ["memory.banner.detail", "memory.banner.offDetail", "memory.popover.offHint", "memory.temporary.description"] as const) {
+        expect(dict[key]).not.toMatch(/still used|ยังใช้ความจำเดิม/i);
+      }
     }
+    expect("memory.banner.detailStrict" in dictionaries.en).toBe(false);
   });
 
   it("renders nothing when memory is on", () => {
@@ -114,18 +121,14 @@ describe("TemporaryChatBanner", () => {
     expect(classes.filter((c) => /^(sm|md|lg|xl):/.test(c))).toEqual([]);
   });
 
-  it("offers a way back — the strip is not a dead end", () => {
-    seed(conv({ id: "c1", memory_enabled: false }));
-    render(<TemporaryChatBanner conversationId="c1" />);
-    expect(
-      screen.getByRole("button", { name: dictionaries.en["memory.banner.turnOn"] }),
-    ).toBeTruthy();
-  });
-
   it("is localised in Thai too", () => {
     useI18nStore.setState({ locale: "th" });
-    seed(conv({ id: "c1", memory_enabled: false }));
+    seed(conv({ id: "c1", memory_enabled: false, is_temporary: true }));
     render(<TemporaryChatBanner conversationId="c1" />);
     expect(screen.getByText(dictionaries.th["memory.banner.title"])).toBeTruthy();
+    cleanup();
+    seed(conv({ id: "c1", memory_enabled: false }));
+    render(<TemporaryChatBanner conversationId="c1" />);
+    expect(screen.getByText(dictionaries.th["memory.banner.offTitle"])).toBeTruthy();
   });
 });

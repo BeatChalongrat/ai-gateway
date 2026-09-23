@@ -42,6 +42,9 @@ describe("FIX2 §3.6 — the control plane is never a tool, and the op-set is pi
     // page asks the host, which deletes ONLY a 0-message chat (server count,
     // no turn in flight). Page-only; the model has no tool for it.
     "conversation.discardEmpty",
+    // FIX130 A4b — the Memory page changed the saved memories; the host drops
+    // its cached copy. No arguments, returns nothing; the model has no tool for it.
+    "memory.changed",
   ];
 
   // Host↔sidecar INTERNAL ops (a leading _): never in the page's vocabulary, never tools.

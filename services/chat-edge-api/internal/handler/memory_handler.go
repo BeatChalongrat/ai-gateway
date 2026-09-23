@@ -51,9 +51,20 @@ type createMemoryRequest struct {
 	MemoryType string `json:"memory_type"`
 	Category   string `json:"category,omitempty"`
 	Content    string `json:"content"`
-	// SourceType from the public API is forced to user_explicit —
-	// the AI-tool path bypasses this handler entirely.
+	// SourceType from the public API is user_explicit, except that a
+	// caller may ask for the LOWER trust tier: "assistant_inferred" files
+	// the row as a pending suggestion the user confirms on the Memory page
+	// (FIX130 — the desktop host's remember tool, when the user's own words
+	// did not ask to remember). Nothing a caller sends can raise the tier.
 	SourceType string `json:"source_type,omitempty"`
+	// SourceConversationID — FIX130: the chat a memory was saved from (the
+	// desktop host's remember tool), shown as a link on the Memory page.
+	// Display only: the page resolves its title through a user- and
+	// tenant-scoped lookup, so a foreign id shows as a deleted chat.
+	// EvidenceExcerpt — the user's words behind a suggestion (suggestions
+	// only).
+	SourceConversationID string `json:"source_conversation_id,omitempty"`
+	EvidenceExcerpt      string `json:"evidence_excerpt,omitempty"`
 }
 
 type updateMemoryRequest struct {
@@ -139,7 +150,7 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		scopeID = &id
 	}
-	out, err := h.memories.CreateMemory(r.Context(), service.CreateMemoryInput{
+	in := service.CreateMemoryInput{
 		TenantID:   caller.TenantUUID,
 		UserID:     caller.UserID,
 		ScopeType:  req.ScopeType,
@@ -147,11 +158,26 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MemoryType: req.MemoryType,
 		Category:   req.Category,
 		Content:    req.Content,
-		// Public API can only create user-explicit memories. The AI
-		// tool path supplies its own SourceType.
+		// Public API creates user-explicit memories. The AI tool path
+		// supplies its own SourceType.
 		SourceType: model.MemorySourceUserExplicit,
 		ActorType:  "user",
-	})
+	}
+	if raw := strings.TrimSpace(req.SourceConversationID); raw != "" {
+		cid, err := uuid.Parse(raw)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid source_conversation_id")
+			return
+		}
+		in.SourceConversationID = &cid
+	}
+	if req.SourceType == model.MemorySourceAssistantInferred {
+		in.SourceType = model.MemorySourceAssistantInferred
+		in.StatusOverride = model.MemoryStatusPendingConfirmation
+		in.ActorType = "assistant"
+		in.EvidenceExcerpt = req.EvidenceExcerpt
+	}
+	out, err := h.memories.CreateMemory(r.Context(), in)
 	if err != nil {
 		h.writeCreateError(w, err)
 		return
@@ -179,6 +205,8 @@ func (h *MemoryHandler) writeCreateError(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 	case errors.Is(err, service.ErrMemoryDuplicate):
 		WriteError(w, http.StatusConflict, CodeConflict, "an identical memory already exists")
+	case errors.Is(err, service.ErrMemoryRejectedBefore):
+		WriteError(w, http.StatusConflict, CodeConflict, "the user already rejected this suggestion")
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}

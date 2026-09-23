@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, BrainCircuit, FolderKanban, FolderPlus, Pin, PinOff } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import { memoryModeOf } from "@/lib/memoryMode";
 import type { Conversation, Project } from "@/lib/types";
 
 interface Props {
@@ -40,6 +41,9 @@ export function ConversationItem({
   onCreateProjectForMove,
 }: Props) {
   const t = useT();
+  // FIX130 A2 — the row marks both memory-off and temporary chats, and its
+  // tooltip says which (only an ordinary chat can switch memory back on).
+  const memoryMode = memoryModeOf(conv);
   const [menuOpen, setMenuOpen] = useState(false);
   const [moveProjectOpen, setMoveProjectOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -119,9 +123,11 @@ export function ConversationItem({
           <span
             className="flex flex-1 items-center gap-1.5 truncate"
             title={
-              conv.memory_enabled === false
+              memoryMode === "temporary"
                 ? t("conv.tempChatTooltip", { title: conv.title || t("conv.untitled") })
-                : conv.title
+                : memoryMode === "off"
+                  ? t("conv.memoryOffTooltip", { title: conv.title || t("conv.untitled") })
+                  : conv.title
             }
           >
             {conv.is_pinned ? (
@@ -132,7 +138,7 @@ export function ConversationItem({
                 className="shrink-0 text-text-muted opacity-70"
               />
             ) : null}
-            {conv.memory_enabled === false ? (
+            {memoryMode !== "on" ? (
               <BrainCircuit
                 width={12}
                 height={12}

@@ -15,6 +15,8 @@
 //     Read-only, so it stays available in temporary chats while
 //     the memory-write tools (save_memory / list_memories /
 //     update_conversation_state) are hidden behind MemoryEnabled.
+//     FIX130: in a chat whose memory is not active it returns no
+//     saved-memory hits.
 //
 // The OpenAI tool-calling spec is forwarded verbatim by the backend
 // gateway (see backend/app/schemas/public.py — tools + tool_choice
@@ -23,8 +25,9 @@
 // dispatcher, and threads the result back as role="tool" messages
 // before re-calling the gateway for the final assistant response.
 //
-// Tool execution is gated by Conversation.MemoryEnabled at the
-// MessageService layer; this file is the format-agnostic registry,
+// Tool execution is gated by Conversation.MemoryActive (FIX130: memory on
+// AND not a temporary chat) twice: when the tool list is built, and again
+// inside each memory tool at execution time (memoryActiveNow); this file is the format-agnostic registry,
 // so future tools (calendar, search, etc.) layer on the same hook.
 package service
 
@@ -312,6 +315,14 @@ type ToolExecContext struct {
 	// WithheldHit is set to true by executeToolCalls when a call was refused
 	// by CloudToolAllow. The runner records a tool_withheld skip note.
 	WithheldHit *bool
+
+	// UserMessage (FIX130) — the text of the user message this turn is
+	// answering. save_memory honours source "user_requested" (an ACTIVE
+	// memory, injected into every later chat) only when these words
+	// explicitly ask to remember (ExplicitRememberRequest); anything else
+	// becomes a pending suggestion. Empty (a resumed question turn, a unit
+	// test) therefore means "not an explicit request" — the safe side.
+	UserMessage string
 }
 
 // emit is the nil-safe form. Tools call this, never ec.Emit directly.
@@ -328,6 +339,12 @@ func (ec ToolExecContext) emit(u StreamUpdate) {
 // a string result"; the executor decides how to do that.
 type ToolExecutor struct {
 	memories *MemoryService
+	// FIX130 A2 — optional. When wired, the memory tools re-read the
+	// conversation at EXECUTION time and refuse unless its memory is
+	// active (on, and not a temporary chat): the tool list is decided when
+	// the turn starts, the switch can be flipped while it runs, and a model
+	// can emit a call for a tool it was never offered.
+	convs conversationGetter
 	// S3 — optional. When wired, the executor handles
 	// update_conversation_state; when nil, that tool isn't
 	// exposed.
@@ -447,6 +464,37 @@ func NewToolExecutor(memories *MemoryService) *ToolExecutor {
 	return &ToolExecutor{memories: memories}
 }
 
+// conversationGetter is the slice of the conversation repo the memory
+// tools' execution-time gate needs.
+type conversationGetter interface {
+	GetByID(ctx context.Context, tenantID, id uuid.UUID) (*model.Conversation, error)
+}
+
+// SetConversationLookup wires the FIX130 execution-time memory gate.
+// MessageService.SetMemoryService does it whenever it holds the repo.
+func (e *ToolExecutor) SetConversationLookup(c conversationGetter) {
+	e.convs = c
+}
+
+// memoryActiveNow answers, at execution time, whether this turn's
+// conversation may touch memory. Fail-closed once wired: a lookup error,
+// a missing row or someone else's conversation all read as "no". Without
+// the lookup (unit tests that build a bare executor) it allows, as before.
+func (e *ToolExecutor) memoryActiveNow(ctx context.Context, ec ToolExecContext) bool {
+	if e.convs == nil {
+		return true
+	}
+	conv, err := e.convs.GetByID(ctx, ec.TenantID, ec.ConversationID)
+	if err != nil || conv == nil || conv.UserID != ec.UserID {
+		return false
+	}
+	return conv.MemoryActive()
+}
+
+// memoryOffToolResult is what a memory tool returns when the gate refuses.
+// It says REFUSED so the model cannot report a save that did not happen.
+const memoryOffToolResult = "REFUSED: memory is off for this chat (or it is a temporary chat), so nothing was saved or read. Tell the user plainly that it was not saved; in an ordinary chat they can turn memory back on and ask again."
+
 // SetImageGeneration wires the Phase-B image tool. Optional — when
 // either dependency is nil, generate_image is hidden from the tool
 // list. Must run after the executor exists (created inside
@@ -561,8 +609,8 @@ func (e *ToolExecutor) SetSearchService(s *SearchService) {
 
 // ToolDefs returns the tool definitions to attach for THIS
 // conversation. Memory-write tools (save_memory, list_memories,
-// update_conversation_state) are gated on conv.MemoryEnabled —
-// temporary chats opt out of writing memory. The read-only
+// update_conversation_state) are gated on conv.MemoryActive() — memory
+// switched on and not a temporary chat (FIX130 A2). The read-only
 // search tool stays available regardless because looking up a
 // past chat is read-only and doesn't violate the temp-chat
 // contract.
@@ -572,7 +620,7 @@ func (e *ToolExecutor) SetSearchService(s *SearchService) {
 // attachTools, which is a no-op for empty lists.
 func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 	defs := make([]GatewayTool, 0, 4)
-	if conv != nil && conv.MemoryEnabled {
+	if conv.MemoryActive() {
 		defs = append(defs, MemoryToolDefs()...)
 		if e.states != nil {
 			defs = append(defs, updateConversationStateToolDef())
@@ -761,11 +809,28 @@ func (e *ToolExecutor) execSearchPastConversations(
 		args.MaxResults = 5
 	}
 
+	// FIX130 A2 — the search stays available in every chat (past
+	// conversations are the user's own history, not memory), but a chat
+	// whose memory is not active gets no saved-memory hits: that would be
+	// the memory read the switch turned off, arriving through a tool.
+	memoryOK := e.memoryActiveNow(ctx, ec)
+	if !memoryOK && args.Scope == ScopeMemories {
+		return "Saved memories are off in this chat (memory is switched off, or it is a temporary chat), so they cannot be searched here."
+	}
 	hits, err := e.search.SearchPastContext(
 		ctx, ec.UserID, ec.TenantID, args.Query, args.Scope, args.MaxResults,
 	)
 	if err != nil {
 		return "Search failed. Please try again in a moment."
+	}
+	if !memoryOK {
+		kept := hits[:0]
+		for i := range hits {
+			if hits[i].Type != "memory" {
+				kept = append(kept, hits[i])
+			}
+		}
+		hits = kept
 	}
 	if len(hits) == 0 {
 		return fmt.Sprintf("No results found for %q. Try different keywords.", args.Query)
@@ -911,6 +976,9 @@ func (e *ToolExecutor) execUpdateConversationState(
 	if e.states == nil {
 		return "The conversation state tool isn't available right now."
 	}
+	if !e.memoryActiveNow(ctx, ec) {
+		return memoryOffToolResult
+	}
 	var args updateConversationStateArgs
 	if rawArgs != "" {
 		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
@@ -964,6 +1032,10 @@ func (e *ToolExecutor) execSaveMemory(
 	if strings.TrimSpace(args.Content) == "" {
 		return "I need actual content to save. Tell me what you'd like me to remember."
 	}
+	// FIX130 A2 — memory off / temporary: refuse at execution time too.
+	if !e.memoryActiveNow(ctx, ec) {
+		return memoryOffToolResult
+	}
 	// Default to explicit_fact when the model forgets to set the
 	// type — better to save the fact than to refuse over a missing
 	// metadata field.
@@ -974,11 +1046,23 @@ func (e *ToolExecutor) execSaveMemory(
 	// Trust mapping (see saveMemoryArgs.Source): only an explicit
 	// user request keeps the user_explicit/active tier; AI-initiated
 	// saves go to the pending review queue like the S8 extractor's.
+	//
+	// FIX130 — and "explicit" is decided by the user's words, not the
+	// model's label. On the test stack deepseek-v4-flash sent
+	// user_requested for plain self-descriptions nobody asked it to keep;
+	// the row went ACTIVE, into every later chat. A save the user did not
+	// ask for is now a pending suggestion carrying their own words as the
+	// evidence, one click from active on the Memory page.
 	sourceType := model.MemorySourceAssistantInferred
 	statusOverride := model.MemoryStatusPendingConfirmation
-	if args.Source == "user_requested" {
+	evidence := ""
+	downgraded := false
+	if args.Source == "user_requested" && ExplicitRememberRequest(ec.UserMessage) {
 		sourceType = model.MemorySourceUserExplicit
 		statusOverride = ""
+	} else {
+		downgraded = args.Source == "user_requested"
+		evidence = evidenceQuote(ec.UserMessage)
 	}
 
 	// FIX58 — a save inside a project belongs to that project, not to
@@ -1004,6 +1088,7 @@ func (e *ToolExecutor) execSaveMemory(
 		StatusOverride:       statusOverride,
 		SourceConversationID: nilOrUUID(ec.ConversationID),
 		SourceMessageID:      nilOrUUID(ec.MessageID),
+		EvidenceExcerpt:      evidence,
 		ActorType:            "assistant",
 	}
 
@@ -1024,6 +1109,8 @@ func (e *ToolExecutor) execSaveMemory(
 			return "Error: " + err.Error()
 		case errors.Is(err, ErrMemoryDuplicate):
 			return "I already have that saved."
+		case errors.Is(err, ErrMemoryRejectedBefore):
+			return "Not saved: the user already declined this suggestion on the Memory page. Do not suggest it again."
 		case errors.Is(err, ErrMemoryEmpty):
 			return "I need actual content to save."
 		case errors.Is(err, ErrMemoryInvalidType),
@@ -1034,10 +1121,45 @@ func (e *ToolExecutor) execSaveMemory(
 			return "I couldn't save that right now. Please try again in a moment."
 		}
 	}
+	recordMemorySaved(ec, out)
 	if out.Status == model.MemoryStatusPendingConfirmation {
+		if downgraded {
+			return fmt.Sprintf("Noted %q as a SUGGESTION for the user's review on the Memory page — not saved and not active: the user did not ask you to remember it. Do not tell them it is saved.", out.Content)
+		}
 		return fmt.Sprintf("Noted %q — queued for the user's review in Memory settings (not active yet).", out.Content)
 	}
 	return fmt.Sprintf("Saved: %q", out.Content)
+}
+
+// recordMemorySaved (FIX130 A3b) tells the page a save happened during
+// this turn: a memory_saved frame now, and a "memory_saved" context source
+// on the answer so a reload can say the same thing ("บันทึกความจำแล้ว",
+// or "เสนอความจำใหม่ — รอยืนยัน" for a pending suggestion).
+func recordMemorySaved(ec ToolExecContext, m *model.Memory) {
+	if m == nil {
+		return
+	}
+	ec.Sources.Add(ContextSource{
+		SourceType:   model.SourceTypeMemorySaved,
+		SourceID:     m.ID.String(),
+		DisplayLabel: TruncateLabel(m.Content),
+		Metadata:     MarshalMeta(map[string]any{"status": m.Status, "memory_type": m.MemoryType}),
+	})
+	ec.emit(StreamUpdate{MemorySaved: &MemorySavedNotice{
+		MessageID: messageIDString(ec.MessageID),
+		Items:     []MemoryNoticeItem{{ID: m.ID.String(), Label: memoryNoticeLabel(m.Content), Status: m.Status}},
+	}})
+}
+
+// evidenceQuote is the user's own words, trimmed, as the evidence shown
+// with a suggestion on the Memory page.
+func evidenceQuote(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) > 200 {
+		return string(r[:200]) + "…"
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,6 +1173,9 @@ type listMemoriesArgs struct {
 func (e *ToolExecutor) execListMemories(
 	ctx context.Context, rawArgs string, ec ToolExecContext,
 ) string {
+	if !e.memoryActiveNow(ctx, ec) {
+		return memoryOffToolResult
+	}
 	var args listMemoriesArgs
 	// Empty args is a valid call — default scope is global_user.
 	if strings.TrimSpace(rawArgs) != "" {

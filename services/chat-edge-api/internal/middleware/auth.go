@@ -55,6 +55,13 @@ func CallerFrom(ctx context.Context) (Caller, bool) {
 	return c, ok
 }
 
+// WithCaller returns ctx carrying c as the resolved caller — what RequireAuth
+// does after verifying a token. For handler unit tests (FIX130) and code that
+// has already authenticated; it verifies nothing itself.
+func WithCaller(ctx context.Context, c Caller) context.Context {
+	return context.WithValue(ctx, callerKey, c)
+}
+
 // MustCaller is the convenience form: returns the Caller assuming
 // the route is behind RequireAuth. On a route the auth middleware
 // never ran on it returns the zero value — callers MUST only use

@@ -14,6 +14,10 @@ export interface ConversationDto {
   project_id?: string | null;
   message_count?: number;
   memory_enabled?: boolean | null;
+  /** FIX130 A2 — the chat was started as temporary (migration 048). A
+   *  temporary chat reads and writes no memory whatever memory_enabled says
+   *  (prompt-assembler memoryActive). Absent on an older server ⇒ not temporary. */
+  is_temporary?: boolean | null;
 }
 export interface ProjectDto {
   id: string;
@@ -182,7 +186,16 @@ export class ChatEdgeClient {
     scopeId?: string | null;
     memoryType?: string;
     category?: string;
-  }): Promise<{ ok: true; id: string; content: string } | { ok: false; status: number; detail: string }> {
+    /** FIX130 — "assistant_inferred" stores the note as a PENDING suggestion
+     *  the user confirms on the Memory page, instead of an active memory.
+     *  The `remember` tool sends it whenever the user's own message did not
+     *  ask to remember (explicit-remember.ts). Absent ⇒ user_explicit/active. */
+    sourceType?: "assistant_inferred";
+    /** FIX130 — the chat the note came from (the Memory page links to it). */
+    sourceConversationId?: string;
+    /** FIX130 — the user's words that prompted the suggestion (short). */
+    evidenceExcerpt?: string;
+  }): Promise<{ ok: true; id: string; content: string; status?: string } | { ok: false; status: number; detail: string }> {
     const token = this.accessToken();
     if (!token) return { ok: false, status: 0, detail: "not signed in" };
     const body: Record<string, unknown> = {
@@ -192,6 +205,9 @@ export class ChatEdgeClient {
     };
     if (input.scopeId) body["scope_id"] = input.scopeId;
     if (input.category) body["category"] = input.category;
+    if (input.sourceType) body["source_type"] = input.sourceType;
+    if (input.sourceConversationId) body["source_conversation_id"] = input.sourceConversationId;
+    if (input.evidenceExcerpt) body["evidence_excerpt"] = input.evidenceExcerpt;
     try {
       const res = await fetch(`${this.baseUrl}/api/v1/memories`, {
         method: "POST",
@@ -215,8 +231,8 @@ export class ChatEdgeClient {
         this.log.warn(`chat-edge POST /api/v1/memories → HTTP ${res.status} ${detail.slice(0, 200)}`);
         return { ok: false, status: res.status, detail: detail.slice(0, 300) };
       }
-      const saved = (await res.json()) as { id?: string; content?: string };
-      return { ok: true, id: saved.id ?? "", content: saved.content ?? input.content };
+      const saved = (await res.json()) as { id?: string; content?: string; status?: string };
+      return { ok: true, id: saved.id ?? "", content: saved.content ?? input.content, ...(typeof saved.status === "string" ? { status: saved.status } : {}) };
     } catch (err) {
       const detail = (err as Error).message;
       this.log.warn(`chat-edge POST /api/v1/memories failed: ${detail}`);

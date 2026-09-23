@@ -129,11 +129,6 @@ type PromptCompiler struct {
 	prefs  PreferencesReader
 	memory MemoryReader
 	state  *ConversationStateService
-
-	// tempChatReadsMemory — whether a chat with memory switched off
-	// still gets the saved-memory block. See memoryBlock; the operator
-	// flips it with TEMPORARY_CHAT_READS_MEMORY.
-	tempChatReadsMemory bool
 }
 
 // newPromptCompiler builds a compiler from the (possibly nil) services
@@ -144,12 +139,8 @@ func newPromptCompiler(
 	prefs PreferencesReader,
 	memory MemoryReader,
 	state *ConversationStateService,
-	tempChatReadsMemory bool,
 ) *PromptCompiler {
-	return &PromptCompiler{
-		prefs: prefs, memory: memory, state: state,
-		tempChatReadsMemory: tempChatReadsMemory,
-	}
+	return &PromptCompiler{prefs: prefs, memory: memory, state: state}
 }
 
 // Build assembles the 13 layers in order and returns the joined system
@@ -723,8 +714,8 @@ func (pc *PromptCompiler) skillsBlock(in CompileContext) string {
 // Layer 11 — Memory Policy + Saved Memory (emits sources)
 // ---------------------------------------------------------------------------
 
-// temporaryChatNotice is emitted for EVERY memory-off conversation,
-// whether or not saved memories are read into it.
+// memoryOffNotice is emitted for EVERY conversation whose memory is not
+// active — memory switched off, or a temporary chat.
 //
 // It exists because "no memory tools attached" is not the same as "the
 // model knows it cannot remember". Without this the model happily
@@ -737,32 +728,52 @@ func (pc *PromptCompiler) skillsBlock(in CompileContext) string {
 // FIX112 Part A — the three sentences are one asset both surfaces read
 // (prompt_temporary_chat.txt; the desktop holds the same bytes as
 // TEMPORARY_CHAT_BODY, pinned by fix112-prompt-pins.test.ts). Each surface
-// wraps its own envelope: here the XML tag and the "This is a temporary
-// chat." lead-in; the desktop a markdown heading that says the same.
+// wraps its own envelope: here the XML tag and a lead-in sentence; the
+// desktop a markdown heading that says the same.
+//
+// FIX130 A2 — two lead-ins, because they are two different switches: a
+// temporary chat can never have memory, while memory switched off on an
+// ordinary chat can be switched back on. Neither reads saved memories any
+// more (see memoryBlock), and the asset now says so.
 //
 //go:embed prompt_temporary_chat.txt
 var temporaryChatBodyRaw string
 
-var temporaryChatNotice = "<temporary_chat>\nThis is a temporary chat. " + strings.TrimSpace(strings.ReplaceAll(temporaryChatBodyRaw, "\r\n", "\n")) + "\n</temporary_chat>"
+const (
+	temporaryChatLead = "This is a temporary chat: it neither uses nor saves memory, and memory cannot be turned on in it."
+	memoryOffLead     = "Memory is off for this chat; the user can turn it back on for this chat."
+)
+
+var temporaryChatBody = strings.TrimSpace(strings.ReplaceAll(temporaryChatBodyRaw, "\r\n", "\n"))
+
+var temporaryChatNotice = "<temporary_chat>\n" + temporaryChatLead + " " + temporaryChatBody + "\n</temporary_chat>"
+
+var memoryOffNotice = "<temporary_chat>\n" + memoryOffLead + " " + temporaryChatBody + "\n</temporary_chat>"
 
 // memoryBlock injects the saved-memory facts. The proactive-save POLICY
 // now lives in the tool policy (Layer 7), so this layer only surfaces
 // what's already on file. Returns the per-memory ContextSource list for
 // S7 attribution.
 //
-// FIX56.1 Part 1 — a temporary chat now READS memory but still writes
-// none. The switch means "stop recording me", not "forget who I am":
-// an assistant that loses the user's language, stack and formatting the
-// moment they ask a quiet side question is one people stop using, and a
-// privacy mode nobody turns on protects nobody. The write side is
-// untouched — no tool, no extraction, no state — and the read is
-// traceless (no use_count stamp), so a temporary chat still changes
-// nothing outside its own transcript.
-//
-// tempChatReadsMemory=false restores the older, stricter behaviour for
-// deployments that want the seal in both directions.
+// FIX130 A2 — memory off means off. FIX56.1 had a memory-off (and
+// temporary) chat READ the saved memories "tracelessly"; NIGHT2 found the
+// answer quoting them and the saved-memory chip showing in a chat the user
+// had switched memory off for, which is exactly what the switch promises
+// not to do. Now a chat whose memory is not active (switched off, or a
+// temporary chat regardless of the switch) reads nothing: no block, no
+// saved_memory source, no use_count stamp — only the notice that says so.
+// TEMPORARY_CHAT_READS_MEMORY is no longer read (config.go).
 func (pc *PromptCompiler) memoryBlock(ctx context.Context, in CompileContext) (string, []ContextSource) {
 	if in.Conv == nil {
+		return "", nil
+	}
+	if !in.Conv.MemoryActive() {
+		if in.Conv.IsTemporary {
+			return temporaryChatNotice, nil
+		}
+		return memoryOffNotice, nil
+	}
+	if pc.memory == nil {
 		return "", nil
 	}
 	// FIX58 — which memories exist for this turn is decided by the
@@ -772,28 +783,7 @@ func (pc *PromptCompiler) memoryBlock(ctx context.Context, in CompileContext) (s
 	// keeps the decision at the one place that knows the answer; the
 	// repository turns it into a WHERE clause so the other set is
 	// never fetched at all.
-	projectID := in.Conv.ProjectID
-
-	if in.Conv.MemoryEnabled {
-		if pc.memory == nil {
-			return "", nil
-		}
-		return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID, projectID)
-	}
-
-	// Memory off for this conversation.
-	if !pc.tempChatReadsMemory || pc.memory == nil {
-		return temporaryChatNotice, nil
-	}
-	// A temporary chat inside a project reads that project's memories
-	// (and still writes none) — the FIX56.1 rule applied to whichever
-	// set this conversation is entitled to, not a way back to the
-	// global one.
-	block, sources := pc.memory.BuildMemoryContextTraceless(ctx, in.UserID, in.TenantID, projectID)
-	if strings.TrimSpace(block) == "" {
-		return temporaryChatNotice, nil
-	}
-	return temporaryChatNotice + "\n\n" + block, sources
+	return pc.memory.BuildMemoryContextWithSources(ctx, in.UserID, in.TenantID, in.Conv.ProjectID)
 }
 
 // ---------------------------------------------------------------------------

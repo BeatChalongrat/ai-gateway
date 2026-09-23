@@ -66,7 +66,7 @@ function host(scripts: Script[], opts: { seed?: MessageDto[]; importAnswer?: (ca
   };
   const gw = { listModels: async () => null, streamCompletion: (_req: unknown, signal: AbortSignal) => scripts[Math.min(streams++, scripts.length - 1)]!(signal) };
   const sidecar = { listTools: async () => [], callTool: async () => ({ ok: true, text: "", imageDataUri: null }), hostQuery: async () => ({ ok: true, data: {} }), status: async () => ({}), ready: true, phase: "ready", isRunning: true, ensureStarted: async () => {}, invalidateTools: () => {} };
-  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }), temporaryChatReadsMemory: true };
+  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }) };
   let co: TurnCoordinator;
   const hostTools = new HostTools(gw as never, chatEdge as never, (req, sig) => co.runNested(req, sig), quiet, () => false);
   const bridge = {

@@ -45,6 +45,8 @@ const SOURCE_ICONS: Record<ContextSourceType, JSX.Element> = {
 	past_conversation: <MessageSquare className="h-3.5 w-3.5 text-text-muted" />,
 	file_context: <FileText className="h-3.5 w-3.5 text-text-muted" />,
 	compacted_history: <Archive className="h-3.5 w-3.5 text-text-muted" />,
+	// FIX130 A3b — a memory saved / suggested during this turn.
+	memory_saved: <Brain className="h-3.5 w-3.5 text-text-muted" />,
 };
 
 const SOURCE_LABELS: Record<ContextSourceType, string> = {
@@ -53,6 +55,7 @@ const SOURCE_LABELS: Record<ContextSourceType, string> = {
 	past_conversation: "past conversation",
 	file_context: "file context",
 	compacted_history: "compacted history",
+	memory_saved: "memory saved",
 };
 
 export function SourcesCard({ sources, onEditMemory, onOpenConversation }: Props) {

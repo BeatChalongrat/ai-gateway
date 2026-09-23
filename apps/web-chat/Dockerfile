@@ -24,12 +24,10 @@ ARG NEXT_PUBLIC_GATEWAY_URL
 ENV NEXT_PUBLIC_GATEWAY_URL=$NEXT_PUBLIC_GATEWAY_URL
 ARG NEXT_PUBLIC_PORTAL_URL
 ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
-# FIX56.1 — what the temporary-chat strip says about saved memories.
-# Only an explicit "false" flips it, so an unset arg keeps the default
-# rather than baking in the stricter claim. Must match chat-edge's
-# TEMPORARY_CHAT_READS_MEMORY.
-ARG NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY
-ENV NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY=$NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY
+# (FIX130: NEXT_PUBLIC_TEMPORARY_CHAT_READS_MEMORY is gone — a memory-off or
+# temporary chat reads no memory on any deployment, so the strip has no
+# setting to mirror. A build arg still passed by an old compose file is
+# simply unused.)
 # (FIX20 §6.5: hosted mode — the desktop shell — is no longer a build arg.
 # lib/auth.ts detects the shell at runtime from window.sranHost, so ONE image
 # serves the browser and the Electron app.)

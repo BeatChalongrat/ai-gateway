@@ -1,13 +1,19 @@
 "use client";
 
-// PendingPreferenceCard — S8 surface for one inferred-preference
-// suggestion. Lives at the top of the Memory Settings page
-// inside a "Suggested Preferences" section; renders one card per
-// pending_confirmation memory.
+// PendingPreferenceCard — S8 surface for one suggested memory (an inferred
+// preference or, since FIX130, a fact the user stated about themselves).
+// Lives at the top of the Memory Settings page inside the suggestions
+// section; renders one card per pending_confirmation memory.
+//
+// FIX130 A3c — it says the same three things a saved memory does: what
+// (content, category in the user's language), when (absolute date + the
+// relative time) and from which chat (title as a link / deleted chat), plus
+// the user's own words the suggestion was drawn from.
 //
 // Two actions:
 //   Confirm → activate (calls api.confirmMemory(id, true))
-//   Reject  → soft-delete (calls api.deleteMemory(id))
+//   Reject  → api.deleteMemory(id); chat-edge records a rejected
+//             suggestion as status "rejected" so it is never suggested again
 //
 // The card intentionally uses the primary blue CTA on Confirm
 // (matches the plan-card primary buttons from Phase 4) so it
@@ -15,8 +21,9 @@
 
 import { Check, X } from "lucide-react";
 
-import { timeAgo } from "@/components/workspace/workspaceUtil";
+import { MemoryOrigin, MemoryWhen } from "@/components/chat/MemoryCard";
 import { useT } from "@/lib/i18n";
+import { memoryCategoryLabel } from "@/lib/memoryLabels";
 import type { Memory } from "@/lib/types";
 
 interface Props {
@@ -24,27 +31,25 @@ interface Props {
 	onConfirm: (id: string) => void | Promise<void>;
 	onReject: (id: string) => void | Promise<void>;
 	saving?: boolean;
+	/** Fallback title lookup for a server that does not resolve it (see MemoryCard). */
+	resolveConversationTitle?: (id: string) => string | undefined;
 }
 
-export function PendingPreferenceCard({ memory, onConfirm, onReject, saving }: Props) {
+export function PendingPreferenceCard({ memory, onConfirm, onReject, saving, resolveConversationTitle }: Props) {
 	const t = useT();
 	const metaParts: string[] = [];
-	if (memory.category) metaParts.push(memory.category);
-	metaParts.push(t("memory.type.inferred"));
-	if (memory.source_conversation_id) {
-		metaParts.push(
-			t("memory.card.source.fromConvAgo", { time: timeAgo(memory.created_at) }),
-		);
-	} else {
-		metaParts.push(
-			t("memory.card.source.detectedAgo", { time: timeAgo(memory.created_at) }),
-		);
-	}
+	const category = memoryCategoryLabel(memory.category, t);
+	if (category) metaParts.push(category);
+	metaParts.push(t("memory.card.source.assistantInferred"));
 
 	return (
 		<div className="rounded-lg border border-border bg-bg-surface px-4 py-3">
 			<p className="text-sm text-text-primary">{memory.content}</p>
-			<p className="mt-1 text-xs text-text-muted">{metaParts.join(" · ")}</p>
+			<p className="mt-1 text-xs text-text-muted" data-testid="memory-meta">
+				{metaParts.join(" · ")}
+			</p>
+			<MemoryWhen memory={memory} labelKey="memory.card.suggestedOn" />
+			<MemoryOrigin memory={memory} resolveConversationTitle={resolveConversationTitle} />
 
 			{memory.evidence_excerpt ? (
 				<p className="mt-1 text-xs italic text-text-muted">

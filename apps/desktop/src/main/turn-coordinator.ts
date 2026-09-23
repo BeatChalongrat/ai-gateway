@@ -64,7 +64,7 @@ import { CONTEXT_NOTE_RESERVE, compileChain } from "./context-compiler";
 import { ModelWindows } from "./model-windows";
 import type { RunLedgerStore } from "./run-ledger";
 import type { ContextManager } from "./context-manager";
-import { subAgentSystemPrompt, type PromptAssembler } from "./prompt-assembler";
+import { memoryActive, subAgentSystemPrompt, type MemoryUsedItem, type PromptAssembler } from "./prompt-assembler";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import { checkRemoteTarget } from "./remote-target";
 import { endingForOutcome, normalizeHostError, stopReasonFor, type HostErrorFrame, type StopReason, type TerminalCause, type TurnEnding } from "./terminal-cause";
@@ -79,7 +79,7 @@ function hostnameOf(raw: string): string {
 }
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
-import { BROWSER_BRIDGE_TOOLS, MEMORY_READ_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type QuestionRespondPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { BROWSER_BRIDGE_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type QuestionRespondPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, CANCELLED_WHILE_ASKING, NOT_AVAILABLE_IN_THIS_RUN, formatAnswerForModel, validateAskArgs, type AskQuestion } from "./ask-user";
 
 interface BufferedEvent {
@@ -561,6 +561,17 @@ export class TurnCoordinator {
         this.bridge.postHostResult(payload.requestId, r.ok, r.prefs, r.error);
         return;
       }
+      // ── FIX130 A4b: the Memory page changed the saved memories ──
+      // (edit, delete, accept, reject, add, clear). The prompt assembler keeps
+      // chat-edge's memories for 60 s; without this an edit or a delete took up
+      // to a minute to reach the desktop's answers. Nothing to validate: the
+      // op carries no arguments and only makes the next turn read again.
+      case "memory.changed": {
+        this.assembler.invalidateServerMemories();
+        this.log.info("HOST QUERY memory.changed: the page changed the saved memories — the next turn reads them again");
+        this.bridge.postHostResult(payload.requestId, true, { invalidated: true });
+        return;
+      }
       // ── FIX127 C3: the new-chat page's abandoned draft conversation ──
       case "conversation.discardEmpty": {
         const conversationId = payload.args?.["conversationId"];
@@ -636,7 +647,8 @@ export class TurnCoordinator {
           // The same tool count and budget the next turn will use: a
           // tools-blind model is sent no tool definitions, so its meter must
           // not reserve room for them.
-          const memoryEnabled = conversation?.memory_enabled !== false;
+          // FIX130 A2 — "memory active": on AND not a temporary chat.
+          const memoryEnabled = memoryActive(conversation);
           const tools = (await this.modelSupportsTools(model, signal)) ? await this.toolDefinitions(null, false, false, memoryEnabled) : [];
           const basis = await this.budgetBasis(conversationId, model, signal);
           this.bridge.postHostResult(payload.requestId, true, this.opts.contextManager.info(conversationId, messages, { model, basis, numTools: tools.length, memoryEnabled, omittedOlder: built.omittedOlder }));
@@ -1038,10 +1050,13 @@ export class TurnCoordinator {
       taskMessages = built.messages;
       // FIX32 §1.2: the task path gets the same token budget as an interactive
       // turn (an old alarm conversation grows too). The FULL chain persists.
-      const taskTools = await this.toolDefinitions(null, false);
+      // FIX130 A2 — a task's conversation follows the same memory rule as any
+      // chat: no memory-write tool unless its memory is active.
+      const taskMemory = memoryActive(conversation);
+      const taskTools = await this.toolDefinitions(null, false, false, taskMemory);
       const taskBasis = await this.budgetBasis(conversationId, model, controller.signal);
       const tcc = this.opts.contextManager
-        ? await this.opts.contextManager.compile(conversationId, built.messages, { model, basis: taskBasis, numTools: taskTools.length, memoryEnabled: conversation?.memory_enabled !== false, omittedOlder: built.omittedOlder }, controller.signal)
+        ? await this.opts.contextManager.compile(conversationId, built.messages, { model, basis: taskBasis, numTools: taskTools.length, memoryEnabled: taskMemory, omittedOlder: built.omittedOlder }, controller.signal)
         : compileChain(built.messages, taskBasis, taskTools.length);
       if (tcc.compacted) this.log.info(`CONTEXT COMPILED conv=${conversationId} (task ${task.id}) status=compacted total=${tcc.totalMessages} sent=${tcc.sentMessages} dropped=${tcc.dropped}`);
       const taskChainStart = tcc.messages.length;
@@ -1053,6 +1068,9 @@ export class TurnCoordinator {
         maxIterations: this.opts.maxIterations ?? 100,
         maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
         tools: taskTools,
+        memoryEnabled: taskMemory,
+        // The task's prompt is the user's own words (they wrote the task).
+        userMessage: task.prompt,
         parentToolCallId: null,
         onText: (t) => {
           text += t;
@@ -1285,6 +1303,7 @@ export class TurnCoordinator {
     let userText = payload.text;
     let omittedOlder = 0;
     let attached: ResolvedAttachments | null = null;
+    let memoryUsed: MemoryUsedItem[] = [];
     // FIX124 — the page sends Regenerate, and Retry of a failed turn, as a
     // submit with EMPTY text and nothing attached. buildMessages recovers the
     // question from the history so the model is asked it again; the flag is
@@ -1307,6 +1326,7 @@ export class TurnCoordinator {
       messages = built.messages;
       userText = built.userText;
       omittedOlder = built.omittedOlder;
+      memoryUsed = built.memoryUsed;
       if (isRegenerate) regenerate = await this.regenerateTarget(conversationId);
     } catch (err) {
       this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
@@ -1328,6 +1348,16 @@ export class TurnCoordinator {
       // Never drop a file silently: the page shows the names (same event web-chat uses).
       this.emit(conversationId, "image_notice", { filenames: attached.failures.map((f) => f.filename) });
     }
+    // FIX130 A3d — the prompt carried saved memories: the page shows
+    // "ใช้ความจำ N รายการ" on this answer. The same frame chat-edge sends the
+    // web (before the answer, keyed to the assistant bubble); it rides the run
+    // log, so a page that reattaches mid-turn is replayed it. Desktop turns
+    // bypass chat-edge's context_sources, so after a reload the marker is not
+    // there for a desktop turn — live only on this surface.
+    if (memoryUsed.length > 0) {
+      this.emit(conversationId, "memory_used", { message_id: turn.messageId, count: memoryUsed.length, items: memoryUsed });
+      this.log.info(`MEMORY: ${memoryUsed.length} memory item(s) in the prompt conv=${conversationId}`);
+    }
     // FIX32 §1.2 — token-budgeted context (context-compiler.ts, chat-edge's
     // shape). The FULL chain still persists locally; only what is SENT is
     // trimmed, the first exchange survives, tool chains stay atomic, and both
@@ -1345,12 +1375,15 @@ export class TurnCoordinator {
     // The chat's memory switch (chat-edge's conversations.memory_enabled — the
     // same row the web client toggles). Absent field means on, so a client or
     // a server build that never sends it cannot silently turn memory off.
-    const memoryEnabled = conversation?.memory_enabled !== false;
-    // FIX56.1: the read half moved, so the line says what THIS build does
-    // instead of the sentence that was true when it was written.
+    //
+    // FIX130 A2 — what the turn uses is "memory active": the switch on AND
+    // not a temporary chat. A memory-off or temporary chat reads no memory
+    // (the assembler) and writes none (no memory-write tool, `remember`
+    // refused at dispatch — the run carries this value), and keeps no summary
+    // state (the context manager is told the same), mirroring chat-edge.
+    const memoryEnabled = memoryActive(conversation);
     if (!memoryEnabled) {
-      const reads = this.assembler.temporaryChatReadsMemory ? "reads saved memory" : "reads no memory";
-      this.log.info(`MEMORY: off for conv=${conversationId} — ${reads}, writes none, no memory tools`);
+      this.log.info(`MEMORY: not active for conv=${conversationId} (${conversation?.is_temporary === true ? "temporary chat" : "memory off"}) — reads none, writes none, no memory-write tools`);
     }
     const tools = payload.quick || !modelTakesTools ? [] : await this.toolDefinitions(null, false, payload.imageMode, memoryEnabled);
     if (payload.quick) this.log.info(`TOOLS: quick-ask turn conv=${conversationId} — no tools offered`);
@@ -1410,6 +1443,7 @@ export class TurnCoordinator {
       maxMs: (this.opts.maxTurnMinutes ?? 20) * 60_000,
       tools,
       memoryEnabled,
+      userMessage: userText,
       routingContext,
       newestOverBudget: cc.newestOverBudget,
       parentToolCallId: null,
@@ -1601,6 +1635,10 @@ export class TurnCoordinator {
      *  dispatch guard can refuse a memory write on every path, including a
      *  sub-agent that inherits it from the chat that spawned it. */
     memoryEnabled?: boolean;
+    /** FIX130 — the text the USER sent this turn (a sub-agent inherits its
+     *  parent turn's). `remember` saves an active memory only when it asks to
+     *  remember; anything else becomes a pending suggestion. */
+    userMessage?: string;
     /** FIX104 — auto only: what the compiled request needs (routing_hints). */
     routingContext?: { minContextTokens: number; preferredContextTokens: number };
     /** FIX105 — the compiler saw the newest message alone over the budget. */
@@ -1866,7 +1904,7 @@ export class TurnCoordinator {
   /** ChatOrchestrator.ExecuteToolCallAsync — DLP marker → permission → consent → run → result. */
   private async executeToolCall(
     call: GatewayToolCall,
-    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[]; memoryEnabled?: boolean } & RunWaitState,
+    run: { conversationId: string; messages: GatewayMessage[]; signal: AbortSignal; parentToolCallId: string | null; onTrace?: (entry: string) => void; consentConversationId?: string; tools: GatewayToolDefinition[]; memoryEnabled?: boolean; userMessage?: string } & RunWaitState,
   ): Promise<void> {
     const name = call.function.name;
     const eventConv = run.consentConversationId ?? run.conversationId;
@@ -2050,8 +2088,10 @@ export class TurnCoordinator {
     // then tell the user it remembered something it did not. Checked here as
     // well as at the offer site because this is the only point every path
     // (main turn, sub-agent, scheduled task) passes through.
+    // FIX130 A2 — run.memoryEnabled is "memory active", so a temporary chat
+    // (whatever its switch says) is refused here too.
     if (name === "remember" && run.memoryEnabled === false) {
-      run.messages.push(toolResult(call, "Error: memory is turned off for this chat, so nothing can be saved. Tell the user plainly that you did not save it."));
+      run.messages.push(toolResult(call, "Error: memory is off for this chat (or this is a temporary chat), so nothing can be saved. Tell the user plainly that you did not save it."));
       this.activity(eventConv, call.id, name, "finished", { success: false, resultPreview: "Not saved — memory is off for this chat", parentId: run.parentToolCallId, durationMs: 0 });
       this.toolCallsSeen.push({ conversationId: run.conversationId, tool: name, args, decision: "memory-off", ok: false, where: "host" });
       this.log.info(`TOOL remember REFUSED (memory is off for conversation ${run.conversationId})`);
@@ -2116,10 +2156,22 @@ export class TurnCoordinator {
       } else if (hostHandled) {
         where = "host";
         try {
-          const r = await this.hostTools.execute(name, args, { conversationId: run.conversationId, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled });
+          // FIX130 — a sub-agent's run id is not a conversation; `remember`
+          // names the chat the user is in (eventConv) as a suggestion's source.
+          const toolConv = name === "remember" ? eventConv : run.conversationId;
+          const r = await this.hostTools.execute(name, args, { conversationId: toolConv, toolCallId: call.id, signal: run.signal, memoryEnabled: run.memoryEnabled, userMessage: run.userMessage });
           ok = r.ok;
           text = r.text;
           image = r.imageDataUri;
+          // FIX130 A3b/A4b — a memory was saved (active) or suggested
+          // (pending): the next turn must read it (drop the cache), and the
+          // page shows "บันทึกความจำแล้ว" / "เสนอความจำใหม่ — รอยืนยัน" on
+          // this answer (the frame chat-edge sends the web).
+          if (ok && r.memorySaved) {
+            this.assembler.invalidateServerMemories();
+            const turn = this.turns.get(eventConv);
+            if (turn) this.emit(eventConv, "memory_saved", { message_id: turn.messageId, items: [r.memorySaved] });
+          }
           imagesAll = r.imageDataUris && r.imageDataUris.length > 1 ? r.imageDataUris : null;
           // FIX80 — the tool persisted files into the conversation
           // (run_python artifacts): show them under the assistant message
@@ -2450,6 +2502,7 @@ export class TurnCoordinator {
       maxMs: NESTED_MAX_MINUTES * 60_000,
       tools,
       memoryEnabled: req.memoryEnabled !== false,
+      userMessage: req.userMessage,
       parentToolCallId: conversationId,
       onText: (t: string) => {
         answer += t;
@@ -2567,15 +2620,12 @@ export class TurnCoordinator {
     // The web client omits its save_memory this way, so this is what makes the
     // switch mean one thing in both clients.
     //
-    // FIX56.1: the read tool goes only under the stricter setting. Injecting
-    // the saved memories into the prompt and then refusing the tool that reads
-    // the same history would be two answers to one question.
+    // FIX130 A2: `memoryEnabled` here is "memory active" (switch on AND not
+    // a temporary chat). The read tool (search_past_conversations) stays,
+    // as chat-edge keeps it (see MEMORY_READ_TOOLS).
     if (!memoryEnabled) {
       const before = out.length;
-      const withhold = this.assembler.temporaryChatReadsMemory
-        ? MEMORY_WRITE_TOOLS
-        : new Set([...MEMORY_WRITE_TOOLS, ...MEMORY_READ_TOOLS]);
-      out = out.filter((d) => !withhold.has(d.function.name));
+      out = out.filter((d) => !MEMORY_WRITE_TOOLS.has(d.function.name));
       if (before !== out.length) this.log.info(`TOOLS: memory is off for this chat — withholding ${before - out.length} memory tool(s)`);
     }
     // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —
@@ -2809,7 +2859,7 @@ export class TurnCoordinator {
     return resolved;
   }
 
-  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string; omittedOlder: number; source: HistorySource }> {
+  private async buildMessages(conversationId: string, conversation: ConversationDto | null, text: string, attached: ResolvedAttachments | null = null): Promise<{ messages: GatewayMessage[]; userText: string; omittedOlder: number; source: HistorySource; memoryUsed: MemoryUsedItem[] }> {
     let project = null;
     if (conversation?.project_id) {
       const projects = await this.chatEdge.listProjects();
@@ -2872,6 +2922,7 @@ export class TurnCoordinator {
       conversationId,
       activeProject: project,
       memoryEnabled: conversation?.memory_enabled !== false,
+      isTemporary: conversation?.is_temporary === true, // FIX130 A2
       toolsAvailable: true,
       writingStyleProfile,
       localGlobalNotes,
@@ -2925,7 +2976,7 @@ export class TurnCoordinator {
           // rebase the state on this transcript (the server's own state when
           // it has one, translated through the row ids it carries).
           if (this.opts.contextManager) {
-            const memoryOn = conversation?.memory_enabled !== false;
+            const memoryOn = memoryActive(conversation); // FIX130 A2
             const serverState = memoryOn ? await this.chatEdge.getConversationState(conversationId) : null;
             const outcome = this.opts.contextManager.rebase(conversationId, visible.map((m) => m.id), serverState, memoryOn);
             if (outcome !== "none") this.log.info(`STATE conv=${conversationId}: ${outcome === "adopted" ? "server summary adopted" : "local summary anchor reset"} for the server transcript`);
@@ -2963,7 +3014,9 @@ export class TurnCoordinator {
       if (m.role === "user" && typeof m.content === "string") parts.push({ ...PROMPT_PART.earlierMessage, text: m.content });
     }
     this.promptPartsByConversation.set(conversationId, parts);
-    return { messages, userText, omittedOlder, source };
+    // FIX130 A3d — which saved memories the prompt carried (an older stub
+    // assembler that does not say is treated as none).
+    return { messages, userText, omittedOlder, source, memoryUsed: assembled.memoryUsed ?? [] };
   }
 
   /** FIX105 Part B — the chat-edge transcript, oldest first, paged back until it

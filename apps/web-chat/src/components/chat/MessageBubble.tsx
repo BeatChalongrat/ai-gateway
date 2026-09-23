@@ -53,6 +53,7 @@ import { SearchCitations } from "./SearchCitations";
 import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
 import { MessageAttachments } from "./MessageAttachments";
+import { MessageMemoryMarkers } from "./MemoryMarkers";
 import { PptxPlanCard } from "./PptxPlanCard";
 import { linkedGeneratedFile } from "./planCardUI";
 import type { PptxPlan } from "./PptxPlanCard";
@@ -549,6 +550,12 @@ function MessageBubbleImpl({
       {/* FIX32 §1.2 — compaction marker: the host stopped sending the middle
           of a long conversation. Quiet information, not an error. */}
       <MessageCompactionNotice message={message} />
+
+      {/* FIX130 A3 — memory used / saved / suggested for this answer. Live
+          from memory_used / memory_saved, from context_sources after a
+          reload; shown while streaming, and independent of the Sources rail
+          (SHOW_SOURCES_RAIL) that stays hidden. */}
+      <MessageMemoryMarkers message={message} />
 
       {/* Image attach notice — one or more attached images couldn't be
           read into the vision request. Same quiet muted line: the person
@@ -1507,6 +1514,11 @@ function areEqual(prev: Props, next: Props): boolean {
     a.fallback_info === b.fallback_info &&
     a.image_notice === b.image_notice &&
     a.compaction_notice === b.compaction_notice &&
+    // FIX130 — the memory frames land alone (memory_used before the first
+    // word, memory_saved mid-turn): without these the memo kept the bubble
+    // and the chips never appeared until something else changed.
+    a.memory_used === b.memory_used &&
+    a.memory_saved === b.memory_saved &&
     // FIX124 — the connection states change ALONE, on a row whose content
     // and status stand still (that is the point of them): without these the
     // memo kept the bubble as it was, and "reconnecting" / "load the answer"

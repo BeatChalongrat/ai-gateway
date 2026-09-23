@@ -233,6 +233,120 @@ func (r *MemoryRepo) SoftDelete(
 	return nil
 }
 
+// ScrubContextSources blanks a deleted memory's text out of the per-answer
+// attribution rows (FIX130 A4b). Those rows copy the memory's text as their
+// label, so without this a memory the user deleted still showed, word for
+// word, in the "used memory" popover of every older answer that used it.
+// The rows stay (the answer did use a memory then); only the text goes.
+func (r *MemoryRepo) ScrubContextSources(
+	ctx context.Context, memoryID, userID, tenantID uuid.UUID,
+) error {
+	const q = `
+		UPDATE chat.response_context_sources
+		SET display_label = '[deleted]'
+		WHERE source_id = $1 AND user_id = $2 AND tenant_id = $3
+		  AND source_type IN ('saved_memory', 'memory_saved')
+	`
+	if _, err := r.db.Exec(ctx, q, memoryID, userID, tenantID); err != nil {
+		return fmt.Errorf("scrub context sources: %w", err)
+	}
+	return nil
+}
+
+// RejectSuggestion marks a PENDING suggestion as rejected (FIX130 A1f).
+//
+// Not a soft delete: SoftDelete scrubs the content and the normalized key,
+// and that is exactly what let the extractor suggest the same thing again
+// on the next chat — nothing was left to compare against. A rejected row
+// keeps the suggestion's own text (the system's sentence about the user,
+// which the user has already seen) and drops the evidence (the user's
+// verbatim words). It is never listed on the Memory page and never
+// injected; the do-not-repeat list and the dedup gate are its only
+// readers. Only a pending row can be rejected — anything else is
+// ErrNotFound and the caller falls back to an ordinary delete.
+func (r *MemoryRepo) RejectSuggestion(
+	ctx context.Context, id, userID, tenantID uuid.UUID,
+) error {
+	const q = `
+		UPDATE chat.user_memories
+		SET status           = 'rejected',
+		    evidence_excerpt = NULL,
+		    updated_at       = NOW()
+		WHERE id = $1 AND user_id = $2 AND tenant_id = $3
+		  AND status = 'pending_confirmation'
+	`
+	tag, err := r.db.Exec(ctx, q, id, userID, tenantID)
+	if err != nil {
+		return fmt.Errorf("reject suggestion: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ExistsRejected reports whether the user already rejected a suggestion
+// with this normalised content (FIX130 A1f).
+func (r *MemoryRepo) ExistsRejected(
+	ctx context.Context, userID, tenantID uuid.UUID, normalizedKey string,
+) (bool, error) {
+	if strings.TrimSpace(normalizedKey) == "" {
+		return false, nil
+	}
+	const q = `
+		SELECT EXISTS (
+		  SELECT 1 FROM chat.user_memories
+		  WHERE user_id = $1 AND tenant_id = $2
+		    AND normalized_key = $3 AND status = 'rejected'
+		)
+	`
+	var exists bool
+	if err := r.db.QueryRow(ctx, q, userID, tenantID, normalizedKey).Scan(&exists); err != nil {
+		return false, fmt.Errorf("exists rejected: %w", err)
+	}
+	return exists, nil
+}
+
+// SourceConversation is what the Memory page shows for a memory's source
+// chat (FIX130 A3c).
+type SourceConversation struct {
+	Title   string
+	Deleted bool
+}
+
+// SourceConversations resolves the given conversation ids for ONE user in
+// ONE tenant: the title of each chat that still exists, and Deleted for one
+// that was soft-deleted. An id that is not this user's (or no longer
+// exists at all) is simply absent from the map — the caller reports it as
+// deleted, never as someone else's title.
+func (r *MemoryRepo) SourceConversations(
+	ctx context.Context, userID, tenantID uuid.UUID, ids []uuid.UUID,
+) (map[uuid.UUID]SourceConversation, error) {
+	out := make(map[uuid.UUID]SourceConversation, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	const q = `
+		SELECT id, COALESCE(title, ''), (is_deleted OR deleted_at IS NOT NULL)
+		FROM chat.conversations
+		WHERE id = ANY($1) AND user_id = $2 AND tenant_id = $3
+	`
+	rows, err := r.db.Query(ctx, q, ids, userID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("source conversations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var sc SourceConversation
+		if err := rows.Scan(&id, &sc.Title, &sc.Deleted); err != nil {
+			return nil, fmt.Errorf("source conversations scan: %w", err)
+		}
+		out[id] = sc
+	}
+	return out, rows.Err()
+}
+
 // SoftDeleteByProject scrubs every memory belonging to one project and
 // returns the ids it affected, newest write order irrelevant.
 //
@@ -571,6 +685,8 @@ func (r *MemoryRepo) FindSimilarPending(
 // extractor. Returns true when an active row OR a pending
 // inferred-preference row already carries the same normalised
 // content — either way we shouldn't re-create the same suggestion.
+// (FIX130: CreateMemory checks rejected rows separately, via
+// ExistsRejected, so it can say why.)
 //
 // Sibling of ExistsByNormalizedKey (which checks active only and
 // powers the explicit-save dedup); extractor uses this stricter
@@ -684,13 +800,17 @@ func (r *MemoryRepo) SearchByContent(
 // in the background after the injection block ships, so a write
 // failure must not block the message turn — caller swallows the
 // error and logs.
-func (r *MemoryRepo) IncrementUseCount(ctx context.Context, id uuid.UUID) error {
+//
+// FIX130 A4 — scoped by user_id + tenant_id like every other method
+// here. It was the one statement keyed on the id alone, so a leaked or
+// guessed id could stamp another account's row.
+func (r *MemoryRepo) IncrementUseCount(ctx context.Context, id, userID, tenantID uuid.UUID) error {
 	const q = `
 		UPDATE chat.user_memories
 		SET use_count = use_count + 1, last_used_at = NOW()
-		WHERE id = $1
+		WHERE id = $1 AND user_id = $2 AND tenant_id = $3
 	`
-	if _, err := r.db.Exec(ctx, q, id); err != nil {
+	if _, err := r.db.Exec(ctx, q, id, userID, tenantID); err != nil {
 		return fmt.Errorf("increment use count: %w", err)
 	}
 	return nil

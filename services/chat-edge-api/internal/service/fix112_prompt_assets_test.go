@@ -10,21 +10,26 @@ import (
 	"testing"
 )
 
+// FIX130 A2 changed the wording on purpose (memory-off / temporary chats no
+// longer read saved memories, and the two switches get their own lead-in),
+// so the pin moved with it: this is the new text, byte for byte.
 func TestFIX112_TheTemporaryChatNoticeIsByteForByteWhatItWas(t *testing.T) {
-	const was = "<temporary_chat>\n" +
-		"This is a temporary chat. Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.\n" +
-		"If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.\n" +
+	body := "Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one. The user's saved memories are not given to you in this chat either.\n" +
+		"If the user asks you to remember something, tell them plainly that you cannot in this chat. Never say or imply that you have saved, noted, or will recall anything.\n" +
 		"The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.\n" +
 		"</temporary_chat>"
-	if temporaryChatNotice != was {
+	if want := "<temporary_chat>\nThis is a temporary chat: it neither uses nor saves memory, and memory cannot be turned on in it. " + body; temporaryChatNotice != want {
 		t.Fatalf("the temporary-chat notice changed:\n%s", temporaryChatNotice)
+	}
+	if want := "<temporary_chat>\nMemory is off for this chat; the user can turn it back on for this chat. " + body; memoryOffNotice != want {
+		t.Fatalf("the memory-off notice changed:\n%s", memoryOffNotice)
 	}
 	// The asset holds the body alone — three sentences, no envelope.
 	raw, err := os.ReadFile("prompt_temporary_chat.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := strings.TrimSpace(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+	body = strings.TrimSpace(strings.ReplaceAll(string(raw), "\r\n", "\n"))
 	if strings.Contains(body, "<temporary_chat>") || strings.HasPrefix(body, "This is a temporary chat.") {
 		t.Fatal("the asset must carry the body only; the envelope and the lead-in are each surface's own")
 	}

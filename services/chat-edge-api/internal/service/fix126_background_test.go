@@ -131,7 +131,7 @@ func newFix126BgFixture(t *testing.T, rows int) *fix126BgFixture {
 }
 
 func TestFIX126_PreferenceExtractorUsesTheBackgroundModelThenFallsBack(t *testing.T) {
-	f := newFix126BgFixture(t, preferenceMinMessages+2)
+	f := newFix126BgFixture(t, memoryExtractFirstAt+2)
 	ctx := context.Background()
 	run := func(refuse ...string) []string {
 		gw := newModelGateway(t, refuse...)

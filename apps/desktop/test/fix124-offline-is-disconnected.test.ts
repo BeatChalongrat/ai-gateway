@@ -209,7 +209,7 @@ describe("FIX124 R2 — what was written before the loss is kept", () => {
       async updateConversation() { return null; },
     };
     const sidecar = { listTools: async () => [], callTool: async () => ({ ok: true, text: "", imageDataUri: null }), hostQuery: async () => ({ ok: true, data: {} }), status: async () => ({}), ready: true, phase: "ready", isRunning: true, ensureStarted: async () => {}, invalidateTools: () => {} };
-    const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }), temporaryChatReadsMemory: true };
+    const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }) };
     let co: TurnCoordinator;
     const hostTools = new HostTools(gw, chatEdge as never, (req, sig) => co.runNested(req, sig), quiet, () => false);
     const bridge = {

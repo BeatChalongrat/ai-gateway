@@ -42,10 +42,13 @@ var (
 	// token into every future conversation.
 	ErrMemoryMaskedContent = errors.New("memory: content contains DLP mask placeholders")
 	ErrMemoryDuplicate     = errors.New("memory: identical memory already exists")
-	ErrMemoryInvalidScope  = errors.New("memory: invalid scope_type")
-	ErrMemoryInvalidType   = errors.New("memory: invalid memory_type")
-	ErrMemoryInvalidSource = errors.New("memory: invalid source_type")
-	ErrMemoryNotFound      = errors.New("memory: not found")
+	// ErrMemoryRejectedBefore — FIX130 A1f: an assistant-inferred
+	// suggestion the user already rejected is not suggested again.
+	ErrMemoryRejectedBefore = errors.New("memory: the user already rejected this suggestion")
+	ErrMemoryInvalidScope   = errors.New("memory: invalid scope_type")
+	ErrMemoryInvalidType    = errors.New("memory: invalid memory_type")
+	ErrMemoryInvalidSource  = errors.New("memory: invalid source_type")
+	ErrMemoryNotFound       = errors.New("memory: not found")
 	// S9 — enforced when the user is at or above the tenant's
 	// max_memories_per_user setting. Message includes the
 	// observed/limit pair so the UI can render a clear hint.
@@ -199,6 +202,18 @@ func (s *MemoryService) CreateMemory(
 	}
 	if dup {
 		return nil, ErrMemoryDuplicate
+	}
+	// FIX130 A1f — a suggestion the user said "ไม่ใช่" to stays declined.
+	// Only the inferred path is refused: a user who later asks explicitly
+	// to remember the same thing is not second-guessed.
+	if in.SourceType == model.MemorySourceAssistantInferred {
+		rejected, rerr := s.repo.ExistsRejected(ctx, in.UserID, in.TenantID, normKey)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if rejected {
+			return nil, ErrMemoryRejectedBefore
+		}
 	}
 
 	// Trust defaults. User-explicit memories are confirmed + high
@@ -369,6 +384,20 @@ func (s *MemoryService) SetPinned(
 func (s *MemoryService) SetConfirmed(
 	ctx context.Context, id, userID, tenantID uuid.UUID, confirmed bool,
 ) (*model.Memory, error) {
+	// FIX130 A1f — confirmed=false on a pending suggestion is the user
+	// rejecting it: the row becomes 'rejected' (it used to stay pending,
+	// only flagged unconfirmed, and so stayed on the page).
+	if !confirmed {
+		if err := s.repo.RejectSuggestion(ctx, id, userID, tenantID); err == nil {
+			s.logEvent(ctx, &model.MemoryEvent{
+				MemoryID: &id, TenantID: tenantID, UserID: userID,
+				Action: "rejected", ActorType: "user",
+			})
+			return s.repo.GetByID(ctx, id, userID, tenantID)
+		} else if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
+	}
 	if err := s.repo.SetConfirmed(ctx, id, userID, tenantID, confirmed); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrMemoryNotFound
@@ -416,11 +445,28 @@ func (s *MemoryService) DeleteMemory(
 	// clause; a missing row returns ErrNotFound which we surface as
 	// ErrMemoryNotFound regardless of whether the row truly doesn't
 	// exist or belongs to another user.
+	//
+	// FIX130 A1f — deleting a PENDING suggestion is the Memory page's
+	// "ไม่ใช่" (reject) button: it is recorded as rejected, so the
+	// extractor never suggests it again. Everything else is scrubbed.
+	if err := s.repo.RejectSuggestion(ctx, id, userID, tenantID); err == nil {
+		s.logEvent(ctx, &model.MemoryEvent{
+			MemoryID: &id, TenantID: tenantID, UserID: userID,
+			Action: "rejected", ActorType: "user",
+		})
+		return nil
+	} else if !errors.Is(err, repository.ErrNotFound) {
+		return err
+	}
 	if err := s.repo.SoftDelete(ctx, id, userID, tenantID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrMemoryNotFound
 		}
 		return err
+	}
+	// FIX130 A4b — and out of the older answers' "used memory" popovers.
+	if err := s.repo.ScrubContextSources(ctx, id, userID, tenantID); err != nil {
+		slog.Warn("memory: scrub context sources failed", "memory_id", id.String(), "err", err)
 	}
 	s.logEvent(ctx, &model.MemoryEvent{
 		MemoryID:  &id,
@@ -469,7 +515,43 @@ func (s *MemoryService) ListByUser(
 	if err != nil {
 		return nil, 0, err
 	}
+	s.annotateSourceConversations(ctx, userID, tenantID, rows)
 	return rows, total, nil
+}
+
+// annotateSourceConversations fills SourceConversationTitle / Deleted
+// (FIX130 A3c) with one user- and tenant-scoped query. Best-effort: on an
+// error the rows go out without the annotation, as before.
+func (s *MemoryService) annotateSourceConversations(
+	ctx context.Context, userID, tenantID uuid.UUID, rows []model.Memory,
+) {
+	seen := make(map[uuid.UUID]bool)
+	ids := make([]uuid.UUID, 0, len(rows))
+	for i := range rows {
+		if id := rows[i].SourceConversationID; id != nil && !seen[*id] {
+			seen[*id] = true
+			ids = append(ids, *id)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	convs, err := s.repo.SourceConversations(ctx, userID, tenantID, ids)
+	if err != nil {
+		slog.Warn("memory: resolve source conversations failed", "err", err)
+		return
+	}
+	for i := range rows {
+		id := rows[i].SourceConversationID
+		if id == nil {
+			continue
+		}
+		if c, ok := convs[*id]; ok && !c.Deleted {
+			rows[i].SourceConversationTitle = c.Title
+		} else {
+			rows[i].SourceConversationDeleted = true
+		}
+	}
 }
 
 func (s *MemoryService) GetMemory(
@@ -540,33 +622,12 @@ func (s *MemoryService) BuildMemoryContext(
 // FIX58 — projectID picks which disjoint set is read: nil for a general
 // chat (global_user memories), the project's id inside a project (that
 // project's memories only). See MemoryRepo.GetActiveForInjection.
+//
+// FIX130 A2 — there is no longer a "traceless" read for memory-off and
+// temporary chats: those chats read nothing (PromptCompiler.memoryBlock),
+// so every read that happens is a real use and is counted.
 func (s *MemoryService) BuildMemoryContextWithSources(
 	ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID,
-) (string, []ContextSource) {
-	return s.buildMemoryContext(ctx, userID, tenantID, projectID, true)
-}
-
-// BuildMemoryContextTraceless is BuildMemoryContextWithSources with the
-// use_count / last_used_at accounting suppressed.
-//
-// It exists for the temporary chat. A temporary chat may now READ the
-// user's saved memories (FIX56.1 Part 1) but must leave nothing behind,
-// and the ordinary read path is not read-only: it bumps use_count and
-// last_used_at on every memory it injects. Those columns are visible in
-// the memory management UI, so an ordinary read from a temporary chat
-// would stamp "used just now" on the exact facts the user consulted
-// while believing the conversation was leaving no trace — a record of
-// what a private chat was about, written into a table the user can see.
-// No row is created either way; this is about the ones already there.
-func (s *MemoryService) BuildMemoryContextTraceless(
-	ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID,
-) (string, []ContextSource) {
-	return s.buildMemoryContext(ctx, userID, tenantID, projectID, false)
-}
-
-func (s *MemoryService) buildMemoryContext(
-	ctx context.Context, userID, tenantID uuid.UUID,
-	projectID *uuid.UUID, recordUse bool,
 ) (string, []ContextSource) {
 	memories, err := s.repo.GetActiveForInjection(ctx, userID, tenantID, projectID)
 	if err != nil || len(memories) == 0 {
@@ -600,12 +661,6 @@ func (s *MemoryService) buildMemoryContext(
 	// Async use_count bump. Each goroutine carries its own background
 	// ctx so the message turn doesn't block on these writes — and so
 	// a client disconnect doesn't cancel them mid-flight.
-	//
-	// Skipped entirely for a traceless read (temporary chat): see
-	// BuildMemoryContextTraceless.
-	if !recordUse {
-		return block, sources
-	}
 	ids := make([]uuid.UUID, len(memories))
 	for i := range memories {
 		ids[i] = memories[i].ID
@@ -613,7 +668,7 @@ func (s *MemoryService) buildMemoryContext(
 	safeGo("memory-use-count-bump", func() {
 		bg := context.Background()
 		for _, id := range ids {
-			if err := s.repo.IncrementUseCount(bg, id); err != nil {
+			if err := s.repo.IncrementUseCount(bg, id, userID, tenantID); err != nil {
 				slog.Warn("memory: increment use_count failed",
 					"memory_id", id.String(), "err", err)
 			}

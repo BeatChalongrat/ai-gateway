@@ -357,9 +357,9 @@ export const en = {
   "memory.empty.hint":
     "Try saying: “My name is Beat and I prefer concise Thai responses.”",
 
-  "memory.suggested.title": "Suggested preferences ({count})",
+  "memory.suggested.title": "Suggested memories ({count})",
   "memory.suggested.description":
-    "AI noticed these patterns. Confirm to activate; reject to dismiss.",
+    "AI picked these up from your chats. Confirm to save one; reject it and it won't be suggested again.",
 
   // ── Memory card ──────────────────────────────────────────
   "memory.type.fact": "fact",
@@ -370,16 +370,34 @@ export const en = {
   "memory.type.fileReference": "file reference",
   "memory.type.inferred": "inferred",
   "memory.card.pinned": "Pinned",
-  "memory.card.savedAgo": "saved {time}",
+  // FIX130 A3c — when (an absolute date AND the relative time) and from
+  // which chat, for saved memories and suggestions alike.
+  "memory.card.savedOn": "Saved {date} ({ago})",
+  "memory.card.suggestedOn": "Suggested {date} ({ago})",
   "memory.card.sourceLabel": "Source:",
-  "memory.card.source.conv": "“{title}” conversation",
-  "memory.card.source.userExplicitConv": "saved from a conversation",
-  "memory.card.source.userExplicitDirect": "direct input",
-  "memory.card.source.assistantInferred": "AI detected from conversation",
+  "memory.card.origin.deletedChat": "a deleted chat",
+  "memory.card.origin.manual": "Added by you",
+  "memory.card.origin.untitledChat": "open the chat",
+  "memory.card.source.userExplicitConv": "saved at your request",
+  "memory.card.source.assistantInferred": "suggested by AI from a chat",
   "memory.card.source.summary": "conversation summary",
   "memory.card.source.artifact": "file event",
-  "memory.card.source.detectedAgo": "detected {time}",
-  "memory.card.source.fromConvAgo": "from a conversation {time}",
+  "memory.category.identity": "identity",
+  "memory.category.personal": "personal",
+  "memory.category.family": "family",
+  "memory.category.work": "work",
+  "memory.category.location": "location",
+  "memory.category.health": "health",
+  "memory.category.diet": "food & diet",
+  "memory.category.language": "language",
+  "memory.category.response_style": "answer style",
+  "memory.category.coding": "coding",
+  "memory.category.workflow": "way of working",
+  "memory.category.project": "project",
+  "memory.category.interest": "interests",
+  "memory.category.preference": "preference",
+  "memory.category.schedule": "schedule",
+  "memory.category.education": "education",
   "memory.card.usedOne": "Used 1 time",
   "memory.card.usedMany": "Used {count} times",
   "memory.card.lastUsed": "last used {time}",
@@ -435,10 +453,10 @@ export const en = {
   // ── Temporary chat section ───────────────────────────────
   "memory.temporary.title": "Temporary chat",
   "memory.temporary.description":
-    "Start a conversation that creates no memory. Your chat history keeps it like any other; nothing in it is remembered afterwards.",
+    "Start a chat that neither uses nor saves memory. It stays in your chat history like any other, but nothing in it is remembered and your saved memories are not used in it.",
   "memory.temporary.button": "Start temporary chat",
   "memory.temporary.toast":
-    "Starting a temporary chat — memory is off for this one.",
+    "Starting a temporary chat — memory is neither used nor saved in this one.",
 
   // ── Data management ──────────────────────────────────────
   "memory.export.title": "Data management",
@@ -488,9 +506,9 @@ export const en = {
   "memory.clear.toastError": "Couldn’t clear memories.",
 
   // ── Suggested-preference toasts ──────────────────────────
-  "memory.toast.preferenceConfirmed": "Preference confirmed.",
+  "memory.toast.preferenceConfirmed": "Memory saved.",
   "memory.toast.preferenceConfirmError": "Couldn’t confirm preference.",
-  "memory.toast.suggestionDismissed": "Suggestion dismissed.",
+  "memory.toast.suggestionDismissed": "Suggestion rejected — it won’t be suggested again.",
   "memory.toast.suggestionDismissError": "Couldn’t dismiss suggestion.",
   "memory.toast.memoryDeleted": "Memory deleted.",
   "memory.toast.memoryDeleteError": "Couldn’t delete memory.",
@@ -571,18 +589,28 @@ export const en = {
   // ── Batch 2 T4 — conversation rows ──────────────────────────
   "conv.untitled": "Untitled",
   "conv.deleteConfirm": "Delete this conversation? This cannot be undone.",
-  "conv.tempChatTooltip": "{title} — temporary chat (memory off)",
+  "conv.tempChatTooltip": "{title} — temporary chat (memory neither used nor saved)",
+  "conv.memoryOffTooltip": "{title} — memory off (neither used nor saved)",
   "common.copy": "Copy",
   "common.delete": "Delete",
 
   // ── Batch 2 T4 — memory indicator ───────────────────────────
-  "memory.indicator.onTooltip": "Memory is active",
-  "memory.indicator.offTooltip": "Memory is off for this chat",
+  // FIX130 A2 — three states, each saying what the chat really does. Memory
+  // off and temporary both neither USE nor SAVE memory (the FIX56.1 read of
+  // saved memories in a memory-off chat is gone, server and page together);
+  // only an ordinary chat can switch memory back on.
+  "memory.indicator.onTooltip": "Memory is on — this chat uses your saved memories",
+  "memory.indicator.offTooltip": "Memory is off for this chat — memory is neither used nor saved",
+  "memory.indicator.temporaryTooltip": "Temporary chat — memory is neither used nor saved",
   "memory.indicator.on": "Memory",
-  "memory.indicator.off": "No memory",
+  "memory.indicator.off": "Memory off",
+  "memory.indicator.temporary": "Temporary chat",
   "memory.popover.on": "Memory is on",
   "memory.popover.off": "Memory is off",
-  "memory.popover.offHint": "Nothing said here will be saved as a memory.",
+  "memory.popover.temporary": "Temporary chat",
+  "memory.popover.offHint": "This chat neither uses nor saves memory.",
+  "memory.popover.temporaryHint":
+    "A temporary chat neither uses nor saves memory, and memory can't be turned on in it.",
   "memory.popover.toggleOff": "Turn off for this chat",
   "memory.popover.toggleOn": "Turn on for this chat",
   "memory.openSettings": "Open Memory Settings",
@@ -590,22 +618,34 @@ export const en = {
   // hidden below the md breakpoint, so this is what carries the state
   // on a narrow window.
   "sidebar.newTemporaryChat": "Temporary chat",
-  "sidebar.newTemporaryChat.tooltip": "A chat that adds nothing new to memory.",
+  "sidebar.newTemporaryChat.tooltip": "A chat that neither uses nor saves memory.",
   "memory.banner.title": "Temporary chat",
   // Both halves, deliberately. "Temporary" reads to most people as "this
   // conversation disappears", which is not what it does — the transcript
   // is kept like any other. Saying only the memory half would let the
-  // product make a promise it does not keep.
+  // product make a promise it does not keep. FIX130: and the name — a
+  // temporary chat is never sent to a model for a title (title_service
+  // planTitle), so it keeps the first words of its first message.
   "memory.banner.detail":
-    "This chat is saved to your history, but nothing new is remembered from it. Your saved memories are still used.",
-  // The wording for a deployment that set TEMPORARY_CHAT_READS_MEMORY=false.
-  "memory.banner.detailStrict":
-    "This chat is saved to your history, but nothing new is remembered from it, and your saved memories are not used.",
+    "It neither uses nor saves memory, and memory can't be turned on here. The chat stays in your history, but it isn't given an AI-made name — it keeps the first words of your first message.",
+  "memory.banner.offTitle": "Memory off",
+  "memory.banner.offDetail":
+    "This chat neither uses your saved memories nor saves anything to memory. It stays in your history as usual.",
   "memory.banner.turnOn": "Turn memory on",
   "memory.toast.offForChat": "Memory turned off for this chat.",
   "memory.toast.onForChat": "Memory turned on for this chat.",
-  "memory.popover.onHint": "AI can remember facts from this conversation.",
-  "memory.indicator.onPendingTooltip": "Memory is active — {n} suggested preference(s) pending",
+  "memory.popover.onHint":
+    "This chat uses your saved memories, saves what you ask it to remember, and may suggest new memories for you to confirm.",
+  "memory.indicator.onPendingTooltip": "Memory is on — {n} suggested memories waiting for you",
+
+  // FIX130 A3a/A3b — markers under an answer.
+  "memory.used.one": "Used 1 memory",
+  "memory.used.many": "Used {n} memories",
+  "memory.used.title": "Saved memories used for this answer",
+  "memory.used.manage": "Manage memory",
+  "memory.used.deletedItem": "(a memory you have since deleted)",
+  "memory.saved.active": "Memory saved",
+  "memory.saved.pending": "New memory suggested — waiting for you to confirm",
 
   // ── Batch 2 T4 — usage panel (CreditBadge) ──────────────────
   "usage.title": "Usage",
@@ -2049,9 +2089,9 @@ const th: Record<DictKey, string> = {
   "memory.empty.hint":
     "ลองพูดว่า: “ผมชื่อ Beat ชอบคำตอบภาษาไทยแบบกระชับ”",
 
-  "memory.suggested.title": "ความชอบที่แนะนำ ({count})",
+  "memory.suggested.title": "ความจำที่เสนอ ({count})",
   "memory.suggested.description":
-    "AI สังเกตพฤติกรรมเหล่านี้ กดยืนยันเพื่อเปิดใช้งาน หรือไม่ใช่เพื่อปฏิเสธ",
+    "AI เก็บสิ่งเหล่านี้จากแชทของคุณ กดยืนยันเพื่อบันทึก หรือกดไม่ใช่เพื่อปฏิเสธ — สิ่งที่ปฏิเสธแล้วจะไม่ถูกเสนออีก",
 
   // Memory card
   "memory.type.fact": "ข้อเท็จจริง",
@@ -2062,16 +2102,32 @@ const th: Record<DictKey, string> = {
   "memory.type.fileReference": "อ้างอิงไฟล์",
   "memory.type.inferred": "อนุมาน",
   "memory.card.pinned": "ปักหมุดไว้",
-  "memory.card.savedAgo": "บันทึกเมื่อ {time}",
+  "memory.card.savedOn": "บันทึกเมื่อ {date} ({ago})",
+  "memory.card.suggestedOn": "เสนอเมื่อ {date} ({ago})",
   "memory.card.sourceLabel": "ที่มา:",
-  "memory.card.source.conv": "สนทนา “{title}”",
-  "memory.card.source.userExplicitConv": "บันทึกจากการสนทนา",
-  "memory.card.source.userExplicitDirect": "เพิ่มโดยตรง",
-  "memory.card.source.assistantInferred": "AI ตรวจพบจากการสนทนา",
+  "memory.card.origin.deletedChat": "แชทที่ถูกลบแล้ว",
+  "memory.card.origin.manual": "เพิ่มเอง",
+  "memory.card.origin.untitledChat": "เปิดแชทต้นทาง",
+  "memory.card.source.userExplicitConv": "บันทึกตามที่คุณขอ",
+  "memory.card.source.assistantInferred": "AI เสนอจากแชท",
   "memory.card.source.summary": "สรุปการสนทนา",
   "memory.card.source.artifact": "เหตุการณ์ไฟล์",
-  "memory.card.source.detectedAgo": "ตรวจพบเมื่อ {time}",
-  "memory.card.source.fromConvAgo": "จากการสนทนาเมื่อ {time}",
+  "memory.category.identity": "ข้อมูลตัวตน",
+  "memory.category.personal": "เรื่องส่วนตัว",
+  "memory.category.family": "ครอบครัว",
+  "memory.category.work": "งาน",
+  "memory.category.location": "ที่อยู่อาศัย",
+  "memory.category.health": "สุขภาพ",
+  "memory.category.diet": "อาหาร",
+  "memory.category.language": "ภาษา",
+  "memory.category.response_style": "รูปแบบคำตอบ",
+  "memory.category.coding": "การเขียนโค้ด",
+  "memory.category.workflow": "วิธีทำงาน",
+  "memory.category.project": "โปรเจกต์",
+  "memory.category.interest": "สิ่งที่สนใจ",
+  "memory.category.preference": "ความชอบ",
+  "memory.category.schedule": "ตารางเวลา",
+  "memory.category.education": "การศึกษา",
   "memory.card.usedOne": "ใช้ไปแล้ว 1 ครั้ง",
   "memory.card.usedMany": "ใช้ไปแล้ว {count} ครั้ง",
   "memory.card.lastUsed": "ครั้งล่าสุดเมื่อ {time}",
@@ -2127,10 +2183,10 @@ const th: Record<DictKey, string> = {
   // Temporary chat
   "memory.temporary.title": "แชทชั่วคราว",
   "memory.temporary.description":
-    "เริ่มสนทนาที่จะไม่สร้างความจำใหม่ แชทนี้ยังอยู่ในประวัติตามปกติ เพียงแต่จะไม่ถูกจดจำหลังจากนั้น",
+    "เริ่มแชทที่ไม่ใช้และไม่บันทึกความจำ แชทยังอยู่ในประวัติตามปกติ แต่จะไม่มีอะไรในแชทนี้ถูกจดจำ และจะไม่ใช้ความจำที่บันทึกไว้",
   "memory.temporary.button": "เริ่มแชทชั่วคราว",
   "memory.temporary.toast":
-    "เริ่มแชทชั่วคราว — ปิดความจำเฉพาะแชทนี้",
+    "เริ่มแชทชั่วคราว — แชทนี้ไม่ใช้และไม่บันทึกความจำ",
 
   // Data management
   "memory.export.title": "จัดการข้อมูล",
@@ -2180,9 +2236,9 @@ const th: Record<DictKey, string> = {
   "memory.clear.toastError": "ล้างความจำไม่สำเร็จ",
 
   // Suggested-preference toasts
-  "memory.toast.preferenceConfirmed": "ยืนยันความชอบแล้ว",
+  "memory.toast.preferenceConfirmed": "บันทึกความจำแล้ว",
   "memory.toast.preferenceConfirmError": "ยืนยันความชอบไม่สำเร็จ",
-  "memory.toast.suggestionDismissed": "ปิดคำแนะนำแล้ว",
+  "memory.toast.suggestionDismissed": "ปฏิเสธแล้ว — จะไม่ถูกเสนออีก",
   "memory.toast.suggestionDismissError": "ปิดคำแนะนำไม่สำเร็จ",
   "memory.toast.memoryDeleted": "ลบความจำแล้ว",
   "memory.toast.memoryDeleteError": "ลบความจำไม่สำเร็จ",
@@ -2260,33 +2316,49 @@ const th: Record<DictKey, string> = {
   // ── Batch 2 T4 — conversation rows ──────────────────────────
   "conv.untitled": "ไม่มีชื่อ",
   "conv.deleteConfirm": "ลบบทสนทนานี้หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้",
-  "conv.tempChatTooltip": "{title} — แชทชั่วคราว (ปิดความจำ)",
+  "conv.tempChatTooltip": "{title} — แชทชั่วคราว (ไม่ใช้และไม่บันทึกความจำ)",
+  "conv.memoryOffTooltip": "{title} — ปิดความจำ (ไม่ใช้และไม่บันทึกความจำ)",
   "common.copy": "คัดลอก",
   "common.delete": "ลบ",
 
   // ── Batch 2 T4 — memory indicator ───────────────────────────
-  "memory.indicator.onTooltip": "ความจำทำงานอยู่",
-  "memory.indicator.offTooltip": "ปิดความจำสำหรับแชทนี้",
+  "memory.indicator.onTooltip": "เปิดความจำอยู่ — แชทนี้ใช้ความจำที่บันทึกไว้",
+  "memory.indicator.offTooltip": "ปิดความจำสำหรับแชทนี้ — ไม่ใช้และไม่บันทึกความจำ",
+  "memory.indicator.temporaryTooltip": "แชทชั่วคราว — ไม่ใช้และไม่บันทึกความจำ",
   "memory.indicator.on": "ความจำ",
-  "memory.indicator.off": "ไม่บันทึกความจำ",
+  "memory.indicator.off": "ปิดความจำ",
+  "memory.indicator.temporary": "แชทชั่วคราว",
   "memory.popover.on": "เปิดความจำอยู่",
   "memory.popover.off": "ปิดความจำอยู่",
-  "memory.popover.offHint": "สิ่งที่คุยในแชทนี้จะไม่ถูกบันทึกเป็นความจำ",
+  "memory.popover.temporary": "แชทชั่วคราว",
+  "memory.popover.offHint": "แชทนี้ไม่ใช้และไม่บันทึกความจำ",
+  "memory.popover.temporaryHint":
+    "แชทชั่วคราวไม่ใช้และไม่บันทึกความจำ และเปิดความจำในแชทนี้ไม่ได้",
   "memory.popover.toggleOff": "ปิดสำหรับแชทนี้",
   "memory.popover.toggleOn": "เปิดสำหรับแชทนี้",
   "memory.openSettings": "เปิดการตั้งค่าความจำ",
   "sidebar.newTemporaryChat": "แชทชั่วคราว",
-  "sidebar.newTemporaryChat.tooltip": "แชทที่จะไม่จดจำอะไรใหม่",
+  "sidebar.newTemporaryChat.tooltip": "แชทที่ไม่ใช้และไม่บันทึกความจำ",
   "memory.banner.title": "แชทชั่วคราว",
   "memory.banner.detail":
-    "แชทนี้จะถูกบันทึกในประวัติ แต่จะไม่มีการจดจำอะไรใหม่จากแชทนี้ · ยังใช้ความจำเดิมได้",
-  "memory.banner.detailStrict":
-    "แชทนี้จะถูกบันทึกในประวัติ แต่จะไม่มีการจดจำอะไรใหม่จากแชทนี้ และจะไม่ใช้ความจำเดิม",
+    "ไม่ใช้และไม่บันทึกความจำ และเปิดความจำในแชทนี้ไม่ได้ แชทยังอยู่ในประวัติ แต่ AI จะไม่ตั้งชื่อให้ — ใช้คำแรก ๆ ของข้อความแรกเป็นชื่อ",
+  "memory.banner.offTitle": "ปิดความจำ",
+  "memory.banner.offDetail":
+    "แชทนี้ไม่ใช้ความจำที่บันทึกไว้ และไม่บันทึกอะไรเป็นความจำ แชทยังอยู่ในประวัติตามปกติ",
   "memory.banner.turnOn": "เปิดความจำ",
   "memory.toast.offForChat": "ปิดความจำสำหรับแชทนี้แล้ว",
   "memory.toast.onForChat": "เปิดความจำสำหรับแชทนี้แล้ว",
-  "memory.popover.onHint": "AI สามารถจดจำข้อมูลจากบทสนทนานี้ได้",
-  "memory.indicator.onPendingTooltip": "ความจำทำงานอยู่ — มีความชอบที่แนะนำ {n} รายการรอยืนยัน",
+  "memory.popover.onHint":
+    "แชทนี้ใช้ความจำที่บันทึกไว้ บันทึกสิ่งที่คุณขอให้จำ และอาจเสนอความจำใหม่ให้คุณยืนยัน",
+  "memory.indicator.onPendingTooltip": "เปิดความจำอยู่ — มีความจำที่เสนอ {n} รายการรอคุณยืนยัน",
+
+  "memory.used.one": "ใช้ความจำ 1 รายการ",
+  "memory.used.many": "ใช้ความจำ {n} รายการ",
+  "memory.used.title": "ความจำที่ใช้ในคำตอบนี้",
+  "memory.used.manage": "จัดการความจำ",
+  "memory.used.deletedItem": "(ความจำที่ลบแล้ว)",
+  "memory.saved.active": "บันทึกความจำแล้ว",
+  "memory.saved.pending": "เสนอความจำใหม่ — รอยืนยัน",
 
   // ── Batch 2 T4 — usage panel (CreditBadge) ──────────────────
   "usage.title": "การใช้งาน",

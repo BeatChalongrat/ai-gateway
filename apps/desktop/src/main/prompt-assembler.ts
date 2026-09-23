@@ -29,7 +29,11 @@ export interface PromptInputs {
   grantedFolders?: readonly string[];
   conversationId: string;
   activeProject: ProjectDto | null;
+  /** The chat's memory switch (chat-edge conversations.memory_enabled). */
   memoryEnabled: boolean;
+  /** FIX130 A2 — the chat was started as temporary (conversations.is_temporary).
+   *  A temporary chat reads and writes no memory whatever its switch says. */
+  isTemporary?: boolean;
   toolsAvailable: boolean;
   /** FIX2: the user's saved writing-style profile (settings key
    * writingStyleProfile); empty/undefined = none. */
@@ -103,12 +107,46 @@ export function dateTimeBlock(now: Date): string {
 
 /** FIX112 Part A — the three sentences are chat-edge's prompt_temporary_chat.txt,
  *  byte for byte (fix112-prompt-pins.test.ts). The envelope is this side's:
- *  a heading here, `<temporary_chat>` plus a lead-in sentence on the web. */
+ *  a heading here, `<temporary_chat>` plus a lead-in sentence on the web.
+ *
+ *  FIX130 A2 — the asset now also says the saved memories are not given to
+ *  the model (memory off reads nothing any more), and the lead-in is one of
+ *  two, because memory off and temporary are two different switches: a
+ *  temporary chat can never have memory, while memory switched off on an
+ *  ordinary chat can be switched back on. Both lead-ins are chat-edge's
+ *  temporaryChatLead / memoryOffLead, word for word (pinned). */
 export const TEMPORARY_CHAT_BODY =
-  "Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one.\n" +
-  "If the user asks you to remember something, tell them plainly that you cannot in a temporary chat, and that they can turn memory back on for it. Never say or imply that you have saved, noted, or will recall anything.\n" +
+  "Nothing said here will be remembered: you have no tool that can save anything, and no fact, preference, or instruction stated in this conversation will be available in any later one. The user's saved memories are not given to you in this chat either.\n" +
+  "If the user asks you to remember something, tell them plainly that you cannot in this chat. Never say or imply that you have saved, noted, or will recall anything.\n" +
   "The conversation itself is still saved to the user's chat history as normal — it is the remembering that is off, not the record.";
-const TEMPORARY_CHAT_NOTICE = `\n\n## Temporary chat\n${TEMPORARY_CHAT_BODY}\n`;
+export const TEMPORARY_CHAT_LEAD = "This is a temporary chat: it neither uses nor saves memory, and memory cannot be turned on in it.";
+export const MEMORY_OFF_LEAD = "Memory is off for this chat; the user can turn it back on for this chat.";
+const TEMPORARY_CHAT_NOTICE = `\n\n## Temporary chat\n${TEMPORARY_CHAT_LEAD}\n${TEMPORARY_CHAT_BODY}\n`;
+const MEMORY_OFF_NOTICE = `\n\n## Memory off\n${MEMORY_OFF_LEAD}\n${TEMPORARY_CHAT_BODY}\n`;
+
+/** FIX130 A2 — may this conversation read or write memory? Memory switched on
+ *  AND not a temporary chat: the same question chat-edge's
+ *  Conversation.MemoryActive answers, so "memory off" and "temporary" mean one
+ *  thing in both clients — nothing read, nothing written. An absent field
+ *  means on (memory) / not temporary, so a server build that never sends
+ *  either cannot silently change what a chat does. */
+export function memoryActive(conversation: { memory_enabled?: boolean | null; is_temporary?: boolean | null } | null | undefined): boolean {
+  return conversation?.memory_enabled !== false && conversation?.is_temporary !== true;
+}
+
+/** FIX130 A3d — one memory the prompt carried this turn, for the page's
+ *  "ใช้ความจำ N รายการ" chip (the `memory_used` turn event). A server memory
+ *  keeps its id; a local sidecar note has none and is named `local:<n>`. */
+export interface MemoryUsedItem {
+  id: string;
+  label: string;
+}
+/** chat-edge's frame carries labels of at most 80 characters plus an ellipsis. */
+const MEMORY_LABEL_MAX = 80;
+export function memoryLabel(content: string): string {
+  const chars = Array.from(content.replace(/\s+/g, " ").trim());
+  return chars.length <= MEMORY_LABEL_MAX ? chars.join("") : chars.slice(0, MEMORY_LABEL_MAX).join("") + "…";
+}
 
 /** FIX112 Part A — the memory frame's two shared sentences: chat-edge's
  *  prompt_memory_frame.txt, line 1 and line 2 (pinned). The facts sentence
@@ -303,32 +341,22 @@ export class PromptAssembler {
   private serverMemories: MemoryNote[] = [];
   private serverMemoriesAt = 0;
 
-  /** FIX56.1 — what a temporary chat does with the memories already on
-   * file. true (the default): read them, write none. false: read nothing
-   * either, the older and stricter behaviour, kept as a setting because
-   * an organisation may want the seal to run in both directions.
-   *
-   * It moves the READ side only, on purpose. Nothing reachable from here
-   * can enable a write in a memory-off chat: the memory tools are
-   * withheld from the request and `remember` is refused at dispatch, and
-   * neither of those consults this flag. Mirrors the server's
-   * TEMPORARY_CHAT_READS_MEMORY so the two clients cannot disagree about
-   * what the same switch means. */
-  private readonly tempChatReadsMemory: boolean;
-
+  // FIX130 A2 — the FIX56.1 tempChatReadsMemory setting is gone: a memory-off
+  // or temporary chat reads nothing, the same rule chat-edge now applies (its
+  // TEMPORARY_CHAT_READS_MEMORY is no longer read either). An old
+  // `temporaryChatReadsMemory` key in the app's config file is ignored.
   constructor(
     private readonly chatEdge: ChatEdgeClient,
     private readonly log: Logger,
-    opts: { tempChatReadsMemory?: boolean } = {},
-  ) {
-    this.tempChatReadsMemory = opts.tempChatReadsMemory !== false;
-  }
+  ) {}
 
-  /** Read by the turn coordinator so its "memory is off" log line reports
-   * what this build actually does, rather than a sentence that was true
-   * when it was written. */
-  get temporaryChatReadsMemory(): boolean {
-    return this.tempChatReadsMemory;
+  /** FIX130 A4b — the Memory page changed the saved memories (edit, delete,
+   *  accept, reject, add, clear — host op `memory.changed`), or this host's own
+   *  `remember` just saved one: the next turn reads them again instead of
+   *  answering from the 60 s cache. Before this an edit or delete took up to a
+   *  minute to reach the desktop's answers. */
+  invalidateServerMemories(): void {
+    this.serverMemoriesAt = 0;
   }
 
   async buildSystemPrompt(inputs: PromptInputs): Promise<string> {
@@ -340,7 +368,7 @@ export class PromptAssembler {
    * ("a saved memory contains …") instead of naming no cause. The first-party
    * text (base prompt, artifact dialect) is not a part: it is covered by the
    * CI tripwire and the user cannot edit it. */
-  async buildSystemPromptParts(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
+  async buildSystemPromptParts(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[]; memoryUsed: MemoryUsedItem[] }> {
     const parts: PromptPart[] = [];
     let prompt = baseSystemPrompt(inputs.homeDirectory, inputs.toolsAvailable, inputs.grantedFolders ?? []);
     // FIX113 — the web's layer 2. Measured before this existed: asked the
@@ -386,7 +414,7 @@ Web search is turned on in this app but your organisation has NOT enabled it for
     const notes = await this.notesBlock(inputs);
     prompt += notes.text;
     parts.push(...notes.parts);
-    return { text: prompt, parts };
+    return { text: prompt, parts, memoryUsed: notes.used };
   }
 
   /** The durable-memory prologue — a faithful port of
@@ -409,15 +437,18 @@ Web search is turned on in this app but your organisation has NOT enabled it for
    * read nor wrote memory, while here the notes the `remember` tool had written
    * were still read back into every prompt. One switch, one meaning.
    *
-   * FIX56.1 — what that one meaning IS has since moved. A memory-off chat now
-   * reads both stores and writes to neither (see tempChatReadsMemory); the
-   * asymmetry the paragraph above was written to kill is still gone, because
-   * the two stores are still treated identically. The write side is unchanged:
-   * the memory tools are withheld and `remember` is refused at dispatch. */
-  private async notesBlock(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[] }> {
-    const mayRead = inputs.memoryEnabled || this.tempChatReadsMemory;
+   * FIX56.1 had a memory-off chat READ both stores and write neither.
+   *
+   * FIX130 A2 — memory off means off again, and a temporary chat is off
+   * whatever its switch says: neither store is read, the server is not even
+   * asked, and the prompt says which of the two this chat is. The two stores
+   * still move together — the asymmetry above stays dead. The write side is
+   * unchanged: the memory tools are withheld and `remember` is refused at
+   * dispatch. */
+  private async notesBlock(inputs: PromptInputs): Promise<{ text: string; parts: PromptPart[]; used: MemoryUsedItem[] }> {
+    const mayRead = inputs.memoryEnabled && inputs.isTemporary !== true;
     const server = await this.serverMemoriesFor(mayRead);
-    const localGlobal = mayRead ? (inputs.localGlobalNotes ?? []) : [];
+    const localGlobal: MemoryNote[] = mayRead ? (inputs.localGlobalNotes ?? []).map((n, i) => ({ ...n, id: `local:${i}` })) : [];
     const localConversation = mayRead ? (inputs.localConversationNotes ?? []) : [];
 
     const merged = mergeGlobalMemories(localGlobal, server);
@@ -427,8 +458,10 @@ Web search is turned on in this app but your organisation has NOT enabled it for
     // tool attached" is not the same as "the model knows it cannot
     // remember", and without being told it answers "got it, I'll remember
     // that" in a chat where nothing can be saved.
-    if (!inputs.memoryEnabled) out += TEMPORARY_CHAT_NOTICE;
-    out += renderGlobalBlock(merged);
+    if (inputs.isTemporary === true) out += TEMPORARY_CHAT_NOTICE;
+    else if (!inputs.memoryEnabled) out += MEMORY_OFF_NOTICE;
+    const global = renderGlobalBlock(merged);
+    out += global.text;
     out += renderConversationBlock(localConversation);
     // FIX22 §1b: each note is its own labelled part (its fix location differs
     // by store: server memory vs local note vs conversation note).
@@ -436,7 +469,10 @@ Web search is turned on in this app but your organisation has NOT enabled it for
     for (const n of localGlobal) parts.push({ ...PROMPT_PART.localGlobalNote, text: n.content });
     for (const n of server) parts.push({ ...PROMPT_PART.serverMemory, text: n.content });
     for (const n of localConversation) parts.push({ ...PROMPT_PART.localConversationNote, text: n.content });
-    return { text: out, parts };
+    // FIX130 A3d — what the global block actually carried (its size cap can
+    // leave older notes out), for the page's "memory used" chip.
+    const used = global.rendered.map((n, i) => ({ id: n.id ?? `local:${i}`, label: memoryLabel(n.content) }));
+    return { text: out, parts, used };
   }
 
   /** chat-edge's global_user memories (60 s cache, best-effort). Gated the
@@ -448,7 +484,7 @@ Web search is turned on in this app but your organisation has NOT enabled it for
         const memories = await this.chatEdge.listGlobalMemories(100);
         this.serverMemories = memories
           .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
-          .map((m) => ({ content: m.content, createdAt: m.created_at ?? "", memoryType: m.memory_type }));
+          .map((m) => ({ id: m.id, content: m.content, createdAt: m.created_at ?? "", memoryType: m.memory_type }));
         this.serverMemoriesAt = Date.now();
       } catch (err) {
         this.log.info(`Could not read server memories: ${(err as Error).message}`);
@@ -463,6 +499,8 @@ Web search is turned on in this app but your organisation has NOT enabled it for
 /** One global memory as the prompt sees it. `memoryType` is the server's
  * class (see MemoryDto); local sidecar notes carry none and render as facts. */
 interface MemoryNote {
+  /** FIX130 A3d — the server memory's id, or `local:<n>` for a sidecar note. */
+  id?: string;
   content: string;
   createdAt: string;
   memoryType?: string;
@@ -501,10 +539,11 @@ const INSTRUCTION_MEMORY_TYPES = new Set(["confirmed_instruction", "response_pre
  * follow, facts to use when relevant and not force in. Local sidecar notes
  * carry no class and stay facts. Newest-first order and the size cap are
  * unchanged. */
-function renderGlobalBlock(notes: MemoryNote[]): string {
-  if (notes.length === 0) return "";
+function renderGlobalBlock(notes: MemoryNote[]): { text: string; rendered: MemoryNote[] } {
+  if (notes.length === 0) return { text: "", rendered: [] };
   const instructions: string[] = [];
   const facts: string[] = [];
+  const rendered: MemoryNote[] = [];
   let used = 0;
   let omitted = 0;
   for (let i = notes.length - 1; i >= 0; i--) {
@@ -515,6 +554,7 @@ function renderGlobalBlock(notes: MemoryNote[]): string {
       break;
     }
     (n.memoryType && INSTRUCTION_MEMORY_TYPES.has(n.memoryType) ? instructions : facts).push(line);
+    rendered.push(n);
     used += line.length;
   }
   let out = "\n\n## Memory (global)\n";
@@ -528,7 +568,7 @@ function renderGlobalBlock(notes: MemoryNote[]): string {
   }
   if (omitted > 0) out += `(+${omitted} older note(s) omitted)\n`;
   out += MEMORY_CLOSING_LINE + "\n";
-  return out;
+  return { text: out, rendered };
 }
 
 /** AgentNotesFormatter's conversation half: keep newest under the cap, then

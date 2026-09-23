@@ -90,11 +90,6 @@ type MessageService struct {
 	// Optional. Builds the <saved_user_memory> system-prompt block
 	// (S1 — Personal Memory Core). Gated by conv.MemoryEnabled.
 	memorySvc MemoryReader
-	// FIX56.1 — whether a memory-off (temporary) conversation still
-	// READS the saved memories. Writing stays off either way. Default
-	// true; operators set TEMPORARY_CHAT_READS_MEMORY=false for the
-	// stricter "seal it in both directions" behaviour.
-	tempChatReadsMemory bool
 	// Optional. Dispatches AI tool_calls (save_memory, list_memories
 	// today; future tools register here). Same MemoryEnabled gate
 	// hides the tools from the gateway request when the toggle is
@@ -281,10 +276,6 @@ type MemoryReader interface {
 	// FIX58 — projectID selects the disjoint set to read: nil for a
 	// general chat, the project's id inside a project.
 	BuildMemoryContextWithSources(ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID) (string, []ContextSource)
-	// FIX56.1 — the same block with the use_count / last_used_at
-	// accounting suppressed, for a temporary chat that may read
-	// memory but must not leave a mark on it.
-	BuildMemoryContextTraceless(ctx context.Context, userID, tenantID uuid.UUID, projectID *uuid.UUID) (string, []ContextSource)
 }
 
 // ExcelLookup is the slice of the file repo the Phase 4 Excel
@@ -340,20 +331,7 @@ func NewMessageService(
 		maxContext:             maxContext,
 		imageGenerationTimeout: 180 * time.Second,
 		broker:                 NewStreamBroker(),
-		tempChatReadsMemory:    true,
 	}
-}
-
-// SetTemporaryChatReadsMemory applies the deployment's
-// TEMPORARY_CHAT_READS_MEMORY setting. False restores the pre-FIX56.1
-// behaviour where a memory-off conversation reads nothing either.
-//
-// This only ever moves the READ side. Nothing here can enable a write
-// in a temporary chat: the tool is not attached, state extraction and
-// preference extraction are gated separately on conv.MemoryEnabled, and
-// none of those gates consult this flag.
-func (s *MessageService) SetTemporaryChatReadsMemory(v bool) {
-	s.tempChatReadsMemory = v
 }
 
 // teeStream mirrors the pump channel into the resume broker keyed by
@@ -677,6 +655,11 @@ func (s *MessageService) SetMemoryService(m *MemoryService) {
 	s.memorySvc = m
 	if m != nil {
 		s.toolExec = NewToolExecutor(m)
+		// FIX130 A2 — the memory tools re-check the conversation at
+		// execution time (nil-guarded: a typed-nil repo would panic).
+		if s.conversations != nil {
+			s.toolExec.SetConversationLookup(s.conversations)
+		}
 		// If the state service was wired BEFORE memory, re-attach it
 		// here so the executor exposes the S3 tool too.
 		if s.stateSvc != nil {
@@ -1101,6 +1084,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 				ConversationID: conv.ID,
 				ProjectID:      conv.ProjectID,
 				Sources:        sourcesAcc,
+				UserMessage:    in.Content, // FIX130 — explicit-remember check
 				CloudToolAllow: cloudAllow,             // FIX16 §1.4 — nil on interactive turns
 				WithheldHit:    &withheldToolRequested, // set if a withheld tool is asked for
 			})
@@ -1343,6 +1327,12 @@ type StreamUpdate struct {
 	// the turn silently degrading to text-only. Informational, never an
 	// error: the turn still proceeds with whatever images did resolve.
 	ImageNotice *ImageAttachNotice
+
+	// FIX130 A3 — this turn injected saved memories (enqueued before the
+	// pump, like ImageNotice) / a save_memory call succeeded mid-turn. The
+	// handler emits memory_used / memory_saved; see memory_notice.go.
+	MemoryUsed  *MemoryUsedNotice
+	MemorySaved *MemorySavedNotice
 }
 
 // ImageAttachNotice is the payload of the “image_notice“ client event:
@@ -1631,6 +1621,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 	// pre-pump enqueue guarantees it's the first frame the client sees.
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
+	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1644,6 +1635,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
+			UserMessage:    in.Content, // FIX130 — explicit-remember check
 		},
 		out:   ch,
 		canon: canonState,
@@ -1966,6 +1958,7 @@ func (s *MessageService) openAssistantStream(
 	ch := make(chan StreamUpdate, 16)
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
+	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -1979,6 +1972,7 @@ func (s *MessageService) openAssistantStream(
 			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
+			UserMessage:    ragQuery, // FIX130 — the user message being answered
 		},
 		out:   ch,
 		canon: canonState,
@@ -2259,6 +2253,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	ch := make(chan StreamUpdate, 16)
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
+	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -2272,6 +2267,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 			ProjectID:      conv.ProjectID,
 			MessageID:      asstMsg.ID,
 			Sources:        sourcesAcc,
+			UserMessage:    ragQuery, // FIX130 — the user message being answered
 		},
 		out:   ch,
 		canon: canonState,
@@ -2514,7 +2510,7 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		in.PptxContext = s.pptxContext(ctx, tenantID, conv.ID, office.Pptx)
 		in.CanvasContext = s.canvasContext(ctx, tenantID, conv.ID)
 	}
-	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc, s.tempChatReadsMemory)
+	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc)
 	return pc.Build(ctx, in)
 }
 
@@ -3199,15 +3195,15 @@ const (
 //
 // Disabled when:
 //   - the state service isn't wired (tests, legacy builds)
-//   - conv.MemoryEnabled is false (temporary chat — the user
-//     opted out of persisted state)
+//   - the conversation's memory is not active (switched off, or a
+//     temporary chat — FIX130 A2: Conversation.MemoryActive)
 //
 // Read uses background ctx so the trigger survives the request
 // ctx cancellation that fires on stream completion.
 func (s *MessageService) maybeUpdateConversationState(
 	parent context.Context, conv *model.Conversation,
 ) {
-	if s.stateSvc == nil || conv == nil || !conv.MemoryEnabled {
+	if s.stateSvc == nil || !conv.MemoryActive() {
 		return
 	}
 
@@ -3241,21 +3237,35 @@ func (s *MessageService) maybeUpdateConversationState(
 	})
 }
 
-// preferenceExtractAtMessages — minimum conversation size before
-// the S8 background pattern learner runs. Higher than the S3
-// state trigger (10) because preference patterns need MORE signal
-// to surface reliably; one short conversation rarely shows a
-// behaviour.
-const preferenceExtractAtMessages = 20
+// AfterImport is the ImportService hook (FIX130 A1): a desktop turn reaches
+// chat-edge only through the import path, so this is where a desktop chat
+// meets the same memory-extraction trigger a web turn meets in
+// finalizeConversation. The trigger's own gates apply unchanged (memory
+// active, two turns, watermark, one run in flight).
+func (s *MessageService) AfterImport(ctx context.Context, tenantID, convID uuid.UUID) {
+	if s.prefExtractor == nil {
+		return
+	}
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		return
+	}
+	s.maybeExtractPreferences(ctx, conv)
+}
 
-// maybeExtractPreferences fires the S8 PreferenceExtractor at most
-// ONCE per conversation, on a background goroutine, when:
+// maybeExtractPreferences fires the memory extractor (S8, reworked in
+// FIX130 A1e) on a background goroutine when:
 //   - the extractor is wired
-//   - the conv has memory enabled (temp chats opt out — they
-//     mustn't surface suggestions either)
-//   - the conv has crossed preferenceExtractAtMessages messages
-//   - no inferred_preference row from THIS conv exists yet (dedup
-//     check via the source_conversation_id filter)
+//   - the conversation's memory is active (on, and not a temporary chat —
+//     neither of those may surface suggestions)
+//   - the chat holds at least memoryExtractFirstAt messages (two user
+//     turns with their answers), and at least memoryExtractEvery messages
+//     arrived since the last run read it (the watermark)
+//   - no other run for this conversation is in flight (the claim)
+//
+// The run reads only the messages after the watermark and moves it past
+// them when it got an answer (a gateway failure is retried at the next
+// trigger). See the policy constants in preference_extractor.go.
 //
 // Same async-on-background-ctx pattern as
 // maybeUpdateConversationState so the user's response is never
@@ -3263,45 +3273,44 @@ const preferenceExtractAtMessages = 20
 func (s *MessageService) maybeExtractPreferences(
 	parent context.Context, conv *model.Conversation,
 ) {
-	if s.prefExtractor == nil || conv == nil || !conv.MemoryEnabled {
+	if s.prefExtractor == nil || !conv.MemoryActive() {
 		return
 	}
+	e := s.prefExtractor
 
 	count, err := s.messages.CountMessages(parent, conv.TenantID, conv.ID)
 	if err != nil {
 		return
 	}
-	if count < preferenceExtractAtMessages {
+	since := e.marks.Watermark(parent, conv.ID)
+	if count < since {
+		// Messages went away (a branch switch, a deletion): what is there
+		// now was read already or is older than what was.
+		e.marks.SetWatermark(parent, conv.ID, count)
 		return
 	}
-
-	// Only extract once per conversation. We use the memory service's
-	// list path with the source_conversation_id field on a single
-	// scan — cheaper than a dedicated count query for a row that
-	// realistically has at most a handful of suggestions.
-	existing, err := s.prefExtractor.memoryRepo.ListByUser(
-		parent, conv.UserID, conv.TenantID, repository.MemoryListFilters{
-			MemoryType: model.MemoryTypeInferredPreference,
-			Status:     model.MemoryStatusPendingConfirmation,
-			Limit:      100,
-		},
-	)
-	if err == nil {
-		for i := range existing {
-			if existing[i].SourceConversationID != nil && *existing[i].SourceConversationID == conv.ID {
-				return // already extracted from this conv
-			}
-		}
+	if count < memoryExtractFirstAt || count-since < memoryExtractEvery {
+		return
+	}
+	if !e.marks.TryClaim(parent, conv.ID) {
+		return // a run for this conversation is already in flight
 	}
 
 	convID, userID, tenantID := conv.ID, conv.UserID, conv.TenantID
+	release := func() { e.marks.Release(context.Background(), convID) }
 	// FIX126 O1 — runs once the conversation has no turn in flight.
-	s.runWhenTurnIdle("preference-extraction", convID, func(bg context.Context) {
-		if _, err := s.prefExtractor.ExtractPreferences(bg, convID, userID, tenantID); err != nil {
+	s.runWhenTurnIdleOr("preference-extraction", convID, func(bg context.Context) {
+		defer release()
+		res, err := e.extract(bg, convID, userID, tenantID, since)
+		if err != nil {
 			slog.Warn("preference extraction failed",
 				"conv", convID.String(), "err", err)
+			return
 		}
-	})
+		if res.advances() {
+			e.marks.SetWatermark(bg, convID, res.seen)
+		}
+	}, release)
 }
 
 // persistError saves a placeholder assistant row with status=error
@@ -3746,7 +3755,7 @@ func applyContextHints(h *RoutingHints, cc *CompiledContext) {
 // <conversation_state> block, injected as a user/assistant pair at the
 // head of the sent history when compaction happens. nil-safe.
 func (s *MessageService) stateBlockBuilder(ctx context.Context, conv *model.Conversation, userID, tenantID uuid.UUID) func() (string, []ContextSource) {
-	if s.stateSvc == nil || conv == nil || !conv.MemoryEnabled {
+	if s.stateSvc == nil || !conv.MemoryActive() {
 		return nil
 	}
 	return func() (string, []ContextSource) {
@@ -3840,7 +3849,9 @@ func (s *MessageService) ManualCompactWithProgress(
 	if conv.UserID != userID {
 		return nil, ErrMessageConversationNotFound
 	}
-	if !conv.MemoryEnabled {
+	// FIX130 A2 — a temporary chat keeps no summary either, whatever its
+	// memory flag says.
+	if !conv.MemoryActive() {
 		return nil, ErrMessageMemoryOff
 	}
 	latest, err := s.messages.ListContextByConversation(ctx, tenantID, convID, 1)

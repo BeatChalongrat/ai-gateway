@@ -22,6 +22,9 @@ var (
 	ErrConversationNotFound = errors.New("conversation: not found")
 	ErrConversationDenied   = errors.New("conversation: access denied")
 	ErrConversationBadModel = errors.New("conversation: model not allowed")
+	// ErrConversationTemporaryMemory — FIX130 A2: memory cannot be switched
+	// on in a temporary chat; that chat neither reads nor writes memory.
+	ErrConversationTemporaryMemory = errors.New("conversation: memory cannot be turned on in a temporary chat")
 )
 
 // ModelChecker is the small contract the service needs from the
@@ -247,8 +250,15 @@ func (s *ConversationService) SetKnowledgeBase(
 func (s *ConversationService) SetMemoryEnabled(
 	ctx context.Context, tenantID, userID, convID uuid.UUID, enabled bool,
 ) error {
-	if _, err := s.AssertOwnership(ctx, tenantID, userID, convID); err != nil {
+	conv, err := s.AssertOwnership(ctx, tenantID, userID, convID)
+	if err != nil {
 		return err
+	}
+	// FIX130 A2 — temporary means no memory, and that is not a switch the
+	// chat can flip later. (Every memory gate also checks IsTemporary, so a
+	// row switched on before this refusal existed stays sealed anyway.)
+	if enabled && conv.IsTemporary {
+		return ErrConversationTemporaryMemory
 	}
 	if err := s.conversations.UpdateMemoryEnabled(ctx, tenantID, convID, enabled); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

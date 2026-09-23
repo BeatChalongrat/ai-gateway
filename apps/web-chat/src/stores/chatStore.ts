@@ -15,6 +15,7 @@
 import { create } from "zustand";
 
 import { bumpUsageVersion } from "@/hooks/useUsage";
+import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { api, ApiError } from "@/lib/api";
 import { HOSTED_MODE } from "@/lib/auth";
 import { bridge, usingBridgeTransport } from "@/lib/bridge";
@@ -24,6 +25,7 @@ import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outbox
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
+import { mergeMemorySaved, parseMemoryUsed } from "@/lib/memoryMarkers";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
@@ -3145,6 +3147,43 @@ async function consumeStream(
             };
           });
         }
+      } else if (evt.event === "memory_used") {
+        // FIX130 A3a — saved memories went into this answer's prompt. Sent
+        // once, before the first word (chat-edge, or the desktop host over
+        // the bridge), and replayed from the ledger on a reattach, so the
+        // "used N memories" chip is on the answer while it streams.
+        const used = parseMemoryUsed(evt.data);
+        if (used) {
+          const id = realAssistantId ?? tempAsstId;
+          set((s) => {
+            const list = s.messages[convId] ?? [];
+            return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, memory_used: used } : m)) } };
+          });
+        }
+      } else if (evt.event === "memory_saved") {
+        // FIX130 A3b — a save_memory call in this turn stored a memory
+        // (active) or queued a suggestion (pending_confirmation). A turn can
+        // save more than once; a replayed frame updates in place.
+        const id = realAssistantId ?? tempAsstId;
+        let pending = false;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) => {
+                if (m.id !== id) return m;
+                const merged = mergeMemorySaved(m.memory_saved, evt.data);
+                if (!merged || merged === m.memory_saved) return m;
+                pending = merged.some((x) => x.status === "pending_confirmation");
+                return { ...m, memory_saved: merged };
+              }),
+            },
+          };
+        });
+        // A new suggestion waits on the Memory page: the sidebar badge and
+        // the header dot should say so now, not at the next 2-minute poll.
+        if (pending) void useMemoryPendingStore.getState().refresh();
       } else if (evt.event === "image_notice") {
         // One or more attached images couldn't be read (unreachable,
         // resize failure, unsupported format). Stash the filenames on

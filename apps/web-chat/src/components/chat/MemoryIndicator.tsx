@@ -2,12 +2,15 @@
 
 // MemoryIndicator — small Brain chip in the conversation header.
 //
-// Two visual states driven by Conversation.memory_enabled:
-//   - enabled (default): Brain glyph + "Memory" label, full opacity
-//   - disabled:           BrainOff glyph + "No memory" label, dim
-//
-// Clicking opens a small popover with two actions:
+// Three states (FIX130 A2 — lib/memoryMode.ts, the one rule):
+//   - on (default):  Brain glyph + "Memory" label
+//   - off:           BrainCircuit glyph + "Memory off", dim
+//   - temporary:     BrainCircuit glyph + "Temporary chat", dim
+// The popover says what each state really does — off and temporary both
+// neither use nor save memory — and offers:
 //   - "Turn off / on for this chat"  → optimistic PATCH via store
+//                                      (not on a temporary chat: the server
+//                                      refuses memory there, so no button)
 //   - "Open Memory Settings"         → router push to /chat/memory
 //
 // The popover uses the same outside-click + Escape close pattern
@@ -23,6 +26,7 @@ import { Brain, BrainCircuit } from "lucide-react";
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
+import { memoryModeOf } from "@/lib/memoryMode";
 import { useChatStore } from "@/stores/chatStore";
 
 interface Props {
@@ -39,8 +43,10 @@ export function MemoryIndicator({ conversationId }: Props) {
 
   // memory_enabled is optional on Conversation (older payloads).
   // Default to ON so the indicator never lies by silently showing
-  // "No memory" when the backend wasn't queried for the field.
-  const enabled = conv?.memory_enabled !== false;
+  // "Memory off" when the backend wasn't queried for the field.
+  const mode = memoryModeOf(conv);
+  const enabled = mode === "on";
+  const temporary = mode === "temporary";
 
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -54,7 +60,7 @@ export function MemoryIndicator({ conversationId }: Props) {
   useDismissable(wrapRef, open, closePopover);
 
   async function toggle() {
-    if (!conv) return;
+    if (!conv || temporary) return;
     setOpen(false);
     try {
       await setMemory(conversationId, !enabled);
@@ -87,7 +93,9 @@ export function MemoryIndicator({ conversationId }: Props) {
             ? pendingCount > 0
               ? t("memory.indicator.onPendingTooltip", { n: String(pendingCount) })
               : t("memory.indicator.onTooltip")
-            : t("memory.indicator.offTooltip")
+            : temporary
+              ? t("memory.indicator.temporaryTooltip")
+              : t("memory.indicator.offTooltip")
         }
         className={`focus-ring relative inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-colors hover:bg-bg-elevated ${
           enabled ? "text-text-muted" : "text-text-muted"
@@ -99,7 +107,11 @@ export function MemoryIndicator({ conversationId }: Props) {
           <BrainCircuit className="h-3.5 w-3.5 opacity-60" />
         )}
         <span className="hidden sm:inline">
-          {enabled ? t("memory.indicator.on") : t("memory.indicator.off")}
+          {enabled
+            ? t("memory.indicator.on")
+            : temporary
+              ? t("memory.indicator.temporary")
+              : t("memory.indicator.off")}
         </span>
         {/* S8 — small blue dot when pending suggestions exist.
             Tiny + absolute so it overlays the Brain icon without
@@ -120,28 +132,38 @@ export function MemoryIndicator({ conversationId }: Props) {
         >
           <div className="border-b border-border-subtle px-3 py-2.5">
             <div className="text-xs font-semibold text-text-primary">
-              {enabled ? t("memory.popover.on") : t("memory.popover.off")}
+              {enabled
+                ? t("memory.popover.on")
+                : temporary
+                  ? t("memory.popover.temporary")
+                  : t("memory.popover.off")}
             </div>
             <div className="mt-0.5 text-[11px] text-text-muted">
               {enabled
                 ? t("memory.popover.onHint")
-                : t("memory.popover.offHint")}
+                : temporary
+                  ? t("memory.popover.temporaryHint")
+                  : t("memory.popover.offHint")}
             </div>
           </div>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => void toggle()}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
-          >
-            {enabled ? (
-              <BrainCircuit className="h-3.5 w-3.5 text-text-muted" />
-            ) : (
-              <Brain className="h-3.5 w-3.5 text-text-muted" />
-            )}
-            <span>{enabled ? t("memory.popover.toggleOff") : t("memory.popover.toggleOn")}</span>
-          </button>
-          <div className="border-t border-border-subtle" />
+          {temporary ? null : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void toggle()}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-text-primary transition-colors hover:bg-bg-elevated"
+              >
+                {enabled ? (
+                  <BrainCircuit className="h-3.5 w-3.5 text-text-muted" />
+                ) : (
+                  <Brain className="h-3.5 w-3.5 text-text-muted" />
+                )}
+                <span>{enabled ? t("memory.popover.toggleOff") : t("memory.popover.toggleOn")}</span>
+              </button>
+              <div className="border-t border-border-subtle" />
+            </>
+          )}
           <button
             type="button"
             role="menuitem"
