@@ -16,6 +16,7 @@ import type { Message } from "@/lib/types";
 import { useT } from "@/lib/i18n";
 import { knownNotRetryable } from "@/lib/errorMessages";
 import { useChatStore } from "@/stores/chatStore";
+import { useComposerStore } from "@/stores/composerStore";
 import {
   ANCHOR_PREVIOUS_PEEK_PX,
   anchorTarget,
@@ -58,6 +59,10 @@ const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home
  *  id swap (see Message.client_key). */
 const rowKey = (m: Message) => m.client_key ?? m.id;
 
+/** The thread column's own bottom padding (py-6); FIX130 C4 raises it
+ *  to the credits badge's reach when that is larger. */
+export const THREAD_BOTTOM_PAD = 24;
+
 export function ChatThread({
   convId,
   messages,
@@ -71,6 +76,7 @@ export function ChatThread({
   onLoadEarlier,
 }: Props) {
   const t = useT();
+  const badgeReach = useComposerStore((s) => s.badge); // FIX130 C4
   // T2 — stalled-stream notice: the idle watchdog in chatStore flags a
   // conversation whose active stream has received no bytes (events or
   // server heartbeats) past the threshold; the retry rides the
@@ -747,7 +753,12 @@ export function ChatThread({
           if (e.target === e.currentTarget) markUserIntent();
         }}
         className="scrollbar-thin h-full overflow-y-auto px-4 py-6 md:px-10"
-        style={{ overflowAnchor: "none" }}
+        // FIX130 C4 — the credits badge floats over the bottom of this
+        // column; keep its reach (+8 px air) free under the last message so
+        // it never sits on the last timestamp or the last line.
+        // Inline only when it is MORE than the class gives, so the anchor
+        // math (which reads the computed padding) sees no change otherwise.
+        style={{ overflowAnchor: "none", paddingBottom: badgeReach + 8 > THREAD_BOTTOM_PAD ? badgeReach + 8 : undefined }}
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 ? (

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -814,6 +815,38 @@ func writeSSEHeartbeat(w http.ResponseWriter, flusher http.Flusher) {
 	flusher.Flush()
 }
 
+// startPreDrainHeartbeat (FIX130 C1) pings an SSE response that is open
+// before its drain loop runs — the FIX33 early open for compaction. Each
+// ping is written under mu, the lock every other writer of that stretch
+// holds. The returned stop is idempotent and waits for the pinger to exit,
+// so nothing it wrote can follow a frame the caller writes afterwards.
+func startPreDrainHeartbeat(w http.ResponseWriter, flusher http.Flusher, mu *sync.Mutex) (stop func()) {
+	quit := make(chan struct{})
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		t := time.NewTicker(heartbeatInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-quit:
+				return
+			case <-t.C:
+				mu.Lock()
+				writeSSEHeartbeat(w, flusher)
+				mu.Unlock()
+			}
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(quit)
+			<-exited
+		})
+	}
+}
+
 func drainStreamEvents(
 	w http.ResponseWriter,
 	flusher http.Flusher,
@@ -1127,18 +1160,36 @@ func (h *MessageHandler) sendStream(w http.ResponseWriter, r *http.Request, in s
 	// and tell the user the conversation is being organised. Without
 	// this the first byte only arrives after the extraction, and the
 	// pause looks like a hang.
+	//
+	// FIX130 C1 — from that early open until the drain starts nothing
+	// heartbeats: the extraction (bounded at 90 s) and the model call run
+	// with the response already open, and the clients' read deadlines would
+	// read the silence as a dead connection. A pinger covers that stretch;
+	// every write before the drain takes preMu so a ping never lands inside
+	// a frame, and stopEarlyBeat returns only once the pinger is gone.
+	var preMu sync.Mutex
+	stopEarlyBeat := func() {}
 	in.OnCompactionStart = func(assistantID, userMessageID uuid.UUID) {
+		preMu.Lock()
+		first := !started
 		openStream(assistantID, userMessageID)
 		writeSSEEvent(rw, flusher, "compaction_status", map[string]any{"status": "summarizing"})
+		preMu.Unlock()
+		if first {
+			stopEarlyBeat = startPreDrainHeartbeat(rw, flusher, &preMu)
+		}
 	}
 	// FIX117 — after every extraction batch, raw counts; compaction_status
 	// above is untouched, so a client that only knows that frame sees
 	// exactly what it saw before.
 	in.OnCompactionProgress = func(p service.ExtractionProgress) {
+		preMu.Lock()
+		defer preMu.Unlock()
 		writeSSEEvent(rw, flusher, "compaction_progress", compactionProgressPayload(p))
 	}
 
 	stream, err := h.messages.SendStream(r.Context(), in)
+	stopEarlyBeat()
 	if errors.Is(err, service.ErrSendDuplicate) && !started {
 		// FIX121 — lost the user-row insert to another copy of this request.
 		if !h.replayIfRepeated(w, r, in, true) {
@@ -1865,8 +1916,17 @@ func (h *MessageHandler) resumeFromLedger(
 	}
 
 	done := r.Context().Done()
+	// FIX130 C1 — the live tail heartbeats like the primary stream does.
+	// A reattached viewer waiting on a quiet stretch (a slow provider, a
+	// tool run) otherwise got no byte at all, and the clients' read
+	// deadlines read that silence as a dead connection. The ping is written
+	// at the HTTP edge, never into the ledger (same as drainStreamEvents).
+	heartbeat := time.NewTicker(heartbeatInterval)
+	defer heartbeat.Stop()
 	for {
 		select {
+		case <-heartbeat.C:
+			writeSSEHeartbeat(w, flusher)
 		case <-done:
 			// This viewer went away. The run is untouched; only this
 			// subscription ends. Nothing is owed to a client that is no

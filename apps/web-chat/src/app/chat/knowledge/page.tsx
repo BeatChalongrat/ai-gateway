@@ -11,6 +11,12 @@
 // upload promise resolves with a row whose status is already
 // "indexed" or "failed", so we don't poll here. A future async
 // worker would justify adding a poll loop.
+//
+// FIX130 C2 — the page asks the server whether a knowledge base can work
+// right now (GET /knowledge-bases/availability) every time it opens. When it
+// cannot, the page says why in plain words and offers no create / upload —
+// NIGHT2 F27 and the FIX130 test stack both saw every upload fail with the
+// raw "embedding failed: gateway unavailable: status=503".
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,6 +27,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 import type {
   KnowledgeBase,
@@ -47,10 +54,24 @@ export default function KnowledgeBasePage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const availability = useKnowledgeStore((s) => s.availability);
+  const availabilityReason = useKnowledgeStore((s) => s.availabilityReason);
+  const loadAvailability = useKnowledgeStore((s) => s.loadAvailability);
+  const [checking, setChecking] = useState(true);
+  const recheck = () => {
+    setChecking(true);
+    void loadAvailability(true).finally(() => setChecking(false));
+  };
+  const canUse = availability === "available";
 
   useEffect(() => {
     if (!loaded && !loading) void loadKBs();
   }, [loaded, loading, loadKBs]);
+  // Ask afresh on every visit — the verdict may have changed since the
+  // session's first ask (a key was fixed, or credit ran out).
+  useEffect(() => {
+    void loadAvailability(true).finally(() => setChecking(false));
+  }, [loadAvailability]);
 
   async function handleDeleteKB(kb: KnowledgeBase) {
     if (
@@ -107,7 +128,7 @@ export default function KnowledgeBasePage() {
           {/* + Create only renders when there's at least one KB. The
               empty-state CTA handles the no-KBs case so we don't
               double up on calls-to-action. */}
-          {hasKBs ? (
+          {hasKBs && canUse ? (
             <button
               type="button"
               onClick={() => setCreateOpen(true)}
@@ -119,13 +140,17 @@ export default function KnowledgeBasePage() {
           ) : null}
         </div>
 
+        {!checking && !canUse ? (
+          <KBUnavailableNotice reason={availabilityReason} onRecheck={recheck} />
+        ) : null}
+
         <div className="mt-8">
-          {!loaded ? (
+          {!loaded || checking ? (
             <div className="flex items-center justify-center py-10 text-text-secondary">
               <Spinner size={20} />
             </div>
           ) : knowledgeBases.length === 0 ? (
-            <EmptyKBState onCreate={() => setCreateOpen(true)} />
+            canUse ? <EmptyKBState onCreate={() => setCreateOpen(true)} /> : null
           ) : (
             <div className="flex flex-col gap-3">
               {knowledgeBases.map((kb) => (
@@ -137,6 +162,7 @@ export default function KnowledgeBasePage() {
                     setExpandedId((id) => (id === kb.id ? null : kb.id))
                   }
                   onDelete={() => void handleDeleteKB(kb)}
+                  canUpload={canUse}
                 />
               ))}
             </div>
@@ -164,6 +190,40 @@ export default function KnowledgeBasePage() {
       />
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// FIX130 C2 — why a knowledge base cannot be used right now
+// ---------------------------------------------------------------------------
+
+const UNAVAILABLE_REASON: Record<string, DictKey> = {
+  embeddings_failed: "kb.unavailable.embeddings_failed",
+  embeddings_not_configured: "kb.unavailable.embeddings_not_configured",
+};
+
+function KBUnavailableNotice({ reason, onRecheck }: { reason: string | null; onRecheck: () => void }) {
+  const t = useT();
+  return (
+    <div role="status" data-testid="kb-unavailable" className="mt-6 rounded-xl border border-status-warning/40 bg-status-warning/10 px-5 py-4">
+      <h2 className="text-sm font-semibold text-text-primary">{t("kb.unavailable.title")}</h2>
+      <p className="mt-1 text-sm text-text-secondary">{t(UNAVAILABLE_REASON[reason ?? ""] ?? "kb.unavailable.unknown")}</p>
+      <button
+        type="button"
+        onClick={onRecheck}
+        className="focus-ring mt-3 rounded-md border border-border bg-transparent px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated"
+      >
+        {t("kb.unavailable.recheck")}
+      </button>
+    </div>
+  );
+}
+
+/** A failed document's reason in the person's language: an embeddings
+ *  failure (the only one the live system produces) has its own sentence;
+ *  anything else keeps the server's text. */
+function docFailureText(message: string | null | undefined): string {
+  if (!message || /embedding/i.test(message)) return tOutside("kb.doc.embeddingFailed");
+  return message;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,11 +296,13 @@ function KBCard({
   expanded,
   onToggle,
   onDelete,
+  canUpload,
 }: {
   kb: KnowledgeBase;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  canUpload: boolean;
 }) {
   const t = useT();
   // Status label — only one of indexed/processing/failed/inactive
@@ -290,7 +352,7 @@ function KBCard({
           {expanded ? <ChevronIcon up /> : <ArrowRightIcon />}
         </span>
       </button>
-      {expanded ? <KBDocumentsPanel kb={kb} onDelete={onDelete} /> : null}
+      {expanded ? <KBDocumentsPanel kb={kb} onDelete={onDelete} canUpload={canUpload} /> : null}
     </section>
   );
 }
@@ -335,9 +397,11 @@ function ChevronIcon({ up }: { up: boolean }) {
 function KBDocumentsPanel({
   kb,
   onDelete,
+  canUpload,
 }: {
   kb: KnowledgeBase;
   onDelete: () => void;
+  canUpload: boolean;
 }) {
   const t = useT();
   const documents = useKnowledgeStore((s) => s.documentsByKB[kb.id]);
@@ -346,6 +410,7 @@ function KBDocumentsPanel({
   const uploadDocument = useKnowledgeStore((s) => s.uploadDocument);
   const deleteDocument = useKnowledgeStore((s) => s.deleteDocument);
   const reindexDocument = useKnowledgeStore((s) => s.reindexDocument);
+  const loadAvailability = useKnowledgeStore((s) => s.loadAvailability);
 
   useEffect(() => {
     if (documents === undefined) void loadDocs(kb.id);
@@ -358,7 +423,11 @@ function KBDocumentsPanel({
       try {
         const doc = await uploadDocument(kb.id, file);
         if (doc.status === "failed") {
-          toast(tOutside("kb.toast.docFailed", { name: doc.filename, error: doc.error_message ?? "unknown" }));
+          // FIX130 C2 — said in words (the row keeps it too), and the page
+          // re-asks whether knowledge bases work at all: the server has just
+          // learned they do not.
+          toast(tOutside("kb.toast.docFailed", { name: doc.filename, error: docFailureText(doc.error_message) }));
+          void loadAvailability(true);
         } else {
           toast(tOutside("kb.toast.docIndexed", { name: doc.filename, n: String(doc.chunk_count) }));
         }
@@ -396,21 +465,23 @@ function KBDocumentsPanel({
           {t("kb.docs.title")}
         </h3>
         <div className="flex items-center gap-2">
-          <label className="cursor-pointer">
-            <input
-              type="file"
-              multiple
-              accept={ALLOWED_MIME}
-              className="sr-only"
-              onChange={(e) => {
-                if (e.target.files) void handleUpload(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated">
-              <PlusIcon /> {t("kb.docs.upload")}
-            </span>
-          </label>
+          {canUpload ? (
+            <label className="cursor-pointer">
+              <input
+                type="file"
+                multiple
+                accept={ALLOWED_MIME}
+                className="sr-only"
+                onChange={(e) => {
+                  if (e.target.files) void handleUpload(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated">
+                <PlusIcon /> {t("kb.docs.upload")}
+              </span>
+            </label>
+          ) : null}
           <button
             type="button"
             onClick={onDelete}
@@ -477,9 +548,7 @@ function DocumentRow({
           {doc.status === "indexed"
             ? ` · ${doc.chunk_count} ${doc.chunk_count === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}`
             : ""}
-          {doc.status === "failed" && doc.error_message
-            ? ` · ${doc.error_message}`
-            : ""}
+          {doc.status === "failed" ? ` · ${docFailureText(doc.error_message)}` : ""}
         </p>
       </div>
       <div className="flex items-center gap-1">
@@ -505,27 +574,28 @@ function DocumentRow({
 }
 
 function StatusPill({ status }: { status: KnowledgeDocumentStatus }) {
+  const t = useT();
   const map: Record<
     KnowledgeDocumentStatus,
     { label: string; color: string; dot: string }
   > = {
     pending: {
-      label: "pending",
+      label: t("kb.doc.status.pending"),
       color: "text-text-muted border-border",
       dot: "bg-text-muted",
     },
     processing: {
-      label: "indexing",
+      label: t("kb.doc.status.processing"),
       color: "text-status-warning border-status-warning/40",
       dot: "bg-status-warning",
     },
     indexed: {
-      label: "indexed",
+      label: t("kb.doc.status.indexed"),
       color: "text-status-success border-status-success/40",
       dot: "bg-status-success",
     },
     failed: {
-      label: "failed",
+      label: t("kb.doc.status.failed"),
       color: "text-status-danger border-status-danger/40",
       dot: "bg-status-danger",
     },

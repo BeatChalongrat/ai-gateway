@@ -156,29 +156,80 @@ interface PortalMeResponse {
 }
 
 /**
- * Resolve the current session from the gateway's /portal/me using the
- * HttpOnly cookie. Returns null when unauthenticated (401).
+ * FIX130 C3.1 — what the page-load session check found:
+ *   "ok"          /portal/me answered with the person;
+ *   "rejected"    the gateway said no (401/403, and a refresh was refused
+ *                 too) — the session is really over: the login page;
+ *   "unreachable" no answer we can trust (network error, 5xx, a hang past
+ *                 SESSION_CHECK.timeoutMs, a body that is not a person) —
+ *                 the session may be fine. NEVER a reason to sign out:
+ *                 redirectToPortalLogin revokes the tokens (FIX129), so
+ *                 treating a wedged backend as "signed out" signed devices
+ *                 out for real. The page shows a retry screen instead.
+ * Before FIX130 every one of these was `null` → login, and a /portal/me
+ * that never settled left the whole app a blank spinner (NIGHT2 F1: empty
+ * DOM at 90 s).
  */
-export async function fetchSessionUser(): Promise<SessionUser | null> {
+export type SessionCheck =
+  | { kind: "ok"; user: SessionUser }
+  | { kind: "rejected" }
+  | { kind: "unreachable" };
+
+/** Mutable so tests can shorten it. */
+export const SESSION_CHECK = { timeoutMs: 8_000 };
+
+async function readMe(): Promise<SessionCheck | { kind: "unauthorized" }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SESSION_CHECK.timeoutMs);
   try {
     const res = await fetch(`${GATEWAY_URL}/portal/me`, {
       credentials: "include",
       cache: "no-store",
+      signal: ctrl.signal,
     });
-    if (!res.ok) return null;
+    if (res.status === 401 || res.status === 403) return { kind: "unauthorized" };
+    if (!res.ok) return { kind: "unreachable" };
     const me = (await res.json()) as PortalMeResponse;
-    if (!me?.id) return null;
+    if (!me?.id) return { kind: "unreachable" };
     return {
-      user_id: me.id,
-      // tenant_id may be null transiently; fall back to the user id so
-      // downstream filters still have a stable key.
-      tenant_id: me.tenant_id ?? me.id,
-      email: me.email ?? null,
-      role: me.tenant_role ?? "member",
+      kind: "ok",
+      user: {
+        user_id: me.id,
+        // tenant_id may be null transiently; fall back to the user id so
+        // downstream filters still have a stable key.
+        tenant_id: me.tenant_id ?? me.id,
+        email: me.email ?? null,
+        role: me.tenant_role ?? "member",
+      },
     };
   } catch {
-    return null;
+    return { kind: "unreachable" };
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/**
+ * Resolve the current session from the gateway's /portal/me using the
+ * HttpOnly cookie, bounded by SESSION_CHECK.timeoutMs. A 401/403 gets one
+ * refresh first (the access cookie may only have lapsed while the refresh
+ * cookie is good — the same rule as the FIX129 heartbeat); only a refresh
+ * the gateway refuses makes it "rejected".
+ */
+export async function checkSession(): Promise<SessionCheck> {
+  const first = await readMe();
+  if (first.kind !== "unauthorized") return first;
+  const outcome = await refreshSession();
+  if (outcome === "rejected") return { kind: "rejected" };
+  if (outcome === "unreachable") return { kind: "unreachable" };
+  const again = await readMe();
+  return again.kind === "unauthorized" ? { kind: "rejected" } : again;
+}
+
+/** The session user, or null for anything but a confirmed session. */
+export async function fetchSessionUser(): Promise<SessionUser | null> {
+  const r = await checkSession();
+  return r.kind === "ok" ? r.user : null;
 }
 
 /**
@@ -203,17 +254,24 @@ export async function refreshSession(): Promise<RefreshOutcome> {
   // escalates straight to redirectToPortalLogin() — which the shell
   // cancels and answers with a host-side refresh. One holder rotates.
   if (HOSTED_MODE) return "rejected";
+  // FIX130 C3.1 — bounded like the session check: a refresh that never
+  // answers is "unreachable", not a page that waits forever.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SESSION_CHECK.timeoutMs);
   try {
     const res = await fetch(`${GATEWAY_URL}/portal/auth/refresh`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json; charset=utf-8" },
+      signal: ctrl.signal,
     });
     if (res.ok) return "ok";
     if (res.status === 401 || res.status === 403) return "rejected";
     return "unreachable";
   } catch {
     return "unreachable";
+  } finally {
+    clearTimeout(timer);
   }
 }
 

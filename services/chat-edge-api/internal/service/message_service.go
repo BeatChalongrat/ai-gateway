@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -1596,7 +1597,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 		cancel()
 		// Persist as error so the timeline reflects the failed turn.
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
-		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: preStreamCause(err), ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -1943,7 +1944,7 @@ func (s *MessageService) openAssistantStream(
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
-		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: preStreamCause(err), ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -2238,7 +2239,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	if err != nil {
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
-		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: TerminalCauseError, ErrorCode: preStreamErrorCode(err)})
+		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: preStreamCause(err), ErrorCode: preStreamErrorCode(err)})
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -5102,6 +5103,30 @@ var providerStallAfter = 75 * time.Second
 // the reported WaitingSeconds is accurate, large enough to be free.
 var providerStallPoll = time.Second
 
+// providerGiveUpAfter (FIX130 C3.2) is how long the pump waits on provider
+// output before it ENDS the turn with provider_timeout. The stall notice
+// above only told the person; nothing ever ended such a turn, so a backend
+// that stopped writing mid-stream left "กำลังประมวลผล…" spinning for as
+// long as the socket stayed open (NIGHT2 F2: 241 s and counting; the 15 s
+// pings kept every client watchdog quiet). Measured on the same clock as
+// the notice — provider-await windows only — so a tool run of any length
+// is never cut, and any frame (a token, a reasoning fragment, a tool-call
+// delta) restarts it. Above the backend's own idle guard (60 s, which
+// answers with a stream_timeout frame when the backend itself is alive),
+// so this only fires when nothing at all comes back. A var for tests.
+var providerGiveUpAfter = 90 * time.Second
+
+// ProviderNoProgressError is the ending providerGiveUpAfter produces. It
+// unwraps to context.DeadlineExceeded, so ClassifyStreamError files it as
+// provider_timeout with cause timeout — the retryable card on both clients.
+type ProviderNoProgressError struct{ Waited time.Duration }
+
+func (e *ProviderNoProgressError) Error() string {
+	return fmt.Sprintf("no output from the model for %s", e.Waited.Round(time.Second))
+}
+
+func (e *ProviderNoProgressError) Unwrap() error { return context.DeadlineExceeded }
+
 // stallWatch reports a provider that has stopped producing output.
 //
 // The critical property: it measures ONLY the windows in which the pump
@@ -5114,10 +5139,16 @@ var providerStallPoll = time.Second
 type stallWatch struct {
 	out       chan<- StreamUpdate
 	threshold time.Duration
+	// giveUp / onGiveUp (FIX130 C3.2): past giveUp on the same clock the
+	// watcher calls onGiveUp once (the pump closes the stream it is blocked
+	// on) and GaveUp reports the wait. Zero giveUp = never.
+	giveUp   time.Duration
+	onGiveUp func()
 
 	mu       sync.Mutex
 	since    time.Time // zero => not awaiting the provider
 	fired    bool
+	gaveUp   time.Duration
 	stopped  bool
 	stopOnce sync.Once
 	done     chan struct{}
@@ -5145,12 +5176,21 @@ func (w *stallWatch) run() {
 			return
 		case <-t.C:
 			w.mu.Lock()
-			if w.stopped || w.fired || w.since.IsZero() {
+			if w.stopped || w.since.IsZero() || w.gaveUp > 0 {
 				w.mu.Unlock()
 				continue
 			}
 			waited := time.Since(w.since)
-			if waited < w.threshold {
+			if w.giveUp > 0 && waited >= w.giveUp {
+				w.gaveUp = waited
+				cb := w.onGiveUp
+				w.mu.Unlock()
+				if cb != nil {
+					cb()
+				}
+				continue
+			}
+			if w.fired || waited < w.threshold {
 				w.mu.Unlock()
 				continue
 			}
@@ -5171,6 +5211,22 @@ func (w *stallWatch) emit(n *ProviderStallNotice) {
 	case <-w.done:
 	case w.out <- StreamUpdate{ProviderStall: n}:
 	}
+}
+
+// SetGiveUp arms the give-up (FIX130 C3.2). Under the lock: the watcher
+// goroutine is already running.
+func (w *stallWatch) SetGiveUp(after time.Duration, onGiveUp func()) {
+	w.mu.Lock()
+	w.giveUp, w.onGiveUp = after, onGiveUp
+	w.mu.Unlock()
+}
+
+// GaveUp reports how long the provider had been silent when the watcher
+// gave up on it (FIX130 C3.2); zero when it has not.
+func (w *stallWatch) GaveUp() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.gaveUp
 }
 
 // BeginAwait starts (or restarts) the clock: the pump is now blocked on
@@ -5221,6 +5277,15 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	// Registered AFTER close(in.out): defers run LIFO, so the watcher is
 	// stopped (and proven silent) before the channel closes.
 	stall := newStallWatch(in.out, providerStallAfter)
+	// FIX130 C3.2 — the stream the pump is blocked on right now, so a
+	// give-up can close it (the read then fails and the turn ends with
+	// ProviderNoProgressError). Swapped at every round; read by the watcher.
+	var live atomic.Pointer[StreamReader]
+	stall.SetGiveUp(providerGiveUpAfter, func() {
+		if sr := live.Load(); sr != nil {
+			_ = sr.Close()
+		}
+	})
 	defer stall.Stop()
 	// The first round is already in flight when the pump starts — we are
 	// awaiting its first frame right now.
@@ -5236,6 +5301,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 	in.toolExecCtx.Emit = func(u StreamUpdate) { in.out <- u }
 
 	current := in.initialStream
+	live.Store(current)
 	req := in.initialReq
 	var lastUsage *GatewayChatUsage
 
@@ -5278,6 +5344,13 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 
 		for {
 			ev, err := current.Next()
+			if waited := stall.GaveUp(); waited > 0 && err != nil {
+				// FIX130 C3.2 — the read failed because the watcher closed a
+				// stream that had said nothing for providerGiveUpAfter.
+				in.out <- StreamUpdate{Err: &ProviderNoProgressError{Waited: waited}}
+				_ = current.Close()
+				return
+			}
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -5372,6 +5445,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				if retried := s.retryWithoutTools(in, &req, ev.ProviderError, &healed, outerIter, len(acc), finishReason); retried != nil {
 					_ = current.Close()
 					current = retried
+					live.Store(current)
 					continue
 				}
 				// FIX65 — the same repair for images: the catalog said the
@@ -5381,6 +5455,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 				if retried := s.retryWithoutImages(in, &req, ev.ProviderError, &healed, outerIter, len(acc), finishReason); retried != nil {
 					_ = current.Close()
 					current = retried
+					live.Store(current)
 					continue
 				}
 				sawProviderError = true
@@ -5557,6 +5632,7 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			return
 		}
 		current = next
+		live.Store(current)
 	}
 
 }
@@ -5695,6 +5771,16 @@ func (s *MessageService) persistTerminal(ctx context.Context, msgID uuid.UUID, s
 // preStreamErrorCode names a send that failed before the stream opened:
 // the gateway's own envelope code when it answered with one, else
 // chat-edge's send_failed (the same code sendErrorFrame puts on the wire).
+// preStreamCause (FIX130 C3.2) — why a run that failed before streaming
+// ended: a call chat-edge gave up waiting on is a timeout, anything else
+// an error.
+func preStreamCause(err error) string {
+	if isTimeout(err) {
+		return TerminalCauseTimeout
+	}
+	return TerminalCauseError
+}
+
 func preStreamErrorCode(err error) string {
 	var ue *GatewayUnavailableError
 	if errors.As(err, &ue) {

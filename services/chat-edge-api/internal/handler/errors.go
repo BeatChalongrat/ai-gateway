@@ -36,4 +36,6 @@ const (
 	CodeNotFound        = "NOT_FOUND"
 	CodeInternalError   = "INTERNAL_ERROR"
 	CodeBadRequest      = "BAD_REQUEST"
+	// CodeFilenameTooLong (FIX130 C3.4) — the storage refused an upload's name.
+	CodeFilenameTooLong = "FILENAME_TOO_LONG"
 )

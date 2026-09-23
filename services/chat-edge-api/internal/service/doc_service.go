@@ -421,7 +421,7 @@ func (s *DocService) ExecutePlan(
 	outFilename = sanitizeFilename(outFilename)
 
 	newFileID := uuid.New()
-	storageName := fmt.Sprintf("%s_%s", newFileID.String(), outFilename)
+	storageName := storageObjectName(newFileID, outFilename) // FIX130 C3.4
 	newKey := storage.JoinKey(
 		conversationFilesKeyPrefix,
 		in.TenantID.String(),

@@ -1753,6 +1753,34 @@ export const en = {
   "projects.personal.loadFailed": "Couldn't load your instructions.",
   "projects.personal.toast.saved": "Instructions saved.",
   "projects.personal.toast.saveFailed": "Couldn't save instructions.",
+  // ── FIX130 C3.1 — the session check could not reach the gateway ──
+  "session.unreachable.title": "Can't reach SRAN Chat right now",
+  "session.unreachable.body": "The sign-in service did not answer, so the chat could not open. You have not been signed out — this is a connection problem. Try again in a moment.",
+  "session.unreachable.retry": "Try again",
+  "session.unreachable.checking": "Checking…",
+  // ── FIX130 C2 — knowledge bases that cannot work say so ──
+  "kb.unavailable.title": "Knowledge bases can't be used right now",
+  "kb.unavailable.embeddings_failed": "The service that reads and searches your documents (embeddings) is refusing requests — for example the provider's credit ran out or its key is invalid. Uploaded files cannot be indexed and chats cannot search a knowledge base. An administrator needs to fix the OpenAI key in the admin console first.",
+  "kb.unavailable.embeddings_not_configured": "The service that reads and searches your documents (embeddings) is not set up. An administrator needs to add an OpenAI key in the admin console before knowledge bases can be created or used.",
+  "kb.unavailable.unknown": "We couldn't check whether knowledge bases work right now. Try again in a moment.",
+  "kb.unavailable.recheck": "Check again",
+  "kb.doc.embeddingFailed": "Couldn't index this file — the document search service (embeddings) isn't working right now.",
+  "kb.doc.status.pending": "pending",
+  "kb.doc.status.processing": "indexing",
+  "kb.doc.status.indexed": "indexed",
+  "kb.doc.status.failed": "failed",
+  // ── FIX130 C3.4 — attachments never go missing silently ──
+  "file.err.nameTooLong": "The file name is too long — rename the file to something shorter and attach it again.",
+  "input.sendBlocked.failedOne": "Can't send yet: “{name}” didn't upload — press Retry on the file, or remove it.",
+  "input.sendBlocked.failedOneNoRetry": "Can't send yet: “{name}” can't be attached — remove it to send.",
+  "input.sendBlocked.failedMany": "Can't send yet: {n} files didn't upload — retry or remove them.",
+  "input.sendBlocked.removeFailed": "Remove failed files",
+  "input.sendBlocked.vision": "Can't send yet: {model} can't read images — switch to a model that can, or remove the image.",
+  // ── FIX130 C3.5 — the long-chat meter says how many messages are sent ──
+  "context.label.summarizedCount": "Long chat · {sent} of {total} messages sent to the assistant · the rest summarized automatically",
+  "context.label.noSummaryCount": "Long chat · {sent} of {total} messages sent to the assistant · no summary of the rest",
+  "context.chip.sent": "{sent} of {total} messages sent to the assistant",
+  "context.chip.approaching": "Context {pct}% used",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -3436,6 +3464,34 @@ const th: Record<DictKey, string> = {
   "projects.personal.loadFailed": "โหลดคำสั่งของคุณไม่สำเร็จ",
   "projects.personal.toast.saved": "บันทึกคำสั่งแล้ว",
   "projects.personal.toast.saveFailed": "บันทึกคำสั่งไม่สำเร็จ",
+  // ── FIX130 C3.1 ──
+  "session.unreachable.title": "ตอนนี้เชื่อมต่อ SRAN Chat ไม่ได้",
+  "session.unreachable.body": "ระบบยืนยันตัวตนไม่ตอบกลับ จึงยังเปิดแชทไม่ได้ คุณยังไม่ได้ถูกออกจากระบบ — เป็นปัญหาการเชื่อมต่อ ลองใหม่อีกครั้งในอีกสักครู่",
+  "session.unreachable.retry": "ลองใหม่",
+  "session.unreachable.checking": "กำลังตรวจสอบ…",
+  // ── FIX130 C2 ──
+  "kb.unavailable.title": "ตอนนี้ยังใช้ฐานความรู้ไม่ได้",
+  "kb.unavailable.embeddings_failed": "ระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ปฏิเสธคำขออยู่ — เช่น เครดิตของผู้ให้บริการหมดหรือคีย์ไม่ถูกต้อง ไฟล์ที่อัปโหลดจึงทำดัชนีไม่ได้ และแชทจะค้นในฐานความรู้ไม่ได้ ผู้ดูแลระบบต้องแก้ไขคีย์ OpenAI ในหน้าแอดมินก่อน",
+  "kb.unavailable.embeddings_not_configured": "ยังไม่ได้ตั้งค่าระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ผู้ดูแลระบบต้องเพิ่มคีย์ OpenAI ในหน้าแอดมินก่อน จึงจะสร้างและใช้ฐานความรู้ได้",
+  "kb.unavailable.unknown": "ตรวจสอบไม่ได้ว่าตอนนี้ฐานความรู้ใช้งานได้หรือไม่ ลองใหม่อีกครั้งในอีกสักครู่",
+  "kb.unavailable.recheck": "ตรวจสอบอีกครั้ง",
+  "kb.doc.embeddingFailed": "ทำดัชนีไฟล์นี้ไม่สำเร็จ — ระบบค้นหาเอกสาร (embeddings) ใช้งานไม่ได้ในตอนนี้",
+  "kb.doc.status.pending": "รอดำเนินการ",
+  "kb.doc.status.processing": "กำลังทำดัชนี",
+  "kb.doc.status.indexed": "พร้อมใช้",
+  "kb.doc.status.failed": "ไม่สำเร็จ",
+  // ── FIX130 C3.4 ──
+  "file.err.nameTooLong": "ชื่อไฟล์ยาวเกินไป — เปลี่ยนชื่อไฟล์ให้สั้นลงแล้วแนบใหม่",
+  "input.sendBlocked.failedOne": "ยังส่งไม่ได้: ไฟล์ “{name}” อัปโหลดไม่สำเร็จ — กด “ลองใหม่” ที่ไฟล์ หรือเอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.failedOneNoRetry": "ยังส่งไม่ได้: แนบไฟล์ “{name}” ไม่ได้ — เอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.failedMany": "ยังส่งไม่ได้: มี {n} ไฟล์ที่อัปโหลดไม่สำเร็จ — กดลองใหม่หรือเอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.removeFailed": "เอาไฟล์ที่ไม่สำเร็จออก",
+  "input.sendBlocked.vision": "ยังส่งไม่ได้: {model} อ่านรูปภาพไม่ได้ — เปลี่ยนเป็นรุ่นที่อ่านรูปได้ หรือเอารูปออกก่อนส่ง",
+  // ── FIX130 C3.5 ──
+  "context.label.summarizedCount": "แชทยาว · ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ · ส่วนที่เหลือสรุปไว้ให้อัตโนมัติ",
+  "context.label.noSummaryCount": "แชทยาว · ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ · ส่วนที่เหลือไม่มีบทสรุป",
+  "context.chip.sent": "ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ",
+  "context.chip.approaching": "ใช้บริบทไป {pct}%",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

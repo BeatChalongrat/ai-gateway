@@ -253,7 +253,7 @@ func (s *WorkspaceService) Rollback(
 	newVersion := maxVersion + 1
 	newFileID := uuid.New()
 	newName := buildRollbackFilename(target.OriginalFilename, newVersion)
-	storageName := fmt.Sprintf("%s_%s", newFileID.String(), newName)
+	storageName := storageObjectName(newFileID, newName) // FIX130 C3.4
 	newKey := storage.JoinKey(
 		conversationFilesKeyPrefix,
 		in.TenantID.String(),

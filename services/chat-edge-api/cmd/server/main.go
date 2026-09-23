@@ -527,6 +527,10 @@ func main() {
 	// unconditionally so a future env-var flip enables retrieval
 	// without a service restart.
 	embeddingSvc := service.NewEmbeddingService(gateway)
+	// FIX130 C2 — every embedding outcome feeds the knowledge availability
+	// verdict the clients read before offering a knowledge base.
+	kbAvailability := service.NewKnowledgeAvailability(embeddingSvc.Probe)
+	embeddingSvc.SetObserver(kbAvailability.Observe)
 	knowledgeSvc := service.NewKnowledgeService(
 		knowledgeRepo, embeddingSvc, fileSvc, storageBackend,
 		service.KnowledgeServiceKnobs{
@@ -544,6 +548,9 @@ func main() {
 	// Phase 4 — project context (shared instructions + KB) inherited by
 	// member conversations at prompt-compile time.
 	messageSvc.SetProjectReader(projects)
+
+	knowledgeHandler := handler.NewKnowledgeHandler(knowledgeSvc, ragSvc)
+	knowledgeHandler.SetAvailability(kbAvailability)
 
 	conversationHandler := handler.NewConversationHandler(conversationSvc)
 	// FIX33 A-W8 — /usage/me reports the compaction bill separately.
@@ -671,7 +678,7 @@ func main() {
 		Preferences:    preferencesHandler,
 		Share:          shareHandler,
 		Admin:          adminHandler,
-		Knowledge:      handler.NewKnowledgeHandler(knowledgeSvc, ragSvc),
+		Knowledge:      knowledgeHandler,
 		Voice:          handler.NewVoiceHandler(gateway),
 		Excel:          excelHandler,
 		Document:       documentHandler,

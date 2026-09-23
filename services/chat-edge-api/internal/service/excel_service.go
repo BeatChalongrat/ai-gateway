@@ -401,7 +401,7 @@ func (s *ExcelService) ExecutePlan(
 	// Upload to storage under a new key in the same conversation
 	// hierarchy.
 	newFileID := uuid.New()
-	storageName := fmt.Sprintf("%s_%s", newFileID.String(), outFilename)
+	storageName := storageObjectName(newFileID, outFilename) // FIX130 C3.4
 	newKey := storage.JoinKey(
 		conversationFilesKeyPrefix,
 		in.TenantID.String(),

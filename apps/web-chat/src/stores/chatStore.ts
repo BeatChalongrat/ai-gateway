@@ -27,7 +27,7 @@ import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { mergeMemorySaved, parseMemoryUsed } from "@/lib/memoryMarkers";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
-import { parseSSE } from "@/lib/stream";
+import { parseSSE, StreamSilenceError } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
 import { THINKING_DURATION_FLOOR_MS } from "@/lib/types";
 import type { TurnScrollRequest } from "@/lib/turnAnchor";
@@ -96,6 +96,9 @@ export interface PendingFile {
   status: "uploading" | "ready" | "error";
   progress: number; // 0..100
   error?: string;
+  /** FIX130 C3.4 — false when retrying the same upload cannot work (the
+   *  chip offers only "remove"). Absent = retryable. */
+  retryable?: boolean;
   /** Server-side text extraction state, tracked separately from
    *  `status` because the two are now independent: the upload
    *  resolves as soon as the bytes land, while extraction (OCR on a
@@ -229,7 +232,7 @@ interface ChatState {
     serverId: string,
     extractionStatus?: FileAttachment["extraction_status"],
   ) => void;
-  markFileError: (convId: string, pendingId: string, error: string) => void;
+  markFileError: (convId: string, pendingId: string, error: string, retryable?: boolean) => void;
   /** Background text extraction finished (or moved on) for a chip
    *  that has already finished uploading. */
   setFileExtractionStatus: (
@@ -534,12 +537,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     });
   },
-  markFileError(convId, pendingId, error) {
+  markFileError(convId, pendingId, error, retryable) {
     set((s) => ({
       pendingFiles: {
         ...s.pendingFiles,
         [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
-          p.id === pendingId ? { ...p, status: "error", error } : p,
+          p.id === pendingId ? { ...p, status: "error", error, retryable: retryable === false ? false : undefined } : p,
         ),
       },
     }));
@@ -1437,15 +1440,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await api.openMessageStream(
-        convId,
-        trimmed,
-        ctrl.signal,
-        fileIds,
-        imageMode,
-        videoMode,
-        convModelId, // FIX9 Part B: carry the selected model into the hosted turn
-        requestId,
+      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) =>
+        api.openMessageStream(
+          convId,
+          trimmed,
+          signal,
+          fileIds,
+          imageMode,
+          videoMode,
+          convModelId, // FIX9 Part B: carry the selected model into the hosted turn
+          requestId,
+        ),
       );
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } })); // the response is back: `streaming` gates the composer from here
       if (!res.ok) {
@@ -1499,6 +1504,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
         finalizeMessage(set, get, convId, streamingId, "cancelled");
+        return;
+      }
+      // FIX130 C3.2 — nothing answered the send in time (chat-edge's own
+      // model deadline would have): the turn fails into the retry card.
+      if (err instanceof StreamOpenTimeoutError) {
+        failOpenTimeout(set, get, convId, streamingId);
         return;
       }
       // The conversation was deleted elsewhere (desktop propagation /
@@ -1702,10 +1713,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const startingAfter = cursor?.seq ?? 0;
         let res: Response;
         try {
-          res = await api.openResumeStream(convId, messageId, ctrl.signal, startingAfter);
+          // FIX130 C1 — a reattach that gets no answer is a refused one: a
+          // request left pending on a dead link would hold the row forever.
+          res = await openWithin(STREAM_OPEN.resumeMs, ctrl.signal, (signal) =>
+            api.openResumeStream(convId, messageId, signal, startingAfter),
+          );
         } catch (err) {
           if ((err as Error).name === "AbortError") throw err;
-          continue; // network refused — back off and retry
+          continue; // network refused (or silent) — back off and retry
         }
         if (res.status === 409) {
           // RESUME_TOO_OLD: the frames this page is missing have been
@@ -1992,7 +2007,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await api.openRegenerateStream(convId, messageId, ctrl.signal);
+      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openRegenerateStream(convId, messageId, signal));
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2007,6 +2022,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
+      if (err instanceof StreamOpenTimeoutError) {
+        failOpenTimeout(set, get, convId, streamingId);
+        return;
+      }
+      // FIX130 C1 — a drop under a running regeneration reattaches.
+      if (isConnectionDrop(err) && (await reattachAfterDrop(set, get, convId, streamingId))) return;
       get().setError(tOutside("error.networkRegenerate"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
@@ -2071,7 +2092,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await api.openEditStream(convId, messageId, trimmed, ctrl.signal);
+      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openEditStream(convId, messageId, trimmed, signal));
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2092,6 +2113,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
+      if (err instanceof StreamOpenTimeoutError) {
+        failOpenTimeout(set, get, convId, streamingId);
+        return;
+      }
+      // FIX130 C1 — a drop under a running edit reattaches.
+      if (isConnectionDrop(err) && (await reattachAfterDrop(set, get, convId, streamingId))) return;
       get().setError(tOutside("error.networkEdit"));
       finalizeMessage(set, get, convId, streamingId, "error");
     } finally {
@@ -2276,7 +2303,19 @@ function awaitReload(set: Set, convId: string, messageId: string): void {
 // even the server's ": ping" heartbeats) for this long is dead, not slow. It
 // is aborted so the turn finalises (the assistant bubble stops "streaming",
 // Edit / Regenerate come back) instead of the page needing a reload.
-export const STREAM_IDLE = { timeoutMs: 90_000, checkMs: 5_000, deadMs: 180_000 };
+// FIX130 C1: ``readDeadlineMs`` — on the network transport, this long with
+// no byte at all is a dead connection (the server pings every 15 s, so it is
+// two missed pings and change): the read is abandoned and the page
+// reattaches from its cursor. ``onlineSilenceMs`` — when the browser reports
+// the network back, a stream silent for longer than this is reattached at
+// once rather than at the deadline.
+export const STREAM_IDLE = {
+  timeoutMs: 90_000,
+  checkMs: 5_000,
+  deadMs: 180_000,
+  readDeadlineMs: 40_000,
+  onlineSilenceMs: 3_000,
+};
 
 // FIX41 — the stream cursor, per conversation (docs/STREAM_CONTRACT.md §9).
 //
@@ -2341,6 +2380,97 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** FIX130 C3.2 — how long a stream request may go without its response
+ *  (headers) before the page stops waiting. chat-edge gives up on a model
+ *  that has not answered within 90 s of the call (STREAM_OPEN_TIMEOUT in
+ *  gateway_client.go) and says so with a proper error; `sendMs` sits just
+ *  above that, so it only fires when chat-edge itself cannot answer — the
+ *  case NIGHT2 F2 watched spin for 241 s. A resume answers at once when
+ *  chat-edge is alive. Mutable so tests can shorten it. */
+export const STREAM_OPEN = { sendMs: 100_000, resumeMs: 20_000 };
+
+/** The stream request got no response within its STREAM_OPEN budget. */
+export class StreamOpenTimeoutError extends Error {
+  constructor() {
+    super("no response from the chat service in time");
+    this.name = "StreamOpenTimeoutError";
+  }
+}
+
+/** Opens a stream request that must answer within `ms`. The request gets
+ *  its own signal: the caller's (Stop) still aborts it — also after it
+ *  answered, so Stop keeps ending the body — and the deadline aborts it
+ *  and throws StreamOpenTimeoutError instead of an AbortError, which every
+ *  caller reads as the person's Stop. The desktop's bridge is a local pipe
+ *  with its own run deadline and is opened as is. */
+async function openWithin(ms: number, parent: AbortSignal, open: (signal: AbortSignal) => Promise<Response>): Promise<Response> {
+  if (HOSTED_MODE) return open(parent); // = usingBridgeTransport (lib/bridge)
+  const local = new AbortController();
+  const follow = () => local.abort();
+  if (parent.aborted) local.abort();
+  else parent.addEventListener("abort", follow, { once: true });
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    local.abort();
+  }, ms);
+  try {
+    return await open(local.signal);
+  } catch (err) {
+    parent.removeEventListener("abort", follow);
+    if (timedOut && !parent.aborted) throw new StreamOpenTimeoutError();
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/** FIX130 C1 — the connection under a turn dropped (a network error, or
+ *  parseSSE's StreamSilenceError), as opposed to the person's Stop. */
+function isConnectionDrop(err: unknown): boolean {
+  return err instanceof StreamSilenceError || err instanceof TypeError;
+}
+
+/** FIX130 C1 — the turn's row already has its persisted id: the generation
+ *  keeps running server-side, so the page goes back in through resumeStream
+ *  (which replays what was missed from the cursor and owns every fallback)
+ *  instead of calling the turn failed. False when there is nothing to
+ *  reattach to. The send path has done this since Phase 5; regenerate, edit
+ *  and a question's answer did not. */
+async function reattachAfterDrop(set: Set, get: Get, convId: string, streamingId: string): Promise<boolean> {
+  if (streamingId.startsWith("tmp-")) return false;
+  set((s) => {
+    const aborts = { ...s.abortControllers };
+    delete aborts[convId];
+    const sids = { ...s.streamingAssistantId };
+    delete sids[convId];
+    return { abortControllers: aborts, streamingAssistantId: sids };
+  });
+  await get().resumeStream(convId, streamingId);
+  return true;
+}
+
+/** FIX130 C3.2 — the turn could not reach the model in time: the row ends
+ *  on the catalogue's provider_timeout (retryable → the card's
+ *  "สร้างคำตอบใหม่"), and chat-edge is asked to stop whatever it may still
+ *  be waiting on. */
+function failOpenTimeout(set: Set, get: Get, convId: string, rowId: string): void {
+  void api.cancelGeneration(convId).catch(() => {
+    /* best-effort */
+  });
+  const localized = localizeErrorCode("provider_timeout", undefined, true);
+  set((s) => ({
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === rowId ? { ...m, error_code: "provider_timeout", error_retryable: true, error_message: localized, terminal_cause: "timeout" } : m,
+      ),
+    },
+  }));
+  finalizeMessage(set, get, convId, rowId, "error");
+  get().setError(localized);
+}
+
 /** FIX74 — resume a parked web turn with the user's answer: POST the answer,
  *  consume the continuation into the SAME assistant row. 409 (another tab
  *  answered first) and 410 (expired) mean the server's row is the truth:
@@ -2367,7 +2497,7 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
       return { abortControllers: aborts, streamingAssistantId: sids };
     });
   try {
-    const res = await api.openQuestionAnswerStream(convId, answer.promptId, answer, ctrl.signal);
+    const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openQuestionAnswerStream(convId, answer.promptId, answer, signal));
     if (res.status === 409 || res.status === 410) {
       releaseSlot();
       await get().loadMessages(convId);
@@ -2383,6 +2513,12 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
       finalizeMessage(set, get, convId, messageId, "cancelled");
       return;
     }
+    if (err instanceof StreamOpenTimeoutError) {
+      failOpenTimeout(set, get, convId, messageId);
+      return;
+    }
+    // FIX130 C1 — the continuation runs on the same row: a drop reattaches.
+    if (isConnectionDrop(err) && (await reattachAfterDrop(set, get, convId, messageId))) return;
     get().setError(tOutside("error.resumeLost"));
     finalizeMessage(set, get, convId, messageId, "error");
   } finally {
@@ -2530,6 +2666,32 @@ async function consumeStream(
     lastActivityAt = Date.now();
     if (get().stalledStreams[convId]) setStalled(false);
   };
+  // FIX130 C1 — the connection's own deadline (network transport only; the
+  // desktop's bridge is a local pipe with its own run deadline). chat-edge
+  // writes ": ping" every 15 s through every quiet stretch — a slow
+  // provider, a tool run, a resume tail — so STREAM_IDLE.readDeadlineMs
+  // without a single byte is not a slow answer, it is a dead socket. The
+  // read is abandoned (parseSSE throws StreamSilenceError) and the callers
+  // reattach from the cursor like after any other drop, so a turn that
+  // finished meanwhile shows its answer without a reload. The browser
+  // saying it is back online, or the tab coming back after its timers were
+  // throttled, checks at once instead of at the next tick.
+  const connection = new AbortController();
+  const watchConnection = !HOSTED_MODE; // = !usingBridgeTransport (lib/bridge)
+  const declareDead = () => {
+    if (!connection.signal.aborted) connection.abort();
+  };
+  const silentFor = () => Date.now() - lastActivityAt;
+  const onOnline = () => {
+    if (silentFor() > STREAM_IDLE.onlineSilenceMs) declareDead();
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible" && silentFor() > STREAM_IDLE.readDeadlineMs) declareDead();
+  };
+  if (watchConnection) {
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+  }
   const watchdog = window.setInterval(() => {
     // FIX30 §3.2: a turn waiting for the user's consent is not idle — the
     // host re-says so every heartbeat (bytes), and even without one the card
@@ -2543,6 +2705,10 @@ async function consumeStream(
       return;
     }
     const idle = Date.now() - lastActivityAt;
+    if (watchConnection && idle > STREAM_IDLE.readDeadlineMs) {
+      declareDead();
+      return;
+    }
     if (idle > STREAM_IDLE.timeoutMs) setStalled(true);
     if (idle > STREAM_IDLE.deadMs) {
       // FIX28 §2: a wedged turn ends here — abort → the send path finalises
@@ -2553,7 +2719,7 @@ async function consumeStream(
   }, STREAM_IDLE.checkMs);
 
   try {
-    for await (const evt of parseSSE(res, signal, onActivity)) {
+    for await (const evt of parseSSE(res, signal, onActivity, watchConnection ? connection.signal : undefined)) {
       // FIX41 — advance the cursor for every frame the page is about to
       // act on. Recorded here, one line above the dispatch, so a new event
       // type cannot be added without it.
@@ -3323,6 +3489,10 @@ async function consumeStream(
     // T2 — the watchdog dies with its stream; a finished/aborted turn
     // is never "stalled".
     window.clearInterval(watchdog);
+    if (watchConnection) {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
+    }
     setStalled(false);
     setProviderStalled(false);
     // Any deltas left in the buffer at this point belong to an
@@ -3381,12 +3551,14 @@ async function handleStreamPreError(
   const text = await res.text();
   let msg = res.statusText;
   let code: string | undefined;
+  let retryable: boolean | undefined;
   try {
     const env = JSON.parse(text) as {
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string; retryable?: boolean };
     };
     msg = env.error?.message ?? msg;
     code = env.error?.code;
+    retryable = typeof env.error?.retryable === "boolean" ? env.error.retryable : undefined;
   } catch {
     /* ignore */
   }
@@ -3446,6 +3618,22 @@ async function handleStreamPreError(
     get().setError(tOutside("error.serviceUnavailable"));
   } else if (code === "CONVERSATION_BUSY") {
     get().setError(tOutside("error.conversationBusy"));
+  } else if (res.status !== 401 && code) {
+    // FIX130 C3.2 — a coded refusal (chat-edge's 504 provider_timeout when
+    // the model did not answer in time, a gateway envelope's code) is
+    // localized and kept on the row, so the card says why in the person's
+    // language and offers the retry the code allows — not the server's
+    // English sentence in a banner over a generic card.
+    const localized = localizeErrorCode(code, msg, retryable);
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [convId]: (s.messages[convId] ?? []).map((m) =>
+          m.id === tempAsstId ? { ...m, error_code: code, error_retryable: retryable, error_message: localized } : m,
+        ),
+      },
+    }));
+    get().setError(localized);
   } else if (res.status !== 401) {
     get().setError(msg);
   }

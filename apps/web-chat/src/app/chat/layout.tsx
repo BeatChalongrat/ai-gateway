@@ -5,12 +5,13 @@ import {
   useRouter,
   useSelectedLayoutSegments,
 } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useChatStore } from "@/stores/chatStore";
 import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
@@ -19,6 +20,7 @@ import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
 import { TurnNotSavedBanner } from "@/components/chat/TurnNotSavedBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
 import { Spinner } from "@/components/ui/Spinner";
+import { SessionUnreachable } from "@/components/ui/SessionUnreachable";
 import {
   useKeyboardShortcuts,
   useNewChatHandler,
@@ -76,19 +78,30 @@ export default function ChatLayout({
           : t("a11y.pageChat");
 
   const [isReady, setIsReady] = useState(false);
+  // FIX130 C3.1 — the session check got no trustworthy answer: a retry
+  // screen, never the login bounce (which revokes the tokens).
+  const [unreachable, setUnreachable] = useState(false);
+  const [authAttempt, setAuthAttempt] = useState(0);
+  const [authChecking, setAuthChecking] = useState(false);
+  const retryAuth = useCallback(() => setAuthAttempt((n) => n + 1), []);
 
   useEffect(() => {
     let alive = true;
     // Cookie-based auth: we can't read the token in JS, so resolve the
-    // session via /portal/me (cookie-authenticated). No session →
-    // bounce to the Portal login.
+    // session via /portal/me (cookie-authenticated). A session the gateway
+    // refused → bounce to the Portal login.
     void (async () => {
+      setAuthChecking(true);
       await useAuthStore.getState().checkAuth();
       if (!alive) return;
-      if (!useAuthStore.getState().user) {
-        redirectToPortalLogin();
+      setAuthChecking(false);
+      const { user, status } = useAuthStore.getState();
+      if (!user) {
+        if (status === "rejected") redirectToPortalLogin();
+        else setUnreachable(true);
         return;
       }
+      setUnreachable(false);
       // Seed the model catalog now that we know the user is
       // authenticated, so the picker isn't empty wherever they land
       // inside this layout.
@@ -100,7 +113,7 @@ export default function ChatLayout({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [authAttempt]);
 
   // Lock body scroll while the mobile slide-over is open.
   useEffect(() => {
@@ -175,6 +188,9 @@ export default function ChatLayout({
     },
   });
 
+  if (!isReady && unreachable) {
+    return <SessionUnreachable onRetry={retryAuth} checking={authChecking} />;
+  }
   if (!isReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary">
@@ -347,9 +363,11 @@ const SUBTLE_TOPBAR_BTN =
   "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-xl " +
   "text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary";
 
-const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
-  { label: "Memory", Icon: Brain, href: "/chat/memory" },
-  { label: "Knowledge", Icon: BookOpen, href: "/chat/knowledge" },
+// FIX130 C2 — labels through the dictionary (they were English on a Thai
+// screen); the knowledge entry only when a knowledge base can work.
+const MORE_MENU_ITEMS: { labelKey: "menu.memory" | "menu.knowledgeBase"; Icon: typeof Brain; href: string; needsKB?: boolean }[] = [
+  { labelKey: "menu.memory", Icon: Brain, href: "/chat/memory" },
+  { labelKey: "menu.knowledgeBase", Icon: BookOpen, href: "/chat/knowledge", needsKB: true },
 ];
 
 function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
@@ -357,6 +375,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
   const pathname = usePathname();
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
+  const kbAvailable = useKnowledgeAvailable();
 
   // Dismiss the menu on any navigation so it never lingers over a new
   // route after a menu item (or anything else) changes the path.
@@ -400,9 +419,9 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
             aria-label={t("a11y.moreOptions")}
             className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-xl"
           >
-            {MORE_MENU_ITEMS.map(({ label, Icon, href }) => (
+            {MORE_MENU_ITEMS.filter((item) => !item.needsKB || kbAvailable).map(({ labelKey, Icon, href }) => (
               <button
-                key={label}
+                key={href}
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -412,7 +431,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
                 className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
               >
                 <Icon size={16} aria-hidden />
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </div>

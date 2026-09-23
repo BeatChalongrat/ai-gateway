@@ -11,6 +11,7 @@ import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { beginUpload, endUpload } from "@/lib/uploadRegistry";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { loadSkillTemplates, skillSlashCommands } from "@/lib/skillTemplates";
 import {
   clearDraft,
@@ -27,8 +28,9 @@ import {
   FILE_PICKER_ACCEPT_NO_IMAGES,
   isImageFile,
   uploadErrorMessage,
+  uploadErrorRetryable,
 } from "@/lib/fileUtil";
-import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch } from "@/lib/visionGate";
+import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch, visionAlternative } from "@/lib/visionGate";
 import { detectImageIntent } from "@/lib/imageIntent";
 import { tOutside, useT } from "@/lib/i18n";
 import { shouldSendOnEnter } from "@/lib/keyboard";
@@ -124,6 +126,9 @@ export function ChatInput({
   onRequestConversation,
 }: Props) {
   const t = useT();
+  // FIX130 C2 — the ฐานความรู้ button only when a knowledge base can work
+  // (or one is already bound here, so it can still be unbound).
+  const kbAvailable = useKnowledgeAvailable();
   const hosted = useHostedMode();
   const router = useRouter();
   const [text, setText] = useState("");
@@ -332,6 +337,7 @@ export function ChatInput({
   // the paste listener binds once at mount and would otherwise close
   // over a stale model).
   const acceptsImages = modelAcceptsImages(activeModelId ?? null, models);
+  const visionAlt = acceptsImages ? null : visionAlternative(activeModelId ?? null, models);
   const activeModelIdRef = useRef(activeModelId);
   activeModelIdRef.current = activeModelId;
   // Phase 11 — Thinking Mode toggle. The store action + server columns have
@@ -694,10 +700,23 @@ export function ChatInput({
   const readyFileIds = pendingFiles
     .filter((p) => p.status === "ready" && p.serverId)
     .map((p) => p.serverId!);
+  // FIX130 C3.4 — a message is never sent with an attachment silently
+  // missing. A failed chip used to be skipped by the send and then swept
+  // away with the rest (NIGHT2 F6: the file never reached the model and the
+  // answer said "รับข้อความได้ครบ"). Now any failed chip holds the send, and
+  // the composer says which file and what to do (retry or remove).
+  const failedChips = pendingFiles.filter((p) => p.status === "error");
+  // FIX130 C3.4 — the image the selected model cannot read. This was the
+  // real "5 chips incl. one error → Send does nothing" (NIGHT2 F5): the run
+  // had an image at deepseek-v4-flash (no vision), and the FIX27 gate held
+  // the send with a toast that was gone within seconds. It now also says so
+  // in the composer for as long as it holds.
+  const visionBlocked = !acceptsImages && pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file));
   const canSend =
     !disabled &&
     !streaming &&
     !isUploading &&
+    failedChips.length === 0 &&
     (text.trim().length > 0 || readyFileIds.length > 0);
 
   function submit() {
@@ -706,7 +725,7 @@ export function ChatInput({
     // removable, "send now"), and is sent as its own turn when the answer
     // finishes. Ready attachments travel with it; one still uploading
     // stays in the composer for the next message.
-    if (streaming && !disabled && conversationId && (text.trim().length > 0 || readyFileIds.length > 0)) {
+    if (streaming && !disabled && conversationId && failedChips.length === 0 && (text.trim().length > 0 || readyFileIds.length > 0)) {
       enqueueMessage(conversationId, text.trim(), readyFileIds);
       setText("");
       textRef.current = "";
@@ -987,7 +1006,7 @@ export function ChatInput({
       if (err instanceof ApiError && err.code === "ABORTED") return;
       // FIX126 F5 — the chip speaks the UI's language, not the transport's.
       const msg = uploadErrorMessage(err);
-      markFileError(chipBucket, pendingId, msg);
+      markFileError(chipBucket, pendingId, msg, uploadErrorRetryable(err));
       toast(msg);
     }
   }
@@ -1250,7 +1269,7 @@ export function ChatInput({
                   pending={p}
                   onRemove={() => removePendingFile(renderBucket, p.id)}
                   onRetry={
-                    p.status === "error"
+                    p.status === "error" && p.retryable !== false
                       ? () => {
                           // Retry path: drop the failed row + re-run
                           // the full handleFiles pipeline against the
@@ -1263,6 +1282,50 @@ export function ChatInput({
                   }
                 />
               ))}
+            </div>
+          ) : null}
+
+          {/* FIX130 C3.4 — why Send is held, for as long as it is held:
+              a failed upload (named, with what to do) or an image the
+              selected model cannot read. */}
+          {failedChips.length > 0 ? (
+            <div
+              role="alert"
+              data-testid="send-blocked-files"
+              className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-text-primary"
+            >
+              <span className="min-w-0 flex-1">
+                {failedChips.length === 1
+                  ? t(failedChips[0].retryable === false ? "input.sendBlocked.failedOneNoRetry" : "input.sendBlocked.failedOne", { name: failedChips[0].file.name })
+                  : t("input.sendBlocked.failedMany", { n: String(failedChips.length) })}
+              </span>
+              <button
+                type="button"
+                data-testid="remove-failed-files"
+                onClick={() => {
+                  for (const p of failedChips) removePendingFile(renderBucket, p.id);
+                }}
+                className="focus-ring rounded-md border border-border bg-bg-surface px-2 py-1 text-xs font-medium text-text-primary hover:bg-bg-elevated"
+              >
+                {t("input.sendBlocked.removeFailed")}
+              </button>
+            </div>
+          ) : visionBlocked ? (
+            <div
+              role="status"
+              data-testid="send-blocked-vision"
+              className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-2 text-xs text-text-secondary"
+            >
+              <span className="min-w-0 flex-1">{t("input.sendBlocked.vision", { model: activeModel?.name ?? activeModelId ?? "" })}</span>
+              {visionAlt ? (
+                <button
+                  type="button"
+                  onClick={() => useModelStore.getState().selectModel(visionAlt.id)}
+                  className="focus-ring rounded-md border border-border bg-bg-surface px-2 py-1 text-xs font-medium text-text-primary hover:border-border-strong"
+                >
+                  {t("input.visionSwitchTo", { model: visionAlt.name ?? visionAlt.id })}
+                </button>
+              ) : null}
             </div>
           ) : null}
 
@@ -1404,7 +1467,7 @@ export function ChatInput({
                 screen (the model label truncates) instead of pushing the
                 send button past the composer's clipped edge. */}
             <div className="flex min-w-0 items-center gap-1.5">
-              {onKBPick ? (
+              {onKBPick && (kbAvailable || activeKBId) ? (
                 <KBSelector
                   conversationId={conversationId}
                   activeKBId={activeKBId ?? null}
@@ -1663,7 +1726,7 @@ export async function uploadFiles(
       sid: string,
       extractionStatus?: ExtractionStatus,
     ) => void;
-    markFileError: (id: string, pid: string, err: string) => void;
+    markFileError: (id: string, pid: string, err: string, retryable?: boolean) => void;
     /** Optional so existing callers that don't care about the
      *  background-extraction phase keep compiling unchanged. */
     setFileExtractionStatus?: (
@@ -1720,7 +1783,7 @@ export async function uploadFiles(
       endUpload(pid);
       if (err instanceof ApiError && err.code === "ABORTED") continue;
       const msg = uploadErrorMessage(err);
-      store.markFileError(chipBucket, pid, msg);
+      store.markFileError(chipBucket, pid, msg, uploadErrorRetryable(err));
       toast(msg);
     }
   }

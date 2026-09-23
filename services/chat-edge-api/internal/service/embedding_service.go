@@ -35,6 +35,22 @@ var ErrEmbeddingDisabled = errors.New("embedding: gateway not configured")
 // EmbeddingService forwards embedding requests to the gateway.
 type EmbeddingService struct {
 	gateway *GatewayClient
+	// observe (FIX130 C2) is told every call's outcome, so the knowledge
+	// availability verdict follows what really happened. Nil = nobody asks.
+	observe func(error)
+}
+
+// SetObserver wires the FIX130 availability tracker. Call before serving.
+func (s *EmbeddingService) SetObserver(fn func(error)) { s.observe = fn }
+
+// Probe is one embedding of a short fixed string on behalf of the person
+// asking — the FIX130 availability check when nothing has been observed.
+func (s *EmbeddingService) Probe(ctx context.Context, tenantID, userID uuid.UUID) error {
+	if !s.Enabled() {
+		return ErrEmbeddingDisabled
+	}
+	_, err := s.gateway.GenerateEmbedding(ctx, embeddingCallCtx(tenantID, userID), "knowledge base availability check")
+	return err
 }
 
 // NewEmbeddingService wires the gateway client used for every embedding
@@ -59,13 +75,20 @@ func (s *EmbeddingService) GenerateEmbedding(
 	ctx context.Context, callCtx GatewayCallContext, text string,
 ) ([]float32, error) {
 	if !s.Enabled() {
+		if s.observe != nil {
+			s.observe(ErrEmbeddingDisabled)
+		}
 		return nil, ErrEmbeddingDisabled
 	}
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil, errors.New("embedding: empty input")
 	}
-	return s.gateway.GenerateEmbedding(ctx, callCtx, text)
+	vec, err := s.gateway.GenerateEmbedding(ctx, callCtx, text)
+	if s.observe != nil {
+		s.observe(err)
+	}
+	return vec, err
 }
 
 // embeddingCallCtx builds the identity envelope for an embedding egress.

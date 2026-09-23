@@ -361,7 +361,7 @@ func (s *FileService) Upload(ctx context.Context, in UploadInput) (*model.Conver
 	// with the same name don't collide.
 	clean := sanitizeFilename(in.OriginalName)
 	fileID := uuid.New()
-	storageName := fmt.Sprintf("%s_%s", fileID.String(), clean)
+	storageName := storageObjectName(fileID, clean)
 
 	// Storage key — forward-slash joined, same shape on disk and in
 	// S3 so the migration script can copy bytes 1:1. ``StoragePath``
@@ -849,7 +849,7 @@ func (s *FileService) SaveGeneratedFile(
 	if display == "" {
 		display = "output"
 	}
-	storageName := fmt.Sprintf("%s_%s", uuid.New().String(), display)
+	storageName := storageObjectName(uuid.New(), display)
 	key := storage.JoinKey(
 		conversationFilesKeyPrefix,
 		in.TenantID.String(),
@@ -2001,9 +2001,11 @@ func splitExtractMeta(out string) (string, ExtractMeta) {
 // Path / name helpers
 // ---------------------------------------------------------------------------
 
-// sanitizeFilename trims path separators, control chars, and caps
-// the byte length to 200. UTF-8 friendly because rune-iteration
-// counts codepoints, not bytes, so Thai / CJK filenames survive.
+// sanitizeFilename trims path separators, control chars, and caps the
+// name at 200 RUNES (not bytes — a Thai character is three bytes, which
+// is why this name must never be used as a file name on disk as is; see
+// storageObjectName). FIX130: the cap keeps the extension — a 300-char
+// "….pdf" used to lose its ".pdf" and with it its type.
 func sanitizeFilename(name string) string {
 	// Reject anything path-like.
 	name = filepath.Base(name)
@@ -2028,12 +2030,51 @@ func sanitizeFilename(name string) string {
 	if out == "" {
 		out = "untitled"
 	}
-	// 200-rune cap.
+	// 200-rune cap, extension kept.
 	runes := []rune(out)
 	if len(runes) > 200 {
-		out = string(runes[:200])
+		ext := []rune(filepath.Ext(out))
+		if len(ext) > 16 {
+			ext = nil
+		}
+		out = string(runes[:200-len(ext)]) + string(ext)
 	}
 	return out
+}
+
+// storageNameMaxBytes is the byte budget for the part of a storage object
+// name after "<uuid>_". ext4 (the live volume) and most filesystems allow
+// 255 BYTES per path component; 36 + 1 + 180 leaves room to spare.
+const storageNameMaxBytes = 180
+
+// storageObjectName (FIX130 C3.4) is the name a blob is stored under:
+// "<id>_<name>", with the name cut to storageNameMaxBytes on a rune
+// boundary and its extension kept (extraction reads the type from it).
+// Before, the whole 200-rune display name went into the file name: 200
+// Thai characters are 600 bytes, and anything past ~72 Thai characters
+// failed the rename on ext4 — a 500 in 2 ms and a retry that could never
+// succeed (NIGHT2 F4). The display name (original_filename) is untouched.
+func storageObjectName(id uuid.UUID, name string) string {
+	if len(name) > storageNameMaxBytes {
+		ext := filepath.Ext(name)
+		if len(ext) > 16 || !utf8.ValidString(ext) {
+			ext = ""
+		}
+		stem := name[:len(name)-len(ext)]
+		budget := storageNameMaxBytes - len(ext)
+		cut := 0
+		for i := range stem { // rune starts
+			if i > budget {
+				break
+			}
+			cut = i
+		}
+		if len(stem) <= budget {
+			cut = len(stem)
+		}
+		name = stem[:cut] + ext
+	}
+	return id.String() + "_" + name
 }
 
 func truncateChars(s string, n int) string {

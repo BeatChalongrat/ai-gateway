@@ -27,7 +27,20 @@ export interface UploadingDocument {
   progress: number; // 0–100
 }
 
+/** FIX130 C2 — the server's word on whether a knowledge base can work.
+ *  "unknown" until it answered (and when asking failed). Nothing
+ *  knowledge-base-shaped is offered unless it is "available": NIGHT2 F27 was
+ *  a composer button, a project dropdown and a menu entry leading to a
+ *  feature whose every upload failed. */
+export type KnowledgeAvailabilityState = "unknown" | "available" | "unavailable";
+
 interface KnowledgeState {
+  availability: KnowledgeAvailabilityState;
+  /** Why it is unavailable (embeddings_not_configured | embeddings_failed). */
+  availabilityReason: string | null;
+  /** Ask the server; once per session unless `force` (the knowledge page
+   *  asks afresh every time it opens, and after a failed upload). */
+  loadAvailability: (force?: boolean) => Promise<void>;
   knowledgeBases: KnowledgeBase[];
   documentsByKB: Record<string, KnowledgeDocument[]>;
   uploadingByKB: Record<string, UploadingDocument[]>;
@@ -58,7 +71,33 @@ function tempID(): string {
   );
 }
 
+let availabilityAsked: Promise<void> | null = null;
+
+/** Test seam: forget that availability was asked. */
+export function _resetKnowledgeAvailability(): void {
+  availabilityAsked = null;
+}
+
 export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
+  availability: "unknown",
+  availabilityReason: null,
+  loadAvailability(force = false) {
+    if (availabilityAsked && !force) return availabilityAsked;
+    availabilityAsked = (async () => {
+      try {
+        const res = await api.getKnowledgeAvailability();
+        set({
+          availability: res?.available ? "available" : "unavailable",
+          availabilityReason: res?.available ? null : (res?.reason ?? null),
+        });
+      } catch {
+        // Could not ask: offer nothing rather than something that may not
+        // work. A later forced ask (the knowledge page) tries again.
+        set({ availability: "unknown", availabilityReason: null });
+      }
+    })();
+    return availabilityAsked;
+  },
   knowledgeBases: [],
   documentsByKB: {},
   uploadingByKB: {},

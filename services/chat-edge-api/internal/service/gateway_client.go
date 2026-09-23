@@ -42,10 +42,53 @@ import (
 type GatewayUnavailableError struct {
 	Status int
 	Body   string
+	// timedOut (FIX130 C3.2) — chat-edge gave up waiting (streamOpenTimeout)
+	// rather than the gateway refusing: Unwrap then says
+	// context.DeadlineExceeded, so the stream classifier files it as
+	// provider_timeout / timeout like any other deadline.
+	timedOut bool
 }
 
 func (e *GatewayUnavailableError) Error() string {
 	return fmt.Sprintf("gateway unavailable: status=%d body=%s", e.Status, truncate(e.Body, 200))
+}
+
+// Unwrap exposes the deadline behind a stream-open timeout; nil otherwise.
+func (e *GatewayUnavailableError) Unwrap() error {
+	if e.timedOut {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// backendErrorCode (FIX130 C3.2) — the code a gateway error body is known
+// by. The backend's own stream guards (bounded_sse: stream_timeout; the
+// request hard timeout: upstream_timeout) write {"error":{"type":…}} with
+// NO "code", and every reader here took only "code": the frame became
+// INTERNAL_ERROR with an English sentence, and the pre-stream 504 became
+// PROVIDER_UNAVAILABLE. A timeout of the backend is the catalogue's
+// provider_timeout (retryable); any other code-less body is known by its
+// type. "" when the body carries neither.
+func backendErrorCode(code, typ string) string {
+	if code != "" {
+		return code
+	}
+	switch typ {
+	case "stream_timeout", "upstream_timeout":
+		return CodeProviderTimeout
+	}
+	return typ
+}
+
+// normalize fills Code from Type (backendErrorCode) and marks a timeout
+// retryable when the backend did not say.
+func (e *StreamProviderError) normalize() {
+	code := backendErrorCode(e.Code, e.Type)
+	if e.Code == "" && code == CodeProviderTimeout && e.Retryable == nil {
+		yes := true
+		e.Retryable = &yes
+	}
+	e.Code = code
 }
 
 // Envelope is the gateway's typed error body — {"error":{"code","message",
@@ -64,14 +107,24 @@ func (e *GatewayUnavailableError) Envelope() (GatewayErrorEnvelope, bool) {
 	var body struct {
 		Error struct {
 			Code      string `json:"code"`
+			Type      string `json:"type"`
 			Message   string `json:"message"`
 			Retryable *bool  `json:"retryable"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal([]byte(e.Body), &body); err != nil || body.Error.Code == "" {
+	if err := json.Unmarshal([]byte(e.Body), &body); err != nil {
 		return GatewayErrorEnvelope{}, false
 	}
-	return GatewayErrorEnvelope{Code: body.Error.Code, Message: body.Error.Message, Retryable: body.Error.Retryable}, true
+	code := backendErrorCode(body.Error.Code, body.Error.Type)
+	if code == "" {
+		return GatewayErrorEnvelope{}, false
+	}
+	retryable := body.Error.Retryable
+	if body.Error.Code == "" && code == CodeProviderTimeout && retryable == nil {
+		yes := true
+		retryable = &yes
+	}
+	return GatewayErrorEnvelope{Code: code, Message: body.Error.Message, Retryable: retryable}, true
 }
 
 // GatewayClient is the typed HTTP client used by every chat-edge
@@ -494,7 +547,11 @@ type ReasoningNotice struct {
 // (B1). “Attempts“ is populated on the “all_models_failed“ case so
 // the client can show which models were tried and why each failed.
 type StreamProviderError struct {
-	Code     string         `json:"code"`
+	Code string `json:"code"`
+	// Type is the backend's own discriminator on its code-less frames
+	// (FIX130: bounded_sse writes {"error":{"type":"stream_timeout"}}).
+	// parseStreamChunk folds it into Code; nothing downstream reads it.
+	Type     string         `json:"type,omitempty"`
 	Message  string         `json:"message"`
 	Details  map[string]any `json:"details,omitempty"`
 	Attempts []any          `json:"attempts,omitempty"`
@@ -535,13 +592,32 @@ func (g *GatewayClient) SendChatCompletionStream(
 		IncludeUsage bool `json:"include_usage"`
 	}{IncludeUsage: true}
 
-	resp, err := g.do(ctx, callCtx, req)
+	// FIX130 C3.2 — the call gets streamOpenTimeout to answer (headers),
+	// not the transport's 120 s per hop: a turn whose gateway never
+	// answers now fails with provider_timeout at 90 s instead of spinning
+	// (NIGHT2 F2: 241 s). The deadline covers the headers only — the timer
+	// is stopped once they arrive, and the context lives on with the body
+	// until StreamReader.Close.
+	octx, ocancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(streamOpenTimeout, ocancel)
+	resp, err := g.do(octx, callCtx, req)
+	if !timer.Stop() {
+		ocancel()
+		if resp != nil {
+			resp.Body.Close()
+		}
+		slog.Warn("gateway_stream_open_timeout", "run_id", callCtx.RequestID,
+			"conversation_id", callCtx.ConversationID.String(), "after_ms", streamOpenTimeout.Milliseconds())
+		return nil, streamOpenTimeoutError()
+	}
 	if err != nil {
+		ocancel()
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
 		resp.Body.Close()
+		ocancel()
 		return nil, &GatewayUnavailableError{Status: resp.StatusCode, Body: string(body)}
 	}
 	// FIX119 — the backend answers with its own request id (the
@@ -560,7 +636,28 @@ func (g *GatewayClient) SendChatCompletionStream(
 		"run_id", callCtx.RequestID, "conversation_id", callCtx.ConversationID.String(),
 		"gateway_request_id", gatewayRequestID, "gateway_provider", resp.Header.Get("X-Gateway-Provider"),
 		"gateway_model", resp.Header.Get("X-Gateway-Model"))
-	return &StreamReader{body: resp.Body, scanner: bufio.NewScanner(resp.Body), GatewayRequestID: gatewayRequestID}, nil
+	return &StreamReader{body: resp.Body, scanner: bufio.NewScanner(resp.Body), GatewayRequestID: gatewayRequestID, cancel: ocancel}, nil
+}
+
+// streamOpenTimeout (FIX130 C3.2) is how long a streaming completion may
+// wait for the gateway's response headers. The gateway answers with SSE
+// headers as soon as it has routed the request (a slow first token is
+// AFTER the headers and does not count); its own pre-stream bound is
+// 120 s. A var so tests can shorten it; the web client's matching guard
+// (STREAM_OPEN.sendMs) sits just above it.
+var streamOpenTimeout = 90 * time.Second
+
+// streamOpenTimeoutError is the gateway-shaped error for a call that got
+// no answer in time: a 504 carrying the catalogue's provider_timeout,
+// so every pre-stream path (send, regenerate, edit, the early-open frame)
+// answers with the code the clients localise, and unwrapping to
+// context.DeadlineExceeded for the in-stream classifier.
+func streamOpenTimeoutError() *GatewayUnavailableError {
+	return &GatewayUnavailableError{
+		Status:   http.StatusGatewayTimeout,
+		Body:     `{"error":{"code":"provider_timeout","message":"The AI service did not answer in time. Please try again.","retryable":true}}`,
+		timedOut: true,
+	}
 }
 
 // StreamReader wraps the gateway's SSE body. “Next“ blocks until
@@ -568,12 +665,20 @@ func (g *GatewayClient) SendChatCompletionStream(
 type StreamReader struct {
 	body    io.ReadCloser
 	scanner *bufio.Scanner
+	// cancel releases the request context (FIX130); nil in tests that
+	// build a reader by hand.
+	cancel context.CancelFunc
 	// GatewayRequestID (FIX119) — the backend's own id for the call this
 	// stream answers ("" when the response carried none).
 	GatewayRequestID string
 }
 
-func (s *StreamReader) Close() error { return s.body.Close() }
+func (s *StreamReader) Close() error {
+	if s.cancel != nil {
+		defer s.cancel()
+	}
+	return s.body.Close()
+}
 
 // Next parses the next SSE event. Returns “io.EOF“ on stream
 // end. Skips empty / comment lines per the SSE spec.
@@ -741,6 +846,7 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 		// the handler surfaces it instead of the client hanging on a
 		// truncated stream.
 		if env.Error != nil {
+			env.Error.normalize() // FIX130 — a code-less frame gets its code
 			return &StreamEvent{ProviderError: env.Error}, nil
 		}
 		// B2: fallback notice frame.
