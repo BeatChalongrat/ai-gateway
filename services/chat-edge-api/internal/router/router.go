@@ -466,6 +466,7 @@ func New(
 			// service layer.
 			if h.Knowledge != nil {
 				r.Get("/knowledge-bases", h.Knowledge.List)
+				r.Get("/knowledge-bases/availability", h.Knowledge.Availability) // FIX130 C2
 				r.Post("/knowledge-bases", h.Knowledge.Create)
 				r.Get("/knowledge-bases/{id}", h.Knowledge.Get)
 				r.Patch("/knowledge-bases/{id}", h.Knowledge.Update)

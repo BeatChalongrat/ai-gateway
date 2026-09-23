@@ -35,6 +35,9 @@ import (
 type KnowledgeHandler struct {
 	svc *service.KnowledgeService
 	rag *service.RAGService
+	// avail (FIX130 C2) answers GET /knowledge-bases/availability; nil =
+	// no embeddings wired, which is "not configured".
+	avail *service.KnowledgeAvailability
 	// maxMemMultipartMB — same value as file.go for parity.
 	maxMemMultipartMB int64
 }
@@ -143,6 +146,24 @@ func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(toKBResponse(kb))
+}
+
+// SetAvailability wires the FIX130 C2 availability tracker.
+func (h *KnowledgeHandler) SetAvailability(a *service.KnowledgeAvailability) { h.avail = a }
+
+// Availability — GET /api/v1/knowledge-bases/availability (FIX130 C2).
+// Whether a knowledge base can work right now: {available, reason,
+// checked_at}. The clients show no knowledge-base affordance unless this
+// says available, and the knowledge page says why when it does not.
+func (h *KnowledgeHandler) Availability(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	v := service.KBAvailability{Available: false, Reason: service.KBUnavailableNotConfigured, CheckedAt: time.Now().UTC()}
+	if h.avail != nil {
+		v = h.avail.Status(r.Context(), caller.TenantUUID, caller.UserID)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 func (h *KnowledgeHandler) List(w http.ResponseWriter, r *http.Request) {
