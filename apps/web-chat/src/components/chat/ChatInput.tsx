@@ -11,6 +11,7 @@ import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { beginUpload, endUpload } from "@/lib/uploadRegistry";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { loadSkillTemplates, skillSlashCommands } from "@/lib/skillTemplates";
 import {
   clearDraft,
@@ -124,6 +125,9 @@ export function ChatInput({
   onRequestConversation,
 }: Props) {
   const t = useT();
+  // FIX130 C2 — the ฐานความรู้ button only when a knowledge base can work
+  // (or one is already bound here, so it can still be unbound).
+  const kbAvailable = useKnowledgeAvailable();
   const hosted = useHostedMode();
   const router = useRouter();
   const [text, setText] = useState("");
@@ -1404,7 +1408,7 @@ export function ChatInput({
                 screen (the model label truncates) instead of pushing the
                 send button past the composer's clipped edge. */}
             <div className="flex min-w-0 items-center gap-1.5">
-              {onKBPick ? (
+              {onKBPick && (kbAvailable || activeKBId) ? (
                 <KBSelector
                   conversationId={conversationId}
                   activeKBId={activeKBId ?? null}

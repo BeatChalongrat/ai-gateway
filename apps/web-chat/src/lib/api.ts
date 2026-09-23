@@ -18,6 +18,7 @@ import type {
   FileListResponse,
   KnowledgeBase,
   KnowledgeBaseDetailResponse,
+  KnowledgeAvailability,
   KnowledgeBaseListResponse,
   KnowledgeDocument,
   KnowledgeSearchResponse,
@@ -1107,6 +1108,10 @@ class ApiClient {
   }
 
   // ----- Knowledge bases (RAG) ------------------------------
+  /** FIX130 C2 — whether a knowledge base can work right now. */
+  getKnowledgeAvailability() {
+    return this.json<KnowledgeAvailability>("/knowledge-bases/availability");
+  }
   listKnowledgeBases() {
     return this.json<KnowledgeBaseListResponse>("/knowledge-bases");
   }

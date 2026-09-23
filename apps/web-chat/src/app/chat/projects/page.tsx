@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { toast } from "@/components/ui/Toast";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { consumeQueryProject } from "@/lib/deepLinkParams";
 import { timeAgo } from "@/components/workspace/workspaceUtil";
 import { api } from "@/lib/api";
@@ -351,6 +352,11 @@ function ProjectDetailPanel({
 
   const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
   const kbsLoaded = useKnowledgeStore((s) => s.loaded);
+  // FIX130 C2 — the knowledge-base dropdown and its promise ("chats here can
+  // search the attached knowledge base") only when a knowledge base can work;
+  // a project that already has one keeps the control so it can be detached.
+  const kbAvailable = useKnowledgeAvailable();
+  const showKB = kbAvailable || Boolean(project.knowledge_base_id);
   const kbsLoading = useKnowledgeStore((s) => s.loading);
   const loadKBs = useKnowledgeStore((s) => s.loadKnowledgeBases);
 
@@ -444,31 +450,33 @@ function ProjectDetailPanel({
       </div>
 
       {/* Knowledge base attach */}
-      <div className="flex flex-col gap-1.5">
-        <label
-          htmlFor={`proj-kb-${project.id}`}
-          className="text-xs font-medium uppercase tracking-wider text-text-secondary"
-        >
-          {t("projects.kb.label")}
-        </label>
-        <select
-          id={`proj-kb-${project.id}`}
-          value={project.knowledge_base_id ?? ""}
-          disabled={kbSaving || !kbsLoaded}
-          onChange={(e) => void handleKBChange(e.target.value)}
-          className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong disabled:opacity-60"
-        >
-          <option value="">{t("projects.kb.none")}</option>
-          {knowledgeBases.map((kb) => (
-            <option key={kb.id} value={kb.id}>
-              {kb.name}
-            </option>
-          ))}
-        </select>
-        <span className="text-[11px] text-text-muted">
-          {t("projects.kb.hint")}
-        </span>
-      </div>
+      {showKB ? (
+        <div data-testid="project-kb" className="flex flex-col gap-1.5">
+          <label
+            htmlFor={`proj-kb-${project.id}`}
+            className="text-xs font-medium uppercase tracking-wider text-text-secondary"
+          >
+            {t("projects.kb.label")}
+          </label>
+          <select
+            id={`proj-kb-${project.id}`}
+            value={project.knowledge_base_id ?? ""}
+            disabled={kbSaving || !kbsLoaded}
+            onChange={(e) => void handleKBChange(e.target.value)}
+            className="rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong disabled:opacity-60"
+          >
+            <option value="">{t("projects.kb.none")}</option>
+            {knowledgeBases.map((kb) => (
+              <option key={kb.id} value={kb.id}>
+                {kb.name}
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-text-muted">
+            {t("projects.kb.hint")}
+          </span>
+        </div>
+      ) : null}
 
       {/* Chats in this project */}
       <div>

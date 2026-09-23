@@ -11,6 +11,7 @@ import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useChatStore } from "@/stores/chatStore";
 import { CreditBadge } from "@/components/chat/CreditBadge";
 import { ShortcutsDialog } from "@/components/chat/ShortcutsDialog";
@@ -362,9 +363,11 @@ const SUBTLE_TOPBAR_BTN =
   "focus-ring tap-44 flex h-9 w-9 items-center justify-center rounded-xl " +
   "text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary";
 
-const MORE_MENU_ITEMS: { label: string; Icon: typeof Brain; href: string }[] = [
-  { label: "Memory", Icon: Brain, href: "/chat/memory" },
-  { label: "Knowledge", Icon: BookOpen, href: "/chat/knowledge" },
+// FIX130 C2 — labels through the dictionary (they were English on a Thai
+// screen); the knowledge entry only when a knowledge base can work.
+const MORE_MENU_ITEMS: { labelKey: "menu.memory" | "menu.knowledgeBase"; Icon: typeof Brain; href: string; needsKB?: boolean }[] = [
+  { labelKey: "menu.memory", Icon: Brain, href: "/chat/memory" },
+  { labelKey: "menu.knowledgeBase", Icon: BookOpen, href: "/chat/knowledge", needsKB: true },
 ];
 
 function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
@@ -372,6 +375,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
   const pathname = usePathname();
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
+  const kbAvailable = useKnowledgeAvailable();
 
   // Dismiss the menu on any navigation so it never lingers over a new
   // route after a menu item (or anything else) changes the path.
@@ -415,9 +419,9 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
             aria-label={t("a11y.moreOptions")}
             className="absolute right-0 top-12 z-50 w-48 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-xl"
           >
-            {MORE_MENU_ITEMS.map(({ label, Icon, href }) => (
+            {MORE_MENU_ITEMS.filter((item) => !item.needsKB || kbAvailable).map(({ labelKey, Icon, href }) => (
               <button
-                key={label}
+                key={href}
                 type="button"
                 role="menuitem"
                 onClick={() => {
@@ -427,7 +431,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
                 className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
               >
                 <Icon size={16} aria-hidden />
-                {label}
+                {t(labelKey)}
               </button>
             ))}
           </div>

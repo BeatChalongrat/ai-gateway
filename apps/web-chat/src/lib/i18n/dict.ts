@@ -1718,6 +1718,17 @@ export const en = {
   "session.unreachable.body": "The sign-in service did not answer, so the chat could not open. You have not been signed out — this is a connection problem. Try again in a moment.",
   "session.unreachable.retry": "Try again",
   "session.unreachable.checking": "Checking…",
+  // ── FIX130 C2 — knowledge bases that cannot work say so ──
+  "kb.unavailable.title": "Knowledge bases can't be used right now",
+  "kb.unavailable.embeddings_failed": "The service that reads and searches your documents (embeddings) is refusing requests — for example the provider's credit ran out or its key is invalid. Uploaded files cannot be indexed and chats cannot search a knowledge base. An administrator needs to fix the OpenAI key in the admin console first.",
+  "kb.unavailable.embeddings_not_configured": "The service that reads and searches your documents (embeddings) is not set up. An administrator needs to add an OpenAI key in the admin console before knowledge bases can be created or used.",
+  "kb.unavailable.unknown": "We couldn't check whether knowledge bases work right now. Try again in a moment.",
+  "kb.unavailable.recheck": "Check again",
+  "kb.doc.embeddingFailed": "Couldn't index this file — the document search service (embeddings) isn't working right now.",
+  "kb.doc.status.pending": "pending",
+  "kb.doc.status.processing": "indexing",
+  "kb.doc.status.indexed": "indexed",
+  "kb.doc.status.failed": "failed",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -3374,6 +3385,17 @@ const th: Record<DictKey, string> = {
   "session.unreachable.body": "ระบบยืนยันตัวตนไม่ตอบกลับ จึงยังเปิดแชทไม่ได้ คุณยังไม่ได้ถูกออกจากระบบ — เป็นปัญหาการเชื่อมต่อ ลองใหม่อีกครั้งในอีกสักครู่",
   "session.unreachable.retry": "ลองใหม่",
   "session.unreachable.checking": "กำลังตรวจสอบ…",
+  // ── FIX130 C2 ──
+  "kb.unavailable.title": "ตอนนี้ยังใช้ฐานความรู้ไม่ได้",
+  "kb.unavailable.embeddings_failed": "ระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ปฏิเสธคำขออยู่ — เช่น เครดิตของผู้ให้บริการหมดหรือคีย์ไม่ถูกต้อง ไฟล์ที่อัปโหลดจึงทำดัชนีไม่ได้ และแชทจะค้นในฐานความรู้ไม่ได้ ผู้ดูแลระบบต้องแก้ไขคีย์ OpenAI ในหน้าแอดมินก่อน",
+  "kb.unavailable.embeddings_not_configured": "ยังไม่ได้ตั้งค่าระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ผู้ดูแลระบบต้องเพิ่มคีย์ OpenAI ในหน้าแอดมินก่อน จึงจะสร้างและใช้ฐานความรู้ได้",
+  "kb.unavailable.unknown": "ตรวจสอบไม่ได้ว่าตอนนี้ฐานความรู้ใช้งานได้หรือไม่ ลองใหม่อีกครั้งในอีกสักครู่",
+  "kb.unavailable.recheck": "ตรวจสอบอีกครั้ง",
+  "kb.doc.embeddingFailed": "ทำดัชนีไฟล์นี้ไม่สำเร็จ — ระบบค้นหาเอกสาร (embeddings) ใช้งานไม่ได้ในตอนนี้",
+  "kb.doc.status.pending": "รอดำเนินการ",
+  "kb.doc.status.processing": "กำลังทำดัชนี",
+  "kb.doc.status.indexed": "พร้อมใช้",
+  "kb.doc.status.failed": "ไม่สำเร็จ",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

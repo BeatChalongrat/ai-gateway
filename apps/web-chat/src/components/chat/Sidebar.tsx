@@ -21,6 +21,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useNewChatHandler } from "@/hooks/useKeyboardShortcuts";
 import { useHostedMode } from "@/hooks/useHostedMode";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { logoutSession } from "@/lib/auth";
 import { CONV_SEARCH_EVENT } from "@/lib/composerShortcuts";
@@ -70,6 +71,7 @@ export function Sidebar({
 }: Props) {
   const router = useRouter();
   const { user } = useAuth();
+  const kbAvailable = useKnowledgeAvailable(); // FIX130 C2
   const conversations = useChatStore((s) => s.conversations);
   const loadConversations = useChatStore((s) => s.loadConversations);
   const loadMoreConversations = useChatStore((s) => s.loadMoreConversations);
@@ -536,7 +538,7 @@ export function Sidebar({
         <UserMenu
           userDisplay={userDisplay}
           userInitial={userInitial}
-          onKnowledgeBase={() => router.push("/chat/knowledge")}
+          onKnowledgeBase={kbAvailable ? () => router.push("/chat/knowledge") : undefined}
           onProjects={() => router.push("/chat/projects")}
           onArchive={() => router.push("/chat/archive")}
           onVoiceSettings={() => setVoiceSettingsOpen(true)}
@@ -570,7 +572,8 @@ function UserMenu({
 }: {
   userDisplay: string;
   userInitial: string;
-  onKnowledgeBase: () => void;
+  /** FIX130 C2 — absent when a knowledge base cannot work (no menu entry). */
+  onKnowledgeBase?: () => void;
   onProjects: () => void;
   onArchive: () => void;
   onVoiceSettings: () => void;
@@ -672,13 +675,16 @@ function UserMenu({
             closeOnClick={false}
             setOpen={setOpen}
           />
-          <MenuItem
-            onClick={onKnowledgeBase}
-            icon={<BookIcon />}
-            label={t("menu.knowledgeBase")}
-            trailing={<ArrowIcon />}
-            setOpen={setOpen}
-          />
+          {/* FIX130 C2 — only when a knowledge base can work. */}
+          {onKnowledgeBase ? (
+            <MenuItem
+              onClick={onKnowledgeBase}
+              icon={<BookIcon />}
+              label={t("menu.knowledgeBase")}
+              trailing={<ArrowIcon />}
+              setOpen={setOpen}
+            />
+          ) : null}
           <MenuItem
             onClick={onProjects}
             icon={<FolderKanban width={14} height={14} aria-hidden />}

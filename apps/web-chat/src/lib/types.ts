@@ -673,6 +673,15 @@ export type KnowledgeDocumentStatus =
   | "indexed"
   | "failed";
 
+/** FIX130 C2 — GET /knowledge-bases/availability: can a knowledge base work
+ *  right now (the embeddings provider answered, or would)? */
+export interface KnowledgeAvailability {
+  available: boolean;
+  /** embeddings_not_configured | embeddings_failed (when not available). */
+  reason?: string;
+  checked_at?: string;
+}
+
 export interface KnowledgeBase {
   id: UUID;
   name: string;
