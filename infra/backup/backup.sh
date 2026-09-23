@@ -14,6 +14,8 @@
 # the source keeps taking writes — and drill.sh can compare EXACTLY.
 #
 # Then directories older than BACKUP_KEEP_DAYS (default 14) are pruned.
+# (The off-site copy of the run — FIX130 E1, offsite.sh — is entrypoint.sh's
+# job after the drill; the manifest only records whether one is configured.)
 # Any failure exits non-zero and the partial directory is renamed *.failed.
 # If BACKUP_RESULT_FILE is set, the finished directory's path is written there.
 set -euo pipefail
@@ -99,12 +101,16 @@ dump_db chat "$CHAT_DB" "$dir/sran_ai.dump" "$work/chat.counts.json" "${CHAT_TAB
 # Uploads. A file removed between the directory scan and its read (the
 # unattached-file sweep) makes tar exit 1 — a warning here, not a failure;
 # any other tar exit code fails the run.
+# FIX130 E1: gzip --rsyncable (same format, slightly larger) restarts the
+# compressor at content-defined points, so a file added to the volume
+# changes only the bytes around it and the off-site copy (restic, chunk
+# dedup) uploads roughly the new file instead of the whole archive.
 rc=0
-tar -czf "$dir/uploads.tar.gz" --warning=no-file-changed --warning=no-file-removed -C "$UPLOADS_DIR" . || rc=$?
+tar -cf "$dir/uploads.tar.gz" -I 'gzip --rsyncable' --warning=no-file-changed --warning=no-file-removed -C "$UPLOADS_DIR" . || rc=$?
 if [ $rc -eq 1 ]; then log "WARN uploads: tar reported files that changed during the read"
 elif [ $rc -ne 0 ]; then die "uploads: tar failed rc=$rc"; fi
 uploads_entries=$(tar -tzf "$dir/uploads.tar.gz" | wc -l | tr -d ' ')
-log "uploads: tar -czf -> uploads.tar.gz bytes=$(file_bytes "$dir/uploads.tar.gz") entries=$uploads_entries"
+log "uploads: tar | gzip --rsyncable -> uploads.tar.gz bytes=$(file_bytes "$dir/uploads.tar.gz") entries=$uploads_entries"
 
 # manifest.json — everything drill.sh needs to prove the backup, and nothing
 # secret (hosts/databases/users only).
@@ -128,13 +134,15 @@ jq -n \
   --argjson chat_counts "$(cat "$work/chat.counts.json")" \
   --argjson uploads_entries "$uploads_entries" \
   --argjson files "$(cat "$work/files.json")" \
+  --argjson offsite_configured "$([ -n "${BACKUP_OFFSITE_REPOSITORY:-}" ] && echo true || echo false)" \
   '{
      schema: 1, id: $id, created_at: $created_at, tz: $tz, duration_s: $duration_s,
      pg_dump_version: $pg_dump_version,
      gateway: {host: $gw_host, database: $gw_db, user: $gw_user, file: "gateway.dump", counts: $gw_counts},
      chat:    {host: $chat_host, database: $chat_db, user: $chat_user, file: "sran_ai.dump", counts: $chat_counts},
      uploads: {file: "uploads.tar.gz", entries: $uploads_entries},
-     files: $files
+     files: $files,
+     offsite: {configured: $offsite_configured}
    }' > "$dir/manifest.json"
 log "manifest: $dir/manifest.json written"
 

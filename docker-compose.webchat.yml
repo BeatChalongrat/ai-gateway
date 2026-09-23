@@ -467,9 +467,26 @@ services:
       # RESEND_API_KEY + ALERT_EMAIL_TO (ALERT_EMAIL_FROM defaults to
       # no-reply@sran.ai). Nothing secret is ever put in a message.
       ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
+      # FIX130 — optional ntfy access token (reserved / ACL'd / self-hosted topic).
+      ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-no-reply@sran.ai}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # FIX130 E1 — the off-site copy (restic → an S3-compatible bucket; see
+      # docs/ops/backups.md "Off-site copy"). All optional: an empty
+      # repository = "offsite copy: not configured", the local backup runs as
+      # before. The password is the encryption key of the copy — keep it off
+      # this machine as well (password manager), or the copy dies with it.
+      BACKUP_OFFSITE_REPOSITORY: ${BACKUP_OFFSITE_REPOSITORY:-}
+      BACKUP_OFFSITE_PASSWORD: ${BACKUP_OFFSITE_PASSWORD:-}
+      BACKUP_OFFSITE_ACCESS_KEY_ID: ${BACKUP_OFFSITE_ACCESS_KEY_ID:-}
+      BACKUP_OFFSITE_SECRET_ACCESS_KEY: ${BACKUP_OFFSITE_SECRET_ACCESS_KEY:-}
+      BACKUP_OFFSITE_REGION: ${BACKUP_OFFSITE_REGION:-}
+      BACKUP_OFFSITE_KEEP_DAILY: ${BACKUP_OFFSITE_KEEP_DAILY:-14}
+      BACKUP_OFFSITE_KEEP_WEEKLY: ${BACKUP_OFFSITE_KEEP_WEEKLY:-8}
+      BACKUP_OFFSITE_KEEP_MONTHLY: ${BACKUP_OFFSITE_KEEP_MONTHLY:-12}
+      BACKUP_OFFSITE_CHECK_WEEKDAY: ${BACKUP_OFFSITE_CHECK_WEEKDAY:-7}
+      BACKUP_OFFSITE_CHECK_SUBSET: ${BACKUP_OFFSITE_CHECK_SUBSET:-5%}
     volumes:
       - chat_edge_uploads:/uploads:ro
       - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups
