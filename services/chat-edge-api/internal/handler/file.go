@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -229,6 +230,12 @@ func (h *FileHandler) writeUploadError(w http.ResponseWriter, err error) {
 		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationError,
 			fmt.Sprintf("conversation file quota exceeded (max %s total)",
 				humanBytes(h.files.MaxConversationBytes())))
+	case errors.Is(err, syscall.ENAMETOOLONG):
+		// FIX130 C3.4 — the storage refused the name. storageObjectName
+		// keeps every name inside the budget, so this is defence in depth:
+		// a request that can never succeed as sent is a 4xx the client can
+		// explain, never a 500 it retries forever.
+		WriteError(w, http.StatusUnprocessableEntity, CodeFilenameTooLong, "file name too long")
 	default:
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 	}

@@ -231,7 +231,7 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 
 	clean := sanitizeFilename(in.OriginalName)
 	docID := uuid.New()
-	storageName := fmt.Sprintf("%s_%s", docID.String(), clean)
+	storageName := storageObjectName(docID, clean) // FIX130 C3.4
 	key := storage.JoinKey(
 		knowledgeKeyPrefix,
 		in.TenantID.String(),
