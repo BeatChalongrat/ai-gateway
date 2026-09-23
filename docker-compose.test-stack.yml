@@ -36,7 +36,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\infra\\postgres\\init-chat-edge-db.sh",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\infra\\postgres\\init-chat-edge-db.sh",
           "target": "/docker-entrypoint-initdb.d/02-chat-edge.sh",
           "type": "bind"
         },
@@ -45,7 +45,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
           "target": "/chat-edge-migrations",
           "type": "bind"
         }
@@ -463,7 +463,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix129\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
           "target": "/docker-entrypoint-initdb.d",
           "type": "bind"
         }
