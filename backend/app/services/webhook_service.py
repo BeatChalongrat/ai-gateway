@@ -15,6 +15,8 @@ from typing import Any
 import httpx
 import structlog
 
+from app.services.alert_channels import register_secret_url, url_label
+
 logger = structlog.get_logger(__name__)
 
 # H15: bounded so a single dead webhook can't stall the alert sweep for
@@ -63,6 +65,9 @@ class WebhookService:
         """Attempt to deliver payload to URL with retries."""
         delivery = WebhookDelivery(webhook_url=url, payload=payload)
         self._deliveries.append(delivery)
+        # FIX130 E4: a webhook URL is often its own credential; the httpx
+        # request log and these lines name scheme://host/ only.
+        register_secret_url(url)
 
         for attempt in range(self._max_retries):
             delivery.attempts = attempt + 1
@@ -73,7 +78,7 @@ class WebhookService:
                     delivery.mark_delivered()
                     logger.info(
                         "webhook_delivered",
-                        url=url,
+                        url=url_label(url),
                         status_code=resp.status_code,
                         attempts=delivery.attempts,
                     )
@@ -87,9 +92,9 @@ class WebhookService:
         delivery.mark_failed(delivery.last_error or "max retries exceeded")
         logger.warning(
             "webhook_failed",
-            url=url,
+            url=url_label(url),
             attempts=delivery.attempts,
-            error=delivery.last_error,
+            error=(delivery.last_error or "").replace(url, url_label(url)),
         )
         return delivery
 
