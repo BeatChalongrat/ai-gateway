@@ -31,6 +31,39 @@ export function useBottomInset(): number {
   return useComposerStore((s) => s.height);
 }
 
+/** FIX130 C4 — the height of what is stacked on top of the docked composer
+ *  (banners, the phone's long-chat chip). */
+export function useAboveComposer(): number {
+  return useComposerStore((s) => (s.height > 0 ? s.above : 0));
+}
+
+/** FIX130 C4 — producer for useAboveComposer: publish `ref`'s height while
+ *  it is mounted (0 on unmount). The stack sits in normal flow directly
+ *  above the composer, so its height is exactly how much higher a
+ *  bottom-floating element must sit to clear it. */
+export function useAboveComposerProbe(ref: RefObject<HTMLElement | null>): void {
+  const setAbove = useComposerStore((s) => s.setAbove);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const publish = () => setAbove(el.getBoundingClientRect().height);
+    publish();
+    if (typeof ResizeObserver === "undefined") return () => setAbove(0);
+    const ro = new ResizeObserver(() => {
+      try {
+        flushSync(publish);
+      } catch {
+        publish();
+      }
+    });
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      setAbove(0);
+    };
+  }, [ref, setAbove]);
+}
+
 /** How far the composer's bottom edge may sit above the viewport bottom
  *  and still count as "docked at the bottom": the safe-area padding and
  *  the disclaimer lines the quick window renders UNDER the composer

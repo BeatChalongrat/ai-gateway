@@ -22,15 +22,16 @@
 //    the number is unavailable and offers a retry (FIX77: collapse,
 //    never delete).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ChevronUp, ExternalLink } from "lucide-react";
 
-import { BADGE_GAP, useBottomInset } from "@/hooks/useBottomInset";
+import { BADGE_GAP, useAboveComposer, useBottomInset } from "@/hooks/useBottomInset";
 import { useUsage } from "@/hooks/useUsage";
 import { PORTAL_URL } from "@/lib/auth";
 import { tOutside, useT } from "@/lib/i18n";
 import type { ModelUsage } from "@/lib/types";
+import { useComposerStore } from "@/stores/composerStore";
 import { useModelStore } from "@/stores/modelStore";
 import { useSidePaneStore } from "@/stores/sidePaneStore";
 
@@ -65,6 +66,10 @@ function providerLabel(id: string): string {
   return PROVIDER_LABELS[id] ?? id.charAt(0).toUpperCase() + id.slice(1);
 }
 
+/** The pill's rendered height (22 px ring + py-1.5 + border) — used only
+ *  where nothing is laid out (jsdom). */
+export const PILL_FALLBACK_HEIGHT = 36;
+
 function levelColor(pctRemaining: number): string {
   if (pctRemaining > 50) return LEVEL.ok;
   if (pctRemaining > 20) return LEVEL.warn;
@@ -88,9 +93,22 @@ export function CreditBadge() {
 
   const dockedWidth = useSidePaneStore((s) => s.dockedWidth);
   const inset = useBottomInset();
+  const above = useAboveComposer();
+  // FIX130 C4 — tell the thread how far up the badge reaches, so it keeps
+  // that much room under its last message (the badge covered the last
+  // timestamp at 360 px, NIGHT2 F11 / FIX128 §6).
+  const setBadge = useComposerStore((s) => s.setBadge);
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const shown = Boolean(data) || isError;
+  useEffect(() => {
+    if (!shown) return;
+    const h = pillRef.current?.getBoundingClientRect().height || PILL_FALLBACK_HEIGHT;
+    setBadge(h + BADGE_GAP);
+    return () => setBadge(0);
+  }, [shown, setBadge]);
   // Nothing yet and nothing wrong: the first fetch is in flight — no
   // pill flashes a placeholder. A failed fetch keeps the pill and says so.
-  if (!data && !isError) return null;
+  if (!shown) return null;
   const unavailable = !data;
 
   const { total, remaining } = data?.credits ?? { total: 0, remaining: 0 };
@@ -102,7 +120,7 @@ export function CreditBadge() {
     // FIX86 — and above the composer's MEASURED height, whatever it is.
     <div
       className="absolute z-10"
-      style={{ right: 16 + dockedWidth, bottom: inset + BADGE_GAP }}
+      style={{ right: 16 + dockedWidth, bottom: inset + above + BADGE_GAP }}
       data-testid="credit-badge"
       data-unavailable={unavailable ? "true" : undefined}
     >
@@ -118,6 +136,7 @@ export function CreditBadge() {
         {open ? <UsagePanel onClose={() => setOpen(false)} /> : null}
 
         <button
+          ref={pillRef}
           type="button"
           aria-label={unavailable ? t("usage.unavailable") : t("a11y.usageAndCredits")}
           title={unavailable ? t("usage.unavailable") : undefined}
