@@ -116,7 +116,7 @@ function host(opts: { rows: Row[] | null; messageCount: number | null; state?: R
   };
   const gw = { listModels: async () => null, async *streamCompletion() { yield { kind: "done", finish_reason: "stop" }; } };
   const sidecar = { listTools: async () => [], callTool: async () => ({ ok: true, text: "", imageDataUri: null }), hostQuery: async () => ({ ok: true, data: {} }), status: async () => ({}) };
-  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }), temporaryChatReadsMemory: true };
+  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }) };
   let co: TurnCoordinator;
   const hostTools = new HostTools(gw as never, chatEdge as never, (req, sig) => co.runNested(req, sig), quiet, () => false);
   const store = opts.store ?? new MemoryConversationStateStore();

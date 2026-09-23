@@ -6,6 +6,8 @@
 
 import { clipboard } from "electron";
 import type { ChatEdgeClient } from "./chat-edge-client";
+import { explicitRememberRequest } from "./explicit-remember";
+import { memoryLabel } from "./prompt-assembler";
 import type { GatewayClient } from "./gateway-client";
 import type { Logger } from "./logger";
 
@@ -28,7 +30,25 @@ export interface HostToolResult {
    *  the assistant message (message_files) and links them at import
    *  (file_ids), so the user can open and download them from the chat. */
   attachedFiles?: { id: string; filename: string; content_type: string; file_size_bytes: number }[];
+  /** FIX130 — `remember` saved a memory: what the page's "บันทึกความจำแล้ว" /
+   *  "เสนอความจำใหม่ — รอยืนยัน" marker shows (the `memory_saved` turn event). */
+  memorySaved?: { id: string; label: string; status: "active" | "pending_confirmation" };
 }
+
+/** FIX130 — the context a host tool runs in. `userMessage` is the text the
+ *  USER sent this turn (for a sub-agent: its parent turn's, never the task the
+ *  model wrote); `remember` keeps an active save only when it asks to remember. */
+export interface HostToolContext {
+  conversationId: string;
+  toolCallId: string;
+  signal: AbortSignal;
+  memoryEnabled?: boolean;
+  userMessage?: string;
+}
+
+/** FIX130 — how much of the user's message rides a suggestion as its evidence. */
+const EVIDENCE_MAX_CHARS = 200;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export interface NestedRunRequest {
   task: string;
   /** Allow-list of tool names, or null = every tool except run_subagent. */
@@ -42,6 +62,9 @@ export interface NestedRunRequest {
    *  memory-off chat must not save memory either — otherwise the switch is
    *  escapable by asking for the work to be delegated. */
   memoryEnabled?: boolean;
+  /** FIX130 — the PARENT turn's user message. The task text is written by
+   *  the model, so it can never be what makes a `remember` explicit. */
+  userMessage?: string;
 }
 /** FIX30 §3.1: a sub-agent's final answer that opens like this is a failure
  *  (the prompt asks for `FAILED:`; `ERROR:` is what a model writes unprompted). */
@@ -206,7 +229,7 @@ export class HostTools {
     return name in HOST_TOOL_DEFINITIONS && (name !== "web_search" || this.webSearchEnabled());
   }
 
-  async execute(name: string, args: Record<string, unknown>, ctx: { conversationId: string; toolCallId: string; signal: AbortSignal; memoryEnabled?: boolean }): Promise<HostToolResult> {
+  async execute(name: string, args: Record<string, unknown>, ctx: HostToolContext): Promise<HostToolResult> {
     switch (name) {
       case "read_clipboard": {
         const text = String(await clipboard.readText());
@@ -246,10 +269,41 @@ export class HostTools {
           // logged loudly enough to notice if it becomes common.
           this.log.warn(`remember: could not resolve the project for conversation ${ctx.conversationId}; saving to global memory`);
         }
-        const r = await this.chatEdge.createMemory({ content: note.trim(), scopeType, scopeId });
+        // FIX130 — the model's decision to call `remember` is not the user's
+        // request to be remembered. On the test stack a model saved plain
+        // self-descriptions ("my nickname is …, I work as …") nobody had asked
+        // it to keep, as ACTIVE memories injected into every later chat; and
+        // anything that can steer the model (a fetched page, a tool result)
+        // could plant one the same way. The save stays active only when the
+        // user's own message this turn asks to remember (the matcher shared
+        // with chat-edge); otherwise it becomes a pending suggestion — the
+        // same review queue the background extractor fills — with this chat
+        // named as its source and the user's words as its evidence.
+        const explicit = explicitRememberRequest(ctx.userMessage);
+        // Either way the row names the chat it came from, so the Memory page
+        // links back to it instead of calling it "added by hand".
+        const source = UUID_RE.test(ctx.conversationId) ? { sourceConversationId: ctx.conversationId } : {};
+        const suggestion = explicit
+          ? source
+          : {
+              sourceType: "assistant_inferred" as const,
+              ...source,
+              ...(ctx.userMessage && ctx.userMessage.trim() ? { evidenceExcerpt: Array.from(ctx.userMessage.trim()).slice(0, EVIDENCE_MAX_CHARS).join("") } : {}),
+            };
+        const r = await this.chatEdge.createMemory({ content: note.trim(), scopeType, scopeId, ...suggestion });
         if (r.ok) {
+          const status: "active" | "pending_confirmation" = r.status === "pending_confirmation" || (!r.status && !explicit) ? "pending_confirmation" : "active";
+          const memorySaved = { id: r.id, label: memoryLabel(r.content), status };
+          if (status === "pending_confirmation") {
+            return {
+              ok: true,
+              text: `Noted "${r.content}" — queued for the user's review on the Memory page (not active yet; it will be used once they confirm it). Say so plainly if you mention it; do not claim it is saved.`,
+              imageDataUri: null,
+              memorySaved,
+            };
+          }
           const where = scopeType === "project" ? "this project's memory" : "your memory";
-          return { ok: true, text: `Saved to ${where}: "${r.content}"`, imageDataUri: null };
+          return { ok: true, text: `Saved to ${where}: "${r.content}"`, imageDataUri: null, memorySaved };
         }
         // Never report a save that did not happen (FIX5 §1 / FIX22 §1a).
         // The server's own sentence is passed through when it has one —
@@ -341,9 +395,19 @@ export class HostTools {
         const scope = ["all", "messages", "conversations", "memories"].includes(scopeRaw) ? scopeRaw : "all";
         const maxRaw = typeof args["max_results"] === "number" ? Math.floor(args["max_results"] as number) : 10;
         const limit = Math.max(1, Math.min(20, Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : 10));
+        // FIX130 A2 — the search stays available in a chat whose memory is
+        // not active (past conversations are the user's own history), but the
+        // SAVED MEMORIES it can also return are the memory read the switch
+        // turned off. Same rule as chat-edge's own copy of this tool.
+        const memoryOff = ctx.memoryEnabled === false;
+        if (memoryOff && scope === "memories") {
+          return { ok: false, text: "Saved memories are off in this chat (memory is switched off, or it is a temporary chat), so they cannot be searched here.", imageDataUri: null };
+        }
         const r = await this.chatEdge.searchPastConversations(query.trim(), scope, limit);
         if (!r) return { ok: false, text: "Past-conversation search is unavailable right now (chat-edge unreachable or refused).", imageDataUri: null };
-        const results = Array.isArray(r.results) ? r.results : [];
+        const all = Array.isArray(r.results) ? r.results : [];
+        const results = memoryOff ? all.filter((h) => !(h && typeof h === "object" && (h as { type?: unknown }).type === "memory")) : all;
+        if (memoryOff) return { ok: true, text: JSON.stringify({ query: r.query ?? query.trim(), scope: r.scope ?? scope, total: results.length, results }), imageDataUri: null };
         return { ok: true, text: JSON.stringify({ query: r.query ?? query.trim(), scope: r.scope ?? scope, total: r.total ?? results.length, results }), imageDataUri: null };
       }
       case "run_subagent": {
@@ -362,7 +426,7 @@ export class HostTools {
               // permission raises the SAME consent card as the parent's would,
               // attributed to this subtask by label (the FIX8 boundary was a
               // stand-in for a consent path that did not exist; now it does).
-              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, label, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled }, ctx.signal);
+              const r = await this.runNested({ task: String(t.task ?? ""), tools: null, label, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled, userMessage: ctx.userMessage }, ctx.signal);
               results[i] = `## ${label}\n${r.completed ? r.answer : r.stopReason === "failed" ? `(failed)\n${r.answer}` : `(did not finish: ${r.stopReason ?? "unknown"})\n${r.answer}`}${trace(r.trace)}`;
             }
           });
@@ -374,7 +438,7 @@ export class HostTools {
         // An empty allow-list means "every tool" (SpawnAgentTool.ReadAllowlist), not "no tools".
         const allowRaw = Array.isArray(args["tools"]) ? (args["tools"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
         const allow = allowRaw.length > 0 ? allowRaw : null;
-        const r = await this.runNested({ task, tools: allow, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled }, ctx.signal);
+        const r = await this.runNested({ task, tools: allow, parentToolCallId: ctx.toolCallId, conversationId: ctx.conversationId, memoryEnabled: ctx.memoryEnabled, userMessage: ctx.userMessage }, ctx.signal);
         if (r.completed) return { ok: true, text: r.answer + trace(r.trace), imageDataUri: null };
         if (r.stopReason === "failed") return { ok: false, text: `Sub-agent failed: ${r.answer}${trace(r.trace)}`, imageDataUri: null };
         return { ok: false, text: `Sub-agent did not finish: ${r.stopReason ?? "the run ended unexpectedly."}${trace(r.trace)}`, imageDataUri: null };

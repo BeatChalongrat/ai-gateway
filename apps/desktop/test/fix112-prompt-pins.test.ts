@@ -29,7 +29,7 @@ import {
   OBSERVATION_TRUST_LEVEL,
   renderObservation,
 } from "../src/main/attachments";
-import { MEMORY_CLOSING_LINE, MEMORY_STANDING_LINE, TEMPORARY_CHAT_BODY } from "../src/main/prompt-assembler";
+import { MEMORY_CLOSING_LINE, MEMORY_OFF_LEAD, MEMORY_STANDING_LINE, TEMPORARY_CHAT_BODY, TEMPORARY_CHAT_LEAD } from "../src/main/prompt-assembler";
 
 const SERVICE = path.join(__dirname, "..", "..", "..", "services", "chat-edge-api", "internal", "service");
 const read = (name: string) => fs.readFileSync(path.join(SERVICE, name), "utf8").replace(/\r\n/g, "\n");
@@ -41,8 +41,19 @@ describe("FIX112 — the temporary-chat body is one asset", () => {
   it("chat-edge embeds that asset and wraps it in its own envelope; the desktop wraps a heading", () => {
     const go = read("prompt_compiler.go");
     expect(go).toContain("//go:embed prompt_temporary_chat.txt");
-    expect(go).toContain('"<temporary_chat>\\nThis is a temporary chat. "');
+    expect(go).toContain('"<temporary_chat>\\n" + temporaryChatLead + " " + temporaryChatBody');
+    expect(go).toContain('"<temporary_chat>\\n" + memoryOffLead + " " + temporaryChatBody');
     expect(go).not.toContain("Nothing said here will be remembered"); // the sentence lives in the asset only
+  });
+  // FIX130 A2 — two lead-ins, because they are two switches: a temporary chat
+  // can never have memory; memory switched off on an ordinary chat can be
+  // switched back on. The desktop says the same two sentences under its own
+  // headings (## Temporary chat / ## Memory off).
+  it("the two lead-ins are chat-edge's, word for word", () => {
+    const go = read("prompt_compiler.go");
+    const constant = (name: string, value: string) => new RegExp(`${name}\\s*=\\s*${JSON.stringify(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+    expect(go).toMatch(constant("temporaryChatLead", TEMPORARY_CHAT_LEAD));
+    expect(go).toMatch(constant("memoryOffLead", MEMORY_OFF_LEAD));
   });
 });
 

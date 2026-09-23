@@ -41,7 +41,7 @@ function host(script: () => AsyncGenerator<Ev>) {
   };
   const gw = { listModels: async () => null, streamCompletion: () => script() };
   const sidecar = { listTools: async () => [], callTool: async () => ({ ok: true, text: "", imageDataUri: null }), hostQuery: async () => ({ ok: true, data: {} }), status: async () => ({}), ready: true, phase: "ready", isRunning: true, ensureStarted: async () => {}, invalidateTools: () => {} };
-  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }), temporaryChatReadsMemory: true };
+  const assembler = { buildSystemPromptParts: async () => ({ text: "system", parts: [] }) };
   let co: TurnCoordinator;
   const hostTools = new HostTools(gw as never, chatEdge as never, (req, sig) => co.runNested(req, sig), log, () => false);
   const bridge = { postTurnEvent: (_c: string, _s: number, event: string, data: unknown) => posted.push({ event, data: data as Record<string, unknown> }), post: () => {}, postHostResult: () => {}, postHostError: () => {} };

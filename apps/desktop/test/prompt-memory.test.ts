@@ -93,68 +93,42 @@ describe("FIX5 §1 — the memory prologue reads BOTH stores and renders both se
   });
 });
 
-// FIX56.1 Part 1 — the owner's decision, and the second reversal of the
-// same assertion in two rounds. Worth stating plainly rather than quietly
-// rewriting: FIX56 made a memory-off chat read NOTHING, because the switch
-// then meant two different things in the two clients and the desktop was
-// the one quietly still reading. That asymmetry is what had to die, and it
-// stays dead — both stores are still gated identically here. What moved is
-// where the shared line sits: "don't record me" no longer also means
-// "forget who I am".
-//
-// The half that is NOT a preference and must never move: nothing is
-// written. That is enforced elsewhere (memory tools withheld from the
-// request, `remember` refused at dispatch, sub-agents inheriting the flag)
-// and none of it reads tempChatReadsMemory.
-describe("FIX56.1 — a temporary chat reads memory, writes none, and says so", () => {
+// FIX56.1 made a memory-off chat READ both stores and write neither.
+// FIX130 A2 reverses the read half, on the evidence: NIGHT2 found answers
+// quoting a saved memory in a chat the user had switched memory off for.
+// "Memory off" means nothing read and nothing written; a temporary chat is
+// sealed whatever its switch says (fix130-memory-off.test.ts covers the
+// temporary half and the two notices). What stays from FIX56 is the rule
+// that the two stores move TOGETHER — neither may be read alone.
+describe("FIX130 — a memory-off chat reads neither store, writes none, and says so", () => {
   const bothStores = {
     localGlobalNotes: [{ content: "local global fact", createdAt: "2026-08-25T11:00:00Z" }],
     localConversationNotes: [{ content: "local conv fact", createdAt: "2026-08-25T11:00:00Z" }],
   };
   const serverMem = [{ id: "s1", content: "server-only fact", created_at: "2026-08-25T09:00:00Z" }];
 
-  it("reads BOTH stores in a memory-off chat under the default setting", async () => {
+  it("reads NEITHER store in a memory-off chat", async () => {
     const a = assemblerWithServerMemories(serverMem);
-    const prompt = await a.buildSystemPrompt({ ...baseInputs, memoryEnabled: false, ...bothStores });
-    expect(prompt).toContain("local global fact");
-    expect(prompt).toContain("local conv fact");
-    expect(prompt).toContain("server-only fact");
-  });
-
-  it("reads NEITHER store when the deployment sets tempChatReadsMemory=false", async () => {
-    const chatEdge = {
-      listGlobalMemories: async () => serverMem,
-      listProjects: async () => [],
-    } as unknown as ChatEdgeClient;
-    const a = new PromptAssembler(chatEdge, noopLog, { tempChatReadsMemory: false });
     const prompt = await a.buildSystemPrompt({ ...baseInputs, memoryEnabled: false, ...bothStores });
     expect(prompt).not.toContain("local global fact");
     expect(prompt).not.toContain("local conv fact");
     expect(prompt).not.toContain("server-only fact");
     expect(prompt).not.toContain("## Memory (global)");
-    // Still told it cannot remember — the stricter setting must not make
-    // the model MORE likely to promise a save.
-    expect(prompt).toContain("## Temporary chat");
+    // Still told it cannot remember.
+    expect(prompt).toContain("## Memory off");
   });
 
-  it("keeps the two stores in step under BOTH settings — neither may be read alone", async () => {
-    // The FIX56 bug in one assertion: the desktop read the local store in a
-    // chat where the server store was gated off. Whatever the setting, the
-    // two are visible together or not at all.
-    for (const reads of [true, false]) {
-      const chatEdge = {
-        listGlobalMemories: async () => serverMem,
-        listProjects: async () => [],
-      } as unknown as ChatEdgeClient;
-      const a = new PromptAssembler(chatEdge, noopLog, { tempChatReadsMemory: reads });
-      const prompt = await a.buildSystemPrompt({ ...baseInputs, memoryEnabled: false, ...bothStores });
+  it("keeps the two stores in step — on, off and temporary, neither may be read alone", async () => {
+    for (const flags of [{ memoryEnabled: true }, { memoryEnabled: false }, { memoryEnabled: true, isTemporary: true }]) {
+      const a = assemblerWithServerMemories(serverMem);
+      const prompt = await a.buildSystemPrompt({ ...baseInputs, ...flags, ...bothStores });
       const sawLocal = prompt.includes("local global fact");
       const sawServer = prompt.includes("server-only fact");
-      expect(sawLocal, `tempChatReadsMemory=${reads}: local and server must agree`).toBe(sawServer);
+      expect(sawLocal, `${JSON.stringify(flags)}: local and server must agree`).toBe(sawServer);
     }
   });
 
-  it("carries the temporary-chat notice even when there is nothing to recall", async () => {
+  it("carries the memory-off notice even when there is nothing to recall", async () => {
     // "No memory tool attached" is not the same as "the model knows it
     // cannot remember". Without being told, it answers "got it, I'll
     // remember that" in a chat where nothing can be saved.
@@ -165,9 +139,9 @@ describe("FIX56.1 — a temporary chat reads memory, writes none, and says so", 
       localGlobalNotes: [],
       localConversationNotes: [],
     });
-    expect(prompt).toContain("## Temporary chat");
+    expect(prompt).toContain("## Memory off");
     expect(prompt).toMatch(/no tool that can save anything/i);
-    // And it names what IS kept, so "temporary" cannot be read as
+    // And it names what IS kept, so "memory off" cannot be read as
     // "this conversation disappears".
     expect(prompt).toMatch(/still saved to the user's chat history/i);
   });
@@ -176,6 +150,7 @@ describe("FIX56.1 — a temporary chat reads memory, writes none, and says so", 
     const a = assemblerWithServerMemories([]);
     const prompt = await a.buildSystemPrompt({ ...baseInputs, memoryEnabled: true });
     expect(prompt).not.toContain("## Temporary chat");
+    expect(prompt).not.toContain("## Memory off");
   });
 });
 

@@ -91,6 +91,10 @@ export const HOST_QUERY_OPS = Object.freeze([
   // is torn down, so the page asks the host, which deletes it ONLY if the
   // server still says it has no messages. Page-only, never a tool.
   "conversation.discardEmpty",
+  // FIX130 A4b: the Memory page changed the saved memories (edit, delete,
+  // accept, reject, add, clear). The host drops its cached copy so the next
+  // turn reads them again. No arguments, nothing returned; never a tool.
+  "memory.changed",
 ] as const);
 export type HostQueryOp = (typeof HOST_QUERY_OPS)[number];
 export const E3_SUPPORTED_OPS: readonly HostQueryOp[] = Object.freeze(["session.logout", "diag.reportRendererError"]);
@@ -115,14 +119,15 @@ export const MEMORY_WRITE_TOOLS: ReadonlySet<string> = Object.freeze(
   new Set(["remember"]),
 ) as ReadonlySet<string>;
 
-/** The tools that READ across conversations. Withheld from a memory-off chat
- *  only under the stricter TEMPORARY_CHAT_READS_MEMORY=false, because from
- *  FIX56.1 a temporary chat may use what is already on file — offering the
- *  saved memories in the prompt while refusing the tool that reads the same
- *  history would be two answers to one question. chat-edge has always kept
- *  `search_past_conversations` available regardless of the switch (tools.go),
- *  so under the default this is also what removes a live disagreement between
- *  the two clients. */
+/** The tools that READ across conversations. NOT withheld from a memory-off
+ *  or temporary chat: chat-edge keeps `search_past_conversations` available
+ *  regardless of the switch (tools.go — looking up a past chat on the user's
+ *  request is read-only), and the two clients must agree. In such a chat the
+ *  tool drops the SAVED-MEMORY hits and refuses scope "memories" (FIX130 A2,
+ *  host-tools.ts — the same rule as chat-edge's copy). FIX130 removed the
+ *  FIX56.1 setting (TEMPORARY_CHAT_READS_MEMORY=false) under which this set
+ *  was withheld; the set stays named so the split with MEMORY_WRITE_TOOLS is
+ *  still pinned (memory-tool-gating.test.ts). */
 export const MEMORY_READ_TOOLS: ReadonlySet<string> = Object.freeze(
   new Set(["search_past_conversations"]),
 ) as ReadonlySet<string>;

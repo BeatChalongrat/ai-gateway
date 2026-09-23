@@ -35,13 +35,6 @@ export interface ShellConfig {
   readonly approvalMode: string;
   /** E4: web_search is listed only when true (the WPF default is off). */
   readonly webSearchEnabled: boolean;
-  /** FIX56.1: what a temporary chat does with the memories already on file.
-   * Absent ⇒ true: read them, write none. Set false for the stricter "read
-   * nothing either" behaviour. Mirrors chat-edge's
-   * TEMPORARY_CHAT_READS_MEMORY, and must be set to match it — the same
-   * switch cannot mean two things in the two clients. Only the READ side
-   * moves; a temporary chat writes no memory under either value. */
-  readonly temporaryChatReadsMemory: boolean;
   /** FIX69: may a user-typed remote MCP connector URL point inside the
    * network (loopback / RFC 1918 / link-local)? Default false: public https
    * targets only. A deploy-time decision made in this file by whoever ships
@@ -156,10 +149,10 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     throw new Error(`'approvalMode' must be manual, auto or skip (got '${approvalMode}').`);
   }
   const webSearchEnabled = obj["webSearchEnabled"] === true;
-  // Defaults to true when absent, and only an explicit `false` turns it off:
-  // a config written before FIX56.1, or one with a typo in the key, must not
-  // silently pick the behaviour the deployment did not choose.
-  const temporaryChatReadsMemory = obj["temporaryChatReadsMemory"] !== false;
+  // FIX130 A2 — `temporaryChatReadsMemory` (FIX56.1) is retired: a memory-off
+  // or temporary chat reads no memory, the rule chat-edge applies too. A
+  // config written before this still carries the key; it is ignored here
+  // rather than refused, so an old file keeps launching.
   // FIX69: only an explicit `true` opens internal targets to remote connectors.
   const connectorPrivateNetwork = obj["connectorPrivateNetwork"] === true;
   // FIX69: an extra trust-anchor file for remote connectors — absolute path,
@@ -205,7 +198,6 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     sidecarPath,
     approvalMode,
     webSearchEnabled,
-    temporaryChatReadsMemory,
     connectorPrivateNetwork,
     connectorExtraCaFile,
     protocolScheme,

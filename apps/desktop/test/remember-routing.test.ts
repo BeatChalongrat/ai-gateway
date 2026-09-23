@@ -61,10 +61,14 @@ function toolsWith(
   return { tools, calls };
 }
 
+// FIX130 — these pin scope routing and failure honesty for a save the user
+// ASKED for; a note nobody asked for becomes a pending suggestion instead
+// (fix130-turn-memory.test.ts).
 const ctx = () => ({
   conversationId: "11111111-1111-4111-8111-111111111111",
   toolCallId: "tc1",
   signal: new AbortController().signal,
+  userMessage: "Please remember this.",
 });
 
 describe("remember (host tool)", () => {
