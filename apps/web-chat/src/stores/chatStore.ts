@@ -3495,12 +3495,14 @@ async function handleStreamPreError(
   const text = await res.text();
   let msg = res.statusText;
   let code: string | undefined;
+  let retryable: boolean | undefined;
   try {
     const env = JSON.parse(text) as {
-      error?: { code?: string; message?: string };
+      error?: { code?: string; message?: string; retryable?: boolean };
     };
     msg = env.error?.message ?? msg;
     code = env.error?.code;
+    retryable = typeof env.error?.retryable === "boolean" ? env.error.retryable : undefined;
   } catch {
     /* ignore */
   }
@@ -3560,6 +3562,22 @@ async function handleStreamPreError(
     get().setError(tOutside("error.serviceUnavailable"));
   } else if (code === "CONVERSATION_BUSY") {
     get().setError(tOutside("error.conversationBusy"));
+  } else if (res.status !== 401 && code) {
+    // FIX130 C3.2 — a coded refusal (chat-edge's 504 provider_timeout when
+    // the model did not answer in time, a gateway envelope's code) is
+    // localized and kept on the row, so the card says why in the person's
+    // language and offers the retry the code allows — not the server's
+    // English sentence in a banner over a generic card.
+    const localized = localizeErrorCode(code, msg, retryable);
+    set((s) => ({
+      messages: {
+        ...s.messages,
+        [convId]: (s.messages[convId] ?? []).map((m) =>
+          m.id === tempAsstId ? { ...m, error_code: code, error_retryable: retryable, error_message: localized } : m,
+        ),
+      },
+    }));
+    get().setError(localized);
   } else if (res.status !== 401) {
     get().setError(msg);
   }

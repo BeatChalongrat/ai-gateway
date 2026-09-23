@@ -247,4 +247,17 @@ describe("FIX130 C3.2 — a send nothing answers fails into the retry card", () 
     expect(row?.error_retryable).toBe(true);
     expect(mockApi.cancelGeneration).toHaveBeenCalledWith("c1");
   });
+
+  it("chat-edge's 504 provider_timeout lands on the row localized (the card's reason + retry), not as an English banner", async () => {
+    mockApi.openMessageStream.mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: "provider_timeout", message: "The AI service did not answer in time. Please try again." } }), { status: 504 }),
+    );
+    seed();
+    await useChatStore.getState().sendMessage("c1", "สวัสดี", []);
+    const row = (useChatStore.getState().messages.c1 ?? []).find((m) => m.role === "assistant");
+    expect(row?.status).toBe("error");
+    expect(row?.error_code).toBe("provider_timeout");
+    expect(row?.error_message).toBe("The AI provider took too long to respond. Please try again.");
+    expect(useChatStore.getState().errorBanner).toBe("The AI provider took too long to respond. Please try again.");
+  });
 });
