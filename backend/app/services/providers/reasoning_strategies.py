@@ -86,3 +86,13 @@ STRATEGIES_WITH_EFFORT_KNOB = frozenset({STRATEGY_OPENAI_COMPATIBLE})
 # ``reasoning.mode == "off"`` — never on any other mode, and never for a
 # strategy not listed here (an unknown field 400s a self-hosted box).
 STRATEGIES_WITH_ENABLE_THINKING_OFF = frozenset({STRATEGY_ENABLE_THINKING})
+
+# FIX130 — rows whose completion may carry the thinking IN ``content``
+# (``<think>…</think>``, or only the closer when the chat template opened
+# the block in the prompt). Both are "the box emits thinking on its own"
+# strategies: when the server runs a reasoning parser it arrives as
+# ``reasoning_content``; when it runs none (the sranai box, measured in
+# FIX130 step 1) it arrives in-band. Read ONLY by
+# ``think_splitter.in_band_thinking_is_implicit`` and only for a
+# self-hosted provider; nothing is sent upstream because of it.
+STRATEGIES_MAY_THINK_IN_BAND = frozenset({STRATEGY_REASONING_CONTENT, STRATEGY_ENABLE_THINKING})

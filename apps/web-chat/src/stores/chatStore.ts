@@ -29,6 +29,7 @@ import { mergeMemorySaved, parseMemoryUsed } from "@/lib/memoryMarkers";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
+import { THINKING_DURATION_FLOOR_MS } from "@/lib/types";
 import type { TurnScrollRequest } from "@/lib/turnAnchor";
 // One-way dependency: the chat store nudges the canvas store after a
 // turn (Phase 8). canvasStore must never import chatStore back.
@@ -2622,9 +2623,18 @@ async function consumeStream(
             };
           });
         } else if (data.status === "completed") {
-          const duration =
+          // FIX130 B2 — a pair that arrived back to back (a resume
+          // snapshot replays started + reasoning + completed in one
+          // write) timed the replay, not the thought. Record nothing
+          // then, and never let it overwrite a duration this page
+          // already measured live before the stream dropped.
+          const measured =
             thinkingStartedAt !== null
               ? Date.now() - thinkingStartedAt
+              : undefined;
+          const duration =
+            measured !== undefined && measured >= THINKING_DURATION_FLOOR_MS
+              ? measured
               : undefined;
           // Flush any pending reasoning fragment BEFORE flipping the
           // flag so the final paint includes every fragment under
@@ -2645,7 +2655,7 @@ async function consumeStream(
                     ? {
                         ...m,
                         is_thinking: false,
-                        thinking_duration_ms: duration,
+                        thinking_duration_ms: duration ?? m.thinking_duration_ms,
                       }
                     : m,
                 ),
@@ -2807,7 +2817,7 @@ async function consumeStream(
               ...s.messages,
               [convId]: list.map((m) =>
                 m.id === finalId
-                  ? { ...m, status: "waiting_user", isStreaming: false, is_generating_image: false, is_generating_video: false, is_searching: false, is_compacting: false, agent_status: null, agent_wait: null }
+                  ? { ...m, status: "waiting_user", isStreaming: false, is_thinking: false, is_generating_image: false, is_generating_video: false, is_searching: false, is_compacting: false, agent_status: null, agent_wait: null }
                   : m,
               ),
             },
@@ -2965,6 +2975,10 @@ async function consumeStream(
                           ? m.status
                           : "completed",
                       isStreaming: false,
+                      // FIX130 B2 — the turn is over, so is the thinking,
+                      // whether or not analysis_status: completed made it
+                      // here (FIX116 did this for cancel / error only).
+                      is_thinking: false,
                       is_generating_image: false,
                       is_generating_video: false,
                       is_searching: false,

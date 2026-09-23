@@ -366,8 +366,10 @@ function MessageBubbleImpl({
           reads "thought first, then answered". Self-hides when
           neither reasoning_content nor is_thinking is set, so
           non-reasoning turns are byte-identical to the pre-T4
-          layout. */}
-      {(message.reasoning_content || message.is_thinking) ? (
+          layout. FIX130 B2 — whitespace-only reasoning is not a
+          thought (ThinkingBlock renders nothing for it once the
+          model stops thinking). */}
+      {(message.reasoning_content?.trim() || message.is_thinking) ? (
         <ThinkingBlock
           content={message.reasoning_content ?? ""}
           // FIX116 — "Thinking…" only while the ROW is still streaming.

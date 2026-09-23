@@ -529,6 +529,10 @@ def enqueue(
     record: RequestRecord, *, fallback_session: "Session | None" = None
 ) -> None:
     """Module-level entry point used by the orchestrator."""
+    # FIX130 E3 — a queued row is this turn's row (pre_provider_log).
+    from app.services.pre_provider_log import note_row_written
+
+    note_row_written()
     _singleton.enqueue(record, fallback_session=fallback_session)
 
 

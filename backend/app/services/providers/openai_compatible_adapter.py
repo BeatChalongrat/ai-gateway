@@ -42,6 +42,11 @@ from app.services.providers.reasoning_strategies import (
     STRATEGIES_WITH_EFFORT_KNOB,
     STRATEGIES_WITH_ENABLE_THINKING_OFF,
 )
+from app.services.providers.think_splitter import (
+    ThinkSplitter,
+    in_band_thinking_is_implicit,
+    split_response,
+)
 
 if TYPE_CHECKING:
     from app.schemas.common import Message
@@ -234,6 +239,14 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
         data = resp.json()
 
         parsed = parse_openai_response(data)
+        # FIX130 — thinking a box returned inside ``content`` goes to
+        # ``reasoning_content`` (think_splitter module doc).
+        parsed = split_response(
+            parsed,
+            implicit_open=in_band_thinking_is_implicit(
+                self.provider_name, body.get("model", ""), body
+            ),
+        )
         return with_provider_request_id(parsed, provider_request_id_of(resp))
 
     # ------------------------------------------------------------------
@@ -272,10 +285,53 @@ class OpenAICompatibleAdapter(BaseProviderAdapter):
                 except httpx.HTTPStatusError as exc:
                     raise map_provider_error(exc, self.provider_name) from exc
             _prid = provider_request_id_of(resp)
+            # FIX130 — one splitter per completion: thinking the box put in
+            # ``content`` (``<think>…</think>``, or only the closer when the
+            # chat template opened the block) is re-routed to
+            # ``reasoning_delta`` before any caller sees it.
+            splitter = ThinkSplitter(
+                implicit_open=in_band_thinking_is_implicit(
+                    self.provider_name, body.get("model", ""), body
+                )
+            )
+            saw_tool_calls = False
             async for line in resp.aiter_lines():
                 chunk = _parse_sse_line(line, provider_name=self.provider_name)
                 if chunk is not None:
+                    chunk = _split_chunk(splitter, chunk, saw_tool_calls)
+                    saw_tool_calls = saw_tool_calls or bool(chunk.tool_calls)
                     if _prid:
                         chunk = with_provider_request_id(chunk, _prid)
                         _prid = None
                     yield chunk
+            # A stream that ended without a finish_reason chunk still owes
+            # the held partial tag (never re-emitted as an answer: an
+            # abrupt end is not a natural stop).
+            tail_reasoning, tail_answer = splitter.finish(None, saw_tool_calls=saw_tool_calls)
+            if tail_reasoning or tail_answer:
+                yield ProviderStreamChunk(
+                    delta=tail_answer, reasoning_delta=tail_reasoning or None
+                )
+
+
+def _split_chunk(
+    splitter: ThinkSplitter, chunk: ProviderStreamChunk, saw_tool_calls: bool
+) -> ProviderStreamChunk:
+    """Run one parsed chunk's ``content`` through the per-stream splitter."""
+    if chunk.reasoning_delta:
+        splitter.upstream_separates_reasoning()
+    reasoning, answer = splitter.feed(chunk.delta) if chunk.delta else ("", "")
+    if chunk.finish_reason:
+        r_tail, a_tail = splitter.finish(
+            chunk.finish_reason,
+            saw_tool_calls=saw_tool_calls or bool(chunk.tool_calls),
+        )
+        reasoning += r_tail
+        answer += a_tail
+    if not reasoning and answer == chunk.delta:
+        return chunk
+    return dataclasses.replace(
+        chunk,
+        delta=answer,
+        reasoning_delta=((chunk.reasoning_delta or "") + reasoning) or None,
+    )

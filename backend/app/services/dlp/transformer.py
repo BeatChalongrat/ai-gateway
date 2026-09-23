@@ -139,7 +139,9 @@ def contains_mask_token(text: str) -> bool:
     return ANY_MASK_TOKEN_RE.search(text) is not None
 
 
-def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
+def redact_orphan_tokens(
+    text: str, span_map: dict[str, str], *, trim_edges: bool = True
+) -> str:
     """Strip mask tokens that survived ``restore`` and have no
     entry in ``span_map``.
 
@@ -164,6 +166,12 @@ def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
     preserved verbatim.
 
     No-op when the text is empty or contains no mask-token shape.
+
+    ``trim_edges=False`` is for a SLICE of a streamed answer (FIX130): its
+    edges are not the answer's edges, so the whitespace there — often the
+    space between the previous slice's last word and this slice's first —
+    must stay. Trimming it glued words ("the staging box" → "the
+    stagingbox") whenever the 120-char DLP tail happened to cut at a space.
     """
     if not text or ("<r" not in text and "<<" not in text):
         return text
@@ -180,7 +188,9 @@ def redact_orphan_tokens(text: str, span_map: dict[str, str]) -> str:
         # ("hello <r5> world" → "hello  world" → "hello world") and
         # trim any leading/trailing whitespace from edge cases where
         # the orphan was at the start or end of the text.
-        result = re.sub(r" {2,}", " ", result).strip()
+        result = re.sub(r" {2,}", " ", result)
+        if trim_edges:
+            result = result.strip()
     return result
 
 

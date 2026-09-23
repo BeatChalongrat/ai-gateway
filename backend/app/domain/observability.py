@@ -24,6 +24,12 @@ class RequestStatus(str, Enum):
     VALIDATION_ERROR = "validation_error"
     AUTH_ERROR = "auth_error"
     INTERNAL_ERROR = "internal_error"
+    # FIX130 E3 — the turn failed before any provider was called (a dead
+    # model, no key, no capable model, the provider boundary, the pre-stream
+    # hard timeout). Written with ``provider=""`` and zero cost by
+    # app.services.pre_provider_log; counted by error_rate and
+    # no_successful_turn, not by provider_failure.
+    PRE_PROVIDER_ERROR = "pre_provider_error"
 
 
 @dataclass

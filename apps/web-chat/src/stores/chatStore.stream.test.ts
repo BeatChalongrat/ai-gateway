@@ -251,6 +251,9 @@ describe("sendMessage / consumeStream", () => {
     await tick();
     // Buffered until flush; analysis completed forces a synchronous flush.
     expect(messagesOf("c1").at(-1)?.reasoning_content ?? "").toBe("");
+    // FIX130 B2 — a window shorter than THINKING_DURATION_FLOOR_MS is a
+    // replay, not a measurement; let this one be a real thought.
+    await new Promise<void>((r) => setTimeout(r, 120));
     s.push(frame("analysis_status", { status: "completed" }));
     await tick();
     const thought = messagesOf("c1").at(-1);

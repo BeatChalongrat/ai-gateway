@@ -67,6 +67,7 @@ from app.schemas.public import (
     FeedbackResponse,
 )
 from app.services.dlp.stream_guard import CredentialStreamGuard
+from app.services import pre_provider_log
 from app.services.orchestrator import GatewayOrchestrator
 from app.services.policy.profile_service import (
     get_runtime_profile,
@@ -382,6 +383,10 @@ async def chat_completions(
             released = True
             reg.release(key)
 
+    # FIX130 E3 — a turn that fails before any provider is called writes its
+    # one request_logs row here (pre_provider_log module doc); the ledger
+    # knows whether the pipeline already wrote one or reached a provider.
+    _turn_token = pre_provider_log.begin_turn(payload.model, bool(payload.stream))
     try:
         result = await asyncio.wait_for(
             _chat_completions_impl(payload, response, auth, session, turn_id=_turn_id_from(request)),
@@ -390,6 +395,10 @@ async def chat_completions(
     except asyncio.TimeoutError:
         _release()
         logger.error("chat_request_hard_timeout", timeout_s=hard_s, model=payload.model, stream=bool(payload.stream))
+        await pre_provider_log.record_failure(
+            model=payload.model, exc=None, error_code="upstream_timeout"
+        )
+        pre_provider_log.end_turn(_turn_token)
         return _ArmourResponse(
             status_code=504,
             content={"error": {"type": "upstream_timeout", "message": (
@@ -397,9 +406,18 @@ async def chat_completions(
                 "Please retry; if this repeats, the gateway is unhealthy."
             )}},
         )
+    except Exception as exc:
+        _release()
+        await pre_provider_log.record_failure(
+            model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc)
+        )
+        pre_provider_log.end_turn(_turn_token)
+        raise
     except BaseException:
         _release()
+        pre_provider_log.end_turn(_turn_token)
         raise
+    pre_provider_log.end_turn(_turn_token)
 
     if isinstance(result, StreamingResponse):
         inner = result.body_iterator
@@ -2436,6 +2454,21 @@ async def _chat_completions_impl(
         if _dlp_notice_frame is not None:
             yield _dlp_notice_frame
 
+        # FIX130 — verbatim system-prompt text is removed from the answer
+        # and from the reasoning shown to the user, BEFORE the credential
+        # guard / DLP window see it (prompt_echo_guard module doc).
+        # Fingerprinted once, from what the provider is about to receive
+        # (identity line included); a request with no system text builds
+        # no guard and both channels pass through untouched.
+        from app.services.model_identity import inject_model_identity as _identity_for_echo
+        from app.services.prompt_echo_guard import EchoGuard, build_echo_fingerprints
+
+        _echo_fp = build_echo_fingerprints(
+            _identity_for_echo(messages_to_send, route.model_name, route.provider_name)
+        )
+        _content_echo_guard = EchoGuard(_echo_fp)
+        _reasoning_echo_guard = EchoGuard(_echo_fp)
+
         try:
             while True:
                 # FIX124 — a failed attempt is stored with the time it took
@@ -2521,8 +2554,16 @@ async def _chat_completions_impl(
                                 # channel's OWN guard instance (the two
                                 # channels stream interleaved fragments and
                                 # must not share hold state).
-                                _r_released = _reasoning_cred_guard.feed(
+                                # FIX130 — the system-prompt echo guard
+                                # runs first, on raw text (the prompt was
+                                # sent unmasked).
+                                _r_echo_released = _reasoning_echo_guard.feed(
                                     chunk.reasoning_delta
+                                )
+                                _r_released = (
+                                    _reasoning_cred_guard.feed(_r_echo_released)
+                                    if _r_echo_released
+                                    else ""
                                 )
                                 if _r_released:
                                     r_window = _reasoning_tail_masked + _r_released
@@ -2594,9 +2635,15 @@ async def _chat_completions_impl(
                         # header kept — see stream_guard module doc). May
                         # return "" while holding; the audit trail above
                         # (``cumulative_raw``) still sees every raw byte.
-                        _released_delta = (
-                            _stream_cred_guard.feed(chunk.delta)
+                        # FIX130 — the system-prompt echo guard runs first.
+                        _echo_released = (
+                            _content_echo_guard.feed(chunk.delta)
                             if chunk.delta
+                            else ""
+                        )
+                        _released_delta = (
+                            _stream_cred_guard.feed(_echo_released)
+                            if _echo_released
                             else ""
                         )
                         if _released_delta:
@@ -2671,8 +2718,9 @@ async def _chat_completions_impl(
                                 # LLM-echoed credential token (``<r0>``)
                                 # falls into the orphan path and gets
                                 # deleted, matching the non-stream P3.
+                                # FIX130 — a slice keeps its edge whitespace.
                                 emit_text = _stream_orphan_redact(
-                                    emit_text, _redact_span_map,
+                                    emit_text, _redact_span_map, trim_edges=False,
                                 )
                                 if emit_text:
                                     # FIX49 Part C — deferred fallback notice:
@@ -3141,7 +3189,12 @@ async def _chat_completions_impl(
         # the usual sanitize + restore + orphan-redact passes before
         # anything reaches the wire. Runs BEFORE ``_finalize_stream`` so
         # the extra findings land in the persisted DLP summary.
-        _guard_rest = _stream_cred_guard.flush()
+        # FIX130 — whatever the echo guard still holds (a suffix that could
+        # have grown into an echo) goes the same way, ahead of it.
+        _echo_rest = _content_echo_guard.flush()
+        _guard_rest = (
+            _stream_cred_guard.feed(_echo_rest) if _echo_rest else ""
+        ) + _stream_cred_guard.flush()
         if _guard_rest:
             _final_window = tail_masked + _guard_rest
             _final_masked, _final_actions = await _dlp_scan_and_mask(_final_window)
@@ -3153,7 +3206,10 @@ async def _chat_completions_impl(
         # usual place after the content flush, so frame ordering on the
         # wire is unchanged.
         if _show_reasoning:
-            _r_guard_rest = _reasoning_cred_guard.flush()
+            _r_echo_rest = _reasoning_echo_guard.flush()
+            _r_guard_rest = (
+                _reasoning_cred_guard.feed(_r_echo_rest) if _r_echo_rest else ""
+            ) + _reasoning_cred_guard.flush()
             if _r_guard_rest:
                 _r_final_masked, _r_final_actions = await _dlp_scan_and_mask(
                     _reasoning_tail_masked + _r_guard_rest
@@ -3161,6 +3217,18 @@ async def _chat_completions_impl(
                 if _r_final_actions:
                     accumulated_outbound_actions.extend(_r_final_actions)
                 _reasoning_tail_masked = _r_final_masked
+        # FIX130 — one line per turn that had system-prompt text removed;
+        # counts only, never the text.
+        if _content_echo_guard.removed_chars or _reasoning_echo_guard.removed_chars:
+            log.warning(
+                "system_prompt_echo_suppressed",
+                request_id=ctx.request_id,
+                model=final_model,
+                answer_chars=_content_echo_guard.removed_chars,
+                answer_runs=_content_echo_guard.removed_runs,
+                reasoning_chars=_reasoning_echo_guard.removed_chars,
+                reasoning_runs=_reasoning_echo_guard.removed_runs,
+            )
 
         # Flush the remaining tail. The tail already went through a
         # DLP scan in its most recent iteration; no need to re-mask.
@@ -3181,8 +3249,12 @@ async def _chat_completions_impl(
             # on the wire), but that's where they cluster.
             from app.services.dlp.transformer import redact_orphan_tokens
             # Filtered span_map — see the per-chunk orphan-redact above
-            # for why the secret tokens are excluded here.
-            final_emit = redact_orphan_tokens(final_emit, _redact_span_map)
+            # for why the secret tokens are excluded here. FIX130 — the
+            # tail is a slice too: the space that starts it joins it to
+            # what is already on the wire.
+            final_emit = redact_orphan_tokens(
+                final_emit, _redact_span_map, trim_edges=False
+            )
             if final_emit:
                 # FIX49 Part C — deferred fallback notice (a short answer
                 # can live entirely in the DLP tail window).
