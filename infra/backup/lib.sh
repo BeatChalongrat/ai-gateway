@@ -51,3 +51,35 @@ describe_sources() {
   printf 'gateway=%s:%s/%s as %s; chat=%s:%s/%s as %s' \
     "$GW_HOST" "$GW_PORT" "$GW_DB" "$GW_USER" "$CHAT_HOST" "$CHAT_PORT" "$CHAT_DB" "$CHAT_USER"
 }
+
+# FIX130 E4 — stdin -> stdout with anything secret-shaped replaced: the
+# literal values of this service's secrets (DB passwords, the off-site repo
+# password and keys, the Resend key, the ntfy token), credentials in URLs,
+# JWTs, key-shaped and long random tokens, and SQL statements. Every alert
+# message goes through it (notify.sh), and so does every line restic prints
+# (offsite.sh). The Python twin is backend/app/services/alert_scrub.py.
+redact() {
+  perl -CSD -pe '
+    BEGIN {
+      @lit = sort { length($b) <=> length($a) } grep { defined && length($_) >= 4 }
+             map { $ENV{$_} } qw(POSTGRES_PASSWORD WEBCHAT_POSTGRES_PASSWORD
+               BACKUP_OFFSITE_PASSWORD BACKUP_OFFSITE_ACCESS_KEY_ID BACKUP_OFFSITE_SECRET_ACCESS_KEY
+               RESEND_API_KEY ALERT_NTFY_TOKEN);
+      # The off-site repository (and its bare endpoint URL, which restic
+      # prints in network errors) is named, not shown: bucket and path stay
+      # out of logs and alerts.
+      @repo = sort { length($b) <=> length($a) } grep { defined && length($_) >= 4 }
+              map { $ENV{$_} } qw(BACKUP_OFFSITE_REPOSITORY BACKUP_OFFSITE_REPOSITORY_URL);
+    }
+    for my $s (@repo) { s/\Q$s\E/<offsite repository>/g }
+    for my $s (@lit) { s/\Q$s\E/[redacted]/g }
+    s{(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/@:]+:[^\s/@]+@}{$1\[redacted\]@}g;
+    s/\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}(?:\.[A-Za-z0-9_\-]*)?/[redacted token]/g;
+    s/(?i)\b(bearer\s+)(?!\[redacted)[A-Za-z0-9._~+\/\-]{8,}=*/$1\[redacted\]/g;
+    s/(?i)\b(token|password|passwd|pwd|secret|api[_-]?key|access[_-]?key)(\s*[=:]\s*)(?!\[redacted)[^\s,;\x27"]{4,}/$1$2\[redacted\]/g;
+    s/\b(?:sk|pk|rk|re|tk|ak|ghp|gho|ghs|glpat|xox[abprs])[-_][A-Za-z0-9_\-]{12,}/[redacted key]/g;
+    s/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/[redacted key]/g;
+    s/(?<![A-Za-z0-9+\/_\-])(?=[A-Za-z0-9+\/_\-]*[0-9])(?=[A-Za-z0-9+\/_\-]*[A-Za-z])(?:[A-Za-z0-9+\/_]{32,}={0,2}|[A-Za-z0-9_\-]{40,})(?![A-Za-z0-9+\/_\-])/[redacted]/g;
+    s/(?:(?i:\bselect\b[^\n]*?\bfrom\b)|(?i:\binsert\s+into\b)|(?i:\bupdate\s+\S+\s+set\b)|(?i:\bdelete\s+from\b)|(?i:\b(?:alter|create|drop|truncate)\s+(?:table|index|database|schema|role|user|extension)\b)|(?i:\bcopy\s+\S+\s+(?:from|to)\b)|\b(?:SELECT|INSERT|UPDATE|DELETE|WITH|BEGIN|COMMIT|ROLLBACK|ALTER|CREATE|DROP|TRUNCATE|COPY|VACUUM|LOCK)\b\s+\S)[^\n]*/[sql redacted]/g;
+  '
+}
