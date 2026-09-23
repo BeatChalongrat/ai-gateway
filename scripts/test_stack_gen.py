@@ -12,7 +12,13 @@ live system:
   code; no sandbox containers are spawned on the host);
 * no ``container_name`` (the live stack owns ``ai-gateway-*``);
 * loopback-only ports shifted into 1xxxx, none overlapping the live stack;
-* only the services the destructive tests need (see SERVICES).
+* only the services the destructive tests need (see SERVICES);
+* none of the OWNER's destinations (FIX130): the alert channels
+  (``ALERT_*``, ``RESEND_API_KEY``) and the off-site backup repository
+  (``BACKUP_OFFSITE_*``) are replaced by their ``TS_`` twins — empty unless
+  set, so a test-stack alert is logged only and a test-stack backup stays
+  local. Before FIX130 the test stack's backend and backup service read
+  the live ``ALERT_NTFY_URL`` and paged the owner.
 
 ``docker compose config --no-interpolate`` keeps every ``${VAR}`` reference as
 text, so the generated file holds no secret: values are read from ``.env`` when
@@ -79,10 +85,33 @@ TEST_ENV = {
 # Env keys dropped outright (sandbox plumbing that names host paths).
 DROP_ENV = {"chat-edge-api": {"SANDBOX_HOST_WORKDIR", "SANDBOX_SECCOMP_PATH", "SANDBOX_WORKDIR", "SANDBOX_RUNTIME", "SANDBOX_IMAGE"}}
 
+# FIX130 — env keys that name the OWNER's destinations and credentials, in
+# any service: alert channels (the phone, the inbox, a webhook, the Resend
+# key that sends as the owner) and the off-site backup repository + its keys
+# (a test backup must never upload into, or prune by retention, the owner's
+# bucket). Each value becomes its TS_ twin: "${ALERT_NTFY_URL:-}" ->
+# "${TS_ALERT_NTFY_URL:-}" (default kept), a literal -> "${TS_<KEY>:-}".
+# Unset TS_ variables = log only / off-site not configured.
+REDIRECT_ENV_KEYS = {"RESEND_API_KEY"}
+REDIRECT_ENV_PREFIXES = ("ALERT_", "BACKUP_OFFSITE_")
+
 # If any of these survive into the generated file, generation fails: each one
-# is a way for a test-stack container to reach the live stack.
+# is a way for a test-stack container to reach the live stack — or the owner
+# (a live alert/off-site variable, or a public ntfy topic written literally).
 LIVE_REFERENCES = ["host.docker.internal", "localhost:8080", "localhost:8081", "localhost:4000",
-                   "localhost:5433", "localhost:6380", "ai-gateway_", "ai-gateway-", "/var/run/docker.sock"]
+                   "localhost:5433", "localhost:6380", "ai-gateway_", "ai-gateway-", "/var/run/docker.sock",
+                   "${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/"]
+
+
+def redirect_env(key: str, value):
+    """The test-stack value of an owner-destination variable (see above)."""
+    if isinstance(value, str) and value.startswith("${" + key):
+        return "${TS_" + value[2:]
+    return "${TS_" + key + ":-}"
+
+
+def _is_redirected(key: str) -> bool:
+    return key in REDIRECT_ENV_KEYS or key.startswith(REDIRECT_ENV_PREFIXES)
 
 
 def main() -> int:
@@ -135,6 +164,8 @@ def main() -> int:
             env = dict(e.split("=", 1) if "=" in e else (e, None) for e in env)
         for k in DROP_ENV.get(name, ()):
             env.pop(k, None)
+        for k in [k for k in env if _is_redirected(k)]:
+            env[k] = redirect_env(k, env[k])
         env.update(TEST_ENV.get(name, {}))
         svc["environment"] = env
         svc["restart"] = "on-failure"  # first Postgres init restarts the server once
