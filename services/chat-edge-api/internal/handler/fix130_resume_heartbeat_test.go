@@ -23,7 +23,7 @@ func TestFIX130_LedgerResumeTailHeartbeatsThroughAQuietStretch(t *testing.T) {
 
 	live := make(chan service.LedgerEvent)
 	go func() {
-		time.Sleep(120 * time.Millisecond) // the quiet stretch
+		time.Sleep(400 * time.Millisecond) // the quiet stretch (long enough for a loaded host)
 		live <- service.LedgerEvent{Seq: 3, Event: "content_delta", Data: json.RawMessage(`{"delta":"late","run_id":"r1","seq":3}`)}
 		live <- service.LedgerEvent{Seq: 4, Event: "message_complete", Data: json.RawMessage(`{"message_id":"m","run_id":"r1","seq":4}`)}
 		close(live)

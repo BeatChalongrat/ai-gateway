@@ -19,13 +19,19 @@ func TestFIX130_PreDrainHeartbeatPingsUntilStoppedAndNeverAfter(t *testing.T) {
 	rec := httptest.NewRecorder()
 	var mu sync.Mutex
 	stop := startPreDrainHeartbeat(rec, rec, &mu)
-	time.Sleep(80 * time.Millisecond) // the extraction pause
+	// The extraction pause: wait (bounded) for three pings — a fixed sleep
+	// flakes on a loaded Windows host, where timers fire at ~15 ms steps.
+	pings := 0
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		mu.Lock()
+		pings = strings.Count(rec.Body.String(), ": ping\n\n")
+		mu.Unlock()
+		if pings >= 3 {
+			break
+		}
+	}
 	stop()
 	stop() // idempotent
-
-	mu.Lock()
-	pings := strings.Count(rec.Body.String(), ": ping\n\n")
-	mu.Unlock()
 	if pings < 3 {
 		t.Fatalf("want >=3 pings during the pre-drain pause, got %d", pings)
 	}

@@ -756,7 +756,9 @@ export function ChatThread({
         // FIX130 C4 — the credits badge floats over the bottom of this
         // column; keep its reach (+8 px air) free under the last message so
         // it never sits on the last timestamp or the last line.
-        style={{ overflowAnchor: "none", paddingBottom: Math.max(THREAD_BOTTOM_PAD, badgeReach + 8) }}
+        // Inline only when it is MORE than the class gives, so the anchor
+        // math (which reads the computed padding) sees no change otherwise.
+        style={{ overflowAnchor: "none", paddingBottom: badgeReach + 8 > THREAD_BOTTOM_PAD ? badgeReach + 8 : undefined }}
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 ? (
