@@ -154,21 +154,32 @@ func TestFIX130_TemporaryChatCannotSwitchMemoryOn(t *testing.T) {
 	}
 }
 
-// search_past_conversations stays available in every chat (past chats are
-// the user's own history), but a chat whose memory is not active gets no
-// saved-memory hits from it.
-func TestFIX130_SearchInAMemoryOffChatReturnsNoSavedMemories(t *testing.T) {
+// search_past_conversations reads the user's other chats and saved memories:
+// that is memory, so a chat whose memory is not active (switched off, or a
+// temporary chat) neither is offered the tool nor gets anything from it if a
+// model calls it anyway. FIX56.1 had let temporary chats read; FIX130 A2: a
+// temporary chat neither reads nor writes.
+func TestFIX130_SearchInAMemoryOffChatReadsNothing(t *testing.T) {
 	f := newFix130Fixture(t)
 	f.savedMemory(t)
 	for _, c := range []struct {
 		name                string
 		temporary, memoryOn bool
-		wantMemory          bool
+		wantRead            bool
 	}{{"memory on", false, true, true}, {"memory off", false, false, false}, {"temporary", true, true, false}} {
 		t.Run(c.name, func(t *testing.T) {
 			conv := f.chat(t, c.temporary, c.memoryOn)
 			s := f.service()
 			s.SetSearchService(NewSearchService(f.mr, f.cr, f.mem))
+			offered := false
+			for _, d := range s.toolExec.ToolDefs(conv) {
+				if d.Function.Name == "search_past_conversations" {
+					offered = true
+				}
+			}
+			if offered != c.wantRead {
+				t.Fatalf("search_past_conversations offered = %v, want %v", offered, c.wantRead)
+			}
 			call := GatewayToolCall{ID: "s1", Type: "function", Function: GatewayToolCallFunction{
 				Name: "search_past_conversations", Arguments: `{"query":"กะทิ"}`,
 			}}
@@ -177,11 +188,16 @@ func TestFIX130_SearchInAMemoryOffChatReturnsNoSavedMemories(t *testing.T) {
 				TenantID: f.tenant, UserID: f.user, ConversationID: conv.ID, Sources: acc,
 			})
 			// The query is echoed in the result; look for the rest of the memory.
-			if got := strings.Contains(out, "กาแฟดำ"); got != c.wantMemory {
-				t.Fatalf("saved memory in the search result = %v, want %v:\n%s", got, c.wantMemory, out)
+			if got := strings.Contains(out, "กาแฟดำ"); got != c.wantRead {
+				t.Fatalf("saved memory in the search result = %v, want %v:\n%s", got, c.wantRead, out)
 			}
-			if !c.wantMemory && savedMemorySources(acc.Snapshot()) != 0 {
-				t.Fatal("a saved_memory source was recorded in a chat whose memory is off")
+			if !c.wantRead {
+				if !strings.Contains(out, "REFUSED") {
+					t.Fatalf("a call in a chat whose memory is off must be refused, got:\n%s", out)
+				}
+				if savedMemorySources(acc.Snapshot()) != 0 {
+					t.Fatal("a saved_memory source was recorded in a chat whose memory is off")
+				}
 			}
 		})
 	}

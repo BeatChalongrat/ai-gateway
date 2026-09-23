@@ -608,12 +608,13 @@ func (e *ToolExecutor) SetSearchService(s *SearchService) {
 }
 
 // ToolDefs returns the tool definitions to attach for THIS
-// conversation. Memory-write tools (save_memory, list_memories,
-// update_conversation_state) are gated on conv.MemoryActive() — memory
-// switched on and not a temporary chat (FIX130 A2). The read-only
-// search tool stays available regardless because looking up a
-// past chat is read-only and doesn't violate the temp-chat
-// contract.
+// conversation. The memory tools — the writes (save_memory, list_memories,
+// update_conversation_state) AND the read across chats
+// (search_past_conversations, which returns other chats and saved
+// memories) — are gated on conv.MemoryActive(): memory switched on and not
+// a temporary chat. FIX56.1 had kept the search in memory-off and temporary
+// chats as "read-only"; FIX130 A2: off means off and a temporary chat
+// neither reads nor writes, so recalling past chats is not offered there.
 //
 // Returns an empty slice when no tool services are wired AND
 // the conv has memory disabled — callers should still call
@@ -626,7 +627,7 @@ func (e *ToolExecutor) ToolDefs(conv *model.Conversation) []GatewayTool {
 			defs = append(defs, updateConversationStateToolDef())
 		}
 	}
-	if e.search != nil {
+	if e.search != nil && conv.MemoryActive() {
 		defs = append(defs, searchPastConversationsToolDef())
 	}
 	// Phase B — image generation. Not gated on MemoryEnabled (generating
@@ -809,28 +810,19 @@ func (e *ToolExecutor) execSearchPastConversations(
 		args.MaxResults = 5
 	}
 
-	// FIX130 A2 — the search stays available in every chat (past
-	// conversations are the user's own history, not memory), but a chat
-	// whose memory is not active gets no saved-memory hits: that would be
-	// the memory read the switch turned off, arriving through a tool.
+	// FIX130 A2 — recalling past chats and saved memories is a memory read:
+	// a chat whose memory is not active (switched off, or temporary) is not
+	// offered this tool (ToolDefs), and a call that arrives anyway reads
+	// nothing.
 	memoryOK := e.memoryActiveNow(ctx, ec)
-	if !memoryOK && args.Scope == ScopeMemories {
-		return "Saved memories are off in this chat (memory is switched off, or it is a temporary chat), so they cannot be searched here."
+	if !memoryOK {
+		return "REFUSED: memory is off in this chat (switched off, or it is a temporary chat), so past chats and saved memories cannot be searched here. Answer from this conversation only."
 	}
 	hits, err := e.search.SearchPastContext(
 		ctx, ec.UserID, ec.TenantID, args.Query, args.Scope, args.MaxResults,
 	)
 	if err != nil {
 		return "Search failed. Please try again in a moment."
-	}
-	if !memoryOK {
-		kept := hits[:0]
-		for i := range hits {
-			if hits[i].Type != "memory" {
-				kept = append(kept, hits[i])
-			}
-		}
-		hits = kept
 	}
 	if len(hits) == 0 {
 		return fmt.Sprintf("No results found for %q. Try different keywords.", args.Query)

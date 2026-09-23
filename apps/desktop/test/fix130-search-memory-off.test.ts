@@ -1,12 +1,14 @@
-// FIX130 A2 — search_past_conversations stays available in a chat whose
-// memory is off (or a temporary chat): past conversations are the user's own
-// history, not memory. But chat-edge's /api/v1/search also returns SAVED
-// MEMORIES (type "memory"), and handing those to the model in such a chat is
-// the memory read the switch turned off, arriving through a tool. chat-edge's
-// own copy of the tool drops them the same way (tools.go
-// execSearchPastConversations).
+// FIX130 A2 — a chat whose memory is not active (switched off, or a temporary
+// chat) reads NO memory, and recalling past chats is memory: chat-edge's
+// /api/v1/search returns other chats and saved memories alike. So the tool is
+// not offered there (turn-coordinator, withholdMemoryTools) and a call that
+// arrives anyway is refused without asking chat-edge — the same rule as
+// chat-edge's own copy (tools.go ToolDefs / execSearchPastConversations).
+// FIX56.1 had kept it as "read-only"; the card reverses that: a temporary
+// chat neither reads nor writes.
 import { describe, expect, it } from "vitest";
 import { HostTools } from "../src/main/host-tools";
+import { withholdMemoryTools } from "../src/shared/bridge-protocol";
 
 function toolsReturning(results: unknown[]): { tools: HostTools; scopes: string[] } {
   const scopes: string[] = [];
@@ -33,27 +35,32 @@ const ctx = (memoryEnabled: boolean | undefined) => ({
   memoryEnabled,
 });
 
-describe("FIX130 — search in a chat whose memory is not active", () => {
-  it("drops saved-memory hits and keeps past-conversation hits", async () => {
-    const { tools } = toolsReturning(HITS);
-    const r = await tools.execute("search_past_conversations", { query: "เชียงใหม่" }, ctx(false));
-    expect(r.ok).toBe(true);
-    expect(r.text).toContain("ทริปเชียงใหม่");
-    expect(r.text).not.toContain("กะทิ");
-    expect(JSON.parse(r.text).total).toBe(1);
-  });
+const def = (name: string) => ({ type: "function" as const, function: { name, description: "", parameters: {} } });
 
-  it("refuses a memories-only search", async () => {
-    const { tools, scopes } = toolsReturning(HITS);
-    const r = await tools.execute("search_past_conversations", { query: "ชื่อ", scope: "memories" }, ctx(false));
-    expect(r.ok).toBe(false);
-    expect(r.text).not.toContain("กะทิ");
-    expect(scopes).toEqual([]); // never asked
+describe("FIX130 — past-chat search in a chat whose memory is not active", () => {
+  it("is refused and never asks chat-edge", async () => {
+    for (const scope of ["all", "messages", "memories"]) {
+      const { tools, scopes } = toolsReturning(HITS);
+      const r = await tools.execute("search_past_conversations", { query: "เชียงใหม่", scope }, ctx(false));
+      expect(r.ok).toBe(false);
+      expect(r.text).toMatch(/^REFUSED/);
+      expect(r.text).not.toContain("ทริปเชียงใหม่");
+      expect(r.text).not.toContain("กะทิ");
+      expect(scopes).toEqual([]);
+    }
   });
 
   it("an ordinary memory-on chat still gets every hit", async () => {
     const { tools } = toolsReturning(HITS);
     const r = await tools.execute("search_past_conversations", { query: "ชื่อ" }, ctx(true));
+    expect(r.ok).toBe(true);
+    expect(r.text).toContain("ทริปเชียงใหม่");
     expect(r.text).toContain("กะทิ");
+  });
+
+  it("is not offered — nor is remember — when memory is not active; both are when it is", () => {
+    const defs = ["web_search", "remember", "search_past_conversations", "run_python"].map(def);
+    expect(withholdMemoryTools(defs, false).map((d) => d.function.name)).toEqual(["web_search", "run_python"]);
+    expect(withholdMemoryTools(defs, true).map((d) => d.function.name)).toEqual(["web_search", "remember", "search_past_conversations", "run_python"]);
   });
 });

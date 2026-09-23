@@ -119,18 +119,24 @@ export const MEMORY_WRITE_TOOLS: ReadonlySet<string> = Object.freeze(
   new Set(["remember"]),
 ) as ReadonlySet<string>;
 
-/** The tools that READ across conversations. NOT withheld from a memory-off
- *  or temporary chat: chat-edge keeps `search_past_conversations` available
- *  regardless of the switch (tools.go — looking up a past chat on the user's
- *  request is read-only), and the two clients must agree. In such a chat the
- *  tool drops the SAVED-MEMORY hits and refuses scope "memories" (FIX130 A2,
- *  host-tools.ts — the same rule as chat-edge's copy). FIX130 removed the
- *  FIX56.1 setting (TEMPORARY_CHAT_READS_MEMORY=false) under which this set
- *  was withheld; the set stays named so the split with MEMORY_WRITE_TOOLS is
- *  still pinned (memory-tool-gating.test.ts). */
+/** The tools that READ across conversations (other chats and saved
+ *  memories). Withheld from a chat whose memory is not active exactly like the
+ *  write half: recalling past chats IS a memory read. FIX56.1 had kept them in
+ *  memory-off and temporary chats as "read-only"; FIX130 A2 reverses that — a
+ *  temporary chat neither reads nor writes, and "memory off" means off. The
+ *  same rule as chat-edge (tools.go ToolDefs / execSearchPastConversations);
+ *  host-tools.ts also refuses a call that arrives anyway. The sets stay split
+ *  so the union is still pinned (memory-tool-gating.test.ts). */
 export const MEMORY_READ_TOOLS: ReadonlySet<string> = Object.freeze(
   new Set(["search_past_conversations"]),
 ) as ReadonlySet<string>;
+
+/** FIX130 A2 — the tool list a chat gets: every memory tool (write AND read)
+ *  only when memory is active (switched on and not a temporary chat). */
+export function withholdMemoryTools<T extends { function: { name: string } }>(defs: T[], memoryActive: boolean): T[] {
+  if (memoryActive) return defs;
+  return defs.filter((d) => !MEMORY_WRITE_TOOLS.has(d.function.name) && !MEMORY_READ_TOOLS.has(d.function.name));
+}
 
 export const MAX_MESSAGE_BYTES = 1_048_576;
 export const MAX_TEXT_CHARS = 200_000;

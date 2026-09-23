@@ -1,10 +1,11 @@
 // FIX56.1 — the split of the memory tools into a write set and a read set.
 //
-// FIX56 withheld both from a memory-off chat, which was right while such a
-// chat read nothing. Now it reads, so only the write half is unconditional.
-// The risk in a split like this is that a tool falls out of BOTH sets and is
-// silently offered again in a chat that promised nothing would be saved —
-// which is why the union is pinned, not just the halves.
+// FIX56 withheld both from a memory-off chat; FIX56.1 let a temporary chat
+// read; FIX130 A2 withholds both again whenever memory is not active
+// (withholdMemoryTools, bridge-protocol.ts). The sets stay split, and the
+// union is pinned: the risk is that a tool falls out of BOTH sets and is
+// silently offered again in a chat that promised nothing would be read or
+// saved.
 
 import { describe, expect, it } from "vitest";
 

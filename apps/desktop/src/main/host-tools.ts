@@ -395,19 +395,16 @@ export class HostTools {
         const scope = ["all", "messages", "conversations", "memories"].includes(scopeRaw) ? scopeRaw : "all";
         const maxRaw = typeof args["max_results"] === "number" ? Math.floor(args["max_results"] as number) : 10;
         const limit = Math.max(1, Math.min(20, Number.isFinite(maxRaw) && maxRaw > 0 ? maxRaw : 10));
-        // FIX130 A2 — the search stays available in a chat whose memory is
-        // not active (past conversations are the user's own history), but the
-        // SAVED MEMORIES it can also return are the memory read the switch
-        // turned off. Same rule as chat-edge's own copy of this tool.
-        const memoryOff = ctx.memoryEnabled === false;
-        if (memoryOff && scope === "memories") {
-          return { ok: false, text: "Saved memories are off in this chat (memory is switched off, or it is a temporary chat), so they cannot be searched here.", imageDataUri: null };
+        // FIX130 A2 — recalling past chats and saved memories is a memory
+        // read: a chat whose memory is not active is not offered this tool
+        // (withholdMemoryTools) and a call that arrives anyway reads nothing.
+        // Same rule as chat-edge's own copy of this tool.
+        if (ctx.memoryEnabled === false) {
+          return { ok: false, text: "REFUSED: memory is off in this chat (switched off, or it is a temporary chat), so past chats and saved memories cannot be searched here. Answer from this conversation only.", imageDataUri: null };
         }
         const r = await this.chatEdge.searchPastConversations(query.trim(), scope, limit);
         if (!r) return { ok: false, text: "Past-conversation search is unavailable right now (chat-edge unreachable or refused).", imageDataUri: null };
-        const all = Array.isArray(r.results) ? r.results : [];
-        const results = memoryOff ? all.filter((h) => !(h && typeof h === "object" && (h as { type?: unknown }).type === "memory")) : all;
-        if (memoryOff) return { ok: true, text: JSON.stringify({ query: r.query ?? query.trim(), scope: r.scope ?? scope, total: results.length, results }), imageDataUri: null };
+        const results = Array.isArray(r.results) ? r.results : [];
         return { ok: true, text: JSON.stringify({ query: r.query ?? query.trim(), scope: r.scope ?? scope, total: r.total ?? results.length, results }), imageDataUri: null };
       }
       case "run_subagent": {

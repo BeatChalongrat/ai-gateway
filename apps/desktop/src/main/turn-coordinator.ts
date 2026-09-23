@@ -79,7 +79,7 @@ function hostnameOf(raw: string): string {
 }
 import type { SidecarClient } from "./sidecar-client";
 import type { PromptPart } from "../shared/guardrail-mirror";
-import { BROWSER_BRIDGE_TOOLS, MEMORY_WRITE_TOOLS, type ConsentRespondPayload, type HostQueryPayload, type QuestionRespondPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
+import { BROWSER_BRIDGE_TOOLS, withholdMemoryTools, type ConsentRespondPayload, type HostQueryPayload, type QuestionRespondPayload, type TurnCancelPayload, type TurnSubmitPayload, type UiReadyPayload } from "../shared/bridge-protocol";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, CANCELLED_WHILE_ASKING, NOT_AVAILABLE_IN_THIS_RUN, formatAnswerForModel, validateAskArgs, type AskQuestion } from "./ask-user";
 
 interface BufferedEvent {
@@ -2621,11 +2621,11 @@ export class TurnCoordinator {
     // switch mean one thing in both clients.
     //
     // FIX130 A2: `memoryEnabled` here is "memory active" (switch on AND not
-    // a temporary chat). The read tool (search_past_conversations) stays,
-    // as chat-edge keeps it (see MEMORY_READ_TOOLS).
+    // a temporary chat), and the READ tool (search_past_conversations) is
+    // withheld too — recalling past chats is memory (withholdMemoryTools).
     if (!memoryEnabled) {
       const before = out.length;
-      out = out.filter((d) => !MEMORY_WRITE_TOOLS.has(d.function.name));
+      out = withholdMemoryTools(out, false);
       if (before !== out.length) this.log.info(`TOOLS: memory is off for this chat — withholding ${before - out.length} memory tool(s)`);
     }
     // §3.3: when the browser bridge is down, do not offer the 8 bridge tools —
