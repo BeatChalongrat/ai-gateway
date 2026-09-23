@@ -103,6 +103,9 @@ export function uploadErrorMessage(err: unknown): string {
       return tOutside("file.err.timeout");
     case "UNAUTHORIZED":
       return tOutside("file.err.sessionExpired");
+    case "FILENAME_TOO_LONG":
+      // FIX130 C3.4 — said as what it is (it used to fall to 422 → "empty").
+      return tOutside("file.err.nameTooLong");
   }
   switch (status) {
     case 401:
@@ -117,6 +120,20 @@ export function uploadErrorMessage(err: unknown): string {
       return tOutside("file.err.empty");
   }
   return tOutside("file.err.uploadFailed");
+}
+
+/** FIX130 C3.4 — whether pressing "ลองใหม่" on a failed chip can work.
+ *  A refusal of the file itself (too large, unsupported, empty, a name the
+ *  storage will not take, a conversation that is gone) fails the same way
+ *  every time — NIGHT2 F4 pressed Retry on a name that could never be
+ *  stored, and it failed forever. A network drop, a timeout or a 5xx may
+ *  not. */
+export function uploadErrorRetryable(err: unknown): boolean {
+  const e = (err ?? {}) as { code?: unknown; status?: unknown };
+  const code = typeof e.code === "string" ? e.code : "";
+  const status = typeof e.status === "number" ? e.status : -1;
+  if (code === "FILENAME_TOO_LONG") return false;
+  return !(status === 404 || status === 413 || status === 415 || status === 422);
 }
 
 export function formatBytes(n: number): string {

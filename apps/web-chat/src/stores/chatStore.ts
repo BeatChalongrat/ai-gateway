@@ -93,6 +93,9 @@ export interface PendingFile {
   status: "uploading" | "ready" | "error";
   progress: number; // 0..100
   error?: string;
+  /** FIX130 C3.4 — false when retrying the same upload cannot work (the
+   *  chip offers only "remove"). Absent = retryable. */
+  retryable?: boolean;
   /** Server-side text extraction state, tracked separately from
    *  `status` because the two are now independent: the upload
    *  resolves as soon as the bytes land, while extraction (OCR on a
@@ -226,7 +229,7 @@ interface ChatState {
     serverId: string,
     extractionStatus?: FileAttachment["extraction_status"],
   ) => void;
-  markFileError: (convId: string, pendingId: string, error: string) => void;
+  markFileError: (convId: string, pendingId: string, error: string, retryable?: boolean) => void;
   /** Background text extraction finished (or moved on) for a chip
    *  that has already finished uploading. */
   setFileExtractionStatus: (
@@ -531,12 +534,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
     });
   },
-  markFileError(convId, pendingId, error) {
+  markFileError(convId, pendingId, error, retryable) {
     set((s) => ({
       pendingFiles: {
         ...s.pendingFiles,
         [convId]: (s.pendingFiles[convId] ?? []).map((p) =>
-          p.id === pendingId ? { ...p, status: "error", error } : p,
+          p.id === pendingId ? { ...p, status: "error", error, retryable: retryable === false ? false : undefined } : p,
         ),
       },
     }));

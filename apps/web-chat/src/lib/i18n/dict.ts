@@ -1729,6 +1729,13 @@ export const en = {
   "kb.doc.status.processing": "indexing",
   "kb.doc.status.indexed": "indexed",
   "kb.doc.status.failed": "failed",
+  // ── FIX130 C3.4 — attachments never go missing silently ──
+  "file.err.nameTooLong": "The file name is too long — rename the file to something shorter and attach it again.",
+  "input.sendBlocked.failedOne": "Can't send yet: “{name}” didn't upload — press Retry on the file, or remove it.",
+  "input.sendBlocked.failedOneNoRetry": "Can't send yet: “{name}” can't be attached — remove it to send.",
+  "input.sendBlocked.failedMany": "Can't send yet: {n} files didn't upload — retry or remove them.",
+  "input.sendBlocked.removeFailed": "Remove failed files",
+  "input.sendBlocked.vision": "Can't send yet: {model} can't read images — switch to a model that can, or remove the image.",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -3396,6 +3403,13 @@ const th: Record<DictKey, string> = {
   "kb.doc.status.processing": "กำลังทำดัชนี",
   "kb.doc.status.indexed": "พร้อมใช้",
   "kb.doc.status.failed": "ไม่สำเร็จ",
+  // ── FIX130 C3.4 ──
+  "file.err.nameTooLong": "ชื่อไฟล์ยาวเกินไป — เปลี่ยนชื่อไฟล์ให้สั้นลงแล้วแนบใหม่",
+  "input.sendBlocked.failedOne": "ยังส่งไม่ได้: ไฟล์ “{name}” อัปโหลดไม่สำเร็จ — กด “ลองใหม่” ที่ไฟล์ หรือเอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.failedOneNoRetry": "ยังส่งไม่ได้: แนบไฟล์ “{name}” ไม่ได้ — เอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.failedMany": "ยังส่งไม่ได้: มี {n} ไฟล์ที่อัปโหลดไม่สำเร็จ — กดลองใหม่หรือเอาไฟล์ออกก่อนส่ง",
+  "input.sendBlocked.removeFailed": "เอาไฟล์ที่ไม่สำเร็จออก",
+  "input.sendBlocked.vision": "ยังส่งไม่ได้: {model} อ่านรูปภาพไม่ได้ — เปลี่ยนเป็นรุ่นที่อ่านรูปได้ หรือเอารูปออกก่อนส่ง",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {
