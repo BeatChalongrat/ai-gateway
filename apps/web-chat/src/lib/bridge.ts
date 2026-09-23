@@ -76,7 +76,10 @@ export type HostQueryOp =
   // quick-ask window's two hand-offs (close, open this chat in the main window).
   | "shell.prefs.get" | "shell.prefs.set" | "quick.close" | "quick.openInMain"
   // FIX127 C3: delete an attached-then-abandoned 0-message chat via the host.
-  | "conversation.discardEmpty";
+  | "conversation.discardEmpty"
+  // FIX130 A4b: the Memory page changed the saved memories (edit, delete,
+  // accept, reject, add, clear); the host drops its cached copy.
+  | "memory.changed";
 
 export interface HostResult<T = unknown> {
   ok: boolean;

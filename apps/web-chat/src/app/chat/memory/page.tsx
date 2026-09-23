@@ -35,7 +35,8 @@ import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
 import { Modal } from "@/components/ui/Modal";
 import { toast } from "@/components/ui/Toast";
 import { api, ApiError } from "@/lib/api";
-import { useT } from "@/lib/i18n";
+import { notifyHostMemoriesChanged } from "@/lib/hostApi";
+import { tOutside, useT } from "@/lib/i18n";
 import { downloadMemoryExport } from "@/lib/memoryExport";
 import type { Memory } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -82,6 +83,14 @@ export default function MemorySettingsPage() {
   // doesn't desync.
   const refreshPendingCount = useMemoryPendingStore((s) => s.refresh);
 
+  // FIX130 A4a — load runs ONCE per mount. It used to depend on `t`, and
+  // useT() returns a new function on every render, so every render made a
+  // new `load`, the effect below re-ran it, and its own setState rendered
+  // again: the page re-fetched both lists in an endless loop for as long as
+  // it was open. Besides the load on the server, an in-flight refetch could
+  // put back a suggestion the user had just rejected (or drop one just
+  // accepted) until the next round. The error text is read with tOutside
+  // (current locale at call time) so nothing here changes per render.
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -108,13 +117,13 @@ export default function MemorySettingsPage() {
         return;
       }
       const msg =
-        err instanceof ApiError ? err.message : t("memory.error.loadFailed");
+        err instanceof ApiError ? err.message : tOutside("memory.error.loadFailed");
       setError(msg);
       setMemories(null);
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -123,7 +132,16 @@ export default function MemorySettingsPage() {
   async function handleConfirmPending(id: string) {
     setPendingBusy(id);
     try {
-      const updated = await api.confirmMemory(id, true);
+      const confirmed = await api.confirmMemory(id, true);
+      // The confirm endpoint returns the bare row; the list endpoint is the
+      // one that resolves the source chat. Keep what the suggestion already
+      // showed, so the memory does not lose "from which chat" on the move.
+      const was = pending.find((m) => m.id === id);
+      const updated: Memory = {
+        ...confirmed,
+        source_conversation_title: confirmed.source_conversation_title ?? was?.source_conversation_title,
+        source_conversation_deleted: confirmed.source_conversation_deleted ?? was?.source_conversation_deleted,
+      };
       setPending((prev) => prev.filter((m) => m.id !== id));
       // Promoted to active → splice into the main list (sorted).
       setMemories((prev) => {
@@ -134,6 +152,7 @@ export default function MemorySettingsPage() {
       });
       toast(t("memory.toast.preferenceConfirmed"));
       void refreshPendingCount();
+      notifyHostMemoriesChanged();
     } catch {
       toast(t("memory.toast.preferenceConfirmError"));
     } finally {
@@ -148,6 +167,7 @@ export default function MemorySettingsPage() {
       setPending((prev) => prev.filter((m) => m.id !== id));
       toast(t("memory.toast.suggestionDismissed"));
       void refreshPendingCount();
+      notifyHostMemoriesChanged();
     } catch {
       toast(t("memory.toast.suggestionDismissError"));
     } finally {
@@ -155,7 +175,9 @@ export default function MemorySettingsPage() {
     }
   }
 
+  // Called by the add / edit dialog after a successful save.
   function upsertLocal(m: Memory) {
+    notifyHostMemoriesChanged();
     setMemories((prev) => {
       if (!prev) return [m];
       const next = prev.filter((x) => x.id !== m.id);
@@ -177,6 +199,7 @@ export default function MemorySettingsPage() {
       await api.deleteMemory(target.id);
       setMemories((prev) => prev?.filter((m) => m.id !== target.id) ?? null);
       toast(t("memory.toast.memoryDeleted"));
+      notifyHostMemoriesChanged();
     } catch {
       toast(t("memory.toast.memoryDeleteError"));
     }
@@ -184,12 +207,22 @@ export default function MemorySettingsPage() {
 
   async function handleTogglePin(id: string, pinned: boolean) {
     try {
-      const updated = await api.pinMemory(id, pinned);
+      const pinnedRow = await api.pinMemory(id, pinned);
       setMemories((prev) => {
         if (!prev) return prev;
-        const next = prev.map((m) => (m.id === id ? updated : m));
+        // Same as confirm: the pin endpoint's row carries no resolved title.
+        const next = prev.map((m) =>
+          m.id === id
+            ? {
+                ...pinnedRow,
+                source_conversation_title: pinnedRow.source_conversation_title ?? m.source_conversation_title,
+                source_conversation_deleted: pinnedRow.source_conversation_deleted ?? m.source_conversation_deleted,
+              }
+            : m,
+        );
         return sortMemories(next);
       });
+      notifyHostMemoriesChanged();
     } catch {
       toast(t("memory.toast.pinError"));
     }
@@ -200,6 +233,7 @@ export default function MemorySettingsPage() {
     try {
       const { deleted_count } = await api.clearAllMemories();
       setMemories([]);
+      notifyHostMemoriesChanged();
       toast(
         deleted_count === 0
           ? t("memory.clear.toastNone")
@@ -251,6 +285,7 @@ export default function MemorySettingsPage() {
       setMemories([]);
       setPending([]);
       void refreshPendingCount();
+      notifyHostMemoriesChanged();
       toast(
         res.memories_deleted === 1
           ? t("memory.danger.purgeDoneOne")
@@ -346,6 +381,7 @@ export default function MemorySettingsPage() {
                 <PendingPreferenceCard
                   key={m.id}
                   memory={m}
+                  resolveConversationTitle={resolveConversationTitle}
                   saving={pendingBusy === m.id}
                   onConfirm={(id) => handleConfirmPending(id)}
                   onReject={(id) => handleRejectPending(id)}
@@ -407,7 +443,7 @@ export default function MemorySettingsPage() {
                 {t("memory.noResults", { query: searchQuery })}
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2" data-testid="saved-memories">
                 {(filteredMemories ?? memories).map((m) => (
                   <MemoryCard
                     key={m.id}

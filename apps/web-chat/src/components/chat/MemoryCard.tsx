@@ -4,9 +4,13 @@
 //
 // Shows:
 //   - Pin glyph (if pinned) + content text (the main line)
-//   - Metadata line: category · type · saved {time ago}
-//   - Source line: where this memory came from (a conversation,
-//     direct API input, AI-detected, etc.)
+//   - Metadata line: category (in the user's language) · type · how it
+//     was saved (at the user's request / suggested by AI)
+//   - When line (FIX130 A3c): an absolute date ("23 ก.ย. 2569") and the
+//     relative time — "3 days ago" alone could not be told apart from
+//     another memory saved the same week
+//   - Source line: which chat it came from — the chat's title as a link
+//     (resolved by the server), "a deleted chat", or "added by you"
 //   - Usage line (only when use_count > 0)
 //   - Action buttons: Edit, Pin/Unpin, Delete
 //
@@ -15,11 +19,13 @@
 // tokens (text-text-primary / -secondary / -tertiary / -muted),
 // border-border-subtle / border-border for grouping.
 
+import Link from "next/link";
 import { Pencil, Pin, PinOff, X } from "lucide-react";
 
 import { timeAgo } from "@/components/workspace/workspaceUtil";
-import { useT } from "@/lib/i18n";
+import { useI18nStore, useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
+import { formatMemoryDate, memoryCategoryLabel, memoryOriginOf } from "@/lib/memoryLabels";
 import type { Memory } from "@/lib/types";
 
 // Maps the memory_type enum the API exposes to the i18n dict key
@@ -40,10 +46,9 @@ interface Props {
   onEdit: (memory: Memory) => void;
   onDelete: (id: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
-  /** Optional. When wired, the source line resolves the source
-   *  conversation id to its title via this lookup. Falls back to
-   *  "another conversation" inside the card when the id isn't in
-   *  the user's current conversation list. */
+  /** Optional. A fallback for a server that does not send
+   *  source_conversation_title yet: resolves the source conversation id
+   *  through the sidebar's loaded list. */
   resolveConversationTitle?: (id: string) => string | undefined;
 }
 
@@ -58,12 +63,11 @@ export function MemoryCard({
   const typeKey = MEMORY_TYPE_DICT_KEYS[memory.memory_type];
   const typeLabel = typeKey ? t(typeKey) : memory.memory_type;
   const metaParts = [
-    memory.category || null,
+    memoryCategoryLabel(memory.category, t),
     typeLabel,
-    t("memory.card.savedAgo", { time: timeAgo(memory.created_at) }),
+    howSaved(memory, t),
   ].filter(Boolean) as string[];
 
-  const sourceLabel = renderSource(memory, t, resolveConversationTitle);
   const usageLabel = renderUsage(memory, t);
 
   return (
@@ -81,14 +85,11 @@ export function MemoryCard({
         <p className="min-w-0 flex-1 text-sm text-text-primary">{memory.content}</p>
       </div>
 
-      <p className="mt-1 text-xs text-text-muted">{metaParts.join(" · ")}</p>
-
-      {sourceLabel ? (
-        <p className="mt-0.5 text-xs text-text-muted">
-          {t("memory.card.sourceLabel")}{" "}
-          <span className="text-text-muted">{sourceLabel}</span>
-        </p>
-      ) : null}
+      <p className="mt-1 text-xs text-text-muted" data-testid="memory-meta">
+        {metaParts.join(" · ")}
+      </p>
+      <MemoryWhen memory={memory} labelKey="memory.card.savedOn" />
+      <MemoryOrigin memory={memory} resolveConversationTitle={resolveConversationTitle} />
 
       {usageLabel ? (
         <p className="mt-0.5 text-xs text-text-muted">{usageLabel}</p>
@@ -151,24 +152,15 @@ function CardAction({
   );
 }
 
-// renderSource — collapses the (source_type, source_conversation_id)
-// pair into a single line the user can parse. Conversation titles
-// resolve through the optional lookup; otherwise we describe the
-// origin in plain English.
-function renderSource(
+// howSaved — the trust tier in words: saved because the user asked, or
+// suggested by AI (and, if it is in the saved list, confirmed by the user).
+function howSaved(
   m: Memory,
   t: (key: DictKey, vars?: Record<string, string>) => string,
-  resolveConversationTitle?: (id: string) => string | undefined,
 ): string | null {
-  if (m.source_conversation_id && resolveConversationTitle) {
-    const title = resolveConversationTitle(m.source_conversation_id);
-    if (title) return t("memory.card.source.conv", { title });
-  }
   switch (m.source_type) {
     case "user_explicit":
-      return m.source_conversation_id
-        ? t("memory.card.source.userExplicitConv")
-        : t("memory.card.source.userExplicitDirect");
+      return m.source_conversation_id ? t("memory.card.source.userExplicitConv") : null;
     case "assistant_inferred":
       return t("memory.card.source.assistantInferred");
     case "conversation_summary":
@@ -178,6 +170,53 @@ function renderSource(
     default:
       return null;
   }
+}
+
+/** FIX130 A3c — "บันทึกเมื่อ 23 ก.ย. 2569 (3 วันที่แล้ว)". Shared with
+ *  PendingPreferenceCard (labelKey memory.card.suggestedOn). */
+export function MemoryWhen({ memory, labelKey }: { memory: Memory; labelKey: "memory.card.savedOn" | "memory.card.suggestedOn" }) {
+  const t = useT();
+  const locale = useI18nStore((s) => s.locale);
+  const date = formatMemoryDate(memory.created_at, locale);
+  if (!date) return null;
+  return (
+    <p className="mt-0.5 text-xs text-text-muted" data-testid="memory-when">
+      <time dateTime={memory.created_at}>
+        {t(labelKey, { date, ago: timeAgo(memory.created_at) })}
+      </time>
+    </p>
+  );
+}
+
+/** FIX130 A3c — which chat the memory came from: its title as a link,
+ *  "a deleted chat", or "added by you". Shared with PendingPreferenceCard. */
+export function MemoryOrigin({
+  memory,
+  resolveConversationTitle,
+}: {
+  memory: Memory;
+  resolveConversationTitle?: (id: string) => string | undefined;
+}) {
+  const t = useT();
+  const origin = memoryOriginOf(memory, resolveConversationTitle);
+  if (origin.kind === "none") return null;
+  return (
+    <p className="mt-0.5 text-xs text-text-muted" data-testid="memory-origin">
+      {t("memory.card.sourceLabel")}{" "}
+      {origin.kind === "chat" ? (
+        <Link
+          href={`/chat/${origin.conversationId}`}
+          className="text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
+        >
+          {origin.title ?? t("memory.card.origin.untitledChat")}
+        </Link>
+      ) : origin.kind === "deleted" ? (
+        <span>{t("memory.card.origin.deletedChat")}</span>
+      ) : (
+        <span>{t("memory.card.origin.manual")}</span>
+      )}
+    </p>
+  );
 }
 
 function renderUsage(

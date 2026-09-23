@@ -3,6 +3,8 @@
 // reflecting them on the server side; the client trusts these
 // shapes to be exact.
 
+import type { MemorySavedItem, MemoryUsed } from "./memoryMarkers";
+
 export type UUID = string;
 
 export interface AuthSuccess {
@@ -568,6 +570,15 @@ export interface Message {
    *  turn: `dropped` older messages were not sent to the model. The user is
    *  told, the way web-chat's compacted_history source marker tells them. */
   compaction_notice?: { dropped: number; sent?: number; total?: number; summary?: string } | null;
+  /** FIX130 A3a — local-only: the live `memory_used` frame (chat-edge, or the
+   *  desktop host over the bridge): the saved memories that went into this
+   *  answer. After a reload the same fact comes from the `saved_memory`
+   *  context sources (lib/memoryMarkers.ts messageMemoryUsed). */
+  memory_used?: MemoryUsed | null;
+  /** FIX130 A3b — local-only: the live `memory_saved` frames of this turn —
+   *  memories save_memory stored (active) or queued for the user's review
+   *  (pending_confirmation). After a reload: the `memory_saved` sources. */
+  memory_saved?: MemorySavedItem[] | null;
   image_notice?: {
     filenames: string[];
   };
@@ -615,7 +626,10 @@ export type ContextSourceType =
   | "conversation_state"
   | "past_conversation"
   | "file_context"
-  | "compacted_history";
+  | "compacted_history"
+  // FIX130 A3b — a save_memory call in this turn stored a memory or queued a
+  // suggestion; source_id is the memory, metadata.status says which.
+  | "memory_saved";
 
 export interface ContextSource {
   id: UUID;
@@ -754,6 +768,12 @@ export interface Memory {
   valid_until?: string | null;
   created_at: string;
   updated_at: string;
+  /** FIX130 A3c — resolved server-side by the list endpoint (a user+tenant
+   *  scoped read of chat.conversations): the source chat's title while it
+   *  exists, and `source_conversation_deleted` when source_conversation_id
+   *  names a chat that is gone. Absent on other endpoints' rows. */
+  source_conversation_title?: string | null;
+  source_conversation_deleted?: boolean;
 }
 
 export interface MemoryListResponse {
