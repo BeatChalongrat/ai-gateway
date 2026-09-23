@@ -23,6 +23,7 @@ updates the status to ``delivered`` / ``failed`` after the HTTP call.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -33,6 +34,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from app.models.alert_rule import AlertEventORM
+from app.services.alert_scrub import scrub_text, scrub_value
 from app.services.webhook_service import DeliveryStatus, WebhookService
 
 if TYPE_CHECKING:
@@ -96,6 +98,7 @@ class AlertService:
         Synchronous path — no webhook call. Use ``emit_and_deliver``
         when a webhook needs to actually be dispatched.
         """
+        alert = self._scrubbed(alert)
         self._log(alert)
         if session is None:
             return None
@@ -120,6 +123,7 @@ class AlertService:
         Updates the persisted ``alert_events`` row with the delivery
         outcome after the HTTP call returns.
         """
+        alert = self._scrubbed(alert)
         self._log(alert)
         event = self._persist(
             session,
@@ -160,19 +164,29 @@ class AlertService:
         return event
 
     @staticmethod
+    def _scrubbed(alert: Alert) -> Alert:
+        """FIX130 E4 — the alert as it may be logged, stored and sent: no
+        SQL, credentials, tokens or user content (``alert_scrub``)."""
+        return dataclasses.replace(
+            alert, message=scrub_text(alert.message), details=scrub_value(alert.details)
+        )
+
+    @staticmethod
     def _notification_text(alert: Alert) -> str:
         lines = [alert.message]
         for k in ("window_minutes", "metric_value", "threshold", "attempts", "successes",
                   "errors", "total", "stuck_age_s"):
             if k in alert.details:
                 lines.append(f"{k}: {alert.details[k]}")
+        # FIX130 E4 — per session: pid, state, application, age. The query
+        # head is NOT sent (it stays in the pg_stuck_transaction log line).
         sessions = alert.details.get("sessions") or []
         for s in sessions[:3]:
             lines.append(
                 f"pid {s.get('pid')} {s.get('state')} {s.get('application_name') or '-'} "
-                f"{s.get('xact_age_s')}s: {str(s.get('query', ''))[:80]}"
+                f"{s.get('xact_age_s')} s"
             )
-        return "\n".join(lines)
+        return scrub_text("\n".join(lines))
 
     @staticmethod
     def build_payload(alert: Alert) -> dict:
@@ -181,8 +195,8 @@ class AlertService:
             "event": "alert_fired",
             "alert_type": alert.alert_type.value,
             "severity": alert.severity.value,
-            "message": alert.message,
-            "details": alert.details,
+            "message": scrub_text(alert.message),
+            "details": scrub_value(alert.details),
             "tenant_id": str(alert.tenant_id) if alert.tenant_id else None,
             "project_id": str(alert.project_id) if alert.project_id else None,
             "fired_at": alert.timestamp.isoformat(),

@@ -333,13 +333,22 @@ class AlertEvaluator:
             from app.services import pg_activity
 
             sample = pg_activity.last_sample()
+            # FIX130 E4 — what happened and the numbers: state, age, limit,
+            # application and pid. Never the query (it holds user text and
+            # tokens); the pg_stuck_transaction log line has it.
+            oldest = pg_activity.oldest_session(sample.worst) if sample is not None else None
+            what = pg_activity.describe_state(oldest) if oldest else "stuck"
+            who = (
+                f" — app {oldest.get('application_name') or 'unknown'}, pid {oldest.get('pid')}"
+                if oldest else ""
+            )
             message = (
-                f"{rule.name}: a database transaction has been stuck for "
-                f"{value:.0f} s (limit {rule.threshold:g} s)"
+                f"{rule.name}: a database transaction has been {what} for "
+                f"{value:.0f} s (limit {rule.threshold:g} s){who}"
             )
             if sample is not None:
                 details["stuck_age_s"] = round(sample.stuck_age_s, 1)
-                details["sessions"] = sample.worst[:5]
+                details["sessions"] = pg_activity.public_sessions(sample.worst[:5])
         else:
             message = (
                 f"{rule.name}: {rule.metric} threshold {rule.threshold} "

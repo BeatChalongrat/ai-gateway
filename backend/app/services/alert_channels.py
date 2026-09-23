@@ -15,12 +15,15 @@ nobody. This module is the one delivery point used by the rule evaluator
 
 Delivery is synchronous (``httpx.Client``) so the ops watcher — a plain
 process, no event loop — can use it; ``deliver_async`` runs it in a thread.
-It never raises and never puts a secret in a message.
+It never raises and never puts a secret in a message: every notification is
+passed through ``alert_scrub`` first (FIX130 E4 — no SQL, credentials,
+tokens or user text leave in an alert, whatever the caller built).
 """
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -28,6 +31,7 @@ import httpx
 import structlog
 
 from app.core.config import settings
+from app.services.alert_scrub import scrub_text, scrub_value
 
 logger = structlog.get_logger(__name__)
 
@@ -122,8 +126,18 @@ def _send_webhook(n: Notification, client: httpx.Client) -> bool:
     return 200 <= r.status_code < 300
 
 
+def scrubbed(n: Notification) -> Notification:
+    """FIX130 E4 — ``n`` as it may leave the machine: title, message and
+    details without SQL, credentials, tokens or user content. The last hop,
+    so a caller that forgets (backend rule, ops watcher) cannot leak."""
+    return dataclasses.replace(
+        n, title=scrub_text(n.title), message=scrub_text(n.message), details=scrub_value(n.details)
+    )
+
+
 def deliver(n: Notification) -> dict[str, bool]:
     """Send ``n`` on every configured channel. Returns {channel: ok}."""
+    n = scrubbed(n)
     outcomes: dict[str, bool] = {}
     channels = configured_channels()
     if not channels:

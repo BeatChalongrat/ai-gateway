@@ -130,8 +130,10 @@ class TestMetrics:
         assert AlertEvaluator._compute_metric(session, rule, now) == 95.0
         alert = AlertEvaluator._build_alert(rule, 95.0)
         assert alert.alert_type is AlertType.STUCK_TRANSACTION
-        assert "stuck for 95 s" in alert.message
+        # FIX130 E4: the state, age, limit, application and pid — never the query.
+        assert "has been idle for 95 s (limit 60 s) — app sran-backend-async, pid 1" in alert.message
         assert alert.details["sessions"][0]["pid"] == 1
+        assert "query" not in alert.details["sessions"][0]
 
     def test_messages_read_like_a_notification(self):
         a = AlertEvaluator._build_alert(_rule("no_successful_turn", 1.0), 7.0)

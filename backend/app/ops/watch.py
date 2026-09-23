@@ -120,12 +120,12 @@ def classify_pg_activity(name: str, rows: list[dict], *, stuck_after_s: float) -
     """``rows`` = pg_stat_activity rows (pid, state, application_name,
     wait_event_type, xact_age_s, query) for sessions idle in transaction
     or waiting on a lock. One finding per database when the oldest is past
-    ``stuck_after_s`` — the 2026-09-22 wedge, seen from outside the backend."""
-    worst = None
-    for r in rows:
-        age = float(r.get("xact_age_s") or 0.0)
-        if worst is None or age > float(worst.get("xact_age_s") or 0.0):
-            worst = r
+    ``stuck_after_s`` — the 2026-09-22 wedge, seen from outside the backend.
+
+    FIX130 E4 — the finding (= the alert) names pid, state, application,
+    wait and age; never the query, which holds whatever the application
+    bound into it. ``tick`` logs the query head (``pg_stuck_transaction``)."""
+    worst = _oldest(rows)
     if worst is None or float(worst.get("xact_age_s") or 0.0) < stuck_after_s:
         return []
     age = float(worst.get("xact_age_s") or 0.0)
@@ -135,9 +135,35 @@ def classify_pg_activity(name: str, rows: list[dict], *, stuck_after_s: float) -
         message=(
             f"pid {worst.get('pid')} {worst.get('state')} "
             f"({worst.get('application_name') or 'no application_name'}, wait {worst.get('wait_event_type') or '-'}) "
-            f"for {age:.0f} s: {str(worst.get('query', ''))[:100]} — {len(rows)} session(s) idle/blocked"
+            f"for {age:.0f} s (limit {stuck_after_s:.0f} s) — {len(rows)} session(s) idle/blocked"
         ),
     )]
+
+
+def _oldest(rows: list[dict]) -> dict | None:
+    worst = None
+    for r in rows:
+        age = float(r.get("xact_age_s") or 0.0)
+        if worst is None or age > float(worst.get("xact_age_s") or 0.0):
+            worst = r
+    return worst
+
+
+def stuck_log_sessions(rows: list[dict], limit: int = 5) -> list[dict]:
+    """The sessions as the ``pg_stuck_transaction`` log line records them —
+    the one place the query head is kept (oldest first, JSON-safe)."""
+    ordered = sorted(rows, key=lambda r: float(r.get("xact_age_s") or 0.0), reverse=True)
+    return [
+        {
+            "pid": r.get("pid"),
+            "state": r.get("state"),
+            "application_name": r.get("application_name"),
+            "wait_event_type": r.get("wait_event_type"),
+            "xact_age_s": round(float(r.get("xact_age_s") or 0.0), 1),
+            "query": str(r.get("query") or "")[:120],
+        }
+        for r in ordered[:limit]
+    ]
 
 
 def classify_turns(
@@ -357,7 +383,8 @@ def probe_ready(url: str) -> tuple[int | None, dict | None, str | None]:
 
 
 def _log(msg: str, **kv) -> None:
-    print(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "msg": msg, **kv}, ensure_ascii=False), flush=True)
+    print(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "msg": msg, **kv},
+                     ensure_ascii=False, default=str), flush=True)
 
 
 def tick(state: AlertState, cfg: dict) -> None:
@@ -375,9 +402,13 @@ def tick(state: AlertState, cfg: dict) -> None:
     findings += classify_memory(*meminfo(), max_pct=cfg["mem_pct"])
     for name, dsn in cfg["pg_dsns"]:
         try:
-            findings += classify_pg_activity(
-                name, pg_activity_rows(dsn), stuck_after_s=cfg["pg_stuck_s"]
-            )
+            rows = pg_activity_rows(dsn)
+            stuck = classify_pg_activity(name, rows, stuck_after_s=cfg["pg_stuck_s"])
+            if stuck:
+                # The query head goes to this log only, never into the alert.
+                _log("pg_stuck_transaction", db=name, stuck_after_s=cfg["pg_stuck_s"],
+                     sessions=stuck_log_sessions(rows))
+            findings += stuck
         except Exception as exc:  # noqa: BLE001 — the DSN, never the password, is named by its label
             _log("pg_activity_query_failed", db=name, error=f"{type(exc).__name__}: {str(exc)[:120]}")
     chat_dsn = dict(cfg["pg_dsns"]).get("chat")
