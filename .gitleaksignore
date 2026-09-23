@@ -1,3 +1,8 @@
 # gitleaks false positives, by fingerprint (commit:file:rule:line).
 # FIX129: the request-id literal "req-fix129-slow" in a unit test is not a key.
 86b1905b7d475e7215c03d323ce0430af6358040:backend/tests/test_fix129_credit_deduction_instrumentation.py:generic-api-key:90
+# FIX130: deliberately fake secrets in the alert-redaction tests (a made-up JWT, an sk-live-… and a re_… dummy key) — the tests prove these never reach an alert.
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:jwt:34
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:35
+c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:91
+9caa2cbc850eaf48a9a2deae7ee7b4c65d47b64c:backend/tests/test_fix130_alert_redaction.py:generic-api-key:53
