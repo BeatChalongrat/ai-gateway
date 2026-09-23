@@ -2700,8 +2700,9 @@ async def _chat_completions_impl(
                                 # LLM-echoed credential token (``<r0>``)
                                 # falls into the orphan path and gets
                                 # deleted, matching the non-stream P3.
+                                # FIX130 — a slice keeps its edge whitespace.
                                 emit_text = _stream_orphan_redact(
-                                    emit_text, _redact_span_map,
+                                    emit_text, _redact_span_map, trim_edges=False,
                                 )
                                 if emit_text:
                                     # FIX49 Part C — deferred fallback notice:
@@ -3230,8 +3231,12 @@ async def _chat_completions_impl(
             # on the wire), but that's where they cluster.
             from app.services.dlp.transformer import redact_orphan_tokens
             # Filtered span_map — see the per-chunk orphan-redact above
-            # for why the secret tokens are excluded here.
-            final_emit = redact_orphan_tokens(final_emit, _redact_span_map)
+            # for why the secret tokens are excluded here. FIX130 — the
+            # tail is a slice too: the space that starts it joins it to
+            # what is already on the wire.
+            final_emit = redact_orphan_tokens(
+                final_emit, _redact_span_map, trim_edges=False
+            )
             if final_emit:
                 # FIX49 Part C — deferred fallback notice (a short answer
                 # can live entirely in the DLP tail window).
