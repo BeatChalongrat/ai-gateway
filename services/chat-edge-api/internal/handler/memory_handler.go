@@ -57,8 +57,12 @@ type createMemoryRequest struct {
 	// (FIX130 — the desktop host's remember tool, when the user's own words
 	// did not ask to remember). Nothing a caller sends can raise the tier.
 	SourceType string `json:"source_type,omitempty"`
-	// SourceConversationID / EvidenceExcerpt — FIX130: where a suggestion
-	// came from and the user's words behind it (suggestions only).
+	// SourceConversationID — FIX130: the chat a memory was saved from (the
+	// desktop host's remember tool), shown as a link on the Memory page.
+	// Display only: the page resolves its title through a user- and
+	// tenant-scoped lookup, so a foreign id shows as a deleted chat.
+	// EvidenceExcerpt — the user's words behind a suggestion (suggestions
+	// only).
 	SourceConversationID string `json:"source_conversation_id,omitempty"`
 	EvidenceExcerpt      string `json:"evidence_excerpt,omitempty"`
 }
@@ -159,19 +163,19 @@ func (h *MemoryHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SourceType: model.MemorySourceUserExplicit,
 		ActorType:  "user",
 	}
+	if raw := strings.TrimSpace(req.SourceConversationID); raw != "" {
+		cid, err := uuid.Parse(raw)
+		if err != nil {
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid source_conversation_id")
+			return
+		}
+		in.SourceConversationID = &cid
+	}
 	if req.SourceType == model.MemorySourceAssistantInferred {
 		in.SourceType = model.MemorySourceAssistantInferred
 		in.StatusOverride = model.MemoryStatusPendingConfirmation
 		in.ActorType = "assistant"
 		in.EvidenceExcerpt = req.EvidenceExcerpt
-		if raw := strings.TrimSpace(req.SourceConversationID); raw != "" {
-			cid, err := uuid.Parse(raw)
-			if err != nil {
-				WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid source_conversation_id")
-				return
-			}
-			in.SourceConversationID = &cid
-		}
 	}
 	out, err := h.memories.CreateMemory(r.Context(), in)
 	if err != nil {

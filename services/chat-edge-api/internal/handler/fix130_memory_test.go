@@ -76,9 +76,13 @@ func TestFIX130_PostMemoryCanFileASuggestion(t *testing.T) {
 		out["source_type"] != model.MemorySourceAssistantInferred || out["source_conversation_id"] != conv.String() || out["evidence_excerpt"] != "ผมแพ้กุ้งนะ" {
 		t.Fatalf("suggestion: %d %v", rec.Code, out)
 	}
-	// Without the lower tier it is the user's own explicit memory, as before.
-	rec, out = post(map[string]any{"content": "ชื่อเล่นว่าบีท", "scope_type": "global_user", "memory_type": "explicit_fact"})
-	if rec.Code != http.StatusCreated || out["status"] != model.MemoryStatusActive || out["source_type"] != model.MemorySourceUserExplicit {
+	// Without the lower tier it is the user's own explicit memory, as before
+	// — and it can still name the chat it was saved from (the desktop's
+	// remember tool), so the Memory page links back instead of "เพิ่มเอง".
+	rec, out = post(map[string]any{"content": "ชื่อเล่นว่าบีท", "scope_type": "global_user", "memory_type": "explicit_fact",
+		"source_conversation_id": conv.String()})
+	if rec.Code != http.StatusCreated || out["status"] != model.MemoryStatusActive || out["source_type"] != model.MemorySourceUserExplicit ||
+		out["source_conversation_id"] != conv.String() {
 		t.Fatalf("explicit: %d %v", rec.Code, out)
 	}
 	// No caller can RAISE the tier through the field.
