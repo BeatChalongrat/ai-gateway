@@ -228,7 +228,7 @@ async function caseBanner() {
     const t = await text(page);
     out[`w${w}`] = {
       bannerText: (t.match(/[^\n]*(แชทยาว|ส่งให้ผู้ช่วย|ข้อความเก่า)[^\n]*/g) || []).slice(0, 3),
-      visible: await page.evaluate(() => [...document.querySelectorAll("body *")].some((e) => /แชทยาว|ส่งให้ผู้ช่วย|ข้อความเก่า/.test(e.textContent || "") && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)),
+      visible: await page.evaluate(() => [...document.querySelectorAll("body *")].some((e) => /ส่งให้ผู้ช่วย|ข้อความเก่า/.test(e.textContent || "") && e.children.length === 0 && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0)),
     };
     await shot(page, `banner-${w}`);
     await browser.close();
@@ -239,22 +239,40 @@ async function caseBanner() {
 }
 
 async function casePill(id) {
-  const { browser, page, tok } = await open("A", { width: 360, height: 740 });
-  if (!id) { id = await L.newChat(tok); await L.turn(tok, id, "[FIX130] ตอบสั้นๆ ว่า สวัสดี"); await L.turn(tok, id, "[FIX130] ตอบสั้นๆ ว่า ขอบคุณ"); }
-  await gotoChat(page, id);
-  await L.wait(2500);
-  const geo = await page.evaluate(() => {
-    const pill = [...document.querySelectorAll("[aria-label]")].find((e) => /การใช้งานและเครดิต|เครดิต/.test(e.getAttribute("aria-label") || ""));
-    const times = [...document.querySelectorAll("time, [data-testid*=time], [class*=timestamp]")].filter((e) => e.getBoundingClientRect().height > 0);
-    const last = times[times.length - 1];
-    const r = (e) => e && (({ x, y, width, height }) => ({ x: Math.round(x), y: Math.round(y), w: Math.round(width), h: Math.round(height) }))(e.getBoundingClientRect());
-    const a = r(pill), b = r(last);
-    const overlap = !!(a && b && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h);
-    return { pill: a, lastTime: b, lastTimeText: last?.textContent?.trim() || null, overlap };
-  });
-  await shot(page, "pill-360");
-  await browser.close();
-  return { id, ...geo, pass: !!geo.pill && !!geo.lastTime && !geo.overlap };
+  // The credit pill floats over the thread: at 360 px it must not cover ANY visible text
+  // (the last message's timestamp, the memory/temporary banner) — scrolled to the bottom.
+  const out = {};
+  for (const [name, memory] of [["memoryOn", true], ["memoryOff", false]]) {
+    const { browser, page, tok } = await open("A", { width: 360, height: 740 });
+    const cid = await L.newChat(tok, { memory });
+    for (const q of ["[FIX130] ตอบสั้นๆ ว่า สวัสดี", "[FIX130] ตอบสั้นๆ ว่า ขอบคุณ", "[FIX130] ตอบสั้นๆ ว่า ลาก่อน"]) await L.turn(tok, cid, q);
+    await gotoChat(page, cid);
+    await L.wait(2500);
+    const geo = await page.evaluate(() => {
+      const pill = [...document.querySelectorAll("[aria-label]")].find((e) => /การใช้งานและเครดิต|เครดิต/.test(e.getAttribute("aria-label") || ""));
+      if (!pill) return { pill: null, covered: [] };
+      const a = pill.getBoundingClientRect();
+      const composer = document.querySelector("textarea[data-shortcut=composer]")?.closest("form, footer, [data-composer]") || null;
+      const covered = [];
+      for (const e of document.querySelectorAll("body *")) {
+        if (pill.contains(e) || e.contains(pill) || (composer && composer.contains(e))) continue;
+        const own = [...e.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent.trim()).join("");
+        if (!own) continue;
+        const b = e.getBoundingClientRect();
+        if (b.width === 0 || b.height === 0) continue;
+        const st = getComputedStyle(e);
+        if (st.visibility === "hidden" || st.opacity === "0") continue;
+        if (a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height) covered.push(own.slice(0, 40));
+      }
+      return { pill: { x: Math.round(a.x), y: Math.round(a.y), w: Math.round(a.width), h: Math.round(a.height) }, covered };
+    });
+    await shot(page, `pill-360-${name}`);
+    await browser.close();
+    await L.deleteChat(tok, cid);
+    out[name] = geo;
+  }
+  out.pass = !!out.memoryOn.pill && out.memoryOn.covered.length === 0 && out.memoryOff.covered.length === 0;
+  return out;
 }
 
 async function caseKb() {
