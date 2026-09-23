@@ -1,19 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Edge middleware gate. HttpOnly cookie migration: the backend now sets
-// the auth tokens as HttpOnly cookies. Edge middleware runs server-side,
-// so it CAN read them (the browser-JS same-origin restriction doesn't
-// apply here) — we don't need the old JS ``portal_logged_in`` marker.
+import { ACCESS_COOKIE, REFRESH_COOKIE, checkSession } from "./lib/session-check";
+
+// Edge middleware gate. The backend sets the auth tokens as HttpOnly
+// cookies (access 60 min, refresh 90 days); edge middleware runs
+// server-side, so it CAN read them.
 //
-// We gate on the *refresh* cookie, not the access cookie. The access
-// token is short-lived (60 min) and rotates; the refresh cookie lives 90
-// days and is the real "is there a session?" signal. Gating on the
-// access cookie would bounce an active-but-idle user to /login the moment
-// their access token lapsed, even though silent refresh / the API
-// 401-retry would have renewed it. We do NOT verify the token here (no
-// secret at the edge) — the backend re-verifies on every API call.
-const SESSION_COOKIE = "portal_refresh_token";
-const ACCESS_COOKIE = "portal_access_token";
+// FIX130 E2 — "a cookie is present" is no longer "signed in". A device that
+// still held a REVOKED token (signed out elsewhere, password reset) was
+// sent from /login straight back to the ?redirect= target, which bounced
+// it back to /login: a loop (FIX129 B2 found it from the Web Chat side).
+// The session is now checked for real, by the backend (lib/session-check):
+//
+//   signed-in   /portal/me accepted the access token, or a refresh
+//               succeeded (an idle user whose access token lapsed is NOT
+//               bounced; the rotated cookies ride this response).
+//   signed-out  the backend REJECTED both (401/403): the stale cookies are
+//               cleared on this response, and the login page renders
+//               instead of redirecting — no loop.
+//   unknown     the backend could not be asked (down, timeout, 5xx). The
+//               login page renders (never a redirect, so never a loop);
+//               app pages render as before (fail open for the SHELL only —
+//               every API call they make is still checked by the backend,
+//               which is where the data is). A backend blip therefore
+//               neither locks everyone out nor loops anyone.
+//
+// Pages with no portal cookie at all are decided without a network call,
+// exactly as before.
 
 // Routes that should render the same way for everyone — authed users
 // still see the landing page, they just get a different nav.
@@ -69,13 +82,22 @@ function safeRedirect(raw: string | null, reqOrigin: string): string | null {
   return null;
 }
 
-export function middleware(request: NextRequest) {
+/** Copy the backend's Set-Cookie headers (rotation or clearing) onto ``res``. */
+function relayCookies(res: NextResponse, setCookies: string[]): NextResponse {
+  for (const c of setCookies) res.headers.append("set-cookie", c);
+  return res;
+}
+
+/** Expire both portal cookies on this host (backup to the backend's own clear). */
+function clearPortalCookies(res: NextResponse): NextResponse {
+  for (const name of [ACCESS_COOKIE, REFRESH_COOKIE]) {
+    res.cookies.set(name, "", { path: "/", maxAge: 0, httpOnly: true, sameSite: "lax" });
+  }
+  return res;
+}
+
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  // Either cookie counts as "signed in"; the refresh cookie is the
-  // durable signal but accept the access cookie too for robustness.
-  const signedIn =
-    !!request.cookies.get(SESSION_COOKIE)?.value ||
-    !!request.cookies.get(ACCESS_COOKIE)?.value;
 
   const isPublic = PUBLIC_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + "?")
@@ -87,36 +109,59 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Already-signed-in users bouncing off /login or /signup go to the
-  // app — but PRESERVE a valid ``?redirect=`` so the Web Chat handoff
-  // completes (the old code stripped it and dumped them on /dashboard,
-  // breaking "I clicked Sign in from chat" — audit finding #6.9).
-  if (signedIn && isAuthPage) {
-    const target = safeRedirect(
-      request.nextUrl.searchParams.get("redirect"),
-      request.nextUrl.origin
-    );
-    const url = request.nextUrl.clone();
-    if (target) {
-      return NextResponse.redirect(new URL(target, request.nextUrl.origin));
+  const access = request.cookies.get(ACCESS_COOKIE)?.value || undefined;
+  const refresh = request.cookies.get(REFRESH_COOKIE)?.value || undefined;
+  const verdict = await checkSession(access, refresh);
+
+  if (verdict.state === "signed-in") {
+    // Already-signed-in users bouncing off /login or /signup go to the
+    // app — but PRESERVE a valid ``?redirect=`` so the Web Chat handoff
+    // completes (the old code stripped it and dumped them on /dashboard,
+    // breaking "I clicked Sign in from chat" — audit finding #6.9).
+    if (isAuthPage) {
+      const target = safeRedirect(
+        request.nextUrl.searchParams.get("redirect"),
+        request.nextUrl.origin
+      );
+      if (target) {
+        return relayCookies(
+          NextResponse.redirect(new URL(target, request.nextUrl.origin)),
+          verdict.setCookies
+        );
+      }
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      url.search = "";
+      return relayCookies(NextResponse.redirect(url), verdict.setCookies);
     }
-    url.pathname = "/dashboard";
-    url.search = "";
-    return NextResponse.redirect(url);
+    return relayCookies(NextResponse.next(), verdict.setCookies);
+  }
+
+  if (verdict.state === "unknown") {
+    // The backend could not be asked: render whatever was asked for — the
+    // login page renders (no redirect, so no loop), app pages render and
+    // their API calls get the backend's own answer.
+    return NextResponse.next();
+  }
+
+  // signed-out: no cookie, or the backend rejected the session. Stale
+  // cookies are expired on this response (the backend's clear, which
+  // carries the configured Domain, plus a host-only clear).
+  const hadCookie = !!(access || refresh);
+  if (isAuthPage) {
+    const res = NextResponse.next();
+    return hadCookie ? relayCookies(clearPortalCookies(res), verdict.setCookies) : res;
   }
 
   // Unauthed users hitting the app shell go to /login, carrying the
   // originally-requested path back so post-login can return them there.
-  if (!signedIn && !isAuthPage) {
-    const url = request.nextUrl.clone();
-    const original = pathname + (request.nextUrl.search || "");
-    url.pathname = "/login";
-    url.search = "";
-    url.searchParams.set("redirect", original);
-    return NextResponse.redirect(url);
-  }
-
-  return NextResponse.next();
+  const url = request.nextUrl.clone();
+  const original = pathname + (request.nextUrl.search || "");
+  url.pathname = "/login";
+  url.search = "";
+  url.searchParams.set("redirect", original);
+  const res = NextResponse.redirect(url);
+  return hadCookie ? relayCookies(clearPortalCookies(res), verdict.setCookies) : res;
 }
 
 export const config = {

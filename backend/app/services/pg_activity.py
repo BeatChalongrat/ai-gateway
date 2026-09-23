@@ -11,7 +11,9 @@ looked. This module looks every ``pg_activity_sample_seconds``:
   ``pg_stuck_transaction_seconds``) and for the ``stuck_transaction`` alert
   rule (``alert_evaluator``) — neither of them touches the database again;
 * a ``pg_stuck_transaction`` warning naming pid, application_name, age and
-  the head of the query, so the next incident report writes itself.
+  the head of the query, so the next incident report writes itself. That
+  log line is the ONLY place the query head goes (FIX130 E4): an alert
+  carries ``public_sessions`` — pid, state, application, wait, age.
 
 The query only reads ``pg_stat_activity`` for the current database and
 skips itself. On a non-Postgres bind (sqlite tests) it returns an empty
@@ -88,6 +90,31 @@ def last_sample() -> ActivitySample | None:
 def _set_last(sample: ActivitySample) -> None:
     global _last
     _last = sample
+
+
+# FIX130 E4 — the fields of a session an alert may carry. The query head is
+# not one of them: SQL holds whatever the application bound into it (message
+# text, addresses, tokens). It stays in the pg_stuck_transaction log line.
+PUBLIC_SESSION_FIELDS = ("pid", "state", "application_name", "wait", "xact_age_s")
+
+
+def public_sessions(worst: list[dict]) -> list[dict]:
+    """``worst`` without the query: what an alert may say about each session."""
+    return [{k: s.get(k) for k in PUBLIC_SESSION_FIELDS if k in s} for s in worst]
+
+
+def oldest_session(worst: list[dict]) -> dict | None:
+    """The session whose transaction is oldest (the one to name in an alert)."""
+    return max(worst, key=lambda s: float(s.get("xact_age_s") or 0.0), default=None)
+
+
+def describe_state(session: dict) -> str:
+    """``idle`` / ``waiting on a lock`` / ``stuck`` — for a notification."""
+    if session.get("state") == "idle in transaction":
+        return "idle"
+    if session.get("wait") == "Lock" or session.get("wait_event_type") == "Lock":
+        return "waiting on a lock"
+    return "stuck"
 
 
 def stuck_age_seconds() -> float:

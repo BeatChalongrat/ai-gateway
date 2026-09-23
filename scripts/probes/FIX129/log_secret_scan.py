@@ -7,6 +7,8 @@ What counts as a secret (values are NEVER printed, only the key names):
   * the value of every .env key whose NAME matches (PASSWORD|SECRET|KEY|TOKEN|DSN);
   * for ANY .env value that is a URL with ``user:pass@`` or a libpq DSN with
     ``password=...``, the password part;
+  * (FIX130) the path of ``ALERT_NTFY_URL`` / ``*WEBHOOK_URL`` — the ntfy
+    topic is that channel's only secret;
   * values shorter than 8 characters and the well-known dev defaults
     (``postgres``, ``changeme``, anything containing ``change-in-prod``) are
     ignored — they would match prose, not leaks.
@@ -35,6 +37,7 @@ from urllib.parse import unquote, urlsplit
 SECRET_KEY_RE = re.compile(r"(PASSWORD|SECRET|KEY|TOKEN|DSN)", re.I)
 URL_CRED_RE = re.compile(r"^[a-z][a-z0-9+.-]*://[^/@\s]*:[^/@\s]+@", re.I)
 LIBPQ_PASSWORD_RE = re.compile(r"(?:^|\s)password=(\S+)")
+CHANNEL_URL_KEY_RE = re.compile(r"^(?:TS_)?(ALERT_NTFY_URL|[A-Z0-9_]*WEBHOOK_URL)$")
 DEV_DEFAULTS = {"postgres", "changeme"}
 MIN_LEN = 8
 
@@ -80,6 +83,16 @@ def collect_secrets(env: dict[str, str]) -> dict[str, set[str]]:
         for pw in LIBPQ_PASSWORD_RE.findall(value):
             if not is_ignorable(pw):
                 secrets[pw].add(f"{key} (dsn password)")
+        # FIX130 E4 — an alert channel URL is a credential: an ntfy topic is
+        # the channel's only secret (anyone who knows it reads the alerts)
+        # and a webhook's path often is. The path is looked for on its own.
+        if CHANNEL_URL_KEY_RE.match(key) and value:
+            try:
+                path = urlsplit(value).path.strip("/")
+            except ValueError:
+                path = ""
+            if path and not is_ignorable(path):
+                secrets[path].add(f"{key} (topic/path)")
     return secrets
 
 

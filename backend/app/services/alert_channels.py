@@ -15,12 +15,16 @@ nobody. This module is the one delivery point used by the rule evaluator
 
 Delivery is synchronous (``httpx.Client``) so the ops watcher — a plain
 process, no event loop — can use it; ``deliver_async`` runs it in a thread.
-It never raises and never puts a secret in a message.
+It never raises and never puts a secret in a message: every notification is
+passed through ``alert_scrub`` first (FIX130 E4 — no SQL, credentials,
+tokens or user text leave in an alert, whatever the caller built).
 """
 
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -28,10 +32,62 @@ import httpx
 import structlog
 
 from app.core.config import settings
+from app.services.alert_scrub import scrub_text, scrub_value
 
 logger = structlog.get_logger(__name__)
 
 _TIMEOUT_S = 6.0
+
+
+# FIX130 E4 — an alert URL is a credential: an ntfy.sh topic IS the secret
+# of that channel (anyone who knows it reads every alert), and a webhook's
+# path often is too (Slack-style /services/T…/B…/<secret>). httpx logs every
+# request at INFO ("HTTP Request: POST <url> …") and the backend's root
+# logger is at INFO, so the first delivered alert would have written the
+# topic into the backend log. This filter on the "httpx" logger replaces the
+# configured channel URLs, and every rule webhook URL WebhookService posts
+# to, with scheme://host/… before the record is formatted anywhere.
+_SECRET_URLS: set[str] = set()
+
+
+def url_label(url: str) -> str:
+    """``https://ntfy.sh/<topic>`` → ``https://ntfy.sh/…`` (safe to log)."""
+    try:
+        u = httpx.URL(url)
+        return f"{u.scheme}://{u.host}{f':{u.port}' if u.port else ''}/…"
+    except Exception:  # noqa: BLE001
+        return "<alert url>"
+
+
+def register_secret_url(url: str | None) -> None:
+    """Keep ``url`` out of the httpx request log (see ``_HideAlertUrls``)."""
+    if url and url.strip():
+        _SECRET_URLS.add(url.strip())
+
+
+class _HideAlertUrls(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        urls = {u for u in ((settings.alert_ntfy_url or "").strip(),
+                            (settings.alert_webhook_url or "").strip()) if u} | _SECRET_URLS
+        if not urls:
+            return True
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001 — never break logging
+            return True
+        hit = False
+        for u in sorted(urls, key=len, reverse=True):
+            if u in msg:
+                msg = msg.replace(u, url_label(u))
+                hit = True
+        if hit:
+            record.msg, record.args = msg, ()
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(f, _HideAlertUrls) for f in _httpx_logger.filters):
+    _httpx_logger.addFilter(_HideAlertUrls())
 
 # ntfy priority scale: 1 min … 5 max/urgent.
 _NTFY_PRIORITY = {"info": "3", "warning": "4", "critical": "5"}
@@ -122,8 +178,18 @@ def _send_webhook(n: Notification, client: httpx.Client) -> bool:
     return 200 <= r.status_code < 300
 
 
+def scrubbed(n: Notification) -> Notification:
+    """FIX130 E4 — ``n`` as it may leave the machine: title, message and
+    details without SQL, credentials, tokens or user content. The last hop,
+    so a caller that forgets (backend rule, ops watcher) cannot leak."""
+    return dataclasses.replace(
+        n, title=scrub_text(n.title), message=scrub_text(n.message), details=scrub_value(n.details)
+    )
+
+
 def deliver(n: Notification) -> dict[str, bool]:
     """Send ``n`` on every configured channel. Returns {channel: ok}."""
+    n = scrubbed(n)
     outcomes: dict[str, bool] = {}
     channels = configured_channels()
     if not channels:
@@ -141,9 +207,13 @@ def deliver(n: Notification) -> dict[str, bool]:
                 else:
                     ok = _send_webhook(n, client)
             except Exception as exc:  # noqa: BLE001 — delivery never raises
+                err = str(exc)
+                for u in (settings.alert_ntfy_url, settings.alert_webhook_url):
+                    if (u or "").strip():
+                        err = err.replace(u.strip(), url_label(u.strip()))
                 logger.warning(
                     "alert_delivery_failed", channel=ch, title=n.title,
-                    error=f"{type(exc).__name__}: {str(exc)[:160]}",
+                    error=f"{type(exc).__name__}: {err[:160]}",
                 )
                 ok = False
             outcomes[ch] = ok

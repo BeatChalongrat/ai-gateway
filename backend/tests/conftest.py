@@ -219,6 +219,28 @@ def _email_domain_allowlist_open_by_default(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _alert_channels_off_by_default(monkeypatch):
+    """FIX130 — no test can page a person.
+
+    The lane's env is copied from the live backend container, which carries
+    the owner's ALERT_NTFY_URL / ALERT_EMAIL_TO: every test that fired an
+    alert rule POSTed it to the real ntfy topic (17 fake "test-rule: …"
+    notifications on 2026-09-23), and the rule tests that expect
+    ``delivery_status == "log_only"`` failed because a channel was
+    configured. The global channels are blanked for every test; tests that
+    exercise delivery set their own (fake) endpoint via the same monkeypatch
+    mechanism (explicit setattr runs after this autouse one).
+    """
+    try:
+        from app.core.config import settings
+    except Exception:
+        return
+    for name in ("alert_ntfy_url", "alert_ntfy_token", "alert_email_to", "alert_webhook_url"):
+        monkeypatch.setattr(settings, name, "", raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _password_login_enabled_by_default(monkeypatch):
     """Keep password signup/login usable for every test that doesn't
     explicitly exercise the kill-switch.

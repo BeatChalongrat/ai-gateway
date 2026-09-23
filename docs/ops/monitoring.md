@@ -110,6 +110,89 @@ Body:     No successful turn in 5 min (with attempts): 12 request(s) in the last
           threshold: 1.0
 ```
 
+### What an alert may carry (FIX130)
+
+What happened and the numbers — never SQL, credentials, tokens or user text.
+Before FIX130 the stuck-transaction alert carried the head of the oldest
+session's SQL in the ntfy / e-mail body, the whole `sessions` list with each
+query in `alert_events.details_json`, the `alert_emitted` log line and the
+rule's webhook payload, and the ops watcher put `query[:100]` in its
+message. A query holds whatever the application bound into it — message
+text, e-mail addresses, tokens. Now:
+
+```
+Title:    Transaction stuck longer than 60 s: a database transaction has been idle for 64 s (limit 60 s) — app psql, pid 262
+Body:     … stuck_age_s: 64.2
+          pid 262 idle in transaction psql 64.2 s
+ops-watch: transaction stuck 64 s on chat — pid 262 idle in transaction (psql, wait Client) for 64 s (limit 60 s) — 1 session(s) idle/blocked
+```
+
+* The query head is kept in ONE place: the `pg_stuck_transaction` log line
+  (backend: `pg_activity.record_sample`; ops-watch: its own log). That is
+  where the incident report reads it from.
+* `alert_scrub` (backend) and `lib.sh redact` (backup image) are the last hop
+  before anything leaves or is stored: `AlertService` (log line,
+  `alert_events` row, rule webhook) and `alert_channels.deliver` (ntfy,
+  e-mail, webhook — so the ops watcher too) drop `query` / `sql` /
+  `statement` / `content` / `prompt` / `messages` / `body` keys at any
+  depth and replace SQL statements, credentials in URLs, JWTs, `key=value`
+  secrets, API-key-shaped and long random tokens; `notify.sh` does the same
+  plus the literal values of the backup service's secrets.
+* The channel URLs themselves are credentials (next section): httpx logs
+  every request URL at INFO, so a filter on the `httpx` logger shows the
+  configured ntfy / webhook URLs and every rule webhook as
+  `scheme://host/…`; `WebhookService` logs the same label.
+* Proven by `backend/tests/test_fix130_alert_redaction.py` (every builder fed
+  a session whose query holds SQL, a DSN with a password, a JWT, an API key
+  and Thai user text), `test_fix130_alert_url_not_logged.py` and
+  `infra/backup/tests/test_notify.sh`.
+* The unit lane cannot page anyone: `conftest._alert_channels_off_by_default`
+  blanks the global channels for every test (the lane's environment is the
+  live backend's — on 2026-09-23 it sent 17 fake "test-rule: …" alerts to the
+  owner's topic), and the test stack gets `TS_ALERT_*` twins, empty unless
+  set (`scripts/test_stack_gen.py` refuses a file that references a live
+  alert variable).
+
+### The ntfy topic is the secret (FIX130)
+
+On ntfy.sh, a topic with no reservation has no password: whoever knows the
+topic name can subscribe and read every alert (and publish fake ones). The
+alerts now carry no data, but they still describe the system (which service
+is down, when, how often). Measured on 2026-09-23 without printing either
+topic:
+
+| Topic | Length | Random part | Strength |
+|---|---|---|---|
+| owner (`ALERT_NTFY_URL` in `.env`) | 36 chars | 24 hex characters after a readable prefix | ~96 bits — cannot be guessed |
+| FIX129 test topic (the running test stack) | 33 chars | 16 hex characters | ~64 bits — cannot be guessed either, but weaker; it is a test topic, keep it away from real alerts |
+
+Guessing is not the risk; leaking is. The owner topic reached places it
+should not: 17 fake alerts from the unit lane (07:20–07:23Z and
+09:22–09:23Z), and one lane's tool output printed the full topic URL (pytest
+echoed httpx's `HTTP Request: POST https://ntfy.sh/<topic>` line). The
+extended log secret scan (below) found the topic in no container log, live
+or test. **Rotate the owner topic after this card** (new random topic in
+`.env` → recreate `backend`, `ops-watch`, `backup`; resubscribe the phone),
+whichever option below is chosen.
+
+Three ways to run the channel:
+
+| | Keep a random public topic (today) | Reserved topic on ntfy.sh (paid tier) | Self-hosted ntfy |
+|---|---|---|---|
+| Security | the topic name is the only secret; anyone who learns it (a log, a screenshot, a leaked `.env`) reads and can post until it is rotated | the topic is reserved to our account; read and publish need an access token (`ALERT_NTFY_TOKEN`, supported since FIX130 by the backend, ops-watch and the backup job); a leaked topic name alone is useless | same token/ACL model (`auth-default-access: deny-all`, users + tokens) and the data never touches a third party |
+| Effort | none — rotate the topic after a leak | an ntfy.sh account and a small monthly fee, reserve the topic, create a token with publish rights; set `ALERT_NTFY_TOKEN`; the phone app logs in to read | run and patch another service (container, TLS certificate, a public hostname so the phone can reach it, backups of its user DB), and keep it up |
+| If this PC dies | alerts keep working — ntfy.sh is elsewhere (but nothing is left to send them: ops-watch and the backup job die with the PC; see below) | same as today | **a self-hosted ntfy on this PC dies with it** — the one moment an alert matters most, the channel is gone; it only makes sense on a different machine / VPS, which is a new machine to run |
+
+Recommendation: a **reserved ntfy.sh topic with an access token**, plus
+e-mail (`RESEND_API_KEY` + `ALERT_EMAIL_TO`) as a second, independent
+channel. It closes "the name is the secret" for a small fee and no new
+server; self-hosting only makes sense once there is a second machine to run
+it on. Whatever is chosen, every alert source runs on this PC — if the PC
+dies, nothing is sent at all. The missing piece is an outside heartbeat (an
+external uptime monitor that polls the public health URL and e-mails when it
+stops answering) that alerts when the PC goes silent; that is a follow-up,
+not part of FIX130.
+
 ### Rules (backend, `alert_rules`, evaluated every `alert_sweep_interval_seconds` = 10 s)
 
 Seeded at startup when no rule with the metric exists (`alert_defaults.py`;
@@ -175,7 +258,17 @@ The web client polls `GET /api/v1/auth/session` every 5 s while the tab is
 visible, so a signed-out or copied token is off every open tab within
 seconds. Both revocation checks fail OPEN on a Redis outage (availability
 first, logged as `access_token_revocation_check_failed` /
-`auth_revocation_check_failed`). A deleted chat's files answer 404 on
+`auth_revocation_check_failed`).
+
+FIX130 — the Portal's middleware used to count "a portal cookie is present"
+as signed in, so a device holding a revoked token looped login → chat →
+login. It now asks the backend (`GET /portal/me`, then
+`POST /portal/auth/refresh`, 1.5 s each, `portal/lib/session-check.ts`):
+signed in → as before (an expired access token with a valid refresh token
+is signed in, the rotated cookies ride the response); rejected → the login
+page renders with the stale cookies cleared; backend unreachable → the login
+page renders (never a redirect, so never a loop) and app pages render (their
+API calls are checked by the backend). A deleted chat's files answer 404 on
 `/files/{id}/download`, `/text` and `/versions` while the chat is deleted
 (B1, `file_repo.go`).
 
@@ -224,9 +317,11 @@ python scripts/probes/FIX129/log_secret_scan.py --env .env --project sran-test
 
 * Secrets = the values of every key whose NAME matches
   `(PASSWORD|SECRET|KEY|TOKEN|DSN)`, plus the password part of ANY value that
-  is a URL with `user:pass@` or a libpq DSN with `password=…`. Values shorter
+  is a URL with `user:pass@` or a libpq DSN with `password=…`, plus (FIX130)
+  the path of `ALERT_NTFY_URL` / `*WEBHOOK_URL` — the topic. Values shorter
   than 8 characters and the well-known dev defaults (`postgres`, `changeme`,
-  `…change-in-prod…`) are ignored.
+  `…change-in-prod…`) are ignored. The 2026-09-23 FIX130 run: green on all
+  22 live and 13 test-stack containers, topic included.
 * It runs `docker logs` for every container whose
   `com.docker.compose.project` label is the project (running or stopped) and
   reports, per container, the KEY NAMES found and the counts — never a value,

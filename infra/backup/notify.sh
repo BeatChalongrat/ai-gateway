@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # FIX129 A5 — send one alert. Both channels are optional; each is used when
 # its variables are set. The MESSAGE must never contain a secret — callers
-# pass sizes, durations and check names only.
+# pass sizes, durations and check names only; and since FIX130 E4 the title
+# and message go through lib.sh `redact` here, the last hop, so a caller that
+# slips (a DSN, a token, a SQL line in an error) cannot leak it.
 #
 #   notify.sh <level> <title> <message>
 #     level   high | ok | info       (ntfy priority + tag)
 #     title   ASCII only (an HTTP header)
 #
 #   ALERT_NTFY_URL                 full topic URL, e.g. https://ntfy.sh/<topic>
+#   ALERT_NTFY_TOKEN               optional ntfy access token (tk_...) for a
+#                                  reserved / ACL-protected or self-hosted
+#                                  topic: "Authorization: Bearer <token>"
 #   RESEND_API_KEY + ALERT_EMAIL_TO  e-mail via https://api.resend.com/emails
 #   ALERT_EMAIL_FROM               default no-reply@sran.ai
+#   RESEND_API_URL                 default https://api.resend.com/emails (tests
+#                                  point it at a local dummy endpoint)
 #
 # Exit 0 when at least one configured channel accepted the message or when
 # no channel is configured (logged); 1 when every configured channel failed.
@@ -17,8 +24,20 @@ set -uo pipefail
 . /lib.sh
 
 level="${1:?usage: notify.sh <high|ok|info> <title> <message>}"
-title="${2:?title}"
-message="${3:?message}"
+title="$(printf '%s' "${2:?title}" | redact)"
+message="$(printf '%s' "${3:?message}" | redact)"
+
+# Secret headers ride a curl config on stdin, never argv (argv shows in ps).
+# curl_bearer <token> <curl args...>: with a token, the Authorization header
+# comes from a curl config read on stdin; without one, no header at all.
+curl_bearer() {
+  local token="$1"; shift
+  if [ -n "$token" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$token" | curl --config - "$@"
+  else
+    curl "$@" </dev/null
+  fi
+}
 
 case "$level" in
   high|error|fail) prio=high;    tags=rotating_light ;;
@@ -30,7 +49,7 @@ configured=0 sent=0
 
 if [ -n "${ALERT_NTFY_URL:-}" ]; then
   configured=1
-  if curl -fsS --max-time 20 -o /dev/null \
+  if curl_bearer "${ALERT_NTFY_TOKEN:-}" -fsS --max-time 20 -o /dev/null \
        -H "Title: $title" -H "Priority: $prio" -H "Tags: $tags" \
        --data-raw "$message" "$ALERT_NTFY_URL"; then
     sent=1; log "notify: ntfy accepted ($prio)"
@@ -44,8 +63,8 @@ if [ -n "${RESEND_API_KEY:-}" ] && [ -n "${ALERT_EMAIL_TO:-}" ]; then
   payload=$(jq -n --arg from "${ALERT_EMAIL_FROM:-no-reply@sran.ai}" --arg to "$ALERT_EMAIL_TO" \
                   --arg subject "[$level] $title" --arg text "$message" \
                   '{from: $from, to: ($to | split(",") | map(gsub("^\\s+|\\s+$"; ""))), subject: $subject, text: $text}')
-  if curl -fsS --max-time 20 -o /dev/null -X POST https://api.resend.com/emails \
-       -H "Authorization: Bearer $RESEND_API_KEY" -H "Content-Type: application/json" \
+  if curl_bearer "$RESEND_API_KEY" -fsS --max-time 20 -o /dev/null -X POST "${RESEND_API_URL:-https://api.resend.com/emails}" \
+       -H "Content-Type: application/json" \
        --data-raw "$payload"; then
     sent=1; log "notify: resend accepted (to $ALERT_EMAIL_TO)"
   else
