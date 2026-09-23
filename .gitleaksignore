@@ -1,0 +1,3 @@
+# gitleaks false positives, by fingerprint (commit:file:rule:line).
+# FIX129: the request-id literal "req-fix129-slow" in a unit test is not a key.
+86b1905b7d475e7215c03d323ce0430af6358040:backend/tests/test_fix129_credit_deduction_instrumentation.py:generic-api-key:90
