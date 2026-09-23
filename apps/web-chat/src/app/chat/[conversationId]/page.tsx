@@ -270,6 +270,12 @@ export default function ConversationPage() {
   // taking the memory chip with it.
   const composerBlock = (
     <>
+      {/* FIX130 C3.5 — below md the header (and its meter) is hidden, so
+          the phone gets the meter as a tappable chip here. Passive: the
+          header's instance, mounted but hidden, fetches the numbers. */}
+      <div className="md:hidden">
+        <ContextMeter conversationId={convId} variant="compact" passive />
+      </div>
       <TemporaryChatBanner conversationId={convId} />
       <MessageQueue conversationId={convId} />
       {composer}

@@ -1736,6 +1736,11 @@ export const en = {
   "input.sendBlocked.failedMany": "Can't send yet: {n} files didn't upload — retry or remove them.",
   "input.sendBlocked.removeFailed": "Remove failed files",
   "input.sendBlocked.vision": "Can't send yet: {model} can't read images — switch to a model that can, or remove the image.",
+  // ── FIX130 C3.5 — the long-chat meter says how many messages are sent ──
+  "context.label.summarizedCount": "Long chat · {sent} of {total} messages sent to the assistant · the rest summarized automatically",
+  "context.label.noSummaryCount": "Long chat · {sent} of {total} messages sent to the assistant · no summary of the rest",
+  "context.chip.sent": "{sent} of {total} messages sent to the assistant",
+  "context.chip.approaching": "Context {pct}% used",
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -3410,6 +3415,11 @@ const th: Record<DictKey, string> = {
   "input.sendBlocked.failedMany": "ยังส่งไม่ได้: มี {n} ไฟล์ที่อัปโหลดไม่สำเร็จ — กดลองใหม่หรือเอาไฟล์ออกก่อนส่ง",
   "input.sendBlocked.removeFailed": "เอาไฟล์ที่ไม่สำเร็จออก",
   "input.sendBlocked.vision": "ยังส่งไม่ได้: {model} อ่านรูปภาพไม่ได้ — เปลี่ยนเป็นรุ่นที่อ่านรูปได้ หรือเอารูปออกก่อนส่ง",
+  // ── FIX130 C3.5 ──
+  "context.label.summarizedCount": "แชทยาว · ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ · ส่วนที่เหลือสรุปไว้ให้อัตโนมัติ",
+  "context.label.noSummaryCount": "แชทยาว · ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ · ส่วนที่เหลือไม่มีบทสรุป",
+  "context.chip.sent": "ส่งให้ผู้ช่วย {sent} จาก {total} ข้อความ",
+  "context.chip.approaching": "ใช้บริบทไป {pct}%",
 };
 
 export const dictionaries: Record<Locale, Record<DictKey, string>> = {

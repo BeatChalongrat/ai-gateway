@@ -98,16 +98,19 @@ describe("ContextMeter", () => {
   });
 
   // FIX102 — once trimming is routine the old meter read "Context 100% used"
-  // on every turn. FIX107 — and then it read like a fault ("sees 5 of 24").
-  it("trimming routinely: a settled line, no percent, no counts on the row; the counts are in the details", async () => {
+  // on every turn. FIX107 — and then it read like a fault ("sees 5 of 24"),
+  // so the counts moved into the details. FIX130 C3.5 — where nobody saw them
+  // (NIGHT2 F10): the row now says how many are sent, as a fact beside
+  // "summarized automatically". Still no percent.
+  it("trimming routinely: a settled line with the counts, no percent; the details say the same", async () => {
     mockApi.getContextInfo.mockResolvedValue(
       info(0.72, { compacted: true, state_present: true, state_injected: true, messages_total: 24, messages_would_send: 7, sent_tokens: 2854, messages_budget: 3944, est_messages_remaining: 0 }),
     );
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
     const status = screen.getByRole("status");
-    expect(status.textContent).toBe(dictionaries.en["context.label.summarized"]);
-    expect(status.textContent).not.toMatch(/\d/);
+    expect(status.textContent).toBe(fill(dictionaries.en["context.label.summarizedCount"], { sent: "5", total: "24" }));
+    expect(status.textContent).not.toMatch(/%/);
     expect(status.getAttribute("title")).toBe("2,854 / 3,944 tokens");
     openDetails();
     expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling"], { sent: "5", total: "24" }));
@@ -118,7 +121,7 @@ describe("ContextMeter", () => {
     mockApi.getContextInfo.mockResolvedValue(info(0.3, { compacted: true, state_present: false, messages_total: 30, messages_would_send: 6 }));
     render(<ContextMeter conversationId="c1" />);
     await act(tick);
-    expect(screen.getByRole("status").textContent).toBe(dictionaries.en["context.label.noSummary"]);
+    expect(screen.getByRole("status").textContent).toBe(fill(dictionaries.en["context.label.noSummaryCount"], { sent: "6", total: "30" }));
     openDetails();
     expect(screen.getByTestId("context-detail").textContent).toBe(fill(dictionaries.en["context.rolling.noSummary"], { sent: "6", total: "30" }));
     expect(screen.queryByText(dictionaries.en["context.detail.auto"])).toBeNull();
