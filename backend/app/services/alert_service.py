@@ -23,6 +23,7 @@ updates the status to ``delivered`` / ``failed`` after the HTTP call.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import uuid
@@ -117,6 +118,7 @@ class AlertService:
         session: "Session",
         webhook_url: str | None = None,
         rule_id: str | None = None,
+        rule_name: str = "",
     ) -> AlertEventORM:
         """Log, persist, and (if URL set) deliver to webhook.
 
@@ -142,26 +144,46 @@ class AlertService:
 
         # FIX129 A4 — every fired rule also goes to the configured channels
         # (ntfy / email / webhook), not only to the rule's own webhook_url.
+        # FIX131 D — through the pager: grouped with the ops watcher's view of
+        # the same incident, severity by impact, human text; paged once.
         from app.services import alert_channels
 
-        if alert_channels.configured_channels():
-            outcomes = await alert_channels.deliver_async(
-                alert_channels.Notification(
-                    title=alert.message[:120],
-                    message=self._notification_text(alert),
-                    severity=alert.severity.value,
-                    source="alert-rule",
-                    tags=(alert.alert_type.value,),
-                    details={k: v for k, v in alert.details.items() if k != "sessions"},
-                )
-            )
-            results.extend(outcomes.values())
+        decision = await self.page(alert, rule_id=rule_id, rule_name=rule_name)
+        if decision is not None and decision.delivered:
+            results.extend(decision.delivered.values())
 
         if results:
             event.delivery_status = "delivered" if any(results) else "failed"
             session.flush()
+        elif decision is not None and not decision.paged and alert_channels.configured_channels():
+            # Not sent on purpose: grouped / hold / maintenance / log_only.
+            event.delivery_status = decision.action[:20]
+            session.flush()
 
         return event
+
+    async def page(self, alert: Alert, *, rule_id: str | None = None, rule_name: str = ""):
+        """FIX131 D — hand ``alert`` to the pager (``alert_pager``). Returns
+        its Decision, or None if the pager failed (logged, never raised)."""
+        from app.services import alert_pager
+
+        try:
+            sig = alert_pager.signal_for_alert(self._scrubbed(alert), rule_id=rule_id, rule_name=rule_name)
+            return await asyncio.to_thread(alert_pager.get_pager().fire, sig)
+        except Exception as exc:  # noqa: BLE001 — alerting never breaks the sweep
+            logger.warning("alert_page_failed", rule_id=rule_id, error=f"{type(exc).__name__}: {str(exc)[:160]}")
+            return None
+
+    async def clear(self, *, metric: str, rule_id: str) -> None:
+        """FIX131 D — the rule no longer fires: tell the pager, which closes
+        the incident (one "recovered") when no other sender still sees it."""
+        from app.services import alert_catalog, alert_pager
+
+        try:
+            group = alert_catalog.group_for_rule(metric, rule_id)
+            await asyncio.to_thread(alert_pager.get_pager().clear, group, f"rule:{rule_id}")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("alert_clear_failed", rule_id=rule_id, error=f"{type(exc).__name__}: {str(exc)[:160]}")
 
     @staticmethod
     def _scrubbed(alert: Alert) -> Alert:
@@ -173,6 +195,9 @@ class AlertService:
 
     @staticmethod
     def _notification_text(alert: Alert) -> str:
+        """The rule's numbers as text (window, value, threshold, sessions).
+        FIX131: no longer sent — the page carries alert_catalog's words and
+        the numbers stay in the log line and ``alert_events``."""
         lines = [alert.message]
         for k in ("window_minutes", "metric_value", "threshold", "attempts", "successes",
                   "errors", "total", "stuck_age_s"):

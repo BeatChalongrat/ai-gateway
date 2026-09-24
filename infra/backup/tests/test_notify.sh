@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # FIX130 E4 — the backup service's alert (notify.sh) carries no secret, no
 # SQL and no user text, and supports an ntfy access token.
+# FIX131 D4 — a test alert (ALERT_ENVIRONMENT=test, or the `notify` test
+# fire) is labelled [TEST] and goes only to ALERT_TEST_NTFY_URL, never to
+# the owner's topic.
 #
 # Runs INSIDE the backup image, with a stub `curl` first on PATH that records
 # its argv and stdin instead of sending anything (no network, no real topic):
@@ -94,6 +97,59 @@ scan "resend" "$T/mail.log"
 if sed -n '/^--- ARGV$/,/^--- STDIN$/p' "$T/mail.log" | grep -qF 're_fix130dummykey'; then
   fail "resend: API key visible in curl argv"
 else pass "resend: API key not in argv"; fi
+
+# FIX131 D4 — a test alert is labelled and never reaches the owner's topic.
+OWNER=http://sink.invalid/owner-topic-fix131
+TESTTOPIC=http://sink.invalid/throwaway-test-topic
+OWNER_TOKEN=tk_fix131ownertoken0123456789
+argv_of() { sed -n '/^--- ARGV$/,/^--- STDIN$/p' "$1"; }
+
+# 4. ALERT_ENVIRONMENT=test: [TEST] in title and body, only the test topic,
+#    not the owner's topic, not its token, no e-mail.
+run_notify "$T/envtest.log" ALERT_ENVIRONMENT=test ALERT_NTFY_URL=$OWNER ALERT_NTFY_TOKEN=$OWNER_TOKEN \
+  ALERT_TEST_NTFY_URL=$TESTTOPIC RESEND_API_KEY=re_fix131dummykey0123456789 ALERT_EMAIL_TO=ops@example.com \
+  RESEND_API_URL=http://sink.invalid/emails -- high "Backup failed" "the dump did not complete"
+if argv_of "$T/envtest.log" | grep -qxF "$TESTTOPIC"; then pass "env=test: sent to ALERT_TEST_NTFY_URL"
+else fail "env=test: not sent to the test topic"; fi
+if grep -qF "$OWNER" "$T/envtest.log"; then fail "env=test: the owner's topic was called"
+else pass "env=test: the owner's topic is never called"; fi
+if grep -qF "$OWNER_TOKEN" "$T/envtest.log"; then fail "env=test: the owner's token was sent"
+else pass "env=test: the owner's token is never sent"; fi
+if grep -qF "sink.invalid/emails" "$T/envtest.log"; then fail "env=test: an e-mail was sent"
+else pass "env=test: no e-mail"; fi
+if argv_of "$T/envtest.log" | grep -qxF "Title: [TEST] Backup failed"; then pass "env=test: title starts with [TEST]"
+else fail "env=test: title not labelled [TEST]"; fi
+if argv_of "$T/envtest.log" | grep -qxF "[TEST] the dump did not complete"; then pass "env=test: body starts with [TEST]"
+else fail "env=test: body not labelled [TEST]"; fi
+
+# 5. A test fire (`entrypoint.sh notify ...`) in the LIVE environment (no
+#    ALERT_ENVIRONMENT, the owner's topic configured): still [TEST], still only
+#    the test topic.
+: > "$T/fire.log"
+env -i PATH="$PATH" HOME=/tmp CURL_LOG="$T/fire.log" ALERT_NTFY_URL=$OWNER ALERT_TEST_NTFY_URL=$TESTTOPIC \
+  /entrypoint.sh notify info "hello" "from the backup service" </dev/null >"$T/fire.log.out" 2>&1
+if argv_of "$T/fire.log" | grep -qxF "$TESTTOPIC" && ! grep -qF "$OWNER" "$T/fire.log"; then
+  pass "test fire: goes to the test topic, never the owner's"
+else fail "test fire: routed to the owner's topic (or nowhere)"; fi
+if argv_of "$T/fire.log" | grep -qxF "Title: [TEST] hello"; then pass "test fire: labelled [TEST]"
+else fail "test fire: not labelled [TEST]"; fi
+
+# 6. A test alert with no test topic: logged only — nothing is sent anywhere.
+run_notify "$T/notest.log" ALERT_ENVIRONMENT=test ALERT_NTFY_URL=$OWNER -- high "t" "m"
+rc=$?
+if [ ! -s "$T/notest.log" ] && [ "$rc" = 0 ] && grep -q "test alert, no ALERT_TEST_NTFY_URL - logged only" "$T/notest.log.out"; then
+  pass "env=test without a test topic: nothing sent, logged, exit 0"
+else fail "env=test without a test topic: something was sent (or rc=$rc)"; fi
+
+# 7. Another environment name labels but routes normally; production = no label.
+run_notify "$T/staging.log" ALERT_ENVIRONMENT=staging ALERT_NTFY_URL=$OWNER -- high "t" "m"
+if argv_of "$T/staging.log" | grep -qxF "Title: [STAGING] t" && argv_of "$T/staging.log" | grep -qxF "$OWNER"; then
+  pass "env=staging: labelled [STAGING], its own configured topic"
+else fail "env=staging: label or routing wrong"; fi
+run_notify "$T/prod.log" ALERT_ENVIRONMENT=production ALERT_NTFY_URL=$OWNER -- high "t" "m"
+if argv_of "$T/prod.log" | grep -qxF "Title: t" && argv_of "$T/prod.log" | grep -qxF "$OWNER"; then
+  pass "env=production: no label, the configured topic"
+else fail "env=production: unexpected label or routing"; fi
 
 echo "---"
 if [ "$fails" -eq 0 ]; then echo "test_notify: ALL PASS"; exit 0; fi

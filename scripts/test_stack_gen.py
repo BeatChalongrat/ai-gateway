@@ -79,7 +79,12 @@ TEST_ENV = {
                       "GATEWAY_API_URL": "http://gateway:8080/v1",
                       "CLOUD_TASK_AUTHORIZE_URL": "http://backend:8080",
                       "CORS_ALLOW_ORIGINS": "http://localhost:13002"},
-    "backend": {"APP_ENV": "development"},
+    # FIX131 D4 — every alert from the test stack says [TEST] in title and
+    # body and goes only to ALERT_TEST_NTFY_URL (= TS_ALERT_TEST_NTFY_URL, a
+    # throwaway topic; empty = logged only) — never an owner channel, even
+    # if a TS_ALERT_NTFY_URL were set to the owner's topic by mistake.
+    "backend": {"APP_ENV": "development", "ALERT_ENVIRONMENT": "test"},
+    "backup": {"ALERT_ENVIRONMENT": "test"},
 }
 
 # Env keys dropped outright (sandbox plumbing that names host paths).

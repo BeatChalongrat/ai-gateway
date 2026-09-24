@@ -392,7 +392,8 @@ services:
       APP_ENV: ${APP_ENV:-development}
       OPS_WATCH_PROJECT: ai-gateway
       OPS_WATCH_INTERVAL: ${OPS_WATCH_INTERVAL:-30}
-      OPS_WATCH_COOLDOWN: ${OPS_WATCH_COOLDOWN:-600}
+      # (FIX131: OPS_WATCH_COOLDOWN retired — the pager re-pages only on
+      # escalation or after ALERT_REMINDER_SECONDS.)
       OPS_WATCH_BACKEND_URL: http://backend:8080
       OPS_WATCH_DISK_PATHS: /host/docker
       OPS_WATCH_DISK_PCT: ${OPS_WATCH_DISK_PCT:-90}
@@ -407,10 +408,25 @@ services:
       OPS_WATCH_PG_STUCK_S: ${OPS_WATCH_PG_STUCK_S:-60}
       # Open findings + last-announced times survive a restart of the watcher.
       OPS_WATCH_STATE_FILE: /state/ops_watch_state.json
+      # FIX131 B3 — "no fresh backup": the backup folder, read-only (below).
+      # Same BACKUP_MAX_AGE_H as the backup service (26 h).
+      OPS_WATCH_BACKUP_DIR: /backups
+      OPS_WATCH_BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
+      # FIX131 D5 — replies still "streaming" after N minutes.
+      OPS_WATCH_TURN_STUCK_MIN: ${OPS_WATCH_TURN_STUCK_MIN:-15}
+      # FIX131 D — the pager's shared incident store: the backend's Redis
+      # (db 0), so the backend rules and this watcher page once per incident.
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       ALERT_NTFY_URL: ${ALERT_NTFY_URL:-}
       ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # FIX131 D4 — empty = the real system; "test" labels every alert [TEST]
+      # and sends it only to ALERT_TEST_NTFY_URL (a throwaway topic).
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@sran.ai}
     volumes:
@@ -419,6 +435,10 @@ services:
       # on a Linux engine) — what "disk nearly full" has to measure.
       - /var/lib/docker:/host/docker:ro
       - ops_watch_state:/state
+      # FIX131 B3 — the backup service's folder (same source as its /backups
+      # in docker-compose.webchat.yml), READ-ONLY: last_success.json /
+      # last_failure.json. The backup container cannot report its own death.
+      - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups:ro
     depends_on:
       backend:
         condition: service_started
@@ -734,6 +754,9 @@ services:
       ALERT_NTFY_TOKEN: ${ALERT_NTFY_TOKEN:-}
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # FIX131 D4 — see ops-watch: [TEST] label + the throwaway test topic.
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
       # FIX129 B2 — logout also revokes the access token on chat-edge
       # (POST /internal/auth/revoke, gated by INTERNAL_SERVICE_SECRET on
       # both sides). Same docker network, so the service name resolves.

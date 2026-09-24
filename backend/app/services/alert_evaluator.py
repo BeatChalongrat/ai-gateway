@@ -117,6 +117,7 @@ class AlertEvaluator:
                     session=session,
                     webhook_url=rule.webhook_url,
                     rule_id=rule.id,
+                    rule_name=rule.name,
                 )
             except Exception as exc:
                 # Webhook delivery failed catastrophically — already
@@ -164,22 +165,35 @@ class AlertEvaluator:
         for rule in rows:
             if rule.metric not in _METRIC_TO_TYPE:
                 continue
-            if self._in_cooldown(rule, now):
-                continue
 
+            # FIX131 D — computed on every sweep, also inside the rule's
+            # cooldown, so the pager (alert_pager) always knows whether the
+            # incident is still there: below the threshold = cleared (one
+            # "recovered" once no other sender sees it either).
             value = await asyncio.to_thread(
                 self._compute_metric, session, rule, now
             )
             if value < rule.threshold:
+                await self.alert_service.clear(metric=rule.metric, rule_id=rule.id)
                 continue
 
             alert = self._build_alert(rule, value)
+            if self._in_cooldown(rule, now):
+                # Still firing inside the cooldown: no new alert_events row,
+                # but the pager hears it — its sighting stays fresh, and an
+                # escalation (1 → 3 failed attempts) pages now, recorded.
+                decision = await self.alert_service.page(alert, rule_id=rule.id, rule_name=rule.name)
+                if decision is not None and decision.paged:
+                    await asyncio.to_thread(self._record_page, session, alert, rule, decision)
+                continue
+
             try:
                 await self.alert_service.emit_and_deliver(
                     alert,
                     session=session,
                     webhook_url=rule.webhook_url,
                     rule_id=rule.id,
+                    rule_name=rule.name,
                 )
             except Exception as exc:
                 logger.warning(
@@ -208,6 +222,14 @@ class AlertEvaluator:
     ) -> None:
         rule.last_fired_at = now
         session.flush()
+
+    def _record_page(self, session: "Session", alert: Alert, rule: AlertRuleORM, decision) -> None:
+        """FIX131 — a page sent while the rule was in its cooldown still gets
+        its alert_events row."""
+        event = self.alert_service.emit(alert, session=session, rule_id=rule.id)
+        if event is not None and decision.delivered:
+            event.delivery_status = "delivered" if any(decision.delivered.values()) else "failed"
+            session.flush()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -310,6 +332,22 @@ class AlertEvaluator:
             severity = AlertSeverity.CRITICAL
         else:
             severity = AlertSeverity.WARNING
+        # FIX131 D — the three baseline rules are graded by impact on users
+        # (alert_catalog): "no successful turn" is critical only with enough
+        # attempts to mean an outage (one failed turn in a quiet window is
+        # info), error rate and a stuck transaction are degraded (warning).
+        if rule.metric in ("no_successful_turn", "error_rate", "stuck_transaction"):
+            from app.core.config import settings
+            from app.services import alert_catalog
+
+            impact = alert_catalog.rule_signal_parts(
+                rule.metric, rule.id, rule.name, value, rule.threshold, rule.window_minutes,
+                min_attempts=int(getattr(settings, "alert_page_min_attempts", 3)),
+            )[1]
+            severity = {
+                alert_catalog.CRITICAL: AlertSeverity.CRITICAL,
+                alert_catalog.HIGH: AlertSeverity.WARNING,
+            }.get(impact, AlertSeverity.INFO)
 
         details = {
             "rule_id": rule.id,

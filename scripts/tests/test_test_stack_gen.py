@@ -99,6 +99,24 @@ class GeneratedTestStackTest(unittest.TestCase):
         for marker in ("${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/"):
             self.assertNotIn(marker, text)
 
+    def test_every_test_stack_alert_is_labelled_test(self):
+        """FIX131 D4: a test-stack page looked exactly like a real one. The
+        alert senders run with ALERT_ENVIRONMENT=test ([TEST] in title and
+        body, routed to ALERT_TEST_NTFY_URL only), and the test topic is the
+        test stack's own TS_ twin."""
+        merged = _merged()
+        for svc in ("backend", "backup"):
+            merged["services"][svc]["environment"].update({
+                "ALERT_ENVIRONMENT": "${ALERT_ENVIRONMENT:-}",
+                "ALERT_TEST_NTFY_URL": "${ALERT_TEST_NTFY_URL:-}",
+            })
+        rc, doc, _ = self._generate(merged)
+        self.assertEqual(rc, 0)
+        for svc in ("backend", "backup"):
+            env = doc["services"][svc]["environment"]
+            self.assertEqual(env["ALERT_ENVIRONMENT"], "test", svc)
+            self.assertEqual(env["ALERT_TEST_NTFY_URL"], "${TS_ALERT_TEST_NTFY_URL:-}", svc)
+
     def test_the_guard_refuses_an_owner_destination_that_slips_through(self):
         # A key the redirect does not know (not ALERT_*/BACKUP_OFFSITE_*) that
         # still carries a public ntfy topic must stop generation.
