@@ -46,6 +46,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 )
 
 // KBModelsDefaultURL is where kb-models answers on the compose network.
@@ -89,10 +91,7 @@ const (
 // SparseVec is bge-m3's lexical weights for one text: token ids (0-based,
 // ascending) and their weights. The lexical score of a passage for a query is
 // the inner product over shared ids.
-type SparseVec struct {
-	Indices []int
-	Values  []float32
-}
+type SparseVec = model.SparseVector
 
 // KBEmbedding is one text's embeddings.
 type KBEmbedding struct {

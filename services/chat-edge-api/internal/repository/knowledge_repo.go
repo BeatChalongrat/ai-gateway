@@ -1,8 +1,8 @@
 // KnowledgeRepo persists the RAG storage layer:
 //
-//	chat.knowledge_bases    one library per tenant
+//	chat.knowledge_bases    one library per owner (FIX132 B: user_id)
 //	chat.knowledge_documents one row per uploaded file
-//	chat.knowledge_chunks    embedded slices with vector(1536)
+//	chat.knowledge_chunks    passages: bge-m3 vector(1024), sparsevec, tsvector
 //
 // pgvector wire format note: the “vector“ column round-trips as a
 // textual “[f1,f2,...]“ form on both insert and read. We format /
@@ -46,8 +46,8 @@ func (r *KnowledgeRepo) WithTx(tx pgx.Tx) *KnowledgeRepo {
 func (r *KnowledgeRepo) CreateKB(ctx context.Context, kb *model.KnowledgeBase) (*model.KnowledgeBase, error) {
 	const q = `
 		INSERT INTO chat.knowledge_bases
-			(tenant_id, name, description, embedding_model, chunk_size, chunk_overlap)
-		VALUES ($1, $2, $3, $4, $5, $6)
+			(tenant_id, name, description, embedding_model, chunk_size, chunk_overlap, user_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, is_active, document_count, total_chunks, created_at, updated_at
 	`
 	if kb.EmbeddingModel == "" {
@@ -61,7 +61,7 @@ func (r *KnowledgeRepo) CreateKB(ctx context.Context, kb *model.KnowledgeBase) (
 	}
 	err := r.db.QueryRow(ctx, q,
 		kb.TenantID, kb.Name, kb.Description,
-		kb.EmbeddingModel, kb.ChunkSize, kb.ChunkOverlap,
+		kb.EmbeddingModel, kb.ChunkSize, kb.ChunkOverlap, kb.UserID,
 	).Scan(&kb.ID, &kb.IsActive, &kb.DocumentCount, &kb.TotalChunks, &kb.CreatedAt, &kb.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create kb: %w", err)
@@ -70,10 +70,7 @@ func (r *KnowledgeRepo) CreateKB(ctx context.Context, kb *model.KnowledgeBase) (
 }
 
 func (r *KnowledgeRepo) ListKBs(ctx context.Context, tenantID uuid.UUID) ([]model.KnowledgeBase, error) {
-	const q = `
-		SELECT id, tenant_id, name, description, embedding_model, chunk_size,
-		       chunk_overlap, is_active, document_count, total_chunks,
-		       created_at, updated_at
+	q := `SELECT ` + kbColumns + `
 		FROM chat.knowledge_bases
 		WHERE tenant_id = $1
 		ORDER BY created_at DESC
@@ -86,11 +83,7 @@ func (r *KnowledgeRepo) ListKBs(ctx context.Context, tenantID uuid.UUID) ([]mode
 	out := make([]model.KnowledgeBase, 0)
 	for rows.Next() {
 		var kb model.KnowledgeBase
-		if err := rows.Scan(
-			&kb.ID, &kb.TenantID, &kb.Name, &kb.Description, &kb.EmbeddingModel,
-			&kb.ChunkSize, &kb.ChunkOverlap, &kb.IsActive,
-			&kb.DocumentCount, &kb.TotalChunks, &kb.CreatedAt, &kb.UpdatedAt,
-		); err != nil {
+		if err := scanKB(rows, &kb); err != nil {
 			return nil, fmt.Errorf("list kbs scan: %w", err)
 		}
 		out = append(out, kb)
@@ -99,19 +92,12 @@ func (r *KnowledgeRepo) ListKBs(ctx context.Context, tenantID uuid.UUID) ([]mode
 }
 
 func (r *KnowledgeRepo) GetKB(ctx context.Context, tenantID, id uuid.UUID) (*model.KnowledgeBase, error) {
-	const q = `
-		SELECT id, tenant_id, name, description, embedding_model, chunk_size,
-		       chunk_overlap, is_active, document_count, total_chunks,
-		       created_at, updated_at
+	q := `SELECT ` + kbColumns + `
 		FROM chat.knowledge_bases
 		WHERE id = $1 AND tenant_id = $2
 	`
 	kb := &model.KnowledgeBase{}
-	err := r.db.QueryRow(ctx, q, id, tenantID).Scan(
-		&kb.ID, &kb.TenantID, &kb.Name, &kb.Description, &kb.EmbeddingModel,
-		&kb.ChunkSize, &kb.ChunkOverlap, &kb.IsActive,
-		&kb.DocumentCount, &kb.TotalChunks, &kb.CreatedAt, &kb.UpdatedAt,
-	)
+	err := scanKB(r.db.QueryRow(ctx, q, id, tenantID), kb)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -205,17 +191,21 @@ func (r *KnowledgeRepo) RecomputeKBStats(ctx context.Context, kbID uuid.UUID) er
 func (r *KnowledgeRepo) CreateDocument(ctx context.Context, d *model.KnowledgeDocument) (*model.KnowledgeDocument, error) {
 	const q = `
 		INSERT INTO chat.knowledge_documents
-			(knowledge_base_id, tenant_id, filename, original_filename,
-			 content_type, file_size_bytes, storage_path, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(id, knowledge_base_id, tenant_id, filename, original_filename,
+			 content_type, file_size_bytes, storage_path, status, uploaded_by)
+		VALUES (COALESCE($1::uuid, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, chunk_count, char_count, created_at, updated_at
 	`
 	if d.Status == "" {
 		d.Status = "pending"
 	}
-	err := r.db.QueryRow(ctx, q,
+	var id any
+	if d.ID != uuid.Nil {
+		id = d.ID
+	}
+	err := r.db.QueryRow(ctx, q, id,
 		d.KnowledgeBaseID, d.TenantID, d.Filename, d.OriginalFilename,
-		d.ContentType, d.FileSizeBytes, d.StoragePath, d.Status,
+		d.ContentType, d.FileSizeBytes, d.StoragePath, d.Status, d.UploadedBy,
 	).Scan(&d.ID, &d.ChunkCount, &d.CharCount, &d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("create document: %w", err)
@@ -224,10 +214,7 @@ func (r *KnowledgeRepo) CreateDocument(ctx context.Context, d *model.KnowledgeDo
 }
 
 func (r *KnowledgeRepo) ListDocuments(ctx context.Context, tenantID, kbID uuid.UUID) ([]model.KnowledgeDocument, error) {
-	const q = `
-		SELECT id, knowledge_base_id, tenant_id, filename, original_filename,
-		       content_type, file_size_bytes, storage_path, status,
-		       chunk_count, char_count, error_message, created_at, updated_at
+	q := `SELECT ` + kbDocColumns + `
 		FROM chat.knowledge_documents
 		WHERE knowledge_base_id = $1 AND tenant_id = $2
 		ORDER BY created_at DESC
@@ -240,11 +227,7 @@ func (r *KnowledgeRepo) ListDocuments(ctx context.Context, tenantID, kbID uuid.U
 	out := make([]model.KnowledgeDocument, 0)
 	for rows.Next() {
 		var d model.KnowledgeDocument
-		if err := rows.Scan(
-			&d.ID, &d.KnowledgeBaseID, &d.TenantID, &d.Filename, &d.OriginalFilename,
-			&d.ContentType, &d.FileSizeBytes, &d.StoragePath, &d.Status,
-			&d.ChunkCount, &d.CharCount, &d.ErrorMessage, &d.CreatedAt, &d.UpdatedAt,
-		); err != nil {
+		if err := scanDoc(rows, &d); err != nil {
 			return nil, fmt.Errorf("list documents scan: %w", err)
 		}
 		out = append(out, d)
@@ -253,19 +236,12 @@ func (r *KnowledgeRepo) ListDocuments(ctx context.Context, tenantID, kbID uuid.U
 }
 
 func (r *KnowledgeRepo) GetDocument(ctx context.Context, tenantID, id uuid.UUID) (*model.KnowledgeDocument, error) {
-	const q = `
-		SELECT id, knowledge_base_id, tenant_id, filename, original_filename,
-		       content_type, file_size_bytes, storage_path, status,
-		       chunk_count, char_count, error_message, created_at, updated_at
+	q := `SELECT ` + kbDocColumns + `
 		FROM chat.knowledge_documents
 		WHERE id = $1 AND tenant_id = $2
 	`
 	d := &model.KnowledgeDocument{}
-	err := r.db.QueryRow(ctx, q, id, tenantID).Scan(
-		&d.ID, &d.KnowledgeBaseID, &d.TenantID, &d.Filename, &d.OriginalFilename,
-		&d.ContentType, &d.FileSizeBytes, &d.StoragePath, &d.Status,
-		&d.ChunkCount, &d.CharCount, &d.ErrorMessage, &d.CreatedAt, &d.UpdatedAt,
-	)
+	err := scanDoc(r.db.QueryRow(ctx, q, id, tenantID), d)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -331,32 +307,37 @@ func (r *KnowledgeRepo) InsertChunkBatch(ctx context.Context, chunks []model.Kno
 	if len(chunks) == 0 {
 		return nil
 	}
-	const cols = 7
+	const cols = 9
 	args := make([]any, 0, len(chunks)*cols)
 	rowsSQL := make([]string, 0, len(chunks))
 	for i, c := range chunks {
 		base := i*cols + 1
 		// embedding goes in as the literal ``[f1,f2,...]`` string the
-		// pgvector input parser accepts.
+		// pgvector input parser accepts; sparse as ``{i:v,...}/dim``.
 		emb := encodeVector(c.Embedding)
 		md := c.Metadata
 		if md == nil {
 			md = map[string]any{}
 		}
 		mdJSON, _ := json.Marshal(md)
+		var seg *string
+		if strings.TrimSpace(c.Segmented) != "" {
+			v := c.Segmented
+			seg = &v
+		}
 		rowsSQL = append(rowsSQL, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, $%d::vector, $%d, $%d::jsonb)",
-			base, base+1, base+2, base+3, base+4, base+5, base+6,
+			"($%d, $%d, $%d, $%d, $%d::vector, $%d::sparsevec, to_tsvector('simple', $%d::text), $%d, $%d::jsonb)",
+			base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8,
 		))
 		args = append(args,
 			c.DocumentID, c.KnowledgeBaseID, c.TenantID,
-			c.Content, emb, c.ChunkIndex, string(mdJSON),
+			c.Content, emb, encodeSparse(c.Sparse), seg, c.ChunkIndex, string(mdJSON),
 		)
 	}
 	q := fmt.Sprintf(`
 		INSERT INTO chat.knowledge_chunks
 			(document_id, knowledge_base_id, tenant_id, content,
-			 embedding, chunk_index, metadata)
+			 embedding, sparse, content_tsv, chunk_index, metadata)
 		VALUES %s
 	`, strings.Join(rowsSQL, ", "))
 	if _, err := r.db.Exec(ctx, q, args...); err != nil {
@@ -452,4 +433,68 @@ func encodeVector(v []float32) string {
 	}
 	b.WriteByte(']')
 	return b.String()
+}
+
+// SparseDim is the sparsevec dimension of knowledge_chunks.sparse — bge-m3's
+// vocabulary (migration 049).
+const SparseDim = 250002
+
+// encodeSparse turns bge-m3 lexical weights into pgvector's sparsevec input
+// form. pgvector's indices are 1-BASED, token ids are 0-based: token 5 with
+// weight 0.3 is "{6:0.3}". Zero weights are dropped. nil -> NULL.
+func encodeSparse(v *model.SparseVector) *string {
+	if v == nil {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteByte('{')
+	n := 0
+	for i, id := range v.Indices {
+		if i >= len(v.Values) || v.Values[i] == 0 || id < 0 || id >= SparseDim {
+			continue
+		}
+		if n > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Itoa(id + 1))
+		b.WriteByte(':')
+		b.WriteString(strconv.FormatFloat(float64(v.Values[i]), 'g', 7, 32))
+		n++
+	}
+	b.WriteString("}/")
+	b.WriteString(strconv.Itoa(SparseDim))
+	s := b.String()
+	return &s
+}
+
+// kbColumns / scanKB — one column list for every knowledge_bases read.
+const kbColumns = `id, tenant_id, user_id, name, COALESCE(description, ''),
+	COALESCE(embedding_model, ''), COALESCE(chunk_size, 0), COALESCE(chunk_overlap, 0),
+	COALESCE(is_active, TRUE), COALESCE(document_count, 0), COALESCE(total_chunks, 0),
+	created_at, updated_at`
+
+func scanKB(row pgx.Row, kb *model.KnowledgeBase) error {
+	return row.Scan(
+		&kb.ID, &kb.TenantID, &kb.UserID, &kb.Name, &kb.Description, &kb.EmbeddingModel,
+		&kb.ChunkSize, &kb.ChunkOverlap, &kb.IsActive,
+		&kb.DocumentCount, &kb.TotalChunks, &kb.CreatedAt, &kb.UpdatedAt,
+	)
+}
+
+// kbDocColumns / scanDoc — one column list for every knowledge_documents read.
+const kbDocColumns = `id, knowledge_base_id, tenant_id, filename, original_filename,
+	COALESCE(content_type, ''), COALESCE(file_size_bytes, 0), COALESCE(storage_path, ''),
+	COALESCE(status, 'pending'), COALESCE(chunk_count, 0), COALESCE(char_count, 0),
+	error_message, created_at, updated_at,
+	COALESCE(progress_done, 0), COALESCE(progress_total, 0), error_code, uploaded_by,
+	indexed_at, COALESCE(attempts, 0), next_attempt_at, claimed_at`
+
+func scanDoc(row pgx.Row, d *model.KnowledgeDocument) error {
+	return row.Scan(
+		&d.ID, &d.KnowledgeBaseID, &d.TenantID, &d.Filename, &d.OriginalFilename,
+		&d.ContentType, &d.FileSizeBytes, &d.StoragePath, &d.Status,
+		&d.ChunkCount, &d.CharCount, &d.ErrorMessage, &d.CreatedAt, &d.UpdatedAt,
+		&d.ProgressDone, &d.ProgressTotal, &d.ErrorCode, &d.UploadedBy,
+		&d.IndexedAt, &d.Attempts, &d.NextAttemptAt, &d.ClaimedAt,
+	)
 }

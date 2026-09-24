@@ -113,7 +113,10 @@ func NewKnowledgeService(
 // ---------------------------------------------------------------------------
 
 type CreateKBInput struct {
-	TenantID     uuid.UUID
+	TenantID uuid.UUID
+	// UserID is the owner (FIX132 B): a knowledge base is private to the
+	// user who created it.
+	UserID       uuid.UUID
 	Name         string
 	Description  string
 	ChunkSize    int
@@ -128,8 +131,10 @@ func (s *KnowledgeService) CreateKB(ctx context.Context, in CreateKBInput) (*mod
 	if len([]rune(in.Name)) > 255 {
 		in.Name = string([]rune(in.Name)[:255])
 	}
+	owner := in.UserID
 	return s.repo.CreateKB(ctx, &model.KnowledgeBase{
 		TenantID:     in.TenantID,
+		UserID:       &owner,
 		Name:         in.Name,
 		Description:  in.Description,
 		ChunkSize:    in.ChunkSize,

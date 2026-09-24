@@ -130,6 +130,7 @@ func (h *KnowledgeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	kb, err := h.svc.CreateKB(r.Context(), service.CreateKBInput{
 		TenantID:     caller.TenantUUID,
+		UserID:       caller.UserID,
 		Name:         req.Name,
 		Description:  req.Description,
 		ChunkSize:    req.ChunkSize,
