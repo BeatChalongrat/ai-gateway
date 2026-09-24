@@ -48,7 +48,7 @@ func TestExportSweep_RemovesExpiredFilesAndFailsStaleBuilds(t *testing.T) {
 		}
 		return row, path
 	}
-	old, oldPath := mk("old.json", now.Add(-time.Hour))     // window closed an hour ago
+	old, oldPath := mk("old.json", now.Add(-time.Hour))      // window closed an hour ago
 	fresh, freshPath := mk("fresh.json", now.Add(time.Hour)) // still downloadable
 
 	// A build that started three hours ago and never finished.

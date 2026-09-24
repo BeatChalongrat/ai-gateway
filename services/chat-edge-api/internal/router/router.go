@@ -448,6 +448,10 @@ func New(
 				r.Post("/account/export-memories", h.Account.ExportMemories)
 				r.Get("/account/exports/{id}/download", h.Account.DownloadExport)
 				r.Delete("/account/purge-memories", h.Account.PurgeMemories)
+				// FIX132 C — export all my data + the data policy.
+				r.Post("/account/exports", h.Account.StartFullExport)
+				r.Get("/account/exports", h.Account.ListFullExports)
+				r.Get("/account/data-policy", h.Account.DataPolicy)
 			}
 
 			// S1 — Personal Memory Core. Bulk-clear lives at

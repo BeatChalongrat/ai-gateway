@@ -696,6 +696,28 @@ func main() {
 	)
 	accountDeletion.SetStreamCanceller(messageSvc)
 
+	// FIX132 C — "export all my data" (a ZIP built in the background) and
+	// the data policy the Settings page states.
+	accountExport := service.NewAccountExportService(service.AccountExportSources{
+		Conversations: conversations, Messages: messages, Files: filesRepo,
+		Memories: memoriesRepo, Projects: projects, Preferences: prefsRepo,
+		Skills: skillsRepo, Exports: exportsRepo, Settings: tenantSettingsRepo,
+	}, storageBackend, cfg.FileStorageRoot, cfg.ExportMaxFileBytes, cfg.ExportMaxConversations)
+	if cfg.DLPDisplayLifecycleEnabled {
+		// The export reads messages the way the owner's reload does.
+		accountExport.SetDisplayResolver(func(ctx context.Context, m model.Message, userID, tenantID uuid.UUID) string {
+			return messageSvc.ResolveRepresentation(ctx, service.ConsumerBrowserReloadOwner, m,
+				service.DisplayActor{UserID: userID, TenantID: tenantID}).Content
+		})
+	}
+	accountHandler := handler.NewAccountHandler(exportSvc, purgeSvc)
+	accountHandler.SetFullExport(accountExport)
+	accountHandler.SetDataPolicy(handler.DataPolicySource{
+		Retention:    retentionSettingsRepo,
+		PurgeEnvMode: cfg.DeletedDataPurgeMode,
+		BackupDays:   cfg.BackupRetentionDays,
+	})
+
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Usage:          usageHandler,
@@ -723,7 +745,7 @@ func main() {
 		// on CLOUD_SCHEDULER_ENABLED): StartScheduler → CloudTaskRunner.Tick,
 		// authorize-before-run, DB lease (migration 036), cloud tool subset.
 		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
-		Account:    handler.NewAccountHandler(exportSvc, purgeSvc),
+		Account:    accountHandler,
 		// Retention & deletion program admin surface: settings (floor-
 		// validated, audited), deletion-audit reads, dry-run preview.
 		RetentionAdmin: handler.NewRetentionAdminHandler(
