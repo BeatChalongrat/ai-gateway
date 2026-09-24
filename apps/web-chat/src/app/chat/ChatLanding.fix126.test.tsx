@@ -15,6 +15,11 @@ const { mockApi, mockRouter } = vi.hoisted(() => ({
     downloadFile: vi.fn(),
     listSkills: vi.fn(async () => ({ skills: [] })),
     deleteConversationOnExit: vi.fn(),
+    // FIX133 — removing a ready chip deletes its upload on the server
+    // (uploadRegistry.discardUpload → api.deleteFile). The mock lacked it, so
+    // the click threw "api.deleteFile is not a function" as an unhandled
+    // error and the lane exited 1 with no failing test.
+    deleteFile: vi.fn(async (_fileId: string) => undefined),
   },
   mockRouter: { push: vi.fn(), replace: vi.fn() },
 }));
@@ -94,6 +99,8 @@ describe("FIX126 F2 — no empty conversation left behind", () => {
       fireEvent.click(screen.getByRole("button", { name: "Remove file" }));
     });
     await vi.waitFor(() => expect(deleteConversation).toHaveBeenCalledWith("c-new"));
+    // each removed chip also removes its upload from the server
+    expect(mockApi.deleteFile.mock.calls.map((c) => c[0]).sort()).toEqual(["srv-a.txt", "srv-b.txt"]);
   });
 
   it("attach, then close or reload the tab → a keepalive delete is sent", async () => {
