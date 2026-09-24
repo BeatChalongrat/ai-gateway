@@ -35,8 +35,11 @@ import (
 // "high" / "medium" bucket derived from ts_rank so the AI can
 // weight results without having to reason about a raw float.
 type PastContextResult struct {
-	Type              string `json:"type"`
-	ConversationID    string `json:"conversation_id,omitempty"`
+	Type           string `json:"type"`
+	ConversationID string `json:"conversation_id,omitempty"`
+	// MessageID — message hits only (FIX132 F12): the page opens the chat
+	// at this message. The AI tool's text formatter does not print it.
+	MessageID         string `json:"message_id,omitempty"`
 	ConversationTitle string `json:"conversation_title,omitempty"`
 	Content           string `json:"content"`
 	Role              string `json:"role,omitempty"`        // messages only
@@ -150,6 +153,7 @@ func (s *SearchService) SearchPastContext(
 				out = append(out, PastContextResult{
 					Type:              "message",
 					ConversationID:    h.ConversationID.String(),
+					MessageID:         h.MessageID.String(),
 					ConversationTitle: h.ConversationTitle,
 					Role:              h.Role,
 					Content:           truncateRunes(safe, contentTruncate),
