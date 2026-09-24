@@ -18,6 +18,18 @@
 #   RESEND_API_URL                 default https://api.resend.com/emails (tests
 #                                  point it at a local dummy endpoint)
 #
+# FIX131 — a test alert can never reach the owner:
+#   ALERT_ENVIRONMENT              empty / production / live = the real system.
+#                                  Anything else labels title AND message
+#                                  ("[TEST] ", "[STAGING] " ...); test / testing
+#                                  / ci / lane / test-stack also ROUTE the alert
+#                                  to ALERT_TEST_NTFY_URL only (no e-mail, never
+#                                  ALERT_NTFY_URL, never its token).
+#   NOTIFY_TEST=1                  a test fire (`entrypoint.sh notify ...`): the
+#                                  same as ALERT_ENVIRONMENT=test for this call.
+#   ALERT_TEST_NTFY_URL            the throwaway topic for test alerts; empty =
+#                                  test alerts are logged only.
+#
 # Exit 0 when at least one configured channel accepted the message or when
 # no channel is configured (logged); 1 when every configured channel failed.
 set -uo pipefail
@@ -26,6 +38,21 @@ set -uo pipefail
 level="${1:?usage: notify.sh <high|ok|info> <title> <message>}"
 title="$(printf '%s' "${2:?title}" | redact)"
 message="$(printf '%s' "${3:?message}" | redact)"
+
+# FIX131 — the environment label and the test route (see the header).
+env_name=$(printf '%s' "${ALERT_ENVIRONMENT:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+label=""
+test_route=0
+case "$env_name" in
+  ""|prod|production|live) ;;
+  test|testing|ci|lane|test-stack) label="[TEST]"; test_route=1 ;;
+  *) label="[$(printf '%s' "$env_name" | tr '[:lower:]' '[:upper:]')]" ;;
+esac
+if [ "${NOTIFY_TEST:-0}" = "1" ]; then label="[TEST]"; test_route=1; fi
+if [ -n "$label" ]; then
+  title="$label $title"
+  message="$label $message"
+fi
 
 # Secret headers ride a curl config on stdin, never argv (argv shows in ps).
 # curl_bearer <token> <curl args...>: with a token, the Authorization header
@@ -46,6 +73,23 @@ case "$level" in
 esac
 
 configured=0 sent=0
+
+if [ "$test_route" = 1 ]; then
+  # A test alert: the throwaway test topic or nowhere. Never the owner's
+  # topic, never its token, never e-mail.
+  if [ -z "${ALERT_TEST_NTFY_URL:-}" ]; then
+    log "notify: test alert, no ALERT_TEST_NTFY_URL - logged only: $title - $message"
+    exit 0
+  fi
+  if curl -fsS --max-time 20 -o /dev/null \
+       -H "Title: $title" -H "Priority: $prio" -H "Tags: $tags,test" \
+       --data-raw "$message" "$ALERT_TEST_NTFY_URL" </dev/null; then
+    log "notify: test topic accepted ($prio)"
+    exit 0
+  fi
+  log "notify: WARN test topic POST failed"
+  exit 1
+fi
 
 if [ -n "${ALERT_NTFY_URL:-}" ]; then
   configured=1
