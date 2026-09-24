@@ -82,7 +82,8 @@ offending sessions once the oldest passes `pg_stuck_transaction_seconds`
 `failures: ["stuck_transaction"]` (503) at the same threshold — so the
 container healthcheck goes red and autoheal restarts the backend, which
 closes its connections and releases the lock. `/ready` also reports
-`checks.turns.last_success_age_s` / `last_attempt_age_s` (this worker).
+`checks.turns.last_success_age_s` / `last_attempt_age_s` (every worker of
+the container since FIX131 — see docs/ops/deploy-backend.md).
 
 ## Alerts (A4)
 

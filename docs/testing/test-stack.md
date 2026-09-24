@@ -38,6 +38,8 @@ references and no secrets; values come from `.env` at `up`). The generator:
 - keeps: postgres, redis, backend, gateway, log-worker, dlp-sidecar,
   ner-service, rate-limiter, mock-provider, chat-edge-api, postgres-webchat,
   redis-webchat (no web-chat, portal, admin, monitoring);
+- runs the backend's image process (FIX131: `serve.sh` → gunicorn with
+  `GUNICORN_WORKERS` workers, the same as live — no command override);
 - removes `container_name`, source bind mounts, the Docker socket and
   `extra_hosts`; renames data volumes to `ts_*`;
 - points chat-edge at the test gateway/backend (the real file uses

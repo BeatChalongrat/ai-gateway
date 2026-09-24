@@ -253,8 +253,11 @@ Redis errors: `docker logs ai-gateway-redis-1` and the `redis-exporter`
 
 ## 10. Known bottlenecks
 
-1. **Single-worker dev backend.** The dev `docker-compose.override.yml` runs
-   `uvicorn --reload` (one process). Production runs multiple gunicorn workers.
+1. **Single-worker dev backend** (until FIX131). The dev
+   `docker-compose.override.yml` ran `uvicorn --reload` (one process). Since
+   FIX131 the stack runs the image's gunicorn with `GUNICORN_WORKERS` workers
+   like production; the one-process hot reload is the opt-in
+   `docker-compose.dev.yml`.
    A single async worker handles many concurrent streams via the event loop,
    but CPU-bound work (DLP regex, JSON, and especially **NER**) serializes on
    it. **Dev capacity numbers are a floor, not the prod ceiling.**
@@ -325,6 +328,7 @@ Redis errors: `docker logs ai-gateway-redis-1` and the `redis-exporter`
      inactive (shared-key 429 collision above 60 req/min).
   2. Mock provider not wired (`PROVIDER_BASE_URL_OVERRIDES` empty) → a full run
      would hit the **real** OpenAI key (cost).
-  3. Dev backend is single-worker `--reload` — not representative of prod.
+  3. Dev backend is single-worker `--reload` — not representative of prod
+     (resolved by FIX131: the stack runs the image's gunicorn workers).
 
 Do **not** claim 150 or 250 is supported until those stages actually pass.
