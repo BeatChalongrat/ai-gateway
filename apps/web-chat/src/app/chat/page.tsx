@@ -30,6 +30,7 @@ import { HOSTED_MODE } from "@/lib/auth";
 import { hostApi } from "@/lib/hostApi";
 import { ChatInput, DRAFT_CONV_KEY, uploadFiles } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
+import { ProjectChip } from "@/components/chat/ProjectChip";
 import { toast } from "@/components/ui/Toast";
 import { SEND_STRANDED_EVENT } from "@/components/ui/ErrorBanner";
 import { clearDraft, NEW_CHAT_DRAFT_KEY } from "@/lib/draftStore";
@@ -47,6 +48,9 @@ export default function ChatLanding() {
     (s) => s.pendingFiles[DRAFT_CONV_KEY]?.length ?? 0,
   );
   const sendMessage = useChatStore((s) => s.sendMessage);
+  // FIX132 F30 — set by "แชทใหม่ในโปรเจกต์นี้"; the first send files the chat there.
+  const nextProjectId = useChatStore((s) => s.nextConversationProjectId);
+  const setNextProjectId = useChatStore((s) => s.setNextConversationProjectId);
   const selectedModelId = useModelStore((s) => s.selectedModelId);
   const selectGlobalModel = useModelStore((s) => s.selectModel);
   const addPendingFile = useChatStore((s) => s.addPendingFile);
@@ -260,6 +264,12 @@ export default function ChatLanding() {
     >
       <div className="scrollbar-thin flex flex-1 flex-col overflow-y-auto">
         <EmptyState onPrompt={(text) => setInjectedText(text)}>
+          {/* FIX132 F30 — "แชทใหม่ในโปรเจกต์นี้" says so here, with a way out. */}
+          {nextProjectId ? (
+            <div className="mb-2 flex justify-center">
+              <ProjectChip projectId={nextProjectId} variant="newChat" onClear={() => setNextProjectId(null)} />
+            </div>
+          ) : null}
           <ChatInput
             // Intentionally always null: keeps ChatInput's chip
             // bucket constant (DRAFT) for this instance's lifetime

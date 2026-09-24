@@ -15,6 +15,7 @@ import { MessageQueue } from "@/components/chat/MessageQueue";
 import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
 import { ConversationNotFound } from "@/components/chat/ConversationNotFound";
+import { ProjectChip } from "@/components/chat/ProjectChip";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { FilePreviewPane } from "@/components/chat/FilePreviewModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
@@ -323,6 +324,10 @@ export default function ConversationPage() {
           here was redundant). Just the file-attachments indicator
           + the "..." menu on the right. */}
       <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        {/* FIX132 F30 — the project this chat is in, named. */}
+        <div className="mr-auto min-w-0">
+          <ProjectChip projectId={conv?.project_id} />
+        </div>
         {/* FIX33 — quiet context meter: nothing until 70 % of the budget. */}
         <ContextMeter conversationId={convId} />
         <MemoryIndicator conversationId={convId} />
