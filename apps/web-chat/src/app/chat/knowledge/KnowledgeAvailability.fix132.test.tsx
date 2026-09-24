@@ -4,7 +4,7 @@
 // OpenAI key (there is none in the path any more), and — because loading
 // ends by itself — asks again by itself, so the knowledge base appears
 // without a reload the moment it can work.
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { mockApi } = vi.hoisted(() => ({
@@ -82,21 +82,20 @@ describe("FIX132 — why the knowledge base cannot be used, in Thai", () => {
 describe("FIX132 — loading ends by itself, so the page asks again by itself", () => {
   it("the knowledge page flips from 'starting' to usable without a reload", async () => {
     expect(recheck).toBeDefined();
-    recheck!.loadingMs = 20;
+    recheck!.loadingMs = 300;
     mockApi.getKnowledgeAvailability
       .mockResolvedValueOnce({ available: false, reason: "models_loading" })
       .mockResolvedValue({ available: true });
     render(<KnowledgeBasePage />);
     expect(await screen.findByTestId("kb-unavailable")).toBeInTheDocument();
-    await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
-    await flush();
-    expect(screen.queryByTestId("kb-unavailable")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("kb-unavailable")).toBeNull(), { timeout: 3000 });
     expect(await screen.findByText(th["kb.create.full"])).toBeInTheDocument();
+    expect(mockApi.getKnowledgeAvailability).toHaveBeenCalledTimes(2);
   });
 
   it("the composer's knowledge-base affordance appears once the models are ready", async () => {
     expect(recheck).toBeDefined();
-    recheck!.loadingMs = 20;
+    recheck!.loadingMs = 300;
     mockApi.getKnowledgeAvailability
       .mockResolvedValueOnce({ available: false, reason: "models_loading" })
       .mockResolvedValue({ available: true });
@@ -104,10 +103,10 @@ describe("FIX132 — loading ends by itself, so the page asks again by itself", 
       return <span data-testid="probe">{useKnowledgeAvailable() ? "yes" : "no"}</span>;
     }
     render(<Probe />);
+    await waitFor(() => expect(mockApi.getKnowledgeAvailability).toHaveBeenCalledTimes(1));
     await flush();
     expect(screen.getByTestId("probe")).toHaveTextContent("no");
-    await act(async () => { await new Promise((r) => setTimeout(r, 80)); });
-    expect(screen.getByTestId("probe")).toHaveTextContent("yes");
+    await waitFor(() => expect(screen.getByTestId("probe")).toHaveTextContent("yes"), { timeout: 3000 });
   });
 
   it("models_unavailable is not polled (a failure does not end by itself)", async () => {
