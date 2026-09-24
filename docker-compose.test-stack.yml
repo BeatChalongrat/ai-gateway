@@ -558,6 +558,10 @@
         "SERVICE_JWT_SECRET": "${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}",
         "STORAGE_BACKEND": "${STORAGE_BACKEND:-local}",
         "USER_JWT_SECRET": "${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}",
+        "CHAT_EDGE_DRAIN_TIMEOUT": "${CHAT_EDGE_DRAIN_TIMEOUT:-60s}",
+        "CHAT_EDGE_DRAIN_GRACE": "${CHAT_EDGE_DRAIN_GRACE:-10s}",
+        "INTERRUPTED_TURN_SWEEP_INTERVAL": "${INTERRUPTED_TURN_SWEEP_INTERVAL:-60s}",
+        "INTERRUPTED_TURN_MIN_AGE": "${INTERRUPTED_TURN_MIN_AGE:-2m}",
         "STREAM_LEDGER_TTL_SECONDS": "${STREAM_LEDGER_TTL_SECONDS:-600}",
         "STREAM_LEDGER_MAX_EVENTS": "${STREAM_LEDGER_MAX_EVENTS:-8000}",
         "CLOUD_SCHEDULER_ENABLED": "false",
@@ -588,6 +592,7 @@
         "default": null
       },
       "restart": "on-failure",
+      "stop_grace_period": "90s",
       "volumes": [
         {
           "type": "volume",
