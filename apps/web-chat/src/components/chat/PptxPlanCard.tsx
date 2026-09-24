@@ -13,16 +13,23 @@ import {
   Image as ImageIcon,
   LayoutTemplate,
   Presentation,
+  RotateCw,
   Table2,
   Target,
 } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
+import {
+  persistedPlanFailure,
+  planFailureFromError,
+  type PlanFailure,
+} from "@/lib/planFailure";
 import type {
   DocExecuteResponse,
   FileAttachment,
+  PlanOutcome,
   PptxGenerationReport,
 } from "@/lib/types";
 
@@ -30,16 +37,18 @@ import {
   CardShell,
   DownloadButton,
   OpenPreviewButton,
-  ErrorLine,
   MetadataRow,
+  PlanFailureNotice,
   PlanList,
   PlanListItem,
   PrimaryButton,
+  ProvenanceLine,
   ValidationBadge,
   humanSize,
   linkedGeneratedFile,
   serverMessageId,
   truncate,
+  useConversationFilename,
 } from "./planCardUI";
 import type { DocResult } from "./DocPlanCard";
 
@@ -101,20 +110,23 @@ interface Props {
   /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
   messageId?: string;
   files?: FileAttachment[];
+  /** FIX131 — the message's failed plan executions (GET /messages). */
+  outcomes?: PlanOutcome[];
 }
 
-export function PptxPlanCard({ convId, plan, messageId, files }: Props) {
+export function PptxPlanCard({ convId, plan, messageId, files, outcomes }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
   );
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<PlanFailure | null>(null);
   const [result, setResult] = useState<DocExecuteResponse | null>(null);
+  const sourceName = useConversationFilename(convId, plan.source_file_id);
 
   async function execute() {
     if (status === "running") return;
     setStatus("running");
-    setError(null);
+    setFailure(null);
     try {
       const res = await api.executeDocumentPlan(convId, {
         source_file_id: plan.source_file_id || undefined,
@@ -126,8 +138,7 @@ export function PptxPlanCard({ convId, plan, messageId, files }: Props) {
       setResult(res);
       setStatus("done");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || tOutside("plan.pptx.execFailed"));
+      setFailure(planFailureFromError(err)); // FIX131
       setStatus("error");
     }
   }
@@ -141,6 +152,13 @@ export function PptxPlanCard({ convId, plan, messageId, files }: Props) {
   if (linked) {
     return <PptxResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
+  // FIX131 — a failure kept on the message survives the reload.
+  const shownFailure =
+    status === "error"
+      ? failure
+      : status === "idle"
+        ? persistedPlanFailure(outcomes, "pptx-plan", plan.output_filename)
+        : undefined;
 
   const settings = plan.presentation_settings || {};
   const layout = (settings.layout as string) || "16:9";
@@ -153,14 +171,21 @@ export function PptxPlanCard({ convId, plan, messageId, files }: Props) {
       headerTitle={t("plan.pptx.title")}
       metadata={`${layout} · ${language} · ${slides.length} ${t(slides.length === 1 ? "unit.slide" : "unit.slides")}`}
       footer={
-        <>
-          <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? t("plan.generating") : t("plan.pptx.generate")}
-          </PrimaryButton>
-          {error ? <ErrorLine message={error} /> : null}
-        </>
+        <PrimaryButton
+          onClick={execute}
+          loading={status === "running"}
+          icon={shownFailure ? <RotateCw className="h-4 w-4" /> : undefined}
+        >
+          {status === "running"
+            ? t("plan.generating")
+            : shownFailure
+              ? t("plan.retry")
+              : t("plan.pptx.generate")}
+        </PrimaryButton>
       }
     >
+      {shownFailure ? <PlanFailureNotice failure={shownFailure} kind="PowerPoint" /> : null}
+      <ProvenanceLine source={sourceName ?? shownFailure?.sourceFilename} />
       {settings.title ? (
         <p className="text-sm italic text-text-secondary">
           &ldquo;{settings.title as string}&rdquo;
@@ -186,12 +211,13 @@ export function PptxResultCard({ result }: { result: DocResult }) {
   const slideCount = pptxGen?.slide_count ?? validation?.stats?.page_count;
   const wordCount = validation?.stats?.word_count;
   const slideLog = pptxGen?.change_log;
+  const madeFromInput = file.made_from?.role === "input"; // FIX131
 
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension=".pptx" size="sm" />}
       headerTitle={file.filename}
-      metadata={file.version ? `v${file.version}` : undefined}
+      metadata={file.version && !madeFromInput ? `v${file.version}` : undefined}
       footer={
         <>
           <OpenPreviewButton file={file} />
@@ -199,6 +225,11 @@ export function PptxResultCard({ result }: { result: DocResult }) {
         </>
       }
     >
+      <ProvenanceLine
+        source={file.made_from?.filename}
+        output={file.filename}
+        role={file.made_from?.role}
+      />
       <MetadataRow>
         <span>PPTX</span>
         <span>{humanSize(file.file_size_bytes)}</span>

@@ -63,10 +63,31 @@ export function isUnreadable(
   return i >= 0 && READABLE_DOCUMENT_EXTENSIONS.has(filename.slice(i + 1).toLowerCase());
 }
 
+/** FIX131 — the chip's sentence for an unreadable file: which reason, and
+ *  what to do. An older row (no reason) keeps the FIX126 wording. */
+export function unreadableMessageKey(
+  reason: FileAttachment["unreadable_reason"] | undefined,
+):
+  | "file.unreadable"
+  | "file.unreadable.encrypted"
+  | "file.unreadable.scanned"
+  | "file.unreadable.damaged" {
+  switch (reason) {
+    case "encrypted":
+      return "file.unreadable.encrypted";
+    case "scanned":
+      return "file.unreadable.scanned";
+    case "damaged":
+      return "file.unreadable.damaged";
+    default:
+      return "file.unreadable";
+  }
+}
+
 interface Watcher {
   fileId: string;
   expiresAt: number;
-  onStatus: (status: ExtractionStatus) => void;
+  onStatus: (status: ExtractionStatus, row: FileAttachment) => void;
 }
 
 interface ConversationPoll {
@@ -123,7 +144,7 @@ async function tick(convId: string, poll: ConversationPoll) {
       poll.watchers.delete(w);
       continue;
     }
-    w.onStatus(row.extraction_status);
+    w.onStatus(row.extraction_status, row);
     if (!isExtracting(row.extraction_status) || now > w.expiresAt) {
       poll.watchers.delete(w);
     }
@@ -145,7 +166,7 @@ export function watchExtraction(
   convId: string,
   fileId: string,
   initialStatus: ExtractionStatus,
-  onStatus: (status: ExtractionStatus) => void,
+  onStatus: (status: ExtractionStatus, row?: FileAttachment) => void,
 ): () => void {
   if (!isExtracting(initialStatus)) return () => {};
 

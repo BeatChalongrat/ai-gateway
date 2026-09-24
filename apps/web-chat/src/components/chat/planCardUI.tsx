@@ -19,8 +19,10 @@ import type { ReactNode } from "react";
 
 import {
   AlertTriangle,
+  ArrowRight,
   Download,
   Eye,
+  FileInput,
   Loader2,
   Play,
   XCircle,
@@ -29,7 +31,9 @@ import {
 import { StatusBadge } from "@/components/ui/FileTypeBadge";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n";
+import { planFailureText, type PlanFailure, type PlanFileKind } from "@/lib/planFailure";
 import type { FileAttachment } from "@/lib/types";
+import { useChatStore } from "@/stores/chatStore";
 import { previewKindFor, useFilePreviewOpener } from "./FilePreviewModal";
 
 interface CardShellProps {
@@ -366,4 +370,86 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *  carries a client-side temporary id ("asst-<uuid>"). */
 export function serverMessageId(id: string | undefined): string | undefined {
   return id && UUID_RE.test(id) ? id : undefined;
+}
+
+// ── FIX131 — which file went in, and a failure that says why ──────────
+
+/** The name of a file of this conversation (an attachment on any message),
+ *  or undefined when it is not loaded. Selects a string, so the card
+ *  re-renders only when the name itself changes. */
+export function useConversationFilename(
+  convId: string,
+  fileId: string | undefined,
+): string | undefined {
+  return useChatStore((s) => {
+    if (!fileId) return undefined;
+    for (const m of s.messages[convId] ?? []) {
+      const f = m.files?.find((x) => x.id === fileId);
+      if (f) return f.filename;
+    }
+    return undefined;
+  });
+}
+
+/** "From fixture.pdf" on a plan card; "From fixture.pdf → made
+ *  summary.docx" / "Edited from draft.docx → draft_edited.docx" on a
+ *  result card. Nothing when the source is unknown. */
+export function ProvenanceLine({
+  source,
+  output,
+  role,
+}: {
+  source?: string;
+  output?: string;
+  role?: "input" | "edit" | "none";
+}) {
+  const t = useT();
+  if (!source) return null;
+  const text = !output
+    ? t("plan.from", { file: source })
+    : role === "edit"
+      ? t("plan.madeFrom.edit", { source, output })
+      : t("plan.madeFrom.input", { source, output });
+  return (
+    <p
+      data-testid="plan-provenance"
+      className="flex min-w-0 items-center gap-1.5 text-xs text-text-secondary"
+    >
+      {output ? (
+        <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 text-text-muted" aria-hidden />
+      ) : (
+        <FileInput className="h-3.5 w-3.5 flex-shrink-0 text-text-muted" aria-hidden />
+      )}
+      <span className="truncate" title={text}>
+        {text}
+      </span>
+    </p>
+  );
+}
+
+/** The failed state of a plan card, live or read back after a reload:
+ *  "Failed — <reason, with what to do>". */
+export function PlanFailureNotice({
+  failure,
+  kind,
+}: {
+  failure: PlanFailure;
+  kind: PlanFileKind;
+}) {
+  const t = useT();
+  return (
+    <div
+      role="alert"
+      data-testid="plan-failure"
+      data-reason={failure.reason}
+      className="flex gap-2 rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-sm text-status-danger"
+    >
+      <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
+      <span className="min-w-0">
+        <span className="font-medium">{t("plan.fail.title")}</span>
+        {" — "}
+        {planFailureText(t, failure, kind)}
+      </span>
+    </div>
+  );
 }

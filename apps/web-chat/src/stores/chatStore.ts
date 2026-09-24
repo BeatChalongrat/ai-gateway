@@ -107,6 +107,9 @@ export interface PendingFile {
    *  exactly the state where sending is allowed but the composer
    *  should say what is happening. */
   extractionStatus?: FileAttachment["extraction_status"];
+  /** FIX131 — why the server could not read it (set with a terminal
+   *  "failed"), so the chip can say which and what to do. */
+  unreadableReason?: FileAttachment["unreadable_reason"];
 }
 
 interface ChatState {
@@ -239,6 +242,7 @@ interface ChatState {
     convId: string,
     pendingId: string,
     extractionStatus: FileAttachment["extraction_status"],
+    unreadableReason?: FileAttachment["unreadable_reason"],
   ) => void;
   clearPendingFiles: (convId: string) => void;
   /** Hand the composer's staged attachment metadata to the store just
@@ -520,7 +524,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       },
     }));
   },
-  setFileExtractionStatus(convId, pendingId, extractionStatus) {
+  setFileExtractionStatus(convId, pendingId, extractionStatus, unreadableReason) {
     set((s) => {
       // Late arrival: extraction polling outlives the chip (submit()
       // clears the bucket while the server is still reading a scan).
@@ -531,7 +535,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         pendingFiles: {
           ...s.pendingFiles,
           [convId]: bucket.map((p) =>
-            p.id === pendingId ? { ...p, extractionStatus } : p,
+            p.id === pendingId ? { ...p, extractionStatus, unreadableReason } : p,
           ),
         },
       };
@@ -1373,6 +1377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           content_type: p.file.type || "application/octet-stream",
           file_size_bytes: p.file.size,
           extraction_status: p.extractionStatus ?? "completed",
+          unreadable_reason: p.unreadableReason,
           created_at: new Date().toISOString(),
         });
       }

@@ -93,7 +93,7 @@ describe("watchExtraction", () => {
     watchExtraction(CONV, "f1", "processing", onStatus);
 
     await advanceOnePoll();
-    expect(onStatus).toHaveBeenCalledWith("completed");
+    expect(onStatus).toHaveBeenCalledWith("completed", expect.objectContaining({ id: "f1" }));
     expect(mockApi.listFiles).toHaveBeenCalledTimes(1);
 
     // Watcher retired — no further traffic.
@@ -109,7 +109,7 @@ describe("watchExtraction", () => {
     await advanceOnePoll();
     await advanceOnePoll();
     expect(mockApi.listFiles).toHaveBeenCalledTimes(2);
-    expect(onStatus).toHaveBeenLastCalledWith("processing");
+    expect(onStatus).toHaveBeenLastCalledWith("processing", expect.objectContaining({ id: "f1" }));
   });
 
   it("coalesces several files in one conversation into a single request per interval", async () => {
@@ -123,8 +123,18 @@ describe("watchExtraction", () => {
 
     await advanceOnePoll();
     expect(mockApi.listFiles).toHaveBeenCalledTimes(1);
-    expect(a).toHaveBeenCalledWith("processing");
-    expect(b).toHaveBeenCalledWith("completed");
+    expect(a).toHaveBeenCalledWith("processing", expect.objectContaining({ id: "f1" }));
+    expect(b).toHaveBeenCalledWith("completed", expect.objectContaining({ id: "f2" }));
+  });
+
+  it("FIX131: hands the polled row over, so a failed file's reason reaches the chip", async () => {
+    mockApi.listFiles.mockResolvedValue({
+      files: [{ ...row("f1", "failed"), unreadable_reason: "encrypted" }],
+    });
+    const onStatus = vi.fn();
+    watchExtraction(CONV, "f1", "processing", onStatus);
+    await advanceOnePoll();
+    expect(onStatus).toHaveBeenCalledWith("failed", expect.objectContaining({ unreadable_reason: "encrypted" }));
   });
 
   it("stops when the last watcher unsubscribes", async () => {

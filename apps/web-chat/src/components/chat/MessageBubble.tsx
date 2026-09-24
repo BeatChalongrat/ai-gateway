@@ -1331,13 +1331,13 @@ function AssistantContentBody({
         // already produced its file opens in the done state) and its id
         // (sent with execute so the server links the file to it).
         if (seg.kind === "excel-plan") {
-          return <ExcelPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
+          return <ExcelPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} outcomes={message.plan_outcomes} />;
         }
         if (seg.kind === "doc-plan") {
-          return <DocPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
+          return <DocPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} outcomes={message.plan_outcomes} />;
         }
         if (seg.kind === "pptx-plan") {
-          return <PptxPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} />;
+          return <PptxPlanCard key={i} convId={convId} plan={seg.plan} messageId={message.id} files={message.files} outcomes={message.plan_outcomes} />;
         }
         return (
           <Markdown key={i} citations>

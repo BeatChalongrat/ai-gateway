@@ -18,30 +18,38 @@ import {
   Presentation,
   Quote,
   Replace,
+  RotateCw,
   SeparatorHorizontal,
   Table2,
   Type,
 } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
-import type { DocExecuteResponse, FileAttachment } from "@/lib/types";
+import {
+  persistedPlanFailure,
+  planFailureFromError,
+  type PlanFailure,
+} from "@/lib/planFailure";
+import type { DocExecuteResponse, FileAttachment, PlanOutcome } from "@/lib/types";
 
 import {
   CardShell,
   DownloadButton,
   OpenPreviewButton,
-  ErrorLine,
   MetadataRow,
+  PlanFailureNotice,
   PlanList,
   PlanListItem,
   PrimaryButton,
+  ProvenanceLine,
   ValidationBadge,
   humanSize,
   linkedGeneratedFile,
   serverMessageId,
   truncate,
+  useConversationFilename,
 } from "./planCardUI";
 
 /** What a result card needs. A card restored from a reloaded message has
@@ -106,20 +114,24 @@ interface Props {
   /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
   messageId?: string;
   files?: FileAttachment[];
+  /** FIX131 — the message's failed plan executions (GET /messages). */
+  outcomes?: PlanOutcome[];
 }
 
-export function DocPlanCard({ convId, plan, messageId, files }: Props) {
+export function DocPlanCard({ convId, plan, messageId, files, outcomes }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">(
     "idle",
   );
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<PlanFailure | null>(null);
   const [result, setResult] = useState<DocExecuteResponse | null>(null);
+  // FIX131 — "from fixture.pdf": the file the plan reads, when it names one.
+  const sourceName = useConversationFilename(convId, plan.source_file_id);
 
   async function execute() {
     if (status === "running") return;
     setStatus("running");
-    setError(null);
+    setFailure(null);
     try {
       const format = (plan.format || "docx") as "docx" | "pdf";
       const res = await api.executeDocumentPlan(convId, {
@@ -132,8 +144,9 @@ export function DocPlanCard({ convId, plan, messageId, files }: Props) {
       setResult(res);
       setStatus("done");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || tOutside("plan.doc.execFailed"));
+      // FIX131 — a reason worded in the user's language, never the
+      // server's English.
+      setFailure(planFailureFromError(err));
       setStatus("error");
     }
   }
@@ -150,6 +163,14 @@ export function DocPlanCard({ convId, plan, messageId, files }: Props) {
   if (linked) {
     return <DocResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
+  // FIX131 — a failure kept on the message: the card says so after a
+  // reload (with a retry) instead of looking untouched.
+  const shownFailure =
+    status === "error"
+      ? failure
+      : status === "idle"
+        ? persistedPlanFailure(outcomes, "doc-plan", plan.output_filename)
+        : undefined;
 
   const format = (plan.format || "docx").toUpperCase();
   const settings = plan.document_settings || {};
@@ -164,14 +185,23 @@ export function DocPlanCard({ convId, plan, messageId, files }: Props) {
       headerTitle={format === "PDF" ? t("plan.doc.titlePdf") : t("plan.doc.titleDocx")}
       metadata={`${pageSize} ${orientation} · ${language} · ${actions.length} ${t(actions.length === 1 ? "unit.action" : "unit.actions")}`}
       footer={
-        <>
-          <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? t("plan.generating") : t("plan.doc.generate")}
-          </PrimaryButton>
-          {error ? <ErrorLine message={error} /> : null}
-        </>
+        <PrimaryButton
+          onClick={execute}
+          loading={status === "running"}
+          icon={shownFailure ? <RotateCw className="h-4 w-4" /> : undefined}
+        >
+          {status === "running"
+            ? t("plan.generating")
+            : shownFailure
+              ? t("plan.retry")
+              : t("plan.doc.generate")}
+        </PrimaryButton>
       }
     >
+      {shownFailure ? (
+        <PlanFailureNotice failure={shownFailure} kind={format === "PDF" ? "PDF" : "Word"} />
+      ) : null}
+      <ProvenanceLine source={sourceName ?? shownFailure?.sourceFilename} />
       {settings.title_page?.title ? (
         <p className="text-sm italic text-text-secondary">
           &ldquo;{settings.title_page.title}&rdquo;
@@ -201,12 +231,14 @@ export function DocResultCard({ result }: { result: DocResult }) {
     ? validation?.stats?.page_count
     : validation?.stats?.page_count;
   const words = validation?.stats?.word_count;
+  // FIX131 — a document made FROM an input is new, not "v2" of the PDF.
+  const madeFromInput = file.made_from?.role === "input";
 
   return (
     <CardShell
       headerIcon={headerIcon}
       headerTitle={file.filename}
-      metadata={file.version ? `v${file.version}` : undefined}
+      metadata={file.version && !madeFromInput ? `v${file.version}` : undefined}
       footer={
         <>
           <OpenPreviewButton file={file} />
@@ -214,6 +246,11 @@ export function DocResultCard({ result }: { result: DocResult }) {
         </>
       }
     >
+      <ProvenanceLine
+        source={file.made_from?.filename}
+        output={file.filename}
+        role={file.made_from?.role}
+      />
       <MetadataRow>
         <span>{fileTypeLabel}</span>
         <span>{humanSize(file.file_size_bytes)}</span>
