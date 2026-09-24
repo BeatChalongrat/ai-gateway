@@ -1,5 +1,32 @@
 # Backend test quarantine — known baseline (FIX126 O8)
 
+**FIX133 (2026-09-25): no test is quarantined.** The lane (a throwaway container
+from the backend image, `scripts/probes/FIX132/results/lane_backend.sh`, FIX131)
+mounts the sibling trees the 32 conditional quarantines were written for
+(`examples/`, `services/chat-edge-api/`, `SranDesktop/src`, `apps/desktop/src`,
+`docker-compose*.yml`), so their `condition=` was already false and they ran as
+plain tests; the markers are gone and they are hard gates everywhere. The 3
+unconditional ones were released with a cause each:
+
+- FIX126-O8-5 (`test_health.py::test_health`, `test_error_handling.py::TestRegression::test_health_still_works`):
+  the value 200 "ok" belongs to a live stack. `test_health.py` now unit-tests the
+  aggregation with every component probe stubbed (200 ok / 503 unhealthy when the
+  database is down / 200 degraded when only Redis is down) and keeps the live
+  assertion as an `integration` test; the error-handling regression guard asserts
+  the shape (/health answers in its own shape, code agrees with the status word).
+- FIX126-O8-6 (`test_dlp_eval_gate.py::test_no_regression_against_baseline`): not a
+  detector regression. The five missed `thai_address` items have no address keyword
+  (the regex's documented gaps) and were caught in the FIX46 baseline by the Thai
+  NER layer's LOCATION spans, which come from the ner-service alone: `caught 41,
+  by_expected 36`. The hermetic lane has no `ner_service_url`, so those five are
+  unreachable by any detector there. The baseline is unchanged; the gate now records
+  whether the NER model was reachable and, when that differs from the baseline's,
+  compares each category's own detectors (`by_expected`) — the regex and lexicon
+  detectors are still gated (36/41), and the full 41/41 is gated wherever the
+  ner-service answers.
+
+The rest of this file is the FIX126 O8 record as it was.
+
 The unit lane is `python -m pytest -m "not integration"` (in-container, `APP_ENV=test`).
 On 45cf6c1 it had 45 failing tests, plus 5 that fail in any container that cannot
 reach a healthy stack. Each of the 50 was classified below. Obsolete tests and
@@ -32,22 +59,22 @@ does not have).
 
 | name | class | reason | ticket |
 |---|---|---|---|
-| test_dlp_docs.py::TestExampleProfilesExist::test_file_exists[policy_default.json / policy_strict.json / policy_internal_only.json] (3) | environment | reads repo-root `examples/`. The lane container mounts only `backend/` and `docs/`. Quarantined only while `examples/` is missing | FIX126-O8-1 |
-| test_dlp_docs.py::TestExampleProfilesParse::test_valid_json / test_has_required_fields / test_category_actions_are_valid / test_severity_threshold_valid [×3 files] (12) | environment | same: `examples/` not mounted | FIX126-O8-1 |
-| test_dlp_docs.py::TestExampleProfilesConstructible::test_constructs_policy_profile [×3 files] (3) | environment | same | FIX126-O8-1 |
-| test_dlp_docs.py::TestSpecificProfileBehavior::test_default_masks_pii / test_default_blocks_secrets / test_strict_blocks_financial / test_strict_has_critical_threshold / test_internal_allows_pii / test_internal_no_response_scanning (6) | environment | same | FIX126-O8-1 |
-| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_desktop_registry_scan_is_alive | environment → real bug — **fixed FIX128** | the scan read only the tools sidecar (`SranDesktop/…/Mcp/Tools`, 25 tools) against a ≥ 30 floor written for the WPF shell. It now also reads the Electron host's tools (`apps/desktop/src/main/host-tools.ts`, `turn-coordinator.ts`, `ask-user.ts`): 31 tools. Both trees are mounted into the dev lane; quarantined only where they are absent | FIX126-O8-2 |
-| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_desktop_tool_is_classified | environment → real bug — **fixed FIX128** | with the host tools scanned, `update_task_schedule` was unclassified (hard-blocked at runtime once its masked args carry a placeholder). Classified `local_execution` (it writes the local sidecar task store only) | FIX126-O8-2 |
-| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_chat_edge_registry_scan_is_alive | environment | `services/chat-edge-api/` tree not mounted | FIX126-O8-2 |
-| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_chat_edge_tool_is_classified | environment | same | FIX126-O8-2 |
-| test_dlp_egress_invariant.py::test_chat_edge_embeddings_voice_route_through_gateway_not_openai | environment | reads chat-edge Go source, which is not mounted | FIX126-O8-3 |
-| test_dlp_egress_invariant.py::test_code_interpreter_egress_is_go_side_and_network_locked | environment | same | FIX126-O8-3 |
+| test_dlp_docs.py::TestExampleProfilesExist::test_file_exists[policy_default.json / policy_strict.json / policy_internal_only.json] (3) | environment — **released FIX133** | reads repo-root `examples/`, which the lane mounts | FIX126-O8-1 |
+| test_dlp_docs.py::TestExampleProfilesParse::test_valid_json / test_has_required_fields / test_category_actions_are_valid / test_severity_threshold_valid [×3 files] (12) | environment — **released FIX133** | same | FIX126-O8-1 |
+| test_dlp_docs.py::TestExampleProfilesConstructible::test_constructs_policy_profile [×3 files] (3) | environment — **released FIX133** | same | FIX126-O8-1 |
+| test_dlp_docs.py::TestSpecificProfileBehavior::test_default_masks_pii / test_default_blocks_secrets / test_strict_blocks_financial / test_strict_has_critical_threshold / test_internal_allows_pii / test_internal_no_response_scanning (6) | environment — **released FIX133** | same | FIX126-O8-1 |
+| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_desktop_registry_scan_is_alive | environment → real bug — **fixed FIX128**, marker **released FIX133** | the scan read only the tools sidecar (`SranDesktop/…/Mcp/Tools`, 25 tools) against a ≥ 30 floor written for the WPF shell. It now also reads the Electron host's tools (`apps/desktop/src/main/host-tools.ts`, `turn-coordinator.ts`, `ask-user.ts`): 31 tools. Both trees are mounted by the lane | FIX126-O8-2 |
+| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_desktop_tool_is_classified | environment → real bug — **fixed FIX128**, marker **released FIX133** | with the host tools scanned, `update_task_schedule` was unclassified (hard-blocked at runtime once its masked args carry a placeholder). Classified `local_execution` (it writes the local sidecar task store only) | FIX126-O8-2 |
+| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_chat_edge_registry_scan_is_alive | environment — **released FIX133** | `services/chat-edge-api/` is mounted by the lane | FIX126-O8-2 |
+| test_dlp_tool_policy_parity.py::TestToolPolicyParity::test_every_chat_edge_tool_is_classified | environment — **released FIX133** | same | FIX126-O8-2 |
+| test_dlp_egress_invariant.py::test_chat_edge_embeddings_voice_route_through_gateway_not_openai | environment — **released FIX133** | reads chat-edge Go source, which the lane mounts | FIX126-O8-3 |
+| test_dlp_egress_invariant.py::test_code_interpreter_egress_is_go_side_and_network_locked | environment — **released FIX133** | same | FIX126-O8-3 |
 | test_dlp_egress_invariant.py::test_every_outbound_http_module_is_classified | real bug (in the gate's inventory) — **fixed** | `api/routes/health.py` imports httpx to probe our own NER sidecar and had never been classified. Classified `no_user_content`. The new `services/search/url_resolve.py` (FIX126 U1) is classified in the same place | — |
-| test_service_jwt_wiring.py::test_compose_feeds_service_jwt_to_both_services | environment | reads repo-root `docker-compose.yml`, which is not mounted | FIX126-O8-4 |
-| test_service_jwt_wiring.py::test_prod_compose_hard_requires_service_jwt_on_backend | environment | reads `docker-compose.prod.yml`, which is not mounted | FIX126-O8-4 |
-| test_health.py::test_health | environment | asserts status `ok`, which needs Postgres, Redis, the active sidecars and NER to be reachable. In the lane container /health answers 503 by design. Belongs in the integration lane | FIX126-O8-5 |
-| test_error_handling.py::TestRegression::test_health_still_works | environment | same as above | FIX126-O8-5 |
-| test_dlp_eval_gate.py::test_no_regression_against_baseline | real bug (suspected, not confirmed) | thai_address must-catch recall 41/41 → 36/41 in python AND rust since 2026-09-17. It is the same at a36124f, so the cause is data or environment, not a code change in that window. Full addresses such as "128/4 ซอยรามคำแหง 24 … 10240" are missed. DLP is parked, so this is not investigated here, and the baseline must NOT be rewritten to make it pass | FIX126-O8-6 |
+| test_service_jwt_wiring.py::test_compose_feeds_service_jwt_to_both_services | environment — **released FIX133** | reads repo-root `docker-compose.yml`, which the lane mounts | FIX126-O8-4 |
+| test_service_jwt_wiring.py::test_prod_compose_hard_requires_service_jwt_on_backend | environment — **released FIX133** | reads `docker-compose.prod.yml`, which the lane mounts | FIX126-O8-4 |
+| test_health.py::test_health | environment — **released FIX133** (see the top of this file) | asserted status `ok`, which needs Postgres, Redis, the active sidecars and NER to be reachable; in the lane container /health answers 503 by design. Now a unit test of the aggregation with stubbed probes, plus an `integration` test for the live value | FIX126-O8-5 |
+| test_error_handling.py::TestRegression::test_health_still_works | environment — **released FIX133** | now asserts the shape, not the infrastructure's value | FIX126-O8-5 |
+| test_dlp_eval_gate.py::test_no_regression_against_baseline | real bug (suspected) → environment — **released FIX133** (see the top of this file) | thai_address 41/41 → 36/41 was the Thai NER model's five LOCATION catches, unreachable without the ner-service; the baseline was not rewritten | FIX126-O8-6 |
 | test_api_inventory.py::TestPublicEndpointsExist::test_health | obsolete test — **fixed** | it checks that the endpoint exists and answers. 503 with the check report is an answer. It now asserts 200 or 503 plus the service field | — |
 | test_cors.py::TestCORS::test_actual_request_has_cors_header | obsolete test (setup) — **fixed** | it used /health, whose status depends on infrastructure. It now uses /live, and CORS is what the test checks | — |
 | test_body_limit.py::TestBodySizeLimit::test_oversized_request_rejected | obsolete test — **fixed** | the chat route's limit is 20 MB on purpose (vision payloads, app/main.py). The 1 MB default is now checked on a non-chat path, and a new test checks the 20 MB chat limit | — |
@@ -71,6 +98,9 @@ real bug in the parked DLP area. No test was classified flaky.
 Still in `known_failing.txt` (not part of the 45): the 3 shared-rate-limit-window tests
 (`unit/test_public_audio.py` ×2, `unit/test_public_videos.py` ×1), class **flaky**
 (order-dependent, FIX55). They did not fail on this tree's pinned order.
+FIX133: gone from the ledger — every `_auth` block in those files is its own API key,
+so the per-key media window is never shared between tests
+(`test_rate_limit_window_belongs_to_the_auth_block_not_the_process` pins it).
 
 Releasing a quarantine: fix the cause, confirm the test passes (it shows as XPASS),
 delete the marker and its row here.

@@ -148,16 +148,6 @@ def test_mismatched_secret_is_rejected(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-# FIX126 O8-4 — the compose files live at the repo root, which the backend
-# lane container does not mount. Quarantined only where they are missing.
-_Q_NO_COMPOSE = pytest.mark.quarantine(
-    reason="environment: repo-root docker-compose*.yml are not mounted in the backend lane container",
-    ticket="FIX126-O8-4",
-    condition=not (REPO_ROOT / "docker-compose.yml").is_file(),
-)
-
-
-@_Q_NO_COMPOSE
 def test_compose_feeds_service_jwt_to_both_services():
     base = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     # Both the Python backend (gateway/verifier) AND chat-edge (signer) must
@@ -168,7 +158,6 @@ def test_compose_feeds_service_jwt_to_both_services():
     )
 
 
-@_Q_NO_COMPOSE
 def test_prod_compose_hard_requires_service_jwt_on_backend():
     prod = (REPO_ROOT / "docker-compose.prod.yml").read_text(encoding="utf-8")
     # Prod backend must hard-require it (the :? form), like chat-edge does.

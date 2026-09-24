@@ -1,8 +1,19 @@
 // FIX128 D4 — keyboard-only navigation of the chat list.
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { moveBetweenChats } from "./Sidebar";
+
+// FIX133 — jsdom has no Element.scrollIntoView, so the row the arrow key
+// focused threw "rows[next].scrollIntoView is not a function" as an unhandled
+// error (the lane exited 1 with every test passing). Shimmed here, as
+// MessageBubble.*.test.tsx do, and NOT in vitest.setup.ts: ChatThread's
+// "Show" button falls back to jumping to the tail when scrollIntoView is
+// absent, and ChatThread.consent.test.tsx asserts that fallback.
+const scrollIntoView = vi.fn();
+if (typeof Element.prototype.scrollIntoView !== "function") {
+  Element.prototype.scrollIntoView = scrollIntoView;
+}
 
 afterEach(cleanup);
 
@@ -27,6 +38,8 @@ describe("FIX128 D4 — arrow keys move between chats", () => {
     row(container, "a").focus();
     fireEvent.keyDown(row(container, "a"), { key: "ArrowDown" });
     expect(document.activeElement).toBe(row(container, "b"));
+    // the focused row is also scrolled into view (nearest edge, no jump)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
     fireEvent.keyDown(row(container, "b"), { key: "End" });
     expect(document.activeElement).toBe(row(container, "c"));
     fireEvent.keyDown(row(container, "c"), { key: "ArrowDown" }); // stays on the last

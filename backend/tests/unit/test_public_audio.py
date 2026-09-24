@@ -20,9 +20,14 @@ from app.models.portal_user import PortalUserORM
 
 @contextlib.contextmanager
 def _auth(portal_user_id, tenant_id="test-tenant"):
+    # FIX133 — every block is its own API key. The media limiter keeps one
+    # sliding window per key for the whole pytest process (fakeredis), so a
+    # shared "test-key-id" made whichever test ran after the window was spent
+    # get 429 instead of its expected status (the FIX55 known-failing family).
+    key_id = f"test-key-{uuid.uuid4().hex[:8]}"
     prev = main_app.dependency_overrides.get(get_resolved_api_key)
     main_app.dependency_overrides[get_resolved_api_key] = lambda: ResolvedApiKey(
-        key_id="test-key-id",
+        key_id=key_id,
         tenant_id=tenant_id,
         project_id="test-project",
         key_prefix="gw_test_",
@@ -174,3 +179,24 @@ async def test_invalid_mode_400(async_db, monkeypatch):
             "/v1/audio/generations", json=_body(model="mock-tts-1", mode="bogus")
         )
     assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_window_belongs_to_the_auth_block_not_the_process(async_db, monkeypatch):
+    """FIX133 — the per-key media window (one Redis ZSET per key, alive for the
+    whole pytest process) is never shared between tests: each ``_auth`` block
+    is a fresh key. With the old shared "test-key-id" the third request here
+    answered 429, and in the suite whichever test ran after the window was
+    spent failed (known_failing.txt, the FIX55 family)."""
+    monkeypatch.setattr(settings, "video_gen_enabled", True)
+    monkeypatch.setattr(settings, "media_rate_limit_audio_per_hour", 1)
+    uid = await _seed_user(async_db)
+    await _ensure_model(
+        async_db, "mock-tts-1", supports_tts=True, cost_per_character=Decimal("0.0001")
+    )
+    await async_db.commit()
+    with _auth(uid):
+        assert TestClient(main_app).post("/v1/audio/generations", json=_body()).status_code == 200
+        assert TestClient(main_app).post("/v1/audio/generations", json=_body()).status_code == 429
+    with _auth(uid):  # a new block: a new key, an unspent window
+        assert TestClient(main_app).post("/v1/audio/generations", json=_body()).status_code == 200

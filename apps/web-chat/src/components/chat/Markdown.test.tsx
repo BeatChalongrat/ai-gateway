@@ -233,27 +233,32 @@ describe("XSS / injection hardening", () => {
 
 describe("shared-component invariant", () => {
   const srcRoot = path.join(process.cwd(), "src");
-  const sourceFiles = fs
+  // FIX133 — the ~430 source files are read ONCE, at collection, and the
+  // scans below run on the texts. Each scan used to re-read every file
+  // inside its own 5 s test budget; under the full lane's parallel workers
+  // the second scan took 10 s on Windows and failed as a timeout.
+  const sources = fs
     .readdirSync(srcRoot, { recursive: true })
     .map(String)
     .filter((p) => /\.(ts|tsx)$/.test(p) && !/\.test\.(ts|tsx)$/.test(p))
-    .map((p) => path.join(srcRoot, p));
+    .map((p) => path.join(srcRoot, p))
+    .map((file) => ({ file, text: fs.readFileSync(file, "utf8") }));
+
+  it("scans the source tree (an empty scan would prove nothing)", () => {
+    expect(sources.length).toBeGreaterThan(100);
+    expect(sources.some(({ file }) => file.endsWith(path.join("components", "chat", "Markdown.tsx")))).toBe(true);
+  });
 
   it("only Markdown.tsx imports react-markdown (every render site goes through the shared component)", () => {
-    const offenders = sourceFiles.filter((file) => {
-      if (file.endsWith(path.join("components", "chat", "Markdown.tsx"))) {
-        return false;
-      }
-      const text = fs.readFileSync(file, "utf8");
-      return /from\s+["']react-markdown["']/.test(text);
-    });
+    const offenders = sources
+      .filter(({ file }) => !file.endsWith(path.join("components", "chat", "Markdown.tsx")))
+      .filter(({ text }) => /from\s+["']react-markdown["']/.test(text))
+      .map(({ file }) => file);
     expect(offenders).toEqual([]);
   });
 
   it("no source file imports rehype-raw (raw HTML passthrough stays off)", () => {
-    const offenders = sourceFiles.filter((file) =>
-      /["']rehype-raw["']/.test(fs.readFileSync(file, "utf8")),
-    );
+    const offenders = sources.filter(({ text }) => /["']rehype-raw["']/.test(text)).map(({ file }) => file);
     expect(offenders).toEqual([]);
     // Belt and braces: it must not even be a dependency.
     const pkg = JSON.parse(

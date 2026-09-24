@@ -133,9 +133,9 @@ describe("portal api — 401 → refresh → retry", () => {
       other: () => jsonResponse(401, { error: { code: "unauthorized", message: "x" } }),
     });
 
-    const err = await api.get("/portal/me").catch((e) => e);
+    const err: unknown = await api.get("/portal/me").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PortalApiError);
-    expect(err.status).toBe(401);
+    expect((err as PortalApiError).status).toBe(401);
     // original + refresh + one replay — then give up.
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(refreshCalls()).toBe(1);

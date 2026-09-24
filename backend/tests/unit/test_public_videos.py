@@ -17,9 +17,12 @@ from app.models.portal_user import PortalUserORM
 
 @contextlib.contextmanager
 def _auth(portal_user_id, tenant_id="test-tenant"):
+    # FIX133 — every block is its own API key: the media limiter's window is
+    # per key for the whole pytest process, see test_public_audio._auth.
+    key_id = f"test-key-{uuid.uuid4().hex[:8]}"
     prev = main_app.dependency_overrides.get(get_resolved_api_key)
     main_app.dependency_overrides[get_resolved_api_key] = lambda: ResolvedApiKey(
-        key_id="test-key-id",
+        key_id=key_id,
         tenant_id=tenant_id,
         project_id="test-project",
         key_prefix="gw_test_",
