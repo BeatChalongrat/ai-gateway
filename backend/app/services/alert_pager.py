@@ -34,8 +34,9 @@ this system needs):
   transition page) is recorded as paged (``notified_elsewhere``), so the
   incident is not paged twice but still gets its reminder and "recovered".
 
-Every decision is logged (``pager_decision``); the repeated "still grouped"
-of an open incident is not.
+Every decision is logged (``pager_decision``); a repeat of the same
+non-paging decision for an open incident (grouped, hold, maintenance,
+log_only) is not.
 """
 
 from __future__ import annotations
@@ -424,7 +425,9 @@ class Pager:
             if action in PAGE_ACTIONS:
                 note = self._notification(rec, action, now)
                 rec.update(notified_severity=rec["severity"], notified_at=now, pages=int(rec.get("pages") or 0) + 1)
-            quiet = action in ("grouped", "hold") and rec.get("last_action") == action
+            # A repeat of the same non-paging decision is not logged again
+            # (every sender re-reports an open incident every 10–30 s).
+            quiet = action in ("grouped", "hold", "maintenance", "log_only") and rec.get("last_action") == action
             rec["last_action"] = action
             self.store.save(sig.group, rec)
 

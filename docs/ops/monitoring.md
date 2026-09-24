@@ -262,7 +262,7 @@ compose does not pass them — to change one, add it to both the `backend`
 and `ops-watch` environment in `docker-compose.yml`.)
 
 Every decision is logged: `pager_decision action=page|escalate|remind|grouped|hold|maintenance|log_only|recovered|expired|closed_unpaged group=… source=… reason=…`
-(the repeated "grouped" of an open incident is not). An `alert_events` row is
+(a repeat of the same non-paging decision — grouped, hold, maintenance, log_only — is not). An `alert_events` row is
 still written for every fired rule; `delivery_status` says `grouped`,
 `hold`, `maintenance` or `log_only` when the pager did not send it.
 
