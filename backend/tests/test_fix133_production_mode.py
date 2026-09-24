@@ -88,3 +88,17 @@ def test_master_key_rotation_rewrites_once_and_refuses_foreign_blobs():
     foreign = encrypt_provider_key("x", "d" * 64)
     with pytest.raises(Exception):
         rewrite_value(foreign, DEV_KEY, new_key)
+
+
+def test_empty_optional_booleans_mean_unset(monkeypatch):
+    """compose passes ``${AUTH_COOKIE_SECURE:-}`` / ``${API_DOCS_ENABLED:-}`` — an
+    empty string is "not set" (auto), not a boot failure (found live)."""
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "")
+    monkeypatch.setenv("API_DOCS_ENABLED", "")
+    s = Settings(app_env="production")
+    assert s.auth_cookie_secure is None and s.api_docs_enabled is None
+    assert s.cookie_secure_effective is True and s.api_docs_on is False
+    monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
+    monkeypatch.setenv("API_DOCS_ENABLED", "true")
+    s = Settings(app_env="production")
+    assert s.auth_cookie_secure is False and s.api_docs_on is True

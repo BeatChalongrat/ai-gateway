@@ -2,7 +2,7 @@ import warnings
 from decimal import Decimal
 from urllib.parse import quote_plus
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _INSECURE_DEFAULTS = {"change-me", "changeme", "secret", "password", "", "dev-stable-key-change-in-prod"}
@@ -1004,6 +1004,16 @@ class Settings(BaseSettings):
             for p in self.model_discovery_auto_add_providers.split(",")
             if p.strip()
         )
+
+    @field_validator("auth_cookie_secure", "api_docs_enabled", mode="before")
+    @classmethod
+    def _empty_means_unset(cls, v):
+        """FIX133 B — compose passes ``${VAR:-}`` (an empty string) for these
+        optional booleans; empty means "not set" (auto), never a parse error.
+        Found live: the backend restart-looped on '' for AUTH_COOKIE_SECURE."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     @property
     def api_docs_on(self) -> bool:

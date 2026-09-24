@@ -122,6 +122,9 @@ services:
       # .env turn Validate() on (real secrets or no boot); CHAT_EDGE_DEV empty
       # = JSON logs.
       - CHAT_EDGE_DEV=${CHAT_EDGE_DEV-1}
+      # FIX133 E6a — knowledge-base passages stay with self-hosted models.
+      - KB_EXTERNAL_MODELS=${KB_EXTERNAL_MODELS:-deny}
+      - KB_ALLOWED_PROVIDERS=${KB_ALLOWED_PROVIDERS:-sranai}
       - APP_ENV=${APP_ENV:-development}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - CHAT_EDGE_ADMIN_API_KEY=${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
