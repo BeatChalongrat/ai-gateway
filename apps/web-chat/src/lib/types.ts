@@ -664,6 +664,11 @@ export type ContextSourceType =
   // FIX130 A3b — a save_memory call in this turn stored a memory or queued a
   // suggestion; source_id is the memory, metadata.status says which.
   | "memory_saved";
+// FIX132 — the server also sends "knowledge_chunk" (one passage of a
+// knowledge-base document the model was given) and "knowledge_pending"
+// (files still being processed at answer time). lib/knowledge.ts reads them
+// as strings; they are not listed above so the hidden Sources rail
+// (SourcesCard, SHOW_SOURCES_RAIL) stays exactly as it is.
 
 export interface ContextSource {
   id: UUID;

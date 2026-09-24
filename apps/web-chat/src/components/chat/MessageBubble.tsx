@@ -52,6 +52,7 @@ import { VideoGeneratingPlaceholder } from "./VideoGeneratingPlaceholder";
 import { SearchCitations } from "./SearchCitations";
 import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
+import { KnowledgeCitationScope, KnowledgePendingNotice, KnowledgeSourcesRow } from "./KnowledgeSources";
 import { MessageAttachments } from "./MessageAttachments";
 import { MessageMemoryMarkers } from "./MemoryMarkers";
 import { PptxPlanCard } from "./PptxPlanCard";
@@ -636,6 +637,13 @@ function MessageBubbleImpl({
       {message.search_sources && message.search_sources.length > 0 ? (
         <SearchCitations sources={message.search_sources} />
       ) : null}
+
+      {/* FIX132 — the knowledge-base documents this answer used (shown even
+          when the model wrote no [Source: …] marker), and whether some of
+          the KB's files were still being processed. Independent of the
+          hidden Sources rail below. */}
+      <KnowledgeSourcesRow message={message} />
+      <KnowledgePendingNotice message={message} />
 
       {/* S7 — "Sources used" rail. Renders only when the
           assistant turn drew on saved memory / state / search /
@@ -1278,7 +1286,10 @@ function AssistantContent(props: { message: Message; convId: string }) {
       conversationId={props.convId}
       messageId={props.message.id}
     >
-      <AssistantContentBody {...props} />
+      {/* FIX132 — [Source: file] pills open the cited passages. */}
+      <KnowledgeCitationScope message={props.message}>
+        <AssistantContentBody {...props} />
+      </KnowledgeCitationScope>
     </CanvasSourceProvider>
   );
 }
