@@ -10,6 +10,8 @@ import { BookOpen, Brain, MoreHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+import { useChatDeletionText } from "@/hooks/useDataPolicy";
+import { DELETION_NOTICE_KEYS } from "@/lib/dataPolicy";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useChatStore } from "@/stores/chatStore";
@@ -149,6 +151,9 @@ export default function ChatLayout({
   const router = useRouter();
   const hosted = useHostedMode();
   const deleteConversation = useChatStore((s) => s.deleteConversation);
+  // FIX132 C — the confirmation states the real period; asked only once
+  // the dialog opens.
+  const deleteBody = useChatDeletionText(t, DELETION_NOTICE_KEYS.shortcutDialog, deleteOpen);
   async function confirmDelete() {
     const id = useChatStore.getState().activeConversationId;
     setDeleteOpen(false);
@@ -286,7 +291,7 @@ export default function ChatLayout({
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         title={t("shortcuts.deleteConfirm.title")}
-        description={t("shortcuts.deleteConfirm.body")}
+        description={deleteBody}
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setDeleteOpen(false)} data-testid="delete-cancel">

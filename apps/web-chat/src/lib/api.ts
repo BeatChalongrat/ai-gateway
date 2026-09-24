@@ -941,6 +941,24 @@ class ApiClient {
     });
   }
 
+  // ----- Your data (FIX132 C) -------------------------------
+  /** What happens to deleted data (purge mode + days), how long backups
+   *  keep it, how long an export link works, and the export caps. */
+  getDataPolicy() {
+    return this.json<import("./dataPolicy").DataPolicy>("/account/data-policy");
+  }
+  /** Start "export all my data" (a ZIP built in the background). An
+   *  export already running is returned instead of a second one. */
+  startFullExport() {
+    return this.json<{ export: import("./dataPolicy").FullExport }>("/account/exports", {
+      method: "POST",
+    });
+  }
+  /** The newest full exports and their status. */
+  listFullExports() {
+    return this.json<{ exports: import("./dataPolicy").FullExport[] }>("/account/exports");
+  }
+
   // ----- Canvas artifacts (Phase 6 / C3) --------------------
   /** Newest version of every artifact lineage in a conversation. */
   listCanvasArtifacts(convId: string) {

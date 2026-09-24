@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/Switch";
 import { acceleratorFromKey, describeAccelerator } from "@/lib/accelerator";
 import { hostApi, type SettingKey, type SettingsSnapshot, type ShellPrefsDto } from "@/lib/hostApi";
 import { tOutside, useT } from "@/lib/i18n";
+import { YourDataSection } from "./YourDataSection";
 
 export function DeviceSettings() {
   // Rendered only when page.tsx has already decided the surface is the
@@ -274,6 +275,9 @@ export function DeviceSettings() {
               />
               <p className="text-[11px] text-text-muted">{t("settings.extensionId.hint")}</p>
             </Section>
+
+            {/* FIX132 C — the account's data, the same section as the web. */}
+            <YourDataSection />
           </div>
         )}
       </main>
