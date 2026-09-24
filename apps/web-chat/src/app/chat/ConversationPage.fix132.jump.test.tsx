@@ -17,9 +17,9 @@ vi.mock("@/hooks/useHostedMode", () => ({ useHostedMode: () => false }));
 vi.mock("@/lib/hostApi", () => ({ hostApi: { contextInfo: vi.fn(), compactContext: vi.fn() } }));
 vi.mock("@/components/ui/Toast", () => ({ toast: toastMock }));
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ conversationId: "c1" }),
+  useParams: () => ({ conversationId: "0c1c1c1c-0000-4000-8000-000000000001" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/chat/c1",
+  usePathname: () => "/chat/0c1c1c1c-0000-4000-8000-000000000001",
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/components/chat/AttachmentDropZone", () => ({ AttachmentDropZone: ({ children }: { children: React.ReactNode }) => <div>{children}</div> }));
@@ -48,6 +48,8 @@ import { requestMessageJump, useMessageJumpStore } from "@/lib/messageJump";
 import type { Message } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
 
+const C1 = "0c1c1c1c-0000-4000-8000-000000000001";
+
 const initial = useChatStore.getState();
 const m = (i: number): Message => ({ id: `m${i}`, role: i % 2 ? "assistant" : "user", content: `#${i}`, status: "completed", created_at: new Date(Date.UTC(2026, 8, 1, 0, 0, i)).toISOString() }) as Message;
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, k) => m(a + k));
@@ -60,7 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   threadProps.current = null;
   useMessageJumpStore.setState({ request: null });
-  useChatStore.setState({ ...initial, conversations: [{ id: "c1", title: "t", model_id: "m", message_count: 3000, created_at: "", updated_at: "" }], messages: { c1: range(2950, 2999) }, messagesLoaded: { c1: true }, hasMoreMessages: { c1: true } }, true);
+  useChatStore.setState({ ...initial, conversations: [{ id: C1, title: "t", model_id: "m", message_count: 3000, created_at: "", updated_at: "" }], messages: { [C1]: range(2950, 2999) }, messagesLoaded: { [C1]: true }, hasMoreMessages: { [C1]: true } }, true);
   mockApi.getContextInfo.mockResolvedValue(null);
 });
 afterEach(() => {
@@ -70,11 +72,11 @@ afterEach(() => {
 
 describe("FIX132 F12 — the page opens the chat at the message", () => {
   it("a #msg-<id> link to a message not loaded yet: one through= request, then the thread jumps", async () => {
-    window.history.replaceState(null, "", "/chat/c1#msg-m16");
+    window.history.replaceState(null, "", `/chat/${C1}#msg-m16`);
     mockApi.listMessages.mockResolvedValueOnce({ messages: range(16, 2949), has_more: true });
     render(<ConversationPage />);
     await settle();
-    expect(mockApi.listMessages).toHaveBeenCalledWith("c1", { limit: 1000, before: "m2950", through: "m16" });
+    expect(mockApi.listMessages).toHaveBeenCalledWith(C1, { limit: 1000, before: "m2950", through: "m16" });
     expect(jumpProp()).toMatchObject({ messageId: "m16" });
   });
 
@@ -83,7 +85,7 @@ describe("FIX132 F12 — the page opens the chat at the message", () => {
     await settle();
     expect(jumpProp() ?? null).toBeNull();
     mockApi.listMessages.mockResolvedValueOnce({ messages: range(100, 2949), has_more: true });
-    act(() => requestMessageJump("c1", "m100"));
+    act(() => requestMessageJump(C1, "m100"));
     await settle();
     expect(jumpProp()).toMatchObject({ messageId: "m100" });
   });
@@ -106,7 +108,7 @@ describe("FIX132 F12 — the page opens the chat at the message", () => {
     mockApi.listMessages.mockResolvedValueOnce({ messages: range(0, 2949), has_more: false });
     render(<ConversationPage />);
     await settle();
-    act(() => requestMessageJump("c1", "deleted-msg"));
+    act(() => requestMessageJump(C1, "deleted-msg"));
     await settle();
     expect(jumpProp() ?? null).toBeNull();
     expect(toastMock).toHaveBeenCalled();

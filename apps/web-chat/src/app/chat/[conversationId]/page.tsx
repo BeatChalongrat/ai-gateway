@@ -14,6 +14,7 @@ import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
 import { MessageQueue } from "@/components/chat/MessageQueue";
 import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
+import { ConversationNotFound } from "@/components/chat/ConversationNotFound";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { FilePreviewPane } from "@/components/chat/FilePreviewModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
@@ -25,6 +26,7 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside } from "@/lib/i18n";
 import { useIsStreaming } from "@/hooks/useStream";
 import { ApiError, api } from "@/lib/api";
+import { isConversationId } from "@/lib/conversationId";
 import { consumeQueryAttach, consumeQueryPrefill } from "@/lib/deepLinkParams";
 import { clearMessageJump, jumpTargetFromHash, requestMessageJump, useMessageJumpStore } from "@/lib/messageJump";
 import { gateImagesForVision } from "@/lib/visionGate";
@@ -35,8 +37,12 @@ import { useSidePaneStore } from "@/stores/sidePaneStore";
 export default function ConversationPage() {
   const params = useParams();
   const router = useRouter();
-  const convId =
+  const rawId =
     typeof params?.conversationId === "string" ? params.conversationId : null;
+  // FIX132 F17 — only a real conversation id is loaded; anything else
+  // ("/chat/undefined", a typo) is answered by ConversationNotFound below.
+  const badId = rawId !== null && !isConversationId(rawId);
+  const convId = badId ? null : rawId;
 
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) =>
@@ -169,14 +175,6 @@ export default function ConversationPage() {
     }
   }, [activeId, convId, router]);
 
-  if (!convId) {
-    router.replace("/chat");
-    return null;
-  }
-  // Skeleton renders ONLY when the fetch has not yet completed.
-  // Once messagesLoaded[convId] flips to true the page falls through
-  // to the empty-vs-thread branch below — even if the load failed,
-  // because the errorBanner already surfaces the failure.
   // FIX127 D4 / FIX132 F12 — a message deep link (/chat/<id>#msg-<messageId>),
   // a search hit and "go to the first message" all open the chat AT that
   // message: load down to it (one `through=` request, not 50 rows per
@@ -211,6 +209,19 @@ export default function ConversationPage() {
   // FIX127 D4 — regenerated answers are branches (see the thread prop below).
   // Before the early return: a hook.
   const visibleMessages = useMemo(() => (messages ?? []).filter((m) => m.status !== "regenerated"), [messages]);
+
+  // Early returns only after every hook (FIX132 moved them here).
+  if (badId) {
+    return <ConversationNotFound onNewChat={() => router.push("/chat")} />;
+  }
+  if (!convId) {
+    router.replace("/chat");
+    return null;
+  }
+  // Skeleton renders ONLY when the fetch has not yet completed.
+  // Once messagesLoaded[convId] flips to true the page falls through
+  // to the empty-vs-thread branch below — even if the load failed,
+  // because the errorBanner already surfaces the failure.
   if (!messagesLoaded || messages === undefined) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">

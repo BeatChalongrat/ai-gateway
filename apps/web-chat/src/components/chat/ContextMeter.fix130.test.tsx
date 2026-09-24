@@ -23,9 +23,10 @@ vi.mock("@/lib/api", () => ({ api: mockApi, ApiError: class extends Error {} }))
 vi.mock("@/hooks/useHostedMode", () => ({ useHostedMode: () => false }));
 vi.mock("@/lib/hostApi", () => ({ hostApi: { contextInfo: vi.fn(), compactContext: vi.fn() } }));
 vi.mock("next/navigation", () => ({
-  useParams: () => ({ conversationId: "c1" }),
+  // FIX132 F17 — the page only loads a real conversation id (a UUID).
+  useParams: () => ({ conversationId: "0c1c1c1c-0000-4000-8000-000000000001" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/chat/c1",
+  usePathname: () => "/chat/0c1c1c1c-0000-4000-8000-000000000001",
   useSearchParams: () => new URLSearchParams(),
 }));
 // The page's heavy children are stubbed; ContextMeter is the real one.
@@ -69,7 +70,7 @@ beforeEach(() => {
     { id: "u1", role: "user", status: "completed", content: "q", created_at: "2026-09-23T00:00:00Z" },
     { id: "a1", role: "assistant", status: "completed", content: "a", created_at: "2026-09-23T00:00:01Z" },
   ] as Message[];
-  useChatStore.setState({ ...initial, messages: { c1: msgs }, messagesLoaded: { c1: true }, contextBudgetByConv: { c1: trimming } }, true);
+  useChatStore.setState({ ...initial, messages: { "0c1c1c1c-0000-4000-8000-000000000001": msgs }, messagesLoaded: { "0c1c1c1c-0000-4000-8000-000000000001": true }, contextBudgetByConv: { "0c1c1c1c-0000-4000-8000-000000000001": trimming } }, true);
   mockApi.getContextInfo.mockResolvedValue(trimming);
   mockApi.listMessages.mockResolvedValue({ messages: msgs, has_more: false });
 });
@@ -80,7 +81,7 @@ afterEach(() => {
 
 describe("FIX130 C3.5 — the phone chip", () => {
   it("says how many messages are sent, opens the details on tap, and does not fetch again", async () => {
-    render(<ContextMeter conversationId="c1" variant="compact" passive />);
+    render(<ContextMeter conversationId="0c1c1c1c-0000-4000-8000-000000000001" variant="compact" passive />);
     await act(tick);
     const chip = screen.getByTestId("context-meter-compact");
     expect(chip).toHaveTextContent(fill(th["context.chip.sent"], { sent: "8", total: "40" }));
@@ -93,7 +94,7 @@ describe("FIX130 C3.5 — the phone chip", () => {
 
 describe("FIX130 C3.5 — the desktop row", () => {
   it("carries the count and is itself clickable", async () => {
-    render(<ContextMeter conversationId="c1" />);
+    render(<ContextMeter conversationId="0c1c1c1c-0000-4000-8000-000000000001" />);
     await act(tick);
     expect(screen.getByRole("status")).toHaveTextContent("ส่งให้ผู้ช่วย 8 จาก 40 ข้อความ");
     fireEvent.click(screen.getByTestId("context-meter-label"));
