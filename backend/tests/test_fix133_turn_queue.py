@@ -67,6 +67,12 @@ def test_gunicorn_config_reads_workers_from_the_environment(monkeypatch):
     """WORKERS in .env wins; GUNICORN_WORKERS still works; empty = formula."""
     src = open(os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py"), encoding="utf-8").read()
     monkeypatch.setenv("SRAN_RUNTIME_DIR", "/tmp/sran-backend-test-fix133")
+    # The config writes these two straight into os.environ (the master sets them
+    # before forking); registering them with monkeypatch first means they are
+    # restored after this test instead of leaking a non-existent multiprocess
+    # directory into tests/unit/test_gen_metrics.py (seen in the FIX133 lane).
+    monkeypatch.setenv("PROMETHEUS_MULTIPROC_DIR", "")
+    monkeypatch.setenv("SRAN_WORKER_STATE_DIR", "")
 
     def load() -> int:
         ns: dict = {"__file__": os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py")}

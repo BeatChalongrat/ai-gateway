@@ -128,6 +128,9 @@ Thumbs.db
 # electron-builder OUTPUT, apps/desktop/release/, stays ignored above.)
 !apps/desktop/build/
 !apps/desktop/build/**
+# FIX133 — the local CA the desktop pins is staged here by scripts/dist.js from
+# infra/caddy/certs (per machine, never committed).
+apps/desktop/build/trusted-ca.pem
 # FIX20 — but the runtime config scripts/dist.js STAGES there for
 # electron-builder (a copy of whatever config the build was pointed at — for
 # a server build, a file that lives outside the repo) is a build artefact.
