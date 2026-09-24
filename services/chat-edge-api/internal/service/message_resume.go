@@ -13,10 +13,12 @@ package service
 //  4. Broker miss + row still "streaming":
 //     a. younger than resumeOrphanGrace → ErrResumeUnavailable (the
 //        generation may not have registered yet; client retries).
-//     b. older → the generation was orphaned (process restart mid-
-//        stream). Settle the row to status=error (guarded UPDATE) and
-//        replay what was persisted with an interrupted terminal so
-//        clients stop waiting forever.
+//     b. a live run lease (FIX131) → ErrResumeUnavailable: some process
+//        runs it; it is not orphaned.
+//     c. older and unleased → the generation was orphaned (process
+//        restart mid-stream). Settle the row to status=error (guarded
+//        UPDATE) and replay what was persisted with an interrupted
+//        terminal so clients stop waiting forever.
 
 import (
 	"context"
@@ -147,6 +149,11 @@ func (s *MessageService) ResumeAttachFrom(
 			if ferr != nil {
 				return nil, ErrResumeTooOld
 			}
+			if fa.Interrupted && (msg.Status == "streaming" || msg.Status == "pending") && s.leasedElsewhere(ctx, msgID) {
+				// FIX131 E1 — another process holds the run's lease: it is
+				// running, not orphaned. Not ours to settle; retry.
+				return nil, ErrResumeUnavailable
+			}
 			if fa.Interrupted && (msg.Status == "streaming" || msg.Status == "pending") {
 				// Settle the row too, so the conversation list and a later
 				// reload agree with what the stream just said.
@@ -167,6 +174,13 @@ func (s *MessageService) ResumeAttachFrom(
 	switch msg.Status {
 	case "streaming", "pending":
 		if time.Since(msg.CreatedAt) < resumeOrphanGrace {
+			return nil, ErrResumeUnavailable
+		}
+		// FIX131 E1 — age alone does not make a row orphaned: a parked
+		// question's row is old the moment it streams again, and another
+		// instance may be running this turn. A live lease (or a lease check
+		// that failed) means "not attachable here yet", never "dead".
+		if s.leasedElsewhere(ctx, msgID) {
 			return nil, ErrResumeUnavailable
 		}
 		// Orphaned by a restart — settle the row so clients stop

@@ -497,3 +497,50 @@ imported item as `error_attempts`.
   item at all.
 * A client that receives `rejected` (or any non-2xx) must tell the person
   the turn was not saved; a log line is not telling anyone.
+
+## 13. A turn nobody will finish, and a restart that loses none (FIX131)
+
+### 13.1 Interrupted is an ending
+
+A turn whose process went away before it ended (a crash, a kill, a restart
+that ran out of drain time) is written down as **interrupted**: status
+`error`, `terminal_cause` `interrupted`, `error_code`
+`GENERATION_INTERRUPTED`; the text it had streamed stays on the row. The
+pages render it as "this answer did not finish" with Retry (regenerate) —
+live and after a reload. It is never left `streaming`.
+
+Who writes it:
+
+* **the shutdown drain** (13.2) for the turns it had to cut; the live stream
+  ends on `error` `GENERATION_INTERRUPTED` (`cause: interrupted`,
+  `retryable: true`);
+* **the interrupted-turn sweep** (chat-edge, at start-up and every
+  `INTERRUPTED_TURN_SWEEP_INTERVAL`, default 60 s) for any other
+  `streaming` row older than `INTERRUPTED_TURN_MIN_AGE` (2 min);
+* **the resume path** for a row it is asked about and finds orphaned.
+
+**Ownership.** Every streaming row holds a **run lease** (Redis
+`chat:runlease:<message id>` = the instance id, TTL `RUN_LEASE_TTL` 45 s,
+renewed every 15 s with `SET … EX`) while a process runs it. The sweep
+settles a row only when no lease exists on two looks at least 30 s apart
+(so a Redis that lost its keys does not close live turns before their
+owners renew), and never when the lease check fails. The resume path
+answers `409 RESUME_UNAVAILABLE` for a row another process leases.
+
+### 13.2 The restart
+
+On SIGTERM chat-edge keeps its listener open and:
+
+1. refuses every **new** turn (send, regenerate, edit, a question's answer)
+   with **`503 SERVER_DRAINING`** + `Retry-After` before anything is written
+   (Retry-After is exposed to the cross-origin page);
+2. lets the turns in flight finish, up to `CHAT_EDGE_DRAIN_TIMEOUT` (60 s);
+3. cuts the rest as interrupted (13.1), settles any row whose ending was not
+   written within `CHAT_EDGE_DRAIN_GRACE` (10 s), releases every lease;
+4. closes the HTTP server and exits. `stop_grace_period` is 90 s.
+
+The web page re-sends a refused request by itself — the same `X-Request-Id`
+on a send, so a copy that did land is replayed (12.1), never run twice —
+backing off 2 s → 10 s for up to 120 s, and treats a refused connection
+right after a `SERVER_DRAINING` as the same restart. When the wait runs out
+nothing was sent: the rows go and the text is back in the composer.

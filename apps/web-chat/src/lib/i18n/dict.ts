@@ -967,8 +967,15 @@ export const en = {
   "error.networkEdit": "Network error during edit.",
   "error.resumeLost":
     "Connection lost and the reply could not be reattached. Refresh to see what was saved.",
-  "error.generationInterrupted":
-    "The reply was interrupted before it finished.",
+  // FIX131 — the turn's process went away before it finished (a restart, a
+  // crash). Said plainly; what was written stays above it, and the card
+  // offers Retry.
+  "error.generationInterrupted": "This answer didn't finish.",
+  // FIX131 E2 — chat-edge is restarting and took no new turn (503
+  // SERVER_DRAINING). The page re-sends by itself first; this is what is
+  // left when the restart outlasts that.
+  "error.serverDraining": "The chat service is restarting — send your message again in a few seconds.",
+  "msg.serverRestarting": "The chat service is restarting — your message goes out as soon as it's back…",
   "error.tooManyMessages": "Too many messages — slow down for a minute.",
   "error.conversationBusy": "This chat is already answering in another tab — wait for it to finish, then send again",
   "error.tooManyFiles": "At most {max} files per message — this one has {n}. Remove some and send again",
@@ -2710,7 +2717,9 @@ const th: Record<DictKey, string> = {
   "error.networkEdit": "เครือข่ายขัดข้องระหว่างแก้ไขข้อความ",
   "error.resumeLost":
     "การเชื่อมต่อหลุดและไม่สามารถกลับเข้าสตรีมคำตอบได้ รีเฟรชหน้าเพื่อดูส่วนที่บันทึกไว้",
-  "error.generationInterrupted": "คำตอบถูกขัดจังหวะก่อนจะเสร็จสมบูรณ์",
+  "error.generationInterrupted": "คำตอบนี้ไม่เสร็จ",
+  "error.serverDraining": "ระบบแชทกำลังเริ่มใหม่ — ลองส่งข้อความอีกครั้งในอีกสักครู่",
+  "msg.serverRestarting": "ระบบแชทกำลังเริ่มใหม่ — จะส่งข้อความให้ทันทีที่ระบบพร้อม…",
   "error.tooManyMessages": "ส่งข้อความถี่เกินไป กรุณารอสักครู่",
   "error.conversationBusy": "แชทนี้กำลังตอบอยู่ในอีกหน้าต่าง — รอให้ตอบเสร็จก่อนแล้วส่งใหม่",
   "error.tooManyFiles": "ส่งได้สูงสุด {max} ไฟล์ต่อข้อความ — ข้อความนี้มี {n} ไฟล์ นำไฟล์ออกบางส่วนแล้วส่งใหม่",

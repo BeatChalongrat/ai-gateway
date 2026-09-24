@@ -234,6 +234,23 @@ type Config struct {
 	UnattachedFileSweepMode     string        `env:"UNATTACHED_FILE_SWEEP_MODE" envDefault:"dry_run"`
 	UnattachedFileSweepInterval time.Duration `env:"UNATTACHED_FILE_SWEEP_INTERVAL" envDefault:"1h"`
 
+	// FIX131 E1 — turns nobody will finish. Every streaming row holds a run
+	// lease in Redis while a process runs it (RUN_LEASE_TTL, renewed every
+	// TTL/3). The sweep runs at boot and every INTERRUPTED_TURN_SWEEP_INTERVAL
+	// and settles, as interrupted, a row older than INTERRUPTED_TURN_MIN_AGE
+	// that no process holds a lease for (seen lease-less twice).
+	RunLeaseTTL                  time.Duration `env:"RUN_LEASE_TTL" envDefault:"45s"`
+	InterruptedTurnSweepInterval time.Duration `env:"INTERRUPTED_TURN_SWEEP_INTERVAL" envDefault:"60s"`
+	InterruptedTurnMinAge        time.Duration `env:"INTERRUPTED_TURN_MIN_AGE" envDefault:"2m"`
+
+	// FIX131 E2 — graceful shutdown. On SIGTERM new turns get 503
+	// SERVER_DRAINING; the turns in flight get CHAT_EDGE_DRAIN_TIMEOUT to
+	// finish; the rest are ended as interrupted, with CHAT_EDGE_DRAIN_GRACE
+	// for their endings to be written. The container's stop_grace_period
+	// must be longer than both together (docker-compose.webchat.yml: 90s).
+	DrainTimeout time.Duration `env:"CHAT_EDGE_DRAIN_TIMEOUT" envDefault:"60s"`
+	DrainGrace   time.Duration `env:"CHAT_EDGE_DRAIN_GRACE" envDefault:"10s"`
+
 	// Phase 13 Part A — hardened code-interpreter sandbox. When
 	// SANDBOX_ENABLED=1 the plan-executor (excel) + doc generators run
 	// inside a locked-down `docker run` of SANDBOX_IMAGE instead of

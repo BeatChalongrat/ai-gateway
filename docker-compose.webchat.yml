@@ -36,9 +36,24 @@ services:
         CREATED: ${CREATED:-unknown}
     container_name: ai-gateway-chat-edge-api
     restart: unless-stopped
+    # FIX131 E2 — a stop (every deploy, every autoheal restart) drains: new
+    # turns get 503 SERVER_DRAINING (the page re-sends by itself), the turns
+    # in flight get CHAT_EDGE_DRAIN_TIMEOUT to finish, the rest end as
+    # interrupted (text kept) within CHAT_EDGE_DRAIN_GRACE, then the process
+    # exits. Docker's default 10 s would SIGKILL in the middle of that; this
+    # must stay above drain + grace + ~15 s (HTTP close, ledger flush).
+    stop_grace_period: 90s
     ports:
       - "127.0.0.1:4000:4000"
     environment:
+      # FIX131 E2 — see stop_grace_period above.
+      - CHAT_EDGE_DRAIN_TIMEOUT=${CHAT_EDGE_DRAIN_TIMEOUT:-60s}
+      - CHAT_EDGE_DRAIN_GRACE=${CHAT_EDGE_DRAIN_GRACE:-10s}
+      # FIX131 E1 — streaming rows no process owns (a crash, a kill) are
+      # settled as interrupted by a sweep at boot and every interval; a row
+      # is only touched when no run lease (redis-webchat) exists for it.
+      - INTERRUPTED_TURN_SWEEP_INTERVAL=${INTERRUPTED_TURN_SWEEP_INTERVAL:-60s}
+      - INTERRUPTED_TURN_MIN_AGE=${INTERRUPTED_TURN_MIN_AGE:-2m}
       # The three WEBCHAT_* secrets come from .env (gitignored). The defaults
       # are the published dev values: fine for a fresh clone whose ports are
       # loopback-only, never for a machine that holds real conversations.

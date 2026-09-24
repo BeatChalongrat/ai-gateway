@@ -293,8 +293,13 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 	}
 
 	// The row streams again: UpdateContent has no status guard, but the
-	// orphan sweep and the resume path both key on "streaming".
+	// interrupted-turn sweep and the resume path both key on "streaming".
+	// FIX131 E1 — the lease is taken BEFORE the flip: the row was created
+	// when the question was asked, so its age says nothing and only the
+	// lease tells the sweep that a process runs it again.
+	leaseRel := s.leaseRun(q.MessageID)
 	if err := s.messages.UpdateStatus(ctx, q.MessageID, "streaming"); err != nil {
+		leaseRel()
 		return nil, err
 	}
 	streamCtx, cancel := context.WithCancel(context.Background())
@@ -305,6 +310,7 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 		// Nothing invented: the turn simply could not continue. The row
 		// says so.
 		_ = s.messages.UpdateContent(ctx, q.MessageID, state.ContentPrefix, "error", nil, nil)
+		leaseRel()
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -391,5 +397,7 @@ func (s *MessageService) ResumeQuestion(ctx context.Context, in AnswerQuestionIn
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
 		release:        release,
+		leaseRelease:   leaseRel,          // FIX131 E1
+		interrupted:    reg.isInterrupted, // FIX131 E2
 	}, nil
 }

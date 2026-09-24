@@ -145,6 +145,14 @@ interface ChatState {
    *  what a composer that mounts later reads. */
   returnedDrafts: Record<string, { id: string; text: string } | undefined>;
   consumeReturnedDraft: (convId: string, id: string) => void;
+  /** FIX131 E3 (desktop shell) — a consent / question card the host sent for
+   *  a conversation whose streaming row the page has not built yet. On a
+   *  reopened chat the host replays the run and re-posts the pending card in
+   *  the same breath; the resume probe builds the row ~700 ms later. The
+   *  card waits here and is attached the moment the row exists — before, it
+   *  was dropped (no row) or pinned to the previous, finished answer, and the
+   *  page showed only Stop while the host waited for an answer. */
+  parkedHostPrompts: Record<string, { consent?: PendingConsent; question?: PendingQuestion } | undefined>;
   /** FIX124 R2 — "load the answer": read the conversation from the server
    *  (the row that stopped waiting is replaced by what really happened) and
    *  reattach if the turn is still being written. */
@@ -417,6 +425,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   sendsOpening: {},
   returnedDrafts: {},
+  parkedHostPrompts: {},
   async reloadAnswer(convId) {
     if (get().streamingAssistantId[convId]) return;
     if (!(await adoptServerRows(set, convId))) {
@@ -1327,6 +1336,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // had and says it was cut short — before the new rows are added.
     const inflight = get().streamingAssistantId[convId];
     if (inflight) finalizeMessage(set, get, convId, inflight, "cancelled");
+    // FIX131 E3 — the host closes the previous turn's cards when a new turn
+    // starts; a card still parked for it is stale.
+    if (get().parkedHostPrompts[convId]) set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined } }));
 
     // FIX124 — a chat is named after the first turn that is ANSWERED, which
     // need not be the first turn: asking only after turn one left a chat whose
@@ -1445,17 +1457,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) =>
-        api.openMessageStream(
-          convId,
-          trimmed,
-          signal,
-          fileIds,
-          imageMode,
-          videoMode,
-          convModelId, // FIX9 Part B: carry the selected model into the hosted turn
-          requestId,
-        ),
+      // FIX131 E2 — a chat-edge restart answers 503 SERVER_DRAINING: the
+      // same request goes out again by itself (same requestId: the server's
+      // idempotency key) once the new process is up; the typed text stays in
+      // the outbox the whole time.
+      const res = await openThroughRestart(
+        () =>
+          openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) =>
+            api.openMessageStream(
+              convId,
+              trimmed,
+              signal,
+              fileIds,
+              imageMode,
+              videoMode,
+              convModelId, // FIX9 Part B: carry the selected model into the hosted turn
+              requestId,
+            ),
+          ),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        true,
       );
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } })); // the response is back: `streaming` gates the composer from here
       if (!res.ok) {
@@ -1602,7 +1624,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delete aborts[convId];
       const sids = { ...s.streamingAssistantId };
       delete sids[convId];
-      return { abortControllers: aborts, streamingAssistantId: sids };
+      // FIX131 E3 — the host denies a pending card on cancel: nothing parked
+      // for this conversation is answerable any more.
+      return { abortControllers: aborts, streamingAssistantId: sids, parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined } };
     });
     if (ctrl) ctrl.abort();
     try {
@@ -1811,14 +1835,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addPendingConsent(convId, consent) {
-    const id = get().streamingAssistantId[convId];
+    // Attach to the row of the turn that is running. FIX131 E3 — when the page
+    // has no such row yet (a reopened chat: the host re-posts the card in the
+    // same breath as the replay, before the resume probe builds the row), the
+    // card is parked and attached as soon as the row exists — never dropped,
+    // never pinned to an earlier, finished answer.
+    const targetId = hostPromptTarget(get, convId);
+    if (!targetId) {
+      set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: { ...s.parkedHostPrompts[convId], consent } } }));
+      return;
+    }
     set((s) => {
       const list = s.messages[convId] ?? [];
-      // Attach to the streaming assistant row; if none is known yet, attach to
-      // the last assistant row (a replayed consent after reload).
-      const targetId =
-        id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
-      if (!targetId) return {};
       return {
         messages: {
           ...s.messages,
@@ -1831,11 +1859,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addPendingQuestion(convId, question) {
-    const id = get().streamingAssistantId[convId];
+    // Same rule as the consent card (FIX131 E3).
+    const targetId = hostPromptTarget(get, convId);
+    if (!targetId) {
+      set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: { ...s.parkedHostPrompts[convId], question } } }));
+      return;
+    }
     set((s) => {
       const list = s.messages[convId] ?? [];
-      const targetId = id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
-      if (!targetId) return {};
       return {
         messages: {
           ...s.messages,
@@ -1870,7 +1901,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     bridge.respondConsent(promptId, decision, scope);
     set((s) => {
       const list = s.messages[convId] ?? [];
+      const parked = s.parkedHostPrompts[convId];
       return {
+        parkedHostPrompts:
+          parked?.consent?.promptId === promptId
+            ? { ...s.parkedHostPrompts, [convId]: parked.question ? { question: parked.question } : undefined }
+            : s.parkedHostPrompts,
         messages: {
           ...s.messages,
           [convId]: list.map((m) =>
@@ -1938,6 +1974,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
         abortControllers: { ...s.abortControllers, [convId]: ctrl },
       }));
+      // FIX131 E3 — the host re-posted the run's pending consent / question
+      // card together with the replay, before this row existed: it waited in
+      // parkedHostPrompts and goes on the row now.
+      attachParkedHostPrompts(set, get, convId);
       try {
         await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
       } catch (err) {
@@ -2012,7 +2052,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openRegenerateStream(convId, messageId, signal));
+      // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+      const res = await openThroughRestart(
+        () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openRegenerateStream(convId, messageId, signal)),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        false,
+      );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2097,7 +2143,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openEditStream(convId, messageId, trimmed, signal));
+      // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+      const res = await openThroughRestart(
+        () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openEditStream(convId, messageId, trimmed, signal)),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        false,
+      );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2430,6 +2482,102 @@ async function openWithin(ms: number, parent: AbortSignal, open: (signal: AbortS
   }
 }
 
+/** FIX131 E2 — how a turn waits out a chat-edge restart. The server drains
+ *  for up to 60 s (CHAT_EDGE_DRAIN_TIMEOUT) and answers new turns 503
+ *  SERVER_DRAINING meanwhile; then it is down for the few seconds it takes
+ *  to start again. The page sends the same request again (same X-Request-Id
+ *  on a send, so a copy that did land is replayed, never run twice), backing
+ *  off from `firstMs` to `maxMs`, for at most `budgetMs`. Mutable for tests. */
+export const DRAIN_RETRY = { firstMs: 2_000, maxMs: 10_000, budgetMs: 120_000 };
+
+/** The wait (ms) a 503 SERVER_DRAINING asks for, or null for any other
+ *  response. The body is read from a clone: the caller still owns `res`. */
+async function drainingWait(res: Response): Promise<number | null> {
+  if (res.status !== 503) return null;
+  let code: string | undefined;
+  try {
+    const env = (await res.clone().json()) as { error?: { code?: string } };
+    code = env?.error?.code;
+  } catch {
+    return null;
+  }
+  if (code !== "SERVER_DRAINING") return null;
+  const secs = Number(res.headers.get("Retry-After"));
+  return Number.isFinite(secs) && secs > 0 ? secs * 1000 : DRAIN_RETRY.firstMs;
+}
+
+/** FIX131 E2 — opens a turn's stream through a chat-edge restart. While the
+ *  server answers 503 SERVER_DRAINING (nothing was written), or cannot be
+ *  reached right after having said so (the old process exited, the new one
+ *  is not listening yet — only when `retryUnreachable`, i.e. the request is
+ *  idempotent), the row says the service is restarting and the request is
+ *  sent again. Any other answer is returned as is; so is the last 503 when
+ *  the budget runs out or the person presses Stop during the wait, so the
+ *  caller's refusal path hands the text back. */
+async function openThroughRestart(
+  open: () => Promise<Response>,
+  signal: AbortSignal,
+  onWaiting: (waiting: boolean) => void,
+  retryUnreachable: boolean,
+): Promise<Response> {
+  if (HOSTED_MODE) return open(); // the desktop host runs the turn, not chat-edge
+  const started = Date.now();
+  let backoff = DRAIN_RETRY.firstMs;
+  let last: Response | null = null;
+  const stopWaiting = () => {
+    if (last) onWaiting(false);
+  };
+  for (;;) {
+    let res: Response;
+    try {
+      res = await open();
+    } catch (err) {
+      const unreachable = err instanceof TypeError && !signal.aborted;
+      if (!last || !retryUnreachable || !unreachable || Date.now() - started >= DRAIN_RETRY.budgetMs) {
+        stopWaiting();
+        throw err;
+      }
+      try {
+        await abortableSleep(backoff, signal);
+      } catch {
+        stopWaiting();
+        return last; // Stop while waiting: the server never took it
+      }
+      backoff = Math.min(backoff * 2, DRAIN_RETRY.maxMs);
+      continue;
+    }
+    const wait = await drainingWait(res);
+    if (wait === null || Date.now() - started >= DRAIN_RETRY.budgetMs) {
+      stopWaiting();
+      return res;
+    }
+    last = res;
+    onWaiting(true);
+    try {
+      await abortableSleep(Math.min(Math.max(wait, backoff), DRAIN_RETRY.maxMs), signal);
+    } catch {
+      stopWaiting();
+      return res;
+    }
+    backoff = Math.min(backoff * 2, DRAIN_RETRY.maxMs);
+  }
+}
+
+/** Marks (or clears) a row as waiting out a restart. */
+function setRestartWait(set: Set, convId: string, rowId: () => string, on: boolean): void {
+  set((s) => {
+    const id = rowId();
+    const list = s.messages[convId] ?? [];
+    if (!list.some((m) => m.id === id && Boolean(m.restart_wait) !== on)) return {};
+    return {
+      messages: {
+        ...s.messages,
+        [convId]: list.map((m) => (m.id === id ? { ...m, restart_wait: on || undefined } : m)),
+      },
+    };
+  });
+}
+
 /** FIX130 C1 — the connection under a turn dropped (a network error, or
  *  parseSSE's StreamSilenceError), as opposed to the person's Stop. */
 function isConnectionDrop(err: unknown): boolean {
@@ -2502,7 +2650,13 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
       return { abortControllers: aborts, streamingAssistantId: sids };
     });
   try {
-    const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openQuestionAnswerStream(convId, answer.promptId, answer, signal));
+    // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+    const res = await openThroughRestart(
+      () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openQuestionAnswerStream(convId, answer.promptId, answer, signal)),
+      ctrl.signal,
+      (on) => setRestartWait(set, convId, () => messageId, on),
+      false,
+    );
     if (res.status === 409 || res.status === 410) {
       releaseSlot();
       await get().loadMessages(convId);
@@ -2539,16 +2693,66 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
  *  The row keeps rendering under the id it was born with (``client_key``):
  *  a React key that changed with the id unmounted the bubble and mounted
  *  a new one mid-send — the flicker the user saw on every message. */
+/** FIX131 E3 — the row a host consent / question card belongs on: the
+ *  conversation's streaming row, or else its last assistant row when that
+ *  row is still streaming. Undefined when the page has no running turn for
+ *  the conversation yet (the card is then parked). */
+function hostPromptTarget(get: Get, convId: string): string | undefined {
+  const list = get().messages[convId] ?? [];
+  const sid = get().streamingAssistantId[convId];
+  if (sid && list.some((m) => m.id === sid)) return sid;
+  const last = [...list].reverse().find((m) => m.role === "assistant");
+  if (last && (last.isStreaming || last.status === "streaming")) return last.id;
+  return undefined;
+}
+
+/** FIX131 E3 — puts a parked host card on the conversation's running row,
+ *  once that row exists. */
+function attachParkedHostPrompts(set: Set, get: Get, convId: string): void {
+  const parked = get().parkedHostPrompts[convId];
+  if (!parked || (!parked.consent && !parked.question)) return;
+  const targetId = hostPromptTarget(get, convId);
+  if (!targetId) return;
+  set((s) => ({
+    parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined },
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === targetId
+          ? {
+              ...m,
+              ...(parked.consent ? { pending_consent: parked.consent } : {}),
+              ...(parked.question ? { pending_question: parked.question } : {}),
+            }
+          : m,
+      ),
+    },
+  }));
+}
+
 function swapMessageId(set: Set, convId: string, fromId: string | undefined, toId: string | undefined) {
   if (!fromId || !toId || fromId === toId) return;
   set((s) => {
     const list = s.messages[convId] ?? [];
-    if (!list.some((m) => m.id === fromId)) return {};
+    const from = list.find((m) => m.id === fromId);
+    if (!from) return {};
     // FIX127 C2 — the persisted id is already in the list (the row came
     // from the server transcript and a replay painted it again): one row,
     // the server's — it carries the files a frame-built row never has.
+    // FIX131 E3 — an open consent / question card on the dropped copy moves
+    // to the kept row: the host is still waiting for its answer.
     if (list.some((m) => m.id === toId)) {
-      return { messages: { ...s.messages, [convId]: list.filter((m) => m.id !== fromId) } };
+      const cards = {
+        ...(from.pending_consent ? { pending_consent: from.pending_consent } : {}),
+        ...(from.pending_question ? { pending_question: from.pending_question } : {}),
+      };
+      const kept = list.filter((m) => m.id !== fromId);
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: Object.keys(cards).length > 0 ? kept.map((m) => (m.id === toId ? { ...m, ...cards } : m)) : kept,
+        },
+      };
     }
     return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? renamed(m, toId) : m)) } };
   });
@@ -3584,6 +3788,16 @@ async function handleStreamPreError(
     // notice says what to do.
     withdrawRefusedSend(set, convId, tempUserId, tempAsstId, sentText);
     get().setError(tooManyFilesNotice(msg));
+    return;
+  }
+  if (res.status === 503 && code === "SERVER_DRAINING" && tempUserId) {
+    // FIX131 E2 — chat-edge was still restarting when the page stopped
+    // waiting (the retry budget ran out, or the person pressed Stop during
+    // the wait). Nothing was sent: this send's rows go, the text is back in
+    // the composer (the outbox give-back ran before this), and a notice
+    // says to send again in a moment.
+    withdrawRefusedSend(set, convId, tempUserId, tempAsstId, sentText);
+    get().setError(tOutside("error.serverDraining"));
     return;
   }
   if (res.status === 409 && code === "CONVERSATION_BUSY" && tempUserId) {
