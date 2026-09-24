@@ -11,7 +11,7 @@
 // mismatch warning. We render the greeting as a generic placeholder
 // during SSR and swap it in on the client.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useT } from "@/lib/i18n";
@@ -33,14 +33,16 @@ interface ChipDef {
   // at render time so a locale switch updates the chip text
   // without forcing the parent to re-render.
   labelKey: DictKey;
-  promptKey: DictKey;
+  /** FIX132 F26 — whole example questions the chip offers (it used to
+   *  insert a stub such as "ช่วยร่าง "). */
+  examples: [DictKey, DictKey, DictKey];
   icon: React.ReactNode;
 }
 
 const CHIPS: ChipDef[] = [
   {
     labelKey: "empty.chip.write",
-    promptKey: "empty.chip.write.prompt",
+    examples: ["empty.example.write.1", "empty.example.write.2", "empty.example.write.3"],
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -55,7 +57,7 @@ const CHIPS: ChipDef[] = [
   },
   {
     labelKey: "empty.chip.learn",
-    promptKey: "empty.chip.learn.prompt",
+    examples: ["empty.example.learn.1", "empty.example.learn.2", "empty.example.learn.3"],
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -70,7 +72,7 @@ const CHIPS: ChipDef[] = [
   },
   {
     labelKey: "empty.chip.code",
-    promptKey: "empty.chip.code.prompt",
+    examples: ["empty.example.code.1", "empty.example.code.2", "empty.example.code.3"],
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -85,7 +87,7 @@ const CHIPS: ChipDef[] = [
   },
   {
     labelKey: "empty.chip.analyze",
-    promptKey: "empty.chip.analyze.prompt",
+    examples: ["empty.example.analyze.1", "empty.example.analyze.2", "empty.example.analyze.3"],
     icon: (
       <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
         <path
@@ -123,6 +125,9 @@ function firstName(input: string | null | undefined): string {
 }
 
 export function EmptyState({ onPrompt, children }: Props) {
+  const [openChip, setOpenChip] = useState<DictKey | null>(null);
+  const examplesId = useId();
+  const openChipDef = CHIPS.find((c) => c.labelKey === openChip) ?? null;
   const { user } = useAuth();
   const t = useT();
   const name = firstName(user?.email ?? user?.user_id ?? null);
@@ -168,7 +173,11 @@ export function EmptyState({ onPrompt, children }: Props) {
             <button
               key={c.labelKey}
               type="button"
-              onClick={() => onPrompt(t(c.promptKey))}
+              // FIX132 F26 — opens the chip's examples (Claude / ChatGPT
+              // starters do the same); picking one fills the composer.
+              aria-expanded={openChip === c.labelKey}
+              aria-controls={openChip === c.labelKey ? examplesId : undefined}
+              onClick={() => setOpenChip((v) => (v === c.labelKey ? null : c.labelKey))}
               // FIX132 N7 — the ring shows at once (only transform and colours
               // animate, not the outline) and the chip keeps its pill shape.
               className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-[transform,color,background-color,border-color] hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary focus-visible:!rounded-full"
@@ -181,6 +190,24 @@ export function EmptyState({ onPrompt, children }: Props) {
             </button>
           ))}
         </div>
+        {openChipDef ? (
+          <ul id={examplesId} aria-label={t(openChipDef.labelKey)} className="mx-auto mt-3 flex max-w-xl flex-col gap-1 text-left">
+            {openChipDef.examples.map((key) => (
+              <li key={key}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPrompt(t(key));
+                    setOpenChip(null);
+                  }}
+                  className="focus-ring w-full rounded-lg px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-bg-surface hover:text-text-primary"
+                >
+                  {t(key)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </div>
   );
