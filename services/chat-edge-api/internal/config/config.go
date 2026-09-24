@@ -234,6 +234,26 @@ type Config struct {
 	UnattachedFileSweepMode     string        `env:"UNATTACHED_FILE_SWEEP_MODE" envDefault:"dry_run"`
 	UnattachedFileSweepInterval time.Duration `env:"UNATTACHED_FILE_SWEEP_INTERVAL" envDefault:"1h"`
 
+	// FIX132 C — the user owns their data.
+	//
+	// DELETED_DATA_PURGE_MODE is the ceiling for the nightly purge of what
+	// users deleted (chats; and whole accounts, which the backend asks for):
+	// on (default — the owner's decision of 2026-09-24), dry_run (count and
+	// audit, delete nothing) or off. A tenant's own flags
+	// (chat.tenant_retention_settings, migration 050) can only lower it.
+	//
+	// BACKUP_RETENTION_DAYS is how long the nightly backups keep both
+	// databases and the uploads; it deletes nothing here, it is what the
+	// Settings page tells the user ("backups roll off N days later").
+	//
+	// EXPORT_MAX_FILE_BYTES caps the uploaded + generated file bytes one
+	// "export all my data" ZIP carries; files past the cap are listed in the
+	// ZIP's README instead. EXPORT_MAX_CONVERSATIONS caps the chats.
+	DeletedDataPurgeMode   string `env:"DELETED_DATA_PURGE_MODE" envDefault:"on"`
+	BackupRetentionDays    int    `env:"BACKUP_RETENTION_DAYS" envDefault:"14"`
+	ExportMaxFileBytes     int64  `env:"EXPORT_MAX_FILE_BYTES" envDefault:"524288000"` // 500 MiB
+	ExportMaxConversations int    `env:"EXPORT_MAX_CONVERSATIONS" envDefault:"5000"`
+
 	// FIX131 E1 — turns nobody will finish. Every streaming row holds a run
 	// lease in Redis while a process runs it (RUN_LEASE_TTL, renewed every
 	// TTL/3). The sweep runs at boot and every INTERRUPTED_TURN_SWEEP_INTERVAL

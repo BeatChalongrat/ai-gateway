@@ -245,6 +245,32 @@ func (r *ConversationEraseRepo) ListDeletedPastPurgeWindow(
 	return r.listCandidates(ctx, q, tenantID, cutoff, limit)
 }
 
+// ListTenantsWithDeletedBefore — every tenant holding at least one
+// user-deleted conversation deleted before the cutoff. The deleted-data
+// purge (FIX132) runs for EVERY tenant, settings row or not, so its scan
+// target is the data itself rather than the settings table. Served by
+// the partial index idx_conversations_deleted_at (migration 050).
+func (r *ConversationEraseRepo) ListTenantsWithDeletedBefore(
+	ctx context.Context, cutoff time.Time,
+) ([]uuid.UUID, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT tenant_id FROM chat.conversations
+		WHERE is_deleted = true AND deleted_at < $1`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("list tenants with deleted conversations: %w", err)
+	}
+	defer rows.Close()
+	out := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan tenant: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (r *ConversationEraseRepo) listCandidates(
 	ctx context.Context, q string, tenantID uuid.UUID, cutoff time.Time, limit int,
 ) ([]EraseCandidate, error) {

@@ -37,25 +37,79 @@ type TenantRetentionSettings struct {
 	// deleted it. The user-visible removal is immediate; this is the
 	// back-end erasure window.
 	DeletedConversationPurgeDays int `json:"deleted_conversation_purge_days"`
-	// DryRun — when true (the default) the sweep only COUNTS what it
-	// would delete and writes a dry_run audit entry; nothing is
-	// removed. A human turns this off after reading the numbers.
+	// DryRun — when true (the default) the retention_expired rule only
+	// COUNTS what it would delete and writes a dry_run audit entry;
+	// nothing is removed. A human turns this off after reading the
+	// numbers. Since FIX132 it governs retention_expired only; the
+	// deleted-data purge has its own pair of flags below.
 	DryRun bool `json:"dry_run"`
+
+	// DeletedPurgeEnabled (FIX132, migration 050) — erase what the user
+	// deleted (chats, and whole accounts) DeletedConversationPurgeDays
+	// after they deleted it. Default TRUE for every tenant, row or no
+	// row: the owner decided the 30-day purge is on.
+	DeletedPurgeEnabled bool `json:"deleted_purge_enabled"`
+	// DeletedPurgeDryRun (FIX132) — count the deleted-data purge instead
+	// of running it. Default false.
+	DeletedPurgeDryRun bool `json:"deleted_purge_dry_run"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// DefaultTenantRetentionSettings is the no-row shape: retention off,
-// dry-run on, 30-day purge window for user-deleted conversations.
+// DefaultDeletedPurgeDays — how long after the user deletes a chat (or
+// their account) it is permanently removed, when nothing else is set.
+const DefaultDeletedPurgeDays = 30
+
+// DefaultTenantRetentionSettings is the no-row shape: inactive-transcript
+// retention off (dry-run on), and the deleted-data purge ON with a 30-day
+// window (FIX132).
 func DefaultTenantRetentionSettings(tenantID uuid.UUID) *TenantRetentionSettings {
 	return &TenantRetentionSettings{
 		TenantID:                     tenantID,
 		TranscriptRetentionEnabled:   false,
 		TranscriptRetentionDays:      nil,
-		DeletedConversationPurgeDays: 30,
+		DeletedConversationPurgeDays: DefaultDeletedPurgeDays,
 		DryRun:                       true,
+		DeletedPurgeEnabled:          true,
+		DeletedPurgeDryRun:           false,
 	}
+}
+
+// Deleted-data purge modes (FIX132). The env DELETED_DATA_PURGE_MODE sets
+// a ceiling for every tenant; a tenant's own flags can only lower it.
+const (
+	PurgeModeOn     = "on"
+	PurgeModeDryRun = "dry_run"
+	PurgeModeOff    = "off"
+)
+
+// NormalizePurgeMode maps an env value onto the closed vocabulary. An
+// unknown value becomes dry_run: it deletes nothing, yet still shows in
+// the audit what a live pass would have done — neither a silent delete
+// nor a silent off.
+func NormalizePurgeMode(v string) string {
+	switch v {
+	case "", PurgeModeOn, "true", "1", "yes":
+		return PurgeModeOn
+	case PurgeModeOff, "false", "0", "no", "disabled":
+		return PurgeModeOff
+	default:
+		return PurgeModeDryRun
+	}
+}
+
+// EffectiveDeletedPurgeMode — the stricter of the env ceiling and the
+// tenant's own flags: off beats dry_run beats on.
+func EffectiveDeletedPurgeMode(envMode string, s *TenantRetentionSettings) string {
+	env := NormalizePurgeMode(envMode)
+	if env == PurgeModeOff || s == nil || !s.DeletedPurgeEnabled {
+		return PurgeModeOff
+	}
+	if env == PurgeModeDryRun || s.DeletedPurgeDryRun {
+		return PurgeModeDryRun
+	}
+	return PurgeModeOn
 }
 
 // Deletion-audit action names. Closed vocabulary — the admin surface

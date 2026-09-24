@@ -66,6 +66,10 @@ func seedRetentionTenant(
 		TranscriptRetentionDays:      &days,
 		DeletedConversationPurgeDays: 30,
 		DryRun:                       dryRun,
+		// FIX132 — the deleted-data purge has its own switches; these
+		// tests drive both rules together, so "disabled" means both off.
+		DeletedPurgeEnabled: enabled,
+		DeletedPurgeDryRun:  dryRun,
 	}); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}

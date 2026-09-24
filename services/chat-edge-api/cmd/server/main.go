@@ -39,6 +39,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/db"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/router"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
@@ -329,6 +330,11 @@ func main() {
 	transcriptRetention := service.NewTranscriptRetentionService(
 		retentionSettingsRepo, eraseRepo, filesRepo, deletionAuditRepo, storageBackend,
 	)
+	// FIX132 C — the purge of what users deleted runs for every tenant;
+	// DELETED_DATA_PURGE_MODE (on | dry_run | off) is its ceiling.
+	transcriptRetention.SetDeletedPurgeMode(cfg.DeletedDataPurgeMode)
+	slog.Info("deleted data purge", "mode", transcriptRetention.DeletedPurgeMode(),
+		"default_days", model.DefaultDeletedPurgeDays)
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
 	// S1 — Personal Memory Core. Service is wired alongside prefs +
@@ -773,10 +779,11 @@ func main() {
 	}
 	startBackground(retentionEnforcer.StartBackground)
 
-	// Transcript retention sweep — 00:00 UTC daily, per-tenant opt-in,
-	// dry-run by default. Deletes NOTHING for a tenant until an admin
-	// enables it and then, after reading the dry-run numbers, turns
-	// dry_run off. No boot-time pass: the deletion hour is fixed.
+	// Transcript retention sweep — 00:00 UTC daily. FIX132: chats users
+	// deleted are erased 30 days later for every tenant (the tenant flags
+	// and DELETED_DATA_PURGE_MODE can hold it at dry_run or off); the
+	// inactive-transcript rule stays per-tenant opt-in, dry-run first.
+	// No boot-time pass: the deletion hour is fixed.
 	startBackground(transcriptRetention.StartBackground)
 
 	// FIX131 E1 — the lease renewal runs until AFTER the shutdown drain
