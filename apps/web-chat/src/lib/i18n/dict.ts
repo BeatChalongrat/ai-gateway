@@ -69,6 +69,7 @@ export const en = {
   "file.unreadable.scanned": "A scanned image with no readable text — upload a copy with text, or a sharper scan",
   "file.unreadable.damaged": "This file is damaged — save or export it again, then upload it",
   "input.attach": "Attach files",
+  "input.chipRow.aria": "Attached files",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "Attach files (this model can't read images)",
   "input.visionUnsupported": "This model can't read images — switch to {model} to attach them.",
@@ -1864,6 +1865,7 @@ const th: Record<DictKey, string> = {
   "file.unreadable.scanned": "เป็นภาพสแกนที่อ่านข้อความไม่ได้ — อัปโหลดไฟล์ที่มีข้อความ หรือสแกนให้คมชัดขึ้น",
   "file.unreadable.damaged": "ไฟล์เสียหาย เปิดไม่ได้ — บันทึกหรือส่งออกไฟล์ใหม่แล้วอัปโหลดอีกครั้ง",
   "input.attach": "แนบไฟล์",
+  "input.chipRow.aria": "ไฟล์ที่แนบ",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "แนบไฟล์ (โมเดลนี้อ่านรูปภาพไม่ได้)",
   "input.visionUnsupported": "โมเดลนี้อ่านรูปภาพไม่ได้ — เปลี่ยนไปใช้ {model} เพื่อแนบรูป",

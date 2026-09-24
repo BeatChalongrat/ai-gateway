@@ -1258,13 +1258,24 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Row 0: pending-file chips. Wraps to a second line rather
-              than scrolling horizontally — feels native to the pill.
-              The bucket is `conversationId ?? DRAFT_CONV_KEY` so a
-              landing-page user who picked a file before the conv
-              row was created still sees their chip immediately. */}
+          {/* Row 0: pending-file chips. The bucket is
+              `conversationId ?? DRAFT_CONV_KEY` so a landing-page user
+              who picked a file before the conv row was created still
+              sees their chip immediately.
+              FIX132 D3 — the row never grows without bound. On a phone
+              the 160-px cards stacked one per row: five of them made the
+              composer ~830 px tall in a 740-px window, the text box and
+              Send went below the screen and the credits pill landed on
+              the header. Below sm it is one row that scrolls sideways
+              (like ChatGPT/Claude); from sm up it wraps but stops at a
+              cap and scrolls inside. */}
           {pendingFiles.length > 0 ? (
-            <div className="flex flex-wrap gap-2 px-3 pt-3">
+            <div
+              role="group"
+              aria-label={t("input.chipRow.aria")}
+              data-testid="composer-chip-row"
+              className="flex flex-nowrap gap-2 overflow-x-auto px-3 pt-3 sm:max-h-[248px] sm:flex-wrap sm:overflow-y-auto sm:overflow-x-hidden"
+            >
               {pendingFiles.map((p) => (
                 <FilePreviewCard
                   key={p.id}
