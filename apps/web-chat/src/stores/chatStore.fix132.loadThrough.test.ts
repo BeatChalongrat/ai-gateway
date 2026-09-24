@@ -87,3 +87,15 @@ describe("FIX132 F12 — a content hit names the message", () => {
     expect(useChatStore.getState().conversationsSearchHits[0]).toMatchObject({ conversation_id: "c9", message_id: "m16" });
   });
 });
+
+describe("FIX132 F20 — a content hit's snippet is plain text", () => {
+  it("no **markdown** in the sidebar snippet", async () => {
+    mockApi.listConversationsSearch.mockResolvedValue({ conversations: [] });
+    mockApi.searchMessages.mockResolvedValue({
+      query: "q", scope: "all", total: 1,
+      results: [{ type: "message", conversation_id: "c9", conversation_title: "T", message_id: "m1", content: "**ศาลเจ้าฟูชิมิอินาริ** — เปิด 24 ชั่วโมง", date: "2026-09-01", relevance: "high" }],
+    });
+    await useChatStore.getState().searchConversations("ศาลเจ้า");
+    expect(useChatStore.getState().conversationsSearchHits[0].snippet).toBe("ศาลเจ้าฟูชิมิอินาริ — เปิด 24 ชั่วโมง");
+  });
+});

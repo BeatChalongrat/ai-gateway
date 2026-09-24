@@ -26,6 +26,7 @@ import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
 import { mergeMemorySaved } from "@/lib/memoryMarkers";
+import { snippetText } from "@/lib/snippetText";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE, StreamSilenceError } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
@@ -701,13 +702,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (titleIds.has(r.conversation_id) || seen.has(r.conversation_id))
           continue;
         seen.add(r.conversation_id);
-        const content = r.content.trim();
         hits.push({
           conversation_id: r.conversation_id,
           message_id: r.message_id,
           conversation_title: r.conversation_title?.trim() || "Untitled",
-          snippet:
-            content.length > 140 ? `${content.slice(0, 140)}…` : content,
+          // FIX132 F20 — plain text, not **raw markdown**.
+          snippet: snippetText(r.content, 140),
           date: r.date,
         });
       }
