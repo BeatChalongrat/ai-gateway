@@ -362,18 +362,19 @@ class TestHTTPExceptionPassthrough:
 
 
 class TestRegression:
-    @pytest.mark.quarantine(
-        reason=(
-            "environment: asserts /health status 'ok', which needs a live "
-            "Postgres/Redis/sidecars; the unit-lane container answers 503 by "
-            "design. Belongs in the integration lane."
-        ),
-        ticket="FIX126-O8-5",
-    )
     def test_health_still_works(self):
+        # FIX133 — what this guards is that the error handlers leave /health
+        # alone: it answers in its own shape, never the error envelope, and
+        # its status code agrees with its status word. The VALUE depends on
+        # the infrastructure around the process (503 "unhealthy" in the
+        # hermetic lane, by design) and is tests/test_health.py's business.
         resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+        assert resp.status_code in (200, 503)
+        body = resp.json()
+        assert "error" not in body
+        assert body["service"] == "secure-ai-gateway"
+        assert body["status"] in ("ok", "degraded", "unhealthy")
+        assert (resp.status_code == 503) == (body["status"] == "unhealthy")
 
     def test_chat_stub_still_works(self):
         resp = client.post(
