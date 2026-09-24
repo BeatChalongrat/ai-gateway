@@ -314,6 +314,8 @@ restore_run() {
   local t0 rc=0 rdir f want got n=0 ok=true
   t0=$(date +%s)
   if [ -z "${BACKUP_OFFSITE_REPOSITORY:-}" ]; then log "offsite: restore FAIL — BACKUP_OFFSITE_REPOSITORY is not set"; return 3; fi
+  setup_env
+  WORK=$(mktemp -d)
   if ! open_repo; then log "offsite: restore FAIL — $OPEN_ERR"; return 3; fi
   mkdir -p "$target"
   log "offsite: restore start snapshot=$snap repository=$(repo_label) -> $target"
