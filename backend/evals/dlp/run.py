@@ -275,9 +275,54 @@ def render(py: dict, rs: dict | None, corpus_n: int) -> str:
     return "\n".join(lines)
 
 
+def thai_ner_model_source() -> str:
+    """Where the Thai NER layer's MODEL candidates come from in this run.
+
+    FIX133 — ``off`` (``dlp_thai_ner_enabled`` is false), ``unreachable``
+    (the layer is on but ``ner_service_url`` is empty or the ner-service does
+    not answer with its Thai tagger ready — the hermetic lane, ``--network
+    none``) or ``reachable``. ``ThaiNerDetector`` degrades to "no model
+    spans" by design, and LOCATION spans come from the model alone, so an
+    unreachable service costs exactly the keyword-less addresses the baseline
+    was recorded with (FIX46: thai_address 41/41 caught, 36 by the regex).
+    The baseline records this too (absent = recorded in the container, where
+    the service answers), and ``compare_to_baseline`` compares like with like.
+    """
+    from app.core.config import settings
+
+    if not bool(getattr(settings, "dlp_thai_ner_enabled", False)):
+        return "off"
+    url = str(getattr(settings, "ner_service_url", "") or "")
+    if not url:
+        return "unreachable"
+    try:
+        import httpx
+
+        r = httpx.get(url.rstrip("/") + "/health", timeout=1.0)
+        data = r.json() if r.status_code == 200 else {}
+        ready = data.get("status") == "ready" and "th_ner=ready" in str(data.get("model", ""))
+        return "reachable" if ready else "unreachable"
+    except Exception:  # noqa: BLE001 — a probe never raises
+        return "unreachable"
+
+
 def compare_to_baseline(results: dict, baseline: dict) -> list[str]:
-    """Regressions only: a lower recall, a new swallow, or more corpus fires."""
+    """Regressions only: a lower recall, a new swallow, or more corpus fires.
+
+    FIX133 — ``caught`` is compared only when this run and the baseline had
+    the same Thai NER model source (``thai_ner_model``; absent in the baseline
+    means the container, where the ner-service answers). Without the model
+    (the hermetic lane) the keyword-less addresses cannot be caught by
+    anything, so the gate compares ``by_expected`` instead — what each
+    category's OWN detectors caught, which the model never adds to. The
+    regex and lexicon detectors stay gated; swallows and corpus fires compare
+    as before (fewer sources can only lower them).
+    """
     problems: list[str] = []
+    model_now = results.get("thai_ner_model", "reachable") == "reachable"
+    model_base = baseline.get("thai_ner_model", "reachable") == "reachable"
+    like_for_like = model_now == model_base
+    field = "caught" if like_for_like else "by_expected"
     for eng in ("python", "rust"):
         cur, base = results.get(eng), baseline.get(eng)
         if not cur or not base:
@@ -287,8 +332,13 @@ def compare_to_baseline(results: dict, baseline: dict) -> list[str]:
             if c is None:
                 problems.append(f"{eng}: category {cat} missing from the run")
                 continue
-            if c["caught"] < b["caught"]:
-                problems.append(f"{eng}/{cat}: recall dropped {b['caught']}/{b['total']} → {c['caught']}/{c['total']}")
+            if c[field] < b[field]:
+                what = "recall" if like_for_like else (
+                    "recall by the category's own detectors (Thai NER model "
+                    f"{results.get('thai_ner_model')} in this run, "
+                    f"{baseline.get('thai_ner_model', 'reachable')} in the baseline)"
+                )
+                problems.append(f"{eng}/{cat}: {what} dropped {b[field]}/{b['total']} → {c[field]}/{c['total']}")
             if c["swallow"] > b["swallow"]:
                 problems.append(f"{eng}/{cat}: swallowed-word hits rose {b['swallow']} → {c['swallow']}")
         if len(cur["corpus_fires"]) > len(base["corpus_fires"]):
@@ -322,9 +372,18 @@ def main(argv: list[str] | None = None) -> int:
             print("NOTE: Rust sidecar not reachable — Python only (the live engine was NOT measured)", file=sys.stderr)
         else:
             rs = run_engine("rust", scan, sets, corpus)
-    results = {"python": py, "rust": rs, "data": {cat: len(v) for cat, v in sets.items()}, "corpus": len(corpus)}
+    results = {
+        "python": py,
+        "rust": rs,
+        "data": {cat: len(v) for cat, v in sets.items()},
+        "corpus": len(corpus),
+        "thai_ner_model": thai_ner_model_source(),
+    }
 
     print(render(py, rs, len(corpus)))
+    if results["thai_ner_model"] != "reachable":
+        print(f"NOTE: Thai NER model {results['thai_ner_model']} — keyword-less addresses are not measurable in this run; "
+              "the baseline check compares each category's own detectors (by_expected)", file=sys.stderr)
     if rs is not None:
         # FIX38 — the sidecar with no Python post-pass, for the categories
         # the Thai NER layer touches. This is the size of the Rust port
@@ -356,6 +415,7 @@ def main(argv: list[str] | None = None) -> int:
         slim = {k: ({"categories": {c: {kk: vv for kk, vv in v.items() if kk not in ("misses", "swallows")} for c, v in e["categories"].items()}, "corpus_fires": [{"id": f["id"]} for f in e["corpus_fires"]]} if e else None) for k, e in (("python", py), ("rust", rs))}
         slim["data"] = results["data"]
         slim["corpus"] = len(corpus)
+        slim["thai_ner_model"] = results["thai_ner_model"]
         BASELINE.write_text(json.dumps(slim, ensure_ascii=False, indent=1), encoding="utf-8")
         print(f"\nbaseline written → {BASELINE}")
     if a.check_baseline:
