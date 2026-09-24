@@ -285,7 +285,7 @@ func (r *indexRun) retryAs(err error, code, what string) {
 	}
 	attempts := r.doc.Attempts + 1
 	if attempts >= cfg.MaxAttempts {
-		r.fail(code, what+" were unavailable after "+strconv.Itoa(attempts)+" attempts: "+short(err))
+		r.fail(code, what+": still unavailable after "+strconv.Itoa(attempts)+" attempts ("+short(err)+").")
 		return
 	}
 	delay := cfg.BackoffBase << (attempts - 1)
@@ -293,7 +293,7 @@ func (r *indexRun) retryAs(err error, code, what string) {
 		delay = 10 * time.Minute
 	}
 	if e := r.w.svc.repo.RetryLater(r.ctx, r.doc.ID, r.claim, delay, true,
-		code, what+" are unavailable; retrying automatically ("+short(err)+")."); e != nil && !r.lost(e) {
+		code, what+": unavailable; retrying automatically ("+short(err)+")."); e != nil && !r.lost(e) {
 		r.log.Warn("kb index: could not requeue", "err", e)
 	}
 	r.log.Info("kb index: unavailable, requeued", "code", code, "attempt", attempts, "delay", delay.String(), "err", err)
