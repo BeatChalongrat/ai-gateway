@@ -91,6 +91,10 @@ EGRESS_CLASSIFICATION: dict[str, str] = {
     # names, disk/memory numbers): none carries user-authored content.
     "services/alert_channels.py": "no_user_content",
     "services/portal/chat_edge_revoke.py": "no_user_content",
+    # FIX132 — account deletion's two chat-edge calls (hide now, purge after
+    # 30 days) carry a user id in the path and nothing else; the answers are
+    # counts.
+    "services/portal/chat_edge_account.py": "no_user_content",
     "ops/watch.py": "no_user_content",
     "services/provider_key_service.py": "no_user_content",   # key probes
     "services/portal/oauth_flow_service.py": "no_user_content",
