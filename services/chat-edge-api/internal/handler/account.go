@@ -25,11 +25,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
@@ -42,6 +44,9 @@ const PurgeConfirmationPhrase = "DELETE ALL MY MEMORIES"
 type AccountHandler struct {
 	exports *service.ExportService
 	purge   *service.PurgeService
+	// FIX132 C — "export all my data" and the data policy (account_data.go).
+	fullExport *service.AccountExportService
+	policy     *DataPolicySource
 }
 
 func NewAccountHandler(exp *service.ExportService, pur *service.PurgeService) *AccountHandler {
@@ -106,6 +111,20 @@ func (h *AccountHandler) DownloadExport(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	defer file.Close()
+	if row.ExportType == model.ExportTypeFullAccount {
+		// FIX132 — the full export is a ZIP named after its day.
+		day := row.RequestedAt.UTC().Format("2006-01-02")
+		if row.CompletedAt != nil {
+			day = row.CompletedAt.UTC().Format("2006-01-02")
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", `attachment; filename="sranchat-export-`+day+`.zip"`)
+		if info, err := file.Stat(); err == nil {
+			w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+		}
+		_, _ = io.Copy(w, file)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+sanitiseFilename(row.ID.String())+`.json"`)
 	_, _ = io.Copy(w, file)

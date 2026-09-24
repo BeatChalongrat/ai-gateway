@@ -13,7 +13,7 @@
 
 // Gateway (FastAPI) origin — the identity authority that mints/rotates
 // the session cookies and serves /portal/me. Configurable for prod.
-const GATEWAY_URL =
+export const GATEWAY_URL =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_GATEWAY_URL) ||
   "http://localhost:8080";
 

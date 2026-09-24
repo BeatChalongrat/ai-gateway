@@ -39,6 +39,7 @@ import (
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/db"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/handler"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/router"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
@@ -329,6 +330,11 @@ func main() {
 	transcriptRetention := service.NewTranscriptRetentionService(
 		retentionSettingsRepo, eraseRepo, filesRepo, deletionAuditRepo, storageBackend,
 	)
+	// FIX132 C — the purge of what users deleted runs for every tenant;
+	// DELETED_DATA_PURGE_MODE (on | dry_run | off) is its ceiling.
+	transcriptRetention.SetDeletedPurgeMode(cfg.DeletedDataPurgeMode)
+	slog.Info("deleted data purge", "mode", transcriptRetention.DeletedPurgeMode(),
+		"default_days", model.DefaultDeletedPurgeDays)
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	shareSvc := service.NewShareService(shareRepo, conversations, messages, filesRepo)
 	// S1 — Personal Memory Core. Service is wired alongside prefs +
@@ -705,6 +711,36 @@ func main() {
 	importSvc := service.NewImportService(pool, conversations, messages, filesRepo, conversationSvc)
 	importSvc.SetAfterImport(messageSvc.AfterImport)
 
+	// FIX132 C — account deletion, driven by the backend: hide now, purge
+	// after 30 days (handler/internal_account.go). The revocation store is
+	// wired below, once it exists.
+	accountDeletion := service.NewAccountDeletionService(
+		pool, eraseRepo, filesRepo, deletionAuditRepo, storageBackend, cfg.FileStorageRoot,
+	)
+	accountDeletion.SetStreamCanceller(messageSvc)
+
+	// FIX132 C — "export all my data" (a ZIP built in the background) and
+	// the data policy the Settings page states.
+	accountExport := service.NewAccountExportService(service.AccountExportSources{
+		Conversations: conversations, Messages: messages, Files: filesRepo,
+		Memories: memoriesRepo, Projects: projects, Preferences: prefsRepo,
+		Skills: skillsRepo, Exports: exportsRepo, Settings: tenantSettingsRepo,
+	}, storageBackend, cfg.FileStorageRoot, cfg.ExportMaxFileBytes, cfg.ExportMaxConversations)
+	if cfg.DLPDisplayLifecycleEnabled {
+		// The export reads messages the way the owner's reload does.
+		accountExport.SetDisplayResolver(func(ctx context.Context, m model.Message, userID, tenantID uuid.UUID) string {
+			return messageSvc.ResolveRepresentation(ctx, service.ConsumerBrowserReloadOwner, m,
+				service.DisplayActor{UserID: userID, TenantID: tenantID}).Content
+		})
+	}
+	accountHandler := handler.NewAccountHandler(exportSvc, purgeSvc)
+	accountHandler.SetFullExport(accountExport)
+	accountHandler.SetDataPolicy(handler.DataPolicySource{
+		Retention:    retentionSettingsRepo,
+		PurgeEnvMode: cfg.DeletedDataPurgeMode,
+		BackupDays:   cfg.BackupRetentionDays,
+	})
+
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Usage:          usageHandler,
@@ -732,7 +768,7 @@ func main() {
 		// on CLOUD_SCHEDULER_ENABLED): StartScheduler → CloudTaskRunner.Tick,
 		// authorize-before-run, DB lease (migration 036), cloud tool subset.
 		CloudTasks: handler.NewCloudTaskHandler(cloudTasksRepo),
-		Account:    handler.NewAccountHandler(exportSvc, purgeSvc),
+		Account:    accountHandler,
 		// Retention & deletion program admin surface: settings (floor-
 		// validated, audited), deletion-audit reads, dry-run preview.
 		RetentionAdmin: handler.NewRetentionAdminHandler(
@@ -745,6 +781,8 @@ func main() {
 		// filesRepo: FIX 10 — imported user messages can link uploaded
 		// attachments via file_ids.
 		Import: handler.NewImportHandler(importSvc),
+		// FIX132 C — registered only when INTERNAL_SERVICE_SECRET is set.
+		InternalAccount: handler.NewInternalAccountHandler(cfg.InternalServiceSecret, accountDeletion),
 	}
 
 	// Phase 13 Part B — the /code/run endpoint is ALWAYS registered so the
@@ -768,6 +806,7 @@ func main() {
 	// then on. Redis holds the marks; a Redis error on the read side
 	// serves the request and logs auth_revocation_check_failed.
 	revocations := auth.NewRedisRevocations(rdb)
+	accountDeletion.SetRevoker(revocations)
 	if cfg.InternalServiceSecret == "" {
 		slog.Warn("INTERNAL_SERVICE_SECRET is empty: POST /internal/auth/revoke is not registered, so a Portal sign-out cannot end a chat-edge session before the token expires")
 	}
@@ -796,11 +835,16 @@ func main() {
 	}
 	startBackground(retentionEnforcer.StartBackground)
 
-	// Transcript retention sweep — 00:00 UTC daily, per-tenant opt-in,
-	// dry-run by default. Deletes NOTHING for a tenant until an admin
-	// enables it and then, after reading the dry-run numbers, turns
-	// dry_run off. No boot-time pass: the deletion hour is fixed.
+	// Transcript retention sweep — 00:00 UTC daily. FIX132: chats users
+	// deleted are erased 30 days later for every tenant (the tenant flags
+	// and DELETED_DATA_PURGE_MODE can hold it at dry_run or off); the
+	// inactive-transcript rule stays per-tenant opt-in, dry-run first.
+	// No boot-time pass: the deletion hour is fixed.
 	startBackground(transcriptRetention.StartBackground)
+
+	// FIX132 C — export files are removed once their 24-hour download
+	// window closes (hourly pass; at boot too).
+	startBackground(exportSvc.StartSweep)
 
 	// FIX131 E1 — the lease renewal runs until AFTER the shutdown drain
 	// (its own context): the turns being drained must keep their leases.

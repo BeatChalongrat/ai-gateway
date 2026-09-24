@@ -1,29 +1,35 @@
 // TranscriptRetentionService — the nightly transcript sweep
-// (docs/DATA_RETENTION_PLAN.md item 1).
+// (docs/DATA_RETENTION_PLAN.md item 1, docs/ops/user-data.md).
 //
-// Two rules, both per-tenant (chat.tenant_retention_settings):
+// Two rules, each with its own switch:
 //
-//   - retention_expired: conversations with no activity for
-//     transcript_retention_days (floor 30) are hard-deleted — the
-//     full cascade in ConversationEraseRepo, storage objects
-//     included. Applies to archived and pinned conversations too:
-//     this is a compliance window, not a preference.
-//   - user_request: a user-deleted (soft-deleted) conversation is
-//     hard-deleted deleted_conversation_purge_days after the user
-//     deleted it. The user-visible removal was immediate; this is
-//     the back-end erasure completing.
+//   - user_request (FIX132: ON for every tenant by default): a user-deleted
+//     (soft-deleted) conversation is hard-deleted
+//     deleted_conversation_purge_days (30) after the user deleted it —
+//     rows AND file bytes. The user-visible removal was immediate; this is
+//     the back-end erasure completing. Governed by the env ceiling
+//     DELETED_DATA_PURGE_MODE (on | dry_run | off) and the tenant's
+//     deleted_purge_enabled / deleted_purge_dry_run (migration 050); no
+//     settings row = on. Until FIX132 this rule only ran for tenants that
+//     had opted into the rule below, so on the defaults nothing was ever
+//     erased.
+//   - retention_expired (per-tenant opt-in, unchanged): conversations with
+//     no activity for transcript_retention_days (floor 30) are
+//     hard-deleted — archived and pinned ones too: this is a compliance
+//     window, not a preference. Runs only for tenants with
+//     transcript_retention_enabled = true; dry_run defaults TRUE.
 //
 // Safety shape (mandatory for anything that deletes):
-//   - the sweep runs only for tenants with
-//     transcript_retention_enabled = true (default false);
-//   - dry_run defaults TRUE: the pass counts what it WOULD delete,
-//     writes a retention_dry_run audit entry with those counts, and
-//     touches nothing. A human reads the numbers and flips dry_run.
+//   - a dry-run pass counts what it WOULD delete, writes a
+//     retention_dry_run audit entry with those counts, and touches
+//     nothing;
 //   - live deletes are per-conversation transactions that commit the
-//     deletion-audit row atomically with the erasure.
+//     deletion-audit row atomically with the erasure; the file objects
+//     are deleted first (the rows carry their keys);
 //   - the floor is re-checked here: a settings row that somehow
 //     carries transcript_retention_days < 30 is SKIPPED loudly, not
-//     honored.
+//     honored;
+//   - at most maxErasuresPerTenantPerRun per tenant per night.
 //
 // Runs at 00:00 UTC (the fixed deletion time the product documents),
 // never immediately on boot — a restart must not move the deletion
@@ -57,6 +63,20 @@ type TranscriptRetentionService struct {
 	files    *repository.FileRepo
 	audit    *repository.DeletionAuditRepo
 	storage  objectStore
+	// purgeEnvMode — DELETED_DATA_PURGE_MODE, the ceiling for the
+	// user_request rule. "" = on (the default).
+	purgeEnvMode string
+}
+
+// SetDeletedPurgeMode sets the env ceiling for the deleted-data purge
+// (on | dry_run | off; anything else is treated as dry_run).
+func (s *TranscriptRetentionService) SetDeletedPurgeMode(mode string) {
+	s.purgeEnvMode = mode
+}
+
+// DeletedPurgeMode reports the env ceiling in its normalised form.
+func (s *TranscriptRetentionService) DeletedPurgeMode() string {
+	return model.NormalizePurgeMode(s.purgeEnvMode)
 }
 
 func NewTranscriptRetentionService(
@@ -89,20 +109,52 @@ type SweepStats struct {
 	TenantsLikelyTest         int `json:"tenants_likely_test"`
 }
 
-// EnforceOnce runs one pass across every retention-enabled tenant.
+// EnforceOnce runs one pass: every tenant that opted into the
+// retention_expired rule, plus every tenant holding user-deleted
+// conversations (the user_request rule needs no opt-in since FIX132).
 func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats {
 	stats := SweepStats{Counts: map[string]int{}}
-	tenants, err := s.settings.ListEnabled(ctx)
+	enabled, err := s.settings.ListEnabled(ctx)
 	if err != nil {
 		slog.Warn("transcript retention: list tenants failed", "err", err)
 		stats.Errors++
-		return stats
+		enabled = nil
 	}
-	for i := range tenants {
-		t := &tenants[i]
+	seen := make(map[uuid.UUID]bool, len(enabled))
+	for i := range enabled {
+		t := &enabled[i]
+		seen[t.TenantID] = true
 		stats.TenantsScanned++
 		s.enforceTenant(ctx, t, &stats)
 	}
+
+	// The deleted-data purge scans the DATA, not the settings table: a
+	// tenant with no settings row gets the defaults, which purge. The
+	// discovery cutoff is one day (the shortest window a row may carry);
+	// each tenant's own window is applied in candidates().
+	if s.DeletedPurgeMode() != model.PurgeModeOff {
+		tenants, err := s.erase.ListTenantsWithDeletedBefore(
+			ctx, time.Now().UTC().AddDate(0, 0, -1))
+		if err != nil {
+			slog.Warn("transcript retention: list tenants with deleted chats failed", "err", err)
+			stats.Errors++
+		}
+		for _, tid := range tenants {
+			if seen[tid] {
+				continue
+			}
+			t, err := s.settings.Get(ctx, tid)
+			if err != nil {
+				slog.Warn("transcript retention: settings lookup failed",
+					"tenant", tid.String(), "err", err)
+				stats.Errors++
+				continue
+			}
+			stats.TenantsScanned++
+			s.enforceTenant(ctx, t, &stats)
+		}
+	}
+
 	if stats.ConversationsSeen > 0 || stats.Errors > 0 {
 		slog.Info("transcript retention: pass complete",
 			"tenants", stats.TenantsScanned,
@@ -111,9 +163,24 @@ func (s *TranscriptRetentionService) EnforceOnce(ctx context.Context) SweepStats
 			"seen_real", stats.ConversationsSeen-stats.ConversationsSeenTestData,
 			"tenants_likely_test", stats.TenantsLikelyTest,
 			"erased", stats.Erased,
-			"errors", stats.Errors)
+			"errors", stats.Errors,
+			"deleted_purge_mode", s.DeletedPurgeMode())
 	}
 	return stats
+}
+
+// ruleModes — what each rule does for this tenant on this pass.
+func (s *TranscriptRetentionService) ruleModes(
+	t *model.TenantRetentionSettings,
+) (retention, purge string) {
+	retention = model.PurgeModeOff
+	if t.TranscriptRetentionEnabled {
+		retention = model.PurgeModeOn
+		if t.DryRun {
+			retention = model.PurgeModeDryRun
+		}
+	}
+	return retention, model.EffectiveDeletedPurgeMode(s.purgeEnvMode, t)
 }
 
 // PreviewTenant runs the counting half for ONE tenant regardless of
@@ -126,7 +193,9 @@ func (s *TranscriptRetentionService) PreviewTenant(
 	if err != nil {
 		return nil, err
 	}
-	expired, purgeable, err := s.candidates(ctx, settings)
+	// The preview counts both rules whatever their switches say — it is
+	// the "what would a live pass do" number an admin reads first.
+	expired, purgeable, err := s.candidates(ctx, settings, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -160,10 +229,10 @@ func (s *TranscriptRetentionService) PreviewTenant(
 }
 
 func (s *TranscriptRetentionService) candidates(
-	ctx context.Context, t *model.TenantRetentionSettings,
+	ctx context.Context, t *model.TenantRetentionSettings, withExpired, withDeleted bool,
 ) (expired, purgeable []repository.EraseCandidate, err error) {
 	now := time.Now().UTC()
-	if t.TranscriptRetentionDays != nil {
+	if withExpired && t.TranscriptRetentionDays != nil {
 		if *t.TranscriptRetentionDays < model.TranscriptRetentionMinDays {
 			slog.Error("transcript retention: days below floor — tenant skipped",
 				"tenant", t.TenantID.String(),
@@ -178,11 +247,17 @@ func (s *TranscriptRetentionService) candidates(
 			}
 		}
 	}
-	purgeCutoff := now.AddDate(0, 0, -t.DeletedConversationPurgeDays)
-	purgeable, err = s.erase.ListDeletedPastPurgeWindow(
-		ctx, t.TenantID, purgeCutoff, maxErasuresPerTenantPerRun)
-	if err != nil {
-		return nil, nil, err
+	if withDeleted {
+		days := t.DeletedConversationPurgeDays
+		if days < 1 {
+			days = model.DefaultDeletedPurgeDays
+		}
+		purgeCutoff := now.AddDate(0, 0, -days)
+		purgeable, err = s.erase.ListDeletedPastPurgeWindow(
+			ctx, t.TenantID, purgeCutoff, maxErasuresPerTenantPerRun)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return expired, purgeable, nil
 }
@@ -190,7 +265,12 @@ func (s *TranscriptRetentionService) candidates(
 func (s *TranscriptRetentionService) enforceTenant(
 	ctx context.Context, t *model.TenantRetentionSettings, stats *SweepStats,
 ) {
-	expired, purgeable, err := s.candidates(ctx, t)
+	retentionMode, purgeMode := s.ruleModes(t)
+	if retentionMode == model.PurgeModeOff && purgeMode == model.PurgeModeOff {
+		return
+	}
+	expired, purgeable, err := s.candidates(ctx, t,
+		retentionMode != model.PurgeModeOff, purgeMode != model.PurgeModeOff)
 	if err != nil {
 		slog.Warn("transcript retention: candidate scan failed",
 			"tenant", t.TenantID.String(), "err", err)
@@ -201,41 +281,50 @@ func (s *TranscriptRetentionService) enforceTenant(
 	stats.ConversationsSeen += seen
 	// Keep the test-data share as its own running total so the pass
 	// can report both numbers instead of one blended figure.
-	if class, err := s.erase.ClassifyTenant(ctx, t.TenantID); err == nil &&
-		class == repository.TenantLikelyTest {
-		stats.TenantsLikelyTest++
-		stats.ConversationsSeenTestData += seen
+	if seen > 0 {
+		if class, err := s.erase.ClassifyTenant(ctx, t.TenantID); err == nil &&
+			class == repository.TenantLikelyTest {
+			stats.TenantsLikelyTest++
+			stats.ConversationsSeenTestData += seen
+		}
 	}
 
-	if t.DryRun {
+	// A rule in dry-run counts instead of deleting. One audited report
+	// per tenant per pass (both rules' numbers side by side) so the admin
+	// surface can show "what last night's pass would have done". A tenant
+	// whose only dry-run rule is the purge and who has nothing due writes
+	// nothing — hundreds of empty reports a night would bury the real ones.
+	if retentionMode == model.PurgeModeDryRun ||
+		(purgeMode == model.PurgeModeDryRun && len(purgeable) > 0) {
 		stats.DryRunTenants++
 		counts, err := s.PreviewTenant(ctx, t.TenantID)
 		if err != nil {
 			slog.Warn("transcript retention: dry-run count failed",
 				"tenant", t.TenantID.String(), "err", err)
 			stats.Errors++
-			return
+		} else {
+			if err := s.audit.Insert(ctx, &model.DeletionAuditEntry{
+				TenantID: t.TenantID,
+				Actor:    "system:transcript-retention",
+				Action:   model.AuditActionRetentionDryRun,
+				Scope:    "tenant",
+				Rule:     model.AuditRuleDryRun,
+				Counts:   counts,
+				Details: map[string]any{
+					model.AuditRuleRetentionExpired: retentionMode,
+					model.AuditRuleUserRequest:      purgeMode,
+				},
+			}); err != nil {
+				slog.Warn("transcript retention: dry-run audit write failed",
+					"tenant", t.TenantID.String(), "err", err)
+				stats.Errors++
+			}
+			slog.Info("transcript retention: dry run",
+				"tenant", t.TenantID.String(),
+				"retention_expired", counts["conversations_retention_expired"],
+				"user_deleted_due", counts["conversations_user_deleted_due"],
+				"messages", counts["messages"])
 		}
-		// The dry-run report is itself an audited event so the admin
-		// surface can show "what last night's pass would have done".
-		if err := s.audit.Insert(ctx, &model.DeletionAuditEntry{
-			TenantID: t.TenantID,
-			Actor:    "system:transcript-retention",
-			Action:   model.AuditActionRetentionDryRun,
-			Scope:    "tenant",
-			Rule:     model.AuditRuleDryRun,
-			Counts:   counts,
-		}); err != nil {
-			slog.Warn("transcript retention: dry-run audit write failed",
-				"tenant", t.TenantID.String(), "err", err)
-			stats.Errors++
-		}
-		slog.Info("transcript retention: dry run",
-			"tenant", t.TenantID.String(),
-			"retention_expired", counts["conversations_retention_expired"],
-			"user_deleted_due", counts["conversations_user_deleted_due"],
-			"messages", counts["messages"])
-		return
 	}
 
 	erase := func(c repository.EraseCandidate, rule string) {
@@ -263,11 +352,15 @@ func (s *TranscriptRetentionService) enforceTenant(
 			stats.Counts[k] += n
 		}
 	}
-	for _, c := range expired {
-		erase(c, model.AuditRuleRetentionExpired)
+	if retentionMode == model.PurgeModeOn {
+		for _, c := range expired {
+			erase(c, model.AuditRuleRetentionExpired)
+		}
 	}
-	for _, c := range purgeable {
-		erase(c, model.AuditRuleUserRequest)
+	if purgeMode == model.PurgeModeOn {
+		for _, c := range purgeable {
+			erase(c, model.AuditRuleUserRequest)
+		}
 	}
 }
 

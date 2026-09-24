@@ -4,9 +4,11 @@
 // event the user owns, writes it to local storage under
 // {root}/exports/, and records the metadata in
 // chat.data_export_requests so the download endpoint can serve it
-// later. Files expire after exportExpiryWindow; the
-// RetentionEnforcer (S9 sibling) sweeps expired rows + their
-// files nightly.
+// later. Files expire after exportExpiryWindow; SweepExpired (run
+// every exportSweepInterval by StartSweep, FIX132) deletes the file of
+// every expired export and marks its row 'expired'. Until FIX132 this
+// comment said the RetentionEnforcer did that — it never did, and
+// expired export files stayed on disk.
 package service
 
 import (
@@ -14,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,6 +40,15 @@ var (
 // download it again from the past-exports list, short enough that
 // stale files don't pile up.
 const exportExpiryWindow = 24 * time.Hour
+
+// exportSweepInterval — how often expired export files are removed, so a
+// file outlives its 24-hour window by at most this much.
+const exportSweepInterval = time.Hour
+
+// exportStaleAfter — an export still pending/processing this long after
+// it was asked for belongs to a process that is gone; it is failed so the
+// user can start a new one.
+const exportStaleAfter = 2 * time.Hour
 
 type ExportService struct {
 	memories    *repository.MemoryRepo
@@ -192,4 +204,78 @@ func (s *ExportService) ListByUser(
 	ctx context.Context, userID, tenantID uuid.UUID,
 ) ([]model.DataExportRequest, error) {
 	return s.exports.ListByUser(ctx, userID, tenantID)
+}
+
+// ExportSweepStats — one sweep's outcome, counts only.
+type ExportSweepStats struct {
+	FilesRemoved int `json:"files_removed"`
+	RowsExpired  int `json:"rows_expired"`
+	StaleFailed  int `json:"stale_failed"`
+	Errors       int `json:"errors"`
+}
+
+// SweepExpired deletes the file of every export past its expiry and
+// marks the row expired (the row keeps ids, size and times only), and
+// fails exports whose builder vanished. A file already gone counts as
+// removed; a file that cannot be removed leaves its row as it is, so
+// the next sweep tries again.
+func (s *ExportService) SweepExpired(ctx context.Context, now time.Time) ExportSweepStats {
+	var st ExportSweepStats
+	if n, err := s.exports.FailStale(ctx, now.Add(-exportStaleAfter)); err != nil {
+		slog.Warn("export sweep: fail stale failed", "err", err)
+		st.Errors++
+	} else {
+		st.StaleFailed = n
+	}
+	// A build whose process died leaves its work directory behind; the row
+	// was failed above, the directory goes here.
+	if dirs, err := filepath.Glob(filepath.Join(s.storageRoot, "exports", "*", "*", ".build-*")); err == nil {
+		for _, d := range dirs {
+			if info, err := os.Stat(d); err == nil && now.Sub(info.ModTime()) > exportStaleAfter {
+				_ = os.RemoveAll(d)
+			}
+		}
+	}
+	expired, err := s.exports.ListExpiredWithFiles(ctx, now, 1000)
+	if err != nil {
+		slog.Warn("export sweep: list failed", "err", err)
+		st.Errors++
+		return st
+	}
+	for _, e := range expired {
+		if err := os.Remove(e.FilePath); err != nil && !os.IsNotExist(err) {
+			slog.Warn("export sweep: remove failed", "export", e.ID.String(), "err", err)
+			st.Errors++
+			continue
+		}
+		st.FilesRemoved++
+		if err := s.exports.MarkExpired(ctx, e.ID); err != nil {
+			slog.Warn("export sweep: mark expired failed", "export", e.ID.String(), "err", err)
+			st.Errors++
+			continue
+		}
+		st.RowsExpired++
+	}
+	if st.FilesRemoved > 0 || st.StaleFailed > 0 || st.Errors > 0 {
+		slog.Info("export sweep: pass complete",
+			"files_removed", st.FilesRemoved, "rows_expired", st.RowsExpired,
+			"stale_failed", st.StaleFailed, "errors", st.Errors)
+	}
+	return st
+}
+
+// StartSweep runs SweepExpired at boot and every exportSweepInterval
+// until ctx ends.
+func (s *ExportService) StartSweep(ctx context.Context) {
+	s.SweepExpired(ctx, time.Now().UTC())
+	t := time.NewTicker(exportSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.SweepExpired(ctx, time.Now().UTC())
+		}
+	}
 }

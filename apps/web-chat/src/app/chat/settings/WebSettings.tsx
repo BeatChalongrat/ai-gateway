@@ -4,7 +4,9 @@
 //
 // Deliberately small, and shaped like the big products' settings pages:
 // Appearance (theme, language), Account (who you are, log out), Data (the
-// account-wide pages that live elsewhere — Memory, Knowledge base, Skills).
+// account-wide pages that live elsewhere — Memory, Knowledge base, Skills),
+// Your data (FIX132: export everything, delete the account, and what
+// deleting does when).
 // Nothing here is device state: theme and language are the same stores the
 // sidebar menu already drives, and the account rows go through the same
 // session helpers the sidebar uses. Connectors and Writing style are NOT
@@ -23,6 +25,7 @@ import type { Locale } from "@/lib/i18n/dict";
 import { useThemeStore, type Theme } from "@/stores/themeStore";
 
 import { BackIcon, Row, Section } from "./DeviceSettings";
+import { YourDataSection } from "./YourDataSection";
 
 export function WebSettings() {
   const t = useT();
@@ -98,6 +101,9 @@ export function WebSettings() {
             <DoorRow href="/chat/knowledge" label={t("menu.knowledgeBase")} hint={t("settings.web.knowledge.hint")} />
             <DoorRow href="/chat/skills" label={t("menu.skills")} hint={t("settings.web.skills.hint")} />
           </Section>
+
+          {/* FIX132 C — export all my data, delete a chat / the account, and when. */}
+          <YourDataSection />
         </div>
       </main>
     </div>

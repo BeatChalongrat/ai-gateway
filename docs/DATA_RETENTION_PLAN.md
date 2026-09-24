@@ -20,7 +20,9 @@ auditor should be pointed at.
 |---|---|
 | Retention window | Admin-configurable per tenant; **minimum 30 days**; empty = keep forever |
 | Deletion time | **00:00 UTC daily** — a fixed hour, not "within 24 hours"; restarts do not move it |
-| User-deleted chats | Removed from the user's view **immediately**; permanently erased from the server after the configured purge window (default **30 days**) |
+| User-deleted chats | Removed from the user's view **immediately**; permanently erased from the server after the configured purge window (default **30 days**) — **on for every tenant by default** since FIX132 (before, it only ran for tenants that had opted into transcript retention, so nothing was erased) |
+| Deleted accounts (FIX132) | Refused and hidden **immediately**; everything the user owns permanently erased or anonymised **30 days** later; credit ledger kept anonymised. See [ops/user-data.md](ops/user-data.md) |
+| Backups | Local copies roll off after **14 days**; off-site snapshots (when configured) keep up to 12 months — see [ops/user-data.md](ops/user-data.md#backups) |
 | Deletion semantics | **Permanent and unrecoverable** — hard delete, not a hidden flag |
 | Evidence | Every deletion and every retention-setting change writes an audit row that **no deletion path can remove** |
 | Settings changes | Take effect **at the next scheduled run**, never retroactively or immediately; the admin UI shows the exact effective time |
@@ -88,12 +90,12 @@ reach and why.
 | `chat.shared_conversations` (share links) | links to messages | cascade |
 | `chat.cloud_scheduled_tasks` (task prompts) | yes | cascade |
 | `chat.feedback` | rating only | cascade (via the conversation's messages) |
-| `chat.user_memories` / `memory_events` (derived facts) | yes | the user-scoped memory purge (`DELETE /account/purge-memories`) — deliberately separate: a memory may be derived from many conversations, so erasing one conversation must not silently delete facts the user still relies on |
+| `chat.user_memories` / `memory_events` (derived facts) | yes | the user-scoped memory purge (`DELETE /account/purge-memories`) and the account purge (FIX132) — deliberately separate from conversation erasure: a memory may be derived from many conversations, so erasing one conversation must not silently delete facts the user still relies on |
 | Gateway `request_logs` (masked snapshots; raw columns) | raw columns for ≤ the DLP window (90 days), masked snapshots after | time-based: the nightly strip NULLs raw columns; archive + expiry + partition drops age the rows. **Not conversation-addressable** — these rows are keyed by request, not conversation, so per-conversation erasure cannot select them; their lifetime is bounded by the time-based windows instead |
 | `request_logs_archive` (cold storage) | masked only (the pipeline refuses to move rows on a night the strip failed) | the archive-expiry step |
 | Desktop local cache (`history/*.json` transcripts with tool results, `conversation-state/*.json`, run ledger, logs) | yes (plaintext) | TTL sweep at launch — `localStateTtlDays`, **30 days by default** (0 disables) — plus the app's immediate **Clear local data** command. Server-side erasure cannot reach a client disk — stated here rather than implied otherwise |
 | Streaming resume ledger (Redis) | yes | self-expiring TTL (~10 minutes) |
-| Memory export files | yes | 24-hour link expiry + deleted by the memory purge |
+| Export files (memories; FIX132 full "export all my data" ZIP) | yes | 24-hour link, then deleted by the hourly export sweep (FIX132 — before it, nothing removed them); also by the memory purge and the account purge |
 | `chat.cloud_task_runs`, `chat.compaction_usage` | no (counts/outcomes) | retained — content-free accounting (see exceptions). **Label caveat (FIX113):** `compaction_usage.trigger` rows written between FIX111 (`d1a4223`, when the desktop began compacting through `POST /compact`) and the FIX113 Part B commit say `manual` for the desktop's AUTOMATIC compactions as well — the endpoint could not say otherwise. From FIX113 Part B the desktop sends `auto` and the button `manual`; the earlier rows are left as written, not corrected, and a per-trigger reconciliation over that window must not read `manual` as "a person pressed the button" |
 
 A structural guard keeps this table honest: a coverage test derives
@@ -115,11 +117,15 @@ first (their rows carry the paths). Triggered by two rules:
   (applies to archived and pinned conversations too: the window is a
   compliance control, not a preference);
 * `user_request` — the user deleted the chat; the sweep completes
-  the erasure `deleted_conversation_purge_days` later.
+  the erasure `deleted_conversation_purge_days` later. **FIX132: on for
+  every tenant by default** — its own switches `deleted_purge_enabled`
+  (default true) / `deleted_purge_dry_run` (default false), migration
+  050, under the env ceiling `DELETED_DATA_PURGE_MODE` (on | dry_run |
+  off). No settings row = on.
 
 Per-tenant settings live in `chat.tenant_retention_settings`
 (`transcript_retention_enabled` default **false**, `dry_run` default
-**true**, floor 30). The sweep runs at 00:00 UTC, caps each tenant's
+**true**, floor 30 — these govern `retention_expired` only). The sweep runs at 00:00 UTC, caps each tenant's
 nightly work, and refuses windows below the floor even if a row
 somehow carries one.
 
@@ -205,7 +211,11 @@ operator cannot reach.
 ## Rollback & safety properties
 
 * Every deleting mechanism ships **off**, previews before it acts,
-  and is enabled per tenant / per flag by a human.
+  and is enabled per tenant / per flag by a human — **except** what the
+  user asked for themselves (FIX132, the owner's decision of
+  2026-09-24): the deleted-chat purge and the deleted-account purge are
+  on by default, and can each be held at `dry_run` or `off`
+  (`DELETED_DATA_PURGE_MODE`, the tenant flags, `ACCOUNT_PURGE_MODE`).
 * Schema changes are additive (new tables only); reverting them drops
   only the new, initially-empty tables.
 * The erasure cascade is transactional per conversation — a failure

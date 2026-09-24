@@ -39,6 +39,7 @@ const retentionSettingsColumns = `
 	tenant_id,
 	transcript_retention_enabled, transcript_retention_days,
 	deleted_conversation_purge_days, dry_run,
+	deleted_purge_enabled, deleted_purge_dry_run,
 	created_at, updated_at
 `
 
@@ -47,12 +48,14 @@ func scanRetentionSettings(row pgx.Row, s *model.TenantRetentionSettings) error 
 		&s.TenantID,
 		&s.TranscriptRetentionEnabled, &s.TranscriptRetentionDays,
 		&s.DeletedConversationPurgeDays, &s.DryRun,
+		&s.DeletedPurgeEnabled, &s.DeletedPurgeDryRun,
 		&s.CreatedAt, &s.UpdatedAt,
 	)
 }
 
-// Get returns the row, or the defaults (retention off, dry-run on)
-// when none exists. Never ErrNotFound.
+// Get returns the row, or the defaults (inactive-transcript retention
+// off and dry-run; deleted-data purge on, 30 days) when none exists.
+// Never ErrNotFound.
 func (r *TenantRetentionSettingsRepo) Get(
 	ctx context.Context, tenantID uuid.UUID,
 ) (*model.TenantRetentionSettings, error) {
@@ -90,27 +93,32 @@ func (r *TenantRetentionSettingsRepo) Upsert(
 	const q = `
 		INSERT INTO chat.tenant_retention_settings (
 			tenant_id, transcript_retention_enabled, transcript_retention_days,
-			deleted_conversation_purge_days, dry_run
+			deleted_conversation_purge_days, dry_run,
+			deleted_purge_enabled, deleted_purge_dry_run
 		)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			transcript_retention_enabled    = EXCLUDED.transcript_retention_enabled,
 			transcript_retention_days       = EXCLUDED.transcript_retention_days,
 			deleted_conversation_purge_days = EXCLUDED.deleted_conversation_purge_days,
 			dry_run                         = EXCLUDED.dry_run,
+			deleted_purge_enabled           = EXCLUDED.deleted_purge_enabled,
+			deleted_purge_dry_run           = EXCLUDED.deleted_purge_dry_run,
 			updated_at                      = NOW()
 	`
 	if _, err := r.db.Exec(ctx, q,
 		s.TenantID, s.TranscriptRetentionEnabled, s.TranscriptRetentionDays,
 		s.DeletedConversationPurgeDays, s.DryRun,
+		s.DeletedPurgeEnabled, s.DeletedPurgeDryRun,
 	); err != nil {
 		return fmt.Errorf("upsert retention settings: %w", err)
 	}
 	return nil
 }
 
-// ListEnabled returns every tenant whose transcript sweep is turned
-// on (dry-run or live) — the nightly enforcer's scan target.
+// ListEnabled returns every tenant whose inactive-transcript rule
+// (retention_expired) is turned on, dry-run or live. The deleted-data
+// purge does NOT use this list: it runs for every tenant (FIX132).
 func (r *TenantRetentionSettingsRepo) ListEnabled(
 	ctx context.Context,
 ) ([]model.TenantRetentionSettings, error) {

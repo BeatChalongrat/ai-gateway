@@ -107,6 +107,14 @@ def check_email_domain_allowed(email_norm: str) -> None:
         )
 
 
+def _refuse_inactive(user: PortalUserORM) -> None:
+    """Same refusal (and wording) as the password login."""
+    if user.status != "active":
+        from app.core.exceptions import AuthenticationError
+
+        raise AuthenticationError("Account is not active. Contact support.")
+
+
 def login_or_create(
     db: Session,
     *,
@@ -157,6 +165,11 @@ def login_or_create(
             )
         )
     ).scalar_one_or_none()
+    if user is not None:
+        # FIX132 C — the password login and the refresh both refuse an
+        # account that is not active; this door did not, so a suspended or
+        # deleted-pending account could sign in with Google and get tokens.
+        _refuse_inactive(user)
 
     if user is None:
         # 2. Link to an email match?
@@ -164,6 +177,7 @@ def login_or_create(
             select(PortalUserORM).where(PortalUserORM.email == email_norm)
         ).scalar_one_or_none()
         if user is not None:
+            _refuse_inactive(user)
             user.oauth_provider = provider
             user.oauth_id = oauth_id
             if avatar_url and not user.avatar_url:

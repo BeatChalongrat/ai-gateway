@@ -85,6 +85,12 @@ type putRetentionSettingsBody struct {
 	TranscriptRetentionDays      *int   `json:"transcript_retention_days"`
 	DeletedConversationPurgeDays int    `json:"deleted_conversation_purge_days"`
 	DryRun                       bool   `json:"dry_run"`
+	// FIX132 — the deleted-data purge switches. Optional: a client that
+	// predates them (the admin UI's retention form) leaves them out, and
+	// the tenant keeps what it had — an unrelated edit must never turn
+	// the purge off by omission.
+	DeletedPurgeEnabled *bool `json:"deleted_purge_enabled,omitempty"`
+	DeletedPurgeDryRun  *bool `json:"deleted_purge_dry_run,omitempty"`
 }
 
 func (h *RetentionAdminHandler) PutSettings(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +120,14 @@ func (h *RetentionAdminHandler) PutSettings(w http.ResponseWriter, r *http.Reque
 		TranscriptRetentionDays:      body.TranscriptRetentionDays,
 		DeletedConversationPurgeDays: body.DeletedConversationPurgeDays,
 		DryRun:                       body.DryRun,
+		DeletedPurgeEnabled:          before.DeletedPurgeEnabled,
+		DeletedPurgeDryRun:           before.DeletedPurgeDryRun,
+	}
+	if body.DeletedPurgeEnabled != nil {
+		next.DeletedPurgeEnabled = *body.DeletedPurgeEnabled
+	}
+	if body.DeletedPurgeDryRun != nil {
+		next.DeletedPurgeDryRun = *body.DeletedPurgeDryRun
 	}
 	if err := h.settings.Upsert(r.Context(), next); err != nil {
 		if err == repository.ErrRetentionBelowFloor {
@@ -142,12 +156,16 @@ func (h *RetentionAdminHandler) PutSettings(w http.ResponseWriter, r *http.Reque
 				"days":       before.TranscriptRetentionDays,
 				"purge_days": before.DeletedConversationPurgeDays,
 				"dry_run":    before.DryRun,
+				"purge":      before.DeletedPurgeEnabled,
+				"purge_dry":  before.DeletedPurgeDryRun,
 			},
 			"after": map[string]any{
 				"enabled":    next.TranscriptRetentionEnabled,
 				"days":       next.TranscriptRetentionDays,
 				"purge_days": next.DeletedConversationPurgeDays,
 				"dry_run":    next.DryRun,
+				"purge":      next.DeletedPurgeEnabled,
+				"purge_dry":  next.DeletedPurgeDryRun,
 			},
 		},
 	})

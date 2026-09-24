@@ -102,6 +102,10 @@ type Handlers struct {
 	// Import — desktop agent-conversation backup mirror (migration 026).
 	// Optional; no sendRateLimit (nothing here reaches an LLM).
 	Import *handler.ImportHandler
+	// InternalAccount — FIX132 C: the backend's account-deletion calls
+	// (hide now, purge after 30 days). Outside /api/v1, gated by
+	// INTERNAL_SERVICE_SECRET. nil or no secret → routes not registered.
+	InternalAccount *handler.InternalAccountHandler
 	// Code — Phase 13 Part B run_python endpoint for the desktop agent's
 	// thin-client tool. Optional: wired ONLY when the hardened sandbox is
 	// available (SANDBOX_ENABLED=1). Rate-limited (a sandbox run is
@@ -153,6 +157,10 @@ func New(
 	// a store exists), so with the feature off the path answers 404.
 	if internalAuth := handler.NewInternalAuthHandler(cfg.InternalServiceSecret, revocations); internalAuth.Enabled() {
 		r.Post("/internal/auth/revoke", internalAuth.Revoke)
+	}
+	if h.InternalAccount.Enabled() {
+		r.Post("/internal/accounts/{userID}/deletion-request", h.InternalAccount.DeletionRequest)
+		r.Post("/internal/accounts/{userID}/purge", h.InternalAccount.Purge)
 	}
 
 	// Rate-limit middleware shared across the high-cost endpoints.
@@ -440,6 +448,10 @@ func New(
 				r.Post("/account/export-memories", h.Account.ExportMemories)
 				r.Get("/account/exports/{id}/download", h.Account.DownloadExport)
 				r.Delete("/account/purge-memories", h.Account.PurgeMemories)
+				// FIX132 C — export all my data + the data policy.
+				r.Post("/account/exports", h.Account.StartFullExport)
+				r.Get("/account/exports", h.Account.ListFullExports)
+				r.Get("/account/data-policy", h.Account.DataPolicy)
 			}
 
 			// S1 — Personal Memory Core. Bulk-clear lives at

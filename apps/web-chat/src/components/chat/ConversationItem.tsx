@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 import { Archive, ArchiveRestore, BrainCircuit, FolderKanban, FolderPlus, Pin, PinOff } from "lucide-react";
 
+import { useChatDeletionText } from "@/hooks/useDataPolicy";
+import { DELETION_NOTICE_KEYS } from "@/lib/dataPolicy";
 import { useT } from "@/lib/i18n";
 import { memoryModeOf } from "@/lib/memoryMode";
 import type { Conversation, Project } from "@/lib/types";
@@ -332,7 +334,7 @@ export function ConversationItem({
           onClick={(e) => e.stopPropagation()}
         >
           <p className="text-text-secondary">
-            {t("conv.deleteConfirm")}
+            <DeleteConfirmText />
           </p>
           <div className="mt-1.5 flex gap-2">
             <button
@@ -357,4 +359,12 @@ export function ConversationItem({
       ) : null}
     </div>
   );
+}
+
+/** FIX132 C — the confirmation states the real period (useDataPolicy);
+ *  mounted only while the confirmation is open, so the policy is asked
+ *  for once, when someone is actually deleting. */
+function DeleteConfirmText() {
+  const t = useT();
+  return <>{useChatDeletionText(t, DELETION_NOTICE_KEYS.sidebarConfirm)}</>;
 }

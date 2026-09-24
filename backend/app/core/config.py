@@ -367,6 +367,14 @@ class Settings(BaseSettings):
     # access token there too (POST /internal/auth/revoke, gated by
     # INTERNAL_SERVICE_SECRET on both sides). Empty = chat-edge is not told.
     chat_edge_internal_url: str = ""
+    # FIX132 C — self-service account deletion. The account is refused at
+    # once (status pending_deletion) and purged ACCOUNT_PURGE_DAYS later by
+    # the nightly retention pipeline: chat-edge erases the chat data
+    # (POST /internal/accounts/{id}/purge), then the portal row becomes an
+    # anonymised tombstone. ACCOUNT_PURGE_MODE: on (the owner's decision,
+    # 2026-09-24) | dry_run (count, log, audit; delete nothing) | off.
+    account_purge_mode: str = "on"
+    account_purge_days: int = 30
     image_generation_timeout_seconds: float = 180.0
     openai_image_timeout_seconds: float = 180.0
     # Ceiling for /v1/voice/* (transcribe + synthesize). Audio work on a
