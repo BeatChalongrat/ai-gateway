@@ -688,6 +688,14 @@ func main() {
 	importSvc := service.NewImportService(pool, conversations, messages, filesRepo, conversationSvc)
 	importSvc.SetAfterImport(messageSvc.AfterImport)
 
+	// FIX132 C — account deletion, driven by the backend: hide now, purge
+	// after 30 days (handler/internal_account.go). The revocation store is
+	// wired below, once it exists.
+	accountDeletion := service.NewAccountDeletionService(
+		pool, eraseRepo, filesRepo, deletionAuditRepo, storageBackend, cfg.FileStorageRoot,
+	)
+	accountDeletion.SetStreamCanceller(messageSvc)
+
 	handlers := router.Handlers{
 		Auth:           handler.NewAuthHandler(authSvc, cfg.CSRFSecret, cfg.CookieSecure),
 		Usage:          usageHandler,
@@ -728,6 +736,8 @@ func main() {
 		// filesRepo: FIX 10 — imported user messages can link uploaded
 		// attachments via file_ids.
 		Import: handler.NewImportHandler(importSvc),
+		// FIX132 C — registered only when INTERNAL_SERVICE_SECRET is set.
+		InternalAccount: handler.NewInternalAccountHandler(cfg.InternalServiceSecret, accountDeletion),
 	}
 
 	// Phase 13 Part B — the /code/run endpoint is ALWAYS registered so the
@@ -751,6 +761,7 @@ func main() {
 	// then on. Redis holds the marks; a Redis error on the read side
 	// serves the request and logs auth_revocation_check_failed.
 	revocations := auth.NewRedisRevocations(rdb)
+	accountDeletion.SetRevoker(revocations)
 	if cfg.InternalServiceSecret == "" {
 		slog.Warn("INTERNAL_SERVICE_SECRET is empty: POST /internal/auth/revoke is not registered, so a Portal sign-out cannot end a chat-edge session before the token expires")
 	}
