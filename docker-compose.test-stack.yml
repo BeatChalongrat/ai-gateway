@@ -122,7 +122,7 @@
         "NER_SCORE_THRESHOLD_EN": "${NER_SCORE_THRESHOLD_EN:-0.7}",
         "NER_SCORE_THRESHOLD_TH": "${NER_SCORE_THRESHOLD_TH:-0.85}",
         "NER_THAI_ENABLED": "${NER_THAI_ENABLED:-1}",
-        "NER_WORKERS": "${NER_WORKERS:-4}"
+        "NER_WORKERS": "${NER_WORKERS:-}"
       },
       "healthcheck": {
         "interval": "10s",
@@ -276,6 +276,7 @@
         "ALERT_WEBHOOK_URL": "${TS_ALERT_WEBHOOK_URL:-}",
         "ALLOWED_EMAIL_DOMAINS": "${ALLOWED_EMAIL_DOMAINS:-gbtech.co.th}",
         "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY:-}",
+        "API_DOCS_ENABLED": "${API_DOCS_ENABLED:-}",
         "APP_ENV": "development",
         "ARCHIVE_EXPIRY_DRY_RUN": "${ARCHIVE_EXPIRY_DRY_RUN:-true}",
         "ARCHIVE_EXPIRY_ENABLED": "${ARCHIVE_EXPIRY_ENABLED:-false}",
@@ -285,8 +286,10 @@
         "AUDIT_LOG_RETENTION_DAYS": "${AUDIT_LOG_RETENTION_DAYS:-365}",
         "AUTH_COOKIE_DOMAIN": "${AUTH_COOKIE_DOMAIN:-}",
         "AUTH_COOKIE_SAMESITE": "${AUTH_COOKIE_SAMESITE:-lax}",
+        "AUTH_COOKIE_SECURE": "${AUTH_COOKIE_SECURE:-}",
         "CHAT_EDGE_INTERNAL_URL": "${CHAT_EDGE_INTERNAL_URL:-http://chat-edge-api:4000}",
-        "CORS_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002",
+        "CHAT_INFLIGHT_LIMIT": "${CHAT_INFLIGHT_LIMIT:-64}",
+        "CORS_ORIGINS": "${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}",
         "DB_ASYNC_MAX_OVERFLOW": "${DB_ASYNC_MAX_OVERFLOW:-15}",
         "DB_ASYNC_POOL_SIZE": "${DB_ASYNC_POOL_SIZE:-10}",
         "DB_IDLE_IN_TRANSACTION_TIMEOUT_MS": "${DB_IDLE_IN_TRANSACTION_TIMEOUT_MS:-}",
@@ -294,17 +297,21 @@
         "DB_STATEMENT_TIMEOUT_MS": "${DB_STATEMENT_TIMEOUT_MS:-}",
         "DB_SYNC_MAX_OVERFLOW": "${DB_SYNC_MAX_OVERFLOW:-5}",
         "DB_SYNC_POOL_SIZE": "${DB_SYNC_POOL_SIZE:-5}",
+        "DLP_AUDIT_KEY": "${DLP_AUDIT_KEY:-}",
         "DLP_ENGINE": "${DLP_ENGINE:-python}",
         "DLP_GRPC_ADDRESS": "${DLP_GRPC_ADDRESS:-dlp-sidecar:50051}",
         "DLP_GRPC_TIMEOUT_SECONDS": "${DLP_GRPC_TIMEOUT_SECONDS:-1.0}",
         "DLP_HMAC_KEY": "${DLP_HMAC_KEY:-dev-dlp-hmac-key-change-in-production}",
         "DLP_PROMPT_VARIANT": "${DLP_PROMPT_VARIANT:-v1}",
         "DLP_PSEUDONYM_MODE": "${DLP_PSEUDONYM_MODE:-true}",
+        "EMAIL_DELIVERY": "${EMAIL_DELIVERY:-auto}",
+        "FORWARDED_ALLOW_IPS": "${FORWARDED_ALLOW_IPS:-*}",
         "GOOGLE_HOSTED_DOMAIN": "${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}",
         "GUNICORN_GRACEFUL_TIMEOUT": "${GUNICORN_GRACEFUL_TIMEOUT:-180}",
         "GUNICORN_TIMEOUT": "${GUNICORN_TIMEOUT:-60}",
-        "GUNICORN_WORKERS": "${GUNICORN_WORKERS:-4}",
+        "GUNICORN_WORKERS": "${GUNICORN_WORKERS:-}",
         "IMAGE_GENERATION_TIMEOUT_SECONDS": "${IMAGE_GENERATION_TIMEOUT_SECONDS:-180}",
+        "INITIAL_ADMIN_PASSWORD": "${INITIAL_ADMIN_PASSWORD:-}",
         "INTERNAL_SERVICE_SECRET": "${INTERNAL_SERVICE_SECRET:-}",
         "JWT_SECRET": "${JWT_SECRET:-dev-stable-key-change-in-prod}",
         "LANG": "C.UTF-8",
@@ -329,11 +336,12 @@
         "POSTGRES_HOST": "postgres",
         "POSTGRES_MAX_CONNECTIONS": "250",
         "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-postgres}",
-        "POSTGRES_PORT": "5432",
+        "POSTGRES_PORT": 5432,
         "POSTGRES_USER": "${POSTGRES_USER:-postgres}",
         "PROVIDER_BASE_URL_OVERRIDES": "${PROVIDER_BASE_URL_OVERRIDES:-}",
         "PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS": "${PROVIDER_CONCURRENCY_ACQUIRE_TIMEOUT_SECONDS:-1.0}",
         "PROVIDER_CONCURRENCY_CAPS": "${PROVIDER_CONCURRENCY_CAPS:-}",
+        "PROVIDER_KEY_MASTER_KEY": "${PROVIDER_KEY_MASTER_KEY:-}",
         "PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS": "${PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS:-30.0}",
         "PROVIDER_POOL_MAX_CONNECTIONS": "${PROVIDER_POOL_MAX_CONNECTIONS:-50}",
         "PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS": "${PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS:-20}",
@@ -344,10 +352,17 @@
         "RATE_LIMITER_GRPC_TIMEOUT_SECONDS": "${RATE_LIMITER_GRPC_TIMEOUT_SECONDS:-0.5}",
         "REDIS_HOST": "redis",
         "REDIS_PASSWORD": "${REDIS_PASSWORD:-}",
-        "REDIS_PORT": "6379",
+        "REDIS_PORT": 6379,
         "SCHEMA_DRIFT_MODE": "${SCHEMA_DRIFT_MODE:-failclosed}",
         "SERVICE_JWT_SECRET": "${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}",
-        "VIDEO_GEN_ENABLED": "${VIDEO_GEN_ENABLED:-false}"
+        "SESSION_SIGNING_SECRETS": "${SESSION_SIGNING_SECRETS:-}",
+        "TURN_QUEUE_ENABLED": "${TURN_QUEUE_ENABLED:-true}",
+        "TURN_QUEUE_MAX_ACTIVE": "${TURN_QUEUE_MAX_ACTIVE:-0}",
+        "TURN_QUEUE_MAX_PER_IDENTITY": "${TURN_QUEUE_MAX_PER_IDENTITY:-0}",
+        "TURN_QUEUE_MAX_WAITING": "${TURN_QUEUE_MAX_WAITING:-0}",
+        "TURN_QUEUE_MAX_WAIT_SECONDS": "${TURN_QUEUE_MAX_WAIT_SECONDS:-120}",
+        "VIDEO_GEN_ENABLED": "${VIDEO_GEN_ENABLED:-false}",
+        "WORKERS": "${WORKERS:-}"
       },
       "healthcheck": {
         "interval": "10s",
@@ -361,6 +376,7 @@
       },
       "labels": {
         "autoheal": "true",
+        "autoheal.stop.timeout": "200",
         "sran.test-stack": "true"
       },
       "networks": {
@@ -536,7 +552,7 @@
       },
       "environment": {
         "CHAT_EDGE_ADMIN_API_KEY": "${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}",
-        "CHAT_EDGE_DEV": "1",
+        "CHAT_EDGE_DEV": "${CHAT_EDGE_DEV-1}",
         "CHAT_EDGE_IMAGE_TIMEOUT_SECONDS": "${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}",
         "CORS_ALLOW_ORIGINS": "http://localhost:13002",
         "CSRF_SECRET": "${CSRF_SECRET:-dev-csrf-secret-change-in-prod}",
@@ -571,7 +587,7 @@
         "SERVICE_JWT_SECRET": "${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}",
         "STORAGE_BACKEND": "${STORAGE_BACKEND:-local}",
         "USER_JWT_SECRET": "${USER_JWT_SECRET:-dev-user-jwt-secret-change-in-prod}",
-        "CHAT_EDGE_DRAIN_TIMEOUT": "${CHAT_EDGE_DRAIN_TIMEOUT:-60s}",
+        "CHAT_EDGE_DRAIN_TIMEOUT": "${CHAT_EDGE_DRAIN_TIMEOUT:-90s}",
         "CHAT_EDGE_DRAIN_GRACE": "${CHAT_EDGE_DRAIN_GRACE:-10s}",
         "INTERRUPTED_TURN_SWEEP_INTERVAL": "${INTERRUPTED_TURN_SWEEP_INTERVAL:-60s}",
         "INTERRUPTED_TURN_MIN_AGE": "${INTERRUPTED_TURN_MIN_AGE:-2m}",
@@ -580,6 +596,10 @@
         "CLOUD_SCHEDULER_ENABLED": "false",
         "CLOUD_TASK_AUTHORIZE_URL": "http://backend:8080",
         "CLOUD_SCHEDULER_INTERVAL": "${CLOUD_SCHEDULER_INTERVAL:-60s}",
+        "KB_EXTERNAL_MODELS": "${KB_EXTERNAL_MODELS:-deny}",
+        "KB_ALLOWED_PROVIDERS": "${KB_ALLOWED_PROVIDERS:-sranai}",
+        "APP_ENV": "${APP_ENV:-development}",
+        "COOKIE_SECURE": "${COOKIE_SECURE:-false}",
         "CONTEXT_COMPACT_TRIGGER_RATIO": "${CONTEXT_COMPACT_TRIGGER_RATIO:-0.85}",
         "CONTEXT_COMPACT_TARGET_RATIO": "${CONTEXT_COMPACT_TARGET_RATIO:-0.60}",
         "CONTEXT_SUMMARY_MODEL": "${CONTEXT_SUMMARY_MODEL:-}",
@@ -599,13 +619,14 @@
       },
       "labels": {
         "autoheal": "true",
+        "autoheal.stop.timeout": "120",
         "sran.test-stack": "true"
       },
       "networks": {
         "default": null
       },
       "restart": "on-failure",
-      "stop_grace_period": "90s",
+      "stop_grace_period": "120s",
       "volumes": [
         {
           "type": "volume",
@@ -692,7 +713,7 @@
         "HF_HUB_OFFLINE": "1",
         "KB_DTYPE": "${KB_DTYPE:-bf16}",
         "KB_RERANK_ENABLED": "${KB_RERANK_ENABLED:-false}",
-        "KB_THREADS": "${KB_THREADS:-6}"
+        "KB_THREADS": "${KB_THREADS:-}"
       },
       "image": "ai-gateway-kb-models:${TS_KB_MODELS_TAG:-latest}",
       "networks": {
