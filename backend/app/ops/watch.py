@@ -192,14 +192,17 @@ def classify_turns(
 
     FIX131 — "no successful turn" is critical only with at least
     ``min_attempts`` attempts; one failed turn in a quiet window is a
-    log-only finding (severity none). The error rate is degraded (warning)."""
+    log-only finding (severity none). The error rate is degraded (warning)
+    and, like it, needs ``min_attempts`` failed turns."""
     total = ok + failed
     out: list[Finding] = []
     if total >= 1 and ok == 0:
         severity, title, body = cat.turns_none_text(window_min, total, failed, min_attempts)
         out.append(Finding(key="turns:none_succeeded", title=title, message=body, severity=severity,
                            group=cat.GROUP_TURNS_NONE))
-    if total >= min_sample:
+    # FIX131 — the rate also needs ``min_attempts`` failed turns: one failed
+    # turn in ten (10 %) is a model outcome, not an incident to page for.
+    if total >= min_sample and failed >= min_attempts:
         pct = 100.0 * failed / total
         if pct > max_error_pct:
             severity, title, body = cat.turns_error_rate_text(window_min, pct, failed, total, max_error_pct)

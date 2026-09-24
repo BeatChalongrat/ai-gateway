@@ -315,6 +315,14 @@ class AlertEvaluator:
             )
             if total < ERROR_RATE_MIN_SAMPLE:
                 return 0.0
+            # FIX131 D — a rate over a small window is not an incident by
+            # itself: one failed request in ten (live 2026-09-24, a qwen
+            # output_limit_reached) paged the owner at top priority. The
+            # page also needs ``alert_page_min_attempts`` failed requests.
+            from app.core.config import settings
+
+            if errors < int(getattr(settings, "alert_page_min_attempts", 3)):
+                return 0.0
             return round(100.0 * errors / total, 2)
         else:
             return 0.0

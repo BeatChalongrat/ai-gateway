@@ -306,7 +306,7 @@ an operator's own rule with the same metric is never overridden):
 | Rule | Metric | Fires when | Cooldown |
 |---|---|---|---|
 | No successful turn in 5 min (with attempts) | `no_successful_turn` | ≥ 1 request in the window and 0 with `status=success` — a quiet night is not an outage. Gateway-level: only requests that reached a provider are in `request_logs` (see the ops watcher's turn rules for the chat-level truth) | 5 min |
-| Error rate above 5 % (5 min, ≥10 requests) | `error_rate` | ≥ 10 requests in the window and > 5 % have a status other than `success` / `blocked` (same gateway-level caveat) | 5 min |
+| Error rate above 5 % (5 min, ≥10 requests) | `error_rate` | ≥ 10 requests in the window, > 5 % have a status other than `success` / `blocked`, **and at least `ALERT_PAGE_MIN_ATTEMPTS` (3) of them failed** — one failed request in ten is not a page (FIX131; same gateway-level caveat; ops-watch's turn rate uses the same floor) | 5 min |
 | Transaction stuck longer than 60 s | `stuck_transaction` | the sampler's oldest idle / lock-blocked transaction is ≥ 60 s | 1 min |
 
 Every fired rule is written to `alert_events` (`delivery_status`
