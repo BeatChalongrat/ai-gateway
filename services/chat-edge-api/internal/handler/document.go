@@ -37,10 +37,16 @@ type DocumentHandler struct {
 	// owners (FIX126 F4) names the message a generated file belongs to.
 	// nil = files stay unlinked (message_id NULL), as before.
 	owners *service.PlanOwnerResolver
+	// outcomes (FIX131 A3) keeps a failed execution for the plan's
+	// message so a reload shows it. nil = not kept, as before.
+	outcomes service.PlanOutcomeStore
 }
 
 // SetPlanOwnerResolver wires FIX126 F4's plan → message link.
 func (h *DocumentHandler) SetPlanOwnerResolver(r *service.PlanOwnerResolver) { h.owners = r }
+
+// SetPlanOutcomeStore wires FIX131 A3's failed-execution record.
+func (h *DocumentHandler) SetPlanOutcomeStore(s service.PlanOutcomeStore) { h.outcomes = s }
 
 func NewDocumentHandler(
 	files *repository.FileRepo, excel *service.ExcelService, docs *service.DocService,
@@ -180,26 +186,22 @@ func (h *DocumentHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		OutputFilename: req.OutputFilename,
 		MessageID:      owner,
 	})
+	// FIX131 A3 — the outcome survives a reload (a success clears it).
+	recordPlanOutcome(r.Context(), h.outcomes, convID, owner, req.Format, req.OutputFilename, srcID, err)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrDocSourceNotFound):
-			WriteError(w, http.StatusNotFound, CodeNotFound, "source file not found")
-		case errors.Is(err, service.ErrDocInvalidPlan),
-			errors.Is(err, service.ErrDocInvalidFormat),
-			errors.Is(err, service.ErrDocUnsupported):
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-		case errors.Is(err, service.ErrDocValidatorFailed):
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-		case errors.Is(err, service.ErrDocGeneratorFailed),
-			errors.Is(err, service.ErrDocInspectorFailed):
-			WriteError(w, http.StatusBadGateway, CodeInternalError, err.Error())
-		default:
-			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
-		}
+		// FIX131 A2 — the script's own error goes to the log; the card
+		// gets a reason it words in the user's language.
+		service.LogPlanFailure("doc", req.Format, convID, owner, err)
+		writePlanError(w, err)
 		return
 	}
 
 	wire := FileToWire(row)
+	if srcID != uuid.Nil {
+		if src, gerr := h.files.GetByID(r.Context(), caller.TenantUUID, srcID); gerr == nil && src.UserID == caller.UserID {
+			wire.MadeFrom = madeFrom(row, src)
+		}
+	}
 	resp := executeDocResponse{
 		File:       wire,
 		Validation: validation,

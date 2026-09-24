@@ -73,6 +73,14 @@ type fileResponse struct {
 	// "Made by …". Carried in inspection_json (nil for media otherwise) so no
 	// schema change / new scanned column was needed.
 	GeneratedBy string `json:"generated_by,omitempty"`
+	// FIX131 A2 — why the server could not read this file's text
+	// (encrypted | scanned | damaged | unknown); omitted for a readable or
+	// still-reading file. The page words it on the file's own chip.
+	UnreadableReason string `json:"unreadable_reason,omitempty"`
+	// FIX131 A4 — for a generated Office/PDF file: the file it was made
+	// from and how (edit | input). Set by the execute routes and GET
+	// /messages; omitted elsewhere.
+	MadeFrom *madeFromResponse `json:"made_from,omitempty"`
 }
 
 // FileToWire formats a model.ConversationFile for the wire. Exported
@@ -104,6 +112,9 @@ func FileToWire(f *model.ConversationFile) fileResponse {
 	}
 	if f.ParentFileID != nil {
 		r.ParentFileID = f.ParentFileID.String()
+	}
+	if why, bad := service.UnreadableReason(*f); bad {
+		r.UnreadableReason = why
 	}
 	if f.ClientID != nil {
 		r.ClientID = *f.ClientID

@@ -41,7 +41,15 @@ type MessageHandler struct {
 	// attribution onto each assistant message via a single batched
 	// query (no N+1).
 	sources *repository.ResponseContextSourceRepo
+	// Optional (FIX131 A3). When set, the list endpoint returns each
+	// assistant message's failed plan executions as plan_outcomes, so the
+	// plan card after a reload says "ไม่สำเร็จ — …" instead of offering to
+	// generate again as if nothing had happened.
+	planOutcomes service.PlanOutcomeStore
 }
+
+// SetPlanOutcomeStore wires FIX131 A3's failed-execution record.
+func (h *MessageHandler) SetPlanOutcomeStore(s service.PlanOutcomeStore) { h.planOutcomes = s }
 
 func NewMessageHandler(m *service.MessageService) *MessageHandler {
 	return &MessageHandler{messages: m}
@@ -117,6 +125,22 @@ type messageResponse struct {
 	// (status waiting_user). Same shape the desktop bridge posts, so the
 	// page renders one component for both.
 	PendingQuestion *pendingQuestionResponse `json:"pending_question,omitempty"`
+	// FIX131 A3 — the plan cards of this assistant message whose last
+	// execution failed, and why. A success is not listed: it is the file
+	// in `files`.
+	PlanOutcomes []planOutcomeResponse `json:"plan_outcomes,omitempty"`
+}
+
+// planOutcomeResponse is one failed plan execution on the wire.
+type planOutcomeResponse struct {
+	Fence          string `json:"fence"`
+	Format         string `json:"format"`
+	OutputFilename string `json:"output_filename,omitempty"`
+	Status         string `json:"status"`
+	Reason         string `json:"reason"`
+	SourceFileID   string `json:"source_file_id,omitempty"`
+	SourceFilename string `json:"source_filename,omitempty"`
+	At             string `json:"at"`
 }
 
 type pendingQuestionResponse struct {
@@ -335,15 +359,51 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		byMsg, err := h.files.ListByMessageIDs(r.Context(), caller.TenantUUID, ids)
 		if err == nil {
+			known := filesByID(byMsg)
 			for i := range items {
 				if attached, ok := byMsg[msgs[i].ID]; ok {
 					out := make([]fileResponse, 0, len(attached))
 					for j := range attached {
-						out = append(out, FileToWire(&attached[j]))
+						wire := FileToWire(&attached[j])
+						// FIX131 A4 — "from fixture.pdf": the file a
+						// generated document was made from, and how.
+						if p := attached[j].ParentFileID; attached[j].IsGenerated && p != nil {
+							if parent := h.fileForCaller(r.Context(), caller.TenantUUID, caller.UserID, *p, known); parent != nil {
+								wire.MadeFrom = madeFrom(&attached[j], parent)
+							}
+						}
+						out = append(out, wire)
 					}
 					items[i].Files = out
 				}
 			}
+		}
+	}
+
+	// FIX131 A3 — failed plan executions, on the message that wrote the plan.
+	if h.planOutcomes != nil && len(msgs) > 0 {
+		pos := make(map[uuid.UUID]int, len(msgs))
+		for i := range msgs {
+			if msgs[i].Role == "assistant" {
+				pos[msgs[i].ID] = i
+			}
+		}
+		for _, o := range h.planOutcomes.List(r.Context(), convID) {
+			i, ok := pos[o.MessageID]
+			if !ok {
+				continue
+			}
+			wire := planOutcomeResponse{
+				Fence: o.Fence, Format: o.Format, OutputFilename: o.OutputFilename,
+				Status: o.Status, Reason: o.Reason, At: o.At.UTC().Format("2006-01-02T15:04:05Z"),
+			}
+			if o.SourceFileID != nil && h.files != nil {
+				wire.SourceFileID = o.SourceFileID.String()
+				if src := h.fileForCaller(r.Context(), caller.TenantUUID, caller.UserID, *o.SourceFileID, nil); src != nil {
+					wire.SourceFilename = src.OriginalFilename
+				}
+			}
+			items[i].PlanOutcomes = append(items[i].PlanOutcomes, wire)
 		}
 	}
 
@@ -352,6 +412,42 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 		"messages": items,
 		"has_more": hasMore,
 	})
+}
+
+// filesByID indexes the page's attachments by id.
+func filesByID(byMsg map[uuid.UUID][]model.ConversationFile) map[uuid.UUID]*model.ConversationFile {
+	out := map[uuid.UUID]*model.ConversationFile{}
+	for _, list := range byMsg {
+		for j := range list {
+			out[list[j].ID] = &list[j]
+		}
+	}
+	return out
+}
+
+// fileForCaller returns a file of this caller by id: from the page's own
+// attachments when it is there, else one tenant-scoped lookup. nil when it
+// is gone or belongs to someone else.
+func (h *MessageHandler) fileForCaller(
+	ctx context.Context, tenantID, userID, id uuid.UUID, known map[uuid.UUID]*model.ConversationFile,
+) *model.ConversationFile {
+	if f, ok := known[id]; ok {
+		if f.UserID != userID {
+			return nil
+		}
+		return f
+	}
+	if h.files == nil {
+		return nil
+	}
+	f, err := h.files.GetByID(ctx, tenantID, id)
+	if err != nil || f.UserID != userID {
+		return nil
+	}
+	if known != nil {
+		known[id] = f
+	}
+	return f
 }
 
 // ---------------------------------------------------------------------------
