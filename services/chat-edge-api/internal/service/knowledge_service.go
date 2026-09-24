@@ -8,6 +8,12 @@
 // FIX132 the upload request itself extracted and embedded every chunk, one
 // HTTP call per chunk, so a 50-page PDF held the request for minutes.
 //
+// FIX132 B — a knowledge base is private to the user who created it (like a
+// personal project in ChatGPT or Claude): every user-facing method takes the
+// caller and answers ErrKBNotFound for anyone else's, so a colleague in the
+// same tenant cannot even learn that it exists. The Admin* methods (the
+// cross-tenant admin console) skip the owner check.
+//
 // Storage layout mirrors FileService (one directory per tenant per KB) so
 // the on-disk shape stays predictable across products.
 package service
@@ -180,8 +186,9 @@ func (s *KnowledgeService) CreateKB(ctx context.Context, in CreateKBInput) (*mod
 	})
 }
 
-func (s *KnowledgeService) ListKBs(ctx context.Context, tenantID uuid.UUID) ([]model.KnowledgeBase, error) {
-	return s.repo.ListKBs(ctx, tenantID)
+// ListKBs lists the caller's own knowledge bases.
+func (s *KnowledgeService) ListKBs(ctx context.Context, tenantID, userID uuid.UUID) ([]model.KnowledgeBase, error) {
+	return s.repo.ListKBsForUser(ctx, tenantID, userID)
 }
 
 // IndexingCounts returns, per knowledge base, how many documents are
@@ -190,7 +197,20 @@ func (s *KnowledgeService) IndexingCounts(ctx context.Context, kbIDs []uuid.UUID
 	return s.repo.CountIndexing(ctx, kbIDs)
 }
 
-func (s *KnowledgeService) GetKB(ctx context.Context, tenantID, id uuid.UUID) (*model.KnowledgeBase, error) {
+// GetKB returns the knowledge base if the caller owns it, else ErrKBNotFound.
+func (s *KnowledgeService) GetKB(ctx context.Context, tenantID, userID, id uuid.UUID) (*model.KnowledgeBase, error) {
+	kb, err := s.repo.GetKBForUser(ctx, tenantID, userID, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrKBNotFound
+		}
+		return nil, err
+	}
+	return kb, nil
+}
+
+// adminKB is GetKB without the owner check (admin console only).
+func (s *KnowledgeService) adminKB(ctx context.Context, tenantID, id uuid.UUID) (*model.KnowledgeBase, error) {
 	kb, err := s.repo.GetKB(ctx, tenantID, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -207,7 +227,10 @@ type UpdateKBInput struct {
 	IsActive    *bool
 }
 
-func (s *KnowledgeService) UpdateKB(ctx context.Context, tenantID, id uuid.UUID, in UpdateKBInput) error {
+func (s *KnowledgeService) UpdateKB(ctx context.Context, tenantID, userID, id uuid.UUID, in UpdateKBInput) error {
+	if _, err := s.GetKB(ctx, tenantID, userID, id); err != nil {
+		return err
+	}
 	if err := s.repo.UpdateKB(ctx, tenantID, id, in.Name, in.Description, in.IsActive); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrKBNotFound
@@ -217,7 +240,20 @@ func (s *KnowledgeService) UpdateKB(ctx context.Context, tenantID, id uuid.UUID,
 	return nil
 }
 
-func (s *KnowledgeService) DeleteKB(ctx context.Context, tenantID, id uuid.UUID) error {
+// DeleteKB deletes the caller's knowledge base.
+func (s *KnowledgeService) DeleteKB(ctx context.Context, tenantID, userID, id uuid.UUID) error {
+	if _, err := s.GetKB(ctx, tenantID, userID, id); err != nil {
+		return err
+	}
+	return s.deleteKB(ctx, tenantID, id)
+}
+
+// AdminDeleteKB deletes any knowledge base of the tenant (admin console).
+func (s *KnowledgeService) AdminDeleteKB(ctx context.Context, tenantID, id uuid.UUID) error {
+	return s.deleteKB(ctx, tenantID, id)
+}
+
+func (s *KnowledgeService) deleteKB(ctx context.Context, tenantID, id uuid.UUID) error {
 	// Pull documents first so we can unlink on-disk blobs after the
 	// row is gone. The FK cascade already wipes the DB rows.
 	docs, _ := s.repo.ListDocuments(ctx, tenantID, id)
@@ -238,8 +274,8 @@ func (s *KnowledgeService) DeleteKB(ctx context.Context, tenantID, id uuid.UUID)
 	return nil
 }
 
-func (s *KnowledgeService) ListDocuments(ctx context.Context, tenantID, kbID uuid.UUID) ([]model.KnowledgeDocument, error) {
-	if _, err := s.GetKB(ctx, tenantID, kbID); err != nil {
+func (s *KnowledgeService) ListDocuments(ctx context.Context, tenantID, userID, kbID uuid.UUID) ([]model.KnowledgeDocument, error) {
+	if _, err := s.GetKB(ctx, tenantID, userID, kbID); err != nil {
 		return nil, err
 	}
 	return s.repo.ListDocuments(ctx, tenantID, kbID)
@@ -274,7 +310,7 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 	if !allowedKBContentTypes[strings.ToLower(in.ContentType)] {
 		return nil, fmt.Errorf("%w: %s", ErrKBDocumentBadType, in.ContentType)
 	}
-	kb, err := s.GetKB(ctx, in.TenantID, in.KnowledgeBaseID)
+	kb, err := s.GetKB(ctx, in.TenantID, in.UserID, in.KnowledgeBaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,8 +358,15 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 	return doc, nil
 }
 
-// GetDocument returns one document of the knowledge base.
-func (s *KnowledgeService) GetDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
+// GetDocument returns one document of the caller's knowledge base.
+func (s *KnowledgeService) GetDocument(ctx context.Context, tenantID, userID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
+	if _, err := s.GetKB(ctx, tenantID, userID, kbID); err != nil {
+		return nil, err
+	}
+	return s.documentOf(ctx, tenantID, kbID, docID)
+}
+
+func (s *KnowledgeService) documentOf(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
 	doc, err := s.repo.GetDocument(ctx, tenantID, docID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -341,8 +384,8 @@ func (s *KnowledgeService) GetDocument(ctx context.Context, tenantID, kbID, docI
 // chunks cascade) and the blob, then recomputes the KB's counters. A worker
 // in another process notices at its next batch: its fenced write matches no
 // row. (Cancel first: cancelling after would race a fresh claim.)
-func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) error {
-	doc, err := s.GetDocument(ctx, tenantID, kbID, docID)
+func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, userID, kbID, docID uuid.UUID) error {
+	doc, err := s.GetDocument(ctx, tenantID, userID, kbID, docID)
 	if err != nil {
 		return err
 	}
@@ -363,10 +406,25 @@ func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, d
 // ReindexDocument deletes the document's chunks and puts it back in the
 // queue as 'pending' (a re-index after a model or chunking change, or a
 // retry after a failure). Any indexing of it in progress stops.
-func (s *KnowledgeService) ReindexDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
-	if _, err := s.GetDocument(ctx, tenantID, kbID, docID); err != nil {
+func (s *KnowledgeService) ReindexDocument(ctx context.Context, tenantID, userID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
+	if _, err := s.GetDocument(ctx, tenantID, userID, kbID, docID); err != nil {
 		return nil, err
 	}
+	return s.reindex(ctx, tenantID, kbID, docID)
+}
+
+// AdminReindexDocument re-queues any document of the tenant (admin console).
+func (s *KnowledgeService) AdminReindexDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
+	if _, err := s.adminKB(ctx, tenantID, kbID); err != nil {
+		return nil, err
+	}
+	if _, err := s.documentOf(ctx, tenantID, kbID, docID); err != nil {
+		return nil, err
+	}
+	return s.reindex(ctx, tenantID, kbID, docID)
+}
+
+func (s *KnowledgeService) reindex(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
 	s.cancelIndexing(docID)
 	if err := s.repo.ResetDocumentForReindex(ctx, tenantID, docID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

@@ -217,7 +217,7 @@ func TestFIX132_DeleteMidIndexStopsCleanly(t *testing.T) {
 	if n := h.count(t, `SELECT count(*) FROM chat.knowledge_chunks WHERE document_id=$1`, d.ID); n != KBEmbedBatchMax {
 		t.Fatalf("batch 1 stored: %d chunks", n)
 	}
-	if err := h.svc.DeleteDocument(context.Background(), h.tenant, h.kb.ID, d.ID); err != nil {
+	if err := h.svc.DeleteDocument(context.Background(), h.tenant, h.user, h.kb.ID, d.ID); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -243,7 +243,7 @@ func TestFIX132_DeleteMidIndexInAnotherProcessStopsCleanly(t *testing.T) {
 	<-h.fake.EmbedStarted
 	h.fake.Block <- struct{}{}
 	<-h.fake.EmbedStarted
-	if err := h.svc.DeleteDocument(context.Background(), h.tenant, h.kb.ID, d.ID); err != nil {
+	if err := h.svc.DeleteDocument(context.Background(), h.tenant, h.user, h.kb.ID, d.ID); err != nil {
 		t.Fatal(err)
 	}
 	close(h.fake.Block) // batch 2 comes back after the row is gone
@@ -270,7 +270,7 @@ func TestFIX132_ReindexDeletesChunksAndRequeues(t *testing.T) {
 	d := h.upload(t, "a.txt", "text/plain", longEnglish(200))
 	h.drain(t)
 	first := h.doc(t, d.ID)
-	re, err := h.svc.ReindexDocument(context.Background(), h.tenant, h.kb.ID, d.ID)
+	re, err := h.svc.ReindexDocument(context.Background(), h.tenant, h.user, h.kb.ID, d.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +304,7 @@ func TestFIX132_ReindexMidIndexInAnotherProcess(t *testing.T) {
 	<-h.fake.EmbedStarted
 	h.fake.Block <- struct{}{}
 	<-h.fake.EmbedStarted
-	if _, err := h.svc.ReindexDocument(context.Background(), h.tenant, h.kb.ID, d.ID); err != nil {
+	if _, err := h.svc.ReindexDocument(context.Background(), h.tenant, h.user, h.kb.ID, d.ID); err != nil {
 		t.Fatal(err)
 	}
 	close(h.fake.Block)

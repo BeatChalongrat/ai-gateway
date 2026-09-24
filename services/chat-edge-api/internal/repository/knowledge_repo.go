@@ -110,6 +110,48 @@ func (r *KnowledgeRepo) GetKB(ctx context.Context, tenantID, id uuid.UUID) (*mod
 	return kb, nil
 }
 
+// ListKBsForUser lists the knowledge bases the user owns (FIX132 B: a
+// knowledge base is private to its creator; rows without an owner, from
+// before migration 049, are not listed).
+func (r *KnowledgeRepo) ListKBsForUser(ctx context.Context, tenantID, userID uuid.UUID) ([]model.KnowledgeBase, error) {
+	q := `SELECT ` + kbColumns + `
+		FROM chat.knowledge_bases
+		WHERE tenant_id = $1 AND user_id = $2
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.Query(ctx, q, tenantID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list kbs for user: %w", err)
+	}
+	defer rows.Close()
+	out := make([]model.KnowledgeBase, 0)
+	for rows.Next() {
+		var kb model.KnowledgeBase
+		if err := scanKB(rows, &kb); err != nil {
+			return nil, fmt.Errorf("list kbs scan: %w", err)
+		}
+		out = append(out, kb)
+	}
+	return out, rows.Err()
+}
+
+// GetKBForUser returns the knowledge base only if the user owns it;
+// ErrNotFound otherwise (another user's KB is indistinguishable from none).
+func (r *KnowledgeRepo) GetKBForUser(ctx context.Context, tenantID, userID, id uuid.UUID) (*model.KnowledgeBase, error) {
+	q := `SELECT ` + kbColumns + `
+		FROM chat.knowledge_bases
+		WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+	`
+	kb := &model.KnowledgeBase{}
+	if err := scanKB(r.db.QueryRow(ctx, q, id, tenantID, userID), kb); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get kb for user: %w", err)
+	}
+	return kb, nil
+}
+
 // UpdateKB applies a sparse patch. Each pointer that's non-nil
 // becomes a SET clause. Returns ErrNotFound if no row matched.
 func (r *KnowledgeRepo) UpdateKB(

@@ -419,11 +419,11 @@ func (h *ConversationHandler) Update(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadRequest, CodeValidationError, perr.Error())
 			return
 		}
-		// Verify the KB exists for this tenant before binding (so we
-		// don't store a dangling FK and so the user gets a clean 404
-		// when they tap an unknown KB id).
+		// Verify the KB exists AND is the caller's before binding (FIX132
+		// B: knowledge bases are private to their creator), so we don't
+		// store a dangling FK and a colleague's KB id answers a clean 404.
 		if kbID != uuid.Nil && h.knowledge != nil {
-			if _, err := h.knowledge.GetKB(r.Context(), caller.TenantUUID, kbID); err != nil {
+			if _, err := h.knowledge.GetKB(r.Context(), caller.TenantUUID, caller.UserID, kbID); err != nil {
 				if errors.Is(err, service.ErrKBNotFound) {
 					WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
 					return

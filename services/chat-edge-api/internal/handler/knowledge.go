@@ -170,7 +170,7 @@ func (h *KnowledgeHandler) Availability(w http.ResponseWriter, r *http.Request) 
 
 func (h *KnowledgeHandler) List(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
-	kbs, err := h.svc.ListKBs(r.Context(), caller.TenantUUID)
+	kbs, err := h.svc.ListKBs(r.Context(), caller.TenantUUID, caller.UserID)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
@@ -190,7 +190,7 @@ func (h *KnowledgeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid kb id")
 		return
 	}
-	kb, err := h.svc.GetKB(r.Context(), caller.TenantUUID, kbID)
+	kb, err := h.svc.GetKB(r.Context(), caller.TenantUUID, caller.UserID, kbID)
 	if err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
@@ -199,7 +199,7 @@ func (h *KnowledgeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	docs, err := h.svc.ListDocuments(r.Context(), caller.TenantUUID, kbID)
+	docs, err := h.svc.ListDocuments(r.Context(), caller.TenantUUID, caller.UserID, kbID)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
@@ -237,7 +237,7 @@ func (h *KnowledgeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "no fields to update")
 		return
 	}
-	if err := h.svc.UpdateKB(r.Context(), caller.TenantUUID, kbID, service.UpdateKBInput{
+	if err := h.svc.UpdateKB(r.Context(), caller.TenantUUID, caller.UserID, kbID, service.UpdateKBInput{
 		Name:        req.Name,
 		Description: req.Description,
 		IsActive:    req.IsActive,
@@ -249,7 +249,7 @@ func (h *KnowledgeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	kb, err := h.svc.GetKB(r.Context(), caller.TenantUUID, kbID)
+	kb, err := h.svc.GetKB(r.Context(), caller.TenantUUID, caller.UserID, kbID)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
@@ -265,7 +265,7 @@ func (h *KnowledgeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid kb id")
 		return
 	}
-	if err := h.svc.DeleteKB(r.Context(), caller.TenantUUID, kbID); err != nil {
+	if err := h.svc.DeleteKB(r.Context(), caller.TenantUUID, caller.UserID, kbID); err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
 			return
@@ -287,7 +287,7 @@ func (h *KnowledgeHandler) ListDocuments(w http.ResponseWriter, r *http.Request)
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid kb id")
 		return
 	}
-	docs, err := h.svc.ListDocuments(r.Context(), caller.TenantUUID, kbID)
+	docs, err := h.svc.ListDocuments(r.Context(), caller.TenantUUID, caller.UserID, kbID)
 	if err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
@@ -358,8 +358,8 @@ func (h *KnowledgeHandler) DeleteDocument(w http.ResponseWriter, r *http.Request
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid document id")
 		return
 	}
-	if err := h.svc.DeleteDocument(r.Context(), caller.TenantUUID, kbID, docID); err != nil {
-		if errors.Is(err, service.ErrKBDocumentNotFound) {
+	if err := h.svc.DeleteDocument(r.Context(), caller.TenantUUID, caller.UserID, kbID, docID); err != nil {
+		if errors.Is(err, service.ErrKBDocumentNotFound) || errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "document not found")
 			return
 		}
@@ -381,9 +381,9 @@ func (h *KnowledgeHandler) ReindexDocument(w http.ResponseWriter, r *http.Reques
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid document id")
 		return
 	}
-	doc, err := h.svc.ReindexDocument(r.Context(), caller.TenantUUID, kbID, docID)
+	doc, err := h.svc.ReindexDocument(r.Context(), caller.TenantUUID, caller.UserID, kbID, docID)
 	if err != nil {
-		if errors.Is(err, service.ErrKBDocumentNotFound) {
+		if errors.Is(err, service.ErrKBDocumentNotFound) || errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "document not found")
 			return
 		}
@@ -460,7 +460,7 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	// Sanity check the KB exists for this tenant before running
 	// retrieval — otherwise the search would silently return nothing.
-	if _, err := h.svc.GetKB(r.Context(), caller.TenantUUID, kbID); err != nil {
+	if _, err := h.svc.GetKB(r.Context(), caller.TenantUUID, caller.UserID, kbID); err != nil {
 		if errors.Is(err, service.ErrKBNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "knowledge base not found")
 			return

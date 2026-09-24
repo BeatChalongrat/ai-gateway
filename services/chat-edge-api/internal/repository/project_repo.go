@@ -122,9 +122,9 @@ func (r *ProjectRepo) Update(
 }
 
 // SetKnowledgeBase attaches (or detaches, kbID = nil) the project's KB.
-// The EXISTS guard enforces tenant scope on the KB itself (knowledge
-// bases are tenant-scoped — migration 011 has no per-user ownership), so
-// a leaked KB id from another tenant can never be attached.
+// The EXISTS guard enforces the KB's scope: same tenant AND owned by the
+// project's user (FIX132 B — a knowledge base is private to its creator), so
+// neither another tenant's nor a colleague's KB id can be attached.
 func (r *ProjectRepo) SetKnowledgeBase(
 	ctx context.Context, tenantID, userID, projectID uuid.UUID, kbID *uuid.UUID,
 ) (*model.Project, error) {
@@ -134,7 +134,7 @@ func (r *ProjectRepo) SetKnowledgeBase(
 		WHERE id = $1 AND tenant_id = $2 AND user_id = $3
 		  AND ($4::uuid IS NULL OR EXISTS (
 		        SELECT 1 FROM chat.knowledge_bases kb
-		        WHERE kb.id = $4 AND kb.tenant_id = $2))
+		        WHERE kb.id = $4 AND kb.tenant_id = $2 AND kb.user_id = $3))
 		RETURNING ` + projectColumns
 	var arg any
 	if kbID != nil {

@@ -641,10 +641,10 @@ func main() {
 	// only cares about error.
 	adminHandler.SetKBSink(handler.AdminKBSink{
 		ReindexDocument: func(ctx context.Context, tenantID, kbID, docID uuid.UUID) error {
-			_, err := knowledgeSvc.ReindexDocument(ctx, tenantID, kbID, docID)
+			_, err := knowledgeSvc.AdminReindexDocument(ctx, tenantID, kbID, docID)
 			return err
 		},
-		DeleteKB: knowledgeSvc.DeleteKB,
+		DeleteKB: knowledgeSvc.AdminDeleteKB,
 	})
 
 	// Phase D — the model handler also backs the image-route capability
