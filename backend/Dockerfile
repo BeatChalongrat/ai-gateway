@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt requirements-dev.txt ./
 # Install base + dev deps (respx, etc). Test deps are tiny and having
-# them in the image lets `make test` work against the running
-# container without a separate install step.
-RUN pip install --no-cache-dir -r requirements-dev.txt gunicorn
+# them in the image lets the test lane (scripts/backend-test-lane.sh: a
+# throwaway container of this image with the checkout mounted read-only)
+# run without a separate install step.
+RUN pip install --no-cache-dir -r requirements-dev.txt
 
 # spaCy models for Presidio NER.
 #
@@ -47,9 +48,11 @@ ARG CREATED=unknown
 LABEL org.opencontainers.image.revision=$REVISION \
       org.opencontainers.image.created=$CREATED
 
-# Run migrations then start with gunicorn managing uvicorn workers.
-# GUNICORN_WORKERS is the single worker-count knob (also read by
-# scripts/start.sh and the loadtest compose) — remember the per-provider
-# concurrency caps are per-worker semaphores, so a provider's effective
-# ceiling is cap × GUNICORN_WORKERS.
-CMD ["sh", "-c", "python -m alembic upgrade head && gunicorn app.main:app -w ${GUNICORN_WORKERS:-4} -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8080 --timeout 60 --graceful-timeout 30 --worker-connections 100"]
+# FIX131 — serve.sh: migrate once, then `exec gunicorn -c gunicorn.conf.py`
+# (gunicorn is PID 1, so Docker's SIGTERM starts a graceful drain instead of
+# waiting for the SIGKILL). Workers, timeouts and the drain window are set in
+# gunicorn.conf.py from GUNICORN_WORKERS / GUNICORN_TIMEOUT /
+# GUNICORN_GRACEFUL_TIMEOUT. Remember the per-provider concurrency caps are
+# per-worker semaphores, so a provider's effective ceiling is
+# cap x GUNICORN_WORKERS.
+CMD ["sh", "/app/serve.sh"]

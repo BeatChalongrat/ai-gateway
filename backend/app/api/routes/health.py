@@ -198,15 +198,44 @@ async def live():
     return {"status": "alive", "worker_pid": os.getpid()}
 
 
+def _stuck_after_s() -> float:
+    """A chat request older than this is stuck (FIX26: hard timeout + 30 s)."""
+    return float(getattr(settings, "request_hard_timeout_seconds", 120.0)) + 30.0
+
+
+def worker_record() -> dict:
+    """FIX131 — what this worker publishes on the worker board every few seconds.
+
+    /ready on ANY worker of the container reads these (app/core/worker_board.py):
+    this worker's stuck requests, its last turn, whether it leads.
+    """
+    from app.core import leader, turn_pulse
+    from app.core.inflight import registry
+
+    snap = registry().snapshot(stuck_after_s=_stuck_after_s())
+    return {
+        "inflight": {"count": snap.count, "oldest_age_s": snap.oldest_age_s, "stuck": snap.stuck},
+        "leader": leader.is_leader(),
+        **turn_pulse.timestamps(),
+    }
+
+
 @router.get("/ready")
 async def ready():
-    """Readiness: a chat request could complete now, in this worker."""
+    """Readiness: a chat request could complete now, in this worker.
+
+    FIX131 — the engine checks are this worker's; ``stuck_requests``,
+    ``turns`` and ``container`` cover every worker of the container (the
+    worker board), so the answer does not depend on which worker the probe
+    landed on.
+    """
     import os
 
+    from app.core import leader, worker_board
     from app.core.inflight import registry
 
     budget = float(getattr(settings, "readiness_timeout_seconds", 3.0))
-    stuck_after = float(getattr(settings, "request_hard_timeout_seconds", 120.0)) + 30.0
+    stuck_after = _stuck_after_s()
     checks: dict = {"worker_pid": os.getpid()}
     failures: list[str] = []
 
@@ -241,7 +270,18 @@ async def ready():
         "limit": snap.limit,
         "available": snap.available,
     }
-    if snap.stuck:
+    peers = worker_board.peers()
+    peer_stuck = sum(int((p.get("inflight") or {}).get("stuck") or 0) for p in peers)
+    leader_pid = os.getpid() if leader.is_leader() else next(
+        (p.get("pid") for p in peers if p.get("leader")), None
+    )
+    checks["container"] = {
+        "workers": 1 + len(peers),
+        "inflight": snap.count + sum(int((p.get("inflight") or {}).get("count") or 0) for p in peers),
+        "stuck": snap.stuck + peer_stuck,
+        "leader_pid": leader_pid,
+    }
+    if snap.stuck or peer_stuck:
         failures.append("stuck_requests")
 
     # FIX129 A3 — the 2026-09-22 wedge was one transaction idle in
@@ -251,6 +291,9 @@ async def ready():
     # transaction idle or lock-blocked past ``pg_stuck_transaction_seconds``
     # turns readiness red, and the last completed turn's age is reported
     # so "ready" can be read against "actually answering".
+    # FIX131: every worker runs its own sampler of the same database
+    # (main.py), so whichever worker answers, this reflects the database
+    # within pg_activity_sample_seconds.
     from app.core import turn_pulse
     from app.services import pg_activity
 
@@ -264,7 +307,7 @@ async def ready():
     )
     if sample_fresh and sample.stuck_age_s >= stuck_tx_after:
         failures.append("stuck_transaction")
-    checks["turns"] = turn_pulse.snapshot()
+    checks["turns"] = turn_pulse.snapshot(peers)
 
     status = "ready" if not failures else "not-ready"
     # FIX103 — ready but running on a fallback is said, not hidden in a string.

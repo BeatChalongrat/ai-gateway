@@ -5,6 +5,11 @@
 sees, so ``/ready`` can report the age of the last success and the last
 attempt in this worker without a database query. Process-local, like the
 in-flight registry.
+
+FIX131 — under gunicorn the backend is N such workers; ``timestamps()`` is
+what each one publishes on the worker board (app/core/worker_board.py) and
+``snapshot(peers)`` answers for the whole container: the most recent success
+and attempt of ANY worker, whichever worker /ready landed on.
 """
 
 from __future__ import annotations
@@ -23,15 +28,25 @@ def mark(status: str) -> None:
         _last_success = now
 
 
-def snapshot() -> dict:
+def timestamps() -> dict:
+    """This worker's raw epoch timestamps (None = never), for the worker board."""
+    return {"last_success_at": _last_success, "last_attempt_at": _last_attempt}
+
+
+def _latest(own: float | None, peers: list[dict] | None, key: str) -> float | None:
+    values = [own] + [p.get(key) for p in (peers or [])]
+    nums = [float(v) for v in values if isinstance(v, (int, float))]
+    return max(nums) if nums else None
+
+
+def snapshot(peers: list[dict] | None = None) -> dict:
+    """Ages of the last success / attempt, over this worker and ``peers``."""
     now = time.time()
+    success = _latest(_last_success, peers, "last_success_at")
+    attempt = _latest(_last_attempt, peers, "last_attempt_at")
     return {
-        "last_success_age_s": (
-            round(now - _last_success, 1) if _last_success is not None else None
-        ),
-        "last_attempt_age_s": (
-            round(now - _last_attempt, 1) if _last_attempt is not None else None
-        ),
+        "last_success_age_s": round(now - success, 1) if success is not None else None,
+        "last_attempt_age_s": round(now - attempt, 1) if attempt is not None else None,
     }
 
 

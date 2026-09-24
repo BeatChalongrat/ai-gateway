@@ -1,5 +1,9 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+# FIX131 — the production process manager (gunicorn.conf.py). Pinned: it was
+# installed unpinned by the Dockerfile, so every rebuild could change the
+# process model (the image had drifted to 26.2.0).
+gunicorn==26.2.0
 pydantic==2.9.2
 pydantic-settings==2.5.2
 sqlalchemy==2.0.35

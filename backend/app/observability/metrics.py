@@ -1,14 +1,29 @@
 """Prometheus metric declarations + registry wiring.
 
-The registry is per-process. Under gunicorn ``--workers=N`` each worker
-holds its own counters — a production multi-worker deployment should
-add the ``prometheus_client.multiprocess`` collector, but that requires
-setting ``PROMETHEUS_MULTIPROC_DIR`` and using ``Collector`` overrides.
-For the perf-baseline work the backend is exercised as a single uvicorn
-process so the default in-process registry is sufficient.
+FIX131 — the backend runs as N gunicorn workers, and each worker is its own
+process with its own counters; a scrape of ``/metrics`` lands on one of them,
+so counters would jump between workers and ``rate()`` would lie. gunicorn.conf.py
+therefore sets ``PROMETHEUS_MULTIPROC_DIR`` (wiped at every start) before the
+workers import this module: prometheus_client then keeps every value in
+per-process files there, and ``render_prometheus_exposition`` merges all of
+them — counters and histograms summed (a dead worker's totals stay counted,
+so counters never go backwards), each gauge by the ``multiprocess_mode`` it
+declares below:
+
+* ``livesum`` — the container's total of a per-worker quantity (requests in
+  flight, pool connections in use, queue depth);
+* ``livemostrecent`` — a value every worker observes of the same shared thing
+  (pg_stat_activity, a Redis spend counter): the latest sample wins.
+
+Without the variable (tests, a one-off ``python -c``, the dev hot-reload
+process) nothing changes: one process, one in-memory registry. Every Gauge
+here must declare a mode — the default, ``all``, would add a ``pid`` label to
+the series (tests/test_fix131_metrics_multiproc.py enforces it).
 """
 
 from __future__ import annotations
+
+import os
 
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
@@ -52,6 +67,7 @@ HTTP_IN_FLIGHT = Gauge(
     "http_requests_in_flight",
     "Number of HTTP requests currently being processed by the app.",
     labelnames=("route",),
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -112,6 +128,7 @@ DLP_SCAN_DURATION = Histogram(
 DB_POOL_ACTIVE = Gauge(
     "db_pool_active",
     "Active SQLAlchemy connections checked out from the pool.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -123,6 +140,7 @@ DB_POOL_ACTIVE = Gauge(
 REQUEST_LOG_QUEUE_SIZE = Gauge(
     "request_log_queue_size",
     "Pending RequestRecord items in the async request-log queue.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -151,12 +169,15 @@ DB_POOL_OVERFLOW = Gauge(
     "db_pool_overflow",
     "SQLAlchemy overflow connections currently in use (beyond pool_size). "
     "Approaching db_pool_max means imminent checkout timeouts.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
 DB_POOL_MAX = Gauge(
     "db_pool_max",
-    "Configured maximum connections per worker (pool_size + max_overflow).",
+    "Configured maximum connections (pool_size + max_overflow), summed over "
+    "the container's live workers.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -175,6 +196,7 @@ DB_POOL_CHECKOUT_TIMEOUTS = Counter(
 ASYNC_DB_POOL_CHECKED_OUT = Gauge(
     "async_db_pool_checked_out",
     "Async-engine connections currently checked out (chat hot path).",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -182,12 +204,15 @@ ASYNC_DB_POOL_OVERFLOW = Gauge(
     "async_db_pool_overflow",
     "Async-engine overflow connections in use beyond pool_size. "
     "Approaching async_db_pool_max means imminent checkout-timeout 500s.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
 ASYNC_DB_POOL_MAX = Gauge(
     "async_db_pool_max",
-    "Configured async max connections per worker (pool_size + max_overflow).",
+    "Configured async max connections (pool_size + max_overflow), summed over "
+    "the container's live workers.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -207,6 +232,7 @@ CREDIT_DEDUCTION_INFLIGHT = Gauge(
     "credit_deduction_inflight",
     "Credit deductions currently between their FOR UPDATE and their return "
     "(the caller still owns the commit). Stays >0 when one is stuck.",
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
@@ -240,18 +266,21 @@ CREDIT_DEDUCTION_TOTAL = Counter(
 PG_IDLE_IN_TRANSACTION_SESSIONS = Gauge(
     "pg_idle_in_transaction_sessions",
     "Sessions in state 'idle in transaction' on this database.",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
 PG_IDLE_IN_TRANSACTION_MAX_AGE_SECONDS = Gauge(
     "pg_idle_in_transaction_max_age_seconds",
     "Age of the oldest 'idle in transaction' session (0 when none).",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
 PG_LOCK_WAITERS = Gauge(
     "pg_lock_waiters",
     "Sessions currently waiting on a lock on this database.",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
@@ -259,6 +288,7 @@ PG_STUCK_TRANSACTION_AGE_SECONDS = Gauge(
     "pg_stuck_transaction_age_seconds",
     "Age of the oldest transaction that is idle or blocked on a lock — the "
     "number the 'transaction stuck' alert rule reads.",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
@@ -360,12 +390,14 @@ GEN_JOBS_ACTIVE = Gauge(
     "gen_jobs_active",
     "Media-generation jobs currently in the 'processing' state.",
     labelnames=("modality",),
+    multiprocess_mode="livesum",
     registry=metrics_registry,
 )
 
 GEN_QUEUE_DEPTH = Gauge(
     "gen_queue_depth",
     "Queued media-generation jobs awaiting a worker.",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
@@ -403,6 +435,7 @@ DLP_CUSTOM_DETECTOR_LATENCY_SECONDS = Histogram(
 REPLICATE_SESSION_SPEND_USD = Gauge(
     "replicate_session_spend_usd",
     "Current session-wide Replicate spend in USD (today's L1 counter).",
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
@@ -410,6 +443,7 @@ REPLICATE_DAILY_SPEND_USD = Gauge(
     "replicate_daily_spend_usd",
     "Per-tenant daily Replicate spend in USD (today's L2 counter).",
     labelnames=("tenant_id",),
+    multiprocess_mode="livemostrecent",
     registry=metrics_registry,
 )
 
@@ -475,10 +509,19 @@ FALLBACK_DECISIONS_TOTAL = Counter(
 
 
 def render_prometheus_exposition() -> tuple[bytes, str]:
-    """Serialize the registry into the Prometheus text exposition format.
+    """Serialize the metrics into the Prometheus text exposition format.
 
     Returns a ``(body, content_type)`` tuple. ``CONTENT_TYPE_LATEST`` is
     the OpenMetrics-compatible ``text/plain; version=0.0.4; charset=utf-8``
-    header per the directive.
+    header per the directive. Under gunicorn (``PROMETHEUS_MULTIPROC_DIR``
+    set) the body is every worker of the container merged; otherwise it is
+    this process's registry.
     """
+    mp_dir = (os.environ.get("PROMETHEUS_MULTIPROC_DIR") or "").strip()
+    if mp_dir:
+        from prometheus_client import multiprocess
+
+        merged = CollectorRegistry()
+        multiprocess.MultiProcessCollector(merged, path=mp_dir)
+        return generate_latest(merged), CONTENT_TYPE_LATEST
     return generate_latest(metrics_registry), CONTENT_TYPE_LATEST
