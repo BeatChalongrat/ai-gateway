@@ -197,6 +197,23 @@ func TestFIX131_SweepSettlesNothingWhenLeasesCannotBeChecked(t *testing.T) {
 	}
 }
 
+func TestFIX131_SweepWithoutLeasesSettlesNothing(t *testing.T) {
+	id := uuid.New()
+	repo := &fakeSweepRepo{rows: map[uuid.UUID]string{id: "streaming"}}
+	clock := &testClock{t: time.Now()}
+	sw := NewInterruptedTurnSweep(repo, nil, time.Minute, 2*time.Minute)
+	sw.SetClock(clock.now)
+	for i := 0; i < 3; i++ {
+		if rep, _ := sw.RunOnce(context.Background()); rep.Settled != 0 {
+			t.Fatalf("a sweep with no lease source settled a row: %+v", rep)
+		}
+		clock.add(time.Hour)
+	}
+	if repo.status(id) != "streaming" {
+		t.Fatal("settled without a lease source")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // E1 — against a real database: the live shapes
 // ---------------------------------------------------------------------------

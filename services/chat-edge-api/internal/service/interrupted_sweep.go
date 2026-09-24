@@ -111,6 +111,11 @@ func (s *InterruptedTurnSweep) SetClock(now func() time.Time) { s.now = now }
 // RunOnce is one pass. It never settles a row seen lease-less only once.
 func (s *InterruptedTurnSweep) RunOnce(ctx context.Context) (SweepReport, error) {
 	var rep SweepReport
+	if s.leases == nil {
+		// Without leases nothing can tell a live turn from a dead one: settle
+		// nothing rather than guess.
+		return rep, nil
+	}
 	now := s.now()
 	ids, err := s.repo.ListStreamingAssistantIDs(ctx, now.Add(-s.MinAge), s.Limit)
 	if err != nil {
