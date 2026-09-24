@@ -21,6 +21,7 @@ import {
   saveDraft,
 } from "@/lib/draftStore";
 import type { ExtractionStatus } from "@/lib/fileExtraction";
+import type { FileAttachment } from "@/lib/types";
 import { isExtracting, watchExtraction } from "@/lib/fileExtraction";
 import {
   admitFilesForMessage,
@@ -779,6 +780,7 @@ export function ChatInput({
           content_type: p.file.type || "application/octet-stream",
           file_size_bytes: p.file.size,
           extraction_status: p.extractionStatus ?? "completed",
+          unreadable_reason: p.unreadableReason,
           created_at: new Date().toISOString(),
         })),
     );
@@ -997,8 +999,8 @@ export function ChatInput({
       // The upload call now returns before the server has finished
       // reading the document, so follow the row until extraction lands.
       // Fire-and-forget: the chip is already usable and sendable.
-      watchExtraction(netConvId, row.id, row.extraction_status, (status) =>
-        setFileExtractionStatus(chipBucket, pendingId, status),
+      watchExtraction(netConvId, row.id, row.extraction_status, (status, polled) =>
+        setFileExtractionStatus(chipBucket, pendingId, status, polled?.unreadable_reason),
       );
     } catch (err) {
       endUpload(pendingId);
@@ -1733,6 +1735,7 @@ export async function uploadFiles(
       id: string,
       pid: string,
       extractionStatus: ExtractionStatus,
+      unreadableReason?: FileAttachment["unreadable_reason"],
     ) => void;
   },
   chipBucket: string = typeof conv === "string" ? conv : DRAFT_CONV_KEY,
@@ -1775,8 +1778,8 @@ export async function uploadFiles(
       const onStatus = store.setFileExtractionStatus;
       if (onStatus) {
         const target = netConvId;
-        watchExtraction(target, row.id, row.extraction_status, (status) =>
-          onStatus(chipBucket, pid, status),
+        watchExtraction(target, row.id, row.extraction_status, (status, polled) =>
+          onStatus(chipBucket, pid, status, polled?.unreadable_reason),
         );
       }
     } catch (err) {

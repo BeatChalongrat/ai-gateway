@@ -657,6 +657,12 @@ func main() {
 	excelHandler.SetPlanOwnerResolver(planOwners)
 	documentHandler := handler.NewDocumentHandler(filesRepo, excelSvc, docSvc)
 	documentHandler.SetPlanOwnerResolver(planOwners)
+	// FIX131 A3 — a failed plan execution is kept (Redis, 30 days) for the
+	// plan's message; GET /messages returns it so a reload shows the failure.
+	planOutcomes := service.NewPlanOutcomeStore(rdb)
+	excelHandler.SetPlanOutcomeStore(planOutcomes)
+	documentHandler.SetPlanOutcomeStore(planOutcomes)
+	messageHandler.SetPlanOutcomeStore(planOutcomes)
 
 	// Phase 3 — desktop agent-conversation backup mirror (migration 026).
 	// FIX130 A1 — an import that adds messages kicks the memory extractor,

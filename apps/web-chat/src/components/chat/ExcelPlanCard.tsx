@@ -20,29 +20,37 @@ import {
   Paintbrush,
   PenLine,
   Plus,
+  RotateCw,
   Sheet,
   Snowflake,
   Table2,
 } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { tOutside, useT } from "@/lib/i18n";
-import type { ExcelExecuteResponse, FileAttachment } from "@/lib/types";
+import {
+  persistedPlanFailure,
+  planFailureFromError,
+  type PlanFailure,
+} from "@/lib/planFailure";
+import type { ExcelExecuteResponse, FileAttachment, PlanOutcome } from "@/lib/types";
 
 import {
   CardShell,
   DownloadButton,
   OpenPreviewButton,
-  ErrorLine,
   MetadataRow,
+  PlanFailureNotice,
   PlanList,
   PlanListItem,
   PrimaryButton,
+  ProvenanceLine,
   ValidationBadge,
   humanSize,
   linkedGeneratedFile,
   serverMessageId,
+  useConversationFilename,
 } from "./planCardUI";
 
 /** FIX126 F4 — a restored card has no validator report. */
@@ -96,18 +104,21 @@ interface Props {
   /** FIX126 F4 — the assistant message that wrote the plan, and its files. */
   messageId?: string;
   files?: FileAttachment[];
+  /** FIX131 — the message's failed plan executions (GET /messages). */
+  outcomes?: PlanOutcome[];
 }
 
-export function ExcelPlanCard({ convId, plan, messageId, files }: Props) {
+export function ExcelPlanCard({ convId, plan, messageId, files, outcomes }: Props) {
   const t = useT();
   const [status, setStatus] = useState<"idle" | "running" | "done" | "error">("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<PlanFailure | null>(null);
   const [result, setResult] = useState<ExcelExecuteResponse | null>(null);
+  const sourceName = useConversationFilename(convId, plan.source_file_id);
 
   async function execute() {
     if (status === "running") return;
     setStatus("running");
-    setError(null);
+    setFailure(null);
     try {
       // No source_file_id → create-from-scratch (Phase 8). The server
       // forces operation=create_workbook in that mode, so a plan the
@@ -121,8 +132,7 @@ export function ExcelPlanCard({ convId, plan, messageId, files }: Props) {
       setResult(res);
       setStatus("done");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : (err as Error).message;
-      setError(msg || tOutside("plan.excel.execFailed"));
+      setFailure(planFailureFromError(err)); // FIX131
       setStatus("error");
     }
   }
@@ -136,6 +146,13 @@ export function ExcelPlanCard({ convId, plan, messageId, files }: Props) {
   if (linked) {
     return <ExcelResultCard result={{ file: linked, changes: linked.change_log ?? [] }} />;
   }
+  // FIX131 — a failure kept on the message survives the reload.
+  const shownFailure =
+    status === "error"
+      ? failure
+      : status === "idle"
+        ? persistedPlanFailure(outcomes, "excel-plan", plan.output_filename)
+        : undefined;
 
   const actions = plan.actions ?? [];
 
@@ -145,14 +162,21 @@ export function ExcelPlanCard({ convId, plan, messageId, files }: Props) {
       headerTitle={t("plan.excel.title")}
       metadata={`${actions.length} ${t(actions.length === 1 ? "unit.action" : "unit.actions")}`}
       footer={
-        <>
-          <PrimaryButton onClick={execute} loading={status === "running"}>
-            {status === "running" ? t("plan.processing") : t("plan.execute")}
-          </PrimaryButton>
-          {error ? <ErrorLine message={error} /> : null}
-        </>
+        <PrimaryButton
+          onClick={execute}
+          loading={status === "running"}
+          icon={shownFailure ? <RotateCw className="h-4 w-4" /> : undefined}
+        >
+          {status === "running"
+            ? t("plan.processing")
+            : shownFailure
+              ? t("plan.retry")
+              : t("plan.execute")}
+        </PrimaryButton>
       }
     >
+      {shownFailure ? <PlanFailureNotice failure={shownFailure} kind="Excel" /> : null}
+      <ProvenanceLine source={sourceName ?? shownFailure?.sourceFilename} />
       {plan.description ? (
         <p className="text-sm italic text-text-secondary">
           &ldquo;{plan.description}&rdquo;
@@ -177,12 +201,13 @@ export function ExcelResultCard({ result }: { result: ExcelResult }) {
   const sheets = validation?.stats?.sheets;
   const charts = validation?.stats?.charts;
   const brokenCount = validation?.stats?.broken_formulas ?? 0;
+  const madeFromInput = file.made_from?.role === "input"; // FIX131
 
   return (
     <CardShell
       headerIcon={<FileTypeBadge extension=".xlsx" size="sm" />}
       headerTitle={file.filename}
-      metadata={file.version ? `v${file.version}` : undefined}
+      metadata={file.version && !madeFromInput ? `v${file.version}` : undefined}
       footer={
         <>
           <OpenPreviewButton file={file} />
@@ -190,6 +215,11 @@ export function ExcelResultCard({ result }: { result: ExcelResult }) {
         </>
       }
     >
+      <ProvenanceLine
+        source={file.made_from?.filename}
+        output={file.filename}
+        role={file.made_from?.role}
+      />
       <MetadataRow>
         <span>Excel</span>
         <span>{humanSize(file.file_size_bytes)}</span>

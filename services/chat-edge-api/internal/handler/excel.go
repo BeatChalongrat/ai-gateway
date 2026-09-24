@@ -37,6 +37,8 @@ type ExcelHandler struct {
 	// owners (FIX126 F4) names the message a generated workbook belongs
 	// to. nil = unlinked (message_id NULL), as before.
 	owners *service.PlanOwnerResolver
+	// outcomes (FIX131 A3) keeps a failed execution for the plan's message.
+	outcomes service.PlanOutcomeStore
 }
 
 func NewExcelHandler(excel *service.ExcelService, files *repository.FileRepo) *ExcelHandler {
@@ -45,6 +47,9 @@ func NewExcelHandler(excel *service.ExcelService, files *repository.FileRepo) *E
 
 // SetPlanOwnerResolver wires FIX126 F4's plan → message link.
 func (h *ExcelHandler) SetPlanOwnerResolver(r *service.PlanOwnerResolver) { h.owners = r }
+
+// SetPlanOutcomeStore wires FIX131 A3's failed-execution record.
+func (h *ExcelHandler) SetPlanOutcomeStore(s service.PlanOutcomeStore) { h.outcomes = s }
 
 // parseOptionalMessageID reads an execute body's optional message_id. An
 // absent id is uuid.Nil; a malformed one is a 400 (ok=false, answered).
@@ -184,27 +189,23 @@ func (h *ExcelHandler) Execute(w http.ResponseWriter, r *http.Request) {
 		OutputFilename: req.OutputFilename,
 		MessageID:      owner,
 	})
+	// FIX131 A3 — the outcome survives a reload (a success clears it).
+	recordPlanOutcome(r.Context(), h.outcomes, convID, owner, "xlsx", req.OutputFilename, srcID, err)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrExcelSourceNotFound):
-			WriteError(w, http.StatusNotFound, CodeNotFound, "source file not found")
-		case errors.Is(err, service.ErrExcelInvalidPlan):
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-		case errors.Is(err, service.ErrExcelValidatorFailed):
-			// The output file failed validation. Surface as 422 so
-			// the frontend can show the message without redirecting
-			// to a generic 500 page.
-			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
-		case errors.Is(err, service.ErrExcelExecutorFailed),
-			errors.Is(err, service.ErrExcelInspectorFailed):
-			WriteError(w, http.StatusBadGateway, CodeInternalError, err.Error())
-		default:
-			WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
-		}
+		// FIX131 A2 — the executor's own error goes to the log; the card
+		// gets a reason (a validation failure is still a 422, a missing
+		// source a 404, the executor's failure a 502).
+		service.LogPlanFailure("excel", "xlsx", convID, owner, err)
+		writePlanError(w, err)
 		return
 	}
 
 	wire := FileToWire(row)
+	if srcID != uuid.Nil {
+		if src, gerr := h.files.GetByID(r.Context(), caller.TenantUUID, srcID); gerr == nil && src.UserID == caller.UserID {
+			wire.MadeFrom = madeFrom(row, src)
+		}
+	}
 	resp := executePlanResponse{
 		File:       wire,
 		Validation: validation,

@@ -24,6 +24,7 @@ package service
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
@@ -44,19 +45,80 @@ func isExtractableDocType(ct string) bool {
 	return IsDocContentType(ct) || IsExcelContentType(ct)
 }
 
+// FIX131 A2 — WHY a file could not be read, a closed set the page words in
+// Thai on the file's own chip and on a plan card that names it
+// ("ไฟล์นี้มีรหัสผ่าน — ปลดล็อกแล้วอัปโหลดใหม่"). extract_text.py reports it
+// ("reason=<code>" on stderr); file_service.go stores it at the end of the
+// failed row's placeholder text (no migration: extracted_text of a failed
+// row is ours). A row written before FIX131 has no marker → unknown, which
+// reads exactly as before ("damaged or password-protected").
+const (
+	UnreadableEncrypted = "encrypted"
+	UnreadableScanned   = "scanned"
+	UnreadableDamaged   = "damaged"
+	UnreadableUnknown   = "unknown"
+)
+
+// unreadableMarkerRE finds the reason FIX131 appends to a failed row's
+// placeholder: "… reason=encrypted]".
+var unreadableMarkerRE = regexp.MustCompile(`reason=(encrypted|scanned|damaged)\]\s*$`)
+
+// unreadablePlaceholder is the extracted_text stored for a PDF/Office file
+// the extractor could not read.
+func unreadablePlaceholder(f *model.ConversationFile, ct, reason string) string {
+	return fmt.Sprintf("[File: %s, %s, %s. The file could not be read: %s. reason=%s]",
+		f.OriginalFilename, ct, humanSize(f.FileSizeBytes), unreadableReasonText(reason, true), reason)
+}
+
+// unreadableReasonText is the reason in words for the model's note.
+func unreadableReasonText(reason string, docType bool) string {
+	switch reason {
+	case UnreadableEncrypted:
+		return "the file is password-protected"
+	case UnreadableScanned:
+		return "it is a scanned image and no text could be recognised in it"
+	case UnreadableDamaged:
+		return "the file is damaged"
+	}
+	if docType {
+		return "the file is damaged or password-protected"
+	}
+	return "the file could not be opened"
+}
+
+// UnreadableReason reports whether a row's text could not be read, and the
+// closed-set reason: "failed" on any file, or "unsupported" on a PDF/Office
+// file (the page's chip reads the same rule, fileExtraction.isUnreadable).
+func UnreadableReason(f model.ConversationFile) (string, bool) {
+	switch f.ExtractionStatus {
+	case "failed":
+	case "unsupported":
+		if !isExtractableDocType(f.ContentType) {
+			return "", false
+		}
+	default:
+		return "", false
+	}
+	if f.ExtractedText != nil {
+		if m := unreadableMarkerRE.FindStringSubmatch(*f.ExtractedText); m != nil {
+			return m[1], true
+		}
+	}
+	return UnreadableUnknown, true
+}
+
 // fileUnreadable reports whether a row's extraction ended without text the
 // model can use, and why, in words for the note. ok=false for a readable or
 // still-processing file.
 func fileUnreadable(f model.ConversationFile) (reason string, ok bool) {
 	switch f.ExtractionStatus {
 	case "failed":
-		if isExtractableDocType(f.ContentType) {
-			return "the file is damaged or password-protected", true
-		}
-		return "the file could not be opened", true
+		why, _ := UnreadableReason(f)
+		return unreadableReasonText(why, isExtractableDocType(f.ContentType)), true
 	case "unsupported":
 		if isExtractableDocType(f.ContentType) {
-			return "the file is damaged or password-protected", true
+			why, _ := UnreadableReason(f)
+			return unreadableReasonText(why, true), true
 		}
 		return "text cannot be extracted from this file type", true
 	}

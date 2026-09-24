@@ -39,6 +39,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -1425,14 +1426,15 @@ func (s *FileService) extract(ctx context.Context, f *model.ConversationFile) (s
 		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 		ct == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-		text, ok := s.runPythonExtractorOnKey(ctx, f.StoragePath, ct)
+		text, _, reason, ok := s.runPythonExtractorClassified(ctx, f.StoragePath, ct)
 		if !ok {
 			// FIX126 F3 — the type is readable; THIS file was not (damaged,
 			// password-protected, or the extractor could not run). "failed",
 			// not "unsupported": the page's chip and the model's note both
-			// key on it (unreadable_file_note.go).
-			placeholder := fmt.Sprintf("[File: %s, %s, %s. The file could not be read (damaged or password-protected).]",
-				f.OriginalFilename, ct, humanSize(f.FileSizeBytes))
+			// key on it (unreadable_file_note.go). FIX131 A2 — the reason
+			// (encrypted / scanned / damaged / unknown) rides at the end of
+			// the placeholder so the chip and a plan card can say which.
+			placeholder := unreadablePlaceholder(f, ct, reason)
 			return "failed", &placeholder
 		}
 		text = truncateChars(text, maxExtractedChars)
@@ -1931,18 +1933,30 @@ const extractionWall = 240 * time.Second
 func (s *FileService) runPythonExtractorWithMeta(
 	parent context.Context, key, ct string,
 ) (string, ExtractMeta, bool) {
+	text, meta, _, ok := s.runPythonExtractorClassified(parent, key, ct)
+	return text, meta, ok
+}
+
+// runPythonExtractorClassified is runPythonExtractorWithMeta plus, on a
+// failure, WHY the file could not be read (FIX131 A2): the reason line
+// extract_text.py prints on stderr, exit 5 (no text, no OCR text) as
+// "scanned" for an older image, and "unknown" when the extractor did not
+// run at all (storage / sandbox trouble — nothing is known about the file).
+func (s *FileService) runPythonExtractorClassified(
+	parent context.Context, key, ct string,
+) (string, ExtractMeta, string, bool) {
 	var meta ExtractMeta
 
 	path, cleanup, err := s.storage.OpenLocalCopy(parent, key)
 	if err != nil {
 		slog.Warn("storage local copy failed", "key", key, "err", err)
-		return "", meta, false
+		return "", meta, UnreadableUnknown, false
 	}
 	defer cleanup()
 
 	if s.sandbox == nil {
 		slog.Warn("python extractor blocked: sandbox unavailable")
-		return "", meta, false
+		return "", meta, UnreadableUnknown, false
 	}
 	inputName := "source" + filepath.Ext(path)
 	res, err := s.sandbox.Execute(parent, sandbox.Spec{
@@ -1955,9 +1969,14 @@ func (s *FileService) runPythonExtractorWithMeta(
 	if res != nil {
 		defer res.Cleanup()
 	}
-	if err != nil || res == nil || res.Exit != 0 {
+	if err != nil || res == nil {
 		slog.Warn("sandboxed python extractor failed", "err", err)
-		return "", meta, false
+		return "", meta, UnreadableUnknown, false
+	}
+	if res.Exit != 0 {
+		reason := classifyExtractFailure(res.Exit, res.Stderr)
+		slog.Warn("sandboxed python extractor failed", "exit", res.Exit, "reason", reason)
+		return "", meta, reason, false
 	}
 
 	text, meta := splitExtractMeta(string(res.Stdout))
@@ -1971,7 +1990,24 @@ func (s *FileService) runPythonExtractorWithMeta(
 			"ocr_truncated", meta.OCRTruncated,
 		)
 	}
-	return text, meta, true
+	return text, meta, "", true
+}
+
+// extractReasonRE reads the "reason=<code>" line extract_text.py prints on
+// stderr when it cannot read a file (FIX131 A2).
+var extractReasonRE = regexp.MustCompile(`(?m)^reason=(encrypted|scanned|damaged)\s*$`)
+
+// classifyExtractFailure maps a failed extractor run to the closed set.
+func classifyExtractFailure(exit int, stderr []byte) string {
+	if m := extractReasonRE.FindSubmatch(stderr); m != nil {
+		return string(m[1])
+	}
+	if exit == 5 {
+		// Older image: exit 5 already meant "no text layer and OCR found
+		// no text" — a scan nothing could be read from.
+		return UnreadableScanned
+	}
+	return UnreadableUnknown
 }
 
 // splitExtractMeta peels the meta header off the extractor's stdout.

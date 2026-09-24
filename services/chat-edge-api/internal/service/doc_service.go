@@ -93,6 +93,17 @@ var (
 	ErrDocUnsupported        = errors.New("doc: unsupported file type")
 	ErrDocInvalidFormat      = errors.New("doc: format must be 'docx', 'pdf', or 'pptx'")
 	ErrDocSandboxUnavailable = errors.New("doc: sandbox unavailable")
+	// ErrDocSourceUnreadable (FIX131 A2) — the plan's source could not be
+	// read (password, scan with no text, damaged): refused before the
+	// generator runs, with the reason on the *PlanExecError.
+	ErrDocSourceUnreadable = errors.New("doc: source file could not be read")
+)
+
+// errGeneratorTimedOut / errGeneratorNoOutput (FIX131 A2) — how a sandboxed
+// generator run failed without a result the script wrote itself.
+var (
+	errGeneratorTimedOut = errors.New("generator: wall-clock timeout")
+	errGeneratorNoOutput = errors.New("generator: no output file")
 )
 
 // ---------------------------------------------------------------------------
@@ -302,29 +313,36 @@ type DocExecution struct {
 // ExecutePlan runs the appropriate generator inside a temp dir,
 // validates the output, uploads it, and creates a new
 // conversation_files row.
+//
+// FIX131 A1 — the source is EDITED only when it is the same kind as the
+// output (PlanSourceRoleFor); any other source is input the model already
+// read, and the generator builds a new file. A source that could not be
+// read is refused before the generator runs. Every failure is a
+// *PlanExecError (reason for the card, the script's own error for the log).
 func (s *DocService) ExecutePlan(
 	ctx context.Context, in DocExecution,
 ) (*model.ConversationFile, *DocValidationResult, *DocGenerationResult, error) {
 	format := strings.ToLower(strings.TrimSpace(in.Format))
 	if format != "docx" && format != "pdf" && format != "pptx" {
-		return nil, nil, nil, ErrDocInvalidFormat
+		return nil, nil, nil, &PlanExecError{Reason: PlanFailInvalidPlan, Err: ErrDocInvalidFormat}
 	}
+	notFound := &PlanExecError{Reason: PlanFailSourceNotFound, Err: ErrDocSourceNotFound}
 
 	var source *model.ConversationFile
 	if in.SourceFileID != uuid.Nil {
 		s2, err := s.files.GetByID(ctx, in.TenantID, in.SourceFileID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, nil, nil, ErrDocSourceNotFound
+				return nil, nil, nil, notFound
 			}
 			return nil, nil, nil, err
 		}
 		if s2.ConversationID != in.ConversationID {
-			return nil, nil, nil, ErrDocSourceNotFound
+			return nil, nil, nil, notFound
 		}
 		if s2.UserID != in.UserID {
 			// Same-tenant-different-user — 404 shape, no existence leak.
-			return nil, nil, nil, ErrDocSourceNotFound
+			return nil, nil, nil, notFound
 		}
 		source = s2
 	} else {
@@ -336,13 +354,20 @@ func (s *DocService) ExecutePlan(
 		conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, nil, nil, ErrDocSourceNotFound
+				return nil, nil, nil, notFound
 			}
 			return nil, nil, nil, err
 		}
 		if conv.UserID != in.UserID {
-			return nil, nil, nil, ErrDocSourceNotFound
+			return nil, nil, nil, notFound
 		}
+	}
+
+	role := PlanSourceRoleFor(format, source)
+	if reason, bad := unreadableSourceReason(source); bad {
+		// The model could not read this file (FIX126 F3 told it so): a
+		// document "from" it would be invented. Say which file and why.
+		return nil, nil, nil, &PlanExecError{Reason: reason, Source: source, Role: role, Err: ErrDocSourceUnreadable}
 	}
 
 	tmp, err := os.MkdirTemp("", "doc-exec-*")
@@ -354,7 +379,8 @@ func (s *DocService) ExecutePlan(
 	planPath := filepath.Join(tmp, "plan.json")
 	planBytes, err := json.Marshal(in.Plan)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: marshal: %v", ErrDocInvalidPlan, err)
+		return nil, nil, nil, &PlanExecError{Reason: PlanFailInvalidPlan, Role: role, Err: ErrDocInvalidPlan,
+			Detail: redactScriptError(err.Error())}
 	}
 	if err := os.WriteFile(planPath, planBytes, 0o600); err != nil {
 		return nil, nil, nil, fmt.Errorf("write plan: %w", err)
@@ -372,12 +398,11 @@ func (s *DocService) ExecutePlan(
 		script = pptxGeneratorScript
 	}
 
-	// docx + pptx support an optional source argument for the edit
-	// path (the script copies the source then mutates / appends).
-	// pdf is always create-from-scratch — the user can re-feed an
-	// existing PDF's inspection back to the LLM to regenerate.
+	// Only an EDIT hands the source to the generator (it copies it, then
+	// mutates / appends). An input source is never opened by the
+	// generator: its content reached the plan through the model.
 	var srcPath string
-	if (format == "docx" || format == "pptx") && source != nil {
+	if role == PlanSourceEdit {
 		sp, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("source download: %w", err)
@@ -388,33 +413,38 @@ func (s *DocService) ExecutePlan(
 
 	out, err := s.runGenerator(ctx, script, planBytes, planPath, srcPath, outPath, format)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: %v", ErrDocGeneratorFailed, err)
+		return nil, nil, nil, generatorFailure(ErrDocGeneratorFailed, role, source, out, err, errors.Is(err, errGeneratorTimedOut))
 	}
 	var genResult DocGenerationResult
 	if err := json.Unmarshal(out, &genResult); err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: decode: %v", ErrDocGeneratorFailed, err)
+		return nil, nil, nil, generatorFailure(ErrDocGeneratorFailed, role, source, out,
+			fmt.Errorf("decode generator result: %v", err), false)
 	}
 	if !genResult.Success {
-		return nil, nil, nil, fmt.Errorf("%w: script reported failure", ErrDocGeneratorFailed)
+		return nil, nil, nil, generatorFailure(ErrDocGeneratorFailed, role, source, out, nil, false)
 	}
 	if _, err := os.Stat(outPath); err != nil {
-		return nil, nil, nil, fmt.Errorf("%w: output missing: %v", ErrDocGeneratorFailed, err)
+		return nil, nil, nil, generatorFailure(ErrDocGeneratorFailed, role, source, nil, errGeneratorNoOutput, false)
 	}
 
 	validation, err := s.validatePath(ctx, outPath)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, generatorFailure(ErrDocValidatorFailed, role, source, nil, err, false)
 	}
 	if !validation.Valid {
-		return nil, nil, nil, fmt.Errorf("%w: %s",
-			ErrDocValidatorFailed, strings.Join(validation.Errors, "; "))
+		return nil, nil, nil, &PlanExecError{Reason: PlanFailValidation, Role: role, Err: ErrDocValidatorFailed,
+			Detail: redactScriptError(strings.Join(validation.Errors, "; "))}
 	}
 
 	outFilename := strings.TrimSpace(in.OutputFilename)
 	if outFilename == "" {
-		if source != nil {
+		switch role {
+		case PlanSourceEdit:
 			outFilename = deriveGeneratedFilename(source.OriginalFilename, format)
-		} else {
+		case PlanSourceInput:
+			// A new file made FROM the input: its name, the new type.
+			outFilename = deriveFromInputFilename(source.OriginalFilename, format)
+		default:
 			outFilename = fmt.Sprintf("report_%s.%s", time.Now().UTC().Format("20060102_150405"), format)
 		}
 	}
@@ -528,17 +558,36 @@ func (s *DocService) runGenerator(
 		Limits: sandbox.Limits{Wall: docGeneratorTimeout},
 	})
 	if err != nil {
+		// FIX131 A2 — keep what the script printed (its error envelope)
+		// even when the run itself failed.
+		if res != nil {
+			stdout := res.Stdout
+			res.Cleanup()
+			return stdout, err
+		}
 		return nil, err
 	}
 	defer res.Cleanup()
+	if res.TimedOut {
+		return res.Stdout, errGeneratorTimedOut
+	}
 	art := res.Artifact(outName)
 	if art == nil {
-		return nil, fmt.Errorf("sandbox produced no %s (stderr: %s)", outName, strings.TrimSpace(string(res.Stderr)))
+		// The script's own error is on stdout; stderr's last line is a
+		// hint for the log (redacted — a traceback can quote the plan).
+		return res.Stdout, fmt.Errorf("%w %s (exit %d; stderr: %s)", errGeneratorNoOutput, outName, res.Exit,
+			redactScriptError(lastLine(res.Stderr)))
 	}
 	if err := copyFile(art.Path, outPath); err != nil {
 		return nil, err
 	}
 	return res.Stdout, nil
+}
+
+// lastLine is the last non-empty line of a script's stderr.
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // ---------------------------------------------------------------------------
@@ -592,6 +641,18 @@ func deriveGeneratedFilename(original, format string) string {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
 	return base + "_edited." + format
+}
+
+// deriveFromInputFilename names a file made FROM an input of another kind
+// (FIX131): "fixture.pdf" → "fixture.docx". Not "_edited" — nothing was
+// edited. Used only when the plan doesn't supply output_filename.
+func deriveFromInputFilename(original, format string) string {
+	name := strings.TrimSpace(original)
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	if base == "" {
+		return "report." + format
+	}
+	return base + "." + format
 }
 
 // flattenDocChangeLog turns the python generator's per-action

@@ -64,6 +64,10 @@ export const en = {
   // sendable while this is up — extraction no longer blocks the turn.
   "file.reading": "Reading…",
   "file.unreadable": "Couldn't read this file — it may be damaged or password-protected",
+  // FIX131 — the reason, when the server knows it, with what to do.
+  "file.unreadable.encrypted": "This file has a password — unlock it and upload it again",
+  "file.unreadable.scanned": "A scanned image with no readable text — upload a copy with text, or a sharper scan",
+  "file.unreadable.damaged": "This file is damaged — save or export it again, then upload it",
   "input.attach": "Attach files",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "Attach files (this model can't read images)",
@@ -1480,7 +1484,6 @@ export const en = {
 
   // ── Phase-3 i18n cleanup — Excel plan card ──────────────────
   "plan.excel.title": "Excel Edit Plan",
-  "plan.excel.execFailed": "Could not execute plan.",
   "plan.excel.createSheet": 'Create sheet "{sheet}"',
   "plan.excel.deleteSheet": 'Delete sheet "{sheet}"',
   "plan.excel.renameSheet": 'Rename "{sheet}" → "{name}"',
@@ -1499,7 +1502,6 @@ export const en = {
   "plan.doc.titleDocx": "Word Document Plan",
   "plan.doc.titlePdf": "PDF Report Plan",
   "plan.doc.generate": "Generate Document",
-  "plan.doc.execFailed": "Could not generate document.",
   "plan.doc.titlePage": "Title page",
   "plan.doc.heading": "H{lvl}: {text}",
   "plan.doc.paragraph": "Paragraph: {text}",
@@ -1521,7 +1523,6 @@ export const en = {
   // ── Phase-3 i18n cleanup — Pptx plan card ───────────────────
   "plan.pptx.title": "Presentation Plan",
   "plan.pptx.generate": "Generate Presentation",
-  "plan.pptx.execFailed": "Could not generate presentation.",
   "plan.pptx.slideTitle": 'Title — "{title}"',
   "plan.pptx.section": 'Section — "{title}"',
   "plan.pptx.twoColumn": 'Two-column — "{title}"',
@@ -1534,6 +1535,27 @@ export const en = {
   "plan.pptx.content.none": 'Content — "{title}"',
   "plan.pptx.content.one": 'Content — "{title}" (1 bullet)',
   "plan.pptx.content.other": 'Content — "{title}" ({n} bullets)',
+
+  // ── FIX131 — plan cards: provenance, and a failure that says why ──
+  // {kind} is the file type's product name (Word / PDF / PowerPoint /
+  // Excel); {file} is the user's own file name.
+  "plan.from": "From {file}",
+  "plan.madeFrom.input": "From {source} → made {output}",
+  "plan.madeFrom.edit": "Edited from {source} → {output}",
+  "plan.fail.title": "Failed",
+  "plan.fail.source_encrypted": "{file} has a password — unlock it and upload it again, then ask again.",
+  "plan.fail.source_scanned": "{file} is a scanned image with no readable text — upload a copy with text, or a sharper scan, then ask again.",
+  "plan.fail.source_damaged": "{file} is damaged and can't be opened — save or export it again, upload it, then ask again.",
+  "plan.fail.source_unreadable": "Couldn't read {file} — it may be damaged or password-protected. Upload it again, then ask again.",
+  "plan.fail.source_not_found": "The source file is gone — attach it again and ask the assistant to redo it.",
+  "plan.fail.invalid_plan": "This plan can't make a file — ask the assistant for a new plan.",
+  "plan.fail.generator_failed": "Couldn't create the {kind} file — try again, or ask the assistant to summarise it again.",
+  "plan.fail.generator_timeout": "Creating the {kind} file took too long — try again, or ask for a shorter version.",
+  "plan.fail.validation_failed": "The {kind} file didn't pass the check — try again, or ask the assistant for a new plan.",
+  "plan.fail.sandbox_unavailable": "The file generator is unavailable right now — try again in a moment.",
+  "plan.fail.internal": "Couldn't create the {kind} file — try again.",
+  "plan.fail.someFile": "the file",
+  "plan.retry": "Try again",
 
   // ── Phase-3 i18n cleanup — auth redirect pages ──────────────
   "auth.redirectSignin": "Redirecting to SRAN Portal sign-in…",
@@ -1835,6 +1857,9 @@ const th: Record<DictKey, string> = {
   "input.placeholder.reading": "กำลังอ่านเอกสาร…",
   "file.reading": "กำลังอ่าน…",
   "file.unreadable": "อ่านไฟล์ไม่ได้ — ไฟล์อาจเสียหายหรือมีรหัสผ่าน",
+  "file.unreadable.encrypted": "ไฟล์นี้มีรหัสผ่าน — ปลดล็อกแล้วอัปโหลดใหม่",
+  "file.unreadable.scanned": "เป็นภาพสแกนที่อ่านข้อความไม่ได้ — อัปโหลดไฟล์ที่มีข้อความ หรือสแกนให้คมชัดขึ้น",
+  "file.unreadable.damaged": "ไฟล์เสียหาย เปิดไม่ได้ — บันทึกหรือส่งออกไฟล์ใหม่แล้วอัปโหลดอีกครั้ง",
   "input.attach": "แนบไฟล์",
   // ── Batch 1 W3 — vision gating ──────────────────────────────
   "input.attachNoImages": "แนบไฟล์ (โมเดลนี้อ่านรูปภาพไม่ได้)",
@@ -3196,7 +3221,6 @@ const th: Record<DictKey, string> = {
 
   // ── Phase-3 i18n cleanup — Excel plan card ──────────────────
   "plan.excel.title": "แผนแก้ไข Excel",
-  "plan.excel.execFailed": "ดำเนินการตามแผนไม่สำเร็จ",
   "plan.excel.createSheet": 'สร้างชีต "{sheet}"',
   "plan.excel.deleteSheet": 'ลบชีต "{sheet}"',
   "plan.excel.renameSheet": 'เปลี่ยนชื่อ "{sheet}" → "{name}"',
@@ -3215,7 +3239,6 @@ const th: Record<DictKey, string> = {
   "plan.doc.titleDocx": "แผนเอกสาร Word",
   "plan.doc.titlePdf": "แผนรายงาน PDF",
   "plan.doc.generate": "สร้างเอกสาร",
-  "plan.doc.execFailed": "สร้างเอกสารไม่สำเร็จ",
   "plan.doc.titlePage": "หน้าปก",
   "plan.doc.heading": "H{lvl}: {text}",
   "plan.doc.paragraph": "ย่อหน้า: {text}",
@@ -3237,7 +3260,6 @@ const th: Record<DictKey, string> = {
   // ── Phase-3 i18n cleanup — Pptx plan card ───────────────────
   "plan.pptx.title": "แผนงานนำเสนอ",
   "plan.pptx.generate": "สร้างงานนำเสนอ",
-  "plan.pptx.execFailed": "สร้างงานนำเสนอไม่สำเร็จ",
   "plan.pptx.slideTitle": 'หน้าปก — "{title}"',
   "plan.pptx.section": 'ตอน — "{title}"',
   "plan.pptx.twoColumn": 'สองคอลัมน์ — "{title}"',
@@ -3250,6 +3272,24 @@ const th: Record<DictKey, string> = {
   "plan.pptx.content.none": 'เนื้อหา — "{title}"',
   "plan.pptx.content.one": 'เนื้อหา — "{title}" (1 หัวข้อ)',
   "plan.pptx.content.other": 'เนื้อหา — "{title}" ({n} หัวข้อ)',
+
+  "plan.from": "จาก {file}",
+  "plan.madeFrom.input": "จาก {source} → สร้าง {output}",
+  "plan.madeFrom.edit": "แก้ไขจาก {source} → {output}",
+  "plan.fail.title": "ไม่สำเร็จ",
+  "plan.fail.source_encrypted": "ไฟล์ {file} มีรหัสผ่าน — ปลดล็อกแล้วอัปโหลดใหม่ แล้วขอให้ผู้ช่วยทำอีกครั้ง",
+  "plan.fail.source_scanned": "ไฟล์ {file} เป็นภาพสแกนที่อ่านข้อความไม่ได้ — อัปโหลดไฟล์ที่มีข้อความ หรือสแกนให้คมชัดขึ้น แล้วขอใหม่",
+  "plan.fail.source_damaged": "ไฟล์ {file} เสียหาย เปิดไม่ได้ — บันทึกหรือส่งออกไฟล์ใหม่ อัปโหลดอีกครั้ง แล้วขอใหม่",
+  "plan.fail.source_unreadable": "อ่านไฟล์ {file} ไม่ได้ — ไฟล์อาจเสียหายหรือมีรหัสผ่าน ลองอัปโหลดใหม่แล้วขออีกครั้ง",
+  "plan.fail.source_not_found": "ไม่พบไฟล์ต้นฉบับแล้ว — แนบไฟล์อีกครั้งแล้วขอให้ผู้ช่วยทำใหม่",
+  "plan.fail.invalid_plan": "แผนนี้ใช้สร้างไฟล์ไม่ได้ — ขอให้ผู้ช่วยทำแผนใหม่",
+  "plan.fail.generator_failed": "สร้างไฟล์ {kind} ไม่สำเร็จ — ลองกดสร้างอีกครั้ง หรือขอให้ผู้ช่วยสรุปใหม่",
+  "plan.fail.generator_timeout": "สร้างไฟล์ {kind} นานเกินไป — ลองกดสร้างอีกครั้ง หรือขอให้ผู้ช่วยทำให้สั้นลง",
+  "plan.fail.validation_failed": "ไฟล์ {kind} ที่สร้างไม่ผ่านการตรวจ — ลองกดสร้างอีกครั้ง หรือขอให้ผู้ช่วยทำแผนใหม่",
+  "plan.fail.sandbox_unavailable": "ระบบสร้างไฟล์ไม่พร้อมใช้งานชั่วคราว — ลองอีกครั้งในอีกสักครู่",
+  "plan.fail.internal": "สร้างไฟล์ {kind} ไม่สำเร็จ — ลองกดสร้างอีกครั้ง",
+  "plan.fail.someFile": "ต้นฉบับ",
+  "plan.retry": "ลองอีกครั้ง",
 
   // ── Phase-3 i18n cleanup — auth redirect pages ──────────────
   "auth.redirectSignin": "กำลังพาไปหน้าเข้าสู่ระบบ SRAN Portal…",

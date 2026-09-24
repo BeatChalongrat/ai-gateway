@@ -156,6 +156,7 @@ class ApiClient {
         env?.error?.code ?? `HTTP_${res.status}`,
         env?.error?.message ?? res.statusText,
         res.status,
+        env?.error ? { ...env.error } : undefined,
       );
     }
     return body as T;
@@ -1379,6 +1380,9 @@ export class ApiError extends Error {
     public code: string,
     message: string,
     public status: number,
+    /** FIX131 — the error envelope's extra fields (a plan execute's
+     *  `reason`, `source_filename`), when the server sent any. */
+    public details?: Record<string, unknown>,
   ) {
     super(message);
   }

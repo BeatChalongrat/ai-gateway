@@ -245,6 +245,28 @@ export interface FileAttachment {
   parent_file_id?: UUID;
   version?: number;
   change_log?: string[];
+  /** FIX131 — why the server could not read this file's text, when it
+   *  could not (the chip says which, with what to do). */
+  unreadable_reason?: UnreadableReason;
+  /** FIX131 — for a generated Office/PDF file: the file it was made from
+   *  and how ("input": read, a new file built; "edit": a copy edited). */
+  made_from?: { id: UUID; filename: string; role: "input" | "edit" | "none" };
+}
+
+/** FIX131 — closed set: why a file's text could not be read. */
+export type UnreadableReason = "encrypted" | "scanned" | "damaged" | "unknown";
+
+/** FIX131 — a plan card whose last execution failed, as GET /messages
+ *  returns it on the message that wrote the plan (survives a reload). */
+export interface PlanOutcome {
+  fence: "doc-plan" | "pptx-plan" | "excel-plan" | string;
+  format: string;
+  output_filename?: string;
+  status: "failed" | string;
+  reason: string;
+  source_file_id?: UUID;
+  source_filename?: string;
+  at: string;
 }
 
 /** Validation report shape returned by the chat-edge Excel
@@ -399,6 +421,8 @@ export interface Message {
    *  search, or a compaction event. Absent / empty for user
    *  messages and assistant messages with no special context. */
   context_sources?: ContextSource[];
+  /** FIX131 — this message's plan cards whose last execution failed. */
+  plan_outcomes?: PlanOutcome[];
   /** local-only — true while content is being streamed in. */
   isStreaming?: boolean;
   /** local-only — the key the thread renders this row under. An
@@ -674,6 +698,11 @@ export interface ErrorEnvelope {
   error: {
     code: string;
     message: string;
+    /** FIX131 — plan execute routes: the closed-set failure reason and
+     *  the input file it names. */
+    reason?: string;
+    source_file_id?: string;
+    source_filename?: string;
   };
 }
 

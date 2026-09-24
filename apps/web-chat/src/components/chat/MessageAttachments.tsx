@@ -12,9 +12,10 @@
 
 import { useRef, useState } from "react";
 
-import { Download, Eye } from "lucide-react";
+import { AlertTriangle, Download, Eye } from "lucide-react";
 
 import { api } from "@/lib/api";
+import { isUnreadable, unreadableMessageKey } from "@/lib/fileExtraction";
 import { downloadFromObjectUrl, formatBytes, isImageMime } from "@/lib/fileUtil";
 import { useT } from "@/lib/i18n";
 import type { FileAttachment } from "@/lib/types";
@@ -202,6 +203,18 @@ function FileCard({
               </span>
             ) : null}
           </span>
+          {/* FIX131 — a file the server could not read says so on the
+              sent message too (after a reload), and why. */}
+          {isUnreadable(file.extraction_status, file.filename) ? (
+            <span
+              data-testid="file-card-unreadable"
+              data-reason={file.unreadable_reason ?? "unknown"}
+              className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-status-warning"
+            >
+              <AlertTriangle className="mt-px h-3 w-3 flex-shrink-0" aria-hidden />
+              <span>{t(unreadableMessageKey(file.unreadable_reason))}</span>
+            </span>
+          ) : null}
         </span>
       </button>
       <button

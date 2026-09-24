@@ -24,7 +24,7 @@ import { AlertTriangle, ImageIcon, Loader2, RotateCw, X } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { useT } from "@/lib/i18n";
-import { isExtracting, isUnreadable } from "@/lib/fileExtraction";
+import { isExtracting, isUnreadable, unreadableMessageKey } from "@/lib/fileExtraction";
 import type { PendingFile } from "@/stores/chatStore";
 import {
   fileExtension,
@@ -49,6 +49,7 @@ function CardShell({
   status,
   extracting,
   unreadable,
+  unreadableReason,
   progress,
   errorMsg,
   onRemove,
@@ -65,6 +66,8 @@ function CardShell({
   extracting?: boolean;
   /** FIX126 F3 — stored, but the server could not read its text. */
   unreadable?: boolean;
+  /** FIX131 — and why, when the server knows (password / scan / damaged). */
+  unreadableReason?: PendingFile["unreadableReason"];
   /** 0..100 from the XHR upload-progress event. Phase 7: this was
    *  already being measured and stored per pending file but never
    *  surfaced — the card showed a bare spinner, so a large upload
@@ -107,10 +110,11 @@ function CardShell({
           <p
             className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-status-warning"
             data-testid="file-unreadable"
-            title={t("file.unreadable")}
+            data-reason={unreadableReason ?? "unknown"}
+            title={t(unreadableMessageKey(unreadableReason))}
           >
             <AlertTriangle className="mt-px h-3 w-3 flex-shrink-0" aria-hidden />
-            <span className="line-clamp-2">{t("file.unreadable")}</span>
+            <span className="line-clamp-2">{t(unreadableMessageKey(unreadableReason))}</span>
           </p>
         ) : (
           <p className="mt-0.5 text-[11px] text-text-muted">
@@ -209,6 +213,7 @@ function ImagePreviewCard({ pending, onRemove, onRetry }: Props) {
       progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
       unreadable={isUnreadable(pending.extractionStatus, pending.file.name)}
+      unreadableReason={pending.unreadableReason}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}
@@ -245,6 +250,7 @@ function DocumentPreviewCard({ pending, onRemove, onRetry }: Props) {
       progress={pending.progress}
       extracting={isExtracting(pending.extractionStatus)}
       unreadable={isUnreadable(pending.extractionStatus, pending.file.name)}
+      unreadableReason={pending.unreadableReason}
       errorMsg={pending.error}
       onRemove={onRemove}
       onRetry={onRetry}
