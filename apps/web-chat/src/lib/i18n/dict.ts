@@ -1003,6 +1003,7 @@ export const en = {
   // this state is just "stream open, nothing visible yet" and fires
   // for every model, reasoning or not.
   "gen.working": "Working…",
+  "plan.preparing": "Preparing the plan…",
   "gen.searching": "Searching the web...",
   "gen.image": "Generating image...",
   "gen.video": "Generating video...",
@@ -2760,6 +2761,7 @@ const th: Record<DictKey, string> = {
 
   // ── Phase-2 i18n sweep — progress indicators ────────────────
   "gen.working": "กำลังประมวลผล…",
+  "plan.preparing": "กำลังเตรียมแผน…",
   "gen.searching": "กำลังค้นหาข้อมูล...",
   "gen.image": "กำลังสร้างรูปภาพ...",
   "gen.video": "กำลังสร้างวิดีโอ...",

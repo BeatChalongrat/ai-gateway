@@ -1339,10 +1339,14 @@ function AssistantContentBody({
     // don't reflow when the stream ends. Plan cards (:::excel-plan etc.)
     // are intentionally NOT segmented here — they only mount on the
     // terminal "complete" event so the user doesn't see a half-parsed
-    // plan flicker into a card; until then the fence shows as text.
+    // plan flicker into a card. FIX132 F8 — until then the fence is not
+    // shown as text either (NIGHT3: ~3.6 s of raw ":::doc-plan" JSON); one
+    // quiet line stands in for it.
+    const { text: streamText, planInProgress } = streamingWithoutPlans(message.content);
     return (
       <div ref={bodyRef} data-testid="assistant-body" data-held-for-selection={holdForSelection || undefined}>
-        <StreamingMarkdown content={message.content} />
+        <StreamingMarkdown content={streamText} />
+        {planInProgress ? <CatIndicator labelKey="plan.preparing" /> : null}
       </div>
     );
   }
@@ -1398,6 +1402,26 @@ type PlanSegment =
   | { kind: "excel-plan"; plan: ExcelPlan }
   | { kind: "doc-plan"; plan: DocPlan }
   | { kind: "pptx-plan"; plan: PptxPlan };
+
+/** FIX132 F8 — the streaming text without its plan fences: a closed fence
+ *  is dropped (its card mounts when the turn ends), an open one is cut
+ *  from its opener to the end, and a half-typed opener at the very end
+ *  (":::doc-pl") is not shown. `planInProgress`: a plan is being written. */
+export function streamingWithoutPlans(content: string): { text: string; planInProgress: boolean } {
+  let text = content.replace(PLAN_FENCE, "");
+  PLAN_FENCE.lastIndex = 0;
+  let planInProgress = text.length !== content.length;
+  const open = /:::(?:excel-plan|doc-plan|pptx-plan)\b/.exec(text);
+  if (open) {
+    text = text.slice(0, open.index);
+    planInProgress = true;
+  }
+  const partial = /:::[a-z-]*$/.exec(text);
+  if (partial && "doc-plan excel-plan pptx-plan".split(" ").some((k) => `:::${k}`.startsWith(partial[0]))) {
+    text = text.slice(0, partial.index);
+  }
+  return { text, planInProgress };
+}
 
 // Single combined regex with a capture group on the plan type so
 // one pass handles all three fence flavours in document order.
