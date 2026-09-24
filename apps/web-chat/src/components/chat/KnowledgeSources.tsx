@@ -29,8 +29,10 @@ import type { Message } from "@/lib/types";
 
 import { CitationRendererContext, type CitationRenderer } from "./Markdown";
 
+// A control, so the text is text-primary: text-secondary on bg-elevated is
+// 4.35:1 in the dark theme, under the 4.5:1 controls need (FIX44).
 const PILL =
-  "focus-ring mx-0.5 inline-flex max-w-[16rem] items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary";
+  "focus-ring mx-0.5 inline-flex max-w-[16rem] items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-primary transition-colors hover:border-border-strong";
 
 const MAX_EXCERPTS = 3;
 
