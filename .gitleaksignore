@@ -6,3 +6,5 @@ c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:jwt:3
 c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:35
 c44a6c480994c495791fac4fec842363058dfee7:infra/backup/tests/test_notify.sh:generic-api-key:91
 9caa2cbc850eaf48a9a2deae7ee7b4c65d47b64c:backend/tests/test_fix130_alert_redaction.py:generic-api-key:53
+# FIX131: the deliberately fake Resend key in the [TEST]-routing test — it proves a test alert never uses the owner's channels.
+68aaab1a24203a160d59921b4d8cfc21d2868887:infra/backup/tests/test_notify.sh:generic-api-key:110
