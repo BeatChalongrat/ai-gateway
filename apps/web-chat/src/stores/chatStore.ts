@@ -2338,6 +2338,53 @@ async function adoptServerRows(set: Set, convId: string): Promise<boolean> {
   }
 }
 
+/** FIX132 — how long to wait before the one second read of a finished
+ *  answer's sources. Mutable so tests can shorten it. */
+export const KNOWLEDGE_SOURCES_RETRY = { delayMs: 1_500 };
+
+/** FIX132 — a knowledge-base answer's sources (context_sources:
+ *  knowledge_chunk / knowledge_pending) are written to the stored row and
+ *  sent in no stream frame, so a live answer had no passages behind its
+ *  [Source: …] pills and no "แหล่งข้อมูล" until a reload. When the turn ends
+ *  in a chat that searches a knowledge base — its own, or its project's —
+ *  the finished row is read (twice at most, in case the sources land a
+ *  moment after the answer) and its sources are copied onto the answer.
+ *  A chat without a knowledge base makes no request. */
+async function hydrateKnowledgeSources(set: Set, get: Get, convId: string, messageId: string): Promise<void> {
+  const state = get();
+  const conv = state.conversations.find((c) => c.id === convId);
+  if (!conv) return;
+  const projectKB = conv.project_id
+    ? state.projects.find((p) => p.id === conv.project_id)?.knowledge_base_id
+    : null;
+  if (!conv.knowledge_base_id && !projectKB) return;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, KNOWLEDGE_SOURCES_RETRY.delayMs));
+    let row: Message | undefined;
+    try {
+      const res = await api.listMessages(convId, { limit: 4 });
+      row = res?.messages?.find((m) => m.id === messageId);
+    } catch {
+      return;
+    }
+    if (!row) return;
+    const sources = row.context_sources;
+    if (sources && sources.length > 0) {
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [convId]: (s.messages[convId] ?? []).map((m) =>
+            m.id === messageId && !(m.context_sources && m.context_sources.length > 0)
+              ? { ...m, context_sources: sources }
+              : m,
+          ),
+        },
+      }));
+      return;
+    }
+  }
+}
+
 /** The row stops waiting without a verdict: not streaming, not failed —
  *  the bubble offers to load the answer (MessageBubble). */
 function awaitReload(set: Set, convId: string, messageId: string): void {
@@ -3406,6 +3453,8 @@ async function consumeStream(
         useCanvasStore.getState().refreshIfOpen();
         // FIX41 — the run is over; its cursor cannot resume anything.
         clearStreamCursor(convId);
+        // FIX132 — the knowledge-base sources are on the stored row only.
+        void hydrateKnowledgeSources(set, get, convId, (data as { assistant_message_id?: string }).assistant_message_id ?? id);
       } else if (evt.event === "fallback_info") {
         // B2 — a fallback model answered. Stash the requested/actual
         // model pair on the message so MessageBubble can show a small
