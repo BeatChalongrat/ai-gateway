@@ -62,11 +62,10 @@ Optional knobs fall back to sensible defaults documented in
 | `PRESIGNED_URL_EXPIRY` | — | `15m` | TTL on presigned download URLs. |
 | `OPENAI_API_KEY` | — | empty | Required for embeddings, Whisper, TTS. Without it those surfaces 503. |
 | `OPENAI_BASE_URL` | — | `https://api.openai.com/v1` | Azure / proxy override. |
-| `OPENAI_EMBEDDING_MODEL` | — | `text-embedding-3-small` | Embedding model id. |
 | `OPENAI_WHISPER_MODEL` | — | `whisper-1` | Speech-to-text model. |
 | `OPENAI_TTS_MODEL` | — | `tts-1` | Text-to-speech model. |
-| `RAG_TOP_K` | — | `5` | Default retrieval count. |
-| `RAG_SIMILARITY_THRESHOLD` | — | `0.70` | Minimum cosine similarity for retrieved chunks. |
+| `KB_MODELS_URL` | — | `http://kb-models:8090` | The knowledge base's models (kb-models, on this machine; internal hosts only). |
+| `KB_*` | — | see `docs/ops/knowledge-base.md` | Indexing workers, chunk size, hybrid retrieval weights and floors, reranker, context cap. |
 | `CORS_ALLOW_ORIGINS` | — | `http://localhost:3002` | Comma-separated. |
 | `CHAT_EDGE_DEV` | — | unset | Switches logging to text format. |
 
