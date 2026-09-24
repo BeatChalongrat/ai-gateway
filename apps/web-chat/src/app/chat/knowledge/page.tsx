@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
+import { useOpenKnowledgeFile } from "@/hooks/useOpenKnowledgeFile";
 import { tOutside, useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
 import {
@@ -571,6 +572,7 @@ function KBDocumentsPanel({
           {documents.map((doc) => (
             <DocumentRow
               key={doc.id}
+              kbId={kb.id}
               doc={doc}
               onDelete={() => setConfirmDoc(doc)}
               onRetry={() => reindexDocument(kb.id, doc.id)}
@@ -731,16 +733,21 @@ const STATUS_TONE: Record<KnowledgeDocumentStatus, string> = {
 };
 
 function DocumentRow({
+  kbId,
   doc,
   onDelete,
   onRetry,
 }: {
+  kbId: string;
   doc: KnowledgeDocument;
   onDelete: () => void;
   onRetry: () => Promise<void>;
 }) {
   const t = useT();
   const [actionError, setActionError] = useState<DictKey | null>(null);
+  // FIX132 — the original file: a PDF in a new tab, anything else saved.
+  const opener = useOpenKnowledgeFile();
+  const rowError = actionError ?? opener.error;
   const failed = doc.status === "failed";
   const total = doc.progress_total ?? 0;
   const done = Math.min(doc.progress_done ?? 0, total);
@@ -776,13 +783,24 @@ function DocumentRow({
             {t(docErrorKey(doc.error_code))}
           </p>
         ) : null}
-        {actionError ? (
+        {rowError ? (
           <p role="alert" className="mt-0.5 text-[11px] text-status-danger">
-            {t(actionError)}
+            {t(rowError)}
           </p>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          disabled={opener.busy}
+          onClick={() => {
+            setActionError(null);
+            void opener.open(kbId, doc.id, doc.filename);
+          }}
+          className={ROW_BUTTON}
+        >
+          {opener.busy ? t("kb.open.opening") : t("kb.doc.open")}
+        </button>
         {failed ? (
           <button
             type="button"
