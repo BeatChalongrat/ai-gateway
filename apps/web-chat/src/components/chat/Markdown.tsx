@@ -30,7 +30,7 @@
 
 import "katex/dist/katex.min.css";
 
-import { useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 
 import ReactMarkdown, { type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -56,14 +56,32 @@ import { CodeBlock } from "./CodeBlock";
 const CITATION_PREFIX = "#__rag_citation:";
 const CITATION_PATTERN = /\[Source:\s*([^\]]+?)\]/g;
 
+/** FIX132 — how a `[Source: file]` pill renders inside a scope that knows
+ *  more about the sources (an answer's knowledge-base passages: a pill that
+ *  opens them). Returning null keeps the plain pill. Provided by
+ *  KnowledgeCitationScope; absent everywhere else (the shared view, a
+ *  message without knowledge sources), so nothing changes there. */
+export type CitationRenderer = (filename: string) => React.ReactNode;
+export const CitationRendererContext = createContext<CitationRenderer | null>(null);
+
+function CitationSlot({ filename }: { filename: string }) {
+  const render = useContext(CitationRendererContext);
+  const custom = render ? render(filename) : null;
+  return custom ? <>{custom}</> : <CitationPill filename={filename} />;
+}
+
 function renderCitations(text: string): string {
   // Escape any existing parentheses inside the filename so the markdown
   // link grammar parses cleanly. We don't try to be clever — citations
   // come from the indexer which already sanitizes filenames, so the
   // edge cases here are vanishingly rare.
+  //
+  // FIX132 — the href is fully percent-encoded: a space (common in Thai file
+  // names, "สวัสดิการ 2569.docx") ended the link destination, so the marker
+  // rendered as plain text instead of a pill. The renderer decodes it.
   return text.replace(CITATION_PATTERN, (_, raw: string) => {
     const filename = raw.trim();
-    const safe = filename
+    const safe = encodeURIComponent(filename)
       .replace(/\(/g, "%28")
       .replace(/\)/g, "%29");
     return `[__RAG_CITATION__${filename}](${CITATION_PREFIX}${safe})`;
@@ -102,7 +120,7 @@ const markdownComponents = {
     const href = props.href ?? "";
     if (href.startsWith(CITATION_PREFIX)) {
       const filename = decodeURIComponent(href.slice(CITATION_PREFIX.length));
-      return <CitationPill filename={filename} />;
+      return <CitationSlot filename={filename} />;
     }
     return <a {...props} target="_blank" rel="noopener noreferrer" />;
   },

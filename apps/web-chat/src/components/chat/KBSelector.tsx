@@ -11,12 +11,23 @@
 //     unbind. The currently-bound KB carries a checkmark.
 //
 // Lazy-loads the KB list on first dropdown open so the chat page
-// doesn't pay the round-trip until the user actually cares.
+// doesn't pay the round-trip until the user actually cares — unless a KB is
+// attached, whose name the pill must show (FIX132).
+//
+// FIX132 — the pill is a chip: it names the attached KB without opening the
+// dropdown, and its × takes it off this chat in one click (below `sm` the ×
+// is hidden for room, like the label; the dropdown's "ไม่ใช้" still removes).
+// A chat inside a project whose KB the server uses (conversation KB ?? the
+// project's) shows that KB too, marked as the project's; it is changed on
+// the project page, so it has no ×.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+
 import { useDismissable } from "@/hooks/useDismissable";
 import { useT } from "@/lib/i18n";
 
+import { useChatStore } from "@/stores/chatStore";
 import { useKnowledgeStore } from "@/stores/knowledgeStore";
 
 interface Props {
@@ -50,41 +61,75 @@ export function KBSelector({
   const closePopover = useCallback(() => setOpen(false), []);
   useDismissable(wrapRef, open, closePopover);
 
+  // The project's KB, which the server uses when the chat has none of its own.
+  const inheritedKBId = useChatStore((s) => {
+    if (!conversationId) return null;
+    const projectId = s.conversations.find((c) => c.id === conversationId)?.project_id;
+    if (!projectId) return null;
+    return s.projects.find((p) => p.id === projectId)?.knowledge_base_id ?? null;
+  });
+  const shownKBId = activeKBId ?? inheritedKBId;
+
   // Lazy-load on first open so the chat page doesn't pay the round-
-  // trip for users who never use RAG.
+  // trip for users who never use RAG; an attached KB needs its name now.
   useEffect(() => {
-    if (open && !loaded && !loading) void loadKBs();
-  }, [open, loaded, loading, loadKBs]);
+    if ((open || shownKBId) && !loaded && !loading) void loadKBs();
+  }, [open, shownKBId, loaded, loading, loadKBs]);
 
   if (!conversationId) return null;
 
   const activeKB = activeKBId
     ? knowledgeBases.find((k) => k.id === activeKBId)
     : null;
-  const isActive = !!activeKB;
+  const inheritedKB = !activeKBId && inheritedKBId
+    ? knowledgeBases.find((k) => k.id === inheritedKBId)
+    : null;
+  const isActive = !!activeKBId || !!inheritedKB;
 
-  const label = activeKB ? activeKB.name : t("kb.picker.label");
-  const pickLabel = activeKB ? t("kb.picker.active", { name: activeKB.name }) : t("kb.picker.pick");
+  const label = activeKB?.name ?? inheritedKB?.name ?? t("kb.picker.label");
+  const pickLabel = activeKB
+    ? t("kb.picker.active", { name: activeKB.name })
+    : inheritedKB
+      ? t("kb.chip.fromProject", { name: inheritedKB.name })
+      : activeKBId
+        ? t("kb.picker.label")
+        : t("kb.picker.pick");
 
   return (
     <div ref={wrapRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        aria-label={pickLabel}
-        title={pickLabel}
-        className={`focus-ring inline-flex h-8 max-w-[140px] items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors disabled:opacity-50 ${
+      <div
+        className={`inline-flex h-8 max-w-[180px] items-center rounded-full border text-xs transition-colors ${
           isActive
             ? "border-border-strong bg-bg-elevated text-text-primary"
             : "border-border bg-transparent text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
         }`}
       >
-        <BookIcon />
-        {/* FIX128 D4 — icon-only below sm: at 360 px the label pushed the
-            send button out of the composer. The name stays in aria-label/title. */}
-        <span className="hidden truncate sm:inline">{label}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          disabled={disabled}
+          aria-label={pickLabel}
+          title={pickLabel}
+          className="focus-ring inline-flex h-full min-w-0 items-center gap-1.5 rounded-full px-2.5 disabled:opacity-50"
+        >
+          <BookIcon />
+          {/* FIX128 D4 — icon-only below sm: at 360 px the label pushed the
+              send button out of the composer. The name stays in aria-label/title. */}
+          <span className="hidden truncate sm:inline">{label}</span>
+        </button>
+        {activeKBId ? (
+          <button
+            type="button"
+            onClick={() => void onPick(null)}
+            disabled={disabled}
+            aria-label={t("kb.chip.remove")}
+            title={t("kb.chip.remove")}
+            className="focus-ring -ml-1 mr-1 hidden h-5 w-5 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-base hover:text-text-primary disabled:opacity-50 sm:inline-flex"
+          >
+            <X className="h-3 w-3" aria-hidden />
+          </button>
+        ) : null}
+      </div>
       {open ? (
         <div className="popover-appear absolute bottom-10 right-0 z-30 w-64 overflow-hidden rounded-lg border border-border bg-bg-surface text-xs shadow-2xl">
           <div className="border-b border-border px-3 py-2">
@@ -92,6 +137,11 @@ export function KBSelector({
               {t("menu.knowledgeBase")}
             </p>
           </div>
+          {inheritedKB ? (
+            <p className="border-b border-border px-3 py-2 text-[11px] text-text-muted">
+              {t("kb.picker.projectNote", { name: inheritedKB.name })}
+            </p>
+          ) : null}
           <div className="max-h-72 overflow-y-auto">
             <KBRow
               checked={!activeKBId}

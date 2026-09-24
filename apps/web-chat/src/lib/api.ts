@@ -21,6 +21,7 @@ import type {
   KnowledgeAvailability,
   KnowledgeBaseListResponse,
   KnowledgeDocument,
+  KnowledgeDocumentListResponse,
   KnowledgeSearchResponse,
   AudioGenInput,
   MediaGenSubmitResponse,
@@ -45,6 +46,7 @@ import type {
 import type { PreviewData } from "./previewData";
 import { redirectToPortalLogin, refreshSession, type RefreshOutcome } from "./auth";
 import { bridge, usingBridgeTransport } from "./bridge";
+import { filenameFromDisposition } from "./knowledge";
 
 const API_BASE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
@@ -54,13 +56,11 @@ const API_BASE =
 /** FIX129 B2 — the chat-edge base for the session heartbeat (auth-refresh.ts). */
 export const CHAT_API_BASE = API_BASE;
 
-// Ceiling for a file upload. Shared by both upload paths, which now
-// differ in what they wait for: a KB document is still extracted inside
-// the request (OCR for a scanned PDF, up to the server's 240 s wall),
-// while a conversation-file upload returns as soon as the bytes land and
-// extracts in the background. Sized for the slower of the two, and
-// finite either way so a stuck request eventually surfaces as an error
-// instead of disabling the composer forever.
+// Ceiling for a file upload. Shared by both upload paths. Both now return
+// as soon as the bytes land and extract in the background (a KB document
+// since FIX132: 202 pending), so the ceiling only bounds a slow link; it
+// stays finite so a stuck request eventually surfaces as an error instead
+// of disabling the composer forever.
 const UPLOAD_TIMEOUT_MS = 300_000;
 
 // Single-flight refresh shared across all concurrent 401s (parallel
@@ -1113,8 +1113,11 @@ class ApiClient {
   getKnowledgeAvailability() {
     return this.json<KnowledgeAvailability>("/knowledge-bases/availability");
   }
-  listKnowledgeBases() {
-    return this.json<KnowledgeBaseListResponse>("/knowledge-bases");
+  /** FIX132 — the contract gives a bare array; chat-edge before it wraps
+   *  the list as {knowledge_bases}. Both read the same. */
+  async listKnowledgeBases(): Promise<KnowledgeBaseListResponse> {
+    const res = await this.json<KnowledgeBaseListResponse | KnowledgeBase[] | null>("/knowledge-bases");
+    return { knowledge_bases: Array.isArray(res) ? res : (res?.knowledge_bases ?? []) };
   }
   createKnowledgeBase(data: {
     name: string;
@@ -1141,6 +1144,24 @@ class ApiClient {
   }
   deleteKnowledgeBase(id: string) {
     return this.raw(`/knowledge-bases/${id}`, { method: "DELETE" });
+  }
+  /** FIX132 — GET /knowledge-bases/{id}/documents (polled while files are
+   *  being processed). A bare array per the contract, or {documents}. */
+  async listKBDocuments(kbId: string): Promise<KnowledgeDocument[]> {
+    const res = await this.json<KnowledgeDocumentListResponse | KnowledgeDocument[] | null>(
+      `/knowledge-bases/${kbId}/documents`,
+    );
+    return Array.isArray(res) ? res : (res?.documents ?? []);
+  }
+  /** FIX132 — the original bytes of a KB document, through the cookie-
+   *  authed client (401 → refresh → retry). The name comes from
+   *  Content-Disposition (filename* carries a Thai name). */
+  async kbDocumentFile(kbId: string, docId: string): Promise<{ blob: Blob; filename: string | null }> {
+    const res = await this.raw(`/knowledge-bases/${kbId}/documents/${docId}/file`);
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+    return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get("Content-Disposition")) };
   }
   deleteKBDocument(kbId: string, docId: string) {
     return this.raw(`/knowledge-bases/${kbId}/documents/${docId}`, {

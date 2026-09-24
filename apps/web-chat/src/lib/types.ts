@@ -664,6 +664,11 @@ export type ContextSourceType =
   // FIX130 A3b — a save_memory call in this turn stored a memory or queued a
   // suggestion; source_id is the memory, metadata.status says which.
   | "memory_saved";
+// FIX132 — the server also sends "knowledge_chunk" (one passage of a
+// knowledge-base document the model was given) and "knowledge_pending"
+// (files still being processed at answer time). lib/knowledge.ts reads them
+// as strings; they are not listed above so the hidden Sources rail
+// (SourcesCard, SHOW_SOURCES_RAIL) stays exactly as it is.
 
 export interface ContextSource {
   id: UUID;
@@ -727,10 +732,10 @@ export type KnowledgeDocumentStatus =
   | "failed";
 
 /** FIX130 C2 — GET /knowledge-bases/availability: can a knowledge base work
- *  right now (the embeddings provider answered, or would)? */
+ *  right now? FIX132: the local models (kb-models) are loaded and answer. */
 export interface KnowledgeAvailability {
   available: boolean;
-  /** embeddings_not_configured | embeddings_failed (when not available). */
+  /** models_loading | models_unavailable (when not available). */
   reason?: string;
   checked_at?: string;
 }
@@ -747,20 +752,33 @@ export interface KnowledgeBase {
   total_chunks: number;
   created_at: string;
   updated_at: string;
+  /** FIX132 — how many of its documents are still queued / being processed
+   *  / failed (GET /knowledge-bases). */
+  indexing?: { pending: number; processing: number; failed: number };
 }
 
 export interface KnowledgeDocument {
   id: UUID;
   knowledge_base_id: UUID;
+  /** The name the page shows. FIX132's contract sends `original_filename`;
+   *  normalizeKBDocument (lib/knowledge) fills this from it. */
   filename: string;
+  original_filename?: string;
   content_type: string;
   file_size_bytes: number;
   status: KnowledgeDocumentStatus;
   chunk_count: number;
   char_count: number;
+  /** FIX132 — indexing progress, in chunks (0/0 until it is known). */
+  progress_done?: number;
+  progress_total?: number;
+  /** FIX132 — why it failed: unsupported_type | too_large | empty_text |
+   *  encrypted | extract_failed | models_unavailable | internal. */
+  error_code?: string | null;
   error_message?: string | null;
   created_at: string;
   updated_at: string;
+  indexed_at?: string | null;
 }
 
 export interface KnowledgeBaseListResponse {
