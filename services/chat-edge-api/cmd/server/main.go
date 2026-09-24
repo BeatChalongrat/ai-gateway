@@ -786,6 +786,10 @@ func main() {
 	// No boot-time pass: the deletion hour is fixed.
 	startBackground(transcriptRetention.StartBackground)
 
+	// FIX132 C — export files are removed once their 24-hour download
+	// window closes (hourly pass; at boot too).
+	startBackground(exportSvc.StartSweep)
+
 	// FIX131 E1 — the lease renewal runs until AFTER the shutdown drain
 	// (its own context): the turns being drained must keep their leases.
 	leaseCtx, leaseCancel := context.WithCancel(context.Background())
