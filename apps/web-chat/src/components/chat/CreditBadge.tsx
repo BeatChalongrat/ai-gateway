@@ -139,7 +139,13 @@ export function CreditBadge() {
           ref={pillRef}
           type="button"
           aria-label={unavailable ? t("usage.unavailable") : t("a11y.usageAndCredits")}
-          title={unavailable ? t("usage.unavailable") : undefined}
+          // FIX132 F21 — what the number is, on hover too (NIGHT3: a bare
+          // "93,819,763" with the words only in the aria-label).
+          title={
+            unavailable
+              ? t("usage.unavailable")
+              : t("usage.pill.title", { remaining: remaining.toLocaleString(), total: total.toLocaleString() })
+          }
           aria-haspopup="dialog"
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
@@ -149,6 +155,7 @@ export function CreditBadge() {
           <span className="text-xs font-medium tabular-nums text-text-primary">
             {unavailable ? "—" : remaining.toLocaleString()}
           </span>
+          {unavailable ? null : <span className="-ml-1 text-[11px] text-text-muted">{t("usage.pill.unit")}</span>}
           <ChevronUp
             size={12}
             aria-hidden
