@@ -1,0 +1,11 @@
+# CPU-only torch comes from the PyTorch CPU index (see Dockerfile); pinned here for the rest.
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+transformers==4.46.3
+tokenizers==0.20.3
+sentencepiece==0.2.0
+safetensors==0.4.5
+huggingface_hub==0.26.2
+numpy==1.26.4
+pythainlp==5.0.4
