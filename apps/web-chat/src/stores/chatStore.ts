@@ -1440,17 +1440,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) =>
-        api.openMessageStream(
-          convId,
-          trimmed,
-          signal,
-          fileIds,
-          imageMode,
-          videoMode,
-          convModelId, // FIX9 Part B: carry the selected model into the hosted turn
-          requestId,
-        ),
+      // FIX131 E2 — a chat-edge restart answers 503 SERVER_DRAINING: the
+      // same request goes out again by itself (same requestId: the server's
+      // idempotency key) once the new process is up; the typed text stays in
+      // the outbox the whole time.
+      const res = await openThroughRestart(
+        () =>
+          openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) =>
+            api.openMessageStream(
+              convId,
+              trimmed,
+              signal,
+              fileIds,
+              imageMode,
+              videoMode,
+              convModelId, // FIX9 Part B: carry the selected model into the hosted turn
+              requestId,
+            ),
+          ),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        true,
       );
       if (get().sendsOpening[convId]?.requestId === requestId) set((s) => ({ sendsOpening: { ...s.sendsOpening, [convId]: undefined } })); // the response is back: `streaming` gates the composer from here
       if (!res.ok) {
@@ -2007,7 +2017,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openRegenerateStream(convId, messageId, signal));
+      // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+      const res = await openThroughRestart(
+        () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openRegenerateStream(convId, messageId, signal)),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        false,
+      );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2092,7 +2108,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openEditStream(convId, messageId, trimmed, signal));
+      // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+      const res = await openThroughRestart(
+        () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openEditStream(convId, messageId, trimmed, signal)),
+        ctrl.signal,
+        (on) => setRestartWait(set, convId, () => tempAsstId, on),
+        false,
+      );
       if (!res.ok) {
         await handleStreamPreError(res, set, get, convId, tempAsstId);
         return;
@@ -2425,6 +2447,102 @@ async function openWithin(ms: number, parent: AbortSignal, open: (signal: AbortS
   }
 }
 
+/** FIX131 E2 — how a turn waits out a chat-edge restart. The server drains
+ *  for up to 60 s (CHAT_EDGE_DRAIN_TIMEOUT) and answers new turns 503
+ *  SERVER_DRAINING meanwhile; then it is down for the few seconds it takes
+ *  to start again. The page sends the same request again (same X-Request-Id
+ *  on a send, so a copy that did land is replayed, never run twice), backing
+ *  off from `firstMs` to `maxMs`, for at most `budgetMs`. Mutable for tests. */
+export const DRAIN_RETRY = { firstMs: 2_000, maxMs: 10_000, budgetMs: 120_000 };
+
+/** The wait (ms) a 503 SERVER_DRAINING asks for, or null for any other
+ *  response. The body is read from a clone: the caller still owns `res`. */
+async function drainingWait(res: Response): Promise<number | null> {
+  if (res.status !== 503) return null;
+  let code: string | undefined;
+  try {
+    const env = (await res.clone().json()) as { error?: { code?: string } };
+    code = env?.error?.code;
+  } catch {
+    return null;
+  }
+  if (code !== "SERVER_DRAINING") return null;
+  const secs = Number(res.headers.get("Retry-After"));
+  return Number.isFinite(secs) && secs > 0 ? secs * 1000 : DRAIN_RETRY.firstMs;
+}
+
+/** FIX131 E2 — opens a turn's stream through a chat-edge restart. While the
+ *  server answers 503 SERVER_DRAINING (nothing was written), or cannot be
+ *  reached right after having said so (the old process exited, the new one
+ *  is not listening yet — only when `retryUnreachable`, i.e. the request is
+ *  idempotent), the row says the service is restarting and the request is
+ *  sent again. Any other answer is returned as is; so is the last 503 when
+ *  the budget runs out or the person presses Stop during the wait, so the
+ *  caller's refusal path hands the text back. */
+async function openThroughRestart(
+  open: () => Promise<Response>,
+  signal: AbortSignal,
+  onWaiting: (waiting: boolean) => void,
+  retryUnreachable: boolean,
+): Promise<Response> {
+  if (HOSTED_MODE) return open(); // the desktop host runs the turn, not chat-edge
+  const started = Date.now();
+  let backoff = DRAIN_RETRY.firstMs;
+  let last: Response | null = null;
+  const stopWaiting = () => {
+    if (last) onWaiting(false);
+  };
+  for (;;) {
+    let res: Response;
+    try {
+      res = await open();
+    } catch (err) {
+      const unreachable = err instanceof TypeError && !signal.aborted;
+      if (!last || !retryUnreachable || !unreachable || Date.now() - started >= DRAIN_RETRY.budgetMs) {
+        stopWaiting();
+        throw err;
+      }
+      try {
+        await abortableSleep(backoff, signal);
+      } catch {
+        stopWaiting();
+        return last; // Stop while waiting: the server never took it
+      }
+      backoff = Math.min(backoff * 2, DRAIN_RETRY.maxMs);
+      continue;
+    }
+    const wait = await drainingWait(res);
+    if (wait === null || Date.now() - started >= DRAIN_RETRY.budgetMs) {
+      stopWaiting();
+      return res;
+    }
+    last = res;
+    onWaiting(true);
+    try {
+      await abortableSleep(Math.min(Math.max(wait, backoff), DRAIN_RETRY.maxMs), signal);
+    } catch {
+      stopWaiting();
+      return res;
+    }
+    backoff = Math.min(backoff * 2, DRAIN_RETRY.maxMs);
+  }
+}
+
+/** Marks (or clears) a row as waiting out a restart. */
+function setRestartWait(set: Set, convId: string, rowId: () => string, on: boolean): void {
+  set((s) => {
+    const id = rowId();
+    const list = s.messages[convId] ?? [];
+    if (!list.some((m) => m.id === id && Boolean(m.restart_wait) !== on)) return {};
+    return {
+      messages: {
+        ...s.messages,
+        [convId]: list.map((m) => (m.id === id ? { ...m, restart_wait: on || undefined } : m)),
+      },
+    };
+  });
+}
+
 /** FIX130 C1 — the connection under a turn dropped (a network error, or
  *  parseSSE's StreamSilenceError), as opposed to the person's Stop. */
 function isConnectionDrop(err: unknown): boolean {
@@ -2497,7 +2615,13 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
       return { abortControllers: aborts, streamingAssistantId: sids };
     });
   try {
-    const res = await openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openQuestionAnswerStream(convId, answer.promptId, answer, signal));
+    // FIX131 E2 — waits out a chat-edge restart (503 SERVER_DRAINING).
+    const res = await openThroughRestart(
+      () => openWithin(STREAM_OPEN.sendMs, ctrl.signal, (signal) => api.openQuestionAnswerStream(convId, answer.promptId, answer, signal)),
+      ctrl.signal,
+      (on) => setRestartWait(set, convId, () => messageId, on),
+      false,
+    );
     if (res.status === 409 || res.status === 410) {
       releaseSlot();
       await get().loadMessages(convId);
@@ -3579,6 +3703,16 @@ async function handleStreamPreError(
     // notice says what to do.
     withdrawRefusedSend(set, convId, tempUserId, tempAsstId, sentText);
     get().setError(tooManyFilesNotice(msg));
+    return;
+  }
+  if (res.status === 503 && code === "SERVER_DRAINING" && tempUserId) {
+    // FIX131 E2 — chat-edge was still restarting when the page stopped
+    // waiting (the retry budget ran out, or the person pressed Stop during
+    // the wait). Nothing was sent: this send's rows go, the text is back in
+    // the composer (the outbox give-back ran before this), and a notice
+    // says to send again in a moment.
+    withdrawRefusedSend(set, convId, tempUserId, tempAsstId, sentText);
+    get().setError(tOutside("error.serverDraining"));
     return;
   }
   if (res.status === 409 && code === "CONVERSATION_BUSY" && tempUserId) {

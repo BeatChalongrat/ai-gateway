@@ -16,7 +16,7 @@
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Copy, PenLine } from "lucide-react";
+import { ArrowRightLeft, Copy, PenLine, RotateCcw } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
@@ -360,6 +360,13 @@ function MessageBubbleImpl({
     message.status === "error" &&
     !message.isStreaming &&
     (!message.content.trim() || !!message.error_code);
+  // FIX131 — a turn that did not finish (its process went away: a restart,
+  // a crash) says so in the card and offers Retry right there, live and
+  // after a reload alike — the way ChatGPT and Claude show an interrupted
+  // response. Retry is the row's regenerate, so it appears only where
+  // regenerate would (the last answer, nothing streaming).
+  const interruptedRetry =
+    message.error_code === "GENERATION_INTERRUPTED" && showRegenerate && onRegenerate ? onRegenerate : undefined;
   return (
     <div className="group message-enter flex w-full flex-col gap-1.5">
       {/* T4 — Thinking Mode. Renders ABOVE the body so the user
@@ -470,6 +477,7 @@ function MessageBubbleImpl({
              end: the failure is one the person has to change something
              about, and the place to change it is the composer. */
           offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
+          onRetry={interruptedRetry}
         />
       ) : null}
 
@@ -493,6 +501,7 @@ function MessageBubbleImpl({
           referenceId={message.run_id}
           convId={convId}
           offerNewMessage={knownNotRetryable(message.error_code, message.error_retryable)}
+          onRetry={interruptedRetry}
         />
       ) : null}
 
@@ -504,6 +513,13 @@ function MessageBubbleImpl({
       {message.reconnecting ? (
         <div role="status" data-testid="reconnecting-notice" className="mt-1 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
           {t("msg.reconnecting")}
+        </div>
+      ) : null}
+      {/* FIX131 E2 — the service is restarting; the request goes out again
+          by itself. A state of the service, not a failure. */}
+      {message.restart_wait ? (
+        <div role="status" data-testid="restart-wait-notice" className="mt-1 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+          {t("msg.serverRestarting")}
         </div>
       ) : null}
       {message.awaiting_reload ? (
@@ -908,6 +924,7 @@ function ErrorNotice({
   convId,
   offerNewMessage,
   referenceId,
+  onRetry,
 }: {
   message: string;
   attempts?: FallbackAttempt[];
@@ -916,6 +933,8 @@ function ErrorNotice({
   offerNewMessage?: boolean;
   /** FIX119 — the run id a person can quote to support; copyable. */
   referenceId?: string;
+  /** FIX131 — an interrupted turn: Retry in the card (the row's regenerate). */
+  onRetry?: () => void;
 }) {
   const t = useT();
   const models = useModelStore((s) => s.models);
@@ -948,6 +967,17 @@ function ErrorNotice({
         >
           <ArrowRightLeft size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 break-words">{t("error.switchModel", { model: alternative.name || alternative.id })}</span>
+        </button>
+      ) : null}
+      {onRetry ? (
+        <button
+          type="button"
+          data-testid="retry-interrupted"
+          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline"
+          onClick={onRetry}
+        >
+          <RotateCcw size={14} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0 break-words">{t("common.retry")}</span>
         </button>
       ) : null}
       {offerNewMessage ? (
@@ -1529,6 +1559,7 @@ function areEqual(prev: Props, next: Props): boolean {
     // a status change today; listed so they do not depend on it.
     a.reconnecting === b.reconnecting &&
     a.awaiting_reload === b.awaiting_reload &&
+    a.restart_wait === b.restart_wait &&
     a.stop_reason === b.stop_reason &&
     a.tool_rounds === b.tool_rounds &&
     a.terminal_cause === b.terminal_cause &&

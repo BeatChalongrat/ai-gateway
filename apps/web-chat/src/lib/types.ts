@@ -509,6 +509,9 @@ export interface Message {
    *  ended, and the bubble offers to load it. Neither is a failure. */
   reconnecting?: boolean;
   awaiting_reload?: boolean;
+  /** FIX131 E2 — client-only: chat-edge is restarting (503 SERVER_DRAINING)
+   *  and this turn's request waits to be sent again by itself. */
+  restart_wait?: boolean;
   /** FIX124 R3 — how many tool rounds ran when the turn stopped at the
    *  tool-round cap without an answer (stop_reason tool_use). From
    *  message_complete; absent after a reload, where the notice drops the

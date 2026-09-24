@@ -58,6 +58,8 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "image_attachment_save_failed",
   // stream resume
   "GENERATION_INTERRUPTED",
+  // FIX131 E2 — chat-edge is restarting; the same request will work shortly.
+  "SERVER_DRAINING",
 ]);
 
 const ERROR_CODE_KEYS: Record<string, DictKey> = {
@@ -147,8 +149,11 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   image_bad_response: "error.image_bad_response",
   image_attachment_save_failed: "error.image_attachment_save_failed",
   image_cancelled: "error.image_cancelled",
-  // Phase 5 — stream resume.
+  // Phase 5 — stream resume. FIX131: also the ending of a turn whose
+  // process went away (restart sweep, shutdown drain).
   GENERATION_INTERRUPTED: "error.generationInterrupted",
+  // FIX131 E2 — 503 from chat-edge while it restarts (nothing was written).
+  SERVER_DRAINING: "error.serverDraining",
 };
 
 /** The dictionary key for a code, or undefined when the code is unknown. */
