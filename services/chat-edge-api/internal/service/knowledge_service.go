@@ -364,7 +364,11 @@ func (s *KnowledgeService) indexDocument(
 		return fail("text extraction failed for this file type")
 	}
 
-	chunks := ChunkText(text, kb.ChunkSize, kb.ChunkOverlap)
+	size, overlap := EffectiveChunking(kb.ChunkSize, kb.ChunkOverlap, DefaultKBChunkSize, DefaultKBChunkOverlap)
+	chunks, err := ChunkTextRunes(ctx, text, size, overlap, s.models)
+	if err != nil {
+		return fail("word segmentation failed: " + err.Error())
+	}
 	if len(chunks) == 0 {
 		return fail("no chunks produced (document too small or empty after extraction)")
 	}

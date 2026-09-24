@@ -2,7 +2,8 @@
 // (services/kb-models) for tests: same endpoints, same shapes, no model.
 //
 //   - /v1/segment splits Thai with a greedy longest match over Words (plus
-//     whitespace), so a test knows every true word boundary.
+//     whitespace), keeping every character, so a test knows every true word
+//     boundary.
 //   - /v1/embeddings gives each word a fixed dimension (FNV hash): the dense
 //     vector is the L2-normalised word count vector, so cosine similarity is
 //     word overlap; the sparse vector is the same words as token ids with
@@ -239,19 +240,26 @@ func (s *Server) segment(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]string, 0, len(req.Texts))
 	for _, t := range req.Texts {
-		out = append(out, strings.Join(s.WordsOf(t), " "))
+		out = append(out, strings.Join(s.Tokens(t), " "))
 	}
 	writeJSON(w, 200, map[string]any{"texts": out})
 }
 
-// WordsOf segments text the way the fake's /v1/segment does: whitespace
-// separates; inside a run, Thai is matched greedily against Words (longest
-// first); anything not in the dictionary becomes a one-rune word (Thai) or
-// runs of letters/digits (Latin), lower-cased.
-func (s *Server) WordsOf(text string) []string {
+// Tokens segments text the way the fake's /v1/segment does, keeping every
+// character (like PyThaiNLP newmm): whitespace separates; inside a run, Thai
+// is matched greedily against Words (longest first), a Thai character not in
+// the dictionary is its own token, runs of Latin letters/digits are one token
+// (case kept), and any other character (punctuation) is its own token.
+func (s *Server) Tokens(text string) []string {
 	s.mu.Lock()
 	dict := append([]string(nil), s.Words...)
 	s.mu.Unlock()
+	return Tokenize(text, dict)
+}
+
+// Tokenize is Tokens with an explicit dictionary (no server needed).
+func Tokenize(text string, dict []string) []string {
+	dict = append([]string(nil), dict...)
 	sort.SliceStable(dict, func(a, b int) bool { return utf8.RuneCountInString(dict[a]) > utf8.RuneCountInString(dict[b]) })
 	var out []string
 	for _, run := range strings.Fields(text) {
@@ -269,12 +277,7 @@ func (s *Server) WordsOf(text string) []string {
 				continue
 			}
 			r, size := utf8.DecodeRuneInString(run)
-			if isThai(r) {
-				out = append(out, run[:size])
-				run = run[size:]
-				continue
-			}
-			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			if !isThai(r) && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
 				end := size
 				for end < len(run) {
 					r2, s2 := utf8.DecodeRuneInString(run[end:])
@@ -283,12 +286,27 @@ func (s *Server) WordsOf(text string) []string {
 					}
 					end += s2
 				}
-				out = append(out, strings.ToLower(run[:end]))
+				out = append(out, run[:end])
 				run = run[end:]
 				continue
 			}
-			run = run[size:] // punctuation: dropped
+			out = append(out, run[:size])
+			run = run[size:]
 		}
+	}
+	return out
+}
+
+// WordsOf is what the fake embeds and reranks on: Tokens lower-cased, with
+// punctuation-only tokens dropped.
+func (s *Server) WordsOf(text string) []string {
+	var out []string
+	for _, t := range s.Tokens(text) {
+		r, _ := utf8.DecodeRuneInString(t)
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || isThai(r)) {
+			continue
+		}
+		out = append(out, strings.ToLower(t))
 	}
 	return out
 }
