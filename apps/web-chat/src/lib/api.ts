@@ -21,6 +21,7 @@ import type {
   KnowledgeAvailability,
   KnowledgeBaseListResponse,
   KnowledgeDocument,
+  KnowledgeDocumentListResponse,
   KnowledgeSearchResponse,
   AudioGenInput,
   MediaGenSubmitResponse,
@@ -45,6 +46,7 @@ import type {
 import type { PreviewData } from "./previewData";
 import { redirectToPortalLogin, refreshSession, type RefreshOutcome } from "./auth";
 import { bridge, usingBridgeTransport } from "./bridge";
+import { filenameFromDisposition } from "./knowledge";
 
 const API_BASE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
@@ -1113,8 +1115,11 @@ class ApiClient {
   getKnowledgeAvailability() {
     return this.json<KnowledgeAvailability>("/knowledge-bases/availability");
   }
-  listKnowledgeBases() {
-    return this.json<KnowledgeBaseListResponse>("/knowledge-bases");
+  /** FIX132 — the contract gives a bare array; chat-edge before it wraps
+   *  the list as {knowledge_bases}. Both read the same. */
+  async listKnowledgeBases(): Promise<KnowledgeBaseListResponse> {
+    const res = await this.json<KnowledgeBaseListResponse | KnowledgeBase[] | null>("/knowledge-bases");
+    return { knowledge_bases: Array.isArray(res) ? res : (res?.knowledge_bases ?? []) };
   }
   createKnowledgeBase(data: {
     name: string;
@@ -1141,6 +1146,24 @@ class ApiClient {
   }
   deleteKnowledgeBase(id: string) {
     return this.raw(`/knowledge-bases/${id}`, { method: "DELETE" });
+  }
+  /** FIX132 — GET /knowledge-bases/{id}/documents (polled while files are
+   *  being processed). A bare array per the contract, or {documents}. */
+  async listKBDocuments(kbId: string): Promise<KnowledgeDocument[]> {
+    const res = await this.json<KnowledgeDocumentListResponse | KnowledgeDocument[] | null>(
+      `/knowledge-bases/${kbId}/documents`,
+    );
+    return Array.isArray(res) ? res : (res?.documents ?? []);
+  }
+  /** FIX132 — the original bytes of a KB document, through the cookie-
+   *  authed client (401 → refresh → retry). The name comes from
+   *  Content-Disposition (filename* carries a Thai name). */
+  async kbDocumentFile(kbId: string, docId: string): Promise<{ blob: Blob; filename: string | null }> {
+    const res = await this.raw(`/knowledge-bases/${kbId}/documents/${docId}/file`);
+    if (!res.ok) {
+      throw new ApiError(`HTTP_${res.status}`, res.statusText, res.status);
+    }
+    return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get("Content-Disposition")) };
   }
   deleteKBDocument(kbId: string, docId: string) {
     return this.raw(`/knowledge-bases/${kbId}/documents/${docId}`, {

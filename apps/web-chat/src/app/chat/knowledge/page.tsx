@@ -2,15 +2,21 @@
 
 // Knowledge Base management page.
 //
-// Lists every KB the tenant has + lets the user create new ones,
-// upload documents into them, see indexing status per document, and
-// delete / reindex on demand. Citation-rendering for chat replies is
-// owned by MessageBubble — this page is purely admin.
+// Lists the person's KBs + lets them create new ones, upload documents into
+// them, see indexing status per document, and delete / retry on demand.
+// Citation-rendering for chat replies is owned by MessageBubble
+// (KnowledgeSources) — this page manages the documents.
 //
-// Indexing is synchronous on the server (Phase 3 contract): the
-// upload promise resolves with a row whose status is already
-// "indexed" or "failed", so we don't poll here. A future async
-// worker would justify adding a poll loop.
+// FIX132 — indexing is asynchronous: an upload answers 202 with a `pending`
+// row and the server processes it in the background. The open KB's documents
+// are therefore re-read every ~2 s while any of them is pending/processing
+// (and on window focus), each row says where it is — รอคิว, กำลังประมวลผล
+// 12/40 ส่วน with a bar, พร้อมใช้ with its chunk count, or ไม่สำเร็จ with the
+// reason for its error_code and ลองใหม่ — and while anything is still being
+// processed a note says the person can already ask: those files are just not
+// used for answers yet. A file that never became a document (refused by the
+// page's own type/size check, or a failed request) stays on its row with the
+// reason until it is retried or removed; no failure is only a toast.
 //
 // FIX130 C2 — the page asks the server whether a knowledge base can work
 // right now (GET /knowledge-bases/availability) every time it opens. When it
@@ -20,6 +26,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { CircleAlert, FileText, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -28,20 +35,20 @@ import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
 import type { DictKey } from "@/lib/i18n/dict";
-import { useKnowledgeStore } from "@/stores/knowledgeStore";
+import {
+  docErrorKey,
+  isDocInFlight,
+  KB_ACCEPT,
+  KB_POLL,
+  uploadErrorKey,
+  uploadRetryable,
+} from "@/lib/knowledge";
+import { useKnowledgeStore, type UploadingDocument } from "@/stores/knowledgeStore";
 import type {
   KnowledgeBase,
   KnowledgeDocument,
   KnowledgeDocumentStatus,
 } from "@/lib/types";
-
-const ALLOWED_MIME = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/csv",
-  "text/plain",
-].join(",");
 
 export default function KnowledgeBasePage() {
   const t = useT();
@@ -67,6 +74,16 @@ export default function KnowledgeBasePage() {
   useEffect(() => {
     if (!loaded && !loading) void loadKBs();
   }, [loaded, loading, loadKBs]);
+  // FIX132 — a closed KB's card says "กำลังประมวลผล N ไฟล์" from the list;
+  // while any says so, re-read the list (the open KB re-reads its own rows).
+  const listIndexing = knowledgeBases.some(
+    (k) => k.id !== expandedId && (k.indexing?.pending ?? 0) + (k.indexing?.processing ?? 0) > 0,
+  );
+  useEffect(() => {
+    if (!listIndexing) return;
+    const id = window.setInterval(() => void loadKBs(), KB_POLL.listMs);
+    return () => window.clearInterval(id);
+  }, [listIndexing, loadKBs]);
   // Ask afresh on every visit — the verdict may have changed since the
   // session's first ask (a key was fixed, or credit ran out).
   useEffect(() => {
@@ -174,18 +191,11 @@ export default function KnowledgeBasePage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreate={async (data) => {
-          try {
-            const kb = await createKB(data);
-            toast(tOutside("kb.toast.created", { name: kb.name }));
-            setCreateOpen(false);
-            setExpandedId(kb.id);
-          } catch (err) {
-            toast(
-              err instanceof Error
-                ? err.message
-                : "Couldn't create knowledge base.",
-            );
-          }
+          // A refusal throws into the dialog, which says so and stays open.
+          const kb = await createKB(data);
+          toast(tOutside("kb.toast.created", { name: kb.name }));
+          setCreateOpen(false);
+          setExpandedId(kb.id);
         }}
       />
     </div>
@@ -218,14 +228,6 @@ function KBUnavailableNotice({ reason, onRecheck }: { reason: string | null; onR
       </button>
     </div>
   );
-}
-
-/** A failed document's reason in the person's language: an embeddings
- *  failure (the only one the live system produces) has its own sentence;
- *  anything else keeps the server's text. */
-function docFailureText(message: string | null | undefined): string {
-  if (!message || /embedding/i.test(message)) return tOutside("kb.doc.embeddingFailed");
-  return message;
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +317,8 @@ function KBCard({
     : kb.document_count === 0
       ? t("kb.status.empty")
       : t("kb.status.indexed");
+  const inFlight = (kb.indexing?.pending ?? 0) + (kb.indexing?.processing ?? 0);
+  const failed = kb.indexing?.failed ?? 0;
 
   return (
     <section
@@ -337,7 +341,7 @@ function KBCard({
               {kb.description}
             </p>
           ) : null}
-          <p className="mt-3 text-xs text-text-muted">
+          <p data-testid="kb-card-summary" className="mt-3 text-xs text-text-muted">
             {kb.document_count}{" "}
             {kb.document_count === 1
               ? t("kb.unit.document")
@@ -346,7 +350,19 @@ function KBCard({
             {kb.total_chunks}{" "}
             {kb.total_chunks === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}
             {" · "}
-            {statusLabel}
+            {inFlight > 0 || failed > 0 ? (
+              <>
+                {inFlight > 0 ? (
+                  <span className="text-status-warning">{t("kb.card.indexing", { n: String(inFlight) })}</span>
+                ) : null}
+                {inFlight > 0 && failed > 0 ? " · " : null}
+                {failed > 0 ? (
+                  <span className="text-status-danger">{t("kb.card.failed", { n: String(failed) })}</span>
+                ) : null}
+              </>
+            ) : (
+              statusLabel
+            )}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1 text-sm text-text-secondary transition-colors group-hover:text-text-primary">
@@ -407,38 +423,43 @@ function KBDocumentsPanel({
 }) {
   const t = useT();
   const documents = useKnowledgeStore((s) => s.documentsByKB[kb.id]);
-  const uploading = useKnowledgeStore((s) => s.uploadingByKB[kb.id]) ?? [];
+  const uploads = useKnowledgeStore((s) => s.uploadingByKB[kb.id]) ?? NO_UPLOADS;
   const loadDocs = useKnowledgeStore((s) => s.loadDocuments);
-  const uploadDocument = useKnowledgeStore((s) => s.uploadDocument);
+  const uploadFiles = useKnowledgeStore((s) => s.uploadFiles);
+  const retryUpload = useKnowledgeStore((s) => s.retryUpload);
+  const dismissUpload = useKnowledgeStore((s) => s.dismissUpload);
   const deleteDocument = useKnowledgeStore((s) => s.deleteDocument);
   const reindexDocument = useKnowledgeStore((s) => s.reindexDocument);
-  const loadAvailability = useKnowledgeStore((s) => s.loadAvailability);
+  const [dragging, setDragging] = useState(false);
 
+  const inFlight = (documents ?? []).some(isDocInFlight);
+
+  // Fresh on every open.
   useEffect(() => {
-    if (documents === undefined) void loadDocs(kb.id);
-  }, [kb.id, documents, loadDocs]);
+    void loadDocs(kb.id);
+  }, [kb.id, loadDocs]);
+  // Re-read while something is queued or processing; stop when nothing is.
+  useEffect(() => {
+    if (!inFlight) return;
+    const id = window.setInterval(() => void loadDocs(kb.id), KB_POLL.docsMs);
+    return () => window.clearInterval(id);
+  }, [inFlight, kb.id, loadDocs]);
+  // Coming back to the page (another tab, the desktop window) re-reads too.
+  useEffect(() => {
+    const onFocus = () => void loadDocs(kb.id);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") onFocus();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [kb.id, loadDocs]);
 
-  async function handleUpload(files: FileList) {
-    for (let i = 0; i < files.length; i++) {
-      const file = files.item(i);
-      if (!file) continue;
-      try {
-        const doc = await uploadDocument(kb.id, file);
-        if (doc.status === "failed") {
-          // FIX130 C2 — said in words (the row keeps it too), and the page
-          // re-asks whether knowledge bases work at all: the server has just
-          // learned they do not.
-          toast(tOutside("kb.toast.docFailed", { name: doc.filename, error: docFailureText(doc.error_message) }));
-          void loadAvailability(true);
-        } else {
-          toast(tOutside("kb.toast.docIndexed", { name: doc.filename, n: String(doc.chunk_count) }));
-        }
-      } catch (err) {
-        toast(
-          err instanceof Error ? err.message : "Upload failed.",
-        );
-      }
-    }
+  function send(files: File[]) {
+    if (files.length > 0) void uploadFiles(kb.id, files);
   }
 
   async function handleDeleteDoc(doc: KnowledgeDocument) {
@@ -451,75 +472,99 @@ function KBDocumentsPanel({
     }
   }
 
-  async function handleReindex(doc: KnowledgeDocument) {
-    try {
-      await reindexDocument(kb.id, doc.id);
-      toast(tOutside("kb.toast.reindexing", { name: doc.filename }));
-    } catch {
-      toast(tOutside("kb.toast.reindexFailed"));
-    }
-  }
-
   return (
-    <div className="border-t border-border bg-bg-base/50 px-4 py-4">
+    <div
+      className="border-t border-border bg-bg-base/50 px-4 py-4"
+      onDragOver={(e) => {
+        if (!canUpload) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!canUpload) return;
+        e.preventDefault();
+        setDragging(false);
+        send(Array.from(e.dataTransfer?.files ?? []));
+      }}
+    >
       <div className="mb-3 flex items-center justify-between gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wider text-text-secondary">
           {t("kb.docs.title")}
         </h3>
-        <div className="flex items-center gap-2">
-          {canUpload ? (
-            <label className="cursor-pointer">
+        <button
+          type="button"
+          onClick={onDelete}
+          className="rounded-md px-2 py-1.5 text-xs text-status-danger hover:bg-status-danger/10"
+        >
+          {t("kb.docs.deleteKb")}
+        </button>
+      </div>
+
+      {canUpload ? (
+        <div
+          data-testid="kb-dropzone"
+          className={`mb-3 flex flex-col items-center gap-1 rounded-lg border border-dashed px-4 py-5 text-center transition-colors ${
+            dragging ? "border-border-strong bg-bg-elevated" : "border-border bg-transparent"
+          }`}
+        >
+          <Upload className="h-4 w-4 text-text-muted" aria-hidden />
+          <p className="text-xs text-text-secondary">
+            {t("kb.drop.title")}{" "}
+            <label className="cursor-pointer font-medium text-text-primary underline-offset-2 hover:underline">
               <input
                 type="file"
                 multiple
-                accept={ALLOWED_MIME}
+                accept={KB_ACCEPT}
                 className="sr-only"
+                data-testid="kb-file-input"
                 onChange={(e) => {
-                  if (e.target.files) void handleUpload(e.target.files);
+                  send(Array.from(e.target.files ?? []));
                   e.target.value = "";
                 }}
               />
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-primary hover:bg-bg-elevated">
-                <PlusIcon /> {t("kb.docs.upload")}
-              </span>
+              {t("kb.drop.pick")}
             </label>
-          ) : null}
-          <button
-            type="button"
-            onClick={onDelete}
-            className="rounded-md px-2 py-1.5 text-xs text-status-danger hover:bg-status-danger/10"
-          >
-            {t("kb.docs.deleteKb")}
-          </button>
+          </p>
+          <p className="text-[11px] text-text-muted">{t("kb.drop.hint")}</p>
         </div>
-      </div>
+      ) : null}
+
+      {inFlight ? (
+        <p
+          role="status"
+          data-testid="kb-processing-note"
+          className="mb-3 rounded-md border border-border bg-bg-surface px-3 py-2 text-xs text-text-secondary"
+        >
+          {t("kb.processingNote")}
+        </p>
+      ) : null}
 
       {documents === undefined ? (
         <div className="flex justify-center py-4">
           <Spinner size={16} />
         </div>
-      ) : documents.length === 0 && uploading.length === 0 ? (
+      ) : documents.length === 0 && uploads.length === 0 ? (
         <p className="py-2 text-xs text-text-muted">{t("kb.docs.empty")}</p>
       ) : (
         <ul className="flex flex-col gap-1.5">
-          {uploading.map((u) => (
-            <li
+          {uploads.map((u) => (
+            <UploadRow
               key={u.tempId}
-              className="flex items-center gap-3 rounded-md border border-border bg-bg-surface px-3 py-2 text-xs"
-            >
-              <Spinner size={12} />
-              <span className="min-w-0 flex-1 truncate text-text-primary">
-                {u.filename}
-              </span>
-              <span className="text-text-muted">{u.progress}%</span>
-            </li>
+              upload={u}
+              onRetry={() => void retryUpload(kb.id, u.tempId)}
+              onDismiss={() => dismissUpload(kb.id, u.tempId)}
+            />
           ))}
           {documents.map((doc) => (
             <DocumentRow
               key={doc.id}
               doc={doc}
               onDelete={() => void handleDeleteDoc(doc)}
-              onReindex={() => void handleReindex(doc)}
+              onRetry={() => reindexDocument(kb.id, doc.id)}
             />
           ))}
         </ul>
@@ -528,88 +573,156 @@ function KBDocumentsPanel({
   );
 }
 
+const NO_UPLOADS: UploadingDocument[] = [];
+
+const ROW = "flex items-start gap-3 rounded-md border border-border bg-bg-surface px-3 py-2";
+const ROW_BUTTON =
+  "focus-ring rounded-md border border-border bg-transparent px-2 py-1 text-[11px] font-medium text-text-primary transition-colors hover:bg-bg-elevated disabled:opacity-60";
+
+/** A chosen file that is not a document (yet): its bytes are going up, or it
+ *  did not get there — then the reason stays here until retried or removed. */
+function UploadRow({
+  upload,
+  onRetry,
+  onDismiss,
+}: {
+  upload: UploadingDocument;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  const t = useT();
+  const failed = upload.state === "failed";
+  return (
+    <li data-testid="kb-upload-row" data-state={upload.state} className={ROW}>
+      <span className="mt-0.5 shrink-0">
+        {failed ? <CircleAlert className="h-3.5 w-3.5 text-status-danger" aria-hidden /> : <Spinner size={12} />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs font-medium text-text-primary">{upload.filename}</p>
+        {failed && upload.errorCode ? (
+          <p role="alert" className="mt-0.5 text-[11px] text-status-danger">
+            {t(uploadErrorKey(upload.errorCode))}
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[11px] text-text-muted">
+            {t("kb.upload.sending", { pct: String(upload.progress) })}
+          </p>
+        )}
+      </div>
+      {failed ? (
+        <div className="flex shrink-0 items-center gap-1">
+          {upload.errorCode && uploadRetryable(upload.errorCode) ? (
+            <button type="button" onClick={onRetry} className={ROW_BUTTON}>
+              {t("kb.doc.retry")}
+            </button>
+          ) : null}
+          <button type="button" onClick={onDismiss} className={ROW_BUTTON}>
+            {t("kb.upload.dismiss")}
+          </button>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function statusText(t: ReturnType<typeof useT>, doc: KnowledgeDocument): string {
+  switch (doc.status) {
+    case "pending":
+      return t("kb.doc.status.pending");
+    case "processing":
+      return (doc.progress_total ?? 0) > 0
+        ? t("kb.doc.progress", { done: String(doc.progress_done ?? 0), total: String(doc.progress_total) })
+        : t("kb.doc.status.processing");
+    case "indexed":
+      return t("kb.doc.ready", { n: String(doc.chunk_count) });
+    default:
+      return t("kb.doc.status.failed");
+  }
+}
+
+const STATUS_TONE: Record<KnowledgeDocumentStatus, string> = {
+  pending: "text-text-muted",
+  processing: "text-status-warning",
+  indexed: "text-status-success",
+  failed: "text-status-danger",
+};
+
 function DocumentRow({
   doc,
   onDelete,
-  onReindex,
+  onRetry,
 }: {
   doc: KnowledgeDocument;
   onDelete: () => void;
-  onReindex: () => void;
+  onRetry: () => Promise<void>;
 }) {
   const t = useT();
+  const [actionError, setActionError] = useState<DictKey | null>(null);
+  const failed = doc.status === "failed";
+  const total = doc.progress_total ?? 0;
+  const done = Math.min(doc.progress_done ?? 0, total);
   return (
-    <li className="flex items-center gap-3 rounded-md border border-border bg-bg-surface px-3 py-2">
-      <StatusPill status={doc.status} />
+    <li data-testid="kb-doc-row" data-status={doc.status} className={ROW}>
+      <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-xs font-medium text-text-primary">
-          {doc.filename}
-        </p>
-        <p className="text-[11px] text-text-muted">
+        <p className="truncate text-xs font-medium text-text-primary">{doc.filename}</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">
+          <span data-testid="kb-doc-status" className={STATUS_TONE[doc.status]}>
+            {statusText(t, doc)}
+          </span>
+          {" · "}
           {humanSize(doc.file_size_bytes)}
-          {doc.status === "indexed"
-            ? ` · ${doc.chunk_count} ${doc.chunk_count === 1 ? t("kb.unit.chunk") : t("kb.unit.chunks")}`
-            : ""}
-          {doc.status === "failed" ? ` · ${docFailureText(doc.error_message)}` : ""}
         </p>
+        {doc.status === "processing" && total > 0 ? (
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={total}
+            aria-valuenow={done}
+            aria-label={doc.filename}
+            className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-elevated"
+          >
+            <div
+              className="h-full rounded-full bg-status-warning transition-[width] duration-500"
+              style={{ width: `${Math.round((done / total) * 100)}%` }}
+            />
+          </div>
+        ) : null}
+        {failed ? (
+          <p data-testid="kb-doc-reason" className="mt-0.5 text-[11px] text-status-danger">
+            {t(docErrorKey(doc.error_code))}
+          </p>
+        ) : null}
+        {actionError ? (
+          <p role="alert" className="mt-0.5 text-[11px] text-status-danger">
+            {t(actionError)}
+          </p>
+        ) : null}
       </div>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={onReindex}
-          title="Reindex"
-          className="tap-44 rounded p-1.5 text-text-muted hover:bg-bg-elevated hover:text-text-primary"
-        >
-          <RefreshIcon />
-        </button>
+      <div className="flex shrink-0 items-center gap-1">
+        {failed ? (
+          <button
+            type="button"
+            onClick={() => {
+              setActionError(null);
+              onRetry().catch(() => setActionError("kb.doc.retryFailed"));
+            }}
+            className={ROW_BUTTON}
+          >
+            {t("kb.doc.retry")}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onDelete}
-          title="Delete"
+          aria-label={t("kb.doc.delete")}
+          title={t("kb.doc.delete")}
           className="tap-44 rounded p-1.5 text-text-muted hover:bg-status-danger/10 hover:text-status-danger"
         >
           <TrashIcon />
         </button>
       </div>
     </li>
-  );
-}
-
-function StatusPill({ status }: { status: KnowledgeDocumentStatus }) {
-  const t = useT();
-  const map: Record<
-    KnowledgeDocumentStatus,
-    { label: string; color: string; dot: string }
-  > = {
-    pending: {
-      label: t("kb.doc.status.pending"),
-      color: "text-text-muted border-border",
-      dot: "bg-text-muted",
-    },
-    processing: {
-      label: t("kb.doc.status.processing"),
-      color: "text-status-warning border-status-warning/40",
-      dot: "bg-status-warning",
-    },
-    indexed: {
-      label: t("kb.doc.status.indexed"),
-      color: "text-status-success border-status-success/40",
-      dot: "bg-status-success",
-    },
-    failed: {
-      label: t("kb.doc.status.failed"),
-      color: "text-status-danger border-status-danger/40",
-      dot: "bg-status-danger",
-    },
-  };
-  const s = map[status];
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border bg-bg-base px-2 py-0.5 text-[10px] uppercase tracking-wider ${s.color}`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} aria-hidden />
-      {s.label}
-    </span>
   );
 }
 
@@ -638,6 +751,7 @@ function CreateKBModal({
   const [chunkSize, setChunkSize] = useState(512);
   const [chunkOverlap, setChunkOverlap] = useState(50);
   const [submitting, setSubmitting] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -647,12 +761,14 @@ function CreateKBModal({
       setChunkSize(512);
       setChunkOverlap(50);
       setSubmitting(false);
+      setFailed(false);
     }
   }, [open]);
 
   async function submit() {
     if (!name.trim()) return;
     setSubmitting(true);
+    setFailed(false);
     try {
       await onCreate({
         name: name.trim(),
@@ -660,6 +776,8 @@ function CreateKBModal({
         chunk_size: chunkSize,
         chunk_overlap: chunkOverlap,
       });
+    } catch {
+      setFailed(true);
     } finally {
       setSubmitting(false);
     }
@@ -723,6 +841,11 @@ function CreateKBModal({
             />
           </div>
         ) : null}
+        {failed ? (
+          <p role="alert" className="text-xs text-status-danger">
+            {t("kb.dialog.createFailed")}
+          </p>
+        ) : null}
       </div>
     </Modal>
   );
@@ -750,26 +873,6 @@ function TrashIcon() {
       <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
       <path d="M10 11v6M14 11v6" />
       <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg
-      width={14}
-      height={14}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <polyline points="23 4 23 10 17 10" />
-      <polyline points="1 20 1 14 7 14" />
-      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
     </svg>
   );
 }

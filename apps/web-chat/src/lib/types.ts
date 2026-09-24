@@ -747,20 +747,33 @@ export interface KnowledgeBase {
   total_chunks: number;
   created_at: string;
   updated_at: string;
+  /** FIX132 — how many of its documents are still queued / being processed
+   *  / failed (GET /knowledge-bases). */
+  indexing?: { pending: number; processing: number; failed: number };
 }
 
 export interface KnowledgeDocument {
   id: UUID;
   knowledge_base_id: UUID;
+  /** The name the page shows. FIX132's contract sends `original_filename`;
+   *  normalizeKBDocument (lib/knowledge) fills this from it. */
   filename: string;
+  original_filename?: string;
   content_type: string;
   file_size_bytes: number;
   status: KnowledgeDocumentStatus;
   chunk_count: number;
   char_count: number;
+  /** FIX132 — indexing progress, in chunks (0/0 until it is known). */
+  progress_done?: number;
+  progress_total?: number;
+  /** FIX132 — why it failed: unsupported_type | too_large | empty_text |
+   *  encrypted | extract_failed | models_unavailable | internal. */
+  error_code?: string | null;
   error_message?: string | null;
   created_at: string;
   updated_at: string;
+  indexed_at?: string | null;
 }
 
 export interface KnowledgeBaseListResponse {
