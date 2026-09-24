@@ -85,6 +85,16 @@ class PortalUserORM(Base):
     preferred_language: Mapped[str] = mapped_column(
         String(8), nullable=False, server_default="en"
     )
+    # FIX132 C (migration 089) — self-service account deletion. Set when
+    # the user confirms (status becomes 'pending_deletion'); the nightly
+    # pipeline purges the account account_purge_days later and stamps
+    # deleted_at (status 'deleted', the row an anonymised tombstone).
+    deletion_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

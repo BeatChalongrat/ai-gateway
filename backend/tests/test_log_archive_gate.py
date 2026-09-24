@@ -166,6 +166,20 @@ def test_pipeline_calls_steps_in_order_and_respects_flags(monkeypatch):
     import app.jobs.archive_expiry_job as exp_mod
     import app.services.retention_service as rs_mod
 
+    # FIX132 — step 5, the account purge, runs last.
+    import app.services.portal.account_deletion as acct_mod
+
+    class _PurgeResult:
+        mode = "on"
+
+        def to_dict(self):
+            return {"mode": "on", "due": 0}
+
+    def fake_account_purge(session_factory, *, chat_edge, mode, days):
+        calls.append("account_purge")
+        return _PurgeResult()
+
+    monkeypatch.setattr(acct_mod, "purge_due_accounts", fake_account_purge)
     monkeypatch.setattr(dlp_mod, "run_dlp_retention_cleanup", fake_strip)
     monkeypatch.setattr(arch_mod, "run_log_archive", fake_archive)
     monkeypatch.setattr(exp_mod, "run_archive_expiry", fake_expiry)
@@ -185,8 +199,8 @@ def test_pipeline_calls_steps_in_order_and_respects_flags(monkeypatch):
     monkeypatch.setattr(settings, "audit_log_aging_enabled", True)
 
     result = rp.run_retention_pipeline(_FakeSession)
-    assert calls == ["strip", "archive", "expiry", "audit_aging"]
-    assert result.steps_run == ["strip", "archive", "expiry", "audit_aging"]
+    assert calls == ["strip", "archive", "expiry", "audit_aging", "account_purge"]
+    assert result.steps_run == ["strip", "archive", "expiry", "audit_aging", "account_purge"]
     assert result.strip_rows == 3
     assert result.archive_rows == 7
 

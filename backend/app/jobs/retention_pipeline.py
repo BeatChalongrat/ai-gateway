@@ -14,6 +14,10 @@ which fails if the order is ever flipped:
                   dry-run by default)
     4. audit    — admin-audit-log aging     (``audit_log_aging_enabled``, default off;
                   dry-run by default)
+    5. accounts — FIX132: accounts the user deleted ``account_purge_days``
+                  (30) ago are purged — chat-edge erases the chat data, then
+                  the portal row is anonymised (``account_purge_mode``:
+                  on by default, the owner's decision; dry_run | off)
 
 Every deleting step is flag-gated off by default, starts in dry-run
 (counts only, deletes nothing) and its live runs write a row into the
@@ -55,6 +59,7 @@ class PipelineResult:
     archive_rows: int = 0
     expiry: dict | None = None
     audit_aging: dict | None = None
+    account_purge: dict | None = None
     errors: list[str] = field(default_factory=list)
 
 
@@ -155,6 +160,26 @@ def run_retention_pipeline(session_factory) -> PipelineResult:
         finally:
             session.close()
 
+    # ── 5. account purge — FIX132, on by default ─────────────────────
+    try:
+        from app.services.portal import account_deletion
+        from app.services.portal.chat_edge_account import ChatEdgeAccountClient
+
+        purge = account_deletion.purge_due_accounts(
+            session_factory,
+            chat_edge=ChatEdgeAccountClient(),
+            mode=settings.account_purge_mode,
+            days=settings.account_purge_days,
+        )
+        result.account_purge = purge.to_dict()
+        if purge.mode != "off":
+            result.steps_run.append("account_purge")
+    except Exception as exc:  # noqa: BLE001
+        result.errors.append(f"account_purge: {exc}")
+        logger.error(
+            "retention_pipeline_step_failed", step="account_purge", error=str(exc)
+        )
+
     logger.info(
         "retention_pipeline_complete",
         steps=result.steps_run,
@@ -162,6 +187,7 @@ def run_retention_pipeline(session_factory) -> PipelineResult:
         archive_rows=result.archive_rows,
         expiry=result.expiry,
         audit_aging=result.audit_aging,
+        account_purge=result.account_purge,
         errors=result.errors,
     )
     return result

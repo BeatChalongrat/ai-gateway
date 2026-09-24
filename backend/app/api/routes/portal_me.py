@@ -631,3 +631,73 @@ def get_transactions(
         ],
         "total": int(total),
     }
+
+
+# ---------------------------------------------------------------------------
+# FIX132 C — delete my account
+# ---------------------------------------------------------------------------
+
+
+class DeleteAccountRequest(BaseModel):
+    # The account's own email, typed by the user — the second factor
+    # against a mis-click, the way the vendors ask for it.
+    confirm: str = Field(..., min_length=1, max_length=320)
+
+
+def _chat_edge_account_client():
+    """Seam for tests: the chat-edge client the deletion talks to."""
+    from app.services.portal.chat_edge_account import ChatEdgeAccountClient
+
+    return ChatEdgeAccountClient()
+
+
+@router.post("/delete-account")
+@scope_to_portal_tenant
+def delete_account(
+    body: DeleteAccountRequest,
+    user: PortalUserORM = Depends(get_portal_user),
+    session: Session = Depends(get_db_session),
+):
+    """Delete the caller's account (FIX132 C).
+
+    At once: every chat hidden, every session ended, sign-in refused, API
+    keys revoked. ``account_purge_days`` (30) later the nightly pipeline
+    erases the data (services/portal/account_deletion.py). The response
+    expires this device's session cookies.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.core.config import settings
+    from app.services.portal.account_deletion import (
+        CHAT_EDGE_DOWN_TH,
+        ChatEdgeUnavailable,
+        request_account_deletion,
+    )
+    from app.services.portal.cookies import clear_auth_cookies
+
+    try:
+        result = request_account_deletion(
+            session,
+            user,
+            confirm=body.confirm,
+            chat_edge=_chat_edge_account_client(),
+            purge_days=int(settings.account_purge_days),
+        )
+    except ChatEdgeUnavailable:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": "account_deletion_unavailable",
+                    "message": CHAT_EDGE_DOWN_TH,
+                    "retryable": True,
+                }
+            },
+        )
+    session.commit()
+    response = JSONResponse(
+        status_code=200,
+        content={**result, "purge_days": int(settings.account_purge_days)},
+    )
+    clear_auth_cookies(response)
+    return response
