@@ -120,7 +120,7 @@ func NewKnowledgeService(
 	if knobs.ChunkSize <= 0 {
 		knobs.ChunkSize = DefaultKBChunkSize
 	}
-	if knobs.ChunkOverlap < 0 {
+	if knobs.ChunkOverlap <= 0 {
 		knobs.ChunkOverlap = DefaultKBChunkOverlap
 	}
 	return &KnowledgeService{

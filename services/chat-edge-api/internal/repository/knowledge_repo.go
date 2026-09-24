@@ -56,11 +56,13 @@ func (r *KnowledgeRepo) CreateKB(ctx context.Context, kb *model.KnowledgeBase) (
 	if kb.EmbeddingModel == "" {
 		kb.EmbeddingModel = "bge-m3" // FIX132 B — kb-models, on this machine
 	}
+	// FIX132 B — rune-based defaults (chunker.go); the service always sets
+	// them, these only guard a direct repository caller.
 	if kb.ChunkSize == 0 {
-		kb.ChunkSize = 512
+		kb.ChunkSize = 1000
 	}
 	if kb.ChunkOverlap == 0 {
-		kb.ChunkOverlap = 50
+		kb.ChunkOverlap = 150
 	}
 	err := r.db.QueryRow(ctx, q,
 		kb.TenantID, kb.Name, kb.Description,
