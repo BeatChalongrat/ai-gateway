@@ -138,3 +138,23 @@ describe("FIX130 C3.4 — the image the model cannot read is said, not toasted a
     expect(notice.querySelector("button")).toHaveTextContent("gpt-vision");
   });
 });
+
+// FIX132 N6 — the notice offered only the switch; the other way out it
+// names ("หรือเอารูปออกก่อนส่ง") had no button. Now it has one: the image
+// chips go, the text stays, and the message can be sent.
+describe("FIX132 N6 — the vision notice can remove the image too", () => {
+  it("เอารูปออก removes the image chips, keeps the other files and the text, and Send works", async () => {
+    mockApi.uploadFile.mockImplementation(async (_c: string, f: File) => ({ id: `srv-${f.name}`, extraction_status: "completed" }));
+    const m = mount(TEXT_ONLY.id);
+    await attach(m.fileInput, [new File(["png"], "fx-image.png", { type: "image/png" }), txt("notes.txt")]);
+    fireEvent.change(m.textarea, { target: { value: "สรุปไฟล์" } });
+    const notice = screen.getByTestId("send-blocked-vision");
+    fireEvent.click(screen.getByRole("button", { name: th["input.sendBlocked.removeImages"] }));
+    expect(chips().map((p) => p.file.name)).toEqual(["notes.txt"]);
+    expect(notice).not.toBeInTheDocument();
+    fireEvent.keyDown(m.textarea, { key: "Enter" });
+    expect(m.onSend).toHaveBeenCalledTimes(1);
+    expect(m.onSend.mock.calls[0][0]).toBe("สรุปไฟล์");
+    expect(m.onSend.mock.calls[0][1]).toEqual(["srv-notes.txt"]);
+  });
+});

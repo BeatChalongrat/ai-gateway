@@ -1340,6 +1340,17 @@ export function ChatInput({
                   {t("input.visionSwitchTo", { model: visionAlt.name ?? visionAlt.id })}
                 </button>
               ) : null}
+              {/* FIX132 N6 — the other way out the notice names, one click:
+                  the image chips go, the text and other files stay. */}
+              <button
+                type="button"
+                onClick={() => {
+                  for (const p of pendingFiles) if (p.status !== "error" && isImageFile(p.file)) removePendingFile(renderBucket, p.id);
+                }}
+                className="focus-ring rounded-md border border-border bg-bg-surface px-2 py-1 text-xs font-medium text-text-primary hover:border-border-strong"
+              >
+                {t("input.sendBlocked.removeImages")}
+              </button>
             </div>
           ) : null}
 
