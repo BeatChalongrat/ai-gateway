@@ -449,10 +449,12 @@ class ApiClient {
   }
 
   // ----- Messages -------------------------------------------
-  listMessages(convId: string, opts?: { limit?: number; before?: string }) {
+  listMessages(convId: string, opts?: { limit?: number; before?: string; through?: string }) {
     const params = new URLSearchParams();
     params.set("limit", String(opts?.limit ?? 50));
     if (opts?.before) params.set("before", opts.before);
+    // FIX132 F12 — reach back to this message id (or "first") in one page.
+    if (opts?.through) params.set("through", opts.through);
     return this.json<MessageListResponse>(
       `/conversations/${convId}/messages?${params.toString()}`,
     );

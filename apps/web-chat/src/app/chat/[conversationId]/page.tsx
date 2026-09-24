@@ -14,6 +14,8 @@ import { MemoryIndicator } from "@/components/chat/MemoryIndicator";
 import { MessageQueue } from "@/components/chat/MessageQueue";
 import { TemporaryChatBanner } from "@/components/chat/TemporaryChatBanner";
 import { ContextMeter } from "@/components/chat/ContextMeter";
+import { ConversationNotFound } from "@/components/chat/ConversationNotFound";
+import { ProjectChip } from "@/components/chat/ProjectChip";
 import { ShareModal } from "@/components/chat/ShareModal";
 import { FilePreviewPane } from "@/components/chat/FilePreviewModal";
 import { CanvasPanel } from "@/components/canvas/CanvasPanel";
@@ -25,7 +27,9 @@ import { toast } from "@/components/ui/Toast";
 import { tOutside } from "@/lib/i18n";
 import { useIsStreaming } from "@/hooks/useStream";
 import { ApiError, api } from "@/lib/api";
+import { isConversationId } from "@/lib/conversationId";
 import { consumeQueryAttach, consumeQueryPrefill } from "@/lib/deepLinkParams";
+import { clearMessageJump, jumpTargetFromHash, requestMessageJump, useMessageJumpStore } from "@/lib/messageJump";
 import { gateImagesForVision } from "@/lib/visionGate";
 import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
@@ -34,8 +38,12 @@ import { useSidePaneStore } from "@/stores/sidePaneStore";
 export default function ConversationPage() {
   const params = useParams();
   const router = useRouter();
-  const convId =
+  const rawId =
     typeof params?.conversationId === "string" ? params.conversationId : null;
+  // FIX132 F17 — only a real conversation id is loaded; anything else
+  // ("/chat/undefined", a typo) is answered by ConversationNotFound below.
+  const badId = rawId !== null && !isConversationId(rawId);
+  const convId = badId ? null : rawId;
 
   const conversations = useChatStore((s) => s.conversations);
   const messages = useChatStore((s) =>
@@ -52,6 +60,7 @@ export default function ConversationPage() {
   const setActive = useChatStore((s) => s.setActive);
   const loadMessages = useChatStore((s) => s.loadMessages);
   const loadOlderMessages = useChatStore((s) => s.loadOlderMessages);
+  const loadThrough = useChatStore((s) => s.loadThrough);
   const hasMoreOlder = useChatStore((s) =>
     convId ? s.hasMoreMessages[convId] : undefined,
   );
@@ -167,6 +176,45 @@ export default function ConversationPage() {
     }
   }, [activeId, convId, router]);
 
+  // FIX127 D4 / FIX132 F12 — a message deep link (/chat/<id>#msg-<messageId>),
+  // a search hit and "go to the first message" all open the chat AT that
+  // message: load down to it (one `through=` request, not 50 rows per
+  // "load older"), then the thread scrolls to it and highlights it. FIX127
+  // only scrolled when the row happened to be loaded and rendered already.
+  const jumpRequest = useMessageJumpStore((s) => (s.request && s.request.convId === convId ? s.request : null));
+  const [threadJump, setThreadJump] = useState<{ messageId: string; nonce: number } | null>(null);
+  useEffect(() => {
+    if (!convId || typeof window === "undefined") return;
+    const target = jumpTargetFromHash(window.location.hash);
+    const pending = useMessageJumpStore.getState().request;
+    if (target && !(pending && pending.convId === convId && pending.target === target)) requestMessageJump(convId, target);
+  }, [convId]);
+  useEffect(() => {
+    if (!convId || !jumpRequest || !messagesLoaded) return;
+    const { nonce, target } = jumpRequest;
+    let live = true;
+    void (async () => {
+      const found = await loadThrough(convId, target);
+      if (!live) return;
+      clearMessageJump(nonce);
+      const list = useChatStore.getState().messages[convId] ?? [];
+      const messageId = target === "first" ? list[0]?.id : target;
+      if (found && messageId) setThreadJump({ messageId, nonce });
+      else toast(tOutside("thread.jumpNotFound"));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [convId, jumpRequest, messagesLoaded, loadThrough]);
+
+  // FIX127 D4 — regenerated answers are branches (see the thread prop below).
+  // Before the early return: a hook.
+  const visibleMessages = useMemo(() => (messages ?? []).filter((m) => m.status !== "regenerated"), [messages]);
+
+  // Early returns only after every hook (FIX132 moved them here).
+  if (badId) {
+    return <ConversationNotFound onNewChat={() => router.push("/chat")} />;
+  }
   if (!convId) {
     router.replace("/chat");
     return null;
@@ -175,26 +223,6 @@ export default function ConversationPage() {
   // Once messagesLoaded[convId] flips to true the page falls through
   // to the empty-vs-thread branch below — even if the load failed,
   // because the errorBanner already surfaces the failure.
-  // FIX127 D4 — a message deep link: /chat/<id>#msg-<messageId> opens the
-  // chat on that message (centred, briefly highlighted). Once per hash,
-  // after the rows exist.
-  const jumpedHashRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (typeof window === "undefined" || !messagesLoaded || !messages?.length) return;
-    const hash = window.location.hash;
-    if (!hash.startsWith("#msg-") || jumpedHashRef.current === hash) return;
-    const el = document.getElementById(hash.slice(1));
-    if (!el) return;
-    jumpedHashRef.current = hash;
-    el.scrollIntoView({ block: "center" });
-    el.classList.add("deep-link-target");
-    const t = window.setTimeout(() => el.classList.remove("deep-link-target"), 2000);
-    return () => window.clearTimeout(t);
-  }, [messagesLoaded, messages]);
-
-  // FIX127 D4 — regenerated answers are branches (see the thread prop below).
-  // Before the early return: a hook.
-  const visibleMessages = useMemo(() => (messages ?? []).filter((m) => m.status !== "regenerated"), [messages]);
   if (!messagesLoaded || messages === undefined) {
     return (
       <div className="flex flex-1 flex-col overflow-hidden">
@@ -296,6 +324,10 @@ export default function ConversationPage() {
           here was redundant). Just the file-attachments indicator
           + the "..." menu on the right. */}
       <div className="hidden items-center justify-end gap-1 px-4 pt-1 md:flex">
+        {/* FIX132 F30 — the project this chat is in, named. */}
+        <div className="mr-auto min-w-0">
+          <ProjectChip projectId={conv?.project_id} />
+        </div>
         {/* FIX33 — quiet context meter: nothing until 70 % of the budget. */}
         <ContextMeter conversationId={convId} />
         <MemoryIndicator conversationId={convId} />
@@ -356,6 +388,12 @@ export default function ConversationPage() {
                 hasMoreOlder={hasMoreOlder ?? false}
                 loadingOlder={loadingOlder ?? false}
                 onLoadEarlier={() => loadOlderMessages(convId)}
+                // FIX132 F12 — open at a message / at the first message.
+                jumpTo={threadJump}
+                onJumpHandled={(_nonce, found) => {
+                  if (!found) toast(tOutside("thread.jumpNotFound"));
+                }}
+                onJumpToFirst={() => requestMessageJump(convId, "first")}
                 onRegenerate={(messageId) => void regenerate(convId, messageId)}
                 onPromptPick={(text) => {
                   setInjectedText(text);

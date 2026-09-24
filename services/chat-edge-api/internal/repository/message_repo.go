@@ -232,6 +232,59 @@ func (r *MessageRepo) ListByConversation(
 	limit int,
 	cursor uuid.UUID,
 ) ([]model.Message, bool, error) {
+	return r.listPage(ctx, tenantID, convID, limit, cursor, nil)
+}
+
+// ListByConversationThrough — FIX132 F12. Like ListByConversation, but the
+// page reaches back THROUGH one message of this conversation (a search
+// hit) instead of stopping after `limit` rows: every active row older than
+// `cursor` down to and including `through`, oldest first. `through` ==
+// uuid.Nil means the first message of the conversation. `limit` still caps
+// one response; when the gap is larger the newest `limit` rows of it come
+// back with hasMore = true and the caller asks again from its new oldest
+// row. hasMore is otherwise "older rows exist before the ones returned".
+// A `through` that is not an active message of this conversation bounds
+// nothing: the call is an ordinary page.
+func (r *MessageRepo) ListByConversationThrough(
+	ctx context.Context,
+	tenantID, convID uuid.UUID,
+	limit int,
+	cursor, through uuid.UUID,
+) ([]model.Message, bool, error) {
+	lower := &listLowerBound{}
+	if through != uuid.Nil {
+		var ts string
+		err := r.db.QueryRow(ctx,
+			`SELECT created_at::text FROM chat.messages_masked
+			 WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3 AND is_active = true`,
+			through, tenantID, convID,
+		).Scan(&ts)
+		switch {
+		case err == nil:
+			lower.ts, lower.id = &ts, through.String()
+		case errors.Is(err, pgx.ErrNoRows):
+			lower = nil // not a message of this chat: an ordinary page
+		default:
+			return nil, false, fmt.Errorf("through lookup: %w", err)
+		}
+	}
+	return r.listPage(ctx, tenantID, convID, limit, cursor, lower)
+}
+
+// listLowerBound is the oldest row a page may reach: ts == nil means the
+// start of the conversation.
+type listLowerBound struct {
+	ts *string
+	id string
+}
+
+func (r *MessageRepo) listPage(
+	ctx context.Context,
+	tenantID, convID uuid.UUID,
+	limit int,
+	cursor uuid.UUID,
+	lower *listLowerBound,
+) ([]model.Message, bool, error) {
 	// Composite cursor (created_at, id) so rows that tie on the
 	// microsecond timestamp aren't silently dropped between pages.
 	var cursorTs *string
@@ -284,10 +337,18 @@ func (r *MessageRepo) ListByConversation(
 		    $3::timestamptz IS NULL
 		    OR (created_at, id) < ($3::timestamptz, $4::uuid)
 		  )
+		  AND (
+		    $6::timestamptz IS NULL
+		    OR (created_at, id) >= ($6::timestamptz, $7::uuid)
+		  )
 		ORDER BY created_at DESC, id DESC
 		LIMIT $5
 	`
-	rows, err := r.db.Query(ctx, q, convID, tenantID, cursorTs, cursorID, limit+1)
+	var lowerTs, lowerID *string
+	if lower != nil && lower.ts != nil {
+		lowerTs, lowerID = lower.ts, &lower.id
+	}
+	rows, err := r.db.Query(ctx, q, convID, tenantID, cursorTs, cursorID, limit+1, lowerTs, lowerID)
 	if err != nil {
 		return nil, false, fmt.Errorf("list messages: %w", err)
 	}
@@ -319,6 +380,19 @@ func (r *MessageRepo) ListByConversation(
 	hasMore := len(out) > limit
 	if hasMore {
 		out = out[:limit]
+	}
+	// FIX132 F12 — a bounded page that reached its bound: the probe row
+	// cannot see past the bound, so ask whether anything older is left.
+	if !hasMore && lower != nil && lower.ts != nil && len(out) > 0 {
+		oldest := out[len(out)-1]
+		if err := r.db.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM chat.messages_masked
+			  WHERE conversation_id = $1 AND tenant_id = $2 AND is_active = true
+			    AND (created_at, id) < ($3::timestamptz, $4::uuid))`,
+			convID, tenantID, oldest.CreatedAt, oldest.ID,
+		).Scan(&hasMore); err != nil {
+			return nil, false, fmt.Errorf("list older-left probe: %w", err)
+		}
 	}
 	// Flip to ascending for the wire response.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -1146,7 +1220,7 @@ func (r *MessageRepo) SetAttempts(ctx context.Context, msgID uuid.UUID, raw json
 	return nil
 }
 
-// jsonOrNull hands a JSON value to a ``$n::jsonb`` parameter as text, and an
+// jsonOrNull hands a JSON value to a “$n::jsonb“ parameter as text, and an
 // empty one as SQL NULL (never the JSON literal null).
 func jsonOrNull(raw json.RawMessage) any {
 	if len(raw) == 0 {

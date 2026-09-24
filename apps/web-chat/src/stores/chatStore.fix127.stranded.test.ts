@@ -72,7 +72,8 @@ describe("FIX127 A3 — send into a deleted conversation", () => {
     const s = useChatStore.getState();
     expect(s.conversations).toHaveLength(0);
     expect(loadDraft(NEW_CHAT_DRAFT_KEY)).toBe("ข้อความสำคัญที่พิมพ์ไว้");
-    expect(s.strandedSend).toEqual({ text: "ข้อความสำคัญที่พิมพ์ไว้" });
+    // FIX132 F25 — plus the model of the chat it was meant for.
+    expect(s.strandedSend).toEqual({ text: "ข้อความสำคัญที่พิมพ์ไว้", modelId: "m" });
     expect(s.errorBanner).toBe(dictionaries.en["error.conversationDeletedKeptText"]);
     expect(dictionaries.th["error.conversationDeletedKeptText"]).toContain("ถูกลบไปแล้ว");
     expect(dictionaries.th["error.sendInNewChat"]).toBe("ส่งในแชทใหม่");

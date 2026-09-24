@@ -270,10 +270,13 @@ func (r *ConversationRepo) ListByUser(
 // migration.
 //
 // Returns conversations sorted updated_at DESC, capped at “limit“.
+//
+// FIX132 F19 — `patterns` are ILIKE patterns (already escaped and
+// %-wrapped by the service); the title must match ALL of them.
 func (r *ConversationRepo) SearchByUser(
 	ctx context.Context,
 	tenantID, userID uuid.UUID,
-	query string,
+	patterns []string,
 	limit int,
 ) ([]model.Conversation, error) {
 	const q = `
@@ -284,11 +287,11 @@ func (r *ConversationRepo) SearchByUser(
 		WHERE tenant_id = $1
 		  AND user_id = $2
 		  AND is_deleted = false
-		  AND title ILIKE $3
+		  AND title ILIKE ALL($3::text[])
 		ORDER BY updated_at DESC, id DESC
 		LIMIT $4
 	`
-	rows, err := r.db.Query(ctx, q, tenantID, userID, "%"+query+"%", limit)
+	rows, err := r.db.Query(ctx, q, tenantID, userID, patterns, limit)
 	if err != nil {
 		return nil, fmt.Errorf("search conversations: %w", err)
 	}

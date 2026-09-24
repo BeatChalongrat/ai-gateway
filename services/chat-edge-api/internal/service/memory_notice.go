@@ -22,6 +22,7 @@ package service
 // it assembles itself, so the page renders one component for both.
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
@@ -94,8 +95,18 @@ func memoryUsedFromSources(messageID uuid.UUID, srcs []ContextSource) *MemoryUse
 // emitMemoryUsed enqueues the memory_used frame before the pump starts,
 // like emitImageNotice, so it is the answer's first frame after
 // message_start. No-op when the turn read no memory.
+//
+// FIX132 A — the web page no longer shows a "used N memories" chip, so the
+// server keeps the record: besides the saved_memory context-source rows and
+// this ledger frame, one log line per turn names the memory ids. Ids only —
+// a label is the user's own words and never goes to the log.
 func emitMemoryUsed(ch chan<- StreamUpdate, messageID uuid.UUID, acc *SourcesAccumulator) {
 	if n := memoryUsedFromSources(messageID, acc.Snapshot()); n != nil {
+		ids := make([]string, len(n.Items))
+		for i := range n.Items {
+			ids[i] = n.Items[i].ID
+		}
+		slog.Info("memory_used", "message_id", n.MessageID, "count", n.Count, "memory_ids", ids)
 		ch <- StreamUpdate{MemoryUsed: n}
 	}
 }

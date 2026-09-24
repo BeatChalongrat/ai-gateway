@@ -25,7 +25,8 @@ import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outbox
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
-import { mergeMemorySaved, parseMemoryUsed } from "@/lib/memoryMarkers";
+import { mergeMemorySaved } from "@/lib/memoryMarkers";
+import { snippetText } from "@/lib/snippetText";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE, StreamSilenceError } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
@@ -213,7 +214,9 @@ interface ChatState {
   /** FIX127 A3 — a message sent into a conversation that was deleted
    *  elsewhere. The text is already in the new-chat draft; this is the
    *  banner's "send in a new chat" hand-off. */
-  strandedSend: { text: string } | null;
+  /** FIX132 F25 — modelId: the model of the chat the text was meant for,
+   *  so "send in a new chat" does not fall back to the new-chat default. */
+  strandedSend: { text: string; modelId?: string } | null;
   clearStrandedSend: () => void;
 
   /** FIX127 D1 — messages typed while an answer streams wait here, per
@@ -365,6 +368,9 @@ interface ChatState {
   handleConversationGone: (convId: string) => void;
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
+  /** FIX132 F12 — load down to `target` (a message id, or "first"), a
+   *  `through=` page of up to 1000 rows at a time. True when it is loaded. */
+  loadThrough: (convId: string, target: string) => Promise<boolean>;
   sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean, videoMode?: boolean) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   /** Phase 5 — reattach to a generation that is still running
@@ -698,12 +704,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (titleIds.has(r.conversation_id) || seen.has(r.conversation_id))
           continue;
         seen.add(r.conversation_id);
-        const content = r.content.trim();
         hits.push({
           conversation_id: r.conversation_id,
+          message_id: r.message_id,
           conversation_title: r.conversation_title?.trim() || "Untitled",
-          snippet:
-            content.length > 140 ? `${content.slice(0, 140)}…` : content,
+          // FIX132 F20 — plain text, not **raw markdown**.
+          snippet: snippetText(r.content, 140),
           date: r.date,
         });
       }
@@ -1292,6 +1298,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  async loadThrough(convId, target) {
+    const loaded = () =>
+      target === "first"
+        ? get().hasMoreMessages[convId] === false
+        : (get().messages[convId] ?? []).some((m) => m.id === target);
+    for (let round = 0; round < LOAD_THROUGH_MAX_ROUNDS && !loaded(); round++) {
+      const current = get().messages[convId] ?? [];
+      if (current.length === 0 || get().hasMoreMessages[convId] === false) break;
+      set((s) => ({ loadingOlder: { ...s.loadingOlder, [convId]: true } }));
+      try {
+        const res = await api.listMessages(convId, { limit: LOAD_THROUGH_PAGE, before: current[0].id, through: target });
+        set((s) => {
+          const have = new Set((s.messages[convId] ?? []).map((m) => m.id));
+          const prepend = (res?.messages ?? []).filter((m) => !have.has(m.id));
+          return {
+            messages: { ...s.messages, [convId]: [...prepend, ...(s.messages[convId] ?? [])] },
+            hasMoreMessages: { ...s.hasMoreMessages, [convId]: res?.has_more ?? false },
+            loadingOlder: { ...s.loadingOlder, [convId]: false },
+          };
+        });
+        if (!res?.messages?.length) break;
+      } catch {
+        set((s) => ({ loadingOlder: { ...s.loadingOlder, [convId]: false } }));
+        return false;
+      }
+    }
+    return loaded();
+  },
+
   // ────────────────────────────────────────────────────────
   async sendMessage(convId, content, fileIds, imageMode, videoMode) {
     const trimmed = content.trim();
@@ -1499,6 +1534,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // CURRENT — finalizing the stale temp id would leave the message
       // stuck in status "streaming" after a cancel/error.
       const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
+      // FIX132 N1 — nothing answered the send in time. Before calling it a
+      // failure, ask the server what became of THIS send (its run id is on
+      // the user row): NIGHT3 c32 blamed the AI provider, offered a paid
+      // retry and told chat-edge to cancel while the answer sat saved.
+      if (err instanceof StreamOpenTimeoutError) {
+        const outcome = await recoverTimedOutSend(set, get, convId, tempUserId, streamingId, requestId);
+        if (outcome === "missing") giveBackToComposer(set, convId, requestId);
+        else outboxAccepted(convId, requestId);
+        if (outcome === "answered" || outcome === "running") {
+          replyCompleted = lastReplyEndedCompleted(get, convId);
+          return;
+        }
+        // "missing": the text is back in the composer, the way to try again
+        // (a regenerate would answer the PREVIOUS turn — the server never got
+        // this one). "no_reply": the message arrived; a retry can answer it.
+        if (outcome === "missing") failSendConnection(set, get, convId, streamingId, "connection_timeout", false);
+        else failSendConnection(set, get, convId, streamingId, "stream_interrupted", true);
+        return;
+      }
       // FIX122 Part C — the request died with no answer (the entry is still
       // there; an accepted send has dropped it): a failed send, and the text
       // returns to the composer. A Stop is not a failure — the server
@@ -1533,21 +1587,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         finalizeMessage(set, get, convId, streamingId, "cancelled");
         return;
       }
-      // FIX130 C3.2 — nothing answered the send in time (chat-edge's own
-      // model deadline would have): the turn fails into the retry card.
-      if (err instanceof StreamOpenTimeoutError) {
-        failOpenTimeout(set, get, convId, streamingId);
-        return;
-      }
       // The conversation was deleted elsewhere (desktop propagation /
       // another tab): finalize the optimistic rows, then drop the
       // conversation + show the specific "deleted" banner instead of
       // the generic stream-error toast. Checked BEFORE the reattach
       // branch — a gone conversation must never try to resume.
       if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        const modelId = get().conversations.find((c) => c.id === convId)?.model_id ?? undefined;
         finalizeMessage(set, get, convId, streamingId, "error");
         get().handleConversationGone(convId);
-        strandSend(set, trimmed);
+        strandSend(set, trimmed, modelId);
         return;
       }
       // Phase 5 — a mid-stream network drop no longer kills the
@@ -2243,6 +2292,11 @@ type Get = () => ChatState;
 // first attempt is immediate; later ones back off lightly so a brief
 // network blip reattaches fast without hammering the server.
 // Exported ONLY so tests can zero the delays (mutate + restore).
+/** FIX132 F12 — one `through=` page (the server's cap) and how many a jump
+ *  may take (10,000 messages) before it gives up. */
+const LOAD_THROUGH_PAGE = 1000;
+const LOAD_THROUGH_MAX_ROUNDS = 10;
+
 export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
 
 /** FIX124 R2 — after the quick retries: how often a waiting row tries again
@@ -2664,6 +2718,76 @@ function failOpenTimeout(set: Set, get: Get, convId: string, rowId: string): voi
       ...s.messages,
       [convId]: (s.messages[convId] ?? []).map((m) =>
         m.id === rowId ? { ...m, error_code: "provider_timeout", error_retryable: true, error_message: localized, terminal_cause: "timeout" } : m,
+      ),
+    },
+  }));
+  finalizeMessage(set, get, convId, rowId, "error");
+  get().setError(localized);
+}
+
+/** FIX132 N1 — what became of a send that got no response in time. Reads
+ *  the newest rows and looks for the user row carrying this send's run id
+ *  (FIX119: the request id). Found → the optimistic pair is replaced by the
+ *  server's rows; a reply still streaming is attached to ("running"), a
+ *  finished or failed one is simply shown ("answered" — the server's own
+ *  row says what happened). "no_reply": the message arrived but no answer
+ *  row exists. "missing": the send never arrived, or the server cannot be
+ *  asked — a connection problem either way. */
+async function recoverTimedOutSend(
+  set: Set,
+  get: Get,
+  convId: string,
+  tempUserId: string,
+  rowId: string,
+  requestId: string,
+): Promise<"answered" | "running" | "no_reply" | "missing"> {
+  let rows: Message[];
+  try {
+    rows = (await api.listMessages(convId, { limit: 20 }))?.messages ?? [];
+  } catch {
+    return "missing";
+  }
+  const at = rows.findIndex((m) => m.role === "user" && m.run_id === requestId);
+  if (at < 0) return "missing";
+  const user = rows[at];
+  const reply = rows.slice(at + 1).find((m) => m.role === "assistant");
+  set((s) => {
+    const list = (s.messages[convId] ?? []).filter((m) => m.id !== tempUserId && (reply ? m.id !== rowId : true));
+    const have = new Set(list.map((m) => m.id));
+    const add = [user, ...(reply ? [reply] : [])].filter((m) => !have.has(m.id));
+    if (!reply) {
+      // Keep the placeholder (it gets the connection card) after the real user row.
+      const placeholder = list.findIndex((m) => m.id === rowId);
+      if (placeholder >= 0) return { messages: { ...s.messages, [convId]: [...list.slice(0, placeholder), ...add, ...list.slice(placeholder)] } };
+    }
+    return { messages: { ...s.messages, [convId]: [...list, ...add] } };
+  });
+  if (!reply) return "no_reply";
+  if (reply.status === "streaming") {
+    // Hand this send's slot to the reattach (resumeStream is single-flight).
+    set((s) => {
+      const aborts = { ...s.abortControllers };
+      delete aborts[convId];
+      const sids = { ...s.streamingAssistantId };
+      delete sids[convId];
+      return { abortControllers: aborts, streamingAssistantId: sids };
+    });
+    await get().resumeStream(convId, reply.id);
+    return "running";
+  }
+  return "answered";
+}
+
+/** FIX132 N1 — the send's card after a timed-out open: a connection
+ *  problem, never the AI provider's, and nothing is cancelled — there is
+ *  nothing on the server this page knows of to cancel. */
+function failSendConnection(set: Set, get: Get, convId: string, rowId: string, code: string, retryable: boolean): void {
+  const localized = localizeErrorCode(code, undefined, retryable);
+  set((s) => ({
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === rowId ? { ...m, error_code: code, error_retryable: retryable, error_message: localized, terminal_cause: "timeout" } : m,
       ),
     },
   }));
@@ -3586,18 +3710,11 @@ async function consumeStream(
           });
         }
       } else if (evt.event === "memory_used") {
-        // FIX130 A3a — saved memories went into this answer's prompt. Sent
-        // once, before the first word (chat-edge, or the desktop host over
-        // the bridge), and replayed from the ledger on a reattach, so the
-        // "used N memories" chip is on the answer while it streams.
-        const used = parseMemoryUsed(evt.data);
-        if (used) {
-          const id = realAssistantId ?? tempAsstId;
-          set((s) => {
-            const list = s.messages[convId] ?? [];
-            return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, memory_used: used } : m)) } };
-          });
-        }
+        // FIX132 A — ignored on purpose. The frame (chat-edge, or the desktop
+        // host over the bridge) says which saved memories went into this
+        // answer's prompt; FIX130 drew a "ใช้ความจำ N รายการ" chip from it.
+        // The owner removed that chip: memory works in the background and no
+        // answer is badged for using it. The server keeps its own record.
       } else if (evt.event === "memory_saved") {
         // FIX130 A3b — a save_memory call in this turn stored a memory
         // (active) or queued a suggestion (pending_confirmation). A turn can
@@ -3785,12 +3902,12 @@ function drainQueue(get: Get, convId: string): void {
  *  deleted stays with the user: it becomes the new-chat draft (the page is
  *  about to land on /chat) and the banner offers to send it there. Until
  *  FIX127 the 404 path dropped the outbox entry and the composer was empty. */
-function strandSend(set: Set, text: string): void {
+function strandSend(set: Set, text: string, modelId?: string): void {
   const t = text.trim();
   if (!t) return;
   saveDraft(NEW_CHAT_DRAFT_KEY, t);
   set({
-    strandedSend: { text: t },
+    strandedSend: modelId ? { text: t, modelId } : { text: t },
     errorBanner: tOutside("error.conversationDeletedKeptText"),
   });
 }
@@ -3825,9 +3942,10 @@ async function handleStreamPreError(
     // another tab): finalize the optimistic rows, then drop the
     // conversation and surface the specific "deleted" banner instead
     // of echoing the server's raw 404 envelope message.
+    const modelId = get().conversations.find((c) => c.id === convId)?.model_id ?? undefined;
     finalizeMessage(set, get, convId, tempAsstId, "error");
     get().handleConversationGone(convId);
-    if (sentText) strandSend(set, sentText);
+    if (sentText) strandSend(set, sentText, modelId);
     return;
   }
   if (code === "TOO_MANY_FILES" && tempUserId) {

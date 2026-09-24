@@ -24,7 +24,8 @@ vi.mock("@/lib/api", () => {
 });
 vi.mock("@/hooks/useHostedMode", () => ({ useHostedMode: () => false }));
 vi.mock("@/lib/hostApi", () => ({ hostApi: { contextInfo: vi.fn(), compactContext: vi.fn() } }));
-vi.mock("@/components/ui/Toast", () => ({ toast: mockToast }));
+// FIX132 — a failed summary is an error toast (toastError); one spy for both.
+vi.mock("@/components/ui/Toast", () => ({ toast: mockToast, toastError: mockToast }));
 
 import { CONTEXT_METER_SHOW_RATIO, shouldShowMeter } from "@/lib/compaction";
 import { dictionaries } from "@/lib/i18n/dict";

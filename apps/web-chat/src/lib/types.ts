@@ -3,7 +3,7 @@
 // reflecting them on the server side; the client trusts these
 // shapes to be exact.
 
-import type { MemorySavedItem, MemoryUsed } from "./memoryMarkers";
+import type { MemorySavedItem } from "./memoryMarkers";
 
 export type UUID = string;
 
@@ -179,6 +179,8 @@ export interface ConversationListResponse {
 export interface PastContextSearchResult {
   type: string; // "message" | "conversation" | "memory"
   conversation_id?: string;
+  /** FIX132 F12 — message hits: the message to open the chat at. */
+  message_id?: string;
   conversation_title?: string;
   content: string;
   role?: string;
@@ -198,6 +200,8 @@ export interface SearchResponse {
  *  conversation rows instead). */
 export interface ConversationSearchHit {
   conversation_id: string;
+  /** FIX132 F12 — the matching message; the chat opens at it. */
+  message_id?: string;
   conversation_title: string;
   snippet: string;
   date: string;
@@ -597,11 +601,6 @@ export interface Message {
    *  turn: `dropped` older messages were not sent to the model. The user is
    *  told, the way web-chat's compacted_history source marker tells them. */
   compaction_notice?: { dropped: number; sent?: number; total?: number; summary?: string } | null;
-  /** FIX130 A3a — local-only: the live `memory_used` frame (chat-edge, or the
-   *  desktop host over the bridge): the saved memories that went into this
-   *  answer. After a reload the same fact comes from the `saved_memory`
-   *  context sources (lib/memoryMarkers.ts messageMemoryUsed). */
-  memory_used?: MemoryUsed | null;
   /** FIX130 A3b — local-only: the live `memory_saved` frames of this turn —
    *  memories save_memory stored (active) or queued for the user's review
    *  (pending_confirmation). After a reload: the `memory_saved` sources. */

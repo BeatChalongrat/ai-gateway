@@ -72,7 +72,9 @@ async function toastLeft(): Promise<string> {
   const { ToastViewport, toast } = await import("./Toast");
   render(<ToastViewport />);
   act(() => toast("hello"));
-  const el = screen.getByRole("status") as HTMLElement;
+  // FIX132 F18 — role="status" is now the always-mounted live region; the
+  // visible pill is data-testid="toast".
+  const el = screen.getByTestId("toast") as HTMLElement;
   return el.style.left;
 }
 

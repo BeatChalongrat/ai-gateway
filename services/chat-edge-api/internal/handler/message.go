@@ -252,9 +252,34 @@ func (h *MessageHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	cursor := parseUUID(r.URL.Query().Get("before"))
 
-	msgs, hasMore, err := h.messages.ListMessages(
-		r.Context(), caller.TenantUUID, caller.UserID, convID, limit, cursor,
+	var (
+		msgs    []model.Message
+		hasMore bool
 	)
+	// FIX132 F12 — `through=<message id>` (or `first`): reach back to that
+	// message in one response, so a search hit opens the chat AT the hit.
+	// `limit` then only caps the response (up to 1000).
+	if raw := r.URL.Query().Get("through"); raw != "" {
+		through := uuid.Nil
+		if raw != "first" {
+			id, perr := uuid.Parse(raw)
+			if perr != nil {
+				WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid through message id")
+				return
+			}
+			through = id
+		}
+		if r.URL.Query().Get("limit") == "" {
+			limit = 0
+		}
+		msgs, hasMore, err = h.messages.ListMessagesThrough(
+			r.Context(), caller.TenantUUID, caller.UserID, convID, limit, cursor, through,
+		)
+	} else {
+		msgs, hasMore, err = h.messages.ListMessages(
+			r.Context(), caller.TenantUUID, caller.UserID, convID, limit, cursor,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrMessageConversationNotFound) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "conversation not found")

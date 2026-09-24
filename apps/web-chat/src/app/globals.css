@@ -612,6 +612,21 @@ input {
   font-family: inherit;
   color: inherit;
 }
+/* FIX132 F32 — highlight.js makes `pre code.hljs` its own horizontal
+   scroller; the block body is the one scroller instead (thin visible
+   scrollbar, and the right-edge hint below reads its geometry). */
+.code-block-content code.hljs {
+  overflow-x: visible;
+}
+.code-scroll-hint {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  background: linear-gradient(to left, var(--code-bg), transparent);
+}
 .code-block-toggle {
   width: 100%;
   padding: 8px 12px;

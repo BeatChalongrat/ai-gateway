@@ -85,7 +85,7 @@ function CardShell({
   const isUnreadable = Boolean(unreadable) && !isUploading && !isError && !isExtracting;
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-xl border transition-colors ${
+      className={`group relative flex shrink-0 flex-col overflow-hidden rounded-xl border transition-colors ${
         isError
           ? "border-status-danger/40 bg-status-danger/5"
           : "border-border bg-bg-secondary"

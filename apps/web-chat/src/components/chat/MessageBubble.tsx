@@ -570,10 +570,9 @@ function MessageBubbleImpl({
           of a long conversation. Quiet information, not an error. */}
       <MessageCompactionNotice message={message} />
 
-      {/* FIX130 A3 — memory used / saved / suggested for this answer. Live
-          from memory_used / memory_saved, from context_sources after a
-          reload; shown while streaming, and independent of the Sources rail
-          (SHOW_SOURCES_RAIL) that stays hidden. */}
+      {/* FIX130 A3b — memory saved / suggested by this answer. Live from
+          memory_saved, from context_sources after a reload; shown while
+          streaming. FIX132 A: nothing for memory merely USED. */}
       <MessageMemoryMarkers message={message} />
 
       {/* Image attach notice — one or more attached images couldn't be
@@ -1351,10 +1350,14 @@ function AssistantContentBody({
     // don't reflow when the stream ends. Plan cards (:::excel-plan etc.)
     // are intentionally NOT segmented here — they only mount on the
     // terminal "complete" event so the user doesn't see a half-parsed
-    // plan flicker into a card; until then the fence shows as text.
+    // plan flicker into a card. FIX132 F8 — until then the fence is not
+    // shown as text either (NIGHT3: ~3.6 s of raw ":::doc-plan" JSON); one
+    // quiet line stands in for it.
+    const { text: streamText, planInProgress } = streamingWithoutPlans(message.content);
     return (
       <div ref={bodyRef} data-testid="assistant-body" data-held-for-selection={holdForSelection || undefined}>
-        <StreamingMarkdown content={message.content} />
+        <StreamingMarkdown content={streamText} />
+        {planInProgress ? <CatIndicator labelKey="plan.preparing" /> : null}
       </div>
     );
   }
@@ -1410,6 +1413,26 @@ type PlanSegment =
   | { kind: "excel-plan"; plan: ExcelPlan }
   | { kind: "doc-plan"; plan: DocPlan }
   | { kind: "pptx-plan"; plan: PptxPlan };
+
+/** FIX132 F8 — the streaming text without its plan fences: a closed fence
+ *  is dropped (its card mounts when the turn ends), an open one is cut
+ *  from its opener to the end, and a half-typed opener at the very end
+ *  (":::doc-pl") is not shown. `planInProgress`: a plan is being written. */
+export function streamingWithoutPlans(content: string): { text: string; planInProgress: boolean } {
+  let text = content.replace(PLAN_FENCE, "");
+  PLAN_FENCE.lastIndex = 0;
+  let planInProgress = text.length !== content.length;
+  const open = /:::(?:excel-plan|doc-plan|pptx-plan)\b/.exec(text);
+  if (open) {
+    text = text.slice(0, open.index);
+    planInProgress = true;
+  }
+  const partial = /:::[a-z-]*$/.exec(text);
+  if (partial && "doc-plan excel-plan pptx-plan".split(" ").some((k) => `:::${k}`.startsWith(partial[0]))) {
+    text = text.slice(0, partial.index);
+  }
+  return { text, planInProgress };
+}
 
 // Single combined regex with a capture group on the plan type so
 // one pass handles all three fence flavours in document order.
@@ -1557,10 +1580,9 @@ function areEqual(prev: Props, next: Props): boolean {
     a.fallback_info === b.fallback_info &&
     a.image_notice === b.image_notice &&
     a.compaction_notice === b.compaction_notice &&
-    // FIX130 — the memory frames land alone (memory_used before the first
-    // word, memory_saved mid-turn): without these the memo kept the bubble
-    // and the chips never appeared until something else changed.
-    a.memory_used === b.memory_used &&
+    // FIX130 — the memory_saved frame lands alone mid-turn: without this
+    // the memo kept the bubble and the chip never appeared until something
+    // else changed.
     a.memory_saved === b.memory_saved &&
     // FIX124 — the connection states change ALONE, on a row whose content
     // and status stand still (that is the point of them): without these the

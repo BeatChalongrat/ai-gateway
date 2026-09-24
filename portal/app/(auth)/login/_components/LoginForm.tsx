@@ -15,6 +15,11 @@ import type { AuthResponse } from "@/lib/types";
 // what actually closes that surface in Phase 3; this is just UI).
 // GitHub deliberately not rendered (finding L2: Google-only for users).
 // NEXT_PUBLIC_* is baked at BUILD time — flipping requires a rebuild.
+//
+// FIX132 F15 — the page is written in Thai (NIGHT3 j1-01: the product's
+// front door read "Welcome back / Sign in with your company Google
+// account."). The portal has no i18n layer to switch with; brand and
+// standard names stay as they are.
 const OAUTH_ENABLED = process.env.NEXT_PUBLIC_OAUTH_ENABLED === "true";
 
 // Allowlist for ``?redirect=`` targets. Web Chat is the only
@@ -108,29 +113,29 @@ export default function LoginForm() {
       if (err instanceof PortalApiError) {
         setError(err.message);
       } else {
-        setError("Something went wrong. Please try again.");
+        setError("เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง");
       }
       setLoading(false);
     }
   }
 
   return (
-    <>
-      <Link href="/" className="auth-back-home" aria-label="Back to home">
-        <span aria-hidden="true">←</span> Back to home
+    <div lang="th">
+      <Link href="/" className="auth-back-home" aria-label="กลับหน้าแรก">
+        <span aria-hidden="true">←</span> กลับหน้าแรก
       </Link>
       <div className="auth-form-card">
-        <div className="af-eyebrow af-anim d1">Sign in</div>
-        <h1 className="af-title af-anim d1">Welcome back</h1>
+        <div className="af-eyebrow af-anim d1">เข้าสู่ระบบ</div>
+        <h1 className="af-title af-anim d1">ยินดีต้อนรับกลับมา</h1>
         <p className="af-desc af-anim d2">
           {OAUTH_ENABLED
-            ? "Sign in with your company Google account."
-            : "Enter your credentials to access your SRAN dashboard."}
+            ? "เข้าสู่ระบบด้วยบัญชี Google ของบริษัท"
+            : "กรอกอีเมลและรหัสผ่านเพื่อเข้าใช้ SRAN"}
         </p>
 
         {resetSuccess ? (
           <div className="af-success af-anim" role="status">
-            Your password was reset — sign in with your new password.
+            ตั้งรหัสผ่านใหม่แล้ว — เข้าสู่ระบบด้วยรหัสผ่านใหม่ได้เลย
           </div>
         ) : null}
 
@@ -147,7 +152,7 @@ export default function LoginForm() {
               className="af-submit"
               onClick={() => handleSocial("google")}
               disabled={socialLoading !== null}
-              aria-label="Sign in with Google"
+              aria-label="เข้าสู่ระบบด้วย Google"
             >
               <svg
                 viewBox="0 0 24 24"
@@ -162,8 +167,8 @@ export default function LoginForm() {
                 <path fill="#EA4335" d="M12 5.975c1.466 0 2.78.504 3.815 1.493l2.86-2.86C16.96 2.99 14.695 2 12 2 8.07 2 4.673 4.255 3.07 7.5l3.355 2.582C7.21 7.727 9.406 5.975 12 5.975z" />
               </svg>
               {socialLoading === "google"
-                ? "Redirecting to Google…"
-                : "Continue with Google"}
+                ? "กำลังไปที่ Google…"
+                : "ดำเนินการต่อด้วย Google"}
             </button>
           </div>
         ) : null}
@@ -175,7 +180,7 @@ export default function LoginForm() {
         <form onSubmit={handleSubmit} className="af-form af-anim d3">
           <div className="af-field">
             <label className="af-label" htmlFor="login-email">
-              Email
+              อีเมล
             </label>
             <input
               id="login-email"
@@ -192,10 +197,10 @@ export default function LoginForm() {
           <div className="af-field">
             <div className="af-label-row">
               <label className="af-label" htmlFor="login-password">
-                Password
+                รหัสผ่าน
               </label>
               <Link href="/forgot-password" className="af-link">
-                Forgot password?
+                ลืมรหัสผ่าน?
               </Link>
             </div>
             <div className="af-input-wrap">
@@ -212,15 +217,15 @@ export default function LoginForm() {
                 type="button"
                 className="af-toggle"
                 onClick={() => setShowPassword((v) => !v)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label={showPassword ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
               >
-                {showPassword ? "Hide" : "Show"}
+                {showPassword ? "ซ่อน" : "แสดง"}
               </button>
             </div>
           </div>
 
           <button type="submit" className="af-submit" disabled={loading}>
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
             {!loading ? <span className="arrow" aria-hidden="true"><ArrowRight size={16} /></span> : null}
           </button>
         </form>
@@ -229,17 +234,17 @@ export default function LoginForm() {
         <p className="af-bottom-link af-anim d5">
           {OAUTH_ENABLED ? (
             <>
-              Don&apos;t have an account yet?{" "}
-              <Link href="/signup">Get started</Link>
+              ยังไม่มีบัญชี?{" "}
+              <Link href="/signup">เริ่มใช้งาน</Link>
             </>
           ) : (
             <>
-              Don&apos;t have an account?{" "}
-              <Link href="/signup">Sign up free</Link>
+              ยังไม่มีบัญชี?{" "}
+              <Link href="/signup">สมัครใช้ฟรี</Link>
             </>
           )}
         </p>
       </div>
-    </>
+    </div>
   );
 }

@@ -25,6 +25,8 @@ import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { logoutSession } from "@/lib/auth";
 import { CONV_SEARCH_EVENT } from "@/lib/composerShortcuts";
+import { requestMessageJump } from "@/lib/messageJump";
+import { NewProjectDialog } from "./NewProjectDialog";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -157,24 +159,36 @@ export function Sidebar({
   // A project created from the sidebar is a plain grouping container: no
   // instructions, no knowledge base — exactly what a folder was. The user
   // can add instructions later from the Projects page.
-  async function newEmptyProject(): Promise<Project | null> {
+  // FIX132 F29 — it is named first (NewProjectDialog), not created silently
+  // as "โปรเจกต์ใหม่"; then it opens (or, from a chat's menu, takes the chat).
+  const [newProject, setNewProject] = useState<{ moveConvId?: string } | null>(null);
+
+  function handleCreateProject() {
+    setNewProject({});
+  }
+
+  function handleCreateProjectForMove(convId: string) {
+    setNewProject({ moveConvId: convId });
+  }
+
+  async function createNamedProject(name: string): Promise<void> {
+    const moveConvId = newProject?.moveConvId;
+    let p: Project;
     try {
-      return await createProject(t("project.defaultName"), "");
-    } catch {
+      p = await createProject(name, "");
+    } catch (err) {
       setError(t("projects.toast.createFailed"));
-      return null;
+      throw err;
     }
-  }
-
-  async function handleCreateProject() {
-    const p = await newEmptyProject();
-    // Expand the new (empty) project so the user sees it appear.
-    if (p) setCollapsedProjects((prev) => ({ ...prev, [p.id]: false }));
-  }
-
-  async function handleCreateProjectForMove(convId: string) {
-    const p = await newEmptyProject();
-    if (p) await moveConversationToProject(convId, p.id);
+    setNewProject(null);
+    // Expand the new project so the user sees it appear.
+    setCollapsedProjects((prev) => ({ ...prev, [p.id]: false }));
+    if (moveConvId) {
+      await moveConversationToProject(moveConvId, p.id);
+      return;
+    }
+    router.push(`/chat/projects?project=${p.id}`);
+    onClose();
   }
 
   async function handleDeleteProject(id: string) {
@@ -320,6 +334,12 @@ export function Sidebar({
   }
 
   const isHidden = collapsed;
+  // FIX132 F16 — a sidebar that is off screen is `inert` (out of the Tab
+  // order and the accessibility tree): the closed drawer below md, the
+  // collapsed sidebar from md up. NIGHT3 j6: at 360 px, 12 of the first 23
+  // Tab stops were on the closed drawer (x = -298).
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const offScreen = isDesktop ? isHidden : !open;
   const userDisplay =
     user?.email || (user?.user_id ? user.user_id.slice(0, 8) : "Guest");
   const userInitial = (userDisplay || "?").charAt(0).toUpperCase();
@@ -334,6 +354,9 @@ export function Sidebar({
         onClick={onClose}
       />
       <aside
+        // React 18 renders `inert` only as a string ("" = present); the
+        // types say boolean, hence the cast.
+        {...(offScreen ? ({ inert: "" } as unknown as { inert: boolean }) : {})}
         className={`safe-top safe-bottom fixed left-0 top-0 z-40 flex h-full w-[85vw] max-w-[320px] flex-col border-r border-border-subtle bg-bg-sidebar transition-all duration-200 ease-out md:static md:w-[260px] md:max-w-none ${
           open ? "translate-x-0" : "-translate-x-full"
         } md:translate-x-0 ${
@@ -414,7 +437,7 @@ export function Sidebar({
 
           <button
             type="button"
-            onClick={() => void handleCreateProject()}
+            onClick={handleCreateProject}
             className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             <span className="relative flex h-4 w-4 items-center justify-center" aria-hidden>
@@ -508,8 +531,10 @@ export function Sidebar({
           loadingMore={loadingMoreConversations}
           onLoadMore={() => void loadMoreConversations()}
           activeId={activeId}
-          onSelect={(id) => {
-            router.push(`/chat/${id}`);
+          onSelect={(id, messageId) => {
+            // FIX132 F12 — a content hit opens the chat AT the message.
+            if (messageId) requestMessageJump(id, messageId);
+            router.push(messageId ? `/chat/${id}#msg-${messageId}` : `/chat/${id}`);
             onClose();
           }}
           onRename={(id, t) => renameConversation(id, t)}
@@ -550,6 +575,7 @@ export function Sidebar({
         open={voiceSettingsOpen}
         onClose={() => setVoiceSettingsOpen(false)}
       />
+      <NewProjectDialog open={newProject !== null} onClose={() => setNewProject(null)} onCreate={createNamedProject} />
     </>
   );
 }
@@ -1047,7 +1073,7 @@ interface AreaProps {
   loadingMore: boolean;
   onLoadMore: () => void;
   activeId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, messageId?: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
@@ -1261,7 +1287,7 @@ function SidebarRow({
 }: {
   row: Row;
   active: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, messageId?: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
@@ -1296,7 +1322,7 @@ function SidebarRow({
     return (
       <button
         type="button"
-        onClick={() => onSelect(row.hit.conversation_id)}
+        onClick={() => onSelect(row.hit.conversation_id, row.hit.message_id)}
         className={`focus-ring flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors ${
           active
             ? "bg-bg-elevated text-text-primary"
@@ -1543,4 +1569,18 @@ export function moveBetweenChats(e: React.KeyboardEvent<HTMLElement>): void {
   e.preventDefault();
   rows[next].focus();
   rows[next].scrollIntoView({ block: "nearest" });
+}
+
+/** FIX132 F16 — a media query as state (false until mounted; jsdom-safe). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(query);
+    const sync = () => setMatches(mql.matches);
+    sync();
+    mql.addEventListener?.("change", sync);
+    return () => mql.removeEventListener?.("change", sync);
+  }, [query]);
+  return matches;
 }

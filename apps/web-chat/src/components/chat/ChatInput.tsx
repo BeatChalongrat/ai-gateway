@@ -42,7 +42,7 @@ import {
   type SlashCommand,
   type SlashOffer,
 } from "@/lib/slashCommands";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
 import {
   EDIT_MESSAGE_EVENT,
   VOICE_TOGGLE_EVENT,
@@ -1009,7 +1009,7 @@ export function ChatInput({
       // FIX126 F5 — the chip speaks the UI's language, not the transport's.
       const msg = uploadErrorMessage(err);
       markFileError(chipBucket, pendingId, msg, uploadErrorRetryable(err));
-      toast(msg);
+      toastError(msg);
     }
   }
 
@@ -1027,11 +1027,12 @@ export function ChatInput({
     // from the STORE at this instant, not from the render closure: the
     // paste listener is bound once and used to see the mount-time count.
     const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
+    // FIX132 F18 — a refused file is an error: it stays until read.
     const { accepted } = admitFilesForMessage(
       filesRaw,
       liveChipCount(stagingBucket),
       undefined,
-      toast,
+      toastError,
     );
     if (accepted.length === 0) return;
 
@@ -1258,13 +1259,24 @@ export function ChatInput({
             onChange={onPickFiles}
           />
 
-          {/* Row 0: pending-file chips. Wraps to a second line rather
-              than scrolling horizontally — feels native to the pill.
-              The bucket is `conversationId ?? DRAFT_CONV_KEY` so a
-              landing-page user who picked a file before the conv
-              row was created still sees their chip immediately. */}
+          {/* Row 0: pending-file chips. The bucket is
+              `conversationId ?? DRAFT_CONV_KEY` so a landing-page user
+              who picked a file before the conv row was created still
+              sees their chip immediately.
+              FIX132 D3 — the row never grows without bound. On a phone
+              the 160-px cards stacked one per row: five of them made the
+              composer ~830 px tall in a 740-px window, the text box and
+              Send went below the screen and the credits pill landed on
+              the header. Below sm it is one row that scrolls sideways
+              (like ChatGPT/Claude); from sm up it wraps but stops at a
+              cap and scrolls inside. */}
           {pendingFiles.length > 0 ? (
-            <div className="flex flex-wrap gap-2 px-3 pt-3">
+            <div
+              role="group"
+              aria-label={t("input.chipRow.aria")}
+              data-testid="composer-chip-row"
+              className="flex flex-nowrap gap-2 overflow-x-auto px-3 pt-3 sm:max-h-[248px] sm:flex-wrap sm:overflow-y-auto sm:overflow-x-hidden"
+            >
               {pendingFiles.map((p) => (
                 <FilePreviewCard
                   key={p.id}
@@ -1328,6 +1340,17 @@ export function ChatInput({
                   {t("input.visionSwitchTo", { model: visionAlt.name ?? visionAlt.id })}
                 </button>
               ) : null}
+              {/* FIX132 N6 — the other way out the notice names, one click:
+                  the image chips go, the text and other files stay. */}
+              <button
+                type="button"
+                onClick={() => {
+                  for (const p of pendingFiles) if (p.status !== "error" && isImageFile(p.file)) removePendingFile(renderBucket, p.id);
+                }}
+                className="focus-ring rounded-md border border-border bg-bg-surface px-2 py-1 text-xs font-medium text-text-primary hover:border-border-strong"
+              >
+                {t("input.sendBlocked.removeImages")}
+              </button>
             </div>
           ) : null}
 
@@ -1744,7 +1767,7 @@ export async function uploadFiles(
     files,
     liveChipCount(chipBucket),
     undefined,
-    toast,
+    toastError,
   );
   if (accepted.length === 0) return;
   const staged = accepted.map((f) => ({ f, pid: store.addPendingFile(chipBucket, f) }));
@@ -1787,7 +1810,7 @@ export async function uploadFiles(
       if (err instanceof ApiError && err.code === "ABORTED") continue;
       const msg = uploadErrorMessage(err);
       store.markFileError(chipBucket, pid, msg, uploadErrorRetryable(err));
-      toast(msg);
+      toastError(msg);
     }
   }
 }

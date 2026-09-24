@@ -1002,6 +1002,36 @@ func (s *MessageService) ListMessages(
 	return s.messages.ListByConversation(ctx, tenantID, convID, limit, cursor)
 }
 
+// ListThroughMaxRows caps one `through` response (FIX132 F12). The page
+// loops from its new oldest row while has_more says the hit is further.
+const ListThroughMaxRows = 1000
+
+// ListMessagesThrough — FIX132 F12: the page opens a chat at a search hit
+// (or at its first message) by asking for every row between what it holds
+// and `through` (uuid.Nil = the first message) in one request instead of
+// 50 per "load older". Same ownership rule as ListMessages.
+func (s *MessageService) ListMessagesThrough(
+	ctx context.Context,
+	tenantID, userID, convID uuid.UUID,
+	limit int,
+	cursor, through uuid.UUID,
+) ([]model.Message, bool, error) {
+	conv, err := s.conversations.GetByID(ctx, tenantID, convID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, false, ErrMessageConversationNotFound
+		}
+		return nil, false, err
+	}
+	if conv.UserID != userID {
+		return nil, false, ErrMessageConversationNotFound
+	}
+	if limit <= 0 || limit > ListThroughMaxRows {
+		limit = ListThroughMaxRows
+	}
+	return s.messages.ListByConversationThrough(ctx, tenantID, convID, limit, cursor, through)
+}
+
 // ---------------------------------------------------------------------------
 // SendNonStream — request → blocking gateway call → response
 // ---------------------------------------------------------------------------

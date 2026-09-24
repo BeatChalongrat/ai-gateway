@@ -46,6 +46,8 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "output_limit_reached",
   // chat-edge's own codes
   "send_failed",
+  // FIX132 N1 — the page could not reach chat-edge in time.
+  "connection_timeout",
   "INTERNAL_ERROR",
   "PROVIDER_UNAVAILABLE",
   // image pipeline
@@ -78,6 +80,7 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   empty_completion: "error.empty_completion",
   output_limit_reached: "error.output_limit_reached",
   send_failed: "error.send_failed",
+  connection_timeout: "error.connection_timeout",
   INTERNAL_ERROR: "error.internal_error",
   PROVIDER_UNAVAILABLE: "error.provider_unavailable",
   // ── permanent for this request — the message says what to change ──

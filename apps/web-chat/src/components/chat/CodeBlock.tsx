@@ -13,7 +13,7 @@
 // header instead of "JavaScript". This is a Claude convention the
 // LLM picks up from prompt context and we surface it verbatim.
 
-import { Children, isValidElement, useState } from "react";
+import { Children, isValidElement, useCallback, useEffect, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import {
@@ -57,6 +57,7 @@ export function CodeBlock({ children }: PreProps) {
 
   const [expanded, setExpanded] = useState(false);
   const collapsed = canCollapse && !expanded;
+  const { bodyRef, moreRight, onBodyScroll } = useMoreToTheRight(codeText);
 
   // Phase 6 / C1 — previewable blocks (html/svg/markdown) get an
   // "Open in Canvas" button NEXT TO copy, never replacing it. The
@@ -115,10 +116,17 @@ export function CodeBlock({ children }: PreProps) {
       ) : canvasType === "html" ? (
         <InteractiveArtifactCard content={codeText} title={filename} />
       ) : null}
-      <div className="code-block-body scrollbar-thin">
-        <pre className="code-block-content">
-          {codeChild ?? <code>{codeText}</code>}
-        </pre>
+      {/* FIX132 F32 — the body is the one horizontal scroller (see
+          .code-block-content code.hljs in globals.css), and a fade on its
+          right edge says a line goes on (NIGHT3 j12-02: a 1,648-px line in
+          a 294-px box, no scrollbar, fade or arrow). */}
+      <div className="relative">
+        <div ref={bodyRef} onScroll={onBodyScroll} className="code-block-body scrollbar-thin">
+          <pre className="code-block-content">
+            {codeChild ?? <code>{codeText}</code>}
+          </pre>
+        </div>
+        {moreRight ? <div aria-hidden className="code-scroll-hint" data-testid="code-scroll-hint" /> : null}
       </div>
       {canCollapse ? (
         <button
@@ -354,4 +362,25 @@ function extractText(node: ReactNode): string {
     return extractText((node.props as { children?: ReactNode })?.children);
   }
   return "";
+}
+
+/** FIX132 F32 — is part of the block's content off to the right? Re-read on
+ *  scroll, on resize and when the code changes (streaming). */
+function useMoreToTheRight(content: string) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [moreRight, setMoreRight] = useState(false);
+  const measure = useCallback(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  }, []);
+  useEffect(() => {
+    measure();
+    const el = bodyRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure, content]);
+  return { bodyRef, moreRight, onBodyScroll: measure };
 }

@@ -74,7 +74,9 @@ async function mountConsumers(): Promise<{ read: () => Record<"badge" | "toast" 
   await screen.findAllByRole("status");
   const read = () => ({
     badge: px((screen.getByTestId("credit-badge") as HTMLElement).style.bottom),
-    toast: px((screen.getAllByRole("status").find((e) => e.textContent === "hello") as HTMLElement).style.bottom),
+    // FIX132 F18 — role="status" is now the toast's always-mounted live
+    // region; the visible pill is data-testid="toast".
+    toast: px((screen.getByTestId("toast") as HTMLElement).style.bottom),
     update: px((screen.getAllByRole("status").find((e) => /update|refresh|เวอร์ชัน/i.test(e.textContent || "")) as HTMLElement).style.bottom),
     error: px((screen.getByTestId("error-banner") as HTMLElement).style.bottom),
   });

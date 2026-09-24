@@ -30,7 +30,7 @@
 // `context.info` op answers the on-open read. Both paths land in
 // chatStore.contextBudgetByConv, so this component is the same on both.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, Info } from "lucide-react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
@@ -38,9 +38,10 @@ import { api, ApiError } from "@/lib/api";
 import { COMPACT_TRIGGER_RATIO, headLeftOut, isTrimming, messagesSeen, meterPercent, shouldShowMeter } from "@/lib/compaction";
 import { hostApi } from "@/lib/hostApi";
 import { useT } from "@/lib/i18n";
+import { memoryModeOf } from "@/lib/memoryMode";
 import type { ContextInfo } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
 
 // Where the details open: under the header row; above the phone chip (it
 // sits just over the composer), as wide as the screen allows.
@@ -66,6 +67,12 @@ export function ContextMeter({
   const [open, setOpen] = useState(false);
   const [instructions, setInstructions] = useState("");
   const [busy, setBusy] = useState(false);
+  // FIX132 N3 — a summary is kept in the chat's memory; with memory off (or
+  // a temporary chat) the server refuses it every time. Say so inline and
+  // offer nothing that can only fail.
+  const memoryMode = useChatStore((s) => memoryModeOf(s.conversations.find((c) => c.id === conversationId)));
+  const canSummarize = memoryMode === "on";
+  const unavailableId = useId();
 
   const refresh = useCallback(async () => {
     try {
@@ -120,7 +127,7 @@ export function ContextMeter({
   const automatic = !trimming || info!.state_present;
 
   async function submit() {
-    if (busy) return;
+    if (busy || !canSummarize) return;
     setBusy(true);
     try {
       if (hosted) await hostApi.compactContext(conversationId, instructions);
@@ -132,7 +139,7 @@ export function ContextMeter({
     } catch (err) {
       const memoryOff = err instanceof ApiError && err.status === 400;
       const hostMemoryOff = err instanceof Error && /memory/i.test(err.message);
-      toast(memoryOff || hostMemoryOff ? t("context.compact.memoryOff") : t("context.compact.failed"));
+      toastError(memoryOff || hostMemoryOff ? t("context.compact.memoryOff") : t("context.compact.failed"));
     } finally {
       setBusy(false);
     }
@@ -215,15 +222,23 @@ export function ContextMeter({
         {automatic ? <p className="mt-1 text-[11px] text-text-muted">{t("context.detail.auto")}</p> : null}
         <div className="mt-3 border-t border-border pt-2">
           <p className="text-[11px] font-medium text-text-secondary">{t("context.compact.title")}</p>
-          <p className="mt-1 text-[11px] text-text-muted">{t("context.compact.desc")}</p>
-          <textarea
-            className="focus-ring mt-2 w-full resize-none rounded-md border border-border bg-bg-base p-2 text-xs text-text-primary"
-            rows={2}
-            maxLength={2000}
-            placeholder={t("context.compact.placeholder")}
-            value={instructions}
-            onChange={(e) => setInstructions(e.target.value)}
-          />
+          {canSummarize ? (
+            <>
+              <p className="mt-1 text-[11px] text-text-muted">{t("context.compact.desc")}</p>
+              <textarea
+                className="focus-ring mt-2 w-full resize-none rounded-md border border-border bg-bg-base p-2 text-xs text-text-primary"
+                rows={2}
+                maxLength={2000}
+                placeholder={t("context.compact.placeholder")}
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+              />
+            </>
+          ) : (
+            <p id={unavailableId} className="mt-1 text-[11px] text-text-secondary" data-testid="context-compact-unavailable">
+              {t("context.compact.memoryOff")}
+            </p>
+          )}
           <div className="mt-2 flex justify-end gap-2">
             <button type="button" className="focus-ring rounded-md px-2 py-1 text-xs text-text-muted hover:text-text-primary" onClick={() => setOpen(false)}>
               {t("common.cancel")}
@@ -232,7 +247,8 @@ export function ContextMeter({
               type="button"
               className="focus-ring rounded-md border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-base hover:text-text-primary disabled:opacity-50"
               onClick={() => void submit()}
-              disabled={busy || streaming}
+              disabled={busy || streaming || !canSummarize}
+              aria-describedby={canSummarize ? undefined : unavailableId}
               data-testid="context-compact-submit"
             >
               {busy ? t("context.compact.working") : t("context.compact.submit")}

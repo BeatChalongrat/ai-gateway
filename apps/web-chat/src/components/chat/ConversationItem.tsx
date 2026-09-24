@@ -153,7 +153,9 @@ export function ConversationItem({
         )}
         <button
           type="button"
-          aria-label={t("a11y.conversationActions")}
+          // FIX132 F23 — named after its chat: 47 rows and the chat's own
+          // menu all read "การจัดการบทสนทนา" (NIGHT3 f23).
+          aria-label={t("a11y.conversationActionsFor", { title: conv.title || t("conv.untitled") })}
           onClick={(e) => {
             e.stopPropagation();
             setMenuOpen((v) => !v);

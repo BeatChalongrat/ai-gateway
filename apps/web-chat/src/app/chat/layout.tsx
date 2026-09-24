@@ -21,8 +21,7 @@ import { Sidebar } from "@/components/chat/Sidebar";
 import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
 import { TurnNotSavedBanner } from "@/components/chat/TurnNotSavedBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
-import { Spinner } from "@/components/ui/Spinner";
-import { SessionUnreachable } from "@/components/ui/SessionUnreachable";
+import { SessionChecking, SessionUnreachable } from "@/components/ui/SessionUnreachable";
 import {
   useKeyboardShortcuts,
   useNewChatHandler,
@@ -197,11 +196,8 @@ export default function ChatLayout({
     return <SessionUnreachable onRetry={retryAuth} checking={authChecking} />;
   }
   if (!isReady) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary">
-        <Spinner size={28} />
-      </div>
-    );
+    // FIX132 N9 — the brand and, after a moment, what is happening.
+    return <SessionChecking />;
   }
 
   return (
