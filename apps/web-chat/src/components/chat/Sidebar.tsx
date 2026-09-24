@@ -26,6 +26,7 @@ import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { logoutSession } from "@/lib/auth";
 import { CONV_SEARCH_EVENT } from "@/lib/composerShortcuts";
 import { requestMessageJump } from "@/lib/messageJump";
+import { NewProjectDialog } from "./NewProjectDialog";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -158,24 +159,36 @@ export function Sidebar({
   // A project created from the sidebar is a plain grouping container: no
   // instructions, no knowledge base — exactly what a folder was. The user
   // can add instructions later from the Projects page.
-  async function newEmptyProject(): Promise<Project | null> {
+  // FIX132 F29 — it is named first (NewProjectDialog), not created silently
+  // as "โปรเจกต์ใหม่"; then it opens (or, from a chat's menu, takes the chat).
+  const [newProject, setNewProject] = useState<{ moveConvId?: string } | null>(null);
+
+  function handleCreateProject() {
+    setNewProject({});
+  }
+
+  function handleCreateProjectForMove(convId: string) {
+    setNewProject({ moveConvId: convId });
+  }
+
+  async function createNamedProject(name: string): Promise<void> {
+    const moveConvId = newProject?.moveConvId;
+    let p: Project;
     try {
-      return await createProject(t("project.defaultName"), "");
-    } catch {
+      p = await createProject(name, "");
+    } catch (err) {
       setError(t("projects.toast.createFailed"));
-      return null;
+      throw err;
     }
-  }
-
-  async function handleCreateProject() {
-    const p = await newEmptyProject();
-    // Expand the new (empty) project so the user sees it appear.
-    if (p) setCollapsedProjects((prev) => ({ ...prev, [p.id]: false }));
-  }
-
-  async function handleCreateProjectForMove(convId: string) {
-    const p = await newEmptyProject();
-    if (p) await moveConversationToProject(convId, p.id);
+    setNewProject(null);
+    // Expand the new project so the user sees it appear.
+    setCollapsedProjects((prev) => ({ ...prev, [p.id]: false }));
+    if (moveConvId) {
+      await moveConversationToProject(moveConvId, p.id);
+      return;
+    }
+    router.push(`/chat/projects?project=${p.id}`);
+    onClose();
   }
 
   async function handleDeleteProject(id: string) {
@@ -415,7 +428,7 @@ export function Sidebar({
 
           <button
             type="button"
-            onClick={() => void handleCreateProject()}
+            onClick={handleCreateProject}
             className="focus-ring tap-44 flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             <span className="relative flex h-4 w-4 items-center justify-center" aria-hidden>
@@ -553,6 +566,7 @@ export function Sidebar({
         open={voiceSettingsOpen}
         onClose={() => setVoiceSettingsOpen(false)}
       />
+      <NewProjectDialog open={newProject !== null} onClose={() => setNewProject(null)} onCreate={createNamedProject} />
     </>
   );
 }

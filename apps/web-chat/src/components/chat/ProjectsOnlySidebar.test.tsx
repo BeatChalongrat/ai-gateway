@@ -183,21 +183,27 @@ describe("sidebar has one organiser", () => {
 });
 
 describe("creating a project from the sidebar", () => {
+  // FIX132 F29 — the project is named in a dialog first (it used to be
+  // created at once as "New project"); it is still an EMPTY project.
+  async function createNamed(name: string) {
+    fireEvent.click(screen.getByText(dictionaries.en["project.new"]));
+    const input = screen.getByLabelText(dictionaries.en["project.nameLabel"]);
+    fireEvent.change(input, { target: { value: name } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: dictionaries.en["project.createAction"] }));
+    });
+  }
+
   it("creates an EMPTY project (grouping only, no instructions)", async () => {
     useChatStore.setState({ conversationsLoaded: true, projectsLoaded: true });
     mockApi.createProject.mockResolvedValue({
-      project: bareProject("p-new", "New project", 0),
+      project: bareProject("p-new", "Work", 0),
     });
     renderSidebar();
 
-    await act(async () => {
-      fireEvent.click(screen.getByText(dictionaries.en["project.new"]));
-    });
+    await createNamed("Work");
 
-    expect(mockApi.createProject).toHaveBeenCalledWith(
-      dictionaries.en["project.defaultName"],
-      "",
-    );
+    expect(mockApi.createProject).toHaveBeenCalledWith("Work", "");
   });
 
   it("surfaces a failure instead of silently doing nothing", async () => {
@@ -205,13 +211,13 @@ describe("creating a project from the sidebar", () => {
     mockApi.createProject.mockRejectedValue(new Error("500"));
     renderSidebar();
 
-    await act(async () => {
-      fireEvent.click(screen.getByText(dictionaries.en["project.new"]));
-    });
+    await createNamed("Work");
 
     expect(useChatStore.getState().errorBanner).toBe(
       dictionaries.en["projects.toast.createFailed"],
     );
+    // The dialog stays, with the name, so it can be tried again.
+    expect(screen.getByLabelText(dictionaries.en["project.nameLabel"])).toHaveValue("Work");
   });
 });
 
