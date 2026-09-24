@@ -1789,8 +1789,9 @@ export const en = {
   "session.unreachable.checking": "Checking…",
   // ── FIX130 C2 — knowledge bases that cannot work say so ──
   "kb.unavailable.title": "Knowledge bases can't be used right now",
-  "kb.unavailable.embeddings_failed": "The service that reads and searches your documents (embeddings) is refusing requests — for example the provider's credit ran out or its key is invalid. Uploaded files cannot be indexed and chats cannot search a knowledge base. An administrator needs to fix the OpenAI key in the admin console first.",
-  "kb.unavailable.embeddings_not_configured": "The service that reads and searches your documents (embeddings) is not set up. An administrator needs to add an OpenAI key in the admin console before knowledge bases can be created or used.",
+  // FIX132 — local models: loading after a restart, or failed.
+  "kb.unavailable.models_loading": "The document search system is starting up. Try again in a moment.",
+  "kb.unavailable.models_unavailable": "The document search system isn't running right now, so files can't be processed and chats can't search a knowledge base. Try again later.",
   "kb.unavailable.unknown": "We couldn't check whether knowledge bases work right now. Try again in a moment.",
   "kb.unavailable.recheck": "Check again",
   "kb.doc.embeddingFailed": "Couldn't index this file — the document search service (embeddings) isn't working right now.",
@@ -3520,8 +3521,9 @@ const th: Record<DictKey, string> = {
   "session.unreachable.checking": "กำลังตรวจสอบ…",
   // ── FIX130 C2 ──
   "kb.unavailable.title": "ตอนนี้ยังใช้ฐานความรู้ไม่ได้",
-  "kb.unavailable.embeddings_failed": "ระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ปฏิเสธคำขออยู่ — เช่น เครดิตของผู้ให้บริการหมดหรือคีย์ไม่ถูกต้อง ไฟล์ที่อัปโหลดจึงทำดัชนีไม่ได้ และแชทจะค้นในฐานความรู้ไม่ได้ ผู้ดูแลระบบต้องแก้ไขคีย์ OpenAI ในหน้าแอดมินก่อน",
-  "kb.unavailable.embeddings_not_configured": "ยังไม่ได้ตั้งค่าระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ผู้ดูแลระบบต้องเพิ่มคีย์ OpenAI ในหน้าแอดมินก่อน จึงจะสร้างและใช้ฐานความรู้ได้",
+  // FIX132
+  "kb.unavailable.models_loading": "ระบบค้นหาในเอกสารกำลังเริ่มทำงาน ลองใหม่ในอีกสักครู่",
+  "kb.unavailable.models_unavailable": "ระบบค้นหาในเอกสารไม่ทำงานในตอนนี้ จึงประมวลผลไฟล์ไม่ได้และแชทค้นในฐานความรู้ไม่ได้ ลองใหม่ภายหลัง",
   "kb.unavailable.unknown": "ตรวจสอบไม่ได้ว่าตอนนี้ฐานความรู้ใช้งานได้หรือไม่ ลองใหม่อีกครั้งในอีกสักครู่",
   "kb.unavailable.recheck": "ตรวจสอบอีกครั้ง",
   "kb.doc.embeddingFailed": "ทำดัชนีไฟล์นี้ไม่สำเร็จ — ระบบค้นหาเอกสาร (embeddings) ใช้งานไม่ได้ในตอนนี้",

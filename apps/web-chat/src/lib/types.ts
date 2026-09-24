@@ -727,10 +727,10 @@ export type KnowledgeDocumentStatus =
   | "failed";
 
 /** FIX130 C2 — GET /knowledge-bases/availability: can a knowledge base work
- *  right now (the embeddings provider answered, or would)? */
+ *  right now? FIX132: the local models (kb-models) are loaded and answer. */
 export interface KnowledgeAvailability {
   available: boolean;
-  /** embeddings_not_configured | embeddings_failed (when not available). */
+  /** models_loading | models_unavailable (when not available). */
   reason?: string;
   checked_at?: string;
 }

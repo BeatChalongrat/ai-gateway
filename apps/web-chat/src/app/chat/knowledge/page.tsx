@@ -196,9 +196,11 @@ export default function KnowledgeBasePage() {
 // FIX130 C2 — why a knowledge base cannot be used right now
 // ---------------------------------------------------------------------------
 
+// FIX132 — the knowledge base runs on local models (kb-models): the only
+// reasons are that they are still loading or that they failed.
 const UNAVAILABLE_REASON: Record<string, DictKey> = {
-  embeddings_failed: "kb.unavailable.embeddings_failed",
-  embeddings_not_configured: "kb.unavailable.embeddings_not_configured",
+  models_loading: "kb.unavailable.models_loading",
+  models_unavailable: "kb.unavailable.models_unavailable",
 };
 
 function KBUnavailableNotice({ reason, onRecheck }: { reason: string | null; onRecheck: () => void }) {

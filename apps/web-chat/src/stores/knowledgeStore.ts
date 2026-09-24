@@ -36,7 +36,7 @@ export type KnowledgeAvailabilityState = "unknown" | "available" | "unavailable"
 
 interface KnowledgeState {
   availability: KnowledgeAvailabilityState;
-  /** Why it is unavailable (embeddings_not_configured | embeddings_failed). */
+  /** Why it is unavailable (models_loading | models_unavailable). */
   availabilityReason: string | null;
   /** Ask the server; once per session unless `force` (the knowledge page
    *  asks afresh every time it opens, and after a failed upload). */
@@ -73,9 +73,21 @@ function tempID(): string {
 
 let availabilityAsked: Promise<void> | null = null;
 
+/** FIX132 — the knowledge base runs on local models that take a while to
+ *  load after a restart. "models_loading" ends by itself, so while the
+ *  server says it, the page asks again on this interval (one timer for the
+ *  whole page, whoever asked) and every knowledge-base affordance appears
+ *  without a reload. "models_unavailable" is a failure and is not polled —
+ *  the knowledge page's "check again" and its next visit ask afresh.
+ *  Mutable so tests can shorten it. */
+export const KB_AVAILABILITY_RECHECK = { loadingMs: 15_000 };
+let availabilityRecheck: ReturnType<typeof setTimeout> | null = null;
+
 /** Test seam: forget that availability was asked. */
 export function _resetKnowledgeAvailability(): void {
   availabilityAsked = null;
+  if (availabilityRecheck) clearTimeout(availabilityRecheck);
+  availabilityRecheck = null;
 }
 
 export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
@@ -90,6 +102,13 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
           availability: res?.available ? "available" : "unavailable",
           availabilityReason: res?.available ? null : (res?.reason ?? null),
         });
+        if (!res?.available && res?.reason === "models_loading" && typeof window !== "undefined") {
+          if (availabilityRecheck) clearTimeout(availabilityRecheck);
+          availabilityRecheck = setTimeout(() => {
+            availabilityRecheck = null;
+            void get().loadAvailability(true);
+          }, KB_AVAILABILITY_RECHECK.loadingMs);
+        }
       } catch {
         // Could not ask: offer nothing rather than something that may not
         // work. A later forced ask (the knowledge page) tries again.

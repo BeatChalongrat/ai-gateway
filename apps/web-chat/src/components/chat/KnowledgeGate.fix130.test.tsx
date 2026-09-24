@@ -14,6 +14,7 @@ const { mockApi } = vi.hoisted(() => ({
     getKnowledgeAvailability: vi.fn(),
     listKnowledgeBases: vi.fn(),
     getKnowledgeBase: vi.fn(),
+    listKBDocuments: vi.fn(),
     uploadFile: vi.fn(),
     fileObjectUrl: vi.fn(),
     downloadFile: vi.fn(),
@@ -60,7 +61,7 @@ const kb: KnowledgeBase = {
 };
 
 function serverSays(available: boolean) {
-  mockApi.getKnowledgeAvailability.mockResolvedValue(available ? { available: true } : { available: false, reason: "embeddings_failed" });
+  mockApi.getKnowledgeAvailability.mockResolvedValue(available ? { available: true } : { available: false, reason: "models_unavailable" });
 }
 
 beforeEach(() => {
@@ -80,6 +81,7 @@ beforeEach(() => {
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
   vi.stubGlobal("cancelAnimationFrame", () => {});
   mockApi.listKnowledgeBases.mockResolvedValue({ knowledge_bases: [] });
+  mockApi.listKBDocuments.mockResolvedValue([]);
   mockApi.listConversations.mockResolvedValue({ conversations: [], has_more: false, next_cursor: null });
   mockApi.listProjects.mockResolvedValue({ projects: [] });
   mockApi.getPreferences.mockResolvedValue({ custom_instructions_about: "", custom_instructions_respond: "" });
@@ -100,7 +102,8 @@ describe("FIX130 C2 — the knowledge page says why, and offers nothing that fai
     render(<KnowledgeBasePage />);
     const notice = await screen.findByTestId("kb-unavailable");
     expect(notice).toHaveTextContent(th["kb.unavailable.title"]);
-    expect(notice).toHaveTextContent(th["kb.unavailable.embeddings_failed"]);
+    // FIX132 — the reasons are the local models' (no OpenAI key any more).
+    expect(notice).toHaveTextContent(th["kb.unavailable.models_unavailable"]);
     expect(screen.queryByText(th["kb.create"])).toBeNull();
     expect(screen.queryByText(th["kb.create.full"])).toBeNull();
     // An existing KB stays listed (it can be deleted), but nothing can be uploaded into it.
