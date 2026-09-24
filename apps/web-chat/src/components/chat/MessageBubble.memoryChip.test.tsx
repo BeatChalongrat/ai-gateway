@@ -1,10 +1,17 @@
-// FIX130 A3a/A3b — the answer says when memory was used and when something
-// was saved. NIGHT2: the only trace of memory on an answer was the Sources
-// rail, which is switched off (SHOW_SOURCES_RAIL), so a user could not tell
-// that "how did it know my name?" came from a saved memory. The chip is its
-// own component, independent of that rail, and reads the live frame or the
-// persisted context_sources the same way.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+// FIX132 A — no "used N memories" badge on answers. FIX130 A3a put a chip
+// "ใช้ความจำ N รายการ" (with a popover listing the memories) under every
+// answer whose prompt carried saved memories; the owner decided memory works
+// in the background: ChatGPT only says "Memory updated" when it SAVES, and
+// Claude shows nothing per answer. So the used-chip is gone everywhere —
+// on a live turn, while streaming, and on old chats after a reload (their
+// persisted saved_memory context_sources must not bring it back). The server
+// still records which memories went into the turn; the page just does not
+// badge it.
+//
+// FIX130 A3b stays: an answer where a save happened says so once —
+// "บันทึกความจำแล้ว" (saved) or "เสนอความจำใหม่ — รอยืนยัน" (suggested) —
+// which IS the quiet "Memory updated" notice.
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/clipboard", () => ({ copyTextToClipboard: vi.fn(async () => true) }));
@@ -17,88 +24,69 @@ import type { ContextSource, Message } from "@/lib/types";
 
 import { MessageBubble } from "./MessageBubble";
 
-function msg(over: Partial<Message>): Message {
+function msg(over: Partial<Message> & Record<string, unknown>): Message {
   return { id: "a1", role: "assistant", content: "สวัสดีคุณบีท", status: "completed", created_at: "2026-09-23T00:00:00Z", ...over } as Message;
 }
 const src = (over: Partial<ContextSource>): ContextSource =>
   ({ id: "s", source_type: "saved_memory", display_label: "", created_at: "2026-09-23T00:00:00Z", ...over }) as ContextSource;
 const th = dictionaries.th;
+// The old chip's wording, spelled out so the test does not depend on dict
+// keys that no longer exist.
+const USED_WORDS = /ใช้ความจำ\s*\d+\s*รายการ|Used \d+ memor/;
 
 beforeEach(() => useI18nStore.setState({ locale: "th" }));
 afterEach(cleanup);
 
-describe("FIX130 — 'used memory' chip on the answer", () => {
-  it("live: shows ใช้ความจำ N รายการ and lists the memories with a link to the Memory page", () => {
-    render(
+function expectNoUsedChip(container: HTMLElement) {
+  expect(screen.queryByTestId("memory-used-chip")).toBeNull();
+  expect(screen.queryByTestId("memory-used-popover")).toBeNull();
+  expect(container.textContent ?? "").not.toMatch(USED_WORDS);
+}
+
+describe("FIX132 A — no 'used memory' chip on answers", () => {
+  it("a live turn whose memory_used frame reached the row shows nothing", () => {
+    const { container } = render(
       <MessageBubble
         convId="c1"
         message={msg({ memory_used: { count: 2, items: [{ id: "m1", label: "ชื่อเล่นว่าบีท" }, { id: "m2", label: "อยู่เชียงใหม่" }] } })}
       />,
     );
-    const chip = screen.getByTestId("memory-used-chip");
-    expect(chip.textContent).toContain(th["memory.used.many"].replace("{n}", "2"));
+    expectNoUsedChip(container);
     expect(screen.queryByText("ชื่อเล่นว่าบีท")).toBeNull();
-    fireEvent.click(chip);
-    const pop = screen.getByTestId("memory-used-popover");
-    expect(pop.textContent).toContain("ชื่อเล่นว่าบีท");
-    expect(pop.textContent).toContain("อยู่เชียงใหม่");
-    const link = pop.querySelector("a[href='/chat/memory']");
-    expect(link?.textContent).toBe(th["memory.used.manage"]);
+    expect(screen.queryByTestId("memory-markers")).toBeNull();
   });
 
-  it("after a reload: derived from the saved_memory context sources", () => {
-    render(<MessageBubble convId="c1" message={msg({ context_sources: [src({ source_id: "m1", display_label: "ชื่อเล่นว่าบีท" })] })} />);
-    expect(screen.getByTestId("memory-used-chip").textContent).toContain(th["memory.used.one"]);
-  });
-
-  // A memory deleted later: chat-edge rewrites the older rows' label to
-  // "[deleted]" so the text is gone everywhere. The answer still used it,
-  // so it still counts — but the popover says so in words, not the token.
-  it("a memory deleted since shows as a placeholder, still counted", () => {
-    render(
+  it("an old chat after a reload: persisted saved_memory context_sources do not bring it back", () => {
+    const { container } = render(
       <MessageBubble
         convId="c1"
         message={msg({
           context_sources: [
-            src({ source_id: "m1", display_label: "[deleted]" }),
-            src({ source_id: "m2", display_label: "อยู่เชียงใหม่" }),
+            src({ source_id: "m1", display_label: "ชื่อเล่นว่าบีท" }),
+            src({ source_id: "m2", display_label: "[deleted]" }),
           ],
         })}
       />,
     );
-    const chip = screen.getByTestId("memory-used-chip");
-    expect(chip.textContent).toContain(th["memory.used.many"].replace("{n}", "2"));
-    fireEvent.click(chip);
-    const pop = screen.getByTestId("memory-used-popover");
-    expect(pop.textContent).toContain(th["memory.used.deletedItem"]);
-    expect(pop.textContent).not.toContain("[deleted]");
-    expect(pop.textContent).toContain("อยู่เชียงใหม่");
+    expectNoUsedChip(container);
+    expect(screen.queryByTestId("memory-markers")).toBeNull();
   });
 
-  it("no chip when the answer used no memory", () => {
-    render(<MessageBubble convId="c1" message={msg({ context_sources: [src({ source_type: "compacted_history", display_label: "x" })] })} />);
-    expect(screen.queryByTestId("memory-used-chip")).toBeNull();
-    cleanup();
-    render(<MessageBubble convId="c1" message={msg({})} />);
-    expect(screen.queryByTestId("memory-used-chip")).toBeNull();
-  });
-
-  it("appears while the answer streams — the memo must not hide the field when it arrives alone", () => {
+  it("nothing appears while the answer streams either", () => {
     const streaming = msg({ status: "streaming", isStreaming: true, content: "" });
-    const { rerender } = render(<MessageBubble convId="c1" message={streaming} />);
-    expect(screen.queryByTestId("memory-used-chip")).toBeNull();
-    rerender(<MessageBubble convId="c1" message={{ ...streaming, memory_used: { count: 1, items: [{ id: "m1", label: "x" }] } }} />);
-    expect(screen.getByTestId("memory-used-chip")).toBeTruthy();
+    const { container, rerender } = render(<MessageBubble convId="c1" message={streaming} />);
+    rerender(<MessageBubble convId="c1" message={{ ...streaming, memory_used: { count: 1, items: [{ id: "m1", label: "x" }] } } as Message} />);
+    expectNoUsedChip(container);
   });
 
-  it("English wording too", () => {
+  it("English locale: no 'Used N memories' either", () => {
     useI18nStore.setState({ locale: "en" });
-    render(<MessageBubble convId="c1" message={msg({ memory_used: { count: 3, items: [] } })} />);
-    expect(screen.getByTestId("memory-used-chip").textContent).toContain(dictionaries.en["memory.used.many"].replace("{n}", "3"));
+    const { container } = render(<MessageBubble convId="c1" message={msg({ memory_used: { count: 3, items: [] }, context_sources: [src({ source_id: "m1", display_label: "x" })] })} />);
+    expectNoUsedChip(container);
   });
 });
 
-describe("FIX130 — 'memory saved / suggested' marker on the answer", () => {
+describe("FIX130 A3b kept — 'memory saved / suggested' marker on the answer where a save happened", () => {
   it("an explicit save says บันทึกความจำแล้ว; a suggestion says it waits for the user", () => {
     render(
       <MessageBubble
@@ -127,6 +115,23 @@ describe("FIX130 — 'memory saved / suggested' marker on the answer", () => {
     );
     expect(screen.getByTestId("memory-suggested-chip")).toBeTruthy();
     expect(screen.queryByTestId("memory-saved-chip")).toBeNull();
+  });
+
+  it("an answer that both used and saved memory shows only the saved notice", () => {
+    const { container } = render(
+      <MessageBubble
+        convId="c1"
+        message={msg({
+          memory_used: { count: 1, items: [{ id: "m9", label: "อยู่เชียงใหม่" }] },
+          context_sources: [
+            src({ source_id: "m9", display_label: "อยู่เชียงใหม่" }),
+            src({ source_type: "memory_saved", source_id: "m1", display_label: "ชื่อบีท", metadata: { status: "active" } }),
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByTestId("memory-saved-chip").textContent).toContain(th["memory.saved.active"]);
+    expectNoUsedChip(container);
   });
 
   it("a saved memory deleted since is named as deleted, not '[deleted]'", () => {

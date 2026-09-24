@@ -642,11 +642,7 @@ export const en = {
     "This chat uses your saved memories, saves what you ask it to remember, and may suggest new memories for you to confirm.",
   "memory.indicator.onPendingTooltip": "Memory is on — {n} suggested memories waiting for you",
 
-  // FIX130 A3a/A3b — markers under an answer.
-  "memory.used.one": "Used 1 memory",
-  "memory.used.many": "Used {n} memories",
-  "memory.used.title": "Saved memories used for this answer",
-  "memory.used.manage": "Manage memory",
+  // FIX130 A3b — marker under an answer that saved a memory (FIX132 A: none for memory used).
   "memory.used.deletedItem": "(a memory you have since deleted)",
   "memory.saved.active": "Memory saved",
   "memory.saved.pending": "New memory suggested — waiting for you to confirm",
@@ -2412,10 +2408,6 @@ const th: Record<DictKey, string> = {
     "แชทนี้ใช้ความจำที่บันทึกไว้ บันทึกสิ่งที่คุณขอให้จำ และอาจเสนอความจำใหม่ให้คุณยืนยัน",
   "memory.indicator.onPendingTooltip": "เปิดความจำอยู่ — มีความจำที่เสนอ {n} รายการรอคุณยืนยัน",
 
-  "memory.used.one": "ใช้ความจำ 1 รายการ",
-  "memory.used.many": "ใช้ความจำ {n} รายการ",
-  "memory.used.title": "ความจำที่ใช้ในคำตอบนี้",
-  "memory.used.manage": "จัดการความจำ",
   "memory.used.deletedItem": "(ความจำที่ลบแล้ว)",
   "memory.saved.active": "บันทึกความจำแล้ว",
   "memory.saved.pending": "เสนอความจำใหม่ — รอยืนยัน",

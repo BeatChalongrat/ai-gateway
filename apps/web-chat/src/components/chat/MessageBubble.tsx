@@ -569,10 +569,9 @@ function MessageBubbleImpl({
           of a long conversation. Quiet information, not an error. */}
       <MessageCompactionNotice message={message} />
 
-      {/* FIX130 A3 — memory used / saved / suggested for this answer. Live
-          from memory_used / memory_saved, from context_sources after a
-          reload; shown while streaming, and independent of the Sources rail
-          (SHOW_SOURCES_RAIL) that stays hidden. */}
+      {/* FIX130 A3b — memory saved / suggested by this answer. Live from
+          memory_saved, from context_sources after a reload; shown while
+          streaming. FIX132 A: nothing for memory merely USED. */}
       <MessageMemoryMarkers message={message} />
 
       {/* Image attach notice — one or more attached images couldn't be
@@ -1546,10 +1545,9 @@ function areEqual(prev: Props, next: Props): boolean {
     a.fallback_info === b.fallback_info &&
     a.image_notice === b.image_notice &&
     a.compaction_notice === b.compaction_notice &&
-    // FIX130 — the memory frames land alone (memory_used before the first
-    // word, memory_saved mid-turn): without these the memo kept the bubble
-    // and the chips never appeared until something else changed.
-    a.memory_used === b.memory_used &&
+    // FIX130 — the memory_saved frame lands alone mid-turn: without this
+    // the memo kept the bubble and the chip never appeared until something
+    // else changed.
     a.memory_saved === b.memory_saved &&
     // FIX124 — the connection states change ALONE, on a row whose content
     // and status stand still (that is the point of them): without these the

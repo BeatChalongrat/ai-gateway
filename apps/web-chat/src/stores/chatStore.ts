@@ -25,7 +25,7 @@ import { outboxAccepted, outboxGiveBack, outboxIsUndelivered, outboxPeek, outbox
 import { tOutside } from "@/lib/i18n";
 import { toast } from "@/components/ui/Toast";
 import { localizeErrorCode } from "@/lib/errorMessages";
-import { mergeMemorySaved, parseMemoryUsed } from "@/lib/memoryMarkers";
+import { mergeMemorySaved } from "@/lib/memoryMarkers";
 import { EOF_WITHOUT_TERMINAL_CAUSE, EOF_WITHOUT_TERMINAL_CODE, isStopReason } from "@/lib/terminalCause";
 import { parseSSE, StreamSilenceError } from "@/lib/stream";
 import type { ContextInfo } from "@/lib/types";
@@ -3537,18 +3537,11 @@ async function consumeStream(
           });
         }
       } else if (evt.event === "memory_used") {
-        // FIX130 A3a — saved memories went into this answer's prompt. Sent
-        // once, before the first word (chat-edge, or the desktop host over
-        // the bridge), and replayed from the ledger on a reattach, so the
-        // "used N memories" chip is on the answer while it streams.
-        const used = parseMemoryUsed(evt.data);
-        if (used) {
-          const id = realAssistantId ?? tempAsstId;
-          set((s) => {
-            const list = s.messages[convId] ?? [];
-            return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === id ? { ...m, memory_used: used } : m)) } };
-          });
-        }
+        // FIX132 A — ignored on purpose. The frame (chat-edge, or the desktop
+        // host over the bridge) says which saved memories went into this
+        // answer's prompt; FIX130 drew a "ใช้ความจำ N รายการ" chip from it.
+        // The owner removed that chip: memory works in the background and no
+        // answer is badged for using it. The server keeps its own record.
       } else if (evt.event === "memory_saved") {
         // FIX130 A3b — a save_memory call in this turn stored a memory
         // (active) or queued a suggestion (pending_confirmation). A turn can
