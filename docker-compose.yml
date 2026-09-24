@@ -388,6 +388,11 @@ services:
     image: ai-gateway-backend:latest
     restart: unless-stopped
     command: ["python", "-m", "app.ops.watch"]
+    # FIX131 — runs the image's code (no source mount; the dev file adds one).
+    # A Python PID 1 without a SIGTERM handler ignores SIGTERM, so every
+    # stop waited for the SIGKILL; `init` puts a real init in front of it.
+    init: true
+    stop_grace_period: 10s
     environment:
       APP_ENV: ${APP_ENV:-development}
       OPS_WATCH_PROJECT: ai-gateway
@@ -689,7 +694,12 @@ services:
       PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS: ${PROVIDER_POOL_MAX_KEEPALIVE_CONNECTIONS:-20}
       PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS: ${PROVIDER_POOL_KEEPALIVE_EXPIRY_SECONDS:-30.0}
       PROVIDER_POOL_OVERRIDES: ${PROVIDER_POOL_OVERRIDES:-}
+      # FIX131 — the process model (backend/gunicorn.conf.py): workers,
+      # worker heartbeat, and how long in-flight turns get after SIGTERM.
+      # stop_grace_period below must stay above GUNICORN_GRACEFUL_TIMEOUT.
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
+      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-180}
       # Phase-3 log-worker engine selector. ``python`` keeps the
       # legacy in-process queue; ``go`` dispatches to the Go sidecar
       # over gRPC. Falls back to the legacy path automatically when
@@ -735,11 +745,23 @@ services:
       # (POST /internal/auth/revoke, gated by INTERNAL_SERVICE_SECRET on
       # both sides). Same docker network, so the service name resolves.
       CHAT_EDGE_INTERNAL_URL: ${CHAT_EDGE_INTERNAL_URL:-http://chat-edge-api:4000}
+    # FIX131 — the live backend runs the IMAGE (Dockerfile CMD = serve.sh:
+    # migrate, then gunicorn with GUNICORN_WORKERS workers): no source mount,
+    # no --reload; editing the checkout changes nothing until an image is
+    # built and deployed (docs/ops/deploy-backend.md). The only volume is the
+    # runtime data the app writes: users' avatars (served at /static). The
+    # DLP parity fixtures mount moved to docker-compose.dev.yml with the
+    # other test-time mounts; tests run in a throwaway container
+    # (scripts/backend-test-lane.sh), never in this one.
     volumes:
-      # Mount the DLP parity fixtures so the Python parity test can
-      # read them from inside the backend container. Read-only and
-      # tiny (<10kB) — purely a test-time convenience.
-      - ./dlp-sidecar/tests/parity/fixtures:/work/dlp-sidecar/tests/parity/fixtures:ro
+      - backend_uploads:/app/uploads
+    # FIX131 — Docker's SIGTERM starts gunicorn's graceful drain (in-flight
+    # turns finish, up to GUNICORN_GRACEFUL_TIMEOUT = 180 s); this is how
+    # long Docker waits before SIGKILL. It must exceed the drain plus the
+    # lifespan shutdown (request-log flush, leader hand-over). Without it the
+    # engine's default applies — measured 1 s on this Docker Desktop (a
+    # stopped test container exited 137 after 1.4 s).
+    stop_grace_period: 200s
     ports:
       # Python is now an internal service behind the Go gateway. Its
       # container bind stays 8080; the host publish moved to 8081 so you
@@ -760,8 +782,13 @@ services:
     # stuck). /ready exercises the real request path (async DB, Redis, a
     # real DLP scan) and reports stuck in-flight requests; 503 = cannot
     # serve. Bounded server-side (readiness_timeout_seconds) and here.
+    # FIX131 — backend/healthcheck.py: the same /ready probe, but a
+    # container draining after SIGTERM reports healthy (its socket is closed
+    # on purpose), so autoheal does not restart it in the middle of the drain.
+    # The fallback is the old inline probe, for an image built before FIX131
+    # (a rollback), which has no healthcheck.py.
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)\""]
+      test: ["CMD-SHELL", "test -f /app/healthcheck.py && exec python /app/healthcheck.py || exec python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)\""]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -965,4 +992,8 @@ volumes:
   chat_edge_uploads:
   # FIX129 — the ops watcher's open findings / last-announced times.
   ops_watch_state:
+  # FIX131 — backend runtime uploads (avatars). Before FIX131 they lived in
+  # the bind-mounted checkout (backend/uploads/); see
+  # docs/ops/deploy-backend.md for the one-time copy into this volume.
+  backend_uploads:
   mcp_workspace:

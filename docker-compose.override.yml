@@ -1,75 +1,26 @@
-# Dev-mode overrides. Compose auto-merges this on top of
-# docker-compose.yml, so `docker compose up -d` in development gives
-# you: hot-reload backend (uvicorn --reload), hot-reload admin-ui
-# (next dev), hot-reload portal (next dev). In CI / prod, invoke
-# compose with -f docker-compose.yml alone to skip this overlay.
+# Local overrides. Compose auto-merges this on top of docker-compose.yml, so
+# `docker compose -p ai-gateway up -d` (the live stack on this machine) gets
+# them: hot-reload admin-ui (next dev), hot-reload portal (next dev), and the
+# backend's extra CORS origins. In CI / prod, invoke compose with
+# -f docker-compose.yml alone to skip this overlay.
+#
+# FIX131 — the BACKEND is no longer a dev process here. It runs the image's
+# production process (backend/serve.sh: migrate, then gunicorn with
+# GUNICORN_WORKERS workers, graceful drain on SIGTERM), like prod. The
+# hot-reload backend (uvicorn --reload on a bind mount of ./backend, plus the
+# read-only cross-tree test mounts) and ops-watch's source mount are opt-in:
+#
+#   docker compose -p ai-gateway -f docker-compose.yml \
+#     -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch
+#
+# (docker-compose.dev.yml has the details.) Going back to the image:
+# `docker compose -p ai-gateway up -d backend ops-watch` (no dev file).
 services:
   backend:
-    # Override the image CMD so uvicorn runs with --reload against the
-    # mounted source tree. Migrations still run once on container start.
-    # FIX126 O3 — `exec` makes uvicorn PID 1, so SIGTERM reaches it and a
-    # restart does not wait out Docker's 10 s stop timeout.
-    command: >-
-      sh -c "python -m alembic upgrade head &&
-             exec uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload --reload-dir /app/app"
-    volumes:
-      - ./backend:/app
-      # Read-only mount so test_*_docs.py tests that read ../docs/*.md
-      # from backend/ can resolve the path inside the container.
-      - ./docs:/docs:ro
-      # Same reason for examples/: test_dlp_docs.py validates the example
-      # policy profiles in examples/*.json against the PolicyProfile
-      # dataclass. Without this mount all 24 of its assertions fail on a
-      # missing path, which is why the file sat in pyproject's --ignore
-      # list rather than being fixed.
-      - ./examples:/examples:ro
-      # FIX127 E2 — the cross-tree gates (tool-policy parity with the
-      # chat-edge tool registry, the egress invariant that reads Go source,
-      # the service-JWT compose wiring) are quarantined ONLY while the
-      # sibling tree is absent (tests/QUARANTINE.md O8-2/3/4). Mounted
-      # read-only here, they are hard gates in the dev lane too, not just in
-      # CI. FIX128: the desktop parity scan reads the tools sidecar
-      # (SranDesktop/src) AND the Electron host's tools (apps/desktop/src),
-      # so both are mounted and the desktop gate is a hard gate here too.
-      - ./services/chat-edge-api:/services/chat-edge-api:ro
-      - ./SranDesktop/src:/SranDesktop/src:ro
-      - ./apps/desktop/src:/apps/desktop/src:ro
-      - ./docker-compose.yml:/docker-compose.yml:ro
-      - ./docker-compose.prod.yml:/docker-compose.prod.yml:ro
     environment:
-      # Schema-drift guard (FIX 3): dev hot-reloads source, so code can
-      # advance past a long-lived container's schema — the container's own
-      # `alembic upgrade head` (in `command:` above) runs once at container
-      # START, and a hot reload does not re-run it.
-      #
-      # FIX90: that gap used to be closed by `autoupgrade`, which applied the
-      # pending migrations IN-PROCESS. It meant any import of the app — a
-      # pytest run inside the container, a one-off `python -c` — silently
-      # migrated the developer's database; FIX88's migration 088 reached the
-      # live database that way, not by anyone running it. A guard that
-      # changes the thing it is guarding is not a guard.
-      #
-      # The default is now the same as prod's: refuse to start and name the
-      # command. Measured on a scratch stack (own project, own volume, no
-      # published ports): on an EMPTY volume the container command migrates
-      # before uvicorn, so a fresh clone boots normally (healthy in 25 s);
-      # with the DB deliberately one revision behind, the app refuses with
-      # "SCHEMA DRIFT: DB at 087, code needs 088 - refusing to start", the
-      # CONTAINER stays up (uvicorn's reloader outlives the failed app), so
-      # `make migrate` reaches it, and the next reload comes back 200.
-      # Set SCHEMA_DRIFT_MODE=autoupgrade in your own .env to opt back in.
-      SCHEMA_DRIFT_MODE: ${SCHEMA_DRIFT_MODE:-failclosed}
-      # watchfiles polls on the Windows-to-container bridge — docker
-      # inotify events don't always propagate through the Hyper-V layer.
-      WATCHFILES_FORCE_POLLING: "true"
+      # web-chat / admin / portal are also opened on 127.0.0.1, not only
+      # localhost; the base file lists the localhost origins only.
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
-
-  # FIX129 — the ops watcher runs the same checkout the dev backend runs
-  # (read-only), so a change to app/ops/watch.py is live on its next
-  # restart without an image build. Prod runs it from the image.
-  ops-watch:
-    volumes:
-      - ./backend:/app:ro
 
   admin-ui:
     # Run next dev out of a plain node image against the bind-mounted
