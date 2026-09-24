@@ -212,6 +212,15 @@ describe("FIX132 — a failed file says why, in Thai, and can be retried", () =>
     expect(screen.getByTestId("kb-doc-reason")).not.toHaveTextContent("raw english");
   });
 
+  it("extract_unavailable blames the reader being down, not the file", async () => {
+    mockApi.listKBDocuments.mockResolvedValue([doc({ status: "failed", error_code: "extract_unavailable", error_message: "raw english" })]);
+    await openKB();
+    const reason = await screen.findByTestId("kb-doc-reason");
+    expect(reason).toHaveTextContent("ระบบอ่านไฟล์ไม่พร้อมทำงาน");
+    expect(reason).not.toHaveTextContent(th["kb.err.extract_failed"]);
+    expect(reason).not.toHaveTextContent(th["kb.err.unknown"]);
+  });
+
   it("ลองใหม่ reindexes and the row goes back to รอคิว", async () => {
     mockApi.listKBDocuments.mockResolvedValueOnce([doc({ status: "failed", error_code: "extract_failed" })]).mockResolvedValue([doc({ status: "pending" })]);
     mockApi.reindexKBDocument.mockResolvedValue(null);

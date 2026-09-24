@@ -70,6 +70,7 @@ const DOC_ERROR_KEY: Record<string, DictKey> = {
   encrypted: "kb.err.encrypted",
   extract_failed: "kb.err.extract_failed",
   models_unavailable: "kb.err.models_unavailable",
+  extract_unavailable: "kb.err.extract_unavailable",
   internal: "kb.err.internal",
 };
 

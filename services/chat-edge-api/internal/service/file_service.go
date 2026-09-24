@@ -1993,7 +1993,7 @@ func (s *FileService) runPythonExtractorClassified(
 
 	if s.sandbox == nil {
 		slog.Warn("python extractor blocked: sandbox unavailable")
-		return "", meta, UnreadableUnknown, false
+		return "", meta, UnreadableUnavailable, false
 	}
 	inputName := "source" + filepath.Ext(path)
 	res, err := s.sandbox.Execute(parent, sandbox.Spec{
@@ -2007,8 +2007,10 @@ func (s *FileService) runPythonExtractorClassified(
 		defer res.Cleanup()
 	}
 	if err != nil || res == nil {
+		// The sandbox could not run the script at all (engine unreachable,
+		// image missing): nothing is known about the file itself.
 		slog.Warn("sandboxed python extractor failed", "err", err)
-		return "", meta, UnreadableUnknown, false
+		return "", meta, UnreadableUnavailable, false
 	}
 	if res.Exit != 0 {
 		reason := classifyExtractFailure(res.Exit, res.Stderr)

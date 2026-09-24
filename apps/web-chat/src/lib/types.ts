@@ -773,7 +773,7 @@ export interface KnowledgeDocument {
   progress_done?: number;
   progress_total?: number;
   /** FIX132 — why it failed: unsupported_type | too_large | empty_text |
-   *  encrypted | extract_failed | models_unavailable | internal. */
+   *  encrypted | extract_failed | models_unavailable | extract_unavailable | internal. */
   error_code?: string | null;
   error_message?: string | null;
   created_at: string;

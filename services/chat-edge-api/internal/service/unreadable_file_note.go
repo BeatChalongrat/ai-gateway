@@ -57,6 +57,12 @@ const (
 	UnreadableScanned   = "scanned"
 	UnreadableDamaged   = "damaged"
 	UnreadableUnknown   = "unknown"
+	// UnreadableUnavailable — FIX132 B: the extractor itself could not run
+	// (the sandbox is disabled or unreachable). It says nothing about the
+	// file, so the knowledge base retries instead of calling the file
+	// damaged. A chat attachment's marker does not carry it (the marker set
+	// above), so an attachment reads exactly as before.
+	UnreadableUnavailable = "unavailable"
 )
 
 // unreadableMarkerRE finds the reason FIX131 appends to a failed row's

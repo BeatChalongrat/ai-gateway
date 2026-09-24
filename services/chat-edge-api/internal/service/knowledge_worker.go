@@ -265,6 +265,12 @@ func (r *indexRun) fail(code, message string) {
 
 // retry puts the document back in the queue (kb-models could not serve it).
 func (r *indexRun) retry(err error) {
+	r.retryAs(err, model.KBErrModelsUnavailable, "The knowledge base models")
+}
+
+// retryAs requeues with backoff under code, and fails with it after the last
+// attempt. what names the part that was unavailable, for the row's message.
+func (r *indexRun) retryAs(err error, code, what string) {
 	if r.stopped() {
 		return
 	}
@@ -279,7 +285,7 @@ func (r *indexRun) retry(err error) {
 	}
 	attempts := r.doc.Attempts + 1
 	if attempts >= cfg.MaxAttempts {
-		r.fail(model.KBErrModelsUnavailable, "The knowledge base models were unavailable after "+strconv.Itoa(attempts)+" attempts: "+short(err))
+		r.fail(code, what+" were unavailable after "+strconv.Itoa(attempts)+" attempts: "+short(err))
 		return
 	}
 	delay := cfg.BackoffBase << (attempts - 1)
@@ -287,10 +293,10 @@ func (r *indexRun) retry(err error) {
 		delay = 10 * time.Minute
 	}
 	if e := r.w.svc.repo.RetryLater(r.ctx, r.doc.ID, r.claim, delay, true,
-		model.KBErrModelsUnavailable, "The knowledge base models are unavailable; retrying automatically ("+short(err)+")."); e != nil && !r.lost(e) {
+		code, what+" are unavailable; retrying automatically ("+short(err)+")."); e != nil && !r.lost(e) {
 		r.log.Warn("kb index: could not requeue", "err", e)
 	}
-	r.log.Info("kb index: models unavailable, requeued", "attempt", attempts, "delay", delay.String(), "err", err)
+	r.log.Info("kb index: unavailable, requeued", "code", code, "attempt", attempts, "delay", delay.String(), "err", err)
 }
 
 // modelError routes a kb-models error: interruption, retry, or failure.
@@ -340,6 +346,8 @@ func (w *KnowledgeWorker) index(ctx, docCtx context.Context, doc *model.Knowledg
 			r.fail(model.KBErrEmptyText, "No text could be read from this file (a scan with no recognisable text).")
 		case "unsupported":
 			r.fail(model.KBErrUnsupportedType, "This file type cannot be indexed.")
+		case UnreadableUnavailable:
+			r.retryAs(errors.New("the file reader could not run"), model.KBErrExtractUnavailable, "The file reader")
 		default:
 			r.fail(model.KBErrExtractFailed, "The file could not be read (damaged, or an unsupported variant of the format).")
 		}

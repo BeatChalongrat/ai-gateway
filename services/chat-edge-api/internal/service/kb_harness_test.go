@@ -37,6 +37,7 @@ func (e stubExtractor) ExtractKnowledgeText(ctx context.Context, key, _ string) 
 	s := string(b)
 	for marker, reason := range map[string]string{
 		"%ENCRYPTED": UnreadableEncrypted, "%SCANNED": UnreadableScanned, "%DAMAGED": UnreadableDamaged,
+		"%UNAVAILABLE": "unavailable", // the extractor itself could not run (sandbox off / unreachable)
 	} {
 		if strings.HasPrefix(s, marker) {
 			return "", reason, false

@@ -84,6 +84,9 @@ const (
 	KBErrEncrypted         = "encrypted"
 	KBErrExtractFailed     = "extract_failed"
 	KBErrModelsUnavailable = "models_unavailable"
+	// KBErrExtractUnavailable — the file reader (extraction sandbox) could
+	// not run; retried like a model outage, never blamed on the file.
+	KBErrExtractUnavailable = "extract_unavailable"
 	KBErrInternal          = "internal"
 )
 
