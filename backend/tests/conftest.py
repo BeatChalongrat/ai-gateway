@@ -235,8 +235,19 @@ def _alert_channels_off_by_default(monkeypatch):
         from app.core.config import settings
     except Exception:
         return
-    for name in ("alert_ntfy_url", "alert_ntfy_token", "alert_email_to", "alert_webhook_url"):
+    # FIX131: the test topic and the environment label too — a test that
+    # wants either sets it itself.
+    for name in ("alert_ntfy_url", "alert_ntfy_token", "alert_email_to", "alert_webhook_url",
+                 "alert_test_ntfy_url", "alert_environment"):
         monkeypatch.setattr(settings, name, "", raising=False)
+    # FIX131: the pager's shared store is Redis in a real process; every test
+    # gets its own empty in-memory store (no Redis, no state between tests).
+    try:
+        from app.services import alert_pager
+
+        monkeypatch.setattr(alert_pager, "_store", alert_pager.MemoryStore(), raising=False)
+    except Exception:
+        pass
     yield
 
 

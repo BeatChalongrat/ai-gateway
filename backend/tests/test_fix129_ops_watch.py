@@ -22,7 +22,10 @@ def test_stuck_transaction_seen_from_outside():
     ]
     assert classify_pg_activity("gateway", rows, stuck_after_s=60) [0].key == "pg:gateway:stuck"
     f = classify_pg_activity("gateway", rows, stuck_after_s=60)[0]
-    assert f.title == "transaction stuck 1500 s on gateway"
+    # FIX131: the title says what it means for users; the incident is the
+    # stuck-transaction group the backend rule reports into as well.
+    assert f.title == "Chat may hang: a database transaction is stuck (gateway, 25 min)"
+    assert f.incident == "db:gateway:stuck" and f.severity == "warning"
     assert "pid 31926 idle in transaction" in f.message and "2 session(s)" in f.message
     assert classify_pg_activity("gateway", rows, stuck_after_s=2000) == []
     assert classify_pg_activity("chat", [], stuck_after_s=60) == []
@@ -36,8 +39,11 @@ def test_turn_rules_from_the_chat_db():
     assert classify_turns(3, 0, **kw) == []
     f = classify_turns(0, 12, **kw)
     assert [x.key for x in f] == ["turns:none_succeeded", "turns:error_rate"]
-    assert f[0].message == "12 turn(s) attempted in the last 5 min, none completed (12 failed)"
-    assert f[1].severity == "critical" and "12 of 12 turns failed" in f[1].message
+    assert f[0].message.startswith("12 turn(s) attempted in the last 5 min, none completed (12 failed).")
+    # FIX131: severity by impact — nothing succeeds = users cannot chat
+    # (critical); an error rate is degraded (warning), however high.
+    assert f[0].severity == "critical"
+    assert f[1].severity == "warning" and "12 of 12 turns failed" in f[1].message
     assert classify_turns(8, 1, **kw) == []                       # below the sample floor
     g = classify_turns(93, 7, **kw)
     assert [x.key for x in g] == ["turns:error_rate"] and g[0].severity == "warning"
@@ -101,19 +107,28 @@ def test_ready_probe_outcomes():
     assert "does not answer" in g[0].title and "ReadTimeout" in g[0].message
 
 
-def test_alert_state_cooldown_and_recovery():
+def test_alert_state_pages_once_and_recovers_once():
+    """FIX131: the watcher no longer re-announces an open finding every 10
+    minutes (OPS_WATCH_COOLDOWN); the pager pages once per incident, stays
+    quiet while it is open, and sends one "recovered" when it closes."""
+    from app.services.alert_pager import MemoryStore
+
     clock = {"t": 1000.0}
-    state = AlertState(cooldown_s=600, now=lambda: clock["t"])
+    sent: list = []
+    state = AlertState(store=MemoryStore(now=lambda: clock["t"]), now=lambda: clock["t"])
+    state.pager._send = lambda n: sent.append(n) or {"ntfy": True}
     f = classify_ready(503, {"failures": ["x"]}, None)
-    announce, recovered = state.step(f)
-    assert [a.key for a in announce] == ["backend:ready"] and recovered == []
+    state.step(f)
+    assert [n.title for n in sent] == ["Chat is down: the backend is not ready"]
+    assert sent[0].severity == "critical"
     clock["t"] += 60
-    announce, recovered = state.step(f)
-    assert announce == [] and recovered == []           # inside the cooldown: quiet
+    state.step(f)
     clock["t"] += 600
-    announce, _ = state.step(f)
-    assert len(announce) == 1                            # re-announced after the cooldown
-    announce, recovered = state.step([])
-    assert announce == [] and [r.key for r in recovered] == ["backend:ready"]
-    announce, _ = state.step(f)
-    assert len(announce) == 1                            # a fresh incident announces at once
+    state.step(f)
+    assert len(sent) == 1                                # open incident: quiet (no 10-min re-announce)
+    clock["t"] += 30
+    state.step([])
+    assert len(sent) == 2 and sent[1].title == "Recovered: Chat is down: the backend is not ready"
+    assert sent[1].severity == "low"
+    state.step(f)
+    assert len(sent) == 3                                # a fresh incident pages at once

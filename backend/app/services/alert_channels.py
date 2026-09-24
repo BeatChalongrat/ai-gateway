@@ -68,7 +68,8 @@ def register_secret_url(url: str | None) -> None:
 class _HideAlertUrls(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         urls = {u for u in ((settings.alert_ntfy_url or "").strip(),
-                            (settings.alert_webhook_url or "").strip()) if u} | _SECRET_URLS
+                            (settings.alert_webhook_url or "").strip(),
+                            (getattr(settings, "alert_test_ntfy_url", "") or "").strip()) if u} | _SECRET_URLS
         if not urls:
             return True
         try:
@@ -89,18 +90,28 @@ _httpx_logger = logging.getLogger("httpx")
 if not any(isinstance(f, _HideAlertUrls) for f in _httpx_logger.filters):
     _httpx_logger.addFilter(_HideAlertUrls())
 
-# ntfy priority scale: 1 min … 5 max/urgent.
-_NTFY_PRIORITY = {"info": "3", "warning": "4", "critical": "5"}
+# ntfy priority scale: 1 min … 5 max/urgent. FIX131: "low" (2 — no sound,
+# no vibration) for "recovered" notes; "critical" (5) is only for "users
+# cannot use the system" (alert_pager / alert_catalog decide which).
+_NTFY_PRIORITY = {"low": "2", "info": "3", "warning": "4", "critical": "5"}
+
+# FIX131 D4 — environment names whose alerts are tests: labelled [TEST] and
+# routed to ALERT_TEST_NTFY_URL only. Real names carry no label.
+TEST_ENVIRONMENTS = frozenset({"test", "testing", "ci", "lane", "test-stack"})
+_REAL_ENVIRONMENTS = frozenset({"", "prod", "production", "live"})
 
 
 @dataclass(frozen=True)
 class Notification:
     title: str
     message: str
-    severity: str = "warning"  # info | warning | critical
+    severity: str = "warning"  # low | info | warning | critical
     source: str = "backend"
     tags: tuple[str, ...] = field(default_factory=tuple)
     details: dict = field(default_factory=dict)
+    # FIX131 D4 — a test fire: labelled [TEST] and sent to the test topic
+    # only, whatever the environment.
+    test: bool = False
 
     def payload(self) -> dict:
         return {
@@ -112,10 +123,48 @@ class Notification:
             "tags": list(self.tags),
             "details": self.details,
             "fired_at": datetime.now(timezone.utc).isoformat(),
+            **({"test": True} if self.test else {}),
         }
 
 
-def configured_channels() -> list[str]:
+def environment_name() -> str:
+    return (getattr(settings, "alert_environment", "") or "").strip().lower()
+
+
+def is_test_environment() -> bool:
+    return environment_name() in TEST_ENVIRONMENTS
+
+
+def environment_label(test: bool = False) -> str:
+    """The prefix every alert of this deployment carries: ``[TEST]`` for a
+    test environment or a test fire, ``[STAGING]`` etc. for another named
+    one, nothing for the real system."""
+    env = environment_name()
+    if test or env in TEST_ENVIRONMENTS:
+        return "[TEST]"
+    if env in _REAL_ENVIRONMENTS:
+        return ""
+    return f"[{env.upper()}]"
+
+
+def labelled(n: Notification) -> Notification:
+    """``n`` with the environment label on its title AND its body."""
+    label = environment_label(n.test)
+    if not label:
+        return n
+
+    def _l(text: str) -> str:
+        return text if text.startswith(label) else f"{label} {text}"
+
+    return dataclasses.replace(n, title=_l(n.title), message=_l(n.message))
+
+
+def configured_channels(test: bool = False) -> list[str]:
+    """Where an alert goes. A test (``test=True`` or a test environment)
+    goes to ``ntfy-test`` (ALERT_TEST_NTFY_URL) or nowhere — never to the
+    owner's channels."""
+    if test or is_test_environment():
+        return ["ntfy-test"] if (getattr(settings, "alert_test_ntfy_url", "") or "").strip() else []
     out = []
     if (settings.alert_ntfy_url or "").strip():
         out.append("ntfy")
@@ -137,18 +186,22 @@ def _header_value(text: str) -> str:
         return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode("ascii") + "?="
 
 
-def _send_ntfy(n: Notification, client: httpx.Client) -> bool:
-    url = settings.alert_ntfy_url.strip()
+def _send_ntfy(n: Notification, client: httpx.Client, *, test: bool = False) -> bool:
+    # FIX131 D4 — the test topic never gets the owner's token.
+    url = (settings.alert_test_ntfy_url if test else settings.alert_ntfy_url).strip()
+    token = "" if test else (settings.alert_ntfy_token or "").strip()
     # ntfy renders a known tag as an emoji (rotating_light, warning); the
     # severity word stays so the notification list is searchable by it.
     tags = (["rotating_light", "critical"] if n.severity == "critical" else [n.severity]) + list(n.tags)
+    if test:
+        tags.append("test")
     headers = {
         "Title": _header_value(n.title),
         "Priority": _NTFY_PRIORITY.get(n.severity, "3"),
         "Tags": ",".join(tags),
     }
-    if (settings.alert_ntfy_token or "").strip():
-        headers["Authorization"] = f"Bearer {settings.alert_ntfy_token.strip()}"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     r = client.post(url, content=n.message.encode("utf-8"), headers=headers)
     return 200 <= r.status_code < 300
 
@@ -188,19 +241,25 @@ def scrubbed(n: Notification) -> Notification:
 
 
 def deliver(n: Notification) -> dict[str, bool]:
-    """Send ``n`` on every configured channel. Returns {channel: ok}."""
-    n = scrubbed(n)
+    """Send ``n`` on every configured channel. Returns {channel: ok}.
+
+    FIX131 D4 — labelled with the environment ([TEST] …) and, for a test
+    (a test fire or a test environment), sent to ALERT_TEST_NTFY_URL only."""
+    test = n.test or is_test_environment()
+    n = labelled(scrubbed(n))
     outcomes: dict[str, bool] = {}
-    channels = configured_channels()
+    channels = configured_channels(test=test)
     if not channels:
         logger.warning(
-            "alert_no_channel_configured", title=n.title, severity=n.severity
+            "alert_no_channel_configured", title=n.title, severity=n.severity, test=test
         )
         return outcomes
     with httpx.Client(timeout=_TIMEOUT_S) as client:
         for ch in channels:
             try:
-                if ch == "ntfy":
+                if ch == "ntfy-test":
+                    ok = _send_ntfy(n, client, test=True)
+                elif ch == "ntfy":
                     ok = _send_ntfy(n, client)
                 elif ch == "email":
                     ok = _send_email(n)
@@ -208,7 +267,8 @@ def deliver(n: Notification) -> dict[str, bool]:
                     ok = _send_webhook(n, client)
             except Exception as exc:  # noqa: BLE001 — delivery never raises
                 err = str(exc)
-                for u in (settings.alert_ntfy_url, settings.alert_webhook_url):
+                for u in (settings.alert_ntfy_url, settings.alert_webhook_url,
+                          getattr(settings, "alert_test_ntfy_url", "")):
                     if (u or "").strip():
                         err = err.replace(u.strip(), url_label(u.strip()))
                 logger.warning(

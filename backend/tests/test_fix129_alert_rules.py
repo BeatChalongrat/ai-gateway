@@ -151,8 +151,11 @@ class TestMetrics:
         monkeypatch.setattr(alert_channels, "deliver", lambda n: (sent.append(n) or {"ntfy": True}))
         session.add(_rule("no_successful_turn", 1.0))
         session.commit()
-        _log(session, "provider_error")
+        # FIX131: pages with a meaningful number of attempts (3) — one failed
+        # request in a quiet window is logged, not paged (test_fix131_pager).
+        for _ in range(3):
+            _log(session, "provider_error")
         fired = await AlertEvaluator().evaluate_all(session)
         assert len(fired) == 1
-        assert len(sent) == 1 and sent[0].severity in ("warning", "critical")
-        assert "none succeeded" in sent[0].message
+        assert len(sent) == 1 and sent[0].severity == "critical"
+        assert "none completed" in sent[0].message

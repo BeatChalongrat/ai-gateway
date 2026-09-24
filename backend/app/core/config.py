@@ -343,6 +343,23 @@ class Settings(BaseSettings):
     alert_ntfy_token: str = ""
     alert_email_to: str = ""
     alert_webhook_url: str = ""
+    # FIX131 D — which deployment an alert comes from. Empty / production /
+    # live = the real system (no label). Anything else prefixes every title
+    # and body ("[TEST] …", "[STAGING] …"); test / testing / ci / lane /
+    # test-stack also ROUTE every alert to alert_test_ntfy_url only, never to
+    # the channels above. A test fire is always [TEST] and goes there too.
+    alert_environment: str = ""
+    alert_test_ntfy_url: str = ""
+    # FIX131 D — the pager (services/alert_pager.py): one incident = one page
+    # + one "recovered". Re-paged only on escalation or after the reminder
+    # interval (urgent 4 h, high 24 h — Grafana's default repeat is 4 h);
+    # container / readiness findings must last alert_debounce_seconds before
+    # they page (a normal restart heals first); "no successful turn" pages
+    # only with at least alert_page_min_attempts attempts in the window.
+    alert_reminder_seconds: float = 14400.0
+    alert_reminder_high_seconds: float = 86400.0
+    alert_debounce_seconds: float = 90.0
+    alert_page_min_attempts: int = 3
     # Seed the three baseline rules (no successful turn, error rate,
     # stuck transaction) when no rule with that metric exists yet.
     alert_default_rules_enabled: bool = True
