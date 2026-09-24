@@ -90,21 +90,14 @@ export default function KnowledgeBasePage() {
     void loadAvailability(true).finally(() => setChecking(false));
   }, [loadAvailability]);
 
+  // FIX132 — confirmed in the app (window.confirm is a bare system box in
+  // the desktop app); a refusal is said inside the dialog.
+  const [confirmKB, setConfirmKB] = useState<KnowledgeBase | null>(null);
   async function handleDeleteKB(kb: KnowledgeBase) {
-    if (
-      !window.confirm(
-        tOutside("kb.confirmDelete", { name: kb.name, docs: String(kb.document_count), chunks: String(kb.total_chunks) }),
-      )
-    ) {
-      return;
-    }
-    try {
-      await deleteKB(kb.id);
-      toast(tOutside("kb.toast.deleted"));
-      if (expandedId === kb.id) setExpandedId(null);
-    } catch {
-      toast(tOutside("kb.toast.deleteFailed"));
-    }
+    await deleteKB(kb.id);
+    toast(tOutside("kb.toast.deleted"));
+    if (expandedId === kb.id) setExpandedId(null);
+    setConfirmKB(null);
   }
 
   const hasKBs = loaded && knowledgeBases.length > 0;
@@ -178,7 +171,7 @@ export default function KnowledgeBasePage() {
                   onToggle={() =>
                     setExpandedId((id) => (id === kb.id ? null : kb.id))
                   }
-                  onDelete={() => void handleDeleteKB(kb)}
+                  onDelete={() => setConfirmKB(kb)}
                   canUpload={canUse}
                 />
               ))}
@@ -186,6 +179,24 @@ export default function KnowledgeBasePage() {
           )}
         </div>
       </main>
+
+      <ConfirmDialog
+        open={confirmKB !== null}
+        title={t("kb.confirmKb.title")}
+        body={
+          confirmKB
+            ? t("kb.confirmDelete", {
+                name: confirmKB.name,
+                docs: String(confirmKB.document_count),
+                chunks: String(confirmKB.total_chunks),
+              })
+            : ""
+        }
+        actionLabel={t("kb.confirmKb.action")}
+        errorLabel={t("kb.toast.deleteFailed")}
+        onCancel={() => setConfirmKB(null)}
+        onConfirm={() => (confirmKB ? handleDeleteKB(confirmKB) : Promise.resolve())}
+      />
 
       <CreateKBModal
         open={createOpen}
@@ -462,14 +473,12 @@ function KBDocumentsPanel({
     if (files.length > 0) void uploadFiles(kb.id, files);
   }
 
+  // FIX132 — the confirmation says what deleting means for answers.
+  const [confirmDoc, setConfirmDoc] = useState<KnowledgeDocument | null>(null);
   async function handleDeleteDoc(doc: KnowledgeDocument) {
-    if (!window.confirm(t("kb.confirmDeleteDoc", { name: doc.filename }))) return;
-    try {
-      await deleteDocument(kb.id, doc.id);
-      toast(tOutside("kb.toast.docDeleted"));
-    } catch {
-      toast(tOutside("kb.toast.docDeleteFailed"));
-    }
+    await deleteDocument(kb.id, doc.id);
+    toast(tOutside("kb.toast.docDeleted"));
+    setConfirmDoc(null);
   }
 
   return (
@@ -563,13 +572,87 @@ function KBDocumentsPanel({
             <DocumentRow
               key={doc.id}
               doc={doc}
-              onDelete={() => void handleDeleteDoc(doc)}
+              onDelete={() => setConfirmDoc(doc)}
               onRetry={() => reindexDocument(kb.id, doc.id)}
             />
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={confirmDoc !== null}
+        title={t("kb.confirmDoc.title")}
+        body={confirmDoc ? t("kb.confirmDoc.body", { name: confirmDoc.filename }) : ""}
+        actionLabel={t("kb.confirmDoc.action")}
+        errorLabel={t("kb.toast.docDeleteFailed")}
+        onCancel={() => setConfirmDoc(null)}
+        onConfirm={() => (confirmDoc ? handleDeleteDoc(confirmDoc) : Promise.resolve())}
+      />
     </div>
+  );
+}
+
+/** A destructive action confirmed inside the app. `onConfirm` throws when
+ *  the server refused; the dialog then stays open and says so. */
+function ConfirmDialog({
+  open,
+  title,
+  body,
+  actionLabel,
+  errorLabel,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  body: string;
+  actionLabel: string;
+  errorLabel: string;
+  onCancel: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!open) {
+      setBusy(false);
+      setFailed(false);
+    }
+  }, [open]);
+  return (
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={title}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel}>
+            {t("common.cancel")}
+          </Button>
+          <Button
+            variant="danger"
+            loading={busy}
+            onClick={() => {
+              setBusy(true);
+              setFailed(false);
+              onConfirm()
+                .catch(() => setFailed(true))
+                .finally(() => setBusy(false));
+            }}
+          >
+            {actionLabel}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-text-secondary">{body}</p>
+      {failed ? (
+        <p role="alert" className="mt-3 text-xs text-status-danger">
+          {errorLabel}
+        </p>
+      ) : null}
+    </Modal>
   );
 }
 
