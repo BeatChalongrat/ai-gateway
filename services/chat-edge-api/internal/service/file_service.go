@@ -1406,6 +1406,43 @@ func (s *FileService) ExtractTextForStorageKey(
 	}
 }
 
+// kbTextReadCap bounds how much of a plain-text knowledge document is read
+// (FIX132 B). The conversation-file path reads 2 × maxExtractedChars because
+// it feeds a prompt; a knowledge base indexes the whole file, so it reads up
+// to the upload limit's order of magnitude instead.
+const kbTextReadCap = 64 << 20
+
+// ExtractKnowledgeText reads a knowledge-base document IN FULL (FIX132 B):
+// text types straight from storage (up to kbTextReadCap), PDF / Office
+// through the sandboxed extractor. On failure reason is the extractor's
+// closed-set reason (UnreadableEncrypted / UnreadableScanned /
+// UnreadableDamaged / UnreadableUnknown) or "unsupported" for a type it
+// cannot read.
+func (s *FileService) ExtractKnowledgeText(ctx context.Context, key, contentType string) (text, reason string, ok bool) {
+	ct := strings.ToLower(contentType)
+	switch {
+	case ct == "text/plain", ct == "text/csv", ct == "text/markdown", ct == "application/json":
+		body, _, _, err := s.storage.Download(ctx, key)
+		if err != nil {
+			return "", UnreadableUnknown, false
+		}
+		defer body.Close()
+		buf, err := io.ReadAll(io.LimitReader(body, kbTextReadCap))
+		if err != nil {
+			return "", UnreadableUnknown, false
+		}
+		return string(buf), "", true
+	case ct == "application/pdf",
+		ct == "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		ct == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		ct == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		t, _, r, ok := s.runPythonExtractorClassified(ctx, key, ct)
+		return t, r, ok
+	default:
+		return "", "unsupported", false
+	}
+}
+
 const maxExtractedChars = 50_000
 
 // extract dispatches on content type. Returns (status, text) where

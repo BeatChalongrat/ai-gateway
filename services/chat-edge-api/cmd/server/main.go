@@ -557,8 +557,14 @@ func main() {
 			StorageRoot:      cfg.FileStorageRoot + "/knowledge",
 			MaxFileSizeBytes: 50 * 1024 * 1024,
 			EmbedBatchSize:   service.KBEmbedBatchMax,
+			ChunkSize:        cfg.KBChunkSize,
+			ChunkOverlap:     cfg.KBChunkOverlap,
 		},
 	)
+	// FIX132 B — documents are indexed in the background (started below
+	// with the other background loops; stopped by the shutdown drain, which
+	// hands an in-flight document back to the queue).
+	kbWorker := service.NewKnowledgeWorker(knowledgeSvc, service.KnowledgeWorkerConfig{Workers: cfg.KBIndexWorkers})
 	ragSvc := service.NewRAGService(knowledgeRepo, kbModels)
 	messageSvc.SetRAGReader(ragSvc)
 	// Phase 4 — project context (shared instructions + KB) inherited by
@@ -811,6 +817,11 @@ func main() {
 	slog.Info("unattached file sweep", "mode", unattachedSweep.Mode,
 		"ttl", unattachedSweep.TTL.String(), "interval", unattachedSweep.Interval.String())
 	startBackground(unattachedSweep.StartBackground)
+
+	// FIX132 B — the knowledge-base indexer: KB_INDEX_WORKERS goroutines plus
+	// a sweeper that returns documents a dead process left 'processing'.
+	slog.Info("knowledge base indexer", "workers", kbWorker.Workers())
+	startBackground(kbWorker.StartBackground)
 
 	// FIX16 — cloud scheduled tasks: the always-on firing goroutine. OFF
 	// unless CLOUD_SCHEDULER_ENABLED=true. The runner authorizes EVERY fire

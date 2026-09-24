@@ -79,6 +79,14 @@ type Config struct {
 	// the knowledge base reports itself unavailable) — document text never
 	// leaves the host. docs/ops/knowledge-base.md.
 	KBModelsURL string `env:"KB_MODELS_URL" envDefault:"http://kb-models:8090"`
+	// KB_INDEX_WORKERS — background indexing goroutines (1..4). kb-models
+	// runs one request at a time, so two keep it busy while one document is
+	// being extracted (OCR can take minutes).
+	KBIndexWorkers int `env:"KB_INDEX_WORKERS" envDefault:"2"`
+	// KB_CHUNK_SIZE / KB_CHUNK_OVERLAP — the chunker's defaults in characters
+	// (runes) for new knowledge bases and for rows still on the old 512/50.
+	KBChunkSize    int `env:"KB_CHUNK_SIZE" envDefault:"1000"`
+	KBChunkOverlap int `env:"KB_CHUNK_OVERLAP" envDefault:"150"`
 
 	// Optional whole-request deadline for the gateway client (Batch A).
 	// Default 0 = unbounded: Client.Timeout covers the entire streamed

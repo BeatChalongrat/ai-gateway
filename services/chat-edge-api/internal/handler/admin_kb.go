@@ -291,11 +291,10 @@ func (h *AdminHandler) DeleteKnowledgeBase(w http.ResponseWriter, r *http.Reques
 // POST /admin/knowledge-bases/{id}/reindex
 // ---------------------------------------------------------------------------
 
-// ReindexKnowledgeBase walks every document in the KB and triggers a
-// reindex through KnowledgeService. The current ReindexDocument
-// implementation is synchronous and can take seconds per document;
-// for a KB with many docs the call may take a while. The handler
-// returns a summary once everything has finished.
+// ReindexKnowledgeBase walks every document in the KB and queues a
+// reindex through KnowledgeService (FIX132 B: each document's chunks are
+// deleted and it goes back to 'pending'; the background indexer does the
+// work). Returns how many were queued.
 func (h *AdminHandler) ReindexKnowledgeBase(w http.ResponseWriter, r *http.Request) {
 	kbID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {

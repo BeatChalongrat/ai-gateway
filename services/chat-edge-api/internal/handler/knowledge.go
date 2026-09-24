@@ -9,7 +9,7 @@
 //	PATCH  /api/v1/knowledge-bases/{id}                  update KB
 //	DELETE /api/v1/knowledge-bases/{id}                  delete KB (cascade)
 //	GET    /api/v1/knowledge-bases/{id}/documents        list docs
-//	POST   /api/v1/knowledge-bases/{id}/documents        upload doc + index
+//	POST   /api/v1/knowledge-bases/{id}/documents        upload doc (202; indexed in the background)
 //	DELETE /api/v1/knowledge-bases/{id}/documents/{docId} delete doc
 //	POST   /api/v1/knowledge-bases/{id}/documents/{docId}/reindex
 //	POST   /api/v1/knowledge-bases/{id}/search           debug RAG search
@@ -338,8 +338,10 @@ func (h *KnowledgeHandler) UploadDocument(w http.ResponseWriter, r *http.Request
 		h.writeUploadError(w, err)
 		return
 	}
+	// FIX132 B — indexing runs in the background: 202 with the pending row;
+	// the client follows status / progress_done / progress_total.
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(toKBDocResponse(doc))
 }
 
@@ -388,6 +390,7 @@ func (h *KnowledgeHandler) ReindexDocument(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(toKBDocResponse(doc))
 }
 

@@ -1,20 +1,21 @@
-// KnowledgeService — orchestrates KB CRUD, document upload, and the
-// extract → chunk → embed → store pipeline.
+// KnowledgeService — knowledge-base CRUD and document upload / delete /
+// re-index. Indexing itself (extract → chunk → embed → store) runs in the
+// background (knowledge_worker.go).
 //
-// Synchronous indexing (Phase 3 contract): the upload handler waits
-// for IndexDocument to finish before returning. For 50-page PDFs
-// this can take ~30s; that's acceptable for now. A background
-// worker queue is on the Phase 4 roadmap.
+// FIX132 B — an upload stores the file and a 'pending' row and returns at
+// once (202); a worker picks the document up, reports progress per batch,
+// and marks it indexed or failed with a closed-set error code. Until
+// FIX132 the upload request itself extracted and embedded every chunk, one
+// HTTP call per chunk, so a 50-page PDF held the request for minutes.
 //
-// Storage layout mirrors FileService (one directory per tenant per
-// KB) so the on-disk shape stays predictable across products.
+// Storage layout mirrors FileService (one directory per tenant per KB) so
+// the on-disk shape stays predictable across products.
 package service
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"mime/multipart"
 	"strings"
 
@@ -57,22 +58,32 @@ var allowedKBContentTypes = map[string]bool{
 	"text/plain": true,
 }
 
-// TextExtractor is the slice of FileService the KB service needs.
-// Tiny interface keeps the dependency direction clean. The
-// implementation reads the object via the shared storage.Backend and
-// materialises a local copy when the extractor needs one — callers
-// here only deal in storage keys.
+// TextExtractor is the slice of FileService the KB indexer needs: the whole
+// text of a stored document, or why it could not be read (FileService's
+// closed set: encrypted / scanned / damaged / unknown, or "unsupported").
 type TextExtractor interface {
-	ExtractTextForStorageKey(ctx context.Context, key, contentType string) (string, bool)
+	ExtractKnowledgeText(ctx context.Context, key, contentType string) (text, reason string, ok bool)
 }
 
-// KnowledgeServiceKnobs is the runtime config bag for the KB
-// pipeline. StorageRoot is retained for backwards-compat only — the
-// active path now goes through the storage.Backend instance.
+// KnowledgeServiceKnobs is the runtime config bag for the KB pipeline.
+// StorageRoot is retained for backwards-compat only — the active path goes
+// through the storage.Backend instance.
 type KnowledgeServiceKnobs struct {
 	StorageRoot      string
 	MaxFileSizeBytes int64
-	EmbedBatchSize   int
+	// EmbedBatchSize — chunks per kb-models embeddings call (≤ 16).
+	EmbedBatchSize int
+	// ChunkSize / ChunkOverlap — the chunker defaults in runes
+	// (KB_CHUNK_SIZE / KB_CHUNK_OVERLAP; 0 = DefaultKBChunkSize/Overlap).
+	ChunkSize    int
+	ChunkOverlap int
+}
+
+// indexControl is the background indexer as the service sees it: wake it
+// after an upload, stop its work on a document that was deleted or reset.
+type indexControl interface {
+	Notify()
+	Cancel(docID uuid.UUID)
 }
 
 type KnowledgeService struct {
@@ -81,6 +92,7 @@ type KnowledgeService struct {
 	extractor TextExtractor
 	storage   storage.Backend
 	knobs     KnowledgeServiceKnobs
+	indexer   indexControl
 }
 
 func NewKnowledgeService(
@@ -99,12 +111,33 @@ func NewKnowledgeService(
 	if knobs.EmbedBatchSize <= 0 || knobs.EmbedBatchSize > KBEmbedBatchMax {
 		knobs.EmbedBatchSize = KBEmbedBatchMax
 	}
+	if knobs.ChunkSize <= 0 {
+		knobs.ChunkSize = DefaultKBChunkSize
+	}
+	if knobs.ChunkOverlap < 0 {
+		knobs.ChunkOverlap = DefaultKBChunkOverlap
+	}
 	return &KnowledgeService{
 		repo:      repo,
 		models:    models,
 		extractor: extractor,
 		storage:   store,
 		knobs:     knobs,
+	}
+}
+
+// SetIndexer wires the background indexer (knowledge_worker.go).
+func (s *KnowledgeService) SetIndexer(c indexControl) { s.indexer = c }
+
+func (s *KnowledgeService) notify() {
+	if s.indexer != nil {
+		s.indexer.Notify()
+	}
+}
+
+func (s *KnowledgeService) cancelIndexing(docID uuid.UUID) {
+	if s.indexer != nil {
+		s.indexer.Cancel(docID)
 	}
 }
 
@@ -131,19 +164,30 @@ func (s *KnowledgeService) CreateKB(ctx context.Context, in CreateKBInput) (*mod
 	if len([]rune(in.Name)) > 255 {
 		in.Name = string([]rune(in.Name)[:255])
 	}
+	size, overlap := s.knobs.ChunkSize, s.knobs.ChunkOverlap
+	if in.ChunkSize > 0 {
+		size, overlap = in.ChunkSize, in.ChunkOverlap
+	}
+	size, overlap = clampChunking(size, overlap)
 	owner := in.UserID
 	return s.repo.CreateKB(ctx, &model.KnowledgeBase{
 		TenantID:     in.TenantID,
 		UserID:       &owner,
 		Name:         in.Name,
 		Description:  in.Description,
-		ChunkSize:    in.ChunkSize,
-		ChunkOverlap: in.ChunkOverlap,
+		ChunkSize:    size,
+		ChunkOverlap: overlap,
 	})
 }
 
 func (s *KnowledgeService) ListKBs(ctx context.Context, tenantID uuid.UUID) ([]model.KnowledgeBase, error) {
 	return s.repo.ListKBs(ctx, tenantID)
+}
+
+// IndexingCounts returns, per knowledge base, how many documents are
+// pending / processing / failed.
+func (s *KnowledgeService) IndexingCounts(ctx context.Context, kbIDs []uuid.UUID) (map[uuid.UUID]repository.IndexingCounts, error) {
+	return s.repo.CountIndexing(ctx, kbIDs)
 }
 
 func (s *KnowledgeService) GetKB(ctx context.Context, tenantID, id uuid.UUID) (*model.KnowledgeBase, error) {
@@ -177,6 +221,9 @@ func (s *KnowledgeService) DeleteKB(ctx context.Context, tenantID, id uuid.UUID)
 	// Pull documents first so we can unlink on-disk blobs after the
 	// row is gone. The FK cascade already wipes the DB rows.
 	docs, _ := s.repo.ListDocuments(ctx, tenantID, id)
+	for _, d := range docs {
+		s.cancelIndexing(d.ID)
+	}
 	if err := s.repo.DeleteKB(ctx, tenantID, id); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrKBNotFound
@@ -205,9 +252,7 @@ func (s *KnowledgeService) ListDocuments(ctx context.Context, tenantID, kbID uui
 type UploadDocumentInput struct {
 	TenantID        uuid.UUID
 	KnowledgeBaseID uuid.UUID
-	// UserID is the uploading end-user (FIX 2) — forwarded to the gateway
-	// so the embedding egress is attributed/audited to them. May be Nil
-	// for system callers (indexDocument falls back to the tenant marker).
+	// UserID is the uploading user (recorded as uploaded_by).
 	UserID       uuid.UUID
 	OriginalName string
 	ContentType  string
@@ -215,10 +260,10 @@ type UploadDocumentInput struct {
 	Body         multipart.File
 }
 
-// UploadDocument validates + persists the blob, creates the row, and
-// runs the full extract → chunk → embed → store pipeline before
-// returning. The returned row reflects post-index state (status =
-// "indexed" on success, "failed" with error_message on failure).
+// UploadDocument validates and stores the file, creates the row as
+// 'pending', wakes the indexer and returns at once — the handler answers
+// 202. The row's progress_done / progress_total and status tell the client
+// how indexing is going.
 func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocumentInput) (*model.KnowledgeDocument, error) {
 	if in.Size <= 0 {
 		return nil, ErrKBDocumentEmpty
@@ -247,49 +292,61 @@ func (s *KnowledgeService) UploadDocument(ctx context.Context, in UploadDocument
 	if err := s.storage.Upload(ctx, key, in.Body, in.ContentType, in.Size); err != nil {
 		return nil, fmt.Errorf("kb storage upload: %w", err)
 	}
-	written := in.Size
 
+	var uploader *uuid.UUID
+	if in.UserID != uuid.Nil {
+		u := in.UserID
+		uploader = &u
+	}
 	doc, err := s.repo.CreateDocument(ctx, &model.KnowledgeDocument{
+		ID:               docID,
 		KnowledgeBaseID:  kb.ID,
 		TenantID:         in.TenantID,
 		Filename:         storageName,
 		OriginalFilename: clean,
-		ContentType:      in.ContentType,
-		FileSizeBytes:    written,
+		ContentType:      strings.ToLower(in.ContentType),
+		FileSizeBytes:    in.Size,
 		StoragePath:      key,
-		Status:           "processing",
+		Status:           "pending",
+		UploadedBy:       uploader,
 	})
 	if err != nil {
 		_ = s.storage.Delete(ctx, key)
 		return nil, err
 	}
-	// Run the indexer synchronously per Phase 3 contract. Errors are
-	// recorded on the row but we still return success — the user can
-	// see "failed" in the UI and retry via reindex.
-	if err := s.indexDocument(ctx, kb, doc, in.UserID); err != nil {
-		slog.Warn("kb index failed", "doc_id", doc.ID.String(), "err", err)
+	_ = s.repo.RecomputeKBStats(ctx, kb.ID)
+	s.notify()
+	if fresh, err := s.repo.GetDocument(ctx, in.TenantID, doc.ID); err == nil {
+		return fresh, nil
 	}
-	// Re-fetch so the response carries post-index state.
-	updated, err := s.repo.GetDocument(ctx, in.TenantID, doc.ID)
-	if err != nil {
-		return doc, nil
-	}
-	return updated, nil
+	return doc, nil
 }
 
-// DeleteDocument removes the row + blob + cascaded chunks, then
-// recomputes the KB's denormalised counters.
-func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) error {
+// GetDocument returns one document of the knowledge base.
+func (s *KnowledgeService) GetDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
 	doc, err := s.repo.GetDocument(ctx, tenantID, docID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return ErrKBDocumentNotFound
+			return nil, ErrKBDocumentNotFound
 		}
-		return err
+		return nil, err
 	}
 	if doc.KnowledgeBaseID != kbID {
-		return ErrKBDocumentNotFound
+		return nil, ErrKBDocumentNotFound
 	}
+	return doc, nil
+}
+
+// DeleteDocument stops any indexing of the document, removes the row (its
+// chunks cascade) and the blob, then recomputes the KB's counters. A worker
+// in another process notices at its next batch: its fenced write matches no
+// row. (Cancel first: cancelling after would race a fresh claim.)
+func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) error {
+	doc, err := s.GetDocument(ctx, tenantID, kbID, docID)
+	if err != nil {
+		return err
+	}
+	s.cancelIndexing(docID)
 	if err := s.repo.DeleteDocument(ctx, tenantID, docID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return ErrKBDocumentNotFound
@@ -303,114 +360,21 @@ func (s *KnowledgeService) DeleteDocument(ctx context.Context, tenantID, kbID, d
 	return nil
 }
 
-// ReindexDocument wipes the existing chunks and re-runs the
-// pipeline. Used when chunk-size config changes or extraction
-// previously failed and the user wants to try again.
+// ReindexDocument deletes the document's chunks and puts it back in the
+// queue as 'pending' (a re-index after a model or chunking change, or a
+// retry after a failure). Any indexing of it in progress stops.
 func (s *KnowledgeService) ReindexDocument(ctx context.Context, tenantID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, error) {
-	doc, err := s.repo.GetDocument(ctx, tenantID, docID)
-	if err != nil {
+	if _, err := s.GetDocument(ctx, tenantID, kbID, docID); err != nil {
+		return nil, err
+	}
+	s.cancelIndexing(docID)
+	if err := s.repo.ResetDocumentForReindex(ctx, tenantID, docID); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrKBDocumentNotFound
 		}
 		return nil, err
 	}
-	if doc.KnowledgeBaseID != kbID {
-		return nil, ErrKBDocumentNotFound
-	}
-	kb, err := s.GetKB(ctx, tenantID, kbID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.repo.DeleteChunksForDocument(ctx, doc.ID); err != nil {
-		return nil, err
-	}
-	_ = s.repo.UpdateDocumentStatus(ctx, doc.ID, "processing", nil, 0, 0)
-	// Reindex has no end-user context (may be admin/background); indexDocument
-	// falls back to the tenant marker for the embedding egress identity.
-	if err := s.indexDocument(ctx, kb, doc, uuid.Nil); err != nil {
-		slog.Warn("kb reindex failed", "doc_id", doc.ID.String(), "err", err)
-	}
-	return s.repo.GetDocument(ctx, tenantID, doc.ID)
-}
-
-// ---------------------------------------------------------------------------
-// Indexing pipeline
-// ---------------------------------------------------------------------------
-
-// indexDocument runs extract → chunk → embed → store. On any failure
-// the document's status flips to "failed" with the error message
-// surfaced for the UI; the function still returns the error for
-// telemetry but the caller treats it as informational.
-func (s *KnowledgeService) indexDocument(
-	ctx context.Context, kb *model.KnowledgeBase, doc *model.KnowledgeDocument,
-	userID uuid.UUID,
-) error {
-	// FIX132 B — embeddings come from kb-models on this machine; the text
-	// does not leave the host (kb_models_client.go).
-	_ = userID
-	fail := func(msg string) error {
-		e := msg
-		_ = s.repo.UpdateDocumentStatus(ctx, doc.ID, "failed", &e, 0, 0)
-		_ = s.repo.RecomputeKBStats(ctx, kb.ID)
-		return errors.New(msg)
-	}
-
-	if s.models == nil {
-		return fail("the knowledge base models are not configured (KB_MODELS_URL)")
-	}
-
-	text, ok := s.extractor.ExtractTextForStorageKey(ctx, doc.StoragePath, doc.ContentType)
-	if !ok || strings.TrimSpace(text) == "" {
-		return fail("text extraction failed for this file type")
-	}
-
-	size, overlap := EffectiveChunking(kb.ChunkSize, kb.ChunkOverlap, DefaultKBChunkSize, DefaultKBChunkOverlap)
-	chunks, err := ChunkTextRunes(ctx, text, size, overlap, s.models)
-	if err != nil {
-		return fail("word segmentation failed: " + err.Error())
-	}
-	if len(chunks) == 0 {
-		return fail("no chunks produced (document too small or empty after extraction)")
-	}
-
-	// Embed in batches and stream into the chunks table to keep peak
-	// memory bounded for large documents (hundreds of chunks).
-	batchSize := s.knobs.EmbedBatchSize
-	total := 0
-	for i := 0; i < len(chunks); i += batchSize {
-		end := i + batchSize
-		if end > len(chunks) {
-			end = len(chunks)
-		}
-		batch := chunks[i:end]
-		embs, err := s.models.Embed(ctx, batch, false, KBPriorityIndex)
-		if err != nil {
-			return fail("embedding failed: " + err.Error())
-		}
-		rows := make([]model.KnowledgeChunk, 0, len(batch))
-		for j, c := range batch {
-			emb := embs[j].Dense
-			rows = append(rows, model.KnowledgeChunk{
-				DocumentID:      doc.ID,
-				KnowledgeBaseID: kb.ID,
-				TenantID:        doc.TenantID,
-				Content:         c,
-				Embedding:       emb,
-				ChunkIndex:      i + j,
-				Metadata: map[string]any{
-					"filename": doc.OriginalFilename,
-				},
-			})
-		}
-		if err := s.repo.InsertChunkBatch(ctx, rows); err != nil {
-			return fail("chunk insert failed: " + err.Error())
-		}
-		total += len(rows)
-	}
-
-	if err := s.repo.UpdateDocumentStatus(ctx, doc.ID, "indexed", nil, total, len(text)); err != nil {
-		return err
-	}
-	_ = s.repo.RecomputeKBStats(ctx, kb.ID)
-	return nil
+	_ = s.repo.RecomputeKBStats(ctx, kbID)
+	s.notify()
+	return s.repo.GetDocument(ctx, tenantID, docID)
 }

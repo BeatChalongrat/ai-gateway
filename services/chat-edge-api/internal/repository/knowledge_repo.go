@@ -29,10 +29,13 @@ import (
 
 type KnowledgeRepo struct {
 	db DB
+	// pool opens the short transactions the indexer needs (FIX132 B);
+	// nil on a WithTx copy.
+	pool *pgxpool.Pool
 }
 
 func NewKnowledgeRepo(db *pgxpool.Pool) *KnowledgeRepo {
-	return &KnowledgeRepo{db: db}
+	return &KnowledgeRepo{db: db, pool: db}
 }
 
 func (r *KnowledgeRepo) WithTx(tx pgx.Tx) *KnowledgeRepo {
@@ -172,8 +175,12 @@ func (r *KnowledgeRepo) RecomputeKBStats(ctx context.Context, kbID uuid.UUID) er
 		SET document_count = (
 		      SELECT COUNT(*) FROM chat.knowledge_documents WHERE knowledge_base_id = $1
 		    ),
+		    -- FIX132 B: only searchable chunks count (a document being indexed
+		    -- has some of its chunks already stored).
 		    total_chunks = (
-		      SELECT COUNT(*) FROM chat.knowledge_chunks WHERE knowledge_base_id = $1
+		      SELECT COUNT(*) FROM chat.knowledge_chunks c
+		      JOIN chat.knowledge_documents d ON d.id = c.document_id
+		      WHERE c.knowledge_base_id = $1 AND d.status = 'indexed'
 		    ),
 		    updated_at = NOW()
 		WHERE id = $1
