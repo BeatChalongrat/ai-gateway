@@ -67,7 +67,10 @@ services:
       # host.docker.internal so chat-edge can reach it across the
       # two compose stacks. ``extra_hosts`` below makes the alias
       # work on Linux too.
-      - GATEWAY_API_URL=http://host.docker.internal:8080/v1
+      # FIX133 B — the gateway by its compose-network name: host port 8080 is
+      # Caddy's https listener now (found live: every chat-edge call through
+      # host.docker.internal:8080 got "HTTP request to an HTTPS server").
+      - GATEWAY_API_URL=${GATEWAY_API_URL:-http://gateway:8080/v1}
       - GATEWAY_API_KEY=${GATEWAY_API_KEY:-}
       # FIX41 — the run ledger (docs/STREAM_CONTRACT.md §8).
       #
