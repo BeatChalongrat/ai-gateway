@@ -142,6 +142,14 @@ interface ChatState {
    *  what a composer that mounts later reads. */
   returnedDrafts: Record<string, { id: string; text: string } | undefined>;
   consumeReturnedDraft: (convId: string, id: string) => void;
+  /** FIX131 E3 (desktop shell) — a consent / question card the host sent for
+   *  a conversation whose streaming row the page has not built yet. On a
+   *  reopened chat the host replays the run and re-posts the pending card in
+   *  the same breath; the resume probe builds the row ~700 ms later. The
+   *  card waits here and is attached the moment the row exists — before, it
+   *  was dropped (no row) or pinned to the previous, finished answer, and the
+   *  page showed only Stop while the host waited for an answer. */
+  parkedHostPrompts: Record<string, { consent?: PendingConsent; question?: PendingQuestion } | undefined>;
   /** FIX124 R2 — "load the answer": read the conversation from the server
    *  (the row that stopped waiting is replaced by what really happened) and
    *  reattach if the turn is still being written. */
@@ -413,6 +421,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: {},
   sendsOpening: {},
   returnedDrafts: {},
+  parkedHostPrompts: {},
   async reloadAnswer(convId) {
     if (get().streamingAssistantId[convId]) return;
     if (!(await adoptServerRows(set, convId))) {
@@ -1323,6 +1332,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // had and says it was cut short — before the new rows are added.
     const inflight = get().streamingAssistantId[convId];
     if (inflight) finalizeMessage(set, get, convId, inflight, "cancelled");
+    // FIX131 E3 — the host closes the previous turn's cards when a new turn
+    // starts; a card still parked for it is stale.
+    if (get().parkedHostPrompts[convId]) set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined } }));
 
     // FIX124 — a chat is named after the first turn that is ANSWERED, which
     // need not be the first turn: asking only after turn one left a chat whose
@@ -1607,7 +1619,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       delete aborts[convId];
       const sids = { ...s.streamingAssistantId };
       delete sids[convId];
-      return { abortControllers: aborts, streamingAssistantId: sids };
+      // FIX131 E3 — the host denies a pending card on cancel: nothing parked
+      // for this conversation is answerable any more.
+      return { abortControllers: aborts, streamingAssistantId: sids, parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined } };
     });
     if (ctrl) ctrl.abort();
     try {
@@ -1816,14 +1830,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addPendingConsent(convId, consent) {
-    const id = get().streamingAssistantId[convId];
+    // Attach to the row of the turn that is running. FIX131 E3 — when the page
+    // has no such row yet (a reopened chat: the host re-posts the card in the
+    // same breath as the replay, before the resume probe builds the row), the
+    // card is parked and attached as soon as the row exists — never dropped,
+    // never pinned to an earlier, finished answer.
+    const targetId = hostPromptTarget(get, convId);
+    if (!targetId) {
+      set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: { ...s.parkedHostPrompts[convId], consent } } }));
+      return;
+    }
     set((s) => {
       const list = s.messages[convId] ?? [];
-      // Attach to the streaming assistant row; if none is known yet, attach to
-      // the last assistant row (a replayed consent after reload).
-      const targetId =
-        id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
-      if (!targetId) return {};
       return {
         messages: {
           ...s.messages,
@@ -1836,11 +1854,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   addPendingQuestion(convId, question) {
-    const id = get().streamingAssistantId[convId];
+    // Same rule as the consent card (FIX131 E3).
+    const targetId = hostPromptTarget(get, convId);
+    if (!targetId) {
+      set((s) => ({ parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: { ...s.parkedHostPrompts[convId], question } } }));
+      return;
+    }
     set((s) => {
       const list = s.messages[convId] ?? [];
-      const targetId = id ?? [...list].reverse().find((m) => m.role === "assistant")?.id;
-      if (!targetId) return {};
       return {
         messages: {
           ...s.messages,
@@ -1875,7 +1896,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     bridge.respondConsent(promptId, decision, scope);
     set((s) => {
       const list = s.messages[convId] ?? [];
+      const parked = s.parkedHostPrompts[convId];
       return {
+        parkedHostPrompts:
+          parked?.consent?.promptId === promptId
+            ? { ...s.parkedHostPrompts, [convId]: parked.question ? { question: parked.question } : undefined }
+            : s.parkedHostPrompts,
         messages: {
           ...s.messages,
           [convId]: list.map((m) =>
@@ -1943,6 +1969,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingAssistantId: { ...s.streamingAssistantId, [convId]: tempAsstId },
         abortControllers: { ...s.abortControllers, [convId]: ctrl },
       }));
+      // FIX131 E3 — the host re-posted the run's pending consent / question
+      // card together with the replay, before this row existed: it waited in
+      // parkedHostPrompts and goes on the row now.
+      attachParkedHostPrompts(set, get, convId);
       try {
         await consumeStream(res, ctrl.signal, set, get, convId, tempAsstId);
       } catch (err) {
@@ -2658,16 +2688,66 @@ async function answerParkedQuestion(set: Set, get: Get, convId: string, messageI
  *  The row keeps rendering under the id it was born with (``client_key``):
  *  a React key that changed with the id unmounted the bubble and mounted
  *  a new one mid-send — the flicker the user saw on every message. */
+/** FIX131 E3 — the row a host consent / question card belongs on: the
+ *  conversation's streaming row, or else its last assistant row when that
+ *  row is still streaming. Undefined when the page has no running turn for
+ *  the conversation yet (the card is then parked). */
+function hostPromptTarget(get: Get, convId: string): string | undefined {
+  const list = get().messages[convId] ?? [];
+  const sid = get().streamingAssistantId[convId];
+  if (sid && list.some((m) => m.id === sid)) return sid;
+  const last = [...list].reverse().find((m) => m.role === "assistant");
+  if (last && (last.isStreaming || last.status === "streaming")) return last.id;
+  return undefined;
+}
+
+/** FIX131 E3 — puts a parked host card on the conversation's running row,
+ *  once that row exists. */
+function attachParkedHostPrompts(set: Set, get: Get, convId: string): void {
+  const parked = get().parkedHostPrompts[convId];
+  if (!parked || (!parked.consent && !parked.question)) return;
+  const targetId = hostPromptTarget(get, convId);
+  if (!targetId) return;
+  set((s) => ({
+    parkedHostPrompts: { ...s.parkedHostPrompts, [convId]: undefined },
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === targetId
+          ? {
+              ...m,
+              ...(parked.consent ? { pending_consent: parked.consent } : {}),
+              ...(parked.question ? { pending_question: parked.question } : {}),
+            }
+          : m,
+      ),
+    },
+  }));
+}
+
 function swapMessageId(set: Set, convId: string, fromId: string | undefined, toId: string | undefined) {
   if (!fromId || !toId || fromId === toId) return;
   set((s) => {
     const list = s.messages[convId] ?? [];
-    if (!list.some((m) => m.id === fromId)) return {};
+    const from = list.find((m) => m.id === fromId);
+    if (!from) return {};
     // FIX127 C2 — the persisted id is already in the list (the row came
     // from the server transcript and a replay painted it again): one row,
     // the server's — it carries the files a frame-built row never has.
+    // FIX131 E3 — an open consent / question card on the dropped copy moves
+    // to the kept row: the host is still waiting for its answer.
     if (list.some((m) => m.id === toId)) {
-      return { messages: { ...s.messages, [convId]: list.filter((m) => m.id !== fromId) } };
+      const cards = {
+        ...(from.pending_consent ? { pending_consent: from.pending_consent } : {}),
+        ...(from.pending_question ? { pending_question: from.pending_question } : {}),
+      };
+      const kept = list.filter((m) => m.id !== fromId);
+      return {
+        messages: {
+          ...s.messages,
+          [convId]: Object.keys(cards).length > 0 ? kept.map((m) => (m.id === toId ? { ...m, ...cards } : m)) : kept,
+        },
+      };
     }
     return { messages: { ...s.messages, [convId]: list.map((m) => (m.id === fromId ? renamed(m, toId) : m)) } };
   });
