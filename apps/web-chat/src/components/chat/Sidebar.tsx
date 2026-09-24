@@ -25,6 +25,7 @@ import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { useShortcutHint } from "@/hooks/useShortcutHint";
 import { logoutSession } from "@/lib/auth";
 import { CONV_SEARCH_EVENT } from "@/lib/composerShortcuts";
+import { requestMessageJump } from "@/lib/messageJump";
 import { useI18nStore, useT } from "@/lib/i18n";
 import type {
   Conversation,
@@ -508,8 +509,10 @@ export function Sidebar({
           loadingMore={loadingMoreConversations}
           onLoadMore={() => void loadMoreConversations()}
           activeId={activeId}
-          onSelect={(id) => {
-            router.push(`/chat/${id}`);
+          onSelect={(id, messageId) => {
+            // FIX132 F12 — a content hit opens the chat AT the message.
+            if (messageId) requestMessageJump(id, messageId);
+            router.push(messageId ? `/chat/${id}#msg-${messageId}` : `/chat/${id}`);
             onClose();
           }}
           onRename={(id, t) => renameConversation(id, t)}
@@ -1047,7 +1050,7 @@ interface AreaProps {
   loadingMore: boolean;
   onLoadMore: () => void;
   activeId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, messageId?: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
@@ -1261,7 +1264,7 @@ function SidebarRow({
 }: {
   row: Row;
   active: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, messageId?: string) => void;
   onRename: (id: string, title: string) => Promise<void> | void;
   onDelete: (id: string) => Promise<void> | void;
   onTogglePin: (id: string) => Promise<void> | void;
@@ -1296,7 +1299,7 @@ function SidebarRow({
     return (
       <button
         type="button"
-        onClick={() => onSelect(row.hit.conversation_id)}
+        onClick={() => onSelect(row.hit.conversation_id, row.hit.message_id)}
         className={`focus-ring flex w-full flex-col items-start gap-0.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors ${
           active
             ? "bg-bg-elevated text-text-primary"

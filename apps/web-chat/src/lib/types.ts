@@ -179,6 +179,8 @@ export interface ConversationListResponse {
 export interface PastContextSearchResult {
   type: string; // "message" | "conversation" | "memory"
   conversation_id?: string;
+  /** FIX132 F12 — message hits: the message to open the chat at. */
+  message_id?: string;
   conversation_title?: string;
   content: string;
   role?: string;
@@ -198,6 +200,8 @@ export interface SearchResponse {
  *  conversation rows instead). */
 export interface ConversationSearchHit {
   conversation_id: string;
+  /** FIX132 F12 — the matching message; the chat opens at it. */
+  message_id?: string;
   conversation_title: string;
   snippet: string;
   date: string;

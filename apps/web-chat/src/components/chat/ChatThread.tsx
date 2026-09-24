@@ -46,6 +46,14 @@ interface Props {
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadEarlier?: () => Promise<void> | void;
+  /** FIX132 F12 — open the thread AT this message (a search hit, a
+   *  #msg-<id> link, "go to the first message"): scrolled to near the top,
+   *  held there while the rows around it measure, highlighted briefly.
+   *  The page loads the message first; a new nonce is a new jump. */
+  jumpTo?: { messageId: string; nonce: number } | null;
+  onJumpHandled?: (nonce: number, found: boolean) => void;
+  /** FIX132 F12 — "go to the first message", next to "load earlier". */
+  onJumpToFirst?: () => void;
 }
 
 const SCROLL_TOLERANCE_PX = 1;
@@ -63,6 +71,11 @@ const rowKey = (m: Message) => m.client_key ?? m.id;
  *  to the credits badge's reach when that is larger. */
 export const THREAD_BOTTOM_PAD = 24;
 
+/** FIX132 F12 — where a jumped-to message's top lands, below the viewport top. */
+export const JUMP_TOP_PX = 48;
+/** FIX132 F12 — how long the jumped-to message stays highlighted. */
+const JUMP_HIGHLIGHT_MS = 2000;
+
 export function ChatThread({
   convId,
   messages,
@@ -74,6 +87,9 @@ export function ChatThread({
   hasMoreOlder,
   loadingOlder,
   onLoadEarlier,
+  jumpTo,
+  onJumpHandled,
+  onJumpToFirst,
 }: Props) {
   const t = useT();
   const badgeReach = useComposerStore((s) => s.badge); // FIX130 C4
@@ -530,6 +546,41 @@ export function ChatThread({
     // (see attachScroller) — that commit positions the view too.
   }, [messages, scrollRequest, convId, scrollerEl]);
 
+  // FIX132 F12 — the jump. The row becomes the reading landmark at
+  // JUMP_TOP_PX, so the thread's one position keeper (reconcile) puts it
+  // there and keeps it there while the rows around it are measured — the
+  // same hold that keeps the reader's row still after "load earlier". In
+  // the virtual list the landmark's row is always rendered (preservedKey),
+  // so a row far outside the rendered window is mounted, then placed.
+  const handledJump = useRef<number | null>(null);
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    if (!jumpTo || handledJump.current === jumpTo.nonce) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    handledJump.current = jumpTo.nonce;
+    const idx = messages.findIndex((m) => m.id === jumpTo.messageId);
+    if (idx < 0) {
+      onJumpHandled?.(jumpTo.nonce, false);
+      return;
+    }
+    const key = rowKey(messages[idx]);
+    releaseHold();
+    cancelScrollAnimation();
+    pendingRestore.current = null;
+    setFollow(false);
+    setPendingNew(false);
+    readingLandmark.current = { key, offset: JUMP_TOP_PX };
+    setHighlightKey(key);
+    reconcile();
+    onJumpHandled?.(jumpTo.nonce, true);
+  }, [jumpTo, messages, scrollerEl]);
+  useEffect(() => {
+    if (!highlightKey) return;
+    const timer = window.setTimeout(() => setHighlightKey(null), JUMP_HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [highlightKey, jumpTo?.nonce]);
+
   const anyStreaming = messages.some((m) => m.isStreaming);
 
   // ── Screen-reader announcements ─────────────────────────────
@@ -769,6 +820,7 @@ export function ChatThread({
                 visible={!!hasMoreOlder}
                 loading={!!loadingOlder}
                 onClick={handleLoadEarlier}
+                onJumpToFirst={onJumpToFirst}
               />
               {shouldVirtualize ? scrollerEl && (
                 <VirtualMessageList
@@ -791,6 +843,7 @@ export function ChatThread({
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
                   onQuote={onQuote}
+                  highlightKey={highlightKey}
                 />
               ) : (
                 <PlainMessageList
@@ -802,6 +855,7 @@ export function ChatThread({
                   onEditMessage={onEditMessage}
                   onSwitchBranch={onSwitchBranch}
                   onQuote={onQuote}
+                  highlightKey={highlightKey}
                 />
               )}
             </>
@@ -960,6 +1014,8 @@ interface InnerProps {
   onSwitchBranch?: (messageId: string, branchIndex: number) => void;
   /** FIX33 B5 — quote-reply: selected assistant text → the composer. */
   onQuote?: (quoted: string) => void;
+  /** FIX132 F12 — the row a jump landed on, highlighted for a moment. */
+  highlightKey?: string | null;
 }
 
 function PlainMessageList(props: InnerProps) {
@@ -1110,13 +1166,19 @@ function renderRow(m: Message, i: number, props: InnerProps) {
   } = props;
   const prev = messages[i - 1];
   const extraGap = prev && prev.role !== m.role ? "mt-2" : "";
+  const highlighted = props.highlightKey != null && rowKey(m) === props.highlightKey;
   return (
     // data-msg-index — the P3 anchor locates rows by index in BOTH
     // render modes (getBoundingClientRect, so the virtualizer's
     // translateY is included). Keyed by rowKey so the id swap after
     // message_start never re-creates the bubble.
     // FIX127 D4 — id="msg-<id>" is the deep-link anchor (/chat/<conv>#msg-<id>).
-    <div key={rowKey(m)} id={`msg-${m.id}`} className={extraGap} data-msg-index={i}>
+    <div
+      key={rowKey(m)}
+      id={`msg-${m.id}`}
+      className={highlighted ? `${extraGap} deep-link-target`.trim() : extraGap}
+      data-msg-index={i}
+    >
       <MessageBubble
         convId={convId}
         message={m}
@@ -1158,15 +1220,17 @@ function LoadEarlierBar({
   visible,
   loading,
   onClick,
+  onJumpToFirst,
 }: {
   visible: boolean;
   loading: boolean;
   onClick: () => void;
+  onJumpToFirst?: () => void;
 }) {
   const t = useT();
   if (!visible) return null;
   return (
-    <div className="-mt-2 flex justify-center pb-2">
+    <div className="-mt-2 flex flex-wrap justify-center gap-2 pb-2">
       <button
         type="button"
         onClick={onClick}
@@ -1188,6 +1252,22 @@ function LoadEarlierBar({
         )}
         {t("thread.loadEarlier")}
       </button>
+      {/* FIX132 F12 — the start of a long chat in one click, not a click
+          per 50 messages. (ChatGPT and Claude load a whole chat at once,
+          so scrolling up gets there; this thread pages, so it needs a way.) */}
+      {onJumpToFirst ? (
+        <button
+          type="button"
+          onClick={onJumpToFirst}
+          disabled={loading}
+          className="focus-ring inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-secondary/70 px-3 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-wait disabled:opacity-60"
+        >
+          <svg width={11} height={11} viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M6 18l6-6 6 6M6 6h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {t("thread.jumpToFirst")}
+        </button>
+      ) : null}
     </div>
   );
 }

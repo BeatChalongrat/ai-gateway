@@ -365,6 +365,9 @@ interface ChatState {
   handleConversationGone: (convId: string) => void;
   loadMessages: (convId: string) => Promise<void>;
   loadOlderMessages: (convId: string) => Promise<void>;
+  /** FIX132 F12 — load down to `target` (a message id, or "first"), a
+   *  `through=` page of up to 1000 rows at a time. True when it is loaded. */
+  loadThrough: (convId: string, target: string) => Promise<boolean>;
   sendMessage: (convId: string, content: string, fileIds?: string[], imageMode?: boolean, videoMode?: boolean) => Promise<void>;
   cancelGeneration: (convId: string) => Promise<void>;
   /** Phase 5 — reattach to a generation that is still running
@@ -701,6 +704,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const content = r.content.trim();
         hits.push({
           conversation_id: r.conversation_id,
+          message_id: r.message_id,
           conversation_title: r.conversation_title?.trim() || "Untitled",
           snippet:
             content.length > 140 ? `${content.slice(0, 140)}…` : content,
@@ -1290,6 +1294,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
         loadingOlder: { ...s.loadingOlder, [convId]: false },
       }));
     }
+  },
+
+  async loadThrough(convId, target) {
+    const loaded = () =>
+      target === "first"
+        ? get().hasMoreMessages[convId] === false
+        : (get().messages[convId] ?? []).some((m) => m.id === target);
+    for (let round = 0; round < LOAD_THROUGH_MAX_ROUNDS && !loaded(); round++) {
+      const current = get().messages[convId] ?? [];
+      if (current.length === 0 || get().hasMoreMessages[convId] === false) break;
+      set((s) => ({ loadingOlder: { ...s.loadingOlder, [convId]: true } }));
+      try {
+        const res = await api.listMessages(convId, { limit: LOAD_THROUGH_PAGE, before: current[0].id, through: target });
+        set((s) => {
+          const have = new Set((s.messages[convId] ?? []).map((m) => m.id));
+          const prepend = (res?.messages ?? []).filter((m) => !have.has(m.id));
+          return {
+            messages: { ...s.messages, [convId]: [...prepend, ...(s.messages[convId] ?? [])] },
+            hasMoreMessages: { ...s.hasMoreMessages, [convId]: res?.has_more ?? false },
+            loadingOlder: { ...s.loadingOlder, [convId]: false },
+          };
+        });
+        if (!res?.messages?.length) break;
+      } catch {
+        set((s) => ({ loadingOlder: { ...s.loadingOlder, [convId]: false } }));
+        return false;
+      }
+    }
+    return loaded();
   },
 
   // ────────────────────────────────────────────────────────
@@ -2243,6 +2276,11 @@ type Get = () => ChatState;
 // first attempt is immediate; later ones back off lightly so a brief
 // network blip reattaches fast without hammering the server.
 // Exported ONLY so tests can zero the delays (mutate + restore).
+/** FIX132 F12 — one `through=` page (the server's cap) and how many a jump
+ *  may take (10,000 messages) before it gives up. */
+const LOAD_THROUGH_PAGE = 1000;
+const LOAD_THROUGH_MAX_ROUNDS = 10;
+
 export const RESUME_RETRY_DELAYS = [0, 1000, 2000, 4000];
 
 /** FIX124 R2 — after the quick retries: how often a waiting row tries again
