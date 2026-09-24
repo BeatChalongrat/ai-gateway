@@ -42,7 +42,7 @@ RUN set -eu; \
     chmod 0755 /usr/local/bin/restic; \
     restic version
 
-COPY lib.sh backup.sh drill.sh notify.sh offsite.sh entrypoint.sh /
+COPY lib.sh schedule.sh backup.sh drill.sh notify.sh offsite.sh entrypoint.sh /
 RUN chmod 0755 /backup.sh /drill.sh /notify.sh /offsite.sh /entrypoint.sh
 
 # Where the scripts read from / write to. Both are mounts in compose
