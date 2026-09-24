@@ -109,6 +109,15 @@ async def lifespan(app: FastAPI):
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=20)
     asyncio.get_event_loop().set_default_executor(executor)
 
+    # FIX133 A1/A2 — the per-worker admission cap now comes from settings
+    # (CHAT_INFLIGHT_LIMIT; the constructor's 64 was the only value applied
+    # before), and the shared turn queue is built from its settings.
+    from app.core import inflight as _inflight
+    from app.core import turn_queue as _turn_queue
+
+    _inflight.configure(settings.chat_inflight_limit)
+    _turn_queue.configure(_turn_queue.config_from_settings(settings))
+
     # Schema-drift guard (FIX 3) — BEFORE any DB-dependent startup work or
     # serving traffic. If the DB schema is behind the code's Alembic head
     # (the hot-reload drift that made every request 500 on a missing

@@ -62,6 +62,9 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
   "GENERATION_INTERRUPTED",
   // FIX131 E2 — chat-edge is restarting; the same request will work shortly.
   "SERVER_DRAINING",
+  // FIX133 A2 — the gateway's turn queue was full, or the wait ran out.
+  "queue_full",
+  "queue_timeout",
 ]);
 
 const ERROR_CODE_KEYS: Record<string, DictKey> = {
@@ -157,6 +160,9 @@ const ERROR_CODE_KEYS: Record<string, DictKey> = {
   GENERATION_INTERRUPTED: "error.generationInterrupted",
   // FIX131 E2 — 503 from chat-edge while it restarts (nothing was written).
   SERVER_DRAINING: "error.serverDraining",
+  // FIX133 A2 — the gateway's turn queue.
+  queue_full: "error.queue_full",
+  queue_timeout: "error.queue_timeout",
 };
 
 /** The dictionary key for a code, or undefined when the code is unknown. */

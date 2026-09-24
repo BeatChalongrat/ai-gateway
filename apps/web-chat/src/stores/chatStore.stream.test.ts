@@ -411,6 +411,41 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  it("FIX133 A2 — shows where the turn stands from a queued frame and clears it when the turn starts", async () => {
+    const st = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(st.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "hi");
+    await tick();
+    expect(useChatStore.getState().queuedStreams["c1"]).toBeFalsy();
+
+    st.push(frame("queued", { position: 3, ahead: 2, active: 12, waiting: 4, max_active: 12, estimate_s: 20 }));
+    await tick();
+    expect(useChatStore.getState().queuedStreams["c1"]?.position).toBe(3);
+    expect(useChatStore.getState().queuedStreams["c1"]?.estimate_s).toBe(20);
+
+    st.push(frame("queued", { position: 1, ahead: 0, active: 12, waiting: 2, max_active: 12 }));
+    await tick();
+    expect(useChatStore.getState().queuedStreams["c1"]?.position).toBe(1);
+
+    // position 0 = the turn started: nothing to show any more
+    st.push(frame("queued", { position: 0, ahead: 0, active: 12, waiting: 1, max_active: 12 }));
+    await tick();
+    expect(useChatStore.getState().queuedStreams["c1"]).toBeNull();
+
+    // and the first content clears a stale one too
+    st.push(frame("queued", { position: 2, ahead: 1, active: 12, waiting: 3, max_active: 12 }));
+    await tick();
+    st.push(frame("content_delta", { delta: "สวัสดี" }));
+    await tick();
+    expect(useChatStore.getState().queuedStreams["c1"]).toBeNull();
+
+    st.push(frame("message_complete", { message_id: "m" }));
+    st.close();
+    await done;
+  });
+
   // Phase 13 Part B — run_python artifacts reuse the existing
   // message_files seam: a chart png / generated file the sandbox produced
   // is attached to the assistant message and the generating flags clear.

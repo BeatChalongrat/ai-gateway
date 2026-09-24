@@ -54,6 +54,7 @@ import type {
   SSEError,
   SSEFallbackInfo,
   SSEProviderStall,
+  SSEQueued,
   SSEImageNotice,
   SSEReasoningNotice,
   SSEMessageComplete,
@@ -187,6 +188,10 @@ interface ChatState {
    *  the instant the next ": ping" landed. Cleared only by the server's
    *  recovery frame, by retry, or by stream end. */
   providerStalledStreams: Record<string, boolean>;
+  /** FIX133 A2 — the turn waits in the gateway's queue: the latest
+   *  ``queued`` frame per conversation (null / position 0 = not waiting).
+   *  Cleared by the first content, by stream end, by Stop. */
+  queuedStreams: Record<string, SSEQueued | null>;
   /** FIX33 A-W6 — the context meter's numbers per conversation (web: the
    *  /context-info dry run; desktop: the host's context_budget events). */
   contextBudgetByConv: Record<string, ContextInfo>;
@@ -451,6 +456,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   abortControllers: {},
   stalledStreams: {},
   providerStalledStreams: {},
+  queuedStreams: {},
   contextBudgetByConv: {},
   setContextBudget(convId, info) {
     set((s) => ({ contextBudgetByConv: { ...s.contextBudgetByConv, [convId]: info } }));
@@ -1698,6 +1704,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({
       stalledStreams: { ...s.stalledStreams, [convId]: false },
       providerStalledStreams: { ...s.providerStalledStreams, [convId]: false },
+      queuedStreams: { ...s.queuedStreams, [convId]: null },
     }));
     ctrl?.abort();
     if (!messageId || messageId.startsWith("tmp-")) return;
@@ -2589,7 +2596,7 @@ async function openWithin(ms: number, parent: AbortSignal, open: (signal: AbortS
  *  to start again. The page sends the same request again (same X-Request-Id
  *  on a send, so a copy that did land is replayed, never run twice), backing
  *  off from `firstMs` to `maxMs`, for at most `budgetMs`. Mutable for tests. */
-export const DRAIN_RETRY = { firstMs: 2_000, maxMs: 10_000, budgetMs: 120_000 };
+export const DRAIN_RETRY = { firstMs: 2_000, maxMs: 10_000, budgetMs: 150_000 }; // FIX133 A5 — drain 90 s + grace + restart
 
 /** The wait (ms) a 503 SERVER_DRAINING asks for, or null for any other
  *  response. The body is read from a clone: the caller still owns `res`. */
@@ -3129,6 +3136,9 @@ async function consumeStream(
           };
         });
       } else if (evt.event === "content_delta") {
+        if (get().queuedStreams[convId]) {
+          set((s) => ({ queuedStreams: { ...s.queuedStreams, [convId]: null } })); // FIX133 A2 — it started
+        }
         const data = evt.data as SSEContentDelta;
         if (compactingAsst) {
           // FIX33 A-W9 — the answer is flowing: "organizing…" is over.
@@ -3654,6 +3664,12 @@ async function consumeStream(
             };
           });
         }
+      } else if (evt.event === "queued") {
+        // FIX133 A2 — the gateway's turn queue: show where the turn stands
+        // ("waiting in queue · position N") until it starts (position 0).
+        const data = evt.data as SSEQueued;
+        const waiting = Boolean(data && typeof data.position === "number" && data.position > 0);
+        set((s) => ({ queuedStreams: { ...s.queuedStreams, [convId]: waiting ? data : null } }));
       } else if (evt.event === "provider_stall") {
         // chat-edge holds the upstream connection, so it is the only
         // layer that can tell provider silence from server work. Trust

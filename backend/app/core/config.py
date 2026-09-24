@@ -323,6 +323,21 @@ class Settings(BaseSettings):
     stream_hard_timeout_seconds: float = 900.0
     chat_inflight_limit: int = 64
     chat_admit_timeout_seconds: float = 5.0
+    # FIX133 A2/A3 — the turn queue (app/core/turn_queue.py): a cap on the
+    # turns generating at once across every worker (0 = the CPU count,
+    # sizing.default_max_active_turns), a visible waiting line above it, a
+    # per-caller share (0 = max(1, max_active // 6)), a refusal only past
+    # max_waiting (0 = 4 x max_active) and a bounded wait.
+    turn_queue_enabled: bool = True
+    turn_queue_max_active: int = 0
+    turn_queue_max_per_identity: int = 0
+    turn_queue_max_waiting: int = 0
+    turn_queue_max_wait_seconds: float = 120.0
+    turn_queue_poll_seconds: float = 0.5
+    turn_queue_frame_seconds: float = 5.0
+    turn_queue_active_ttl_seconds: float = 45.0
+    turn_queue_recent_turn_seconds: int = 30
+    turn_queue_retry_after_seconds: int = 10
     readiness_timeout_seconds: float = 3.0
     # FIX129 A2 — the credit deduction's own transaction limits (SET LOCAL,
     # tighter than the connection-wide DB_*_TIMEOUT_MS in core/db.py) and

@@ -306,8 +306,9 @@ type Config struct {
 	// SERVER_DRAINING; the turns in flight get CHAT_EDGE_DRAIN_TIMEOUT to
 	// finish; the rest are ended as interrupted, with CHAT_EDGE_DRAIN_GRACE
 	// for their endings to be written. The container's stop_grace_period
-	// must be longer than both together (docker-compose.webchat.yml: 90s).
-	DrainTimeout time.Duration `env:"CHAT_EDGE_DRAIN_TIMEOUT" envDefault:"60s"`
+	// must be longer than both together (docker-compose.webchat.yml: 120s).
+	// FIX133 A5 — 90 s (was 60): a long deepseek answer is not cut on deploy.
+	DrainTimeout time.Duration `env:"CHAT_EDGE_DRAIN_TIMEOUT" envDefault:"90s"`
 	DrainGrace   time.Duration `env:"CHAT_EDGE_DRAIN_GRACE" envDefault:"10s"`
 
 	// Phase 13 Part A — hardened code-interpreter sandbox. When

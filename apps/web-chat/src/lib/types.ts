@@ -1144,6 +1144,19 @@ export interface SSEProviderStall {
   waiting_seconds?: number;
 }
 
+/** ``queued`` SSE frame (FIX133 A2) — the gateway's turn queue: where this
+ *  turn stands while it waits for a generation slot. ``position`` is 1-based
+ *  in the line and 0 once the turn started (which clears the notice);
+ *  ``estimate_s`` is missing until a turn has finished since boot. */
+export interface SSEQueued {
+  position: number;
+  ahead: number;
+  active: number;
+  waiting: number;
+  max_active: number;
+  estimate_s?: number | null;
+}
+
 /** ``image_notice`` SSE frame — one or more attached images couldn't be
  *  turned into vision content this turn (unreachable, resize failure, or
  *  unsupported format). Informational: the turn still runs, minus those

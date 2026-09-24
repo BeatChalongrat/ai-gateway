@@ -160,7 +160,9 @@ services:
         CREATED: ${CREATED:-unknown}
     image: ai-gateway-ner-service:latest
     environment:
-      NER_WORKERS: ${NER_WORKERS:-4}
+      # FIX133 A1 — empty = computed in the image from cores and the memory
+      # limit (backend/ner_service/sizing.py); a number here pins it.
+      NER_WORKERS: ${NER_WORKERS:-}
       # FIX38 — the CRF ThaiNER tagger. "0" runs the service English-only
       # and /health reports th_ner=disabled (still "ready"); any load
       # failure while "1" reports "degraded" and fails the healthcheck.
@@ -377,6 +379,9 @@ services:
       AUTOHEAL_CONTAINER_LABEL: autoheal
       AUTOHEAL_INTERVAL: "10"
       AUTOHEAL_START_PERIOD: "60"
+      # FIX133 A5 — a restart by autoheal must not cut a drain short: the
+      # backend and chat-edge carry autoheal.stop.timeout labels equal to
+      # their stop_grace_period; 20 s is the default for the rest.
       AUTOHEAL_DEFAULT_STOP_TIMEOUT: "20"
       DOCKER_SOCK: /var/run/docker.sock
     volumes:
@@ -471,7 +476,7 @@ services:
         CREATED: ${CREATED:-unknown}
     # FIX131 E2 — the stop drains turns (CHAT_EDGE_DRAIN_TIMEOUT 60s + grace
     # 10s by default); keep this above both. Same as docker-compose.webchat.yml.
-    stop_grace_period: 90s
+    stop_grace_period: 120s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_EDGE_DB:-sran_chat}?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2
@@ -552,7 +557,7 @@ services:
         CREATED: ${CREATED:-unknown}
     image: ai-gateway-kb-models:latest
     environment:
-      KB_THREADS: ${KB_THREADS:-6}
+      KB_THREADS: ${KB_THREADS:-} # FIX133 A1 — empty = min(6, CPUs / 2) in the image
       KB_DTYPE: ${KB_DTYPE:-bf16}
       KB_RERANK_ENABLED: ${KB_RERANK_ENABLED:-false}
       HF_HUB_OFFLINE: ${KB_MODELS_OFFLINE:-1}
@@ -768,7 +773,20 @@ services:
       # FIX131 — the process model (backend/gunicorn.conf.py): workers,
       # worker heartbeat, and how long in-flight turns get after SIGTERM.
       # stop_grace_period below must stay above GUNICORN_GRACEFUL_TIMEOUT.
-      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
+      # FIX133 A1 — WORKERS in .env wins, then GUNICORN_WORKERS; empty (the
+      # default) = computed from cores, RAM and the Postgres budget
+      # (backend/app/core/sizing.py: 4 on this box). Nothing hardcoded.
+      WORKERS: ${WORKERS:-}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-}
+      # FIX133 A2/A3 — the turn queue (app/core/turn_queue.py). 0 = computed:
+      # max_active = CPUs, per-caller share = max_active/6, refuse past
+      # 4 x max_active waiting; the wait itself is bounded.
+      CHAT_INFLIGHT_LIMIT: ${CHAT_INFLIGHT_LIMIT:-64}
+      TURN_QUEUE_ENABLED: ${TURN_QUEUE_ENABLED:-true}
+      TURN_QUEUE_MAX_ACTIVE: ${TURN_QUEUE_MAX_ACTIVE:-0}
+      TURN_QUEUE_MAX_PER_IDENTITY: ${TURN_QUEUE_MAX_PER_IDENTITY:-0}
+      TURN_QUEUE_MAX_WAITING: ${TURN_QUEUE_MAX_WAITING:-0}
+      TURN_QUEUE_MAX_WAIT_SECONDS: ${TURN_QUEUE_MAX_WAIT_SECONDS:-120}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
       GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-180}
       # Phase-3 log-worker engine selector. ``python`` keeps the
@@ -872,6 +890,8 @@ services:
     # retries × interval (see the autoheal service).
     labels:
       autoheal: "true"
+      # FIX133 A5 — an autoheal restart gets the same drain as a deploy.
+      autoheal.stop.timeout: "200"
 
   admin-ui:
     build:

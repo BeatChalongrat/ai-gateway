@@ -1081,6 +1081,10 @@ Loop:
 					"status": ev.AnalysisStatus,
 				})
 			}
+			// FIX133 A2 — where the turn stands in the gateway's queue.
+			if ev.Queued != nil {
+				writeSSEEvent(w, flusher, "queued", ev.Queued)
+			}
 			// Image-generation phase marker — the frontend swaps the
 			// typing dots for an image placeholder until message_files
 			// (or a terminal frame) arrives.
@@ -2146,6 +2150,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	// Latest stall state — a client reattaching mid-stall is told the
 	// turn is stuck; one reattaching after recovery gets Stalled=false.
+	if snap.Queued != nil && snap.Queued.Position > 0 {
+		writeSSEEvent(w, flusher, "queued", snap.Queued) // FIX133 A2 — still waiting
+	}
 	if snap.ProviderStall != nil {
 		writeSSEEvent(w, flusher, "provider_stall", snap.ProviderStall)
 	}

@@ -107,6 +107,10 @@ export function ChatThread({
     Boolean(s.providerStalledStreams[convId]),
   );
   const stalled = byteStalled || providerStalled;
+  // FIX133 A2 — the turn waits in the gateway's queue; shown above the
+  // composer like the stalled notice, and it wins over "stalled": a turn
+  // that has not started is not slow.
+  const queued = useChatStore((s) => s.queuedStreams[convId] ?? null);
   const retryStalledStream = useChatStore((s) => s.retryStalledStream);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   // FIX122 Part A — the scroller as STATE as well as a ref. The virtualized
@@ -918,6 +922,16 @@ export function ChatThread({
           className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
         >
           {t("thread.toolRunning", { tool: toolWait.tool, s: String(Math.round(toolWait.elapsedMs / 1000)) })}
+        </div>
+      ) : queued && queued.position > 0 ? (
+        <div
+          role="status"
+          data-testid="queued-notice"
+          className="popover-appear absolute bottom-16 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-bg-surface px-3 py-1.5 text-xs text-text-secondary shadow-lg backdrop-blur-sm"
+        >
+          {typeof queued.estimate_s === "number" && queued.estimate_s > 0
+            ? t("thread.queuedEta", { position: String(queued.position), ahead: String(queued.ahead), s: String(queued.estimate_s) })
+            : t("thread.queued", { position: String(queued.position), ahead: String(queued.ahead) })}
         </div>
       ) : stalled ? (
         <div

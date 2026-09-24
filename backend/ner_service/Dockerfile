@@ -66,9 +66,10 @@ HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=60s \
 # Multi-worker uvicorn — each worker is its own process with its own
 # spaCy/Presidio analyzer (loaded via the lifespan hook in main.py).
 # Worker count is driven by ${NER_WORKERS} so it can be tuned per env
-# without rebuilding the image; default of 4 matches the 4-core
-# reservation in docker-compose.yml.
-ENV NER_WORKERS=4
+# without rebuilding the image. FIX133 A1 — empty (the default) means
+# computed from the container: ner_service/sizing.py, min(cpus // 3,
+# RAM / 450 MB per worker), at least 2 — 4 on the live box.
+ENV NER_WORKERS=
 # FIX126 O6 - provenance: every build carries the commit it was built from.
 # compose passes REVISION/CREATED as build args (`REVISION=$(git rev-parse
 # --short HEAD) docker compose ... build`); scripts/build-images.sh sets both
@@ -79,4 +80,4 @@ ARG CREATED=unknown
 LABEL org.opencontainers.image.revision=$REVISION \
       org.opencontainers.image.created=$CREATED
 
-CMD ["sh", "-c", "exec uvicorn ner_service.main:app --host 0.0.0.0 --port 8001 --workers ${NER_WORKERS}"]
+CMD ["sh", "-c", "W=$(python -m ner_service.sizing) && echo \"ner_workers=$W (NER_WORKERS='${NER_WORKERS}')\" && exec uvicorn ner_service.main:app --host 0.0.0.0 --port 8001 --workers $W"]

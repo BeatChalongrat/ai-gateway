@@ -164,6 +164,9 @@ export type StreamEvent =
   | { kind: "tool_call_delta"; index: number; id: string | null; name: string | null; argumentsDelta: string }
   | { kind: "reasoning_delta"; delta: string }
   | { kind: "analysis_status"; status: string }
+  // FIX133 A2 — the gateway's turn queue: where this turn stands while it
+  // waits for a generation slot (position 0 = it started).
+  | { kind: "queued"; position: number; ahead: number; active: number; waiting: number; max_active: number; estimate_s: number | null }
   | { kind: "fallback_info"; requested_model: string; actual_model: string; reason: string | null }
   /** FIX50 P1-C — input DLP masked part of the question before the model
    *  read it. Counts per detector only, never values. */
@@ -710,6 +713,17 @@ export function parseChunk(data: string): StreamEvent[] {
       out.push({ kind: "reasoning_delta", delta: root["text"] });
     } else if (t === "analysis_status" && typeof root["status"] === "string" && root["status"]) {
       out.push({ kind: "analysis_status", status: root["status"] });
+    } else if (t === "queued" && typeof root["position"] === "number") {
+      const num = (k: string) => (typeof root[k] === "number" ? (root[k] as number) : 0);
+      out.push({
+        kind: "queued",
+        position: root["position"] as number,
+        ahead: num("ahead"),
+        active: num("active"),
+        waiting: num("waiting"),
+        max_active: num("max_active"),
+        estimate_s: typeof root["estimate_s"] === "number" ? (root["estimate_s"] as number) : null,
+      });
     } else if (t === "reasoning_notice") {
       out.push({ kind: "reasoning_notice", model: typeof root["model"] === "string" ? root["model"] : null, reason: typeof root["reason"] === "string" ? root["reason"] : null });
     } else if (t === "model_resolved" && typeof root["model"] === "string" && root["model"]) {

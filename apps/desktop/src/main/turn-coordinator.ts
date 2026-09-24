@@ -1729,6 +1729,20 @@ export class TurnCoordinator {
           case "analysis_status":
             if (!run.parentToolCallId) this.emit(eventConv, "analysis_status", { status: ev.status });
             break;
+          case "queued":
+            // FIX133 A2 — the page shows "waiting in queue · position N" the
+            // same way the web page does; position 0 clears it.
+            if (!run.parentToolCallId) {
+              this.emit(eventConv, "queued", {
+                position: ev.position,
+                ahead: ev.ahead,
+                active: ev.active,
+                waiting: ev.waiting,
+                max_active: ev.max_active,
+                estimate_s: ev.estimate_s,
+              });
+            }
+            break;
           case "fallback_info":
             // FIX120 — attribute the turn to the model that answered.
             if (ev.requested_model && ev.actual_model && ev.requested_model !== ev.actual_model) run.onFallback?.(ev.requested_model, ev.actual_model);

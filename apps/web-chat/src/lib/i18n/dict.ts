@@ -1004,6 +1004,8 @@ export const en = {
   // SERVER_DRAINING). The page re-sends by itself first; this is what is
   // left when the restart outlasts that.
   "error.serverDraining": "The chat service is restarting — send your message again in a few seconds.",
+  "error.queue_full": "Many people are using the service right now and the queue is full — send again in a moment.",
+  "error.queue_timeout": "Your message waited in the queue too long and never started — send it again.",
   "msg.serverRestarting": "The chat service is restarting — your message goes out as soon as it's back…",
   "error.tooManyMessages": "Too many messages — slow down for a minute.",
   "error.conversationBusy": "This chat is already answering in another tab — wait for it to finish, then send again",
@@ -1429,6 +1431,8 @@ export const en = {
   "thread.newMessages": "New messages",
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "Still working — this is taking longer than usual.",
+  "thread.queued": "Waiting in the queue · position {position} ({ahead} ahead)",
+  "thread.queuedEta": "Waiting in the queue · position {position} ({ahead} ahead, about {s} s)",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "Long conversation — {n} older messages are no longer sent to the assistant (the first exchange and recent messages are kept).",
   "thread.compacted.noSummary": "Long conversation — {n} older messages were left out of this reply with no summary in their place: the summary could not be written. They are still saved; if the answer seems to be missing something, say what it was.",
@@ -2847,6 +2851,8 @@ const th: Record<DictKey, string> = {
     "การเชื่อมต่อหลุดและไม่สามารถกลับเข้าสตรีมคำตอบได้ รีเฟรชหน้าเพื่อดูส่วนที่บันทึกไว้",
   "error.generationInterrupted": "คำตอบนี้ไม่เสร็จ",
   "error.serverDraining": "ระบบแชทกำลังเริ่มใหม่ — ลองส่งข้อความอีกครั้งในอีกสักครู่",
+  "error.queue_full": "ตอนนี้มีผู้ใช้งานจำนวนมากและคิวเต็ม — กรุณาส่งอีกครั้งในอีกสักครู่",
+  "error.queue_timeout": "ข้อความรอคิวนานเกินไปและยังไม่ได้เริ่มตอบ — กรุณาส่งอีกครั้ง",
   "msg.serverRestarting": "ระบบแชทกำลังเริ่มใหม่ — จะส่งข้อความให้ทันทีที่ระบบพร้อม…",
   "error.tooManyMessages": "ส่งข้อความถี่เกินไป กรุณารอสักครู่",
   "error.conversationBusy": "แชทนี้กำลังตอบอยู่ในอีกหน้าต่าง — รอให้ตอบเสร็จก่อนแล้วส่งใหม่",
@@ -3268,6 +3274,8 @@ const th: Record<DictKey, string> = {
   "thread.newMessages": "ข้อความใหม่",
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
+  "thread.queued": "กำลังรอคิว · ลำดับที่ {position} (มี {ahead} คิวก่อนหน้า)",
+  "thread.queuedEta": "กำลังรอคิว · ลำดับที่ {position} (มี {ahead} คิวก่อนหน้า รออีกประมาณ {s} วินาที)",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "บทสนทนายาวมาก — ข้อความเก่า {n} รายการจะไม่ถูกส่งให้ผู้ช่วยแล้ว (ยังเก็บข้อความแรกและข้อความล่าสุดไว้)",
   "thread.compacted.noSummary": "บทสนทนายาวมาก — คำตอบนี้ไม่ได้ส่งข้อความเก่า {n} รายการให้ผู้ช่วย และไม่มีบทสรุปแทน เพราะเขียนบทสรุปไม่สำเร็จ ข้อความทั้งหมดยังบันทึกอยู่ ถ้าคำตอบดูขาดอะไรไป บอกได้เลยว่าเรื่องอะไร",

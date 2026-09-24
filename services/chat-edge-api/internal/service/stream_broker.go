@@ -111,6 +111,10 @@ type StreamSnapshot struct {
 	// reattaching after recovery must NOT see a stale warning, which is
 	// why the recovery frame overwrites this instead of clearing a flag.
 	ProviderStall *ProviderStallNotice
+	// Queued (FIX133 A2): sticky, latest state — a client reattaching while
+	// the turn still waits in the gateway's queue must see that, not a
+	// spinner; once admitted (position 0) the replay shows nothing.
+	Queued *QueueStatus
 	// ImageNotice: sticky like FallbackInfo — a client reattaching after
 	// the one-shot image_notice frame still learns an attachment failed.
 	ImageNotice *ImageAttachNotice
@@ -155,6 +159,7 @@ type brokerEntry struct {
 	served    string         // FIX35 Part B — sticky like fallback: a reattaching client learns the model too
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
+	queued    *QueueStatus // FIX133 A2 — sticky, latest state
 	inotice   *ImageAttachNotice
 	cnotice   *CompactionNotice
 	mused     *MemoryUsedNotice  // FIX130 A3a — sticky
@@ -221,6 +226,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		ServedModel:      e.served,
 		ReasoningNotice:  e.rnotice,
 		ProviderStall:    e.stall,
+		Queued:           e.queued,
 		ImageNotice:      e.inotice,
 		CompactionNotice: e.cnotice,
 		MemoryUsed:       e.mused,
@@ -390,6 +396,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.ProviderStall != nil {
 		e.stall = ev.ProviderStall
+	}
+	if ev.Queued != nil {
+		e.queued = ev.Queued
 	}
 	if ev.ImageNotice != nil {
 		e.inotice = ev.ImageNotice

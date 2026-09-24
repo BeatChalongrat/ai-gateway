@@ -6,7 +6,9 @@ This file is the image's process model (``backend/serve.sh`` runs
 
 Knobs (environment, read when the master starts):
 
-GUNICORN_WORKERS           worker processes (default 4). Sizing, measured on
+WORKERS / GUNICORN_WORKERS worker processes. Empty = computed from the
+                           machine (app/core/sizing.py: cores, RAM, the Postgres
+                           connection budget) — FIX133 A1. Sizing, measured on
                            the live box (12 vCPU / 16 GB Docker VM, shared with
                            NER, two Postgres, chat-edge, gateway, three Next.js
                            dev servers): NIGHT3 saw ONE process saturate at
@@ -75,7 +77,33 @@ os.environ["SRAN_WORKER_STATE_DIR"] = WORKERS_DIR
 
 bind = "0.0.0.0:8080"
 worker_class = "uvicorn.workers.UvicornWorker"
-workers = max(1, _env_int("GUNICORN_WORKERS", 4))
+
+
+def _workers() -> int:
+    """FIX133 A1 — WORKERS (or GUNICORN_WORKERS) from .env; empty = computed.
+
+    The formula lives in app/core/sizing.py: min(cpus // 3, RAM / 250 MB,
+    180 Postgres connections / 35 per worker), at least 2 — 4 on the live
+    12-vCPU box, where FIX131 measured 4 and 6 workers within noise.
+    """
+    for name in ("WORKERS", "GUNICORN_WORKERS"):
+        v = _env_int(name, 0)
+        if v > 0:
+            return v
+    try:
+        import sys as _sys
+
+        _here = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        from app.core.sizing import default_backend_workers
+
+        return default_backend_workers()
+    except Exception:  # noqa: BLE001 — a sizing error must never stop the master
+        return 4
+
+
+workers = max(1, _workers())
 timeout = _env_int("GUNICORN_TIMEOUT", 60)
 graceful_timeout = _env_int("GUNICORN_GRACEFUL_TIMEOUT", 180)
 keepalive = _env_int("GUNICORN_KEEPALIVE", 5)

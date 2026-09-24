@@ -1324,6 +1324,11 @@ type StreamUpdate struct {
 	ReasoningDelta string
 	AnalysisStatus string
 
+	// Queued (FIX133 A2) — the gateway's turn queue: where this turn stands
+	// while it waits for a generation slot, then position 0 when it starts.
+	// Forwarded as the ``queued`` SSE event; sticky in the resume broker.
+	Queued *QueueStatus
+
 	// Image-generation phase marker, "started" only. Emitted just
 	// before the generate_image tool executes (tool path) or the
 	// direct /images/generations call begins (direct path) so the
@@ -5575,6 +5580,9 @@ func (s *MessageService) pumpStreamWithTools(in streamPumpInput) {
 			}
 			if ev.AnalysisStatus != "" {
 				in.out <- StreamUpdate{AnalysisStatus: ev.AnalysisStatus}
+			}
+			if ev.Queued != nil {
+				in.out <- StreamUpdate{Queued: ev.Queued}
 			}
 			// B1 / B2 — forward provider-error + fallback frames straight
 			// through. Never swallow: an error frame the pump drops is a

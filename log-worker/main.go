@@ -65,8 +65,13 @@ func main() {
 	// Modest pool — one in-flight COPY per concurrent batch worker is
 	// usually enough; multi-row COPYs are CPU-bound on the server side
 	// and a wide pool just spreads contention.
-	db.SetMaxOpenConns(4)
-	db.SetMaxIdleConns(2)
+	// FIX133 A1 — LOG_WORKER_DB_MAX_CONNS (default 4) instead of a constant.
+	maxConns := 4
+	if v, err := strconv.Atoi(os.Getenv("LOG_WORKER_DB_MAX_CONNS")); err == nil && v > 0 {
+		maxConns = v
+	}
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(max(1, maxConns/2))
 	db.SetConnMaxLifetime(5 * time.Minute)
 
 	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)

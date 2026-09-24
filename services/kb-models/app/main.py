@@ -53,7 +53,26 @@ RERANK_REPO = os.getenv("KB_RERANK_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANK_REV = os.getenv("KB_RERANK_REVISION", "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e")
 MODELS_DIR = Path(os.getenv("KB_MODELS_DIR", "/models"))
 DTYPE = os.getenv("KB_DTYPE", "fp32").lower()  # fp32 | bf16
-THREADS = int(os.getenv("KB_THREADS", "4"))
+
+
+def _default_threads() -> int:
+    """FIX133 A1 — torch threads from the container: half the CPUs it may
+    use (cgroup quota, else the count), at most 6, at least 1. One request
+    runs at a time (the priority lock), so more threads than cores/2 only
+    starve the co-tenants."""
+    quota = None
+    try:
+        with open("/sys/fs/cgroup/cpu.max", encoding="utf-8") as fh:
+            parts = fh.read().split()
+        if len(parts) == 2 and parts[0] != "max":
+            quota = -(-int(parts[0]) // int(parts[1]))
+    except (OSError, ValueError):
+        quota = None
+    cpus = quota or (os.cpu_count() or 2)
+    return max(1, min(6, cpus // 2))
+
+
+THREADS = int(os.getenv("KB_THREADS") or _default_threads())
 EMBED_MAX_TOKENS = int(os.getenv("KB_EMBED_MAX_TOKENS", "1024"))
 RERANK_MAX_TOKENS = int(os.getenv("KB_RERANK_MAX_TOKENS", "512"))
 BATCH = int(os.getenv("KB_BATCH", "8"))

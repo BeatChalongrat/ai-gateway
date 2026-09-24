@@ -504,6 +504,10 @@ type StreamEvent struct {
 	// populated — the pump distinguishes by checking which is set.
 	ReasoningDelta string
 	AnalysisStatus string
+	// Queued (FIX133 A2) — the gateway's turn queue says where this turn
+	// stands: a frame per change of place while it waits, then one with
+	// position 0 when it starts. Forwarded to the client as ``queued``.
+	Queued *QueueStatus
 	// B1 — provider error frame. The Gateway emits
 	//   data: {"error":{"code":"...","message":"...","details":{...},"attempts":[...]}}
 	// when a stream fails terminally (pre-stream or mid-stream). The
@@ -551,6 +555,18 @@ type ReasoningNotice struct {
 // StreamProviderError is the payload of a Gateway “error“ SSE frame
 // (B1). “Attempts“ is populated on the “all_models_failed“ case so
 // the client can show which models were tried and why each failed.
+// QueueStatus (FIX133 A2) is the gateway's ``queued`` frame: where a turn
+// stands in the line of turns waiting for a generation slot. Position 0
+// means it holds one now. The wire shape is the client's too.
+type QueueStatus struct {
+	Position  int  `json:"position"`
+	Ahead     int  `json:"ahead"`
+	Active    int  `json:"active"`
+	Waiting   int  `json:"waiting"`
+	MaxActive int  `json:"max_active"`
+	EstimateS *int `json:"estimate_s,omitempty"`
+}
+
 type StreamProviderError struct {
 	Code string `json:"code"`
 	// Type is the backend's own discriminator on its code-less frames
@@ -804,6 +820,13 @@ type reasoningEnvelope struct {
 	// but no top-level "type", so it never reaches that branch).
 	Model  string `json:"model"`
 	Reason string `json:"reason"`
+	// FIX133 A2 — ``queued`` frames.
+	Position  int  `json:"position"`
+	Ahead     int  `json:"ahead"`
+	Active    int  `json:"active"`
+	Waiting   int  `json:"waiting"`
+	MaxActive int  `json:"max_active"`
+	EstimateS *int `json:"estimate_s"`
 	// B1 / B2 — error + fallback frames carried on the same top-level
 	// envelope so we sniff them before the OpenAI-shape decoder.
 	Error        *StreamProviderError `json:"error"`
@@ -872,6 +895,15 @@ func parseStreamChunk(raw string, eventName string) (*StreamEvent, error) {
 			return &StreamEvent{ReasoningDelta: env.Text}, nil
 		case "analysis_status":
 			return &StreamEvent{AnalysisStatus: env.Status}, nil
+		case "queued":
+			return &StreamEvent{Queued: &QueueStatus{
+				Position:  env.Position,
+				Ahead:     env.Ahead,
+				Active:    env.Active,
+				Waiting:   env.Waiting,
+				MaxActive: env.MaxActive,
+				EstimateS: env.EstimateS,
+			}}, nil
 		case "reasoning_notice":
 			return &StreamEvent{ReasoningNotice: &ReasoningNotice{
 				Model:  env.Model,

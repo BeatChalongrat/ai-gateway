@@ -270,6 +270,18 @@ async def ready():
         "limit": snap.limit,
         "available": snap.available,
     }
+    # FIX133 A2 — the shared turn queue (active / waiting / caps), read by
+    # ops-watch for the "queue too long" rule.
+    from app.core.turn_queue import turn_queue as _turn_queue
+
+    _q = _turn_queue()
+    if _q is not None:
+        try:
+            checks["turn_queue"] = (await asyncio.wait_for(_q.snapshot(), timeout=1.0)).as_dict()
+        except Exception as exc:  # noqa: BLE001 — never fail readiness on the queue's store
+            checks["turn_queue"] = {"enabled": True, "error": f"{type(exc).__name__}: {str(exc)[:80]}"}
+    else:
+        checks["turn_queue"] = {"enabled": False}
     peers = worker_board.peers()
     peer_stuck = sum(int((p.get("inflight") or {}).get("stuck") or 0) for p in peers)
     leader_pid = os.getpid() if leader.is_leader() else next(

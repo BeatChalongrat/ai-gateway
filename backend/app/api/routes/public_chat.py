@@ -24,7 +24,7 @@ import time
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,17 @@ from app.core import error_catalog
 from app.core.config import settings
 from app.core.bounded_stream import bounded_sse
 from app.core.inflight import AdmissionTimeout, registry as inflight_registry
+from app.core.db import get_async_session_factory
+from app.core.turn_queue import (
+    QueueFull,
+    QueueStatus,
+    QueueTimeout,
+    Ticket,
+    purpose_never_queues,
+    turn_queue,
+)
 from app.core.exceptions import (
+    GatewayError,
     DLPViolationError,
     GuardrailViolationError,
     ModerationViolationError,
@@ -327,6 +337,158 @@ def _turn_id_from(request: Request) -> str | None:
     raw = raw.strip()
     return raw if _TURN_ID_RE.match(raw) else None
 
+
+def _queue_error_body(code: str, n: int) -> dict:
+    """FIX133 A2 — the envelope of a turn the queue refused or timed out.
+
+    Both are retryable by the same caller a moment later; the gateway's
+    error catalog carries the same verdict for the codes (retryable=True)
+    and chat-edge / the web page localise them.
+    """
+    if code == "queue_full":
+        msg = f"The gateway already has {n} turns waiting; please send again in a moment."
+    else:
+        msg = f"Your turn waited in the queue (position {n}) without getting a slot; please send again."
+    return {"error": {"type": code, "code": code, "message": msg, "retryable": True}}
+
+
+def _sse(obj) -> str:
+    return "data: " + _sse_dumps(obj) + "\n\n"
+
+
+async def _record_queue_failure(payload, code: str) -> None:
+    tok = pre_provider_log.begin_turn(payload.model, bool(payload.stream))
+    try:
+        await pre_provider_log.record_failure(model=payload.model, exc=None, error_code=code)
+    finally:
+        pre_provider_log.end_turn(tok)
+
+
+def _queued_stream_response(
+    *, payload, response, auth, queue, ticket, first: QueueStatus, turn_id, hard_s: float, release,
+) -> StreamingResponse:
+    """FIX133 A2 — a streaming request that has to wait for a slot.
+
+    The response opens NOW with a ``queued`` frame, another follows on every
+    change of place (and at least every few seconds, so nothing upstream
+    reads the wait as a dead connection), then the pipeline runs inside
+    this body exactly as it runs when nobody waited. From the first frame
+    on, an error can only travel as a frame: the same envelope the
+    gateway's own error frames carry (code, message, retryable), then
+    ``[DONE]``. Nothing is charged for a turn the queue ended.
+    """
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    if turn_id:
+        headers["X-Turn-Id"] = turn_id
+
+    async def body():
+        try:
+            yield _sse(first.frame())
+            updates: asyncio.Queue = asyncio.Queue()
+
+            async def _on(st: QueueStatus) -> None:
+                await updates.put(st)
+
+            wait_task = asyncio.create_task(queue.wait(ticket, _on))
+            wait_task.add_done_callback(lambda _t: updates.put_nowait(None))
+            try:
+                while True:
+                    st = await updates.get()
+                    if st is None:
+                        break
+                    yield _sse(st.frame())
+                try:
+                    await wait_task
+                except QueueTimeout as exc:
+                    logger.warning("turn_queue_timeout", waited_s=round(exc.waited_s), position=exc.position, stream=True)
+                    await _record_queue_failure(payload, "queue_timeout")
+                    yield _sse(_queue_error_body("queue_timeout", exc.position))
+                    yield "data: [DONE]\n\n"
+                    return
+                except QueueFull as exc:
+                    await _record_queue_failure(payload, "queue_full")
+                    yield _sse(_queue_error_body("queue_full", exc.waiting))
+                    yield "data: [DONE]\n\n"
+                    return
+            finally:
+                if not wait_task.done():
+                    wait_task.cancel()
+
+            # A slot is ours. The request's own session was closed when this
+            # response was returned (the dependency's finally ran), so the
+            # pipeline's pre-stream work gets a fresh one, released as soon
+            # as the pipeline has handed back its stream — the same window
+            # the request session covers on the path that never waited.
+            _turn_token = pre_provider_log.begin_turn(payload.model, True)
+            result = None
+            try:
+                factory = get_async_session_factory()
+                async with factory() as session:
+                    try:
+                        result = await asyncio.wait_for(
+                            _chat_completions_impl(payload, response, auth, session, turn_id=turn_id),
+                            timeout=hard_s,
+                        )
+                        await session.commit()
+                    except BaseException:
+                        await session.rollback()
+                        raise
+            except asyncio.TimeoutError:
+                logger.error("chat_request_hard_timeout", timeout_s=hard_s, model=payload.model, stream=True, queued=True)
+                await pre_provider_log.record_failure(model=payload.model, exc=None, error_code="upstream_timeout")
+                yield _sse({"error": {"type": "upstream_timeout", "code": "upstream_timeout", "retryable": True, "message": (
+                    f"The request did not complete within {hard_s:.0f}s and was closed. Please retry."
+                )}})
+                yield "data: [DONE]\n\n"
+                return
+            except GatewayError as exc:
+                await pre_provider_log.record_failure(model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc))
+                frame = {"error": {"type": exc.code, "code": exc.code, "message": exc.message,
+                                   "retryable": error_catalog.is_retryable(exc.code)}}
+                if exc.details:
+                    frame["error"]["details"] = exc.details
+                yield _sse(frame)
+                yield "data: [DONE]\n\n"
+                return
+            except HTTPException as exc:
+                await pre_provider_log.record_failure(model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc))
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                err = detail.get("error") if isinstance(detail.get("error"), dict) else detail
+                code = str(err.get("code") or err.get("type") or f"http_{exc.status_code}")
+                yield _sse({"error": {"type": code, "code": code, "message": str(err.get("message") or exc.detail),
+                                      "retryable": error_catalog.is_retryable(code)}})
+                yield "data: [DONE]\n\n"
+                return
+            except Exception as exc:  # noqa: BLE001 — the pipe must end on a frame
+                logger.exception("chat_queued_pipeline_failed", model=payload.model)
+                await pre_provider_log.record_failure(model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc))
+                yield _sse({"error": {"type": "internal_error", "code": "internal_error", "retryable": True, "message": "internal error"}})
+                yield "data: [DONE]\n\n"
+                return
+            finally:
+                pre_provider_log.end_turn(_turn_token)
+
+            if not isinstance(result, StreamingResponse):
+                yield _sse({"error": {"type": "internal_error", "code": "internal_error", "retryable": True,
+                                      "message": "the pipeline answered a streaming request without a stream"}})
+                yield "data: [DONE]\n\n"
+                return
+            request_id = result.headers.get("x-request-id") or None
+            async for _frame in bounded_sse(
+                result.body_iterator,
+                idle_timeout_s=float(settings.stream_idle_timeout_seconds),
+                hard_timeout_s=float(settings.stream_hard_timeout_seconds),
+                request_id=request_id,
+                on_timeout=lambda kind: logger.error(
+                    "chat_stream_timeout", kind=kind, request_id=request_id, model=payload.model
+                ),
+            ):
+                yield _frame
+        finally:
+            release()
+
+    return StreamingResponse(body(), media_type="text/event-stream", headers=headers)
+
 @router.post(
     "/chat/completions",
     response_model=ChatCompletionsResponse,
@@ -388,12 +550,67 @@ async def chat_completions(
         )
 
     released = False
+    ticket: Ticket | None = None
 
     def _release() -> None:
         nonlocal released
         if not released:
             released = True
             reg.release(key)
+            if ticket is not None:
+                ticket.release_nowait()
+
+    turn_id = _turn_id_from(request)
+
+    # FIX133 A2/A3 — the turn queue (app.core.turn_queue): a cap on the turns
+    # generating at once across every worker, a visible line above it and a
+    # per-caller share of the slots. A streaming caller that has to wait gets
+    # its response opened now and a ``queued`` frame for every change of
+    # place; a non-streaming caller waits (bounded). A line that is already
+    # too long is refused (503 queue_full + Retry-After) before anything runs.
+    # A follow-up call of a turn already admitted (a tool round, same
+    # X-Request-Id) never waits again; background purposes never queue.
+    queue = turn_queue()
+    if queue is not None and not purpose_never_queues(payload.metadata):
+        identity = auth.rate_limit_key_id or auth.key_id or "anonymous"
+        try:
+            ticket, queued = await queue.try_admit(identity, turn_id)
+        except QueueFull as exc:
+            _release()
+            logger.warning("turn_queue_full", waiting=exc.waiting, limit=exc.max_waiting,
+                           stream=bool(payload.stream), identity=identity)
+            await _record_queue_failure(payload, "queue_full")
+            return _ArmourResponse(
+                status_code=503,
+                headers={"Retry-After": str(exc.retry_after_s)},
+                content=_queue_error_body("queue_full", exc.waiting),
+            )
+        if not queued.granted:
+            if payload.stream:
+                return _queued_stream_response(
+                    payload=payload, response=response, auth=auth, queue=queue, ticket=ticket,
+                    first=queued, turn_id=turn_id, hard_s=hard_s, release=_release,
+                )
+            try:
+                await queue.wait(ticket)
+            except QueueTimeout as exc:
+                _release()
+                logger.warning("turn_queue_timeout", waited_s=round(exc.waited_s), position=exc.position,
+                               stream=False, identity=identity)
+                await _record_queue_failure(payload, "queue_timeout")
+                return _ArmourResponse(
+                    status_code=503,
+                    headers={"Retry-After": str(queue.cfg.retry_after_s)},
+                    content=_queue_error_body("queue_timeout", exc.position),
+                )
+            except QueueFull as exc:
+                _release()
+                await _record_queue_failure(payload, "queue_full")
+                return _ArmourResponse(
+                    status_code=503,
+                    headers={"Retry-After": str(exc.retry_after_s)},
+                    content=_queue_error_body("queue_full", exc.waiting),
+                )
 
     # FIX130 E3 — a turn that fails before any provider is called writes its
     # one request_logs row here (pre_provider_log module doc); the ledger
@@ -401,7 +618,7 @@ async def chat_completions(
     _turn_token = pre_provider_log.begin_turn(payload.model, bool(payload.stream))
     try:
         result = await asyncio.wait_for(
-            _chat_completions_impl(payload, response, auth, session, turn_id=_turn_id_from(request)),
+            _chat_completions_impl(payload, response, auth, session, turn_id=turn_id),
             timeout=hard_s,
         )
     except asyncio.TimeoutError:

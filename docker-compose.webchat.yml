@@ -42,12 +42,12 @@ services:
     # interrupted (text kept) within CHAT_EDGE_DRAIN_GRACE, then the process
     # exits. Docker's default 10 s would SIGKILL in the middle of that; this
     # must stay above drain + grace + ~15 s (HTTP close, ledger flush).
-    stop_grace_period: 90s
+    stop_grace_period: 120s
     ports:
       - "127.0.0.1:4000:4000"
     environment:
       # FIX131 E2 — see stop_grace_period above.
-      - CHAT_EDGE_DRAIN_TIMEOUT=${CHAT_EDGE_DRAIN_TIMEOUT:-60s}
+      - CHAT_EDGE_DRAIN_TIMEOUT=${CHAT_EDGE_DRAIN_TIMEOUT:-90s}
       - CHAT_EDGE_DRAIN_GRACE=${CHAT_EDGE_DRAIN_GRACE:-10s}
       # FIX131 E1 — streaming rows no process owns (a crash, a kill) are
       # settled as interrupted by a sweep at boot and every interval; a row
@@ -279,6 +279,9 @@ services:
     # label; the two files share the compose project `ai-gateway`).
     labels:
       autoheal: "true"
+      # FIX133 A5 — an autoheal restart gets the same drain as a deploy
+      # (CHAT_EDGE_DRAIN_TIMEOUT 90 s + grace 10 s + close).
+      autoheal.stop.timeout: "120"
 
   # FIX132 B — the knowledge base's models (services/kb-models): bge-m3
   # (dense 1024-d + sparse keyword weights in one pass), bge-reranker-v2-m3
@@ -301,7 +304,7 @@ services:
     container_name: ai-gateway-kb-models
     restart: unless-stopped
     environment:
-      - KB_THREADS=${KB_THREADS:-6}
+      - KB_THREADS=${KB_THREADS:-} # FIX133 A1 — empty = min(6, CPUs / 2) in the image
       - KB_DTYPE=${KB_DTYPE:-bf16}
       - KB_RERANK_ENABLED=${KB_RERANK_ENABLED:-false}
       - HF_HUB_OFFLINE=${KB_MODELS_OFFLINE:-1}
