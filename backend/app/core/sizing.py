@@ -8,7 +8,8 @@ in the environment; the defaults are the measured costs, not guesses:
 
 * a backend (gunicorn/uvicorn) worker holds ~250 MB RSS under load (FIX131
   load runs: 1.07 GiB for 4 workers + master after 15 minutes at 10 users);
-* a NER worker holds ~450 MB (1.46 GiB for 4 workers, live, idle);
+* a NER worker holds ~1.1 GB under load (1.0-1.15 GB RSS each in the FIX133
+  load runs; 1.46 GiB for all four when idle);
 * every backend worker may open 35 Postgres connections (sync 5+5, async
   10+15 — docker-compose.yml), and the server allows 250, of which 180 are
   the backend's budget (the rest: chat-edge, gateway, ops-watch, backup,
@@ -17,7 +18,7 @@ in the environment; the defaults are the measured costs, not guesses:
 Formulas (all clamped to at least ``min_workers``):
 
     backend workers  = min(cpus // 3, ram / 250 MB, 180 / 35)      -> 4 on 12 vCPU
-    NER workers      = min(cpus // 3, ram / 450 MB)                 -> 4 on 12 vCPU
+    NER workers      = min(cpus // 3, ram / 1100 MB)                -> 4 on 12 vCPU
     turns generating = max(4, cpus)                                 -> 12 on 12 vCPU
 
 ``cpus`` is the cgroup CPU quota when one is set (compose ``cpus:``), else the
@@ -36,7 +37,7 @@ import sys
 MB = 1024 * 1024
 
 BACKEND_WORKER_MB = 250
-NER_WORKER_MB = 450
+NER_WORKER_MB = 1100
 PG_BUDGET_CONNECTIONS = 180
 PG_CONNECTIONS_PER_WORKER = 35
 

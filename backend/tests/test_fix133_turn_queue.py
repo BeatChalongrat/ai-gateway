@@ -56,8 +56,9 @@ def test_backend_workers_follow_cores_ram_and_the_pg_budget():
 
 def test_ner_workers_and_active_turns_follow_the_machine():
     gib = 1024**3
-    assert sizing.default_ner_workers(cpus=12, memory_bytes=7 * gib) == 4  # 7 g / 450 MB = 15, cores/3 = 4
-    assert sizing.default_ner_workers(cpus=12, memory_bytes=1 * gib) == 2  # RAM: 2
+    assert sizing.default_ner_workers(cpus=12, memory_bytes=7 * gib) == 4  # 7 g / 1.1 GB = 6, cores/3 = 4
+    assert sizing.default_ner_workers(cpus=12, memory_bytes=3 * gib) == 2  # RAM: 2
+    assert sizing.default_ner_workers(cpus=12, memory_bytes=1 * gib) == 1  # RAM holds one
     assert sizing.default_max_active_turns(cpus=12) == 12
     assert sizing.default_max_active_turns(cpus=2) == 4
 

@@ -1,7 +1,7 @@
 """FIX133 A1 — NER worker count from the machine (the image's CMD runs this
 when NER_WORKERS is empty). Same formula as backend/app/core/sizing.py:
-min(cpus // 3, RAM / 450 MB per worker), at least 2 — each worker loads its
-own spaCy + Presidio analyzer (~450 MB RSS measured live, 1.46 GiB for 4).
+min(cpus // 3, RAM / 1100 MB per worker), at least 2 — each worker loads its
+own spaCy + Presidio analyzer (1.0-1.15 GB RSS each under load, FIX133 runs).
 The cgroup limits (compose ``cpus:`` / ``mem_limit``) win over the machine.
 """
 
@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 
 MB = 1024 * 1024
-WORKER_MB = 450
+WORKER_MB = 1100
 
 
 def _read(path: str) -> str | None:
