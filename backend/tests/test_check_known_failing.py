@@ -35,13 +35,32 @@ def test_empty_output_is_not_green(tmp_path):
     assert _run(tmp_path, "") == 2
 
 
-def test_finished_lane_with_only_known_failures_is_green(tmp_path):
-    known = ckf.load_known(ckf._KNOWN)
-    assert known, "the ledger is expected to have entries"
-    name = next(iter(known))
+def _ledger(tmp_path, monkeypatch, *names: str) -> None:
+    """Point the checker at a ledger of these names — the test's own, not the
+    repo's. FIX133: the repo ledger is meant to shrink to nothing (it did),
+    and this test used to read a name from it, so an empty ledger failed the
+    test that guards the gate."""
+    p = tmp_path / "known_failing.txt"
+    p.write_text("# test ledger\n" + "".join(f"{n}  # 2026-01-01 reason\n" for n in names), encoding="utf-8")
+    monkeypatch.setattr(ckf, "_KNOWN", p)
+
+
+def test_finished_lane_with_only_known_failures_is_green(tmp_path, monkeypatch):
+    name = "tests/unit/test_known.py::test_documented_breakage"
+    _ledger(tmp_path, monkeypatch, name)
     text = f"FAILED {name} - AssertionError\n1 failed, 10 passed, 2 warnings in 3.21s\n"
     assert ckf.lane_finished(text) is True
     assert _run(tmp_path, text) == 0
+
+
+def test_finished_clean_lane_with_an_empty_ledger_is_green(tmp_path, monkeypatch):
+    _ledger(tmp_path, monkeypatch)
+    assert _run(tmp_path, "4756 passed, 58 skipped, 6 xfailed in 614.66s (0:10:14)\n") == 0
+
+
+def test_the_repo_ledger_parses(tmp_path):
+    # whatever it holds today, the real file must be readable by the gate
+    assert isinstance(ckf.load_known(ckf._KNOWN), dict)
 
 
 def test_finished_lane_with_a_new_failure_is_red(tmp_path):
