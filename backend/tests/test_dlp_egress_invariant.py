@@ -242,16 +242,6 @@ CHAT_EDGE_GATEWAY_CLIENT_GO = (
 )
 
 
-# FIX126 O8-3 — these two read chat-edge Go source; quarantined only where
-# that tree is not mounted (the backend lane container), a hard gate otherwise.
-_Q_NO_CHAT_EDGE = pytest.mark.quarantine(
-    reason="environment: services/chat-edge-api/ tree is not mounted in the backend lane container",
-    ticket="FIX126-O8-3",
-    condition=not (REPO_ROOT / "services" / "chat-edge-api").is_dir(),
-)
-
-
-@_Q_NO_CHAT_EDGE
 def test_chat_edge_embeddings_voice_route_through_gateway_not_openai():
     """Drift guard for the FIX 2 bypass removal (Go side). chat-edge used to
     call OpenAI embeddings/Whisper/TTS directly, bypassing DLP. Voice must
@@ -305,7 +295,6 @@ def test_code_interpreter_is_not_a_raw_egress_channel():
     assert "run_python" not in RAW_EGRESS_ALLOWED
 
 
-@_Q_NO_CHAT_EDGE
 def test_code_interpreter_egress_is_go_side_and_network_locked():
     """The code-interpreter egress path is Go-side + internal. Pin the actual
     no-third-party-network guarantee from PART A/C at the source level so a
