@@ -2102,7 +2102,7 @@ const th: Record<DictKey, string> = {
 
   // Model selector
   "model.auto.name": "อัตโนมัติ",
-  "model.auto.description": "เลือก model ให้อัตโนมัติ",
+  "model.auto.description": "เลือกโมเดลให้อัตโนมัติ",
   "model.selectModel": "เลือกโมเดล",
   "model.searchPlaceholder": "ค้นหาโมเดล…",
   "model.popular": "ยอดนิยม",
