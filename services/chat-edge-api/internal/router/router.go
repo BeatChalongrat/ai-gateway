@@ -475,6 +475,7 @@ func New(
 				r.Post("/knowledge-bases/{id}/documents", h.Knowledge.UploadDocument)
 				r.Delete("/knowledge-bases/{id}/documents/{docId}", h.Knowledge.DeleteDocument)
 				r.Post("/knowledge-bases/{id}/documents/{docId}/reindex", h.Knowledge.ReindexDocument)
+				r.Get("/knowledge-bases/{id}/documents/{docId}/file", h.Knowledge.DocumentFile) // FIX132 B
 				r.Post("/knowledge-bases/{id}/search", h.Knowledge.Search)
 			}
 		})

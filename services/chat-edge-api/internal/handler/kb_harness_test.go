@@ -97,6 +97,7 @@ func newKBHTTP(t *testing.T) *kbHTTP {
 	r.Post("/knowledge-bases/{id}/documents", k.h.UploadDocument)
 	r.Delete("/knowledge-bases/{id}/documents/{docId}", k.h.DeleteDocument)
 	r.Post("/knowledge-bases/{id}/documents/{docId}/reindex", k.h.ReindexDocument)
+	r.Get("/knowledge-bases/{id}/documents/{docId}/file", k.h.DocumentFile)
 	r.Post("/knowledge-bases/{id}/search", k.h.Search)
 	k.mux = r
 	return k

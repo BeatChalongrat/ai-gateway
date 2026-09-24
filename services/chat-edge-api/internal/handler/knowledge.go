@@ -11,8 +11,13 @@
 //	GET    /api/v1/knowledge-bases/{id}/documents        list docs
 //	POST   /api/v1/knowledge-bases/{id}/documents        upload doc (202; indexed in the background)
 //	DELETE /api/v1/knowledge-bases/{id}/documents/{docId} delete doc
-//	POST   /api/v1/knowledge-bases/{id}/documents/{docId}/reindex
-//	POST   /api/v1/knowledge-bases/{id}/search           debug RAG search
+//	POST   /api/v1/knowledge-bases/{id}/documents/{docId}/reindex  (202)
+//	GET    /api/v1/knowledge-bases/{id}/documents/{docId}/file     original bytes
+//	POST   /api/v1/knowledge-bases/{id}/search           search (mode, timings)
+//	GET    /api/v1/knowledge-bases/availability          kb-models health
+//
+// FIX132 B — every route is owner-only: a knowledge base is private to the
+// user who created it.
 //
 // All tenant scoping happens inside KnowledgeService — the handlers
 // only do request parsing + status mapping, mirroring file.go.
@@ -21,7 +26,10 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +38,7 @@ import (
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/middleware"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/model"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/repository"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
 )
 
@@ -63,6 +72,15 @@ type kbResponse struct {
 	TotalChunks    int    `json:"total_chunks"`
 	CreatedAt      string `json:"created_at"`
 	UpdatedAt      string `json:"updated_at"`
+	// Indexing (FIX132 B) — how many documents are waiting, being indexed,
+	// or failed; the list shows progress without opening each KB.
+	Indexing *repository.IndexingCounts `json:"indexing,omitempty"`
+}
+
+// withIndexing attaches the indexing counts (zero when absent).
+func withIndexing(r kbResponse, c repository.IndexingCounts) kbResponse {
+	r.Indexing = &c
+	return r
 }
 
 func toKBResponse(kb *model.KnowledgeBase) kbResponse {
@@ -81,34 +99,54 @@ func toKBResponse(kb *model.KnowledgeBase) kbResponse {
 	}
 }
 
+// kbDocResponse — FIX132 B contract: status pending | processing |
+// indexed | failed, progress_done / progress_total (chunks embedded / to
+// embed), error_code (unsupported_type | too_large | empty_text | encrypted |
+// extract_failed | models_unavailable | internal) with error_message in
+// words, indexed_at. `filename` is kept (= original_filename) for clients
+// written before FIX132.
 type kbDocResponse struct {
-	ID              string  `json:"id"`
-	KnowledgeBaseID string  `json:"knowledge_base_id"`
-	Filename        string  `json:"filename"`
-	ContentType     string  `json:"content_type"`
-	FileSizeBytes   int64   `json:"file_size_bytes"`
-	Status          string  `json:"status"`
-	ChunkCount      int     `json:"chunk_count"`
-	CharCount       int     `json:"char_count"`
-	ErrorMessage    *string `json:"error_message,omitempty"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID               string  `json:"id"`
+	KnowledgeBaseID  string  `json:"knowledge_base_id"`
+	OriginalFilename string  `json:"original_filename"`
+	Filename         string  `json:"filename"`
+	ContentType      string  `json:"content_type"`
+	FileSizeBytes    int64   `json:"file_size_bytes"`
+	Status           string  `json:"status"`
+	ProgressDone     int     `json:"progress_done"`
+	ProgressTotal    int     `json:"progress_total"`
+	ChunkCount       int     `json:"chunk_count"`
+	CharCount        int     `json:"char_count"`
+	ErrorCode        *string `json:"error_code"`
+	ErrorMessage     *string `json:"error_message"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+	IndexedAt        *string `json:"indexed_at"`
 }
 
 func toKBDocResponse(d *model.KnowledgeDocument) kbDocResponse {
-	return kbDocResponse{
-		ID:              d.ID.String(),
-		KnowledgeBaseID: d.KnowledgeBaseID.String(),
-		Filename:        d.OriginalFilename,
-		ContentType:     d.ContentType,
-		FileSizeBytes:   d.FileSizeBytes,
-		Status:          d.Status,
-		ChunkCount:      d.ChunkCount,
-		CharCount:       d.CharCount,
-		ErrorMessage:    d.ErrorMessage,
-		CreatedAt:       d.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:       d.UpdatedAt.UTC().Format(time.RFC3339),
+	out := kbDocResponse{
+		ID:               d.ID.String(),
+		KnowledgeBaseID:  d.KnowledgeBaseID.String(),
+		OriginalFilename: d.OriginalFilename,
+		Filename:         d.OriginalFilename,
+		ContentType:      d.ContentType,
+		FileSizeBytes:    d.FileSizeBytes,
+		Status:           d.Status,
+		ProgressDone:     d.ProgressDone,
+		ProgressTotal:    d.ProgressTotal,
+		ChunkCount:       d.ChunkCount,
+		CharCount:        d.CharCount,
+		ErrorCode:        d.ErrorCode,
+		ErrorMessage:     d.ErrorMessage,
+		CreatedAt:        d.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:        d.UpdatedAt.UTC().Format(time.RFC3339),
 	}
+	if d.IndexedAt != nil {
+		s := d.IndexedAt.UTC().Format(time.RFC3339)
+		out.IndexedAt = &s
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -175,9 +213,18 @@ func (h *KnowledgeHandler) List(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
+	ids := make([]uuid.UUID, 0, len(kbs))
+	for i := range kbs {
+		ids = append(ids, kbs[i].ID)
+	}
+	counts, err := h.svc.IndexingCounts(r.Context(), ids)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
 	out := make([]kbResponse, 0, len(kbs))
 	for i := range kbs {
-		out = append(out, toKBResponse(&kbs[i]))
+		out = append(out, withIndexing(toKBResponse(&kbs[i]), counts[kbs[i].ID]))
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"knowledge_bases": out})
@@ -205,12 +252,21 @@ func (h *KnowledgeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	docOut := make([]kbDocResponse, 0, len(docs))
+	var counts repository.IndexingCounts
 	for i := range docs {
 		docOut = append(docOut, toKBDocResponse(&docs[i]))
+		switch docs[i].Status {
+		case "pending":
+			counts.Pending++
+		case "processing":
+			counts.Processing++
+		case "failed":
+			counts.Failed++
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"knowledge_base": toKBResponse(kb),
+		"knowledge_base": withIndexing(toKBResponse(kb), counts),
 		"documents":      docOut,
 	})
 }
@@ -393,6 +449,78 @@ func (h *KnowledgeHandler) ReindexDocument(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	_ = json.NewEncoder(w).Encode(toKBDocResponse(doc))
+}
+
+// DocumentFile — GET /knowledge-bases/{id}/documents/{docId}/file (FIX132
+// B): the original bytes, shown inline (the web opens a cited source). Owner
+// only; anyone else gets 404. Served through chat-edge rather than a
+// presigned URL (the bundled object store's presigned URLs do not work from
+// the browser). The file is the user's own upload, but it is still served
+// with nosniff and a sandbox CSP so a text file can never run as a page.
+func (h *KnowledgeHandler) DocumentFile(w http.ResponseWriter, r *http.Request) {
+	caller, _ := middleware.CallerFrom(r.Context())
+	kbID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid kb id")
+		return
+	}
+	docID, err := uuid.Parse(chi.URLParam(r, "docId"))
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeBadRequest, "invalid document id")
+		return
+	}
+	doc, body, size, err := h.svc.OpenDocumentFile(r.Context(), caller.TenantUUID, caller.UserID, kbID, docID)
+	if err != nil {
+		if errors.Is(err, service.ErrKBDocumentNotFound) || errors.Is(err, service.ErrKBNotFound) {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "document not found")
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
+		return
+	}
+	defer body.Close()
+	ct := doc.ContentType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	if strings.HasPrefix(ct, "text/") && !strings.Contains(ct, "charset") {
+		ct += "; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", ct)
+	if size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	}
+	w.Header().Set("Content-Disposition", inlineDisposition(doc.OriginalFilename))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, body)
+}
+
+// inlineDisposition is RFC 6266: an ASCII fallback filename plus the exact
+// name as filename* (UTF-8, percent-encoded, RFC 5987), so a Thai filename
+// arrives intact.
+func inlineDisposition(name string) string {
+	var ascii strings.Builder
+	for _, r := range name {
+		switch {
+		case r < 0x20 || r > 0x7e || r == '"' || r == '\\':
+			ascii.WriteByte('_')
+		default:
+			ascii.WriteRune(r)
+		}
+	}
+	var enc strings.Builder
+	for _, b := range []byte(name) {
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') ||
+			strings.IndexByte("!#$&+-.^_`|~", b) >= 0 {
+			enc.WriteByte(b)
+			continue
+		}
+		fmt.Fprintf(&enc, "%%%02X", b)
+	}
+	return `inline; filename="` + ascii.String() + `"; filename*=UTF-8''` + enc.String()
 }
 
 func (h *KnowledgeHandler) writeUploadError(w http.ResponseWriter, err error) {

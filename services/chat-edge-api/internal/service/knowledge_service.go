@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"strings"
 
@@ -378,6 +379,29 @@ func (s *KnowledgeService) documentOf(ctx context.Context, tenantID, kbID, docID
 		return nil, ErrKBDocumentNotFound
 	}
 	return doc, nil
+}
+
+// OpenDocumentFile returns the caller's document and its original bytes
+// (the caller closes the reader) — GET …/documents/{docId}/file.
+func (s *KnowledgeService) OpenDocumentFile(ctx context.Context, tenantID, userID, kbID, docID uuid.UUID) (*model.KnowledgeDocument, io.ReadCloser, int64, error) {
+	doc, err := s.GetDocument(ctx, tenantID, userID, kbID, docID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	if doc.StoragePath == "" {
+		return nil, nil, 0, ErrKBDocumentNotFound
+	}
+	body, size, _, err := s.storage.Download(ctx, doc.StoragePath)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, nil, 0, ErrKBDocumentNotFound
+		}
+		return nil, nil, 0, err
+	}
+	if size <= 0 {
+		size = doc.FileSizeBytes
+	}
+	return doc, body, size, nil
 }
 
 // DeleteDocument stops any indexing of the document, removes the row (its
