@@ -214,7 +214,9 @@ interface ChatState {
   /** FIX127 A3 — a message sent into a conversation that was deleted
    *  elsewhere. The text is already in the new-chat draft; this is the
    *  banner's "send in a new chat" hand-off. */
-  strandedSend: { text: string } | null;
+  /** FIX132 F25 — modelId: the model of the chat the text was meant for,
+   *  so "send in a new chat" does not fall back to the new-chat default. */
+  strandedSend: { text: string; modelId?: string } | null;
   clearStrandedSend: () => void;
 
   /** FIX127 D1 — messages typed while an answer streams wait here, per
@@ -1591,9 +1593,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // the generic stream-error toast. Checked BEFORE the reattach
       // branch — a gone conversation must never try to resume.
       if (err instanceof ApiError && (err.status === 404 || err.status === 410)) {
+        const modelId = get().conversations.find((c) => c.id === convId)?.model_id ?? undefined;
         finalizeMessage(set, get, convId, streamingId, "error");
         get().handleConversationGone(convId);
-        strandSend(set, trimmed);
+        strandSend(set, trimmed, modelId);
         return;
       }
       // Phase 5 — a mid-stream network drop no longer kills the
@@ -3850,12 +3853,12 @@ function drainQueue(get: Get, convId: string): void {
  *  deleted stays with the user: it becomes the new-chat draft (the page is
  *  about to land on /chat) and the banner offers to send it there. Until
  *  FIX127 the 404 path dropped the outbox entry and the composer was empty. */
-function strandSend(set: Set, text: string): void {
+function strandSend(set: Set, text: string, modelId?: string): void {
   const t = text.trim();
   if (!t) return;
   saveDraft(NEW_CHAT_DRAFT_KEY, t);
   set({
-    strandedSend: { text: t },
+    strandedSend: modelId ? { text: t, modelId } : { text: t },
     errorBanner: tOutside("error.conversationDeletedKeptText"),
   });
 }
@@ -3890,9 +3893,10 @@ async function handleStreamPreError(
     // another tab): finalize the optimistic rows, then drop the
     // conversation and surface the specific "deleted" banner instead
     // of echoing the server's raw 404 envelope message.
+    const modelId = get().conversations.find((c) => c.id === convId)?.model_id ?? undefined;
     finalizeMessage(set, get, convId, tempAsstId, "error");
     get().handleConversationGone(convId);
-    if (sentText) strandSend(set, sentText);
+    if (sentText) strandSend(set, sentText, modelId);
     return;
   }
   if (code === "TOO_MANY_FILES" && tempUserId) {

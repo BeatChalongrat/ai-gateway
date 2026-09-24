@@ -186,3 +186,12 @@ describe("FIX132 N1 — the open deadline asks the server before blaming anyone"
     expect(useChatStore.getState().returnedDrafts.c1?.text).toBe("สวัสดี");
   });
 });
+
+describe("FIX132 F25 — a send refused because the chat was deleted remembers the chat's model", () => {
+  it("404 on the send → strandedSend carries the text and the model", async () => {
+    useChatStore.setState({ conversations: [{ ...conv(), model_id: "deepseek-v4-pro" }], messages: { c1: [] }, messagesLoaded: { c1: true } });
+    mockApi.openMessageStream.mockResolvedValue(new Response(JSON.stringify({ error: { code: "not_found", message: "conversation not found" } }), { status: 404 }));
+    await useChatStore.getState().sendMessage("c1", "สรุปให้หน่อย", []);
+    expect(useChatStore.getState().strandedSend).toEqual({ text: "สรุปให้หน่อย", modelId: "deepseek-v4-pro" });
+  });
+});
