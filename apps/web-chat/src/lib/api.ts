@@ -56,13 +56,11 @@ const API_BASE =
 /** FIX129 B2 — the chat-edge base for the session heartbeat (auth-refresh.ts). */
 export const CHAT_API_BASE = API_BASE;
 
-// Ceiling for a file upload. Shared by both upload paths, which now
-// differ in what they wait for: a KB document is still extracted inside
-// the request (OCR for a scanned PDF, up to the server's 240 s wall),
-// while a conversation-file upload returns as soon as the bytes land and
-// extracts in the background. Sized for the slower of the two, and
-// finite either way so a stuck request eventually surfaces as an error
-// instead of disabling the composer forever.
+// Ceiling for a file upload. Shared by both upload paths. Both now return
+// as soon as the bytes land and extract in the background (a KB document
+// since FIX132: 202 pending), so the ceiling only bounds a slow link; it
+// stays finite so a stuck request eventually surfaces as an error instead
+// of disabling the composer forever.
 const UPLOAD_TIMEOUT_MS = 300_000;
 
 // Single-flight refresh shared across all concurrent 401s (parallel

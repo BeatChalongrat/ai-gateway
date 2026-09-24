@@ -86,7 +86,7 @@ export default function KnowledgeBasePage() {
     return () => window.clearInterval(id);
   }, [listIndexing, loadKBs]);
   // Ask afresh on every visit — the verdict may have changed since the
-  // session's first ask (a key was fixed, or credit ran out).
+  // session's first ask (the local models finished loading, or stopped).
   useEffect(() => {
     void loadAvailability(true).finally(() => setChecking(false));
   }, [loadAvailability]);
