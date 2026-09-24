@@ -1,0 +1,12 @@
+# FIX131 — the live backend no longer bind-mounts this directory, so what the
+# image contains is what runs. Keep runtime data and local caches out of it:
+# uploads/ holds users' avatars (it is a named volume at runtime, see
+# docker-compose.yml) and must never be copied into an image layer by a
+# `docker compose build` run from a working checkout. (scripts/build-images.sh
+# builds from `git archive`, which already leaves gitignored files out.)
+# The same context also builds ner-service (ner_service/Dockerfile copies only
+# ner_service/), which none of this touches.
+uploads/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/

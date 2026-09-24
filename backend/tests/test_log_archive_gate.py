@@ -89,9 +89,13 @@ def test_lifespan_runs_one_pipeline_task_and_no_free_archive_loop():
     src = inspect.getsource(main_mod)
     lifespan_src = inspect.getsource(main_mod.lifespan)
 
+    # FIX131: one pipeline per DEPLOYMENT, not per gunicorn worker — it is
+    # handed to the leader jobs exactly once and never started directly
+    # (tests/test_fix131_leader.py covers the election itself).
     assert lifespan_src.count(
-        "create_task(_nightly_retention_pipeline())"
+        '"retention_pipeline": _nightly_retention_pipeline'
     ) == 1
+    assert "create_task(_nightly_retention_pipeline())" not in lifespan_src
     # The old independent loops must not come back.
     assert "_daily_log_archive" not in src
     assert "_daily_dlp_retention" not in src

@@ -1,4 +1,4 @@
-.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up sandbox-image webchat-up webchat-down compose-check health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main
+.PHONY: up preflight prod prod-desktop down logs seed migrate clean clean-portal-users fresh bootstrap sandbox-up sandbox-image webchat-up webchat-down compose-check health test test-unit test-all typecheck web-test web-e2e go-test ci shell-backend shell-admin shell-portal build rebuild ps help chat-edge-migrate chat-edge-migrate-main dev-backend live-backend deploy-backend
 .DEFAULT_GOAL := help
 
 # Shell commands passed to `docker compose exec` run inside the
@@ -9,7 +9,8 @@ help: ## Show this help
 	@echo ""
 	@echo "Deployment shapes (they intentionally differ — do NOT merge the compose files):"
 	@echo "  dev           make bootstrap   first-run: gen .env + up + health-gate + migrate + seed"
-	@echo "                make up          start the dev stack (hot-reload; ports on 0.0.0.0)"
+	@echo "                make up          start the dev stack (backend = its image, gunicorn; admin/portal hot-reload)"
+	@echo "                make dev-backend backend hot reload instead (opt-in: docker-compose.dev.yml)"
 	@echo "  prod-desktop  make prod-desktop  dev-set + chat-edge + mcp-gateway + nginx (:80/:443, --profile desktop)"
 	@echo "  webchat       make webchat-up  SEPARATE stack + its OWN postgres:5433 / redis:6380 / web-chat:3002"
 	@echo "                                 code-interpreter sandbox is ON by default here (document reading,"
@@ -19,7 +20,7 @@ help: ## Show this help
 preflight: ## Verify .env has the hard-required vars (REDIS_PASSWORD, ...) before compose up — fails loud with a fix hint
 	bash scripts/preflight.sh
 
-up: preflight ## Start the full stack in DEV mode (hot-reload, ports bound to 0.0.0.0)
+up: preflight ## Start the full stack in DEV mode (backend runs its image; admin/portal hot-reload)
 	docker compose up -d
 	@echo ""
 	@echo "Backend:   http://localhost:8080/health"
@@ -95,23 +96,26 @@ fresh: clean ## NUCLEAR reset — wipe volumes + rebuild images + start + seed. 
 	@echo ""
 	@echo "System fresh. Open http://localhost:3000"
 
-test: ## Run the backend test suite inside the backend container
-	# Config / dlp tests assert pydantic Settings defaults. The compose
-	# runtime sets POSTGRES_HOST=postgres etc.; `env -u` unsets those
-	# so the defaults come from the Settings class, not the container env.
-	docker compose exec backend env \
-	  -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_DB \
-	  -u POSTGRES_USER -u POSTGRES_PASSWORD \
-	  -u REDIS_HOST -u REDIS_PORT \
-	  -u CORS_ORIGINS -u LOG_LEVEL \
-	  -u PROVIDER_BASE_URL_OVERRIDES -u DLP_DISABLED_DETECTORS \
-	  pytest
+# FIX131 — backend tests never run inside the live backend container (it no
+# longer carries the source, and FIX90 showed what a test run there can do to
+# the live database). They run in a throwaway container: --network none, the
+# checkout mounted read-only, APP_ENV=test only.
+test: test-unit ## Backend tests (the unit lane) in a throwaway container
 
-test-unit: ## Backend UNIT lane only (excludes integration) — the CI gate
-	docker compose exec backend pytest -m "not integration"
+test-unit: ## Backend UNIT lane only (excludes integration) — the CI gate, throwaway container
+	bash scripts/backend-test-lane.sh
 
-test-all: ## Full backend suite (includes integration — needs the live stack)
-	docker compose exec backend pytest
+test-all: ## Backend suite incl. integration-marked tests (throwaway, no network: service-backed ones need the test stack, docs/testing/test-stack.md)
+	bash scripts/backend-test-lane.sh -q -p no:cacheprovider -rf
+
+dev-backend: ## Backend hot reload on the checkout (opt-in dev shape; `make live-backend` goes back)
+	docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch
+
+live-backend: ## Backend + ops-watch from the image (the production process; leaves the dev shape)
+	docker compose up -d backend ops-watch
+
+deploy-backend: ## Build HEAD's backend image and deploy it with a drain (docs/ops/deploy-backend.md)
+	bash scripts/deploy-backend.sh
 
 typecheck: ## TypeScript typecheck for the web-chat frontend
 	cd apps/web-chat && npx tsc --noEmit
@@ -229,6 +233,7 @@ PROD_CONFIG_ENV := WEB_CHAT_PUBLIC_URL=placeholder PORTAL_PUBLIC_URL=placeholder
 
 compose-check: ## Validate every supported compose shape (dev / prod / prod-desktop / webchat / webchat+sandbox / desktop+sandbox)
 	@echo "[1/6] dev: base + override" && docker compose -f docker-compose.yml -f docker-compose.override.yml config -q
+	@echo "[1b]  dev backend hot reload: + docker-compose.dev.yml" && docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.dev.yml config -q
 	@echo "[2/6] prod: base + prod" && $(PROD_CONFIG_ENV) docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
 	@echo "[3/6] prod-desktop: base + prod + profile desktop" && $(PROD_CONFIG_ENV) docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile desktop config -q
 	@echo "[4/6] webchat: webchat.yml alone" && docker compose $(WEBCHAT_COMPOSE) config -q

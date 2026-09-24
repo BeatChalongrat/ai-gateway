@@ -148,6 +148,17 @@ async def lifespan(app: FastAPI):
     # its own analyzer when the DB flag is on.
     await _timed("ner_preload", asyncio.to_thread(_maybe_preload_ner))
 
+    # FIX131 — under gunicorn EVERY worker runs this lifespan. Two kinds of
+    # background work start below:
+    #   per worker (they describe or serve THIS process): loop monitor, DB
+    #     pool sampler, pg_activity sampler (feeds this worker's /ready), the
+    #     generation job loop (each claim is advisory-locked, 900004), the
+    #     request-log queue, custom-detector loader, model-registry follower,
+    #     worker-board publisher;
+    #   once per deployment (they act on the world): alert sweep, nightly
+    #     retention, partition maintenance, search-provider health probes,
+    #     model discovery — started only in the worker that holds the leader
+    #     lock (app/core/leader.py), handed over when that worker exits.
     # Start event loop lag monitor — logs when loop is blocked > 100ms
     monitor_task = asyncio.create_task(_loop_monitor())
 
@@ -159,7 +170,7 @@ async def lifespan(app: FastAPI):
     # a night the strip failed. The stripper always runs; every step
     # that DELETES is flag-gated off by default and dry-run first.
     # See app/jobs/retention_pipeline.py.
-    retention_task = asyncio.create_task(_nightly_retention_pipeline())
+    # (leader-only since FIX131: started by leader_jobs below)
     if not settings.log_archive_enabled:
         import structlog as _structlog
 
@@ -175,7 +186,7 @@ async def lifespan(app: FastAPI):
     # if it doesn't exist yet. Sleeps 24h between checks; the CREATE
     # statement itself is idempotent so the actual frequency doesn't
     # matter as long as it runs at least once before each month rolls.
-    partition_task = asyncio.create_task(_daily_partition_maintenance())
+    # (leader-only since FIX131: started by leader_jobs below)
 
     # Sprint 1 — async media-generation job loop. Polls ``generation_jobs``
     # and (once Sprint 2 lands a provider adapter) drives video/music/TTS
@@ -195,7 +206,8 @@ async def lifespan(app: FastAPI):
     # sweep instead of once per completed request. Their metrics are
     # time-window aggregates, so a sweep is equivalent and keeps the
     # enabled-rules SELECT + window aggregates off the request hot path.
-    alert_task = asyncio.create_task(_alert_evaluation_sweep())
+    # (leader-only since FIX131 — N sweeps sent each alert up to N times:
+    # the cooldown check and the last_fired_at write are not atomic.)
 
     # FIX129 A4 — the baseline alert rules exist on every deployment
     # (alert_rules was empty through the 2026-09-22 outage).
@@ -209,8 +221,8 @@ async def lifespan(app: FastAPI):
     # provider across all tenants every 5 minutes, updating health /
     # latency / uptime in the DB and logging outage/recovery transitions.
     # The fallback chain skips providers it marks 'down'.
+    # (leader-only since FIX131: each probe is a real, paid search query.)
     from app.services.search.health import search_health_monitor_loop
-    search_health_task = asyncio.create_task(search_health_monitor_loop())
 
     # Model registry: swap the import-time seed snapshot for the
     # current DB contents, then start the APScheduler job that
@@ -218,7 +230,47 @@ async def lifespan(app: FastAPI):
     # and swallowed — the seed snapshot is a valid fallback and
     # the gateway must still serve requests on a cold DB.
     await _timed("model_registry_reload", asyncio.to_thread(_initial_registry_reload))
-    _start_model_discovery_scheduler()
+
+    # FIX131 — an admin edit reloads the registry in the ONE worker that
+    # handled it; every worker follows model_configs itself (reloads when the
+    # active rows change), so the others no longer route and bill on the old
+    # rows until a restart. See app/services/providers/registry_sync.py.
+    from app.core.db import SessionLocal as _SessionLocal
+    from app.services.providers.model_registry import _registry as _model_registry
+    from app.services.providers.registry_sync import sync_loop as _registry_sync_loop
+
+    registry_sync_task = asyncio.create_task(
+        _registry_sync_loop(_SessionLocal, reload=_model_registry.reload)
+    )
+
+    # FIX131 — the once-per-deployment jobs, run by the elected worker only.
+    # The daily discovery sync (APScheduler) is started and stopped with them.
+    from app.core import leader as _leader
+
+    leader_jobs = _leader.LeaderJobs(
+        {
+            "alert_sweep": _alert_evaluation_sweep,
+            "retention_pipeline": _nightly_retention_pipeline,
+            "partition_maintenance": _daily_partition_maintenance,
+            "search_health": search_health_monitor_loop,
+        },
+        on_start=_start_model_discovery_scheduler,
+        on_stop=_stop_model_discovery_scheduler,
+    )
+    election = _leader.LeaderElection(
+        _leader.make_leader_lock(settings.database_url),
+        on_elected=leader_jobs.start,
+        on_demoted=leader_jobs.stop,
+    )
+    _leader.set_current(election)
+    election_task = asyncio.create_task(election.run())
+
+    # FIX131 — this worker's line on the worker board (stuck requests, last
+    # turn, leader), so /ready answers for the container from any worker.
+    from app.api.routes.health import worker_record as _worker_record
+    from app.core import worker_board as _worker_board
+
+    board_task = asyncio.create_task(_worker_board.publisher_loop(_worker_record))
 
     # Sprint 6: admin-configurable custom DLP detectors. Build the initial
     # snapshot, subscribe to the Redis reload channel, and install the
@@ -285,6 +337,16 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # FIX131 — hand leadership over first: stop the leader jobs and release
+    # the lock, so a worker of the other container (a deploy) or a surviving
+    # worker takes over on its next attempt instead of after this exit.
+    election_task.cancel()
+    try:
+        await election.resign()
+    except Exception:  # noqa: BLE001 — process exit releases the lock anyway
+        pass
+    _leader.set_current(None)
+
     # Drain + stop the queue first so any in-flight records make it
     # to Postgres before the worker pool tears down.
     await request_log_queue.stop_worker()
@@ -300,12 +362,9 @@ async def lifespan(app: FastAPI):
         await dispose_async_engine()
     except Exception:  # noqa: BLE001
         pass
-    _stop_model_discovery_scheduler()
     monitor_task.cancel()
-    retention_task.cancel()
-    alert_task.cancel()
-    search_health_task.cancel()
-    partition_task.cancel()
+    registry_sync_task.cancel()
+    board_task.cancel()
     generation_job_task.cancel()
     pool_task.cancel()
     pg_activity_task.cancel()
@@ -341,6 +400,11 @@ STARTUP_LOCK_SEED_ADMIN = 900005
 # cannot collide with a new claimant. 900007 is the schema-guard autoupgrade
 # (app/core/schema_guard.py).
 STARTUP_LOCK_PROVIDER_ENV_SEED = 900008
+# FIX131: 900009 is the leader lock (app/core/leader.py, session-level, held
+# for a worker's life); 900010 serializes the default alert rules seed, a
+# check-then-insert with no unique constraint that N workers booting
+# together would otherwise insert N times (each copy then fires on its own).
+STARTUP_LOCK_ALERT_RULES_SEED = 900010
 
 
 def _acquire_startup_lock(session, lock_id: int) -> None:
@@ -761,6 +825,7 @@ def _seed_default_alert_rules() -> None:
 
     session = SessionLocal()
     try:
+        _acquire_startup_lock(session, STARTUP_LOCK_ALERT_RULES_SEED)
         added = ensure_default_rules(session)
         session.commit()
         if added:

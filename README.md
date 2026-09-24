@@ -160,10 +160,12 @@ browser bundle. Two vars matter for a non-localhost deploy — set them in
 
 #### "SCHEMA DRIFT … refusing to start" — the backend will not come up
 
-A container that has been running while you pulled a new migration has a
-schema older than the code: its `alembic upgrade head` ran once, at container
-start, and a hot reload does not re-run it. The backend then refuses to start
-and says so:
+The live backend runs its image (FIX131, docs/ops/deploy-backend.md): every
+container start migrates before gunicorn starts, so this happens only in the
+opt-in hot-reload shape (`docker-compose.dev.yml`). There, a container that has
+been running while you pulled a new migration has a schema older than the
+code: its `alembic upgrade head` ran once, at container start, and a hot
+reload does not re-run it. The backend then refuses to start and says so:
 
 ```
 SCHEMA DRIFT: DB at 087, code needs 088 - refusing to start.

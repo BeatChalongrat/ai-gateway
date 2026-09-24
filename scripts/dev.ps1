@@ -53,7 +53,7 @@ switch ($Command) {
     "logs"          { docker compose logs -f }
     "seed"          { docker compose exec backend python -m scripts.seed_audit_data }
     "clean"         { docker compose down -v }
-    "test"          { docker compose exec backend pytest }
+    "test"          { bash scripts/backend-test-lane.sh }   # FIX131: throwaway container, never the live one
     "build"         { docker compose build }
     "rebuild"       { docker compose build --no-cache }
     "ps"            { docker compose ps }

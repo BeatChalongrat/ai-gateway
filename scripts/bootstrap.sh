@@ -5,7 +5,7 @@
 #
 #   1. Generate .env (if absent) with strong secrets — scripts/gen_env.sh
 #   2. Apply BACKEND migrations           (one-shot container, no app import)
-#   3. docker compose up -d              (dev stack; hot-reload overlay)
+#   3. docker compose up -d              (dev stack; backend = its image, FIX131)
 #   4. Health-gate every critical svc    — scripts/wait_for_health.sh
 #   5. Apply chat-edge SQL migrations     (idempotent IF NOT EXISTS)
 #   6. Seed admin+portal ONLY if not seeded (query admin first)

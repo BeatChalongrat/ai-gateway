@@ -107,6 +107,14 @@ and drops the lock. The `worker` service env keeps `POSTGRES_HOST=postgres`.
 
 ## 4. Remove the singleton jobs from the web lifespan
 
+> **FIX131:** no longer needed for correctness. The web lifespan runs the
+> once-per-deployment jobs (alert sweep, retention, partition maintenance,
+> search health, model discovery) only in the worker holding the leader lock
+> (Postgres advisory lock 900009, `backend/app/core/leader.py`), across all
+> workers and pods. That lock is session-level: with the backend behind
+> PgBouncer transaction pooling, point the leader connection at Postgres
+> directly (it uses `settings.database_url`). The text below is the older plan.
+
 So they don't run on every web pod **and** in the worker. In
 `backend/app/main.py`'s lifespan, remove the three `asyncio.create_task(...)`
 lines for the daily jobs (they call `run_dlp_retention_cleanup`,

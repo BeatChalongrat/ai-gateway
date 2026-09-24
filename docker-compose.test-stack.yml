@@ -249,11 +249,6 @@
       }
     },
     "backend": {
-      "command": [
-        "sh",
-        "-c",
-        "python -m alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8080"
-      ],
       "depends_on": {
         "mock-provider": {
           "condition": "service_healthy",
@@ -306,6 +301,8 @@
         "DLP_PROMPT_VARIANT": "${DLP_PROMPT_VARIANT:-v1}",
         "DLP_PSEUDONYM_MODE": "${DLP_PSEUDONYM_MODE:-true}",
         "GOOGLE_HOSTED_DOMAIN": "${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}",
+        "GUNICORN_GRACEFUL_TIMEOUT": "${GUNICORN_GRACEFUL_TIMEOUT:-180}",
+        "GUNICORN_TIMEOUT": "${GUNICORN_TIMEOUT:-60}",
         "GUNICORN_WORKERS": "${GUNICORN_WORKERS:-4}",
         "IMAGE_GENERATION_TIMEOUT_SECONDS": "${IMAGE_GENERATION_TIMEOUT_SECONDS:-180}",
         "INTERNAL_SERVICE_SECRET": "${INTERNAL_SERVICE_SECRET:-}",
@@ -350,8 +347,7 @@
         "REDIS_PORT": "6379",
         "SCHEMA_DRIFT_MODE": "${SCHEMA_DRIFT_MODE:-failclosed}",
         "SERVICE_JWT_SECRET": "${SERVICE_JWT_SECRET:-dev-service-jwt-secret-change-in-prod}",
-        "VIDEO_GEN_ENABLED": "${VIDEO_GEN_ENABLED:-false}",
-        "WATCHFILES_FORCE_POLLING": "true"
+        "VIDEO_GEN_ENABLED": "${VIDEO_GEN_ENABLED:-false}"
       },
       "healthcheck": {
         "interval": "10s",
@@ -359,7 +355,7 @@
         "start_period": "30s",
         "test": [
           "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)\""
+          "test -f /app/healthcheck.py && exec python /app/healthcheck.py || exec python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/ready', timeout=4)\""
         ],
         "timeout": "5s"
       },
@@ -371,6 +367,14 @@
         "default": null
       },
       "restart": "on-failure",
+      "stop_grace_period": "200s",
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "ts_backend_uploads",
+          "target": "/app/uploads"
+        }
+      ],
       "image": "ai-gateway-backend:${TS_BACKEND_TAG:-latest}",
       "ports": [
         "127.0.0.1:18081:8080"
@@ -662,6 +666,7 @@
     "ts_postgres_data": {},
     "ts_pgdata_webchat": {},
     "ts_chat_edge_uploads": {},
-    "ts_backups": {}
+    "ts_backups": {},
+    "ts_backend_uploads": {}
   }
 }

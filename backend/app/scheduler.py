@@ -9,11 +9,12 @@ Why an in-process scheduler (vs. an external cron worker):
 - The admin "sync now" endpoint shares the same code path, so
   scheduled and manual syncs go through identical logic.
 
-The scheduler ticks regardless of which gunicorn worker happens to
-run it — every worker will start its own scheduler. For our 24h
-cadence + idempotent upserts, multiple workers running the same job
-is acceptable redundant work. If/when that becomes expensive we can
-gate on a Postgres advisory lock at the start of ``sync_all``.
+FIX131 — only the elected leader worker runs it (app/core/leader.py:
+main.py starts the scheduler when a worker is elected and stops it when
+that worker is demoted or exits). Before, every gunicorn worker started
+its own, so N workers ran N simultaneous ``sync_all`` passes (every
+provider's /models N times, racing on model_configs' unique constraint).
+``start_scheduler`` after ``stop_scheduler`` starts it again.
 """
 
 from __future__ import annotations
