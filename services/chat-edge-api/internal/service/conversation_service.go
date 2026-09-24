@@ -160,13 +160,27 @@ func (s *ConversationService) Search(
 	if limit > 100 {
 		limit = 100
 	}
-	// Escape SQL LIKE meta-characters so a literal `_` or `%` in
-	// the search text doesn't act as a wildcard.
-	q = strings.ReplaceAll(q, "\\", "\\\\")
-	q = strings.ReplaceAll(q, "%", "\\%")
-	q = strings.ReplaceAll(q, "_", "\\_")
-	return s.conversations.SearchByUser(ctx, tenantID, userID, q, limit)
+	// FIX132 F19 — every word of the query must appear in the title, in
+	// any order ("NIGHT3 j2" finds "[NIGHT3] j2 …"; it used to be one
+	// substring). A query with no spaces — any Thai phrase — is one word,
+	// the same match as before. Each word is escaped so a literal `_` or
+	// `%` doesn't act as a wildcard.
+	words := strings.Fields(q)
+	if len(words) > maxTitleSearchWords {
+		words = words[:maxTitleSearchWords]
+	}
+	patterns := make([]string, len(words))
+	for i, w := range words {
+		w = strings.ReplaceAll(w, "\\", "\\\\")
+		w = strings.ReplaceAll(w, "%", "\\%")
+		w = strings.ReplaceAll(w, "_", "\\_")
+		patterns[i] = "%" + w + "%"
+	}
+	return s.conversations.SearchByUser(ctx, tenantID, userID, patterns, limit)
 }
+
+// maxTitleSearchWords bounds the ILIKE ALL list (FIX132 F19).
+const maxTitleSearchWords = 8
 
 // Rename updates the title. Validates non-empty + length cap to
 // match the DB column expectations (TEXT is unbounded but the UI
