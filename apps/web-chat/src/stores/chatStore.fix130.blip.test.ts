@@ -229,7 +229,10 @@ describe("FIX130 C1 — a silent (half-open) connection is reattached, never wai
 });
 
 describe("FIX130 C3.2 — a send nothing answers fails into the retry card", () => {
-  it("no response to the send within the open deadline → provider_timeout error card, chat-edge told to stop, never 'cancelled'", async () => {
+  // FIX132 N1 — the card now names a connection problem (the send never
+  // reached the server) and nothing is cancelled; the server is asked first
+  // (chatStore.fix132.lostReply.test.ts covers the answered / running cases).
+  it("no response to the send within the open deadline → connection error card, never 'cancelled'", async () => {
     mockApi.openMessageStream.mockImplementation(
       (_c: string, _t: string, signal: AbortSignal) =>
         new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))),
@@ -243,9 +246,9 @@ describe("FIX130 C3.2 — a send nothing answers fails into the retry card", () 
     await sending;
     const row = (useChatStore.getState().messages.c1 ?? []).find((m) => m.role === "assistant");
     expect(row?.status).toBe("error");
-    expect(row?.error_code).toBe("provider_timeout");
-    expect(row?.error_retryable).toBe(true);
-    expect(mockApi.cancelGeneration).toHaveBeenCalledWith("c1");
+    expect(row?.error_code).toBe("connection_timeout");
+    expect(row?.error_retryable).toBe(false); // the text is back in the composer
+    expect(mockApi.cancelGeneration).not.toHaveBeenCalled();
   });
 
   it("chat-edge's 504 provider_timeout lands on the row localized (the card's reason + retry), not as an English banner", async () => {

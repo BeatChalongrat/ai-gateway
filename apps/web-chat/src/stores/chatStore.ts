@@ -1532,6 +1532,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // CURRENT — finalizing the stale temp id would leave the message
       // stuck in status "streaming" after a cancel/error.
       const streamingId = get().streamingAssistantId[convId] ?? tempAsstId;
+      // FIX132 N1 — nothing answered the send in time. Before calling it a
+      // failure, ask the server what became of THIS send (its run id is on
+      // the user row): NIGHT3 c32 blamed the AI provider, offered a paid
+      // retry and told chat-edge to cancel while the answer sat saved.
+      if (err instanceof StreamOpenTimeoutError) {
+        const outcome = await recoverTimedOutSend(set, get, convId, tempUserId, streamingId, requestId);
+        if (outcome === "missing") giveBackToComposer(set, convId, requestId);
+        else outboxAccepted(convId, requestId);
+        if (outcome === "answered" || outcome === "running") {
+          replyCompleted = lastReplyEndedCompleted(get, convId);
+          return;
+        }
+        // "missing": the text is back in the composer, the way to try again
+        // (a regenerate would answer the PREVIOUS turn — the server never got
+        // this one). "no_reply": the message arrived; a retry can answer it.
+        if (outcome === "missing") failSendConnection(set, get, convId, streamingId, "connection_timeout", false);
+        else failSendConnection(set, get, convId, streamingId, "stream_interrupted", true);
+        return;
+      }
       // FIX122 Part C — the request died with no answer (the entry is still
       // there; an accepted send has dropped it): a failed send, and the text
       // returns to the composer. A Stop is not a failure — the server
@@ -1564,12 +1583,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
           return;
         }
         finalizeMessage(set, get, convId, streamingId, "cancelled");
-        return;
-      }
-      // FIX130 C3.2 — nothing answered the send in time (chat-edge's own
-      // model deadline would have): the turn fails into the retry card.
-      if (err instanceof StreamOpenTimeoutError) {
-        failOpenTimeout(set, get, convId, streamingId);
         return;
       }
       // The conversation was deleted elsewhere (desktop propagation /
@@ -2655,6 +2668,76 @@ function failOpenTimeout(set: Set, get: Get, convId: string, rowId: string): voi
       ...s.messages,
       [convId]: (s.messages[convId] ?? []).map((m) =>
         m.id === rowId ? { ...m, error_code: "provider_timeout", error_retryable: true, error_message: localized, terminal_cause: "timeout" } : m,
+      ),
+    },
+  }));
+  finalizeMessage(set, get, convId, rowId, "error");
+  get().setError(localized);
+}
+
+/** FIX132 N1 — what became of a send that got no response in time. Reads
+ *  the newest rows and looks for the user row carrying this send's run id
+ *  (FIX119: the request id). Found → the optimistic pair is replaced by the
+ *  server's rows; a reply still streaming is attached to ("running"), a
+ *  finished or failed one is simply shown ("answered" — the server's own
+ *  row says what happened). "no_reply": the message arrived but no answer
+ *  row exists. "missing": the send never arrived, or the server cannot be
+ *  asked — a connection problem either way. */
+async function recoverTimedOutSend(
+  set: Set,
+  get: Get,
+  convId: string,
+  tempUserId: string,
+  rowId: string,
+  requestId: string,
+): Promise<"answered" | "running" | "no_reply" | "missing"> {
+  let rows: Message[];
+  try {
+    rows = (await api.listMessages(convId, { limit: 20 }))?.messages ?? [];
+  } catch {
+    return "missing";
+  }
+  const at = rows.findIndex((m) => m.role === "user" && m.run_id === requestId);
+  if (at < 0) return "missing";
+  const user = rows[at];
+  const reply = rows.slice(at + 1).find((m) => m.role === "assistant");
+  set((s) => {
+    const list = (s.messages[convId] ?? []).filter((m) => m.id !== tempUserId && (reply ? m.id !== rowId : true));
+    const have = new Set(list.map((m) => m.id));
+    const add = [user, ...(reply ? [reply] : [])].filter((m) => !have.has(m.id));
+    if (!reply) {
+      // Keep the placeholder (it gets the connection card) after the real user row.
+      const placeholder = list.findIndex((m) => m.id === rowId);
+      if (placeholder >= 0) return { messages: { ...s.messages, [convId]: [...list.slice(0, placeholder), ...add, ...list.slice(placeholder)] } };
+    }
+    return { messages: { ...s.messages, [convId]: [...list, ...add] } };
+  });
+  if (!reply) return "no_reply";
+  if (reply.status === "streaming") {
+    // Hand this send's slot to the reattach (resumeStream is single-flight).
+    set((s) => {
+      const aborts = { ...s.abortControllers };
+      delete aborts[convId];
+      const sids = { ...s.streamingAssistantId };
+      delete sids[convId];
+      return { abortControllers: aborts, streamingAssistantId: sids };
+    });
+    await get().resumeStream(convId, reply.id);
+    return "running";
+  }
+  return "answered";
+}
+
+/** FIX132 N1 — the send's card after a timed-out open: a connection
+ *  problem, never the AI provider's, and nothing is cancelled — there is
+ *  nothing on the server this page knows of to cancel. */
+function failSendConnection(set: Set, get: Get, convId: string, rowId: string, code: string, retryable: boolean): void {
+  const localized = localizeErrorCode(code, undefined, retryable);
+  set((s) => ({
+    messages: {
+      ...s.messages,
+      [convId]: (s.messages[convId] ?? []).map((m) =>
+        m.id === rowId ? { ...m, error_code: code, error_retryable: retryable, error_message: localized, terminal_cause: "timeout" } : m,
       ),
     },
   }));
