@@ -76,44 +76,40 @@ def rewrite_value(value: str | None, old_key: str, new_key: str):
 
 
 def run(conn, old_key: str, new_key: str, apply: bool) -> list[Plan]:
-    """conn: a psycopg2 connection (autocommit off). Returns the per-column plan."""
+    """conn: a SQLAlchemy Connection (the app's sync engine). Returns the per-column plan."""
+    from sqlalchemy import text
+
     plans: list[Plan] = []
-    cur = conn.cursor()
-    try:
-        for table, pk, columns in TARGETS:
-            cur.execute("SELECT to_regclass(%s)", (table,))
-            if cur.fetchone()[0] is None:
-                continue
-            for column in columns:
-                plan = Plan(table, column)
-                cur.execute(f"SELECT {pk}, {column} FROM {table} ORDER BY {pk}")
-                rows = cur.fetchall()
-                updates = []
-                for row_id, value in rows:
-                    try:
-                        new_value, state = rewrite_value(value, old_key, new_key)
-                    except Exception as exc:  # noqa: BLE001
-                        conn.rollback()
-                        raise SystemExit(
-                            f"{table}.{column} row {row_id}: decrypts under neither key "
-                            f"({type(exc).__name__}); nothing was written"
-                        ) from exc
-                    if state == "rewritten":
-                        plan.to_rewrite += 1
-                        updates.append((new_value, row_id))
-                    elif state == "already_new":
-                        plan.already_new += 1
-                    else:
-                        plan.empty += 1
-                if apply and updates:
-                    cur.executemany(f"UPDATE {table} SET {column} = %s WHERE {pk} = %s", updates)
-                plans.append(plan)
-        if apply:
-            conn.commit()
-        else:
-            conn.rollback()
-    finally:
-        cur.close()
+    for table, pk, columns in TARGETS:
+        if conn.execute(text("SELECT to_regclass(:t)"), {"t": table}).scalar() is None:
+            continue
+        for column in columns:
+            plan = Plan(table, column)
+            rows = conn.execute(text(f"SELECT {pk}, {column} FROM {table} ORDER BY {pk}")).all()
+            updates = []
+            for row_id, value in rows:
+                try:
+                    new_value, state = rewrite_value(value, old_key, new_key)
+                except Exception as exc:  # noqa: BLE001
+                    conn.rollback()
+                    raise SystemExit(
+                        f"{table}.{column} row {row_id}: decrypts under neither key "
+                        f"({type(exc).__name__}); nothing was written"
+                    ) from exc
+                if state == "rewritten":
+                    plan.to_rewrite += 1
+                    updates.append({"v": new_value, "id": row_id})
+                elif state == "already_new":
+                    plan.already_new += 1
+                else:
+                    plan.empty += 1
+            if apply and updates:
+                conn.execute(text(f"UPDATE {table} SET {column} = :v WHERE {pk} = :id"), updates)
+            plans.append(plan)
+    if apply:
+        conn.commit()
+    else:
+        conn.rollback()
     return plans
 
 
@@ -122,23 +118,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--old", required=True, help="the key the rows are encrypted with now (64 hex or 'dev')")
     ap.add_argument("--new", required=True, help="the key to encrypt with (64 hex)")
     ap.add_argument("--apply", action="store_true", help="write (default: dry run)")
-    ap.add_argument("--dsn", default=os.environ.get("REENCRYPT_DSN", ""), help="psycopg2 DSN (default: the app's sync database URL)")
+    ap.add_argument("--dsn", default=os.environ.get("REENCRYPT_DSN", ""), help="SQLAlchemy URL (default: the app's own database)")
     args = ap.parse_args(argv)
     old_key, new_key = _key(args.old), _key(args.new)
     if old_key == new_key:
         raise SystemExit("old and new keys are the same")
-    import psycopg2
+    from sqlalchemy import create_engine
 
-    dsn = args.dsn
-    if not dsn:
-        from app.core.config import settings
-
-        dsn = settings.database_url.replace("postgresql+psycopg2://", "postgresql://").replace("postgresql+asyncpg://", "postgresql://")
-    conn = psycopg2.connect(dsn)
-    try:
+    if args.dsn:
+        engine = create_engine(args.dsn)
+    else:
+        from app.core.db import engine  # the app's own sync engine (psycopg 3)
+    with engine.connect() as conn:
         plans = run(conn, old_key, new_key, args.apply)
-    finally:
-        conn.close()
     mode = "APPLIED" if args.apply else "DRY RUN"
     print(f"{mode}:")
     for p in plans:
