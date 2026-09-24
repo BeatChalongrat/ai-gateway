@@ -74,10 +74,10 @@ func TestLayer10_ProjectWithoutUserPrefs(t *testing.T) {
 // stubRAG captures which KB id the retrieval was asked for.
 type stubRAG struct{ gotKB *uuid.UUID }
 
-func (s *stubRAG) BuildContext(_ context.Context, _, _, kbID uuid.UUID, _ string) string {
-	k := kbID
-	s.gotKB = &k
-	return "ctx"
+func (s *stubRAG) BuildContext(_ context.Context, req RAGRequest) (string, []ContextSource) {
+	id := req.KBID
+	s.gotKB = &id
+	return "ctx", nil
 }
 
 func TestRAGContext_ProjectKBFallbackPriority(t *testing.T) {
@@ -90,7 +90,7 @@ func TestRAGContext_ProjectKBFallbackPriority(t *testing.T) {
 	// (1) conversation KB wins over the project fallback.
 	s, rag := mk()
 	conv := &model.Conversation{TenantID: uuid.New(), KnowledgeBaseID: &convKB}
-	if out := s.ragContext(context.Background(), uuid.New(), conv, "q", &projKB); out != "ctx" {
+	if out, _ := s.ragContext(context.Background(), uuid.New(), conv, "q", &projKB, 0); out != "ctx" {
 		t.Fatalf("expected retrieval, got %q", out)
 	}
 	if rag.gotKB == nil || *rag.gotKB != convKB {
@@ -100,7 +100,7 @@ func TestRAGContext_ProjectKBFallbackPriority(t *testing.T) {
 	// (2) no conversation KB → the project's KB is used.
 	s, rag = mk()
 	conv = &model.Conversation{TenantID: uuid.New()}
-	if out := s.ragContext(context.Background(), uuid.New(), conv, "q", &projKB); out != "ctx" {
+	if out, _ := s.ragContext(context.Background(), uuid.New(), conv, "q", &projKB, 0); out != "ctx" {
 		t.Fatalf("expected fallback retrieval, got %q", out)
 	}
 	if rag.gotKB == nil || *rag.gotKB != projKB {
@@ -110,7 +110,7 @@ func TestRAGContext_ProjectKBFallbackPriority(t *testing.T) {
 	// (3) neither → no retrieval at all.
 	s, rag = mk()
 	conv = &model.Conversation{TenantID: uuid.New()}
-	if out := s.ragContext(context.Background(), uuid.New(), conv, "q", nil); out != "" {
+	if out, _ := s.ragContext(context.Background(), uuid.New(), conv, "q", nil, 0); out != "" {
 		t.Fatalf("expected no retrieval, got %q", out)
 	}
 	if rag.gotKB != nil {

@@ -29,6 +29,11 @@ const (
 	// is active or a pending suggestion. No schema change: source_type is a
 	// free VARCHAR(30) (migration 017).
 	SourceTypeMemorySaved = "memory_saved"
+	// FIX132 B — a knowledge-base passage given to the model (source_id =
+	// chunk id) and the knowledge base's not-yet-indexed files (source_id =
+	// knowledge base id). Same free VARCHAR(30) column.
+	SourceTypeKnowledgeChunk   = "knowledge_chunk"
+	SourceTypeKnowledgePending = "knowledge_pending"
 )
 
 type ResponseContextSource struct {

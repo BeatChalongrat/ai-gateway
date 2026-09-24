@@ -266,10 +266,33 @@ type PreferencesReader interface {
 
 // RAGReader queries the bound knowledge base for context relevant
 // to the user's prompt. The message service hands it the most-recent
-// user content; the returned string (possibly empty) is folded into
-// the system prompt prefix.
+// user content; the returned block (possibly empty) is folded into
+// the system prompt prefix, and the sources (FIX132 B: knowledge_chunk /
+// knowledge_pending) are recorded on the answer.
 type RAGReader interface {
-	BuildContext(ctx context.Context, tenantID, userID, kbID uuid.UUID, query string) string
+	BuildContext(ctx context.Context, req RAGRequest) (string, []ContextSource)
+}
+
+// kbTurn memoises one turn's knowledge-base retrieval (FIX132 B): the
+// context compiler may build the system prefix twice (before and after a
+// compaction), and the retrieval — an embedding plus SQL — must run once and
+// give both builds the same passages and sources.
+type kbTurn struct {
+	maxTokens int
+	done      bool
+	block     string
+	sources   []ContextSource
+}
+
+// kbTokenBudget is a quarter of the working context window of the model
+// the turn is budgeted against (FIX102: for "auto" the model that answered
+// last, else the conservative default).
+func (s *MessageService) kbTokenBudget(ctx context.Context, conv *model.Conversation, history []model.Message, modelID string) int {
+	budgetModel := s.budgetModelFor(ctx, conv, history)
+	if budgetModel == "" {
+		budgetModel = modelID
+	}
+	return GetModelContextLimitWith(ctx, s.contextWindow, budgetModel) / 4
 }
 
 // MemoryReader is the slice of MemoryService the message flow needs.
@@ -2462,24 +2485,27 @@ func (s *MessageService) fileContext(ctx context.Context, tenantID, convID uuid.
 // fallbackKB (Phase 4) is the project-inherited KB, consulted only when
 // the conversation has no explicit binding of its own — an explicit
 // per-conversation KB always wins over the inherited one.
-func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string, fallbackKB *uuid.UUID) string {
+//
+// FIX132 B — returns the knowledge_chunk / knowledge_pending sources too;
+// maxTokens caps the block (a quarter of the model's window).
+func (s *MessageService) ragContext(ctx context.Context, userID uuid.UUID, conv *model.Conversation, query string, fallbackKB *uuid.UUID, maxTokens int) (string, []ContextSource) {
 	if s.ragSvc == nil || conv == nil {
-		return ""
+		return "", nil
 	}
 	kb := conv.KnowledgeBaseID
 	if kb == nil {
 		kb = fallbackKB
 	}
 	if kb == nil {
-		return ""
+		return "", nil
 	}
 	q := strings.TrimSpace(query)
 	if q == "" {
-		return ""
+		return "", nil
 	}
-	// FIX 2 — forward the end-user so the query-embedding egress (through
-	// the gateway) is attributed/audited to them.
-	return s.ragSvc.BuildContext(ctx, conv.TenantID, userID, *kb, q)
+	// The retrieval runs as the conversation's owner: a knowledge base is
+	// private to its creator (FIX132 B), and BuildContext checks it.
+	return s.ragSvc.BuildContext(ctx, RAGRequest{TenantID: conv.TenantID, UserID: userID, KBID: *kb, Query: q, MaxTokens: maxTokens})
 }
 
 // buildSystemPrefix concatenates the user's custom instructions, the
@@ -2532,6 +2558,20 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	office OfficeIntent,
 	resolvedModel string,
 ) (string, []ContextSource) {
+	return s.buildSystemPrefixForTurn(ctx, tenantID, userID, conv, ragQuery, office, resolvedModel, nil)
+}
+
+// buildSystemPrefixForTurn is buildSystemPrefixWithSources with the turn's
+// knowledge-base memo (nil = retrieve now, budgeted on resolvedModel).
+func (s *MessageService) buildSystemPrefixForTurn(
+	ctx context.Context,
+	tenantID, userID uuid.UUID,
+	conv *model.Conversation,
+	ragQuery string,
+	office OfficeIntent,
+	resolvedModel string,
+	kb *kbTurn,
+) (string, []ContextSource) {
 	in := CompileContext{
 		Model:       resolvedModel,
 		Conv:        conv,
@@ -2560,8 +2600,16 @@ func (s *MessageService) buildSystemPrefixWithSources(
 	in.ActiveSkills, in.SkillCatalog = s.resolveSkillsForTurn(ctx, tenantID, userID, ragQuery)
 	// Layer 13 inputs — built with the file/KB repos and gated exactly
 	// as before (each returns "" when its precondition isn't met).
+	var kbSources []ContextSource
 	if conv != nil {
-		in.RAGContext = s.ragContext(ctx, userID, conv, ragQuery, projectKB)
+		if kb == nil {
+			kb = &kbTurn{maxTokens: GetModelContextLimitWith(ctx, s.contextWindow, resolvedModel) / 4}
+		}
+		if !kb.done {
+			kb.block, kb.sources = s.ragContext(ctx, userID, conv, ragQuery, projectKB, kb.maxTokens)
+			kb.done = true
+		}
+		in.RAGContext, kbSources = kb.block, kb.sources
 		in.FileContext = s.fileContext(ctx, tenantID, conv.ID)
 		in.ExcelContext = s.excelContext(ctx, tenantID, conv.ID, office.Excel)
 		in.DocContext = s.docContext(ctx, tenantID, conv.ID, office.Doc)
@@ -2569,7 +2617,8 @@ func (s *MessageService) buildSystemPrefixWithSources(
 		in.CanvasContext = s.canvasContext(ctx, tenantID, conv.ID)
 	}
 	pc := newPromptCompiler(s.prefsSvc, s.memorySvc, s.stateSvc)
-	return pc.Build(ctx, in)
+	text, srcs := pc.Build(ctx, in)
+	return text, append(srcs, kbSources...)
 }
 
 // activeToolNames returns the names of the tools active for this
@@ -3483,8 +3532,9 @@ func (s *MessageService) compileAndBuildRequest(
 	// ContextSource list each block contributed. Compile uses the
 	// MOST RECENT call's sources via CompiledContext.Sources.
 	office := DetectOfficeIntent(OfficeIntentText(history, ragQuery))
+	kbMemo := &kbTurn{maxTokens: s.kbTokenBudget(ctx, conv, history, modelID)}
 	build := func() (string, []ContextSource) {
-		return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, office, modelID)
+		return s.buildSystemPrefixForTurn(ctx, tenantID, userID, conv, ragQuery, office, modelID, kbMemo)
 	}
 
 	if s.compiler == nil {
@@ -3722,6 +3772,7 @@ func (s *MessageService) InspectContext(
 			MessagesSent:  len(history),
 		}, nil
 	}
+	kbMemo := &kbTurn{maxTokens: s.kbTokenBudget(ctx, conv, history, conv.ModelID)}
 	return s.compiler.Compile(ctx, CompileInputs{
 		Conv:      conv,
 		UserID:    userID,
@@ -3729,7 +3780,7 @@ func (s *MessageService) InspectContext(
 		History:   history,
 		ImageURLs: imageURLs,
 		BuildPrefix: func() (string, []ContextSource) {
-			return s.buildSystemPrefixWithSources(ctx, tenantID, userID, conv, ragQuery, DetectOfficeIntent(OfficeIntentText(history, ragQuery)), conv.ModelID)
+			return s.buildSystemPrefixForTurn(ctx, tenantID, userID, conv, ragQuery, DetectOfficeIntent(OfficeIntentText(history, ragQuery)), conv.ModelID, kbMemo)
 		},
 		NumTools:      numTools,
 		OmittedOlder:  s.omittedOlder(ctx, tenantID, convID, len(history)),
