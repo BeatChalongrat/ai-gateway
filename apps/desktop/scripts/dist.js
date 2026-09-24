@@ -70,7 +70,21 @@ if (localhostBuild) {
 
 // ── 3. stage it where electron-builder.yml picks it up ─────────────────────
 fs.mkdirSync(path.dirname(STAGED_CONFIG), { recursive: true });
-fs.copyFileSync(source, STAGED_CONFIG);
+// FIX133 B — a config that pins the deployment's CA (trustedCaFile) ships
+// that PEM beside the exe as resources/trusted-ca.pem; the staged config
+// names it by that fixed relative name. A config without one stages an
+// empty placeholder so electron-builder.yml's extraResources entry exists.
+const STAGED_CA = path.join(ROOT, "build", "trusted-ca.pem");
+const staged = JSON.parse(fs.readFileSync(source, "utf8"));
+if (typeof staged.trustedCaFile === "string" && staged.trustedCaFile) {
+  const caSource = path.isAbsolute(staged.trustedCaFile) ? staged.trustedCaFile : path.resolve(path.dirname(source), staged.trustedCaFile);
+  fs.copyFileSync(caSource, STAGED_CA);
+  staged.trustedCaFile = "trusted-ca.pem";
+  console.log(`trusted CA : ${caSource} → resources/trusted-ca.pem (pinned for the app's own hosts)`);
+} else {
+  fs.writeFileSync(STAGED_CA, "");
+}
+fs.writeFileSync(STAGED_CONFIG, JSON.stringify(staged, null, 2) + "\n");
 // FIX34 Part C — the Explorer context menu's command carries an app link
 // (sran://<web host>/new?file=%1), and the web host comes from THIS config, so
 // the NSIS script reads it from a generated defines file (never edited by hand).

@@ -15,7 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+import uuid
+
 from app.models.model_config import ModelConfigORM
+from app.models.provider_key import ProviderKeyORM
 from app.models.system_setting import SystemSettingORM
 from app.services.media_gen.destinations import ALLOW_MOCK_KEY
 
@@ -50,7 +53,13 @@ def seeded_media_rows():
 
     gen = _integration_db_session()
     session = next(gen)
-    rows = [_media_row("mock", "fix84-mock-video"), _media_row("replicate", "fix84-real-video")]
+    rows = [_media_row("mock", "fix84-mock-video"), _media_row("replicate", "fix84-real-video"),
+            # FIX133 E6b — a real provider WITHOUT a valid key: its media
+            # models must not be offered (sora-2 stayed listed after the
+            # OpenAI key was turned off).
+            _media_row("openai", "fix133-keyless-video"),
+            ProviderKeyORM(id=str(uuid.uuid4()), provider_name="replicate", label="fix133-test",
+                           api_key_encrypted="not-a-real-key", is_active=True, last_test_status="valid")]
     session.add_all(rows)
     session.commit()
     try:
@@ -88,3 +97,11 @@ def test_mock_model_hidden_when_switch_is_absent(seeded_media_rows):
 def test_mock_model_listed_only_when_operator_allows_it(seeded_media_rows):
     _set_allow_mock(seeded_media_rows, "true")
     assert "fix84-mock-video" in _listed_ids()
+
+
+def test_media_model_hidden_when_its_provider_has_no_valid_key(seeded_media_rows):
+    """FIX133 E6b — the video/audio/tts listing is key-gated like the chat listing."""
+    _set_allow_mock(seeded_media_rows, "false")
+    ids = _listed_ids()
+    assert "fix84-real-video" in ids  # replicate: a valid, active key was seeded
+    assert "fix133-keyless-video" not in ids  # openai: no valid key

@@ -1,64 +1,20 @@
 # Local overrides. Compose auto-merges this on top of docker-compose.yml, so
 # `docker compose -p ai-gateway up -d` (the live stack on this machine) gets
-# them: hot-reload admin-ui (next dev), hot-reload portal (next dev), and the
-# backend's extra CORS origins. In CI / prod, invoke compose with
-# -f docker-compose.yml alone to skip this overlay.
+# them.
 #
-# FIX131 — the BACKEND is no longer a dev process here. It runs the image's
-# production process (backend/serve.sh: migrate, then gunicorn with
-# GUNICORN_WORKERS workers, graceful drain on SIGTERM), like prod. The
-# hot-reload backend (uvicorn --reload on a bind mount of ./backend, plus the
-# read-only cross-tree test mounts) and ops-watch's source mount are opt-in:
+# FIX133 B — nothing runs in dev mode here any more. The backend has been the
+# image's production process since FIX131; admin-ui and portal now run their
+# built images too (production mode behind the Caddy front door, service
+# `edge`). The hot-reload shapes — backend `uvicorn --reload`, admin-ui and
+# portal `next dev` on bind mounts — live in docker-compose.dev.yml and are
+# opt-in:
 #
 #   docker compose -p ai-gateway -f docker-compose.yml \
-#     -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch
+#     -f docker-compose.override.yml -f docker-compose.dev.yml up -d backend ops-watch admin-ui portal
 #
-# (docker-compose.dev.yml has the details.) Going back to the image:
-# `docker compose -p ai-gateway up -d backend ops-watch` (no dev file).
-services:
-  backend:
-    environment:
-      # web-chat / admin / portal are also opened on 127.0.0.1, not only
-      # localhost; the base file lists the localhost origins only.
-      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002
-
-  admin-ui:
-    # Run next dev out of a plain node image against the bind-mounted
-    # source tree. The Dockerfile's prod multi-stage build is bypassed
-    # for dev so edits on the host reload inside the container.
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3000"
-    volumes:
-      - ./admin-ui:/app
-      - admin_ui_node_modules:/app/node_modules
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
-      # In-network gateway hostname for the chat-edge proxy's server-side
-      # session check (see docker-compose.yml for the full rationale).
-      GATEWAY_API_URL: http://backend:8080
-      CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
-      CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
-      WATCHPACK_POLLING: "true"
-    # No build block in dev: we only use the node:20-alpine base.
-    build: !reset null
-
-  portal:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "if [ ! -d node_modules ] || [ ! -f node_modules/.install-stamp ]; then npm ci && touch node_modules/.install-stamp; fi && npx next dev -H 0.0.0.0 -p 3001"
-    volumes:
-      - ./portal:/app
-      - portal_node_modules:/app/node_modules
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:8080
-      NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
-      BACKEND_URL: http://backend:8080
-      WATCHPACK_POLLING: "true"
-    build: !reset null
-
-volumes:
-  admin_ui_node_modules:
-  portal_node_modules:
+# NEVER leave the live stack in that shape (every checkout edit deploys
+# itself; dev mode ships debug output and non-Secure cookies).
+#
+# The backend's extra CORS origins (the 127.0.0.1 twins) moved into the base
+# file's CORS_ORIGINS default; set CORS_ORIGINS in .env for the https origins.
+services: {}

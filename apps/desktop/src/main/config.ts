@@ -47,6 +47,11 @@ export interface ShellConfig {
    * Chain validation is not relaxed — only one more root is trusted. Null =
    * system roots only. Reaches the sidecar as SRAN_CONNECTOR_EXTRA_CA_FILE. */
   readonly connectorExtraCaFile: string | null;
+  // FIX133 B — the deployment's own CA (PEM), pinned for the app's own hosts
+  // when the stack is served over https by the local front door. Relative
+  // paths resolve against the config file's directory (the staged
+  // desktop.config.json sits beside trusted-ca.pem in <install>\resources).
+  readonly trustedCaFile: string | null;
   readonly protocolScheme: string;
   /** Backend-side client id that maps to protocolScheme (allow-listed there). */
   readonly oauthClient: string;
@@ -165,6 +170,15 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     if (!fs.existsSync(rawCa)) throw new Error(`'connectorExtraCaFile' does not exist: ${rawCa}`);
     connectorExtraCaFile = rawCa;
   }
+  // FIX133 B — the pinned local CA (see src/main/local-ca.ts).
+  const rawTrusted = obj["trustedCaFile"];
+  let trustedCaFile: string | null = null;
+  if (rawTrusted !== undefined && rawTrusted !== null && rawTrusted !== "") {
+    if (typeof rawTrusted !== "string") throw new Error("'trustedCaFile' must be a path to a PEM file.");
+    const resolved = path.isAbsolute(rawTrusted) ? rawTrusted : path.resolve(path.dirname(sourcePath), rawTrusted);
+    if (!fs.existsSync(resolved)) throw new Error(`'trustedCaFile' does not exist: ${resolved}`);
+    trustedCaFile = resolved;
+  }
   const oauthClient = requireString(obj, "oauthClient", sourcePath);
   if (!/^[a-z][a-z0-9-]*$/.test(oauthClient)) {
     throw new Error(`'oauthClient' must be a lower-case identifier (got '${oauthClient}').`);
@@ -200,6 +214,7 @@ export function validateConfig(raw: unknown, sourcePath: string): ShellConfig {
     webSearchEnabled,
     connectorPrivateNetwork,
     connectorExtraCaFile,
+    trustedCaFile,
     protocolScheme,
     oauthClient,
     oauthProvider,

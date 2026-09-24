@@ -308,6 +308,13 @@ type Config struct {
 	// for their endings to be written. The container's stop_grace_period
 	// must be longer than both together (docker-compose.webchat.yml: 120s).
 	// FIX133 A5 — 90 s (was 60): a long deepseek answer is not cut on deploy.
+	// FIX133 E6a — a turn that carries knowledge-base passages is answered
+	// by self-hosted models only (KB_ALLOWED_PROVIDERS, the gateway's
+	// allowed_providers boundary): internal documents never leave the
+	// organisation until the DLP round scans them. "allow" lifts it.
+	KBExternalModels   string `env:"KB_EXTERNAL_MODELS" envDefault:"deny"`
+	KBAllowedProviders string `env:"KB_ALLOWED_PROVIDERS" envDefault:"sranai"`
+
 	DrainTimeout time.Duration `env:"CHAT_EDGE_DRAIN_TIMEOUT" envDefault:"90s"`
 	DrainGrace   time.Duration `env:"CHAT_EDGE_DRAIN_GRACE" envDefault:"10s"`
 

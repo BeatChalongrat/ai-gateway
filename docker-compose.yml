@@ -337,7 +337,9 @@ services:
       GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-26214400}
       APP_ENV: ${APP_ENV:-development}
     ports:
-      - "127.0.0.1:8080:8080"
+      # FIX133 A4 — the public port (8080) is Caddy's (service `edge`, https);
+      # this is the plain-http debug door for scripts and probes.
+      - "127.0.0.1:28080:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -428,6 +430,18 @@ services:
       # FIX131 B3 — "no fresh backup": the backup folder, read-only (below).
       # Same BACKUP_MAX_AGE_H as the backup service (26 h).
       OPS_WATCH_BACKUP_DIR: /backups
+      # FIX133 C/D — off-site copy freshness (h), the two paging speeds (s):
+      # a hard outage (no /ready, container not restarting) pages after
+      # READY_DEBOUNCE + one tick (~60-75 s); a restarting container gets
+      # RESTART_DEBOUNCE; the queue / saturation rules page only after
+      # CAPACITY_DEBOUNCE of continuous backlog.
+      OPS_WATCH_OFFSITE_MAX_AGE_H: ${OPS_WATCH_OFFSITE_MAX_AGE_H:-48}
+      OPS_WATCH_READY_DEBOUNCE_S: ${OPS_WATCH_READY_DEBOUNCE_S:-45}
+      OPS_WATCH_RESTART_DEBOUNCE_S: ${OPS_WATCH_RESTART_DEBOUNCE_S:-150}
+      OPS_WATCH_QUEUE_MIN_WAITING: ${OPS_WATCH_QUEUE_MIN_WAITING:-0}
+      OPS_WATCH_QUEUE_OLDEST_S: ${OPS_WATCH_QUEUE_OLDEST_S:-60}
+      OPS_WATCH_SATURATION_PCT: ${OPS_WATCH_SATURATION_PCT:-90}
+      OPS_WATCH_CAPACITY_DEBOUNCE_S: ${OPS_WATCH_CAPACITY_DEBOUNCE_S:-180}
       OPS_WATCH_BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
       # FIX131 D5 — replies still "streaming" after N minutes.
       OPS_WATCH_TURN_STUCK_MIN: ${OPS_WATCH_TURN_STUCK_MIN:-15}
@@ -519,7 +533,7 @@ services:
     volumes:
       - chat_edge_uploads:/app/data/uploads
     ports:
-      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:24000:4000" # FIX133 A4 — 4000 is Caddy's (https)
     depends_on:
       postgres:
         condition: service_healthy
@@ -685,6 +699,25 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       JWT_SECRET: ${JWT_SECRET:-dev-stable-key-change-in-prod}
       MASTER_ENCRYPTION_KEY: ${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}
+      # FIX133 B — production mode needs every one of these set in .env
+      # (validate_secrets refuses the dev defaults outside dev/test):
+      # session signing keys (comma list, newest first), the Safe Trace
+      # audit key, the master key that encrypts provider / search / connector
+      # secrets at rest (64 hex; rotate with backend/scripts/reencrypt_master_key.py),
+      # the first admin password (only used when no admin exists yet).
+      SESSION_SIGNING_SECRETS: ${SESSION_SIGNING_SECRETS:-}
+      DLP_AUDIT_KEY: ${DLP_AUDIT_KEY:-}
+      PROVIDER_KEY_MASTER_KEY: ${PROVIDER_KEY_MASTER_KEY:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
+      # FIX133 B — email: auto (Resend in production, the console in dev),
+      # resend, console, or disabled (an internal tool without a mail
+      # sender: verification / reset mails are reported as not delivered,
+      # never silently dropped).
+      EMAIL_DELIVERY: ${EMAIL_DELIVERY:-auto}
+      # FIX133 B — /docs, /redoc and /openapi.json: on in dev, off in
+      # production unless API_DOCS_ENABLED=true.
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-}
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
       # Trust anchor for the chat-edge → gateway X-User-ID header
       # (per-end-user rate limiting AND per-end-user credit billing
@@ -721,7 +754,9 @@ services:
       # 3000=admin-ui, 3001=portal, 3002=web-chat. allow_credentials=True
       # requires explicit origins (no "*"), and web-chat (:3002) now calls
       # the gateway directly for silent refresh, so it must be listed.
-      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      # FIX133 B — the browser origins (https once Caddy fronts them); the
+      # 127.0.0.1 twins used to live in docker-compose.override.yml.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
       # Portal auth cookies (HttpOnly migration). Empty domain = host-only
       # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
       # auto (off in dev, on in prod — no configuration needed for Secure).
@@ -789,6 +824,9 @@ services:
       TURN_QUEUE_MAX_WAIT_SECONDS: ${TURN_QUEUE_MAX_WAIT_SECONDS:-120}
       GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-60}
       GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-180}
+      # FIX133 B — proxies whose X-Forwarded-* headers uvicorn honours ("*":
+      # the compose network is the only way in; see gunicorn.conf.py).
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-*}
       # Phase-3 log-worker engine selector. ``python`` keeps the
       # legacy in-process queue; ``go`` dispatches to the Go sidecar
       # over gRPC. Falls back to the legacy path automatically when
@@ -897,11 +935,11 @@ services:
     build:
       context: ./admin-ui
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
       # Server-side base URL the chat-edge proxy uses to validate the
       # admin session against gateway-api's /auth/session/me. MUST be the
       # in-network service hostname — NEXT_PUBLIC_API_BASE_URL is a
@@ -910,8 +948,12 @@ services:
       GATEWAY_API_URL: http://backend:8080
       CHAT_EDGE_API_URL: http://chat-edge-api:4000/api/v1
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
+      # FIX133 B — the built (standalone) Next server must listen on every
+      # interface of the container, not only localhost, for Caddy to reach it.
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:23000:3000" # FIX133 A4 — 3000 is Caddy's (https)
     depends_on:
       backend:
         condition: service_healthy
@@ -921,7 +963,7 @@ services:
     build:
       context: ./portal
       args:
-        NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
         NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
         # Where SRAN Chat lives — the "Open SRAN Chat" dashboard link plus
         # the three redirect allowlists (middleware.ts, LoginForm,
@@ -936,7 +978,7 @@ services:
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
       NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
       # Runtime twin of the build arg above (server-render parity). The build
       # arg is the authoritative one for anything the browser executes.
@@ -951,8 +993,11 @@ services:
       GOOGLE_HOSTED_DOMAIN: ${GOOGLE_HOSTED_DOMAIN:-gbtech.co.th}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      # FIX133 B — see admin-ui.
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
     ports:
-      - "127.0.0.1:3001:3001"
+      - "127.0.0.1:23001:3001" # FIX133 A4 — 3001 is Caddy's (https)
     depends_on:
       backend:
         condition: service_healthy
@@ -1079,6 +1124,34 @@ services:
       - portal
     restart: unless-stopped
 
+  # FIX133 A4/B — the front door (infra/caddy/Caddyfile): TLS for every
+  # browser-facing port, least-connections balancing, active health checks
+  # and a graceful hand-over while a service drains. Same port numbers as
+  # before, https instead of http; the services themselves keep a plain
+  # loopback debug door at port + 20000. The certificate and key are the
+  # machine's own (infra/caddy/certs, gitignored; docs/ops/tls.md).
+  edge:
+    image: caddy:2-alpine
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infra/caddy/certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${EDGE_BIND:-127.0.0.1}:3000:3000"
+      - "${EDGE_BIND:-127.0.0.1}:3001:3001"
+      - "${EDGE_BIND:-127.0.0.1}:3002:3002"
+      - "${EDGE_BIND:-127.0.0.1}:4000:4000"
+      - "${EDGE_BIND:-127.0.0.1}:8080:8080"
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 130s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   prometheus_data:
@@ -1093,3 +1166,5 @@ volumes:
   mcp_workspace:
   # FIX132 B — kb-models' pinned weights, filled once.
   kb_models:
+  caddy_data:
+  caddy_config:

@@ -108,6 +108,13 @@ type MessageService struct {
 	// a ``tools`` param the provider would reject. nil / unknown id /
 	// the Auto sentinel => tools stay attached.
 	nonToolModel func(ctx context.Context, modelID string) bool
+	// FIX133 E6a — the knowledge-base boundary: when a turn carries KB
+	// passages, the gateway may only use kbAllowedProviders, and a chat
+	// pinned to a model outside them is answered by Auto (inside them) with
+	// a notice. selfHostedModel answers (selfHosted, known) from the catalogue.
+	kbSelfHostedOnly   bool
+	kbAllowedProviders []string
+	selfHostedModel    func(ctx context.Context, modelID string) (bool, bool)
 	// FIX64 — drops the cached catalog behind nonToolModel so a stale
 	// "has tools" answer can be re-asked after the Gateway refuses tools.
 	invalidateCatalog func()
@@ -799,6 +806,84 @@ func (s *MessageService) SetNonToolModelChecker(fn func(ctx context.Context, mod
 	s.nonToolModel = fn
 }
 
+// SetKBBoundary (FIX133 E6a) turns the knowledge-base boundary on: a turn
+// with KB passages is limited to providers (the gateway's allowed_providers).
+func (s *MessageService) SetKBBoundary(deny bool, providers []string) {
+	s.kbSelfHostedOnly = deny && len(providers) > 0
+	s.kbAllowedProviders = providers
+}
+
+// SetSelfHostedModelChecker (FIX133 E6a) wires the catalogue lookup that
+// says whether a model id is served by the operator's own box.
+func (s *MessageService) SetSelfHostedModelChecker(fn func(ctx context.Context, modelID string) (bool, bool)) {
+	s.selfHostedModel = fn
+}
+
+// KBNotice (FIX133 E6a) tells the client why this turn is not answered by
+// the model the chat is pinned to: it carries knowledge-base passages, and
+// those stay with self-hosted models. Emitted as the ``kb_notice`` SSE event.
+type KBNotice struct {
+	RequestedModel   string   `json:"requested_model"`
+	Reason           string   `json:"reason"`
+	AllowedProviders []string `json:"allowed_providers"`
+}
+
+func emitKBNotice(ch chan<- StreamUpdate, n *KBNotice) {
+	if n == nil {
+		return
+	}
+	ch <- StreamUpdate{KBNotice: n}
+}
+
+// applyKBBoundary (FIX133 E6a) — after the request is built: if it carries
+// knowledge-base passages (a knowledge_chunk source), pin the gateway to the
+// allowed providers; a chat pinned to a model outside them is switched to
+// Auto for this turn (Auto routes inside the boundary) and the notice says
+// so. Nil when nothing changed.
+func (s *MessageService) applyKBBoundary(
+	ctx context.Context, conv *model.Conversation, req *GatewayChatRequest, sources *SourcesAccumulator,
+	message string, hasFiles, hasImages bool, historyLen int,
+) *KBNotice {
+	if !s.kbSelfHostedOnly || req == nil || sources == nil {
+		return nil
+	}
+	used := false
+	for _, src := range sources.Snapshot() {
+		if src.SourceType == SourceTypeKnowledgeChunk {
+			used = true
+			break
+		}
+	}
+	if !used {
+		return nil
+	}
+	if req.Metadata == nil {
+		req.Metadata = map[string]any{}
+	}
+	req.Metadata["allowed_providers"] = append([]string(nil), s.kbAllowedProviders...)
+	req.Metadata["allowed_providers_reason"] = "knowledge_base"
+	if IsAutoModel(req.Model) {
+		return nil
+	}
+	if s.selfHostedModel != nil {
+		if self, known := s.selfHostedModel(ctx, req.Model); known && self {
+			return nil
+		}
+	}
+	requested := req.Model
+	req.Model = AutoModelID
+	if req.RoutingHints == nil {
+		h := BuildRoutingHints(message, hasFiles, hasImages, historyLen, conv.ReasoningEnabled, len(req.Tools))
+		h.Tier = conv.RoutingTier
+		req.RoutingHints = &h
+	}
+	slog.Info("kb_boundary_applied",
+		"conversation_id", conv.ID.String(), "requested_model", requested,
+		"allowed_providers", s.kbAllowedProviders)
+	return &KBNotice{RequestedModel: requested, Reason: "knowledge_base_self_hosted",
+		AllowedProviders: append([]string(nil), s.kbAllowedProviders...)}
+}
+
 // SetContextWindowLookup wires the catalogue's advertised context window
 // (handler.ModelHandler.AdvertisedContextWindow) for the ONE budget this
 // service builds itself — the /context-info path taken when no compiler
@@ -1111,6 +1196,7 @@ func (s *MessageService) SendNonStream(ctx context.Context, in SendInput) (*Send
 	// source row persisted with the reply records the same loss.
 	gwReq, _ := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, in.CloudToolAllowlist, false)
+	s.applyKBBoundary(ctx, conv, &gwReq, sourcesAcc, in.Content, len(in.FileIDs) > 0, len(imgs.current) > 0, len(history)) // FIX133 E6a
 	// FIX16 §1.4 — on a cloud run, build the allow-map the executor guard
 	// uses to refuse (and flag) any out-of-allowlist call.
 	var cloudAllow map[string]bool
@@ -1328,6 +1414,9 @@ type StreamUpdate struct {
 	// while it waits for a generation slot, then position 0 when it starts.
 	// Forwarded as the ``queued`` SSE event; sticky in the resume broker.
 	Queued *QueueStatus
+	// KBNotice (FIX133 E6a) — this turn carries knowledge-base passages and
+	// is answered inside the self-hosted boundary instead of the pinned model.
+	KBNotice *KBNotice
 
 	// Image-generation phase marker, "started" only. Emitted just
 	// before the generate_image tool executes (tool path) or the
@@ -1659,6 +1748,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 	}
 	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, in.UserID, in.TenantID, in.Content, history, imgs, sourcesAcc, s.omittedOlder(ctx, in.TenantID, conv.ID, len(history)), onExtractionStart, in.OnCompactionProgress)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
+	kbNotice := s.applyKBBoundary(ctx, conv, &gwReq, sourcesAcc, in.Content, len(in.FileIDs) > 0, len(imgs.current) > 0, len(history)) // FIX133 E6a
 	intent := DetectImageIntent(in.Content)
 	if in.ImageMode || intent {
 		imageModel := ""
@@ -1728,6 +1818,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
 	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
+	emitKBNotice(ch, kbNotice)                 // FIX133 E6a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -2042,6 +2133,7 @@ func (s *MessageService) openAssistantStream(
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, omittedOlder, nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
+	kbNotice := s.applyKBBoundary(ctx, conv, &gwReq, sourcesAcc, ragQuery, false, len(imgs.current) > 0, len(history)) // FIX133 E6a
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -2069,6 +2161,7 @@ func (s *MessageService) openAssistantStream(
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
 	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
+	emitKBNotice(ch, kbNotice)                 // FIX133 E6a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,
@@ -2341,6 +2434,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	sourcesAcc := NewSourcesAccumulator()
 	gwReq, lossNotice := s.compileAndBuildRequest(ctx, conv, userID, conv.TenantID, ragQuery, history, imgs, sourcesAcc, s.omittedOlder(ctx, conv.TenantID, conv.ID, len(history)), nil, nil)
 	toolsAttached := s.attachTools(ctx, &gwReq, conv, nil, true)
+	kbNotice := s.applyKBBoundary(ctx, conv, &gwReq, sourcesAcc, ragQuery, false, len(imgs.current) > 0, len(history)) // FIX133 E6a
 	callCtx := GatewayCallContext{
 		TenantID:       conv.TenantID,
 		UserID:         userID,
@@ -2368,6 +2462,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	emitImageNotice(ch, imgs.failures)
 	emitCompactionNotice(ch, lossNotice)
 	emitMemoryUsed(ch, asstMsg.ID, sourcesAcc) // FIX130 A3a
+	emitKBNotice(ch, kbNotice)                 // FIX133 E6a
 	go s.pumpStreamWithTools(streamPumpInput{
 		initialStream: stream,
 		initialReq:    gwReq,

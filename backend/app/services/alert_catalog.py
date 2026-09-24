@@ -72,6 +72,12 @@ GROUP_TURNS_ERROR_RATE = "turns:error_rate"
 GROUP_TURNS_STUCK = "turns:stuck"
 GROUP_BACKUP = "backup"
 GROUP_BACKUP_OFFSITE = "backup:offsite"
+# FIX133 C/D — the off-site copy is stale or was never set up; the turn
+# queue backs up; the backend workers are saturated.
+GROUP_BACKUP_OFFSITE_STALE = "backup:offsite_stale"
+GROUP_BACKUP_OFFSITE_MISSING = "backup:offsite_missing"
+GROUP_QUEUE = "capacity:queue"
+GROUP_SATURATED = "capacity:saturated"
 
 
 def _dur(seconds: float) -> str:
@@ -241,6 +247,49 @@ def backup_offsite_text(backup_id: str) -> tuple[str, str, str]:
         f"Backup {backup_id} was written and proven here, but its copy to the off-site bucket "
         "failed, so a dead PC would lose it. Look: offsite.json in that backup folder and "
         "docker logs ai-gateway-backup; check the bucket keys (docs/ops/backups.md, Off-site copy)."
+    )
+
+
+def backup_offsite_stale_text(age_s: float | None, newest: str, max_age_h: float) -> tuple[str, str, str]:
+    """FIX133 C — the newest proven off-site copy is older than max_age_h."""
+    if age_s is None:
+        how = "no proven off-site copy exists yet"
+    else:
+        how = f"the newest proven off-site copy is {age_s / 3600:.0f} h old"
+    return HIGH, "Off-site backup copy is stale", (
+        f"{how} (limit {max_age_h:.0f} h; newest local backup {newest}). A dead PC would lose "
+        "everything since then. Look: docker logs ai-gateway-backup, offsite.json in the newest "
+        "backup folder, and whether the off-site folder / bucket is reachable "
+        "(docs/ops/backups.md, Off-site copy)."
+    )
+
+
+def backup_offsite_missing_text() -> tuple[str, str, str]:
+    """FIX133 C — backups exist, but nothing leaves this PC."""
+    return LOW, "No off-site backup copy is configured", (
+        "Backups are written and proven on this PC only. Set BACKUP_OFFSITE_REPOSITORY (a synced "
+        "folder or a bucket) and BACKUP_OFFSITE_PASSWORD in .env, then run "
+        "`backup offsite-check` (docs/ops/backups.md, Off-site copy)."
+    )
+
+
+def queue_backlog_text(waiting: int, oldest_s: float, active: int, max_active: int) -> tuple[str, str, str]:
+    """FIX133 D — the turn queue has a line that is not draining."""
+    return HIGH, f"Chat is slow: {waiting} turns are waiting in the queue", (
+        f"{active} of {max_active} generation slots are busy and {waiting} turns wait, the oldest "
+        f"for {oldest_s:.0f} s; users see \"waiting in queue\". If this lasts, the box is at its "
+        "ceiling: docs/ops/scaling.md (scale on queue depth, not CPU). Look: "
+        "curl -s http://localhost:8081/ready | jq .checks.turn_queue"
+    )
+
+
+def saturated_text(inflight: int, capacity: int, workers: int) -> tuple[str, str, str]:
+    """FIX133 D — every backend worker is near its admission cap."""
+    return HIGH, "Backend workers are saturated", (
+        f"{inflight} chat requests are in flight across {workers} workers (cap {capacity}); the next "
+        "ones are refused with 503 server_busy. Either a stuck request holds slots (see "
+        "checks.inflight.stuck) or the box needs more workers / a second machine "
+        "(docs/ops/scaling.md). Look: curl -s http://localhost:8081/ready | jq .checks.container"
     )
 
 

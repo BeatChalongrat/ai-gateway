@@ -47,6 +47,10 @@ extraResources:
   # validator. Producing a server build therefore never edits source.
   - from: build/desktop.config.json
     to: desktop.config.json
+  # FIX133 B — the deployment's CA the app pins (empty when the config has
+  # no trustedCaFile; scripts/dist.js stages it).
+  - from: build/trusted-ca.pem
+    to: trusted-ca.pem
 
 # FIX34 Part B — the app's URL scheme. electron-builder writes
 # HKCU\Software\Classes\sran (URL Protocol + shell\open\command → this exe) at

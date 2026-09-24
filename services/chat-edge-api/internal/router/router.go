@@ -326,7 +326,7 @@ func New(
 			// AI-generated title — frontend fires this once after the
 			// first assistant turn completes so the sidebar gets a
 			// human-readable name instead of a truncated user prompt.
-			r.Post("/conversations/{id}/generate-title", h.Conversation.GenerateTitle)
+			r.With(sendRateLimit).Post("/conversations/{id}/generate-title", h.Conversation.GenerateTitle) // FIX133 F1 — calls the model
 
 			// S3 — Structured Conversation State (read-only). The
 			// AI mutates state via the update_conversation_state
@@ -344,7 +344,7 @@ func New(
 			// FIX33 A-W7 — manual compaction (Claude's /compact +
 			// instructions): summarise everything up to now into
 			// <conversation_state> and drop it from the next turn.
-			r.Post("/conversations/{id}/compact", h.Conversation.Compact)
+			r.With(sendRateLimit).Post("/conversations/{id}/compact", h.Conversation.Compact) // FIX133 F1 — calls the model
 
 			// Conversation sharing (authenticated half — the
 			// public share-view endpoint is registered outside the
@@ -354,7 +354,7 @@ func New(
 			r.Delete("/conversations/{id}/share", h.Share.Revoke)
 
 			// Branching: edit a user message + switch active branch.
-			r.Post("/conversations/{id}/messages/{messageID}/edit", h.Message.Edit)
+			r.With(sendRateLimit).Post("/conversations/{id}/messages/{messageID}/edit", h.Message.Edit) // FIX133 F1 — a streamed turn
 			r.Post("/conversations/{id}/messages/{messageID}/switch-branch", h.Message.SwitchBranch)
 
 			// Voice (Whisper transcription + OpenAI TTS). Each

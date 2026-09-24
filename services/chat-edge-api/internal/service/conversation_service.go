@@ -78,6 +78,36 @@ func (s *ConversationService) Create(ctx context.Context, in CreateInput) (*mode
 	})
 }
 
+// CreateIdempotent (FIX133 F2) creates a conversation once per client id:
+// a retried create (same X-Request-Id) returns the row the first call made,
+// replayed = true. The same validation as Create.
+func (s *ConversationService) CreateIdempotent(ctx context.Context, in CreateInput, clientID string) (*model.Conversation, bool, error) {
+	if strings.TrimSpace(in.ModelID) == "" {
+		return nil, false, errors.New("model_id is required")
+	}
+	if !s.models.ModelAllowed(in.ModelID) {
+		return nil, false, ErrConversationBadModel
+	}
+	c := &model.Conversation{
+		TenantID:    in.TenantID,
+		UserID:      in.UserID,
+		ModelID:     in.ModelID,
+		IsTemporary: in.IsTemporary,
+	}
+	inserted, err := s.conversations.CreateWithClientID(ctx, c, clientID)
+	if err != nil {
+		return nil, false, err
+	}
+	if inserted {
+		return c, false, nil
+	}
+	existing, err := s.conversations.GetByClientID(ctx, in.TenantID, in.UserID, clientID)
+	if err != nil {
+		return nil, false, err
+	}
+	return existing, true, nil
+}
+
 // Get returns a conversation enforcing tenant scope. The repo
 // already gates on tenant_id + is_deleted=false — we surface its
 // ErrNotFound as ErrConversationNotFound for typed error mapping.

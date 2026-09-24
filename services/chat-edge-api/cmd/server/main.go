@@ -667,6 +667,10 @@ func main() {
 	// tools, so switching to one mid-conversation (e.g. after an image
 	// was generated) doesn't send a ``tools`` param the provider rejects.
 	messageSvc.SetNonToolModelChecker(modelHandler.KnownWithoutTools)
+	// FIX133 E6a — knowledge-base passages stay with self-hosted models.
+	messageSvc.SetSelfHostedModelChecker(modelHandler.KnownSelfHosted)
+	messageSvc.SetKBBoundary(strings.ToLower(strings.TrimSpace(cfg.KBExternalModels)) != "allow", csvList(cfg.KBAllowedProviders))
+	slog.Info("kb boundary", "external_models", cfg.KBExternalModels, "allowed_providers", csvList(cfg.KBAllowedProviders))
 	// FIX64 — when the Gateway refuses tools the catalog said the model
 	// had, drop the cached catalog and retry the turn without tools.
 	messageSvc.SetCatalogInvalidator(modelHandler.InvalidateCatalog)
@@ -929,4 +933,15 @@ func main() {
 		drainGrace:   cfg.DrainGrace,
 	}.run(stop)
 	slog.Info("chat-edge-api stopped")
+}
+
+// csvList splits a comma list, trimmed, empties dropped.
+func csvList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

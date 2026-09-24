@@ -55,6 +55,23 @@ SSE_PATH_PREFIXES = (
 )
 
 
+def cache_key_for(tenant_header: str, authorization: str, path: str, body: bytes) -> str:
+    """FIX133 F2 — the cache key binds the CALLER (the Authorization header)
+    as well as the tenant header: the tenant header is client-supplied, so
+    two callers naming the same tenant and the same body must never replay
+    each other's reply. Same shape as before otherwise."""
+    digest = hashlib.sha256(
+        tenant_header.encode()
+        + b"|"
+        + hashlib.sha256((authorization or "").encode()).hexdigest().encode()
+        + b"|"
+        + path.encode()
+        + b"|"
+        + body
+    ).hexdigest()
+    return f"idem:{tenant_header}:{digest}"
+
+
 class IdempotencyMiddleware(BaseHTTPMiddleware):
     def __init__(
         self,
@@ -104,14 +121,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         request._receive = _receive  # type: ignore[attr-defined]
 
         tenant_id = request.headers.get(_TENANT_HEADER, "")
-        digest = hashlib.sha256(
-            tenant_id.encode()
-            + b"|"
-            + request.url.path.encode()
-            + b"|"
-            + body
-        ).hexdigest()
-        cache_key = f"idem:{tenant_id}:{digest}"
+        cache_key = cache_key_for(tenant_id, request.headers.get("authorization", ""), request.url.path, body)
 
         redis = None
         cached = None

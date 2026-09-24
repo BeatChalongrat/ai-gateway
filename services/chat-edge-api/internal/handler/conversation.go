@@ -216,12 +216,32 @@ func (h *ConversationHandler) Create(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	c, err := h.conversations.Create(r.Context(), service.CreateInput{
+	in := service.CreateInput{
 		UserID:      caller.UserID,
 		TenantID:    caller.TenantUUID,
 		ModelID:     req.ModelID,
 		IsTemporary: req.IsTemporary,
-	})
+	}
+	// FIX133 F2 — an X-Request-Id the CLIENT chose makes the create
+	// idempotent: a retry gets the conversation the first call made (200,
+	// Idempotent-Replayed: true) instead of a second one.
+	if key := middleware.SuppliedRequestIDFrom(r.Context()); key != "" {
+		c, replayed, err := h.conversations.CreateIdempotent(r.Context(), in, key)
+		if err != nil {
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if replayed {
+			w.Header().Set("Idempotent-Replayed", "true")
+			w.WriteHeader(http.StatusOK)
+		} else {
+			w.WriteHeader(http.StatusCreated)
+		}
+		_ = json.NewEncoder(w).Encode(toResponse(c))
+		return
+	}
+	c, err := h.conversations.Create(r.Context(), in)
 	if err != nil {
 		WriteError(w, http.StatusUnprocessableEntity, CodeValidationError, err.Error())
 		return

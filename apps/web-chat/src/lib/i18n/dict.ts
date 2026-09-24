@@ -1432,6 +1432,7 @@ export const en = {
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "Still working — this is taking longer than usual.",
   "thread.queued": "Waiting in the queue · position {position} ({ahead} ahead)",
+  "chat.kbSelfHosted": "Answered by an in-house model instead of {model}: this turn uses knowledge-base documents, which never leave the organisation.",
   "thread.queuedEta": "Waiting in the queue · position {position} ({ahead} ahead, about {s} s)",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "Long conversation — {n} older messages are no longer sent to the assistant (the first exchange and recent messages are kept).",
@@ -3275,6 +3276,7 @@ const th: Record<DictKey, string> = {
   // Batch 2 T2 — stalled-stream notice
   "thread.stalled": "ยังทำงานอยู่ — ใช้เวลานานกว่าปกติ",
   "thread.queued": "กำลังรอคิว · ลำดับที่ {position} (มี {ahead} คิวก่อนหน้า)",
+  "chat.kbSelfHosted": "ตอบด้วยโมเดลภายในองค์กรแทน {model} เนื่องจากคำตอบนี้ใช้เอกสารจากคลังความรู้ ซึ่งจะไม่ถูกส่งออกนอกองค์กร",
   "thread.queuedEta": "กำลังรอคิว · ลำดับที่ {position} (มี {ahead} คิวก่อนหน้า รออีกประมาณ {s} วินาที)",
   // FIX30 §3.2 — what the turn is waiting on
   "thread.compacted": "บทสนทนายาวมาก — ข้อความเก่า {n} รายการจะไม่ถูกส่งให้ผู้ช่วยแล้ว (ยังเก็บข้อความแรกและข้อความล่าสุดไว้)",

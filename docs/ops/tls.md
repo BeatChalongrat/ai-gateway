@@ -1,0 +1,112 @@
+# TLS and production mode (FIX133 B)
+
+Every browser-facing port of the stack is served over **https** by the Caddy
+front door (compose service `edge`, `infra/caddy/Caddyfile`), and every
+service runs in **production mode**. The port numbers did not change:
+
+| URL (before)            | URL (now)                | behind it              | plain-http debug door |
+|-------------------------|--------------------------|------------------------|-----------------------|
+| http://localhost:3002   | https://localhost:3002   | web-chat (the page)    | http://127.0.0.1:23002 |
+| http://localhost:4000   | https://localhost:4000   | chat-edge-api          | http://127.0.0.1:24000 |
+| http://localhost:8080   | https://localhost:8080   | gateway (the API)      | http://127.0.0.1:28080 |
+| http://localhost:3001   | https://localhost:3001   | portal                 | http://127.0.0.1:23001 |
+| http://localhost:3000   | https://localhost:3000   | admin-ui               | http://127.0.0.1:23000 |
+
+The debug doors are loopback-only and exist for scripts and probes (they
+skip the proxy). Nothing else listens on the old plain ports: an old
+`http://localhost:3002` bookmark now fails (Caddy cannot serve http and https
+on one port), so use the https one.
+
+## The certificate
+
+`infra/caddy/certs/` (gitignored, this machine's own):
+
+* `local.pem` / `local-key.pem` — the server certificate, issued for
+  `localhost`, `127.0.0.1`, `::1`, the machine's hostname and its LAN address,
+  valid ~27 months (mkcert default);
+* `rootCA.pem` — the **public** root of the local certificate authority that
+  issued it (the private key stays in mkcert's own store,
+  `%LOCALAPPDATA%\mkcert\rootCA-key.pem`, never in the repo).
+
+Renew (from the repo root, mkcert installed with `winget install
+FiloSottile.mkcert`):
+
+```
+mkcert -cert-file infra/caddy/certs/local.pem -key-file infra/caddy/certs/local-key.pem \
+  localhost 127.0.0.1 ::1 <hostname> <hostname>.local <lan-ip>
+docker compose -p ai-gateway restart edge
+```
+
+## Trusting the root (one step per machine)
+
+Browsers trust the certificate once the root CA is in the OS store. This is a
+one-time step **per machine and per person**, and it needs one click on the
+Windows "install this root certificate?" dialog:
+
+```
+certutil -user -addstore Root infra\caddy\certs\rootCA.pem
+```
+
+(or `mkcert -install` on the machine that made the CA). Until then Chrome
+shows "Your connection is not private" for the https ports; the site works
+after "Advanced → proceed", but the padlock is red.
+
+**The desktop app does not need that step.** Its config pins the root
+(`trustedCaFile`, shipped beside the exe as `resources/trusted-ca.pem` by
+`scripts/dist.js`); `src/main/local-ca.ts` accepts a server certificate only
+when Chromium's sole complaint is "issuer unknown", the host is one of the
+app's own, and the leaf is signed by that root, valid now and names the host.
+Everything else keeps Chromium's verdict. Build the https app with
+`npm run dist -- --config config/desktop.config.local-tls.json`.
+
+For colleagues on the LAN (a pilot): they open `https://<hostname>:3002` and
+must import `rootCA.pem` once (the same `certutil` line); the desktop
+installer built from the local-tls config already carries it.
+
+## Production mode
+
+`.env` states it: `APP_ENV=production`, `COOKIE_SECURE=true`,
+`CHAT_EDGE_DEV=` (empty). With that the backend's `validate_secrets()` and
+chat-edge's `Validate()` refuse to boot on any dev-default secret, so every
+secret in `.env` is real: `JWT_SECRET`, `MASTER_ENCRYPTION_KEY`,
+`PORTAL_JWT_SECRET`, `SERVICE_JWT_SECRET`, `USER_JWT_SECRET`, `CSRF_SECRET`,
+`CHAT_EDGE_ADMIN_API_KEY`, `SESSION_SIGNING_SECRETS`, `DLP_AUDIT_KEY`,
+`PROVIDER_KEY_MASTER_KEY`, `NEXTAUTH_SECRET`.
+
+What production mode changes:
+
+* auth cookies are `Secure` (portal, chat-edge, NextAuth's `__Secure-` names);
+* `/docs`, `/redoc`, `/openapi.json` are off (`API_DOCS_ENABLED=true` turns
+  them back on);
+* the dev token is no longer echoed in auth responses, seeds and the
+  `admin1234` auto-admin never run, the mock search provider is gone;
+* email: `EMAIL_DELIVERY=disabled` is the stated choice for a deployment
+  without a mail sender (sign-in is Google OAuth; verification and reset mails
+  are reported as not delivered, never silently dropped). Set a Resend key and
+  `EMAIL_DELIVERY=auto` to send real mail;
+* admin-ui and portal run their built images (`next start`), not `next dev`;
+  the hot-reload shapes are opt-in in `docker-compose.dev.yml`.
+
+Rotating `PROVIDER_KEY_MASTER_KEY` (the key that encrypts provider, search
+and connector secrets at rest) needs every stored blob rewritten first:
+
+```
+docker compose -p ai-gateway exec backend python -m scripts.reencrypt_master_key --old <old|dev> --new <new>            # dry run
+docker compose -p ai-gateway exec backend python -m scripts.reencrypt_master_key --old <old|dev> --new <new> --apply
+```
+
+## Behind the proxy
+
+The backend trusts `X-Forwarded-Proto` / `-For` from the compose network
+(`FORWARDED_ALLOW_IPS=*`, gunicorn.conf.py), so `url_for()` builds https
+callback URLs — the Google sign-in redirect URI registered in the Google
+console must be the https one. Caddy sends no HSTS on purpose: HSTS is per
+host, and `localhost` also serves the plain debug doors and the test stack.
+
+## Rollback
+
+`APP_ENV=development`, `COOKIE_SECURE=false`, `CHAT_EDGE_DEV=1` in `.env` and
+recreate backend, chat-edge-api, web-chat, portal, admin-ui; the `edge`
+service can stay (https keeps working in dev mode) or be stopped after
+restoring the `ports:` lines. Secrets rotated for production keep working in
+dev mode — never put the dev defaults back.

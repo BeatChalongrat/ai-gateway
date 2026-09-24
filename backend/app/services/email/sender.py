@@ -205,7 +205,17 @@ def send_email(
             delivered=False, provider="noop", reason="invalid_recipient"
         )
 
-    if _is_dev_env():
+    delivery = (getattr(settings, "email_delivery", "auto") or "auto").strip().lower()
+    if delivery == "disabled":
+        # FIX133 B — a deployment that states it has no mail sender: the
+        # caller learns the mail was NOT delivered (and logs it); nothing
+        # pretends to have sent it.
+        _log.warning(
+            "email.delivery_disabled",
+            extra={"email_to": to, "email_subject": subject},
+        )
+        return EmailSendResult(delivered=False, provider="disabled", reason="email_delivery_disabled")
+    if delivery == "console" or (delivery == "auto" and _is_dev_env()):
         return _console_log_email(
             to=to, subject=subject, html_body=html_body, text_body=text_body
         )

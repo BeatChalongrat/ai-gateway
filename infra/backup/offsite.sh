@@ -305,8 +305,47 @@ check_repo() {
   return $rc
 }
 
+# ---------------------------------------------------------------------------
+# restore [snapshot|latest] [target dir] — FIX133 C: bring a backup back FROM
+# the off-site copy (never the local one), prove it against its manifest.
+# ---------------------------------------------------------------------------
+restore_run() {
+  local snap="${1:-latest}" target="${2:-$BACKUP_ROOT/restore-offsite-$(date -u +%Y%m%d_%H%M%S)}"
+  local t0 rc=0 rdir f want got n=0 ok=true
+  t0=$(date +%s)
+  if [ -z "${BACKUP_OFFSITE_REPOSITORY:-}" ]; then log "offsite: restore FAIL — BACKUP_OFFSITE_REPOSITORY is not set"; return 3; fi
+  if ! open_repo; then log "offsite: restore FAIL — $OPEN_ERR"; return 3; fi
+  mkdir -p "$target"
+  log "offsite: restore start snapshot=$snap repository=$(repo_label) -> $target"
+  if [ "$snap" = latest ]; then
+    rs restore "$STEP_TIMEOUT" restore latest --host "$HOST_TAG" --tag "$OFFSITE_TAG" --target "$target" --quiet || rc=$?
+  else
+    rs restore "$STEP_TIMEOUT" restore "$snap" --target "$target" --quiet || rc=$?
+  fi
+  if [ $rc -ne 0 ]; then log "offsite: restore FAIL — restic restore rc=$rc"; return 3; fi
+  rdir=$(find "$target" -maxdepth 4 -name manifest.json -printf '%h\n' 2>/dev/null | sort | tail -n 1)
+  if [ -z "$rdir" ]; then log "offsite: restore FAIL — no manifest.json in the restored tree"; return 3; fi
+  for f in $(jq -r '.files | keys[]' "$rdir/manifest.json"); do
+    n=$((n + 1))
+    want=$(jq -r --arg f "$f" '.files[$f].sha256' "$rdir/manifest.json")
+    if [ -f "$rdir/$f" ]; then got=$(file_sha256 "$rdir/$f"); else got=missing; fi
+    if [ "$got" = "$want" ]; then log "offsite: restore PASS $f"; else log "offsite: restore FAIL $f expected=$want actual=$got"; ok=false; fi
+  done
+  jq -n --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg snapshot "$snap" --arg dir "$rdir" \
+    --argjson pass "$ok" --argjson files "$n" --argjson duration_s "$(( $(date +%s) - t0 ))" \
+    '{schema: 1, at: $at, snapshot: $snapshot, restored_dir: $dir, files: $files, pass: $pass, duration_s: $duration_s}' \
+    > "$target/restore-offsite.json"
+  if [ "$ok" = true ]; then
+    log "offsite: restore PASS $n files in $(( $(date +%s) - t0 ))s -> $rdir (load the dumps with docs/ops/backups.md, Restore for real)"
+    return 0
+  fi
+  log "offsite: restore FAIL -> $target/restore-offsite.json"
+  return 3
+}
+
 case "${1:-}" in
-  copy)  shift; copy_run "$@" ;;
-  check) check_repo ;;
-  *) echo "usage: offsite.sh copy <backup dir> | offsite.sh check" >&2; exit 2 ;;
+  copy)    shift; copy_run "$@" ;;
+  check)   check_repo ;;
+  restore) shift; restore_run "$@" ;;
+  *) echo "usage: offsite.sh copy <backup dir> | offsite.sh check | offsite.sh restore [snapshot|latest] [target dir]" >&2; exit 2 ;;
 esac

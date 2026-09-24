@@ -278,6 +278,12 @@ async def get_models(
     for mc in media_rows:
         if media_dest.is_mock_provider(mc.provider) and not mock_enabled:
             continue
+        # FIX133 E6b — a media model whose provider has no valid, active key is
+        # not offered (the chat listing above already gates on the same set).
+        # Live: sora-2 / sora-2-pro stayed in the video picker after the OpenAI
+        # key was turned off; a generation would have failed at submit.
+        if not media_dest.is_mock_provider(mc.provider) and mc.provider not in valid_providers:
+            continue
         mcaps: dict[str, bool] = {}
         if mc.supports_video_gen:  # FIX28 §5.2: kind is a fact; the gate is elsewhere
             mcaps["video_generation"] = True

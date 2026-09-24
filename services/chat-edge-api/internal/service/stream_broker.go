@@ -115,6 +115,8 @@ type StreamSnapshot struct {
 	// the turn still waits in the gateway's queue must see that, not a
 	// spinner; once admitted (position 0) the replay shows nothing.
 	Queued *QueueStatus
+	// KBNotice (FIX133 E6a): sticky like FallbackInfo.
+	KBNotice *KBNotice
 	// ImageNotice: sticky like FallbackInfo — a client reattaching after
 	// the one-shot image_notice frame still learns an attachment failed.
 	ImageNotice *ImageAttachNotice
@@ -160,6 +162,7 @@ type brokerEntry struct {
 	rnotice   *ReasoningNotice
 	stall     *ProviderStallNotice
 	queued    *QueueStatus // FIX133 A2 — sticky, latest state
+	kbnotice  *KBNotice    // FIX133 E6a — sticky
 	inotice   *ImageAttachNotice
 	cnotice   *CompactionNotice
 	mused     *MemoryUsedNotice  // FIX130 A3a — sticky
@@ -227,6 +230,7 @@ func (e *brokerEntry) snapshotLocked() StreamSnapshot {
 		ReasoningNotice:  e.rnotice,
 		ProviderStall:    e.stall,
 		Queued:           e.queued,
+		KBNotice:         e.kbnotice,
 		ImageNotice:      e.inotice,
 		CompactionNotice: e.cnotice,
 		MemoryUsed:       e.mused,
@@ -399,6 +403,9 @@ func (e *brokerEntry) publish(ev StreamUpdate) {
 	}
 	if ev.Queued != nil {
 		e.queued = ev.Queued
+	}
+	if ev.KBNotice != nil {
+		e.kbnotice = ev.KBNotice
 	}
 	if ev.ImageNotice != nil {
 		e.inotice = ev.ImageNotice

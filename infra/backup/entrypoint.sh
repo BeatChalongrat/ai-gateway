@@ -19,6 +19,10 @@
 #   offsite <dir>   the off-site copy of an existing backup directory.
 #   offsite-check   first-time setup of the off-site repository: init it if
 #                   needed + a tiny upload/restore round trip (offsite.sh).
+#   restore-offsite [snapshot|latest] [target dir]
+#                   FIX133 C — bring a backup back FROM the off-site copy into
+#                   /backups/restore-offsite-<ts> (default) and prove every
+#                   file's sha256 against its manifest; exit 0 = complete.
 #   notify <level> <title> <message>   send a TEST alert (FIX131: always
 #                   "[TEST]", only to ALERT_TEST_NTFY_URL — never the owner's
 #                   topic).
@@ -221,6 +225,7 @@ case "${1:-loop}" in
   drill)  shift; exec "$S/drill.sh" "$@" ;;
   offsite) shift; exec "$S/offsite.sh" copy "$@" ;;
   offsite-check) exec "$S/offsite.sh" check ;;
+  restore-offsite) shift; exec "$S/offsite.sh" restore "$@" ;;
   notify) shift; NOTIFY_TEST=1 exec "$S/notify.sh" "$@" ;;
   loop)
     trap 'lock_release; log "scheduler stopped"; exit 0' TERM INT
@@ -233,7 +238,7 @@ case "${1:-loop}" in
     done
     ;;
   *)
-    echo "usage: entrypoint.sh [now|tick|backup|drill <dir>|offsite <dir>|offsite-check|notify <level> <title> <message>]" >&2
+    echo "usage: entrypoint.sh [now|tick|backup|drill <dir>|offsite <dir>|offsite-check|restore-offsite [snapshot] [dir]|notify <level> <title> <message>]" >&2
     exit 2
     ;;
 esac

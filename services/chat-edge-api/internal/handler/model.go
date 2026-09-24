@@ -631,6 +631,22 @@ func (h *ModelHandler) SupportsVision(ctx context.Context, id string) bool {
 // Gateway hasn't reported (and for the gateway-down window before the
 // first fetch). Unknown ids and the Auto sentinel return false
 // (capability unknown → keep tools).
+// KnownSelfHosted (FIX133 E6a) reports (selfHosted, known) for a model id
+// from the last catalogue the gateway served: self_hosted is the gateway's
+// own flag (FIX65, the operator's box). Unknown ids are (false, false) —
+// the boundary then treats the model as external.
+func (h *ModelHandler) KnownSelfHosted(ctx context.Context, id string) (bool, bool) {
+	if id == "" {
+		return false, false
+	}
+	for _, m := range h.catalog(ctx) {
+		if m.ID == id {
+			return m.SelfHosted, true
+		}
+	}
+	return false, false
+}
+
 func (h *ModelHandler) KnownWithoutTools(ctx context.Context, id string) bool {
 	// Refresh the catalog if stale — this also (re)populates gwTools.
 	h.catalog(ctx)

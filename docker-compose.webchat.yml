@@ -44,7 +44,7 @@ services:
     # must stay above drain + grace + ~15 s (HTTP close, ledger flush).
     stop_grace_period: 120s
     ports:
-      - "127.0.0.1:4000:4000"
+      - "127.0.0.1:24000:4000" # FIX133 A4 — 4000 is Caddy's (https, base file service `edge`)
     environment:
       # FIX131 E2 — see stop_grace_period above.
       - CHAT_EDGE_DRAIN_TIMEOUT=${CHAT_EDGE_DRAIN_TIMEOUT:-90s}
@@ -118,9 +118,14 @@ services:
       # ``portal_jwt_secret``. Tokens minted by the Portal verify here.
       - PORTAL_JWT_SECRET=${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
       - PORT=4000
-      - CHAT_EDGE_DEV=1
+      # FIX133 B — production mode: APP_ENV=production + COOKIE_SECURE=true in
+      # .env turn Validate() on (real secrets or no boot); CHAT_EDGE_DEV empty
+      # = JSON logs.
+      - CHAT_EDGE_DEV=${CHAT_EDGE_DEV-1}
+      - APP_ENV=${APP_ENV:-development}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - CHAT_EDGE_ADMIN_API_KEY=${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
-      - CORS_ALLOW_ORIGINS=http://localhost:3002
+      - CORS_ALLOW_ORIGINS=${CHAT_CORS_ORIGINS:-http://localhost:3002}
       - MAX_CONTEXT_MESSAGES=1000
       # FIX33 A-W2 — auto-compact at a threshold (default ON: 0.85 of the
       # messages budget triggers a state refresh + a head-preserving trim
@@ -458,7 +463,7 @@ services:
     container_name: ai-gateway-web-chat
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3002:3002"
+      - "127.0.0.1:23002:3002" # FIX133 A4 — 3002 is Caddy's (https, base file service `edge`)
     environment:
       - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
       - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
@@ -550,6 +555,10 @@ services:
       # repository = "offsite copy: not configured", the local backup runs as
       # before. The password is the encryption key of the copy — keep it off
       # this machine as well (password manager), or the copy dies with it.
+      # FIX133 C — a repository can also be a FOLDER this PC syncs elsewhere
+      # (OneDrive / Google Drive / a NAS share): BACKUP_OFFSITE_DIR names the
+      # host folder (mounted at /offsite) and BACKUP_OFFSITE_REPOSITORY=/offsite
+      # points restic at it. Encrypted before it lands there, like a bucket.
       BACKUP_OFFSITE_REPOSITORY: ${BACKUP_OFFSITE_REPOSITORY:-}
       BACKUP_OFFSITE_PASSWORD: ${BACKUP_OFFSITE_PASSWORD:-}
       BACKUP_OFFSITE_ACCESS_KEY_ID: ${BACKUP_OFFSITE_ACCESS_KEY_ID:-}
@@ -563,6 +572,7 @@ services:
     volumes:
       - chat_edge_uploads:/uploads:ro
       - ${BACKUP_DIR:-../ai-gateway-backups/daily}:/backups
+      - ${BACKUP_OFFSITE_DIR:-../ai-gateway-backups/offsite}:/offsite
     depends_on:
       postgres-webchat:
         condition: service_healthy

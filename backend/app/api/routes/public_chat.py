@@ -35,6 +35,7 @@ from app.core import error_catalog
 from app.core.config import settings
 from app.core.bounded_stream import bounded_sse
 from app.core.inflight import AdmissionTimeout, registry as inflight_registry
+from app.core.chat_idempotency import ChatIdempotency, chat_idempotency
 from app.core.db import get_async_session_factory
 from app.core.turn_queue import (
     QueueFull,
@@ -366,6 +367,7 @@ async def _record_queue_failure(payload, code: str) -> None:
 
 def _queued_stream_response(
     *, payload, response, auth, queue, ticket, first: QueueStatus, turn_id, hard_s: float, release,
+    on_stream_end=None,
 ) -> StreamingResponse:
     """FIX133 A2 — a streaming request that has to wait for a slot.
 
@@ -486,6 +488,8 @@ def _queued_stream_response(
                 yield _frame
         finally:
             release()
+            if on_stream_end is not None:
+                await on_stream_end()
 
     return StreamingResponse(body(), media_type="text/event-stream", headers=headers)
 
@@ -562,6 +566,65 @@ async def chat_completions(
 
     turn_id = _turn_id_from(request)
 
+    # FIX133 F2 — Idempotency-Key (app.core.chat_idempotency): the same key
+    # from the same caller runs ONE turn and is charged once. A repeat while
+    # the first runs is 409, a repeat with another body 422, a repeat after a
+    # non-streaming answer gets that answer again (Idempotent-Replayed), a
+    # repeat after a streamed answer is 409 idempotent_stream_done.
+    idem = chat_idempotency()
+    idem_key = ChatIdempotency.valid_key(request.headers.get("idempotency-key"))
+    payload_json = payload.model_dump_json(exclude_none=True) if idem_key else ""
+    idem_claimed = False
+
+    async def _idem_abort() -> None:
+        if idem_claimed and idem_key:
+            await idem.release(auth.tenant_id, auth.key_id, idem_key)
+
+    async def _idem_done_stream() -> None:
+        if idem_claimed and idem_key:
+            await idem.stream_done(auth.tenant_id, auth.key_id, idem_key, payload_json)
+
+    async def _idem_done_json(res) -> None:
+        if not (idem_claimed and idem_key):
+            return
+        body, status = None, 200
+        if hasattr(res, "model_dump"):
+            body = res.model_dump(mode="json", exclude_none=True)
+        elif hasattr(res, "body"):
+            try:
+                body = json.loads(res.body)
+                status = int(getattr(res, "status_code", 200) or 200)
+            except Exception:  # noqa: BLE001
+                body = None
+        if body is None:
+            await idem.stream_done(auth.tenant_id, auth.key_id, idem_key, payload_json)
+        else:
+            await idem.complete(auth.tenant_id, auth.key_id, idem_key, payload_json, status, body)
+
+    if idem_key:
+        claim = await idem.claim(auth.tenant_id, auth.key_id, idem_key, payload_json)
+        if claim.state == "replay":
+            _release()
+            return _ArmourResponse(status_code=claim.status or 200, content=claim.body,
+                                   headers={"Idempotent-Replayed": "true"})
+        if claim.state == "in_progress":
+            _release()
+            return _ArmourResponse(status_code=409, headers={"Retry-After": "2"}, content={"error": {
+                "type": "idempotency_in_progress", "code": "idempotency_in_progress", "retryable": True,
+                "message": "A request with this Idempotency-Key is still running; retry shortly."}})
+        if claim.state == "mismatch":
+            _release()
+            return _ArmourResponse(status_code=422, content={"error": {
+                "type": "idempotency_key_reused", "code": "idempotency_key_reused", "retryable": False,
+                "message": "This Idempotency-Key was already used with a different request body."}})
+        if claim.state == "stream_done":
+            _release()
+            return _ArmourResponse(status_code=409, content={"error": {
+                "type": "idempotent_stream_done", "code": "idempotent_stream_done", "retryable": False,
+                "message": "A streamed answer for this Idempotency-Key already ran and was charged once; "
+                           "it is not generated again. Use a new key for a new turn."}})
+        idem_claimed = True
+
     # FIX133 A2/A3 — the turn queue (app.core.turn_queue): a cap on the turns
     # generating at once across every worker, a visible line above it and a
     # per-caller share of the slots. A streaming caller that has to wait gets
@@ -577,6 +640,7 @@ async def chat_completions(
             ticket, queued = await queue.try_admit(identity, turn_id)
         except QueueFull as exc:
             _release()
+            await _idem_abort()
             logger.warning("turn_queue_full", waiting=exc.waiting, limit=exc.max_waiting,
                            stream=bool(payload.stream), identity=identity)
             await _record_queue_failure(payload, "queue_full")
@@ -590,11 +654,13 @@ async def chat_completions(
                 return _queued_stream_response(
                     payload=payload, response=response, auth=auth, queue=queue, ticket=ticket,
                     first=queued, turn_id=turn_id, hard_s=hard_s, release=_release,
+                    on_stream_end=_idem_done_stream,
                 )
             try:
                 await queue.wait(ticket)
             except QueueTimeout as exc:
                 _release()
+                await _idem_abort()
                 logger.warning("turn_queue_timeout", waited_s=round(exc.waited_s), position=exc.position,
                                stream=False, identity=identity)
                 await _record_queue_failure(payload, "queue_timeout")
@@ -605,6 +671,7 @@ async def chat_completions(
                 )
             except QueueFull as exc:
                 _release()
+                await _idem_abort()
                 await _record_queue_failure(payload, "queue_full")
                 return _ArmourResponse(
                     status_code=503,
@@ -623,6 +690,7 @@ async def chat_completions(
         )
     except asyncio.TimeoutError:
         _release()
+        await _idem_abort()
         logger.error("chat_request_hard_timeout", timeout_s=hard_s, model=payload.model, stream=bool(payload.stream))
         await pre_provider_log.record_failure(
             model=payload.model, exc=None, error_code="upstream_timeout"
@@ -637,6 +705,7 @@ async def chat_completions(
         )
     except Exception as exc:
         _release()
+        await _idem_abort()
         await pre_provider_log.record_failure(
             model=payload.model, exc=exc, error_code=pre_provider_log.error_code_of(exc)
         )
@@ -644,6 +713,7 @@ async def chat_completions(
         raise
     except BaseException:
         _release()
+        await _idem_abort()
         pre_provider_log.end_turn(_turn_token)
         raise
     pre_provider_log.end_turn(_turn_token)
@@ -666,10 +736,12 @@ async def chat_completions(
                     yield _frame
             finally:
                 _release()
+                await _idem_done_stream()
 
         result.body_iterator = _bounded_body()
         return result
 
+    await _idem_done_json(result)
     _release()
     return result
 

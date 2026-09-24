@@ -601,6 +601,9 @@ export interface Message {
    *  turn: `dropped` older messages were not sent to the model. The user is
    *  told, the way web-chat's compacted_history source marker tells them. */
   compaction_notice?: { dropped: number; sent?: number; total?: number; summary?: string } | null;
+  /** FIX133 E6a — this turn carried knowledge-base passages, so it was
+   *  answered inside the self-hosted boundary instead of the pinned model. */
+  kb_notice?: { requested_model: string; reason: string; allowed_providers?: string[] } | null;
   /** FIX130 A3b — local-only: the live `memory_saved` frames of this turn —
    *  memories save_memory stored (active) or queued for the user's review
    *  (pending_confirmation). After a reload: the `memory_saved` sources. */

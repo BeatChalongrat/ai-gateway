@@ -1085,6 +1085,10 @@ Loop:
 			if ev.Queued != nil {
 				writeSSEEvent(w, flusher, "queued", ev.Queued)
 			}
+			// FIX133 E6a — answered inside the self-hosted boundary (KB passages).
+			if ev.KBNotice != nil {
+				writeSSEEvent(w, flusher, "kb_notice", ev.KBNotice)
+			}
 			// Image-generation phase marker — the frontend swaps the
 			// typing dots for an image placeholder until message_files
 			// (or a terminal frame) arrives.
@@ -2150,6 +2154,9 @@ func (h *MessageHandler) writeResumeSnapshot(
 	}
 	// Latest stall state — a client reattaching mid-stall is told the
 	// turn is stuck; one reattaching after recovery gets Stalled=false.
+	if snap.KBNotice != nil {
+		writeSSEEvent(w, flusher, "kb_notice", snap.KBNotice) // FIX133 E6a
+	}
 	if snap.Queued != nil && snap.Queued.Position > 0 {
 		writeSSEEvent(w, flusher, "queued", snap.Queued) // FIX133 A2 — still waiting
 	}

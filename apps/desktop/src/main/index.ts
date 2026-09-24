@@ -38,6 +38,7 @@ import { BridgeChannel } from "./bridge";
 import { ChatEdgeClient } from "./chat-edge-client";
 import { sweepConversationStateTTL, sweepHistoryTTL, wipeLocalData } from "./local-data";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
+import { installLocalCaTrust, loadLocalCa, trustedHostsOf } from "./local-ca";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
 import { parseAppLink, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
@@ -869,6 +870,16 @@ function installNavigationGuards(contents: WebContents): void {
 // ── session policy: CSP, permissions, downloads, logout observation ─────────
 function installSessionPolicy(ses: Session): void {
   const allowed = config.policy.allowedOrigins;
+  // FIX133 B — the stack is served over https by the local front door; its
+  // certificate authority is pinned from the config, for the app's own
+  // hosts only (src/main/local-ca.ts). No CA in the config = nothing
+  // changes: Chromium's verification stands alone.
+  if (config.trustedCaFile) {
+    const hosts = trustedHostsOf([config.pageUrl, ...allowed, config.gatewayUrl, config.chatEdgeUrl, config.policy.portalOrigin]);
+    const trust = loadLocalCa(config.trustedCaFile, hosts);
+    installLocalCaTrust(ses, trust, (line) => log.warn(line));
+    log.info(`local CA pinned from ${config.trustedCaFile} for ${[...hosts].join(", ")}`);
+  }
   ses.webRequest.onHeadersReceived({ urls: ["http://*/*", "https://*/*"] }, (details, callback) => {
     const isDocument = details.resourceType === "mainFrame" || details.resourceType === "subFrame";
     let origin: string | null = null;

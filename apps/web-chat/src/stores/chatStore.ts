@@ -3670,6 +3670,24 @@ async function consumeStream(
         const data = evt.data as SSEQueued;
         const waiting = Boolean(data && typeof data.position === "number" && data.position > 0);
         set((s) => ({ queuedStreams: { ...s.queuedStreams, [convId]: waiting ? data : null } }));
+      } else if (evt.event === "kb_notice") {
+        // FIX133 E6a — the answer stays with self-hosted models because the
+        // turn carries knowledge-base passages; a quiet line on the message.
+        const data = evt.data as { requested_model?: string; reason?: string; allowed_providers?: string[] };
+        const id = realAssistantId ?? tempAsstId;
+        set((s) => {
+          const list = s.messages[convId] ?? [];
+          return {
+            messages: {
+              ...s.messages,
+              [convId]: list.map((m) =>
+                m.id === id
+                  ? { ...m, kb_notice: { requested_model: data?.requested_model ?? "", reason: data?.reason ?? "", allowed_providers: data?.allowed_providers } }
+                  : m,
+              ),
+            },
+          };
+        });
       } else if (evt.event === "provider_stall") {
         // chat-edge holds the upstream connection, so it is the only
         // layer that can tell provider silence from server work. Trust

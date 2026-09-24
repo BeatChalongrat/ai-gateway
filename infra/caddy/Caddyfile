@@ -1,0 +1,128 @@
+# FIX133 A4/B — the front door: TLS for every browser-facing port, a load
+# balancer in front of each service, health checks and graceful drain.
+#
+# Same port numbers as before, over https: the page, the desktop app and
+# every script keep their host:port, only the scheme changes. One site block
+# per port; the upstream lists are where a second machine is added later
+# (docs/ops/scaling.md) — that is a config change, not a rewrite.
+#
+#   https://localhost:3002  → web-chat        (the chat page)
+#   https://localhost:4000  → chat-edge-api   (conversations, SSE streams, uploads)
+#   https://localhost:8080  → gateway         (the API: /v1, /portal/auth, admin)
+#   https://localhost:3001  → portal
+#   https://localhost:3000  → admin-ui
+#
+# Certificate: infra/caddy/certs/local.pem + local-key.pem, issued by the
+# mkcert root CA of this machine (infra/caddy/certs/rootCA.pem, public) for
+# localhost, 127.0.0.1, ::1, the hostname and the LAN address. docs/ops/tls.md
+# says how the root is trusted (browsers: once, via the OS store; the desktop
+# app pins it from its config). Plain-http debug doors stay on loopback at
+# port + 20000 (23002, 24000, 28080, 23001, 23000) for scripts and probes.
+#
+# No HSTS on purpose: HSTS is per host, not per port — sending it for
+# "localhost" would force https on every localhost port, the debug doors and
+# the test stack included.
+
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+(front) {
+	tls /certs/local.pem /certs/local-key.pem
+	encode zstd gzip
+	header -Server
+	header X-Content-Type-Options nosniff
+	header Referrer-Policy strict-origin-when-cross-origin
+	log {
+		output stdout
+		format json
+		level WARN
+	}
+}
+
+# Load-balancing + health + drain, shared by every upstream. least_conn sends
+# a new request to the upstream with the fewest open connections (the right
+# policy for long SSE turns). An upstream that fails its active check, or a
+# connection to it, is taken out of rotation for fail_duration; a service
+# that closes its socket while it drains (gunicorn / chat-edge on SIGTERM)
+# therefore stops receiving new connections within health_interval while its
+# open streams finish undisturbed.
+(balanced) {
+	lb_policy least_conn
+	lb_try_duration 5s
+	lb_try_interval 250ms
+	health_interval 5s
+	health_timeout 3s
+	fail_duration 15s
+	max_fails 1
+	unhealthy_status 5xx
+	transport http {
+		dial_timeout 5s
+		response_header_timeout 300s
+		keepalive 90s
+	}
+}
+
+# SSE: never buffer, never time a body out — a turn streams for minutes.
+(streaming) {
+	flush_interval -1
+	transport http {
+		dial_timeout 5s
+		response_header_timeout 300s
+		read_timeout 0
+		write_timeout 0
+		keepalive 90s
+	}
+}
+
+https://:3002 {
+	import front
+	reverse_proxy web-chat:3002 {
+		import balanced
+		health_uri /api/version
+	}
+}
+
+https://:4000 {
+	import front
+	request_body {
+		max_size 1GB
+	}
+	reverse_proxy chat-edge-api:4000 {
+		import balanced
+		import streaming
+		health_uri /health
+	}
+}
+
+https://:8080 {
+	import front
+	request_body {
+		max_size 64MB
+	}
+	reverse_proxy gateway:8080 {
+		import balanced
+		import streaming
+		health_uri /__gw/health
+	}
+}
+
+https://:3001 {
+	import front
+	reverse_proxy portal:3001 {
+		import balanced
+		health_uri /login
+	}
+}
+
+https://:3000 {
+	import front
+	reverse_proxy admin-ui:3000 {
+		import balanced
+		health_uri /login
+	}
+}

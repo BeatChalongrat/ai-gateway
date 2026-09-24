@@ -411,6 +411,24 @@ describe("sendMessage / consumeStream", () => {
     await done;
   });
 
+  it("FIX133 E6a — a kb_notice frame is kept on the message", async () => {
+    const st = makeStream();
+    mockApi.openMessageStream.mockResolvedValue(st.response);
+    seedConversation("c1", [userMsg("u0")]);
+
+    const done = useChatStore.getState().sendMessage("c1", "hi");
+    await tick();
+    st.push(frame("kb_notice", { requested_model: "deepseek-v4-flash", reason: "knowledge_base_self_hosted", allowed_providers: ["sranai"] }));
+    await tick();
+    const asst = (useChatStore.getState().messages["c1"] ?? []).find((m) => m.role === "assistant");
+    expect(asst?.kb_notice?.requested_model).toBe("deepseek-v4-flash");
+    expect(asst?.kb_notice?.reason).toBe("knowledge_base_self_hosted");
+
+    st.push(frame("message_complete", { message_id: "m" }));
+    st.close();
+    await done;
+  });
+
   it("FIX133 A2 — shows where the turn stands from a queued frame and clears it when the turn starts", async () => {
     const st = makeStream();
     mockApi.openMessageStream.mockResolvedValue(st.response);

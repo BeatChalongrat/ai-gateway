@@ -870,11 +870,16 @@ def _run_partition_maintenance_once() -> None:
         session.close()
 
 
+# FIX133 B — the interactive API docs are a development aid: on in
+# dev/test, off in production unless API_DOCS_ENABLED=true says otherwise.
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     lifespan=lifespan,
     default_response_class=UTF8JSONResponse,
+    docs_url="/docs" if settings.api_docs_on else None,
+    redoc_url="/redoc" if settings.api_docs_on else None,
+    openapi_url="/openapi.json" if settings.api_docs_on else None,
 )
 
 # --- Middleware (outermost first) ---

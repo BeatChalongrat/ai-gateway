@@ -570,6 +570,10 @@ function MessageBubbleImpl({
           of a long conversation. Quiet information, not an error. */}
       <MessageCompactionNotice message={message} />
 
+      {/* FIX133 E6a — knowledge-base passages stay with self-hosted models:
+          this turn was answered inside that boundary, not by the pinned model. */}
+      <MessageKBNotice message={message} />
+
       {/* FIX130 A3b — memory saved / suggested by this answer. Live from
           memory_saved, from context_sources after a reload; shown while
           streaming. FIX132 A: nothing for memory merely USED. */}
@@ -1104,6 +1108,17 @@ function MessageCompactionNotice({ message }: { message: Message }) {
   const notice = message.compaction_notice ?? lossNoticeFromSources(message.context_sources);
   if (!notice || notice.dropped <= 0) return null;
   return <CompactionNotice dropped={notice.dropped} summary={notice.summary} />;
+}
+
+function MessageKBNotice({ message }: { message: Message }) {
+  const t = useT();
+  const notice = message.kb_notice;
+  if (!notice) return null;
+  return (
+    <div className="mt-0.5 text-[11px] text-text-muted" data-testid="kb-notice">
+      {t("chat.kbSelfHosted", { model: notice.requested_model || "?" })}
+    </div>
+  );
 }
 
 function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {

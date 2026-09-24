@@ -50,6 +50,34 @@ func (r *ConversationRepo) Create(ctx context.Context, c *model.Conversation) (*
 	return c, nil
 }
 
+// CreateWithClientID (FIX133 F2) inserts a conversation keyed by the
+// client's own id (the X-Request-Id of the create call), so a retried
+// create converges on one row: true when this call inserted it, false when
+// a row with that client id already exists (the caller reads it back with
+// GetByClientID). Origin "api" tells it from the desktop import path.
+func (r *ConversationRepo) CreateWithClientID(ctx context.Context, c *model.Conversation, clientID string) (bool, error) {
+	const q = `
+		INSERT INTO chat.conversations (tenant_id, user_id, model_id, client_id, origin, is_test, is_temporary, memory_enabled)
+		VALUES ($1, $2, $3, $4, 'api', COALESCE((SELECT u.is_test FROM identity.users u WHERE u.id = $2), false), $5, NOT $5)
+		ON CONFLICT (tenant_id, user_id, client_id) WHERE client_id IS NOT NULL
+		DO NOTHING
+		RETURNING id, title, message_count, is_deleted, deleted_at, created_at, updated_at, knowledge_base_id, memory_enabled,
+		       reasoning_enabled, reasoning_mode, show_reasoning_summary, locked_model, is_pinned, folder_id, project_id, is_archived, routing_tier, is_temporary
+	`
+	err := r.db.QueryRow(ctx, q, c.TenantID, c.UserID, c.ModelID, clientID, c.IsTemporary).Scan(
+		&c.ID, &c.Title, &c.MessageCount, &c.IsDeleted,
+		&c.DeletedAt, &c.CreatedAt, &c.UpdatedAt, &c.KnowledgeBaseID, &c.MemoryEnabled,
+		&c.ReasoningEnabled, &c.ReasoningMode, &c.ShowReasoningSummary, &c.LockedModel, &c.IsPinned, &c.FolderID, &c.ProjectID, &c.IsArchived, &c.RoutingTier, &c.IsTemporary,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("create conversation (client id): %w", err)
+	}
+	return true, nil
+}
+
 // CreateImported inserts a desktop-imported conversation keyed by the
 // client's local id (migration 026). “ON CONFLICT DO NOTHING“ against the
 // partial unique index makes concurrent imports of the same client_id

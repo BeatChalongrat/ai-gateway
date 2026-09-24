@@ -733,6 +733,15 @@ class Settings(BaseSettings):
     # refuses to boot without it. Dev/test leaves the sender in
     # "log-to-console" mode and never calls the real API.
     resend_api_key: str = ""
+    # FIX133 B — how transactional mail leaves the box: auto (Resend outside
+    # dev/test, the console log in dev/test), resend, console, or disabled
+    # (no sender: a verification / reset mail is reported as not delivered
+    # and logged, never silently dropped; production no longer demands a
+    # Resend key when this is the stated choice).
+    email_delivery: str = "auto"
+    # FIX133 B — /docs, /redoc, /openapi.json. Unset = on in dev/test, off
+    # outside; "true"/"false" overrides.
+    api_docs_enabled: bool | None = None
     email_from_address: str = "no-reply@sran.ai"
     email_from_name: str = "SRAN AI Gateway"
     # Absolute URL to prefix verification / password-reset links with.
@@ -997,6 +1006,14 @@ class Settings(BaseSettings):
         )
 
     @property
+    def api_docs_on(self) -> bool:
+        """FIX133 B — /docs, /redoc, /openapi.json: API_DOCS_ENABLED when set,
+        else only in dev/test."""
+        if self.api_docs_enabled is not None:
+            return bool(self.api_docs_enabled)
+        return self.app_env.lower() in _DEV_ENVS
+
+    @property
     def effective_master_key(self) -> str:
         """The AES-256-GCM master key for provider-key encryption.
 
@@ -1096,11 +1113,14 @@ class Settings(BaseSettings):
         # verification + password-reset flows aren't silently dropped.
         # Dev/test runs with the console-log sender and doesn't need
         # a real key.
-        if not (self.resend_api_key or "").strip():
+        delivery = (self.email_delivery or "auto").strip().lower()
+        if delivery not in ("auto", "resend", "console", "disabled"):
+            issues.append(f"EMAIL_DELIVERY must be auto|resend|console|disabled (got {self.email_delivery!r})")
+        elif delivery in ("auto", "resend") and not (self.resend_api_key or "").strip():
             issues.append(
                 "RESEND_API_KEY is empty "
-                "(required in production — set a Resend API key or "
-                "switch APP_ENV=development to use the console sender)"
+                "(required in production — set a Resend API key, or state "
+                "EMAIL_DELIVERY=disabled for a deployment without a mail sender)"
             )
 
         # Provider API keys are encrypted at rest with AES-256-GCM

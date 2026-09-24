@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -222,15 +223,43 @@ def classify_stuck_turns(count: int, oldest_s: float, *, after_min: int) -> list
                     group=cat.GROUP_TURNS_STUCK)]
 
 
+def container_restarting(items: list[dict], service: str = "backend") -> bool:
+    """FIX133 D — is the service's container (re)starting right now? Docker
+    says ``restarting``, or its healthcheck is still ``starting``, or it came
+    up less than three minutes ago. A deploy or an autoheal restart looks
+    like this; a hard outage does not."""
+    for c in items:
+        labels = c.get("Labels") or {}
+        if labels.get("com.docker.compose.service") != service:
+            continue
+        if labels.get("com.docker.compose.oneoff") == "True":
+            continue
+        state = str(c.get("State", "")).lower()
+        status = str(c.get("Status", ""))
+        if state == "restarting" or "health: starting" in status:
+            return True
+        if state == "running" and re.match(r"^Up (Less than a second|\d+ seconds?|1 minute|2 minutes)\b", status):
+            return True
+    return False
+
+
 def classify_ready(status_code: int | None, body: dict | None, error: str | None, *,
-                   debounce_s: float = 0.0) -> list[Finding]:
+                   debounce_s: float = 0.0, restart_debounce_s: float | None = None,
+                   restarting: bool = False) -> list[Finding]:
     """The backend's /ready from outside. No answer or a 503 = the backend
     incident (``service:backend``, critical after the debounce) — except a
     503 whose only reason is ``stuck_transaction``: that is the stuck
     transaction's incident (``db:gateway:stuck``), already reported by the
-    backend's rule and the pg_stat_activity watch."""
+    backend's rule and the pg_stat_activity watch.
+
+    FIX133 D — two speeds: a hard outage (the container is not restarting)
+    pages after ``debounce_s``; a container that is restarting or just came
+    up gets ``restart_debounce_s`` (longer) to come back before it pages.
+    """
     if status_code == 200:
         return []
+    if restarting and restart_debounce_s is not None:
+        debounce_s = restart_debounce_s
     if status_code is None:
         severity, title, text = cat.ready_down_text(error or "unknown")
         return [Finding(key="backend:ready", title=title, message=text, severity=severity,
@@ -245,6 +274,40 @@ def classify_ready(status_code: int | None, body: dict | None, error: str | None
                     group=cat.service_group("backend"), debounce_s=debounce_s)]
 
 
+def classify_capacity(body: dict | None, *, queue_min_waiting: int = 0, queue_oldest_s: float = 60.0,
+                      saturation_pct: float = 90.0, debounce_s: float = 180.0) -> list[Finding]:
+    """FIX133 D — from a 200 /ready body: the turn queue's line is not
+    draining (``checks.turn_queue``: waiting >= queue_min_waiting, default
+    max(4, max_active / 3), or the oldest waiter past queue_oldest_s), and
+    the backend workers are saturated (``checks.container``: in-flight >=
+    saturation_pct of workers x cap). Both are degraded (HIGH), both only
+    after the debounce — a spike that drains is not an incident."""
+    out: list[Finding] = []
+    checks = (body or {}).get("checks") or {}
+    tq = checks.get("turn_queue") or {}
+    if tq.get("enabled") and "waiting" in tq:
+        waiting = int(tq.get("waiting") or 0)
+        oldest = float(tq.get("oldest_wait_s") or 0.0)
+        max_active = int(tq.get("max_active") or 0)
+        active = int(tq.get("active") or 0)
+        threshold = queue_min_waiting if queue_min_waiting > 0 else max(4, max_active // 3)
+        if waiting >= threshold or (waiting > 0 and oldest >= queue_oldest_s):
+            severity, title, text = cat.queue_backlog_text(waiting, oldest, active, max_active)
+            out.append(Finding(key="capacity:queue", title=title, message=text, severity=severity,
+                               group=cat.GROUP_QUEUE, debounce_s=debounce_s))
+    container = checks.get("container") or {}
+    inflight_one = checks.get("inflight") or {}
+    workers = int(container.get("workers") or 0)
+    limit = int(inflight_one.get("limit") or 0)
+    inflight = int(container.get("inflight") or 0)
+    capacity = workers * limit
+    if capacity > 0 and inflight >= capacity * saturation_pct / 100.0:
+        severity, title, text = cat.saturated_text(inflight, capacity, workers)
+        out.append(Finding(key="capacity:saturated", title=title, message=text, severity=severity,
+                           group=cat.GROUP_SATURATED, debounce_s=debounce_s))
+    return out
+
+
 def _when(epoch: float | None) -> str:
     if not epoch:
         return "none"
@@ -252,7 +315,10 @@ def _when(epoch: float | None) -> str:
 
 
 def classify_backup(success: dict | None, failure: dict | None, *, now: float, max_age_h: float,
-                    newest_proven: tuple[float, str] | None = None) -> list[Finding]:
+                    newest_proven: tuple[float, str] | None = None,
+                    offsite_max_age_h: float | None = None,
+                    newest_offsite: tuple[float, str] | None = None,
+                    offsite_remind: bool = False) -> list[Finding]:
     """FIX131 B — from the backup container's records (infra/backup/
     schedule.sh): ``last_success.json`` (the newest backup whose restore
     drill passed) and ``last_failure.json`` (the newest failed run).
@@ -291,6 +357,27 @@ def classify_backup(success: dict | None, failure: dict | None, *, now: float, m
         severity, title, body = cat.backup_offsite_text(str(success.get("backup_id") or "?"))
         out.append(Finding(key="backup:offsite", title=title, message=body, severity=severity,
                            group=cat.GROUP_BACKUP_OFFSITE, notified_elsewhere=bool(offsite.get("notified"))))
+    # FIX133 C — a copy that never leaves the PC, or one older than
+    # offsite_max_age_h, is its own (degraded) incident. Configured = the
+    # newest run says anything but "not_configured", or a proven copy exists.
+    if offsite_max_age_h is not None and (success is not None or newest_offsite is not None):
+        status = str(offsite.get("status") or "")
+        if status == "not_configured" and newest_offsite is None:
+            # The backup container said so itself (a record without the key
+            # predates the off-site copy and says nothing). An opt-in
+            # reminder (OPS_WATCH_OFFSITE_REMIND), quiet while the backups
+            # themselves are failing or stale: that is the incident.
+            if out or not offsite_remind:
+                return out
+            severity, title, body = cat.backup_offsite_missing_text()
+            out.append(Finding(key="backup:offsite_missing", title=title, message=body, severity=severity,
+                               group=cat.GROUP_BACKUP_OFFSITE_MISSING))
+        elif status not in ("", "not_configured") or newest_offsite is not None:
+            age = None if newest_offsite is None else now - newest_offsite[0]
+            if age is None or age > offsite_max_age_h * 3600:
+                severity, title, body = cat.backup_offsite_stale_text(age, newest, offsite_max_age_h)
+                out.append(Finding(key="backup:offsite_stale", title=title, message=body, severity=severity,
+                                   group=cat.GROUP_BACKUP_OFFSITE_STALE))
     return out
 
 
@@ -514,6 +601,26 @@ def backup_records(root: str) -> tuple[dict | None, dict | None, tuple[float, st
     return success, failure, newest
 
 
+def newest_offsite_copy(root: str) -> tuple[float, str] | None:
+    """FIX133 C — (epoch, backup id) of the newest run whose off-site copy was
+    proven (``<run>/offsite.json``: pass == true), from the run directories."""
+    try:
+        names = sorted((n for n in os.listdir(root) if len(n) == 15 and n[8] == "_" and n.replace("_", "").isdigit()),
+                       reverse=True)
+    except OSError:
+        return None
+    for name in names:
+        rec = _read_json(os.path.join(root, name, "offsite.json"))
+        if not rec or rec.get("pass") is not True:
+            continue
+        try:
+            at = datetime.strptime(str(rec.get("at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        return (at.timestamp(), name)
+    return None
+
+
 def parse_pg_dsns(spec: str) -> list[tuple[str, str]]:
     """``OPS_WATCH_PG_DSNS`` = ``name=dsn;name=dsn`` (';' — DSNs carry ',')."""
     out: list[tuple[str, str]] = []
@@ -550,15 +657,25 @@ def collect(cfg: dict) -> list[Finding]:
 
     debounce = float(cfg.get("debounce_s", getattr(settings, "alert_debounce_seconds", 90.0)))
     findings: list[Finding] = []
+    items: list[dict] = []
     try:
-        findings += classify_containers(
-            docker_containers(cfg["project"], cfg["sock"]),
-            ignore_exited=cfg["ignore_exited"], debounce_s=debounce,
-        )
+        items = docker_containers(cfg["project"], cfg["sock"])
+        findings += classify_containers(items, ignore_exited=cfg["ignore_exited"], debounce_s=debounce)
     except Exception as exc:  # noqa: BLE001
         _log("docker_query_failed", error=f"{type(exc).__name__}: {str(exc)[:120]}")
     if cfg["backend_url"]:
-        findings += classify_ready(*probe_ready(cfg["backend_url"].rstrip("/") + "/ready"), debounce_s=debounce)
+        # FIX133 D — two speeds: a hard outage pages after ready_debounce_s
+        # (~60 s with the tick), a restart gets restart_debounce_s.
+        code, body, err = probe_ready(cfg["backend_url"].rstrip("/") + "/ready")
+        findings += classify_ready(code, body, err,
+                                   debounce_s=float(cfg.get("ready_debounce_s", debounce)),
+                                   restart_debounce_s=float(cfg.get("restart_debounce_s", debounce)),
+                                   restarting=container_restarting(items, "backend"))
+        if code == 200 and body:
+            findings += classify_capacity(body, queue_min_waiting=int(cfg.get("queue_min_waiting", 0)),
+                                          queue_oldest_s=float(cfg.get("queue_oldest_s", 60.0)),
+                                          saturation_pct=float(cfg.get("saturation_pct", 90.0)),
+                                          debounce_s=float(cfg.get("capacity_debounce_s", 180.0)))
     findings += classify_disk(disk_usage(cfg["disk_paths"]), max_pct=cfg["disk_pct"])
     findings += classify_memory(*meminfo(), max_pct=cfg["mem_pct"])
     for name, dsn in cfg["pg_dsns"]:
@@ -593,7 +710,10 @@ def collect(cfg: dict) -> list[Finding]:
         if os.path.isdir(cfg["backup_dir"]):
             success, failure, newest = backup_records(cfg["backup_dir"])
             findings += classify_backup(success, failure, now=time.time(),
-                                        max_age_h=float(cfg.get("backup_max_age_h", 26)), newest_proven=newest)
+                                        max_age_h=float(cfg.get("backup_max_age_h", 26)), newest_proven=newest,
+                                        offsite_max_age_h=float(cfg.get("offsite_max_age_h", 48)),
+                                        newest_offsite=newest_offsite_copy(cfg["backup_dir"]),
+                                        offsite_remind=bool(cfg.get("offsite_remind", False)))
         else:
             _log("backup_dir_missing", path=cfg["backup_dir"],
                  note="the backup folder is not mounted — no-fresh-backup alerts are off")
@@ -636,6 +756,16 @@ def main() -> int:
         "turn_stuck_lookback_h": int(_env("OPS_WATCH_TURN_STUCK_LOOKBACK_H", "24")),
         "backup_dir": _env("OPS_WATCH_BACKUP_DIR", ""),
         "backup_max_age_h": float(_env("OPS_WATCH_BACKUP_MAX_AGE_H", "26")),
+        # FIX133 C/D — the off-site copy's freshness, the two paging speeds
+        # (hard outage vs a restart), the queue and saturation rules.
+        "offsite_max_age_h": float(_env("OPS_WATCH_OFFSITE_MAX_AGE_H", "48")),
+        "offsite_remind": _env("OPS_WATCH_OFFSITE_REMIND", "") in ("1", "true", "yes"),
+        "ready_debounce_s": float(_env("OPS_WATCH_READY_DEBOUNCE_S", "45")),
+        "restart_debounce_s": float(_env("OPS_WATCH_RESTART_DEBOUNCE_S", "150")),
+        "queue_min_waiting": int(_env("OPS_WATCH_QUEUE_MIN_WAITING", "0")),
+        "queue_oldest_s": float(_env("OPS_WATCH_QUEUE_OLDEST_S", "60")),
+        "saturation_pct": float(_env("OPS_WATCH_SATURATION_PCT", "90")),
+        "capacity_debounce_s": float(_env("OPS_WATCH_CAPACITY_DEBOUNCE_S", "180")),
         # FIX131 — the pager's knobs (settings: ALERT_*).
         "debounce_s": float(getattr(settings, "alert_debounce_seconds", 90.0)),
         "min_attempts": int(getattr(settings, "alert_page_min_attempts", 3)),

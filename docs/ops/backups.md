@@ -352,6 +352,43 @@ exit 0, no alert), and no secret in any log. The 2026-09-23 run
 (`scripts/probes/FIX130/results/ops/`): all 20 assertions PASS; the same
 script against the FIX129 image: 15 FAIL.
 
+### A synced folder instead of a bucket (FIX133 C)
+
+The repository does not have to be a bucket. Any folder this PC syncs
+somewhere else — OneDrive, Google Drive, a NAS share — works the same way:
+restic encrypts and deduplicates locally and writes only ciphertext into the
+folder, the sync client carries it off the machine. In `.env`:
+
+```
+BACKUP_OFFSITE_DIR=C:/Users/<you>/OneDrive/sran-backups     # the synced folder (host path)
+BACKUP_OFFSITE_REPOSITORY=/offsite                           # where the container sees it
+BACKUP_OFFSITE_PASSWORD=<long random passphrase — keep a copy OFF this PC>
+```
+
+then `docker compose -p ai-gateway -f docker-compose.webchat.yml up -d backup`
+and `run --rm backup offsite-check`. No keys, no account. The trade-off: the
+sync client must be signed in and running for the copy to leave the PC, and
+a ransomware that reaches the synced folder reaches the copy (restic's
+encryption keeps it unreadable, not undeletable — keep the bucket option for
+that). The default `BACKUP_OFFSITE_DIR` (`../ai-gateway-backups/offsite`) is
+only a mount point: on this PC it is NOT off-site until it points at a synced
+folder.
+
+### Restore from the off-site copy (FIX133 C)
+
+```
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite            # newest snapshot
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite <snapshot> [dir]
+```
+
+restores the run directory from the OFF-SITE repository (never the local
+backup) into `/backups/restore-offsite-<timestamp>/`, checks every file's
+sha256 against the manifest and writes `restore-offsite.json` (`pass`,
+`files`, `duration_s`). From there, "Restore for real" below loads the dumps.
+The alert `Off-site backup copy is stale` (ops-watch, `OPS_WATCH_OFFSITE_MAX_AGE_H`,
+48 h) fires when no proven off-site copy is younger than two days; `No off-site
+backup copy is configured` is an opt-in reminder (`OPS_WATCH_OFFSITE_REMIND=1`).
+
 ## Run one now
 
 ```sh

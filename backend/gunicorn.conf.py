@@ -107,6 +107,14 @@ workers = max(1, _workers())
 timeout = _env_int("GUNICORN_TIMEOUT", 60)
 graceful_timeout = _env_int("GUNICORN_GRACEFUL_TIMEOUT", 180)
 keepalive = _env_int("GUNICORN_KEEPALIVE", 5)
+# FIX133 B — behind the TLS front door (Caddy → Go gateway → here) the
+# request's scheme and client address arrive in X-Forwarded-Proto / -For.
+# Uvicorn only honours them from trusted proxies; the backend is reachable
+# from the compose network and a loopback debug door only, so the default
+# trusts every proxy ("*"). Without this, url_for() builds http:// callback
+# URLs (the Google sign-in redirect) although the page came over https.
+forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "*")
+proxy_protocol = False
 # Recycling a worker drains it WITHOUT heartbeats (see GUNICORN_TIMEOUT) and
 # interrupted SSE streams in waves in the capacity runs
 # (docs/CAPACITY_VALIDATION_150_250.md). Off.
