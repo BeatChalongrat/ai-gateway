@@ -63,7 +63,18 @@ func TestExportSweep_RemovesExpiredFilesAndFailsStaleBuilds(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ...and the work directory its dead builder left behind.
+	orphan := filepath.Join(root, "exports", tenant.String(), user.String(), ".build-123")
+	if err := os.MkdirAll(orphan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old3h := now.Add(-3 * time.Hour)
+	_ = os.Chtimes(orphan, old3h, old3h)
+
 	st := svc.SweepExpired(ctx, now)
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("a dead build's work directory is still on disk")
+	}
 
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Errorf("expired export file still on disk (stat err=%v)", err)

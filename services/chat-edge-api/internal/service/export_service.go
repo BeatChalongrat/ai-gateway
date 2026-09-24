@@ -227,6 +227,15 @@ func (s *ExportService) SweepExpired(ctx context.Context, now time.Time) ExportS
 	} else {
 		st.StaleFailed = n
 	}
+	// A build whose process died leaves its work directory behind; the row
+	// was failed above, the directory goes here.
+	if dirs, err := filepath.Glob(filepath.Join(s.storageRoot, "exports", "*", "*", ".build-*")); err == nil {
+		for _, d := range dirs {
+			if info, err := os.Stat(d); err == nil && now.Sub(info.ModTime()) > exportStaleAfter {
+				_ = os.RemoveAll(d)
+			}
+		}
+	}
 	expired, err := s.exports.ListExpiredWithFiles(ctx, now, 1000)
 	if err != nil {
 		slog.Warn("export sweep: list failed", "err", err)
