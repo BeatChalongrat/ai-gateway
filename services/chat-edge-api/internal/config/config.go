@@ -87,6 +87,29 @@ type Config struct {
 	// (runes) for new knowledge bases and for rows still on the old 512/50.
 	KBChunkSize    int `env:"KB_CHUNK_SIZE" envDefault:"1000"`
 	KBChunkOverlap int `env:"KB_CHUNK_OVERLAP" envDefault:"150"`
+	// Retrieval (rag_service.go; defaults measured on the FIX132 eval set).
+	// KB_SPARSE_WEIGHT — score = cosine + weight × bge-m3 lexical score over
+	// the union of both arms' candidates; 0 = dense only.
+	KBSparseWeight float64 `env:"KB_SPARSE_WEIGHT" envDefault:"0.3"`
+	// KB_CANDIDATES — candidates per arm (dense, sparse) before fusion.
+	KBCandidates int `env:"KB_CANDIDATES" envDefault:"50"`
+	// KB_RERANK_ENABLED — rerank the fused top KB_RERANK_CANDIDATES with
+	// bge-reranker-v2-m3. Off: on this CPU 30–40 passages take 20–60 s. When
+	// on, KB_RERANK_BUDGET_MS bounds it; past it the fused order is used.
+	// kb-models reads the same variable to decide whether to load the model.
+	KBRerankEnabled    bool    `env:"KB_RERANK_ENABLED" envDefault:"false"`
+	KBRerankCandidates int     `env:"KB_RERANK_CANDIDATES" envDefault:"40"`
+	KBRerankBudgetMS   int     `env:"KB_RERANK_BUDGET_MS" envDefault:"4000"`
+	KBRerankFloor      float64 `env:"KB_RERANK_FLOOR" envDefault:"0.01"`
+	// KB_MIN_SCORE — without the reranker, a passage is given to the model
+	// only if cosine + weight × lexical reaches this (measured: real
+	// questions' top score ≥ 0.51, off-topic 0.32–0.50). None passes → no
+	// passage at all; the model answers normally.
+	KBMinScore float64 `env:"KB_MIN_SCORE" envDefault:"0.40"`
+	// KB_TOP_K — passages given to the model; KB_CONTEXT_MAX_CHARS caps the
+	// block (it is also held to a quarter of the model's context window).
+	KBTopK            int `env:"KB_TOP_K" envDefault:"20"`
+	KBContextMaxChars int `env:"KB_CONTEXT_MAX_CHARS" envDefault:"24000"`
 
 	// Optional whole-request deadline for the gateway client (Batch A).
 	// Default 0 = unbounded: Client.Timeout covers the entire streamed

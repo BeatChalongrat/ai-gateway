@@ -348,69 +348,6 @@ func (r *KnowledgeRepo) InsertChunkBatch(ctx context.Context, chunks []model.Kno
 	return nil
 }
 
-// SearchSimilarChunks does a vector similarity search inside a KB.
-// Returns (chunk, score, filename) tuples ordered by similarity
-// descending. “threshold“ is the minimum cosine similarity to
-// include in the result (1.0 == identical; 0.0 == orthogonal).
-//
-// pgvector exposes the cosine-distance operator “<=>“ so the
-// equivalent similarity is “1 - distance“. The query computes
-// both, filters by similarity, and orders by distance ascending
-// (== similarity descending).
-type RetrievedChunkRow struct {
-	Chunk            model.KnowledgeChunk
-	Similarity       float64
-	DocumentFilename string
-}
-
-func (r *KnowledgeRepo) SearchSimilarChunks(
-	ctx context.Context, tenantID, kbID uuid.UUID,
-	embedding []float32, topK int, threshold float64,
-) ([]RetrievedChunkRow, error) {
-	if topK <= 0 {
-		topK = 5
-	}
-	emb := encodeVector(embedding)
-	const q = `
-		SELECT c.id, c.document_id, c.knowledge_base_id, c.tenant_id,
-		       c.content, c.chunk_index, c.metadata, c.created_at,
-		       1 - (c.embedding <=> $3::vector) AS similarity,
-		       d.original_filename
-		FROM chat.knowledge_chunks c
-		JOIN chat.knowledge_documents d ON d.id = c.document_id
-		WHERE c.knowledge_base_id = $1
-		  AND c.tenant_id = $2
-		  AND c.embedding IS NOT NULL
-		ORDER BY c.embedding <=> $3::vector ASC
-		LIMIT $4
-	`
-	rows, err := r.db.Query(ctx, q, kbID, tenantID, emb, topK)
-	if err != nil {
-		return nil, fmt.Errorf("search similar chunks: %w", err)
-	}
-	defer rows.Close()
-	out := make([]RetrievedChunkRow, 0, topK)
-	for rows.Next() {
-		var rc RetrievedChunkRow
-		var md []byte
-		if err := rows.Scan(
-			&rc.Chunk.ID, &rc.Chunk.DocumentID, &rc.Chunk.KnowledgeBaseID, &rc.Chunk.TenantID,
-			&rc.Chunk.Content, &rc.Chunk.ChunkIndex, &md, &rc.Chunk.CreatedAt,
-			&rc.Similarity, &rc.DocumentFilename,
-		); err != nil {
-			return nil, fmt.Errorf("search scan: %w", err)
-		}
-		if len(md) > 0 {
-			_ = json.Unmarshal(md, &rc.Chunk.Metadata)
-		}
-		if rc.Similarity < threshold {
-			continue
-		}
-		out = append(out, rc)
-	}
-	return out, rows.Err()
-}
-
 // ---------------------------------------------------------------------------
 // Vector helpers
 // ---------------------------------------------------------------------------

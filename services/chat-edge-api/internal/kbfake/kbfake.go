@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -50,6 +51,8 @@ type Server struct {
 	FailStatus int
 	// RerankFails makes every /v1/rerank call answer 500.
 	RerankFails bool
+	// RerankDelay makes every /v1/rerank call take at least this long.
+	RerankDelay time.Duration
 	// Block, when non-nil, makes every /v1/embeddings call with priority
 	// "index" wait until it is closed (or a value is received).
 	Block chan struct{}
@@ -193,8 +196,15 @@ func (s *Server) rerank(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	s.mu.Lock()
-	fails := s.RerankFails
+	fails, delay := s.RerankFails, s.RerankDelay
 	s.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if fails {
 		writeJSON(w, 500, map[string]any{"detail": "rerank broke"})
 		return

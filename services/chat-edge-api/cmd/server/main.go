@@ -565,7 +565,20 @@ func main() {
 	// with the other background loops; stopped by the shutdown drain, which
 	// hands an in-flight document back to the queue).
 	kbWorker := service.NewKnowledgeWorker(knowledgeSvc, service.KnowledgeWorkerConfig{Workers: cfg.KBIndexWorkers})
-	ragSvc := service.NewRAGService(knowledgeRepo, kbModels)
+	ragSvc := service.NewRAGService(knowledgeRepo, kbModels, service.RAGConfig{
+		SparseWeight:     cfg.KBSparseWeight,
+		Candidates:       cfg.KBCandidates,
+		RerankEnabled:    cfg.KBRerankEnabled,
+		RerankCandidates: cfg.KBRerankCandidates,
+		RerankBudget:     time.Duration(cfg.KBRerankBudgetMS) * time.Millisecond,
+		RerankFloor:      cfg.KBRerankFloor,
+		MinScore:         cfg.KBMinScore,
+		TopK:             cfg.KBTopK,
+		ContextMaxChars:  cfg.KBContextMaxChars,
+	})
+	slog.Info("knowledge base retrieval", "mode", ragSvc.DefaultMode(),
+		"sparse_weight", ragSvc.Config().SparseWeight, "candidates", ragSvc.Config().Candidates,
+		"min_score", ragSvc.Config().MinScore, "top_k", ragSvc.Config().TopK, "rerank", ragSvc.Config().RerankEnabled)
 	messageSvc.SetRAGReader(ragSvc)
 	// Phase 4 — project context (shared instructions + KB) inherited by
 	// member conversations at prompt-compile time.

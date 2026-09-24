@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -415,15 +416,25 @@ func (h *KnowledgeHandler) writeUploadError(w http.ResponseWriter, err error) {
 
 type searchKBRequest struct {
 	Query string `json:"query"`
-	TopK  int    `json:"top_k"`
+	// Mode — dense | sparse | hybrid | hybrid_rerank (FIX132 B); empty =
+	// what chat uses.
+	Mode string `json:"mode"`
+	TopK int    `json:"top_k"`
+	// MinScore overrides KB_MIN_SCORE for this search (eval); omitted = the
+	// configured floor.
+	MinScore *float64 `json:"min_score,omitempty"`
 }
 
 type searchKBHit struct {
-	Content    string  `json:"content"`
-	Score      float64 `json:"score"`
-	DocumentID string  `json:"document_id"`
-	Filename   string  `json:"filename"`
-	ChunkIndex int     `json:"chunk_index"`
+	ChunkID     string   `json:"chunk_id"`
+	DocumentID  string   `json:"document_id"`
+	Filename    string   `json:"filename"`
+	ChunkIndex  int      `json:"chunk_index"`
+	Content     string   `json:"content"`
+	Score       float64  `json:"score"`
+	RerankScore *float64 `json:"rerank_score,omitempty"`
+	Cosine      float64  `json:"cosine"`
+	Lexical     float64  `json:"lexical"`
 }
 
 func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
@@ -438,8 +449,13 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeBadRequest, "malformed JSON body")
 		return
 	}
-	if req.Query == "" {
+	if strings.TrimSpace(req.Query) == "" {
 		WriteError(w, http.StatusBadRequest, CodeValidationError, "query is required")
+		return
+	}
+	mode, ok := service.ParseSearchMode(req.Mode)
+	if !ok {
+		WriteError(w, http.StatusBadRequest, CodeValidationError, "mode must be dense, sparse, hybrid or hybrid_rerank")
 		return
 	}
 	// Sanity check the KB exists for this tenant before running
@@ -452,7 +468,7 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	chunks, err := h.rag.QueryKnowledgeBase(r.Context(), caller.TenantUUID, caller.UserID, kbID, req.Query, req.TopK)
+	res, err := h.rag.SearchWith(r.Context(), caller.TenantUUID, kbID, req.Query, mode, req.TopK, service.SearchOptions{MinScore: req.MinScore})
 	if err != nil {
 		if service.IsKBModelsUnavailable(err) {
 			WriteError(w, http.StatusServiceUnavailable, "KB_MODELS_UNAVAILABLE",
@@ -462,16 +478,24 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
 		return
 	}
-	out := make([]searchKBHit, 0, len(chunks))
-	for _, c := range chunks {
+	out := make([]searchKBHit, 0, len(res.Chunks))
+	for _, c := range res.Chunks {
 		out = append(out, searchKBHit{
-			Content:    c.Content,
-			Score:      c.Score,
-			DocumentID: c.DocumentID.String(),
-			Filename:   c.Filename,
-			ChunkIndex: c.ChunkIndex,
+			ChunkID:     c.ChunkID.String(),
+			DocumentID:  c.DocumentID.String(),
+			Filename:    c.Filename,
+			ChunkIndex:  c.ChunkIndex,
+			Content:     c.Content,
+			Score:       c.Score,
+			RerankScore: c.Rerank,
+			Cosine:      c.Cosine,
+			Lexical:     c.Lexical,
 		})
 	}
+	body := map[string]any{"results": out, "mode": res.Mode, "timing_ms": res.Timing, "below_floor": res.BelowFloor}
+	if res.RerankFallback != "" {
+		body["rerank_fallback"] = res.RerankFallback
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"results": out})
+	_ = json.NewEncoder(w).Encode(body)
 }
