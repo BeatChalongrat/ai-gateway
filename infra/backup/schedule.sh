@@ -5,7 +5,7 @@
 #
 # Why: until FIX131 the loop computed "next 03:15" once and slept that many
 # seconds. Docker Desktop's VM clock does not advance while the PC sleeps, so
-# the run of 2026-09-23 fired at 05:52 (2 h 37 min late), and a run missed
+# the 03:15 run due on 2026-09-24 fired at 05:52 (2 h 37 min late), and a run missed
 # while the container was down was simply skipped. Now the loop wakes every
 # BACKUP_TICK_S (60 s) and compares the WALL clock with the schedule:
 #

@@ -15,7 +15,8 @@ name.
 
 | What | Value | Where to change |
 |---|---|---|
-| Schedule | daily at `BACKUP_AT` = **03:15** in `TZ` = **Asia/Bangkok** | `.env`: `BACKUP_AT=HH:MM`, `TZ=` |
+| Schedule | daily at `BACKUP_AT` = **03:15** in `TZ` = **Asia/Bangkok**, checked against the wall clock every minute and caught up after a missed window (FIX131, below) | `.env`: `BACKUP_AT=HH:MM`, `TZ=` |
+| Freshness | a backup older than `BACKUP_MAX_AGE_H` = **26 h** is "not fresh": ops-watch pages (below) | `.env`: `BACKUP_MAX_AGE_H=` |
 | Location | `BACKUP_DIR` on the host, default **`../ai-gateway-backups/daily`** (a sibling of the checkout, so a re-clone, `git clean` or worktree removal never eats it) → `/backups` in the container | `.env`: `BACKUP_DIR=/mnt/backups/sran` (put it on another disk on a real deployment) |
 | Retention | directories older than `BACKUP_KEEP_DAYS` = **14** days are deleted at the end of each run | `.env`: `BACKUP_KEEP_DAYS=` |
 | Success note | silent by default; `BACKUP_NOTIFY_SUCCESS=1` sends a quiet daily summary | `.env` |
@@ -24,6 +25,96 @@ The service runs with `restart: unless-stopped`, so it comes back with the
 stack. One backup directory per run: `<BACKUP_DIR>/<YYYYMMDD_HHMMSS>/`. A run
 that fails leaves `<YYYYMMDD_HHMMSS>.failed/` (whatever was written) so the
 partial output can be inspected; it is pruned like the others.
+
+## Schedule and catch-up (FIX131)
+
+Until FIX131 the loop computed "next 03:15" once and slept that many seconds.
+Docker Desktop's VM clock does not advance while the PC sleeps, so the run
+due at 03:15 on 2026-09-24 fired at 05:52 (2 h 37 min late), and a window
+missed while the container was down was simply skipped. Now
+(`infra/backup/schedule.sh`):
+
+* **Every `BACKUP_TICK_S` (60 s)** the loop reads the wall clock.
+  `slot` = the latest `BACKUP_AT` in `TZ` that has passed. The backup is
+  **due** when the newest *successful* backup (restore drill passed) finished
+  before that slot. So after a missed window — PC asleep, container stopped,
+  a failure — it runs at the first tick after it is back: **once**, not once
+  per missed day.
+* **No double runs.** A lock directory `<BACKUP_DIR>/.backup.lock` (holder,
+  pid, time) is shared by the scheduled loop and `run --rm backup now`
+  (`now` refuses with exit 4 while a backup runs). A lock older than
+  `BACKUP_LOCK_STALE_S` (3 h) is a crashed run's and is taken over (logged);
+  a restarted container releases its own old lock at start. `mkdir` is used
+  because it is atomic on every filesystem, the Windows bind mount included
+  (`flock` is not reliable there).
+* **Retry with backoff.** A failed run is retried after
+  `BACKUP_RETRY_BASE_S` (10 min), then 20, 40, 80 min, capped at
+  `BACKUP_RETRY_MAX_S` (2 h), until one succeeds; the next slot starts
+  fresh. An off-site failure (exit 3) does not retry the local backup, which
+  is proven.
+* **One log line per decision** (on every change, and hourly while nothing
+  changes):
+  ```
+  decision: wait — newest successful backup 2026-09-24T03:16:40+0700 is not older than the slot 2026-09-24T03:15:00+0700; next slot 2026-09-25T03:15:00+0700
+  decision: run (catch-up, attempt 1) — slot 2026-09-24T03:15:00+0700 passed 2 h 37 min ago and was missed (PC asleep or container down); newest successful backup 2026-09-23T03:16:40+0700 (26 h 35 min old)
+  decision: retry-wait — attempt 1 for the slot 2026-09-24T03:15:00+0700 failed at 2026-09-24T03:15:30+0700; retry 2 at 2026-09-24T03:25:30+0700 (backoff 10 min)
+  decision: skip — another backup is running (a1b2c3d4 pid 17, since 45 s)
+  ```
+  `docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup tick`
+  runs one decision by hand (and the backup, if due).
+
+### The records
+
+Every run writes one of two files in `BACKUP_DIR`, atomically (temp file +
+rename in the same directory):
+
+```json
+last_success.json   {"at": "2026-09-23T20:16:40Z", "epoch": 1790194600, "slot": "2026-09-24T03:15:00+0700",
+                     "trigger": "schedule|catch-up|retry|manual", "attempt": 1, "backup_id": "20260924_031500",
+                     "duration_s": 100, "drill": {"pass": true, "checks_total": 14, "checks_failed": 0},
+                     "sizes": {"gateway.dump": 205000000, "sran_ai.dump": 6800000, "uploads.tar.gz": 67500000, "total": 279300000},
+                     "offsite": {"status": "pass|fail|not_configured", "snapshot": "1a2b3c4d…", "notified": false}}
+last_failure.json   {"at": "…", "epoch": …, "slot": "…", "rc": 1, "status": "BACKUP FAILED|DRILL FAILED",
+                     "backup_id": null, "attempts": 2, "next_retry_at": "…", "notified": false, "summary": "…"}
+```
+
+`last_success.json` is written for a run whose restore drill passed (exit 0,
+or 3 = local backup fine, off-site copy failed — `offsite.status: "fail"`).
+Before the first FIX131 run there is no record; the scheduler and ops-watch
+then use the newest directory whose `drill.json` says `"pass": true`.
+
+## The "no fresh backup" alert (FIX131)
+
+Nothing used to alert on a *missing* backup: success was silent
+(`BACKUP_NOTIFY_SUCCESS=0`) and a container that is stopped, or a schedule
+that never fires, sends nothing. The backup container cannot report its own
+death, so the check lives in **ops-watch**, which mounts the same folder
+read-only (`${BACKUP_DIR}:/backups:ro`, `OPS_WATCH_BACKUP_DIR=/backups`) and
+reads the records every 30 s — the dead man's switch pattern (the job
+reports, a separate monitor alerts):
+
+| Incident | When | Priority |
+|---|---|---|
+| `backup` — "Backups: no fresh backup for 30 h" | no proven backup newer than `BACKUP_MAX_AGE_H` (26 h: a day plus a 2 h grace) | high (4) |
+| `backup` — "Backups are failing: the last backup did not complete / could not be restored in the drill" | `last_failure.json` newer than `last_success.json` | high (4) |
+| `backup:offsite` — "Off-site backup copy failed (the local backup is fine)" | the newest success's `offsite.status` is `fail` | high (4) |
+
+It pages through the shared pager (`docs/ops/monitoring.md`, "The pager"):
+one page per incident, a reminder after 24 h if still open, and one
+"Recovered: …" (low priority) when a fresh proven backup appears.
+
+Who pages what, so one incident is one page: the backup container pages the
+**transition** into failure itself (the first failed attempt since the
+newest success, while that success is still fresh) and records
+`"notified": true`; ops-watch then registers the incident as already paged
+and owns everything after it — failed retries, staleness, the reminder and
+"recovered". If the container did not page (a retry, the newest success
+already stale, or its channel failed), ops-watch does. An off-site failure
+is paged by the container on the first night only.
+
+To see the check without paging anyone: `docker compose -p ai-gateway exec
+ops-watch python -c "from app.ops.watch import backup_records, classify_backup; import time; s,f,n = backup_records('/backups'); print([x.title for x in classify_backup(s, f, now=time.time(), max_age_h=26, newest_proven=n)])"`
+(prints `[]` when the backups are fresh).
 
 ## What is in a backup
 
@@ -270,16 +361,23 @@ docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup now
 That is backup + drill + off-site copy + notification, then exit (0 =
 written and proven, and the off-site copy proven or not configured; 1 = the
 backup failed; 2 = the drill failed; 3 = the off-site copy failed — the
-local backup is still there and still proven). Sub-commands, when you need
-one piece:
+local backup is still there and still proven; 4 = another backup is running,
+nothing started). It takes the same lock as the scheduled loop and writes
+the same records, so a manual run counts for tonight's slot. Sub-commands,
+when you need one piece:
 
 ```sh
 docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup backup            # dump only
 docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup drill /backups/20260923_031500
 docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite /backups/20260923_031500
 docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite-check     # first-time setup / "is it still working?"
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup tick              # one scheduler decision (FIX131)
 docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup notify info "test" "hello from the backup service"
 ```
+
+`notify` is a **test fire** (FIX131): always `[TEST]` in title and body, and
+sent only to `ALERT_TEST_NTFY_URL` (a throwaway topic) — never the owner's
+topic, its token or e-mail. Without `ALERT_TEST_NTFY_URL` it is logged only.
 
 The scheduled container's log (`docker logs ai-gateway-backup`) has one
 timestamped line per step: the snapshot id, each table's count, each file's
@@ -365,23 +463,36 @@ message):
   `docs/ops/monitoring.md`, "What an alert may carry").
 * **e-mail via Resend** — `RESEND_API_KEY` + `ALERT_EMAIL_TO=ops@example.com`
   (`ALERT_EMAIL_FROM` defaults to `no-reply@sran.ai`). Subject is
-  `[high] SRAN backup FAILED` / `[ok] SRAN backup OK`.
+  `[high] <title>`.
+* `ALERT_ENVIRONMENT` (FIX131): empty on the real system; `test` (the test
+  stack sets it) puts `[TEST]` in front of title and message and sends only
+  to `ALERT_TEST_NTFY_URL` — never `ALERT_NTFY_URL`, its token or e-mail.
 
-The message is the one-line summary that also ends the container log:
+Since FIX131 the title says what is wrong and the message what still works
+and what to do; the one-line summary that also ends the container log
+follows as `Details:`. The container sends these on the transition into
+failure only (see "The no fresh backup alert" for who sends what after):
 
 ```
-Title:   SRAN backup FAILED                                    (priority high, tag rotating_light)
-DRILL FAILED backup=/backups/20260923_031500 sizes: gateway.dump 41.2 MB, sran_ai.dump 3.8 MB, uploads.tar.gz 120.5 MB (57 entries); duration 38s; drill: FAIL 13/14 checks: rows:gw:request_logs
+Title:   Backup failed: no new backup was written              (priority high, tag rotating_light)
+Tonight's backup of the databases and uploads did not complete. The previous backup is still there:
+2026-09-23 03:16 +07 (23 h 59 min old). The next automatic try is in 10 min. Look: docker logs
+ai-gateway-backup (the step that failed). Run one by hand: docker compose -p ai-gateway -f
+docker-compose.webchat.yml run --rm backup now
+Details: BACKUP FAILED backup=none sizes: n/a; duration 3s; drill: not run; offsite: not run
+
+Title:   Backup failed its restore test                        (priority high)
+… Details: DRILL FAILED backup=/backups/20260923_031500 sizes: gateway.dump 41.2 MB, …; drill: FAIL 13/14 checks: rows:gw:request_logs
+
+Title:   Off-site backup copy failed (the local backup is fine)   (priority high; exit 3)
+… Details: OFFSITE FAILED backup=/backups/20260923_171923 …; drill: pass 14/14 checks; offsite: FAIL at connect (wrong repository password)
 
 Title:   SRAN backup OK                                        (priority low, only with BACKUP_NOTIFY_SUCCESS=1)
-OK backup=/backups/20260923_031500 sizes: gateway.dump 41.2 MB, sran_ai.dump 3.8 MB, uploads.tar.gz 120.5 MB (57 entries); duration 36s; drill: pass 14/14 checks; offsite: pass snapshot 1a2b3c4d, 9.1 MB new of 165.5 MB, restore 4/4 sha256
-
-Title:   SRAN off-site backup FAILED                           (priority high; exit 3 — the local backup is fine)
-OFFSITE FAILED backup=/backups/20260923_171923 sizes: gateway.dump 15.4 MB, sran_ai.dump 1.1 MB, uploads.tar.gz 15 MB (131 entries); duration 7s; drill: pass 14/14 checks; offsite: FAIL at connect (wrong repository password)
+OK backup=/backups/20260923_031500 sizes: …; drill: pass 14/14 checks; offsite: pass snapshot 1a2b3c4d, 9.1 MB new of 165.5 MB, restore 4/4 sha256
 ```
 
-(The last one is verbatim from the FIX130 proof's dummy endpoint; the other
-failure reasons read `the bucket did not answer in time (unreachable?)`,
+(The off-site `Details` line is verbatim from the FIX130 proof's dummy
+endpoint; the other failure reasons read `the bucket did not answer in time (unreachable?)`,
 `FAIL at upload: upload`, `FAIL at restore: restore-sha256:gateway.dump`, …)
 
 `BACKUP FAILED backup=none … drill: not run` means the dump itself failed

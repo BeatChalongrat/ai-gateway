@@ -96,18 +96,22 @@ watcher and the backup job:
 | `ALERT_NTFY_URL` | ntfy push (phone) | a full topic URL, e.g. `https://ntfy.sh/<random topic>`; the owner subscribes to it in the ntfy app. `ALERT_NTFY_TOKEN` for a protected topic. |
 | `ALERT_EMAIL_TO` | e-mail via Resend | needs `RESEND_API_KEY`; in `APP_ENV=development` the sender only logs |
 | `ALERT_WEBHOOK_URL` | JSON POST | the same payload the alert rules' own `webhook_url` gets |
+| `ALERT_ENVIRONMENT` (FIX131) | label + route | empty / `production` / `live` = the real system. Anything else prefixes every title and body (`[STAGING] …`); `test` / `testing` / `ci` / `lane` / `test-stack` prefixes `[TEST]` AND sends every alert only to `ALERT_TEST_NTFY_URL` — never to the three channels above |
+| `ALERT_TEST_NTFY_URL` (FIX131) | throwaway ntfy topic | where test alerts go (a test environment, `python -m app.ops.fire_test_alert`, `backup notify …`); empty = test alerts are logged only. Never gets `ALERT_NTFY_TOKEN`. |
 
 A notification carries a title, a body, a priority (critical = 5, warning =
-4, info = 3) and tags; it never carries a secret. Example (ntfy):
+4, info = 3, low = 2) and tags; it never carries a secret. Since FIX131 the
+title says what is wrong for users and the body what still works, what to do
+and where to look; the numbers (window, metric value, threshold) stay in the
+log line and `alert_events`. Example (ntfy):
 
 ```
-Title:    No successful turn in 5 min (with attempts): 12 request(s) in the last 5 min, none succeeded
+Title:    Chat is failing: no reply succeeded in 5 min (12 tries)
 Priority: 5
-Tags:     rotating_light,critical,no_successful_turn
-Body:     No successful turn in 5 min (with attempts): 12 request(s) in the last 5 min, none succeeded
-          window_minutes: 5
-          metric_value: 12.0
-          threshold: 1.0
+Tags:     rotating_light,critical,incident
+Body:     12 turn(s) attempted in the last 5 min, none completed (12 failed). Users get errors instead
+          of answers. Look: admin → Requests (status, error_code), docker logs
+          ai-gateway-chat-edge-api --tail 100, and the model provider keys.
 ```
 
 ### What an alert may carry (FIX130)
@@ -147,7 +151,9 @@ ops-watch: transaction stuck 64 s on chat — pid 262 idle in transaction (psql,
   and Thai user text), `test_fix130_alert_url_not_logged.py` and
   `infra/backup/tests/test_notify.sh`.
 * The unit lane cannot page anyone: `conftest._alert_channels_off_by_default`
-  blanks the global channels for every test (the lane's environment is the
+  blanks the global channels (FIX131: and `ALERT_TEST_NTFY_URL`,
+  `ALERT_ENVIRONMENT`, and gives each test its own in-memory pager store —
+  never Redis) for every test (the lane's environment is the
   live backend's — on 2026-09-23 it sent 17 fake "test-rule: …" alerts to the
   owner's topic), and the test stack gets `TS_ALERT_*` twins, empty unless
   set (`scripts/test_stack_gen.py` refuses a file that references a live
@@ -193,6 +199,104 @@ external uptime monitor that polls the public health URL and e-mails when it
 stops answering) that alerts when the PC goes silent; that is a follow-up,
 not part of FIX130.
 
+### The pager: one incident, one page (FIX131)
+
+NIGHT3 (2026-09-23): one stuck transaction produced FOUR pushes (the rule
+"Transaction stuck longer than 60 s" p4, ops-watch "backend is not ready:
+/ready answered 503: stuck_transaction" p5, "transaction stuck 80 s on
+gateway" p5, "… on chat" p5); a planned backend reload paged p5; one failed
+turn in a quiet 5 min paged twice (the rule p4 and its ops-watch twin p5); a
+test-stack page looked like a real one. Each sender had its own cooldown and
+graded severity by its own rule.
+
+Now the backend's alert rules and ops-watch hand every finding to one pager
+(`backend/app/services/alert_pager.py`; groups, severities and words in
+`alert_catalog.py`), with its state in the backend's Redis (db 0, keys
+`sran:alert:incident:<group>`, a short lock per group), so both processes —
+and every backend worker — decide together. If Redis does not answer, each
+process decides from its own memory (logged `pager_store_fallback`; worst
+case one page per sender), and ops-watch keeps that memory in its state file.
+This follows the PagerDuty / Alertmanager model: a dedup key per incident,
+grouping, a repeat interval, inhibition during maintenance.
+
+**Grouping** — related signals are one incident:
+
+| Incident (group) | Signals |
+|---|---|
+| `service:<service>` | container unhealthy / restarting / exited; for `backend` also "/ready does not answer" and "/ready 503" for any reason but a stuck transaction |
+| `db:gateway:stuck` | backend rule `stuck_transaction` + ops-watch `pg:gateway:stuck` + "/ready 503" whose only reason is `stuck_transaction` |
+| `db:chat:stuck` | ops-watch `pg:chat:stuck` (another database = another incident) |
+| `turns:none_succeeded` / `turns:error_rate` | the backend rules `no_successful_turn` / `error_rate` + their ops-watch twins |
+| `turns:stuck` | ops-watch: assistant replies still `streaming` > 15 min (last 24 h) |
+| `backup` / `backup:offsite` | ops-watch from the backup records (`docs/ops/backups.md`) |
+| `disk:<path>`, `memory` | ops-watch |
+| `rule:<id>` | any other (operator-defined) rule |
+
+**Severity by impact:**
+
+| Priority | When |
+|---|---|
+| critical (ntfy 5) | users cannot use the system: a user-facing service (`backend`, `gateway`, `chat-edge-api`, `web-chat`, both Postgres, both Redis) down or not ready past the debounce; no successful turn with at least `ALERT_PAGE_MIN_ATTEMPTS` (3) attempts |
+| warning / high (ntfy 4) | degraded: error rate, a stuck transaction, replies stuck, disk / memory high, backups, another service down, any operator rule |
+| low (ntfy 2, silent) | "Recovered: …" / "No longer reported: …" |
+| none (log only) | one or two failed turns in a quiet window; a restart that heals within the debounce |
+
+**When it pages:**
+
+* once per incident, when its severity is above none and it has lasted
+  `ALERT_DEBOUNCE_SECONDS` (90 s) for container / readiness findings (a
+  normal restart heals first; everything else pages at once);
+* again only on **escalation** (a higher severity than the one paged — "one
+  failed turn" becoming "three") or as a **reminder** while still open:
+  after `ALERT_REMINDER_SECONDS` (4 h, Grafana's default repeat interval)
+  for critical, `ALERT_REMINDER_HIGH_SECONDS` (24 h) for high;
+* one **"Recovered: …"** when every sender has cleared it; "No longer
+  reported: …" when its senders stopped reporting (the check itself stopped
+  running) — never a "recovered" for something that was never paged;
+* a failed delivery (every channel refused) is not counted as paged and is
+  tried again on the next sighting.
+
+(`ALERT_DEBOUNCE_SECONDS`, `ALERT_PAGE_MIN_ATTEMPTS`, `ALERT_REMINDER_SECONDS`
+and `ALERT_REMINDER_HIGH_SECONDS` are backend settings with these defaults;
+compose does not pass them — to change one, add it to both the `backend`
+and `ops-watch` environment in `docker-compose.yml`.)
+
+Every decision is logged: `pager_decision action=page|escalate|remind|grouped|hold|maintenance|log_only|recovered|expired|closed_unpaged group=… source=… reason=…`
+(the repeated "grouped" of an open incident is not). An `alert_events` row is
+still written for every fired rule; `delivery_status` says `grouped`,
+`hold`, `maintenance` or `log_only` when the pager did not send it.
+
+**Maintenance window** — planned work never pages:
+
+```sh
+docker compose -p ai-gateway exec -T ops-watch python -m app.ops.maintenance start 15 "deploy FIX131"
+docker compose -p ai-gateway exec -T ops-watch python -m app.ops.maintenance status
+docker compose -p ai-gateway exec -T ops-watch python -m app.ops.maintenance stop
+```
+
+A Redis key `sran:ops:maintenance` with a TTL (so a forgotten window ends by
+itself; capped at 480 min). While it is open every finding is logged
+(`action=maintenance`) and nothing is sent; an incident still open after the
+window pages normally and says it began during maintenance. Exit 1 = Redis
+did not answer and the window is NOT set. A deploy script: `start` before the
+first restart, `stop` after the last healthcheck is green.
+
+**Test alerts never reach the owner** (`ALERT_ENVIRONMENT`,
+`ALERT_TEST_NTFY_URL` above): the test stack's generator sets
+`ALERT_ENVIRONMENT=test` on its backend and backup services
+(`scripts/test_stack_gen.py`), so every test-stack alert is `[TEST]` and goes
+to `TS_ALERT_TEST_NTFY_URL` or nowhere. A test fire on the live system:
+
+```sh
+docker compose -p ai-gateway exec -T ops-watch python -m app.ops.fire_test_alert "checking the pager"
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup notify info "test" "hello"
+```
+
+Both are always `[TEST]` and go only to `ALERT_TEST_NTFY_URL` (nothing is
+sent without it). There is no admin "send a test alert" endpoint; a rule
+created in the admin UI to try the pipeline pages for real — use
+`fire_test_alert`, or `ALERT_ENVIRONMENT=test` on a test stack.
+
 ### Rules (backend, `alert_rules`, evaluated every `alert_sweep_interval_seconds` = 10 s)
 
 Seeded at startup when no rule with the metric exists (`alert_defaults.py`;
@@ -205,13 +309,16 @@ an operator's own rule with the same metric is never overridden):
 | Transaction stuck longer than 60 s | `stuck_transaction` | the sampler's oldest idle / lock-blocked transaction is ≥ 60 s | 1 min |
 
 Every fired rule is written to `alert_events` (`delivery_status`
-delivered / failed / log_only) and sent on every configured channel.
+delivered / failed / log_only, and since FIX131 grouped / hold / maintenance)
+and handed to the pager, which decides what is sent. Since FIX131 each rule
+is computed on every sweep, also inside its cooldown, so the pager hears
+when it clears ("recovered") or escalates.
 
 ### The ops watcher (`ops-watch`, `backend/app/ops/watch.py`)
 
 The alerts the backend cannot raise about itself, every `OPS_WATCH_INTERVAL`
-(30 s), announced once per `OPS_WATCH_COOLDOWN` (10 min) and followed by a
-"recovered" note:
+(30 s), handed to the pager above (FIX131: `OPS_WATCH_COOLDOWN`, the old
+10-minute re-announce, is retired):
 
 | Finding | Source | Threshold |
 |---|---|---|
@@ -220,7 +327,13 @@ The alerts the backend cannot raise about itself, every `OPS_WATCH_INTERVAL`
 | `disk /host/docker is N % full` | `statvfs` of the Docker data root | `OPS_WATCH_DISK_PCT` (90) |
 | `memory is N % used` | `/proc/meminfo` of the Docker VM | `OPS_WATCH_MEM_PCT` (90) |
 | `transaction stuck N s on gateway|chat` | `pg_stat_activity` on both databases (`OPS_WATCH_PG_DSNS`) | `OPS_WATCH_PG_STUCK_S` (60) |
-| `no successful turn in 5 min` / `N % of turns failed (5 min)` | `chat.messages_masked` assistant rows `completed` / `error` on the chat database (the `chat` DSN) | ≥ 1 turn and 0 completed; ≥ `OPS_WATCH_TURN_MIN_SAMPLE` (10) turns and more than `OPS_WATCH_TURN_ERROR_PCT` (5) % failed |
+| `no successful turn in 5 min` / `N % of turns failed (5 min)` | `chat.messages_masked` assistant rows `completed` / `error` on the chat database (the `chat` DSN) | ≥ 1 turn and 0 completed (pages from 3 attempts); ≥ `OPS_WATCH_TURN_MIN_SAMPLE` (10) turns and more than `OPS_WATCH_TURN_ERROR_PCT` (5) % failed |
+| FIX131: `N replies stuck 'typing' for over 15 min` | assistant rows still `streaming`, created 15 min – 24 h ago (`OPS_WATCH_TURN_STUCK_MIN`, `OPS_WATCH_TURN_STUCK_LOOKBACK_H`) — the orphaned-turn sweep should have closed them | ≥ 1 |
+| FIX131: `no fresh backup` / `backups are failing` / `off-site copy failed` | the backup folder, read-only (`OPS_WATCH_BACKUP_DIR=/backups`): `last_success.json`, `last_failure.json` (`docs/ops/backups.md`) | newest proven backup older than `BACKUP_MAX_AGE_H` (26 h); a failure newer than the last success |
+
+(The titles above are the checks; since FIX131 the page itself is worded for
+users — "Chat is down: backend is unhealthy", "Server disk is 92 % full" —
+see the pager section.)
 
 Why the turn rules live here as well as in `alert_rules`: until FIX130 the
 gateway's `request_logs` only recorded requests that reached a provider. On
