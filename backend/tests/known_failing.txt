@@ -59,17 +59,18 @@
 #    A quarantined test that fails is not a new failure; a quarantined test
 #    that passes reads XPASS and should be released.
 
-# ── the shared rate-limit window (FIX55). These tests spend real requests
-#    against one process-wide limiter, so whichever of them runs after the
-#    window is exhausted gets a 429 instead of its expected status. With
-#    the order now fixed, the SAME members fail every run — but the
-#    members are decided by where the window runs out, not by the tests,
-#    which is why the group's membership changed when the order was
-#    pinned. Splitting the limiter is deferred (owner's call); the family
-#    is one bug with several names.
-tests/unit/test_public_audio.py::test_music_mode_on_tts_only_model_400  # 2026-09-05 shared rate-limit window — asserts 400, gets 429
-tests/unit/test_public_audio.py::test_valid_music_submit_200  # 2026-09-05 same window
-tests/unit/test_public_videos.py::test_valid_submit_200  # 2026-09-04 same window
+# ── FIX133 (2026-09-24): the shared rate-limit window (FIX55) family is
+#    gone. Those tests spent requests against one per-key media window
+#    (rl:media:<bucket>:<key_id>, one Redis ZSET per key for the whole
+#    pytest process) under one shared key_id="test-key-id", so whichever
+#    of them ran after the window was spent got 429 instead of its
+#    expected status. Every `_auth` block in tests/unit/test_public_audio.py
+#    and test_public_videos.py is now its own key, and
+#    test_rate_limit_window_belongs_to_the_auth_block_not_the_process pins
+#    it. The three names that stood here:
+#      tests/unit/test_public_audio.py::test_music_mode_on_tts_only_model_400
+#      tests/unit/test_public_audio.py::test_valid_music_submit_200
+#      tests/unit/test_public_videos.py::test_valid_submit_200
 
 # ── Removed 2026-09-05, no longer failing under the pinned order. Left
 #    here as a note rather than deleted silently, so the next reader can
