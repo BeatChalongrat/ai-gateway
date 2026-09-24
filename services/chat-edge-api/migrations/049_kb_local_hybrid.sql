@@ -1,10 +1,9 @@
 -- 049_kb_local_hybrid.sql — FIX132 B: the knowledge base on local models.
 --
--- The knowledge base now embeds with bge-m3 in kb-models on this machine
--- (1024-d dense + sparse lexical weights) and also indexes each passage for
--- Postgres full-text search over PyThaiNLP-segmented text. Documents are
--- indexed in the background with visible progress, and every knowledge base
--- belongs to the user who created it.
+-- The knowledge base now embeds with bge-m3 in kb-models on this machine:
+-- a 1024-d dense vector and bge-m3's own sparse lexical weights per passage.
+-- Documents are indexed in the background with visible progress, and every
+-- knowledge base belongs to the user who created it.
 --
 -- Idempotent: every step can run again on a database that already has it.
 -- The data lane's migrations start at 050.
@@ -25,7 +24,7 @@ ALTER TABLE chat.knowledge_documents ADD COLUMN IF NOT EXISTS next_attempt_at TI
 -- back to 'pending'.
 ALTER TABLE chat.knowledge_documents ADD COLUMN IF NOT EXISTS claimed_at      TIMESTAMPTZ;
 
--- ── knowledge_chunks: bge-m3 (1024-d) + sparse + full-text ───────────────
+-- ── knowledge_chunks: bge-m3 (1024-d) + sparse ───────────────────────────
 -- The ivfflat index was built on an empty table (pgvector advises against
 -- that: its lists are trained on the rows present at build time). Retrieval
 -- is an exact scan per knowledge base (btree idx_kc_kb); at pilot scale that
@@ -60,11 +59,14 @@ END $$;
 -- bge-m3's lexical weights over its 250,002-token vocabulary. pgvector's
 -- sparsevec literal is 1-based: {token_id+1:weight,…}/250002. Scored with
 -- <#> (negative inner product) = Σ q_w·d_w over shared tokens.
-ALTER TABLE chat.knowledge_chunks ADD COLUMN IF NOT EXISTS sparse      sparsevec(250002);
--- to_tsvector('simple', <text segmented into words by kb-models /v1/segment>)
--- — Thai has no spaces between words, so the text is segmented first.
-ALTER TABLE chat.knowledge_chunks ADD COLUMN IF NOT EXISTS content_tsv tsvector;
-CREATE INDEX IF NOT EXISTS idx_kc_content_tsv ON chat.knowledge_chunks USING GIN (content_tsv);
+ALTER TABLE chat.knowledge_chunks ADD COLUMN IF NOT EXISTS sparse sparsevec(250002);
+-- No Postgres full-text column: measured on the FIX132 eval set (36 Thai and
+-- English questions), ts_rank over segmented Thai missed the answer at rank
+-- 1 for 86 % of questions (it has no IDF; it is not BM25), while bge-m3's
+-- sparse weights fused with the dense score missed 19 %. A draft of this
+-- migration added one; drop it wherever that draft ran.
+DROP INDEX IF EXISTS chat.idx_kc_content_tsv;
+ALTER TABLE chat.knowledge_chunks DROP COLUMN IF EXISTS content_tsv;
 
 -- ── knowledge_bases: an owner; the new default model ─────────────────────
 -- A knowledge base is private to the user who created it (like a personal

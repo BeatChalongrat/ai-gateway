@@ -40,6 +40,11 @@ func TestFIX132_UploadIsPendingAtOnceThenIndexedWithProgress(t *testing.T) {
 	if n := h.count(t, `SELECT count(*) FROM chat.knowledge_chunks WHERE document_id=$1 AND embedding IS NOT NULL AND sparse IS NOT NULL`, d.ID); n != got.ChunkCount {
 		t.Fatalf("every chunk has dense + sparse: %d of %d", n, got.ChunkCount)
 	}
+	// Measured out (coordinator eval): no full-text arm, so indexing never
+	// asks kb-models to segment an English document.
+	if n := h.fake.SegmentCalls.Load(); n != 0 {
+		t.Fatalf("indexing called /v1/segment %d times; it is only for splitting long Thai runs", n)
+	}
 	for _, n := range h.fake.BatchSizes {
 		if n > KBEmbedBatchMax {
 			t.Fatalf("batch of %d > %d", n, KBEmbedBatchMax)

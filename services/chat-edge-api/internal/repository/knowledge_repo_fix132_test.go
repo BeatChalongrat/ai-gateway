@@ -1,8 +1,8 @@
 package repository_test
 
 // FIX132 B — migration 049 and the chunk storage it adds (bge-m3 1024-d
-// dense, sparse lexical weights, full-text over segmented text), on a real
-// pgvector database (a private clone of the test template).
+// dense + sparse lexical weights), on a real pgvector database (a private
+// clone of the test template).
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func TestFIX132_Migration049Shape(t *testing.T) {
 	want := map[string]string{
 		"chat.knowledge_chunks.embedding":          "vector(1024)",
 		"chat.knowledge_chunks.sparse":             "sparsevec(250002)",
-		"chat.knowledge_chunks.content_tsv":        "tsvector",
+		"chat.knowledge_chunks.content_tsv":        "", // measured out: no full-text arm
 		"chat.knowledge_documents.progress_done":   "integer",
 		"chat.knowledge_documents.progress_total":  "integer",
 		"chat.knowledge_documents.error_code":      "character varying(40)",
@@ -71,9 +71,9 @@ func TestFIX132_Migration049Shape(t *testing.T) {
 	}
 	var ivf, gin int
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='chat' AND indexname='idx_kc_embedding'`).Scan(&ivf)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='chat' AND indexname='idx_kc_content_tsv' AND indexdef ILIKE '%gin%'`).Scan(&gin)
-	if ivf != 0 || gin != 1 {
-		t.Errorf("want no ivfflat index and one GIN on content_tsv, got ivfflat=%d gin=%d", ivf, gin)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname='chat' AND indexname='idx_kc_content_tsv'`).Scan(&gin)
+	if ivf != 0 || gin != 0 {
+		t.Errorf("want no ivfflat index and no full-text index, got ivfflat=%d gin=%d", ivf, gin)
 	}
 }
 
@@ -82,8 +82,11 @@ func TestFIX132_Migration049Shape(t *testing.T) {
 func TestFIX132_Migration049ReplacesOldVectorsAndIsIdempotent(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
-	// Put the table back in its pre-049 shape and add a 1536-d chunk.
-	if _, err := pool.Exec(ctx, `ALTER TABLE chat.knowledge_chunks ALTER COLUMN embedding TYPE vector(1536)`); err != nil {
+	// Put the table back in its pre-049 shape (plus the full-text column an
+	// earlier draft of 049 added) and add a 1536-d chunk.
+	if _, err := pool.Exec(ctx, `ALTER TABLE chat.knowledge_chunks ALTER COLUMN embedding TYPE vector(1536);
+		ALTER TABLE chat.knowledge_chunks ADD COLUMN content_tsv tsvector;
+		CREATE INDEX idx_kc_content_tsv ON chat.knowledge_chunks USING GIN (content_tsv)`); err != nil {
 		t.Fatal(err)
 	}
 	tenant := uuid.New()
@@ -108,6 +111,9 @@ func TestFIX132_Migration049ReplacesOldVectorsAndIsIdempotent(t *testing.T) {
 	if got := colType(t, pool, "chat.knowledge_chunks", "embedding"); got != "vector(1024)" {
 		t.Fatalf("embedding column: %s", got)
 	}
+	if got := colType(t, pool, "chat.knowledge_chunks", "content_tsv"); got != "" {
+		t.Fatalf("the draft's full-text column must be dropped, got %s", got)
+	}
 	var chunks int
 	var status string
 	var chunkCount int
@@ -124,7 +130,7 @@ func TestFIX132_Migration049ReplacesOldVectorsAndIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestFIX132_ChunkStoresDenseSparseAndFullText(t *testing.T) {
+func TestFIX132_ChunkStoresDenseAndSparse(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 	repo := repository.NewKnowledgeRepo(pool)
@@ -155,22 +161,18 @@ func TestFIX132_ChunkStoresDenseSparseAndFullText(t *testing.T) {
 	err = repo.InsertChunkBatch(ctx, []model.KnowledgeChunk{{
 		DocumentID: doc.ID, KnowledgeBaseID: kb.ID, TenantID: tenant,
 		Content: "ราคาห้องพัก 1200 บาท", Embedding: dense,
-		Sparse:    &model.SparseVector{Indices: []int{0, 5, 250001}, Values: []float32{0.25, 1.5, 0.5}},
-		Segmented: "ราคา ห้อง พัก 1200 บาท",
+		Sparse: &model.SparseVector{Indices: []int{0, 5, 250001}, Values: []float32{0.25, 1.5, 0.5}},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var dims int
 	var sparse string
-	var ftsHit, ftsMiss bool
 	var ip float64
 	err = pool.QueryRow(ctx, `
 		SELECT vector_dims(embedding), sparse::text,
-		       content_tsv @@ to_tsquery('simple', 'ห้อง'),
-		       content_tsv @@ to_tsquery('simple', 'อาหาร'),
 		       -(sparse <#> '{6:2}/250002'::sparsevec)
-		FROM chat.knowledge_chunks WHERE document_id = $1`, doc.ID).Scan(&dims, &sparse, &ftsHit, &ftsMiss, &ip)
+		FROM chat.knowledge_chunks WHERE document_id = $1`, doc.ID).Scan(&dims, &sparse, &ip)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,9 +182,6 @@ func TestFIX132_ChunkStoresDenseSparseAndFullText(t *testing.T) {
 	// token ids are 0-based, pgvector's sparse indices 1-based.
 	if sparse != "{1:0.25,6:1.5,250002:0.5}/250002" {
 		t.Errorf("sparse stored as %s", sparse)
-	}
-	if !ftsHit || ftsMiss {
-		t.Errorf("full text over the segmented words: hit=%v miss=%v", ftsHit, ftsMiss)
 	}
 	if ip < 2.99 || ip > 3.01 {
 		t.Errorf("sparse inner product = %v, want 1.5*2", ip)

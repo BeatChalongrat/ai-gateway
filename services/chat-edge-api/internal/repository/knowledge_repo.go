@@ -2,7 +2,7 @@
 //
 //	chat.knowledge_bases    one library per owner (FIX132 B: user_id)
 //	chat.knowledge_documents one row per uploaded file
-//	chat.knowledge_chunks    passages: bge-m3 vector(1024), sparsevec, tsvector
+//	chat.knowledge_chunks    passages: bge-m3 vector(1024) + sparsevec
 //
 // pgvector wire format note: the “vector“ column round-trips as a
 // textual “[f1,f2,...]“ form on both insert and read. We format /
@@ -314,7 +314,7 @@ func (r *KnowledgeRepo) InsertChunkBatch(ctx context.Context, chunks []model.Kno
 	if len(chunks) == 0 {
 		return nil
 	}
-	const cols = 9
+	const cols = 8
 	args := make([]any, 0, len(chunks)*cols)
 	rowsSQL := make([]string, 0, len(chunks))
 	for i, c := range chunks {
@@ -327,24 +327,19 @@ func (r *KnowledgeRepo) InsertChunkBatch(ctx context.Context, chunks []model.Kno
 			md = map[string]any{}
 		}
 		mdJSON, _ := json.Marshal(md)
-		var seg *string
-		if strings.TrimSpace(c.Segmented) != "" {
-			v := c.Segmented
-			seg = &v
-		}
 		rowsSQL = append(rowsSQL, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, $%d::vector, $%d::sparsevec, to_tsvector('simple', $%d::text), $%d, $%d::jsonb)",
-			base, base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8,
+			"($%d, $%d, $%d, $%d, $%d::vector, $%d::sparsevec, $%d, $%d::jsonb)",
+			base, base+1, base+2, base+3, base+4, base+5, base+6, base+7,
 		))
 		args = append(args,
 			c.DocumentID, c.KnowledgeBaseID, c.TenantID,
-			c.Content, emb, encodeSparse(c.Sparse), seg, c.ChunkIndex, string(mdJSON),
+			c.Content, emb, encodeSparse(c.Sparse), c.ChunkIndex, string(mdJSON),
 		)
 	}
 	q := fmt.Sprintf(`
 		INSERT INTO chat.knowledge_chunks
 			(document_id, knowledge_base_id, tenant_id, content,
-			 embedding, sparse, content_tsv, chunk_index, metadata)
+			 embedding, sparse, chunk_index, metadata)
 		VALUES %s
 	`, strings.Join(rowsSQL, ", "))
 	if _, err := r.db.Exec(ctx, q, args...); err != nil {

@@ -6,8 +6,7 @@ package service
 // document (FOR UPDATE SKIP LOCKED — several chat-edge processes can run
 // this safely), extract its text, chunk it, embed the chunks in batches of
 // at most 16 with kb-models (dense + sparse in one call, priority "index" so
-// chat-time questions go first), segment them for full-text search, and
-// store each batch with its progress. Every write is fenced on the claim
+// chat-time questions go first), and store each batch with its progress. Every write is fenced on the claim
 // (repository/knowledge_index_repo.go), so a document deleted or re-indexed
 // meanwhile just stops: nothing is written, no error row appears, no chunk
 // is left behind.
@@ -378,17 +377,12 @@ func (w *KnowledgeWorker) index(ctx, docCtx context.Context, doc *model.Knowledg
 		return
 	}
 
-	// 3. Embed + segment + store, one batch at a time.
+	// 3. Embed + store, one batch at a time.
 	batch := svc.knobs.EmbedBatchSize
 	for i := 0; i < len(chunks); i += batch {
 		end := min(i+batch, len(chunks))
 		part := chunks[i:end]
 		embs, err := svc.models.Embed(docCtx, part, true, KBPriorityIndex)
-		if err != nil {
-			r.modelError(err)
-			return
-		}
-		segs, err := svc.models.Segment(docCtx, part)
 		if err != nil {
 			r.modelError(err)
 			return
@@ -402,7 +396,6 @@ func (w *KnowledgeWorker) index(ctx, docCtx context.Context, doc *model.Knowledg
 				Content:         c,
 				Embedding:       embs[j].Dense,
 				Sparse:          embs[j].Sparse,
-				Segmented:       segs[j],
 				ChunkIndex:      i + j,
 				Metadata:        map[string]any{"filename": doc.OriginalFilename},
 			}

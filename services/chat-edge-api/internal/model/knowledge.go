@@ -108,11 +108,7 @@ type KnowledgeChunk struct {
 	Content         string
 	Embedding       []float32
 	// Sparse is bge-m3's lexical weights (FIX132 B); nil = none.
-	Sparse *SparseVector
-	// Segmented is Content with its words separated by spaces (kb-models
-	// /v1/segment); stored as content_tsv = to_tsvector('simple', Segmented).
-	// Empty = no full-text entry.
-	Segmented  string
+	Sparse     *SparseVector
 	ChunkIndex int
 	Metadata   map[string]any
 	CreatedAt  time.Time

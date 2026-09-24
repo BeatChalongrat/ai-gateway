@@ -188,16 +188,17 @@ func TestFIX132_KBModelsRerankAndSegment(t *testing.T) {
 	}
 }
 
-// The knowledge-base path names no OpenAI key, model or endpoint any more:
-// the models are local (FIX132 B). This reads the source, so a message like
-// "set OPENAI_API_KEY" coming back into a KB file fails here.
+// The knowledge-base path names no OpenAI key, model, client or endpoint any
+// more: the models are local (FIX132 B). This reads the source, so a message
+// like "set OPENAI_API_KEY" coming back into a KB file fails here. (A design
+// reference such as "OpenAI file search uses 800-token chunks" is fine.)
 func TestFIX132_KBPathHasNoOpenAI(t *testing.T) {
 	files := []string{
 		"knowledge_service.go", "rag_service.go", "knowledge_availability.go",
 		"kb_models_client.go", "chunker.go", "knowledge_worker.go",
 		"../handler/knowledge.go", "../repository/knowledge_repo.go",
 	}
-	re := regexp.MustCompile(`(?i)openai|text-embedding-3|api\.openai\.com`)
+	re := regexp.MustCompile(`(?i)openai_|api\.openai\.com|text-embedding-3|openai (api )?key|provider \(openai`)
 	for _, f := range files {
 		b, err := os.ReadFile(filepath.FromSlash(f))
 		if err != nil {

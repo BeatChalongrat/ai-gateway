@@ -27,7 +27,8 @@ package service
 //	GET  /health         {status: loading|ready|failed, error, models{…}}
 //	POST /v1/embeddings  {input:[≤64], return_sparse, priority} → dense + sparse
 //	POST /v1/rerank      {query, documents:[≤200], priority} → relevance scores
-//	POST /v1/segment     {texts:[≤64]} → space-joined Thai words
+//	POST /v1/segment     {texts:[≤64]} → space-joined Thai words (used by the
+//	                     chunker only, to split a long Thai run between words)
 //
 // kb-models runs one request at a time; priority "query" goes ahead of
 // "index" waiters, so a chat turn never waits behind a big upload.
@@ -70,11 +71,13 @@ const (
 	kbRerankMaxDocs   = 200
 )
 
-// Per-call time limits. Indexing is generous (a batch of 16 passages on CPU,
-// possibly queued behind a query); a query is short because a person waits.
+// Per-call time limits. Indexing is generous: measured on this PC (CPU,
+// bf16) a batch of 16 passages takes 13–22 s, and it may wait behind a
+// query. A question embeds in ~0.2 s (p50); 10 s means kb-models is stuck,
+// and the turn goes on without the knowledge base rather than wait.
 var (
 	kbTimeoutEmbedIndex = 180 * time.Second
-	kbTimeoutEmbedQuery = 20 * time.Second
+	kbTimeoutEmbedQuery = 10 * time.Second
 	kbTimeoutRerank     = 30 * time.Second
 	kbTimeoutSegment    = 30 * time.Second
 	kbTimeoutHealth     = 3 * time.Second
