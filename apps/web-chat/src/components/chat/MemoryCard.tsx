@@ -179,11 +179,15 @@ export function MemoryWhen({ memory, labelKey }: { memory: Memory; labelKey: "me
   const locale = useI18nStore((s) => s.locale);
   const date = formatMemoryDate(memory.created_at, locale);
   if (!date) return null;
+  // FIX132 N11 — timeAgo turns into a plain date after a week, which said
+  // the date twice ("10 ก.ย. 2569 (10/9/2569)"); from then on, the date alone.
+  const olderThanAWeek = Date.now() - Date.parse(memory.created_at) >= 7 * 86_400_000;
+  const text = olderThanAWeek
+    ? t(labelKey === "memory.card.savedOn" ? "memory.card.savedOnDate" : "memory.card.suggestedOnDate", { date })
+    : t(labelKey, { date, ago: timeAgo(memory.created_at) });
   return (
     <p className="mt-0.5 text-xs text-text-muted" data-testid="memory-when">
-      <time dateTime={memory.created_at}>
-        {t(labelKey, { date, ago: timeAgo(memory.created_at) })}
-      </time>
+      <time dateTime={memory.created_at}>{text}</time>
     </p>
   );
 }

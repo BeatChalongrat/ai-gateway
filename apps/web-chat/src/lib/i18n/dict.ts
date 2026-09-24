@@ -385,6 +385,8 @@ export const en = {
   // which chat, for saved memories and suggestions alike.
   "memory.card.savedOn": "Saved {date} ({ago})",
   "memory.card.suggestedOn": "Suggested {date} ({ago})",
+  "memory.card.savedOnDate": "Saved {date}",
+  "memory.card.suggestedOnDate": "Suggested {date}",
   "memory.card.sourceLabel": "Source:",
   "memory.card.origin.deletedChat": "a deleted chat",
   "memory.card.origin.manual": "Added by you",
@@ -2186,6 +2188,8 @@ const th: Record<DictKey, string> = {
   "memory.card.pinned": "ปักหมุดไว้",
   "memory.card.savedOn": "บันทึกเมื่อ {date} ({ago})",
   "memory.card.suggestedOn": "เสนอเมื่อ {date} ({ago})",
+  "memory.card.savedOnDate": "บันทึกเมื่อ {date}",
+  "memory.card.suggestedOnDate": "เสนอเมื่อ {date}",
   "memory.card.sourceLabel": "ที่มา:",
   "memory.card.origin.deletedChat": "แชทที่ถูกลบแล้ว",
   "memory.card.origin.manual": "เพิ่มเอง",
