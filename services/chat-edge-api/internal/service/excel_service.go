@@ -67,6 +67,9 @@ var (
 	ErrExcelSourceNotFound     = errors.New("excel: source file not found")
 	ErrExcelInvalidPlan        = errors.New("excel: invalid plan")
 	ErrExcelSandboxUnavailable = errors.New("excel: sandbox unavailable")
+	// ErrExcelSourceUnreadable (FIX131 A2) — the plan's source could not be
+	// read; refused before the executor runs (reason on *PlanExecError).
+	ErrExcelSourceUnreadable = errors.New("excel: source file could not be read")
 )
 
 // ---------------------------------------------------------------------------
@@ -282,26 +285,32 @@ type PlannedExecution struct {
 // new conversation_files row marked as a generated child of the
 // source. Returns the populated child row + the validation report so
 // the handler can surface both to the client in one response.
+//
+// FIX131 A1 — only an .xlsx source is EDITED. A CSV, PDF, Word file or any
+// other source is input the model already read: the executor builds a new
+// workbook (operation forced to create_workbook) and never opens it — it
+// used to load_workbook() the CSV and fail. Failures are *PlanExecError.
 func (s *ExcelService) ExecutePlan(
 	ctx context.Context, in PlannedExecution,
 ) (*model.ConversationFile, *ValidationResult, error) {
+	notFound := &PlanExecError{Reason: PlanFailSourceNotFound, Err: ErrExcelSourceNotFound}
 	var source *model.ConversationFile
 	if in.SourceFileID != uuid.Nil {
 		f, err := s.files.GetByID(ctx, in.TenantID, in.SourceFileID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, nil, ErrExcelSourceNotFound
+				return nil, nil, notFound
 			}
 			return nil, nil, err
 		}
 		if f.ConversationID != in.ConversationID {
 			// Don't leak cross-conversation existence.
-			return nil, nil, ErrExcelSourceNotFound
+			return nil, nil, notFound
 		}
 		if f.UserID != in.UserID {
 			// Same-tenant-different-user — never returns 403, always 404
 			// shape so the existence of the file isn't probeable.
-			return nil, nil, ErrExcelSourceNotFound
+			return nil, nil, notFound
 		}
 		source = f
 	} else {
@@ -311,18 +320,23 @@ func (s *ExcelService) ExecutePlan(
 		// attacker could plant a generated workbook in someone else's
 		// thread by guessing a conversation id.
 		if s.conversations == nil {
-			return nil, nil, ErrExcelSourceNotFound
+			return nil, nil, notFound
 		}
 		conv, err := s.conversations.GetByID(ctx, in.TenantID, in.ConversationID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
-				return nil, nil, ErrExcelSourceNotFound
+				return nil, nil, notFound
 			}
 			return nil, nil, err
 		}
 		if conv.UserID != in.UserID {
-			return nil, nil, ErrExcelSourceNotFound
+			return nil, nil, notFound
 		}
+	}
+
+	role := PlanSourceRoleFor("xlsx", source)
+	if reason, bad := unreadableSourceReason(source); bad {
+		return nil, nil, &PlanExecError{Reason: reason, Source: source, Role: role, Err: ErrExcelSourceUnreadable}
 	}
 
 	tmp, err := os.MkdirTemp("", "excel-exec-*")
@@ -331,10 +345,10 @@ func (s *ExcelService) ExecutePlan(
 	}
 	defer os.RemoveAll(tmp)
 
-	// Only the edit path materialises a source workbook; create-mode
-	// never touches storage for input.
+	// Only the edit path materialises a source workbook; create-mode and
+	// an input source (CSV, PDF, …) never touch storage for input.
 	var srcPath string
-	if source != nil {
+	if role == PlanSourceEdit {
 		p, cleanup, err := s.storage.OpenLocalCopy(ctx, source.StoragePath)
 		if err != nil {
 			return nil, nil, fmt.Errorf("source download: %w", err)
@@ -350,9 +364,10 @@ func (s *ExcelService) ExecutePlan(
 	// model wrote it — a plan that says create_workbook while a source
 	// is attached is the documented "generate a fresh workbook from
 	// this data" case and must keep working.
-	planBytes, err := json.Marshal(planForExecution(in.Plan, source != nil))
+	planBytes, err := json.Marshal(planForExecution(in.Plan, role == PlanSourceEdit))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: marshal: %v", ErrExcelInvalidPlan, err)
+		return nil, nil, &PlanExecError{Reason: PlanFailInvalidPlan, Role: role, Err: ErrExcelInvalidPlan,
+			Detail: redactScriptError(err.Error())}
 	}
 	if err := os.WriteFile(planPath, planBytes, 0o600); err != nil {
 		return nil, nil, fmt.Errorf("write plan: %w", err)
@@ -361,36 +376,41 @@ func (s *ExcelService) ExecutePlan(
 	outPath := filepath.Join(tmp, "output.xlsx")
 	out, err := s.runExecutor(ctx, planBytes, planPath, srcPath, outPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrExcelExecutorFailed, err)
+		return nil, nil, generatorFailure(ErrExcelExecutorFailed, role, source, out, err, errors.Is(err, errGeneratorTimedOut))
 	}
 	var execResult ExecutionResult
 	if err := json.Unmarshal(out, &execResult); err != nil {
-		return nil, nil, fmt.Errorf("%w: decode: %v", ErrExcelExecutorFailed, err)
+		return nil, nil, generatorFailure(ErrExcelExecutorFailed, role, source, out,
+			fmt.Errorf("decode executor result: %v", err), false)
 	}
 	if !execResult.Success {
-		return nil, nil, fmt.Errorf("%w: script reported failure", ErrExcelExecutorFailed)
+		return nil, nil, generatorFailure(ErrExcelExecutorFailed, role, source, out, nil, false)
 	}
 	if _, err := os.Stat(outPath); err != nil {
-		return nil, nil, fmt.Errorf("%w: output missing: %v", ErrExcelExecutorFailed, err)
+		return nil, nil, generatorFailure(ErrExcelExecutorFailed, role, source, nil, errGeneratorNoOutput, false)
 	}
 
 	// Validate before upload — if the file's broken we abort and
 	// never expose a download URL for a workbook the user can't open.
 	validation, err := s.validatePath(ctx, outPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, generatorFailure(ErrExcelValidatorFailed, role, source, nil, err, false)
 	}
 	if !validation.Valid {
-		return nil, nil, fmt.Errorf("%w: %s",
-			ErrExcelValidatorFailed, strings.Join(validation.Issues, "; "))
+		return nil, nil, &PlanExecError{Reason: PlanFailValidation, Role: role, Err: ErrExcelValidatorFailed,
+			Detail: redactScriptError(strings.Join(validation.Issues, "; "))}
 	}
 
 	// Determine the output filename (user-supplied wins).
 	outFilename := strings.TrimSpace(in.OutputFilename)
 	if outFilename == "" {
-		if source != nil {
+		switch role {
+		case PlanSourceEdit:
 			outFilename = deriveEditedFilename(source.OriginalFilename)
-		} else {
+		case PlanSourceInput:
+			// "sales.csv" → "sales.xlsx": a new workbook made from it.
+			outFilename = deriveFromInputFilename(source.OriginalFilename, "xlsx")
+		default:
 			// Same shape DocService uses for from-scratch output so the
 			// two features name their files consistently.
 			outFilename = fmt.Sprintf("workbook_%s.xlsx", time.Now().UTC().Format("20060102_150405"))
@@ -494,12 +514,24 @@ func (s *ExcelService) runExecutor(
 		Limits: sandbox.Limits{Wall: executorTimeout},
 	})
 	if err != nil {
+		// FIX131 A2 — keep the script's error envelope for the log.
+		if res != nil {
+			stdout := res.Stdout
+			res.Cleanup()
+			return stdout, err
+		}
 		return nil, err
 	}
 	defer res.Cleanup()
+	if res.TimedOut {
+		return res.Stdout, errGeneratorTimedOut
+	}
 	art := res.Artifact("output.xlsx")
 	if art == nil {
-		return nil, fmt.Errorf("sandbox produced no output.xlsx (stderr: %s)", strings.TrimSpace(string(res.Stderr)))
+		// The executor's own error is on stdout (parsed by the caller);
+		// stderr's last line, redacted, is a hint for the log.
+		return res.Stdout, fmt.Errorf("%w output.xlsx (exit %d; stderr: %s)", errGeneratorNoOutput, res.Exit,
+			redactScriptError(lastLine(res.Stderr)))
 	}
 	if err := copyFile(art.Path, outPath); err != nil {
 		return nil, err

@@ -356,7 +356,10 @@ def generate_docx(plan: dict, output_path: str, source_path: str | None = None) 
     actions = plan.get("actions") or []
 
     if source_path and os.path.exists(source_path):
-        shutil.copy2(source_path, output_path)
+        # FIX131 — content only: copy2 also copies xattrs, and the sandbox
+        # seccomp profile refuses listxattr (EPERM on /job/in/source.*),
+        # which failed every same-kind edit (.docx → .docx) in the sandbox.
+        shutil.copyfile(source_path, output_path)
         doc = Document(output_path)
         mode = "edit"
     else:
@@ -443,7 +446,7 @@ def main() -> int:
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as exc:  # noqa: BLE001
-        print(json.dumps({"error": str(exc), "success": False}))
+        print(json.dumps({"error": str(exc), "error_type": type(exc).__name__, "success": False}, ensure_ascii=False))
         return 1
 
 

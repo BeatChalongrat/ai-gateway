@@ -323,6 +323,61 @@ def _extract_pptx(path: Path) -> str:
     return "\n\n".join(out)
 
 
+# FIX131 A2 — WHY a file could not be read, one machine line on stderr
+# ("reason=<code>") next to the human message. file_service.go stores it on
+# the row so the page can say "this file has a password — unlock it and
+# upload again" instead of "damaged or password-protected". Closed set:
+#   encrypted — needs a password to open (PDF user password, or an Office
+#               file saved with "Encrypt with Password")
+#   scanned   — a PDF with no text layer where OCR found no text either
+#   damaged   — anything else the reader choked on
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+def _exception_chain(exc: BaseException) -> str:
+    """repr of the exception, its args and its cause/context chain —
+    pdfplumber wraps pdfminer's PDFPasswordIncorrect in PdfminerException,
+    so the wrapper's own name says nothing."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        parts.append(type(cur).__name__)
+        parts.append(repr(cur))
+        cur = cur.__cause__ or cur.__context__
+    return " ".join(parts).lower()
+
+
+def _failure_reason(exc: BaseException, path: Path) -> str:
+    chain = _exception_chain(exc)
+    if "password" in chain or "encrypt" in chain:
+        return "encrypted"
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(8)
+    except OSError:
+        head = b""
+    # An Office file saved with a password is not a zip at all: Office
+    # wraps it in an OLE compound file holding an EncryptedPackage stream.
+    if head == _OLE_MAGIC and path.suffix.lower() in (".docx", ".xlsx", ".pptx"):
+        return "encrypted"
+    if head.startswith(b"%PDF"):
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(str(path))
+            if reader.is_encrypted and not reader.decrypt(""):
+                return "encrypted"
+        except Exception:  # noqa: BLE001 — the probe is best-effort
+            pass
+    return "damaged"
+
+
+def _report_reason(reason: str) -> None:
+    print(f"reason={reason}", file=sys.stderr)
+
+
 PDF_CT = "application/pdf"
 DOCX_CT = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -360,6 +415,7 @@ def main(argv: list[str]) -> int:
                     f"ocr_error={meta['ocr_error']})",
                     file=sys.stderr,
                 )
+                _report_reason("scanned")
                 return 5
             _emit(text, meta)
         elif content_type == DOCX_CT or path.suffix.lower() == ".docx":
@@ -375,6 +431,7 @@ def main(argv: list[str]) -> int:
         raise
     except Exception as exc:  # noqa: BLE001
         print(f"extraction failed: {exc}", file=sys.stderr)
+        _report_reason(_failure_reason(exc, path))
         return 4
     return 0
 

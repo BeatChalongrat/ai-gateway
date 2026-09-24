@@ -2796,7 +2796,7 @@ When the user asks you to create, edit, or summarize a Word document (.docx) or 
   * Thai input → language: "th", font_family: "Sarabun", base_font_size: 16.
   * English input → language: "en", font_family: "Arial", base_font_size: 12.
 - "format" is "docx" or "pdf" depending on the user's request. If unclear, ask.
-- When source_file_id is set and format is "docx", the generator preserves the source layout; for pdf the source is treated as reference content.
+- source_file_id names the file the document is made from. Only a .docx made into a .docx is edited (a copy; its layout is kept). Any other file (a PDF, an image, a text file) is only read: nothing of it is copied, so put everything the new document must contain into "actions".
 - Use professional table style (corporate navy headers) for any reporting table.
 
 ## Action Types
