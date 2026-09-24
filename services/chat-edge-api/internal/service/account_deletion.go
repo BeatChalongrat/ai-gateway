@@ -79,6 +79,11 @@ var PurgeUserTables = []struct {
 	{"folders", "chat.folders", "user_id"},
 	{"user_preferences", "chat.user_preferences", "user_id"},
 	{"user_skills", "chat.user_skills", "user_id"},
+	// FIX132 B: knowledge bases are private to their creator. Documents the
+	// user uploaded go first (their chunks cascade), then the user's own
+	// knowledge bases with whatever documents and chunks remain in them.
+	{"knowledge_documents", "chat.knowledge_documents", "uploaded_by"},
+	{"knowledge_bases", "chat.knowledge_bases", "user_id"},
 	{"data_export_requests", "chat.data_export_requests", "user_id"},
 	{"refresh_tokens", "identity.refresh_tokens", "user_id"},
 	{"invitation_tokens", "identity.invitation_tokens", "created_by"},
@@ -339,6 +344,29 @@ func (s *AccountDeletionService) Purge(ctx context.Context, userID uuid.UUID) (m
 	erows.Close()
 	for dir := range exportDirs {
 		_ = os.RemoveAll(dir)
+	}
+
+	// 3b. Stored knowledge-base documents — the user's uploads and everything
+	//     in the user's own knowledge bases — before their rows go.
+	krows, err := s.pool.Query(ctx, `
+		SELECT COALESCE(storage_path, '') FROM chat.knowledge_documents
+		WHERE uploaded_by = $1
+		   OR knowledge_base_id IN (SELECT id FROM chat.knowledge_bases WHERE user_id = $1)`, userID)
+	if err != nil {
+		return counts, fmt.Errorf("list knowledge documents: %w", err)
+	}
+	var kbObjects []string
+	for krows.Next() {
+		var p string
+		if err := krows.Scan(&p); err == nil && p != "" {
+			kbObjects = append(kbObjects, p)
+		}
+	}
+	krows.Close()
+	for _, p := range kbObjects {
+		if err := s.storage.Delete(ctx, p); err == nil {
+			counts["knowledge_file_objects"]++
+		}
 	}
 
 	// 4. Every user-keyed table, then the identity row, in one transaction

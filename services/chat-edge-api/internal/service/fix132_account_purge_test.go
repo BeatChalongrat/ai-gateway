@@ -76,6 +76,7 @@ type accountFixture struct {
 	tenant, user, other uuid.UUID
 	conv, otherConv     uuid.UUID
 	fileKey, otherKey   string
+	kbKey, otherKBKey   string
 	exportPath          string
 }
 
@@ -135,6 +136,25 @@ func seedAccount(t *testing.T, ctx context.Context, pool *pgxpool.Pool, store st
 	}
 	f.conv, _, f.fileKey = mkConv(f.user)
 	f.otherConv, _, f.otherKey = mkConv(f.other)
+
+	// FIX132 B: knowledge bases are private to their creator — one each, with a
+	// stored document and a chunk.
+	mkKB := func(owner uuid.UUID) string {
+		kb, doc := uuid.New(), uuid.New()
+		key := storage.JoinKey("knowledge", f.tenant.String(), kb.String(), doc.String()+"_policy.txt")
+		if err := store.Upload(ctx, key, bytes.NewReader([]byte("นโยบาย")), "text/plain", int64(len("นโยบาย"))); err != nil {
+			t.Fatal(err)
+		}
+		exec(`INSERT INTO chat.knowledge_bases (id, tenant_id, user_id, name) VALUES ($1, $2, $3, 'นโยบาย')`, kb, f.tenant, owner)
+		exec(`INSERT INTO chat.knowledge_documents (id, knowledge_base_id, tenant_id, uploaded_by, filename, original_filename,
+		      content_type, storage_path, status) VALUES ($1, $2, $3, $4, 'policy.txt', 'policy.txt', 'text/plain', $5, 'indexed')`,
+			doc, kb, f.tenant, owner, key)
+		exec(`INSERT INTO chat.knowledge_chunks (document_id, knowledge_base_id, tenant_id, content) VALUES ($1, $2, $3, 'ลาพักร้อน 12 วัน')`,
+			doc, kb, f.tenant)
+		return key
+	}
+	f.kbKey = mkKB(f.user)
+	f.otherKBKey = mkKB(f.other)
 
 	f.exportPath = filepath.Join(exportRoot, "exports", f.tenant.String(), f.user.String(), "x.zip")
 	if err := os.MkdirAll(filepath.Dir(f.exportPath), 0o755); err != nil {
@@ -247,6 +267,24 @@ func TestAccountPurge_ErasesEverythingTheUserOwnsAndNothingElse(t *testing.T) {
 	}
 	if _, err := os.Stat(f.exportPath); !os.IsNotExist(err) {
 		t.Error("the purged user's export file is still on disk")
+	}
+	// Knowledge bases: the user's KB, its documents, chunks and stored file go;
+	// the other user's stay.
+	if n := rowCount(t, ctx, pool, `SELECT count(*) FROM chat.knowledge_documents WHERE uploaded_by = $1`, f.user); n != 0 {
+		t.Errorf("knowledge documents of the purged user left: %d", n)
+	}
+	if n := rowCount(t, ctx, pool, `SELECT count(*) FROM chat.knowledge_chunks c JOIN chat.knowledge_bases b
+		ON b.id = c.knowledge_base_id WHERE b.user_id = $1`, f.other); n != 1 {
+		t.Errorf("the other user's knowledge chunks = %d, want 1", n)
+	}
+	if n := rowCount(t, ctx, pool, `SELECT count(*) FROM chat.knowledge_chunks WHERE content = 'ลาพักร้อน 12 วัน'`); n != 1 {
+		t.Errorf("knowledge chunks left = %d, want only the other user's 1", n)
+	}
+	if objectOnDisk(t, uploads, f.kbKey) {
+		t.Error("the purged user's knowledge-base file is still on disk")
+	}
+	if !objectOnDisk(t, uploads, f.otherKBKey) {
+		t.Error("the other user's knowledge-base file was removed")
 	}
 	if counts["conversations"] != 1 || counts["user_memories"] != 1 || counts["identity_users"] != 1 {
 		t.Errorf("counts = %v", counts)
