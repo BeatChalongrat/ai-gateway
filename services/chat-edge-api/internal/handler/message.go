@@ -511,11 +511,40 @@ func tooManyFilesMessage(tm *service.TooManyFilesError) string {
 
 // writeConversationBusy answers a turn refused by the per-conversation
 // in-flight guard. False when err is not that refusal.
+//
+// FIX131 E2 — it also answers a turn refused because this process is
+// shutting down (every turn error writer calls it first).
 func writeConversationBusy(w http.ResponseWriter, err error) bool {
+	if writeServerDraining(w, err) {
+		return true
+	}
 	if !errors.Is(err, service.ErrConversationBusy) {
 		return false
 	}
 	WriteError(w, http.StatusConflict, CodeConversationBusy, conversationBusyMessage)
+	return true
+}
+
+// CodeServerDraining (FIX131 E2) — the process is restarting and took no
+// new turn; nothing was written. 503 + Retry-After: the client sends the
+// same request again (same X-Request-Id, so a copy that did land is
+// replayed, never run twice) once the new process is up.
+const CodeServerDraining = "SERVER_DRAINING"
+
+// serverDrainingRetryAfter is the Retry-After (seconds) of that refusal: a
+// restart of this service takes a few seconds once the turns in flight
+// are done.
+const serverDrainingRetryAfter = "5"
+
+// writeServerDraining answers a turn refused by the shutdown drain. False
+// when err is not that refusal.
+func writeServerDraining(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, service.ErrServerDraining) {
+		return false
+	}
+	w.Header().Set("Retry-After", serverDrainingRetryAfter)
+	WriteError(w, http.StatusServiceUnavailable, CodeServerDraining,
+		"the chat service is restarting; send the message again in a few seconds")
 	return true
 }
 
@@ -1304,6 +1333,16 @@ func (h *MessageHandler) finishStream(
 			data["token_usage"] = tokens
 		}
 		writeSSEEvent(rw, flusher, "cancelled", data)
+	case stream.Interrupted():
+		// FIX131 E2 — the shutdown drain cut this run at its deadline. The
+		// live stream ends the way the row does (and the way a resume after
+		// the restart replays it): interrupted, retryable, text kept.
+		writeSSEEvent(rw, flusher, "error", map[string]any{
+			"code":      service.CodeGenerationInterrupted,
+			"message":   "generation was interrupted",
+			"cause":     service.TerminalCauseInterrupted,
+			"retryable": true,
+		})
 	case res.err != nil:
 		writeSSEEvent(rw, flusher, "error", res.terminalErrorPayload())
 	default:

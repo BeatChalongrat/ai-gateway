@@ -63,6 +63,12 @@ type turnClaim struct {
 // and gets ErrSendDuplicate so the handler answers it through the replay
 // path exactly as before the guard existed.
 func (s *MessageService) claimTurn(convID uuid.UUID, key string) (func(), error) {
+	// FIX131 E2 — a process that is shutting down takes no new turn. Every
+	// turn path claims here before it writes anything, so the refusal
+	// leaves no trace and the client can send the same request again.
+	if s.draining.Load() {
+		return nil, ErrServerDraining
+	}
 	c := &turnClaim{key: key, since: time.Now()}
 	for {
 		v, loaded := s.turns.LoadOrStore(convID, c)

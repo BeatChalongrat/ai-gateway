@@ -437,6 +437,9 @@ services:
       args:
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
+    # FIX131 E2 — the stop drains turns (CHAT_EDGE_DRAIN_TIMEOUT 60s + grace
+    # 10s by default); keep this above both. Same as docker-compose.webchat.yml.
+    stop_grace_period: 90s
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${CHAT_EDGE_DB:-sran_chat}?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/2

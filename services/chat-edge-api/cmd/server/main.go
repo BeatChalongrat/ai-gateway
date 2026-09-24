@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -248,6 +249,17 @@ func main() {
 	messageSvc.ConfigureRunLedger(ledgerTTL, cfg.StreamLedgerMaxEvents, rdb)
 	// FIX74 — parked web turns (ask_user_question). Migration 042.
 	messageSvc.SetPendingQuestionStore(repository.NewPendingQuestionRepo(pool))
+	// FIX131 E1 — every streaming row holds a run lease (redis-webchat)
+	// while this process runs it, so the interrupted-turn sweep — here or on
+	// another instance — never settles a live turn. Renewed by runLeases.Run
+	// (started below, stopped only after the shutdown drain).
+	runLeases := service.NewRunLeases(service.NewRedisLeaseStore(rdb, ""), "", cfg.RunLeaseTTL, 0)
+	messageSvc.SetRunLeases(runLeases)
+	slog.Info("run leases configured",
+		"owner", runLeases.Owner(),
+		"ttl", runLeases.TTL().String(),
+		"renew_every", runLeases.RenewEvery().String(),
+	)
 	slog.Info("stream-resume ledger configured",
 		"ttl_seconds", cfg.StreamLedgerTTLSeconds,
 		"max_events_per_run", cfg.StreamLedgerMaxEvents,
@@ -742,14 +754,41 @@ func main() {
 	// S9 — start the retention enforcer goroutine. Lifetime is
 	// tied to bgCtx, which we cancel during shutdown so the
 	// background goroutine drains alongside the HTTP server.
+	// FIX131 E2 — the background loops are tracked, so the shutdown waits
+	// for them to stop instead of exiting under a half-done pass.
 	bgCtx, bgCancel := context.WithCancel(context.Background())
-	go retentionEnforcer.StartBackground(bgCtx)
+	var bgWG sync.WaitGroup
+	startBackground := func(run func(context.Context)) {
+		bgWG.Add(1)
+		go func() {
+			defer bgWG.Done()
+			run(bgCtx)
+		}()
+	}
+	startBackground(retentionEnforcer.StartBackground)
 
 	// Transcript retention sweep — 00:00 UTC daily, per-tenant opt-in,
 	// dry-run by default. Deletes NOTHING for a tenant until an admin
 	// enables it and then, after reading the dry-run numbers, turns
 	// dry_run off. No boot-time pass: the deletion hour is fixed.
-	go transcriptRetention.StartBackground(bgCtx)
+	startBackground(transcriptRetention.StartBackground)
+
+	// FIX131 E1 — the lease renewal runs until AFTER the shutdown drain
+	// (its own context): the turns being drained must keep their leases.
+	leaseCtx, leaseCancel := context.WithCancel(context.Background())
+	go runLeases.Run(leaseCtx)
+	// FIX131 E1 — the interrupted-turn sweep: at boot, a confirming pass
+	// shortly after, then every INTERRUPTED_TURN_SWEEP_INTERVAL. Settles
+	// streaming rows no process holds a lease for (the previous process's
+	// turns after a crash, the rows whose conversation was deleted while
+	// they ran). One summary line per pass, counts only.
+	interruptedSweep := service.NewInterruptedTurnSweep(messages, runLeases, cfg.InterruptedTurnSweepInterval, cfg.InterruptedTurnMinAge)
+	slog.Info("interrupted turn sweep",
+		"interval", interruptedSweep.Interval.String(),
+		"min_age", interruptedSweep.MinAge.String(),
+		"confirm", interruptedSweep.Confirm.String(),
+	)
+	startBackground(interruptedSweep.StartBackground)
 
 	// FIX127 A2 — uploads never attached to a sent message expire after
 	// UNATTACHED_FILE_TTL (48 h). dry_run by default: the first pass on a
@@ -761,7 +800,7 @@ func main() {
 	)
 	slog.Info("unattached file sweep", "mode", unattachedSweep.Mode,
 		"ttl", unattachedSweep.TTL.String(), "interval", unattachedSweep.Interval.String())
-	go unattachedSweep.StartBackground(bgCtx)
+	startBackground(unattachedSweep.StartBackground)
 
 	// FIX16 — cloud scheduled tasks: the always-on firing goroutine. OFF
 	// unless CLOUD_SCHEDULER_ENABLED=true. The runner authorizes EVERY fire
@@ -797,16 +836,19 @@ func main() {
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
+	// FIX131 E2 — graceful drain on SIGTERM (cmd/server/shutdown.go,
+	// service/drain.go). The listener stays open through the drain; only
+	// NEW turns are refused (503 SERVER_DRAINING + Retry-After).
+	stop := make(chan os.Signal, 2)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	slog.Info("shutdown signal received")
-
-	bgCancel()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("http server shutdown error", "err", err)
-	}
+	shutdownPlan{
+		svc:          messageSvc,
+		srv:          srv,
+		bgCancel:     bgCancel,
+		bgWG:         &bgWG,
+		leaseCancel:  leaseCancel,
+		drainTimeout: cfg.DrainTimeout,
+		drainGrace:   cfg.DrainGrace,
+	}.run(stop)
 	slog.Info("chat-edge-api stopped")
 }

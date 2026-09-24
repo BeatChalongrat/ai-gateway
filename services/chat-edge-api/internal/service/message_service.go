@@ -214,6 +214,14 @@ type MessageService struct {
 	// tests that construct MessageService directly — teeStream and
 	// ResumeAttach are nil-safe.
 	broker *StreamBroker
+
+	// leases (FIX131 E1) — the lease every streaming row holds while a
+	// process runs it (run_lease.go). Nil = none held (tests; the resume
+	// path then settles a broker miss by age alone, as before).
+	leases *RunLeases
+	// draining (FIX131 E2) — set by BeginDrain at SIGTERM: claimTurn
+	// refuses new turns with ErrServerDraining (drain.go).
+	draining atomic.Bool
 }
 
 // FileLinker is the slice of FileService the message flow needs.
@@ -298,6 +306,9 @@ type streamRegistration struct {
 	cancel        context.CancelFunc
 	mu            sync.Mutex
 	userCancelled bool
+	// interrupted (FIX131 E2) — the shutdown drain cut this run at its
+	// deadline; it ends as interrupted, not as stopped_by_user.
+	interrupted bool
 }
 
 func (r *streamRegistration) markCancelled() {
@@ -1189,6 +1200,12 @@ type StreamHandle struct {
 	// Finish/FinishWith AFTER the finish callback has written the row, so
 	// the next send sees this turn's final state. nil-safe.
 	release func()
+	// leaseRelease (FIX131 E1) drops the run lease of the streaming row,
+	// with release — after the row holds its ending. nil-safe.
+	leaseRelease func()
+	// interrupted (FIX131 E2) reports whether the shutdown drain cut this
+	// run; nil-safe.
+	interrupted func() bool
 }
 
 // UserCancelled reports whether this generation was stopped by a person
@@ -1199,6 +1216,16 @@ func (h *StreamHandle) UserCancelled() bool {
 		return false
 	}
 	return h.cancelled()
+}
+
+// Interrupted reports whether the shutdown drain cut this run at its
+// deadline (FIX131 E2). The run then ends as an interrupted turn: the row
+// and the terminal frame both say GENERATION_INTERRUPTED.
+func (h *StreamHandle) Interrupted() bool {
+	if h.interrupted == nil {
+		return false
+	}
+	return h.interrupted()
 }
 
 // StreamUpdate is the per-event surface — one delta plus optional
@@ -1479,21 +1506,31 @@ func (h *StreamHandle) Cancel() { h.cancel() }
 // when reasoning was off / no reasoning frames arrived — the
 // persist path skips the reasoning_content write in that case.
 func (h *StreamHandle) Finish(content, reasoning, finishReason string, usage *GatewayChatUsage) {
-	defer h.releaseTurn()
-	h.finish(content, reasoning, finishReason, usage, TerminalInfo{})
+	h.FinishWith(content, reasoning, finishReason, usage, TerminalInfo{})
 }
 
 // FinishWith is Finish plus what the handler learned about the ending
 // (FIX118): the terminal cause and the error code of the terminal frame,
 // so the row records the same ending the stream reported.
+//
+// FIX131 E2 — a run the shutdown drain cut ends as interrupted whatever
+// the transport said (the cut reads as a cancelled context, which would
+// otherwise be recorded as "disconnected"). What it produced is kept.
 func (h *StreamHandle) FinishWith(content, reasoning, finishReason string, usage *GatewayChatUsage, term TerminalInfo) {
 	defer h.releaseTurn()
+	if h.Interrupted() {
+		finishReason = "error"
+		term = interruptedEnding()
+	}
 	h.finish(content, reasoning, finishReason, usage, term)
 }
 
 func (h *StreamHandle) releaseTurn() {
 	if h.release != nil {
 		h.release()
+	}
+	if h.leaseRelease != nil {
+		h.leaseRelease()
 	}
 }
 
@@ -1533,6 +1570,15 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 	if err != nil {
 		return nil, err
 	}
+	// FIX131 E1 — this process runs the row from here: hold its lease so
+	// no sweep settles it while it streams. Released with the turn, after
+	// the finish has written the row (or below, on a failed open).
+	leaseRel := s.leaseRun(asstMsg.ID)
+	defer func() {
+		if retErr != nil {
+			leaseRel()
+		}
+	}()
 
 	// Open the upstream stream. cancelCtx propagates the
 	// handler-driven cancel through to the HTTP transport.
@@ -1583,6 +1629,7 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 		cancel()
 		h := s.directImageStream(imageCtx, imageCancel, reg, conv, userMsg, asstMsg, in)
 		h.release = release
+		h.leaseRelease = leaseRel // FIX131 E1
 		return h, nil
 	}
 	// FIX63 — the Phase D branch that used to sit here ("reject when the
@@ -1741,6 +1788,8 @@ func (s *MessageService) SendStream(ctx context.Context, in SendInput) (_ *Strea
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
 		release:        release,
+		leaseRelease:   leaseRel,          // FIX131 E1
+		interrupted:    reg.isInterrupted, // FIX131 E2
 	}, nil
 }
 
@@ -1925,6 +1974,7 @@ func (s *MessageService) openAssistantStream(
 	if err != nil {
 		return nil, err
 	}
+	leaseRel := s.leaseRun(asstMsg.ID) // FIX131 E1
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	// Regenerate: the query for RAG is the last user message in the
@@ -1945,6 +1995,7 @@ func (s *MessageService) openAssistantStream(
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
 		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: preStreamCause(err), ErrorCode: preStreamErrorCode(err)})
+		leaseRel() // FIX131 E1 — the row is settled; the lease goes
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -2032,6 +2083,8 @@ func (s *MessageService) openAssistantStream(
 		finish:         finish,
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
+		leaseRelease:   leaseRel,          // FIX131 E1
+		interrupted:    reg.isInterrupted, // FIX131 E2
 	}, nil
 }
 
@@ -2213,6 +2266,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 	if err != nil {
 		return nil, err
 	}
+	leaseRel := s.leaseRun(asstMsg.ID) // FIX131 E1
 
 	streamCtx, cancel := context.WithCancel(context.Background())
 	// Edit-branch RAG query: prefer the new user message's content
@@ -2240,6 +2294,7 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		cancel()
 		_ = s.messages.UpdateContent(ctx, asstMsg.ID, "", "error", nil, nil)
 		s.persistTerminal(ctx, asstMsg.ID, "error", TerminalInfo{Cause: preStreamCause(err), ErrorCode: preStreamErrorCode(err)})
+		leaseRel() // FIX131 E1 — the row is settled; the lease goes
 		var ue *GatewayUnavailableError
 		if errors.As(err, &ue) {
 			return nil, fmt.Errorf("%w: %w", ErrMessageGatewayUnavailable, ue)
@@ -2318,6 +2373,8 @@ func (s *MessageService) openAssistantStreamWithBranch(
 		finish:         finish,
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
+		leaseRelease:   leaseRel,          // FIX131 E1
+		interrupted:    reg.isInterrupted, // FIX131 E2
 	}, nil
 }
 
@@ -4710,6 +4767,7 @@ func (s *MessageService) directImageStream(
 		finish:         finish,
 		cancel:         cancel,
 		cancelled:      reg.isUserCancelled,
+		interrupted:    reg.isInterrupted, // FIX131 E2
 	}
 }
 

@@ -24,9 +24,10 @@ const (
 )
 
 // MessageStatusWaitingUser is the assistant row's status while its turn
-// is parked. Distinct from "streaming" on purpose: the orphan sweep that
-// settles a "streaming" row left behind by a restart must never touch a
-// row that is deliberately waiting.
+// is parked. Distinct from "streaming" on purpose: the interrupted-turn
+// sweep (service/interrupted_sweep.go, FIX131) that settles a "streaming"
+// row left behind by a restart must never touch a row that is deliberately
+// waiting.
 const MessageStatusWaitingUser = "waiting_user"
 
 type PendingQuestion struct {

@@ -42,7 +42,9 @@ func CORS(allowOrigins string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Headers", CORSAllowHeaders)
 				// Readable by the page: the run id the server settled on, and
 				// whether this response is the replay of an earlier request.
-				w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, Idempotent-Replayed")
+				// FIX131 E2 — and Retry-After, which is not CORS-safelisted: the
+				// 503 SERVER_DRAINING of a restart says when to send again.
+				w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id, Idempotent-Replayed, Retry-After")
 				w.Header().Set("Access-Control-Max-Age", "600")
 			}
 			if r.Method == http.MethodOptions {
