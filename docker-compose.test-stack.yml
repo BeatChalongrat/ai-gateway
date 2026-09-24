@@ -545,6 +545,19 @@
         "GATEWAY_API_URL": "http://gateway:8080/v1",
         "IMAGE_GEN_MODEL": "${IMAGE_GEN_MODEL:-gpt-image-1}",
         "INTERNAL_SERVICE_SECRET": "${INTERNAL_SERVICE_SECRET:-}",
+        "KB_CANDIDATES": "${KB_CANDIDATES:-50}",
+        "KB_CHUNK_OVERLAP": "${KB_CHUNK_OVERLAP:-150}",
+        "KB_CHUNK_SIZE": "${KB_CHUNK_SIZE:-1000}",
+        "KB_CONTEXT_MAX_CHARS": "${KB_CONTEXT_MAX_CHARS:-24000}",
+        "KB_INDEX_WORKERS": "${KB_INDEX_WORKERS:-2}",
+        "KB_MIN_SCORE": "${KB_MIN_SCORE:-0.40}",
+        "KB_MODELS_URL": "${KB_MODELS_URL:-http://kb-models:8090}",
+        "KB_RERANK_BUDGET_MS": "${KB_RERANK_BUDGET_MS:-4000}",
+        "KB_RERANK_CANDIDATES": "${KB_RERANK_CANDIDATES:-40}",
+        "KB_RERANK_ENABLED": "${KB_RERANK_ENABLED:-false}",
+        "KB_RERANK_FLOOR": "${KB_RERANK_FLOOR:-0.01}",
+        "KB_SPARSE_WEIGHT": "${KB_SPARSE_WEIGHT:-0.3}",
+        "KB_TOP_K": "${KB_TOP_K:-20}",
         "MAX_CONTEXT_MESSAGES": "1000",
         "PORT": "4000",
         "PORTAL_JWT_SECRET": "${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}",
@@ -665,6 +678,38 @@
       "labels": {
         "sran.test-stack": "true"
       }
+    },
+    "kb-models": {
+      "deploy": {
+        "resources": {
+          "limits": {
+            "cpus": "6.0",
+            "memory": "6g"
+          }
+        }
+      },
+      "environment": {
+        "HF_HUB_OFFLINE": "1",
+        "KB_DTYPE": "${KB_DTYPE:-bf16}",
+        "KB_RERANK_ENABLED": "${KB_RERANK_ENABLED:-false}",
+        "KB_THREADS": "${KB_THREADS:-6}"
+      },
+      "image": "ai-gateway-kb-models:${TS_KB_MODELS_TAG:-latest}",
+      "networks": {
+        "default": null
+      },
+      "restart": "on-failure",
+      "volumes": [
+        {
+          "type": "volume",
+          "source": "ts_kb_models_live_ro",
+          "target": "/models",
+          "read_only": true
+        }
+      ],
+      "labels": {
+        "sran.test-stack": "true"
+      }
     }
   },
   "volumes": {
@@ -672,6 +717,10 @@
     "ts_pgdata_webchat": {},
     "ts_chat_edge_uploads": {},
     "ts_backups": {},
-    "ts_backend_uploads": {}
+    "ts_backend_uploads": {},
+    "ts_kb_models_live_ro": {
+      "external": true,
+      "name": "ai-gateway_kb_models"
+    }
   }
 }

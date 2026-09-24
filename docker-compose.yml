@@ -496,6 +496,21 @@ services:
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       IMAGE_GEN_MODEL: ${IMAGE_GEN_MODEL:-gpt-image-1}
       CHAT_EDGE_IMAGE_TIMEOUT_SECONDS: ${CHAT_EDGE_IMAGE_TIMEOUT_SECONDS:-180}
+      # FIX132 B — the knowledge base; same knobs as docker-compose.webchat.yml
+      # (docs/ops/knowledge-base.md). kb-models below is desktop-profile too.
+      KB_MODELS_URL: ${KB_MODELS_URL:-http://kb-models:8090}
+      KB_INDEX_WORKERS: ${KB_INDEX_WORKERS:-2}
+      KB_CHUNK_SIZE: ${KB_CHUNK_SIZE:-1000}
+      KB_CHUNK_OVERLAP: ${KB_CHUNK_OVERLAP:-150}
+      KB_SPARSE_WEIGHT: ${KB_SPARSE_WEIGHT:-0.3}
+      KB_CANDIDATES: ${KB_CANDIDATES:-50}
+      KB_MIN_SCORE: ${KB_MIN_SCORE:-0.40}
+      KB_TOP_K: ${KB_TOP_K:-20}
+      KB_CONTEXT_MAX_CHARS: ${KB_CONTEXT_MAX_CHARS:-24000}
+      KB_RERANK_ENABLED: ${KB_RERANK_ENABLED:-false}
+      KB_RERANK_CANDIDATES: ${KB_RERANK_CANDIDATES:-40}
+      KB_RERANK_BUDGET_MS: ${KB_RERANK_BUDGET_MS:-4000}
+      KB_RERANK_FLOOR: ${KB_RERANK_FLOOR:-0.01}
     volumes:
       - chat_edge_uploads:/app/data/uploads
     ports:
@@ -523,6 +538,32 @@ services:
     #   service "web-chat" depends on undefined service "chat-edge-api"
     # Supported combinations: `make compose-check` / README "Deployment
     # shapes".
+    profiles: ["desktop"]
+
+  # FIX132 B — the knowledge base's models for the desktop-profile chat-edge
+  # above (the webchat shape defines its own in docker-compose.webchat.yml;
+  # see the note on chat-edge-api about merging the two files). Internal
+  # only, no host port; weights in the kb_models volume.
+  kb-models:
+    build:
+      context: ./services/kb-models
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-kb-models:latest
+    environment:
+      KB_THREADS: ${KB_THREADS:-6}
+      KB_DTYPE: ${KB_DTYPE:-bf16}
+      KB_RERANK_ENABLED: ${KB_RERANK_ENABLED:-false}
+      HF_HUB_OFFLINE: ${KB_MODELS_OFFLINE:-1}
+    volumes:
+      - kb_models:/models
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: "6g"
+    restart: unless-stopped
     profiles: ["desktop"]
 
   # MCP Gateway (R11 B2 + Phase 10 C1) — hosts stdio MCP servers behind
@@ -1030,3 +1071,5 @@ volumes:
   # docs/ops/deploy-backend.md for the one-time copy into this volume.
   backend_uploads:
   mcp_workspace:
+  # FIX132 B — kb-models' pinned weights, filled once.
+  kb_models:

@@ -38,7 +38,7 @@
 #
 # Services: web-chat chat-edge-api gateway backend worker mcp-gateway
 #   ner-service dlp-sidecar rate-limiter log-worker mock-provider admin-ui
-#   portal sandbox backup
+#   portal sandbox backup kb-models
 #
 # Needs: git, tar, docker (with compose v2), python3 (or python).
 set -euo pipefail
@@ -123,7 +123,7 @@ for svc in "${SERVICES[@]}"; do
     args=(--build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED")
   else
     case "$svc" in
-      web-chat|chat-edge-api|backup) file=docker-compose.webchat.yml ;;
+      web-chat|chat-edge-api|backup|kb-models) file=docker-compose.webchat.yml ;;
       *) file=docker-compose.yml ;;
     esac
     fields=()

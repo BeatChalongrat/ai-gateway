@@ -126,6 +126,43 @@ class GeneratedTestStackTest(unittest.TestCase):
         self.assertIn("REFUSED", written)
         self.assertIn("ntfy.sh/", written)
 
+    def test_kb_models_reads_the_live_weights_read_only_and_never_downloads(self):
+        """FIX132 B: the test stack's kb-models mounts the live weights volume
+        (pinned model files, ~4.6 GB) instead of downloading them again — but
+        read-only, as an EXTERNAL volume (so `test-stack.sh reset`, which is
+        `down --volumes`, can never delete it), offline, with no host port."""
+        merged = _merged()
+        merged["services"]["kb-models"] = {
+            "image": "ai-gateway-kb-models:latest", "container_name": "ai-gateway-kb-models",
+            "build": {"context": "./services/kb-models"},
+            "environment": {"KB_THREADS": "${KB_THREADS:-6}", "HF_HUB_OFFLINE": "${KB_MODELS_OFFLINE:-1}"},
+            "volumes": [{"type": "volume", "source": "kb_models", "target": "/models", "volume": {}}],
+        }
+        merged["services"]["chat-edge-api"]["environment"]["KB_MODELS_URL"] = "${KB_MODELS_URL:-http://kb-models:8090}"
+        rc, doc, written = self._generate(merged)
+        self.assertEqual(rc, 0, written)
+        kb = doc["services"]["kb-models"]
+        self.assertEqual(kb["volumes"], [{"type": "volume", "source": "ts_kb_models_live_ro", "target": "/models", "read_only": True}])
+        self.assertEqual(doc["volumes"]["ts_kb_models_live_ro"], {"external": True, "name": "ai-gateway_kb_models"})
+        self.assertEqual(kb["environment"]["HF_HUB_OFFLINE"], "1")
+        self.assertEqual(kb["image"], "ai-gateway-kb-models:${TS_KB_MODELS_TAG:-latest}")
+        self.assertNotIn("ports", kb)
+        self.assertNotIn("container_name", kb)
+        # Every other volume stays the test stack's own.
+        for name, vol in doc["volumes"].items():
+            if name != "ts_kb_models_live_ro":
+                self.assertEqual(vol, {}, name)
+        # chat-edge reaches the TEST stack's kb-models by service name.
+        self.assertEqual(doc["services"]["chat-edge-api"]["environment"]["KB_MODELS_URL"], "${KB_MODELS_URL:-http://kb-models:8090}")
+
+    def test_the_guard_refuses_a_writable_mount_of_the_live_weights(self):
+        writable = {"kb-models": {"volumes": [{"type": "volume", "source": "ts_kb_models_live_ro", "target": "/models"}]}}
+        with self.assertRaises(ValueError):
+            gen.shared_volumes(writable)
+        ro = {"kb-models": {"volumes": [{"type": "volume", "source": "ts_kb_models_live_ro", "target": "/models", "read_only": True}]}}
+        self.assertEqual(gen.shared_volumes(ro), {"ts_kb_models_live_ro": {"external": True, "name": "ai-gateway_kb_models"}})
+        self.assertEqual(gen.shared_volumes({"x": {}}), {})
+
 
 if __name__ == "__main__":
     unittest.main()

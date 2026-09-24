@@ -151,6 +151,25 @@ services:
       - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
       - S3_SECRET_KEY=${S3_SECRET_KEY:-}
       - S3_FORCE_PATH_STYLE=${S3_FORCE_PATH_STYLE:-true}
+      # FIX132 B — the knowledge base (docs/ops/knowledge-base.md). Its models
+      # run in kb-models below, on this machine: no document or question
+      # text leaves the host (the URL must be a compose service / loopback /
+      # RFC 1918 address; anything else is refused). chat-edge does NOT
+      # depend on kb-models: without it chat works and the knowledge base
+      # reports models_unavailable. Defaults measured on the FIX132 eval set.
+      - KB_MODELS_URL=${KB_MODELS_URL:-http://kb-models:8090}
+      - KB_INDEX_WORKERS=${KB_INDEX_WORKERS:-2}
+      - KB_CHUNK_SIZE=${KB_CHUNK_SIZE:-1000}
+      - KB_CHUNK_OVERLAP=${KB_CHUNK_OVERLAP:-150}
+      - KB_SPARSE_WEIGHT=${KB_SPARSE_WEIGHT:-0.3}
+      - KB_CANDIDATES=${KB_CANDIDATES:-50}
+      - KB_MIN_SCORE=${KB_MIN_SCORE:-0.40}
+      - KB_TOP_K=${KB_TOP_K:-20}
+      - KB_CONTEXT_MAX_CHARS=${KB_CONTEXT_MAX_CHARS:-24000}
+      - KB_RERANK_ENABLED=${KB_RERANK_ENABLED:-false}
+      - KB_RERANK_CANDIDATES=${KB_RERANK_CANDIDATES:-40}
+      - KB_RERANK_BUDGET_MS=${KB_RERANK_BUDGET_MS:-4000}
+      - KB_RERANK_FLOOR=${KB_RERANK_FLOOR:-0.01}
       # Phase B — image-generation tool. The gateway image model the
       # generate_image tool calls (gpt-image-1 is OpenAI's current image model).
       - IMAGE_GEN_MODEL=${IMAGE_GEN_MODEL:-gpt-image-1}
@@ -260,6 +279,41 @@ services:
     # label; the two files share the compose project `ai-gateway`).
     labels:
       autoheal: "true"
+
+  # FIX132 B — the knowledge base's models (services/kb-models): bge-m3
+  # (dense 1024-d + sparse keyword weights in one pass), bge-reranker-v2-m3
+  # (loaded only when KB_RERANK_ENABLED) and PyThaiNLP word segmentation, on
+  # CPU. Internal only: NO host port; chat-edge reaches it as
+  # http://kb-models:8090 on the compose network. The weights (pinned
+  # revisions) live in the kb_models volume (= ai-gateway_kb_models), filled
+  # once; HF_HUB_OFFLINE keeps it from ever reaching out again. First start
+  # loads for ~1–2 minutes (/health "loading"; chat-edge reports
+  # models_loading). Measured on this PC: bf16 is ~2x faster than fp32
+  # (AVX512-BF16), 6 threads; a batch of 16 passages embeds in 13–22 s, a
+  # question in ~0.2 s. docs/ops/knowledge-base.md.
+  kb-models:
+    build:
+      context: ./services/kb-models
+      args:
+        REVISION: ${REVISION:-unknown}
+        CREATED: ${CREATED:-unknown}
+    image: ai-gateway-kb-models:latest
+    container_name: ai-gateway-kb-models
+    restart: unless-stopped
+    environment:
+      - KB_THREADS=${KB_THREADS:-6}
+      - KB_DTYPE=${KB_DTYPE:-bf16}
+      - KB_RERANK_ENABLED=${KB_RERANK_ENABLED:-false}
+      - HF_HUB_OFFLINE=${KB_MODELS_OFFLINE:-1}
+    volumes:
+      - kb_models:/models
+    deploy:
+      resources:
+        limits:
+          cpus: "6.0"
+          memory: "6g"
+    # Healthcheck: the image's own (GET /health status "ready"; 10 min start
+    # period for a first load).
 
   postgres-webchat:
     # pgvector/pgvector:pg16 ships Postgres 16 with the pgvector
@@ -514,3 +568,5 @@ volumes:
   pgdata-webchat:
   minio-data:
   chat_edge_uploads:
+  # FIX132 B — kb-models' pinned weights (~4.6 GB), filled once.
+  kb_models:

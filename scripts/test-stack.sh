@@ -23,6 +23,7 @@ compose() {
   TS_BACKEND_TAG="${TS_BACKEND_TAG:-$(rev ai-gateway-backend-1)}" \
   TS_GATEWAY_TAG="${TS_GATEWAY_TAG:-$(rev ai-gateway-gateway-1)}" \
   TS_CHAT_EDGE_TAG="${TS_CHAT_EDGE_TAG:-$(rev ai-gateway-chat-edge-api)}" \
+  TS_KB_MODELS_TAG="${TS_KB_MODELS_TAG:-$(rev ai-gateway-kb-models)}" \
     docker compose -p "$P" -f "$F" "$@"
 }
 
