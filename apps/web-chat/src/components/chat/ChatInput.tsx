@@ -42,7 +42,7 @@ import {
   type SlashCommand,
   type SlashOffer,
 } from "@/lib/slashCommands";
-import { toast } from "@/components/ui/Toast";
+import { toast, toastError } from "@/components/ui/Toast";
 import {
   EDIT_MESSAGE_EVENT,
   VOICE_TOGGLE_EVENT,
@@ -1009,7 +1009,7 @@ export function ChatInput({
       // FIX126 F5 — the chip speaks the UI's language, not the transport's.
       const msg = uploadErrorMessage(err);
       markFileError(chipBucket, pendingId, msg, uploadErrorRetryable(err));
-      toast(msg);
+      toastError(msg);
     }
   }
 
@@ -1027,11 +1027,12 @@ export function ChatInput({
     // from the STORE at this instant, not from the render closure: the
     // paste listener is bound once and used to see the mount-time count.
     const stagingBucket = conversationId ?? DRAFT_CONV_KEY;
+    // FIX132 F18 — a refused file is an error: it stays until read.
     const { accepted } = admitFilesForMessage(
       filesRaw,
       liveChipCount(stagingBucket),
       undefined,
-      toast,
+      toastError,
     );
     if (accepted.length === 0) return;
 
@@ -1755,7 +1756,7 @@ export async function uploadFiles(
     files,
     liveChipCount(chipBucket),
     undefined,
-    toast,
+    toastError,
   );
   if (accepted.length === 0) return;
   const staged = accepted.map((f) => ({ f, pid: store.addPendingFile(chipBucket, f) }));
@@ -1798,7 +1799,7 @@ export async function uploadFiles(
       if (err instanceof ApiError && err.code === "ABORTED") continue;
       const msg = uploadErrorMessage(err);
       store.markFileError(chipBucket, pid, msg, uploadErrorRetryable(err));
-      toast(msg);
+      toastError(msg);
     }
   }
 }
