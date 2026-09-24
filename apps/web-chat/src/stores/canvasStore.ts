@@ -12,7 +12,7 @@
 
 import { create } from "zustand";
 
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { tOutside } from "@/lib/i18n";
 import type { CanvasArtifactRow } from "@/lib/types";
 import { useSidePaneStore } from "@/stores/sidePaneStore";
@@ -77,6 +77,9 @@ export function canPersist(a: CanvasArtifact | null): a is CanvasArtifact & {
   return Boolean(a?.conversationId && a?.artifactKey);
 }
 
+/** FIX132 D1 — lineages whose version 1 is being saved right now. */
+const adopting = new Set<string>();
+
 export const useCanvasStore = create<CanvasState>()((set, get) => ({
   open: false,
   artifact: null,
@@ -139,11 +142,22 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     if (!canPersist(artifact)) return;
     set({ versionsLoading: true });
     try {
-      const res = await api.listCanvasVersions(
-        artifact.conversationId,
-        artifact.artifactKey,
-      );
-      const versions = res?.versions ?? [];
+      let versions: CanvasArtifactRow[];
+      try {
+        const res = await api.listCanvasVersions(
+          artifact.conversationId,
+          artifact.artifactKey,
+        );
+        versions = res?.versions ?? [];
+      } catch (err) {
+        // FIX132 D1 — chat-edge answers 404 for a key with no versions
+        // yet ("a key only exists through its versions"); it never sends
+        // a 200 with an empty list. Treating that 404 as a failure meant
+        // no block was ever adopted, so the model never saw an artifact
+        // to update and versions never started. It IS the empty lineage.
+        if (err instanceof ApiError && err.status === 404) versions = [];
+        else throw err;
+      }
       // Phase 8 — ADOPT: a block the user just opened for the first time
       // has no lineage yet, so nothing server-side identifies it and the
       // model cannot revise it. Persisting the original source as
@@ -178,6 +192,12 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
 
   async adoptInitialVersion(artifact) {
     if (!canPersist(artifact) || !artifact.content) return;
+    // FIX132 D1 — one adoption per lineage at a time: the open's read and
+    // the end-of-turn refresh can both find it empty before the first
+    // save lands, and two saves would make a duplicate "v2".
+    const lineage = `${artifact.conversationId} ${artifact.artifactKey}`;
+    if (adopting.has(lineage)) return;
+    adopting.add(lineage);
     try {
       const res = await api.saveCanvasArtifact(artifact.conversationId, {
         artifact_key: artifact.artifactKey,
@@ -195,6 +215,8 @@ export const useCanvasStore = create<CanvasState>()((set, get) => ({
     } catch {
       // Adoption is best-effort: the preview and in-session editing work
       // regardless; only the model-driven update needs the lineage.
+    } finally {
+      adopting.delete(lineage);
     }
   },
 
