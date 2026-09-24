@@ -161,13 +161,17 @@ export function EmptyState({ onPrompt, children }: Props) {
 
         {children ? <div className="mt-6 text-left">{children}</div> : null}
 
-        <div className="scrollbar-thin mt-6 flex flex-wrap items-center justify-center gap-2 overflow-x-auto pb-1">
+        {/* FIX132 N7 — p-1: room for the 2 px + 2 px focus ring, which the
+            row's overflow box used to cut off along the top. */}
+        <div className="scrollbar-thin mt-5 flex flex-wrap items-center justify-center gap-2 overflow-x-auto p-1">
           {CHIPS.map((c) => (
             <button
               key={c.labelKey}
               type="button"
               onClick={() => onPrompt(t(c.promptKey))}
-              className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-all hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary"
+              // FIX132 N7 — the ring shows at once (only transform and colours
+              // animate, not the outline) and the chip keeps its pill shape.
+              className="focus-ring tap-44 inline-flex items-center gap-2 rounded-full border border-border-subtle bg-transparent px-4 py-2 text-[13px] text-text-secondary transition-[transform,color,background-color,border-color] hover:-translate-y-0.5 hover:border-border-strong hover:bg-bg-surface hover:text-text-primary focus-visible:!rounded-full"
             >
               {/* Icon inherits the chip's text colour — no accent
                   tint, no green. The chips are intentionally muted
