@@ -322,6 +322,10 @@ export function SidePane({ open, label, title, subtitle, icon, actions, maxWidth
         aria-modal="true"
         aria-label={label}
         aria-hidden={open ? undefined : true}
+        // FIX132 F16 — closed and off screen: out of the Tab order too
+        // (aria-hidden alone left its buttons focusable at x = 680 on a
+        // phone). React 18 renders `inert` only as a string.
+        {...(open ? {} : ({ inert: "" } as unknown as { inert: boolean }))}
         data-testid={testId}
         data-pane-mode="overlay"
         className={`fixed right-0 top-0 z-50 flex h-full w-full flex-col border-l border-border bg-bg-surface shadow-2xl transition-transform duration-200 ease-out ${
