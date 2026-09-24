@@ -43,7 +43,7 @@ describe("FIX132 — the delete-chat confirmation states the period", () => {
     render(
       <ConversationItem conv={conv} active={false} onSelect={noop} onRename={noop} onDelete={noop} onTogglePin={noop} />,
     );
-    fireEvent.click(screen.getByLabelText(dictionaries.th["a11y.conversationActions"]));
+    fireEvent.click(screen.getByLabelText(dictionaries.th["a11y.conversationActionsFor"].replace("{title}", "งบประมาณ")));
     fireEvent.click(screen.getByText(dictionaries.th["conv.delete"]));
     await waitFor(() => expect(document.body.textContent).toContain("ภายใน 30 วัน"));
     const text = document.body.textContent ?? "";
