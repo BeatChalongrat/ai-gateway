@@ -3,28 +3,21 @@ package service
 // FIX130 C2 — "can a knowledge base work right now?", answered by the
 // server so the clients can stop offering one that cannot.
 //
-// A knowledge base is only as good as the embeddings behind it: every
-// document is embedded when it is uploaded, and every question is embedded
-// to search it. The gateway serves embeddings from ONE provider (OpenAI,
-// backend openai_embeddings_client.py) and answers 503 when that provider has
-// no key or refuses. NIGHT2 F27 / the FIX130 test stack: create a KB → 201;
-// upload → 201 with status "failed" ("embedding failed: gateway unavailable:
-// status=503"); and the web offered all of it anyway — a composer button, a
-// project dropdown and a sidebar entry leading to a feature that could not
-// work, with RAG failing silently at answer time.
+// FIX132 B — the answer now comes from the knowledge base's own models
+// (kb-models, on this machine): ready → available; still loading its
+// weights → models_loading; down, failed or not configured →
+// models_unavailable. There is no provider key or credit involved any more.
 //
-// The verdict comes from what actually happened: every embedding call
-// chat-edge makes (an upload, a reindex, a RAG query) is observed, and the
-// newest outcome is the answer. When nothing has been observed recently a
-// single tiny probe is made (one short string — a fraction of a cent when the
-// provider works, free when it refuses), single-flight, and cached: a
-// success for availabilityOKTTL, a failure for availabilityFailTTL so a key
-// being fixed is noticed within minutes.
+// The verdict comes from what actually happened: every embeddings call
+// chat-edge makes (indexing, a question) is observed, and the newest outcome
+// is the answer. When nothing has been observed recently one GET /health is
+// made, single-flight, and cached: a success for availabilityOKTTL, a
+// failure for availabilityFailTTL, "loading" for availabilityLoadingTTL (it
+// becomes ready by itself within minutes of a start).
 
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,11 +27,12 @@ import (
 // Reasons a knowledge base is unavailable — a closed set the clients map to
 // their own sentence.
 const (
-	// KBUnavailableNotConfigured — no embeddings provider is set up at all.
-	KBUnavailableNotConfigured = "embeddings_not_configured"
-	// KBUnavailableProviderFailed — one is set up, and it refuses or fails
-	// (out of credit, invalid key, unreachable).
-	KBUnavailableProviderFailed = "embeddings_failed"
+	// KBUnavailableLoading — kb-models is starting and still loading its
+	// models; it becomes available by itself.
+	KBUnavailableLoading = "models_loading"
+	// KBUnavailableModels — kb-models is not configured, not reachable, or
+	// failed to load its models.
+	KBUnavailableModels = "models_unavailable"
 )
 
 // KBAvailability is the answer the endpoint serves.
@@ -49,14 +43,15 @@ type KBAvailability struct {
 }
 
 var (
-	availabilityOKTTL    = 10 * time.Minute
-	availabilityFailTTL  = 2 * time.Minute
-	availabilityProbeMax = 10 * time.Second
+	availabilityOKTTL      = 10 * time.Minute
+	availabilityFailTTL    = 2 * time.Minute
+	availabilityLoadingTTL = 20 * time.Second
+	availabilityProbeMax   = 10 * time.Second
 )
 
-// KnowledgeAvailability keeps the newest embedding outcome.
+// KnowledgeAvailability keeps the newest model outcome.
 type KnowledgeAvailability struct {
-	probe func(ctx context.Context, tenantID, userID uuid.UUID) error
+	probe func(ctx context.Context) error
 
 	mu      sync.Mutex
 	known   bool
@@ -64,14 +59,14 @@ type KnowledgeAvailability struct {
 	probing chan struct{} // non-nil while a probe runs; closed when it ends
 }
 
-// NewKnowledgeAvailability wires the probe (one embedding of a short string).
-func NewKnowledgeAvailability(probe func(ctx context.Context, tenantID, userID uuid.UUID) error) *KnowledgeAvailability {
+// NewKnowledgeAvailability wires the probe (kb-models GET /health).
+func NewKnowledgeAvailability(probe func(ctx context.Context) error) *KnowledgeAvailability {
 	return &KnowledgeAvailability{probe: probe}
 }
 
-// Observe records a real embedding outcome (nil = it worked). Errors that
-// say nothing about the provider — a cancelled request, an empty input —
-// are ignored.
+// Observe records a real model outcome (nil = it worked). Errors that say
+// nothing about kb-models — a cancelled request, a refused input — are
+// ignored.
 func (a *KnowledgeAvailability) Observe(err error) {
 	v, ok := availabilityFrom(err)
 	if !ok {
@@ -83,8 +78,9 @@ func (a *KnowledgeAvailability) Observe(err error) {
 }
 
 // Status answers from the newest outcome while it is fresh, else probes once
-// on behalf of the asking person (concurrent callers wait on the same probe).
-func (a *KnowledgeAvailability) Status(ctx context.Context, tenantID, userID uuid.UUID) KBAvailability {
+// (concurrent callers wait on the same probe). The ids are the asker's; the
+// probe does not need them (the models are the same for everyone).
+func (a *KnowledgeAvailability) Status(ctx context.Context, _, _ uuid.UUID) KBAvailability {
 	for {
 		a.mu.Lock()
 		if a.known && fresh(a.last) {
@@ -98,7 +94,7 @@ func (a *KnowledgeAvailability) Status(ctx context.Context, tenantID, userID uui
 			case <-wait:
 				continue
 			case <-ctx.Done():
-				return KBAvailability{Available: false, Reason: KBUnavailableProviderFailed, CheckedAt: time.Now().UTC()}
+				return KBAvailability{Available: false, Reason: KBUnavailableModels, CheckedAt: time.Now().UTC()}
 			}
 		}
 		done := make(chan struct{})
@@ -106,11 +102,11 @@ func (a *KnowledgeAvailability) Status(ctx context.Context, tenantID, userID uui
 		a.mu.Unlock()
 
 		pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), availabilityProbeMax)
-		err := a.probe(pctx, tenantID, userID)
+		err := a.probe(pctx)
 		cancel()
 		v, ok := availabilityFrom(err)
 		if !ok { // the probe itself could not say: count it as a failure, briefly
-			v = KBAvailability{Available: false, Reason: KBUnavailableProviderFailed, CheckedAt: time.Now().UTC()}
+			v = KBAvailability{Available: false, Reason: KBUnavailableModels, CheckedAt: time.Now().UTC()}
 		}
 		a.mu.Lock()
 		a.known, a.last, a.probing = true, v, nil
@@ -122,14 +118,17 @@ func (a *KnowledgeAvailability) Status(ctx context.Context, tenantID, userID uui
 
 func fresh(v KBAvailability) bool {
 	ttl := availabilityFailTTL
-	if v.Available {
+	switch {
+	case v.Available:
 		ttl = availabilityOKTTL
+	case v.Reason == KBUnavailableLoading:
+		ttl = availabilityLoadingTTL
 	}
 	return time.Since(v.CheckedAt) < ttl
 }
 
-// availabilityFrom turns an embedding outcome into a verdict; false when
-// the outcome says nothing about the provider.
+// availabilityFrom turns a model outcome into a verdict; false when the
+// outcome says nothing about kb-models.
 func availabilityFrom(err error) (KBAvailability, bool) {
 	now := time.Now().UTC()
 	if err == nil {
@@ -138,25 +137,15 @@ func availabilityFrom(err error) (KBAvailability, bool) {
 	if errors.Is(err, context.Canceled) {
 		return KBAvailability{}, false
 	}
-	if errors.Is(err, ErrEmbeddingDisabled) {
-		return KBAvailability{Available: false, Reason: KBUnavailableNotConfigured, CheckedAt: now}, true
+	if IsKBModelsLoading(err) {
+		return KBAvailability{Available: false, Reason: KBUnavailableLoading, CheckedAt: now}, true
 	}
-	var ue *GatewayUnavailableError
-	if errors.As(err, &ue) {
-		// The gateway's 503 names the missing key in its detail
-		// (openai_embeddings_client.py: "embeddings provider not configured").
-		if strings.Contains(strings.ToLower(ue.Body), "not configured") {
-			return KBAvailability{Available: false, Reason: KBUnavailableNotConfigured, CheckedAt: now}, true
-		}
-		if ue.Status == 0 || ue.Status >= 500 || ue.Status == 429 || ue.Status == 401 || ue.Status == 402 {
-			return KBAvailability{Available: false, Reason: KBUnavailableProviderFailed, CheckedAt: now}, true
-		}
-		// A 4xx about THIS input (the DLP credential block, a too-long
-		// text) is not a verdict on the provider.
-		return KBAvailability{}, false
+	if IsKBModelsUnavailable(err) {
+		return KBAvailability{Available: false, Reason: KBUnavailableModels, CheckedAt: now}, true
 	}
 	if isTimeout(err) || isDisconnect(err) {
-		return KBAvailability{Available: false, Reason: KBUnavailableProviderFailed, CheckedAt: now}, true
+		return KBAvailability{Available: false, Reason: KBUnavailableModels, CheckedAt: now}, true
 	}
+	// A 4xx about THIS input (an empty text) is not a verdict on kb-models.
 	return KBAvailability{}, false
 }

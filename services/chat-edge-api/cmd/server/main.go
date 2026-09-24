@@ -532,19 +532,23 @@ func main() {
 
 	// Knowledge base (RAG) pipeline.
 	//
-	// EmbeddingService reads OPENAI_API_KEY at construction time —
-	// when unset, the upload/index endpoints still respond but the
-	// indexer marks each document "failed" with a clear "configure
-	// OpenAI" error_message. We wire RAGService into messageSvc
-	// unconditionally so a future env-var flip enables retrieval
-	// without a service restart.
-	embeddingSvc := service.NewEmbeddingService(gateway)
-	// FIX130 C2 — every embedding outcome feeds the knowledge availability
+	// FIX132 B — the models run in kb-models on this machine (embeddings,
+	// rerank, Thai segmentation); no text leaves the host. A KB_MODELS_URL
+	// the guard refuses leaves the client nil: every KB call then answers
+	// "models_unavailable" and chat works as before without a knowledge base.
+	kbModels, kbErr := service.NewKBModelsClient(cfg.KBModelsURL)
+	if kbErr != nil {
+		slog.Error("knowledge base models refused; the knowledge base is unavailable", "err", kbErr)
+		kbModels = nil
+	} else {
+		slog.Info("knowledge base models", "url", kbModels.BaseURL())
+	}
+	// FIX130 C2 — every embeddings outcome feeds the knowledge availability
 	// verdict the clients read before offering a knowledge base.
-	kbAvailability := service.NewKnowledgeAvailability(embeddingSvc.Probe)
-	embeddingSvc.SetObserver(kbAvailability.Observe)
+	kbAvailability := service.NewKnowledgeAvailability(kbModels.Probe)
+	kbModels.SetObserver(kbAvailability.Observe)
 	knowledgeSvc := service.NewKnowledgeService(
-		knowledgeRepo, embeddingSvc, fileSvc, storageBackend,
+		knowledgeRepo, kbModels, fileSvc, storageBackend,
 		service.KnowledgeServiceKnobs{
 			// Reuse the file storage env knob's directory as a parent
 			// — KB blobs land under a sibling ``knowledge/`` tree
@@ -552,10 +556,10 @@ func main() {
 			// ignores StorageRoot in favour of the key prefix).
 			StorageRoot:      cfg.FileStorageRoot + "/knowledge",
 			MaxFileSizeBytes: 50 * 1024 * 1024,
-			EmbedBatchSize:   20,
+			EmbedBatchSize:   service.KBEmbedBatchMax,
 		},
 	)
-	ragSvc := service.NewRAGService(knowledgeRepo, embeddingSvc)
+	ragSvc := service.NewRAGService(knowledgeRepo, kbModels)
 	messageSvc.SetRAGReader(ragSvc)
 	// Phase 4 — project context (shared instructions + KB) inherited by
 	// member conversations at prompt-compile time.

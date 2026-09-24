@@ -41,13 +41,13 @@ type RetrievedChunk struct {
 }
 
 type RAGService struct {
-	repo     *repository.KnowledgeRepo
-	embedder *EmbeddingService
-	topK     int
-	thresh   float64
+	repo   *repository.KnowledgeRepo
+	models *KBModelsClient
+	topK   int
+	thresh float64
 }
 
-func NewRAGService(repo *repository.KnowledgeRepo, embedder *EmbeddingService) *RAGService {
+func NewRAGService(repo *repository.KnowledgeRepo, models *KBModelsClient) *RAGService {
 	topK := defaultRAGTopK
 	if v := os.Getenv("RAG_TOP_K"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -61,17 +61,17 @@ func NewRAGService(repo *repository.KnowledgeRepo, embedder *EmbeddingService) *
 		}
 	}
 	return &RAGService{
-		repo:     repo,
-		embedder: embedder,
-		topK:     topK,
-		thresh:   thresh,
+		repo:   repo,
+		models: models,
+		topK:   topK,
+		thresh: thresh,
 	}
 }
 
-// Enabled reports whether the RAG path can run. False when the
-// embedding provider isn't configured — the message service uses
-// this to short-circuit the retrieval branch.
-func (s *RAGService) Enabled() bool { return s.embedder.Enabled() }
+// Enabled reports whether the RAG path can run. False when kb-models
+// isn't configured — the message service uses this to short-circuit the
+// retrieval branch.
+func (s *RAGService) Enabled() bool { return s.models != nil }
 
 // QueryKnowledgeBase embeds “query“ and returns the top matching
 // chunks from the named KB. topK == 0 → service default.
@@ -79,20 +79,18 @@ func (s *RAGService) QueryKnowledgeBase(
 	ctx context.Context, tenantID, userID, kbID uuid.UUID, query string, topK int,
 ) ([]RetrievedChunk, error) {
 	if !s.Enabled() {
-		return nil, ErrEmbeddingDisabled
+		return nil, ErrKBModelsNotConfigured
 	}
 	if topK <= 0 {
 		topK = s.topK
 	}
-	// FIX 2 — the query embeds via the gateway, attributed to the querying
-	// end-user (falls back to the tenant marker when absent).
-	emb, err := s.embedder.GenerateEmbedding(
-		ctx, embeddingCallCtx(tenantID, userID), query,
-	)
+	// FIX132 B — the query embeds in kb-models on this machine.
+	_ = userID
+	embs, err := s.models.Embed(ctx, []string{query}, false, KBPriorityQuery)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.repo.SearchSimilarChunks(ctx, tenantID, kbID, emb, topK, s.thresh)
+	rows, err := s.repo.SearchSimilarChunks(ctx, tenantID, kbID, embs[0].Dense, topK, s.thresh)
 	if err != nil {
 		return nil, err
 	}

@@ -72,6 +72,14 @@ type Config struct {
 	// Upstream Gateway API base URL (no trailing slash).
 	GatewayAPIURL string `env:"GATEWAY_API_URL,required"`
 
+	// FIX132 B — the knowledge base's models (services/kb-models): embeddings,
+	// rerank and Thai segmentation on this machine. chat-edge calls it
+	// directly; the host must be a compose service name, loopback, an
+	// RFC 1918 address or host.docker.internal (anything else is refused and
+	// the knowledge base reports itself unavailable) — document text never
+	// leaves the host. docs/ops/knowledge-base.md.
+	KBModelsURL string `env:"KB_MODELS_URL" envDefault:"http://kb-models:8090"`
+
 	// Optional whole-request deadline for the gateway client (Batch A).
 	// Default 0 = unbounded: Client.Timeout covers the entire streamed
 	// body, so any non-zero value severs SSE generations that outlive

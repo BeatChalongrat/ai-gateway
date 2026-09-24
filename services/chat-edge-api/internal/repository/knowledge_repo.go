@@ -51,7 +51,7 @@ func (r *KnowledgeRepo) CreateKB(ctx context.Context, kb *model.KnowledgeBase) (
 		RETURNING id, is_active, document_count, total_chunks, created_at, updated_at
 	`
 	if kb.EmbeddingModel == "" {
-		kb.EmbeddingModel = "text-embedding-3-small"
+		kb.EmbeddingModel = "bge-m3" // FIX132 B — kb-models, on this machine
 	}
 	if kb.ChunkSize == 0 {
 		kb.ChunkSize = 512

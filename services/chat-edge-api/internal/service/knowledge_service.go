@@ -77,7 +77,7 @@ type KnowledgeServiceKnobs struct {
 
 type KnowledgeService struct {
 	repo      *repository.KnowledgeRepo
-	embedder  *EmbeddingService
+	models    *KBModelsClient
 	extractor TextExtractor
 	storage   storage.Backend
 	knobs     KnowledgeServiceKnobs
@@ -85,7 +85,7 @@ type KnowledgeService struct {
 
 func NewKnowledgeService(
 	repo *repository.KnowledgeRepo,
-	embedder *EmbeddingService,
+	models *KBModelsClient,
 	extractor TextExtractor,
 	store storage.Backend,
 	knobs KnowledgeServiceKnobs,
@@ -96,12 +96,12 @@ func NewKnowledgeService(
 	if knobs.MaxFileSizeBytes <= 0 {
 		knobs.MaxFileSizeBytes = 50 * 1024 * 1024 // 50 MB — bigger than conv-files
 	}
-	if knobs.EmbedBatchSize <= 0 {
-		knobs.EmbedBatchSize = 20
+	if knobs.EmbedBatchSize <= 0 || knobs.EmbedBatchSize > KBEmbedBatchMax {
+		knobs.EmbedBatchSize = KBEmbedBatchMax
 	}
 	return &KnowledgeService{
 		repo:      repo,
-		embedder:  embedder,
+		models:    models,
 		extractor: extractor,
 		storage:   store,
 		knobs:     knobs,
@@ -340,9 +340,9 @@ func (s *KnowledgeService) indexDocument(
 	ctx context.Context, kb *model.KnowledgeBase, doc *model.KnowledgeDocument,
 	userID uuid.UUID,
 ) error {
-	// FIX 2 — embeddings egress through the gateway, attributed to the
-	// uploading end-user (or the tenant marker for system reindex).
-	callCtx := embeddingCallCtx(doc.TenantID, userID)
+	// FIX132 B — embeddings come from kb-models on this machine; the text
+	// does not leave the host (kb_models_client.go).
+	_ = userID
 	fail := func(msg string) error {
 		e := msg
 		_ = s.repo.UpdateDocumentStatus(ctx, doc.ID, "failed", &e, 0, 0)
@@ -350,8 +350,8 @@ func (s *KnowledgeService) indexDocument(
 		return errors.New(msg)
 	}
 
-	if !s.embedder.Enabled() {
-		return fail("embedding provider not configured (set OPENAI_API_KEY)")
+	if s.models == nil {
+		return fail("the knowledge base models are not configured (KB_MODELS_URL)")
 	}
 
 	text, ok := s.extractor.ExtractTextForStorageKey(ctx, doc.StoragePath, doc.ContentType)
@@ -374,12 +374,13 @@ func (s *KnowledgeService) indexDocument(
 			end = len(chunks)
 		}
 		batch := chunks[i:end]
+		embs, err := s.models.Embed(ctx, batch, false, KBPriorityIndex)
+		if err != nil {
+			return fail("embedding failed: " + err.Error())
+		}
 		rows := make([]model.KnowledgeChunk, 0, len(batch))
 		for j, c := range batch {
-			emb, err := s.embedder.GenerateEmbedding(ctx, callCtx, c)
-			if err != nil {
-				return fail("embedding failed: " + err.Error())
-			}
+			emb := embs[j].Dense
 			rows = append(rows, model.KnowledgeChunk{
 				DocumentID:      doc.ID,
 				KnowledgeBaseID: kb.ID,

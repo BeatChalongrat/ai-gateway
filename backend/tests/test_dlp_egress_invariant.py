@@ -220,11 +220,14 @@ SANDBOX_SECCOMP = (
     REPO_ROOT / "services" / "chat-edge-api" / "sandbox" / "seccomp.json"
 )
 
-# FIX 2 — chat-edge's embeddings + voice paths (Go). These MUST route through
-# the gateway (which runs the DLP raw-egress gate), NOT call OpenAI directly.
-CHAT_EDGE_EMBEDDING_GO = (
+# FIX 2 — chat-edge's voice path (Go) MUST route through the gateway (which
+# runs the DLP raw-egress gate), NOT call OpenAI directly.
+# FIX132 B — chat-edge's knowledge-base embeddings no longer leave the host at
+# all: they run in kb-models on the compose network, through a client that
+# refuses any non-internal host (kb_models_client.go).
+CHAT_EDGE_KB_MODELS_GO = (
     REPO_ROOT / "services" / "chat-edge-api" / "internal" / "service"
-    / "embedding_service.go"
+    / "kb_models_client.go"
 )
 CHAT_EDGE_VOICE_GO = (
     REPO_ROOT / "services" / "chat-edge-api" / "internal" / "handler" / "voice.go"
@@ -247,34 +250,42 @@ _Q_NO_CHAT_EDGE = pytest.mark.quarantine(
 @_Q_NO_CHAT_EDGE
 def test_chat_edge_embeddings_voice_route_through_gateway_not_openai():
     """Drift guard for the FIX 2 bypass removal (Go side). chat-edge used to
-    call OpenAI embeddings/Whisper/TTS directly, bypassing DLP. It must now
-    forward to the gateway (which fronts the DLP raw-egress gate). If a future
-    edit re-adds a direct OpenAI call on these paths, this test reddens on the
+    call OpenAI embeddings/Whisper/TTS directly, bypassing DLP. Voice must
+    forward to the gateway (which fronts the DLP raw-egress gate).
+
+    FIX132 B — knowledge-base embeddings are not an egress channel any more:
+    they run in kb-models on this machine, and the client refuses any host
+    that is not a compose service / loopback / RFC 1918 address, at URL
+    validation and again at connect time, with no environment proxy. If a
+    future edit points the KB at a hosted provider, this test reddens on the
     Python side too — mirroring the sandbox pin above.
     """
-    emb = CHAT_EDGE_EMBEDDING_GO.read_text(encoding="utf-8")
+    kb = CHAT_EDGE_KB_MODELS_GO.read_text(encoding="utf-8")
     voice = CHAT_EDGE_VOICE_GO.read_text(encoding="utf-8")
 
     # No direct OpenAI egress on either path.
-    for src, name in ((emb, "embedding_service.go"), (voice, "voice.go")):
+    for src, name in ((kb, "kb_models_client.go"), (voice, "voice.go")):
         assert "api.openai.com" not in src, (
-            f"{name} references api.openai.com — the FIX 2 bypass removal "
-            "regressed (it must route through the gateway)."
+            f"{name} references api.openai.com — the no-egress guarantee "
+            "regressed."
         )
         assert "/audio/transcriptions" not in src
         assert "/audio/speech" not in src
 
-    # Both forward through the gateway client.
-    assert "s.gateway.GenerateEmbedding(" in emb, (
-        "embedding_service.go no longer forwards to the gateway"
-    )
+    # The KB client is internal-only: URL guard + connect-time guard + no proxy.
+    assert "func ValidateKBModelsURL(" in kb
+    assert "Control: internalOnlyDial" in kb
+    assert "Proxy:               nil" in kb
+
+    # Voice forwards through the gateway client.
     assert "h.gw.VoiceTranscribe(" in voice and "h.gw.VoiceSynthesize(" in voice, (
         "voice.go no longer forwards to the gateway"
     )
 
-    # The gateway client targets the gateway's whitelisted routes.
+    # The gateway client targets the gateway's whitelisted voice routes and
+    # no longer carries an embeddings call (FIX132 B).
     gw = CHAT_EDGE_GATEWAY_CLIENT_GO.read_text(encoding="utf-8")
-    assert 'g.BaseURL+"/embeddings"' in gw
+    assert 'g.BaseURL+"/embeddings"' not in gw
     assert 'g.BaseURL+"/voice/transcribe"' in gw
     assert 'g.BaseURL+"/voice/synthesize"' in gw
 

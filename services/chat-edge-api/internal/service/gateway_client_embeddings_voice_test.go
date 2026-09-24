@@ -15,10 +15,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// FIX 2 — chat-edge embeddings + voice must go THROUGH the gateway (which
-// runs the DLP raw-egress gate), never OpenAI directly. These tests prove the
-// client hits the gateway's whitelisted routes, carries the service JWT +
-// end-user identity headers, and parses the responses.
+// FIX 2 — chat-edge voice must go THROUGH the gateway (which runs the DLP
+// raw-egress gate), never OpenAI directly. These tests prove the client hits
+// the gateway's whitelisted routes, carries the service JWT + end-user
+// identity headers, and parses the responses.
+//
+// FIX132 B — knowledge-base embeddings no longer go through the gateway (or
+// anywhere off this machine): they run in kb-models on the compose network
+// (kb_models_client.go, kb_models_client_test.go).
 
 func newTestCallCtx() GatewayCallContext {
 	return GatewayCallContext{
@@ -47,55 +51,6 @@ func newVoiceEmbClient(base string) *GatewayClient {
 	// Service JWT secret set (FIX 1) so the bearer is a service JWT; internal
 	// secret set so the trusted-caller header is stamped.
 	return NewGatewayClient(base, "", testSvcSecret, 60*time.Second, "internal-secret")
-}
-
-func TestGenerateEmbedding_RoutesThroughGatewayWithIdentity(t *testing.T) {
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		assertTrustedHeaders(t, r)
-		var body struct {
-			Input string `json:"input"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body.Input != "hello world" {
-			t.Fatalf("input = %q", body.Input)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"embedding":[0.1,0.2,0.3]}]}`))
-	}))
-	defer srv.Close()
-
-	g := newVoiceEmbClient(srv.URL)
-	vec, err := g.GenerateEmbedding(context.Background(), newTestCallCtx(), "hello world")
-	if err != nil {
-		t.Fatalf("GenerateEmbedding: %v", err)
-	}
-	if gotPath != "/embeddings" {
-		t.Fatalf("path = %q, want /embeddings", gotPath)
-	}
-	if len(vec) != 3 || vec[0] != 0.1 {
-		t.Fatalf("vector = %v", vec)
-	}
-}
-
-func TestGenerateEmbedding_DLPBlockSurfacesAsGatewayError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Gateway DLP gate refuses a secret-bearing embedding.
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":{"code":"raw_egress_blocked"}}`))
-	}))
-	defer srv.Close()
-
-	g := newVoiceEmbClient(srv.URL)
-	_, err := g.GenerateEmbedding(context.Background(), newTestCallCtx(), "key sk-secret")
-	if err == nil {
-		t.Fatal("expected error on DLP block")
-	}
-	var gu *GatewayUnavailableError
-	if !asGatewayUnavailable(err, &gu) || gu.Status != http.StatusForbidden {
-		t.Fatalf("want GatewayUnavailableError 403, got %v", err)
-	}
 }
 
 func TestVoiceTranscribe_RoutesThroughGatewayMultipart(t *testing.T) {

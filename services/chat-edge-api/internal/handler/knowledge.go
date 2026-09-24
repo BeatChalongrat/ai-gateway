@@ -36,7 +36,7 @@ type KnowledgeHandler struct {
 	svc *service.KnowledgeService
 	rag *service.RAGService
 	// avail (FIX130 C2) answers GET /knowledge-bases/availability; nil =
-	// no embeddings wired, which is "not configured".
+	// no kb-models wired, which is "models_unavailable".
 	avail *service.KnowledgeAvailability
 	// maxMemMultipartMB — same value as file.go for parity.
 	maxMemMultipartMB int64
@@ -157,7 +157,7 @@ func (h *KnowledgeHandler) SetAvailability(a *service.KnowledgeAvailability) { h
 // says available, and the knowledge page says why when it does not.
 func (h *KnowledgeHandler) Availability(w http.ResponseWriter, r *http.Request) {
 	caller, _ := middleware.CallerFrom(r.Context())
-	v := service.KBAvailability{Available: false, Reason: service.KBUnavailableNotConfigured, CheckedAt: time.Now().UTC()}
+	v := service.KBAvailability{Available: false, Reason: service.KBUnavailableModels, CheckedAt: time.Now().UTC()}
 	if h.avail != nil {
 		v = h.avail.Status(r.Context(), caller.TenantUUID, caller.UserID)
 	}
@@ -450,9 +450,9 @@ func (h *KnowledgeHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	chunks, err := h.rag.QueryKnowledgeBase(r.Context(), caller.TenantUUID, caller.UserID, kbID, req.Query, req.TopK)
 	if err != nil {
-		if errors.Is(err, service.ErrEmbeddingDisabled) {
-			WriteError(w, http.StatusServiceUnavailable, "EMBEDDING_DISABLED",
-				"embedding provider not configured")
+		if service.IsKBModelsUnavailable(err) {
+			WriteError(w, http.StatusServiceUnavailable, "KB_MODELS_UNAVAILABLE",
+				"the knowledge base models are not available right now")
 			return
 		}
 		WriteError(w, http.StatusInternalServerError, CodeInternalError, "internal error")
