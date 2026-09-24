@@ -1805,6 +1805,7 @@ export const en = {
   "session.unreachable.body": "The sign-in service did not answer, so the chat could not open. You have not been signed out — this is a connection problem. Try again in a moment.",
   "session.unreachable.retry": "Try again",
   "session.unreachable.checking": "Checking…",
+  "session.checking": "Connecting to SRAN Chat…",
   // ── FIX130 C2 — knowledge bases that cannot work say so ──
   "kb.unavailable.title": "Knowledge bases can't be used right now",
   "kb.unavailable.embeddings_failed": "The service that reads and searches your documents (embeddings) is refusing requests — for example the provider's credit ran out or its key is invalid. Uploaded files cannot be indexed and chats cannot search a knowledge base. An administrator needs to fix the OpenAI key in the admin console first.",
@@ -3555,6 +3556,7 @@ const th: Record<DictKey, string> = {
   "session.unreachable.body": "ระบบยืนยันตัวตนไม่ตอบกลับ จึงยังเปิดแชทไม่ได้ คุณยังไม่ได้ถูกออกจากระบบ — เป็นปัญหาการเชื่อมต่อ ลองใหม่อีกครั้งในอีกสักครู่",
   "session.unreachable.retry": "ลองใหม่",
   "session.unreachable.checking": "กำลังตรวจสอบ…",
+  "session.checking": "กำลังเชื่อมต่อ SRAN Chat…",
   // ── FIX130 C2 ──
   "kb.unavailable.title": "ตอนนี้ยังใช้ฐานความรู้ไม่ได้",
   "kb.unavailable.embeddings_failed": "ระบบที่ใช้อ่านและค้นหาเอกสาร (embeddings) ปฏิเสธคำขออยู่ — เช่น เครดิตของผู้ให้บริการหมดหรือคีย์ไม่ถูกต้อง ไฟล์ที่อัปโหลดจึงทำดัชนีไม่ได้ และแชทจะค้นในฐานความรู้ไม่ได้ ผู้ดูแลระบบต้องแก้ไขคีย์ OpenAI ในหน้าแอดมินก่อน",

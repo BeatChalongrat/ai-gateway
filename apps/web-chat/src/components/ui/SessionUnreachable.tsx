@@ -8,9 +8,10 @@
 // screen says what happened, promises nothing it cannot keep, and retries
 // on a click or when the browser reports the network back.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { useT } from "@/lib/i18n";
 
 export function SessionUnreachable({ onRetry, checking = false }: { onRetry: () => void; checking?: boolean }) {
@@ -29,6 +30,29 @@ export function SessionUnreachable({ onRetry, checking = false }: { onRetry: () 
           {checking ? t("session.unreachable.checking") : t("session.unreachable.retry")}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** FIX132 N9 — the wait before the session check answers. It used to be a
+ *  lone spinner on white for up to 8 s (NIGHT3 f1-blank-3s): now the brand
+ *  shows at once and, after a moment, a line says what is happening (in a
+ *  live region that is mounted empty, so the line is announced). */
+export function SessionChecking({ delayMs = 1500 }: { delayMs?: number }) {
+  const t = useT();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setSlow(true), delayMs);
+    return () => window.clearTimeout(id);
+  }, [delayMs]);
+  return (
+    <div data-testid="session-checking" className="flex min-h-screen flex-col items-center justify-center gap-3 bg-bg-base px-4 text-text-secondary">
+      {/* The same mark the new-chat screen shows; decorative here. */}
+      <img src="/sran-logo.png" alt="" aria-hidden className="sran-logo h-16 w-auto select-none" draggable={false} />
+      <Spinner size={22} />
+      <p role="status" aria-live="polite" className="min-h-[1.25rem] text-sm">
+        {slow ? t("session.checking") : ""}
+      </p>
     </div>
   );
 }
