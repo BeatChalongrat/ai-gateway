@@ -45,7 +45,7 @@ type fix131Stack struct {
 	messages *service.MessageService
 }
 
-func newFix131Stack(t *testing.T) *fix131Stack {
+func newFix131PlanStack(t *testing.T) *fix131Stack {
 	t.Helper()
 	pool := testdb.Fresh(t)
 	cr := repository.NewConversationRepo(pool)
@@ -167,7 +167,7 @@ func fix131AssertNoRawError(t *testing.T, raw string) {
 }
 
 func TestFIX131_ExecuteNamesAPasswordProtectedSource(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	locked := s.file(t, "locked.pdf", "application/pdf", "failed", fix131Placeholder("locked.pdf", "encrypted"))
 	code, body, raw := s.executeDoc(t, map[string]any{"source_file_id": locked.ID.String(), "format": "docx", "plan": fix131DocPlan})
 	if code != http.StatusUnprocessableEntity || body.Error.Reason != "source_encrypted" {
@@ -180,7 +180,7 @@ func TestFIX131_ExecuteNamesAPasswordProtectedSource(t *testing.T) {
 }
 
 func TestFIX131_ExecuteNamesAScanWithNoText(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	scan := s.file(t, "scan.pdf", "application/pdf", "failed", fix131Placeholder("scan.pdf", "scanned"))
 	code, body, raw := s.executeExcel(t, map[string]any{"source_file_id": scan.ID.String(), "output_filename": "data.xlsx",
 		"plan": map[string]any{"operation": "create_workbook", "actions": []any{}}})
@@ -192,7 +192,7 @@ func TestFIX131_ExecuteNamesAScanWithNoText(t *testing.T) {
 
 func TestFIX131_ExecuteOnAnOldUnreadableRowStillSaysUnreadable(t *testing.T) {
 	// A row written before FIX131 carries no reason marker.
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	old := s.file(t, "old.pdf", "application/pdf", "failed", fix131Text("[File: old.pdf. The file could not be read (damaged or password-protected).]"))
 	code, body, raw := s.executeDoc(t, map[string]any{"source_file_id": old.ID.String(), "format": "pdf", "plan": fix131DocPlan})
 	if code != http.StatusUnprocessableEntity || body.Error.Reason != "source_unreadable" {
@@ -201,7 +201,7 @@ func TestFIX131_ExecuteOnAnOldUnreadableRowStillSaysUnreadable(t *testing.T) {
 }
 
 func TestFIX131_ExecuteWithTheGeneratorDownSaysSoWithoutInternals(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	pdf := s.file(t, "fixture.pdf", "application/pdf", "completed", fix131Text("--- Page 1 ---\nQuarterly"))
 	code, body, raw := s.executeDoc(t, map[string]any{"source_file_id": pdf.ID.String(), "format": "docx", "plan": fix131DocPlan})
 	if code != http.StatusServiceUnavailable || body.Error.Reason != "sandbox_unavailable" {
@@ -211,7 +211,7 @@ func TestFIX131_ExecuteWithTheGeneratorDownSaysSoWithoutInternals(t *testing.T) 
 }
 
 func TestFIX131_ExecuteOnAMissingSourceIsStillA404(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	code, body, _ := s.executeDoc(t, map[string]any{"source_file_id": uuid.NewString(), "format": "docx", "plan": fix131DocPlan})
 	if code != http.StatusNotFound || body.Error.Code != CodeNotFound || body.Error.Reason != "source_not_found" {
 		t.Fatalf("missing source: %d %+v", code, body.Error)

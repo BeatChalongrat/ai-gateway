@@ -76,7 +76,7 @@ func (s *fix131Stack) attach(t *testing.T, msg *model.Message, files ...*model.C
 const fix131PlanMessage = "สรุปเป็นไฟล์ Word ให้แล้ว\n\n:::doc-plan\n{\"format\":\"docx\",\"output_filename\":\"summary.docx\",\"actions\":[]}\n:::\n"
 
 func TestFIX131_AFailedExecutionSurvivesAReload(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	outcomes := service.NewMemoryPlanOutcomeStore()
 	s.docs.SetPlanOutcomeStore(outcomes)
 
@@ -138,7 +138,7 @@ func TestFIX131_AFailedExecutionSurvivesAReload(t *testing.T) {
 func TestFIX131_NoOwnerNothingKept(t *testing.T) {
 	// No message carries the plan's fence → no owner → nothing is kept
 	// (the same rule as the generated file's link).
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	outcomes := service.NewMemoryPlanOutcomeStore()
 	s.docs.SetPlanOutcomeStore(outcomes)
 	locked := s.file(t, "locked.pdf", "application/pdf", "failed", fix131Placeholder("locked.pdf", "encrypted"))
@@ -151,7 +151,7 @@ func TestFIX131_NoOwnerNothingKept(t *testing.T) {
 }
 
 func TestFIX131_GeneratedFileNamesWhatItWasMadeFrom(t *testing.T) {
-	s := newFix131Stack(t)
+	s := newFix131PlanStack(t)
 	userMsg := s.message(t, "user", "ทำเป็น Word")
 	pdf := s.file(t, "fixture.pdf", "application/pdf", "completed", fix131Text("Quarterly"))
 	docx := s.file(t, "draft.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "completed", fix131Text("Draft"))
