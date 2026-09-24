@@ -144,6 +144,11 @@ func BuildKnowledgeBlock(in KnowledgeBlockInput) (string, []RetrievedChunk) {
 // kbBlockHead is the block's opening tag and instructions.
 func kbBlockHead(name string, passages bool, in KnowledgeBlockInput) string {
 	var b strings.Builder
+	// The heading marks everything below as DATA for the gateway's
+	// system-prompt echo guard (prompt_echo_guard.py _DATA_HEADING_RE): a
+	// passage quoted word for word in the answer is a grounded answer, not
+	// an echo of instructions.
+	b.WriteString("## Retrieved knowledge base passages\n")
 	fmt.Fprintf(&b, "<knowledge_base name=%q>\n", name)
 	switch {
 	case passages:
