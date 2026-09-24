@@ -416,8 +416,11 @@ services:
   # postgres-webchat and the uploads volume; it reaches the base project's
   # `postgres` by service name over the shared ai-gateway_default network.
   #
-  # Default (no command): a loop that sleeps until BACKUP_AT (in TZ) and
-  # then dumps both databases (pg_dump -Fc) + tars the uploads volume into
+  # Default (no command): a loop that checks the wall clock every minute
+  # (FIX131: catches up after the PC slept or the container was down; one
+  # run per slot, retries with backoff, last_success.json / last_failure.json
+  # for ops-watch's "no fresh backup" alert) and at BACKUP_AT (in TZ)
+  # dumps both databases (pg_dump -Fc) + tars the uploads volume into
   # /backups/<YYYYMMDD_HHMMSS>/, writes manifest.json (sizes, sha256, row
   # counts of the key tables), restores every dump into a scratch database
   # on the same server and compares the counts (the DRILL: a backup that
@@ -463,6 +466,13 @@ services:
       ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
       ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM:-no-reply@sran.ai}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      # FIX131 D4 — empty = the real system; "test" labels [TEST] and sends
+      # only to ALERT_TEST_NTFY_URL. `backup notify …` is always a test fire.
+      ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
+      ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
+      # FIX131 B — a backup older than this is "not fresh" (ops-watch pages;
+      # this container then leaves the paging to it). Same value as ops-watch.
+      BACKUP_MAX_AGE_H: ${BACKUP_MAX_AGE_H:-26}
       # FIX130 E1 — the off-site copy (restic → an S3-compatible bucket; see
       # docs/ops/backups.md "Off-site copy"). All optional: an empty
       # repository = "offsite copy: not configured", the local backup runs as
