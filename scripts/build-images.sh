@@ -38,7 +38,7 @@
 #
 # Services: web-chat chat-edge-api gateway backend worker mcp-gateway
 #   ner-service dlp-sidecar rate-limiter log-worker mock-provider admin-ui
-#   portal sandbox
+#   portal sandbox backup
 #
 # Needs: git, tar, docker (with compose v2), python3 (or python).
 set -euo pipefail
@@ -119,11 +119,11 @@ for svc in "${SERVICES[@]}"; do
   args=()
   if [ "$svc" = "sandbox" ]; then
     # Not a compose service: built by `make sandbox-image` from this context.
-    context="$SRC/services/chat-edge-api"; dockerfile="sandbox/Dockerfile.sandbox"; image="ai-gateway-sandbox"
+    context="$SRC/services/chat-edge-api"; dockerfile="$context/sandbox/Dockerfile.sandbox"; image="ai-gateway-sandbox"
     args=(--build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED")
   else
     case "$svc" in
-      web-chat|chat-edge-api) file=docker-compose.webchat.yml ;;
+      web-chat|chat-edge-api|backup) file=docker-compose.webchat.yml ;;
       *) file=docker-compose.yml ;;
     esac
     fields=()
