@@ -334,6 +334,12 @@ export function Sidebar({
   }
 
   const isHidden = collapsed;
+  // FIX132 F16 — a sidebar that is off screen is `inert` (out of the Tab
+  // order and the accessibility tree): the closed drawer below md, the
+  // collapsed sidebar from md up. NIGHT3 j6: at 360 px, 12 of the first 23
+  // Tab stops were on the closed drawer (x = -298).
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+  const offScreen = isDesktop ? isHidden : !open;
   const userDisplay =
     user?.email || (user?.user_id ? user.user_id.slice(0, 8) : "Guest");
   const userInitial = (userDisplay || "?").charAt(0).toUpperCase();
@@ -348,6 +354,9 @@ export function Sidebar({
         onClick={onClose}
       />
       <aside
+        // React 18 renders `inert` only as a string ("" = present); the
+        // types say boolean, hence the cast.
+        {...(offScreen ? ({ inert: "" } as unknown as { inert: boolean }) : {})}
         className={`safe-top safe-bottom fixed left-0 top-0 z-40 flex h-full w-[85vw] max-w-[320px] flex-col border-r border-border-subtle bg-bg-sidebar transition-all duration-200 ease-out md:static md:w-[260px] md:max-w-none ${
           open ? "translate-x-0" : "-translate-x-full"
         } md:translate-x-0 ${
@@ -1560,4 +1569,18 @@ export function moveBetweenChats(e: React.KeyboardEvent<HTMLElement>): void {
   e.preventDefault();
   rows[next].focus();
   rows[next].scrollIntoView({ block: "nearest" });
+}
+
+/** FIX132 F16 — a media query as state (false until mounted; jsdom-safe). */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia(query);
+    const sync = () => setMatches(mql.matches);
+    sync();
+    mql.addEventListener?.("change", sync);
+    return () => mql.removeEventListener?.("change", sync);
+  }, [query]);
+  return matches;
 }
