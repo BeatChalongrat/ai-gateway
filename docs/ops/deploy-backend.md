@@ -148,8 +148,10 @@ What it does:
    running version (`alembic heads` of the new image ≠ `alembic current`) —
    re-run with `--allow-migrations` if the migration is expand-only (old code
    keeps working on the new schema), else `--stop-first`;
-5. calls `$DEPLOY_MAINTENANCE_CMD begin "<reason>" 10` if set (the hook for the
-   OPS lane's alert maintenance window) and `end` afterwards;
+5. opens the alert maintenance window for 10 minutes (`python -m app.ops.maintenance
+   start 10 "backend deploy <rev>"` inside ops-watch; `DEPLOY_MAINTENANCE_CMD` overrides
+   the command, `""` skips it) and closes it (`stop`) at the end, so the planned
+   restart never pages at top priority;
 6. tags the new image `ai-gateway-backend:latest` (what compose runs);
 7. **start-first**: `docker compose run -d --no-deps --use-aliases --name
    ai-gateway-backend-bridge backend` — the new image on the compose network

@@ -40,9 +40,10 @@
 #   --no-ops-watch         do not recreate ops-watch
 #   --dry-run              print what would run
 #
-# Maintenance window: set DEPLOY_MAINTENANCE_CMD to a command that takes
-# `begin <reason> <minutes>` / `end <reason>` (the OPS lane's alert maintenance
-# flag); it is called around the deploy. Unset = no call.
+# Maintenance window: around the deploy the script opens the alert maintenance
+# window (backend/app/ops/maintenance.py, run inside ops-watch) so a planned
+# restart never pages at top priority. DEPLOY_MAINTENANCE_CMD overrides the
+# command (it receives `start <minutes> "<reason>"` / `stop`); set it to "" to skip.
 #
 # Never touches the checkout's files; builds from `git archive` (build-images.sh).
 set -euo pipefail
@@ -149,10 +150,23 @@ if [ "$MODE" = start-first ] && [ -n "$OLD_CID" ] && [ "$ALLOW_MIGRATIONS" = 0 ]
 fi
 
 # --- maintenance window (OPS lane hook) -------------------------------------------
+# maint begin <reason> <minutes> | maint end <reason> -> the alert maintenance CLI
+# (backend/app/ops/maintenance.py: `start <minutes> "<reason>"` / `stop`). By default it
+# runs inside this project's ops-watch (same image and Redis as the pager);
+# DEPLOY_MAINTENANCE_CMD overrides the command, DEPLOY_MAINTENANCE_CMD="" turns it off.
 maint() {
-  [ -n "${DEPLOY_MAINTENANCE_CMD:-}" ] || return 0
-  # shellcheck disable=SC2086
-  run $DEPLOY_MAINTENANCE_CMD "$@" || log "maintenance hook '$1' failed (continuing)"
+  local -a cmd
+  if [ "${DEPLOY_MAINTENANCE_CMD+set}" = set ]; then
+    [ -n "$DEPLOY_MAINTENANCE_CMD" ] || return 0
+    # shellcheck disable=SC2206
+    cmd=($DEPLOY_MAINTENANCE_CMD)
+  else
+    cmd=("${DC[@]}" exec -T ops-watch python -m app.ops.maintenance)
+  fi
+  case "$1" in
+    begin) run "${cmd[@]}" start "$3" "$2" ;;
+    end) run "${cmd[@]}" stop ;;
+  esac || log "maintenance hook '$1' failed (continuing)"
 }
 
 # --- probe: how long did the gateway -> backend path fail? ------------------------
