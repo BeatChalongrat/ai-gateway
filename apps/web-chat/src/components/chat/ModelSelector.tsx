@@ -291,6 +291,11 @@ function ModelPicker({
 
   const loaded = useModelStore((s) => s.loaded);
   const loading = useModelStore((s) => s.loading);
+  // FIX132 F13 — a list that could not load says so (with a retry), and
+  // never tells the user to add provider keys for the service's own fault.
+  const loadFailed = useModelStore((s) => s.loadFailed);
+  const retryLoad = useModelStore((s) => s.loadModels);
+  const listUnknown = loadFailed || loading || !loaded;
 
   // Autofocus the search on desktop only — on touch this would pop the
   // on-screen keyboard over the bottom sheet, which is jarring.
@@ -427,11 +432,22 @@ function ModelPicker({
         {/* Loading / empty states. */}
         {noModels ? (
           <div className="px-3 py-6 text-center text-text-muted">
-            {loading || !loaded ? (
+            {(loading || !loaded) && !loadFailed ? (
               <span className="inline-flex items-center gap-2">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />
                 {t("common.loading")}
               </span>
+            ) : loadFailed ? (
+              <div role="alert" className="flex flex-col items-center gap-2">
+                <span>{t("model.loadFailed")}</span>
+                <button
+                  type="button"
+                  onClick={() => void retryLoad()}
+                  className="focus-ring rounded-md border border-border px-3 py-1 text-xs text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+                >
+                  {t("common.retry")}
+                </button>
+              </div>
             ) : (
               <>{t("model.empty")}</>
             )}
@@ -512,7 +528,7 @@ function ModelPicker({
                 ))
               ) : (
                 <p className="px-3 py-2 text-[11px] text-text-muted">
-                  {t("model.emptyKind")}
+                  {listUnknown ? (loadFailed ? t("model.loadFailedShort") : t("common.loading")) : t("model.emptyKind")}
                 </p>
               )}
             </Section>

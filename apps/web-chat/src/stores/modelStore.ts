@@ -31,6 +31,10 @@ interface ModelState {
   loaded: boolean;
   /** True while the loadModels promise is in-flight. */
   loading: boolean;
+  /** FIX132 F13 — the last load failed or never answered (the list shown,
+   *  if any, is the cached one). The picker says so and offers a retry
+   *  instead of blaming missing provider keys. */
+  loadFailed: boolean;
   /** Derived convenience flag — true whenever `selectedModelId`
    *  equals AUTO_MODEL_ID. Kept on state so subscribers can react
    *  without re-comparing strings. */
@@ -117,19 +121,41 @@ function readInitialSelection(): string | null {
   return readLocal(SELECTED_KEY);
 }
 
+/** FIX132 F13 — how long /models may take before the picker says it
+ *  cannot load the list (NIGHT3: a held request spun forever). Mutable
+ *  for tests. */
+export const MODELS_LOAD_TIMEOUT = { ms: 15_000 };
+
+function withinDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("models load timed out")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 export const useModelStore = create<ModelState>((set, get) => ({
   models: [],
   selectedModelId: readInitialSelection(),
   recentModelIds: [],
   loaded: false,
   loading: false,
+  loadFailed: false,
   autoMode: readAutoMode(),
 
   async loadModels() {
     if (get().loading) return;
     set({ loading: true });
     try {
-      const res = await api.models();
+      const res = await withinDeadline(api.models(), MODELS_LOAD_TIMEOUT.ms);
       const allowed = res.models.filter((m) => m.allowed);
       const stored = readLocal(SELECTED_KEY);
       const auto = readAutoMode();
@@ -147,6 +173,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
         recentModelIds: recents.filter((id) => allowed.some((m) => m.id === id)),
         loaded: true,
         loading: false,
+        loadFailed: false,
       });
     } catch (err) {
       // Network / 5xx — fall back to cached models so the UI still
@@ -173,6 +200,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
         ),
         loaded: true,
         loading: false,
+        loadFailed: true,
       });
     }
   },
