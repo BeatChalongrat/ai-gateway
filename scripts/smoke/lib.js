@@ -19,6 +19,7 @@ const { execFileSync, spawnSync } = require("node:child_process");
 const ROOT = path.resolve(__dirname, "..", "..");
 const TARGET = process.env.SMOKE_TARGET || "live";
 const FREE_MODEL = process.env.SMOKE_MODEL || "qwen3.8-27b-fp8";
+const FALLBACK_MODEL = process.env.SMOKE_FALLBACK_MODEL || "deepseek-v4-flash"; // the card rule: qwen first, deepseek when qwen fails
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const TARGETS = {
@@ -295,7 +296,7 @@ class Report {
 const ageText = (s) => (s < 90 ? `${Math.round(s)} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`);
 
 module.exports = {
-  ROOT, TARGET, T, API_BASE, FREE_MODEL, TS_USER, SMOKE_USER, wait, env, dotenv,
+  ROOT, TARGET, T, API_BASE, FREE_MODEL, FALLBACK_MODEL, TS_USER, SMOKE_USER, wait, env, dotenv,
   dockerExec, dockerLogs, dockerLabel, containerRunning, assertProject, gsql, csql,
   http, tryHttp, errText, cookieSession, bearerSession, mintPortalToken,
   edge, EDGE, newChat, deleteChat, forget, cleanup, turn, created, Report, ageText,

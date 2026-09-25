@@ -18,7 +18,7 @@ module.exports = async function api(R, session) {
   const key = L.TARGET === "live" ? (L.env("SMOKE_API_KEY") || L.env("GATEWAY_TEST_API_KEY")) : (L.env("SMOKE_TS_API_KEY") || L.env("TS_GATEWAY_TEST_API_KEY"));
   const keyName = L.TARGET === "live" ? "SMOKE_API_KEY / GATEWAY_TEST_API_KEY" : "SMOKE_TS_API_KEY / TS_GATEWAY_TEST_API_KEY";
   const noKey = { skip: true, detail: `no API key (${keyName} in .env)` };
-  const body = (n) => JSON.stringify({ model: L.FREE_MODEL, messages: [{ role: "user", content: `[SMOKE] ${n} ตอบว่า ok` }], stream: false, max_tokens: 256 });
+  const body = (n, model = L.FREE_MODEL) => JSON.stringify({ model, messages: [{ role: "user", content: `[SMOKE] ${n} ตอบว่า ok` }], stream: false, max_tokens: 256 });
   const call = async (bodyText, extra = {}) => {
     const r = await L.tryHttp(`${gw}/v1/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", ...extra }, body: bodyText, timeoutMs: 180000 });
     const c = r.json?.choices?.[0];
@@ -27,9 +27,18 @@ module.exports = async function api(R, session) {
 
   await R.run("api.completion", async () => {
     if (!key) return noKey;
-    const r = await call(body("completion"));
-    if (r.status !== 200) return { ok: false, detail: `${gw}/v1/chat/completions → ${r.status} ${r.code || r.text.slice(0, 120)}` };
-    return { ok: !!r.id && Array.isArray(JSON.parse(r.text).choices), detail: `200 id=${r.id} model=${r.model} finish=${r.finish} content="${r.content.slice(0, 24)}"${r.content ? "" : " (empty: the reasoning used the budget)"}` };
+    let r = await call(body("completion"));
+    // Card rule (FIX134): qwen first, deepseek-v4-flash when qwen fails. qwen is a
+    // reasoning model whose thinking shares the output budget (CLAUDE.md): running out
+    // of it is a model outcome, not a gateway defect, so the check asks the fallback
+    // model once — the budget and prompt stay as they are — and says so.
+    let note = "";
+    if (r.status !== 200 && /output_limit_reached|empty_completion|upstream_unavailable|PROVIDER_UNAVAILABLE/i.test(`${r.code} ${r.text}`)) {
+      note = ` (qwen: ${r.status} ${r.code || ""}; answered by ${L.FALLBACK_MODEL} per the card's model rule)`;
+      r = await call(body("completion", L.FALLBACK_MODEL));
+    }
+    if (r.status !== 200) return { ok: false, detail: `${gw}/v1/chat/completions → ${r.status} ${r.code || r.text.slice(0, 120)}${note}` };
+    return { ok: !!r.id && Array.isArray(JSON.parse(r.text).choices), detail: `200 id=${r.id} model=${r.model} finish=${r.finish}${note} content="${r.content.slice(0, 24)}"${r.content ? "" : " (empty: the reasoning used the budget)"}` };
   });
   await R.run("api.idempotency", async () => {
     if (!key) return noKey;
