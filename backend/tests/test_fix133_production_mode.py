@@ -32,6 +32,9 @@ def _prod_settings(**over) -> Settings:
         provider_key_master_key="b" * 64,
         resend_api_key="",
         auth_cookie_samesite="lax",
+        # FIX134 B2 — production refuses an http:// OAuth return_to origin.
+        portal_origin="https://localhost:3001",
+        admin_ui_origin="https://localhost:3000",
     )
     base.update(over)
     return Settings(**base)

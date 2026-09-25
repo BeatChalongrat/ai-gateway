@@ -682,6 +682,18 @@ def _isolate_session_local_to_integration_engine(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_moderation_breaker():
+    """FIX134 B4 — the moderation breaker and its once-only warnings are
+    process state: a 401 in one test must not switch moderation off for
+    the rest of the run."""
+    from app.services.moderation_service import reset_moderation_state
+
+    reset_moderation_state()
+    yield
+    reset_moderation_state()
+
+
+@pytest.fixture(autouse=True)
 def _reset_phase1_inmemory_caches():
     """Clear the Phase-1 per-process hot-path caches between tests.
 

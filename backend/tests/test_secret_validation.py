@@ -33,6 +33,9 @@ def _prod_settings(**overrides):
         # override these with empty/weak values.
         dlp_audit_key="a" * 64,
         provider_key_master_key="b" * 64,
+        # FIX134 B2 — production refuses an http:// OAuth return_to origin.
+        portal_origin="https://localhost:3001",
+        admin_ui_origin="https://localhost:3000",
     )
     defaults.update(overrides)
     return Settings(**defaults)
