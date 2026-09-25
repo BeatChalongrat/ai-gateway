@@ -2,8 +2,17 @@
 // Server-side rewrites need a URL reachable by the Next.js Node
 // process, not the browser. In docker-compose the backend lives at
 // http://backend:8080 (service DNS); bare-metal dev uses
-// http://localhost:8080. BACKEND_URL is injected by docker-compose
-// and falls back to localhost for `npm run dev` outside Docker.
+// http://localhost:8080 (the fallback, for `npm run dev` outside Docker).
+//
+// FIX134 A2 — BACKEND_URL is read when `next build` runs, NOT when the
+// server starts: with output 'standalone' the rewrite destinations are
+// written into the build (routes manifest). It therefore reaches the
+// image as a BUILD ARG (portal/Dockerfile, from compose's
+// build.args / PORTAL_BACKEND_URL); the runtime `environment:` twin in
+// compose serves only the code that reads process.env.BACKEND_URL per
+// request (lib/session-check.ts, the cookie-bridge route). An image built
+// without the arg rewrote to localhost:8080 inside the container
+// (/api/health 500, /api/portal/me 503, ECONNREFUSED in the portal log).
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8080";
 
 const nextConfig = {

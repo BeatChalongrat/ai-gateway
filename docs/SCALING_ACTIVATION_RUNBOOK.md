@@ -163,7 +163,10 @@ docker compose build admin-ui && docker compose --profile scaling up -d
 ```
 
 **Portal is safe** — it uses a server-side `/api` rewrite via the internal
-`BACKEND_URL`, not a baked browser URL.
+`BACKEND_URL`, not a baked browser URL. (Since FIX134 A2 that value is a
+build arg of the portal image — `PORTAL_BACKEND_URL`, default
+`http://backend:8080` — because `next build` bakes the rewrite target;
+rebuild the image if the backend moves off the compose network.)
 
 Add TLS by uncommenting the `443`/cert lines in `infra/nginx/nginx.conf` and the
 `nginx` service, and mounting `infra/nginx/certs/`.
