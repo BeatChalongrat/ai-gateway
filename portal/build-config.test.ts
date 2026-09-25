@@ -67,6 +67,14 @@ describe("next.config.js rewrites (A2)", () => {
   });
 });
 
+describe("next.config.js images (C4)", () => {
+  it("turn the image optimiser off: the standalone image has no sharp", () => {
+    const config = loadConfig(undefined);
+    expect(config.output).toBe("standalone");
+    expect(config.images?.unoptimized).toBe(true);
+  });
+});
+
 describe("Dockerfile (A2)", () => {
   const lines = readFileSync(DOCKERFILE_PATH, "utf8").split(/\r?\n/);
   const at = (re: RegExp) => lines.findIndex((l) => re.test(l));

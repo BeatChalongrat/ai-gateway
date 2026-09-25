@@ -17,6 +17,9 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8080";
 
 const nextConfig = {
   output: 'standalone',
+  // FIX134 C4 — no sharp in the standalone image, so the optimiser logged
+  // an error per <Image>; the portal serves a handful of static images.
+  images: { unoptimized: true },
   async rewrites() {
     return [
       {
