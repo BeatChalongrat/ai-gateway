@@ -240,6 +240,9 @@ services:
       # (dev) vs `requested_runtime=runsc boundary_in_effect=gvisor` (prod).
       # See docs/DEPLOY_SANDBOX.md.
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
+      # Agent Market (docs/agent-market/) — off means absent: no route, no pool.
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      - AGENT_MARKET_ALLOWED_EMAILS=${AGENT_MARKET_ALLOWED_EMAILS:-}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.
@@ -477,6 +480,7 @@ services:
       - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-https://localhost:8080}
       - NEXT_PUBLIC_PORTAL_URL=${WEB_CHAT_PORTAL_URL:-https://localhost:3001}
       - PORT=3002
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
     depends_on:
       - chat-edge-api
     # FIX126 O2. /api/version is a static route handler (no upstream calls),

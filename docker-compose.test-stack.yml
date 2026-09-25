@@ -610,7 +610,9 @@
         "CONTEXT_SUMMARY_MODEL": "${CONTEXT_SUMMARY_MODEL:-}",
         "UNATTACHED_FILE_SWEEP_MODE": "off",
         "UNATTACHED_FILE_TTL": "${UNATTACHED_FILE_TTL:-48h}",
-        "SANDBOX_ENABLED": "0"
+        "SANDBOX_ENABLED": "0",
+        "AGENT_MARKET_ENABLED": "${AGENT_MARKET_ENABLED:-false}",
+        "AGENT_MARKET_ALLOWED_EMAILS": "${AGENT_MARKET_ALLOWED_EMAILS:-}"
       },
       "healthcheck": {
         "interval": "10s",

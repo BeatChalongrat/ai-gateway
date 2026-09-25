@@ -1,0 +1,45 @@
+{
+  "schema_version": "agent.market.v1",
+  "id": "sran.financial-report",
+  "version": "1.0.0",
+  "name": "รายงานการเงิน + สไลด์ผู้บริหาร",
+  "name_en": "Financial Report + Executive Deck",
+  "short_name": "ปิดงบการเงิน",
+  "category": "finance",
+  "icon": "chart",
+  "summary": "อัปโหลดบัญชีแยกประเภทหรืองบกำไรขาดทุนเป็น Excel แล้วได้รายงานพร้อมสไลด์ผู้บริหาร คำนวณด้วยสคริปต์ ไม่ใช่ให้โมเดลบวกเลข ทุกตัวเลขอ้างอิงกลับไปที่ไฟล์ต้นทาง",
+  "entry": "AGENT.md",
+  "python_package": "financial_report",
+  "typical_run_seconds": 120,
+  "greeting": {
+    "text": "สวัสดีครับ ผมดูแลการปิดงบรายเดือน ส่งไฟล์มาได้เลย ผมต้องการ 3 อย่าง",
+    "role": "ผู้ช่วยปิดงบการเงิน",
+    "tagline": "รู้หน้าที่ของตัวเอง · อ่านอย่างเดียว · คำนวณด้วยสคริปต์"
+  },
+  "inputs": [
+    {"role": "primary", "label": "บัญชีแยกประเภทของเดือนที่จะปิด", "note": "จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)", "required": true, "accept": [".xlsx", ".csv"]},
+    {"role": "budget", "label": "งบประมาณของงวดนั้น", "note": "ถ้ามี จะได้เทียบส่วนต่างให้", "required": false, "accept": [".xlsx", ".csv"]},
+    {"role": "prior", "label": "เดือนก่อนหน้า", "note": "ถ้ามี จะได้ดูแนวโน้ม", "required": false, "accept": [".xlsx", ".csv"]}
+  ],
+  "outputs": [
+    {"format": "docx", "label": "รายงาน .docx", "default": true},
+    {"format": "pptx", "label": "สไลด์ .pptx", "default": true},
+    {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false},
+    {"format": "pdf", "label": "PDF", "default": false}
+  ],
+  "capabilities": {
+    "required": ["spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.report.docx", "deliverable.deck.pptx", "model.text"],
+    "optional": ["deliverable.table.xlsx", "deliverable.report.pdf", "document.read.pdf"]
+  },
+  "install": {
+    "defaults": {"formats": ["docx", "pptx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},
+    "questions": ["company", "theme", "formats", "currency", "mapping"]
+  },
+  "permissions": {
+    "default": "read_only",
+    "denied": ["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]
+  },
+  "cannot": "agent ตัวนี้ไม่เขียนกลับระบบบัญชี ไม่ส่งอีเมล และไม่โอนเงิน",
+  "limits": {"max_file_mb": 20, "max_files": 6},
+  "self_test": "self-test.json"
+}

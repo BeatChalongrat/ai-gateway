@@ -1,0 +1,8 @@
+{
+  "schema": "agent.market.theme.v1",
+  "note": "Package default look. The org theme (install) overrides any key; the registry keeps each org's versions.",
+  "presets": ["navy", "teal", "charcoal"],
+  "default": {"id": "navy", "fonts": {"thai": "Sarabun", "latin": "Sarabun"}, "cover": {"style": "band"}, "table": {"zebra": true}},
+  "report": {"sections": ["summary", "pl", "charts", "movements", "accounts", "exceptions", "insights", "assumptions", "sources", "citations", "about"]},
+  "deck": {"slides": ["title", "stats", "summary", "trend", "pl", "budget_variance", "composition", "movements", "exceptions", "next_steps", "assumptions"]}
+}

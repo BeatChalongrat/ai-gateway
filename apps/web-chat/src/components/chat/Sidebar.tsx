@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 
 import { useMemoryPendingStore } from "@/hooks/useMemoryPendingCount";
+import { AgentRailSection } from "@/features/agent-market/AgentRailSection";
 
 import { ConversationItem } from "./ConversationItem";
 import { VoiceSettingsModal } from "./VoiceSettingsModal";
@@ -451,6 +452,7 @@ export function Sidebar({
             </span>
             <span>{t("project.new")}</span>
           </button>
+          <AgentRailSection onNavigate={onClose} />
 
           {searchExpanded || search ? (
             <div className="relative">

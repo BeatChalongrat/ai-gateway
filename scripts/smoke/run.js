@@ -10,7 +10,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const L = require("./lib");
 
-const AREAS = ["tls", "apps", "api", "jobs", "alert", "desktop"];
+const AREAS = ["tls", "apps", "api", "jobs", "alert", "desktop", "agent_market"];
 
 async function main() {
   const t0 = Date.now();
@@ -42,6 +42,7 @@ async function main() {
       await require("./api")(R, session);
     }
     if (only.includes("jobs")) await require("./jobs")(R);
+    if (only.includes("agent_market")) await require("./agent_market")(R, session);
     if (only.includes("alert")) await require("./alert")(R);
     if (only.includes("desktop")) {
       if (desktopOn) await require("./desktop")(R);

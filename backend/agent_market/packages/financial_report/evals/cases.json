@@ -1,0 +1,716 @@
+{
+ "schema": "agent.market.eval.v1",
+ "package": "sran.financial-report",
+ "cases": [
+  {
+   "id": "clean_express_th",
+   "note": "Express-style Thai GL, title rows — the clean case: zero questions",
+   "files": [
+    "clean_express_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายนให้หน่อย",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "clean_xero_en",
+   "note": "English headers, real Excel dates, period from the data alone",
+   "files": [
+    "clean_xero_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "clean_with_prior",
+   "note": "variance vs prior period",
+   "files": [
+    "clean_express_sep.xlsx",
+    "clean_express_aug.xlsx"
+   ],
+   "message": "ปิดงบกันยายน เทียบกับเดือนก่อนด้วย",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "prior_pl": {
+     "revenue": "11534000.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5210400.00",
+     "gross_profit": "6323600.00",
+     "operating_expenses": "3570200.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "8821850.00",
+     "net_profit": "2715970.55",
+     "debit_total": "42791039.32",
+     "credit_total": "42791039.32",
+     "rows": 552
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "clean_with_budget",
+   "note": "budget file with monthly columns",
+   "files": [
+    "clean_express_sep.xlsx",
+    "budget_2569.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09",
+    "budget_revenue": "11950000.00"
+   }
+  },
+  {
+   "id": "clean_ytd_trend",
+   "note": "multi-month export: history feeds the trend, no question",
+   "files": [
+    "ytd_apr_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน 2569",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09",
+    "trend_months": 6
+   }
+  },
+  {
+   "id": "messy_subtotals_page_headers",
+   "note": "subtotal lines per document, repeated page headers, a grand total row",
+   "files": [
+    "messy_express_sep.xlsx"
+   ],
+   "message": "ปิดงบกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "trial_balance",
+   "note": "trial balance (account level, no dates)",
+   "files": [
+    "tb_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "pl_export",
+   "note": "P&L export with section and total rows",
+   "files": [
+    "pl_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "csv_cp874_signed_remembered",
+   "note": "Thai CSV in CP874 with signed amounts; the sign convention was remembered at install",
+   "files": [
+    "signed_cp874_sep.csv"
+   ],
+   "message": "",
+   "defaults": {
+    "dc_convention": {
+     "จำนวนเงิน": "positive_debit"
+    }
+   },
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "csv_cp874_signed_asks",
+   "note": "same file, nothing remembered: the sign convention is asked once",
+   "files": [
+    "signed_cp874_sep.csv"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "ambiguous_debit_credit"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "sap_s_h_indicator",
+   "note": "SAP S/H indicator",
+   "files": [
+    "sap_sh_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "ambiguous_debit_credit"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "sap_s_h_answered",
+   "note": "after the answer, numbers match",
+   "files": [
+    "sap_sh_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {
+    "ambiguous_debit_credit": {
+     "S": "debit",
+     "H": "credit"
+    }
+   },
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "dc_indicator",
+   "note": "the mockup's D/C column",
+   "files": [
+    "dc_indicator_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "ambiguous_debit_credit"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "unmapped_date_column",
+   "note": "'Trans Dt' is not a known date header",
+   "files": [
+    "unmapped_date_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "unmapped_column"
+    ]
+   }
+  },
+  {
+   "id": "unmapped_remembered",
+   "note": "the install mapping covers it: silence",
+   "files": [
+    "unmapped_date_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {
+    "mapping": {
+     "date": "Trans Dt",
+     "debit": "Dr Amt",
+     "credit": "Cr Amt",
+     "account_code": "Acct Code"
+    }
+   },
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "period_mixed_oct_rows",
+   "note": "12 October rows mixed into a September export",
+   "files": [
+    "period_mixed_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "period_mixed"
+    ],
+    "period": "2026-09",
+    "excluded_rows": 12
+   }
+  },
+  {
+   "id": "period_mixed_excluded",
+   "note": "answered: exclude → exact September numbers",
+   "files": [
+    "period_mixed_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน",
+   "defaults": {},
+   "answers": {
+    "period_mixed": "exclude"
+   },
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "period_mixed_remembered",
+   "note": "remembered policy applied silently and written as an assumption",
+   "files": [
+    "period_mixed_sep.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน",
+   "defaults": {
+    "answers": {
+     "period_mixed": "exclude"
+    }
+   },
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09",
+    "assumption_codes": [
+     "period_mixed"
+    ]
+   }
+  },
+  {
+   "id": "period_undetermined",
+   "note": "two full months, no month named anywhere",
+   "files": [
+    "aug_sep_mixed.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "period_undetermined"
+    ]
+   }
+  },
+  {
+   "id": "period_from_message",
+   "note": "the user named the month; August becomes history, not a question",
+   "files": [
+    "aug_sep_mixed.xlsx"
+   ],
+   "message": "ขอรายงานเดือนกันยายน 2569",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [],
+    "period": "2026-09",
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "trend_months": 2
+   }
+  },
+  {
+   "id": "currency_mixed",
+   "note": "ten USD rows among THB rows",
+   "files": [
+    "currency_mixed_sep.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "currency_mixed"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "wrong_document_type",
+   "note": "a customer list where a GL was needed",
+   "files": [
+    "customer_list.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "missing_file",
+     "wrong_document_type"
+    ]
+   }
+  },
+  {
+   "id": "bank_statement_only",
+   "note": "a bank statement parses but is not a ledger",
+   "files": [
+    "bank_statement.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "missing_file",
+     "wrong_document_type"
+    ]
+   }
+  },
+  {
+   "id": "missing_gl_budget_only",
+   "note": "only the budget arrived",
+   "files": [
+    "budget_2569.xlsx"
+   ],
+   "message": "",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "missing_file"
+    ]
+   }
+  },
+  {
+   "id": "unbalanced",
+   "note": "one output-VAT line of IV256909-0024 missing",
+   "files": [
+    "unbalanced_sep.xlsx"
+   ],
+   "message": "ปิดงบกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "unbalanced"
+    ],
+    "period": "2026-09",
+    "imbalance": "8527.45"
+   }
+  },
+  {
+   "id": "duplicate_suspect",
+   "note": "document PV256909-0034 posted twice",
+   "files": [
+    "duplicate_sep.xlsx"
+   ],
+   "message": "ปิดงบกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "duplicate_suspect"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "duplicate_excluded",
+   "note": "excluding the copy gives exact numbers",
+   "files": [
+    "duplicate_sep.xlsx"
+   ],
+   "message": "ปิดงบกันยายน",
+   "defaults": {},
+   "answers": {
+    "duplicate_suspect": "exclude"
+   },
+   "expect": {
+    "findings": [],
+    "pl": {
+     "revenue": "12480300.00",
+     "other_income": "3820.55",
+     "cost_of_sales": "5755800.00",
+     "gross_profit": "6724500.00",
+     "operating_expenses": "3940100.00",
+     "finance_costs": "41250.00",
+     "income_tax": "0.00",
+     "total_expenses": "9737150.00",
+     "net_profit": "2746970.55",
+     "debit_total": "46748763.11",
+     "credit_total": "46748763.11",
+     "rows": 556
+    },
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "materiality_exceeded",
+   "note": "one marketing entry of 4,500,000",
+   "files": [
+    "materiality_sep.xlsx"
+   ],
+   "message": "ปิดงบกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "materiality_exceeded"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "prior_period_mismatch",
+   "note": "the 'previous month' file is September 2568",
+   "files": [
+    "clean_express_sep.xlsx",
+    "prior_wrong_year.xlsx"
+   ],
+   "message": "ปิดงบกันยายน เทียบเดือนก่อน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "prior_period_mismatch"
+    ],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "batching_five_findings",
+   "note": "blocking + cosmetic findings in one pass (batching)",
+   "files": [
+    "five_findings.xlsx"
+   ],
+   "message": "ปิดงบเดือนกันยายน",
+   "defaults": {},
+   "answers": {},
+   "expect": {
+    "findings": [
+     "ambiguous_debit_credit",
+     "account_name_missing",
+     "currency_mixed",
+     "period_mixed",
+     "year_convention_mixed"
+    ],
+    "min_findings": 5
+   }
+  }
+ ]
+}

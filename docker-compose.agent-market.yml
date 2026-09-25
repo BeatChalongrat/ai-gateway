@@ -1,0 +1,104 @@
+# Agent Market — the execution plane, behind its own compose profile.
+#
+# NOT part of the default `up`: nothing here starts unless the profile is
+# named, and it runs as its own compose project so the core's tooling
+# (autoheal labels, ops-watch's project filter, build-images.sh) never sees
+# it. It joins the core network as an external one.
+#
+#   live:  docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market up -d
+#   test:  AM_NETWORK=sran-test_default AM_UPLOADS_VOLUME=sran-test_ts_chat_edge_uploads \
+#          docker compose -p sran-agent-market-test -f docker-compose.agent-market.yml --profile agent-market up -d
+#   stop:  docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market down
+#
+# Bulkheads (docs/agent-market/ARCHITECTURE.md):
+#   * own container with hard CPU/memory limits; every step runs in a fresh
+#     sandbox container (ai-gateway-sandbox, --network none, own limits);
+#   * own Postgres pool (AGENT_RUNNER_POOL_MAX_CONNS, application_name
+#     agent-runner) and its own queue lane (AGENT_RUNNER_SLOTS);
+#   * own model-gateway API key (AGENT_RUNNER_GATEWAY_API_KEY) — its own
+#     rate limit and spend, revocable on its own;
+#   * no autoheal label: a crash is restarted by `restart: unless-stopped`
+#     only, and the core's autoheal never touches it;
+#   * sees only the agent-market/ folder of the uploads volume (subpath).
+name: sran-agent-market
+
+services:
+  agent-market-init:
+    # Creates the agent-market/ folder the runner's subpath mount needs, then exits.
+    profiles: ["agent-market"]
+    image: alpine:3.20
+    command: ["sh", "-c", "mkdir -p /uploads/agent-market && echo ready"]
+    volumes:
+      - uploads:/uploads
+    restart: "no"
+    network_mode: none
+
+  agent-runner:
+    profiles: ["agent-market"]
+    image: ai-gateway-agent-runner:${AM_RUNNER_TAG:-latest}
+    container_name: ${AM_CONTAINER_NAME:-sran-agent-runner}
+    restart: unless-stopped
+    depends_on:
+      agent-market-init:
+        condition: service_completed_successfully
+    environment:
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      - AGENT_RUNNER_DATABASE_URL=postgres://chatedge:${WEBCHAT_POSTGRES_PASSWORD:-chatedge_pass}@postgres-webchat:5432/sran_ai?sslmode=disable
+      - AGENT_RUNNER_POOL_MAX_CONNS=${AGENT_RUNNER_POOL_MAX_CONNS:-4}
+      - AGENT_RUNNER_SLOTS=${AGENT_RUNNER_SLOTS:-1}
+      - AGENT_RUNNER_MODEL_CONCURRENCY=${AGENT_RUNNER_MODEL_CONCURRENCY:-1}
+      - AGENT_RUNNER_YIELD_ACTIVE_TURNS=${AGENT_RUNNER_YIELD_ACTIVE_TURNS:-1}
+      - AGENT_RUNNER_YIELD_MAX_SECONDS=${AGENT_RUNNER_YIELD_MAX_SECONDS:-300}
+      - AGENT_SANDBOX_CPUS=${AGENT_SANDBOX_CPUS:-1.0}
+      - AGENT_RUNNER_GATEWAY_URL=${AGENT_RUNNER_GATEWAY_URL:-http://gateway:8080/v1}
+      - AGENT_RUNNER_GATEWAY_API_KEY=${AGENT_RUNNER_GATEWAY_API_KEY:-}
+      - AGENT_RUNNER_YIELD_URL=${AGENT_RUNNER_YIELD_URL:-http://backend:8080/ready}
+      - AGENT_MARKET_MODEL_PRIMARY=${AGENT_MARKET_MODEL_PRIMARY:-qwen3.8-27b-fp8}
+      - AGENT_MARKET_MODEL_FALLBACK=${AGENT_MARKET_MODEL_FALLBACK:-deepseek-v4-flash}
+      - AGENT_MARKET_SELF_HOSTED_MODELS=${AGENT_MARKET_SELF_HOSTED_MODELS:-qwen3.8-27b-fp8}
+      - AGENT_MARKET_CREDITS_PER_USD=${USAGE_CREDITS_PER_USD:-3000000}
+      - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+      - FILE_STORAGE_ROOT=/app/data/uploads
+      - S3_BUCKET=${S3_BUCKET:-}
+      - S3_REGION=${S3_REGION:-}
+      - S3_ENDPOINT=${S3_ENDPOINT:-}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ai-gateway-sandbox:latest}
+      - SANDBOX_SECCOMP_PATH=/sandbox/seccomp.json
+      - SANDBOX_WORKDIR=/agent-sandbox-runs
+      - SANDBOX_HOST_WORKDIR=${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}
+      - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
+    volumes:
+      # The docker socket launches the per-step sandbox containers (the same
+      # privilege chat-edge holds for run_python); no model input reaches argv.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}:/agent-sandbox-runs
+      - ./services/chat-edge-api/sandbox/seccomp.json:/sandbox/seccomp.json:ro
+      - type: volume
+        source: uploads
+        target: /app/data/uploads/agent-market
+        volume:
+          subpath: agent-market
+    networks:
+      - core
+    ports:
+      - "127.0.0.1:${AM_RUNNER_PORT:-28095}:8095"
+    deploy:
+      resources:
+        limits:
+          cpus: "${AM_RUNNER_CPUS:-1.0}"
+          memory: "${AM_RUNNER_MEMORY:-768m}"
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 20s
+
+volumes:
+  uploads:
+    external: true
+    name: ${AM_UPLOADS_VOLUME:-ai-gateway_chat_edge_uploads}
+
+networks:
+  core:
+    external: true
+    name: ${AM_NETWORK:-ai-gateway_default}

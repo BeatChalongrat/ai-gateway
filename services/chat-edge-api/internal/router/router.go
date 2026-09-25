@@ -111,6 +111,9 @@ type Handlers struct {
 	// available (SANDBOX_ENABLED=1). Rate-limited (a sandbox run is
 	// expensive). nil → route not registered (404).
 	Code *handler.CodeHandler
+	// AgentMarket — Agent Market control plane (internal/agentmarket).
+	// Set only when AGENT_MARKET_ENABLED; nil → no route exists (404).
+	AgentMarket interface{ Routes(chi.Router) }
 }
 
 // New builds the full Chi router with all routes + middleware.
@@ -417,6 +420,9 @@ func New(
 				r.Post("/skills", h.Skills.Create)
 				r.Patch("/skills/{id}", h.Skills.SetEnabled)
 				r.Delete("/skills/{id}", h.Skills.Delete)
+			}
+			if h.AgentMarket != nil {
+				r.Route("/agent-market", h.AgentMarket.Routes)
 			}
 
 			// FIX13 — cloud scheduled tasks. Auth-gated; every op is

@@ -75,6 +75,7 @@ test alert to the `[TEST]` topic, one 429 loop of empty bodies.
 | `desktop.session` | the window is the signed-in page — or the shell's signed-out/signing-in view (SKIP: sign-in is Google-only in the system browser; the suite never starts it) | — |
 | `desktop.turn` | with a session: a `[SMOKE]` chat through the app's own session, one turn typed into the composer, the answer read back and the assistant row `completed`, deleted by id | session in the app |
 | `desktop.closed` | the app closed and port 9333 closed; relaunched without the port when it was running before | — |
+| `agent_market.flag`, `agent_market.web_flag`, `agent_market.runner` | AM1: with `AGENT_MARKET_ENABLED` off the feature is absent (chat-edge `/api/v1/agent-market/*` → 404, web-chat `/api/agent-market` → `enabled:false`, no runner container); with it on, availability 200 and the runner's `/healthz` (docs/agent-market/) | — |
 | `cleanup.chats` | every leftover chat deleted by id | — |
 
 Test stack: no front door, portal, admin-ui, web-chat, ops-watch or mcp-gateway — those

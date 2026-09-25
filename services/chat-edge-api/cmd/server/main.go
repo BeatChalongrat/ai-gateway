@@ -35,6 +35,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/auth"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/config"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/db"
@@ -813,6 +814,19 @@ func main() {
 	accountDeletion.SetRevoker(revocations)
 	if cfg.InternalServiceSecret == "" {
 		slog.Warn("INTERNAL_SERVICE_SECRET is empty: POST /internal/auth/revoke is not registered, so a Portal sign-out cannot end a chat-edge session before the token expires")
+	}
+
+	// Agent Market (AM1) — absent unless AGENT_MARKET_ENABLED: no route, no
+	// pool, no query. Its own small pool; a setup failure leaves chat as is.
+	if amCfg := agentmarket.ConfigFromEnv(); amCfg.Enabled {
+		amCtx, amCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if amAPI, err := agentmarket.NewAPI(amCtx, amCfg, cfg.DatabaseURL, storageBackend, slog.Default()); err != nil {
+			slog.Error("agent market not started", "err", err)
+		} else {
+			handlers.AgentMarket = amAPI
+			defer amAPI.Close()
+		}
+		amCancel()
 	}
 
 	r := router.New(cfg, handlers, corsOrigins, rdb, provisionSvc, revocations)
