@@ -36,7 +36,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\infra\\postgres\\init-chat-edge-db.sh",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix134\\infra\\postgres\\init-chat-edge-db.sh",
           "target": "/docker-entrypoint-initdb.d/02-chat-edge.sh",
           "type": "bind"
         },
@@ -45,7 +45,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix134\\services\\chat-edge-api\\migrations",
           "target": "/chat-edge-migrations",
           "type": "bind"
         }
@@ -268,6 +268,7 @@
         }
       },
       "environment": {
+        "ADMIN_UI_ORIGIN": "${ADMIN_UI_ORIGIN:-https://localhost:3000}",
         "ALERT_EMAIL_TO": "${TS_ALERT_EMAIL_TO:-}",
         "ALERT_ENVIRONMENT": "test",
         "ALERT_NTFY_TOKEN": "${TS_ALERT_NTFY_TOKEN:-}",
@@ -322,6 +323,7 @@
         "LOG_WORKER_GRPC_ADDRESS": "${LOG_WORKER_GRPC_ADDRESS:-log-worker:50052}",
         "LOG_WORKER_GRPC_TIMEOUT_SECONDS": "${LOG_WORKER_GRPC_TIMEOUT_SECONDS:-0.5}",
         "MASTER_ENCRYPTION_KEY": "${MASTER_ENCRYPTION_KEY:-dev-stable-key-change-in-prod}",
+        "MODERATION_MODE": "${MODERATION_MODE:-auto}",
         "NER_SERVICE_TIMEOUT_SECONDS": "${NER_SERVICE_TIMEOUT_SECONDS:-2.0}",
         "NER_SERVICE_URL": "${NER_SERVICE_URL:-http://ner-service:8001}",
         "OAUTH_GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID:-}",
@@ -329,8 +331,10 @@
         "OPENAI_API_KEY": "${OPENAI_API_KEY:-}",
         "OPENAI_IMAGE_TIMEOUT_SECONDS": "${OPENAI_IMAGE_TIMEOUT_SECONDS:-180}",
         "OPENROUTER_API_KEY": "${OPENROUTER_API_KEY:-}",
+        "PASSWORD_LOGIN_ALLOWED_EMAILS": "${PASSWORD_LOGIN_ALLOWED_EMAILS:-}",
         "PASSWORD_LOGIN_ENABLED": "${PASSWORD_LOGIN_ENABLED:-true}",
         "PORTAL_JWT_SECRET": "${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}",
+        "PORTAL_ORIGIN": "${PORTAL_ORIGIN:-${PORTAL_PUBLIC_URL:-https://localhost:3001}}",
         "PORTAL_PUBLIC_URL": "${PORTAL_PUBLIC_URL:-https://localhost:3001}",
         "POSTGRES_DB": "${POSTGRES_DB:-ai_gateway}",
         "POSTGRES_HOST": "postgres",
@@ -418,7 +422,7 @@
         "GATEWAY_MAX_BODY_BYTES": "${GATEWAY_MAX_BODY_BYTES:-26214400}",
         "PORT": "8080",
         "PYTHON_SERVICE_URL": "http://backend:8080",
-        "REDIS_URL": "redis://redis:6379/0"
+        "REDIS_URL": "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0"
       },
       "healthcheck": {
         "interval": "10s",
@@ -485,7 +489,7 @@
             "create_host_path": true
           },
           "read_only": true,
-          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway\\services\\chat-edge-api\\migrations",
+          "source": "C:\\Users\\Beat Beat\\Desktop\\ai-gateway-fix134\\services\\chat-edge-api\\migrations",
           "target": "/docker-entrypoint-initdb.d",
           "type": "bind"
         }
@@ -591,6 +595,7 @@
         "CHAT_EDGE_DRAIN_GRACE": "${CHAT_EDGE_DRAIN_GRACE:-10s}",
         "INTERRUPTED_TURN_SWEEP_INTERVAL": "${INTERRUPTED_TURN_SWEEP_INTERVAL:-60s}",
         "INTERRUPTED_TURN_MIN_AGE": "${INTERRUPTED_TURN_MIN_AGE:-2m}",
+        "PORTAL_PUBLIC_URL": "${PORTAL_PUBLIC_URL:-https://localhost:3001}",
         "STREAM_LEDGER_TTL_SECONDS": "${STREAM_LEDGER_TTL_SECONDS:-600}",
         "STREAM_LEDGER_MAX_EVENTS": "${STREAM_LEDGER_MAX_EVENTS:-8000}",
         "CLOUD_SCHEDULER_ENABLED": "false",

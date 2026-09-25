@@ -75,7 +75,7 @@ services:
     # --requirepass enforces AUTH on every connection — base parity with
     # docker-compose.prod.yml. REDIS_PASSWORD is required (set it in .env;
     # see .env.example). Every consumer passes the same secret: backend
-    # folds it into redis_url (config.py), rate-limiter via REDIS_URL,
+    # folds it into redis_url (config.py), rate-limiter and the Go gateway via REDIS_URL,
     # redis-exporter via REDIS_PASSWORD. No host port is published — the
     # session store / DLP token vault / rate-limit state stay on the
     # internal docker network only.
@@ -332,7 +332,9 @@ services:
       # the compose network at the container port.
       PYTHON_SERVICE_URL: http://backend:8080
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-ai_gateway}
-      REDIS_URL: redis://redis:6379/0
+      # FIX134 — Redis requires AUTH; without the password the gateway logged NOAUTH
+      # once and ran with its API-key cache off (every lookup went to Postgres).
+      REDIS_URL: "redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}@redis:6379/0"
       GATEWAY_AUTH_CACHE_TTL: ${GATEWAY_AUTH_CACHE_TTL:-30s}
       GATEWAY_MAX_BODY_BYTES: ${GATEWAY_MAX_BODY_BYTES:-26214400}
       APP_ENV: ${APP_ENV:-development}
