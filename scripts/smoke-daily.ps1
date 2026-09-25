@@ -34,7 +34,25 @@ if (-not $bash) { $cmd = Get-Command bash -ErrorAction SilentlyContinue; if ($cm
 
 $started = Get-Date
 $env:SMOKE_TARGET = "live"
-$env:SMOKE_DESKTOP = "1"
+# Desktop part: SMOKE_DAILY_DESKTOP in .env = auto (default) | 1 | 0. "auto" runs it only when the
+# app's own log says it holds a session: with no session every launch opens the Google sign-in in
+# the owner's browser by itself, which an unattended 06:30 run must not do.
+$daily = "auto"
+if (Test-Path $envFile) {
+  foreach ($line in Get-Content $envFile) {
+    if ($line -match '^\s*SMOKE_DAILY_DESKTOP\s*=\s*(.+?)\s*$') { $daily = $Matches[1].Trim().ToLower() }
+  }
+}
+$desktop = "0"
+if ($daily -eq "1") { $desktop = "1" }
+elseif ($daily -eq "auto") {
+  $shellLog = Join-Path $env:APPDATA "SranDesktop-Electron\logs\shell.log"
+  if (Test-Path $shellLog) {
+    $last = Get-Content $shellLog | Where-Object { $_ -match 'SIGNED IN|SESSION ROTATED|no stored session|stored session rejected|SIGN-IN STARTED|SIGNED OUT|signed-out' } | Select-Object -Last 1
+    if ($last -match 'SIGNED IN|SESSION ROTATED') { $desktop = "1" }
+  }
+}
+$env:SMOKE_DESKTOP = $desktop
 $env:SMOKE_OUT = $out
 $rc = 2
 if (-not $bash) {

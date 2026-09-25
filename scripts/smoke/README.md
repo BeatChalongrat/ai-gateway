@@ -95,3 +95,5 @@ ops-watch (`backend/app/ops/watch.py`, `classify_smoke`) pages incident `smoke` 
 when that file says `ok: false` (naming the failed checks) or is older than / missing for
 `OPS_WATCH_SMOKE_MAX_AGE_H` (26 h); `OPS_WATCH_SMOKE_FILE` overrides the path. The rule
 ships with the backend image, so it is live after the next backend deploy.
+
+**Desktop part of the daily run.** `SMOKE_DAILY_DESKTOP` in `.env`: `auto` (default) runs the desktop checks only when the app's own log (`%APPDATA%\SranDesktop-Electron\logs\shell.log`) shows it holds a session; with no session every launch of the app opens the Google sign-in in the owner's browser by itself, which an unattended 06:30 run must not do. `1` always, `0` never. The post-deploy gate runs the desktop part by hand (`SMOKE_DESKTOP=1`).
