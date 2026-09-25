@@ -231,3 +231,26 @@ describe("setCookiesOf", () => {
     ]);
   });
 });
+
+// FIX134 C1 — the liveness route the Caddy front door checks is public:
+// the middleware answers it without asking the backend, so a slow or down
+// backend never turns a health probe into a redirect (or a timeout).
+describe("liveness (/healthz)", () => {
+  beforeEach(() =>
+    backend({
+      me: () => {
+        throw new Error("/healthz must not check the session");
+      },
+      refresh: () => {
+        throw new Error("/healthz must not check the session");
+      },
+    }),
+  );
+
+  it("passes through with no cookie and no backend call", async () => {
+    const res = await middleware(req("/healthz"));
+    expect(location(res)).toBeNull();
+    expect(isNext(res)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

@@ -51,14 +51,21 @@
 # that closes its socket while it drains (gunicorn / chat-edge on SIGTERM)
 # therefore stops receiving new connections within health_interval while its
 # open streams finish undisturbed.
+#
+# FIX134 C1 — the checks are cheap and tolerant of a busy box: portal and
+# admin-ui answer /healthz (a route that touches no auth, database or
+# backend; before, /login was a full page render), the timeout is 5s and an
+# upstream is taken out only after two consecutive failures (max_fails 2),
+# because one slow answer during a deploy or the 03:15 backup used to log
+# "context deadline exceeded" and pull a healthy service out of rotation.
 (balanced) {
 	lb_policy least_conn
 	lb_try_duration 5s
 	lb_try_interval 250ms
 	health_interval 5s
-	health_timeout 3s
+	health_timeout 5s
 	fail_duration 15s
-	max_fails 1
+	max_fails 2
 	unhealthy_status 5xx
 	transport http {
 		dial_timeout 5s
@@ -115,7 +122,7 @@ https://:3001 {
 	import front
 	reverse_proxy portal:3001 {
 		import balanced
-		health_uri /login
+		health_uri /healthz
 	}
 }
 
@@ -123,6 +130,6 @@ https://:3000 {
 	import front
 	reverse_proxy admin-ui:3000 {
 		import balanced
-		health_uri /login
+		health_uri /healthz
 	}
 }

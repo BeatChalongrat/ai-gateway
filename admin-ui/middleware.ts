@@ -4,7 +4,10 @@ import type { NextRequest } from "next/server";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // /healthz (FIX134 C1): the liveness route the Caddy front door probes —
+  // answered without the admin_session cookie, so a probe is never a redirect.
   if (
+    pathname === "/healthz" ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||

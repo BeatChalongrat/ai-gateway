@@ -17,6 +17,20 @@ skip the proxy). Nothing else listens on the old plain ports: an old
 `http://localhost:3002` bookmark now fails (Caddy cannot serve http and https
 on one port), so use the https one.
 
+## Health checks
+
+The front door probes every upstream every 5 s (`(balanced)` snippet):
+web-chat `/api/version`, chat-edge `/health`, gateway `/__gw/health`, and
+since FIX134 C1 portal and admin-ui `/healthz` — a route in each Next app
+that answers `{"ok":true,"service":"…"}` from the Node process alone (no
+auth, no database, no backend call; the app's middleware lets it through
+without a session). Before, those two were probed on `/login`, a full page
+render (plus the portal's session check against the backend) with a 3 s
+timeout, which logged `context deadline exceeded` and pulled the service out
+of rotation whenever the box was busy (deploys, the 03:15 backup). The
+timeout is 5 s now and an upstream is marked down only after two consecutive
+failures (`max_fails 2`), for 15 s.
+
 ## The certificate
 
 `infra/caddy/certs/` (gitignored, this machine's own):
