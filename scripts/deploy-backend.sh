@@ -32,8 +32,10 @@
 #   --stop-first           no bridge (see above)
 #   --allow-migrations     start-first even though the new image migrates
 #   --probe-url <url>      polled every 0.25 s during the deploy to measure the
-#                          gap (default http://127.0.0.1:8080/live: the Go
-#                          gateway -> backend path); "" = no probe
+#                          gap (default http://127.0.0.1:28080/live: the Go
+#                          gateway -> backend path through the gateway's plain
+#                          loopback door; :8080 is the https front door since
+#                          FIX133 and answers 308 to plain http); "" = no probe
 #   -p <project>           compose project (default ai-gateway)
 #   -f <file>              compose file (repeatable; default: compose's own
 #                          default = docker-compose.yml + docker-compose.override.yml)
@@ -54,7 +56,7 @@ REV_IN=HEAD
 IMAGE_IN=""
 MODE=start-first
 ALLOW_MIGRATIONS=0
-PROBE_URL="http://127.0.0.1:8080/live"
+PROBE_URL="http://127.0.0.1:28080/live"  # FIX134: not :8080 (https front door, 308)
 PROJECT=ai-gateway
 FILES=()
 OPS_WATCH=1

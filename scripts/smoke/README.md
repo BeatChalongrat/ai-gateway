@@ -88,7 +88,7 @@ a token the FIX130 ts_lib way; the desktop is off (the installed app points at l
 `../ai-gateway-backups/daily`), the folder ops-watch mounts at `/backups`. Register it once:
 
 ```
-schtasks /Create /TN "SRAN smoke daily" /SC DAILY /ST 06:30 /F /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\Beat Beat\Desktop\ai-gateway\scripts\smoke-daily.ps1\""
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-register-task.ps1
 ```
 
 ops-watch (`backend/app/ops/watch.py`, `classify_smoke`) pages incident `smoke` (degraded)

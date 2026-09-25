@@ -15,7 +15,7 @@ import time
 
 import requests
 
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = "http://127.0.0.1:28080"  # the gateway's plain loopback door (8080 is https since FIX133)
 API_KEY = os.environ.get("AI_GATEWAY_API_KEY", "")
 if not API_KEY:
     sys.exit("AI_GATEWAY_API_KEY env var is required (a gw_ key from /api-keys).")

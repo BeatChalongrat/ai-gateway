@@ -3,10 +3,9 @@
 # at /backups — so the ops watcher pages when the suite is red or has not run for 26 h
 # (backend/app/ops/watch.py classify_smoke). The console output goes to smoke_last.log beside it.
 #
-# Register (once, from an elevated or the owner's own PowerShell; the task runs as the owner so
-# it can drive the installed desktop app):
-#   schtasks /Create /TN "SRAN smoke daily" /SC DAILY /ST 06:30 /F ^
-#     /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\Users\Beat Beat\Desktop\ai-gateway\scripts\smoke-daily.ps1\""
+# Register (once, as the owner, so it can drive the installed desktop app):
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-register-task.ps1
+# (Register-ScheduledTask, 06:30, StartWhenAvailable; a schtasks /TR string with this path broke once.)
 # Run by hand:  powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-daily.ps1
 # BACKUP_DIR is read from .env the way compose reads it (relative to the repo root; default
 # ../ai-gateway-backups/daily — docker-compose.webchat.yml).
