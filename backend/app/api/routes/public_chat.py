@@ -33,7 +33,7 @@ from app.api.deps import ResolvedApiKey, check_tenant_access, get_db_session, ge
 from app.core.db import get_async_db
 from app.core import error_catalog
 from app.core.config import settings
-from app.core.bounded_stream import bounded_sse
+from app.core.bounded_stream import ClosingStreamingResponse, bounded_sse  # FIX134 E1: every chat stream closes its body when it stops
 from app.core.inflight import AdmissionTimeout, registry as inflight_registry
 from app.core.chat_idempotency import ChatIdempotency, chat_idempotency
 from app.core.db import get_async_session_factory
@@ -491,7 +491,7 @@ def _queued_stream_response(
             if on_stream_end is not None:
                 await on_stream_end()
 
-    return StreamingResponse(body(), media_type="text/event-stream", headers=headers)
+    return ClosingStreamingResponse(body(), media_type="text/event-stream", headers=headers)
 
 @router.post(
     "/chat/completions",
@@ -1689,7 +1689,7 @@ async def _chat_completions_impl(
                 yield _cf
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(
+        return ClosingStreamingResponse(
             _calc_event_generator(),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Request-Id": ctx.request_id or ""},
@@ -4008,7 +4008,7 @@ async def _chat_completions_impl(
     }
     if _stream_fallback_used:
         _stream_headers["X-Gateway-Fallback"] = "true"
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         _billing_safe_stream(),
         media_type="text/event-stream",
         headers=_stream_headers,
