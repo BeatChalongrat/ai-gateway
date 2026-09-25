@@ -86,7 +86,13 @@ module.exports = async function desktop(R) {
 
   const wasRunning = running();
   const hadPort = await portOpen(PORT);
-  if (wasRunning && !hadPort) { kill(); await waitFor(async () => !running(), 15000); }
+  if (wasRunning && !hadPort) {
+    // CARD-RULES §4: never close the owner's app while it is in use — a turn, a stream, a tool
+    // or a composer line in its own log inside the last 10 minutes means SKIP, not taskkill.
+    const busy = logSince(new Date(Date.now() - 10 * 60_000).toISOString()).filter((l) => /turn|stream|message|tool|composer|send/i.test(l) && !SESSION_LINE.test(l));
+    if (busy.length) { R.skip("desktop.startup", `the app was used in the last 10 minutes (${busy.length} log lines); not closing it`); return; }
+    kill(); await waitFor(async () => !running(), 15000);
+  }
   const since = new Date(Date.now() - 1000).toISOString();
   if (!hadPort) launch([`--remote-debugging-port=${PORT}`]);
   let browser = null;
