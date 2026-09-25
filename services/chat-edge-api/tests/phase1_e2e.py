@@ -32,7 +32,7 @@ from urllib.parse import urljoin
 
 import requests
 
-BASE = os.environ.get("BASE", "http://localhost:4000")
+BASE = os.environ.get("BASE", "http://127.0.0.1:24000")
 API = urljoin(BASE, "/api/v1/")
 GATEWAY_UP = os.environ.get("GATEWAY_UP", "1") != "0"
 

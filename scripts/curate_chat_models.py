@@ -298,7 +298,7 @@ def main() -> int:
     mode.add_argument("--restore", metavar="SNAPSHOT")
     ap.add_argument("--from", dest="from_file", metavar="PROPOSAL_CSV")
     ap.add_argument("--probe-results", metavar="PROBE_JSON")
-    ap.add_argument("--base-url", default="http://localhost:8080")
+    ap.add_argument("--base-url", default="http://127.0.0.1:28080")
     args = ap.parse_args()
 
     password = os.environ.get("ADMIN_PASS")

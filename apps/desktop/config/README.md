@@ -1,7 +1,20 @@
 # Desktop runtime config
 
-`desktop.config.json` is the **dev** config (`npm start`): every origin is
-`localhost`. It is read from this folder only when running from the repo.
+`desktop.config.json` is the **default** config: `npm start` reads it from
+this folder, and `npm run dist` with no `--config` ships it beside the exe.
+Since FIX134 it is the **https** stack — every origin is `localhost` on the
+ports the Caddy front door serves (`docs/ops/tls.md`), and it pins this
+machine's local CA (`trustedCaFile` → `infra/caddy/certs/rootCA.pem`,
+gitignored, one per machine). The validator refuses to start or build without
+that file, so make the CA first (mkcert, see the TLS doc); a worktree or a
+fresh clone has none until you copy `infra/caddy/certs/` in or point
+`SRAN_DESKTOP_CONFIG` elsewhere.
+
+`desktop.config.plain-http.json` is the same stack over plain http, for a
+deployment that runs **without** Caddy (the TLS doc's rollback). It does not
+work against the FIX133 stack (the plain ports are Caddy's). Use it with
+`npm run dist -- --config config/desktop.config.plain-http.json`, or
+`SRAN_DESKTOP_CONFIG=<absolute path>` for `npm start`.
 
 ## The installed app reads a file beside the exe
 

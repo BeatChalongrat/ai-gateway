@@ -41,7 +41,7 @@ chk_redis()    { docker compose exec -T redis sh -c 'redis-cli -a "$REDIS_PASSWO
 # Backend (Python) is published on host :8081; it serves /health.
 chk_backend()  { curl -fsS http://localhost:8081/health; }
 # Go gateway is the public entrypoint on :8080; chi serves GET /__gw/health.
-chk_gateway()  { curl -fsS http://localhost:8080/__gw/health; }
+chk_gateway()  { curl -fsS http://127.0.0.1:28080/__gw/health; }
 
 rc=0
 poll "postgres (pg_isready)"          chk_postgres || rc=1

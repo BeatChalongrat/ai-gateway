@@ -11,7 +11,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$ROOT_DIR"
 
-export AI_GATEWAY_BASE_URL="${AI_GATEWAY_BASE_URL:-http://localhost:8080}"
+export AI_GATEWAY_BASE_URL="${AI_GATEWAY_BASE_URL:-http://127.0.0.1:28080}"
 export AI_GATEWAY_PG_DSN="${AI_GATEWAY_PG_DSN:-postgresql://postgres:postgres@localhost:5432/ai_gateway}"
 
 # The adapter base_url constants include a trailing ``/v1``; the

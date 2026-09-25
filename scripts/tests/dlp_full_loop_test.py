@@ -36,7 +36,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-GATEWAY = "http://localhost:8080"
+GATEWAY = "http://127.0.0.1:28080"
 ADMIN_KEY_ENV = "ADMIN_API_KEY"
 
 # A formatting task — much higher AI compliance than "please confirm".

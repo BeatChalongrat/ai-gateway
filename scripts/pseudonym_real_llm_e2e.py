@@ -9,7 +9,7 @@ import time
 
 import requests
 
-API = "http://localhost:8080/v1/chat/completions"
+API = "http://127.0.0.1:28080/v1/chat/completions"
 KEY = os.environ.get("GW_API_KEY")
 if not KEY:
     sys.exit("GW_API_KEY is not set — export a gateway API key before running this script")

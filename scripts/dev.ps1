@@ -40,9 +40,9 @@ switch ($Command) {
         docker compose up -d
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Write-Host ""
-        Write-Host "Backend:   http://localhost:8080/health"
-        Write-Host "Admin UI:  http://localhost:3000"
-        Write-Host "Portal:    http://localhost:3001"
+        Write-Host "Backend:   https://localhost:8080/health"
+        Write-Host "Admin UI:  https://localhost:3000"
+        Write-Host "Portal:    https://localhost:3001"
         Write-Host "Mock prov: http://localhost:9090/health"
         Write-Host "Postgres:  localhost:5432 (postgres/postgres)"
         Write-Host "Redis:     localhost:6379"

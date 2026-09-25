@@ -131,7 +131,7 @@ services:
       - APP_ENV=${APP_ENV:-development}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - CHAT_EDGE_ADMIN_API_KEY=${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
-      - CORS_ALLOW_ORIGINS=${CHAT_CORS_ORIGINS:-http://localhost:3002}
+      - CORS_ALLOW_ORIGINS=${CHAT_CORS_ORIGINS:-https://localhost:3002}
       - MAX_CONTEXT_MESSAGES=1000
       # FIX33 A-W2 — auto-compact at a threshold (default ON: 0.85 of the
       # messages budget triggers a state refresh + a head-preserving trim
@@ -450,14 +450,14 @@ services:
       context: ./apps/web-chat
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
+        NEXT_PUBLIC_API_URL: ${WEB_CHAT_API_URL:-https://localhost:4000/api/v1}
         # SSO Phase 1 (D1): the auth endpoints web-chat's browser bundle
         # talks to. Same build-time inlining rule as NEXT_PUBLIC_API_URL
         # — without these, non-localhost images bake in the localhost
         # fallbacks from lib/auth.ts and session lookup / silent refresh
         # / login redirect all break. Changing them requires a REBUILD.
-        NEXT_PUBLIC_GATEWAY_URL: ${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
-        NEXT_PUBLIC_PORTAL_URL: ${WEB_CHAT_PORTAL_URL:-http://localhost:3001}
+        NEXT_PUBLIC_GATEWAY_URL: ${WEB_CHAT_GATEWAY_URL:-https://localhost:8080}
+        NEXT_PUBLIC_PORTAL_URL: ${WEB_CHAT_PORTAL_URL:-https://localhost:3001}
         # (FIX20 §6.5: the desktop shell's hosted mode is detected at RUNTIME
         # from window.sranHost — no NEXT_PUBLIC_HOSTED build arg; one image
         # serves the browser and the Electron app.)
@@ -471,9 +471,9 @@ services:
     ports:
       - "127.0.0.1:23002:3002" # FIX133 A4 — 3002 is Caddy's (https, base file service `edge`)
     environment:
-      - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-http://localhost:4000/api/v1}
-      - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-http://localhost:8080}
-      - NEXT_PUBLIC_PORTAL_URL=${WEB_CHAT_PORTAL_URL:-http://localhost:3001}
+      - NEXT_PUBLIC_API_URL=${WEB_CHAT_API_URL:-https://localhost:4000/api/v1}
+      - NEXT_PUBLIC_GATEWAY_URL=${WEB_CHAT_GATEWAY_URL:-https://localhost:8080}
+      - NEXT_PUBLIC_PORTAL_URL=${WEB_CHAT_PORTAL_URL:-https://localhost:3001}
       - PORT=3002
     depends_on:
       - chat-edge-api

@@ -6,7 +6,7 @@ package service
 // round, proven against the running stack (gateway + mock provider + DB).
 //
 // Run:
-//   CLOUD_PROBE=1 GW_URL=http://localhost:8080/v1 GW_KEY=... GW_SECRET=... \
+//   CLOUD_PROBE=1 GW_URL=http://127.0.0.1:28080/v1 GW_KEY=... GW_SECRET=... \
 //     go test ./internal/service/ -run TestCloudTaskLiveFire -count=1 -v
 // Skips unless CLOUD_PROBE=1.
 

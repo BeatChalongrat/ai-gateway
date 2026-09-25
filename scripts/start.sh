@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # SRAN AI Gateway — Start all services (Linux/macOS)
+#
+# NOTE (FIX134): this is the pre-compose HOST-RUN shape — it starts uvicorn
+# on :8080 and `next dev` on :3000 itself. It cannot run beside the compose
+# stack: since FIX133 those ports are Caddy's https ports (docs/ops/tls.md),
+# so the bind fails and the health check below would answer for the stack,
+# not for this process. Use `make up` for the stack; keep this only for a
+# machine that runs no compose stack at all.
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -94,7 +101,7 @@ if echo "$HEALTH" | grep -q '"ok"'; then
   echo " Logs: logs/backend.log, logs/frontend.log"
   echo "======================================"
 else
-  echo "[!] Backend health check failed. Check logs/backend.log"
+  echo "[!] Backend health check failed. Check logs/backend.log (is :8080 held by the compose stack? docs/ops/tls.md)"
   echo "    Response: $HEALTH"
   exit 1
 fi

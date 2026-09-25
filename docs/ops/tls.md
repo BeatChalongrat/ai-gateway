@@ -56,12 +56,16 @@ after "Advanced → proceed", but the padlock is red.
 `scripts/dist.js`); `src/main/local-ca.ts` accepts a server certificate only
 when Chromium's sole complaint is "issuer unknown", the host is one of the
 app's own, and the leaf is signed by that root, valid now and names the host.
-Everything else keeps Chromium's verdict. Build the https app with
-`npm run dist -- --config config/desktop.config.local-tls.json`.
+Everything else keeps Chromium's verdict. Since FIX134 this is the app's
+default config (`apps/desktop/config/desktop.config.json`), so `npm run dist`
+with no `--config` builds the https app and `npm start` runs it; both need
+`infra/caddy/certs/rootCA.pem` to exist (the validator refuses the config
+otherwise). `config/desktop.config.plain-http.json` is the twin for a stack
+that runs without Caddy.
 
 For colleagues on the LAN (a pilot): they open `https://<hostname>:3002` and
 must import `rootCA.pem` once (the same `certutil` line); the desktop
-installer built from the local-tls config already carries it.
+installer built from the default config already carries it.
 
 ## Production mode
 

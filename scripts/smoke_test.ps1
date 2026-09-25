@@ -48,12 +48,12 @@ Write-Host " SRAN AI Gateway - Smoke Test" -ForegroundColor Cyan
 Write-Host "==============================" -ForegroundColor Cyan
 Write-Host ""
 
-Test-Endpoint "Backend health"   "http://localhost:8080/health"
-Test-Endpoint "Admin: tenants"   "http://localhost:8080/admin/tenants"   -CheckItems
-Test-Endpoint "Admin: models"    "http://localhost:8080/admin/models"    -CheckItems
-Test-Endpoint "Admin: providers" "http://localhost:8080/admin/providers" -CheckItems
-Test-Endpoint "Admin: policies"  "http://localhost:8080/admin/policies"  -CheckItems
-Test-Endpoint "Frontend"         "http://localhost:3000/login"
+Test-Endpoint "Backend health"   "http://127.0.0.1:28080/health"
+Test-Endpoint "Admin: tenants"   "http://127.0.0.1:28080/admin/tenants"   -CheckItems
+Test-Endpoint "Admin: models"    "http://127.0.0.1:28080/admin/models"    -CheckItems
+Test-Endpoint "Admin: providers" "http://127.0.0.1:28080/admin/providers" -CheckItems
+Test-Endpoint "Admin: policies"  "http://127.0.0.1:28080/admin/policies"  -CheckItems
+Test-Endpoint "Frontend"         "http://127.0.0.1:23000/login"
 
 Write-Host ""
 Write-Host "==============================" -ForegroundColor Cyan

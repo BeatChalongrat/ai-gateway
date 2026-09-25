@@ -37,10 +37,13 @@ rotate every `dev-...` value in `.env` and flip `APP_ENV=production`.
 
 ## 2. Bring up the stack
 
+The health loops below use the gateway's plain loopback door (`:28080`); the
+https port `:8080` is Caddy's since FIX133 (`docs/ops/tls.md`).
+
 ```bash
 docker compose up -d --build
 # Wait for backend to be healthy
-until curl -fsS http://localhost:8080/health > /dev/null; do sleep 2; done
+until curl -fsS http://127.0.0.1:28080/health > /dev/null; do sleep 2; done
 echo "backend ready"
 ```
 
@@ -86,7 +89,7 @@ the lifespan hook reloads from the fresh `model_configs`:
 
 ```bash
 docker compose restart backend
-until curl -fsS http://localhost:8080/health > /dev/null; do sleep 2; done
+until curl -fsS http://127.0.0.1:28080/health > /dev/null; do sleep 2; done
 ```
 
 ---

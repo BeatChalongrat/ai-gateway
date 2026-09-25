@@ -1,7 +1,7 @@
 """End-to-end live integration tests for the 6 DLP + routing fixes.
 
 These tests fire real HTTP requests at the running gateway
-(``http://localhost:8080`` by default) and inspect side effects in the
+(``http://127.0.0.1:28080`` by default) and inspect side effects in the
 shared Postgres database. Nothing is mocked at the test layer — the
 only redirect is the production-style ``PROVIDER_BASE_URL_OVERRIDES``
 mechanism that points provider adapters at the in-cluster mock LLM
@@ -32,7 +32,7 @@ import psycopg
 import pytest
 
 
-BASE_URL = os.environ.get("AI_GATEWAY_BASE_URL", "http://localhost:8080")
+BASE_URL = os.environ.get("AI_GATEWAY_BASE_URL", "http://127.0.0.1:28080")
 PG_DSN = os.environ.get(
     "AI_GATEWAY_PG_DSN",
     "postgresql://postgres:postgres@localhost:5432/ai_gateway",

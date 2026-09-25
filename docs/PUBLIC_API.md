@@ -5,8 +5,11 @@ The Secure AI Gateway provides an OpenAI-compatible API surface for routing LLM 
 ## Base URL
 
 ```
-http://localhost:8080
+https://localhost:8080
 ```
+
+`https` since FIX133 (Caddy front door with a local CA — see `docs/ops/tls.md`);
+scripts on the box may use the plain loopback door `http://127.0.0.1:28080` instead.
 
 ## Authentication
 

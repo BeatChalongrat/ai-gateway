@@ -29,7 +29,7 @@ PY="${LOADTEST_PYTHON:-python}"
 LOADTEST="${SCRIPT_DIR}/stream_chat_loadtest.py"
 
 MODEL="${1:-gpt-4o-mini}"
-URL="${LOADTEST_URL:-http://localhost:8080/v1/chat/completions}"
+URL="${LOADTEST_URL:-http://127.0.0.1:28080/v1/chat/completions}"
 API_KEY="${GATEWAY_API_KEY:-}"
 SECRET="${INTERNAL_SERVICE_SECRET:-}"
 PAYLOAD_KB="${PAYLOAD_SIZE_KB:-2}"

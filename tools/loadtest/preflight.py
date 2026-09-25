@@ -15,7 +15,7 @@ Exit code 0 = safe to proceed. Non-zero = a hard blocker was found.
 
 Example:
     python preflight.py \
-        --url http://localhost:8080/v1/chat/completions \
+        --url http://127.0.0.1:28080/v1/chat/completions \
         --api-key "$GATEWAY_API_KEY" \
         --internal-service-secret "$INTERNAL_SERVICE_SECRET" \
         --model gpt-4o-mini --allow-real-provider
@@ -293,7 +293,7 @@ def parse_args(argv):
     p.add_argument("--url",
                    default=os.environ.get(
                        "LOADTEST_URL",
-                       "http://localhost:8080/v1/chat/completions"))
+                       "http://127.0.0.1:28080/v1/chat/completions"))
     p.add_argument("--api-key", default=os.environ.get("GATEWAY_API_KEY", ""))
     p.add_argument("--internal-service-secret",
                    default=os.environ.get("INTERNAL_SERVICE_SECRET", ""))
@@ -304,7 +304,7 @@ def parse_args(argv):
                                           "http://localhost:8081/metrics"))
     p.add_argument("--gateway-metrics-url",
                    default=os.environ.get("GATEWAY_METRICS_URL",
-                                          "http://localhost:8080/__gw/metrics"))
+                                          "http://127.0.0.1:28080/__gw/metrics"))
     p.add_argument("--prometheus-url",
                    default=os.environ.get("PROMETHEUS_URL",
                                           "http://localhost:9091"))

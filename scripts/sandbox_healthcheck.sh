@@ -23,10 +23,10 @@ TIMEOUT="${HEALTH_TIMEOUT:-90}"
 
 DC="docker compose -p $PROJECT -f docker-compose.webchat.yml -f docker-compose.sandbox.yml"
 
-# 1. chat-edge serves GET /health at the router root (host :4000).
+# 1. chat-edge serves GET /health at the router root (host loopback door :24000; :4000 is Caddy https, docs/ops/tls.md).
 deadline=$(( $(date +%s) + TIMEOUT ))
-printf '[sandbox] waiting for chat-edge (:4000/health)'
-until curl -fsS http://localhost:4000/health >/dev/null 2>&1; do
+printf '[sandbox] waiting for chat-edge (:24000/health)'
+until curl -fsS http://127.0.0.1:24000/health >/dev/null 2>&1; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo " TIMEOUT (${TIMEOUT}s)"
     echo "[sandbox] FAILED: chat-edge did not become healthy. Check: $DC logs $SVC" >&2

@@ -26,8 +26,8 @@ from urllib.parse import urljoin
 import jwt as pyjwt
 import requests
 
-BACKEND = os.environ.get("BACKEND", "http://localhost:8080")
-CHAT_EDGE = os.environ.get("CHAT_EDGE", "http://localhost:4000")
+BACKEND = os.environ.get("BACKEND", "http://127.0.0.1:28080")
+CHAT_EDGE = os.environ.get("CHAT_EDGE", "http://127.0.0.1:24000")
 PG_CONTAINER = "ai-gateway-postgres-webchat"
 # Must match docker-compose.webchat.yml chat-edge-api env. Same value
 # the FastAPI ``backend`` service uses for ``portal_jwt_secret``.
