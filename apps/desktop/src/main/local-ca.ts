@@ -81,6 +81,43 @@ export function certificateTrustedByLocalCa(leafPem: string, hostname: string, t
   return matched !== undefined;
 }
 
+// FIX134 A3 — the main process's own https calls (sign-in ticket exchange,
+// refresh, models, turns: src/main/gateway-client.ts and portal-auth.ts use
+// the global `fetch`) run on Node's networking, not Chromium's. Node's fetch
+// only knows Node's bundled roots (plus NODE_EXTRA_CA_CERTS, read once at
+// process start), so with e57 every call to https://localhost:8080 failed
+// with UNABLE_TO_VERIFY_LEAF_SIGNATURE although the page in the window was
+// fine. The fix routes the app's OWN https hosts through Electron's
+// `net.fetch` — Chromium's stack, where the verifier above (and the OS store)
+// apply — and leaves every other URL on Node's fetch, so an external OAuth
+// provider or a public MCP server behaves exactly as before.
+
+type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+/** Which fetch serves `input`: Chromium's for the app's own https hosts, Node's for the rest. */
+export function fetchFor(input: string | URL | Request, trust: LocalCaTrust, nodeFetch: FetchLike, netFetch: FetchLike): FetchLike {
+  let url: URL;
+  try {
+    url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(String(input));
+  } catch {
+    return nodeFetch;
+  }
+  return url.protocol === "https:" && trust.hosts.has(url.hostname.toLowerCase()) ? netFetch : nodeFetch;
+}
+
+/**
+ * Replaces the main process's global `fetch` with the router above. Cookies
+ * are never attached by default (`credentials: "omit"`): these calls carry
+ * Bearer tokens, and the session cookies injected for the page must not
+ * leak into gateway calls on the same host.
+ */
+export function installNodeFetchTrust(trust: LocalCaTrust, netFetch: FetchLike, log: (line: string) => void, g: { fetch: FetchLike } = globalThis as unknown as { fetch: FetchLike }): void {
+  const nodeFetch = g.fetch;
+  const viaChromium: FetchLike = (input, init) => netFetch(input, { credentials: "omit", ...(init ?? {}) });
+  g.fetch = (input, init) => fetchFor(input, trust, nodeFetch, viaChromium)(input, init);
+  log(`main-process https to ${[...trust.hosts].sort().join(", ")} goes through Chromium's network stack (pinned CA); everything else stays on Node's fetch`);
+}
+
 /**
  * Installs the certificate verifier on the session. Only the
  * "issuer unknown" failure for one of the app's own hosts is re-examined

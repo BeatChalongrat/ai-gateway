@@ -374,6 +374,33 @@ that). The default `BACKUP_OFFSITE_DIR` (`../ai-gateway-backups/offsite`) is
 only a mount point: on this PC it is NOT off-site until it points at a synced
 folder.
 
+### Choosing the destination (FIX134 C5)
+
+Today `BACKUP_OFFSITE_DIR` is `../ai-gateway-backups/offsite`: a restic
+repository on the same disk as the live data. The copy, the drill and the
+restore all work (proven nightly), but the copy is not off-site until the
+owner picks one of these. Each one is a `.env` change plus one `up -d backup`;
+`offsite-check` proves it and `restore-offsite` restores from it.
+
+| option | what it needs from the owner | `.env` | notes |
+|---|---|---|---|
+| **1. Synced folder** (OneDrive / Google Drive / NAS share) | sign in to the sync client on this PC (the OneDrive folder exists but is empty: not signed in) and create the folder | `BACKUP_OFFSITE_DIR=C:/Users/<you>/OneDrive/sran-backups`, `BACKUP_OFFSITE_REPOSITORY=/offsite` | nothing else changes; the sync client must stay signed in; ransomware that reaches the folder reaches the copy (encrypted, not undeletable) |
+| **2. External drive** | plug in a drive that stays plugged in (none was present on 2026-09-25) | `BACKUP_OFFSITE_DIR=E:/sran-backups`, `BACKUP_OFFSITE_REPOSITORY=/offsite` | the copy fails (and pages after 48 h) while the drive is out; take it off-site by hand |
+| **3. Bucket** (S3-compatible: Backblaze B2, Cloudflare R2, AWS) | create a bucket and an access key with write + list + read | `BACKUP_OFFSITE_REPOSITORY=s3:https://<endpoint>/<bucket>/sran`, `BACKUP_OFFSITE_ACCESS_KEY_ID`, `BACKUP_OFFSITE_SECRET_ACCESS_KEY`, `BACKUP_OFFSITE_REGION` | the only option that survives this PC and the sync account being lost together; ~US$1/month for 300 MB |
+
+In every case `BACKUP_OFFSITE_PASSWORD` stays what it is (rotated in FIX133)
+and a copy of it lives off this PC. Switch:
+
+```
+# edit .env as in the table, then
+docker compose -p ai-gateway -f docker-compose.webchat.yml up -d backup
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup offsite-check
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup copy-offsite     # first copy now
+docker compose -p ai-gateway -f docker-compose.webchat.yml run --rm backup restore-offsite  # prove it
+```
+
+The pager's `Off-site backup copy is stale` rule (48 h) covers all three.
+
 ### Restore from the off-site copy (FIX133 C)
 
 ```

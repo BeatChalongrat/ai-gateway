@@ -600,11 +600,21 @@ services:
       # Dev: catalog advertises http://localhost:3200/mcp/servers/{id}.
       # Prod: set MCP_PUBLIC_BASE=https://sran.yourcompany.com and
       # MCP_PUBLIC_MODE=path → URLs become {base}/mcp/servers/{id} (nginx routes).
+      # FIX134 B3 — on this box the catalogue stays http://localhost:3200 on
+      # purpose: :3200 is published on 127.0.0.1 only (loopback, not behind the
+      # Caddy https front door), every call carries a portal JWT that this
+      # service verifies with the backend's secret (B1), and the desktop's
+      # tools sidecar that consumes these URLs speaks plain Node https with no
+      # local-CA trust. A LAN/prod deployment sets the two variables above.
       MCP_PUBLIC_BASE: ${MCP_PUBLIC_BASE:-http://localhost}
       MCP_PUBLIC_MODE: ${MCP_PUBLIC_MODE:-port}
       # Phase 7: per-user oauth2 connector instances. The gateway verifies
       # the caller's portal JWT (same HS256 secret the backend signs with)
       # and fetches the user's provider token from the backend broker.
+      # FIX134 B1 — this service is behind the "desktop" profile, so a plain
+      # `up -d` does not recreate it: after rotating PORTAL_JWT_SECRET run
+      # `docker compose -p ai-gateway --profile desktop up -d mcp-gateway`
+      # (the FIX133 cutover missed it and every new token failed here).
       PORTAL_JWT_SECRET: ${PORTAL_JWT_SECRET:-dev-stable-portal-key-change-in-prod}
       BACKEND_BASE: http://backend:8080
       # Slack workspace id for the slack connector (deployment-level).
