@@ -23,7 +23,7 @@ ENV_FILE="${1:-.env}"
 # sync with docker-compose*.yml. (SERVICE_JWT_SECRET / other :? prod vars have
 # safe dev defaults in the base file, so only the truly required-everywhere
 # ones are enforced here.)
-REQUIRED_KEYS=(REDIS_PASSWORD)
+REQUIRED_KEYS=(REDIS_PASSWORD WEBCHAT_REDIS_PASSWORD WEBCHAT_POSTGRES_PASSWORD)
 PLACEHOLDER_RE='^changeme'
 
 if [ ! -f "$ENV_FILE" ]; then

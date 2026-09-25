@@ -20,6 +20,8 @@ import (
 	"net/http"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/service"
+	"os"
+	"strings"
 )
 
 // AuthHandler is the legacy struct retained so main.go's wiring
@@ -35,6 +37,17 @@ func NewAuthHandler(a *service.AuthService, csrfSecret string, cookieSecure bool
 	return &AuthHandler{auth: a, csrfSecret: csrfSecret, cookieSecure: cookieSecure}
 }
 
+// portalPublicURL is where a caller of the retired auth endpoints is sent.
+// FIX134 D1 — from PORTAL_PUBLIC_URL (the same value the portal and the
+// backend use); the default is the https front door (FIX133), never the old
+// plain-http port.
+func portalPublicURL() string {
+	if v := strings.TrimSpace(os.Getenv("PORTAL_PUBLIC_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return "https://localhost:3001"
+}
+
 // gone writes the 410 envelope pointing callers at the Portal.
 func gone(w http.ResponseWriter, msg string) {
 	w.Header().Set("Content-Type", "application/json")
@@ -43,7 +56,7 @@ func gone(w http.ResponseWriter, msg string) {
 		"error": map[string]string{
 			"code":    "AUTH_MOVED",
 			"message": msg,
-			"portal":  "http://localhost:3001",
+			"portal":  portalPublicURL(),
 		},
 	})
 }
