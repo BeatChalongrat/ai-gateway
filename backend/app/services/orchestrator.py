@@ -117,7 +117,7 @@ def _restore_opted_out(payload) -> bool:
     return str(meta.get("dlp_response_restore", "")).lower() == "off"
 from app.services.keyword_router import KeywordRouter
 from app.services.keyword_rule_service import KeywordRuleService
-from app.services.moderation_service import ModerationService
+from app.services.moderation_service import ModerationService, resolve_moderation_key
 from app.services.semantic_router import (
     SemanticRouter,
     SemanticRouterDisabled,
@@ -790,17 +790,14 @@ class GatewayOrchestrator:
         # 4b2. Moderation (OpenAI /v1/moderations) — opt-in per policy profile.
         # Uses the OpenAI key directly (moderation is OpenAI-only), independent of
         # the target provider for this request. Fails open on any error.
+        # FIX134 B4 — no key when the OpenAI provider is off, MODERATION_MODE=off
+        # or the breaker is open (a 401/403 earlier); announced once, not per turn.
         if profile.moderation_enabled:
             moderation_input = " ".join(
                 m.get("content", "") for m in dict_messages
                 if isinstance(m.get("content"), str)
             )
-            openai_key = None
-            if session is not None:
-                openai_key = await self.provider_key_service.get_api_key_async(
-                    session, "openai"
-                )
-            openai_key = openai_key or settings.openai_api_key
+            openai_key = await resolve_moderation_key(session, self.provider_key_service)
             if openai_key and moderation_input:
                 t_mod = time.perf_counter()
                 mod_result = await self.moderation_service.check(

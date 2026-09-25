@@ -1253,18 +1253,16 @@ async def _chat_completions_impl(
     # 1c. Moderation (OpenAI /v1/moderations) — opt-in per policy profile.
     # Mirrors GatewayOrchestrator step 4b2. Runs on the post-DLP-mask
     # messages so the moderation endpoint never sees raw PII. Fails open
-    # on any error (timeout, bad key, parse error).
+    # on any error (timeout, bad key, parse error). FIX134 B4 — no key when
+    # the OpenAI provider is off, MODERATION_MODE=off or the breaker is open.
     if profile.moderation_enabled:
+        from app.services.moderation_service import resolve_moderation_key
+
         moderation_input = " ".join(
             m.content for m in messages_to_send
             if isinstance(m.content, str)
         )
-        openai_key = None
-        if session is not None:
-            openai_key = await orchestrator.provider_key_service.get_api_key_async(
-                session, "openai"
-            )
-        openai_key = openai_key or settings.openai_api_key
+        openai_key = await resolve_moderation_key(session, orchestrator.provider_key_service)
         if openai_key and moderation_input:
             t_mod = time.perf_counter()
             mod_result = await orchestrator.moderation_service.check(

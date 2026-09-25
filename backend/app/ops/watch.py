@@ -789,6 +789,24 @@ def tick(state: AlertState, cfg: dict) -> list[Decision]:
     return decisions
 
 
+def log_email_channel_state() -> str | None:
+    """FIX134 C3 — one line at start when ALERT_EMAIL_TO is set but this
+    process cannot send mail (EMAIL_DELIVERY=disabled, or no Resend key):
+    the email channel is off, so the pager uses the other channels and
+    never schedules an email retry. Returns the reason, None when on."""
+    from app.core.config import settings
+    from app.services.alert_channels import email_channel_off_reason
+
+    if not (settings.alert_email_to or "").strip():
+        return None
+    reason = email_channel_off_reason()
+    if reason:
+        _log("alert_email_channel_off", reason=reason,
+             note="ALERT_EMAIL_TO is set but mail cannot leave this process (EMAIL_DELIVERY / RESEND_API_KEY): "
+                  "the email channel is off; alerts go to the other configured channels")
+    return reason
+
+
 def main() -> int:
     from app.core.config import settings
 
@@ -846,6 +864,7 @@ def main() -> int:
              note="Redis did not answer: incidents are kept in this process (and the state file) until it does")
     _log("ops_watch_start", channels=configured_channels(), pager_store=store_ok,
          **{k: (v if k != "pg_dsns" else [n for n, _ in v]) for k, v in cfg.items() if k != "sock"})
+    log_email_channel_state()
     if os.environ.get("OPS_WATCH_COOLDOWN"):
         _log("ops_watch_note", note="OPS_WATCH_COOLDOWN is retired (FIX131): the pager re-pages on escalation "
                                     "or after ALERT_REMINDER_SECONDS / ALERT_REMINDER_HIGH_SECONDS")

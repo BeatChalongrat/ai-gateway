@@ -168,11 +168,23 @@ def configured_channels(test: bool = False) -> list[str]:
     out = []
     if (settings.alert_ntfy_url or "").strip():
         out.append("ntfy")
-    if (settings.alert_email_to or "").strip():
+    # FIX134 C3 — email only when mail can actually leave this process:
+    # ALERT_EMAIL_TO with EMAIL_DELIVERY=disabled (or no Resend key) used to
+    # make every alert log a Resend failure and a skipped retry.
+    if (settings.alert_email_to or "").strip() and email_channel_off_reason() is None:
         out.append("email")
     if (settings.alert_webhook_url or "").strip():
         out.append("webhook")
     return out
+
+
+def email_channel_off_reason() -> str | None:
+    """FIX134 C3 — why ALERT_EMAIL_TO cannot be honoured right now
+    (``email_delivery_disabled`` / ``no_resend_api_key``), or None when the
+    sender can deliver. The one definition lives with the sender."""
+    from app.services.email.sender import delivery_unavailable_reason
+
+    return delivery_unavailable_reason()
 
 
 def _header_value(text: str) -> str:

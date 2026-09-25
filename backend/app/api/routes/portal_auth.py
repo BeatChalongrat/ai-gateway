@@ -9,6 +9,7 @@ response is constant.
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -52,6 +53,7 @@ from app.services.portal.oauth_flow_service import (
 
 
 router = APIRouter()
+logger = structlog.get_logger(__name__)
 
 
 OAUTH_PROVIDERS = {"google", "github"}
@@ -84,20 +86,37 @@ _portal_oauth_verify_rate_limiter: LoginRateLimiter | None = None
 _portal_oauth_ticket_rate_limiter: LoginRateLimiter | None = None
 
 
-def _require_password_login_enabled() -> None:
+def _mask_email(email: str) -> str:
+    """``smoke@gbtech.co.th`` → ``sm***@gbtech.co.th`` (log-safe)."""
+    local, _, domain = email.partition("@")
+    return f"{local[:2]}***@{domain}" if domain else f"{local[:2]}***"
+
+
+def _require_password_login_enabled(email: str | None = None) -> None:
     """Phase 0 kill-switch for the email+password surface.
 
     Enforced server-side (hiding the form in the frontend is not a
     gate). 403 keeps the routes discoverable-but-closed; the code path
     stays intact for a future re-enable via PASSWORD_LOGIN_ENABLED.
+
+    FIX134 B5 — ``email`` (the login route only) may be on
+    PASSWORD_LOGIN_ALLOWED_EMAILS: that address passes while the switch
+    is off (the smoke-test account; never a real person), logged once
+    per login with the address masked. Signup and the password-reset
+    routes pass no email and stay closed for everyone.
     """
     from app.core.config import settings
 
-    if not settings.password_login_enabled:
-        raise AuthorizationError(
-            "Password login is disabled. Sign in with Google instead.",
-            code="password_login_disabled",
-        )
+    if settings.password_login_enabled:
+        return
+    normalised = (email or "").strip().lower()
+    if normalised and normalised in settings.password_login_allowed_emails_set:
+        logger.info("password_login_allowlisted", email=_mask_email(normalised))
+        return
+    raise AuthorizationError(
+        "Password login is disabled. Sign in with Google instead.",
+        code="password_login_disabled",
+    )
 
 
 def get_portal_login_rate_limiter() -> LoginRateLimiter:
@@ -334,7 +353,7 @@ def login(
     session: Session = Depends(get_db_session),
     rate_limiter: LoginRateLimiter = Depends(get_portal_login_rate_limiter),
 ):
-    _require_password_login_enabled()
+    _require_password_login_enabled(body.email)
     # Phase 13 D — mirror of the admin login gate (admin_session.py):
     # check BEFORE bcrypt so attackers can't spend our CPU, record the
     # outcome after. Keyed on the normalised email + client IP.
@@ -699,12 +718,10 @@ def oauth_start(
     from app.core.config import settings
     from app.services.portal.oauth_flow_service import _provider_config
 
-    # Whitelist the portal's own origin; extend via config later.
-    allowed = [
-        getattr(settings, "portal_origin", "") or "",
-        getattr(settings, "admin_ui_origin", "") or "",
-    ]
-    allowed = [o for o in allowed if o]
+    # FIX134 B2 — PORTAL_ORIGIN / ADMIN_UI_ORIGIN as the browser reaches
+    # the UIs (https behind Caddy since FIX133; validate_secrets refuses
+    # an http:// entry outside development).
+    allowed = settings.oauth_return_to_origins()
     try:
         return_to = validate_return_to(return_to, allowed_origins=allowed)
     except InvalidReturnUrl as exc:

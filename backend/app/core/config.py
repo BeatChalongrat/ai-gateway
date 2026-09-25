@@ -1,6 +1,6 @@
 import warnings
 from decimal import Decimal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -160,8 +160,15 @@ class Settings(BaseSettings):
     session_cookie_name: str = "admin_session"
     session_idle_ttl_seconds: int = 86400  # 24h sliding
     session_absolute_ttl_seconds: int = 604800  # 7d hard cap
-    admin_ui_origin: str = "http://localhost:3001"
-    portal_origin: str = "http://localhost:3010"
+    # FIX134 B2 — the OAuth ``return_to`` allowlist (portal_auth.oauth_start)
+    # as the browser sees the two UIs: ADMIN_UI_ORIGIN / PORTAL_ORIGIN. The
+    # defaults are the dev stack's plain-http ports (3000 = admin-ui, 3001 =
+    # portal); compose derives them from the public URLs, and outside
+    # development validate_secrets refuses an http:// value here — since
+    # FIX133 the UIs are served over https behind Caddy, and an http origin
+    # in this list rejected every https return_to (invalid_return_to).
+    admin_ui_origin: str = "http://localhost:3000"
+    portal_origin: str = "http://localhost:3001"
 
     # Server-side OAuth (Phase 2A Commit 4, P0-8 fix). Client secrets
     # stay on the backend; the portal never touches them. Empty values
@@ -186,6 +193,12 @@ class Settings(BaseSettings):
     # POST /portal/auth/login and /signup return 403 password_login_disabled
     # while the code stays in place for a future re-enable.
     password_login_enabled: bool = True
+    # FIX134 B5 — addresses that may still sign in by password while the
+    # switch above is off (PASSWORD_LOGIN_ALLOWED_EMAILS, comma-separated,
+    # case-insensitive). Meant for the smoke-test account only, never a real
+    # person: everyone else stays Google-only. Login only — signup and the
+    # password-reset routes keep the 403 for every address.
+    password_login_allowed_emails: str = ""
     # Optional UX hint only: forwarded as the ``hd`` param on the Google
     # authorize URL so the account chooser pre-filters to the workspace
     # domain. NOT a security control — a forged ``hd`` never bypasses the
@@ -237,6 +250,12 @@ class Settings(BaseSettings):
     openai_embedding_model: str = "text-embedding-3-small"
     openai_whisper_model: str = "whisper-1"
     openai_tts_model: str = "tts-1"
+    # FIX134 B4 — the OpenAI /v1/moderations scan that a policy profile with
+    # ``moderation_enabled`` runs on each turn. ``auto`` (default): only when
+    # a usable OpenAI key exists (the UI-owned key store first, then
+    # OPENAI_API_KEY); ``off``: never. A 401/403 from the endpoint opens a
+    # breaker for 30 minutes with one warning (moderation_service).
+    moderation_mode: str = "auto"
 
     # USD→credit conversion rate (USAGE_CREDITS_PER_USD env). THE rate
     # behind both the balance DEDUCTION and the usage display — see
@@ -1005,6 +1024,31 @@ class Settings(BaseSettings):
             if p.strip()
         )
 
+    def oauth_return_to_origins(self) -> list[str]:
+        """FIX134 B2 — the origins an absolute OAuth ``return_to`` may name:
+        PORTAL_ORIGIN then ADMIN_UI_ORIGIN, stripped of blanks and a
+        trailing slash so they compare equal to ``scheme://host[:port]``."""
+        out: list[str] = []
+        for raw in (self.portal_origin, self.admin_ui_origin):
+            value = (raw or "").strip().rstrip("/")
+            if value:
+                out.append(value)
+        return out
+
+    @property
+    def moderation_mode_effective(self) -> str:
+        """FIX134 B4 — ``off`` when MODERATION_MODE says so, else ``auto``."""
+        return "off" if (self.moderation_mode or "").strip().lower() == "off" else "auto"
+
+    @property
+    def password_login_allowed_emails_set(self) -> frozenset[str]:
+        """FIX134 B5 — PASSWORD_LOGIN_ALLOWED_EMAILS, normalised (strip, lower)."""
+        return frozenset(
+            e.strip().lower()
+            for e in (self.password_login_allowed_emails or "").split(",")
+            if e.strip()
+        )
+
     @field_validator("auth_cookie_secure", "api_docs_enabled", mode="before")
     @classmethod
     def _empty_means_unset(cls, v):
@@ -1132,6 +1176,31 @@ class Settings(BaseSettings):
                 "(required in production — set a Resend API key, or state "
                 "EMAIL_DELIVERY=disabled for a deployment without a mail sender)"
             )
+
+        # FIX134 B2 — the OAuth return_to allowlist must name the UIs as the
+        # browser reaches them. Since FIX133 that is https behind Caddy; an
+        # http:// entry here silently rejected every https return_to
+        # (invalid_return_to). Empty = no absolute return_to to that UI.
+        for name, raw in (("PORTAL_ORIGIN", self.portal_origin), ("ADMIN_UI_ORIGIN", self.admin_ui_origin)):
+            value = (raw or "").strip()
+            if not value:
+                continue
+            parts = urlsplit(value)
+            if parts.scheme.lower() != "https":
+                issues.append(
+                    f"{name} must be an https:// origin outside development "
+                    f"(got {value!r}) — the OAuth return_to allowlist compares "
+                    "scheme://host[:port], and the UIs are served over https "
+                    "(set it to the public URL, e.g. PORTAL_PUBLIC_URL)"
+                )
+            elif not parts.netloc or parts.path.strip("/") or parts.query or parts.fragment:
+                issues.append(
+                    f"{name} must be a bare origin (scheme://host[:port]) — got {value!r}"
+                )
+
+        # FIX134 B4 — MODERATION_MODE: auto (only with a usable OpenAI key) or off.
+        if (self.moderation_mode or "").strip().lower() not in ("auto", "off"):
+            issues.append(f"MODERATION_MODE must be auto|off (got {self.moderation_mode!r})")
 
         # Provider API keys are encrypted at rest with AES-256-GCM
         # (app.core.security.encrypt_provider_key). Without the master key

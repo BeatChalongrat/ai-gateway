@@ -67,6 +67,22 @@ def _is_dev_env() -> bool:
     return settings.app_env.lower() in _DEV_ENVS
 
 
+def delivery_unavailable_reason() -> str | None:
+    """FIX134 C3 — why ``send_email`` cannot hand a mail to any sender right
+    now, or None when it can: ``email_delivery_disabled`` (EMAIL_DELIVERY=
+    disabled, the FIX133 production choice) or ``no_resend_api_key`` (auto
+    outside dev/test, or resend, without a key). The alert channels use it
+    to leave ``email`` out instead of failing on every alert."""
+    delivery = (getattr(settings, "email_delivery", "auto") or "auto").strip().lower()
+    if delivery == "disabled":
+        return "email_delivery_disabled"
+    if delivery == "console" or (delivery == "auto" and _is_dev_env()):
+        return None
+    if not (settings.resend_api_key or "").strip():
+        return "no_resend_api_key"
+    return None
+
+
 def _console_log_email(
     *,
     to: str,
@@ -219,6 +235,14 @@ def send_email(
         return _console_log_email(
             to=to, subject=subject, html_body=html_body, text_body=text_body
         )
+    if not (settings.resend_api_key or "").strip():
+        # FIX134 C3 — Resend accepts nothing without a key, so neither the
+        # attempt nor a retry can succeed: say so once here, schedule nothing.
+        _log.warning(
+            "email.no_api_key",
+            extra={"email_to": to, "email_subject": subject},
+        )
+        return EmailSendResult(delivered=False, provider="resend", reason="no_resend_api_key")
 
     result = _send_via_resend(
         to=to, subject=subject, html_body=html_body, text_body=text_body
