@@ -96,6 +96,21 @@ fs.writeFileSync(
 );
 console.log(`deep link  : ${cfg.protocolScheme}://${webHost}/…  (Explorer menu + app links)`);
 
+// ── 3b. the tools sidecar must be there ─────────────────────────────────────
+// electron-builder.yml copies ../../SranDesktop/publish/sidecar-fix70 into
+// resources/sidecar, but a missing "from" is only a warning to electron-builder
+// ("file source doesn't exist"): FIX134 shipped an e58 build from a fresh
+// worktree with no sidecar at all, and the installed app logged
+// "SIDECAR spawn error … ENOENT" (no tools). The folder is a build output
+// (gitignored), so a checkout that never built it must refuse here.
+const SIDECAR_DIR = path.join(ROOT, "..", "..", "SranDesktop", "publish", "sidecar-fix70");
+for (const exe of ["SranDesktop.ToolsSidecar.exe", "SranDesktop.BrowserHost.exe"]) {
+  if (!fs.existsSync(path.join(SIDECAR_DIR, exe))) {
+    fail(`the tools sidecar is missing: ${path.join(SIDECAR_DIR, exe)} — publish it first (see apps/desktop/config/README.md) or build from the checkout that has it`);
+  }
+}
+console.log(`sidecar    : ${SIDECAR_DIR} (ToolsSidecar + BrowserHost present)`);
+
 // ── 4. electron-builder ────────────────────────────────────────────────────
 const result = spawnSync("npx electron-builder --win --config electron-builder.yml --publish never", {
   cwd: ROOT,
