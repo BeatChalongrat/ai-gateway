@@ -35,6 +35,9 @@ import { ACCESS_COOKIE, REFRESH_COOKIE, checkSession } from "./lib/session-check
 // and an unauthenticated user isn't bounced to /login before it loads
 // (pre-Phase-1 both were unlisted, which made password reset
 // unreachable: the email link redirected straight to /login).
+// /healthz (FIX134 C1) is the liveness route the Caddy front door probes:
+// public, so it is answered without the session check below — a slow or
+// down backend must never turn a health probe into a redirect or a timeout.
 const PUBLIC_PATHS = [
   "/",
   "/docs",
@@ -44,6 +47,7 @@ const PUBLIC_PATHS = [
   "/terms",
   "/forgot-password",
   "/reset-password",
+  "/healthz",
 ];
 
 // Routes that should *redirect away* if the user is already logged in

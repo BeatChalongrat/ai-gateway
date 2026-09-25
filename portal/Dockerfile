@@ -24,6 +24,15 @@ ENV NEXT_PUBLIC_WEB_CHAT_URL=$NEXT_PUBLIC_WEB_CHAT_URL
 # args persist in image history. Leave it unset here.
 ARG NEXTAUTH_SECRET
 ENV NEXTAUTH_SECRET=$NEXTAUTH_SECRET
+# FIX134 A2 — where next.config.js rewrites /api and /static to. With
+# `output: 'standalone'` the rewrite destinations are written into the build
+# (routes manifest), so this is a BUILD-time value: the compose `environment:`
+# twin never reached the rewrites, and every image rewrote to the
+# http://localhost:8080 fallback inside the container (/api/health 500,
+# /api/portal/me 503, ECONNREFUSED). compose passes it from
+# PORTAL_BACKEND_URL; the default is the compose service name.
+ARG BACKEND_URL=http://backend:8080
+ENV BACKEND_URL=$BACKEND_URL
 RUN npm run build
 
 FROM node:20-alpine AS runner

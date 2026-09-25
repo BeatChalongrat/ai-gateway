@@ -985,6 +985,13 @@ services:
         # The three allowlist sites take .origin of this value, so the /chat
         # suffix the dashboard link wants is harmless to them.
         NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
+        # FIX134 A2 — where the portal's server-side /api and /static rewrites
+        # go. With `output: 'standalone'` next.config.js bakes the rewrite
+        # destinations into the build, so this is a BUILD arg: the runtime
+        # twin below never reached them, and every image rewrote to the
+        # http://localhost:8080 fallback inside the container (/api/health
+        # 500, /api/portal/me 503). Changing it means rebuilding the image.
+        BACKEND_URL: ${PORTAL_BACKEND_URL:-http://backend:8080}
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
     environment:
@@ -995,7 +1002,9 @@ services:
       NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
-      BACKEND_URL: http://backend:8080
+      # Runtime twin of the build arg: read per request by lib/session-check.ts
+      # and the cookie-bridge route (not by the rewrites — see the build arg).
+      BACKEND_URL: ${PORTAL_BACKEND_URL:-http://backend:8080}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       # Google account-chooser ``hd`` hint (UX only; the backend's
