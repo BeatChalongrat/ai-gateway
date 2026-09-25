@@ -93,7 +93,14 @@ module.exports = async function desktop(R) {
     if (busy.length) { R.skip("desktop.startup", `the app was used in the last 10 minutes (${busy.length} log lines); not closing it`); return; }
     kill(); await waitFor(async () => !running(), 15000);
   }
-  const since = new Date(Date.now() - 1000).toISOString();
+  let since = new Date(Date.now() - 1000).toISOString();
+  if (hadPort) {
+    // Attached to an app that is already running with the debugging port: its boot
+    // happened before this check, so read the log from that run's first line
+    // ("SRAN Desktop <version> pid=…"), not from now.
+    const bootLines = logSince("0000").filter((l) => /INFO  SRAN Desktop \S+ pid=\d+/.test(l));
+    if (bootLines.length) since = bootLines[bootLines.length - 1].slice(0, 24);
+  }
   if (!hadPort) launch([`--remote-debugging-port=${PORT}`]);
   let browser = null;
   let page = null;
