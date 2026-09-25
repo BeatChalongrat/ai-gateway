@@ -78,6 +78,8 @@ GROUP_BACKUP_OFFSITE_STALE = "backup:offsite_stale"
 GROUP_BACKUP_OFFSITE_MISSING = "backup:offsite_missing"
 GROUP_QUEUE = "capacity:queue"
 GROUP_SATURATED = "capacity:saturated"
+# FIX134 F — the daily smoke suite (scripts/smoke.sh): red, or not running.
+GROUP_SMOKE = "smoke"
 
 
 def _dur(seconds: float) -> str:
@@ -290,6 +292,36 @@ def saturated_text(inflight: int, capacity: int, workers: int) -> tuple[str, str
         "ones are refused with 503 server_busy. Either a stuck request holds slots (see "
         "checks.inflight.stuck) or the box needs more workers / a second machine "
         "(docs/ops/scaling.md). Look: curl -s http://localhost:8081/ready | jq .checks.container"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The smoke suite (FIX134 F: scripts/smoke.sh, daily via scripts/smoke-daily.ps1,
+# result in <BACKUP_DIR>/smoke_last.json)
+# ---------------------------------------------------------------------------
+
+_SMOKE_RUN = "SMOKE_TARGET=live bash scripts/smoke.sh"
+
+
+def smoke_failed_text(failed: list[str], total: int, at: str, target: str = "live") -> tuple[str, str, str]:
+    names = ", ".join(failed[:8]) + (f" (+{len(failed) - 8} more)" if len(failed) > 8 else "")
+    return HIGH, f"Smoke suite is red: {len(failed)} of {total} checks failed", (
+        f"The daily smoke run of {at} on {target} failed: {names or 'see the result file'}. "
+        "An entry point users rely on (a page, sign-in, the API, a background job, the desktop) "
+        "is not answering as it should. Look: smoke_last.json in the backup folder (each check's "
+        f"detail) and scripts/smoke/README.md; re-run: {_SMOKE_RUN}"
+    )
+
+
+def smoke_stale_text(age_s: float | None, max_age_h: float, why: str = "") -> tuple[str, str, str]:
+    """The suite has not produced a result within ``max_age_h`` — the scheduled task is off,
+    failing before it writes, or the file is unreadable (``why``)."""
+    how = f"the newest smoke result is {age_s / 3600:.0f} h old" if age_s is not None else f"no smoke result found for {why or 'unknown reasons'}"
+    return HIGH, "Smoke suite has not run", (
+        f"{how} (limit {max_age_h:.0f} h). Nothing is checking the entry points daily, so a "
+        "broken sign-in or page would go unnoticed. The scheduled task \"SRAN smoke daily\" "
+        "(06:30, scripts/smoke-daily.ps1) may be off or failing before it writes smoke_last.json. "
+        f"Look: schtasks /Query /TN \"SRAN smoke daily\" and smoke_last.log in the backup folder; run: {_SMOKE_RUN}"
     )
 
 
