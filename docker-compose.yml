@@ -504,7 +504,7 @@ services:
       PORT: "4000"
       CHAT_EDGE_DEV: ${CHAT_EDGE_DEV:-1}
       CHAT_EDGE_ADMIN_API_KEY: ${CHAT_EDGE_ADMIN_API_KEY:-dev-chat-edge-admin-key-change-in-prod}
-      CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:-http://localhost:3002}
+      CORS_ALLOW_ORIGINS: ${CHAT_CORS_ORIGINS:-https://localhost:3002}
       MAX_CONTEXT_MESSAGES: ${MAX_CONTEXT_MESSAGES:-1000}
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       S3_BUCKET: ${S3_BUCKET:-sran-chat-files}
@@ -766,7 +766,7 @@ services:
       # the gateway directly for silent refresh, so it must be listed.
       # FIX133 B — the browser origins (https once Caddy fronts them); the
       # 127.0.0.1 twins used to live in docker-compose.override.yml.
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:3002,http://127.0.0.1:3002}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://localhost:3000,https://127.0.0.1:3000,https://localhost:3001,https://127.0.0.1:3001,https://localhost:3002,https://127.0.0.1:3002}
       # Portal auth cookies (HttpOnly migration). Empty domain = host-only
       # (localhost shares across ports in dev). AUTH_COOKIE_SECURE unset =
       # auto (off in dev, on in prod — no configuration needed for Secure).
@@ -779,7 +779,7 @@ services:
       # The portal origin the user browses to. Verification links,
       # password-reset links, and invite-link emails are stamped with
       # this host — mismatched value = dead links in email.
-      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-http://localhost:3001}
+      PORTAL_PUBLIC_URL: ${PORTAL_PUBLIC_URL:-https://localhost:3001}
       # FIX134 B2 — the OAuth return_to allowlist (portal_auth.oauth_start):
       # the portal and admin-ui origins as the browser reaches them (https
       # behind Caddy). Outside development the backend refuses an http://
@@ -960,11 +960,11 @@ services:
     build:
       context: ./admin-ui
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
       # Server-side base URL the chat-edge proxy uses to validate the
       # admin session against gateway-api's /auth/session/me. MUST be the
       # in-network service hostname — NEXT_PUBLIC_API_BASE_URL is a
@@ -988,7 +988,7 @@ services:
     build:
       context: ./portal
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
         NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
         # Where SRAN Chat lives — the "Open SRAN Chat" dashboard link plus
         # the three redirect allowlists (middleware.ts, LoginForm,
@@ -999,7 +999,7 @@ services:
         # rebuilding the portal image (`make build`), not just a restart.
         # The three allowlist sites take .origin of this value, so the /chat
         # suffix the dashboard link wants is harmless to them.
-        NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
+        NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
         # FIX134 A2 — where the portal's server-side /api and /static rewrites
         # go. With `output: 'standalone'` next.config.js bakes the rewrite
         # destinations into the build, so this is a BUILD arg: the runtime
@@ -1010,12 +1010,12 @@ services:
         REVISION: ${REVISION:-unknown}
         CREATED: ${CREATED:-unknown}
     environment:
-      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_GATEWAY_URL:-https://localhost:8080}
       NEXT_PUBLIC_OAUTH_ENABLED: ${NEXT_PUBLIC_OAUTH_ENABLED:-false}
       # Runtime twin of the build arg above (server-render parity). The build
       # arg is the authoritative one for anything the browser executes.
-      NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-http://localhost:3002/chat}
-      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3001}
+      NEXT_PUBLIC_WEB_CHAT_URL: ${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-https://localhost:3001}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-dev-portal-nextauth-secret}
       # Runtime twin of the build arg: read per request by lib/session-check.ts
       # and the cookie-bridge route (not by the rewrites — see the build arg).

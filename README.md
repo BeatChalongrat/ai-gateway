@@ -89,14 +89,19 @@ seeds the admin and portal users. `make help` lists every target. Raw steps:
 
 | URL | What | Default credentials |
 |---|---|---|
-| http://localhost:8080/health | Gateway health (public entry) | — |
+| https://localhost:8080/health | Gateway health (public entry) | — |
 | http://localhost:8081/docs | Backend OpenAPI (debug direct) | — |
-| http://localhost:3000 | Admin UI | `admin` / `admin1234` |
-| http://localhost:3001 | Customer portal | Google account on an allowed domain (see **User Sign-in** below — password login is disabled) |
-| http://localhost:3002 | Web chat | inherits the portal's Google session (cookie) |
+| https://localhost:3000 | Admin UI | `admin` / `admin1234` |
+| https://localhost:3001 | Customer portal | Google account on an allowed domain (see **User Sign-in** below — password login is disabled) |
+| https://localhost:3002 | Web chat | inherits the portal's Google session (cookie) |
 | http://localhost:8001/health | NER service | — |
 | http://localhost:9090/health | Mock LLM provider | — |
 | http://localhost:9091 · :3100 | Prometheus · Grafana | — · `admin`/`admin` |
+
+Since FIX133 the browser-facing ports (3000, 3001, 3002, 4000, 8080) are **https**
+behind the Caddy front door; each has a plain-http loopback debug door at
+port+20000 (`http://127.0.0.1:28080` gateway, `:24000` chat-edge, `:23002` web-chat)
+for scripts. See `docs/ops/tls.md`.
 
 ### Deployment shapes
 
@@ -144,8 +149,8 @@ browser bundle. Two vars matter for a non-localhost deploy — set them in
 
 | Var | Default | Baked into |
 |---|---|---|
-| `WEB_CHAT_API_URL` | `http://localhost:4000/api/v1` | web-chat → chat-edge API base |
-| `WEB_CHAT_PUBLIC_URL` | `http://localhost:3002/chat` | portal's "Open SRAN Chat" link + the three redirect allowlists (`middleware.ts`, login, oauth-complete). Required (`:?`) in `docker-compose.prod.yml` |
+| `WEB_CHAT_API_URL` | `https://localhost:4000/api/v1` | web-chat → chat-edge API base |
+| `WEB_CHAT_PUBLIC_URL` | `https://localhost:3002/chat` | portal's "Open SRAN Chat" link + the three redirect allowlists (`middleware.ts`, login, oauth-complete). Required (`:?`) in `docker-compose.prod.yml` |
 
 ### Migrations
 
@@ -188,10 +193,12 @@ For a clean UAT box see `scripts/uat/README.md`.
 ## API Usage
 
 Create a project-scoped API key in **Admin UI → API Keys** (keys start with
-`gw_`), then call the OpenAI-compatible endpoint **through the gateway on `:8080`**:
+`gw_`), then call the OpenAI-compatible endpoint **through the gateway on `:8080`**
+(https since FIX133 — pass `--cacert infra/caddy/certs/rootCA.pem` for the local CA,
+or use the plain loopback door `http://127.0.0.1:28080`; see `docs/ops/tls.md`):
 
 ```bash
-curl -sS -X POST http://localhost:8080/v1/chat/completions \
+curl -sS -X POST https://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer gw_<your_key>" \
   -H "Content-Type: application/json" \
   -d '{

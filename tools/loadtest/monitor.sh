@@ -23,7 +23,7 @@ set -u
 
 INTERVAL="${INTERVAL:-5}"
 BACKEND_METRICS="${BACKEND_METRICS_URL:-http://localhost:8081/metrics}"
-GATEWAY_METRICS="${GATEWAY_METRICS_URL:-http://localhost:8080/__gw/metrics}"
+GATEWAY_METRICS="${GATEWAY_METRICS_URL:-http://127.0.0.1:28080/__gw/metrics}"
 CONTAINERS="${MONITOR_CONTAINERS:-ai-gateway-backend-1 ai-gateway-gateway-1 ai-gateway-ner-service-1 ai-gateway-postgres-1 ai-gateway-redis-1 ai-gateway-rate-limiter-1 ai-gateway-dlp-sidecar-1}"
 
 metric() {  # metric() <url> <prometheus-line-prefix> ; sums all matching samples

@@ -248,7 +248,7 @@ class GatewayClient:
         model: str | None = None,
     ) -> None:
         # Gateway coordinates (used by the scan-rounds stage only).
-        self.base = (base_url or os.environ.get("GATEWAY_URL") or "http://localhost:8080").rstrip("/")
+        self.base = (base_url or os.environ.get("GATEWAY_URL") or "http://127.0.0.1:28080").rstrip("/")
         self.key = api_key or os.environ.get("GATEWAY_API_KEY") or ""
         # FIX38 Part F — a second, different-vendor judge can be swapped in
         # to check the primary. The primary stays what criteria.json says.

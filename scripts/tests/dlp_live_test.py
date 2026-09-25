@@ -30,7 +30,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-GATEWAY = "http://localhost:8080"
+GATEWAY = "http://127.0.0.1:28080"
 ADMIN_KEY_ENV = "ADMIN_API_KEY"
 
 # Any bracketed ALL-CAPS token with a trailing index is a mask emitted by the

@@ -12,9 +12,13 @@
 //     test never sees that file.
 //   * It cannot see whether index.ts actually calls preventDefault() on a
 //     refusal — that is the live probe's job (`npm run probe`, checks 1–3).
+//   * FIX134: the shipped default pins a per-machine CA (gitignored); on a
+//     box without it the file is validated with that one field cleared
+//     (test/shipped-config.ts), so the origin rules below are still the
+//     real file's.
 import { describe, expect, it } from "vitest";
 import path from "node:path";
-import { loadConfig, resolveConfigPath, validateConfig } from "../src/main/config";
+import { resolveConfigPath, validateConfig } from "../src/main/config";
 import {
   classifyFrame,
   classifyTopLevel,
@@ -23,11 +27,14 @@ import {
   originOf,
   parseOriginEntry,
 } from "../src/main/navigation-policy";
+import { CONFIG_DIR, DEFAULT_CONFIG_NAME, loadShippedConfig } from "./shipped-config";
 
 const APP_ROOT = path.resolve(__dirname, "..");
 
 describe("shipped config", () => {
-  const config = loadConfig(resolveConfigPath(APP_ROOT, {}));
+  // The dev resolution still lands on the file this helper loads.
+  expect(resolveConfigPath(APP_ROOT, {})).toBe(path.join(CONFIG_DIR, DEFAULT_CONFIG_NAME));
+  const config = loadShippedConfig();
 
   it("allow-list is non-empty and contains no wildcard", () => {
     expect(config.allowedOrigins.length).toBeGreaterThan(0);

@@ -1,4 +1,11 @@
 # SRAN AI Gateway — Start all services (Windows PowerShell)
+#
+# NOTE (FIX134): this is the pre-compose HOST-RUN shape — it starts uvicorn
+# on :8080 and `next dev` on :3000 itself. It cannot run beside the compose
+# stack: since FIX133 those ports are Caddy's https ports (docs/ops/tls.md),
+# so the bind fails and the health check below would answer for the stack,
+# not for this process. Use `make up` for the stack; keep this only for a
+# machine that runs no compose stack at all.
 $ErrorActionPreference = "Stop"
 
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -85,6 +92,6 @@ try {
     Write-Host " Logs: logs\backend.log, logs\frontend.log"
     Write-Host "======================================" -ForegroundColor Green
 } catch {
-    Write-Host "[!] Backend health check failed. Check logs\backend.log" -ForegroundColor Red
+    Write-Host "[!] Backend health check failed. Check logs\backend.log (is :8080 held by the compose stack? docs/ops/tls.md)" -ForegroundColor Red
     exit 1
 }

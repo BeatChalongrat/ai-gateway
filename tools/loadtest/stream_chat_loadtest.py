@@ -11,14 +11,14 @@ It is deliberately READ-ONLY against the system: it sends normal API traffic
 and records latency / status outcomes. It changes nothing server-side.
 
 Endpoint (confirmed from the running stack):
-    POST http://localhost:8080/v1/chat/completions
+    POST http://127.0.0.1:28080/v1/chat/completions
     Authorization: Bearer <GATEWAY_API_KEY>
     X-User-ID: <unique per virtual user>
     X-Internal-Service-Secret: <only when --internal-service-secret is given>
 
 Usage (see --help for everything):
     python stream_chat_loadtest.py \
-        --url http://localhost:8080/v1/chat/completions \
+        --url http://127.0.0.1:28080/v1/chat/completions \
         --api-key "$GATEWAY_API_KEY" \
         --internal-service-secret "$INTERNAL_SERVICE_SECRET" \
         --model gpt-4o-mini \
@@ -457,7 +457,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--url",
                    default=os.environ.get(
                        "LOADTEST_URL",
-                       "http://localhost:8080/v1/chat/completions"))
+                       "http://127.0.0.1:28080/v1/chat/completions"))
     p.add_argument("--api-key", default=os.environ.get("GATEWAY_API_KEY", ""),
                    help="Shared gateway API key (Bearer).")
     p.add_argument("--internal-service-secret",

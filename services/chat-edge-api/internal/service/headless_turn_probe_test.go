@@ -6,7 +6,7 @@ package service
 // gateway credential. This is the exact call a cloud scheduler would make.
 //
 // Run against the live stack (gateway + mock provider):
-//   HEADLESS_PROBE=1 GW_URL=http://localhost:8080/v1 GW_KEY=... GW_SECRET=... \
+//   HEADLESS_PROBE=1 GW_URL=http://127.0.0.1:28080/v1 GW_KEY=... GW_SECRET=... \
 //     go test ./internal/service/ -run TestHeadlessTurnProbe -count=1 -v
 // Skips cleanly when HEADLESS_PROBE is unset or the DB is unreachable.
 

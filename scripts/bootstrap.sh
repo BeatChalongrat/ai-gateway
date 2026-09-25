@@ -87,10 +87,10 @@ cat <<'EOF'
 ════════════════════════════════════════════════════════════════
  Bootstrap complete — DEV stack is UP
 ════════════════════════════════════════════════════════════════
-  Gateway (public):   http://localhost:8080/__gw/health
+  Gateway (public):   https://localhost:8080/__gw/health
   Backend (direct):   http://localhost:8081/health
-  Admin UI:           http://localhost:3000     (login: admin / admin1234)
-  Portal:             http://localhost:3001
+  Admin UI:           https://localhost:3000     (login: admin / admin1234)
+  Portal:             https://localhost:3001
   Mock provider:      http://localhost:9090/health
   Prometheus:         http://localhost:9091
   Grafana:            http://localhost:3100     (admin / admin)

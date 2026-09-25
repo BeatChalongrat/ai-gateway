@@ -509,7 +509,7 @@ def print_summary(results: list[tuple[dict, dict, dict | None]]):
         p(_row(f"{total - total_pass} test(s) failed."))
 
     p(_row(""))
-    p(_row("Check full request traces at: http://localhost:3001/requests"))
+    p(_row("Check full request traces at: https://localhost:3001/requests"))
     p(_box_bot())
 
 

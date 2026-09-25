@@ -12,6 +12,9 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
 import { loadConfig, resolveConfigPath, validateConfig } from "../src/main/config";
+// FIX134: the shipped default pins a per-machine CA (gitignored); on a box
+// without it the real file is validated with that one field cleared.
+import { loadShippedConfig } from "./shipped-config";
 
 const APP_ROOT = path.resolve(__dirname, "..");
 
@@ -34,7 +37,7 @@ const base = {
 };
 
 describe("shipped session config", () => {
-  const config = loadConfig(resolveConfigPath(APP_ROOT, {}));
+  const config = loadShippedConfig();
 
   it("gateway is an origin outside the navigation allow-list", () => {
     expect(config.gatewayUrl).toMatch(/^https?:\/\/[^/]+$/);

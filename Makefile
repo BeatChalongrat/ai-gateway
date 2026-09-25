@@ -23,9 +23,9 @@ preflight: ## Verify .env has the hard-required vars (REDIS_PASSWORD, ...) befor
 up: preflight ## Start the full stack in DEV mode (backend runs its image; admin/portal hot-reload)
 	docker compose up -d
 	@echo ""
-	@echo "Backend:   http://localhost:8080/health"
-	@echo "Admin UI:  http://localhost:3000"
-	@echo "Portal:    http://localhost:3001"
+	@echo "Backend:   https://localhost:8080/health"
+	@echo "Admin UI:  https://localhost:3000"
+	@echo "Portal:    https://localhost:3001"
 	@echo "Mock prov: http://localhost:9090/health"
 	@echo "Postgres:  localhost:5432 (postgres/postgres)"
 	@echo "Redis:     localhost:6379"
@@ -209,8 +209,8 @@ webchat-up: sandbox-image ## Start the web-chat stack (chat-edge:4000 + web-chat
 	docker compose -p ai-gateway $(WEBCHAT_COMPOSE) up -d --build
 	@bash scripts/sandbox_healthcheck.sh
 	@echo ""
-	@echo "Web chat:  http://localhost:3002   (log in with portal credentials)"
-	@echo "Chat edge: http://localhost:4000/health"
+	@echo "Web chat:  https://localhost:3002   (log in with portal credentials)"
+	@echo "Chat edge: https://localhost:4000/health"
 
 webchat-down: ## Stop the web-chat stack (preserves volumes)
 	docker compose -p ai-gateway $(WEBCHAT_COMPOSE) down
