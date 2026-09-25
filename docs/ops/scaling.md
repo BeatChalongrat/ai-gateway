@@ -253,3 +253,45 @@ Step 2 (second backend/chat-edge):
 - [ ] Caddy upstream lists carry both boxes; health checks green; one box drained and re-added without a failed turn.
 - [ ] Provider caps halved if the provider limits concurrency.
 - [ ] ops-watch `turn_queue` finding and the backup job point at the shared bucket.
+
+## 7. Published loopback ports (FIX134 D6)
+
+`docker-compose.webchat.yml` publishes two datastore ports on the host:
+
+| Host binding | Container | Why it is published |
+|---|---|---|
+| `127.0.0.1:5433` -> `5432` | `postgres-webchat` | host-side Go tests (`CHAT_EDGE_TEST_DSN`) and psql tooling against the chat DB |
+| `127.0.0.1:6380` -> `6379` | `redis-webchat` | host-side Go benches (`FIX41_BENCH_REDIS_URL`) and redis-cli tooling |
+
+Both bind to **127.0.0.1 only** (`docker ps` shows `127.0.0.1:5433->5432/tcp`
+and `127.0.0.1:6380->6379/tcp`; nothing on the LAN can reach them), and both
+**demand authentication**: Postgres answers the startup message for the
+`chatedge` role with a SASL (scram-sha-256) challenge, Redis answers `PING`
+with `NOAUTH Authentication required` (both checked on the live box,
+2026-09-25). The passwords are `WEBCHAT_POSTGRES_PASSWORD` and
+`WEBCHAT_REDIS_PASSWORD` in `.env`.
+
+Mind the compose defaults, though: Postgres falls back to the published dev
+password and Redis to an **empty** `--requirepass`, which is no auth at all.
+The live box is protected because `.env` sets both, but `scripts/preflight.sh`
+hard-requires only `REDIS_PASSWORD`, so a fresh `.env` without
+`WEBCHAT_REDIS_PASSWORD` would publish an unauthenticated Redis on loopback.
+Adding the two `WEBCHAT_*` keys to preflight's `REQUIRED_KEYS` closes that
+(owner decision, not done here).
+
+The gateway's own Postgres and Redis publish no host port at all
+(`scripts/wait_for_health.sh` reaches them with `docker compose exec`); these
+two are published only because the Go tests run on the host.
+
+### Closing them
+
+If the Go tests move into a throwaway container on the compose network (the
+test stack, `scripts/test-stack.sh`, already runs its own copies on
+`127.0.0.1:15433` / `:16380`), delete the two `ports:` entries from
+`docker-compose.webchat.yml` (services `postgres-webchat` and `redis-webchat`)
+and run `docker compose -p ai-gateway up -d postgres-webchat redis-webchat`:
+the two containers are recreated without the bindings (volumes persist;
+chat-edge reconnects after a few seconds of DB errors, so do it in a quiet
+minute). Host-side `CHAT_EDGE_TEST_DSN` / `FIX41_BENCH_REDIS_URL` stop working
+at that moment, which is the point. Until then, never widen the bind address:
+`0.0.0.0:5433` would put the chat DB on the LAN behind nothing but a password.
