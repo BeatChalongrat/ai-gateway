@@ -151,8 +151,12 @@ module.exports = async function apps(R) {
       const r = await L.tryHttp(`${base.gw}/auth/session/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: adminEmail, password: adminPassword }) });
       if (r.status !== 200) return { ok: false, detail: `${base.gw}/auth/session/login → ${r.status || r.error} ${r.json?.error?.code || ""}` };
       const s = L.cookieSession(r.setCookie, "admin-cookie");
+      // The smoke admin is a least-privilege "viewer": it signs in and reads its own
+      // session, and the admin surface answers it 403 (RBAC) — never 401 (no session).
+      const me = await L.tryHttp(`${base.gw}/auth/session/me`, { headers: s.headers });
       const q = await L.tryHttp(`${base.gw}/admin/requests?limit=1`, { headers: s.headers });
-      return { ok: q.status === 200, detail: `login 200 (cookies ${s.names.join(",")}); /admin/requests?limit=1 → ${q.status || q.error}` };
+      const role = me.json?.role || me.json?.user?.role || "?";
+      return { ok: me.status === 200 && (q.status === 200 || q.status === 403), detail: `login 200 (cookies ${s.names.join(",")}); /auth/session/me → ${me.status || me.error} role=${role}; /admin/requests?limit=1 → ${q.status || q.error} (200 admin / 403 viewer)` };
     });
   }
   await R.run("admin.requests_unauth", async () => {
