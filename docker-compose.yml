@@ -773,9 +773,10 @@ services:
       # FIX134 B2 — the OAuth return_to allowlist (portal_auth.oauth_start):
       # the portal and admin-ui origins as the browser reaches them (https
       # behind Caddy). Outside development the backend refuses an http://
-      # value here. Defaults: the portal's public URL, the admin-ui's dev port.
-      PORTAL_ORIGIN: ${PORTAL_ORIGIN:-${PORTAL_PUBLIC_URL:-http://localhost:3001}}
-      ADMIN_UI_ORIGIN: ${ADMIN_UI_ORIGIN:-http://localhost:3000}
+      # value here. Defaults: the portal's public URL, then the https front door
+      # (an http default would block a production boot, the FIX133 trap).
+      PORTAL_ORIGIN: ${PORTAL_ORIGIN:-${PORTAL_PUBLIC_URL:-https://localhost:3001}}
+      ADMIN_UI_ORIGIN: ${ADMIN_UI_ORIGIN:-https://localhost:3000}
       # Google SSO (Phase 1). The portal's NextAuth flow forwards the
       # Google id_token to /portal/auth/oauth/verify; the backend pins
       # the token's ``aud`` to this client id, so it MUST be the same

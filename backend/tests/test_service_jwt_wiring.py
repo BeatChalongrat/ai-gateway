@@ -74,6 +74,9 @@ def _make_prod_config_valid(monkeypatch):
     monkeypatch.setattr(settings, "session_signing_secrets", strong, raising=False)
     monkeypatch.setattr(settings, "resend_api_key", "re_live_key_xxxx", raising=False)
     monkeypatch.setattr(settings, "provider_key_master_key", hex32, raising=False)
+    # FIX134 B2 — outside development the OAuth return_to allowlist must be https.
+    monkeypatch.setattr(settings, "portal_origin", "https://localhost:3001", raising=False)
+    monkeypatch.setattr(settings, "admin_ui_origin", "https://localhost:3000", raising=False)
 
 
 def test_prod_fails_closed_when_service_jwt_dormant(monkeypatch):
