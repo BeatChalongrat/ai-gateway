@@ -19,7 +19,10 @@ Every ``OPS_WATCH_INTERVAL`` seconds it checks:
   proven backup newer than ``OPS_WATCH_BACKUP_MAX_AGE_H`` (26 h), the last
   run failed, or its off-site copy failed — read from the backup folder
   (``/backups``, read-only), because the backup container cannot report its
-  own death.
+  own death;
+* FIX134: the **smoke suite** (``scripts/smoke.sh``, daily): its result file
+  (``OPS_WATCH_SMOKE_FILE``, default ``/backups/smoke_last.json``) is red, or
+  older / missing for more than ``OPS_WATCH_SMOKE_MAX_AGE_H`` (26 h).
 
 FIX131 D — findings no longer page by themselves. Each one is a signal to
 the pager (``app.services.alert_pager``), shared with the backend's alert
@@ -381,6 +384,42 @@ def classify_backup(success: dict | None, failure: dict | None, *, now: float, m
     return out
 
 
+def classify_smoke(record: dict | None, *, now: float, max_age_h: float = 26.0,
+                   missing_since: float | None = None) -> list[Finding]:
+    """FIX134 F — the daily smoke suite's result (``smoke_last.json``, written by
+    scripts/smoke-daily.ps1 into the backup folder ops-watch reads at /backups).
+
+    * no file: quiet until it has been missing for ``max_age_h`` (``missing_since`` =
+      when this watcher first saw it absent) → "has not run";
+    * a result older than ``max_age_h`` (or one without a timestamp) → "has not run";
+    * a fresh result with ``ok`` false → "is red", naming the failed checks.
+    One incident (``smoke``) for all three, degraded (HIGH): chat may still work."""
+    limit_s = max_age_h * 3600
+    if record is None:
+        if missing_since is None or now - missing_since <= limit_s:
+            return []
+        severity, title, body = cat.smoke_stale_text(now - missing_since, max_age_h)
+        return [Finding(key="smoke:missing", title=title, message=body, severity=severity, group=cat.GROUP_SMOKE)]
+    epoch = record.get("epoch")
+    if not isinstance(epoch, (int, float)):
+        severity, title, body = cat.smoke_stale_text(None, max_age_h, why="an unreadable record (no timestamp)")
+        return [Finding(key="smoke:stale", title=title, message=body, severity=severity, group=cat.GROUP_SMOKE)]
+    age = now - float(epoch)
+    if age > limit_s:
+        severity, title, body = cat.smoke_stale_text(age, max_age_h)
+        return [Finding(key="smoke:stale", title=title, message=body, severity=severity, group=cat.GROUP_SMOKE)]
+    if record.get("ok") is True:
+        return []
+    checks = record.get("checks") if isinstance(record.get("checks"), list) else []
+    failed = [str(c.get("name") or "?") for c in checks if isinstance(c, dict) and c.get("status") == "FAIL"]
+    total = len(checks) or int((record.get("counts") or {}).get("fail") or 0) + int((record.get("counts") or {}).get("pass") or 0)
+    if not failed:
+        failed = [str(record.get("error") or "the suite did not finish")]
+    severity, title, body = cat.smoke_failed_text(failed, total, str(record.get("at") or "unknown time"),
+                                                  str(record.get("target") or "live"))
+    return [Finding(key="smoke:failed", title=title, message=body, severity=severity, group=cat.GROUP_SMOKE)]
+
+
 class AlertState:
     """The watcher's side of the pager: what it reported on the last tick
     (so a finding it no longer sees is cleared at once) and, when Redis is
@@ -621,6 +660,27 @@ def newest_offsite_copy(root: str) -> tuple[float, str] | None:
     return None
 
 
+def smoke_record(path: str) -> dict | None:
+    """FIX134 F — ``smoke_last.json`` (None when absent or unreadable)."""
+    return _read_json(path)
+
+
+def smoke_findings(cfg: dict) -> list[Finding]:
+    """FIX134 F — the smoke rule's I/O: read the record, remember in ``cfg`` when the file
+    was first seen missing (so "has not run" fires after the limit, not at once), classify."""
+    smoke_file = cfg.get("smoke_file")
+    if not smoke_file:
+        return []
+    now = time.time()
+    record = smoke_record(smoke_file)
+    if record is None:
+        cfg.setdefault("_smoke_missing_since", now)
+    else:
+        cfg.pop("_smoke_missing_since", None)
+    return classify_smoke(record, now=now, max_age_h=float(cfg.get("smoke_max_age_h", 26)),
+                          missing_since=cfg.get("_smoke_missing_since"))
+
+
 def parse_pg_dsns(spec: str) -> list[tuple[str, str]]:
     """``OPS_WATCH_PG_DSNS`` = ``name=dsn;name=dsn`` (';' — DSNs carry ',')."""
     out: list[tuple[str, str]] = []
@@ -717,6 +777,7 @@ def collect(cfg: dict) -> list[Finding]:
         else:
             _log("backup_dir_missing", path=cfg["backup_dir"],
                  note="the backup folder is not mounted — no-fresh-backup alerts are off")
+    findings += smoke_findings(cfg)
     return findings
 
 
@@ -766,6 +827,11 @@ def main() -> int:
         "queue_oldest_s": float(_env("OPS_WATCH_QUEUE_OLDEST_S", "60")),
         "saturation_pct": float(_env("OPS_WATCH_SATURATION_PCT", "90")),
         "capacity_debounce_s": float(_env("OPS_WATCH_CAPACITY_DEBOUNCE_S", "180")),
+        # FIX134 F — the daily smoke suite's result, beside the backups by default
+        # (scripts/smoke-daily.ps1 writes <BACKUP_DIR>/smoke_last.json); "" = off.
+        "smoke_file": _env("OPS_WATCH_SMOKE_FILE",
+                           os.path.join(_env("OPS_WATCH_BACKUP_DIR", ""), "smoke_last.json") if _env("OPS_WATCH_BACKUP_DIR", "") else ""),
+        "smoke_max_age_h": float(_env("OPS_WATCH_SMOKE_MAX_AGE_H", "26")),
         # FIX131 — the pager's knobs (settings: ALERT_*).
         "debounce_s": float(getattr(settings, "alert_debounce_seconds", 90.0)),
         "min_attempts": int(getattr(settings, "alert_page_min_attempts", 3)),
