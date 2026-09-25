@@ -14,8 +14,26 @@ service runs in **production mode**. The port numbers did not change:
 
 The debug doors are loopback-only and exist for scripts and probes (they
 skip the proxy). Nothing else listens on the old plain ports: an old
-`http://localhost:3002` bookmark now fails (Caddy cannot serve http and https
-on one port), so use the https one.
+`http://localhost:3002` bookmark is redirected to the https one (see "Plain
+http on the https ports" below).
+
+## Plain http on the https ports (FIX134 A4)
+
+Caddy's `http_redirect` listener wrapper (global `servers` block of the
+Caddyfile) answers a plain-http request on any of the five https ports with
+a **308** to `https://<same host>:<same port><same path>`, instead of the bare
+400 "Client sent an HTTP request to an HTTPS server" it gave before:
+
+* browser ports (3000, 3001, 3002): an old `http://` bookmark or typed
+  address lands on the https page;
+* API ports (4000, 8080): an API client gets the same redirect, so a script
+  that still speaks `http://localhost:8080` must follow redirects
+  (`curl -L`, `requests` does by default; a POST body is re-sent by a 308)
+  or, better, use the plain loopback debug door (`http://127.0.0.1:28080`,
+  `:24000`), which skips the proxy.
+
+The redirect keeps the port, so it never sends anyone to `:443`. There is
+still no HSTS (see above).
 
 ## Health checks
 

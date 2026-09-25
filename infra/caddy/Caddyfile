@@ -28,6 +28,16 @@
 	auto_https off
 	servers {
 		trusted_proxies static private_ranges
+		# FIX134 A4 — a plain-http request on one of the https ports gets a
+		# 308 to https://<host>:<port><path> instead of the bare
+		# "Client sent an HTTP request to an HTTPS server" 400. Browsers
+		# follow it; an API client on 4000/8080 must follow it too (curl -L)
+		# or use the loopback debug door (docs/ops/tls.md). http_redirect
+		# must be listed before tls (Caddy >= 2.4).
+		listener_wrappers {
+			http_redirect
+			tls
+		}
 	}
 }
 
