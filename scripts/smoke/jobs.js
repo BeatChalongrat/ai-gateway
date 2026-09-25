@@ -41,7 +41,19 @@ module.exports = async function jobs(R) {
 
   await R.run("jobs.retention", async () => {
     const line = lastLine(L.dockerLogs(C.chatEdge, `${MAX_BACKUP_AGE_H}h`), /transcript retention: pass complete/);
-    if (!line) return { ok: false, detail: `no "transcript retention: pass complete" in ${C.chatEdge} logs of the last ${MAX_BACKUP_AGE_H} h` };
+    if (!line) {
+      // The pass runs once a day: a chat-edge that started less than the window ago
+      // (a fresh test stack, a deploy) has not had its first pass yet — that is not red.
+      let upH = null;
+      try {
+        const started = require("node:child_process").execFileSync("docker", ["inspect", C.chatEdge, "--format", "{{.State.StartedAt}}"], { encoding: "utf8" }).trim();
+        upH = (Date.now() - Date.parse(started)) / 3_600_000;
+      } catch { /* unknown uptime: treat as old enough */ }
+      if (upH !== null && upH < MAX_BACKUP_AGE_H) {
+        return { skip: true, detail: `${C.chatEdge} is up ${upH.toFixed(1)} h (< ${MAX_BACKUP_AGE_H} h); the daily pass has not been due yet` };
+      }
+      return { ok: false, detail: `no "transcript retention: pass complete" in ${C.chatEdge} logs of the last ${MAX_BACKUP_AGE_H} h (up ${upH === null ? "?" : upH.toFixed(1)} h)` };
+    }
     const m = /"erased"\s*:\s*(\d+)/.exec(line);
     const e = /"errors"\s*:\s*(\d+)/.exec(line);
     return { ok: !e || e[1] === "0", detail: `last pass ${agoText(timeOf(line))}${m ? `, erased ${m[1]}` : ""}${e ? `, errors ${e[1]}` : ""}` };
