@@ -38,7 +38,7 @@ import { BridgeChannel } from "./bridge";
 import { ChatEdgeClient } from "./chat-edge-client";
 import { sweepConversationStateTTL, sweepHistoryTTL, wipeLocalData } from "./local-data";
 import { loadConfig, resolveConfigPath, type ShellConfig } from "./config";
-import { installLocalCaTrust, installNodeFetchTrust, loadLocalCa, trustedHostsOf } from "./local-ca";
+import { installLocalCaTrust, installNodeFetchTrust, loadLocalCa, netRequestFetch, trustedHostsOf } from "./local-ca";
 import { CONNECTOR_OAUTH_FILENAME, ConnectorOAuth, ConnectorTokenStore, RegistrationFile } from "./connector-oauth";
 import { ConnectorTools } from "./connector-mcp";
 import { parseAppLink, parseIntent, parseLoginTicket, type AppLink } from "./deep-link";
@@ -881,7 +881,7 @@ function installSessionPolicy(ses: Session): void {
     log.info(`local CA pinned from ${config.trustedCaFile} for ${[...hosts].join(", ")}`);
     // FIX134 A3 — the main process's own https calls (ticket exchange, refresh,
     // models, turns) must see the same trust: Node's fetch does not, Chromium's does.
-    installNodeFetchTrust(trust, (input, init) => net.fetch(input instanceof URL ? input.toString() : input, init), (line) => log.info(line));
+    installNodeFetchTrust(trust, netRequestFetch((o) => net.request(o)), (line) => log.info(line));
   }
   ses.webRequest.onHeadersReceived({ urls: ["http://*/*", "https://*/*"] }, (details, callback) => {
     const isDocument = details.resourceType === "mainFrame" || details.resourceType === "subFrame";
