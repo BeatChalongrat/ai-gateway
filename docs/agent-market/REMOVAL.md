@@ -2,7 +2,9 @@
 
 Agent Market is a bolt-on. Removing it is five boring steps, and the core is
 left exactly as it was before the feature arrived. This file is the drill the
-AM1 card ran for real (its output is in the AM1 report).
+AM1 card ran for real (its output is in the AM1 report); AM2 ran it again
+after touching core export/delete and the shared sandbox scripts (output in
+the AM2 report).
 
 ## What exists, and where
 
@@ -18,6 +20,10 @@ AM1 card ran for real (its output is in the AM1 report).
 | Settings | `.env`: `AGENT_MARKET_*`, `AGENT_RUNNER_*`, `AM_*` | step 5 |
 | Scratch | `data/agent-sandbox-runs/` | step 4 |
 | Observability (AM1b) | Prometheus job `agent-runner` + `infra/prometheus/agent_market.yml` (+ its test), Grafana `infra/grafana/provisioning/dashboards/agent_market.json` | revert, then `docker kill -s HUP ai-gateway-prometheus-1` |
+| Agent pager (AM1c) | `backend/app/ops/agent_market_alerts.py` (ops-watch reads Agent Market's alerts from Prometheus and pages its own topic only), `.env` `AGENT_MARKET_NTFY_URL` | revert + step 5 |
+| Document converter (AM2) | `services/doc-converter/` (LibreOffice: .docx → PDF, .xlsx recalculation), image `ai-gateway-doc-converter:*` (`scripts/agent-market/build-converter.sh`), service `doc-converter` and the internal network `converter` in `docker-compose.agent-market.yml` | step 1 + revert |
+| Stored engines (AM2) | every runner's engine zip under `agent-market/engines/<build>.zip` (a pinned install runs the engine it was released with) | step 4 (same prefix) |
+| Duplicate index, versions (AM2) | migration `002_document_index`: table `agent_market.document_index`, `agent_runs.scratch_purged_at`, `agent_installs.previous_definition_id` — inside the schema | step 3 |
 
 The only lines in existing files (the "seams") — all removed by the revert:
 
@@ -31,15 +37,33 @@ The only lines in existing files (the "seams") — all removed by the revert:
 - AM1b: `infra/prometheus/prometheus.yml` (the `agent-runner` job and rule file),
   `infra/prometheus/alerts.yml` (`TargetDown` leaves `job="agent-runner"` to its own alert),
   `backend/app/ops/watch.py` (`classify_smoke` never pages on `agent_market.*` checks)
+- AM1c: `backend/app/ops/watch.py` + `backend/app/services/alert_channels.py` +
+  `alert_pager.py` + `backend/app/core/config.py` (the agent-market channel and its
+  topic), `docker-compose.yml` (two env lines on ops-watch),
+  `services/chat-edge-api/internal/sandbox/sandbox.go` (labels on every step
+  container so a restarted runner reaps what a killed one left)
+- AM2, core export and deletion: `services/chat-edge-api/internal/service/account_providers.go`
+  is a feature-agnostic registry (`AccountDataProvider`: Name, Export, Stop, Purge);
+  `account_export.go` and `account_deletion.go` call every registered provider at
+  their three moments (the export ZIP, the deletion request, the purge). Agent
+  Market registers itself with **one line** inside the flag-gated block of
+  `cmd/server/main.go`. With the flag off nothing registers and export and
+  deletion do exactly what they did before; the revert removes the registry too.
+- AM2, shared sandbox scripts (also used by chat's code interpreter, so the
+  sandbox image is rebuilt after a revert, with a rollback tag):
+  `services/chat-edge-api/scripts/extract_text.py` (keeps each OCR word's box and
+  confidence), `excel_executor.py` (fills a workbook's named ranges, input cells
+  only), `docx_generator.py` (markers, repeating rows, content controls). Each
+  change is additive: chat's calls and outputs are unchanged.
 
 ## Steps
 
 Run from the main checkout (`C:\Users\Beat Beat\Desktop\ai-gateway`).
 
 ```bash
-# 1. Stop the execution plane (nothing else depends on it).
+# 1. Stop the execution plane and the converter (nothing else depends on them).
 docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market down
-docker image rm $(docker images -q ai-gateway-agent-runner) 2>/dev/null || true
+docker image rm $(docker images -q ai-gateway-agent-runner) $(docker images -q ai-gateway-doc-converter) 2>/dev/null || true
 
 # 2. Turn the flag off and recreate chat-edge + web-chat on their current images.
 #    (flag off = no route, no pool, no query, no nav item; verify with step 6)
@@ -55,12 +79,14 @@ rm -rf data/agent-sandbox-runs
 #    (S3 backend instead: delete every object under the prefix agent-market/)
 
 # 5. Revoke the runner's key (portal → project "Agent Market runner" → revoke),
-#    then delete AGENT_MARKET_*, AGENT_RUNNER_*, AM_* from .env.
+#    then delete AGENT_MARKET_* (including AGENT_MARKET_NTFY_URL, AGENT_MARKET_VISION_MODEL,
+#    AGENT_MARKET_CONVERTER_URL and the retention windows), AGENT_RUNNER_*, AM_* from .env.
 
-# 6. Revert the code (one squashed commit), rebuild and redeploy as usual.
-git revert --no-edit <AM1 squash sha>
+# 6. Revert the code — every Agent Market commit, newest first — rebuild and redeploy as usual.
+git revert --no-edit $(git log --format=%h --grep='^AM[0-9]' main)
 REVISION=$(git rev-parse --short HEAD) bash scripts/build-images.sh chat-edge-api web-chat
-#    tag :rollback-<label>, swap, measure (CARD-RULES §4)
+#    the shared sandbox scripts changed back too: rebuild ai-gateway-sandbox (tag the
+#    current :latest :rollback-<label> first), then swap and measure (CARD-RULES §4)
 
 # 7. Prove it.
 SMOKE_TARGET=live bash scripts/smoke.sh          # green, including the agent_market-absent check's successor: GET /api/v1/agent-market/* → 404
@@ -70,7 +96,9 @@ SMOKE_TARGET=live bash scripts/smoke.sh          # green, including the agent_ma
 
 - `GET /api/v1/agent-market/availability` → **404** (no route), web-chat shows no Agent Market item.
 - `SELECT to_regclass('agent_market.agent_runs')` → **NULL**; `\dn` lists no `agent_market`.
-- No container of project `sran-agent-market`, no image `ai-gateway-agent-runner`.
+- No container of project `sran-agent-market`, no image `ai-gateway-agent-runner` or `ai-gateway-doc-converter`.
+- A data export ZIP has no `agent-market/` folder and its README no "Also included" line;
+  an account deletion runs the core steps only.
 - No `agent-market/` folder in the uploads volume.
 - `git grep -n -i "agent.market\|agentmarket\|agent-runner"` → only CHANGELOG/history mentions.
 - Every test lane green: backend, Go (chat-edge), web (tsc, vitest, lint:i18n, check:classes, next build), desktop.

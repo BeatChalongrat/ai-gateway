@@ -1,4 +1,4 @@
-# Agent Market — operations (AM1b)
+# Agent Market — operations (AM1b, AM2)
 
 What runs, where it is bounded, how you see it, and how to take it out.
 Removal of the code: `REMOVAL.md`. Design: `ARCHITECTURE.md`.
@@ -58,6 +58,81 @@ step in flight, never another runner's before its deadline, never a container
 without the owner label (chat's sandboxes). Step workspaces of removed
 containers, and any older than 2 × (wall + 30 s) + 1 min, are deleted.
 `docker ps -a --filter label=sran.sandbox.owner=agent-runner` lists them.
+
+## Document converter (AM2)
+
+PDF and workbook recalculation are LibreOffice in its own container,
+`doc-converter` (`services/doc-converter`, image `ai-gateway-doc-converter`,
+built by `scripts/agent-market/build-converter.sh`), in the same compose
+project as the runner.
+
+| Limit | Value | Where |
+|---|---|---|
+| network | only `converter`: an `internal` network shared with agent-runner alone — no route out, no port on the host | `docker-compose.agent-market.yml` |
+| user / filesystem | `cap_drop ALL`, `no-new-privileges`, read-only root, `/tmp` tmpfs 256 MB | same |
+| memory / CPU / processes | 768 MB, 1 CPU (`AM_CONVERTER_CPUS`), 128 pids | same |
+| one conversion | a fresh LibreOffice profile and work directory each, removed after; 60 s wall clock (`AM_CONVERT_TIMEOUT_SECONDS`) then the whole process group is killed | `services/doc-converter/server.py` |
+| queue | one conversion at a time, at most 4 waiting or running (`MAX_PENDING`), input ≤ 25 MB | same |
+| fonts | Thai fonts baked into the image; no font or anything else is ever fetched | `services/doc-converter/Dockerfile` |
+
+A PDF is only ever the converted .docx (the ReportLab path is gone). Every PDF
+passes two gate checks before it is delivered: `pdf.pages` (every page is
+rasterised; a page with no ink or all ink fails) and `pdf.thai` (every Thai
+paragraph of the .docx is found in `pdftotext -raw` text). A customer's .xlsx
+template is recalculated by LibreOffice and only the calculated values are
+merged back into our own filled file — the customer never gets LibreOffice's
+re-export. PDF is offered only by a runner with a converter configured
+(`AGENT_MARKET_CONVERTER_URL` → capability `deliverable.pdf`). If a conversion
+fails (converter down, timeout) or a gate check fails, the run that asked for
+the PDF fails its quality gate (`quality_gate`, the reason in the workspace)
+and nothing unchecked is delivered — the person can run it again without PDF.
+
+## Which model sees a document (AM2)
+
+Digital PDFs, e-Tax XML and spreadsheets are read by rules only (E2) — no
+model. A scan or photo gets a second reading from a vision model **only when
+that model is self-hosted**: `AGENT_MARKET_VISION_MODEL` (default
+`qwen3.8-27b-fp8`) must be listed in `AGENT_MARKET_SELF_HOSTED_MODELS`, and
+there is no fallback to another model. Its reading is only a proposal next to
+E2's; a person decides. Every run records `model_used` and
+`model_self_hosted`; the workbook lists which model saw which document.
+
+## What waits on a person (AM2)
+
+Questions are cards (`agent_run_clarifications`). What a rule found after
+the numbers — an expense over its limit, a missing receipt, a duplicate, a
+split purchase — is a run exception (`agent_run_exceptions`), open until a
+person picks one of its own choices; nothing is rejected automatically, and
+there is no hidden "reject". The per-agent dashboard
+(`GET /installs/{id}/dashboard`) shows what is waiting and for how long.
+
+## Retention (AM2)
+
+The runner's hourly pass:
+
+| What | Kept | Setting |
+|---|---|---|
+| an upload never attached to a run | 48 h | `AGENT_MARKET_STAGED_UPLOAD_HOURS` |
+| a failed or cancelled run's scratch (its step blobs; the run row stays as its record) | 7 days | `AGENT_MARKET_FAILED_SCRATCH_DAYS` |
+| a removed install (everything: runs, files, artifacts, index) | 30 days after removal, like a deleted chat | `AGENT_MARKET_REMOVED_INSTALL_DAYS` |
+| a succeeded run's evidence and outputs | as long as its install | — |
+| the duplicate index (invoice 730 days, expense 730 days) | the package's `document_index.retention_days` | the manifest |
+
+A person's data export includes `agent-market/` (installs, runs, cards,
+exceptions, files and outputs with their bytes); an account deletion stops
+their runs at the request and erases everything at the purge
+(`service.AccountDataProvider`).
+
+## Versions (AM2)
+
+An install is pinned to the version it installed, and its runs execute that
+version's own engine (stored at `agent-market/engines/<build>.zip`, loaded by
+any runner). A changed package must carry a new version or it is not
+registered (the old one keeps running; the runner logs an error). Upgrade:
+settings → upgrade shows the diff, runs the new version's self-test on this
+install, and switches only if it passes and meets the package's own
+expectations; rollback returns to the previous version. An install whose
+pinned engine is missing fails its run with "upgrade this agent".
 
 ## Bulkheads, with numbers
 

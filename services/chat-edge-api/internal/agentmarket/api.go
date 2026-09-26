@@ -118,6 +118,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/installs/{id}/template", a.getTemplate)
 		r.Delete("/installs/{id}/template", a.removeTemplate)
 		r.Get("/installs/{id}/upgrade", a.upgradeInfo)
+		r.Get("/installs/{id}/dashboard", a.dashboard) // AM2: how this agent has been doing
 		r.Post("/installs/{id}/upgrade", a.startUpgrade)
 		r.Post("/installs/{id}/rollback", a.rollback)
 		r.Get("/runs/{id}/exceptions", a.runExceptions)

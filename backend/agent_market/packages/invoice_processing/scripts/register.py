@@ -24,7 +24,7 @@ import datetime as _dt
 from decimal import ROUND_HALF_UP, Decimal
 
 from ....engine.e2 import cards
-from ....engine.e2.schema import FIELD_KINDS, MONEY_FIELDS, STRICT_THRESHOLD
+from ....engine.e2.schema import FIELD_KINDS, MONEY_FIELDS, ORDINARY_THRESHOLD, STRICT_THRESHOLD
 from ....engine.thai import fmt_money, period_label_th
 from ..checks import review as R
 
@@ -244,9 +244,31 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
             "script": "packages/invoice_processing/scripts/register.py"}
 
 
+def confidence_buckets(provenance: list[dict]) -> dict:
+    """How sure the recorded values were, for the agent's dashboard: values read from a document by
+    confidence band (the E2 thresholds: at or above STRICT is accepted as read, between ORDINARY and
+    STRICT only for ordinary fields, below ORDINARY is always asked), and values a person typed or
+    confirmed, or that were computed."""
+    out = {"high": 0, "medium": 0, "low": 0, "person": 0, "computed": 0}
+    for p in provenance:
+        by = p.get("decided_by") or ""
+        if by in ("typed_by_person", "confirmed_by_person"):
+            out["person"] += 1
+        elif by in ("computed", "model_proposal"):
+            out["computed"] += 1
+        else:
+            c = p.get("confidence") or 0
+            out["high" if c >= STRICT_THRESHOLD else "medium" if c >= ORDINARY_THRESHOLD else "low"] += 1
+    return out
+
+
 def summarize(computed: dict) -> dict:
     t = computed["totals"]
+    tiers: dict[str, int] = {}
+    for d in computed["documents"]:
+        tiers[d["tier"]] = tiers.get(d["tier"], 0) + 1
     return {"period": computed["period"], "period_label": computed["period_label"], "documents": t["documents"],
+            "confidence": confidence_buckets(computed["provenance"]), "tiers": tiers,
             "included": t["included"], "excluded": t["excluded"], "exceptions": t["exceptions"],
             "total_thb": t["thb"]["total"], "vat_thb": t["thb"]["vat_amount"],
             "models": [{"model": m["model"], "self_hosted": m["self_hosted"], "documents": len(m["documents"])}

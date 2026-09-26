@@ -67,6 +67,27 @@ class EvalSet(unittest.TestCase):
         self.assertEqual(failures, {})
 
 
+class Summary(unittest.TestCase):
+    """What the agent's dashboard reads from a run: every recorded value in one confidence band, and
+    the documents by how they were read."""
+
+    def test_confidence_bands_and_tiers(self):
+        from agent_market.tests import invoicekit as K
+
+        cases = {c["id"]: c for c in K.load_cases()["cases"]}
+        clean = K.run_case(cases["clean_batch_zero_questions"])
+        conf = clean["summary"]["confidence"]
+        self.assertEqual(sum(conf.values()), len(clean["computed"]["provenance"]))
+        self.assertEqual((conf["low"], conf["person"]), (0, 0))
+        self.assertGreater(conf["high"], 0)
+        self.assertLessEqual(set(clean["summary"]["tiers"]), {"digital", "etax"})    # no scan, no photo
+        scans = K.run_case(cases["scans_accept_every_proposal"])
+        conf = scans["summary"]["confidence"]
+        self.assertEqual(sum(conf.values()), len(scans["computed"]["provenance"]))
+        self.assertGreater(conf["person"], 0)    # the proposals the person accepted
+        self.assertIn("scan", scans["summary"]["tiers"])
+
+
 class Hooks(unittest.TestCase):
     def test_extra_inputs_only_reach_packages_that_take_them(self):
         from agent_market.engine import step
