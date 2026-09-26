@@ -6,6 +6,7 @@ time-window counts, top models, and per-project breakdown.
 
 from __future__ import annotations
 
+import datetime as _datetime_module
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -80,15 +81,17 @@ def _signup(client, email: str) -> dict:
 def _seed_logs_for_tenant(
     tenant_id: str,
     project_specs: list[tuple[str, str, list[tuple[str, int, float]]]],
+    now: datetime | None = None,
 ):
     """Bulk-insert request_log rows.
 
     ``project_specs`` is a list of (project_id, project_name, entries)
-    where ``entries`` is [(model, tokens, age_hours), ...].
+    where ``entries`` is [(model, tokens, age_hours), ...]; ages count back
+    from ``now`` (the real clock when not given).
     """
     db = _Session()
     try:
-        now = datetime.now(timezone.utc)
+        now = now or datetime.now(timezone.utc)
         for pid, pname, entries in project_specs:
             # Insert the project if it doesn't exist.
             if db.get(ProjectORM, pid) is None:
@@ -122,6 +125,25 @@ def _seed_logs_for_tenant(
         db.close()
 
 
+def _pin_clock(monkeypatch, instant: datetime) -> None:
+    """Pin the clock the usage summary reads to ``instant``.
+
+    The endpoint imports ``datetime`` when it runs, so it gets the module's
+    attribute; code that bound ``datetime`` at import (the JWT checks) keeps
+    the real clock. The windows below differ by the hour of ``instant``, so
+    a pin that stopped reaching the endpoint fails the test instead of making
+    it depend on when it runs (AM1c: it failed every day before 05:00 UTC).
+    """
+    real = _datetime_module.datetime
+
+    class _Pinned(real):
+        @classmethod
+        def now(cls, tz=None):
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(_datetime_module, "datetime", _Pinned)
+
+
 class TestUsageSummary:
     def test_empty_tenant_returns_zeros(self, client):
         a = _signup(client, "empty@t.com")
@@ -145,7 +167,15 @@ class TestUsageSummary:
         assert body["top_models"] == []
         assert body["by_project"] == []
 
-    def test_totals_and_windows_aggregate_correctly(self, client):
+    # "today" starts at 00:00 UTC: entries 1 h, 2 h and 5 h old are all
+    # today at noon, two of them at 04:59, none at 00:30.
+    @pytest.mark.parametrize(
+        "clock, today",
+        [("12:00", 3), ("23:59", 3), ("04:59", 2), ("00:30", 0)],
+    )
+    def test_totals_and_windows_aggregate_correctly(
+        self, client, monkeypatch, clock, today
+    ):
         a = _signup(client, "agg@t.com")
         db = _Session()
         try:
@@ -153,6 +183,8 @@ class TestUsageSummary:
             tenant_id = user.tenant_id
         finally:
             db.close()
+        hour, minute = (int(x) for x in clock.split(":"))
+        now = datetime(2026, 9, 15, hour, minute, tzinfo=timezone.utc)
         _seed_logs_for_tenant(
             tenant_id,
             [
@@ -160,7 +192,6 @@ class TestUsageSummary:
                     "proj-1",
                     "Main",
                     [
-                        # 3 entries today, 1 last week, 1 last month
                         ("gpt-4o", 100, 1),
                         ("gpt-4o", 200, 2),
                         ("claude-3", 50, 5),
@@ -169,7 +200,9 @@ class TestUsageSummary:
                     ],
                 ),
             ],
+            now=now,
         )
+        _pin_clock(monkeypatch, now)
         r = client.get(
             "/portal/me/usage/summary",
             headers={"Authorization": f"Bearer {a['access_token']}"},
@@ -177,7 +210,7 @@ class TestUsageSummary:
         body = r.json()
         assert body["totals"]["requests"] == 5
         assert body["totals"]["tokens"] == 470
-        assert body["windows"]["today"] == 3
+        assert body["windows"]["today"] == today
         assert body["windows"]["last_7d"] == 4
         assert body["windows"]["last_30d"] == 5
 
