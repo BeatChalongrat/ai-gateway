@@ -73,9 +73,14 @@ class Render(unittest.TestCase):
             charts = [z.read(n).decode("utf-8") for n in z.namelist() if n.startswith("ppt/charts/chart")]
         bars = [c for c in charts if "<c:barChart>" in c]
         self.assertTrue(bars)
+        import re as _re
+
         for c in bars:
             self.assertNotIn('<c:invertIfNegative val="1"/>', c)
             self.assertIn('<c:invertIfNegative val="0"/>', c)
+            # a bar coloured on its own (<c:dPt>) inverts by itself unless told not to
+            for dpt in _re.findall(r"<c:dPt>.*?</c:dPt>", c, _re.S):
+                self.assertIn('<c:invertIfNegative val="0"/>', dpt)
 
     def test_deck_has_8_to_12_slides(self):
         deck = next(a for a in self.res["artifacts"] if a["format"] == "pptx")

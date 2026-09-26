@@ -15,6 +15,8 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches, Pt
 
 import pptx_generator as pg  # /sandbox/scripts — shared, imported, not modified
@@ -220,6 +222,13 @@ class DeckWriter:
                 pt = ser.points[idx]
                 pt.format.fill.solid()
                 pt.format.fill.fore_color.rgb = RGBColor.from_string(self.p["negative"] if v > 0 else self.p["positive"])
+                # a point with its own colour (<c:dPt>) inverts on its own when
+                # negative: say no right after its <c:idx>, as the schema orders it
+                dpt = ser._element.get_or_add_dPt_for_point(idx)
+                if dpt.find(qn("c:invertIfNegative")) is None:
+                    inv = OxmlElement("c:invertIfNegative")
+                    inv.set("val", "0")
+                    dpt.find(qn("c:idx")).addnext(inv)
         if spec.get("subtitle"):
             self._text(s, 0.7, 0.95, 8.6, 0.3, spec["subtitle"], 10, self.p["muted"])
         self.bindings.append({"slide": len(self.prs.slides), "chart": spec["id"], "categories": cats,
