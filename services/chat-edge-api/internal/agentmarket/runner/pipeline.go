@@ -179,6 +179,10 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := rc.recordIndex(ctx, computedRef); err != nil {
 		return r.fail(ctx, run, "index", err)
 	}
+	// What the package left for a person to decide (the expense audit).
+	if err := rc.recordExceptions(ctx, computedRef); err != nil {
+		return r.fail(ctx, run, "exceptions", err)
+	}
 	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false); err != nil {
 		return r.fail(ctx, run, "outputs", err)
 	}

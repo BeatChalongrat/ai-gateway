@@ -120,6 +120,8 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/installs/{id}/upgrade", a.upgradeInfo)
 		r.Post("/installs/{id}/upgrade", a.startUpgrade)
 		r.Post("/installs/{id}/rollback", a.rollback)
+		r.Get("/runs/{id}/exceptions", a.runExceptions)
+		r.Post("/exceptions/{id}/decision", a.decideException)
 		r.Post("/installs/{id}/messages", a.message)
 		r.Post("/mapping-preview", a.mappingPreview)
 		r.Post("/cards/{id}/answer", a.answer)
@@ -389,7 +391,8 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 func validSettingKey(k string) bool {
 	switch k {
 	case "company", "formats", "currency", "language", "materiality", "mapping", "dc_convention", "theme", "fiscal_year_start",
-		"company_tax_id", "company_branch": // AM2: who tax invoices must be made out to
+		"company_tax_id", "company_branch", // AM2: who tax invoices must be made out to
+		"policy", "holidays", "policy_kb": // AM2: the expense audit's policy table and calendar
 		return true
 	}
 	return strings.HasPrefix(k, "answers.")
@@ -424,6 +427,11 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 				return false
 			}
 		}
+	case "policy":
+		// the structured policy table: limits come from here only, never from a document
+		return len(PolicyProblems(raw)) == 0
+	case "holidays":
+		return len(HolidayProblems(raw)) == 0
 	}
 	return true
 }
@@ -452,6 +460,12 @@ func settingLabel(k string) string {
 		return "เลขประจำตัวผู้เสียภาษีของบริษัท"
 	case "company_branch":
 		return "สาขาของบริษัท"
+	case "policy":
+		return "ตารางนโยบายการเบิก"
+	case "holidays":
+		return "ปฏิทินวันหยุด"
+	case "policy_kb":
+		return "เอกสารระเบียบ (ใช้เป็นบริบทเท่านั้น)"
 	}
 	return k
 }
@@ -591,7 +605,14 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validSettingValue(key, body.Value) {
-		writeErr(w, http.StatusBadRequest, "BAD_VALUE", "ค่าไม่ถูกต้อง: "+settingLabel(key))
+		msg := "ค่าไม่ถูกต้อง: " + settingLabel(key)
+		switch key { // say what is wrong with a table
+		case "policy":
+			msg += " — " + strings.Join(PolicyProblems(body.Value), " · ")
+		case "holidays":
+			msg += " — " + strings.Join(HolidayProblems(body.Value), " · ")
+		}
+		writeErr(w, http.StatusBadRequest, "BAD_VALUE", msg)
 		return
 	}
 	label := body.Label

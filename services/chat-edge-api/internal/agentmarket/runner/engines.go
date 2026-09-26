@@ -181,7 +181,7 @@ func joinLines(xs []string) string {
 func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []string {
 	var st struct {
 		Expect struct {
-			Findings *[]json.RawMessage        `json:"findings"`
+			Findings *[]json.RawMessage         `json:"findings"`
 			Period   string                     `json:"period"`
 			Lines    map[string]string          `json:"lines"`
 			Totals   map[string]json.RawMessage `json:"totals"`

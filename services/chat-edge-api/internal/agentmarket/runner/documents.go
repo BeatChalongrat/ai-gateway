@@ -237,6 +237,28 @@ func (rc *runCtx) recordIndex(ctx context.Context, computed blobRef) error {
 	return err
 }
 
+// recordExceptions stores what the package left for a person to decide
+// (computed.json run_exceptions → agent_run_exceptions, AM2): the expense
+// audit's over-limit, missing-receipt and duplicate claims. Never a
+// rejection — each row stays open until a person picks one of its choices.
+func (rc *runCtx) recordExceptions(ctx context.Context, computed blobRef) error {
+	b, err := rc.download(ctx, computed.Key)
+	if err != nil {
+		return err
+	}
+	var c struct {
+		RunExceptions []am.ExceptionIn `json:"run_exceptions"`
+	}
+	if err := json.Unmarshal(b, &c); err != nil || len(c.RunExceptions) == 0 {
+		return nil
+	}
+	n, err := rc.r.Store.ReplaceRunExceptions(ctx, rc.run.ID, c.RunExceptions)
+	if err == nil {
+		rc.log.Info("run exceptions stored", "open", n)
+	}
+	return err
+}
+
 // visionPages uploads the page images a parse step wrote for the vision step.
 func (rc *runCtx) visionPages(ctx context.Context, res *StepResult, stepKey string, summary map[string]any) ([]blobRef, error) {
 	names, _ := summary["vision_pages"].([]any)

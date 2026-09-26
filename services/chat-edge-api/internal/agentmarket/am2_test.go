@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,5 +164,50 @@ func TestCompanyTaxIDIsCheckedBeforeItIsKept(t *testing.T) {
 		if got := validSettingValue(c.key, json.RawMessage(c.value)); got != c.ok || !validSettingKey(c.key) {
 			t.Fatalf("%s=%s: %v", c.key, c.value, got)
 		}
+	}
+}
+
+func TestExpensePolicyIsCheckedBeforeItIsKept(t *testing.T) {
+	good := `{"schema":"am2.expense_policy.v1","currency":"THB","receipt_required_above":"500.00","approval_threshold":"3,000",
+"categories":{"meals":{"label":"ค่าอาหาร","per_claim":"1500.00","per_person_month":5000},
+"contractor":{"per_claim":"20000","wht_rate":"3","wht_from":"1000"}},"prohibited_merchants":["ผับ"],"weekend_holiday":"flag"}`
+	if p := PolicyProblems(json.RawMessage(good)); len(p) != 0 || !validSettingValue("policy", json.RawMessage(good)) {
+		t.Fatalf("a usable table: %v", p)
+	}
+	for _, c := range []struct{ table, want string }{
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","categories":{"meals":{"per_claim":"ประมาณ 2,000"}}}`, "categories.meals.per_claim"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","categories":{}}`, "categories:"},
+		{`{"schema":"am2.expense_policy.v1","approval_threshold":"3000","categories":{"meals":{"per_claim":"1500"}}}`, "receipt_required_above"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","categories":{"c":{"wht_rate":"3"}}}`, "categories.c.wht_from"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","categories":{"c":{"wht_rate":"300","wht_from":"1"}}}`, "categories.c.wht_rate"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","currency":"USD","categories":{"m":{}}}`, "currency"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","weekend_holiday":"reject","categories":{"m":{}}}`, "weekend_holiday"},
+		{`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","prohibited_merchants":"ผับ","categories":{"m":{}}}`, "prohibited_merchants"},
+		{`{"receipt_required_above":"500","approval_threshold":"3000","categories":{"m":{}}}`, "schema"},
+		{`[1,2]`, "JSON object"},
+	} {
+		p := strings.Join(PolicyProblems(json.RawMessage(c.table)), " | ")
+		if !strings.Contains(p, c.want) || validSettingValue("policy", json.RawMessage(c.table)) {
+			t.Fatalf("%s: want a problem about %q, got %q", c.table, c.want, p)
+		}
+	}
+	for v, ok := range map[string]bool{`{"2026-10-13":"วันนวมินทรมหาราช"}`: true, `{"schema":"am2.holidays.v1","dates":{"2026-10-23":"x"}}`: true,
+		`{"13/10/2569":"x"}`: false, `{}`: false, `null`: false, `["2026-10-13"]`: false} {
+		if validSettingValue("holidays", json.RawMessage(v)) != ok {
+			t.Fatalf("holidays %s: want %v", v, ok)
+		}
+	}
+}
+
+func TestPolicySettingSaysWhatIsWrong(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	in := e.install()
+	bad := json.RawMessage(`{"schema":"am2.expense_policy.v1","receipt_required_above":"500","approval_threshold":"3000","categories":{"meals":{"per_claim":"ประมาณ 2,000"}}}`)
+	code, body := e.do("PUT", "/installs/"+in.ID.String()+"/defaults/policy", map[string]any{"value": bad})
+	if code != 400 || !strings.Contains(fmt.Sprint(body), "categories.meals.per_claim") {
+		t.Fatalf("a limit that is not an amount: %d %v", code, body)
 	}
 }
