@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
@@ -35,9 +37,13 @@ type Runner struct {
 	// refused (no capabilities) and runs fail with a clear reason.
 	SandboxReady bool
 	Now          func() time.Time
+	// Reaper removes the sandbox containers a killed runner left behind; nil
+	// means the default one built from Exec's sandbox (always on).
+	Reaper *Reaper
 
-	running atomic.Int32
-	started time.Time
+	running  atomic.Int32
+	started  time.Time
+	instance string
 }
 
 // Register writes every package in the engine to agent_definitions.
@@ -86,6 +92,7 @@ func (r *Runner) heartbeat(ctx context.Context) {
 // (their leases are left to expire, so a restarted runner resumes them).
 func (r *Runner) Start(ctx context.Context) error {
 	r.started = time.Now()
+	r.instance = uuid.NewString()
 	if r.Now == nil {
 		r.Now = time.Now
 	}
@@ -93,6 +100,7 @@ func (r *Runner) Start(ctx context.Context) error {
 		return err
 	}
 	r.heartbeat(ctx)
+	r.startReaper(ctx)
 	go func() {
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
@@ -147,9 +155,40 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 }
 
+// startReaper removes what a killed runner left behind before the first
+// claim, then keeps sweeping (AM1c).
+func (r *Runner) startReaper(ctx context.Context) {
+	if r.Exec == nil || r.Exec.SB == nil {
+		return
+	}
+	if r.Reaper == nil {
+		r.Reaper = NewReaper(r.Exec.SB, r.Exec.Limits.Wall, r.Log)
+	}
+	me := Identity{Runner: r.ID, Instance: r.instance}
+	if n := r.Reaper.Sweep(ctx, me, r.Exec.InFlight); n > 0 {
+		r.Log.Info("sandbox containers left by a previous runner removed", "count", n)
+	}
+	if r.Reaper.Every <= 0 {
+		return
+	}
+	go func() {
+		t := time.NewTicker(r.Reaper.Every)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				r.Reaper.Sweep(ctx, me, r.Exec.InFlight)
+			}
+		}
+	}()
+}
+
 // execute holds the lease while the run works, and cancels the work the
 // moment a cancel is requested or the lease is lost.
 func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
+	parent = withSandboxLabels(parent, map[string]string{LabelRun: run.ID.String(), LabelRunner: r.ID, LabelInstance: r.instance})
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var cancelled atomic.Bool

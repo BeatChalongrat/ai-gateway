@@ -244,7 +244,7 @@ func TestSandbox_DockerArgsAlwaysNoNetwork(t *testing.T) {
 			if rr.cfg.Image == "" {
 				rr.cfg.Image = "ai-gateway-sandbox:latest"
 			}
-			args := rr.dockerArgs(tc.limits, "/work/in", "/work/out", "sbx-test")
+			args := rr.dockerArgs(tc.limits, "/work/in", "/work/out", "sbx-test", nil)
 
 			vals := networkValues(args)
 			if len(vals) != 1 {
@@ -257,5 +257,23 @@ func TestSandbox_DockerArgsAlwaysNoNetwork(t *testing.T) {
 					vals[0], args)
 			}
 		})
+	}
+}
+
+// AM1c — labels reach the container (sorted, before the image) so its owner
+// can find it again; without labels the arguments carry none.
+func TestSandbox_DockerArgsLabels(t *testing.T) {
+	rr := &Runner{cfg: Config{Image: "img", WorkDir: "/work", HostWorkDir: "/work"}}
+	args := rr.dockerArgs(DefaultLimits, "/work/in", "/work/out", "sbx-x", map[string]string{"b.key": "2", "a.key": "1"})
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--name sbx-x --label a.key=1 --label b.key=2 ") {
+		t.Fatalf("labels missing or unsorted: %s", joined)
+	}
+	if args[len(args)-1] != "img" {
+		t.Fatalf("the image stays last: %v", args)
+	}
+	plain := strings.Join(rr.dockerArgs(DefaultLimits, "/work/in", "/work/out", "sbx-x", nil), " ")
+	if strings.Contains(plain, "--label") {
+		t.Fatalf("no labels, no --label: %s", plain)
 	}
 }

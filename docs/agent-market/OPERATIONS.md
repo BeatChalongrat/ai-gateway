@@ -45,6 +45,20 @@ workspace directory is deleted when the step ends (`Executor.Cleanup`).
 The runner container itself: `cpus 1.0`, `memory 768m` (`docker-compose.agent-market.yml`),
 one step at a time (`AGENT_RUNNER_SLOTS=1`).
 
+**Orphans (AM1c).** Every sandbox container the runner starts is labelled
+`sran.sandbox.owner=agent-runner`, `sran.agent_market.run_id`, `…runner` (the
+runner id), `…instance` (one runner process), `…call` (one step) and
+`sran.sandbox.deadline_unix` (start + wall + 30 s, when the host ceiling has
+removed it). A runner killed between `docker create` and `start`, or mid-step,
+leaves its container behind; the runner removes it at start and then every
+`AGENT_RUNNER_SWEEP_SECONDS` (60): a container of this runner's previous
+process, a container of its own whose step has returned, and any runner's
+container `AGENT_RUNNER_SWEEP_GRACE_SECONDS` (60) past its deadline. Never a
+step in flight, never another runner's before its deadline, never a container
+without the owner label (chat's sandboxes). Step workspaces of removed
+containers, and any older than 2 × (wall + 30 s) + 1 min, are deleted.
+`docker ps -a --filter label=sran.sandbox.owner=agent-runner` lists them.
+
 ## Bulkheads, with numbers
 
 | | Agent Market | Chat (core) |

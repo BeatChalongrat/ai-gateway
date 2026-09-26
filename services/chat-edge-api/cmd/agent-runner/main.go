@@ -156,6 +156,12 @@ func run(log *slog.Logger) error {
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),
 	}
 
+	// The sweep that removes sandbox containers a killed runner left behind
+	// (AM1c): at start, then every AGENT_RUNNER_SWEEP_SECONDS.
+	r.Reaper = runner.NewReaper(sb, r.Exec.Limits.Wall, log)
+	r.Reaper.Every = time.Duration(am.EnvInt("AGENT_RUNNER_SWEEP_SECONDS", 60)) * time.Second
+	r.Reaper.Grace = time.Duration(am.EnvInt("AGENT_RUNNER_SWEEP_GRACE_SECONDS", 60)) * time.Second
+
 	// Health + metrics on its own port (am_ prefix; never the core's).
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, req *http.Request) {

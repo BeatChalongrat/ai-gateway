@@ -44,6 +44,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -160,7 +161,20 @@ type Spec struct {
 	Args   []string
 	Inputs []InputFile
 	Limits Limits
+	// Labels are docker labels for the container, so its owner can find it
+	// again (the agent runner reaps what a killed process left behind). With
+	// labels the container also carries LabelDeadline; without them the
+	// docker arguments are unchanged.
+	Labels map[string]string
 }
+
+// HostGrace is how long past its wall limit a job may live before the host
+// ceiling kills the docker CLI and removes the container.
+const HostGrace = 30 * time.Second
+
+// LabelDeadline is the unix second by which the host ceiling has removed the
+// container: a labelled container still present after it has no live owner.
+const LabelDeadline = "sran.sandbox.deadline_unix"
 
 // Artifact is a file the job produced under /job/out (excluding the __*
 // result sidecars). Path is valid on the host until Result.Cleanup runs.
@@ -272,6 +286,13 @@ func New(cfg Config) *Runner {
 	}
 	return &Runner{cfg: cfg}
 }
+
+// DockerBin is the docker CLI this runner calls.
+func (r *Runner) DockerBin() string { return r.cfg.DockerBin }
+
+// WorkDir is the staging root as this process writes it; each job's
+// workspace is WorkDir/<the container name without "sbx-">.
+func (r *Runner) WorkDir() string { return r.cfg.WorkDir }
 
 // Available reports whether the docker CLI and sandbox image are present.
 // Used at startup so the service can log a loud warning if the sandbox is
@@ -436,11 +457,19 @@ func (r *Runner) Execute(ctx context.Context, spec Spec) (*Result, error) {
 	hostOut := joinHost(hostRun, "out")
 
 	containerName := "sbx-" + runID
-	args := r.dockerArgs(limits, hostIn, hostOut, containerName)
+	var labels map[string]string
+	if len(spec.Labels) > 0 {
+		labels = make(map[string]string, len(spec.Labels)+1)
+		for k, v := range spec.Labels {
+			labels[k] = v
+		}
+		labels[LabelDeadline] = strconv.FormatInt(time.Now().Add(limits.Wall+HostGrace).Unix(), 10)
+	}
+	args := r.dockerArgs(limits, hostIn, hostOut, containerName, labels)
 
 	// Hard host-side ceiling: the runner self-kills at limits.Wall; give
 	// docker startup + teardown grace, then SIGKILL the whole run.
-	cctx, cancel := context.WithTimeout(ctx, limits.Wall+30*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, limits.Wall+HostGrace)
 	defer cancel()
 	// Reap the container unconditionally: if the host ceiling fires it
 	// only kills the `docker run` CLI, NOT the container — an orphaned
@@ -530,11 +559,19 @@ func (r *Runner) enforceRuntime(insideActual string) error {
 
 // dockerArgs builds the immutable lockdown flag set + mounts. Every value
 // here is a server constant or a server-derived limit — no model input.
-func (r *Runner) dockerArgs(l Limits, hostIn, hostOut, name string) []string {
+func (r *Runner) dockerArgs(l Limits, hostIn, hostOut, name string, labels map[string]string) []string {
 	mem := strconv.FormatInt(l.MemoryMB, 10) + "m"
 	args := []string{
 		"run", "--rm",
 		"--name", name,
+	}
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		args = append(args, "--label", k+"="+labels[k])
 	}
 	// FIX14 §2 — the hardened OCI runtime, when configured. docker itself
 	// errors on an unknown runtime name (it does NOT silently fall back), and

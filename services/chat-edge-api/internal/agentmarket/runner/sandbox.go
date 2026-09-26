@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/sandbox"
 )
@@ -30,6 +33,33 @@ type Executor struct {
 	SB     *sandbox.Runner
 	Engine *Engine
 	Limits sandbox.Limits
+
+	mu    sync.Mutex
+	calls map[string]bool // calls in progress (their containers' LabelCall)
+}
+
+// InFlight is a snapshot of the calls in progress.
+func (x *Executor) InFlight() map[string]bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	m := make(map[string]bool, len(x.calls))
+	for k := range x.calls {
+		m[k] = true
+	}
+	return m
+}
+
+func (x *Executor) track(call string, on bool) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if x.calls == nil {
+		x.calls = map[string]bool{}
+	}
+	if on {
+		x.calls[call] = true
+	} else {
+		delete(x.calls, call)
+	}
 }
 
 // Input is one file handed to a step.
@@ -80,8 +110,18 @@ func (x *Executor) Run(ctx context.Context, request any, inputs []Input) (*StepR
 	for _, i := range inputs {
 		in = append(in, sandbox.InputFile{Name: i.Name, LocalPath: i.LocalPath, Bytes: i.Bytes})
 	}
+	// Every container carries the runner's labels and this call's own token,
+	// registered before the container can exist (see Orphans).
+	labels := map[string]string{LabelOwner: OwnerRunner}
+	for k, v := range sandboxLabels(ctx) {
+		labels[k] = v
+	}
+	call := uuid.NewString()
+	labels[LabelCall] = call
+	x.track(call, true)
+	defer x.track(call, false)
 	start := time.Now()
-	res, err := x.SB.Execute(ctx, sandbox.Spec{Mode: sandbox.ModeCode, Code: bootstrap, Inputs: in, Limits: x.Limits})
+	res, err := x.SB.Execute(ctx, sandbox.Spec{Mode: sandbox.ModeCode, Code: bootstrap, Inputs: in, Limits: x.Limits, Labels: labels})
 	if err != nil && res == nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
