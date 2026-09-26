@@ -87,10 +87,13 @@ class Citations:
                            "script": script, "formula": formula})
         return cid
 
-    def derived(self, label: str, value, from_ids: list[str], formula: str) -> str:
+    def derived(self, label: str, value, from_ids: list[str], formula: str, unit: str | None = None) -> str:
         cid = f"c{len(self.items) + 1}"
-        self.items.append({"id": cid, "label": label, "value": s(value), "sources": [],
-                           "derived_from": from_ids, "script": SCRIPT_VERSION, "formula": formula})
+        item = {"id": cid, "label": label, "value": s(value), "sources": [],
+                "derived_from": from_ids, "script": SCRIPT_VERSION, "formula": formula}
+        if unit:
+            item["unit"] = unit  # "pct": the value is a percentage, not baht
+        self.items.append(item)
         return cid
 
 
@@ -352,7 +355,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     def ratio(key, label, num_key, formula):
         cur = pct(L(num_key), rev_c) if rev_c else None
         pri = pct(L(num_key, "prior"), rev_p) if has_prior and rev_p else None
-        cid = cites.derived(label, cur, [line_cite[num_key], line_cite["revenue"]], formula)
+        cid = cites.derived(label, cur, [line_cite[num_key], line_cite["revenue"]], formula, unit="pct")
         return {"key": key, "label": label, "current": s(cur), "prior": s(pri),
                 "change_points": s(q2(cur - pri)) if cur is not None and pri is not None else None, "cite": cid}
 

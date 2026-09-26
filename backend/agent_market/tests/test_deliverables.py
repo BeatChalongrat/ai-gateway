@@ -64,6 +64,19 @@ class Render(unittest.TestCase):
         default = re.search(r"<w:rPrDefault>.*?</w:rPrDefault>", styles, re.S).group(0)
         self.assertIn('w:bidi="th-TH"', default)
 
+    def test_deck_bars_under_budget_keep_their_colour(self):
+        # AM1b walkthrough: PowerPoint inverts the fill of a negative bar
+        # unless the series says not to — the under-budget bars came out white.
+        import zipfile
+
+        with zipfile.ZipFile(os.path.join(self.out, "d_v1.pptx")) as z:
+            charts = [z.read(n).decode("utf-8") for n in z.namelist() if n.startswith("ppt/charts/chart")]
+        bars = [c for c in charts if "<c:barChart>" in c]
+        self.assertTrue(bars)
+        for c in bars:
+            self.assertNotIn('<c:invertIfNegative val="1"/>', c)
+            self.assertIn('<c:invertIfNegative val="0"/>', c)
+
     def test_deck_has_8_to_12_slides(self):
         deck = next(a for a in self.res["artifacts"] if a["format"] == "pptx")
         self.assertTrue(8 <= deck["meta"]["slides"] <= 12)
@@ -228,6 +241,18 @@ class QuotableBudgetVariance(unittest.TestCase):
         self.assertIn("revenue_var_budget", c["quotable"])
         self.assertIn("revenue_var_budget_m", c["quotable"])
         self.assertTrue(rev["var_budget"])
+
+
+class CitationAppendix(unittest.TestCase):
+    def test_ratio_citations_read_as_percent(self):
+        # AM1b walkthrough: Appendix ข printed "อัตรากำไรสุทธิ 2" (money, rounded)
+        # for a 2.4 % ratio.
+        c = computed_for(["GL_2569-09.xlsx", "GL_2569-08.xlsx"])
+        model = content.build(c, REQ)
+        rows = [r for sec in model["sections"] if sec["key"] == "citations"
+                for b in sec["blocks"] if b["type"] == "table" for r in b["rows"]]
+        nm = next(r for r in rows if r[1] == "อัตรากำไรสุทธิ")
+        self.assertRegex(nm[2], r"^-?\d+\.\d%$")
 
 
 class NoComputeInRender(unittest.TestCase):

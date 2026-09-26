@@ -192,6 +192,9 @@ class DeckWriter:
             else:
                 ser.format.fill.solid()
                 ser.format.fill.fore_color.rgb = color
+                # PowerPoint draws a negative bar hollow unless told not to
+                # (the under-budget bars came out white in the walkthrough).
+                ser.invert_if_negative = False
         if kind != "line":
             plot.has_data_labels = True
             dl = plot.data_labels

@@ -330,7 +330,11 @@ def build(computed: dict, req: dict) -> dict:
             where = "คำนวณจาก " + ", ".join(c["derived_from"][:8]) + (" …" if len(c["derived_from"]) > 8 else "")
         else:
             where = "—"
-        val = money0(c["value"]) if c["value"] not in (None, "") and re.match(r"^-?\d+(\.\d+)?$", str(c["value"])) else (c["value"] or "")
+        numeric = c["value"] not in (None, "") and re.match(r"^-?\d+(\.\d+)?$", str(c["value"]))
+        if numeric and c.get("unit") == "pct":
+            val = fmt_pct(Decimal(str(c["value"])), 1)  # a ratio, not baht ("อัตรากำไรสุทธิ 2.4%", not "2")
+        else:
+            val = money0(c["value"]) if numeric else (c["value"] or "")
         citation_rows.append([c["id"], c["label"], val, where, f"{c['script']} · {c['formula']}"])
 
     about = [
