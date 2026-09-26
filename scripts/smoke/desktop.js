@@ -31,7 +31,22 @@ const EXE = L.env("SMOKE_DESKTOP_EXE", path.join(process.env.LOCALAPPDATA || "",
 const LOG = path.join(process.env.APPDATA || "", "SranDesktop-Electron", "logs", "shell.log");
 const PROCS = ["SRAN Desktop.exe", "SranDesktop.ToolsSidecar.exe", "SranDesktop.BrowserHost.exe"];
 const COMPOSER = 'textarea[data-shortcut="composer"]';
-const STOP = 'button[aria-label*="Stop"], button[aria-label*="หยุด"], [data-testid="stop-button"]';
+// The generation Stop is the composer's own send button while it streams
+// (ChatInput: aria-label "หยุด" / "Stop generation"). AM1b: matching every
+// label that merely *contains* หยุด/Stop kept desktop.turn red for ever once
+// a chat titled "… หยุดก่อนตอบ" sat in the sidebar.
+const STOP_LABELS = new Set(["หยุด", "Stop generation", "Stop"]);
+function isStopButton({ label, inComposer }) {
+  return !!inComposer && STOP_LABELS.has(String(label || "").trim());
+}
+async function stopActive(page) {
+  const buttons = await page.evaluate(() => {
+    const c = document.querySelector('textarea[data-shortcut="composer"]');
+    const box = c && (c.closest("form") || c.parentElement?.parentElement?.parentElement);
+    return box ? [...box.querySelectorAll("button")].map((b) => b.getAttribute("aria-label") || "") : [];
+  });
+  return buttons.some((label) => isStopButton({ label, inComposer: true }));
+}
 
 const portOpen = (port) => new Promise((resolve) => {
   const s = net.connect({ host: "127.0.0.1", port, timeout: 1500 });
@@ -171,7 +186,7 @@ module.exports = async function desktop(R) {
         const t0 = Date.now();
         await page.keyboard.press("Enter");
         await L.wait(1500);
-        const ended = await waitFor(async () => ((await page.locator(STOP).count()) === 0 ? Date.now() - t0 : null), 180000);
+        const ended = await waitFor(async () => (!(await stopActive(page)) ? Date.now() - t0 : null), 180000);
         const text = await page.evaluate(() => { const r = [...document.querySelectorAll("[data-msg-index]")]; return (r[r.length - 1]?.innerText || "").replace(/\s+/g, " ").trim(); });
         const row = L.csql(`select status, coalesce(terminal_cause,'') from chat.messages_masked where conversation_id='${mk.id}' and role='assistant' order by created_at desc limit 1`);
         result = { ok: ended !== null && /completed/.test(row) && text.length > 0, detail: `chat ${mk.id.slice(0, 8)}: stream ended ${ended === null ? "NOT within 180 s" : `in ${ended} ms`}, assistant row "${row}", answer "${text.slice(-40)}"` };
@@ -194,3 +209,5 @@ module.exports = async function desktop(R) {
     return { ok: !!gone, detail: `${path.basename(EXE)} closed, port ${PORT} ${gone ? "closed" : "STILL OPEN"}${wasRunning && !hadPort ? "; relaunched without the debugging port (it was running before the check)" : ""}` };
   });
 };
+
+module.exports.isStopButton = isStopButton;
