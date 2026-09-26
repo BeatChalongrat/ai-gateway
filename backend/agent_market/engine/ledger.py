@@ -104,6 +104,11 @@ class ParsedFile:
     error: str | None = None
     encoding: str | None = None
     raw_date_texts: list = field(default_factory=list)
+    # rows with an account and money whose date could not be read: they are
+    # left out of the ledger, and a check asks about them (never silent)
+    unreadable_date_rows: int = 0
+    unreadable_date_samples: list = field(default_factory=list)   # [row, text, account, amount]
+    unreadable_date_amount: Decimal = ZERO
 
     def summary(self) -> dict:
         return {
@@ -231,7 +236,16 @@ def _parse_rows(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
         raw_date = _cell(row, f.get("date"))
         d = parse_date(raw_date)
         if "date" in f and d is None:
-            # A posting without a date is a total/label line in every export we saw.
+            # A posting without a date is a total/label line in every export we
+            # saw — unless it carries money: then the date is in a format the
+            # parser does not know, and the row is counted for the check.
+            money = [to_decimal(_cell(row, f[k])) for k in ("debit", "credit", "amount") if k in f]
+            amount = sum((abs(m) for m in money if m), ZERO)
+            if raw_date not in (None, "") and amount:
+                pf.unreadable_date_rows += 1
+                pf.unreadable_date_amount += amount
+                if len(pf.unreadable_date_samples) < 20:
+                    pf.unreadable_date_samples.append([i + 1, str(raw_date).strip(), code_s, str(amount)])
             pf.skipped_rows += 1
             continue
         if isinstance(raw_date, str) and len(pf.raw_date_texts) < 400:

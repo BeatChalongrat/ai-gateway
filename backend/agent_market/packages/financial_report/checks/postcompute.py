@@ -56,8 +56,13 @@ def run(files: list[ParsedFile], roles: dict, period: str, computed: dict, *, an
             n_rows = sum(len(g["rows"]) for g in groups)
             g0 = groups[0]
             amount = sum((Decimal(g["amount"]) for g in groups), Decimal(0))
-            desc = (f"เอกสาร {g0['copies'][0]} ซ้ำกับ {g0['original']} ทุกบรรทัด (วันเดียวกัน ยอด {fmt_money(Decimal(g0['amount']))} บาท)"
-                    if len(groups) == 1 else f"พบ {len(groups)} ชุดที่ซ้ำกันทุกบรรทัด รวม {fmt_money(amount)} บาท")
+            if len(groups) > 1:
+                desc = f"พบ {len(groups)} ชุดที่ซ้ำกันทุกบรรทัด รวม {fmt_money(amount)} บาท"
+            elif g0.get("same_number"):
+                desc = (f"เอกสาร {g0['original']} มีทุกบรรทัดซ้ำกันสองชุดภายใต้เลขที่เดียวกัน "
+                        f"(วันเดียวกัน ยอด {fmt_money(Decimal(g0['amount']))} บาท)")
+            else:
+                desc = f"เอกสาร {g0['copies'][0]} ซ้ำกับ {g0['original']} ทุกบรรทัด (วันเดียวกัน ยอด {fmt_money(Decimal(g0['amount']))} บาท)"
             out.append(finding(
                 "duplicate_suspect", "blocking", "postcompute", "รายการซ้ำ",
                 f"{desc} น่าจะบันทึกซ้ำ จะให้ตัดชุดที่ซ้ำออกไหมครับ",

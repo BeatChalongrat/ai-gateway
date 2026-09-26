@@ -26,6 +26,9 @@ def dump(pf: ParsedFile) -> dict:
         "indicator_values": pf.indicator_values, "currencies": pf.currencies,
         "account_names": pf.account_names, "error": pf.error, "encoding": pf.encoding,
         "raw_date_texts": pf.raw_date_texts[:400],
+        "unreadable_date_rows": pf.unreadable_date_rows,
+        "unreadable_date_samples": pf.unreadable_date_samples,
+        "unreadable_date_amount": str(pf.unreadable_date_amount),
         "budget": {k: str(v) for k, v in pf.budget.items()},
         "budget_by_month": {k: {str(m): str(v) for m, v in by.items()} for k, by in pf.budget_by_month.items()},
         "header": None if hm is None else {
@@ -56,7 +59,10 @@ def load(d: dict) -> ParsedFile:
                     period_hint=d["period_hint"], dc_mode=d["dc_mode"],
                     indicator_values=d["indicator_values"], currencies=d["currencies"],
                     account_names=d["account_names"], error=d["error"], encoding=d.get("encoding"),
-                    raw_date_texts=d.get("raw_date_texts", []))
+                    raw_date_texts=d.get("raw_date_texts", []),
+                    unreadable_date_rows=d.get("unreadable_date_rows", 0),
+                    unreadable_date_samples=d.get("unreadable_date_samples", []),
+                    unreadable_date_amount=Decimal(d.get("unreadable_date_amount", "0")))
     pf.budget = {k: Decimal(v) for k, v in d.get("budget", {}).items()}
     pf.budget_by_month = {k: {int(m): Decimal(v) for m, v in by.items()} for k, by in d.get("budget_by_month", {}).items()}
     for (row, date, code, name, desc, dr, cr, cur, cc, doc, cols, ind) in d["rows"]:

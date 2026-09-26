@@ -20,7 +20,7 @@ from typing import Any
 SEVERITIES = ("blocking", "cosmetic")
 MOMENTS = ("install", "preflight", "postcompute")
 KINDS = ("question", "request_files")
-MULTI_INSTANCE = ("wrong_document_type", "unmapped_column")
+MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates")
 FORBIDDEN_WORDS = ("password", "รหัสผ่าน", "token", "โทเคน", "เลขบัตรประชาชน", "otp", "pin")
 
 

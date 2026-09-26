@@ -179,6 +179,43 @@ def check_mapping(primary: ParsedFile, answers: dict) -> list[Finding]:
     )]
 
 
+def check_unreadable_dates(files, roles, answers: dict) -> tuple[list[Finding], list[dict]]:
+    """Rows with an account and money whose date the parser cannot read are
+    left out of the ledger. That must never happen silently: the person
+    either sends an export with day/month/year dates or agrees to go on
+    without them, and the report says how much was left out."""
+    out: list[Finding] = []
+    assumptions: list[dict] = []
+    for pf in files:
+        if not pf.unreadable_date_rows or roles.get(pf.name) not in ("primary", "prior"):
+            continue
+        key = f"unreadable_dates:{pf.name}"
+        n, amount = pf.unreadable_date_rows, pf.unreadable_date_amount
+        if key in answers:
+            if answers[key] == "exclude":
+                assumptions.append({"code": "unreadable_dates", "source": "answer", "value": "exclude",
+                                    "text": f"ไม่นับ {fmt_int(n)} แถวใน “{pf.name}” ที่อ่านวันที่ไม่ได้ "
+                                            f"(รวม {fmt_money(amount)} บาท)"})
+            continue
+        examples = []
+        for s in pf.unreadable_date_samples:
+            if s[1] not in examples:
+                examples.append(s[1])
+        out.append(finding(
+            "unreadable_dates", "blocking", "preflight", "อ่านวันที่ไม่ได้",
+            f"ในไฟล์ “{pf.name}” มี {fmt_int(n)} แถวที่มีรหัสบัญชีและจำนวนเงิน แต่ผมอ่านวันที่ไม่ออก "
+            f"เช่น {', '.join('“' + e + '”' for e in examples[:3])} ถ้าคำนวณต่อ แถวเหล่านี้จะไม่ถูกนับ "
+            f"รวม {fmt_money(amount)} บาท จะให้ทำอย่างไรครับ",
+            [("ส่งไฟล์ใหม่ที่วันที่เป็น วัน/เดือน/ปี", "replace", "export ใหม่ แล้วผมตรวจใหม่ตั้งแต่ต้น"),
+             ("ไม่นับแถวเหล่านี้ คำนวณต่อ", "exclude", f"ตัวเลขจะขาดไป {fmt_money(amount)} บาท และรายงานจะบอกไว้")],
+            "replace",
+            evidence={"file": pf.name, "rows": pf.unreadable_date_samples[:20],
+                      "columns": ["แถว", "วันที่ในไฟล์", "บัญชี", "จำนวนเงิน"]},
+            subject=pf.name, facts={"file": pf.name, "rows": n, "amount": str(amount)},
+        ))
+    return out, assumptions
+
+
 def _dc_header(pf: ParsedFile) -> str:
     hm = pf.header
     f = "dc_indicator" if pf.dc_mode == "indicator" else "amount"
@@ -375,6 +412,9 @@ def run(files: list[ParsedFile], *, message: str = "", defaults: dict | None = N
         findings += check_mapping(primary, answers)
         blocking_mapping = any(f.code == "unmapped_column" for f in findings)
         if not blocking_mapping:
+            f0, a0 = check_unreadable_dates(files, roles, answers)
+            findings += f0
+            assumptions += a0
             findings += check_dc(primary, defaults, answers)
             period, source = resolve_period(primary, message, answers, today)
             f2, a2 = check_period(primary, period, source, answers, defaults)

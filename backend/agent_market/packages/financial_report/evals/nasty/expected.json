@@ -1,0 +1,66 @@
+{
+ "GL_Express_2569-08.xlsx": {
+  "data_rows": 1375,
+  "pl": {
+   "cost_of_sales": "6621600.00",
+   "finance_costs": "42750.00",
+   "net_profit": "434549.66",
+   "operating_expenses": "5524285.00",
+   "other_income": "3184.66",
+   "revenue": "12620000.00"
+  }
+ },
+ "GL_Express_2569-09.csv": {
+  "data_rows": 1398,
+  "duplicate_doc": "PV256909-0035",
+  "duplicate_rows": 4,
+  "encoding": "cp874",
+  "pages": 4,
+  "pl_as_exported": {
+   "cost_of_sales": "7232300.00",
+   "finance_costs": "42750.00",
+   "net_profit": "296095.16",
+   "operating_expenses": "5994039.50",
+   "other_income": "3184.66",
+   "revenue": "13562000.00"
+  },
+  "pl_correct": {
+   "cost_of_sales": "7232300.00",
+   "finance_costs": "42750.00",
+   "net_profit": "325539.66",
+   "operating_expenses": "5964595.00",
+   "other_income": "3184.66",
+   "revenue": "13562000.00"
+  },
+  "rows_in_september": 1384,
+  "rows_next_month": 14,
+  "total_credit": "41434944.24",
+  "total_debit": "41435944.24",
+  "unbalanced_by": "1000.00",
+  "unbalanced_doc": "PV256909-0095"
+ },
+ "GL_clean_2569-09.xlsx": {
+  "data_rows": 1377,
+  "pl": {
+   "cost_of_sales": "7232300.00",
+   "finance_costs": "42750.00",
+   "net_profit": "340539.66",
+   "operating_expenses": "5949595.00",
+   "other_income": "3184.66",
+   "revenue": "13562000.00"
+  },
+  "questions": 0
+ },
+ "SAP_FBL3N_09-2026_EN.xlsx": {
+  "data_rows": 1377,
+  "days_over_12": 834,
+  "pl": {
+   "cost_of_sales": "7232300.00",
+   "finance_costs": "42750.00",
+   "net_profit": "340539.66",
+   "operating_expenses": "5949595.00",
+   "other_income": "3184.66",
+   "revenue": "13562000.00"
+  }
+ }
+}

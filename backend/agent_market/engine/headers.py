@@ -143,8 +143,40 @@ def find_header(sheet: Sheet, install_map: dict[str, str] | None = None, scan: i
     return best if best_score >= 2 else None
 
 
-def map_headers(sheet: Sheet, header_row: int, install_map: dict[str, str] | None = None) -> HeaderMap:
+def _looks_like_data(texts: list[str]) -> bool:
+    return any(parse_date(t) is not None or _CODE_RE.match(t) for t in texts if t)
+
+
+def _with_subheader(sheet: Sheet, header_row: int) -> tuple[int, list[str]]:
+    """A header printed over two rows ('จำนวนเงิน' above 'เดบิต | เครดิต', or
+    merged cells whose lower half holds the real names) becomes one row.
+
+    The row below counts as a sub-header only when it holds no data (no date,
+    no account code) and names a field in a column whose upper cell is empty
+    (a merged range) or only a group label such as 'จำนวนเงิน'. Returns the
+    last header row and the combined texts.
+    """
     headers = _row_texts(sheet.rows[header_row])
+    if header_row + 1 >= len(sheet.rows):
+        return header_row, headers
+    sub = _row_texts(sheet.rows[header_row + 1])
+    if _looks_like_data(sub):
+        return header_row, headers
+    combined = list(headers) + [""] * max(0, len(sub) - len(headers))
+    used = False
+    for c, t in enumerate(sub):
+        k = norm(t)
+        if not k or k not in _SYN_INDEX:
+            continue
+        above = norm(combined[c])
+        if not above or _SYN_INDEX.get(above) == "amount":
+            combined[c] = t
+            used = True
+    return (header_row + 1, combined) if used else (header_row, headers)
+
+
+def map_headers(sheet: Sheet, header_row: int, install_map: dict[str, str] | None = None) -> HeaderMap:
+    header_row, headers = _with_subheader(sheet, header_row)
     hm = HeaderMap(sheet=sheet.name, header_row=header_row, headers=headers)
     title_rows = [" ".join(t for t in _row_texts(r) if t) for r in sheet.rows[:header_row]]
     hm.title_text = " ".join(t for t in title_rows if t)[:600]

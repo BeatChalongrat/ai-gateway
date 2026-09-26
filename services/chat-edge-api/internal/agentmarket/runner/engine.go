@@ -168,7 +168,7 @@ func BuildZip(src string) ([]byte, error) {
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
 			switch d.Name() {
-			case "__pycache__", "tests", "fixtures", "tools", ".pytest_cache":
+			case "__pycache__", "tests", "fixtures", "nasty", "tools", ".pytest_cache":
 				return filepath.SkipDir
 			}
 			return nil

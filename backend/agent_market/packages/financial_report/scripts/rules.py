@@ -12,6 +12,7 @@ import re
 import statistics
 from collections import defaultdict
 from decimal import Decimal
+from math import gcd
 
 from ....engine.ledger import LedgerRow, account_digits
 
@@ -51,6 +52,27 @@ def _norm_desc(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
+def _repeated_under_one_number(ls: list[LedgerRow]) -> tuple[list[int], list[int]] | None:
+    """A document whose every line appears k ≥ 2 times was posted k times
+    under the same number (an export or import that ran twice). Returns the
+    rows of the first copy and the rows of the others; None otherwise. One
+    line repeated inside a real document leaves the gcd at 1."""
+    by_sig: dict = defaultdict(list)
+    for r in sorted(ls, key=lambda r: r.row):
+        by_sig[(r.date, account_digits(r.account_code), r.debit, r.credit, _norm_desc(r.description))].append(r.row)
+    k = 0
+    for rows_ in by_sig.values():
+        k = gcd(k, len(rows_))
+    if k < 2:
+        return None
+    original, copies = [], []
+    for rows_ in by_sig.values():
+        keep = len(rows_) // k
+        original += rows_[:keep]
+        copies += rows_[keep:]
+    return sorted(original), sorted(copies)
+
+
 def duplicate_docs(rows: list[LedgerRow]) -> list[dict]:
     """Documents posted twice: same date and the same set of lines.
 
@@ -64,13 +86,25 @@ def duplicate_docs(rows: list[LedgerRow]) -> list[dict]:
         by_doc: dict[str, list[LedgerRow]] = defaultdict(list)
         for r in rows:
             by_doc[r.doc_no].append(r)
+        out = []
         for doc, ls in by_doc.items():
             if not any(is_pl(r.account_code) for r in ls):
                 continue  # balance-sheet-only documents (receipts, payments) repeat legitimately
+            repeat = _repeated_under_one_number(ls)
+            if repeat:
+                original_rows, copy_rows = repeat
+                pl_line = next(r for r in ls if is_pl(r.account_code))
+                out.append({
+                    "original": doc, "copies": [doc], "same_number": True,
+                    "rows": copy_rows, "original_rows": original_rows,
+                    "amount": str(pl_line.debit + pl_line.credit),
+                    "account": pl_line.account_code, "description": pl_line.description,
+                    "date": pl_line.date.isoformat() if pl_line.date else None,
+                })
+                continue
             sig = (ls[0].date, tuple(sorted((account_digits(r.account_code), r.debit, r.credit) for r in ls)),
                    _norm_desc(ls[0].description))
             groups[sig].append(doc)
-        out = []
         for sig, docs in groups.items():
             if len(docs) < 2:
                 continue

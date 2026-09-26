@@ -200,7 +200,7 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 	if _, err := e.PackageFile(pkg, "sample-data/GL_2569-09.xlsx"); err != nil {
 		t.Fatalf("sample data ships in the zip: %v", err)
 	}
-	if strings.Contains(string(a), "evals/fixtures/") || strings.Contains(string(a), "agent_market/tests/") {
+	if strings.Contains(string(a), "evals/fixtures/") || strings.Contains(string(a), "evals/nasty/") || strings.Contains(string(a), "agent_market/tests/") {
 		t.Fatal("tests and eval fixtures stay out of the runtime zip")
 	}
 	// A changed package file changes the package checksum, not the engine's.
