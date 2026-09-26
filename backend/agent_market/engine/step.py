@@ -90,6 +90,23 @@ def _preview(path: str, name: str, pf) -> dict:
             "proposal": proposal, "candidates": candidates, "fields": FIELD_LABEL_TH, "doc_type": pf.doc_type}
 
 
+def _fill_template(pkg, computed: dict, t: dict) -> dict:
+    """The customer's own template filled with this run's values (AM2 Phase E): one more artifact."""
+    import hashlib
+
+    from ..deliverables import template_out
+
+    name = os.path.basename(t["name"])
+    path = os.path.join(JOB_OUT, name)
+    rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, pkg.template_values(computed))
+    with open(path, "rb") as fh:
+        sha = hashlib.sha256(fh.read()).hexdigest()
+    return {"name": name, "format": "template", "kind": "template", "size": os.path.getsize(path), "sha256": sha,
+            "quality": {"passed": rep["passed"], "checks": rep["checks"]}, "chart_bindings": [],
+            "meta": {"ext": rep["kind"], "needs_recalc": bool(rep.get("needs_recalc")), "filled": len(rep.get("filled") or []),
+                     "not_filled": rep.get("not_filled_explained") or [], "refused": rep.get("refused") or {}}}
+
+
 def run(req: dict) -> dict:
     from . import dataset
 
@@ -125,6 +142,21 @@ def run(req: dict) -> dict:
     elif op == "render":
         computed = _read_json(req["computed"])
         out = pkg.render(computed, req, in_dir=JOB_IN, out_dir=JOB_OUT)
+        if req.get("template") and hasattr(pkg, "template_values"):
+            art = _fill_template(pkg, computed, req["template"])
+            out["artifacts"] = list(out.get("artifacts") or []) + [art]
+            out["passed"] = bool(out.get("passed", True)) and art["quality"]["passed"]
+    elif op == "inspect_template":
+        from ..deliverables import template_fill, template_out
+
+        f = req["file"]
+        inspection = template_fill.inspect(_in(f["input"]))
+        sl = template_out.slots(inspection)
+        saved = req.get("saved") or None
+        spec = req.get("spec") or {}
+        proposal = template_out.propose(sl, spec)
+        out = {"inspection": inspection, "slots": sl, "proposal": template_out.carry_over(saved, sl, proposal),
+               "diff": template_out.diff(saved, sl)}
     else:
         raise ValueError(f"unknown op {op!r}")
     out["ok"] = True

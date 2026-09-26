@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +91,10 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/installs/{id}/thread", a.thread)
 		r.Get("/installs/{id}/events", a.events)
 		r.Post("/installs/{id}/files", a.upload)
+		r.Post("/installs/{id}/template", a.uploadTemplate)
+		r.Put("/installs/{id}/template", a.saveTemplate)
+		r.Get("/installs/{id}/template", a.getTemplate)
+		r.Delete("/installs/{id}/template", a.removeTemplate)
 		r.Post("/installs/{id}/messages", a.message)
 		r.Post("/mapping-preview", a.mappingPreview)
 		r.Post("/cards/{id}/answer", a.answer)
@@ -1536,6 +1541,17 @@ var mimeByFormat = map[string]string{
 	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	"pdf":  "application/pdf",
+}
+
+// artifactMime: a filled customer template (format "template") is served as
+// what its extension says.
+func artifactMime(art Artifact) string {
+	if art.Format == "template" {
+		ext := strings.ToLower(filepath.Ext(art.Name))
+		return mimeByFormat[strings.TrimPrefix(ext, ".")]
+	}
+	return mimeByFormat[art.Format]
 }
 
 func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
@@ -1556,7 +1572,7 @@ func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer body.Close()
-	w.Header().Set("Content-Type", mimeByFormat[art.Format])
+	w.Header().Set("Content-Type", artifactMime(art))
 	w.Header().Set("Content-Disposition", contentDisposition(art.Name))
 	w.Header().Set("Content-Length", strconv.FormatInt(art.Size, 10))
 	w.Header().Set("X-Content-SHA256", art.SHA256)

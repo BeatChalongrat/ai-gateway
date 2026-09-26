@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -276,7 +277,26 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 		pyFormats = append(pyFormats, "docx")
 		names["docx"] = strings.TrimSuffix(names["pdf"], ".pdf") + ".docx"
 	}
-	key := am.StepKey(rc.run.ID, name, computeKey, narrKey, formats, names, themeVersion, theme, pres, assumptions)
+	// The customer's own template, filled on every run once one is saved (AM2).
+	tpl, tplFile, err := rc.templateInput(ctx)
+	if err != nil {
+		return renderOut{}, "", err
+	}
+	var tplKey any
+	if tpl != nil {
+		v, err := st.NextVersion(ctx, artifactRun, "template")
+		if err != nil {
+			return renderOut{}, "", err
+		}
+		versions["template"] = v
+		names["template"] = am.TemplateArtifactName(rc.install.Slug, period, tpl.Kind, v)
+		tplKey = map[string]any{"sha256": tpl.SHA256, "version": tpl.Version, "mapping": tpl.Mapping}
+	}
+	keyParts := []any{computeKey, narrKey, formats, names, themeVersion, theme, pres, assumptions}
+	if tplKey != nil {
+		keyParts = append(keyParts, tplKey)
+	}
+	key := am.StepKey(rc.run.ID, name, keyParts...)
 	out, err := rc.step(ctx, name, "deliverable", key, map[string]any{"formats": formats, "names": names, "theme_version": themeVersion}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
 			cpath, cleanup, err := rc.localBlob(ctx, computed.Key)
@@ -290,6 +310,17 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				"presentation": pres,
 				"run":          map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version},
 				"model_info":   map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
+			if tpl != nil {
+				tpath, tclean, err := rc.r.Files.OpenLocalCopy(ctx, tplFile.StorageKey)
+				if err != nil {
+					return nil, 0, "", "", err
+				}
+				defer tclean()
+				input := "template" + filepath.Ext(tplFile.Name)
+				inputs = append(inputs, Input{Name: input, LocalPath: tpath})
+				req["template"] = map[string]any{"input": input, "name": names["template"],
+					"saved": map[string]any{"slots": tpl.Slots, "mapping": tpl.Mapping}}
+			}
 			if logo != nil {
 				lpath, lclean, err := rc.r.Files.OpenLocalCopy(ctx, *logo)
 				if err == nil {
@@ -355,6 +386,18 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 					if hiddenDocx {
 						continue // rendered for the PDF only
 					}
+				}
+				if meta.Kind == "template" {
+					q, err := rc.recalcTemplate(ctx, path, meta.Name, meta.Meta, meta.Quality)
+					if err != nil {
+						return nil, 0, "", "", err
+					}
+					meta.Quality = q
+					fi, err := os.Stat(path)
+					if err != nil {
+						return nil, 0, "", "", err
+					}
+					meta.Size, meta.SHA256 = fi.Size(), fileSHA(path)
 				}
 				f, err := os.Open(path)
 				if err != nil {

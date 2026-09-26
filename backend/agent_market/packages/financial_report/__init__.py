@@ -62,6 +62,23 @@ def summarize(computed: dict) -> dict:
     }
 
 
+def template_values(computed: dict) -> dict:
+    """The values a customer's template can take (the manifest's templates block): money as printed text."""
+    from ...engine.thai import fmt_money
+
+    lines = {l["key"]: l for l in computed["lines"]}
+
+    def m(key):
+        v = (lines.get(key) or {}).get("current")
+        return fmt_money(v) if v is not None else ""
+    return {"company": computed.get("company") or "", "period": computed["period_label"], "revenue": m("revenue"),
+            "gross_profit": m("gross_profit"), "total_expenses": m("total_expenses"), "net_profit": m("net_profit"),
+            "lines": [{"label": l["label"], "current": fmt_money(l["current"]) if l["current"] is not None else "",
+                       "prior": fmt_money(l["prior"]) if l.get("prior") is not None else "",
+                       "budget": fmt_money(l["budget"]) if l.get("budget") is not None else ""}
+                      for l in computed["lines"]]}
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     from ...deliverables import render as _render
 

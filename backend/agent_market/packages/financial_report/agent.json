@@ -41,5 +41,18 @@
   },
   "cannot": "agent ตัวนี้ไม่เขียนกลับระบบบัญชี ไม่ส่งอีเมล และไม่โอนเงิน",
   "limits": {"max_file_mb": 20, "max_files": 6},
-  "self_test": "self-test.json"
+  "self_test": "self-test.json",
+  "templates": {
+    "fields": {
+      "company": {"label": "ชื่อบริษัท", "aliases": ["company_name", "บริษัท"]},
+      "period": {"label": "งวด", "aliases": ["month", "เดือน"]},
+      "revenue": {"label": "รายได้", "aliases": ["sales", "รายได้จากการขาย"]},
+      "gross_profit": {"label": "กำไรขั้นต้น"},
+      "total_expenses": {"label": "ค่าใช้จ่ายรวม", "aliases": ["expenses"]},
+      "net_profit": {"label": "กำไรสุทธิ", "aliases": ["profit", "net_income"]}
+    },
+    "lists": {
+      "lines": {"label": "งบกำไรขาดทุน", "aliases": ["line", "pl", "items"], "columns": {"label": "รายการ", "current": "งวดนี้", "prior": "งวดก่อน", "budget": "งบประมาณ"}}
+    }
+  }
 }

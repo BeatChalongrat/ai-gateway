@@ -101,6 +101,27 @@ def summarize(computed: dict) -> dict:
     return _register.summarize(computed)
 
 
+def template_values(computed: dict) -> dict:
+    """The values a customer's template can take (the manifest's templates block): money as printed text."""
+    from ...engine.thai import fmt_money
+
+    t = computed["totals"]
+    thb = t["thb"]
+
+    def m(v):
+        return fmt_money(v) if v not in (None, "") else ""
+    rows = [d for d in computed["documents"] if d["status"] == "included"]
+    return {"company": computed.get("company") or "", "company_tax_id": computed.get("company_tax_id") or "",
+            "period": computed["period_label"], "prepared_on": computed["prepared_on"], "documents": str(t["documents"]),
+            "included": str(t["included"]), "subtotal_thb": m(thb["subtotal"]), "vat_thb": m(thb["vat_amount"]),
+            "total_thb": m(thb["total"]), "wht_thb": m(thb["wht_amount"]), "net_thb": m(thb["net_payable"]),
+            "lines": [{"date": d["document_date"] or "", "number": d["document_number"] or "", "seller": d["seller_name"] or "",
+                       "seller_tax_id": d["seller_tax_id"] or "",
+                       "description": " · ".join(x for x in (d["seller_name"], d["document_number"]) if x),
+                       "quantity": "1", "subtotal": m(d["thb_subtotal"]), "vat": m(d["thb_vat_amount"]),
+                       "total": m(d["thb_total"]), "amount": m(d["thb_total"])} for d in rows]}
+
+
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 

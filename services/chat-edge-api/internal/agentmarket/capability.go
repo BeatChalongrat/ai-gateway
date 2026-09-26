@@ -73,6 +73,9 @@ type Manifest struct {
 		RetentionDays int `json:"retention_days"`
 	} `json:"document_index"`
 	PhotoNotice string `json:"photo_notice"`
+	// Templates (AM2 Phase E): the fields and lists the agent can put into a
+	// customer's own template (template.go); absent means it fills none.
+	Templates json.RawMessage `json:"templates,omitempty"`
 }
 
 // defaultUploadTypes is what an agent that declares no input types accepts

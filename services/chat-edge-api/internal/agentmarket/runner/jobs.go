@@ -358,12 +358,16 @@ func (r *Runner) previewJob(ctx context.Context, job am.Run, log *slog.Logger) e
 		return r.fail(ctx, job, "load", err)
 	}
 	var params struct {
-		FileID uuid.UUID `json:"file_id"`
+		FileID   uuid.UUID `json:"file_id"`
+		Template bool      `json:"template"`
 	}
 	_ = json.Unmarshal(job.Params, &params)
 	f, err := r.Store.GetFile(ctx, job.TenantID, job.UserID, params.FileID)
 	if err != nil {
 		return r.fail(ctx, job, "preview", err)
+	}
+	if params.Template {
+		return r.inspectTemplate(ctx, rc, job, f)
 	}
 	mapping := rc.mapping()
 	key := am.StepKey(job.ID, "preview", f.SHA256, mapping)

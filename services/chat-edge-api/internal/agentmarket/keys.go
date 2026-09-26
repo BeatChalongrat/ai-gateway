@@ -97,12 +97,18 @@ func canonical(v any) []byte {
 }
 
 // ArtifactName is {agent}_{period}_{kind}_v{n}.{ext}.
+// TemplateArtifactName names a filled customer template (format "template",
+// its own extension): agent_period_template_vN.ext.
+func TemplateArtifactName(slug, period, ext string, version int) string {
+	return strings.TrimSuffix(ArtifactName(slug, period, "template", version), ".template") + "." + ext
+}
+
 func ArtifactName(slug, period, format string, version int) string {
 	agent := slug
 	if i := strings.LastIndex(slug, "."); i >= 0 {
 		agent = slug[i+1:]
 	}
-	kind := map[string]string{"docx": "report", "pptx": "deck", "xlsx": "tables"}[format]
+	kind := map[string]string{"docx": "report", "pptx": "deck", "xlsx": "tables", "pdf": "report", "template": "template"}[format]
 	if kind == "" {
 		kind = "output"
 	}
