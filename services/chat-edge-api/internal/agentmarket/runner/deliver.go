@@ -261,6 +261,21 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	var assumptions []am.Assumption
 	_ = json.Unmarshal(parentRun.Assumptions, &assumptions)
 	pres := rc.presentation()
+	// PDF (AM2): the finished .docx converted by LibreOffice and gated; the
+	// .docx is rendered for it even when it was not asked for (and then not
+	// delivered).
+	wantPDF := contains(formats, "pdf")
+	var pyFormats []string
+	for _, f := range formats {
+		if f != "pdf" {
+			pyFormats = append(pyFormats, f)
+		}
+	}
+	hiddenDocx := wantPDF && !contains(pyFormats, "docx")
+	if hiddenDocx {
+		pyFormats = append(pyFormats, "docx")
+		names["docx"] = strings.TrimSuffix(names["pdf"], ".pdf") + ".docx"
+	}
 	key := am.StepKey(rc.run.ID, name, computeKey, narrKey, formats, names, themeVersion, theme, pres, assumptions)
 	out, err := rc.step(ctx, name, "deliverable", key, map[string]any{"formats": formats, "names": names, "theme_version": themeVersion}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -270,7 +285,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			}
 			defer cleanup()
 			inputs := []Input{{Name: "computed.json", LocalPath: cpath}}
-			req := map[string]any{"op": "render", "package": rc.pkg.PyPackage, "computed": "computed.json", "formats": formats,
+			req := map[string]any{"op": "render", "package": rc.pkg.PyPackage, "computed": "computed.json", "formats": pyFormats,
 				"names": names, "theme": theme, "narrative": json.RawMessage(narrative.Narrative), "assumptions": assumptions,
 				"presentation": pres,
 				"run":          map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version},
@@ -298,6 +313,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			}
 			ro := renderOut{Theme: r.Theme, Passed: r.Passed}
 			var failed []string
+			docxPath := ""
 			for _, a := range r.Artifacts {
 				var meta struct {
 					Name          string          `json:"name"`
@@ -334,6 +350,12 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				if !ok {
 					return nil, 0, "", "", fmt.Errorf("render produced no %s", meta.Name)
 				}
+				if meta.Format == "docx" {
+					docxPath = path
+					if hiddenDocx {
+						continue // rendered for the PDF only
+					}
+				}
 				f, err := os.Open(path)
 				if err != nil {
 					return nil, 0, "", "", err
@@ -347,6 +369,17 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				ro.Artifacts = append(ro.Artifacts, renderedArt{Name: meta.Name, Format: meta.Format, Kind: meta.Kind, Key: skey,
 					Size: meta.Size, SHA256: meta.SHA256, Version: versions[meta.Format], Quality: meta.Quality, Meta: meta.Meta,
 					ChartBindings: meta.ChartBindings})
+			}
+			if wantPDF && len(failed) == 0 {
+				pdfArt, why, err := rc.deliverPDF(ctx, artifactRun, docxPath, names, versions)
+				if err != nil {
+					return nil, 0, "", "", err
+				}
+				if len(why) > 0 {
+					failed = append(failed, why...)
+				} else {
+					ro.Artifacts = append(ro.Artifacts, pdfArt)
+				}
 			}
 			if len(failed) > 0 {
 				// A run is not "succeeded" until its files pass the gate.
@@ -496,12 +529,14 @@ func formatOrder(f string) int {
 	switch f {
 	case "docx":
 		return 0
-	case "pptx":
+	case "pdf":
 		return 1
-	case "xlsx":
+	case "pptx":
 		return 2
+	case "xlsx":
+		return 3
 	}
-	return 3
+	return 4
 }
 
 // startNextRound starts the round the user asked to keep files for.

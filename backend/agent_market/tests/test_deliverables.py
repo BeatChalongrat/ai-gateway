@@ -228,24 +228,27 @@ class GateCatches(unittest.TestCase):
         self.assertFalse(next(c for c in checks if c["name"] == "docx.sections")["ok"])
 
 
-class NoPdf(unittest.TestCase):
-    """AM1b: PDF left the options — its Thai shaping was wrong, and an option
-    that renders Thai wrong is worse than none (it returns in AM-2 as the
-    finished .docx converted by LibreOffice)."""
+class PdfIsOnlyAConversion(unittest.TestCase):
+    """AM1b took PDF out (ReportLab's Thai shaping was wrong). AM2: a PDF is the finished .docx converted by
+    LibreOffice in the doc-converter service and gated by the runner (runner/pdf.go) — offered as an optional
+    output, never required, and never drawn by a second renderer here."""
 
-    def test_the_manifest_offers_no_pdf(self):
+    def test_the_manifest_offers_pdf_as_an_optional_conversion(self):
         import agent_market.packages.financial_report as fr
 
         with open(os.path.join(os.path.dirname(fr.__file__), "agent.json"), encoding="utf-8") as f:
             manifest = json.load(f)
-        self.assertNotIn("pdf", {o["format"] for o in manifest["outputs"]})
-        self.assertNotIn("deliverable.report.pdf", json.dumps(manifest))
+        pdf = next(o for o in manifest["outputs"] if o["format"] == "pdf")
+        self.assertFalse(pdf["default"])
+        self.assertIn("deliverable.pdf", manifest["capabilities"]["optional"])
+        self.assertNotIn("deliverable.pdf", manifest["capabilities"]["required"])
 
     def test_the_renderer_makes_no_pdf(self):
         c = computed_for(["GL_2569-09.xlsx"])
         out = tempfile.mkdtemp()
         res = render_all(c, {**REQ, "formats": ["pdf"]}, in_dir=out, out_dir=out)
         self.assertEqual(res["artifacts"], [])
+        self.assertFalse([n for n in os.listdir(out) if n.endswith(".pdf")])
 
 
 class CitationMarkers(unittest.TestCase):

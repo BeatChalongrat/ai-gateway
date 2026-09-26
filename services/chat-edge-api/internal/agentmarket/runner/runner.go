@@ -18,11 +18,14 @@ import (
 // queue lane: chat never waits for an agent slot, and an agent run never
 // takes a chat slot.
 type Runner struct {
-	Store         *agentmarket.Store
-	Files         storage.Backend
-	Exec          *Executor
-	Model         *ModelClient
-	Engine        *Engine
+	Store  *agentmarket.Store
+	Files  storage.Backend
+	Exec   *Executor
+	Model  *ModelClient
+	Engine *Engine
+	// Converter is the doc-converter service (AM2): a PDF is the finished
+	// .docx converted by LibreOffice; nil or unconfigured means no PDF.
+	Converter     *Converter
 	Log           *slog.Logger
 	ID            string
 	Version       string
@@ -117,6 +120,10 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		// AM2: invoices and receipts read into fields with boxes and confidence
 		// (text layer, e-Tax XML, Tesseract tha+eng on page images).
 		caps["document.extract.e2"] = agentmarket.Binding{Capability: "document.extract.e2", Impl: "engine:e2+tesseract", Version: eng + "|" + img}
+	}
+	// A PDF is the finished report converted by LibreOffice (doc-converter).
+	if r.Converter.Available() {
+		caps["deliverable.pdf"] = agentmarket.Binding{Capability: "deliverable.pdf", Impl: "doc-converter:libreoffice", Version: eng}
 	}
 	// A vision model reads scans and photos — only one that runs in the
 	// organisation (documents never go to an outside provider).

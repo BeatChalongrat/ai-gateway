@@ -109,6 +109,11 @@ type CheckResult struct {
 	Text          string        `json:"text"`
 	RenderedPages int           `json:"rendered_pages"`
 	PagePNGSizes  []PagePNGSize `json:"page_png_sizes"`
+	// RawText is pdftotext -raw: content-stream order, so a table cell's
+	// lines stay together (AM2 Thai gate). PageInk is each page's share of
+	// non-white pixels (a blank page is 0).
+	RawText string    `json:"raw_text"`
+	PageInk []float64 `json:"page_ink"`
 	// FirstPNG is page 1 as a PNG (CheckWithFirstPNG only).
 	FirstPNG []byte `json:"first_png_base64,omitempty"`
 }

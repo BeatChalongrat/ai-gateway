@@ -318,7 +318,7 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 			settings[k] = v
 		}
 		for k, v := range settings {
-			if !validSettingKey(k) {
+			if !validSettingKey(k) || !validSettingValue(k, v) {
 				continue
 			}
 			if err := a.store.SetDefault(ctx, tx, in.ID, Default{Key: k, Value: v, Source: "install",
@@ -358,10 +358,44 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 
 func validSettingKey(k string) bool {
 	switch k {
-	case "company", "formats", "currency", "language", "materiality", "mapping", "dc_convention", "theme", "fiscal_year_start":
+	case "company", "formats", "currency", "language", "materiality", "mapping", "dc_convention", "theme", "fiscal_year_start",
+		"company_tax_id", "company_branch": // AM2: who tax invoices must be made out to
 		return true
 	}
 	return strings.HasPrefix(k, "answers.")
+}
+
+// validSettingValue checks the settings a number depends on (AM2): the
+// company's tax ID (13 digits with a valid mod-11 check digit) and branch
+// ("00000" = head office, else five digits).
+func validSettingValue(k string, raw json.RawMessage) bool {
+	var s string
+	switch k {
+	case "company_tax_id":
+		if json.Unmarshal(raw, &s) != nil || len(s) != 13 {
+			return false
+		}
+		sum := 0
+		for i, r := range s {
+			if r < '0' || r > '9' {
+				return false
+			}
+			if i < 12 {
+				sum += int(r-'0') * (13 - i)
+			}
+		}
+		return int(s[12]-'0') == (11-sum%11)%10
+	case "company_branch":
+		if json.Unmarshal(raw, &s) != nil || len(s) != 5 {
+			return false
+		}
+		for _, r := range s {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func settingLabel(k string) string {
@@ -384,6 +418,10 @@ func settingLabel(k string) string {
 		return "ธีมเอกสาร"
 	case "fiscal_year_start":
 		return "เดือนเริ่มปีบัญชี"
+	case "company_tax_id":
+		return "เลขประจำตัวผู้เสียภาษีของบริษัท"
+	case "company_branch":
+		return "สาขาของบริษัท"
 	}
 	return k
 }
@@ -520,6 +558,10 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil || len(body.Value) == 0 {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", "value required")
+		return
+	}
+	if !validSettingValue(key, body.Value) {
+		writeErr(w, http.StatusBadRequest, "BAD_VALUE", "ค่าไม่ถูกต้อง: "+settingLabel(key))
 		return
 	}
 	label := body.Label
@@ -1378,6 +1420,18 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"run": run})
 }
 
+// runnerOffers reports whether the latest healthy runner binds a capability.
+func (a *API) runnerOffers(ctx context.Context, capability string) bool {
+	st, err := a.store.LatestRunner(ctx, a.cfg.RunnerStaleAfter)
+	if err != nil || !st.Healthy {
+		return false
+	}
+	var caps map[string]json.RawMessage
+	_ = json.Unmarshal(st.Capabilities, &caps)
+	_, ok := caps[capability]
+	return ok
+}
+
 func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
@@ -1402,9 +1456,26 @@ func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "RUN_NOT_FINISHED", "รอให้รอบนี้เสร็จก่อน แล้วค่อยขอไฟล์เพิ่ม")
 		return
 	}
+	offered := map[string]bool{"docx": true, "pptx": true, "xlsx": true}
+	if in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, run.InstallID); err == nil {
+		if def, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
+			if m, err := ParseManifest(def.Manifest); err == nil {
+				offered = map[string]bool{}
+				for _, o := range m.Outputs {
+					offered[o.Format] = true
+				}
+			}
+		}
+	}
 	for _, f := range body.Formats {
-		if f != "docx" && f != "pptx" && f != "xlsx" { // no PDF (AM1b)
+		if !offered[f] {
 			writeErr(w, http.StatusBadRequest, "BAD_FORMAT", "unknown format "+f)
+			return
+		}
+		// A PDF is the report converted by LibreOffice (AM2): only while a
+		// runner offers the converter.
+		if f == "pdf" && !a.runnerOffers(ctx, "deliverable.pdf") {
+			writeErr(w, http.StatusConflict, "PDF_UNAVAILABLE", "ตอนนี้ยังแปลงเป็น PDF ไม่ได้ ตัวแปลงเอกสารยังไม่พร้อม")
 			return
 		}
 	}

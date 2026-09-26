@@ -310,6 +310,32 @@ class ConvertToPdfTest(unittest.TestCase):
         png = base64.b64decode(json.loads(body)["first_png_base64"])
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
 
+    def test_check_reads_content_order_text_and_page_ink(self):
+        # AM2 gate: -raw keeps a table cell's lines together (-layout interleaves cells side by side),
+        # and page_ink tells a page with text from a blank one.
+        import docx
+
+        d = docx.Document()
+        t = d.add_table(rows=1, cols=2)
+        t.cell(0, 0).text = "ค่าใช้จ่าย\nในการบริหาร"
+        t.cell(0, 1).text = "รายได้จาก\nการขาย"
+        d.add_page_break()
+        d.add_paragraph(" ")
+        buf = io.BytesIO()
+        d.save(buf)
+        status, _h, pdf = _post(_Main.base, "/convert?to=pdf", buf.getvalue(), {"X-Filename": "cells.docx"})
+        self.assertEqual(status, 200)
+        status, _h, body = _post(_Main.base, "/check", pdf)
+        self.assertEqual(status, 200)
+        chk = json.loads(body)
+        flat = "".join(unicodedata.normalize("NFC", chk["raw_text"]).split())
+        self.assertIn("ค่าใช้จ่ายในการบริหาร", flat)
+        self.assertIn("รายได้จากการขาย", flat)
+        self.assertEqual(len(chk["page_ink"]), chk["pages"])
+        self.assertEqual(chk["pages"], 2)
+        self.assertGreater(chk["page_ink"][0], 0.001)
+        self.assertEqual(chk["page_ink"][1], 0.0)
+
     def test_bad_requests_get_short_json_errors(self):
         zbuf = io.BytesIO()
         with zipfile.ZipFile(zbuf, "w") as z:

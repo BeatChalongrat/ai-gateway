@@ -28,19 +28,33 @@ func TestRunDateIsTheThaiDay(t *testing.T) {
 	}
 }
 
-// AM1b: PDF is not an output (its Thai shaping was wrong). A typed request
-// for one gets an honest answer, never a PDF render, and the "more files"
-// card does not offer it.
-func TestPDFIsNotAnOutputFormat(t *testing.T) {
-	if got := detectFormats("ขอเป็น PDF ด้วยครับ"); len(got) != 0 {
-		t.Fatalf("a PDF request must not become a render: %v", got)
+// AM1b: PDF was not an output (its Thai shaping was wrong). AM2: a PDF is
+// the finished report converted by LibreOffice — offered only when the agent
+// lists it and the runner has the converter; otherwise a typed request gets
+// an honest answer, never a render, and the "more files" card leaves it out.
+func TestPDFOnlyWhenTheConverterCanMakeIt(t *testing.T) {
+	ask := "ขอเป็น PDF ด้วยครับ" // "ขอเป็น PDF ด้วยครับ"
+	if got := detectFormats(ask); len(got) != 0 {
+		t.Fatalf("plain words never make a PDF render: %v", got)
 	}
-	if !asksForPDF("ขอเป็น PDF ด้วยครับ") || !asksForPDF("ส่งเป็นพีดีเอฟได้ไหม") || asksForPDF("ขอ Excel ด้วย") {
+	if got := detectFormatsFor(ask, false); len(got) != 0 {
+		t.Fatalf("no converter, no PDF: %v", got)
+	}
+	if got := detectFormatsFor(ask, true); len(got) != 1 || got[0] != "pdf" {
+		t.Fatalf("with the converter a PDF request is a render: %v", got)
+	}
+	if !asksForPDF(ask) || !asksForPDF("พีดีเอฟ") || asksForPDF("Excel") {
 		t.Fatal("asksForPDF must recognise a PDF request, and only that")
 	}
-	for _, o := range formatQuestion(nil).Options {
-		if string(o.Value) == `"pdf"` {
-			t.Fatal("the more-files card must not offer PDF")
+	has := func(q am.Question) bool {
+		for _, o := range q.Options {
+			if string(o.Value) == `"pdf"` {
+				return true
+			}
 		}
+		return false
+	}
+	if has(formatQuestion(nil, false)) || !has(formatQuestion(nil, true)) {
+		t.Fatal("the more-files card offers PDF exactly when it can be made")
 	}
 }

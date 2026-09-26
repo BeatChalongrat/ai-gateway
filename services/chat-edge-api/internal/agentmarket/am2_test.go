@@ -147,3 +147,20 @@ func TestDocumentIndexIsPerInstallExpiresAndGoesWithTheInstall(t *testing.T) {
 		t.Fatalf("index rows left after uninstall: %d", left)
 	}
 }
+
+func TestCompanyTaxIDIsCheckedBeforeItIsKept(t *testing.T) {
+	for _, c := range []struct {
+		key, value string
+		ok         bool
+	}{
+		{"company_tax_id", `"0105563012343"`, true}, {"company_tax_id", `"0105545009875"`, true},
+		{"company_tax_id", `"0105545009870"`, false}, {"company_tax_id", `"010556301234"`, false},
+		{"company_tax_id", `"01055630123a3"`, false}, {"company_tax_id", `105563012343`, false},
+		{"company_branch", `"00000"`, true}, {"company_branch", `"00012"`, true}, {"company_branch", `"12"`, false},
+		{"company", `"anything"`, true},
+	} {
+		if got := validSettingValue(c.key, json.RawMessage(c.value)); got != c.ok || !validSettingKey(c.key) {
+			t.Fatalf("%s=%s: %v", c.key, c.value, got)
+		}
+	}
+}

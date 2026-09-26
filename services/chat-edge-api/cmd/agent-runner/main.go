@@ -145,8 +145,12 @@ func run(log *slog.Logger) error {
 		log.Warn("no model gateway key: narratives will be written by rules")
 	}
 	host, _ := os.Hostname()
+	// PDF (AM2): the doc-converter service on the internal network only the
+	// runner shares; unset means no PDF is offered.
+	converter := &runner.Converter{BaseURL: os.Getenv("AGENT_MARKET_CONVERTER_URL"), HTTP: &http.Client{},
+		Timeout: time.Duration(am.EnvInt("AGENT_MARKET_CONVERT_TIMEOUT_SECONDS", 90)) * time.Second}
 	r := &runner.Runner{
-		Store: store, Files: files, Engine: engine, Model: model, Log: log,
+		Store: store, Files: files, Engine: engine, Model: model, Log: log, Converter: converter,
 		Exec: &runner.Executor{SB: sb, Engine: engine, Limits: sandbox.Limits{
 			Wall:     time.Duration(am.EnvInt("AGENT_SANDBOX_WALL_SECONDS", 240)) * time.Second,
 			MemoryMB: int64(am.EnvInt("AGENT_SANDBOX_MEMORY_MB", 1536)), PidsLimit: 256,

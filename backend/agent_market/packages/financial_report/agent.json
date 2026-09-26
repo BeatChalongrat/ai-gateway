@@ -17,18 +17,19 @@
     "tagline": "รู้หน้าที่ของตัวเอง · อ่านอย่างเดียว · คำนวณด้วยสคริปต์"
   },
   "inputs": [
-    {"role": "primary", "label": "บัญชีแยกประเภทของเดือนที่จะปิด", "note": "จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)", "required": true, "accept": [".xlsx", ".csv"]},
-    {"role": "budget", "label": "งบประมาณของงวดนั้น", "note": "ถ้ามี จะได้เทียบส่วนต่างให้", "required": false, "accept": [".xlsx", ".csv"]},
-    {"role": "prior", "label": "เดือนก่อนหน้า", "note": "ถ้ามี จะได้ดูแนวโน้ม", "required": false, "accept": [".xlsx", ".csv"]}
+    {"role": "primary", "label": "บัญชีแยกประเภทของเดือนที่จะปิด", "note": "จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)", "required": true, "accept": [".xlsx", ".xlsm", ".csv", ".txt", ".pdf"]},
+    {"role": "budget", "label": "งบประมาณของงวดนั้น", "note": "ถ้ามี จะได้เทียบส่วนต่างให้", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]},
+    {"role": "prior", "label": "เดือนก่อนหน้า", "note": "ถ้ามี จะได้ดูแนวโน้ม", "required": false, "accept": [".xlsx", ".xlsm", ".csv"]}
   ],
   "outputs": [
     {"format": "docx", "label": "รายงาน .docx", "default": true},
     {"format": "pptx", "label": "สไลด์ .pptx", "default": true},
-    {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false}
+    {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false},
+    {"format": "pdf", "label": "รายงาน PDF (แปลงจาก .docx)", "default": false}
   ],
   "capabilities": {
     "required": ["spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.report.docx", "deliverable.deck.pptx", "model.text"],
-    "optional": ["deliverable.table.xlsx", "document.read.pdf"]
+    "optional": ["deliverable.table.xlsx", "document.read.pdf", "deliverable.pdf"]
   },
   "install": {
     "defaults": {"formats": ["docx", "pptx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},

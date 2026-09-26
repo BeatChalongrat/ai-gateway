@@ -7,8 +7,10 @@ by openpyxl comes back with every formula recalculated. Python stdlib only.
     GET  /health                   {"status":"ok","soffice":"<version>"}
     POST /convert?to=pdf|xlsx      raw file body, name in X-Filename (its
                                    extension picks the filter) -> the bytes
-    POST /check[?first_png=1]      raw PDF body -> {"pages", "text",
-                                   "page_png_sizes", ["first_png_base64"]}
+    POST /check[?first_png=1]      raw PDF body -> {"pages", "text" (-layout),
+                                   "raw_text" (content order), "page_png_sizes",
+                                   "page_ink" (dark share per page),
+                                   ["first_png_base64"]}
 
 Every conversion runs in a fresh LibreOffice profile and a fresh work
 directory under /tmp, both deleted afterwards; one heavy job (conversion or
@@ -230,6 +232,33 @@ def _png_size(path: str) -> dict:
     return {"width": w, "height": h, "bytes": os.path.getsize(path)}
 
 
+def _ink(path: str) -> float:
+    """The share of a page's pixels that are not white — ink (a binary PGM from pdftoppm -gray), 0..1.
+    A blank page is 0; anti-aliased text at a low resolution is grey, so any non-white pixel counts."""
+    with open(path, "rb") as f:
+        data = f.read()
+    fields, i = [], 0
+    while len(fields) < 4:                      # magic, width, height, maxval
+        while data[i:i + 1].isspace():
+            i += 1
+        if data[i:i + 1] == b"#":
+            i = data.index(b"\n", i) + 1
+            continue
+        j = i
+        while not data[j:j + 1].isspace():
+            j += 1
+        fields.append(data[i:j])
+        i = j
+    if fields[0] != b"P5":
+        raise Failure(422, "unexpected page render")
+    w, h, maxval = int(fields[1]), int(fields[2]), int(fields[3])
+    px = data[i + 1:i + 1 + w * h]
+    if maxval > 255 or not px:
+        raise Failure(422, "unexpected page render")
+    dark = sum(1 for b in px if b < maxval * 9 // 10)
+    return round(dark / len(px), 5)
+
+
 def check(pdf: bytes, first_png: bool) -> dict:
     if not pdf.startswith(b"%PDF-"):
         raise Failure(415, "body is not a PDF")
@@ -259,9 +288,24 @@ def check(pdf: bytes, first_png: bool) -> dict:
             raise Failure(422, f"pdftoppm failed ({_short(err)})")
         pngs = sorted((p for p in os.listdir(png_dir) if p.endswith(".png")),
                       key=lambda p: int(re.sub(r"\D", "", p) or 0))
+        # AM2 gate: the text in content-stream order (a table cell's lines stay together, which
+        # -layout interleaves), and how much of each page is ink — a blank or black page is caught.
+        code, raw_text, err = _run(["pdftotext", "-raw", "-enc", "UTF-8", src, "-"], env, left())
+        if code != 0:
+            raise Failure(422, f"pdftotext failed ({_short(err)})")
+        ink_dir = os.path.join(job.dir, "ink")
+        os.makedirs(ink_dir, exist_ok=True)
+        code, _o, err = _run(["pdftoppm", "-r", "36", "-gray", "-f", "1", "-l", str(last), src,
+                              os.path.join(ink_dir, "page")], env, left())
+        if code != 0:
+            raise Failure(422, f"pdftoppm failed ({_short(err)})")
+        pgms = sorted((p for p in os.listdir(ink_dir) if p.endswith(".pgm")),
+                      key=lambda p: int(re.sub(r"\D", "", p) or 0))
         result = {"pages": pages, "text": text.decode("utf-8", "replace"),
+                  "raw_text": raw_text.decode("utf-8", "replace"),
                   "rendered_pages": len(pngs),
-                  "page_png_sizes": [_png_size(os.path.join(png_dir, p)) for p in pngs]}
+                  "page_png_sizes": [_png_size(os.path.join(png_dir, p)) for p in pngs],
+                  "page_ink": [_ink(os.path.join(ink_dir, p)) for p in pgms]}
         if first_png and pngs:
             with open(os.path.join(png_dir, pngs[0]), "rb") as f:
                 result["first_png_base64"] = base64.b64encode(f.read()).decode("ascii")
