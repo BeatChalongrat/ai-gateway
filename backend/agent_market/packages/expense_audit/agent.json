@@ -1,0 +1,66 @@
+{
+  "schema_version": "agent.market.v1",
+  "id": "sran.expense-audit",
+  "version": "1.0.0",
+  "name": "ตรวจการเบิกค่าใช้จ่ายตามนโยบายบริษัท",
+  "name_en": "Expense Audit",
+  "short_name": "ตรวจค่าใช้จ่าย",
+  "category": "finance",
+  "icon": "expense",
+  "summary": "ส่งไฟล์รายการเบิกค่าใช้จ่ายกับใบเสร็จมา แล้วได้ผลตรวจทุกรายการเป็น Excel: วงเงินต่อครั้งและต่อเดือน ใบเสร็จ เบิกซ้ำ วันหยุด ร้านต้องห้าม VAT หัก ณ ที่จ่าย และการแยกบิล ตรวจด้วยกฎจากตารางนโยบายของบริษัท เรื่องที่ต้องใช้วิจารณญาณจะถามคน และไม่มีรายการใดถูกปฏิเสธอัตโนมัติ",
+  "entry": "AGENT.md",
+  "python_package": "expense_audit",
+  "typical_run_seconds": 90,
+  "greeting": {
+    "text": "สวัสดีครับ ส่งไฟล์รายการเบิกค่าใช้จ่าย (Excel หรือ CSV) พร้อมใบเสร็จมาได้เลย ผมจะตรวจทุกรายการตามตารางนโยบายของบริษัท เรื่องไหนต้องใช้วิจารณญาณผมจะถาม และทุกข้อยกเว้นจะรอคนตัดสิน",
+    "role": "ผู้ช่วยตรวจการเบิกค่าใช้จ่าย",
+    "tagline": "อ่านอย่างเดียว · กฎให้ข้อเท็จจริง · คนเป็นผู้ตัดสิน"
+  },
+  "inputs": [
+    {"role": "claims", "label": "ไฟล์รายการเบิกค่าใช้จ่าย", "note": "Excel หรือ CSV หนึ่งแถวต่อหนึ่งรายการ: เลขที่เบิก พนักงาน วันที่ หมวด ร้านค้า จำนวนเงิน ใบเสร็จ รายละเอียด (ขอคืนภาษีซื้อ และหัก ณ ที่จ่าย ถ้ามี)", "required": true, "accept": [".xlsx", ".xlsm", ".csv"]},
+    {"role": "receipts", "label": "ใบเสร็จ / ใบกำกับภาษี", "note": "ชื่อไฟล์ตรงกับคอลัมน์ใบเสร็จ · PDF ดิจิทัลหรือสแกน · รูปถ่ายอ่านแบบพยายามที่สุด (best-effort)", "required": false, "accept": [".pdf", ".jpg", ".jpeg", ".png"]},
+    {"role": "policy_document", "label": "เอกสารระเบียบการเบิก (ถ้ามี)", "note": "ใช้เป็นบริบทเท่านั้น วงเงินมาจากตารางนโยบายที่ตั้งไว้ใน agent เสมอ", "required": false, "accept": [".docx", ".txt"]}
+  ],
+  "outputs": [
+    {"format": "xlsx", "label": "ผลตรวจ .xlsx", "default": true}
+  ],
+  "capabilities": {
+    "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"],
+    "optional": ["model.vision"]
+  },
+  "install": {
+    "defaults": {
+      "formats": ["xlsx"], "language": "th", "currency": "THB", "theme": {"id": "navy"},
+      "policy": {
+        "schema": "am2.expense_policy.v1",
+        "source": "package_sample",
+        "currency": "THB",
+        "receipt_required_above": "500.00",
+        "approval_threshold": "3000.00",
+        "categories": {
+          "meals": {"label": "ค่าอาหาร", "per_claim": "1500.00", "per_person_month": "5000.00"},
+          "taxi": {"label": "ค่าแท็กซี่/เดินทางในเมือง", "per_claim": "800.00"},
+          "hotel": {"label": "ค่าที่พัก", "per_claim": "2500.00"},
+          "office_supplies": {"label": "วัสดุสำนักงาน", "per_claim": "3000.00"},
+          "entertainment": {"label": "ค่ารับรองลูกค้า", "per_claim": "5000.00", "needs_purpose": true},
+          "phone": {"label": "ค่าโทรศัพท์มือถือ", "per_person_month": "1000.00"},
+          "contractor": {"label": "ค่าจ้างบุคคลภายนอก", "per_claim": "20000.00", "wht_rate": "3", "wht_from": "1000.00"}
+        },
+        "prohibited_merchants": ["คาราโอเกะ", "ผับ", "บาร์", "คาสิโน", "ร้านทอง"],
+        "weekend_holiday": "flag",
+        "vat_claim_requires": "full_tax_invoice"
+      }
+    },
+    "questions": ["company", "policy", "theme", "formats"]
+  },
+  "narrative": "rules",
+  "document_index": {"retention_days": 730},
+  "permissions": {
+    "default": "read_only",
+    "denied": ["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]
+  },
+  "cannot": "agent ตัวนี้ไม่อนุมัติหรือปฏิเสธการเบิก ไม่บันทึกเข้าระบบบัญชี ไม่ส่งอีเมล ไม่โอนเงิน และไม่ตั้งเวลาทำงานเอง ทุกข้อยกเว้นรอคนตัดสิน",
+  "photo_notice": "รูปถ่ายใบเสร็จอ่านแบบพยายามที่สุด (best-effort): ใช้เทียบยอดรวมกับยอดที่เบิก และจะถามกลับทุกครั้งที่ไม่มั่นใจ ถ้ามี PDF หรือสแกนให้ส่งแบบนั้นแทน",
+  "limits": {"max_file_mb": 20, "max_files": 60},
+  "self_test": "self-test.json"
+}

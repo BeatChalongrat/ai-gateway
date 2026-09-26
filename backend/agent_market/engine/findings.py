@@ -25,7 +25,9 @@ MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
                   "date_order", "account_group",
                   # AM2 E2 cards: one per document and field / check (subject = "<doc>:<field>")
                   "e2_field_missing", "e2_low_confidence", "e2_check_failed", "e2_source_conflict",
-                  "e2_duplicate", "e2_copy", "e2_doc_type", "e2_page_quality", "e2_typed_invalid")
+                  "e2_duplicate", "e2_copy", "e2_doc_type", "e2_page_quality", "e2_typed_invalid",
+                  # AM2 Agent 4 judgement cards: one per claim (subject = the claim's key)
+                  "expense_weekend_holiday", "expense_vague_purpose")
 FORBIDDEN_WORDS = ("password", "รหัสผ่าน", "token", "โทเคน", "เลขบัตรประชาชน", "otp", "pin")
 
 
