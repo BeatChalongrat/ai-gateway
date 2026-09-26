@@ -242,6 +242,7 @@ type buildState struct {
 	conversations int
 	messages      int
 	truncated     bool
+	provided      []string // README lines from AccountDataProviders
 }
 
 // Build writes the ZIP for row and marks it completed; on any error the
@@ -324,6 +325,20 @@ func (s *AccountExportService) Build(ctx context.Context, row *model.DataExportR
 			return fmt.Errorf("copy %s: %w", p.zipPath, cerr)
 		}
 		body.Close()
+	}
+	// Features that keep data outside the core schemas add their own folder.
+	for _, p := range AccountDataProviders() {
+		lines, perr := p.Export(ctx, row.TenantID, row.UserID, func(path string, r io.Reader) error {
+			w, err := zw.CreateHeader(&zip.FileHeader{Name: safeZipName(p.Name()) + "/" + path, Method: zip.Deflate, Modified: now})
+			if err == nil {
+				_, err = io.Copy(w, r)
+			}
+			return err
+		})
+		if perr != nil {
+			st.skipped = append(st.skipped, p.Name()+"/ — "+perr.Error())
+		}
+		st.provided = append(st.provided, lines...)
 	}
 	for _, e := range []struct {
 		name string
@@ -699,6 +714,12 @@ Not included
 		s.maxFileBytes>>20, s.maxConvs)
 	fmt.Fprintf(&b, "บทสนทนา / conversations: %d · ข้อความ / messages: %d · ไฟล์ / files: %d\n",
 		st.conversations, st.messages, len(st.planned))
+	if len(st.provided) > 0 {
+		b.WriteString("\nรวมไว้ด้วย / Also included:\n")
+		for _, l := range st.provided {
+			b.WriteString("  " + l + "\n")
+		}
+	}
 	if st.truncated {
 		fmt.Fprintf(&b, "บทสนทนาเกิน %d รายการ — ไฟล์นี้มีเฉพาะ %d รายการล่าสุด / only the newest %d conversations are included\n",
 			s.maxConvs, s.maxConvs, s.maxConvs)

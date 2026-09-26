@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,11 +33,12 @@ import (
 // step (no sandbox, no model). chat-edge constructs it only when the flag
 // is on, with a Postgres pool of its own (never chat's pool).
 type API struct {
-	cfg     Config
-	store   *Store
-	files   storage.Backend
-	log     *slog.Logger
-	closeFn func()
+	cfg       Config
+	store     *Store
+	files     storage.Backend
+	log       *slog.Logger
+	closeFn   func()
+	sweepOnce sync.Once
 }
 
 // NewAPI opens the control plane's own small pool and applies the
@@ -58,6 +60,26 @@ func NewAPI(ctx context.Context, cfg Config, dsn string, files storage.Backend, 
 		return nil, err
 	}
 	return &API{cfg: cfg, store: NewStore(pool), files: files, log: log.With("component", "agent-market"), closeFn: pool.Close}, nil
+}
+
+// AccountProvider is Agent Market's part of "export all my data" and of
+// account deletion (account.go), registered by chat-edge while the flag is
+// on. The first call also sweeps, in the background, the data of users
+// deleted while the flag was off.
+func (a *API) AccountProvider() *AccountProvider {
+	p := NewAccountProvider(a.store, a.files)
+	a.sweepOnce.Do(func() {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer cancel()
+			if n, err := p.SweepDeletedUsers(ctx); err != nil {
+				a.log.Warn("sweep of deleted users failed", "err", err)
+			} else if n > 0 {
+				a.log.Info("purged the agent data of users deleted while the feature was off", "users", n)
+			}
+		}()
+	})
+	return p
 }
 
 // NewAPIWithStore is for tests.

@@ -34,3 +34,9 @@ CREATE TABLE IF NOT EXISTS agent_market.document_index (
 CREATE INDEX IF NOT EXISTS document_index_install ON agent_market.document_index (install_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS document_index_expiry ON agent_market.document_index (expires_at);
 CREATE INDEX IF NOT EXISTS document_index_owner ON agent_market.document_index (tenant_id, user_id);
+
+-- AM2 retention: a failed or cancelled run's scratch (step blobs) is deleted
+-- about 7 days after it ended; this marks the runs already cleaned so the
+-- hourly pass does not scan them again (an agent_market table: the isolation
+-- contract forbids altering core tables only).
+ALTER TABLE agent_market.agent_runs ADD COLUMN IF NOT EXISTS scratch_purged_at timestamptz;

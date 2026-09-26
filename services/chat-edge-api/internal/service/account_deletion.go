@@ -234,6 +234,14 @@ func (s *AccountDeletionService) RequestDeletion(
 			s.streams.CancelStream(id)
 		}
 	}
+	// Features outside the core schemas stop their work for the user too.
+	for _, p := range AccountDataProviders() {
+		if n, err := p.Stop(ctx, userID); err != nil {
+			slog.Error("account deletion: provider stop failed", "provider", p.Name(), "user", userID.String(), "err", err)
+		} else {
+			slog.Info("account deletion: provider stopped", "provider", p.Name(), "user", userID.String(), "counts", n)
+		}
+	}
 	slog.Warn("account deletion requested",
 		"user", userID.String(),
 		"conversations_hidden", res.ConversationsHidden,
@@ -366,6 +374,18 @@ func (s *AccountDeletionService) Purge(ctx context.Context, userID uuid.UUID) (m
 	for _, p := range kbObjects {
 		if err := s.storage.Delete(ctx, p); err == nil {
 			counts["knowledge_file_objects"]++
+		}
+	}
+
+	// 3c. Features that keep data outside the core schemas erase their own
+	//     (objects first), before the identity row goes.
+	for _, p := range AccountDataProviders() {
+		n, err := p.Purge(ctx, userID)
+		if err != nil {
+			return counts, fmt.Errorf("purge %s: %w", p.Name(), err)
+		}
+		for k, v := range n {
+			counts[p.Name()+"."+k] += v
 		}
 	}
 

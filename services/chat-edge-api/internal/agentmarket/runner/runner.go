@@ -47,6 +47,8 @@ type Runner struct {
 	SandboxCheck   func(context.Context) error
 	SandboxRecheck time.Duration
 	Now            func() time.Time
+	// Retention (AM2): 0 means the default (48 h, 7 days, 30 days).
+	StagedTTL, ScratchTTL, RemovedTTL time.Duration
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
@@ -139,18 +141,25 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 	return caps
 }
 
-// purgeIndex deletes duplicate-index rows past their retention (AM2): at
-// start, then every hour.
-func (r *Runner) purgeIndex(ctx context.Context) {
+// housekeeping is the retention pass (AM2, agentmarket/retention.go): at
+// start, then every hour — uploads never attached after StagedTTL (48 h), a
+// failed or cancelled run's scratch after ScratchTTL (7 days), a removed
+// install after RemovedTTL (30 days, like a deleted chat), and the expired
+// rows of the duplicate index.
+func (r *Runner) housekeeping(ctx context.Context) {
+	staged, scratch, removed := orDefault(r.StagedTTL, 48*time.Hour), orDefault(r.ScratchTTL, 7*24*time.Hour),
+		orDefault(r.RemovedTTL, 30*24*time.Hour)
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
-		if n, err := r.Store.PurgeExpiredIndex(ctx); err != nil {
+		if c, err := r.Store.Retention(ctx, r.Files, staged, scratch, removed); err != nil {
 			if ctx.Err() == nil {
-				r.Log.Warn("duplicate index purge failed", "err", err)
+				r.Log.Warn("retention pass failed", "err", err)
 			}
-		} else if n > 0 {
-			r.Log.Info("duplicate index purged", "rows", n)
+		} else if c != (agentmarket.RetentionCounts{}) {
+			r.Log.Info("retention pass", "staged_files", c.StagedFiles, "scratch_runs", c.ScratchRuns,
+				"scratch_objects", c.ScratchObjects, "removed_installs", c.RemovedInstalls, "removed_objects", c.RemovedObjects,
+				"index_rows", c.IndexRows)
 		}
 		select {
 		case <-ctx.Done():
@@ -158,6 +167,13 @@ func (r *Runner) purgeIndex(ctx context.Context) {
 		case <-t.C:
 		}
 	}
+}
+
+func orDefault(d, def time.Duration) time.Duration {
+	if d > 0 {
+		return d
+	}
+	return def
 }
 
 func (r *Runner) heartbeat(ctx context.Context) {
@@ -180,7 +196,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 	r.heartbeat(ctx)
 	r.startReaper(ctx)
-	go r.purgeIndex(ctx)
+	go r.housekeeping(ctx)
 	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {
 		t := time.NewTicker(10 * time.Second)

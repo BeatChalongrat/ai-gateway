@@ -824,6 +824,7 @@ func main() {
 			slog.Error("agent market not started", "err", err)
 		} else {
 			handlers.AgentMarket = amAPI
+			service.RegisterAccountDataProvider(amAPI.AccountProvider()) // AM2: export and account deletion reach agent_market
 			defer amAPI.Close()
 		}
 		amCancel()
