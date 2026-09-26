@@ -49,6 +49,7 @@ type Finding struct {
 	Kind         string          `json:"kind"`
 	Subject      string          `json:"subject"`
 	Request      json.RawMessage `json:"request"`
+	Input        json.RawMessage `json:"input"`
 }
 
 // Blocking reports whether the answer changes a number or which rows count.
@@ -257,8 +258,15 @@ func questionOf(f Finding) Question {
 	return Question{
 		Key: f.Key, Code: f.Code, Severity: f.Severity, Header: f.Header, Question: f.Question,
 		Options: f.Options, Default: f.Default, DefaultLabel: labelFor(f, f.Default),
-		Evidence: f.Evidence, Rememberable: f.Rememberable, Request: f.Request,
+		Evidence: f.Evidence, Rememberable: f.Rememberable, Request: f.Request, Input: nullIfEmpty(f.Input),
 	}
+}
+
+func nullIfEmpty(b json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(b)) == 0 || string(bytes.TrimSpace(b)) == "null" {
+		return nil
+	}
+	return b
 }
 
 func validOption(f Finding, v json.RawMessage) bool {
@@ -301,6 +309,19 @@ func ResolveSubmission(questions []Question, sub map[string]Submitted, moment, c
 		s, ok := sub[q.Key]
 		if !ok {
 			continue
+		}
+		if len(q.Input) > 0 && !s.Skipped {
+			// a question that takes a typed value: the person's own words are the value
+			typed := strings.TrimSpace(s.Text)
+			if typed == "" && len(s.Labels) > 0 && !isOption(q, s.Labels) {
+				typed = strings.TrimSpace(strings.Join(s.Labels, " "))
+			}
+			if typed != "" {
+				v, _ := json.Marshal(map[string]string{"typed": typed})
+				answers[q.Key] = Answer{Value: v, Label: typed, Moment: moment, CardID: cardID, Via: "typed",
+					Cosmetic: q.Severity == "cosmetic", Code: q.Code}
+				continue
+			}
 		}
 		if strings.TrimSpace(s.Text) != "" && len(s.Labels) == 0 {
 			texts[q.Key] = strings.TrimSpace(s.Text)
@@ -348,6 +369,21 @@ func ResolveSubmission(questions []Question, sub map[string]Submitted, moment, c
 			Cosmetic: q.Severity == "cosmetic", Code: q.Code}
 	}
 	return answers, texts, nil
+}
+
+func isOption(q Question, labels []string) bool {
+	for _, l := range labels {
+		found := false
+		for _, o := range q.Options {
+			if o.Label == l {
+				found = true
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // InterpretText maps a free-text answer to an option by keywords: an

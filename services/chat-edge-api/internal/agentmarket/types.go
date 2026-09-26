@@ -221,6 +221,11 @@ type Question struct {
 	Evidence     json.RawMessage `json:"evidence,omitempty"`
 	Rememberable bool            `json:"rememberable"`
 	Request      json.RawMessage `json:"request,omitempty"`
+	// Input (AM2): the question also takes a typed value of this kind
+	// ({"kind": "money"|"tax_id"|"date"|"text", "hint": "…"}). Text typed in
+	// the card's own box is the answer as {"typed": text}; the package that
+	// asked validates it deterministically — never a model's reading of it.
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 // Option is one clickable answer. Value is what the check acts on.
