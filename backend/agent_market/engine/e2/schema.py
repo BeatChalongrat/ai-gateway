@@ -102,11 +102,14 @@ def _json(v):
     import datetime as _dt
 
     if isinstance(v, Decimal):
-        return f"{v:.2f}"
+        # money keeps two places; a quantity or rate with more (1.125 kg) is never rounded on output
+        return f"{v:.2f}" if v == v.quantize(Decimal("0.01")) else str(v.normalize())
     if isinstance(v, _dt.date):
         return v.isoformat()
     if isinstance(v, dict):
         return {k: _json(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json(x) for x in v]
     return v
 
 

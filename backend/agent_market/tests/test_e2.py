@@ -153,6 +153,15 @@ class Checks(unittest.TestCase):
         self.assertEqual(self.run_checks(g)["wht"].status, "fail")
 
 
+class Output(unittest.TestCase):
+    def test_numbers_are_never_rounded_on_output(self):
+        from agent_market.engine.e2.schema import _json
+
+        self.assertEqual(_json(D("12850.7")), "12850.70")
+        self.assertEqual(_json(D("1.125")), "1.125")                 # a quantity: not 1.13
+        self.assertEqual(_json({"c": [{"v": D("3")}]}), {"c": [{"v": "3.00"}]})
+
+
 class Typed(unittest.TestCase):
     def test_parse(self):
         self.assertEqual(typed.parse("money", "12,850.70"), (D("12850.70"), None))
@@ -225,7 +234,7 @@ class Cards(unittest.TestCase):
         money = fs[0]
         self.assertEqual(money.input["kind"], "money")
         self.assertIn("12,850.70", money.question)
-        self.assertEqual(fs[3].input["kind"], "text")               # the exchange rate is typed
+        self.assertEqual(fs[3].input["kind"], "rate")               # the exchange rate is typed
         # the same question on another document is another key
         self.assertNotEqual(findings_for("d2", doc)[0].key, money.key)
 
@@ -239,6 +248,68 @@ class BankAccount(unittest.TestCase):
         out = extract(os.path.join(os.path.dirname(here), "fixtures", "e2", "docs", "d01_clean_full_tax_invoice.pdf"))
         self.assertEqual(out["fields"]["bank_account"]["normalized"], "0123456789")     # "เลขที่ 012-3-45678-9"
         self.assertIn(FIELD_KINDS["bank_account"], STRICT_KINDS)
+
+
+class Rejudge(unittest.TestCase):
+    """A document is read once (the parse step) and judged again from its stored state with the run's
+    duplicate history and a person's answers — never read again, never with a different result."""
+
+    D = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fixtures", "e2", "docs")
+
+    def _read(self, name):
+        import json
+
+        from agent_market.engine.e2 import extract
+
+        out = extract(os.path.join(self.D, name), today=dt.date(2026, 9, 30))
+        return out, json.loads(json.dumps(out, ensure_ascii=False))      # as stored in the run's JSON
+
+    def _same(self, a, b):
+        import json
+
+        strip = lambda o: json.dumps({k: v for k, v in o.items() if k != "state"}, sort_keys=True, ensure_ascii=False)
+        self.assertEqual(strip(a), strip(b))
+
+    def test_stored_state_judges_the_same(self):
+        from agent_market.engine.e2.extract import rejudge
+
+        for name in ("d01_clean_full_tax_invoice.pdf", "d05_wht_service_invoice.pdf", "f01_line_total_mismatch.pdf",
+                     "e02_etax_xml_receipt.xml"):
+            out, stored = self._read(name)
+            self._same(out, rejudge(stored, today=dt.date(2026, 9, 30)))
+
+    def test_history_makes_the_duplicate_question(self):
+        from agent_market.engine.e2.extract import rejudge
+
+        out, stored = self._read("d01_clean_full_tax_invoice.pdf")
+        self.assertEqual(out["questions"], [])
+        f = out["fields"]
+        hist = [{"name": "earlier.pdf", "seller_tax_id": f["seller_tax_id"]["normalized"],
+                 "document_number": f["document_number"]["normalized"], "document_date": f["document_date"]["normalized"],
+                 "total": f["total"]["normalized"]}]
+        again = rejudge(stored, history=hist, today=dt.date(2026, 9, 30))
+        self.assertEqual([q["code"] for q in again["questions"]], ["duplicate_candidate"])
+
+    def test_a_persons_answers_close_the_questions(self):
+        from agent_market.engine.e2.extract import rejudge
+
+        _, stored = self._read("f05_missing_seller_tax_id.pdf")
+        asked = [q["key"] for q in rejudge(stored)["questions"]]
+        self.assertIn("field_missing:seller_tax_id", asked)
+        typed = rejudge(stored, overrides={"seller_tax_id": "0105556123453"})
+        self.assertNotIn("field_missing:seller_tax_id", [q["key"] for q in typed["questions"]])
+        self.assertEqual(typed["fields"]["seller_tax_id"]["source"]["method"], "typed_by_person")
+        self.assertEqual(typed["fields"]["seller_tax_id"]["confidence"], 1.0)
+        gone = rejudge(stored, absent={"seller_tax_id"})
+        self.assertNotIn("field_missing:seller_tax_id", [q["key"] for q in gone["questions"]])
+
+        _, stored = self._read("f01_line_total_mismatch.pdf")
+        failed = [q["subject"] for q in rejudge(stored)["questions"] if q["code"] == "check_failed"]
+        self.assertTrue(failed)
+        accepted = rejudge(stored, accepted_checks=set(failed))
+        self.assertEqual([q for q in accepted["questions"] if q["code"] == "check_failed"], [])
+        # the check itself still fails in the output: accepting records a decision, it does not change the arithmetic
+        self.assertTrue(any(c["status"] == "fail" for c in accepted["deterministic_checks"] if c["code"] in failed))
 
 
 class Gate(unittest.TestCase):

@@ -44,9 +44,10 @@ CHECK_TH = {
     "document_date": ("วันที่แปลก", "วันที่เอกสารอยู่ในอนาคตหรือเก่าผิดปกติ"),
     "amount_in_words": ("ตัวอักษร", "จำนวนเงินตัวอักษรไม่เท่ากับยอดรวม"),
 }
-INPUT_KIND = {"money": "money", "tax_id": "tax_id", "date": "date", "code": "text", "party": "text", "text": "text"}
+INPUT_KIND = {"money": "money", "tax_id": "tax_id", "date": "date", "code": "text", "party": "text", "text": "text",
+              "rate": "rate", "bank_account": "text"}
 INPUT_HINT = {"money": "พิมพ์ตัวเลข เช่น 12,850.70", "tax_id": "พิมพ์เลข 13 หลัก", "date": "พิมพ์วันที่ เช่น 15/09/2569",
-              "text": "พิมพ์ตามที่เห็นในเอกสาร"}
+              "rate": "พิมพ์ตัวเลข เช่น 36.25", "text": "พิมพ์ตามที่เห็นในเอกสาร"}
 EXCLUDE = ("ตัดเอกสารนี้ออก", "exclude", "ไม่นำเอกสารนี้เข้าตาราง บันทึกเป็นข้อยกเว้นให้คนตรวจ")
 
 
@@ -68,6 +69,16 @@ def _money(v) -> str:
         return str(v)
 
 
+def _shown(kind: str, proposed):
+    if proposed is None:
+        return None
+    if kind == "money":
+        return _money(proposed)
+    if kind == "party" and isinstance(proposed, dict):
+        return proposed.get("core") or None
+    return proposed
+
+
 def findings_for(doc_key: str, doc: dict) -> list[Finding]:
     """Findings for one E2 extraction (``doc`` is the e2.extraction.v1 dict)."""
     out: list[Finding] = []
@@ -83,7 +94,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             ev["page"], ev["bbox"], ev["raw_text"] = src.get("page"), src.get("bbox"), src.get("raw_text")
         if code in ("low_confidence", "source_conflict") and field in FIELD_KINDS:
             kind = FIELD_KINDS[field]
-            shown = _money(q["proposed"]) if kind == "money" and q.get("proposed") is not None else q.get("proposed")
+            shown = _shown(kind, q.get("proposed"))
             what = FIELD_TH.get(field, field)
             if code == "source_conflict":
                 text = (f"{label}: {what} อ่านได้ไม่ตรงกันจากสองแหล่ง ({q.get('reason')}) "
@@ -92,8 +103,16 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
                 text = f"{label}: อ่าน{what}ไม่ได้ ช่วยพิมพ์ค่าที่เห็นในเอกสาร{note}"
             else:
                 text = f"{label}: อ่าน{what}ได้ {shown} แต่ไม่มั่นใจพอ ตัวเลขนี้ถูกต้องไหม{note}"
-            if shown is not None:
-                options = [(f"ถูกต้อง {shown}"[:60], {"accept": str(q["proposed"])}, "ยืนยันค่าที่อ่านได้"), EXCLUDE]
+            other = _shown(kind, (q.get("evidence") or {}).get("other")) if code == "source_conflict" else None
+            if shown is not None and other is not None and str(other) != str(shown):
+                # two readings: the person picks the one the document shows (or types it)
+                raw_other = (q.get("evidence") or {}).get("other")
+                options = [(f"ใช้ {shown}"[:60], {"accept": shown if kind == "party" else str(q["proposed"])}, "ค่าจากข้อความในเอกสาร"),
+                           (f"ใช้ {other}"[:60], {"accept": other if kind == "party" else str(raw_other)}, "ค่าจากอีกแหล่ง"),
+                           EXCLUDE]
+            elif shown is not None:
+                options = [(f"ถูกต้อง {shown}"[:60], {"accept": shown if kind == "party" else str(q["proposed"])},
+                            "ยืนยันค่าที่อ่านได้"), EXCLUDE]
             else:
                 options = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), EXCLUDE]
             out.append(finding(f"e2_{code}", "blocking", "preflight", HEADER.get(field, "ค่าในเอกสาร"), text,
@@ -115,7 +134,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             inp = None
             if subject == "currency":
                 opts = [("ระบุอัตราแลกเปลี่ยน", "rate", "พิมพ์อัตรา เช่น 36.25"), EXCLUDE]
-                inp = {"kind": "text", "hint": "พิมพ์อัตราแลกเปลี่ยนเป็นบาทต่อ 1 หน่วย เช่น 36.25"}
+                inp = {"kind": "rate", "hint": "พิมพ์อัตราแลกเปลี่ยนเป็นบาทต่อ 1 หน่วย เช่น 36.25"}
             out.append(finding("e2_check_failed", "blocking", "preflight", head, text, opts, "exclude",
                                evidence=ev, subject=subj, input=inp, facts={"check": subject}))
         elif code == "duplicate_candidate":
@@ -124,9 +143,11 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
                                [("ซ้ำ ตัดออก", "exclude", "ไม่นับซ้ำ"), ("ไม่ซ้ำ นับรวม", "include", "เป็นเอกสารคนละฉบับ")],
                                "exclude", evidence=ev, subject=subj))
         elif code == "copy_not_original":
-            out.append(finding("e2_copy", "cosmetic", "preflight", "สำเนา",
-                               f"{label}: เอกสารนี้เป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ",
-                               [("รับทราบ", "ok", "บันทึกตามเดิม พร้อมหมายเหตุว่าเป็นสำเนา"), EXCLUDE], "ok",
+            # blocking: whether a copy is recorded changes which documents count (a cosmetic answer never
+            # reaches the numbers); skipped → left out, like every other E2 card
+            out.append(finding("e2_copy", "blocking", "preflight", "สำเนา",
+                               f"{label}: เอกสารนี้เป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ บันทึกไว้หรือไม่",
+                               [("บันทึก พร้อมหมายเหตุ", "ok", "บันทึกตามเดิม พร้อมข้อยกเว้นว่าเป็นสำเนา"), EXCLUDE], "exclude",
                                evidence=ev, subject=subj))
         elif code == "document_type_unknown":
             out.append(finding("e2_doc_type", "blocking", "preflight", "ชนิดเอกสาร",

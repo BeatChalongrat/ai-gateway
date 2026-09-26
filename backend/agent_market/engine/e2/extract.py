@@ -26,8 +26,10 @@ from decimal import Decimal
 from . import checks as C
 from . import etax, parse
 from . import thai_text as T
+from dataclasses import asdict, dataclass
+
 from .schema import (FIELD_KINDS, MONEY_FIELDS, ORDINARY_THRESHOLD, PAGE_OCR_THRESHOLD, REQUIRED, SCHEMA,
-                     STRICT_KINDS, STRICT_THRESHOLD, TRIAGE_FIELDS, Field, Question, validate)
+                     STRICT_KINDS, STRICT_THRESHOLD, TRIAGE_FIELDS, Field, Question, Source, validate)
 from .words import Page, build_lines, ocr_words_from, pdf_text_words
 
 MIN_TEXT_CHARS = 24          # a page with less text than this is a scan (extract_text.MIN_TEXT_CHARS_PER_PAGE)
@@ -89,11 +91,36 @@ def _read_image(path: str, ocr) -> tuple[list, list[Page], dict]:
     return ocr_words_from(res, 1, scale=1.0), [page], {**tf, "psm": mode}
 
 
+@dataclass
+class State:
+    """What reading a document produced, before any judgement: stored with the extraction
+    (``out["state"]``) so a later step can judge it again with the run's duplicate history,
+    a model's proposals or a person's answers, without reading the file again."""
+    fields: dict
+    items: list
+    doc_type: Field
+    pages: list
+    name: str
+    sha256: str
+    kind: str
+    tier: str
+    method: str
+    transform: dict | None
+    copy_mark: str
+    vat_mode: str
+    agreement: dict
+    has_xml: bool
+
+
 def extract(path: str, name: str | None = None, *, org: dict | None = None, history: list[dict] | None = None,
             today: _dt.date | None = None, proposals: list[dict] | None = None, ocr=None) -> dict:
+    """Read one document and judge it (the parse step's whole job, and the eval's)."""
+    return judge(read(path, name, ocr=ocr), org=org, history=history, today=today, proposals=proposals)
+
+
+def read(path: str, name: str | None = None, *, ocr=None) -> State:
     name = name or os.path.basename(path)
     ext = os.path.splitext(name)[1].lower()
-    today = today or _dt.date.today()
     fields: dict[str, Field] = {}
     items: list[dict] = []
     agreement: dict[str, dict] = {}
@@ -199,6 +226,46 @@ def extract(path: str, name: str | None = None, *, org: dict | None = None, hist
     if vmode == "exclusive" and not _present(fields, "vat_rate"):
         fields["vat_rate"] = Field(value="7", normalized="7", confidence=0.9, source=None,
                                    candidates=[{"value": "7", "normalized": "7", "method": "default", "confidence": 0.9}])
+    return State(fields=fields, items=items, doc_type=doc_type, pages=pages, name=name, sha256=_sha(path), kind=kind,
+                 tier=tier, method=method, transform=transform, copy_mark=copy_mark, vat_mode=vmode, agreement=agreement,
+                 has_xml=xml is not None)
+
+
+def judge(state: State, *, org: dict | None = None, history: list[dict] | None = None, today: _dt.date | None = None,
+          proposals: list[dict] | None = None, overrides: dict | None = None, confirmed: set | None = None,
+          absent: set | None = None, accepted_checks: set | None = None, doc_type: str | None = None,
+          override_methods: dict | None = None) -> dict:
+    """Checks, confidence and questions for a read document.
+
+    A person's answers come back as: ``overrides`` {field: typed value (normalised)}, ``confirmed``
+    (fields the person said are right as read), ``absent`` (required fields the person confirmed the
+    document does not print — recorded by the package as an exception, not asked again),
+    ``accepted_checks`` (failed checks the person accepted as printed — likewise) and ``doc_type``
+    (the type the person chose). ``override_methods`` names how an override came about
+    (default ``typed_by_person``; ``confirmed_by_person`` for a proposal the person accepted).
+    A field the person typed or confirmed is no longer in dispute: its source conflict is dropped."""
+    import copy
+
+    today = today or _dt.date.today()
+    fields = copy.deepcopy(state.fields)
+    items = copy.deepcopy(state.items)
+    pages, vmode, copy_mark, tier, method = state.pages, state.vat_mode, state.copy_mark, state.tier, state.method
+    decided = {n for n in (overrides or {}) if n in FIELD_KINDS} | set(confirmed or ())
+    agreement = {k: v for k, v in state.agreement.items() if k not in decided}
+    doc_type = Field(value=doc_type, normalized=doc_type, confidence=1.0,
+                     source=Source(page=None, bbox=None, span=None, method="chosen_by_person", raw_text=doc_type)) \
+        if doc_type else copy.deepcopy(state.doc_type)
+    for n, v in (overrides or {}).items():
+        if n in FIELD_KINDS and v is not None:
+            how = (override_methods or {}).get(n, "typed_by_person")
+            shown = v.get("core", str(v)) if isinstance(v, dict) else str(v)
+            fields[n] = Field(value=shown, normalized=v, confidence=1.0,
+                              source=Source(page=None, bbox=None, span=None, method=how, raw_text=shown),
+                              checks=[how])
+    for n in confirmed or ():
+        if n in fields and fields[n].present:
+            fields[n].confidence = 1.0
+            fields[n].checks.append("confirmed_by_person")
 
     triage = tier == "photo"
     dtype = doc_type.normalized or "unknown"
@@ -216,7 +283,9 @@ def extract(path: str, name: str | None = None, *, org: dict | None = None, hist
             cand = {"value": v, "normalized": norm, "method": prop.get("method", "model"), "confidence": 0.8}
             f.candidates.append(cand)
             if f.present:
-                if str(f.normalized) == str(norm):
+                if k in decided:
+                    continue          # the person already decided this field
+                if _same_value(k, f.normalized, norm):
                     f.checks.append("model_agrees")
                     f.confidence = max(f.confidence, CORROBORATED if f.confidence >= 0.6 else f.confidence)
                 else:
@@ -267,16 +336,17 @@ def extract(path: str, name: str | None = None, *, org: dict | None = None, hist
                 if n in fields and fields[n].present and c.code not in fields[n].checks:
                     fields[n].checks.append(c.code)
 
-    questions = _questions(fields, items, checks, pages, dtype, triage)
+    questions = _questions(fields, items, checks, pages, dtype, triage, absent=set(absent or ()),
+                           accepted=set(accepted_checks or ()), ocr=tier in ("scan", "photo"))
 
     scope = TRIAGE_FIELDS if triage else tuple(FIELD_KINDS)
     out = {
         "schema": SCHEMA,
-        "document": {"name": name, "sha256": _sha(path), "pages": len(pages) or (1 if xml else 0), "kind": kind,
-                     "tier": tier, "triage_only": triage,
+        "document": {"name": state.name, "sha256": state.sha256, "pages": len(pages) or (1 if state.has_xml else 0),
+                     "kind": state.kind, "tier": tier, "triage_only": triage,
                      "page_quality": [{"page": p.number, "method": p.method, "ocr_confidence": p.ocr_conf, "dpi": p.dpi,
                                        "unit": p.unit, "width": round(p.width, 1), "height": round(p.height, 1)} for p in pages],
-                     "image_transform": transform, "copy_mark": copy_mark, "vat_mode": vmode,
+                     "image_transform": state.transform, "copy_mark": copy_mark, "vat_mode": vmode,
                      "notice": ("รูปถ่ายใบเสร็จอ่านได้แบบพยายามที่สุดเท่านั้น (best-effort): ระบบอ่านแค่ผู้ขาย วันที่ ยอดรวม VAT "
                                 "และเลขผู้เสียภาษี และจะถามกลับทุกครั้งที่ไม่มั่นใจ") if triage else None},
         "document_type": doc_type.to_dict(),
@@ -287,14 +357,94 @@ def extract(path: str, name: str | None = None, *, org: dict | None = None, hist
                                          for it in items],
         "deterministic_checks": [c.to_dict() for c in checks],
         "questions": [q.to_dict() for q in questions],
+        "state": state_dict(state),
     }
     validate(out)
     return out
 
 
+# ── the stored state ────────────────────────────────────────────────────────
+# Exact types survive the run's JSON: Decimal and date are tagged, never guessed from a field's kind.
+
+def _enc(v):
+    if isinstance(v, Decimal):
+        return {"$dec": str(v)}
+    if isinstance(v, _dt.date):
+        return {"$date": v.isoformat()}
+    if isinstance(v, dict):
+        return {k: _enc(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_enc(x) for x in v]
+    return v
+
+
+def _dec(v):
+    if isinstance(v, dict):
+        if set(v) == {"$dec"}:
+            return Decimal(v["$dec"])
+        if set(v) == {"$date"}:
+            return _dt.date.fromisoformat(v["$date"])
+        return {k: _dec(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_dec(x) for x in v]
+    return v
+
+
+def _field_load(d: dict) -> Field:
+    d = _dec(d)
+    src = d.pop("source", None)
+    return Field(**d, source=Source(**src) if src else None)
+
+
+def state_dict(s: State) -> dict:
+    return {"fields": {k: _enc(asdict(f)) for k, f in s.fields.items()},
+            "items": [{k: (_enc(asdict(v)) if isinstance(v, Field) else _enc(v)) for k, v in it.items()} for it in s.items],
+            "doc_type": _enc(asdict(s.doc_type)), "pages": [asdict(p) for p in s.pages],
+            "name": s.name, "sha256": s.sha256, "kind": s.kind, "tier": s.tier, "method": s.method,
+            "transform": _enc(s.transform), "copy_mark": s.copy_mark, "vat_mode": s.vat_mode, "has_xml": s.has_xml,
+            "agreement": _enc(s.agreement)}
+
+
+def state_load(d: dict) -> State:
+    return State(fields={k: _field_load(v) for k, v in d["fields"].items()},
+                 items=[{k: (_field_load(v) if isinstance(v, dict) else v) for k, v in it.items()} for it in d["items"]],
+                 doc_type=_field_load(d["doc_type"]), pages=[Page(**p) for p in d["pages"]], name=d["name"],
+                 sha256=d["sha256"], kind=d["kind"], tier=d["tier"], method=d["method"], transform=_dec(d.get("transform")),
+                 copy_mark=d["copy_mark"], vat_mode=d["vat_mode"], agreement=_dec(d.get("agreement") or {}),
+                 has_xml=d.get("has_xml", False))
+
+
+def rejudge(out: dict, **kw) -> dict:
+    """Judge a stored extraction again (``out`` as ``extract`` returned it); keyword arguments as ``judge``."""
+    return judge(state_load(out["state"]), **kw)
+
+
 def _present(fields, name) -> bool:
     f = fields.get(name)
     return f is not None and f.present
+
+
+def _same_value(name: str, a, b) -> bool:
+    """Two readings of one field agree: names by their skeleton key (spacing and lost marks are not a
+    disagreement), identifiers without spaces, everything else exactly."""
+    kind = FIELD_KINDS.get(name)
+    if kind == "party":
+        ka = (a or {}).get("key") or T.core_key(str((a or {}).get("core") or ""))
+        kb = (b or {}).get("key") or T.core_key(str((b or {}).get("core") or ""))
+        return bool(ka) and ka == kb
+    if kind in ("code", "text"):
+        return "".join(str(a).split()).lower() == "".join(str(b).split()).lower()
+    return str(a) == str(b)
+
+
+def _decided(f) -> bool:
+    """A value the person typed or confirmed."""
+    return f is not None and ("typed_by_person" in f.checks or "confirmed_by_person" in f.checks)
+
+
+# checks that are arithmetic between read numbers: on an OCR'd page a failure is most often a misread
+ARITHMETIC = ("line_arithmetic", "subtotal_sum", "discount_arithmetic", "vat_7_percent", "grand_total", "wht",
+              "amount_in_words")
 
 
 def _normalise(name: str, v):
@@ -309,11 +459,17 @@ def _normalise(name: str, v):
         hit = T.parse_date(s)
         return hit[0] if hit else None
     if kind == "party":
-        return T.legal_form(s) or {"legal_form": "unknown", "core": s.strip()}
+        return T.legal_form(s) or {"legal_form": "unknown", "core": s.strip(), "key": T.core_key(s.strip())}
     return T.arabic(s).strip() or None
 
 
-def _questions(fields, items, checks, pages, dtype, triage) -> list[Question]:
+def _questions(fields, items, checks, pages, dtype, triage, *, absent: set = frozenset(),
+               accepted: set = frozenset(), ocr: bool = False) -> list[Question]:
+    """``ocr``: the document was read from a page image (scan or photo). There a failed arithmetic check
+    first asks the person to confirm each number it involves that nobody has confirmed yet — the numbers
+    are more likely misread than misprinted; only once they are all confirmed and it still fails is it a
+    document defect (``check_failed``). Line-level failures on such a page do not block: the lines are
+    recorded as unverified (the header numbers are what the register keeps)."""
     qs: list[Question] = []
     have = set()
 
@@ -330,11 +486,20 @@ def _questions(fields, items, checks, pages, dtype, triage) -> list[Question]:
         required |= set(TRIAGE_FIELDS)
     for n in sorted(required & scope):
         f = fields.get(n)
+        if n in absent:
+            failed_fields.add(n)      # the person confirmed the document does not print it: not asked again
+            continue
         if (f is None or not f.present) and not (n == "vat_amount" and dtype in ("receipt", "invoice")):
-            add(Question("field_missing", subject=n, fieldname=n, reason="could not be read" if triage else f"a {dtype} must show this"))
+            model = [c for c in (f.candidates if f is not None else []) if str(c.get("method", "")).startswith(("vision", "model"))]
+            if model:
+                # a model read what the text could not: its reading is the proposal, the person decides
+                add(Question("low_confidence", subject=n, fieldname=n, reason="only a model read this value",
+                             proposed=model[0].get("normalized"), evidence={"candidates": model}))
+            else:
+                add(Question("field_missing", subject=n, fieldname=n, reason="could not be read" if triage else f"a {dtype} must show this"))
             failed_fields.add(n)
     for c in checks:
-        if c.status != "fail":
+        if c.status != "fail" or c.code in accepted:
             continue
         if c.code == "document_type":
             add(Question("document_type_unknown", reason="the document's title does not say what it is"))
@@ -345,6 +510,34 @@ def _questions(fields, items, checks, pages, dtype, triage) -> list[Question]:
         elif c.code == "original_copy":
             add(Question("copy_not_original", reason="this is marked สำเนา (copy): input VAT needs the original",
                          blocking=False))
+        elif ocr and c.code in ARITHMETIC:
+            money = [n for n in c.fields if n in MONEY_FIELDS and n in scope and n not in failed_fields and n not in absent]
+            unread = [n for n in money if fields.get(n) is None or not fields[n].present]
+            # a read value nobody confirmed (a sum computed from misread lines is not a reading: not offered)
+            unsure = [n for n in money if n not in unread and not _decided(fields[n]) and fields[n].source is not None]
+            if unread or unsure:
+                for n in unsure:
+                    add(Question("low_confidence", subject=n, fieldname=n, proposed=fields[n].normalized,
+                                 reason=f"the numbers do not add up ({c.code}): please confirm what the page shows",
+                                 evidence={"check": c.code, "expected": c.expected, "actual": c.actual,
+                                           "raw_text": fields[n].source.raw_text}))
+                for n in unread:
+                    model = [x for x in (fields[n].candidates if fields.get(n) is not None else [])
+                             if str(x.get("method", "")).startswith(("vision", "model"))]
+                    if model:
+                        add(Question("low_confidence", subject=n, fieldname=n, reason="only a model read this value",
+                                     proposed=model[0].get("normalized"), evidence={"candidates": model, "check": c.code}))
+                    else:
+                        add(Question("field_missing", subject=n, fieldname=n,
+                                     reason=f"could not be read, and the numbers do not add up without it ({c.code})",
+                                     evidence={"check": c.code}))
+                failed_fields.update(unread + unsure)
+            elif triage or c.code in ("line_arithmetic", "subtotal_sum"):
+                continue      # the lines (recorded as unverified), or a photo's fields outside its five
+            else:
+                add(Question("check_failed", subject=c.code, reason=c.message or f"{c.code} failed",
+                             evidence={"expected": c.expected, "actual": c.actual}))
+                failed_fields.update(c.fields)
         elif c.code.startswith("source_agreement:"):
             n = c.code.split(":", 1)[1]
             add(Question("source_conflict", subject=n, fieldname=n, reason=c.message, proposed=c.expected,
