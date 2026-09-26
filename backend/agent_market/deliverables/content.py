@@ -1,6 +1,6 @@
 """One content model, many formats.
 
-The report (.docx), the deck (.pptx), the PDF and the workbook are all
+The report (.docx), the deck (.pptx) and the workbook are all
 rendered from the model built here, so a number, its citation and its
 wording are identical in every file of a run — and in any file re-rendered
 later from the same computed table.

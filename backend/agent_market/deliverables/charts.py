@@ -1,4 +1,4 @@
-"""Charts as PNG for the report and the PDF (the deck uses native charts).
+"""Charts as PNG for the report (the deck uses native charts).
 
 Every chart is drawn from a spec built by content.charts(): the values are
 the computed table's own strings. The returned binding records which

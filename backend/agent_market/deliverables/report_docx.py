@@ -125,6 +125,13 @@ class ReportWriter:
     def setup(self):
         doc = self.doc
         dg.setup_thai_font(doc, self.font, 11)
+        # The document's complex-script language is Thai (python-docx's
+        # template says ar-SA): Word then breaks Thai lines between words
+        # instead of anywhere ("ค่าจ้า|ง") in narrow table cells.
+        defaults = doc.styles.element.find(qn("w:docDefaults"))
+        lang = defaults.find(f"{qn('w:rPrDefault')}/{qn('w:rPr')}/{qn('w:lang')}") if defaults is not None else None
+        if lang is not None:
+            lang.set(qn("w:bidi"), "th-TH")
         st = doc.styles["Normal"]
         st.font.size = Pt(BODY_PT)
         st.font.color.rgb = _rgb(self.p["ink"])

@@ -460,3 +460,20 @@ func TestEventStreamResumesFromCursor(t *testing.T) {
 		t.Fatalf("stream from cursor must send exactly the two new items, got:\n%s", got)
 	}
 }
+
+// AM1b: PDF is not an output any more; asking the API for one is refused.
+func TestFormatsRefusePDF(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	in := e.install()
+	ctx := context.Background()
+	run, _, _ := e.store.CreateRun(ctx, e.store.Pool, Run{InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID, Kind: KindRun,
+		DefinitionVersion: "1.0.0", Checksum: "pkgsum"}, "")
+	_, _ = e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET status='succeeded', finished_at=now() WHERE id=$1`, run.ID)
+	code, body := e.do("POST", "/runs/"+run.ID.String()+"/formats", map[string]any{"formats": []string{"pdf"}})
+	if code != 400 {
+		t.Fatalf("a PDF request must be refused, got %d %v", code, body)
+	}
+}

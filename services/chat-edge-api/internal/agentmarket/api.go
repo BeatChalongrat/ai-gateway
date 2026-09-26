@@ -1390,7 +1390,7 @@ func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, f := range body.Formats {
-		if f != "docx" && f != "pptx" && f != "xlsx" && f != "pdf" {
+		if f != "docx" && f != "pptx" && f != "xlsx" { // no PDF (AM1b)
 			writeErr(w, http.StatusBadRequest, "BAD_FORMAT", "unknown format "+f)
 			return
 		}
@@ -1452,7 +1452,6 @@ var mimeByFormat = map[string]string{
 	"docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 	"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	"pdf":  "application/pdf",
 }
 
 func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {

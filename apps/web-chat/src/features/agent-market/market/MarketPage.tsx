@@ -43,7 +43,7 @@ export function categoriesOf(a: CatalogAgent): Category[] {
 }
 
 export function formatsLabel(a: CatalogAgent): string {
-  return (a.manifest?.outputs ?? []).map((o) => (o.format === "pdf" ? "PDF" : `.${o.format}`)).join(" + ");
+  return (a.manifest?.outputs ?? []).map((o) => `.${o.format}`).join(" + ");
 }
 
 export function MarketPage() {

@@ -20,11 +20,11 @@ import { runHref } from "./context";
 
 export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
-  pdf: "outputs.fmt.pdf",
   docx: "outputs.fmt.docx",
   pptx: "outputs.fmt.pptx",
 };
-const MORE_FORMATS = ["xlsx", "pdf", "docx", "pptx"];
+// No PDF (AM1b): its Thai shaping was wrong; it returns in AM-2 as the .docx converted by LibreOffice.
+export const MORE_FORMATS = ["xlsx", "docx", "pptx"];
 
 export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | null }[]): { pass: number; total: number; checks: QualityCheck[] } {
   const checks = artifacts.flatMap((a) => a.quality?.checks ?? []);

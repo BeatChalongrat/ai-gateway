@@ -22,7 +22,6 @@ const CAP_KEYS = new Set([
   "deliverable.deck.pptx",
   "model.text",
   "deliverable.table.xlsx",
-  "deliverable.report.pdf",
   "document.read.pdf",
 ]);
 

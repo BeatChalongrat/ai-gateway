@@ -2,7 +2,7 @@
 gate — and the gate really fails on each thing it claims to catch.
 
 Runs inside the sandbox image (python-docx, python-pptx, openpyxl,
-matplotlib, reportlab and /sandbox/scripts are there).
+matplotlib and /sandbox/scripts are there).
 """
 
 import copy
@@ -39,19 +39,30 @@ class Render(unittest.TestCase):
     def setUpClass(cls):
         cls.computed = computed_for(["GL_2569-09.xlsx", "GL_2569-08.xlsx", "งบประมาณ_2569.xlsx"])
         cls.out = tempfile.mkdtemp()
-        cls.res = render_all(cls.computed, {**REQ, "formats": ["docx", "pptx", "xlsx", "pdf"]},
+        cls.res = render_all(cls.computed, {**REQ, "formats": ["docx", "pptx", "xlsx"]},
                              in_dir=cls.out, out_dir=cls.out)
 
     def test_all_formats_pass_the_gate(self):
         self.assertTrue(self.res["passed"], json.dumps(
             [c for a in self.res["artifacts"] for c in a["quality"]["checks"] if not c["ok"]], ensure_ascii=False))
-        self.assertEqual({a["format"] for a in self.res["artifacts"]}, {"docx", "pptx", "xlsx", "pdf"})
+        self.assertEqual({a["format"] for a in self.res["artifacts"]}, {"docx", "pptx", "xlsx"})
 
     def test_check_details_read_as_plain_thai(self):
         # People see these lines on the run page: no Python lists or internals.
         for a in self.res["artifacts"]:
             for c in a["quality"]["checks"]:
                 self.assertNotRegex(c["detail"], r"\[\]|\bcs:|None", f"{a['format']} {c['name']}: {c['detail']}")
+
+    def test_the_report_is_tagged_thai_so_word_breaks_lines_between_words(self):
+        # AM1b: python-docx's template says the complex-script language is
+        # ar-SA; Word then breaks Thai anywhere ("ค่าจ้า|ง") in narrow cells.
+        import re
+        import zipfile
+
+        with zipfile.ZipFile(os.path.join(self.out, "r_v1.docx")) as z:
+            styles = z.read("word/styles.xml").decode("utf-8")
+        default = re.search(r"<w:rPrDefault>.*?</w:rPrDefault>", styles, re.S).group(0)
+        self.assertIn('w:bidi="th-TH"', default)
 
     def test_deck_has_8_to_12_slides(self):
         deck = next(a for a in self.res["artifacts"] if a["format"] == "pptx")
@@ -165,6 +176,26 @@ class GateCatches(unittest.TestCase):
         ReportWriter(model, self.theme, {}).write(path)
         checks = quality.check_docx(path, content.build(self.computed, req), self.theme, req)
         self.assertFalse(next(c for c in checks if c["name"] == "docx.sections")["ok"])
+
+
+class NoPdf(unittest.TestCase):
+    """AM1b: PDF left the options — its Thai shaping was wrong, and an option
+    that renders Thai wrong is worse than none (it returns in AM-2 as the
+    finished .docx converted by LibreOffice)."""
+
+    def test_the_manifest_offers_no_pdf(self):
+        import agent_market.packages.financial_report as fr
+
+        with open(os.path.join(os.path.dirname(fr.__file__), "agent.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        self.assertNotIn("pdf", {o["format"] for o in manifest["outputs"]})
+        self.assertNotIn("deliverable.report.pdf", json.dumps(manifest))
+
+    def test_the_renderer_makes_no_pdf(self):
+        c = computed_for(["GL_2569-09.xlsx"])
+        out = tempfile.mkdtemp()
+        res = render_all(c, {**REQ, "formats": ["pdf"]}, in_dir=out, out_dir=out)
+        self.assertEqual(res["artifacts"], [])
 
 
 class CitationMarkers(unittest.TestCase):

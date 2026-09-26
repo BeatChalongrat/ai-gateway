@@ -15,7 +15,9 @@ from . import quality
 from .charts import render_png
 from .theme import resolve
 
-FORMATS = {"docx": "report", "pptx": "deck", "xlsx": "table", "pdf": "report_pdf"}
+# No PDF: its Thai shaping was wrong (AM1b). It returns in AM-2 as the
+# finished .docx converted by LibreOffice, not as a second renderer.
+FORMATS = {"docx": "report", "pptx": "deck", "xlsx": "table"}
 
 
 def _sha(path: str) -> str:
@@ -37,7 +39,7 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     chart_files: dict[str, str] = {}
     chart_bindings: list[dict] = []
-    if {"docx", "pdf"} & set(formats):
+    if "docx" in formats:
         for spec in model["charts"]:
             path = os.path.join("/tmp", f"chart_{spec['id']}.png")
             chart_bindings.append(render_png(spec, theme, path))
@@ -62,27 +64,18 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
             meta = DeckWriter(model, computed, theme).write(path)
             checks = quality.check_pptx(path, meta, computed, theme) + [cit]
-        elif fmt == "xlsx":
+        else:
             from .table_xlsx import XlsxWriter
 
             meta = XlsxWriter(model, computed, theme).write(path)
             checks = quality.check_xlsx(path, computed)
-        else:
-            from .report_pdf import PdfWriter
-
-            meta = PdfWriter(model, theme, chart_files).write(path)
-            import doc_validator
-
-            v = doc_validator.validate(path)
-            checks = [quality._check("pdf.valid", v.get("valid") and not v.get("errors"),
-                                     "; ".join(v.get("errors") or []), "ไฟล์เปิดได้"), cit, asm]
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         meta.pop("path", None)
         artifacts.append({"name": name, "format": fmt, "kind": FORMATS[fmt], "size": os.path.getsize(path),
                           "sha256": _sha(path), "quality": {"passed": ok, "checks": checks},
                           "meta": {k: v for k, v in meta.items() if k in ("slides", "sheets", "embedded_fonts", "ledger_rows")},
-                          "chart_bindings": meta.get("chart_bindings") or (chart_bindings if fmt in ("docx", "pdf") else []),
+                          "chart_bindings": meta.get("chart_bindings") or (chart_bindings if fmt == "docx" else []),
                           "citations": len(computed["citations"])})
     return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1),
                                                                "name": theme["name"]},

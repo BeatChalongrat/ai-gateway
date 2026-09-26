@@ -66,7 +66,6 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		caps["deliverable.report.docx"] = agentmarket.Binding{Capability: "deliverable.report.docx", Impl: "engine:report_docx+docx_generator.py", Version: eng}
 		caps["deliverable.deck.pptx"] = agentmarket.Binding{Capability: "deliverable.deck.pptx", Impl: "engine:deck_pptx+pptx_generator.py", Version: eng}
 		caps["deliverable.table.xlsx"] = agentmarket.Binding{Capability: "deliverable.table.xlsx", Impl: "engine:table_xlsx", Version: eng}
-		caps["deliverable.report.pdf"] = agentmarket.Binding{Capability: "deliverable.report.pdf", Impl: "engine:report_pdf", Version: eng}
 	}
 	// A model is optional at run time (rules write the narrative when none
 	// answers), but the capability says which models are bound.

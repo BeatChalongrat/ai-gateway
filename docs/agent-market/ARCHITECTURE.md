@@ -81,7 +81,9 @@ files never say a default was used for something the person chose.
   runner's own clock is UTC.
 - `deliverables/` renders report (.docx, Sarabun embedded), deck (.pptx,
   built with `pptx_generator.py`'s builders + a theme layer), tables (.xlsx
-  with a SUMIFS check sheet) and PDF from **one** content model; the quality
+  with a SUMIFS check sheet) from **one** content model (no PDF since AM1b:
+  its Thai shaping was wrong; it returns in AM-2 as the finished .docx
+  converted by headless LibreOffice); the quality
   gate (`quality.py`, using `doc_validator.py` and `pptx_inspector.py`) fails
   the step on overflow, off-theme fonts, unbound charts, empty required
   sections, blank citations, or missing assumptions.

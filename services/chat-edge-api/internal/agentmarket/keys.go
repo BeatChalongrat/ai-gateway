@@ -102,7 +102,7 @@ func ArtifactName(slug, period, format string, version int) string {
 	if i := strings.LastIndex(slug, "."); i >= 0 {
 		agent = slug[i+1:]
 	}
-	kind := map[string]string{"docx": "report", "pptx": "deck", "xlsx": "tables", "pdf": "report"}[format]
+	kind := map[string]string{"docx": "report", "pptx": "deck", "xlsx": "tables"}[format]
 	if kind == "" {
 		kind = "output"
 	}

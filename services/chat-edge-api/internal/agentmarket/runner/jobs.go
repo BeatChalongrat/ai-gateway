@@ -129,9 +129,16 @@ var formatWords = []struct {
 	words  []string
 }{
 	{"xlsx", []string{"excel", "xlsx", "เอ็กเซล", "ตารางตัวเลข", "ตาราง excel", "สเปรดชีต"}},
-	{"pdf", []string{"pdf", "พีดีเอฟ"}},
 	{"pptx", []string{"pptx", "powerpoint", "พาวเวอร์พอยต์", "สไลด์"}},
 	{"docx", []string{"docx", "word", "เวิร์ด", "รายงาน word"}},
+}
+
+// asksForPDF: PDF is not an output (AM1b — its Thai shaping was wrong; it
+// returns as the finished .docx converted by LibreOffice). A request for one
+// gets an honest answer instead of a render.
+func asksForPDF(text string) bool {
+	t := strings.ToLower(text)
+	return strings.Contains(t, "pdf") || strings.Contains(t, "พีดีเอฟ")
 }
 
 func detectFormats(text string) []string {
@@ -199,6 +206,9 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 	switch {
 	case strings.Contains(low, "ภาษาอังกฤษ") || strings.Contains(low, "english"):
 		_ = post("ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป")
+	case asksForPDF(text) && len(detectFormats(text)) == 0:
+		_ = post("ตอนนี้ยังทำไฟล์ PDF ไม่ได้ครับ ภาษาไทยใน PDF ยังจัดวางไม่ถูกต้อง จึงปิดไว้ก่อน " +
+			"ระหว่างนี้เปิดรายงาน .docx แล้วสั่ง “บันทึกเป็น PDF” ใน Word ได้เลย ได้หน้าตาเดียวกันกับรายงาน")
 	case len(detectFormats(text)) > 0:
 		formats := detectFormats(text)
 		switch {
@@ -250,7 +260,7 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 }
 
 func formatNames(fs []string) string {
-	names := map[string]string{"docx": "รายงาน .docx", "pptx": "สไลด์ .pptx", "xlsx": "ตารางตัวเลข .xlsx", "pdf": "PDF"}
+	names := map[string]string{"docx": "รายงาน .docx", "pptx": "สไลด์ .pptx", "xlsx": "ตารางตัวเลข .xlsx"}
 	var out []string
 	for _, f := range fs {
 		out = append(out, names[f])
@@ -258,20 +268,25 @@ func formatNames(fs []string) string {
 	return strings.Join(out, " และ ")
 }
 
-// formatCard asks which extra formats to make (multi-select) — only when
-// the user's words say "more files" without naming one.
-func (r *Runner) formatCard(ctx context.Context, run am.Run) error {
-	var cur []string
-	_ = json.Unmarshal(run.Formats, &cur)
-	q := am.Question{Key: "output_format", Code: "output_format", Severity: "cosmetic", Header: "ชนิดไฟล์",
+// formatQuestion is the "which extra files" question: the three outputs
+// the agent makes (no PDF, see asksForPDF).
+func formatQuestion(_ []string) am.Question {
+	return am.Question{Key: "output_format", Code: "output_format", Severity: "cosmetic", Header: "ชนิดไฟล์",
 		Question: "ต้องการไฟล์แบบไหนเพิ่มครับ (เลือกได้หลายแบบ)", MultiSelect: true,
 		Options: []am.Option{
 			{Label: "รายงาน .docx", Value: json.RawMessage(`"docx"`)},
 			{Label: "สไลด์ .pptx", Value: json.RawMessage(`"pptx"`)},
 			{Label: "ตารางตัวเลข .xlsx", Value: json.RawMessage(`"xlsx"`)},
-			{Label: "PDF", Value: json.RawMessage(`"pdf"`)},
 		},
 		Default: json.RawMessage(`"xlsx"`), DefaultLabel: "ตารางตัวเลข .xlsx"}
+}
+
+// formatCard asks which extra formats to make (multi-select) — only when
+// the user's words say "more files" without naming one.
+func (r *Runner) formatCard(ctx context.Context, run am.Run) error {
+	var cur []string
+	_ = json.Unmarshal(run.Formats, &cur)
+	q := formatQuestion(cur)
 	qs, _ := json.Marshal([]am.Question{q})
 	card, err := r.Store.CreateCard(ctx, r.Store.Pool, am.Card{RunID: run.ID, InstallID: run.InstallID, TenantID: run.TenantID,
 		UserID: run.UserID, Moment: "run", Kind: "output_format", Blocking: false, Questions: qs})

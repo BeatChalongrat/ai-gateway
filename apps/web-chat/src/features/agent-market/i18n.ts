@@ -119,7 +119,6 @@ const th = {
   "cap.deliverable.deck.pptx": "สร้างสไลด์ PowerPoint",
   "cap.model.text": "โมเดลภาษาเขียนคำอธิบายจากตัวเลขที่คำนวณแล้ว",
   "cap.deliverable.table.xlsx": "สร้างตารางตัวเลข Excel",
-  "cap.deliverable.report.pdf": "สร้างรายงาน PDF",
   "cap.document.read.pdf": "อ่านไฟล์ PDF",
 
   // install wizard
@@ -299,7 +298,6 @@ const th = {
   "outputs.checks": "ผลตรวจคุณภาพ",
   "outputs.moreFiles": "ขอไฟล์เพิ่ม",
   "outputs.fmt.xlsx": "Excel (.xlsx)",
-  "outputs.fmt.pdf": "PDF",
   "outputs.fmt.docx": "Word (.docx)",
   "outputs.fmt.pptx": "PowerPoint (.pptx)",
   "outputs.requested": "กำลังสร้าง {fmt} จากตัวเลขชุดเดิม",
@@ -562,7 +560,6 @@ const en: Record<AmKey, string> = {
   "cap.deliverable.deck.pptx": "Create a PowerPoint deck",
   "cap.model.text": "A language model writes the commentary from computed numbers",
   "cap.deliverable.table.xlsx": "Create an Excel table",
-  "cap.deliverable.report.pdf": "Create a PDF report",
   "cap.document.read.pdf": "Read PDF files",
 
   "install.title": "Install · {name}",
@@ -737,7 +734,6 @@ const en: Record<AmKey, string> = {
   "outputs.checks": "Quality checks",
   "outputs.moreFiles": "More files",
   "outputs.fmt.xlsx": "Excel (.xlsx)",
-  "outputs.fmt.pdf": "PDF",
   "outputs.fmt.docx": "Word (.docx)",
   "outputs.fmt.pptx": "PowerPoint (.pptx)",
   "outputs.requested": "Creating {fmt} from the same numbers",

@@ -9,7 +9,7 @@ Layout:
     engine/        request/response protocol, file reading, findings shape,
                    Thai/Decimal helpers
     deliverables/  theme registry + report (.docx), deck (.pptx), tables
-                   (.xlsx), PDF, charts and the quality gate
+                   (.xlsx), charts and the quality gate
     packages/      one folder per installable agent (manifest, AGENT.md,
                    checks/, scripts/, templates/, sample-data/, evals/)
     tools/         fixture generator (deterministic, seeded)

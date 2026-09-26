@@ -24,12 +24,11 @@
   "outputs": [
     {"format": "docx", "label": "รายงาน .docx", "default": true},
     {"format": "pptx", "label": "สไลด์ .pptx", "default": true},
-    {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false},
-    {"format": "pdf", "label": "PDF", "default": false}
+    {"format": "xlsx", "label": "ตารางตัวเลข .xlsx", "default": false}
   ],
   "capabilities": {
     "required": ["spreadsheet.read.xlsx", "compute.python.decimal", "deliverable.report.docx", "deliverable.deck.pptx", "model.text"],
-    "optional": ["deliverable.table.xlsx", "deliverable.report.pdf", "document.read.pdf"]
+    "optional": ["deliverable.table.xlsx", "document.read.pdf"]
   },
   "install": {
     "defaults": {"formats": ["docx", "pptx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},
