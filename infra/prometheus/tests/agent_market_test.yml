@@ -1,0 +1,38 @@
+# promtool test rules infra/prometheus/tests/agent_market_test.yml  (AM1b §0.4)
+rule_files:
+  - ../agent_market.yml
+evaluation_interval: 1m
+tests:
+  # 20 runs ended in 6 h, 1 failed: budget partly used, nothing firing.
+  - interval: 1h
+    input_series:
+      - series: 'agent_market_runs_finished_total{status="succeeded"}'
+        values: '0 4 8 12 16 19'
+      - series: 'agent_market_runs_finished_total{status="failed"}'
+        values: '0 0 0 1 1 1'
+    promql_expr_test:
+      - expr: agent_market:error_budget_remaining:ratio14d
+        eval_time: 5h
+        exp_samples:
+          - labels: 'agent_market:error_budget_remaining:ratio14d'
+            value: 0
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: AgentMarketErrorBudgetBurning
+        exp_alerts: []
+  # 4 of 6 runs failed in the last hours: the burn alert fires on its own channel.
+  - interval: 1h
+    input_series:
+      - series: 'agent_market_runs_finished_total{status="succeeded"}'
+        values: '0 1 2 2 2 2'
+      - series: 'agent_market_runs_finished_total{status="failed"}'
+        values: '0 0 1 2 3 4'
+    alert_rule_test:
+      - eval_time: 5h
+        alertname: AgentMarketErrorBudgetBurning
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: a quarter of recent runs failed — the 14-day error budget is burning"

@@ -1,0 +1,73 @@
+# Agent Market — its own recording rules and alerts (AM1b §0.4).
+#
+# Every alert here carries channel="agent-market". Prometheus in this stack has
+# no Alertmanager: the core pager is ops-watch (ntfy), which never reads these
+# rules and ignores the agent_market.* smoke checks — so nothing about Agent
+# Market pages the core channel. These show on the "Agent Market" Grafana
+# dashboard (docs/agent-market/OPERATIONS.md).
+#
+# SLO: 95 % of the agent runs that end, end succeeded (cancelled by the person
+# excluded), over a rolling 14 days (retention is 15 d). Error budget: 5 %.
+groups:
+  - name: agent-market
+    rules:
+      - record: agent_market:runs_ended:increase14d
+        expr: sum(increase(agent_market_runs_finished_total{status=~"succeeded|failed"}[14d]))
+      - record: agent_market:runs_failed:increase14d
+        expr: sum(increase(agent_market_runs_finished_total{status="failed"}[14d]))
+      # 1 = untouched budget, 0 = spent, below 0 = SLO missed
+      - record: agent_market:error_budget_remaining:ratio14d
+        expr: 1 - (agent_market:runs_failed:increase14d / clamp_min(agent_market:runs_ended:increase14d, 1)) / 0.05
+
+      - alert: AgentMarketErrorBudgetBurning
+        # a quarter of the runs that ended in the last 6 h failed (at least 3)
+        expr: |
+          sum(increase(agent_market_runs_finished_total{status="failed"}[6h])) >= 3
+          and
+          sum(increase(agent_market_runs_finished_total{status="failed"}[6h]))
+            / clamp_min(sum(increase(agent_market_runs_finished_total{status=~"succeeded|failed"}[6h])), 1) > 0.25
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: a quarter of recent runs failed — the 14-day error budget is burning"
+      - alert: AgentMarketErrorBudgetSpent
+        expr: agent_market:error_budget_remaining:ratio14d < 0
+        for: 30m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: more than 5 % of runs failed over 14 days (SLO missed)"
+      - alert: AgentMarketRunnerDown
+        expr: up{job="agent-runner"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market runner is not answering /metrics (runs wait; chat is unaffected)"
+      - alert: AgentMarketQueueStuck
+        expr: agent_market_oldest_queued_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: a run has waited in the queue for more than 10 minutes"
+      - alert: AgentMarketSandboxNotReady
+        expr: agent_market_sandbox_ready == 0
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: the runner cannot start sandboxes"
+      - alert: AgentMarketPoolSaturated
+        expr: agent_market_pool_acquired_conns >= agent_market_pool_max_conns
+        for: 5m
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: the runner's own DB pool is full (chat uses its own pool)"

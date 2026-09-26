@@ -170,13 +170,8 @@ func run(log *slog.Logger) error {
 			"engine": engine.Checksum[:12], "version": version})
 	})
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
-		var queued, running, awaiting int
-		_ = pool.QueryRow(req.Context(), `SELECT count(*) FILTER (WHERE status='queued'), count(*) FILTER (WHERE status='running'),
-			count(*) FILTER (WHERE status='awaiting_input') FROM agent_market.agent_runs`).Scan(&queued, &running, &awaiting)
-		st := pool.Stat()
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprintf(w, "am_runs_queued %d\nam_runs_running %d\nam_runs_awaiting_input %d\n", queued, running, awaiting)
-		fmt.Fprintf(w, "am_pool_acquired_conns %d\nam_pool_max_conns %d\nam_sandbox_ready %d\n", st.AcquiredConns(), st.MaxConns(), b2i(sandboxReady))
+		fmt.Fprint(w, runner.RenderMetrics(runner.CollectMetrics(req.Context(), pool, sandboxReady)))
 	})
 	srv := &http.Server{Addr: am.EnvString("AGENT_RUNNER_ADDR", ":8095"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -191,11 +186,4 @@ func run(log *slog.Logger) error {
 	defer cancel()
 	_ = srv.Shutdown(sctx)
 	return err
-}
-
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }

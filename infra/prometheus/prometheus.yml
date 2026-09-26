@@ -10,6 +10,7 @@ global:
 
 rule_files:
   - "alerts.yml"
+  - "agent_market.yml"
 
 scrape_configs:
   - job_name: "prometheus"
@@ -48,3 +49,11 @@ scrape_configs:
   #
   # nginx + pgbouncer — each needs a dedicated exporter (nginx stub_status
   # is NOT Prometheus format); enable when those services land.
+
+  # Agent Market runner (AM1b): its own compose project (sran-agent-market),
+  # on the core network. Its alerts carry channel="agent-market" and never
+  # page the core channel (agent_market.yml).
+  - job_name: "agent-runner"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["sran-agent-runner:8095"]

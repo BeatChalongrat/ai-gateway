@@ -412,6 +412,13 @@ def classify_smoke(record: dict | None, *, now: float, max_age_h: float = 26.0,
         return []
     checks = record.get("checks") if isinstance(record.get("checks"), list) else []
     failed = [str(c.get("name") or "?") for c in checks if isinstance(c, dict) and c.get("status") == "FAIL"]
+    # AM1b: the agent_market.* checks gate a deploy, but their failures are
+    # Agent Market's own (its dashboard and channel "agent-market"), never a
+    # page on the core channel.
+    core_failed = [n for n in failed if not n.startswith("agent_market.")]
+    if failed and not core_failed:
+        return []
+    failed = core_failed
     total = len(checks) or int((record.get("counts") or {}).get("fail") or 0) + int((record.get("counts") or {}).get("pass") or 0)
     if not failed:
         failed = [str(record.get("error") or "the suite did not finish")]

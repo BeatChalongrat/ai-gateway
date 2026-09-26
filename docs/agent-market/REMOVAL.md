@@ -17,6 +17,7 @@ AM1 card ran for real (its output is in the AM1 report).
 | Runner's gateway identity | portal project "Agent Market runner" and its API key; `.env` `AGENT_RUNNER_GATEWAY_API_KEY` | step 5 |
 | Settings | `.env`: `AGENT_MARKET_*`, `AGENT_RUNNER_*`, `AM_*` | step 5 |
 | Scratch | `data/agent-sandbox-runs/` | step 4 |
+| Observability (AM1b) | Prometheus job `agent-runner` + `infra/prometheus/agent_market.yml` (+ its test), Grafana `infra/grafana/provisioning/dashboards/agent_market.json` | revert, then `docker kill -s HUP ai-gateway-prometheus-1` |
 
 The only lines in existing files (the "seams") — all removed by the revert:
 
@@ -27,6 +28,9 @@ The only lines in existing files (the "seams") — all removed by the revert:
 - `apps/web-chat/tailwind.config.js` — one `content` path
 - `scripts/smoke/run.js` + `scripts/smoke/README.md` — the `agent_market` area
 - `docker-compose.test-stack.yml` — regenerated (it mirrors the flag env line)
+- AM1b: `infra/prometheus/prometheus.yml` (the `agent-runner` job and rule file),
+  `infra/prometheus/alerts.yml` (`TargetDown` leaves `job="agent-runner"` to its own alert),
+  `backend/app/ops/watch.py` (`classify_smoke` never pages on `agent_market.*` checks)
 
 ## Steps
 

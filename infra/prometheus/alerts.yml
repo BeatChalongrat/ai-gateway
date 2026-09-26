@@ -61,7 +61,8 @@ groups:
   - name: infra
     rules:
       - alert: TargetDown
-        expr: up == 0
+        # the Agent Market runner has its own alert (agent_market.yml, channel agent-market)
+        expr: up{job!="agent-runner"} == 0
         for: 1m
         labels:
           severity: critical
