@@ -87,12 +87,17 @@ containers, and any older than 2 × (wall + 30 s) + 1 min, are deleted.
 - **Alerts** (`infra/prometheus/agent_market.yml`, all `channel="agent-market"`):
   budget burning, budget spent, runner down, queue stuck > 10 min, sandbox not
   ready, pool saturated. Tested with `promtool test rules infra/prometheus/tests/agent_market_test.yml`.
-- **Not on the core channel**: Prometheus here has no Alertmanager, and the core
-  pager (ops-watch → ntfy) never reads these rules; the daily smoke's
-  `agent_market.*` checks are recorded but ignored by ops-watch's smoke rule
-  (`classify_smoke`). The core `TargetDown` rule excludes `job="agent-runner"`.
-  Today the agent's alerts are seen on the dashboard; a pager topic of its own
-  is a follow-up.
+- **Its own pager topic (AM1c)**: Prometheus here has no Alertmanager, so
+  ops-watch reads the firing `channel="agent-market"` alerts from Prometheus
+  (`OPS_WATCH_PROMETHEUS_URL`) every tick and pages them on
+  `AGENT_MARKET_NTFY_URL` (`.env`; subscribe to it in the ntfy app) through a
+  pager of their own (`backend/app/ops/agent_market_alerts.py`): one page, one
+  "recovered", its own Redis namespace, the same maintenance window. Never the
+  core channels; a core incident never reaches that topic. The daily smoke's
+  `agent_market.*` checks stay ignored by ops-watch's smoke rule
+  (`classify_smoke`), and the core `TargetDown` rule excludes
+  `job="agent-runner"`. Test: `docker compose -p ai-gateway exec ops-watch
+  python -m app.ops.agent_market_alerts test` (one `[TEST]` alert, agent topic only).
 
 ## Going live (AM1b order)
 

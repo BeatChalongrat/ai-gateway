@@ -69,7 +69,8 @@ class _HideAlertUrls(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         urls = {u for u in ((settings.alert_ntfy_url or "").strip(),
                             (settings.alert_webhook_url or "").strip(),
-                            (getattr(settings, "alert_test_ntfy_url", "") or "").strip()) if u} | _SECRET_URLS
+                            (getattr(settings, "alert_test_ntfy_url", "") or "").strip(),
+                            (getattr(settings, "agent_market_ntfy_url", "") or "").strip()) if u} | _SECRET_URLS
         if not urls:
             return True
         try:
@@ -198,10 +199,11 @@ def _header_value(text: str) -> str:
         return "=?UTF-8?B?" + base64.b64encode(text.encode("utf-8")).decode("ascii") + "?="
 
 
-def _send_ntfy(n: Notification, client: httpx.Client, *, test: bool = False) -> bool:
-    # FIX131 D4 — the test topic never gets the owner's token.
-    url = (settings.alert_test_ntfy_url if test else settings.alert_ntfy_url).strip()
-    token = "" if test else (settings.alert_ntfy_token or "").strip()
+def _send_ntfy(n: Notification, client: httpx.Client, *, test: bool = False, url: str | None = None) -> bool:
+    # FIX131 D4 — the test topic never gets the owner's token; nor does a
+    # topic passed in (AM1c: Agent Market's own).
+    token = "" if (test or url) else (settings.alert_ntfy_token or "").strip()
+    url = (url or (settings.alert_test_ntfy_url if test else settings.alert_ntfy_url)).strip()
     # ntfy renders a known tag as an emoji (rotating_light, warning); the
     # severity word stays so the notification list is searchable by it.
     tags = (["rotating_light", "critical"] if n.severity == "critical" else [n.severity]) + list(n.tags)
@@ -291,6 +293,31 @@ def deliver(n: Notification) -> dict[str, bool]:
             outcomes[ch] = ok
     logger.info("alert_delivered", title=n.title, severity=n.severity, outcomes=outcomes)
     return outcomes
+
+
+def deliver_agent_market(n: Notification) -> dict[str, bool]:
+    """AM1c — an Agent Market alert: to AGENT_MARKET_NTFY_URL only, never the
+    core channels, so it is seen without paging anyone for a core incident.
+    Labelled like every alert; in a test environment it goes to
+    ALERT_TEST_NTFY_URL instead (a test fire stays on the agent topic)."""
+    test_env = is_test_environment()
+    n = labelled(scrubbed(n))
+    url = (getattr(settings, "alert_test_ntfy_url", "") if test_env
+           else getattr(settings, "agent_market_ntfy_url", "")) or ""
+    channel = "ntfy-test" if test_env else "ntfy-agent-market"
+    if not url.strip():
+        logger.warning("alert_no_channel_configured", title=n.title, severity=n.severity, channel=channel)
+        return {}
+    tagged = dataclasses.replace(n, tags=tuple(n.tags) + ("agent-market",))
+    try:
+        with httpx.Client(timeout=_TIMEOUT_S) as client:
+            ok = _send_ntfy(tagged, client, test=test_env, url=url.strip())
+    except Exception as exc:  # noqa: BLE001 — delivery never raises
+        logger.warning("alert_delivery_failed", channel=channel, title=n.title,
+                       error=f"{type(exc).__name__}: {str(exc).replace(url.strip(), url_label(url.strip()))[:160]}")
+        ok = False
+    logger.info("alert_delivered", title=n.title, severity=n.severity, outcomes={channel: ok})
+    return {channel: ok}
 
 
 async def deliver_async(n: Notification) -> dict[str, bool]:

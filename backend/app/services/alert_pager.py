@@ -155,9 +155,14 @@ class RedisStore:
     group so two senders never decide at the same time, and the maintenance
     window as a key with a TTL."""
 
-    def __init__(self, url: str | None = None, *, client: Any = None) -> None:
+    def __init__(self, url: str | None = None, *, client: Any = None,
+                 incident_prefix: str = INCIDENT_PREFIX, lock_prefix: str = LOCK_PREFIX) -> None:
         self._url = url
         self._client = client
+        # AM1c — another pager's namespace (Agent Market's): this store's
+        # groups() never lists it, so neither pager reminds or closes the other's.
+        self._incident = incident_prefix
+        self._lock_prefix = lock_prefix
 
     def _r(self):
         if self._client is None:
@@ -171,7 +176,7 @@ class RedisStore:
     @contextlib.contextmanager
     def lock(self, group: str) -> Iterator[bool]:
         r = self._r()
-        key, token = LOCK_PREFIX + group, uuid.uuid4().hex
+        key, token = self._lock_prefix + group, uuid.uuid4().hex
         deadline = time.monotonic() + 3.0
         got = False
         while True:
@@ -190,7 +195,7 @@ class RedisStore:
                         r.delete(key)
 
     def load(self, group: str) -> dict | None:
-        raw = self._r().get(INCIDENT_PREFIX + group)
+        raw = self._r().get(self._incident + group)
         if not raw:
             return None
         try:
@@ -200,13 +205,13 @@ class RedisStore:
         return rec if isinstance(rec, dict) else None
 
     def save(self, group: str, rec: dict) -> None:
-        self._r().set(INCIDENT_PREFIX + group, json.dumps(rec, ensure_ascii=False), ex=_RECORD_TTL_S)
+        self._r().set(self._incident + group, json.dumps(rec, ensure_ascii=False), ex=_RECORD_TTL_S)
 
     def delete(self, group: str) -> bool:
-        return bool(self._r().delete(INCIDENT_PREFIX + group))
+        return bool(self._r().delete(self._incident + group))
 
     def groups(self) -> list[str]:
-        return [k[len(INCIDENT_PREFIX):] for k in self._r().scan_iter(match=INCIDENT_PREFIX + "*", count=100)]
+        return [k[len(self._incident):] for k in self._r().scan_iter(match=self._incident + "*", count=100)]
 
     def maintenance(self) -> dict | None:
         raw = self._r().get(MAINTENANCE_KEY)

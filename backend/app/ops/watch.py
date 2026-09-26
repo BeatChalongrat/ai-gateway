@@ -438,10 +438,11 @@ class AlertState:
     escalation or after ALERT_REMINDER_SECONDS."""
 
     def __init__(self, *, cooldown_s: float | None = None, now=time.time, store=None,
-                 ttl_s: float = 90.0) -> None:
+                 ttl_s: float = 90.0, send=None, sender: str = "ops-watch") -> None:
         self._now = now
         self.store = store if store is not None else default_store()
-        self.pager = Pager(self.store, send=lambda n: deliver(n), now=now, log=_log, sender="ops-watch")
+        # AM1c — Agent Market's state passes its own store and channel.
+        self.pager = Pager(self.store, send=send or (lambda n: deliver(n)), now=now, log=_log, sender=sender)
         self.ttl_s = ttl_s
         self.seen: dict[str, str] = {}
 
@@ -881,10 +882,33 @@ def main() -> int:
     if state_file:
         state.load(state_file)
 
-    def _tick() -> None:
-        tick(state, cfg)
+    # AM1c — Agent Market's alerts (Prometheus, channel="agent-market") page
+    # its own topic through a pager of their own; never the core channels.
+    from app.ops import agent_market_alerts as ama
+    from app.services.alert_channels import is_test_environment
+
+    prom_url = _env("OPS_WATCH_PROMETHEUS_URL", "")
+    agent_topic = (getattr(settings, "alert_test_ntfy_url", "") if is_test_environment()
+                   else getattr(settings, "agent_market_ntfy_url", "")) or ""
+    agent = None
+    if prom_url and agent_topic.strip():
+        agent = ama.agent_state(ttl_s=3 * interval)
         if state_file:
-            state.save(state_file)
+            agent.load(state_file + ".agent-market")
+    _log("agent_market_pager", on=agent is not None, prometheus=prom_url or None,
+         note=None if agent is not None else "AGENT_MARKET_NTFY_URL or OPS_WATCH_PROMETHEUS_URL is not set: "
+                                             "Agent Market alerts are on the dashboard only")
+
+    def _tick() -> None:
+        try:
+            tick(state, cfg)
+            if state_file:
+                state.save(state_file)
+        finally:
+            if agent is not None:
+                ama.agent_tick(agent, prom_url)
+                if state_file:
+                    agent.save(state_file + ".agent-market")
 
     if len(sys.argv) > 1 and sys.argv[1] == "once":
         _tick()

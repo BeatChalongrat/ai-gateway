@@ -384,6 +384,10 @@ class Settings(BaseSettings):
     # the channels above. A test fire is always [TEST] and goes there too.
     alert_environment: str = ""
     alert_test_ntfy_url: str = ""
+    # AM1c — Agent Market's own topic (ops-watch pages its Prometheus alerts
+    # there, never on the channels above; a core incident never pages it).
+    # In a test environment its alerts go to alert_test_ntfy_url instead.
+    agent_market_ntfy_url: str = ""
     # FIX131 D — the pager (services/alert_pager.py): one incident = one page
     # + one "recovered". Re-paged only on escalation or after the reminder
     # interval (urgent 4 h, high 24 h — Grafana's default repeat is 4 h);

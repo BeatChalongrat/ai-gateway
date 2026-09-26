@@ -460,6 +460,9 @@ services:
       # and sends it only to ALERT_TEST_NTFY_URL (a throwaway topic).
       ALERT_ENVIRONMENT: ${ALERT_ENVIRONMENT:-}
       ALERT_TEST_NTFY_URL: ${ALERT_TEST_NTFY_URL:-}
+      # AM1c — Agent Market's alerts from Prometheus to its own topic only.
+      OPS_WATCH_PROMETHEUS_URL: ${OPS_WATCH_PROMETHEUS_URL:-http://prometheus:9090}
+      AGENT_MARKET_NTFY_URL: ${AGENT_MARKET_NTFY_URL:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@sran.ai}
     volumes:

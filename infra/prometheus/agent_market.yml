@@ -1,10 +1,11 @@
 # Agent Market — its own recording rules and alerts (AM1b §0.4).
 #
 # Every alert here carries channel="agent-market". Prometheus in this stack has
-# no Alertmanager: the core pager is ops-watch (ntfy), which never reads these
-# rules and ignores the agent_market.* smoke checks — so nothing about Agent
-# Market pages the core channel. These show on the "Agent Market" Grafana
-# dashboard (docs/agent-market/OPERATIONS.md).
+# no Alertmanager: ops-watch reads the firing ones every tick and pages them on
+# Agent Market's own ntfy topic (AGENT_MARKET_NTFY_URL, AM1c) through a pager
+# of their own — never the core channel, which also ignores the agent_market.*
+# smoke checks. They show on the "Agent Market" Grafana dashboard too
+# (docs/agent-market/OPERATIONS.md).
 #
 # SLO: 95 % of the agent runs that end, end succeeded (cancelled by the person
 # excluded), over a rolling 14 days (retention is 15 d). Error budget: 5 %.
