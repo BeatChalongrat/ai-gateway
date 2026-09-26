@@ -150,6 +150,7 @@ func run(log *slog.Logger) error {
 			CPUs: am.EnvString("AGENT_SANDBOX_CPUS", "1.0"), MaxOutputB: 8 << 20, FileSizeB: 256 << 20, ScratchMB: 512,
 		}},
 		ID: "agent-runner-" + host, Version: version, SandboxImage: image, SandboxReady: sandboxReady,
+		SandboxCheck: sb.Available,
 		Slots: am.EnvInt("AGENT_RUNNER_SLOTS", 1), Lease: time.Duration(am.EnvInt("AGENT_RUNNER_LEASE_SECONDS", 45)) * time.Second,
 		Poll:                    time.Duration(am.EnvInt("AGENT_RUNNER_POLL_MS", 1000)) * time.Millisecond,
 		CreditsPerUSD:           float64(am.EnvInt("AGENT_MARKET_CREDITS_PER_USD", 3000000)),
@@ -172,12 +173,12 @@ func run(log *slog.Logger) error {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "sandbox": sandboxReady, "model": model.Available(),
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok", "sandbox": r.Sandbox(), "model": model.Available(),
 			"engine": engine.Checksum[:12], "version": version})
 	})
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		fmt.Fprint(w, runner.RenderMetrics(runner.CollectMetrics(req.Context(), pool, sandboxReady)))
+		fmt.Fprint(w, runner.RenderMetrics(runner.CollectMetrics(req.Context(), pool, r.Sandbox())))
 	})
 	srv := &http.Server{Addr: am.EnvString("AGENT_RUNNER_ADDR", ":8095"), Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {

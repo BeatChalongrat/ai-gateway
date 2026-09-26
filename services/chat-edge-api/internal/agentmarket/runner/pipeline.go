@@ -64,7 +64,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		return r.fail(ctx, run, "package_changed", fmt.Errorf("agent package changed since this run started (%s → %s); start a new round",
 			short(run.Checksum), short(rc.pkg.Checksum)))
 	}
-	if !r.SandboxReady {
+	if !r.Sandbox() {
 		return r.fail(ctx, run, "sandbox_unavailable", errors.New("the compute sandbox is not available"))
 	}
 	if run.Kind == am.KindSelfTest {

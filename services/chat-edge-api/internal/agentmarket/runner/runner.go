@@ -36,14 +36,56 @@ type Runner struct {
 	// SandboxReady is false when the sandbox could not start: installs are
 	// refused (no capabilities) and runs fail with a clear reason.
 	SandboxReady bool
+	// SandboxCheck, when set, is retried every SandboxRecheck (default 15 s)
+	// while the sandbox is not ready, so a runner that started before Docker
+	// had finished booting (AM2: the image check timed out right after a
+	// Docker restart) recovers by itself instead of refusing every run until
+	// someone restarts it.
+	SandboxCheck   func(context.Context) error
+	SandboxRecheck time.Duration
 	Now          func() time.Time
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
 
-	running  atomic.Int32
-	started  time.Time
-	instance string
+	running   atomic.Int32
+	started   time.Time
+	instance  string
+	sandboxOK atomic.Bool
+}
+
+// Sandbox reports whether the compute sandbox is usable now: ready at start,
+// or found ready by a later SandboxCheck.
+func (r *Runner) Sandbox() bool { return r.SandboxReady || r.sandboxOK.Load() }
+
+// watchSandbox retries SandboxCheck until it passes, then records the sandbox
+// as ready and heartbeats so the new capabilities are visible at once.
+func (r *Runner) watchSandbox(ctx context.Context, onReady func()) {
+	if r.Sandbox() || r.SandboxCheck == nil {
+		return
+	}
+	every := r.SandboxRecheck
+	if every <= 0 {
+		every = 15 * time.Second
+	}
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if err := r.SandboxCheck(ctx); err != nil {
+			continue
+		}
+		r.sandboxOK.Store(true)
+		r.Log.Info("sandbox available again — installs and runs accepted")
+		if onReady != nil {
+			onReady()
+		}
+		return
+	}
 }
 
 // Register writes every package in the engine to agent_definitions.
@@ -64,7 +106,7 @@ func (r *Runner) Register(ctx context.Context) error {
 func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 	caps := map[string]agentmarket.Binding{}
 	eng := r.Engine.Checksum[:12]
-	if r.SandboxReady {
+	if r.Sandbox() {
 		img := r.SandboxImage
 		caps["spreadsheet.read.xlsx"] = agentmarket.Binding{Capability: "spreadsheet.read.xlsx", Impl: "sandbox:openpyxl", Version: img}
 		caps["compute.python.decimal"] = agentmarket.Binding{Capability: "compute.python.decimal", Impl: "sandbox:python3.12+decimal", Version: img}
@@ -101,6 +143,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 	r.heartbeat(ctx)
 	r.startReaper(ctx)
+	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {
 		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
