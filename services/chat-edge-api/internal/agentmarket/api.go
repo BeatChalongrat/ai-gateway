@@ -647,9 +647,22 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	defer fh.Close()
 	name := SafeName(hdr.Filename)
 	low := strings.ToLower(name)
-	if !(strings.HasSuffix(low, ".xlsx") || strings.HasSuffix(low, ".xlsm") || strings.HasSuffix(low, ".csv") ||
-		strings.HasSuffix(low, ".txt") || strings.HasSuffix(low, ".pdf")) {
-		writeErr(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "รับไฟล์ .xlsx .csv หรือ .pdf")
+	// The agent's manifest says what it reads (AM2: invoices come as .pdf,
+	// e-Tax .xml and photos); an agent that declares nothing takes AM1's set.
+	accept := defaultUploadTypes
+	if def, err := a.store.DefinitionByID(r.Context(), in.DefinitionID); err == nil {
+		if m, err := ParseManifest(def.Manifest); err == nil {
+			accept = m.UploadTypes()
+		}
+	}
+	ok = false
+	for _, ext := range accept {
+		if strings.HasSuffix(low, ext) {
+			ok = true
+		}
+	}
+	if !ok {
+		writeErr(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "รับไฟล์ "+strings.Join(accept, " "))
 		return
 	}
 	if hdr.Size > a.cfg.MaxUploadBytes {

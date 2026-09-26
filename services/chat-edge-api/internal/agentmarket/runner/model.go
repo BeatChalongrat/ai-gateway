@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,14 +21,17 @@ import (
 // separate identity with its own rate limit and spend, revocable on its own.
 // It never borrows chat-edge's service credentials.
 type ModelClient struct {
-	BaseURL    string // e.g. http://gateway:8080/v1
-	APIKey     string
-	Primary    string
-	Fallback   string
-	SelfHosted map[string]bool
-	Timeout    time.Duration
-	MaxTokens  int
-	HTTP       *http.Client
+	BaseURL  string // e.g. http://gateway:8080/v1
+	APIKey   string
+	Primary  string
+	Fallback string
+	// VisionModel reads page images of scans and photos (AM2). Documents go
+	// to it only when it is in SelfHosted, and never to a fallback.
+	VisionModel string
+	SelfHosted  map[string]bool
+	Timeout     time.Duration
+	MaxTokens   int
+	HTTP        *http.Client
 	// YieldURL (optional) is the backend /ready endpoint. Before every model
 	// call the runner waits while people need the shared model path: a chat
 	// turn is queued, chat already holds half the backend's turn slots, or the
@@ -75,11 +79,11 @@ type Completion struct {
 }
 
 type chatReq struct {
-	Model       string    `json:"model"`
-	Messages    []chatMsg `json:"messages"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Temperature float64   `json:"temperature"`
-	Stream      bool      `json:"stream"`
+	Model       string  `json:"model"`
+	Messages    any     `json:"messages"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature"`
+	Stream      bool    `json:"stream"`
 	Reasoning   *struct {
 		Mode string `json:"mode"`
 	} `json:"reasoning,omitempty"`
@@ -145,11 +149,54 @@ func (m *ModelClient) Complete(ctx context.Context, system, user string, validat
 	return Completion{CostUSD: spent, Tokens: tokens}, tried, ErrNoModel
 }
 
+// Vision asks one model to read page images (JPEG) with a prompt. Unlike
+// Complete there is no fallback model: a document goes only to the model
+// named. validate works as in Complete (one retry with the reason).
+func (m *ModelClient) Vision(ctx context.Context, model, prompt string, images [][]byte, validate func(string) error) (Completion, error) {
+	if !m.Available() || model == "" {
+		return Completion{}, ErrNoModel
+	}
+	release, err := m.acquire(ctx)
+	if err != nil {
+		return Completion{}, err
+	}
+	defer release()
+	var spent float64
+	var tokens int
+	text := prompt
+	for attempt := 0; attempt < 2; attempt++ {
+		parts := []map[string]any{{"type": "text", "text": text}}
+		for _, img := range images {
+			parts = append(parts, map[string]any{"type": "image_url",
+				"image_url": map[string]any{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(img)}})
+		}
+		m.yield(ctx)
+		c, err := m.send(ctx, model, []any{map[string]any{"role": "user", "content": parts}}, 0, 2000)
+		spent += c.CostUSD
+		tokens += c.Tokens
+		if err != nil {
+			return Completion{CostUSD: spent, Tokens: tokens}, err
+		}
+		if validate != nil {
+			if verr := validate(c.Content); verr != nil {
+				text = prompt + "\n\nคำตอบก่อนหน้าใช้ไม่ได้เพราะ: " + verr.Error() + " ตอบใหม่เป็น JSON object เดียว"
+				continue
+			}
+		}
+		c.CostUSD, c.Tokens = spent, tokens
+		return c, nil
+	}
+	return Completion{CostUSD: spent, Tokens: tokens}, ErrNoModel
+}
+
 func (m *ModelClient) call(ctx context.Context, model, system, user string) (Completion, error) {
+	return m.send(ctx, model, []chatMsg{{Role: "system", Content: system}, {Role: "user", Content: user}}, 0.2, m.MaxTokens)
+}
+
+func (m *ModelClient) send(ctx context.Context, model string, messages any, temperature float64, maxTokens int) (Completion, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.Timeout)
 	defer cancel()
-	body := chatReq{Model: model, Temperature: 0.2, MaxTokens: m.MaxTokens,
-		Messages: []chatMsg{{Role: "system", Content: system}, {Role: "user", Content: user}}}
+	body := chatReq{Model: model, Temperature: temperature, MaxTokens: maxTokens, Messages: messages}
 	body.Reasoning = &struct {
 		Mode string `json:"mode"`
 	}{Mode: "off"}

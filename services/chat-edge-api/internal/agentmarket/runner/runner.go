@@ -43,7 +43,7 @@ type Runner struct {
 	// someone restarts it.
 	SandboxCheck   func(context.Context) error
 	SandboxRecheck time.Duration
-	Now          func() time.Time
+	Now            func() time.Time
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
@@ -114,6 +114,15 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		caps["deliverable.report.docx"] = agentmarket.Binding{Capability: "deliverable.report.docx", Impl: "engine:report_docx+docx_generator.py", Version: eng}
 		caps["deliverable.deck.pptx"] = agentmarket.Binding{Capability: "deliverable.deck.pptx", Impl: "engine:deck_pptx+pptx_generator.py", Version: eng}
 		caps["deliverable.table.xlsx"] = agentmarket.Binding{Capability: "deliverable.table.xlsx", Impl: "engine:table_xlsx", Version: eng}
+		// AM2: invoices and receipts read into fields with boxes and confidence
+		// (text layer, e-Tax XML, Tesseract tha+eng on page images).
+		caps["document.extract.e2"] = agentmarket.Binding{Capability: "document.extract.e2", Impl: "engine:e2+tesseract", Version: eng + "|" + img}
+	}
+	// A vision model reads scans and photos — only one that runs in the
+	// organisation (documents never go to an outside provider).
+	if v := r.Model.VisionModel; v != "" && r.Model.SelfHosted[v] {
+		vd, _ := json.Marshal(map[string]any{"model": v, "self_hosted": true})
+		caps["model.vision"] = agentmarket.Binding{Capability: "model.vision", Impl: "gateway", Version: v, Detail: vd}
 	}
 	// A model is optional at run time (rules write the narrative when none
 	// answers), but the capability says which models are bound.
@@ -121,6 +130,27 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		"self_hosted": r.Model.SelfHosted})
 	caps["model.text"] = agentmarket.Binding{Capability: "model.text", Impl: "gateway", Version: r.Model.Primary + "|" + r.Model.Fallback, Detail: detail}
 	return caps
+}
+
+// purgeIndex deletes duplicate-index rows past their retention (AM2): at
+// start, then every hour.
+func (r *Runner) purgeIndex(ctx context.Context) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if n, err := r.Store.PurgeExpiredIndex(ctx); err != nil {
+			if ctx.Err() == nil {
+				r.Log.Warn("duplicate index purge failed", "err", err)
+			}
+		} else if n > 0 {
+			r.Log.Info("duplicate index purged", "rows", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func (r *Runner) heartbeat(ctx context.Context) {
@@ -143,6 +173,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	}
 	r.heartbeat(ctx)
 	r.startReaper(ctx)
+	go r.purgeIndex(ctx)
 	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {
 		t := time.NewTicker(10 * time.Second)

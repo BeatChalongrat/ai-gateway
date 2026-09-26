@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ── Capability resolver ─────────────────────────────────────────────────
@@ -63,6 +64,47 @@ type Manifest struct {
 		MaxFileMB int `json:"max_file_mb"`
 		MaxFiles  int `json:"max_files"`
 	} `json:"limits"`
+	// AM2. Narrative "rules": the package's own words, no model step (an
+	// extraction agent has nothing for a model to write). DocumentIndex: the
+	// runner keeps the install's duplicate index (migration 002) and hands it
+	// to the package as history. PhotoNotice: shown where photos are accepted.
+	Narrative     string `json:"narrative"`
+	DocumentIndex *struct {
+		RetentionDays int `json:"retention_days"`
+	} `json:"document_index"`
+	PhotoNotice string `json:"photo_notice"`
+}
+
+// defaultUploadTypes is what an agent that declares no input types accepts
+// (AM1's spreadsheets and PDFs).
+var defaultUploadTypes = []string{".xlsx", ".xlsm", ".csv", ".txt", ".pdf"}
+
+// UploadTypes are the file extensions the agent's inputs accept.
+func (m Manifest) UploadTypes() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, in := range m.Inputs {
+		for _, a := range in.Accept {
+			a = strings.ToLower(strings.TrimSpace(a))
+			if strings.HasPrefix(a, ".") && !seen[a] {
+				seen[a] = true
+				out = append(out, a)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return defaultUploadTypes
+	}
+	return out
+}
+
+// IndexRetention is how long the duplicate index keeps a document (0 = the
+// package keeps none).
+func (m Manifest) IndexRetention() time.Duration {
+	if m.DocumentIndex == nil || m.DocumentIndex.RetentionDays <= 0 {
+		return 0
+	}
+	return time.Duration(m.DocumentIndex.RetentionDays) * 24 * time.Hour
 }
 
 // ParseManifest validates the parts the platform depends on.

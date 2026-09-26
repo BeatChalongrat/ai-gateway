@@ -178,6 +178,11 @@ func (s *Store) RemoveInstall(ctx context.Context, tenant, user, id uuid.UUID) e
 	if err == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	if err != nil {
+		return err
+	}
+	// The duplicate index goes with the install at once (AM2), not at expiry.
+	_, err = s.Pool.Exec(ctx, `DELETE FROM agent_market.document_index WHERE install_id = $1`, id)
 	return err
 }
 

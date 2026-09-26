@@ -61,6 +61,9 @@ type narrativeOut struct {
 }
 
 func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey string) (narrativeOut, string, error) {
+	if rc.pkg.Manifest.Narrative == "rules" {
+		return rc.rulesNarrative(ctx, computed, computeKey)
+	}
 	key := am.StepKey(rc.run.ID, "narrative", computeKey, rc.pkg.Checksum, rc.r.Model.Primary, rc.r.Model.Fallback)
 	out, err := rc.step(ctx, "narrative", "ai", key, map[string]any{"models": []string{rc.r.Model.Primary, rc.r.Model.Fallback}}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -115,6 +118,30 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
 			return narrativeOut{Narrative: nb, Model: c.Model, SelfHosted: self, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD},
 				c.CostUSD * rc.r.CreditsPerUSD, "", c.Model, nil
+		})
+	if err != nil {
+		return narrativeOut{}, key, err
+	}
+	var n narrativeOut
+	return n, key, json.Unmarshal(out, &n)
+}
+
+// rulesNarrative is the package's own summary (computed.json
+// fallback_narrative) with no model step: an extraction agent has nothing
+// for a model to write, and its documents are never sent to a text model.
+func (rc *runCtx) rulesNarrative(ctx context.Context, computed blobRef, computeKey string) (narrativeOut, string, error) {
+	key := am.StepKey(rc.run.ID, "narrative", computeKey, rc.pkg.Checksum, "rules")
+	out, err := rc.step(ctx, "narrative", "compute", key, map[string]any{"written_by": "rules"}, false,
+		func(ctx context.Context) (any, float64, string, string, error) {
+			cv, _, err := rc.readComputed(ctx, computed)
+			if err != nil {
+				return nil, 0, "", "", err
+			}
+			fb := map[string]any{}
+			_ = json.Unmarshal(cv.Fallback, &fb)
+			fb["written_by"] = "rules"
+			nb, _ := json.Marshal(fb)
+			return narrativeOut{Narrative: nb}, 0, "fallback_narrative", "", nil
 		})
 	if err != nil {
 		return narrativeOut{}, key, err
@@ -427,6 +454,10 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return err
 	}
 	text := "เสร็จแล้วครับ"
+	if rc.pkg.Manifest.Narrative == "rules" {
+		text += " " + documentsNote(summary)
+		return st.PostText(ctx, run, text, nil)
+	}
 	if rerender {
 		text = "สร้างไฟล์เพิ่มจากตัวเลขชุดเดิมแล้วครับ ไม่ได้คำนวณใหม่ ตัวเลขและที่มาตรงกับรายงานเดิมทุกตัว"
 	} else if narrative.Model == "" {
@@ -437,6 +468,28 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		text += " ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย " + narrative.Model + " (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)"
 	}
 	return st.PostText(ctx, run, text, nil)
+}
+
+// documentsNote says where an extraction agent's numbers came from and which
+// model saw the documents (AM2: the report names it and whether it runs in
+// the organisation).
+func documentsNote(summary map[string]any) string {
+	text := "ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ หรือเป็นค่าที่คุณพิมพ์/ยืนยัน โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใด"
+	models, _ := summary["models"].([]any)
+	for _, m := range models {
+		mm, _ := m.(map[string]any)
+		name, _ := mm["model"].(string)
+		if name == "" {
+			continue
+		}
+		where := "ผู้ให้บริการภายนอก"
+		if self, _ := mm["self_hosted"].(bool); self {
+			where = "รันในองค์กร"
+		}
+		text += fmt.Sprintf(" · โมเดลที่เห็นเอกสาร: %s (%s) อ่านซ้ำ %d ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
+			name, where, int(numberOf(mm["documents"])))
+	}
+	return text
 }
 
 func formatOrder(f string) int {

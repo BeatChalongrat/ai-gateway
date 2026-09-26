@@ -62,6 +62,9 @@ services:
       - AGENT_MARKET_MODEL_PRIMARY=${AGENT_MARKET_MODEL_PRIMARY:-qwen3.8-27b-fp8}
       - AGENT_MARKET_MODEL_FALLBACK=${AGENT_MARKET_MODEL_FALLBACK:-deepseek-v4-flash}
       - AGENT_MARKET_SELF_HOSTED_MODELS=${AGENT_MARKET_SELF_HOSTED_MODELS:-qwen3.8-27b-fp8}
+      # AM2: reads page images of scans and photos — used only while it is in
+      # the self-hosted list above (documents never go to an outside provider).
+      - AGENT_MARKET_VISION_MODEL=${AGENT_MARKET_VISION_MODEL:-qwen3.8-27b-fp8}
       - AGENT_MARKET_CREDITS_PER_USD=${USAGE_CREDITS_PER_USD:-3000000}
       - STORAGE_BACKEND=${STORAGE_BACKEND:-local}
       - FILE_STORAGE_ROOT=/app/data/uploads

@@ -107,7 +107,13 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 			}
 			parsed = append(parsed, p)
 		}
-		pre, preKey, err := rc.preflight(ctx, parsed)
+		// AM2: the install's duplicate index and a vision reading of each scan
+		// or photo, for packages that use them (empty for the others).
+		extras, err := rc.extras(ctx, parsed)
+		if err != nil {
+			return rc.stepFailed("vision", err)
+		}
+		pre, preKey, err := rc.preflight(ctx, parsed, extras)
 		if err != nil {
 			return rc.stepFailed("preflight", err)
 		}
@@ -125,7 +131,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		}
 		period = *pre.Period
 		_ = r.Store.SetRunFields(ctx, run.ID, &period, nil, nil)
-		computedRef, computeKey, summary, err = rc.compute(ctx, parsed, pre)
+		computedRef, computeKey, summary, err = rc.compute(ctx, parsed, pre, extras)
 		if err != nil {
 			return rc.stepFailed("compute", err)
 		}
@@ -164,6 +170,10 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	arts, err := rc.publish(ctx, rc.run.ID, rendered, renderKey, computedRef)
 	if err != nil {
 		return rc.stepFailed("publish", err)
+	}
+	// The documents this run recorded join the install's duplicate index.
+	if err := rc.recordIndex(ctx, computedRef); err != nil {
+		return r.fail(ctx, run, "index", err)
 	}
 	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false); err != nil {
 		return r.fail(ctx, run, "outputs", err)
@@ -322,6 +332,8 @@ type parsedFile struct {
 	Ref     blobRef        `json:"ref"`
 	Summary map[string]any `json:"summary"`
 	Key     string         `json:"key"`
+	// Vision: page images of a scan or photo for the vision step (AM2).
+	Vision []blobRef `json:"vision"`
 }
 
 func (rc *runCtx) mapping() map[string]any {
@@ -359,7 +371,12 @@ func (rc *runCtx) parse(ctx context.Context, f am.File) (parsedFile, error) {
 			}
 			var summary map[string]any
 			_ = res.Decode("summary", &summary)
-			return map[string]any{"ref": ref, "summary": summary}, rc.sandboxCredits(res.Elapsed), "engine/ledger.parse_file", "", nil
+			vision, err := rc.visionPages(ctx, res, key, summary)
+			if err != nil {
+				return nil, 0, "", "", err
+			}
+			return map[string]any{"ref": ref, "summary": summary, "vision": vision}, rc.sandboxCredits(res.Elapsed),
+				"engine/" + rc.pkg.PyPackage + ".parse", "", nil
 		})
 	if err != nil {
 		return parsedFile{}, err
@@ -414,6 +431,9 @@ type preflightOut struct {
 	Assumptions []am.Assumption   `json:"assumptions"`
 	Stats       map[string]any    `json:"stats"`
 	Files       []map[string]any  `json:"files"`
+	// Today: the date the package judged with (AM2), handed to compute so
+	// both judge a document the same way.
+	Today string `json:"today"`
 }
 
 // thaiTime is the person's clock (Thailand keeps UTC+7 all year, so no tz
@@ -424,9 +444,10 @@ var thaiTime = time.FixedZone("Asia/Bangkok", 7*60*60)
 // "prepared on" line of the files use it.
 func (rc *runCtx) today() string { return rc.r.Now().In(thaiTime).Format("2006-01-02") }
 
-func (rc *runCtx) preflight(ctx context.Context, parsed []parsedFile) (preflightOut, string, error) {
+func (rc *runCtx) preflight(ctx context.Context, parsed []parsedFile, x runExtras) (preflightOut, string, error) {
 	answers := rc.answerValues("preflight", "run")
-	key := am.StepKey(rc.run.ID, "preflight", parsedKeys(parsed), answers, rc.run.Message, rc.defaults, rc.today()[:7])
+	key := am.StepKey(rc.run.ID, "preflight", append([]any{parsedKeys(parsed), answers, rc.run.Message, rc.defaults, rc.today()[:7]},
+		x.keyParts()...)...)
 	out, err := rc.step(ctx, "preflight", "check", key, map[string]any{"files": len(parsed), "answers": answers}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
 			inputs, names, cleanup, err := rc.parsedInputs(ctx, parsed)
@@ -434,8 +455,9 @@ func (rc *runCtx) preflight(ctx context.Context, parsed []parsedFile) (preflight
 				return nil, 0, "", "", err
 			}
 			defer cleanup()
-			res, err := rc.r.Exec.Run(ctx, map[string]any{"op": "preflight", "package": rc.pkg.PyPackage, "parsed": names,
-				"message": rc.run.Message, "defaults": rc.defaults, "answers": answers, "today": rc.today()}, inputs)
+			req := map[string]any{"op": "preflight", "package": rc.pkg.PyPackage, "parsed": names,
+				"message": rc.run.Message, "defaults": rc.defaults, "answers": answers, "today": rc.today()}
+			res, err := rc.r.Exec.Run(ctx, req, x.attach(req, inputs))
 			if err != nil {
 				return nil, 0, "", "", err
 			}
@@ -451,9 +473,13 @@ func (rc *runCtx) preflight(ctx context.Context, parsed []parsedFile) (preflight
 
 // ── compute / postcompute ────────────────────────────────────────────────
 
-func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre preflightOut) (blobRef, string, map[string]any, error) {
+func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre preflightOut, x runExtras) (blobRef, string, map[string]any, error) {
 	answers := rc.answerValues()
-	key := am.StepKey(rc.run.ID, "compute", parsedKeys(parsed), *pre.Period, pre.Roles, answers, rc.defaults)
+	parts := []any{parsedKeys(parsed), *pre.Period, pre.Roles, answers, rc.defaults}
+	if pre.Today != "" {
+		parts = append(parts, pre.Today)
+	}
+	key := am.StepKey(rc.run.ID, "compute", append(parts, x.keyParts()...)...)
 	out, err := rc.step(ctx, "compute", "compute", key, map[string]any{"period": *pre.Period, "roles": pre.Roles, "answers": answers}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
 			inputs, names, cleanup, err := rc.parsedInputs(ctx, parsed)
@@ -461,8 +487,12 @@ func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre prefligh
 				return nil, 0, "", "", err
 			}
 			defer cleanup()
-			res, err := rc.r.Exec.Run(ctx, map[string]any{"op": "compute", "package": rc.pkg.PyPackage, "parsed": names,
-				"roles": pre.Roles, "period": *pre.Period, "answers": answers, "defaults": rc.defaults}, inputs)
+			req := map[string]any{"op": "compute", "package": rc.pkg.PyPackage, "parsed": names,
+				"roles": pre.Roles, "period": *pre.Period, "answers": answers, "defaults": rc.defaults}
+			if pre.Today != "" {
+				req["today"] = pre.Today
+			}
+			res, err := rc.r.Exec.Run(ctx, req, x.attach(req, inputs))
 			if err != nil {
 				return nil, 0, "", "", err
 			}

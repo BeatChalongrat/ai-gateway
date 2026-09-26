@@ -104,7 +104,14 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(string(body), "choice") {
 		content = `{"choice": null}`
 	}
-	b, _ := json.Marshal(map[string]any{"model": "fake-self-hosted", "choices": []any{map[string]any{
+	model := "fake-self-hosted"
+	if strings.Contains(string(body), "image_url") {
+		// AM2: a vision reading of a scan (the Phase A truth of s01)
+		model = "fake-vision"
+		content = `{"seller_name": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด", "seller_tax_id": "0105545009875", "document_number": "IV6909-0015",` +
+			` "document_date": "2026-09-15", "total": 12850.70, "vat_amount": 840.70, "line_items": []}`
+	}
+	b, _ := json.Marshal(map[string]any{"model": model, "choices": []any{map[string]any{
 		"message": map[string]any{"content": content}, "finish_reason": "stop"}},
 		"usage": map[string]any{"total_tokens": 1000, "estimated_cost_usd": 0.0002}})
 	w.Header().Set("Content-Type", "application/json")

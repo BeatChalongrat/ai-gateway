@@ -132,7 +132,10 @@ func run(log *slog.Logger) error {
 	model := &runner.ModelClient{
 		BaseURL: am.EnvString("AGENT_RUNNER_GATEWAY_URL", "http://gateway:8080/v1"), APIKey: os.Getenv("AGENT_RUNNER_GATEWAY_API_KEY"),
 		Primary: am.EnvString("AGENT_MARKET_MODEL_PRIMARY", "qwen3.8-27b-fp8"), Fallback: am.EnvString("AGENT_MARKET_MODEL_FALLBACK", "deepseek-v4-flash"),
-		SelfHosted: selfHosted, Timeout: time.Duration(am.EnvInt("AGENT_MARKET_MODEL_TIMEOUT_SECONDS", 150)) * time.Second,
+		// Reads page images of scans and photos (AM2); used only when it is
+		// in AGENT_MARKET_SELF_HOSTED_MODELS. Empty turns the vision step off.
+		VisionModel: am.EnvString("AGENT_MARKET_VISION_MODEL", "qwen3.8-27b-fp8"),
+		SelfHosted:  selfHosted, Timeout: time.Duration(am.EnvInt("AGENT_MARKET_MODEL_TIMEOUT_SECONDS", 150)) * time.Second,
 		MaxTokens: am.EnvInt("AGENT_MARKET_MODEL_MAX_TOKENS", 6000), HTTP: &http.Client{},
 		YieldURL: os.Getenv("AGENT_RUNNER_YIELD_URL"), YieldMaxWait: time.Duration(am.EnvInt("AGENT_RUNNER_YIELD_MAX_SECONDS", 300)) * time.Second,
 		Concurrency: am.EnvInt("AGENT_RUNNER_MODEL_CONCURRENCY", 1),
@@ -151,7 +154,7 @@ func run(log *slog.Logger) error {
 		}},
 		ID: "agent-runner-" + host, Version: version, SandboxImage: image, SandboxReady: sandboxReady,
 		SandboxCheck: sb.Available,
-		Slots: am.EnvInt("AGENT_RUNNER_SLOTS", 1), Lease: time.Duration(am.EnvInt("AGENT_RUNNER_LEASE_SECONDS", 45)) * time.Second,
+		Slots:        am.EnvInt("AGENT_RUNNER_SLOTS", 1), Lease: time.Duration(am.EnvInt("AGENT_RUNNER_LEASE_SECONDS", 45)) * time.Second,
 		Poll:                    time.Duration(am.EnvInt("AGENT_RUNNER_POLL_MS", 1000)) * time.Millisecond,
 		CreditsPerUSD:           float64(am.EnvInt("AGENT_MARKET_CREDITS_PER_USD", 3000000)),
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),
@@ -186,8 +189,11 @@ func run(log *slog.Logger) error {
 			log.Error("health server", "err", err)
 		}
 	}()
+	if model.VisionModel != "" && !model.SelfHosted[model.VisionModel] {
+		log.Warn("vision model is not in the self-hosted list: scans and photos will not be sent to it", "model", model.VisionModel)
+	}
 	log.Info("agent-runner started", "slots", r.Slots, "packages", len(engine.Packages), "engine", engine.Checksum[:12],
-		"sandbox", sandboxReady, "model", model.Primary+"|"+model.Fallback)
+		"sandbox", sandboxReady, "model", model.Primary+"|"+model.Fallback, "vision", model.VisionModel)
 	err = r.Start(ctx)
 	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
