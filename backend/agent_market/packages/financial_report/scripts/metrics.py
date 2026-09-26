@@ -489,6 +489,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         addq(l["key"] + "_prior", l["prior"], cite=l["cite"])
         addq(l["key"] + "_budget", l["budget"], cite=l["cite"])
         addq(l["key"] + "_var_prior", l["var_prior"], cite=l["cite"])
+        addq(l["key"] + "_var_budget", l.get("var_budget"), cite=l["cite"])  # the report's "ต่างจากงบ"
         if l["var_prior_pct"] is not None:
             addq(l["key"] + "_var_prior_pct", l["var_prior_pct"], "pct", cite=l["cite"])
         if l["var_budget_pct"] is not None:

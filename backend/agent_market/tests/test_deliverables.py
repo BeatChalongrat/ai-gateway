@@ -219,6 +219,17 @@ class QuotableIdentifiers(unittest.TestCase):
         self.assertFalse(ids & set(c["quotable"].values()))
 
 
+class QuotableBudgetVariance(unittest.TestCase):
+    def test_the_budget_difference_the_report_shows_is_quotable(self):
+        # AM1b walkthrough: the table has "ต่างจากงบ" in baht, the narrative may
+        # quote it — the guard refused it because it was not in the list.
+        c = computed_for(["GL_2569-09.xlsx", "GL_2569-08.xlsx", "งบประมาณ_2569.xlsx"])
+        rev = next(l for l in c["lines"] if l["key"] == "revenue")
+        self.assertIn("revenue_var_budget", c["quotable"])
+        self.assertIn("revenue_var_budget_m", c["quotable"])
+        self.assertTrue(rev["var_budget"])
+
+
 class NoComputeInRender(unittest.TestCase):
     def test_render_never_changes_a_number(self):
         c = computed_for(["GL_2569-09.xlsx"])

@@ -306,13 +306,14 @@ func GuardNumbers(text string, quotable map[string]string, ids []string) error {
 	text = blankIDs(text, ids)
 	allowed := map[string]bool{}
 	for _, v := range quotable {
-		allowed[strings.ReplaceAll(v, " ", "")] = true
-		allowed[strings.TrimPrefix(strings.ReplaceAll(v, " ", ""), "+")] = true
+		for _, f := range numberForms(v) {
+			allowed[f] = true
+		}
 	}
 	var bad []string
 	for _, m := range numRe.FindAllString(text, -1) {
 		tok := normalizeNumberToken(m)
-		if allowed[tok] || allowed[strings.TrimPrefix(tok, "+")] {
+		if allowed[tok] || allowed[unsigned(tok)] {
 			continue
 		}
 		plain := strings.Trim(tok, "+-()%ล้าน")
@@ -328,6 +329,38 @@ func GuardNumbers(text string, quotable map[string]string, ids []string) error {
 		return fmt.Errorf("ตัวเลขที่ไม่มีในตารางที่คำนวณ: %s", strings.Join(bad, ", "))
 	}
 	return nil
+}
+
+// numberForms are the ways a sentence quotes one of the table's figures: as
+// printed, without its unit ("-0.95 จุด" → "-0.95": the number pattern knows
+// % and ล้าน only), and without its sign or accounting brackets — the
+// direction is said in words ("ต่ำกว่างบ 6.8%" for -6.8%). The digits must
+// still be the table's own.
+func numberForms(v string) []string {
+	base := strings.ReplaceAll(v, " ", "")
+	forms := []string{base}
+	for _, unit := range []string{"จุด"} {
+		if strings.HasSuffix(base, unit) {
+			forms = append(forms, strings.TrimSuffix(base, unit))
+		}
+	}
+	if strings.HasSuffix(base, "ล้าน") {
+		forms = append(forms, strings.TrimSuffix(base, "ล้าน"))
+	}
+	out := make([]string, 0, len(forms)*2)
+	for _, f := range forms {
+		out = append(out, f, unsigned(f))
+	}
+	return out
+}
+
+// unsigned drops a leading sign and balanced accounting brackets.
+func unsigned(tok string) string {
+	t := strings.TrimLeft(tok, "+-")
+	if strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")") {
+		t = strings.TrimSuffix(strings.TrimPrefix(t, "("), ")")
+	}
+	return t
 }
 
 // blankIDs removes the account codes from the text. A code with a separator

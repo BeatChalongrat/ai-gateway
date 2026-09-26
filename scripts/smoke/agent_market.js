@@ -31,6 +31,21 @@ module.exports = async function agentMarket(R, session) {
     return { ok: r.status === 200, detail: `flag on: availability ${r.status} available=${r.json?.available} runner healthy=${r.json?.runner?.healthy}` };
   });
 
+  // AM1b: with an allowlist that leaves the smoke account out (the owner-only
+  // pilot), that account must see no agent surface: availability says no and
+  // the catalog refuses it (the web rail renders nothing when available=false).
+  await R.run("agent_market.not_allowlisted", async () => {
+    const allow = String(L.env("AGENT_MARKET_ALLOWED_EMAILS", "")).toLowerCase().split(",").map((e) => e.trim()).filter(Boolean);
+    const me = String(session?.email || L.env("SMOKE_EMAIL", "")).toLowerCase();
+    if (!on) return { skip: true, detail: "flag off (the flag check covers it)" };
+    if (!session) return { skip: true, detail: "no signed-in session in this run" };
+    if (!allow.length || allow.includes(me)) return { skip: true, detail: "the smoke account is allowlisted (or no allowlist): nothing to prove here" };
+    const a = await L.http(edge, { headers: session.headers });
+    const c = await L.http(`${L.API_BASE.edge}/api/v1/agent-market/catalog`, { headers: session.headers });
+    return { ok: a.status === 200 && a.json?.available === false && c.status === 403,
+      detail: `not allowlisted: availability ${a.status} available=${a.json?.available}, catalog ${c.status} (want false / 403)` };
+  });
+
   await R.run("agent_market.web_flag", async () => {
     if (!L.T.hasWebApps) return { skip: true, detail: "no web-chat on this target" };
     const web = L.T.front?.web || L.T.plain.web;

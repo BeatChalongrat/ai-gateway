@@ -287,3 +287,22 @@ func TestBudgetCountsPaidAttemptsAndNoCacheHits(t *testing.T) {
 		t.Fatalf("when every answer is refused the spend is still reported: cost=%v err=%v", c2.CostUSD, err)
 	}
 }
+
+// AM1b walkthrough: the self-test's narrative fell back to rules because every
+// model wrote the sign in words ("ต่ำกว่างบ 6.8%" for -6.8%) or quoted a
+// variance with its own sign. The figure is the table's; the direction is prose.
+func TestGuardNumbersAcceptsTheSignInWords(t *testing.T) {
+	q := map[string]string{"net_profit_var_budget_pct": "-6.8%", "revenue_var_prior_m": "0.95 ล้าน", "cogs_var": "(545,400)",
+		"net_margin_change_points": "-1.54 จุด"}
+	for _, ok := range []string{"กำไรสุทธิต่ำกว่างบ 6.8%", "รายได้เพิ่มขึ้น 0.95 ล้าน", "ต่างจากงวดก่อน -0.95 ล้าน", "ลดลง 545,400 บาท",
+		"อัตรากำไรสุทธิลดลง 1.54 จุด", "เปลี่ยน -1.54 จุด"} {
+		if err := GuardNumbers(ok, q, nil); err != nil {
+			t.Fatalf("%q must pass: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"ต่ำกว่างบ 6.9%", "เพิ่มขึ้น 0.96 ล้าน", "ลดลง 545,401 บาท", "ลดลง 1.55 จุด"} {
+		if err := GuardNumbers(bad, q, nil); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
+	}
+}
