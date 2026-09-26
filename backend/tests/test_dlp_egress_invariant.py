@@ -96,6 +96,10 @@ EGRESS_CLASSIFICATION: dict[str, str] = {
     # counts.
     "services/portal/chat_edge_account.py": "no_user_content",
     "ops/watch.py": "no_user_content",
+    # AM1c — Agent Market's pager: reads firing alerts from our own
+    # Prometheus and posts the rule's summary + firing time to its ntfy
+    # topic; alert metadata only, never user content.
+    "ops/agent_market_alerts.py": "no_user_content",
     "services/provider_key_service.py": "no_user_content",   # key probes
     "services/portal/oauth_flow_service.py": "no_user_content",
     "services/portal/connector_oauth_service.py": "no_user_content",
