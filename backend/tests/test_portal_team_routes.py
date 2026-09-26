@@ -234,14 +234,37 @@ class TestRevokeInvite:
         assert r.status_code == 404
 
 
+def _quarantine_am2_q1(r, token) -> None:
+    """AM2-Q1 (tests/QUARANTINE.md) — once, in one of AM1c's full lanes, the
+    token signup had just minted was refused on the very next request (401
+    "Invalid portal token"); it did not reproduce in 10 full lanes in AM2.
+    Only that exact signature is excused (xfail with the ticket); any other
+    failure of this test is still a failure. The message records the token's
+    ``iat`` against the clock: a verify-time clock behind the mint-time clock
+    (a VM wall-clock step) produces exactly this error, since PyJWT checks
+    ``iat`` with no leeway."""
+    if r.status_code == 401 and "Invalid portal token" in r.text:
+        import time
+
+        import jwt
+
+        claims = jwt.decode(token, options={"verify_signature": False}) if token else {}
+        pytest.xfail(
+            f"quarantined [AM2-Q1]: fresh token refused; token={'present' if token else 'MISSING'} "
+            f"iat={claims.get('iat')} now={time.time():.3f}"
+        )
+
+
 class TestRemoveMember:
     def test_owner_removes_member(self, client):
         owner = _signup(client, "owner@t.com")
-        inv = client.post(
+        r_inv = client.post(
             "/portal/team/invites",
             headers=_auth(owner["access_token"]),
             json={},
-        ).json()
+        )
+        _quarantine_am2_q1(r_inv, owner["access_token"])
+        inv = r_inv.json()
         member = _signup(client, "m@t.com", invite_code=inv["code"])
         r = client.delete(
             f"/portal/team/members/{member['user']['id']}",
