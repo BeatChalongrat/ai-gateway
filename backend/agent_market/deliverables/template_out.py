@@ -139,11 +139,9 @@ def template_values(sl: list[dict], mapping: dict, values: dict) -> dict[str, An
         if s["kind"] in LIST_KINDS:
             rows = values.get(src) or []
             cols = s.get("columns") or []
-            pick = {c: mapping.get(f"{s['key']}.{c}", f"{src}.{c}").split(".", 1)[-1] for c in cols}
-            if s["kind"] == "list":
-                out[s["key"]] = [{c: r.get(pick[c], "") for c in cols} for r in rows]
-            else:
-                out[s["key"]] = [{c: r.get(pick[c], "") for c in cols} for r in rows] if cols else rows
+            # a column the person left unmapped stays empty — never filled from a same-named column
+            pick = {c: (mapping.get(f"{s['key']}.{c}") or "").split(".", 1)[-1] for c in cols}
+            out[s["key"]] = [{c: (r.get(pick[c], "") if pick[c] else "") for c in cols} for r in rows] if cols else rows
         elif src in values:
             out[s["key"]] = values[src]
     return out

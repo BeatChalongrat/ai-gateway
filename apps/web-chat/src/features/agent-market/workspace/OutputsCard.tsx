@@ -22,9 +22,30 @@ export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
   docx: "outputs.fmt.docx",
   pptx: "outputs.fmt.pptx",
+  pdf: "outputs.fmt.pdf",
+  template: "outputs.fmt.template",
 };
-// No PDF (AM1b): its Thai shaping was wrong; it returns in AM-2 as the .docx converted by LibreOffice.
+// The menu still offers no PDF: the server makes one only while a runner has
+// the doc-converter (AM2), which this card cannot know; a delivered PDF is labelled.
 export const MORE_FORMATS = ["xlsx", "docx", "pptx"];
+
+// Formats a file name does not explain: a filled template (its name ends in
+// the template's own extension) and the PDF (the report, converted). Their
+// rows say what they are; the office files' names already do.
+const ROW_LABELLED = new Set(["template", "pdf"]);
+
+export function artifactLabelKey(format: string): AmKey | null {
+  return ROW_LABELLED.has(format) ? FORMAT_KEYS[format] ?? null : null;
+}
+
+/** The extension a row's icon shows: a filled template's own (…_template_v1.xlsx), else the format's. */
+export function artifactExtension(a: { format: string; name: string }): string {
+  if (a.format === "template") {
+    const dot = a.name.lastIndexOf(".");
+    if (dot >= 0 && dot < a.name.length - 1) return a.name.slice(dot).toLowerCase();
+  }
+  return extensionOf(a.format);
+}
 
 export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | null }[]): { pass: number; total: number; checks: QualityCheck[] } {
   const checks = artifacts.flatMap((a) => a.quality?.checks ?? []);
@@ -147,14 +168,16 @@ export function ArtifactRow({ artifact }: { artifact: Pick<OutputArtifact, "id" 
       },
     );
   };
+  const label = artifactLabelKey(artifact.format);
   return (
-    <li className="flex items-center gap-3 px-3 py-2" data-testid="am-artifact">
-      <FileTypeBadge extension={extensionOf(artifact.format)} filename={artifact.name} size="sm" />
+    <li className="flex items-center gap-3 px-3 py-2" data-testid="am-artifact" data-format={artifact.format}>
+      <FileTypeBadge extension={artifactExtension(artifact)} filename={artifact.name} size="sm" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm text-text-primary" title={artifact.name}>
           {artifact.name}
         </div>
         <div className="text-[11px] text-text-muted">
+          {label ? `${t(label)} · ` : null}
           {formatBytes(artifact.size)}
           {` · `}
           {t("outputs.version", { n: String(artifact.version) })}

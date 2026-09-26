@@ -4,7 +4,9 @@
 // Remembered answers (what the agent will not ask again) and the settings
 // chosen at install, each clearable; the simple ones editable in place. An
 // agent that asks "company_tax" at install (the invoice agent) gets its own
-// company block: name, tax ID (checked) and branch, edited together.
+// company block: name, tax ID (checked) and branch, edited together. An
+// agent with a templates block gets "แบบฟอร์มของคุณ" (../template): the
+// customer's own template and its mapping.
 // Uninstall confirms inline — never a window.confirm.
 
 import { useRouter } from "next/navigation";
@@ -22,9 +24,13 @@ import { CURRENCIES } from "../install/steps";
 import { checkCompanyTax, COMPANY_TAX_KEYS, CompanyTaxFields, draftFromDefaults, saveCompanyTax, type CompanyTaxDraft } from "../install/CompanyTax";
 import { installQuestions } from "../install/wizard";
 import { formatTaxId } from "../typed";
+import { savedTemplateOf, takesTemplates } from "../template/mapping";
+import { TemplateSection } from "../template/TemplateSection";
 
 const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
+// shown by their own sections, never as a generic row
+const OWN_SECTION_KEYS = new Set(["template"]);
 const FIELD_KEYS = new Set(["date", "account_code", "account_name", "debit", "credit", "amount", "dc_indicator", "cost_center", "description"]);
 
 export function isRemembered(d: Default): boolean {
@@ -135,7 +141,7 @@ function Settings({ installId }: { installId: string }) {
   const companyKeys = new Set<string>(companyTax ? COMPANY_TAX_KEYS : []);
   const remembered = defaults.filter(isRemembered);
   const settings = defaults
-    .filter((d) => !isRemembered(d) && !companyKeys.has(d.key))
+    .filter((d) => !isRemembered(d) && !companyKeys.has(d.key) && !OWN_SECTION_KEYS.has(d.key))
     .sort((a, b) => {
       const ia = INSTALL_KEYS.indexOf(a.key);
       const ib = INSTALL_KEYS.indexOf(b.key);
@@ -179,6 +185,10 @@ function Settings({ installId }: { installId: string }) {
       </section>
 
       {companyTax ? <CompanyTaxSection installId={installId} defaults={defaults} onChanged={refresh} /> : null}
+
+      {takesTemplates(detail.manifest?.templates) ? (
+        <TemplateSection installId={installId} spec={detail.manifest.templates!} saved={savedTemplateOf(defaults)} onChanged={refresh} />
+      ) : null}
 
       <section className="mt-8" aria-labelledby="am-install-settings">
         <h2 id="am-install-settings" className="text-sm font-semibold text-text-primary">

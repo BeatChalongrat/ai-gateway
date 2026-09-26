@@ -61,6 +61,12 @@ class MappingScreen(unittest.TestCase):
         nm = to.propose(_slots("xlsx_no_markers.xlsx"), INVOICE)
         self.assertEqual(nm, {"Sheet1!B1": "company", "Sheet1!B2": "period", "Sheet1!B3": "total_thb"})
 
+    def test_an_unmapped_list_column_stays_empty(self):
+        sl = [{"key": "line", "kind": "list", "label": "line", "fillable": True, "reason": None, "columns": ["date", "amount"]}]
+        rows = to.template_values(sl, {"line": "lines", "line.amount": "lines.total"},
+                                  {"lines": [{"date": "2026-09-15", "total": "12,850.70"}]})
+        self.assertEqual(rows["line"], [{"date": "", "amount": "12,850.70"}])   # "date" was left "not used"
+
     def test_a_new_version_asks_only_what_changed(self):
         old = _slots("docx_placeholders.docx")
         saved = {"slots": old, "mapping": {"company_name": "company", "prepared_by": "company_tax_id"}}

@@ -399,7 +399,7 @@ function latestArtifacts(all: Artifact[]): Artifact[] {
     const cur = by.get(a.format);
     if (!cur || a.version > cur.version) by.set(a.format, a);
   }
-  const order = ["docx", "pptx", "xlsx"];
+  const order = ["docx", "pdf", "pptx", "xlsx", "template"];
   return [...by.values()].sort((a, b) => order.indexOf(a.format) - order.indexOf(b.format));
 }
 

@@ -25,6 +25,8 @@ import type {
   InstallRow,
   Run,
   RunDetail,
+  SavedTemplate,
+  TemplateSlot,
   ThemeResponse,
   ThreadItem,
 } from "./types";
@@ -109,10 +111,18 @@ export interface UploadOptions {
   signal?: AbortSignal;
 }
 
-function uploadOnce(installId: string, file: File, opts: UploadOptions, retried: boolean): Promise<AmFile> {
+/** POST /installs/{id}/template: the stored file and the inspect job to poll. */
+export interface TemplateUpload {
+  file: AmFile;
+  kind: string;
+  job: Run;
+}
+
+/** One multipart POST of `file` to `path`; `pick` takes the answer out of a 2xx body. */
+function uploadOnce<T>(path: string, file: File, opts: UploadOptions, retried: boolean, pick: (body: unknown) => T | undefined): Promise<T> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${CHAT_API_BASE}${BASE}/installs/${encodeURIComponent(installId)}/files`);
+    xhr.open("POST", `${CHAT_API_BASE}${path}`);
     xhr.withCredentials = true;
     xhr.timeout = UPLOAD_TIMEOUT_MS;
     xhr.upload.onprogress = (e) => {
@@ -122,7 +132,7 @@ function uploadOnce(installId: string, file: File, opts: UploadOptions, retried:
       if (xhr.status === 401 && !retried) {
         sharedRefresh().then((outcome) => {
           if (outcome === "ok") {
-            uploadOnce(installId, file, opts, true).then(resolve, reject);
+            uploadOnce(path, file, opts, true, pick).then(resolve, reject);
             return;
           }
           if (outcome === "rejected") redirectToPortalLogin();
@@ -130,9 +140,10 @@ function uploadOnce(installId: string, file: File, opts: UploadOptions, retried:
         });
         return;
       }
-      const body = parse(xhr.responseText) as { file?: AmFile; error?: { code?: string; message?: string } } | null;
-      if (xhr.status >= 200 && xhr.status < 300 && body?.file) {
-        resolve(body.file);
+      const body = parse(xhr.responseText) as { error?: { code?: string; message?: string } } | null;
+      const picked = xhr.status >= 200 && xhr.status < 300 ? pick(body) : undefined;
+      if (picked !== undefined) {
+        resolve(picked);
         return;
       }
       reject(new AmError(body?.error?.code ?? `HTTP_${xhr.status}`, body?.error?.message || tAm("error.upload"), xhr.status));
@@ -181,7 +192,8 @@ export const amApi = {
   events: (installId: string, after: number, signal: AbortSignal) =>
     api.raw(`${BASE}/installs/${id(installId)}/events?after=${after}`, { signal }),
 
-  upload: (installId: string, file: File, opts: UploadOptions = {}) => uploadOnce(installId, file, opts, false),
+  upload: (installId: string, file: File, opts: UploadOptions = {}) =>
+    uploadOnce(`${BASE}/installs/${id(installId)}/files`, file, opts, false, (b) => (b as { file?: AmFile } | null)?.file),
   message: (installId: string, body: { text: string; file_ids: string[]; client_id: string }) =>
     send<{ item: ThreadItem; route?: string; run_id?: string; duplicate?: boolean }>("POST", `/installs/${id(installId)}/messages`, body),
 
@@ -197,6 +209,16 @@ export const amApi = {
 
   downloadArtifact: (artifactId: string, filename: string) => saveBlob(`/artifacts/${id(artifactId)}/download`, filename),
   downloadFile: (fileId: string, filename: string) => saveBlob(`/files/${id(fileId)}/download`, filename),
+
+  /** The customer's own template: upload a (new version of the) file → an inspect job; save the confirmed mapping; stop using it. */
+  uploadTemplate: (installId: string, file: File, opts: UploadOptions = {}) =>
+    uploadOnce(`${BASE}/installs/${id(installId)}/template`, file, opts, false, (b) => {
+      const r = b as TemplateUpload | null;
+      return r?.file && r?.job ? r : undefined;
+    }),
+  saveTemplate: (installId: string, body: { file_id: string; slots: TemplateSlot[]; mapping: Record<string, string> }) =>
+    send<{ template: SavedTemplate }>("PUT", `/installs/${id(installId)}/template`, body),
+  removeTemplate: (installId: string) => send<{ removed: boolean }>("DELETE", `/installs/${id(installId)}/template`),
 
   theme: () => call<ThemeResponse>("/theme"),
   putTheme: (theme: { id: string; company?: string }) => send<{ version: number }>("PUT", "/theme", theme),

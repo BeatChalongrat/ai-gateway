@@ -42,6 +42,71 @@ export interface Manifest {
   document_index?: { retention_days?: number } | null;
   /** AM2: shown under the attached files when one of them is a photo. */
   photo_notice?: string;
+  /** AM2: what the agent can put into the customer's own template. */
+  templates?: TemplateSpec | null;
+}
+
+// ── the customer's own template (AM2 Phase E, agentmarket/template.go) ──
+
+export interface TemplateField {
+  label?: string;
+  aliases?: string[];
+}
+
+export interface TemplateList {
+  label?: string;
+  aliases?: string[];
+  /** column key → its Thai label */
+  columns?: Record<string, string>;
+}
+
+/** manifest.templates: single values (fields) and row lists (lists). */
+export interface TemplateSpec {
+  fields?: Record<string, TemplateField | string>;
+  lists?: Record<string, TemplateList>;
+}
+
+export type TemplateSlotKind = "marker" | "list" | "control" | "name" | "table" | "target";
+
+/** One place a template takes a value (deliverables/template_out.slots). */
+export interface TemplateSlot {
+  key: string;
+  kind: TemplateSlotKind | string;
+  label: string;
+  where?: string;
+  fillable: boolean;
+  /** why it cannot be filled: formula_cell, protected_sheet, not_plain_text, … */
+  reason: string | null;
+  /** a list's {{name.x}} sub-keys, a table's column letters */
+  columns?: string[];
+}
+
+export interface TemplateDiff {
+  first: boolean;
+  kept: string[];
+  added: string[];
+  removed: string[];
+}
+
+/** The inspect job's step output (the step named "template:<file>"). */
+export interface TemplateInspect {
+  inspection?: Record<string, unknown>;
+  slots: TemplateSlot[];
+  /** slot → field / list; "slot.column" → "list.column"; the saved choice for kept slots */
+  proposal: Record<string, string>;
+  diff: TemplateDiff;
+}
+
+/** The saved template (install default "template"). */
+export interface SavedTemplate {
+  file_id: string;
+  name: string;
+  kind: string;
+  sha256?: string;
+  version: number;
+  slots: TemplateSlot[] | null;
+  mapping: Record<string, string> | null;
+  saved_at: string;
 }
 
 export interface CatalogAgent {
