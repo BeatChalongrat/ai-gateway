@@ -126,6 +126,96 @@ def _emit(text: str, meta: dict | None = None) -> None:
     sys.stdout.flush()
 
 
+def ocr_image_words(image, config: str | None = None) -> dict:
+    """OCR one image in ONE Tesseract pass and keep what it measured.
+
+    Returns ``{"width", "height", "words": [...]}`` where every word is
+    ``{"text", "left", "top", "width", "height", "conf", "block", "par",
+    "line", "word"}`` in image pixels, ``conf`` 0-100 (-1 where Tesseract
+    declined to score). This is the data ``_ocr_page`` always gathered and
+    then collapsed into flat text and a page average; structured extraction
+    (Agent Market E2, AM2) needs the boxes and the per-word confidence, so
+    the collapse now happens in the caller that wants flat text.
+    ``config`` overrides the Tesseract flags (default OCR_CONFIG), e.g. a
+    page segmentation mode for a receipt photo.
+    """
+    import pytesseract
+
+    data = pytesseract.image_to_data(
+        image,
+        lang=OCR_LANGS,
+        config=config or OCR_CONFIG,
+        output_type=pytesseract.Output.DICT,
+    )
+    words = []
+    for i, raw_word in enumerate(data.get("text", [])):
+        word = str(raw_word).strip()
+        if not word:
+            continue
+        try:
+            conf = float(data["conf"][i])
+        except (TypeError, ValueError, KeyError):
+            conf = -1.0
+        words.append({
+            "text": word,
+            "left": int(data["left"][i]),
+            "top": int(data["top"][i]),
+            "width": int(data["width"][i]),
+            "height": int(data["height"][i]),
+            "conf": conf,
+            "block": data["block_num"][i],
+            "par": data["par_num"][i],
+            "line": data["line_num"][i],
+            "word": data["word_num"][i],
+        })
+    return {"width": image.width, "height": image.height, "words": words}
+
+
+def render_page(pdf_path: Path, page_index: int, dpi: int = OCR_DPI):
+    """One PDF page as a PIL image at ``dpi``."""
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(str(pdf_path))
+    try:
+        page = doc[page_index]
+        # pypdfium2 takes a scale relative to 72 dpi.
+        bitmap = page.render(scale=dpi / 72.0)
+        return bitmap.to_pil()
+    finally:
+        doc.close()
+
+
+def ocr_page_words(pdf_path: Path, page_index: int, dpi: int = OCR_DPI) -> dict:
+    """``ocr_image_words`` for one PDF page, plus the ``dpi`` it was rendered at."""
+    out = ocr_image_words(render_page(pdf_path, page_index, dpi))
+    out["dpi"] = dpi
+    return out
+
+
+def words_to_text(words: list[dict]) -> tuple[str, float]:
+    """Flat text and mean confidence from ``ocr_image_words`` words.
+
+    Words are grouped back into their source lines by Tesseract's own
+    block/paragraph/line numbers (sorting on that triple restores reading
+    order without any geometry maths) and each line is joined by
+    ``_join_words``. Confidence is the mean over words Tesseract was willing
+    to score: it is what tells the caller "OCR ran but produced noise",
+    which text length alone cannot — a page of garbage is still long.
+    """
+    lines: dict[tuple[int, int, int], list[tuple[str, int, int, int]]] = {}
+    confidences: list[float] = []
+    for w in words:
+        key = (w["block"], w["par"], w["line"])
+        lines.setdefault(key, []).append((w["text"], w["left"], w["width"], w["height"]))
+        # -1 marks a region Tesseract declined to score; counting it
+        # would drag the mean toward zero for no reason.
+        if w["conf"] >= 0:
+            confidences.append(w["conf"])
+    text = "\n".join(_join_words(v) for _, v in sorted(lines.items()))
+    mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
+    return text.strip(), mean_conf
+
+
 def _ocr_page(pdf_path: Path, page_index: int) -> tuple[str, float]:
     """Render one page and OCR it. Returns (text, mean confidence 0-100).
 
@@ -133,66 +223,9 @@ def _ocr_page(pdf_path: Path, page_index: int) -> tuple[str, float]:
     text and image_to_data for the confidence, which OCR'd every page
     twice — measured 23.4 s of pure waste per page on a real scan, about
     half the total extraction time. image_to_data already carries the
-    words, so the text is rebuilt from them instead.
-
-    Confidence is the mean over words Tesseract was willing to score. It
-    is what tells the caller "OCR ran but produced noise", which text
-    length alone cannot — a page of garbage is still long.
+    words, so the text is rebuilt from them instead (``words_to_text``).
     """
-    import pypdfium2 as pdfium
-    import pytesseract
-
-    doc = pdfium.PdfDocument(str(pdf_path))
-    try:
-        page = doc[page_index]
-        # pypdfium2 takes a scale relative to 72 dpi.
-        bitmap = page.render(scale=OCR_DPI / 72.0)
-        image = bitmap.to_pil()
-    finally:
-        doc.close()
-
-    data = pytesseract.image_to_data(
-        image,
-        lang=OCR_LANGS,
-        config=OCR_CONFIG,
-        output_type=pytesseract.Output.DICT,
-    )
-
-    # Group words back into their source lines. Tesseract numbers every
-    # word by block/paragraph/line, so sorting on that triple restores
-    # reading order without any geometry maths.
-    lines: dict[tuple[int, int, int], list[tuple[str, int, int, int]]] = {}
-    confidences: list[float] = []
-    words = data.get("text", [])
-    for i, raw_word in enumerate(words):
-        word = str(raw_word).strip()
-        if not word:
-            continue
-        key = (
-            data["block_num"][i],
-            data["par_num"][i],
-            data["line_num"][i],
-        )
-        lines.setdefault(key, []).append(
-            (
-                word,
-                int(data["left"][i]),
-                int(data["width"][i]),
-                int(data["height"][i]),
-            )
-        )
-        try:
-            value = float(data["conf"][i])
-        except (TypeError, ValueError, KeyError):
-            continue
-        # -1 marks a region Tesseract declined to score; counting it
-        # would drag the mean toward zero for no reason.
-        if value >= 0:
-            confidences.append(value)
-
-    text = "\n".join(_join_words(v) for _, v in sorted(lines.items()))
-    mean_conf = sum(confidences) / len(confidences) if confidences else 0.0
-    return text.strip(), mean_conf
+    return words_to_text(ocr_page_words(pdf_path, page_index)["words"])
 
 
 def _extract_pdf(path: Path) -> tuple[str, dict]:
