@@ -134,6 +134,21 @@ install, and switches only if it passes and meets the package's own
 expectations; rollback returns to the previous version. An install whose
 pinned engine is missing fails its run with "upgrade this agent".
 
+Versions released before AM2 recorded their engine by its AM1 checksum and
+the engine itself was never stored. The AM2 deploy keeps it, once, before the
+new runner takes over — from the running AM1c runner image:
+
+```bash
+docker cp <old runner container>:/app/agent_market.zip ./am1c_engine.zip
+docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market \
+  run --rm --no-deps -v "$PWD/am1c_engine.zip:/tmp/am1c.zip:ro" agent-runner store-engine /tmp/am1c.zip
+# prints: engine checksum … build …, then per package "its engine is kept at agent-market/engines/<checksum>.zip"
+```
+
+It stores the zip only for a released version whose package checksum and
+engine checksum both match it; the installs pinned to those versions keep
+running their own engine, and settings offer the upgrade.
+
 ## Bulkheads, with numbers
 
 | | Agent Market | Chat (core) |

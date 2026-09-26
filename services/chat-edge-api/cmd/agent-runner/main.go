@@ -53,12 +53,77 @@ func main() {
 		fmt.Printf("engine checksum %s (%d bytes)\n", e.Checksum, len(data))
 		return
 	}
+	// Deploy step (AM2): keep a pre-AM2 runner's engine zip for the versions
+	// released with it, so installs pinned to them keep running their own engine.
+	if len(os.Args) == 3 && os.Args[1] == "store-engine" {
+		if err := storeEngine(os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})).With("service", "agent-runner")
 	slog.SetDefault(log)
 	if err := run(log); err != nil {
 		log.Error("agent-runner stopped", "err", err)
 		os.Exit(1)
 	}
+}
+
+func storeEngine(zipPath string) error {
+	ctx := context.Background()
+	e, err := runner.LoadEngine(zipPath, "")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("engine checksum %s build %s\n", e.Checksum, e.Build)
+	pool, err := openPool(ctx, 1)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	files, err := openFiles()
+	if err != nil {
+		return err
+	}
+	lines, err := runner.StoreLegacyEngine(ctx, am.NewStore(pool), files, e)
+	for _, l := range lines {
+		fmt.Println(l)
+	}
+	return err
+}
+
+func openPool(ctx context.Context, maxConns int32) (*pgxpool.Pool, error) {
+	dsn := os.Getenv("AGENT_RUNNER_DATABASE_URL")
+	if dsn == "" {
+		return nil, fmt.Errorf("AGENT_RUNNER_DATABASE_URL is required")
+	}
+	pc, err := db.PoolConfig(dsn, db.DefaultTimeouts())
+	if err != nil {
+		return nil, err
+	}
+	// Its own pool, sized separately: exhausting it can only stall agent runs.
+	pc.MaxConns = maxConns
+	pc.MinConns = 0
+	pc.ConnConfig.RuntimeParams["application_name"] = "agent-runner"
+	pool, err := pgxpool.NewWithConfig(ctx, pc)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: %w", err)
+	}
+	return pool, nil
+}
+
+func openFiles() (storage.Backend, error) {
+	return storage.NewBackend(storage.Config{
+		Backend: am.EnvString("STORAGE_BACKEND", "local"), LocalBasePath: am.EnvString("FILE_STORAGE_ROOT", "/app/data/uploads"),
+		S3Bucket: os.Getenv("S3_BUCKET"), S3Region: os.Getenv("S3_REGION"), S3Endpoint: os.Getenv("S3_ENDPOINT"),
+		S3AccessKey: os.Getenv("S3_ACCESS_KEY"), S3SecretKey: os.Getenv("S3_SECRET_KEY"),
+		S3ForcePathStyle: am.EnvBool("S3_FORCE_PATH_STYLE"),
+	})
 }
 
 func run(log *slog.Logger) error {
@@ -70,26 +135,11 @@ func run(log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	dsn := os.Getenv("AGENT_RUNNER_DATABASE_URL")
-	if dsn == "" {
-		return fmt.Errorf("AGENT_RUNNER_DATABASE_URL is required")
-	}
-	pc, err := db.PoolConfig(dsn, db.DefaultTimeouts())
-	if err != nil {
-		return err
-	}
-	// Its own pool, sized separately: exhausting it can only stall agent runs.
-	pc.MaxConns = int32(am.EnvInt("AGENT_RUNNER_POOL_MAX_CONNS", 4))
-	pc.MinConns = 0
-	pc.ConnConfig.RuntimeParams["application_name"] = "agent-runner"
-	pool, err := pgxpool.NewWithConfig(ctx, pc)
+	pool, err := openPool(ctx, int32(am.EnvInt("AGENT_RUNNER_POOL_MAX_CONNS", 4)))
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("postgres: %w", err)
-	}
 	applied, err := am.Migrate(ctx, pool)
 	if err != nil {
 		return err
@@ -99,12 +149,7 @@ func run(log *slog.Logger) error {
 	}
 	store := am.NewStore(pool)
 
-	files, err := storage.NewBackend(storage.Config{
-		Backend: am.EnvString("STORAGE_BACKEND", "local"), LocalBasePath: am.EnvString("FILE_STORAGE_ROOT", "/app/data/uploads"),
-		S3Bucket: os.Getenv("S3_BUCKET"), S3Region: os.Getenv("S3_REGION"), S3Endpoint: os.Getenv("S3_ENDPOINT"),
-		S3AccessKey: os.Getenv("S3_ACCESS_KEY"), S3SecretKey: os.Getenv("S3_SECRET_KEY"),
-		S3ForcePathStyle: am.EnvBool("S3_FORCE_PATH_STYLE"),
-	})
+	files, err := openFiles()
 	if err != nil {
 		return err
 	}

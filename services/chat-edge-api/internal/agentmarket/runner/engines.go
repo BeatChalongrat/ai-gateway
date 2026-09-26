@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 
 	"github.com/google/uuid"
 
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
+	"github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/storage"
 )
 
 // ── Pinned versions (AM2 Phase G) ────────────────────────────────────────
@@ -86,11 +88,64 @@ func (r *Runner) engineFor(ctx context.Context, run am.Run, slug string) (*Engin
 	if err != nil {
 		return nil, err
 	}
-	if e.Build != ck {
+	if e.Build != ck && !legacyMatch(e, ck, slug, run.Checksum) {
 		return nil, fmt.Errorf("stored engine %s is build %s", short(ck), short(e.Build))
 	}
 	r.engines.byCk[ck] = e
 	return e, nil
+}
+
+// legacyMatch: a version released before AM2 recorded its engine by
+// Engine.Checksum (engine files only), not by the whole zip. Its engine, stored
+// under that checksum when AM2 was deployed, is the right one only if it also
+// holds exactly the package the run is pinned to.
+func legacyMatch(e *Engine, ck, slug, pkgChecksum string) bool {
+	p := e.Packages[slug]
+	return e.Checksum == ck && p != nil && p.Checksum == pkgChecksum
+}
+
+// StoreLegacyEngine keeps an engine from before AM2 (the zip a pre-AM2 runner
+// image carries) where engineFor finds it: under the checksum its released
+// definitions recorded, and only when a released definition of one of its
+// packages — same slug, version and package checksum — was recorded with it.
+// The deploy runs it once (agent-runner store-engine <zip>) so the installs
+// pinned to those versions keep running their own engine. It returns one line
+// per package.
+func StoreLegacyEngine(ctx context.Context, st *am.Store, files storage.Backend, e *Engine) ([]string, error) {
+	var out []string
+	stored := map[string]bool{}
+	slugs := make([]string, 0, len(e.Packages))
+	for s := range e.Packages {
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+	for _, slug := range slugs {
+		p := e.Packages[slug]
+		d, err := st.DefinitionBySlugVersion(ctx, p.Slug, p.Version)
+		switch {
+		case errors.Is(err, am.ErrNotFound):
+			out = append(out, fmt.Sprintf("%s %s: not released — nothing to keep", p.Slug, p.Version))
+			continue
+		case err != nil:
+			return out, err
+		case d.Checksum != p.Checksum || (d.EngineChecksum != e.Checksum && d.EngineChecksum != e.Build):
+			out = append(out, fmt.Sprintf("%s %s: released with another engine (%s) — not this one", p.Slug, p.Version, short(d.EngineChecksum)))
+			continue
+		}
+		key := am.EngineKey(d.EngineChecksum)
+		if !stored[key] {
+			if ok, err := files.Exists(ctx, key); err != nil {
+				return out, err
+			} else if !ok {
+				if err := files.Upload(ctx, key, bytes.NewReader(e.zipBytes), "application/zip", int64(len(e.zipBytes))); err != nil {
+					return out, err
+				}
+			}
+			stored[key] = true
+		}
+		out = append(out, fmt.Sprintf("%s %s: its engine is kept at %s", p.Slug, p.Version, key))
+	}
+	return out, nil
 }
 
 // register writes each package as a new version, or finds it released;
