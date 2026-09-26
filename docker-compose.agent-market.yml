@@ -20,6 +20,9 @@
 #   * no autoheal label: a crash is restarted by `restart: unless-stopped`
 #     only, and the core's autoheal never touches it;
 #   * sees only the agent-market/ folder of the uploads volume (subpath).
+#   * PDF (and .xlsx recalculation) is LibreOffice in its own doc-converter
+#     container: no port, no volume, read-only root, and its only network is
+#     `converter` — internal (no route out) and shared with agent-runner alone.
 name: sran-agent-market
 
 services:
@@ -72,6 +75,7 @@ services:
       - SANDBOX_WORKDIR=/agent-sandbox-runs
       - SANDBOX_HOST_WORKDIR=${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
+      - AGENT_MARKET_CONVERTER_URL=${AGENT_MARKET_CONVERTER_URL:-http://doc-converter:8096}
     volumes:
       # The docker socket launches the per-step sandbox containers (the same
       # privilege chat-edge holds for run_python); no model input reaches argv.
@@ -85,6 +89,7 @@ services:
           subpath: agent-market
     networks:
       - core
+      - converter
     ports:
       - "127.0.0.1:${AM_RUNNER_PORT:-28095}:8095"
     deploy:
@@ -96,6 +101,39 @@ services:
       sran.agent-market: "true"
     stop_grace_period: 20s
 
+  doc-converter:
+    # LibreOffice (+ poppler, Thai fonts) turning a finished .docx/.xlsx/.pptx
+    # into a PDF and recalculating an .xlsx (services/doc-converter). One
+    # conversion at a time, a fresh profile each, a wall-clock limit that kills
+    # the whole process group. Reachable only from agent-runner; no egress.
+    #   build: bash scripts/agent-market/build-converter.sh
+    profiles: ["agent-market"]
+    image: ai-gateway-doc-converter:${AM_CONVERTER_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - CONVERT_TIMEOUT_SECONDS=${AM_CONVERT_TIMEOUT_SECONDS:-60}
+      - MAX_INPUT_BYTES=${AM_CONVERT_MAX_INPUT_BYTES:-26214400}
+    networks:
+      - converter
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    pids_limit: 128
+    cpus: "${AM_CONVERTER_CPUS:-1.0}"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8096/health', timeout=3).status == 200 else 1)"]
+      interval: 15s
+      timeout: 4s
+      start_period: 30s
+      retries: 3
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 10s
+
 volumes:
   uploads:
     external: true
@@ -105,3 +143,7 @@ networks:
   core:
     external: true
     name: ${AM_NETWORK:-ai-gateway_default}
+  converter:
+    # agent-runner <-> doc-converter only. internal: no gateway, no route out,
+    # so a document can never make the converter fetch or send anything.
+    internal: true
