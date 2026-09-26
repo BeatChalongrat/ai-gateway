@@ -20,6 +20,16 @@ Contract pinned here:
   (a few frames of slack for what was in flight), never what the provider
   produced afterwards;
 * exactly one ledger row (the FIX129 finalize-once invariant holds).
+
+AM2 — this thread reads the database through its OWN connection. The server
+thread writes through the suite's integration engine, which is one SQLite
+connection (StaticPool) shared by every thread; a session closed on it rolls
+that connection back, so this thread's polling used to discard whatever the
+server had written but not yet committed — the request_log row or the ledger
+row. That was the flake (``aborted stream must persist a request_log row`` /
+``assert 0 == 1`` on the ledger, 1 run in 3 of the full lane).
+``test_polling_while_the_server_writes_never_loses_its_rows`` holds the
+ledger write open on purpose and polls through it.
 """
 
 from __future__ import annotations
@@ -34,7 +44,9 @@ from typing import AsyncIterator
 
 import pytest
 import uvicorn
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.domain.providers import ProviderStreamChunk
 from app.main import app
@@ -43,9 +55,12 @@ from app.models.credit_transaction import CreditTransactionORM
 from app.models.portal_user import PortalUserORM
 from app.models.request_log import RequestLogORM
 from app.services.providers.openai_adapter import OpenAIAdapter
-from tests.conftest import _integration_engine
+from tests.conftest import _INTEGRATION_DB_URL
 
-_Session = sessionmaker(bind=_integration_engine)
+# Its own connection per session (NullPool) on the same database file: committed
+# rows are visible, and closing a session never touches the server's connection.
+_own_engine = create_engine(_INTEGRATION_DB_URL, poolclass=NullPool, connect_args={"timeout": 30})
+_Session = sessionmaker(bind=_own_engine)
 
 # 60 chars per frame; the streaming DLP tail holds the last 120 chars, so the
 # wire lags the provider by two frames.
@@ -260,3 +275,59 @@ def test_stop_closes_provider_stream_at_once_and_bills_only_delivered(monkeypatc
         db.close()
     assert len(txs) == 1, "a stopped stream must write exactly one ledger row"
     assert txs[0].amount < 0
+
+
+def _ledger_rows(request_id: str) -> int:
+    db = _Session()
+    try:
+        return db.query(CreditTransactionORM).filter_by(request_id=request_id).count()
+    finally:
+        db.close()
+
+
+def test_polling_while_the_server_writes_never_loses_its_rows(monkeypatch, billable_user):
+    """The flake's mechanism, made deterministic: the stream finaliser's ledger write is
+    held open for 0.4 s after its rows are written (flushed, not committed) while this
+    thread polls the ledger. Reading through the server's connection rolled the write
+    back (0 rows); through its own connection the row lands exactly once."""
+    from app.services.gateway import portal_credit_check as pcc
+
+    real_deduct = pcc.deduct_portal_credit
+    held: dict = {"open_at": None, "closed_at": None}
+
+    def _deduct_held_open(session, *args, **kwargs):
+        out = real_deduct(session, *args, **kwargs)
+        session.flush()
+        held["open_at"] = time.monotonic()
+        time.sleep(0.4)
+        held["closed_at"] = time.monotonic()
+        return out
+
+    monkeypatch.setattr(pcc, "deduct_portal_credit", _deduct_held_open)
+    chunk_text, cadence_s, frames = _SHAPES["slow"]
+
+    async def _spy(self, payload, messages, *, resolved_model=None, api_key=None) -> AsyncIterator[ProviderStreamChunk]:
+        for _ in range(frames):
+            yield ProviderStreamChunk(delta=chunk_text, model="gpt-4o-mini")
+            await asyncio.sleep(cadence_s)
+
+    monkeypatch.setattr(OpenAIAdapter, "stream_chat", _spy)
+
+    with _Server() as srv:
+        rid, _delivered, _t_close = _stream_then_close(srv.port, frames_to_read=10)
+        deadline = time.monotonic() + 10
+        polls_while_open = 0
+        while time.monotonic() < deadline and held["closed_at"] is None:
+            _ledger_rows(rid)
+            if held["open_at"] is not None:
+                polls_while_open += 1
+            time.sleep(0.02)
+        assert held["closed_at"] is not None, "the finaliser never reached the ledger write"
+        assert polls_while_open >= 5, polls_while_open  # the poll really ran through the open write
+        rows = 0
+        for _ in range(100):
+            rows = _ledger_rows(rid)
+            if rows:
+                break
+            time.sleep(0.05)
+    assert rows == 1, f"the ledger row was lost: {rows} rows after {polls_while_open} polls during the open write"
