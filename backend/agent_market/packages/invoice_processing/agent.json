@@ -1,0 +1,43 @@
+{
+  "schema_version": "agent.market.v1",
+  "id": "sran.invoice-processing",
+  "version": "1.0.0",
+  "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
+  "name_en": "Invoice Processing",
+  "short_name": "ทะเบียนเอกสารซื้อ",
+  "category": "finance",
+  "icon": "receipt",
+  "summary": "ส่งใบกำกับภาษี ใบเสร็จ หรือไฟล์ e-Tax มา แล้วได้ทะเบียนเอกสารซื้อเป็น Excel ทุกค่าบอกที่มาว่าอ่านจากหน้าไหน ตรงไหน ตรวจเลขผู้เสียภาษี VAT ยอดรวม และเอกสารซ้ำด้วยกฎ ไม่ให้โมเดลกำหนดตัวเลข ค่าที่ไม่มั่นใจจะถามก่อนเสมอ",
+  "entry": "AGENT.md",
+  "python_package": "invoice_processing",
+  "typical_run_seconds": 90,
+  "greeting": {
+    "text": "สวัสดีครับ ส่งใบกำกับภาษี ใบเสร็จ หรือไฟล์ e-Tax มาได้เลย ครั้งละหลายไฟล์ ผมจะอ่าน ตรวจ แล้วทำทะเบียนให้ ค่าไหนไม่มั่นใจผมจะถามก่อน",
+    "role": "ผู้ช่วยบันทึกเอกสารซื้อ",
+    "tagline": "อ่านอย่างเดียว · ตรวจด้วยกฎ · ค่าที่ไม่แน่ใจต้องมีคนยืนยัน"
+  },
+  "inputs": [
+    {"role": "documents", "label": "ใบกำกับภาษี ใบเสร็จ ใบแจ้งหนี้ หรือไฟล์ e-Tax", "note": "PDF ดิจิทัลหรือสแกน 200–300 DPI · XML ของ e-Tax · รูปถ่ายอ่านแบบพยายามที่สุด (best-effort)", "required": true, "accept": [".pdf", ".xml", ".jpg", ".jpeg", ".png"]}
+  ],
+  "outputs": [
+    {"format": "xlsx", "label": "ทะเบียน .xlsx", "default": true}
+  ],
+  "capabilities": {
+    "required": ["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx"],
+    "optional": ["model.vision"]
+  },
+  "install": {
+    "defaults": {"formats": ["xlsx"], "language": "th", "currency": "THB", "theme": {"id": "navy"}},
+    "questions": ["company_tax", "theme", "formats"]
+  },
+  "narrative": "rules",
+  "document_index": {"retention_days": 730},
+  "permissions": {
+    "default": "read_only",
+    "denied": ["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]
+  },
+  "cannot": "agent ตัวนี้ไม่บันทึกเข้าระบบบัญชี ไม่ส่งอีเมล ไม่อนุมัติหรือโอนเงิน และไม่ตั้งเวลาทำงานเอง",
+  "photo_notice": "รูปถ่ายใบเสร็จอ่านแบบพยายามที่สุด (best-effort): อ่านเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี และจะถามกลับทุกครั้งที่ไม่มั่นใจ ถ้ามี PDF หรือสแกนให้ส่งแบบนั้นแทน",
+  "limits": {"max_file_mb": 20, "max_files": 30},
+  "self_test": "self-test.json"
+}

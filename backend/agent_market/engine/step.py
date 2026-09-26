@@ -45,6 +45,25 @@ def _read_json(name: str):
         return json.load(f)
 
 
+def _accepts(fn, name: str) -> bool:
+    import inspect
+
+    return name in inspect.signature(fn).parameters
+
+
+def _extra(req: dict, fn, with_today: bool = False) -> dict:
+    """Optional run context for packages that take it (AM2): the duplicate index (``history``), a
+    model's readings (``proposals``), and the run's date for compute. A package whose function does
+    not name a parameter never receives it."""
+    out = {}
+    for k in ("history", "proposals"):
+        if req.get(k) and _accepts(fn, k):
+            out[k] = _read_json(req[k])
+    if with_today and req.get("today") and _accepts(fn, "today"):
+        out["today"] = _dt.date.fromisoformat(req["today"])
+    return out
+
+
 def _write_json(name: str, obj) -> str:
     path = os.path.join(JOB_OUT, os.path.basename(name))
     with open(path, "w", encoding="utf-8") as f:
@@ -77,22 +96,26 @@ def run(req: dict) -> dict:
     op = req.get("op")
     pkg = _load_package(req.get("package", ""))
     t0 = time.monotonic()
+    dump = getattr(pkg, "dump", dataset.dump)
+    load = getattr(pkg, "load", dataset.load)
     if op == "parse":
         f = req["file"]
         pf = pkg.parse(_in(f["input"]), f["name"], req.get("mapping") or {})
-        _write_json("parsed.json", dataset.dump(pf))
+        _write_json("parsed.json", dump(pf))
         out = {"summary": pf.summary()}
+        if hasattr(pkg, "parse_extras"):
+            out["summary"].update(pkg.parse_extras(pf, _in(f["input"]), JOB_OUT))
         if req.get("preview"):
             out["preview"] = _preview(_in(f["input"]), f["name"], pf)
     elif op in ("preflight", "compute", "postcompute"):
-        files = [dataset.load(_read_json(n)) for n in req.get("parsed", [])]
+        files = [load(_read_json(n)) for n in req.get("parsed", [])]
         today = _dt.date.fromisoformat(req["today"]) if req.get("today") else None
         if op == "preflight":
             out = pkg.preflight(files, message=req.get("message", ""), defaults=req.get("defaults") or {},
-                                answers=req.get("answers") or {}, today=today)
+                                answers=req.get("answers") or {}, today=today, **_extra(req, pkg.preflight))
         elif op == "compute":
             computed = pkg.compute(files, req["roles"], req["period"], answers=req.get("answers") or {},
-                                   defaults=req.get("defaults") or {})
+                                   defaults=req.get("defaults") or {}, **_extra(req, pkg.compute, with_today=True))
             _write_json("computed.json", computed)
             out = {"summary": pkg.summarize(computed)}
         else:

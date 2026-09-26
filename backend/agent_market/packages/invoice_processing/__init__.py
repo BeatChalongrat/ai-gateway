@@ -1,0 +1,125 @@
+"""Agent 1 — Invoice Processing.
+
+Thai purchase documents in (digital PDF, e-Tax PDF/XML, scans; photos as triage), a register out:
+every value with its provenance, every document either recorded or left out with a reason code.
+Reading is the E2 engine (engine/e2); a model may propose a value for a scan or photo, a person
+decides — no model finalises a financial number.
+
+The package's Python surface, called by agent_market.engine.step:
+parse · dump · load · parse_extras · preflight · compute · postcompute · summarize · render.
+"""
+
+from __future__ import annotations
+
+import datetime as _dt
+import json
+import os
+
+from ...engine.e2.extract import extract as _extract
+from .checks import preflight as _pre
+from .checks.review import SCAN_TIERS, Doc
+from .scripts import register as _register
+
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+FORMAT = "am.e2doc.v1"
+VISION_DPI = 150
+VISION_MAX_PAGES = 3
+VISION_MAX_SIDE = 1600
+
+
+def _manifest() -> dict:
+    try:
+        from importlib.resources import files
+
+        return json.loads(files(__name__).joinpath("agent.json").read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+VERSION = _manifest().get("version")
+
+
+def parse(path: str, name: str, mapping: dict) -> Doc:
+    """Read one upload once (the expensive part); later steps judge the stored reading."""
+    out = _extract(path, name)
+    sha = out["document"]["sha256"]
+    return Doc(key="d" + sha[:10], name=name, sha256=sha, extraction=out)
+
+
+def dump(doc: Doc) -> dict:
+    return {"format": FORMAT, "key": doc.key, "name": doc.name, "sha256": doc.sha256, "extraction": doc.extraction}
+
+
+def load(d: dict) -> Doc:
+    if d.get("format") != FORMAT:
+        raise ValueError(f"unknown parsed format {d.get('format')!r}")
+    return Doc(key=d["key"], name=d["name"], sha256=d["sha256"], extraction=d["extraction"])
+
+
+def parse_extras(doc: Doc, path: str, out_dir: str) -> dict:
+    """Page images of a scan or photo for the runner's vision step (a second reader, never the source
+    of a number). Digital and e-Tax documents get none: their text is exact."""
+    if doc.tier not in SCAN_TIERS:
+        return {"vision_pages": []}
+    from PIL import Image, ImageOps
+
+    images = []
+    if path.lower().endswith(".pdf"):
+        import extract_text  # /sandbox/scripts
+
+        for i in range(min(doc.extraction["document"]["pages"], VISION_MAX_PAGES)):
+            images.append(extract_text.render_page(path, i, VISION_DPI))
+    else:
+        images.append(ImageOps.exif_transpose(Image.open(path)))
+    names = []
+    for i, img in enumerate(images, start=1):
+        img = img.convert("RGB")
+        img.thumbnail((VISION_MAX_SIDE, VISION_MAX_SIDE))
+        n = f"vision_{i}.jpg"
+        img.save(os.path.join(out_dir, n), "JPEG", quality=85)
+        names.append(n)
+    return {"vision_pages": names}
+
+
+def preflight(files: list[Doc], *, message: str = "", defaults: dict | None = None, answers: dict | None = None,
+              today: _dt.date | None = None, history: list | None = None, proposals: dict | None = None) -> dict:
+    return _pre.run(files, message=message, defaults=defaults, answers=answers, today=today, history=history,
+                    proposals=proposals)
+
+
+def compute(files, roles, period, *, answers=None, defaults=None, today=None, history=None, proposals=None) -> dict:
+    return _register.compute(files, roles, period, answers=answers, defaults=defaults, today=today, history=history,
+                             proposals=proposals)
+
+
+def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:
+    """Everything was asked before compute; nothing is asked after it."""
+    return {"findings": []}
+
+
+def summarize(computed: dict) -> dict:
+    return _register.summarize(computed)
+
+
+def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
+    import hashlib
+
+    from ...deliverables.theme import resolve
+    from .scripts.workbook import InvoiceWorkbook, check
+
+    theme = resolve(req.get("theme"))
+    names = req.get("names") or {}
+    artifacts, all_ok = [], True
+    for fmt in [f for f in (req.get("formats") or ["xlsx"]) if f == "xlsx"]:
+        name = os.path.basename(names.get(fmt) or "register.xlsx")
+        path = os.path.join(out_dir, name)
+        meta = InvoiceWorkbook(computed, theme, req.get("run")).write(path)
+        checks = check(path, computed)
+        ok = all(c["ok"] for c in checks)
+        all_ok &= ok
+        with open(path, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+        artifacts.append({"name": name, "format": fmt, "kind": "table", "size": os.path.getsize(path), "sha256": sha,
+                          "quality": {"passed": ok, "checks": checks}, "meta": meta, "chart_bindings": [],
+                          "citations": len(computed["provenance"])})
+    return {"passed": all_ok, "artifacts": artifacts, "theme": {"id": theme["id"], "version": theme.get("version", 1)}}

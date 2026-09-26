@@ -1,0 +1,116 @@
+{
+ "schema": "agent.market.eval.v1",
+ "package": "sran.invoice-processing",
+ "note": "Documents are the Phase A pack (fixtures/e2, by fixture id), so every expected value comes from its golden output, never from this package. {id} in an answer key is that fixture's document key. 'skip_rest': unanswered cards take their default, as a skipped card does. Proposals stand in for the vision step: 'truth' = the golden values, or explicit fields.",
+ "company": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "company_tax_id": "0105563012343", "company_branch": "00000"},
+ "cases": [
+  {
+   "id": "clean_batch_zero_questions",
+   "note": "Every clean digital and e-Tax document in one batch: the zero-question case. Nothing asked, everything recorded, every value the golden one.",
+   "files": ["d01_clean_full_tax_invoice", "d02_classic_hyphen_taxid", "d03_abbreviated_retail", "d04_receipt_no_vat_no_lines",
+             "d05_wht_service_invoice", "d06_thai_digits_bmj", "d07_multipage", "d08_vat_rounding_edge",
+             "d09_billing_note_not_tax_invoice", "e01_etax_pdf_embedded_xml", "e02_etax_xml_receipt"],
+   "expect": {"first_questions": "none", "included": "all", "excluded": {}, "notes": {}}
+  },
+  {
+   "id": "designed_failures_skipped",
+   "note": "Each designed failure asks exactly its golden question; every card skipped leaves its document out with the matching reason code — never a number accepted by default.",
+   "files": ["f01_line_total_mismatch", "f02_vat_mismatch", "f03_duplicate_of_d01", "f04_wrong_buyer",
+             "f05_missing_seller_tax_id", "f06_invalid_tax_id_checksum", "f07_foreign_currency_usd"],
+   "history": ["d01_clean_full_tax_invoice"],
+   "skip_rest": true,
+   "expect": {"first_questions": "golden", "included": [],
+              "excluded": {"f01_line_total_mismatch": "check_failed", "f02_vat_mismatch": "check_failed",
+                           "f03_duplicate_of_d01": "duplicate", "f04_wrong_buyer": "check_failed",
+                           "f05_missing_seller_tax_id": "missing_required_field",
+                           "f06_invalid_tax_id_checksum": "check_failed", "f07_foreign_currency_usd": "check_failed"}}
+  },
+  {
+   "id": "designed_failures_answered",
+   "note": "The person answers: accept as printed, type a value (a bad one first — asked again), confirm it is not a duplicate, give an exchange rate. Each answer is recorded as an exception or as the value's provenance.",
+   "files": ["f01_line_total_mismatch", "f02_vat_mismatch", "f03_duplicate_of_d01", "f04_wrong_buyer",
+             "f05_missing_seller_tax_id", "f06_invalid_tax_id_checksum", "f07_foreign_currency_usd"],
+   "history": ["d01_clean_full_tax_invoice"],
+   "answers": {
+     "e2_check_failed:{f01_line_total_mismatch}:line_arithmetic": "accept_as_printed",
+     "e2_check_failed:{f02_vat_mismatch}:vat_7_percent": "exclude",
+     "e2_duplicate:{f03_duplicate_of_d01}": "include",
+     "e2_copy:{f03_duplicate_of_d01}": "ok",
+     "e2_check_failed:{f04_wrong_buyer}:buyer_match": "accept_as_printed",
+     "e2_field_missing:{f05_missing_seller_tax_id}:seller_tax_id": {"typed": "12345"},
+     "e2_typed_invalid:{f05_missing_seller_tax_id}:seller_tax_id": {"typed": "0-1055-45009-87-5"},
+     "e2_check_failed:{f06_invalid_tax_id_checksum}:seller_tax_id_format": "accept_as_printed",
+     "e2_check_failed:{f07_foreign_currency_usd}:currency": {"typed": "36.25"}
+   },
+   "skip_rest": true,
+   "expect": {"first_questions": "golden",
+              "included": ["f01_line_total_mismatch", "f03_duplicate_of_d01", "f04_wrong_buyer", "f05_missing_seller_tax_id",
+                           "f06_invalid_tax_id_checksum", "f07_foreign_currency_usd"],
+              "excluded": {"f02_vat_mismatch": "check_failed"},
+              "notes": {"f01_line_total_mismatch": ["accepted_as_printed"], "f03_duplicate_of_d01": ["not_duplicate_by_person"],
+                        "f04_wrong_buyer": ["accepted_as_printed"], "f06_invalid_tax_id_checksum": ["accepted_as_printed"],
+                        "f07_foreign_currency_usd": ["foreign_currency"]},
+              "typed": {"f05_missing_seller_tax_id": {"seller_tax_id": "0105545009875"}},
+              "asked_again": ["e2_typed_invalid:{f05_missing_seller_tax_id}:seller_tax_id"],
+              "fx": {"f07_foreign_currency_usd": "36.25"}}
+  },
+  {
+   "id": "same_batch_twice_and_duplicate",
+   "note": "The same file uploaded twice counts once (no question: the bytes are identical); an invoice already in this batch is a duplicate question for the later one.",
+   "files": ["d01_clean_full_tax_invoice", "d01_clean_full_tax_invoice", "f03_duplicate_of_d01"],
+   "skip_rest": true,
+   "expect": {"first_questions": {"f03_duplicate_of_d01": ["e2_duplicate", "e2_copy"]},
+              "included": ["d01_clean_full_tax_invoice"],
+              "excluded": {"f03_duplicate_of_d01": "duplicate"}, "same_file_twice": 1}
+  },
+  {
+   "id": "index_duplicate_confirmed_different",
+   "note": "A document the install recorded in an earlier run is asked about; the person says it is a different one.",
+   "files": ["d01_clean_full_tax_invoice"],
+   "history": ["d01_clean_full_tax_invoice"],
+   "answers": {"e2_duplicate:{d01_clean_full_tax_invoice}": "include"},
+   "expect": {"first_questions": {"d01_clean_full_tax_invoice": ["e2_duplicate"]},
+              "included": ["d01_clean_full_tax_invoice"], "excluded": {},
+              "notes": {"d01_clean_full_tax_invoice": ["not_duplicate_by_person"]}}
+  },
+  {
+   "id": "scans_vision_agrees",
+   "note": "Office scans with the vision reading equal to the truth: questions only where OCR and the model cannot settle a value; skipped ones leave the document out; no recorded number comes from the model alone.",
+   "files": ["s01_scan300_full_tax_invoice", "s02_scan200_full_tax_invoice", "s03_scan300_wht_invoice", "s04_scan200_classic"],
+   "proposals": {"s01_scan300_full_tax_invoice": "truth", "s02_scan200_full_tax_invoice": "truth",
+                 "s03_scan300_wht_invoice": "truth", "s04_scan200_classic": "truth"},
+   "skip_rest": true,
+   "expect": {"first_questions": "golden", "included": "unasked", "excluded": "asked", "model_documents": 4}
+  },
+  {
+   "id": "scans_accept_every_proposal",
+   "note": "The person reads each page and answers every value card (a proposal when it is right, the typed value when it is not): every document is recorded — except s02, which is s01 scanned again at 200 DPI and is caught as a duplicate within the batch.",
+   "files": ["s01_scan300_full_tax_invoice", "s02_scan200_full_tax_invoice", "s03_scan300_wht_invoice", "s04_scan200_classic"],
+   "proposals": {"s01_scan300_full_tax_invoice": "truth", "s02_scan200_full_tax_invoice": "truth",
+                 "s03_scan300_wht_invoice": "truth", "s04_scan200_classic": "truth"},
+   "accept_proposals": true,
+   "skip_rest": true,
+   "expect": {"first_questions": "golden", "included": ["s01_scan300_full_tax_invoice", "s03_scan300_wht_invoice", "s04_scan200_classic"],
+              "excluded": {"s02_scan200_full_tax_invoice": "duplicate"}}
+  },
+  {
+   "id": "scan_vision_disagrees",
+   "note": "The model reads another total than OCR: the conflict is a question, and skipping it leaves the document out.",
+   "files": ["s01_scan300_full_tax_invoice"],
+   "proposals": {"s01_scan300_full_tax_invoice": {"total": "12580.70"}},
+   "skip_rest": true,
+   "expect": {"first_questions": {"s01_scan300_full_tax_invoice": ["e2_source_conflict"]}, "first_questions_mode": "includes",
+              "included": [], "excluded": {"s01_scan300_full_tax_invoice": "sources_disagree"}}
+  },
+  {
+   "id": "photos_triage",
+   "note": "Phone photos are triage only: five fields, a best-effort exception on every recorded one, and a question for whatever could not be read.",
+   "files": ["p01_photo_crumpled_thermal", "p02_photo_flat_receipt"],
+   "proposals": {"p01_photo_crumpled_thermal": "truth", "p02_photo_flat_receipt": "truth"},
+   "accept_proposals": true,
+   "skip_rest": true,
+   "expect": {"first_questions": "golden", "included": "all", "excluded": {},
+              "notes": {"p01_photo_crumpled_thermal": ["photo_triage_only"], "p02_photo_flat_receipt": ["photo_triage_only"]}}
+  }
+ ]
+}
