@@ -77,14 +77,20 @@ def period_bounds(period: str) -> tuple[_dt.date, _dt.date]:
 _EXCEL_EPOCH = _dt.date(1899, 12, 30)
 _DATE_RE = re.compile(r"^\s*(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})\s*$")
 _TH_MONTH_DATE_RE = re.compile(r"^\s*(\d{1,2})\s+([^\d\s]+)\s+(\d{2,4})\s*$")
+# A date typed with its day and month as the first two numbers — the only
+# shape whose order (DD/MM or MM/DD) is not written in the text itself.
+_TWO_FIRST_RE = re.compile(r"^\s*(\d{1,2})([/\-.])(\d{1,2})[/\-.](\d{1,4})\s*$")
+
+DATE_ORDERS = ("dmy", "mdy")
 
 
-def parse_date(value) -> _dt.date | None:
+def parse_date(value, order: str = "dmy") -> _dt.date | None:
     """Best-effort date from an Excel cell or CSV text.
 
     Accepts datetime/date objects, Excel serials, 'dd/mm/yyyy' (day first,
-    BE or CE year), 'yyyy-mm-dd', and '1 ก.ย. 2569'. Returns None when the
-    value is not a date — the caller decides whether that is a finding.
+    BE or CE year — or month first with order='mdy', decided per column by
+    date_order_evidence), 'yyyy-mm-dd', and '1 ก.ย. 2569'. Returns None when
+    the value is not a date — the caller decides whether that is a finding.
     """
     if value is None:
         return None
@@ -106,6 +112,8 @@ def parse_date(value) -> _dt.date | None:
         try:
             if len(a) == 4:  # yyyy-mm-dd
                 return _dt.date(ce_year(int(a)), int(b), int(c))
+            if order == "mdy":
+                return _dt.date(ce_year(int(c)), int(a), int(b))  # mm/dd/yyyy
             return _dt.date(ce_year(int(c)), int(b), int(a))  # dd/mm/yyyy
         except ValueError:
             return None
@@ -119,6 +127,66 @@ def parse_date(value) -> _dt.date | None:
             except ValueError:
                 return None
     return None
+
+
+def looks_like_date(value) -> bool:
+    """A date in either day/month order — for telling a date column by its
+    values before the column's order is known."""
+    return parse_date(value) is not None or parse_date(value, "mdy") is not None
+
+
+def date_text_kind(value) -> dict | None:
+    """What a text written 'a/b/y' (or with '-' or '.') says about its own order.
+
+    None for anything whose order is not in question: a real date cell, an
+    Excel serial, 'yyyy-mm-dd', '5 ก.ย. 2569'. Otherwise
+    {kind, separator, buddhist}: kind 'day_first' when the first number is
+    over 12 (it cannot be a month, so MM/DD is impossible), 'month_first'
+    when the second is (DD/MM impossible), 'ambiguous' when both are 1-12,
+    'invalid' when both are over 12. buddhist: the year is Buddhist era
+    (≥ 2400, or two digits read as BE by ce_year) — only a Thai locale writes
+    one, and a Thai locale writes the day first.
+    """
+    if not isinstance(value, str):
+        return None
+    m = _TWO_FIRST_RE.match(value)
+    if not m:
+        return None
+    a, sep, b, y = int(m.group(1)), m.group(2), int(m.group(3)), m.group(4)
+    year = int(y)
+    buddhist = year >= 2400 or (len(y) == 2 and year >= 50)
+    if a < 1 or b < 1:
+        kind = "invalid"
+    elif a > 12 and b > 12:
+        kind = "invalid"
+    elif a > 12:
+        kind = "day_first"
+    elif b > 12:
+        kind = "month_first"
+    else:
+        kind = "ambiguous"
+    return {"kind": kind, "separator": sep, "buddhist": buddhist}
+
+
+def date_order_evidence(values) -> dict:
+    """Counts over one column's values: what its own dates prove about DD/MM
+    vs MM/DD. `day_first` (first number > 12) and `buddhist` (a Thai-era
+    year) say DD/MM; `month_first` (second number > 12) says MM/DD; the rest
+    are `ambiguous`. `separators` counts '/', '-', '.' among these texts."""
+    ev = {"day_first": 0, "month_first": 0, "ambiguous": 0, "buddhist": 0, "invalid": 0,
+          "separators": {}, "samples": {"day_first": [], "month_first": [], "ambiguous": []}}
+    for v in values:
+        k = date_text_kind(v)
+        if k is None:
+            continue
+        ev[k["kind"]] += 1
+        if k["buddhist"]:
+            ev["buddhist"] += 1
+        ev["separators"][k["separator"]] = ev["separators"].get(k["separator"], 0) + 1
+        s = ev["samples"].get(k["kind"])
+        if s is not None and len(s) < 5 and v.strip() not in s:
+            s.append(v.strip())
+    return ev
 
 
 def month_from_word(word: str) -> int | None:

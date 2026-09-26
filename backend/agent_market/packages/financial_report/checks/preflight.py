@@ -6,9 +6,9 @@ has nothing to say returns nothing — on clean input the agent asks zero
 questions, and the eval set fails the gate if it does not.
 
 Checks: missing_file · wrong_document_type · unmapped_column ·
-ambiguous_debit_credit · period_undetermined · period_mixed ·
-currency_mixed · account_name_missing (cosmetic) · year_convention_mixed
-(cosmetic).
+unreadable_dates · date_order · account_group · ambiguous_debit_credit ·
+period_undetermined · period_mixed · currency_mixed · account_name_missing
+(cosmetic) · year_convention_mixed (cosmetic).
 """
 
 from __future__ import annotations
@@ -17,11 +17,15 @@ import datetime as _dt
 from collections import Counter
 from decimal import Decimal
 
-from ....engine.findings import Finding, finding
+from ....engine.findings import FORBIDDEN_WORDS, Finding, finding
 from ....engine.headers import FIELD_LABEL_TH
 from ....engine.ledger import ParsedFile, apply_convention, indicator_guess
 from ....engine.thai import (
-    find_period_in_text, fmt_int, fmt_money, period_bounds, period_label_th, prev_period, year_style,
+    MONTHS_TH_ABBR, find_period_in_text, fmt_int, fmt_money, parse_date, period_bounds, period_label_th,
+    prev_period, year_style,
+)
+from ..scripts.rules import (
+    GROUP_LABEL, NOT_PL, Chart, apply_date_orders, chart_for, date_order_answer, group_of, range_default,
 )
 
 LEDGER_TYPES = ("gl", "tb", "pl")
@@ -216,6 +220,141 @@ def check_unreadable_dates(files, roles, answers: dict) -> tuple[list[Finding], 
     return out, assumptions
 
 
+_ORDER_TH = {"dmy": "วัน/เดือน/ปี", "mdy": "เดือน/วัน/ปี"}
+
+
+def _quotable(text: str) -> bool:
+    """A file's own words (a column header, an account name) go into a question
+    only when the card validator will accept them ('Shipping' holds 'pin');
+    otherwise they stay in the evidence."""
+    return bool(text) and not any(w in text.lower() for w in FORBIDDEN_WORDS)
+
+
+def _th_date(d: _dt.date) -> str:
+    return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + 543}"
+
+
+def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
+                     today: _dt.date) -> tuple[list[Finding], list[dict]]:
+    """A date column whose every date has day and month both 1-12, from an
+    export that does not say its order (not Thai, not SAP), is read one way
+    only after the person says which: read the wrong way, September's rows
+    land in eleven other months. The column's own values decide whenever they
+    can (engine/headers.decide_date_order); this asks only when they cannot."""
+    out: list[Finding] = []
+    assumptions: list[dict] = []
+    for pf in files:
+        info = pf.date_order
+        if not info or roles.get(pf.name) not in ("primary", "prior"):
+            continue
+        column = info.get("column") or "วันที่"
+        if info.get("source") == "sap":
+            assumptions.append({
+                "code": "date_order", "source": "rule", "value": info["order"],
+                "text": f"อ่านวันที่ในคอลัมน์ “{column}” ของ “{pf.name}” เป็น{_ORDER_TH[info['order']]} "
+                        "ตามรูปแบบวันที่ของ SAP (ทุกวันที่มีวันและเดือนไม่เกิน 12 จึงดูจากตัวเลขอย่างเดียวไม่ได้)"})
+            continue
+        if info.get("source") != "undecided":
+            continue
+        order, src = date_order_answer(pf, answers, defaults)
+        if order:
+            if src == "remembered":
+                assumptions.append({"code": "date_order", "source": "remembered", "value": order,
+                                    "text": f"ใช้ค่าที่จำไว้: อ่านวันที่ในคอลัมน์ “{column}” เป็น{_ORDER_TH[order]}"})
+            continue
+        applied = info.get("applied") or "dmy"
+        readings: dict[str, Counter] = {"dmy": Counter(), "mdy": Counter()}
+        for r in pf.rows:
+            if r.date is None:
+                continue
+            d = r.date
+            other = _dt.date(d.year, d.day, d.month) if r.date_swappable else d
+            for o, x in ((applied, d), ("mdy" if applied == "dmy" else "dmy", other)):
+                readings[o][f"{x.year:04d}-{x.month:02d}"] += 1
+        wanted = find_period_in_text(message or "", today)
+
+        def score(o: str) -> int:
+            return readings[o].get(wanted, 0) if wanted else (readings[o].most_common(1)[0][1] if readings[o] else 0)
+
+        best = "mdy" if score("mdy") > score("dmy") else "dmy"
+        samples = (info.get("evidence") or {}).get("samples", {}).get("ambiguous", [])[:3]
+        example = next((s for s in samples if parse_date(s) != parse_date(s, "mdy")), None)
+        options = []
+        for o in (best, "mdy" if best == "dmy" else "dmy"):
+            top = readings[o].most_common(1)
+            where = (f"รายการส่วนใหญ่อยู่ใน{period_label_th(top[0][0])} ({fmt_int(top[0][1])} จาก "
+                     f"{fmt_int(sum(readings[o].values()))} รายการ)") if top else ""
+            ex = f"“{example}” = {_th_date(parse_date(example, o))} · " if example else ""
+            options.append((_ORDER_TH[o], o, ex + where))
+        out.append(finding(
+            "date_order", "blocking", "preflight", "ลำดับวันที่",
+            "วันที่" + (f"ในคอลัมน์ “{column}” " if _quotable(column) else "")
+            + f"ของไฟล์ “{pf.name}” ทุกแถวมีวันและเดือนไม่เกิน 12 "
+            + (f"เช่น {', '.join('“' + s + '”' for s in samples)} " if samples else "")
+            + "จึงอ่านได้ทั้งแบบวัน/เดือน/ปี และเดือน/วัน/ปี และไฟล์ไม่ได้บอกว่าใช้แบบไหน "
+            "ถ้าอ่านผิด รายการจะไปอยู่ผิดเดือน ไฟล์นี้เขียนวันที่แบบไหนครับ",
+            options, best,
+            evidence={"file": pf.name, "column": column, "samples": samples,
+                      "months": {o: dict(sorted(c.items())) for o, c in readings.items()},
+                      "counts": {k: (info.get("evidence") or {}).get(k) for k in ("ambiguous", "separators")}},
+            rememberable=True, subject=pf.name, facts={"file": pf.name, "column": column},
+        ))
+    return out, assumptions
+
+
+_ACCOUNT_OPTIONS = {
+    "income": ("other_income", "revenue"),
+    "expense": ("operating_expenses", "cost_of_sales", "finance_costs"),
+    None: ("operating_expenses", "other_income", "finance_costs"),
+}
+
+
+def check_accounts(chart: Chart) -> list[Finding]:
+    """An account the chart cannot place — outside the Thai standard
+    numbering, with a number that does not say its line (7xxxxx-9xxxxx in an
+    SAP chart) and a name that does not either, or a name that contradicts
+    the number — is asked about, one card per account. It is never put on a
+    P&L line by guess, and never dropped from the P&L without a word."""
+    out: list[Finding] = []
+    for p in chart.pending:
+        code, name = p["code"], p["name"]
+        cands = list(_ACCOUNT_OPTIONS[p["family"]])
+        by_number = range_default(code, chart)
+        if by_number and by_number not in cands:
+            cands = cands[:2] + [by_number]
+        options = [(GROUP_LABEL[g], g, "") for g in cands[:3]]
+        options.append(("ไม่ใช่บัญชีกำไรขาดทุน", NOT_PL, "ไม่นับในงบกำไรขาดทุน"))
+        why = ("ชื่อบัญชีกับเลขบัญชีบอกคนละหมวด" if by_number and p["family"]
+               else "ทั้งเลขบัญชีและชื่อบัญชีไม่พอจะบอกได้ว่าอยู่หมวดไหน")
+        out.append(finding(
+            "account_group", "blocking", "preflight", "หมวดบัญชี",
+            f"บัญชี {code}" + (f" “{name}”" if _quotable(name) else "") + " ไม่อยู่ในผังบัญชีมาตรฐานของไทย "
+            f"และ{why}ในงบกำไรขาดทุน (ในไฟล์มี {fmt_int(p['rows'])} รายการ รวม {fmt_money(p['amount'])} บาท) "
+            "จะให้นับเป็นหมวดไหนครับ",
+            options, options[0][1],
+            evidence={"file": p["file"], "account": code, "name": name, "count": p["rows"],
+                      "amount": str(p["amount"]), "rows": p["sample"],
+                      "columns": ["แถว", "วันที่", "คำอธิบาย", "จำนวนเงิน"]},
+            subject=code, facts={"account": code, "name": name},
+        ))
+    return out
+
+
+def chart_assumptions(chart: Chart) -> list[dict]:
+    """Say how a chart outside the Thai standard was read, so the report shows it."""
+    if chart.style == "th":
+        return []
+    by_name = [(code, chart.groups[d]) for d, code in sorted(chart.codes.items())
+               if chart.why.get(d) == "name" and chart.groups.get(d)]
+    named = ", ".join(f"{c} {chart.names.get(c, '')}".strip() + f" ({GROUP_LABEL[g]})" for c, g in by_name[:6])
+    text = ("ผังบัญชีในไฟล์ไม่ใช่ผังมาตรฐานของไทย ผมจัดหมวดตามเลขหลักแรก (4 รายได้ 5 ต้นทุนขาย "
+            "6 ค่าใช้จ่ายในการขายและบริหาร) และชื่อบัญชี" if chart.style == "extended"
+            else "บางบัญชีไม่อยู่ในผังบัญชีมาตรฐานของไทย ผมจัดหมวดบัญชีเหล่านั้นตามชื่อบัญชี")
+    if named:
+        text += f" โดยใช้ชื่อบัญชีกับ {named}"
+    return [{"code": "chart_of_accounts", "source": "rule", "value": chart.style, "text": text}]
+
+
 def _dc_header(pf: ParsedFile) -> str:
     hm = pf.header
     f = "dc_indicator" if pf.dc_mode == "indicator" else "amount"
@@ -227,7 +366,7 @@ def remembered_convention(pf: ParsedFile, defaults: dict):
     return conv.get(_dc_header(pf))
 
 
-def check_dc(pf: ParsedFile, defaults: dict, answers: dict) -> list[Finding]:
+def check_dc(pf: ParsedFile, defaults: dict, answers: dict, chart: Chart | None = None) -> list[Finding]:
     if pf.dc_mode not in ("indicator", "signed") or pf.doc_type == "pl":
         return []
     if answers.get("ambiguous_debit_credit") is not None or remembered_convention(pf, defaults) is not None:
@@ -238,7 +377,8 @@ def check_dc(pf: ParsedFile, defaults: dict, answers: dict) -> list[Finding]:
     def revenue_under(conv) -> Decimal:
         trial = copy.deepcopy(pf)
         apply_convention(trial, conv)
-        return sum((r.credit - r.debit for r in trial.rows if r.account_code.replace("-", "").startswith("41")), Decimal(0))
+        return sum((r.credit - r.debit for r in trial.rows if group_of(r.account_code, chart) == "revenue"),
+                   Decimal(0))
 
     if pf.dc_mode == "indicator":
         guess = indicator_guess(pf.indicator_values) or {v: ("debit" if i == 0 else "credit")
@@ -401,6 +541,8 @@ def run(files: list[ParsedFile], *, message: str = "", defaults: dict | None = N
     defaults = defaults or {}
     answers = answers or {}
     today = today or _dt.date.today()
+    # Dates first: which month a row is in decides the roles and the period.
+    apply_date_orders(files, answers, defaults)
     roles = assign_roles(files, answers)
     findings: list[Finding] = []
     assumptions: list[dict] = []
@@ -415,11 +557,19 @@ def run(files: list[ParsedFile], *, message: str = "", defaults: dict | None = N
             f0, a0 = check_unreadable_dates(files, roles, answers)
             findings += f0
             assumptions += a0
-            findings += check_dc(primary, defaults, answers)
+            fd, ad = check_date_order(files, roles, answers, defaults, message, today)
+            findings += fd
+            assumptions += ad
+            chart = chart_for([f for f in files if roles.get(f.name) in ("primary", "prior")], answers, files)
+            findings += check_accounts(chart)
+            assumptions += chart_assumptions(chart)
+            findings += check_dc(primary, defaults, answers, chart)
             period, source = resolve_period(primary, message, answers, today)
-            f2, a2 = check_period(primary, period, source, answers, defaults)
-            findings += f2
-            assumptions += a2
+            if not any(f.code == "date_order" and f.subject == primary.name for f in fd):
+                # the months are only known once the date order is
+                f2, a2 = check_period(primary, period, source, answers, defaults)
+                findings += f2
+                assumptions += a2
             f3, a3 = check_currency(primary, defaults.get("currency", "THB"), answers, defaults)
             findings += f3
             assumptions += a3

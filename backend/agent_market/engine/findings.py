@@ -21,6 +21,8 @@ SEVERITIES = ("blocking", "cosmetic")
 MOMENTS = ("install", "preflight", "postcompute")
 KINDS = ("question", "request_files")
 MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
+                  # one per file (date column) and one per account (subject = the code)
+                  "date_order", "account_group",
                   # AM2 E2 cards: one per document and field / check (subject = "<doc>:<field>")
                   "e2_field_missing", "e2_low_confidence", "e2_check_failed", "e2_source_conflict",
                   "e2_duplicate", "e2_copy", "e2_doc_type", "e2_page_quality", "e2_typed_invalid")

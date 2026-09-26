@@ -23,6 +23,7 @@ def run(files: list[ParsedFile], roles: dict, period: str, computed: dict, *, an
     prep = prepare(files, roles, period, answers, defaults)
     current = prep["current"]
     primary = prep["primary"]
+    chart = prep["chart"]
     out: list[Finding] = []
 
     # unbalanced — GL and TB only; a P&L export has no double entry to check.
@@ -51,7 +52,7 @@ def run(files: list[ParsedFile], roles: dict, period: str, computed: dict, *, an
 
     # duplicate_suspect
     if "duplicate_suspect" not in answers:
-        groups = duplicate_docs(current)
+        groups = duplicate_docs(current, chart)
         if groups:
             n_rows = sum(len(g["rows"]) for g in groups)
             g0 = groups[0]
@@ -83,7 +84,7 @@ def run(files: list[ParsedFile], roles: dict, period: str, computed: dict, *, an
         for a in computed["accounts"]:
             if a["prior"] is not None:
                 prior_by[a["code"]] = a["prior"]
-        flagged = large_entries(current, expense_total(current), prior_by)
+        flagged = large_entries(current, expense_total(current, chart), prior_by, chart)
         if flagged:
             f0 = flagged[0]
             amt = Decimal(f0["amount"])

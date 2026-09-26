@@ -23,10 +23,11 @@ from ....engine.thai import (
     fmt_millions, fmt_money, fmt_pct, period_bounds, period_label_th, period_short_th, prev_period,
 )
 from .rules import (
-    PL_GROUPS, RULES_VERSION, STANDARD_NAMES, duplicate_docs, expense_total, group_of, is_pl, large_entries,
+    PL_GROUPS, RULES_VERSION, STANDARD_NAMES, Chart, apply_date_orders, chart_for, duplicate_docs, expense_total,
+    group_of, is_pl, large_entries,
 )
 
-SCRIPT_VERSION = "metrics.py@1.0.0"
+SCRIPT_VERSION = "metrics.py@1.1.0"
 FORMAT = "am.computed.v1"
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -127,14 +128,27 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
     excluded: list[dict] = []
     notes: list[dict] = []
 
-    for pf in files:
-        if roles.get(pf.name) in ("primary", "prior"):
-            apply_convention(pf, _convention_for(pf, answers, defaults))
-            if pf.doc_type in ("tb", "pl"):
-                target = period if roles[pf.name] == "primary" else (pf.period_hint or prev_period(period))
-                account_level_rows(pf, period_bounds(target)[1])
+    apply_date_orders(files, answers, defaults)
+    ledgers = [f for f in files if roles.get(f.name) in ("primary", "prior")]
+    chart = chart_for(ledgers, answers, files)
+
+    def income(code: str) -> bool:
+        return chart.group(code) in ("revenue", "other_income")
+
+    for pf in ledgers:
+        apply_convention(pf, _convention_for(pf, answers, defaults))
+        if pf.doc_type in ("tb", "pl"):
+            target = period if roles[pf.name] == "primary" else (pf.period_hint or prev_period(period))
+            account_level_rows(pf, period_bounds(target)[1], income)
 
     rows = list(primary.rows)
+    if chart.pending:
+        # Only reached when compute runs before the account_group questions
+        # were answered: those accounts stay out of the P&L, and the report says so.
+        codes = {p["code"] for p in chart.pending}
+        excluded.append({"code": "account_group",
+                         "reason": f"บัญชีที่ยังไม่รู้หมวดในงบกำไรขาดทุน ({', '.join(sorted(codes))})",
+                         "rows": [r.row for r in rows if r.account_code in codes]})
     base = defaults.get("currency", "THB")
     cur_ans = answers.get("currency_mixed") or (defaults.get("answers") or {}).get("currency_mixed")
     if cur_ans == "exclude_foreign":
@@ -169,7 +183,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
     dup_ans = answers.get("duplicate_suspect")
     if dup_ans == "exclude":
         drop = set()
-        for g in duplicate_docs(current):
+        for g in duplicate_docs(current, chart):
             drop.update(g["rows"])
         if drop:
             excluded.append({"code": "duplicate_suspect", "reason": f"รายการซ้ำ ({len(drop)} แถว)", "rows": sorted(drop)})
@@ -177,7 +191,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
 
     mat_ans = answers.get("materiality_exceeded")
     if mat_ans == "exclude":
-        flagged = large_entries(current, expense_total(current))
+        flagged = large_entries(current, expense_total(current, chart), chart=chart)
         docs = {f["doc"] for f in flagged if f["doc"]}
         rows_drop = {f["row"] for f in flagged}
         drop = {r.row for r in current if (r.doc_no and r.doc_no in docs) or r.row in rows_drop}
@@ -207,7 +221,7 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
     budget_file = next((by_name[n] for n, r in roles.items() if r == "budget"), None)
     return {"primary": primary, "current": current, "history": history, "prior_rows": prior_rows,
             "prior_period": prior_period if prior_rows else None, "prior_file": prior_file,
-            "budget_file": budget_file, "excluded": excluded, "notes": notes}
+            "budget_file": budget_file, "excluded": excluded, "notes": notes, "chart": chart}
 
 
 # ── compute ───────────────────────────────────────────────────────────────
@@ -219,9 +233,9 @@ def _acct_sum(rows: list[LedgerRow]) -> dict[str, Decimal]:
     return out
 
 
-def _natural(code: str, net_debit: Decimal) -> Decimal:
+def _natural(code: str, net_debit: Decimal, chart: Chart | None = None) -> Decimal:
     """Net debit → the amount as a reader expects it (income positive, expense positive)."""
-    g = group_of(code)
+    g = group_of(code, chart)
     sign = next((side for key, _, _, side in PL_GROUPS if key == g), -1)
     return q2(-net_debit) if sign == 1 else q2(net_debit)
 
@@ -245,6 +259,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     defaults = defaults or {}
     prep = prepare(files, roles, period, answers, defaults)
     cur_rows = prep["current"]
+    chart: Chart = prep["chart"]
     prior_rows = prep["prior_rows"]
     cites = Citations()
 
@@ -276,7 +291,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
     budget_by_digits = {account_digits(k): v for k, v in budget.items()}
 
     accounts = []
-    codes = sorted({c for c in list(cur_acc) + list(pri_acc) + list(budget) if is_pl(c)},
+    codes = sorted({c for c in list(cur_acc) + list(pri_acc) + list(budget) if is_pl(c, chart)},
                    key=lambda c: account_digits(c))
     seen_digits = set()
     for code in codes:
@@ -284,14 +299,14 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
         if dg in seen_digits:
             continue
         seen_digits.add(dg)
-        cur = _natural(code, cur_acc.get(code, ZERO))
-        pri = _natural(code, pri_acc.get(code, ZERO)) if has_prior else None
+        cur = _natural(code, cur_acc.get(code, ZERO), chart)
+        pri = _natural(code, pri_acc.get(code, ZERO), chart) if has_prior else None
         bud = budget_by_digits.get(dg) if has_budget else None
         cid = cites.add(f"{code} {acct_name(code)} งวดนี้", cur, rows_by_acct.get(code, []),
                         "ผลรวม เดบิต − เครดิต ของบัญชีนี้ในงวด (รายได้แสดงเป็นบวก)")
         pid = cites.add(f"{code} งวดก่อน", pri, prior_by_acct.get(code, []), "ผลรวมของบัญชีนี้ในงวดก่อน") if has_prior else None
         accounts.append({
-            "code": code, "name": acct_name(code), "group": group_of(code),
+            "code": code, "name": acct_name(code), "group": group_of(code, chart),
             "current": s(cur), "prior": s(pri), "budget": s(q2(bud)) if bud is not None else None,
             "var_prior": s(q2(cur - pri)) if pri is not None else None,
             "var_prior_pct": s(pct(cur - pri, pri)) if pri is not None else None,
@@ -407,9 +422,10 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
              "revenue": [], "total_expenses": [], "net_profit": []}
     for m in months_sorted:
         acc = _acct_sum(series_rows[m])
-        rev = sum((_natural(c, v) for c, v in acc.items() if group_of(c) == "revenue"), ZERO)
-        oth = sum((_natural(c, v) for c, v in acc.items() if group_of(c) == "other_income"), ZERO)
-        exp = sum((_natural(c, v) for c, v in acc.items() if group_of(c) not in (None, "revenue", "other_income")), ZERO)
+        rev = sum((_natural(c, v, chart) for c, v in acc.items() if group_of(c, chart) == "revenue"), ZERO)
+        oth = sum((_natural(c, v, chart) for c, v in acc.items() if group_of(c, chart) == "other_income"), ZERO)
+        exp = sum((_natural(c, v, chart) for c, v in acc.items()
+                   if group_of(c, chart) not in (None, "revenue", "other_income")), ZERO)
         trend["revenue"].append(s(q2(rev)))
         trend["total_expenses"].append(s(q2(exp)))
         trend["net_profit"].append(s(q2(rev + oth - exp)))
@@ -458,7 +474,7 @@ def compute(files: list[ParsedFile], roles: dict, period: str, answers: dict | N
                                    "detail": f"ยอด {fmt_money(cur, 0)}", "account": a["code"], "amount": a["current"],
                                    "rows": [r.row for r in rows_by_acct.get(a["code"], [])][:30], "cite": a["cite"]})
     if answers.get("materiality_exceeded") == "keep":
-        for f in large_entries(cur_rows, te_c or ZERO):
+        for f in large_entries(cur_rows, te_c or ZERO, chart=chart):
             exceptions.append({"code": "large_single_entry",
                                "title": f"รายการเดียว {fmt_money(Decimal(f['amount']), 0)} ในบัญชี {f['account']}",
                                "detail": f"คุณยืนยันว่าถูกต้อง · สูงกว่ารายการปกติของบัญชีนี้ {(Decimal(f['amount']) / Decimal(f['median'])).quantize(Decimal('1'))} เท่า",

@@ -12,9 +12,11 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 
-from .headers import HeaderMap, find_header, header_by_profile, infer_missing, map_headers, norm
+from .headers import (
+    HeaderMap, decide_date_order, find_header, header_by_profile, infer_missing, map_headers, norm,
+)
 from .tabular import Sheet, Workbook, col_letter
-from .thai import find_period_in_text, parse_date
+from .thai import date_text_kind, find_period_in_text, parse_date
 
 ZERO = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -69,6 +71,9 @@ class LedgerRow:
     doc_no: str = ""
     amount_cols: str = ""    # e.g. 'G:H' — where the money sits on this row
     raw_indicator: str = ""  # D/C indicator text, if the export used one
+    # the date was typed with day and month both 1-12 in a column whose order
+    # nothing decided: an answer may read it the other way round
+    date_swappable: bool = False
 
     @property
     def period(self) -> str | None:
@@ -109,6 +114,9 @@ class ParsedFile:
     unreadable_date_rows: int = 0
     unreadable_date_samples: list = field(default_factory=list)   # [row, text, account, amount]
     unreadable_date_amount: Decimal = ZERO
+    # DD/MM or MM/DD of the date column (headers.DateOrder.to_dict()); 'applied'
+    # is the order the rows' dates are in now
+    date_order: dict | None = None
 
     def summary(self) -> dict:
         return {
@@ -214,6 +222,16 @@ def _parse_rows(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
     else:
         pf.dc_mode = "signed"
         cols = f"{col_letter(f['amount'])}"
+    order, order_source = "dmy", "none"
+    if "date" in f:
+        body = sheet.rows[hm.header_row + 1:]
+        ind_col = f.get("dc_indicator") if pf.dc_mode == "indicator" else None
+        ind_values = sorted({str(_cell(r, ind_col)).strip() for r in body if _cell(r, ind_col) not in (None, "")}) \
+            if ind_col is not None else []
+        do = decide_date_order([_cell(r, f["date"]) for r in body], hm.header_of("date") or "",
+                               hm.headers, pf.name, ind_values[:8])
+        pf.date_order = do.to_dict()
+        order, order_source = do.order or "dmy", do.source
     indicators: dict[str, int] = {}
     for i in range(hm.header_row + 1, len(sheet.rows)):
         row = sheet.rows[i]
@@ -234,7 +252,13 @@ def _parse_rows(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
             pf.skipped_rows += 1
             continue
         raw_date = _cell(row, f.get("date"))
-        d = parse_date(raw_date)
+        d = parse_date(raw_date, order)
+        kind = date_text_kind(raw_date)
+        swappable = bool(kind and kind["kind"] == "ambiguous" and order_source == "undecided")
+        if order_source == "conflict" and kind and kind["kind"] == "ambiguous" and not kind["buddhist"]:
+            # The column proves both orders; a date whose day and month are
+            # both 1-12 could be either, so it is not read — it is asked about.
+            d = None
         if "date" in f and d is None:
             # A posting without a date is a total/label line in every export we
             # saw — unless it carries money: then the date is in a format the
@@ -283,7 +307,7 @@ def _parse_rows(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
             debit=debit, credit=credit, currency=cur,
             cost_center=str(_cell(row, f.get("cost_center")) or "").strip(),
             doc_no=str(_cell(row, f.get("doc_no")) or "").strip(),
-            amount_cols=cols, raw_indicator=indicator,
+            amount_cols=cols, raw_indicator=indicator, date_swappable=swappable,
         ))
         pf.data_rows += 1
     pf.indicator_values = sorted(indicators, key=lambda k: -indicators[k])
@@ -319,14 +343,36 @@ def indicator_guess(values: list[str]) -> dict[str, str] | None:
     Returned mapping: indicator text → 'debit' | 'credit'. A guess is still
     confirmed by a question unless the install already remembers it.
     """
-    up = [v.strip().upper() for v in values if v.strip()]
+    def key(v: str) -> str:
+        return v.strip().upper().rstrip(".")
+
+    up = [key(v) for v in values if v.strip()]
     pairs = [({"D", "DR", "DEBIT", "เดบิต", "ด"}, {"C", "CR", "CREDIT", "เครดิต", "ค"}),
-             ({"S"}, {"H"}),  # SAP Soll/Haben
+             ({"S", "SOLL"}, {"H", "HABEN"}),  # SAP Soll/Haben
              ({"1"}, {"2"}), ({"+"}, {"-"})]
     for deb, cre in pairs:
         if set(up) <= (deb | cre) and set(up) & deb and set(up) & cre:
-            return {v: ("debit" if v.strip().upper() in deb else "credit") for v in values if v.strip()}
+            return {v: ("debit" if key(v) in deb else "credit") for v in values if v.strip()}
     return None
+
+
+def apply_date_order(pf: ParsedFile, order: str | None) -> int:
+    """Read the ambiguous dates of a column whose order nothing decided as
+    `order` ('dmy' | 'mdy'). Only rows typed with day and month both 1-12
+    move; real date cells, 'yyyy-mm-dd' and Thai month names never do.
+    Idempotent — `date_order['applied']` says which order the rows hold.
+    Returns the number of rows whose date changed."""
+    info = pf.date_order
+    if not info or order not in ("dmy", "mdy") or info.get("source") != "undecided" \
+            or info.get("applied") == order:
+        return 0
+    n = 0
+    for r in pf.rows:
+        if r.date_swappable and r.date is not None and r.date.day != r.date.month:
+            r.date = _dt.date(r.date.year, r.date.day, r.date.month)
+            n += 1
+    info["applied"] = order
+    return n
 
 
 def apply_convention(pf: ParsedFile, convention: dict | str | None) -> int:
@@ -353,8 +399,12 @@ def apply_convention(pf: ParsedFile, convention: dict | str | None) -> int:
     return unresolved
 
 
-def account_level_rows(pf: ParsedFile, period_end: _dt.date) -> None:
-    """TB / P&L rows carry no date: they are the period's balances."""
+def account_level_rows(pf: ParsedFile, period_end: _dt.date, income=None) -> None:
+    """TB / P&L rows carry no date: they are the period's balances.
+
+    income(code) says which accounts are income in the file's chart (the
+    package's chart of accounts); without it, a code starting with 4 is.
+    """
     for r in pf.rows:
         if r.date is None:
             r.date = period_end
@@ -362,8 +412,8 @@ def account_level_rows(pf: ParsedFile, period_end: _dt.date) -> None:
         # A P&L export lists positive amounts for both income and expense lines.
         for r in pf.rows:
             amt = r.debit + r.credit
-            d = account_digits(r.account_code)
-            if d.startswith("4"):
+            is_income = income(r.account_code) if income else account_digits(r.account_code).startswith("4")
+            if is_income:
                 r.debit, r.credit = ZERO, amt
             else:
                 r.debit, r.credit = amt, ZERO

@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass, field
 
 from .tabular import Sheet, col_letter
-from .thai import month_from_word, parse_date
+from .thai import date_order_evidence, looks_like_date, month_from_word
 
 FIELDS = (
     "date", "doc_no", "account_code", "account_name", "description",
@@ -67,8 +67,11 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "amount": ("จำนวนเงิน", "ยอดเงิน", "amount", "amountinlc", "amountlc", "localamount", "value",
                "จำนวน", "ยอด", "amountinlocalcurrency"),
     "dc_indicator": ("dr/cr", "d/c", "drcr", "dc", "dcind", "dcindicator", "debitcreditindicator",
-                     "เดบิต/เครดิต", "ด/ค", "ดค", "ประเภทรายการ", "sign"),
-    "currency": ("สกุลเงิน", "currency", "curr", "ccy", "currencycode"),
+                     "เดบิต/เครดิต", "ด/ค", "ดค", "ประเภทรายการ", "sign",
+                     # SAP: 'Debit/Credit Ind.' (FBL3N), the S/H (Soll/Haben) indicator
+                     "debitcreditind", "drcrind", "drcrindicator", "s/h", "shind", "shindicator",
+                     "soll/haben", "debitcreditcode"),
+    "currency": ("สกุลเงิน", "currency", "curr", "ccy", "currencycode", "localcurrency", "lcurr"),
     "cost_center": ("ศูนย์ต้นทุน", "แผนก", "costcenter", "costcentre", "cc", "dept", "department",
                     "หน่วยงาน", "profitcenter"),
     "budget": ("งบประมาณ", "budget", "budgetamount", "ยอดงบประมาณ"),
@@ -144,7 +147,7 @@ def find_header(sheet: Sheet, install_map: dict[str, str] | None = None, scan: i
 
 
 def _looks_like_data(texts: list[str]) -> bool:
-    return any(parse_date(t) is not None or _CODE_RE.match(t) for t in texts if t)
+    return any(looks_like_date(t) or _CODE_RE.match(t) for t in texts if t)
 
 
 def _with_subheader(sheet: Sheet, header_row: int) -> tuple[int, list[str]]:
@@ -222,7 +225,7 @@ def profile_column(sheet: Sheet, header_row: int, col: int, limit: int = 400) ->
     vals = [r[col] if col < len(r) else None for r in sheet.rows[header_row + 1: header_row + 1 + limit]]
     vals = [v for v in vals if v is not None and str(v).strip() != ""]
     n = len(vals) or 1
-    dates = sum(1 for v in vals if parse_date(v) is not None and not (isinstance(v, (int, float)) and v < 20000))
+    dates = sum(1 for v in vals if looks_like_date(v) and not (isinstance(v, (int, float)) and v < 20000))
     nums = sum(1 for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool))
     codes = sum(1 for v in vals if _CODE_RE.match(str(v).strip()))
     short = sum(1 for v in vals if isinstance(v, str) and len(v.strip()) <= 2)
@@ -254,7 +257,7 @@ def header_by_profile(sheet: Sheet, scan: int = 30) -> int | None:
         typed = 0
         for r in below:
             if any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in r) or \
-               any(parse_date(v) is not None for v in r if isinstance(v, str)):
+               any(looks_like_date(v) for v in r if isinstance(v, str)):
                 typed += 1
         if typed >= max(3, len(below) // 2):
             return i
@@ -315,6 +318,82 @@ def infer_missing(sheet: Sheet, hm: HeaderMap) -> None:
                 best = (avg, c)
         if best:
             take("description", best[1])
+
+
+# ── the order of a date column: DD/MM or MM/DD ─────────────────────────────
+
+_THAI_RE = re.compile(f"[{chr(0x0E00)}-{chr(0x0E7F)}]")  # the Thai Unicode block
+# English date headers of ledger exports.
+_EN_DATE_HEADERS = frozenset(norm(h) for h in (
+    "Date", "Posting Date", "Document Date", "Doc. Date", "Pstng Date", "Entry Date", "Transaction Date",
+    "Trans Date", "Value Date", "Baseline Date"))
+# Header texts that SAP line-item reports (FBL3N, FAGLL03, FBL1N/5N) print.
+_SAP_HEADERS = frozenset(norm(h) for h in (
+    "Company Code", "CoCd", "Debit/Credit Ind.", "D/C Ind.", "S/H Ind.", "Amount in Local Currency",
+    "Amount in LC", "Amount in Doc. Curr.", "LCurr", "Posting Key", "Pstng Date"))
+_SAP_FILE_RE = re.compile(r"(?<![a-z])(sap|fbl3n|fagll03|fbl1n|fbl5n|s4hana)(?![a-z])")
+
+
+@dataclass
+class DateOrder:
+    """How one date column writes its dates.
+
+    order: 'dmy' | 'mdy', or None when nothing decides it (the check asks).
+    source: 'values' — the column's own dates decide (a first number over 12
+    is a day, a second number over 12 is a day, a Buddhist-era year is Thai
+    and day-first); 'none' — no text date needs an order; 'conflict' — the
+    column proves both orders (rows that fit neither reading are counted as
+    unreadable, never guessed); 'thai' / 'sap' — every date is ambiguous and
+    the export decides (Thai headers are day-first; SAP writes MM/DD/YYYY
+    with '/' or '-' and DD.MM.YYYY with '.' — it has no DD/MM/YYYY format);
+    'undecided' — ambiguous and nothing decides.
+    """
+    order: str | None
+    source: str
+    evidence: dict
+    column: str = ""
+
+    def to_dict(self) -> dict:
+        return {"column": self.column, "order": self.order, "source": self.source,
+                "applied": self.order or "dmy",
+                "evidence": {k: self.evidence[k] for k in ("day_first", "month_first", "ambiguous", "buddhist",
+                                                            "invalid", "separators", "samples")}}
+
+
+def is_sap_export(headers: list[str], file_name: str = "", indicator_values: list[str] | None = None) -> bool:
+    keys = {norm(h) for h in headers if h}
+    ind = {str(v).strip().upper() for v in (indicator_values or []) if str(v).strip()}
+    return bool(keys & _SAP_HEADERS) or bool(_SAP_FILE_RE.search((file_name or "").lower())) \
+        or bool(ind and ind <= {"S", "H"})
+
+
+def decide_date_order(values, header: str, headers: list[str], file_name: str = "",
+                      indicator_values: list[str] | None = None) -> DateOrder:
+    """DD/MM or MM/DD for one column, from its own values first.
+
+    Any first number over 12 makes MM/DD impossible; any second number over
+    12 makes DD/MM impossible. Only when every date is ambiguous (day and
+    month both 1-12) do the headers break the tie: Thai headers → DD/MM; an
+    English date header in an SAP export → SAP's own format for the
+    separator. Anything else stays undecided, and the check asks.
+    """
+    ev = date_order_evidence(values)
+    day_first = ev["day_first"] + ev["buddhist"]
+    month_first = ev["month_first"]
+    if not (day_first or month_first or ev["ambiguous"]):
+        return DateOrder("dmy", "none", ev, header)
+    if day_first and month_first:
+        return DateOrder("dmy", "conflict", ev, header)
+    if month_first:
+        return DateOrder("mdy", "values", ev, header)
+    if day_first:
+        return DateOrder("dmy", "values", ev, header)
+    if _THAI_RE.search(header or "") or any(_THAI_RE.search(h or "") for h in headers):
+        return DateOrder("dmy", "thai", ev, header)
+    seps = ev["separators"]
+    if norm(header) in _EN_DATE_HEADERS and len(seps) == 1 and is_sap_export(headers, file_name, indicator_values):
+        return DateOrder("dmy" if "." in seps else "mdy", "sap", ev, header)
+    return DateOrder(None, "undecided", ev, header)
 
 
 def candidates_for(field_name: str, sheet: Sheet, hm: HeaderMap, max_n: int = 4) -> list[dict]:
