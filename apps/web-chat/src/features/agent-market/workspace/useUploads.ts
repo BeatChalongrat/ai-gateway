@@ -8,9 +8,35 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { amApi, errorMessage, newClientId } from "../api";
 import { tAm } from "../i18n";
+import type { Manifest } from "../types";
 
 export const DEFAULT_ACCEPT = [".xlsx", ".xlsm", ".csv", ".pdf"];
 export const DEFAULT_MAX_MB = 20;
+
+/** The file types an agent takes: its inputs' accept lists, as the server
+ *  checks them (Manifest.UploadTypes: lower-cased, dot-prefixed, deduped);
+ *  DEFAULT_ACCEPT for an agent that declares none. */
+export function acceptFromManifest(manifest: Manifest | null | undefined): string[] {
+  const out: string[] = [];
+  for (const input of manifest?.inputs ?? []) {
+    for (const raw of input.accept ?? []) {
+      const a = String(raw).trim().toLowerCase();
+      if (a.startsWith(".") && !out.includes(a)) out.push(a);
+    }
+  }
+  return out.length ? out : DEFAULT_ACCEPT;
+}
+
+const IMAGE_EXTS = new Set([".jpg", ".jpeg", ".png"]);
+
+export function isImageName(name: string): boolean {
+  return IMAGE_EXTS.has(extOf(name));
+}
+
+/** A photo among the staged files (a refused one does not count: it is not attached). */
+export function hasImage(items: Pick<Staged, "name" | "status">[]): boolean {
+  return items.some((s) => s.status !== "error" && isImageName(s.name));
+}
 
 export interface Staged {
   localId: string;

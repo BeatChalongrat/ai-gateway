@@ -15,8 +15,8 @@ import type { AnswerBody, CardPayload, Question } from "../types";
 import { BTN_SECONDARY, cls, Pill, Spin } from "../ui";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { useWorkspace } from "./context";
-import { StagedChip } from "./FileChips";
-import { DEFAULT_ACCEPT, useUploads } from "./useUploads";
+import { PhotoNotice, StagedChip } from "./FileChips";
+import { DEFAULT_ACCEPT, hasImage, useUploads } from "./useUploads";
 
 export function RequestFilesCard({
   card,
@@ -181,6 +181,7 @@ function RequestSlot({ q, attempts, submit }: { q: Question; attempts: number; s
           ))}
         </div>
       ) : null}
+      {ws?.photoNotice && hasImage(uploads.items) ? <PhotoNotice text={ws.photoNotice} className="mt-2" /> : null}
 
       {phase === "sending" || phase === "sent" || phase === "answering" ? (
         <div role="status" className="mt-2 flex items-center gap-2 text-xs text-text-secondary">

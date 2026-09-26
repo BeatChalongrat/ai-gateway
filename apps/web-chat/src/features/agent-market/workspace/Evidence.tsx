@@ -7,6 +7,8 @@
 //   * everything else scalar-ish (file, count, debit_total, months{…},
 //     proposal{field: header}, values[…]) as a key/value list.
 // Collapsed by default behind "ดูตัวอย่าง N แถว" / "ดูหลักฐาน".
+// Evidence that names where a value was read (E2 cards: `document`, `page`,
+// `raw_text`) also gets EvidenceSource, one muted line that is always shown.
 
 import { useId, useState } from "react";
 import { ChevronDown } from "lucide-react";
@@ -22,6 +24,8 @@ interface Parsed {
 }
 
 const TABLE_KEYS = new Set(["rows", "columns", "sample_rows", "sample_columns"]);
+// Internal to an E2 card: a value's box on the page and the card that asked before.
+const HIDDEN_KEYS = new Set(["bbox", "answered_by"]);
 const MAX_ROWS = 50;
 
 function isRowArray(v: unknown): v is Row[] {
@@ -56,6 +60,7 @@ export function parseEvidence(evidence: unknown): Parsed {
   }
   for (const [key, value] of Object.entries(ev)) {
     if (out.table && TABLE_KEYS.has(key)) continue; // shown as the table
+    if (HIDDEN_KEYS.has(key)) continue;
     if (isRowArray(value)) continue; // a second table: not flattened into a line
     // Without a table, `rows` next to `columns` is a COUNT (a wrong-file
     // finding) and both read as plain facts.
@@ -65,9 +70,41 @@ export function parseEvidence(evidence: unknown): Parsed {
   return out;
 }
 
+const RAW_MAX = 80;
+
+/** File · page · “text read there”, from evidence with a page and/or raw_text; null otherwise. */
+export function sourceParts(evidence: unknown): { file: string; page: string; raw: string } | null {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return null;
+  const ev = evidence as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "");
+  const page = text(ev.page);
+  const raw = text(ev.raw_text).replace(/\s+/g, " ");
+  if (!page && !raw) return null;
+  return { file: text(ev.document) || text(ev.file), page, raw };
+}
+
+export function EvidenceSource({ evidence }: { evidence: unknown }) {
+  const t = useAmT();
+  const src = sourceParts(evidence);
+  if (!src) return null;
+  const raw = src.raw.length > RAW_MAX ? `${src.raw.slice(0, RAW_MAX - 1)}…` : src.raw;
+  const parts = [
+    src.file ? t("evidence.file", { name: src.file }) : "",
+    src.page ? t("evidence.page", { n: src.page }) : "",
+    raw ? t("evidence.raw", { text: raw }) : "",
+  ].filter(Boolean);
+  return (
+    <p className="mt-1 break-words text-xs text-text-muted" title={src.raw !== raw ? src.raw : undefined} data-testid="am-evidence-source">
+      {parts.join(t("common.sep"))}
+    </p>
+  );
+}
+
 const KNOWN_KEYS = new Set([
   "file", "sheet", "header_row", "count", "debit_total", "months", "proposal", "headers", "column", "values",
   "detected", "error", "currencies", "accounts", "sample", "columns", "rows",
+  // E2 cards (AM2)
+  "document", "page", "raw_text", "question", "check", "expected", "actual", "match", "other", "candidates",
 ]);
 
 export function Evidence({ evidence }: { evidence: unknown }) {

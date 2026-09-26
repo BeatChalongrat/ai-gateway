@@ -1,7 +1,8 @@
 "use client";
 
-// The five install steps. Each one saves what it collected as install
-// defaults before moving on; nothing here computes a number.
+// The install steps (which ones an agent gets: ./wizard.ts). Each one saves
+// what it collected as install defaults before moving on; nothing here
+// computes a number.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileSpreadsheet, Link2, Upload } from "lucide-react";
@@ -16,6 +17,8 @@ import { useAgentMarket } from "../useAgentMarket";
 import { WorkspaceContext, type WorkspaceCtx } from "../workspace/context";
 import { ThreadView } from "../workspace/ThreadView";
 import { useThread } from "../workspace/useThread";
+import { checkCompanyTax, CompanyTaxFields, draftFromDefaults, EMPTY_COMPANY_TAX, saveCompanyTax, type CompanyTaxDraft } from "./CompanyTax";
+import { asksCurrency } from "./wizard";
 
 export type PreviewState =
   | { status: "none" }
@@ -383,6 +386,84 @@ export function MappingStep({ installId, preview, onBack, onNext }: { installId:
   );
 }
 
+// ── company and tax ID (install question "company_tax") ───────────────
+
+export function CompanyTaxStep({ installId, onNext }: { installId: string; onNext: () => void }) {
+  const t = useAmT();
+  const [draft, setDraft] = useState<CompanyTaxDraft>(EMPTY_COMPANY_TAX);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // What was saved before (a reload, a step back) fills only the fields
+  // still empty; the organisation's theme can suggest the name, and a name
+  // saved for this install replaces that suggestion whichever answers first.
+  const suggested = useRef("");
+  useEffect(() => {
+    let alive = true;
+    amApi.defaults(installId).then(
+      (r) => {
+        if (!alive) return;
+        const saved = draftFromDefaults(r?.defaults);
+        setDraft((d) => ({
+          company: saved.company && (!d.company || d.company === suggested.current) ? saved.company : d.company,
+          taxId: d.taxId || saved.taxId,
+          head: d.branch ? d.head : saved.head,
+          branch: d.branch || saved.branch,
+        }));
+      },
+      () => {},
+    );
+    amApi.theme().then(
+      (r) => {
+        const name = r?.theme?.company ? String(r.theme.company) : "";
+        if (!alive || !name) return;
+        suggested.current = name;
+        setDraft((d) => (d.company ? d : { ...d, company: name }));
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [installId]);
+
+  const check = checkCompanyTax(draft);
+
+  const save = async () => {
+    if (!check.value) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveCompanyTax(installId, check.value);
+      onNext();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div data-testid="am-step-company-tax">
+      <StepHeader title={t("companyTax.title")} body={t("companyTax.body")} />
+      <div className="mt-4">
+        <CompanyTaxFields draft={draft} onChange={setDraft} disabled={saving} />
+      </div>
+      {error ? (
+        <div className="mt-3">
+          <ErrorPanel message={error} />
+        </div>
+      ) : null}
+      <Footer>
+        <button type="button" onClick={() => void save()} disabled={saving || !check.value} className={BTN_PRIMARY} data-testid="am-company-tax-save">
+          {saving ? <Spin size={14} /> : null}
+          <span>{saving ? t("common.saving") : t("common.next")}</span>
+        </button>
+      </Footer>
+    </div>
+  );
+}
+
 // ── 3 · document theme ─────────────────────────────────────────────────
 
 /** The document palettes (deliverables/theme.py): primary, accent, surface.
@@ -393,7 +474,18 @@ const SWATCHES: Record<string, [string, string, string]> = {
   charcoal: ["#24272E", "#D9642B", "#F4F4F5"],
 };
 
-export function ThemeStep({ installId, onBack, onNext }: { installId: string; onBack: () => void; onNext: () => void }) {
+export function ThemeStep({
+  installId,
+  askCompany = true,
+  onBack,
+  onNext,
+}: {
+  installId: string;
+  /** false when a company step already asked the name: not asked again, only carried onto the theme. */
+  askCompany?: boolean;
+  onBack: () => void;
+  onNext: () => void;
+}) {
   const t = useAmT();
   const [presets, setPresets] = useState<ThemePreset[] | null>(null);
   const [preset, setPreset] = useState("navy");
@@ -415,21 +507,22 @@ export function ThemeStep({ installId, onBack, onNext }: { installId: string; on
     amApi.defaults(installId).then(
       (r) => {
         const d = (r?.defaults ?? []).find((x) => x.key === "company");
-        if (alive && typeof d?.value === "string") setCompany((c) => c || (d.value as string));
+        // not asked here: the name the company step saved wins over the organisation's theme
+        if (alive && typeof d?.value === "string") setCompany((c) => (askCompany ? c || (d.value as string) : (d.value as string)));
       },
       () => {},
     );
     return () => {
       alive = false;
     };
-  }, [installId]);
+  }, [installId, askCompany]);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
       const name = company.trim();
-      if (name) await amApi.putDefault(installId, "company", name);
+      if (name && askCompany) await amApi.putDefault(installId, "company", name);
       await amApi.putTheme(name ? { id: preset, company: name } : { id: preset });
       await amApi.putDefault(installId, "theme", { id: preset });
       onNext();
@@ -442,18 +535,20 @@ export function ThemeStep({ installId, onBack, onNext }: { installId: string; on
 
   return (
     <div data-testid="am-step-theme">
-      <StepHeader title={t("theme.title")} body={t("theme.body")} />
-      <label className="mt-4 block text-sm">
-        <span className="text-text-secondary">{t("theme.company")}</span>
-        <input
-          value={company}
-          onChange={(e) => setCompany(e.target.value)}
-          maxLength={120}
-          placeholder={t("theme.companyPlaceholder")}
-          className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-        />
-      </label>
-      <fieldset className="mt-5">
+      <StepHeader title={t("theme.title")} body={askCompany ? t("theme.body") : t("theme.bodyNoCompany")} />
+      {askCompany ? (
+        <label className="mt-4 block text-sm">
+          <span className="text-text-secondary">{t("theme.company")}</span>
+          <input
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            maxLength={120}
+            placeholder={t("theme.companyPlaceholder")}
+            className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
+          />
+        </label>
+      ) : null}
+      <fieldset className={askCompany ? "mt-5" : "mt-4"}>
         <legend className="text-sm text-text-secondary">{t("theme.presets")}</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {(presets ?? []).map((p) => {
@@ -510,12 +605,14 @@ export const CURRENCIES = ["THB", "USD", "EUR", "JPY", "CNY", "SGD"];
 export function FormatsStep({ installId, manifest, onBack, onNext }: { installId: string; manifest: Manifest; onBack: () => void; onNext: () => void }) {
   const t = useAmT();
   const outputs = manifest.outputs ?? [];
+  // currency and materiality are the financial report's questions ("currency" in install.questions)
+  const withCurrency = asksCurrency(manifest);
   const [formats, setFormats] = useState<string[]>(() => outputs.filter((o) => o.default).map((o) => o.format));
   const [currency, setCurrency] = useState("THB");
   const [materiality, setMateriality] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const materialityOk = materiality.trim() === "" || /^\d+(\.\d+)?$/.test(materiality.trim());
+  const materialityOk = !withCurrency || materiality.trim() === "" || /^\d+(\.\d+)?$/.test(materiality.trim());
 
   const toggle = (f: string) => setFormats((cur) => (cur.includes(f) ? cur.filter((x) => x !== f) : [...cur, f]));
 
@@ -525,8 +622,10 @@ export function FormatsStep({ installId, manifest, onBack, onNext }: { installId
     try {
       const ordered = outputs.map((o) => o.format).filter((f) => formats.includes(f));
       await amApi.putDefault(installId, "formats", ordered);
-      await amApi.putDefault(installId, "currency", currency);
-      if (materiality.trim()) await amApi.putDefault(installId, "materiality", materiality.trim());
+      if (withCurrency) {
+        await amApi.putDefault(installId, "currency", currency);
+        if (materiality.trim()) await amApi.putDefault(installId, "materiality", materiality.trim());
+      }
       onNext();
     } catch (err) {
       setError(errorMessage(err));
@@ -550,34 +649,36 @@ export function FormatsStep({ installId, manifest, onBack, onNext }: { installId
         </div>
         {formats.length === 0 ? <p className="mt-2 text-xs text-status-warning">{t("formats.needOne")}</p> : null}
       </fieldset>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="text-text-secondary">{t("formats.currency")}</span>
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary"
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="text-text-secondary">{t("formats.materiality")}</span>
-          <input
-            inputMode="decimal"
-            value={materiality}
-            onChange={(e) => setMateriality(e.target.value.replace(/[,\s]/g, ""))}
-            placeholder={t("formats.materialityPlaceholder")}
-            aria-invalid={!materialityOk}
-            className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm tabular-nums text-text-primary placeholder:text-text-muted"
-          />
-          <span className="mt-1 block text-xs text-text-muted">{t("formats.materialityHint")}</span>
-        </label>
-      </div>
+      {withCurrency ? (
+        <div className="mt-5 grid gap-4 sm:grid-cols-2" data-testid="am-formats-currency">
+          <label className="block text-sm">
+            <span className="text-text-secondary">{t("formats.currency")}</span>
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="text-text-secondary">{t("formats.materiality")}</span>
+            <input
+              inputMode="decimal"
+              value={materiality}
+              onChange={(e) => setMateriality(e.target.value.replace(/[,\s]/g, ""))}
+              placeholder={t("formats.materialityPlaceholder")}
+              aria-invalid={!materialityOk}
+              className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm tabular-nums text-text-primary placeholder:text-text-muted"
+            />
+            <span className="mt-1 block text-xs text-text-muted">{t("formats.materialityHint")}</span>
+          </label>
+        </div>
+      ) : null}
       {error ? (
         <div className="mt-3">
           <ErrorPanel message={error} />

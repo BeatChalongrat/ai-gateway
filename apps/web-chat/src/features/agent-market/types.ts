@@ -36,6 +36,12 @@ export interface Manifest {
   permissions?: { default?: string; denied?: string[] };
   cannot?: string;
   limits?: { max_file_mb?: number; max_files?: number };
+  /** AM2: "rules" = the package's own summary, no model step (no UI). */
+  narrative?: string;
+  /** AM2: the install keeps a duplicate index of recorded documents (no UI). */
+  document_index?: { retention_days?: number } | null;
+  /** AM2: shown under the attached files when one of them is a photo. */
+  photo_notice?: string;
 }
 
 export interface CatalogAgent {
@@ -194,6 +200,16 @@ export interface FileRequest {
   accept?: string[];
 }
 
+export type InputKind = "money" | "tax_id" | "date" | "rate" | "text";
+
+/** AM2: a question that also takes a typed value (the card's own "something
+ *  else" box). The server records the typed words as {"typed": text} and
+ *  the package that asked checks them again. */
+export interface QuestionInput {
+  kind: InputKind | string;
+  hint?: string;
+}
+
 export interface Question {
   key: string;
   code: string;
@@ -207,6 +223,7 @@ export interface Question {
   evidence?: unknown;
   rememberable?: boolean;
   request?: FileRequest[] | null;
+  input?: QuestionInput | null;
 }
 
 export interface AnswerRecord {

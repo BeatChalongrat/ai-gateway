@@ -14,6 +14,8 @@ export interface WorkspaceCtx {
   /** Accepted upload types and size for this agent. */
   accept?: string[];
   maxMb?: number;
+  /** The agent's note on photos (manifest photo_notice). */
+  photoNotice?: string;
   /** A card's own drop slot took the files of the drop now in flight, so
    *  the workspace-wide drop zone must not stage them in the composer too. */
   claimDrop?: () => void;

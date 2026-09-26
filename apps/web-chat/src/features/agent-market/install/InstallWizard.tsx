@@ -7,7 +7,9 @@
 // a double mount or a second tab of the same wizard lands on the SAME install
 // instead of creating another. Every later step writes install defaults
 // (PUT /installs/{id}/defaults/{key}); the last one runs the self-test on the
-// bundled sample data and shows its real files.
+// bundled sample data and shows its real files. Which steps there are comes
+// from the manifest's install.questions (./wizard.ts): the financial report
+// keeps its five, the invoice agent asks company details instead of a source.
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -21,9 +23,11 @@ import { BackLink, BTN_PRIMARY, BTN_SECONDARY, Card, cls, ErrorPanel, FeatureGat
 import { notifyInstallsChanged } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
 import { AsksPanel, PreviewPanel } from "./panels";
-import { FormatsStep, MappingStep, SelfTestStep, SourceStep, ThemeStep, type PreviewState } from "./steps";
+import { CompanyTaxStep, FormatsStep, MappingStep, SelfTestStep, SourceStep, ThemeStep, type PreviewState } from "./steps";
+import { installSteps, STEP_LABEL, themeAsksCompany, type StepId } from "./wizard";
 
-const STEPS = ["install.step1", "install.step2", "install.step3", "install.step4", "install.step5"] as const;
+// The most steps any agent has (the stored step is clamped to the agent's own list).
+const MAX_STEPS = 6;
 
 // One POST per idempotency key per page, even under StrictMode's double
 // mount (two concurrent inserts of one key would race the unique index).
@@ -94,7 +98,7 @@ function Wizard({ slug }: { slug: string }) {
   const [step, setStepState] = useState(() => {
     try {
       const n = Number(session()?.getItem(stepName(slug)));
-      return Number.isInteger(n) && n >= 0 && n < STEPS.length ? n : 0;
+      return Number.isInteger(n) && n >= 0 && n < MAX_STEPS ? n : 0;
     } catch {
       return 0;
     }
@@ -159,6 +163,10 @@ function Wizard({ slug }: { slug: string }) {
 
   const manifest: Manifest = item?.manifest ?? {};
   const name = item?.name ?? "";
+  const steps = installSteps(manifest);
+  const at = Math.min(step, steps.length - 1);
+  const current = steps[at]!;
+  const indexOf = (id: StepId) => steps.indexOf(id);
 
   if (boot.phase === "loading" && !item) return <PageSkeleton />;
 
@@ -213,7 +221,7 @@ function Wizard({ slug }: { slug: string }) {
         {item ? <span className="text-xs text-text-muted">{t("install.meta", { v: item.version })}</span> : null}
       </div>
 
-      <Stepper step={step} onJump={(n) => n < step && setStep(n)} />
+      <Stepper labels={steps.map((s) => t(STEP_LABEL[s]))} step={at} onJump={(n) => n < at && setStep(n)} />
 
       {!installId ? (
         <div role="status" className="mt-6 flex items-center gap-2 text-sm text-text-secondary">
@@ -223,20 +231,28 @@ function Wizard({ slug }: { slug: string }) {
       ) : (
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <Card className="min-w-0 px-4 py-5 sm:px-5">
-            {step === 0 ? (
-              <SourceStep installId={installId} preview={preview} setPreview={setPreview} onNext={() => setStep(1)} onSkip={() => setStep(2)} />
-            ) : step === 1 ? (
-              <MappingStep installId={installId} preview={preview} onBack={() => setStep(0)} onNext={() => setStep(2)} />
-            ) : step === 2 ? (
-              <ThemeStep installId={installId} onBack={() => setStep(1)} onNext={() => setStep(3)} />
-            ) : step === 3 ? (
-              <FormatsStep installId={installId} manifest={manifest} onBack={() => setStep(2)} onNext={() => setStep(4)} />
+            {current === "source" ? (
+              <SourceStep
+                installId={installId}
+                preview={preview}
+                setPreview={setPreview}
+                onNext={() => setStep(indexOf("mapping"))}
+                onSkip={() => setStep(indexOf("mapping") + 1)}
+              />
+            ) : current === "mapping" ? (
+              <MappingStep installId={installId} preview={preview} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
+            ) : current === "company_tax" ? (
+              <CompanyTaxStep installId={installId} onNext={() => setStep(at + 1)} />
+            ) : current === "theme" ? (
+              <ThemeStep installId={installId} askCompany={themeAsksCompany(manifest)} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
+            ) : current === "formats" ? (
+              <FormatsStep installId={installId} manifest={manifest} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
             ) : (
-              <SelfTestStep installId={installId} manifest={manifest} onBack={() => setStep(3)} onFinish={finish} />
+              <SelfTestStep installId={installId} manifest={manifest} onBack={() => setStep(at - 1)} onFinish={finish} />
             )}
           </Card>
           <div className="flex min-w-0 flex-col gap-4">
-            {step <= 1 ? <PreviewPanel preview={preview} /> : null}
+            {current === "source" || current === "mapping" ? <PreviewPanel preview={preview} /> : null}
             <AsksPanel manifest={manifest} />
           </div>
         </div>
@@ -245,12 +261,11 @@ function Wizard({ slug }: { slug: string }) {
   );
 }
 
-function Stepper({ step, onJump }: { step: number; onJump: (n: number) => void }) {
+function Stepper({ labels, step, onJump }: { labels: string[]; step: number; onJump: (n: number) => void }) {
   const t = useAmT();
-  const labels = STEPS.map((k) => t(k));
   return (
     <nav aria-label={t("install.steps")} className="mt-5">
-      <p className="text-xs text-text-muted sm:hidden">{`${t("install.stepOf", { n: String(step + 1), total: String(STEPS.length) })} · ${labels[step]}`}</p>
+      <p className="text-xs text-text-muted sm:hidden">{`${t("install.stepOf", { n: String(step + 1), total: String(labels.length) })} · ${labels[step]}`}</p>
       <ol className="mt-2 flex items-center gap-2 sm:mt-0">
         {labels.map((label, i) => {
           const done = i < step;

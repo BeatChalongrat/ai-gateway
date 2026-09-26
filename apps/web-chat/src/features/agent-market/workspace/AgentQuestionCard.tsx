@@ -8,6 +8,11 @@
 // counter and the note. Any other status renders WITHOUT a single clickable
 // answer: interpreting (greyed), answered/defaulted (a compact summary with
 // how each answer was given), superseded/cancelled (one muted line).
+//
+// AM2: a card with a question that takes a typed value (`input`) renders
+// TypedQuestionCard instead — the same card whose "something else" box shows
+// the hint and checks the value before sending. Evidence that names a page
+// or the text read there (E2 cards) also gets a one-line source.
 
 import { useEffect, useState } from "react";
 import { CircleCheck, MessageCircleQuestion } from "lucide-react";
@@ -18,10 +23,12 @@ import type { QuestionAnswerPayload } from "@/lib/types";
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { toAnswerBody, toPendingQuestion } from "../questions";
+import { questionInput } from "../typed";
 import type { AnswerBody, AnswerRecord, CardPayload, Question } from "../types";
 import { cls, Pill, Spin } from "../ui";
-import { Evidence } from "./Evidence";
+import { Evidence, EvidenceSource } from "./Evidence";
 import { FileChip } from "./FileChips";
+import { TypedQuestionCard } from "./TypedQuestionCard";
 
 type Phase = "idle" | "sending" | "sent";
 
@@ -32,6 +39,7 @@ const VIA_KEY: Record<string, AmKey> = {
   reprompt_default: "card.via.default",
   remembered: "card.via.remembered",
   upload: "card.via.upload",
+  typed: "card.via.typed",
 };
 
 export function viaKey(via: string | undefined | null): AmKey | null {
@@ -89,6 +97,9 @@ export function AgentQuestionCard({
 
   const rememberable = questions.some((q) => q.rememberable);
   const details = questions.filter((q) => q.default_label || hasEvidence(q));
+  const inputs = questions.map((q) => questionInput(q.input));
+  const typed = inputs.some(Boolean);
+  const cardKey = `${card.card_id}:${attempts}:${remount}`;
 
   return (
     <div className="flex flex-col" data-testid="am-question-card" data-card-id={card.card_id}>
@@ -106,7 +117,11 @@ export function AgentQuestionCard({
           <Pill tone="warning">{t("card.attempt", { n: String(attempts) })}</Pill>
         </div>
       ) : null}
-      <QuestionCard key={`${card.card_id}:${attempts}:${remount}`} question={toPendingQuestion(card)} onAnswer={onAnswer} />
+      {typed ? (
+        <TypedQuestionCard key={cardKey} question={toPendingQuestion(card)} inputs={inputs} onAnswer={onAnswer} />
+      ) : (
+        <QuestionCard key={cardKey} question={toPendingQuestion(card)} onAnswer={onAnswer} />
+      )}
       {details.length ? (
         <ul className="flex flex-col gap-2 rounded-xl border border-border-subtle px-4 py-2.5" data-testid="am-question-details">
           {details.map((q) => (
@@ -121,6 +136,7 @@ export function AgentQuestionCard({
                   </span>
                 ) : null}
               </div>
+              <EvidenceSource evidence={q.evidence} />
               <Evidence evidence={q.evidence} />
             </li>
           ))}

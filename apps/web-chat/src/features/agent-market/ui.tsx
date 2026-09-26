@@ -38,6 +38,7 @@ export const DOT = "·";
 const ICONS: Record<string, typeof Bot> = {
   chart: ChartLine,
   invoice: Receipt,
+  receipt: Receipt,
   bank: ArrowLeftRight,
   expense: ClipboardCheck,
   po: Table2,

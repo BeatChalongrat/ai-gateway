@@ -23,6 +23,9 @@ const CAP_KEYS = new Set([
   "model.text",
   "deliverable.table.xlsx",
   "document.read.pdf",
+  "document.extract.e2",
+  "model.vision",
+  "deliverable.pdf",
 ]);
 
 export function AgentDetailPage({ slug }: { slug: string }) {

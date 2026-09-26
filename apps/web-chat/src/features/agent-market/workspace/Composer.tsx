@@ -13,8 +13,8 @@ import { amApi, errorMessage, newClientId } from "../api";
 import { useAmT } from "../i18n";
 import type { ThreadItem } from "../types";
 import { cls } from "../ui";
-import { StagedChip } from "./FileChips";
-import { DEFAULT_ACCEPT, useUploads } from "./useUploads";
+import { PhotoNotice, StagedChip } from "./FileChips";
+import { DEFAULT_ACCEPT, hasImage, useUploads } from "./useUploads";
 
 const MAX_TEXT = 4000;
 const MAX_HEIGHT = 200;
@@ -28,11 +28,13 @@ interface Props {
   onSent: (item: ThreadItem | undefined) => void;
   accept?: string[];
   maxMb?: number;
+  /** The agent's note on photos (manifest photo_notice): shown under the chips while one is attached. */
+  photoNotice?: string;
   /** Footer line under the pill: what the agent cannot do + the model note. */
   footer?: React.ReactNode;
 }
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ installId, onSent, accept, maxMb, footer }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ installId, onSent, accept, maxMb, photoNotice, footer }, ref) {
   const t = useAmT();
   const acceptList = accept?.length ? accept : DEFAULT_ACCEPT;
   const uploads = useUploads(installId, { accept: acceptList, maxMb });
@@ -99,6 +101,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ in
               ))}
             </div>
           ) : null}
+          {photoNotice && hasImage(uploads.items) ? <PhotoNotice text={photoNotice} className="px-4 pt-2" /> : null}
           <div className="px-4 pt-3">
             <textarea
               ref={taRef}

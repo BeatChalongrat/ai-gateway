@@ -19,7 +19,7 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { runHref, settingsHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
 import { ThreadView } from "./ThreadView";
 import { useThread } from "./useThread";
-import { DEFAULT_ACCEPT, DEFAULT_MAX_MB } from "./useUploads";
+import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
 
 export function WorkspacePage({ installId }: { installId: string }) {
   return (
@@ -95,11 +95,10 @@ function Workspace({ installId }: { installId: string }) {
   const icon = manifest?.icon ?? installs.find((i) => i.id === installId)?.icon;
   const title = manifest?.greeting?.role || install?.title || "";
   const tagline = manifest?.greeting?.tagline || "";
-  const accept = useMemo(() => {
-    const all = (manifest?.inputs ?? []).flatMap((i) => i.accept ?? []);
-    return all.length ? [...new Set([...all, ".pdf", ".xlsm"].map((a) => a.toLowerCase()))] : DEFAULT_ACCEPT;
-  }, [manifest]);
+  // What the server takes for this agent (its inputs' accept lists), nothing more.
+  const accept = useMemo(() => acceptFromManifest(manifest), [manifest]);
   const maxMb = manifest?.limits?.max_file_mb || DEFAULT_MAX_MB;
+  const photoNotice = manifest?.photo_notice || undefined;
 
   // The latest run with a progress card is the one "ดูขั้นตอน…" opens.
   const latestRunId = useMemo(() => {
@@ -126,11 +125,12 @@ function Workspace({ installId }: { installId: string }) {
       merge: thread.merge,
       accept,
       maxMb,
+      photoNotice,
       claimDrop: () => {
         claimedAt.current = Date.now();
       },
     }),
-    [installId, icon, title, thread.merge, accept, maxMb],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice],
   );
 
   const onDropFiles = useCallback((files: File[]) => {
@@ -209,6 +209,7 @@ function Workspace({ installId }: { installId: string }) {
               onSent={onSent}
               accept={accept}
               maxMb={maxMb}
+              photoNotice={photoNotice}
               footer={
                 <p className="text-center text-[11px] text-text-muted" data-testid="am-ws-footer">
                   {manifest?.cannot}

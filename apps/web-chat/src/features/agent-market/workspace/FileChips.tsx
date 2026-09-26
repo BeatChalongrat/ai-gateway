@@ -1,6 +1,6 @@
 "use client";
 
-import { X } from "lucide-react";
+import { Camera, X } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { formatBytes } from "@/lib/fileUtil";
@@ -17,6 +17,17 @@ export function FileChip({ name, size }: { name: string; size?: number }) {
       <span className="min-w-0 truncate">{name}</span>
       {typeof size === "number" ? <span className="shrink-0 text-text-muted">{formatBytes(size)}</span> : null}
     </span>
+  );
+}
+
+/** The agent's note on photos (manifest photo_notice), under the chips once
+ *  a photo is attached. It informs; it never blocks the send. */
+export function PhotoNotice({ text, className }: { text: string; className?: string }) {
+  return (
+    <p className={cls("flex items-start gap-1.5 text-xs leading-relaxed text-text-secondary", className)} data-testid="am-photo-notice">
+      <Camera width={13} height={13} className="mt-0.5 shrink-0 text-status-warning" aria-hidden />
+      <span className="min-w-0">{text}</span>
+    </p>
   );
 }
 

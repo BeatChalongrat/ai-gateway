@@ -2,7 +2,9 @@
 
 // /chat/agents/i/[installId]/settings — "ค่าที่จำไว้และการตั้งค่า".
 // Remembered answers (what the agent will not ask again) and the settings
-// chosen at install, each clearable; the simple ones editable in place.
+// chosen at install, each clearable; the simple ones editable in place. An
+// agent that asks "company_tax" at install (the invoice agent) gets its own
+// company block: name, tax ID (checked) and branch, edited together.
 // Uninstall confirms inline — never a window.confirm.
 
 import { useRouter } from "next/navigation";
@@ -17,6 +19,9 @@ import { BackLink, BTN_DANGER_OUTLINE, BTN_PRIMARY_SMALL, BTN_SECONDARY, BTN_SMA
 import { notifyInstallsChanged } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
 import { CURRENCIES } from "../install/steps";
+import { checkCompanyTax, COMPANY_TAX_KEYS, CompanyTaxFields, draftFromDefaults, saveCompanyTax, type CompanyTaxDraft } from "../install/CompanyTax";
+import { installQuestions } from "../install/wizard";
+import { formatTaxId } from "../typed";
 
 const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
@@ -126,9 +131,11 @@ function Settings({ installId }: { installId: string }) {
   if (!detail) return <PageSkeleton />;
 
   const defaults = detail.defaults ?? [];
+  const companyTax = installQuestions(detail.manifest).includes("company_tax");
+  const companyKeys = new Set<string>(companyTax ? COMPANY_TAX_KEYS : []);
   const remembered = defaults.filter(isRemembered);
   const settings = defaults
-    .filter((d) => !isRemembered(d))
+    .filter((d) => !isRemembered(d) && !companyKeys.has(d.key))
     .sort((a, b) => {
       const ia = INSTALL_KEYS.indexOf(a.key);
       const ib = INSTALL_KEYS.indexOf(b.key);
@@ -170,6 +177,8 @@ function Settings({ installId }: { installId: string }) {
           )}
         </div>
       </section>
+
+      {companyTax ? <CompanyTaxSection installId={installId} defaults={defaults} onChanged={refresh} /> : null}
 
       <section className="mt-8" aria-labelledby="am-install-settings">
         <h2 id="am-install-settings" className="text-sm font-semibold text-text-primary">
@@ -222,6 +231,102 @@ function Settings({ installId }: { installId: string }) {
         )}
       </section>
     </PageShell>
+  );
+}
+
+/** Company name, tax ID and branch: shown together, edited together, the tax ID checked before it is saved. */
+function CompanyTaxSection({ installId, defaults, onChanged }: { installId: string; defaults: Default[]; onChanged: () => void }) {
+  const t = useAmT();
+  const saved = draftFromDefaults(defaults);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<CompanyTaxDraft>(saved);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const check = checkCompanyTax(draft);
+  const taxId = saved.taxId ? formatTaxId(saved.taxId) : "";
+  const branchSaved = defaults.some((d) => d.key === "company_branch");
+  const branch = !branchSaved ? "" : saved.head ? t("companyTax.head") : t("companyTax.branchLine", { n: saved.branch });
+  const rows: { label: string; value: string; testId: string }[] = [
+    { label: t("companyTax.company"), value: saved.company, testId: "am-company-view-name" },
+    { label: t("companyTax.taxId"), value: taxId, testId: "am-company-view-tax" },
+    { label: t("companyTax.branch"), value: branch, testId: "am-company-view-branch" },
+  ];
+
+  const save = async () => {
+    if (!check.value) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await saveCompanyTax(installId, check.value);
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mt-8" aria-labelledby="am-company-tax">
+      <h2 id="am-company-tax" className="text-sm font-semibold text-text-primary">
+        {t("settings.companyTax")}
+      </h2>
+      <p className="mt-0.5 text-xs text-text-muted">{t("companyTax.taxIdUse")}</p>
+      <div className="mt-2.5 rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-company-tax">
+        {!editing ? (
+          <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+            <dl className="grid min-w-0 flex-1 grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+              {rows.map((r) => (
+                <div key={r.testId} className="contents">
+                  <dt className="text-text-muted">{r.label}</dt>
+                  <dd className={cls("min-w-0 break-words tabular-nums", r.value ? "text-text-primary" : "text-text-muted")} data-testid={r.testId}>
+                    {r.value || t("settings.empty")}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(saved);
+                setError(null);
+                setEditing(true);
+              }}
+              className={BTN_SMALL}
+              aria-label={t("settings.companyTaxEdit")}
+              data-testid="am-company-tax-edit"
+            >
+              <Pencil width={13} height={13} aria-hidden />
+            </button>
+          </div>
+        ) : (
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (check.value && !busy) void save();
+            }}
+          >
+            <CompanyTaxFields draft={draft} onChange={setDraft} idPrefix="am-settings-company" disabled={busy} />
+            <div className="flex gap-2">
+              <button type="submit" disabled={!check.value || busy} className={BTN_PRIMARY_SMALL} data-testid="am-company-tax-submit">
+                {busy ? <Spin size={12} /> : null}
+                <span>{busy ? t("common.saving") : t("common.save")}</span>
+              </button>
+              <button type="button" onClick={() => setEditing(false)} disabled={busy} className={BTN_SMALL}>
+                {t("common.cancel")}
+              </button>
+            </div>
+          </form>
+        )}
+        {error ? (
+          <p role="alert" className="mt-1.5 text-xs text-status-danger">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
