@@ -13,7 +13,11 @@ What it writes, all inside the TEST containers:
   admin preference (``auto_default_model``) so Auto reaches for it first;
 * ``ts-mock-model`` served by the test mock provider through key ``ts-mock`` —
   a model that answers and can then be made dead (flip the key's base_url);
-* a test tenant and owner (``is_test``-style ids ``f1280000-…``) with credits.
+* a test tenant and owner (``is_test``-style ids ``f1280000-…``) with credits;
+* the smoke suite's admin (``SMOKE_ADMIN_EMAIL`` / ``SMOKE_ADMIN_PASSWORD`` from
+  .env, role ``viewer`` as on live) so ``admin.login`` runs on the test stack
+  too (AM1b). The password is hashed inside the test backend container, read
+  from stdin: it never reaches argv, a file or the output.
 
 Idempotent: re-running replaces the catalogue and upserts the test rows.
 Nothing is read from or written to the live stack except the read-only
@@ -28,6 +32,8 @@ import sys
 LIVE_PG = "ai-gateway-postgres-1"
 TEST_PG = "sran-test-postgres-1"
 TEST_WEBCHAT_PG = "sran-test-postgres-webchat-1"
+TEST_BACKEND = "sran-test-backend-1"
+SMOKE_ADMIN_ID = "f1280000-0000-4000-8000-00000000ad01"
 
 TENANT = "f1280000-0000-4000-8000-000000000001"
 USER = "f1280000-0000-4000-8000-000000000011"
@@ -53,6 +59,38 @@ def test_sql(sql: str, db: str = "ai_gateway") -> str:
     if r.returncode != 0:
         raise SystemExit(f"test SQL failed: {r.stderr[-800:]}")
     return r.stdout
+
+
+def dotenv(key: str) -> str:
+    """One value from the repo's .env (never printed)."""
+    import os
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith(key + "="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
+
+def seed_smoke_admin() -> str:
+    email, password = dotenv("SMOKE_ADMIN_EMAIL"), dotenv("SMOKE_ADMIN_PASSWORD")
+    if not email or not password:
+        return "smoke admin: SMOKE_ADMIN_* not in .env, skipped"
+    r = subprocess.run(["docker", "exec", "-i", TEST_BACKEND, "python", "-c",
+                        "import bcrypt,sys; print(bcrypt.hashpw(sys.stdin.read().encode(), bcrypt.gensalt()).decode())"],
+                       input=password, capture_output=True, text=True, encoding="utf-8")
+    hashed = r.stdout.strip()
+    if r.returncode != 0 or not hashed.startswith("$2"):
+        raise SystemExit("hashing the smoke admin password in the test backend failed")
+    email_sql = email.replace("'", "''")
+    test_sql(f"""
+      insert into admin_users (id, username, email, hashed_password, role, is_active, created_at, updated_at)
+      values ('{SMOKE_ADMIN_ID}', 'smoke-viewer', '{email_sql}', '{hashed}', 'viewer', true, now(), now())
+      on conflict (id) do update set email = excluded.email, hashed_password = excluded.hashed_password,
+          role = 'viewer', is_active = true, updated_at = now();
+    """)
+    return "smoke admin: smoke-viewer (role viewer) upserted"
 
 
 def main() -> int:
@@ -126,6 +164,7 @@ def main() -> int:
     print("seeded:", counts.strip())
     print("dead model:", dead.strip()[:160])
     print(f"tenant={TENANT} user={USER} ({EMAIL})")
+    print(seed_smoke_admin())
     return 0
 
 
