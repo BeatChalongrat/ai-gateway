@@ -53,6 +53,7 @@ type Runner struct {
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
 
+	engines   engineCache
 	running   atomic.Int32
 	started   time.Time
 	instance  string
@@ -93,18 +94,14 @@ func (r *Runner) watchSandbox(ctx context.Context, onReady func()) {
 	}
 }
 
-// Register writes every package in the engine to agent_definitions.
+// Register stores this runner's engine (runs pinned to it load it later)
+// and writes every package that is a new version to agent_definitions
+// (engines.go: a released version is never overwritten).
 func (r *Runner) Register(ctx context.Context) error {
-	for _, p := range r.Engine.Packages {
-		if _, err := r.Store.UpsertDefinition(ctx, agentmarket.Definition{
-			Slug: p.Slug, Version: p.Version, Name: p.Manifest.Name, Manifest: p.RawManifest,
-			Instructions: p.Instructions, Checksum: p.Checksum, EngineChecksum: r.Engine.Checksum,
-		}); err != nil {
-			return err
-		}
-		r.Log.Info("agent package registered", "slug", p.Slug, "version", p.Version, "checksum", p.Checksum[:12])
+	if err := r.storeEngine(ctx); err != nil {
+		r.Log.Warn("engine not stored — runs pinned to this engine need this runner", "err", err)
 	}
-	return nil
+	return r.register(ctx)
 }
 
 // Capabilities is what this runner can bind abstract capabilities to.

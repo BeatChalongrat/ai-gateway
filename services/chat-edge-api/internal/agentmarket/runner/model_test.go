@@ -194,7 +194,7 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg := e.Packages["sran.financial-report"]
-	if pkg == nil || pkg.Version != "1.0.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
+	if pkg == nil || pkg.Version != "1.1.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
 		t.Fatalf("package not loaded: %+v", pkg)
 	}
 	if _, err := e.PackageFile(pkg, "sample-data/GL_2569-09.xlsx"); err != nil {
@@ -215,6 +215,11 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 	e2, _ := LoadEngine(p2, "")
 	if e2.Packages["sran.financial-report"].Checksum == pkg.Checksum || e2.Checksum != e.Checksum {
 		t.Fatal("package checksum must follow its files; engine checksum must not")
+	}
+	// AM2: the build (what a released version is pinned to) follows every file, packages included
+	e3, _ := LoadEngine(p, "")
+	if len(e.Build) != 64 || e3.Build != e.Build || e2.Build == e.Build {
+		t.Fatal("the build hash is the same for the same zip and differs when a package changes")
 	}
 }
 

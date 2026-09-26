@@ -31,6 +31,7 @@ type runCtx struct {
 	r          *Runner
 	run        am.Run
 	install    am.Install
+	engine     *Engine // the engine this run is pinned to (AM2)
 	pkg        *Package
 	defaults   map[string]any
 	remembered map[string]json.RawMessage
@@ -57,6 +58,9 @@ type blobRef struct {
 
 func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) error {
 	rc, err := r.load(ctx, run, log)
+	if errors.Is(err, errEngineMissing) {
+		return r.fail(ctx, run, "engine_missing", err)
+	}
 	if err != nil {
 		return r.fail(ctx, run, "load", err)
 	}
@@ -181,8 +185,14 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := r.finish(rc, am.RunSucceeded, ""); err != nil {
 		return err
 	}
+	rc.finishUpgrade(context.Background(), computedRef, true, "")
 	rc.startNextRound(context.Background())
 	return nil
+}
+
+// exec runs one step op with the run's own engine.
+func (rc *runCtx) exec(ctx context.Context, request any, inputs []Input) (*StepResult, error) {
+	return rc.r.Exec.RunEngine(ctx, rc.engine, request, inputs)
 }
 
 func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCtx, error) {
@@ -190,16 +200,26 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	if err != nil {
 		return nil, err
 	}
-	pkg := r.Engine.Packages[in.Slug]
+	if run.EngineChecksum == "" {
+		// a job created without one (a reply, a preview) runs with its install's pinned version
+		if def, err := r.Store.DefinitionByID(ctx, in.DefinitionID); err == nil {
+			run.EngineChecksum = def.EngineChecksum
+		}
+	}
+	eng, err := r.engineFor(ctx, run, in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	pkg := eng.Packages[in.Slug]
 	if pkg == nil {
-		return nil, fmt.Errorf("package %s is not in this runner's engine", in.Slug)
+		return nil, fmt.Errorf("%w: package %s is not in engine %s", errEngineMissing, in.Slug, short(eng.Checksum))
 	}
 	defs, err := r.Store.ListDefaults(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
 	engineDefaults, remembered := am.DefaultsForEngine(defs)
-	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
+	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
 	return rc, rc.reloadAnswers(ctx)
 }
 
@@ -354,7 +374,7 @@ func (rc *runCtx) parse(ctx context.Context, f am.File) (parsedFile, error) {
 			}
 			defer cleanup()
 			input := "in_" + f.ID.String()[:8] + filepath.Ext(f.Name)
-			res, err := rc.r.Exec.Run(ctx, map[string]any{"op": "parse", "package": rc.pkg.PyPackage,
+			res, err := rc.exec(ctx, map[string]any{"op": "parse", "package": rc.pkg.PyPackage,
 				"file": map[string]any{"name": f.Name, "input": input}, "mapping": mapping},
 				[]Input{{Name: input, LocalPath: path}})
 			if err != nil {
@@ -457,7 +477,7 @@ func (rc *runCtx) preflight(ctx context.Context, parsed []parsedFile, x runExtra
 			defer cleanup()
 			req := map[string]any{"op": "preflight", "package": rc.pkg.PyPackage, "parsed": names,
 				"message": rc.run.Message, "defaults": rc.defaults, "answers": answers, "today": rc.today()}
-			res, err := rc.r.Exec.Run(ctx, req, x.attach(req, inputs))
+			res, err := rc.exec(ctx, req, x.attach(req, inputs))
 			if err != nil {
 				return nil, 0, "", "", err
 			}
@@ -492,7 +512,7 @@ func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre prefligh
 			if pre.Today != "" {
 				req["today"] = pre.Today
 			}
-			res, err := rc.r.Exec.Run(ctx, req, x.attach(req, inputs))
+			res, err := rc.exec(ctx, req, x.attach(req, inputs))
 			if err != nil {
 				return nil, 0, "", "", err
 			}
@@ -541,7 +561,7 @@ func (rc *runCtx) postcompute(ctx context.Context, parsed []parsedFile, pre pref
 			}
 			defer ccleanup()
 			inputs = append(inputs, Input{Name: "computed.json", LocalPath: cpath})
-			res, err := rc.r.Exec.Run(ctx, map[string]any{"op": "postcompute", "package": rc.pkg.PyPackage, "parsed": names,
+			res, err := rc.exec(ctx, map[string]any{"op": "postcompute", "package": rc.pkg.PyPackage, "parsed": names,
 				"computed": "computed.json", "roles": pre.Roles, "period": *pre.Period, "answers": answers,
 				"defaults": rc.defaults}, inputs)
 			if err != nil {
@@ -588,6 +608,10 @@ func (r *Runner) fail(ctx context.Context, run am.Run, reason string, err error)
 	bg := context.Background()
 	_ = r.Store.Finish(bg, run.ID, r.ID, am.RunFailed, reason)
 	_ = r.Store.PostText(bg, run, failureText(reason, err), map[string]any{"tone": "error"})
+	if run.Kind == am.KindSelfTest {
+		// an upgrade's self-test that fails leaves the install on its version
+		(&runCtx{r: r, run: run}).finishUpgrade(bg, blobRef{}, false, failureText(reason, err))
+	}
 	r.syncProgress(bg, run.ID)
 	return err
 }
@@ -616,6 +640,8 @@ func failureText(reason string, err error) string {
 		return "agent ถูกอัปเดตระหว่างรอบนี้ กรุณาเริ่มรอบใหม่อีกครั้งครับ"
 	case "sandbox_unavailable":
 		return "ส่วนคำนวณของ agent ยังไม่พร้อมใช้งาน ลองใหม่ภายหลังครับ"
+	case "engine_missing":
+		return "รุ่นของ agent ที่ติดตั้งไว้ไม่มีในระบบแล้วครับ อัปเกรดเป็นรุ่นใหม่ได้ในหน้าตั้งค่า"
 	}
 	msg := "รอบนี้ทำไม่สำเร็จครับ"
 	if err != nil {
@@ -640,7 +666,7 @@ func (rc *runCtx) seedSelfTest(ctx context.Context) error {
 		return fmt.Errorf("self-test.json: %w", err)
 	}
 	for _, rel := range st.Files {
-		data, err := rc.r.Engine.PackageFile(rc.pkg, rel)
+		data, err := rc.engine.PackageFile(rc.pkg, rel)
 		if err != nil {
 			return err
 		}

@@ -29,6 +29,9 @@ import (
 type Engine struct {
 	ZipPath  string
 	Checksum string // sha256 of engine files (everything except packages/)
+	// Build is the sha256 of the whole zip, packages included (AM2): what a
+	// released version is pinned to and where its engine is stored.
+	Build    string
 	zipBytes []byte
 	Packages map[string]*Package // by slug
 }
@@ -75,7 +78,8 @@ func LoadEngine(zipPath, srcDir string) (*Engine, error) {
 	default:
 		return nil, fmt.Errorf("engine: set AGENT_MARKET_ENGINE_ZIP or AGENT_MARKET_ENGINE_SRC")
 	}
-	e := &Engine{ZipPath: zipPath, zipBytes: data, Packages: map[string]*Package{}}
+	build := sha256.Sum256(data)
+	e := &Engine{ZipPath: zipPath, zipBytes: data, Build: hex.EncodeToString(build[:]), Packages: map[string]*Package{}}
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("engine zip: %w", err)

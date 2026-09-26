@@ -119,7 +119,7 @@ func (rc *runCtx) readDocuments(ctx context.Context, parsed []parsedFile) (map[s
 	if !ok {
 		return nil, nil
 	}
-	prompt, err := rc.r.Engine.PackageFile(rc.pkg, "prompts/vision.md")
+	prompt, err := rc.engine.PackageFile(rc.pkg, "prompts/vision.md")
 	if err != nil {
 		return nil, nil // a package without a vision prompt reads no images
 	}

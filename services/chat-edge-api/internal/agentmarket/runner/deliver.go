@@ -329,7 +329,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 					req["logo"] = "logo.png"
 				}
 			}
-			res, err := rc.r.Exec.Run(ctx, req, inputs)
+			res, err := rc.exec(ctx, req, inputs)
 			if err != nil {
 				return nil, 0, "", "", err
 			}

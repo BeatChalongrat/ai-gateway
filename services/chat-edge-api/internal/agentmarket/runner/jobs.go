@@ -379,7 +379,7 @@ func (r *Runner) previewJob(ctx context.Context, job am.Run, log *slog.Logger) e
 			}
 			defer cleanup()
 			input := "in_" + f.ID.String()[:8] + filepath.Ext(f.Name)
-			res, err := r.Exec.Run(ctx, map[string]any{"op": "parse", "package": rc.pkg.PyPackage, "preview": true,
+			res, err := rc.exec(ctx, map[string]any{"op": "parse", "package": rc.pkg.PyPackage, "preview": true,
 				"file": map[string]any{"name": f.Name, "input": input}, "mapping": mapping}, []Input{{Name: input, LocalPath: path}})
 			if err != nil {
 				return nil, 0, "", "", err

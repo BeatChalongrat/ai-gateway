@@ -98,12 +98,14 @@ func (s *Store) DefinitionByID(ctx context.Context, id uuid.UUID) (Definition, e
 // ── installs ─────────────────────────────────────────────────────────────
 
 const installCols = `id, tenant_id, user_id, definition_id, slug, definition_version, checksum, title,
-	capability_bindings, binding_version, budget_credits::float8, status, self_test_run_id, created_at, updated_at`
+	capability_bindings, binding_version, budget_credits::float8, status, self_test_run_id, created_at, updated_at,
+	previous_definition_id`
 
 func scanInstall(r pgx.Row) (Install, error) {
 	var i Install
 	err := r.Scan(&i.ID, &i.TenantID, &i.UserID, &i.DefinitionID, &i.Slug, &i.DefinitionVersion, &i.Checksum, &i.Title,
-		&i.CapabilityBindings, &i.BindingVersion, &i.BudgetCredits, &i.Status, &i.SelfTestRunID, &i.CreatedAt, &i.UpdatedAt)
+		&i.CapabilityBindings, &i.BindingVersion, &i.BudgetCredits, &i.Status, &i.SelfTestRunID, &i.CreatedAt, &i.UpdatedAt,
+		&i.PreviousDefinitionID)
 	return i, err
 }
 

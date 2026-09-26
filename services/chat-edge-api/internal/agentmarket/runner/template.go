@@ -43,7 +43,7 @@ func (r *Runner) inspectTemplate(ctx context.Context, rc *runCtx, job am.Run, f 
 			}
 			defer cleanup()
 			input := "template" + filepath.Ext(f.Name)
-			res, err := r.Exec.Run(ctx, map[string]any{"op": "inspect_template", "package": rc.pkg.PyPackage,
+			res, err := rc.exec(ctx, map[string]any{"op": "inspect_template", "package": rc.pkg.PyPackage,
 				"file": map[string]any{"name": f.Name, "input": input}, "saved": savedArg,
 				"spec": json.RawMessage(rc.pkg.Manifest.Templates)}, []Input{{Name: input, LocalPath: path}})
 			if err != nil {

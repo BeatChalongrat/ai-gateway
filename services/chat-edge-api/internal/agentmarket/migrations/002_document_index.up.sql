@@ -40,3 +40,8 @@ CREATE INDEX IF NOT EXISTS document_index_owner ON agent_market.document_index (
 -- hourly pass does not scan them again (an agent_market table: the isolation
 -- contract forbids altering core tables only).
 ALTER TABLE agent_market.agent_runs ADD COLUMN IF NOT EXISTS scratch_purged_at timestamptz;
+
+-- AM2 versioning: installs are pinned to the definition they installed; an
+-- upgrade keeps the version it replaced so a rollback can point back at it.
+ALTER TABLE agent_market.agent_installs ADD COLUMN IF NOT EXISTS previous_definition_id uuid
+    REFERENCES agent_market.agent_definitions (id);

@@ -63,6 +63,9 @@ type Install struct {
 	SelfTestRunID      *uuid.UUID      `json:"self_test_run_id,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+	// PreviousDefinitionID is the version an upgrade replaced (AM2): a
+	// rollback points the install back at it.
+	PreviousDefinitionID *uuid.UUID `json:"previous_definition_id,omitempty"`
 }
 
 // Default is a remembered answer or an install-time setting.

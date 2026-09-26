@@ -48,6 +48,12 @@ func ArtifactKey(tenant, run uuid.UUID, name string) string {
 }
 
 // LogoKey is where a theme logo lives.
+// EngineKey is where a runner keeps an engine zip by checksum (AM2): a run
+// executes with the engine its pinned definition was released with.
+func EngineKey(checksum string) string {
+	return path.Join(StoragePrefix, "engines", SafeName(checksum)+".zip")
+}
+
 func LogoKey(tenant uuid.UUID, version int, name string) string {
 	return path.Join(StoragePrefix, tenant.String(), "themes", itoa(version), SafeName(name))
 }

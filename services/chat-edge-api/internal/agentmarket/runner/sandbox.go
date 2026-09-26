@@ -97,14 +97,20 @@ func (r *StepResult) Decode(field string, v any) error {
 // ErrStep is a step the engine itself reported as failed.
 var ErrStep = errors.New("engine step failed")
 
-// Run executes one op.
+// Run executes one op with the executor's engine.
 func (x *Executor) Run(ctx context.Context, request any, inputs []Input) (*StepResult, error) {
+	return x.RunEngine(ctx, x.Engine, request, inputs)
+}
+
+// RunEngine executes one op with a given engine (a run pinned to an older
+// version, AM2).
+func (x *Executor) RunEngine(ctx context.Context, eng *Engine, request any, inputs []Input) (*StepResult, error) {
 	req, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
 	}
 	in := []sandbox.InputFile{
-		{Name: "am_engine.zip", LocalPath: x.Engine.ZipPath},
+		{Name: "am_engine.zip", LocalPath: eng.ZipPath},
 		{Name: "request.json", Bytes: req},
 	}
 	for _, i := range inputs {
