@@ -1,0 +1,260 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "d07_multipage",
+ "files": [
+  "docs/d07_multipage.pdf"
+ ],
+ "class": "digital",
+ "purpose": "two pages, the item table continues on page 2 and the totals are only on page 2",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "ไทยออฟฟิศ ซัพพลาย"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105545009875",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "IV6909-0021",
+  "document_date": "2026-09-22",
+  "due_date": "2026-10-22",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "21763.00",
+  "discount": "0.00",
+  "subtotal": "21763.00",
+  "vat_rate": "7",
+  "vat_amount": "1523.41",
+  "total": "23286.41",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ปากกาลูกลื่น 0.5 มม. สีน้ำเงิน",
+    "quantity": "50",
+    "unit_price": "8.50",
+    "amount": "425.00"
+   },
+   {
+    "description": "ปากกาลูกลื่น 0.5 มม. สีแดง",
+    "quantity": "20",
+    "unit_price": "8.50",
+    "amount": "170.00"
+   },
+   {
+    "description": "ดินสอ 2B",
+    "quantity": "48",
+    "unit_price": "6.00",
+    "amount": "288.00"
+   },
+   {
+    "description": "ยางลบดินสอ",
+    "quantity": "24",
+    "unit_price": "5.00",
+    "amount": "120.00"
+   },
+   {
+    "description": "ไม้บรรทัดเหล็ก 30 ซม.",
+    "quantity": "10",
+    "unit_price": "35.00",
+    "amount": "350.00"
+   },
+   {
+    "description": "ลวดเย็บกระดาษ เบอร์ 10",
+    "quantity": "40",
+    "unit_price": "12.00",
+    "amount": "480.00"
+   },
+   {
+    "description": "เครื่องเย็บกระดาษ",
+    "quantity": "6",
+    "unit_price": "145.00",
+    "amount": "870.00"
+   },
+   {
+    "description": "คลิปหนีบกระดาษ 2 ขา",
+    "quantity": "30",
+    "unit_price": "18.00",
+    "amount": "540.00"
+   },
+   {
+    "description": "เทปใส 1 นิ้ว",
+    "quantity": "24",
+    "unit_price": "22.00",
+    "amount": "528.00"
+   },
+   {
+    "description": "เทปกาวสองหน้า",
+    "quantity": "12",
+    "unit_price": "38.00",
+    "amount": "456.00"
+   },
+   {
+    "description": "สมุดบันทึก A5",
+    "quantity": "36",
+    "unit_price": "45.00",
+    "amount": "1620.00"
+   },
+   {
+    "description": "โพสต์อิท 3x3 นิ้ว",
+    "quantity": "30",
+    "unit_price": "55.00",
+    "amount": "1650.00"
+   },
+   {
+    "description": "ปากกาเน้นข้อความ",
+    "quantity": "24",
+    "unit_price": "25.00",
+    "amount": "600.00"
+   },
+   {
+    "description": "ปากกาเคมี 2 หัว",
+    "quantity": "24",
+    "unit_price": "28.00",
+    "amount": "672.00"
+   },
+   {
+    "description": "ปากกาไวท์บอร์ด",
+    "quantity": "24",
+    "unit_price": "32.00",
+    "amount": "768.00"
+   },
+   {
+    "description": "ซองจดหมาย A4 สีน้ำตาล",
+    "quantity": "200",
+    "unit_price": "3.50",
+    "amount": "700.00"
+   },
+   {
+    "description": "ซองจดหมาย DL สีขาว",
+    "quantity": "300",
+    "unit_price": "1.80",
+    "amount": "540.00"
+   },
+   {
+    "description": "แฟ้มสันกว้าง 2 นิ้ว",
+    "quantity": "20",
+    "unit_price": "59.00",
+    "amount": "1180.00"
+   },
+   {
+    "description": "แฟ้มซองพลาสติก",
+    "quantity": "50",
+    "unit_price": "9.00",
+    "amount": "450.00"
+   },
+   {
+    "description": "คัตเตอร์ใหญ่",
+    "quantity": "10",
+    "unit_price": "39.00",
+    "amount": "390.00"
+   },
+   {
+    "description": "กรรไกร 8 นิ้ว",
+    "quantity": "10",
+    "unit_price": "49.00",
+    "amount": "490.00"
+   },
+   {
+    "description": "กาวแท่ง",
+    "quantity": "24",
+    "unit_price": "19.00",
+    "amount": "456.00"
+   },
+   {
+    "description": "ลิควิดเปเปอร์",
+    "quantity": "24",
+    "unit_price": "35.00",
+    "amount": "840.00"
+   },
+   {
+    "description": "เครื่องคิดเลข 12 หลัก",
+    "quantity": "5",
+    "unit_price": "320.00",
+    "amount": "1600.00"
+   },
+   {
+    "description": "ถ่าน AA แพ็ค 4",
+    "quantity": "20",
+    "unit_price": "89.00",
+    "amount": "1780.00"
+   },
+   {
+    "description": "สติ๊กเกอร์ลาเบล A4",
+    "quantity": "10",
+    "unit_price": "150.00",
+    "amount": "1500.00"
+   },
+   {
+    "description": "ถาดเอกสาร 3 ชั้น",
+    "quantity": "6",
+    "unit_price": "260.00",
+    "amount": "1560.00"
+   },
+   {
+    "description": "ที่เจาะกระดาษ",
+    "quantity": "4",
+    "unit_price": "185.00",
+    "amount": "740.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 2,
+  "totals_page": 2
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}

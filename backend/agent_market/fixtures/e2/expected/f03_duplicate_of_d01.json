@@ -1,0 +1,113 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f03_duplicate_of_d01",
+ "files": [
+  "docs/f03_duplicate_of_d01.pdf"
+ ],
+ "class": "digital",
+ "purpose": "the same invoice as d01 sent again as a copy (different file bytes, same supplier tax ID + number + date + total)",
+ "source_fixture": "d01_clean_full_tax_invoice",
+ "duplicate_of": "d01_clean_full_tax_invoice",
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "ไทยออฟฟิศ ซัพพลาย"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105545009875",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "IV6909-0015",
+  "document_date": "2026-09-15",
+  "due_date": "2026-10-15",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "12010.00",
+  "discount": "0.00",
+  "subtotal": "12010.00",
+  "vat_rate": "7",
+  "vat_amount": "840.70",
+  "total": "12850.70",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "กระดาษถ่ายเอกสาร A4 80 แกรม",
+    "quantity": "20",
+    "unit_price": "125.00",
+    "amount": "2500.00"
+   },
+   {
+    "description": "หมึกพิมพ์เลเซอร์ HP 107A",
+    "quantity": "4",
+    "unit_price": "1890.00",
+    "amount": "7560.00"
+   },
+   {
+    "description": "แฟ้มเอกสาร 3 นิ้ว สีน้ำเงิน",
+    "quantity": "30",
+    "unit_price": "65.00",
+    "amount": "1950.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "fail",
+  "original_copy": "fail"
+ },
+ "history": [
+  "d01_clean_full_tax_invoice"
+ ],
+ "questions": {
+  "must": [
+   "duplicate_candidate"
+  ],
+  "may": false,
+  "allowed_extra": [
+   "copy_not_original"
+  ],
+  "max": 2
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

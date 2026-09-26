@@ -1,0 +1,103 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f02_vat_mismatch",
+ "files": [
+  "docs/f02_vat_mismatch.pdf"
+ ],
+ "class": "digital",
+ "purpose": "VAT printed 750.00 on a 10,000.00 base (7 % is 700.00): the VAT check fails and asks",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท เอเชีย คลาวด์ โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "เอเชีย คลาวด์ โซลูชั่นส์"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105562077611",
+   "valid": true
+  },
+  "seller_branch": "00002",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "INV2569/0940",
+  "document_date": "2026-09-25",
+  "due_date": "2026-10-25",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "10000.00",
+  "discount": "0.00",
+  "subtotal": "10000.00",
+  "vat_rate": "7",
+  "vat_amount": "750.00",
+  "total": "10750.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ค่าพัฒนาระบบรายงาน",
+    "quantity": "1",
+    "unit_price": "4000.00",
+    "amount": "4000.00"
+   },
+   {
+    "description": "ค่าออกแบบหน้าจอ",
+    "quantity": "1",
+    "unit_price": "6000.00",
+    "amount": "6000.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "fail",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "check_failed:vat_7_percent"
+  ],
+  "may": false,
+  "allowed_extra": [],
+  "max": 1
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

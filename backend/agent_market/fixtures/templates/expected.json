@@ -1,0 +1,296 @@
+{
+ "schema": "am2.templates.v1",
+ "values": {
+  "company_name": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+  "period": "กันยายน 2569",
+  "invoice_count": "4",
+  "total_amount": "168,000.70",
+  "vat_amount": "10,990.70",
+  "prepared_by": "ฝ่ายบัญชี",
+  "lines": [
+   {
+    "description": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด — IV6909-0015",
+    "quantity": "1",
+    "amount": "12,850.70"
+   },
+   {
+    "description": "บริษัท เอเชีย คลาวด์ โซลูชั่นส์ จำกัด — INV2569/0912",
+    "quantity": "1",
+    "amount": "85,600.00"
+   },
+   {
+    "description": "หจก. ช่างเหล็กการโยธา — CS-2569-0187",
+    "quantity": "1",
+    "amount": "53,500.00"
+   },
+   {
+    "description": "บมจ. ไทยพาณิชย์ขนส่ง — ขส.69/0334",
+    "quantity": "1",
+    "amount": "16,050.00"
+   }
+  ]
+ },
+ "templates": {
+  "docx_placeholders.docx": {
+   "kind": "docx_placeholders",
+   "markers": [
+    "company_name",
+    "period",
+    "invoice_count",
+    "total_amount",
+    "vat_amount",
+    "prepared_by"
+   ],
+   "expect": {
+    "filled": [
+     "company_name",
+     "period",
+     "invoice_count",
+     "total_amount",
+     "vat_amount",
+     "prepared_by"
+    ],
+    "no_braces_left": true,
+    "split_run_marker": "invoice_count",
+    "in_header": [
+     "company_name"
+    ],
+    "in_footer": [
+     "prepared_by"
+    ],
+    "in_table": [
+     "total_amount",
+     "vat_amount"
+    ]
+   }
+  },
+  "docx_repeating_rows.docx": {
+   "kind": "docx_repeating_rows",
+   "markers": [
+    "period",
+    "line.description",
+    "line.quantity",
+    "line.amount",
+    "total_amount"
+   ],
+   "expect": {
+    "repeat_rows": 4,
+    "row_order": [
+     "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด — IV6909-0015",
+     "บริษัท เอเชีย คลาวด์ โซลูชั่นส์ จำกัด — INV2569/0912",
+     "หจก. ช่างเหล็กการโยธา — CS-2569-0187",
+     "บมจ. ไทยพาณิชย์ขนส่ง — ขส.69/0334"
+    ],
+    "header_row_kept": true,
+    "total_row_after_lines": true,
+    "no_braces_left": true
+   }
+  },
+  "docx_content_controls.docx": {
+   "kind": "docx_content_controls",
+   "controls": [
+    {
+     "tag": "CompanyName",
+     "type": "text"
+    },
+    {
+     "tag": "TotalAmount",
+     "type": "text"
+    },
+    {
+     "tag": "ApprovalDate",
+     "type": "date"
+    },
+    {
+     "tag": "Notes",
+     "type": "richText"
+    },
+    {
+     "tag": "Status",
+     "type": "dropDownList"
+    }
+   ],
+   "mapping": {
+    "CompanyName": "company_name",
+    "TotalAmount": "total_amount"
+   },
+   "expect": {
+    "filled_plain_text": {
+     "CompanyName": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+     "TotalAmount": "168,000.70"
+    },
+    "placeholder_flag_cleared": [
+     "CompanyName",
+     "TotalAmount"
+    ],
+    "not_filled_explained": [
+     "ApprovalDate",
+     "Notes",
+     "Status"
+    ],
+    "fallback": "detect_and_explain_then_mapping_screen"
+   }
+  },
+  "docx_no_markers.docx": {
+   "kind": "docx_no_markers",
+   "markers": [],
+   "expect": {
+    "mapping_screen": true,
+    "targets": [
+     {
+      "cell": "table0.r0c1",
+      "label": "บริษัท"
+     },
+     {
+      "cell": "table0.r1c1",
+      "label": "งวด"
+     },
+     {
+      "cell": "table0.r2c1",
+      "label": "ยอดรวม"
+     }
+    ],
+    "silent_noop_forbidden": true
+   }
+  },
+  "xlsx_named_ranges.xlsx": {
+   "kind": "xlsx_named_ranges",
+   "names": {
+    "CompanyName": "สรุป!B2",
+    "Period": "สรุป!B3",
+    "Subtotal": "สรุป!B5",
+    "VatAmount": "สรุป!B6",
+    "GrandTotal": "สรุป!B7 (formula)",
+    "LinesTable": "สรุป!A10:C13",
+    "VatRate": "ข้อมูลอ้างอิง!B1 (protected sheet)"
+   },
+   "fill": {
+    "CompanyName": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+    "Period": "กันยายน 2569",
+    "Subtotal": 157010.0,
+    "VatAmount": 10990.7,
+    "GrandTotal": 168000.7,
+    "LinesTable": [
+     {
+      "description": "บริษัท ไทยออฟฟิศ ซัพพลาย จำกัด — IV6909-0015",
+      "quantity": "1",
+      "amount": "12,850.70"
+     },
+     {
+      "description": "บริษัท เอเชีย คลาวด์ โซลูชั่นส์ จำกัด — INV2569/0912",
+      "quantity": "1",
+      "amount": "85,600.00"
+     },
+     {
+      "description": "หจก. ช่างเหล็กการโยธา — CS-2569-0187",
+      "quantity": "1",
+      "amount": "53,500.00"
+     },
+     {
+      "description": "บมจ. ไทยพาณิชย์ขนส่ง — ขส.69/0334",
+      "quantity": "1",
+      "amount": "16,050.00"
+     }
+    ],
+    "VatRate": 0.07
+   },
+   "expect": {
+    "written": [
+     "CompanyName",
+     "Period",
+     "Subtotal",
+     "VatAmount",
+     "LinesTable"
+    ],
+    "refused": {
+     "GrandTotal": "formula_cell",
+     "VatRate": "protected_sheet"
+    },
+    "formulas_kept": [
+     "สรุป!B7",
+     "สรุป!C14",
+     "ข้อมูลอ้างอิง!B2"
+    ],
+    "recalculated": {
+     "สรุป!B7": 168000.7,
+     "สรุป!C14": 168000.7,
+     "ข้อมูลอ้างอิง!B2": 168000.7
+    },
+    "lines_written_as_numbers": true,
+    "merged_kept": [
+     "A1:C1"
+    ],
+    "chart_kept": true,
+    "protection_kept": "ข้อมูลอ้างอิง"
+   }
+  },
+  "xlsx_no_markers.xlsx": {
+   "kind": "xlsx_no_markers",
+   "expect": {
+    "mapping_screen": true,
+    "targets": [
+     {
+      "cell": "Sheet1!B1",
+      "label": "บริษัท"
+     },
+     {
+      "cell": "Sheet1!B2",
+      "label": "งวด"
+     },
+     {
+      "cell": "Sheet1!B3",
+      "label": "ยอดรวม"
+     }
+    ],
+    "silent_noop_forbidden": true
+   }
+  },
+  "pptx_theme_chart.pptx": {
+   "kind": "pptx_theme_chart",
+   "markers": [
+    "period",
+    "total_amount"
+   ],
+   "expect": {
+    "filled": [
+     "period",
+     "total_amount"
+    ],
+    "chart_kept": true,
+    "title_color": "1F6F8B"
+   }
+  }
+ },
+ "pdf": {
+  "docx_placeholders.docx": {
+   "pages": 1,
+   "text_contains": [
+    "สรุปใบแจ้งหนี้ของ",
+    "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+    "ประจำงวด กันยายน 2569",
+    "168,000.70"
+   ]
+  },
+  "docx_repeating_rows.docx": {
+   "pages": 1,
+   "text_contains": [
+    "รายการใบแจ้งหนี้",
+    "หจก. ช่างเหล็กการโยธา",
+    "53,500.00"
+   ]
+  },
+  "xlsx_named_ranges.xlsx": {
+   "pages_min": 1,
+   "text_contains": [
+    "สรุปใบแจ้งหนี้",
+    "บริษัท สรานเทค โซลูชั่นส์ จำกัด"
+   ]
+  },
+  "pptx_theme_chart.pptx": {
+   "pages": 1,
+   "text_contains": [
+    "สรุปค่าใช้จ่าย กันยายน 2569"
+   ]
+  }
+ }
+}

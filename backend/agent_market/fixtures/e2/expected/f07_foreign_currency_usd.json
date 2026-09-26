@@ -1,0 +1,97 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "f07_foreign_currency_usd",
+ "files": [
+  "docs/f07_foreign_currency_usd.pdf"
+ ],
+ "class": "digital",
+ "purpose": "a USD invoice from a foreign supplier: the THB amount needs an exchange-rate source, ask",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "invoice",
+  "seller_name": {
+   "value": "Cloudnine Software Pte. Ltd.",
+   "normalized": {
+    "legal_form": "foreign",
+    "core": "Cloudnine Software"
+   }
+  },
+  "seller_tax_id": null,
+  "seller_branch": null,
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "CN-2026-00917",
+  "document_date": "2026-09-01",
+  "due_date": "2026-10-01",
+  "currency": "USD",
+  "vat_mode": "none",
+  "sum_lines": "1200.00",
+  "discount": "0.00",
+  "subtotal": "1200.00",
+  "vat_rate": null,
+  "vat_amount": null,
+  "total": "1200.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "Cloudnine Pro subscription, 20 seats, Sep 2026",
+    "quantity": "20",
+    "unit_price": "60.00",
+    "amount": "1200.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "skip",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "skip",
+  "grand_total": "skip",
+  "wht": "skip",
+  "currency": "fail",
+  "required_fields": "pass",
+  "buyer_match": "skip",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [
+   "check_failed:currency"
+  ],
+  "may": false,
+  "allowed_extra": [
+   "pp36_self_assessment",
+   "wht_section_70"
+  ],
+  "max": 3
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": null
+}

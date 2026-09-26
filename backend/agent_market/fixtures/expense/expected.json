@@ -1,0 +1,400 @@
+{
+ "schema": "am2.expense_expected.v1",
+ "period": "2026-10",
+ "employees": {
+  "E001": "สมชาย ใจดี",
+  "E002": "สุดา รักงาน",
+  "E003": "วิชัย ช่างคิด",
+  "E004": "นภา สดใส"
+ },
+ "claims": [
+  {
+   "id": "C01",
+   "employee": "E001",
+   "date": "2026-10-01",
+   "category": "meals",
+   "merchant": "ร้านอาหารครัวไทย",
+   "amount": "850.00",
+   "receipt": "receipts/r_c01.pdf",
+   "vat_claim": false,
+   "description": "ค่าอาหารกลางวันประชุมทีมขาย"
+  },
+  {
+   "id": "C02",
+   "employee": "E001",
+   "date": "2026-10-05",
+   "category": "meals",
+   "merchant": "ร้านสุกี้ชาบูบ้านเรา",
+   "amount": "1980.00",
+   "receipt": "receipts/r_c02.pdf",
+   "vat_claim": false,
+   "description": "ค่าอาหารเย็นทีมขาย (ทำงานล่วงเวลาปิดยอด)"
+  },
+  {
+   "id": "C03",
+   "employee": "E002",
+   "date": "2026-10-06",
+   "category": "taxi",
+   "merchant": "แท็กซี่",
+   "amount": "320.00",
+   "receipt": null,
+   "vat_claim": false,
+   "description": "ไปส่งเอกสารที่กรมสรรพากร"
+  },
+  {
+   "id": "C04",
+   "employee": "E002",
+   "date": "2026-10-07",
+   "category": "office_supplies",
+   "merchant": "ร้านเครื่องเขียนสยาม",
+   "amount": "2450.00",
+   "receipt": null,
+   "vat_claim": false,
+   "description": "ซื้อกระดาษและแฟ้ม"
+  },
+  {
+   "id": "C05",
+   "employee": "E003",
+   "date": "2026-10-08",
+   "category": "hotel",
+   "merchant": "โรงแรมเชียงใหม่ริมดอย",
+   "amount": "2300.00",
+   "receipt": "receipts/r_c05.pdf",
+   "vat_claim": false,
+   "description": "ค่าที่พักติดตั้งระบบลูกค้าเชียงใหม่ 1 คืน"
+  },
+  {
+   "id": "C06",
+   "employee": "E003",
+   "date": "2026-10-08",
+   "category": "hotel",
+   "merchant": "โรงแรมเชียงใหม่ริมดอย",
+   "amount": "2300.00",
+   "receipt": "receipts/r_c05.pdf",
+   "vat_claim": false,
+   "description": "ค่าที่พักเชียงใหม่"
+  },
+  {
+   "id": "C07",
+   "employee": "E004",
+   "date": "2026-10-10",
+   "category": "meals",
+   "merchant": "ร้านกาแฟบ้านไร่",
+   "amount": "600.00",
+   "receipt": "receipts/r_c07.pdf",
+   "vat_claim": false,
+   "description": "ประชุมออกแบบแคมเปญ"
+  },
+  {
+   "id": "C08",
+   "employee": "E004",
+   "date": "2026-10-13",
+   "category": "taxi",
+   "merchant": "แท็กซี่",
+   "amount": "450.00",
+   "receipt": null,
+   "vat_claim": false,
+   "description": "เดินทางไปงานอีเวนต์"
+  },
+  {
+   "id": "C09",
+   "employee": "E001",
+   "date": "2026-10-14",
+   "category": "entertainment",
+   "merchant": "ร้านคาราโอเกะมิวสิคบ็อกซ์",
+   "amount": "4200.00",
+   "receipt": "receipts/r_c09.pdf",
+   "vat_claim": false,
+   "description": "รับรองลูกค้า"
+  },
+  {
+   "id": "C10",
+   "employee": "E002",
+   "date": "2026-10-15",
+   "category": "office_supplies",
+   "merchant": "บริษัท มินิมาร์ท 24 จำกัด",
+   "amount": "2500.00",
+   "receipt": "receipts/r_c10.pdf",
+   "vat_claim": true,
+   "description": "ซื้อของใช้สำนักงาน ขอคืนภาษีซื้อ"
+  },
+  {
+   "id": "C11",
+   "employee": "E003",
+   "date": "2026-10-16",
+   "category": "contractor",
+   "merchant": "นายสมศักดิ์ ช่างแอร์ (บุคคลธรรมดา)",
+   "amount": "5000.00",
+   "receipt": "receipts/r_c11.pdf",
+   "vat_claim": false,
+   "description": "ค่าจ้างซ่อมแอร์ห้องเซิร์ฟเวอร์",
+   "wht_deducted": "0.00"
+  },
+  {
+   "id": "C12",
+   "employee": "E004",
+   "date": "2026-10-19",
+   "category": "office_supplies",
+   "merchant": "ร้านไอทีพลาซ่า",
+   "amount": "2000.00",
+   "receipt": "receipts/r_c12.pdf",
+   "vat_claim": false,
+   "description": "เมาส์และคีย์บอร์ด"
+  },
+  {
+   "id": "C13",
+   "employee": "E004",
+   "date": "2026-10-19",
+   "category": "office_supplies",
+   "merchant": "ร้านไอทีพลาซ่า",
+   "amount": "1900.00",
+   "receipt": "receipts/r_c13.pdf",
+   "vat_claim": false,
+   "description": "จอภาพเสริม"
+  },
+  {
+   "id": "C14",
+   "employee": "E001",
+   "date": "2026-10-20",
+   "category": "meals",
+   "merchant": "ร้านอาหารบ้านสวน",
+   "amount": "1200.00",
+   "receipt": "receipts/r_c14.pdf",
+   "vat_claim": false,
+   "description": "ค่าอาหาร"
+  },
+  {
+   "id": "C15",
+   "employee": "E002",
+   "date": "2026-10-22",
+   "category": "taxi",
+   "merchant": "แท็กซี่",
+   "amount": "780.00",
+   "receipt": "receipts/r_c15.pdf",
+   "vat_claim": false,
+   "description": "เดินทางไปพบลูกค้าบางนา"
+  },
+  {
+   "id": "C16",
+   "employee": "E001",
+   "date": "2026-10-27",
+   "category": "meals",
+   "merchant": "ร้านอาหารครัวไทย",
+   "amount": "1400.00",
+   "receipt": "receipts/r_c16.pdf",
+   "vat_claim": false,
+   "description": "ค่าอาหารประชุมปิดยอด"
+  },
+  {
+   "id": "C17",
+   "employee": "E003",
+   "date": "2026-10-21",
+   "category": "phone",
+   "merchant": "บริษัท โมบายเน็ต ไทย จำกัด (มหาชน)",
+   "amount": "1200.00",
+   "receipt": "receipts/r_c17.pdf",
+   "vat_claim": false,
+   "description": "ค่าโทรศัพท์เดือนตุลาคม"
+  },
+  {
+   "id": "C18",
+   "employee": "E002",
+   "date": "2026-10-26",
+   "category": "meals",
+   "merchant": "ร้านข้าวมันไก่ประตูน้ำ",
+   "amount": "280.00",
+   "receipt": null,
+   "vat_claim": false,
+   "description": "อาหารกลางวันทำงานนอกสถานที่"
+  }
+ ],
+ "receipt_totals": {
+  "r_c01": "850.00",
+  "r_c02": "1980.00",
+  "r_c05": "2300.00",
+  "r_c07": "600.00",
+  "r_c09": "4200.00",
+  "r_c10": "2500.00",
+  "r_c11": "5000.00",
+  "r_c12": "2000.00",
+  "r_c13": "1900.00",
+  "r_c14": "1200.00",
+  "r_c15": "780.00",
+  "r_c16": "1400.00",
+  "r_c17": "1200.00"
+ },
+ "expected": {
+  "C01": {
+   "facts": {
+    "within_claim_limit": "pass",
+    "receipt": "pass"
+   },
+   "outcome": "pass"
+  },
+  "C02": {
+   "facts": {
+    "within_claim_limit": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "over_claim_limit"
+   ]
+  },
+  "C03": {
+   "facts": {
+    "receipt": "pass"
+   },
+   "outcome": "pass",
+   "note": "320 is under the 500 receipt threshold"
+  },
+  "C04": {
+   "facts": {
+    "receipt": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "missing_receipt"
+   ]
+  },
+  "C05": {
+   "facts": {
+    "within_claim_limit": "pass",
+    "duplicate": "pass"
+   },
+   "outcome": "pass"
+  },
+  "C06": {
+   "facts": {
+    "duplicate": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "duplicate_claim"
+   ],
+   "duplicate_of": "C05"
+  },
+  "C07": {
+   "facts": {
+    "weekend_holiday": "fail"
+   },
+   "outcome": "question",
+   "codes": [
+    "weekend_or_holiday"
+   ],
+   "note": "Saturday: a flag for a person, never a rejection"
+  },
+  "C08": {
+   "facts": {
+    "weekend_holiday": "fail"
+   },
+   "outcome": "question",
+   "codes": [
+    "weekend_or_holiday"
+   ],
+   "note": "13 Oct 2026 is วันนวมินทรมหาราช"
+  },
+  "C09": {
+   "facts": {
+    "prohibited_merchant": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "prohibited_merchant"
+   ]
+  },
+  "C10": {
+   "facts": {
+    "vat_document": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "vat_claim_without_full_tax_invoice"
+   ],
+   "note": "the receipt is an abbreviated tax invoice: no input-VAT claim"
+  },
+  "C11": {
+   "facts": {
+    "wht": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "wht_missing"
+   ],
+   "note": "5,000 to an individual for services: 3 % WHT (150.00) expected, 0.00 deducted"
+  },
+  "C12": {
+   "facts": {
+    "split_purchase": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "split_purchase"
+   ],
+   "group": [
+    "C12",
+    "C13"
+   ]
+  },
+  "C13": {
+   "facts": {
+    "split_purchase": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "split_purchase"
+   ],
+   "group": [
+    "C12",
+    "C13"
+   ]
+  },
+  "C14": {
+   "facts": {
+    "within_claim_limit": "pass"
+   },
+   "outcome": "question",
+   "codes": [
+    "vague_purpose"
+   ],
+   "note": "'ค่าอาหาร' alone: business purpose is judgement — a card, not a rule"
+  },
+  "C15": {
+   "facts": {
+    "within_claim_limit": "pass",
+    "receipt": "pass"
+   },
+   "outcome": "pass"
+  },
+  "C16": {
+   "facts": {
+    "within_period_limit": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "over_period_limit"
+   ],
+   "note": "E001 meals in Oct: 850 + 1,980 + 1,200 + 1,400 = 5,430 > 5,000; this is the claim that crosses. Period limits count CLAIMED amounts: the audit runs before anyone decides C02, so C02's own over-limit exception does not shrink the month"
+  },
+  "C17": {
+   "facts": {
+    "within_period_limit": "fail"
+   },
+   "outcome": "exception",
+   "codes": [
+    "over_period_limit"
+   ]
+  },
+  "C18": {
+   "facts": {
+    "receipt": "pass"
+   },
+   "outcome": "pass",
+   "note": "280 is under the receipt threshold"
+  }
+ },
+ "kb_policy_rule": "policy_kb.docx says meals 'ประมาณ 2,000'; the structured table says 1,500: C02 (1,980) must be an over_claim_limit exception under 1,500, and the KB text may only be quoted as context",
+ "never": [
+  "automatic_rejection",
+  "limit_from_kb_document"
+ ]
+}

@@ -1,0 +1,100 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "p01_photo_crumpled_thermal",
+ "files": [
+  "docs/p01_photo_crumpled_thermal.jpg"
+ ],
+ "class": "photo",
+ "purpose": "phone photo of a crumpled thermal receipt: triage only (vendor/date/total/VAT/tax ID); low confidence becomes a question, never a number",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "triage",
+ "scope_fields": [
+  "seller_name",
+  "seller_tax_id",
+  "document_date",
+  "total",
+  "vat_amount"
+ ],
+ "truth": {
+  "document_type": "abbreviated_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท กาแฟดี จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "กาแฟดี"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105560044112",
+   "valid": true
+  },
+  "seller_branch": "00015",
+  "buyer_name": null,
+  "buyer_tax_id": null,
+  "buyer_branch": null,
+  "document_number": "00015-2609-000731",
+  "document_date": "2026-09-21",
+  "due_date": null,
+  "currency": "THB",
+  "vat_mode": "inclusive",
+  "sum_lines": "185.00",
+  "discount": "0.00",
+  "subtotal": "172.90",
+  "vat_rate": "7",
+  "vat_amount": "12.10",
+  "total": "185.00",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "ลาเต้เย็น",
+    "quantity": "2",
+    "unit_price": "65.00",
+    "amount": "130.00"
+   },
+   {
+    "description": "ครัวซองต์เนยสด",
+    "quantity": "1",
+    "unit_price": "55.00",
+    "amount": "55.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "skip",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "skip",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": true,
+  "allowed_extra": [],
+  "max": null
+ },
+ "rules": [
+  "no_silent_errors"
+ ],
+ "provenance": {
+  "method": "ocr",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": null,
+ "ui": {
+  "best_effort_notice": true
+ }
+}
