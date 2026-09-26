@@ -1,0 +1,65 @@
+{
+ "schema": "e2.fixtures.v1",
+ "fixtures": [
+  {
+   "id": "h01_flow_layout",
+   "class": "digital",
+   "files": [
+    "docs/h01_flow_layout.pdf"
+   ],
+   "sha256": {
+    "docs/h01_flow_layout.pdf": "e4ffa70c8fefed5ce5c0d0c12ff486e3e1cd01cdebc7311ebc5479f05888471b"
+   }
+  },
+  {
+   "id": "h02_bilingual",
+   "class": "digital",
+   "files": [
+    "docs/h02_bilingual.pdf"
+   ],
+   "sha256": {
+    "docs/h02_bilingual.pdf": "62fa85fac7351a295cfe28bf7bb35177d736a1e113bc5eb66d6ba89d7c9bf21d"
+   }
+  },
+  {
+   "id": "h03_bilingual_discount",
+   "class": "digital",
+   "files": [
+    "docs/h03_bilingual_discount.pdf"
+   ],
+   "sha256": {
+    "docs/h03_bilingual_discount.pdf": "1e5914e5aa9dd0e8a6c537e29fb704922ddde89f4f49744daac3669c59501e1b"
+   }
+  },
+  {
+   "id": "h05_transport_wht1",
+   "class": "digital",
+   "files": [
+    "docs/h05_transport_wht1.pdf"
+   ],
+   "sha256": {
+    "docs/h05_transport_wht1.pdf": "5f17c25fbefb10944833232597e8757bfd59e4b8706596f89842f96aca03236d"
+   }
+  },
+  {
+   "id": "h06_pos_vatable",
+   "class": "digital",
+   "files": [
+    "docs/h06_pos_vatable.pdf"
+   ],
+   "sha256": {
+    "docs/h06_pos_vatable.pdf": "bf704f1f206e7130f5aa9eb774dbbde796badfbce6f8040a709f9560ab3eabc3"
+   }
+  },
+  {
+   "id": "h04_flow_scan300",
+   "class": "scan300",
+   "files": [
+    "docs/h04_flow_scan300.pdf"
+   ],
+   "sha256": {
+    "docs/h04_flow_scan300.pdf": "482c158843e2c3b7e9b1659e8a6cd287f50d0958e6e76614d7feb25fcc1cbacd"
+   }
+  }
+ ]
+}

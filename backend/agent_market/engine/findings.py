@@ -20,7 +20,10 @@ from typing import Any
 SEVERITIES = ("blocking", "cosmetic")
 MOMENTS = ("install", "preflight", "postcompute")
 KINDS = ("question", "request_files")
-MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates")
+MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
+                  # AM2 E2 cards: one per document and field / check (subject = "<doc>:<field>")
+                  "e2_field_missing", "e2_low_confidence", "e2_check_failed", "e2_source_conflict",
+                  "e2_duplicate", "e2_copy", "e2_doc_type", "e2_page_quality", "e2_typed_invalid")
 FORBIDDEN_WORDS = ("password", "รหัสผ่าน", "token", "โทเคน", "เลขบัตรประชาชน", "otp", "pin")
 
 
@@ -49,6 +52,10 @@ class Finding:
     # Facts the question text was written from — the only fields an optional
     # model rewrite may draw on.
     facts: dict = field(default_factory=dict)
+    # AM2: the question also takes a typed value ({"kind": money|tax_id|date|text,
+    # "hint": ...}); the typed words come back as {"typed": "..."} and are
+    # validated by the package, never interpreted by a model.
+    input: dict | None = None
 
     @property
     def key(self) -> str:

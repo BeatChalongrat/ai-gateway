@@ -1,0 +1,104 @@
+{
+ "schema": "e2.expected.v1",
+ "id": "h03_bilingual_discount",
+ "files": [
+  "docs/h03_bilingual_discount.pdf"
+ ],
+ "class": "digital",
+ "purpose": "H2 / H3: an English-first bilingual tax invoice (Sub Total / Discount / Grand Total).",
+ "source_fixture": null,
+ "duplicate_of": null,
+ "scope": "full",
+ "scope_fields": null,
+ "truth": {
+  "document_type": "full_tax_invoice",
+  "seller_name": {
+   "value": "บริษัท พรีเมียร์ อิเล็คทริค จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "พรีเมียร์ อิเล็คทริค"
+   }
+  },
+  "seller_tax_id": {
+   "value": "0105564122339",
+   "valid": true
+  },
+  "seller_branch": "00000",
+  "buyer_name": {
+   "value": "บริษัท สรานเทค โซลูชั่นส์ จำกัด",
+   "normalized": {
+    "legal_form": "company_limited",
+    "core": "สรานเทค โซลูชั่นส์"
+   }
+  },
+  "buyer_tax_id": {
+   "value": "0105563012343",
+   "valid": true
+  },
+  "buyer_branch": "00000",
+  "document_number": "INV-6909-0117",
+  "document_date": "2026-09-19",
+  "due_date": "2026-10-19",
+  "currency": "THB",
+  "vat_mode": "exclusive",
+  "sum_lines": "19800.00",
+  "discount": "1250.00",
+  "subtotal": "18550.00",
+  "vat_rate": "7",
+  "vat_amount": "1298.50",
+  "total": "19848.50",
+  "wht_rate": null,
+  "wht_amount": null,
+  "net_payable": null,
+  "line_items": [
+   {
+    "description": "โคมไฟ LED 40W",
+    "quantity": "25",
+    "unit_price": "690.00",
+    "amount": "17250.00"
+   },
+   {
+    "description": "สวิตช์ 3 ทาง",
+    "quantity": "30",
+    "unit_price": "85.00",
+    "amount": "2550.00"
+   }
+  ]
+ },
+ "checks": {
+  "document_type": "pass",
+  "seller_tax_id_format": "pass",
+  "buyer_tax_id_format": "pass",
+  "document_date": "pass",
+  "line_arithmetic": "pass",
+  "subtotal_sum": "pass",
+  "vat_7_percent": "pass",
+  "grand_total": "pass",
+  "wht": "skip",
+  "currency": "pass",
+  "required_fields": "pass",
+  "buyer_match": "pass",
+  "duplicate": "pass",
+  "original_copy": "pass"
+ },
+ "history": [],
+ "questions": {
+  "must": [],
+  "may": false,
+  "allowed_extra": [],
+  "max": 0
+ },
+ "rules": [
+  "no_silent_errors",
+  "zero_questions"
+ ],
+ "provenance": {
+  "method": "pdf_text",
+  "pages": 1,
+  "totals_page": 1
+ },
+ "confidence": {
+  "money_min": 0.95
+ },
+ "ui": null
+}
