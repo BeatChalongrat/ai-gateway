@@ -176,7 +176,10 @@ const phases = {
     await browser.close();
   },
 
-  async install() {
+  async install(opts = {}) {
+    const sample = opts.sample || "GL_Express_2569-09.csv";
+    const company = opts.company === undefined ? "[AM1b] บริษัท ตัวอย่างเทรดดิ้ง จำกัด" : opts.company;
+    const tag = opts.tag || "";
     const { browser, page } = await connect();
     await page.goto(`${WEB}/chat/agents`, { waitUntil: "load" });
     await L.wait(3000);
@@ -184,7 +187,7 @@ const phases = {
     await page.goto(`${WEB}/chat/agents/install/${SLUG}`, { waitUntil: "load" });
     const src = page.locator('[data-testid="am-step-source"]');
     await src.waitFor({ timeout: 60000 });
-    await src.locator('input[type="file"]').setInputFiles(path.join(NASTY, "GL_Express_2569-09.csv"));
+    await src.locator('input[type="file"]').setInputFiles(path.join(NASTY, sample));
     await page.waitForSelector('[data-testid="am-preview-table"]', { timeout: 180000 }).catch(() => null);
     await L.wait(1500);
     await shot(page, "03-install-source.png");
@@ -195,7 +198,7 @@ const phases = {
     await page.locator('[data-testid="am-mapping-save"]').click();
     const theme = page.locator('[data-testid="am-step-theme"]');
     await theme.waitFor({ timeout: 60000 });
-    await theme.locator("input").first().fill("[AM1b] บริษัท ตัวอย่างเทรดดิ้ง จำกัด");
+    if (company) await theme.locator("input").first().fill(company);
     await L.wait(500);
     await shot(page, "05-install-theme.png");
     await page.locator('[data-testid="am-theme-save"]').click();
@@ -208,16 +211,22 @@ const phases = {
     const done = await waitFor(async () => (await page.locator('[data-testid="am-selftest-thread"] [data-testid="am-outputs"]').count()) > 0, 300000, 1000);
     log(`self-test ${done ? "delivered files" : "did NOT finish"} after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
     await L.wait(1500);
-    await shot(page, "07-selftest.png");
+    await shot(page, `07${tag}-selftest.png`);
     const inst = await api(page, "/installs");
     const mine = (inst.body?.installs || []).filter((i) => i.slug === SLUG).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-    state.install = mine.id;
+    state[opts.stateKey || "install"] = mine.id;
     log(`install ${mine.id} (self-test run ${mine.self_test_run_id || "?"})`);
     await page.locator('[data-testid="am-selftest-enter"]').click();
     await page.waitForSelector('[data-testid="am-composer-input"]', { timeout: 60000 });
     await L.wait(2000);
-    await shot(page, "08-workspace.png");
+    await shot(page, `08${tag}-workspace.png`);
     await browser.close();
+  },
+
+  // the owner's own install, left ready after the walkthrough's test data is
+  // deleted: the clean sample for the column mapping, no test company name
+  async fresh() {
+    await phases.install({ sample: "GL_clean_2569-09.xlsx", company: "", tag: "-owner", stateKey: "owner_install" });
   },
 
   async run1() {
