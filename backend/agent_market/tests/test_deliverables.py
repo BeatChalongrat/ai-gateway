@@ -64,6 +64,38 @@ class Render(unittest.TestCase):
         default = re.search(r"<w:rPrDefault>.*?</w:rPrDefault>", styles, re.S).group(0)
         self.assertIn('w:bidi="th-TH"', default)
 
+    def test_word_never_has_to_wrap_thai_in_a_table_cell(self):
+        # AM1b left over: Word without Thai proofing tools breaks Thai anywhere ("อ้างอิ|ง") when it wraps a
+        # cell. Every Thai line of every sized table cell must fit its cell as written, measured with the font.
+        from docx import Document
+
+        from agent_market.deliverables.fit import SAFETY, text_width_pt
+
+        CELL_PAD_PT, EMU_PER_PT = 9.0, 12700      # the report's cell margins (90 twips a side); EMU per point
+
+        doc = Document(os.path.join(self.out, "r_v1.docx"))
+        checked, too_wide = 0, []
+        for t in doc.tables:
+            for row in t.rows:
+                for cell in row.cells:
+                    if cell.width is None:
+                        continue
+                    avail = cell.width / EMU_PER_PT - CELL_PAD_PT
+                    for para in cell.paragraphs:
+                        runs = [r for r in para.runs if r.text.strip()]
+                        if not runs:
+                            continue
+                        size = runs[0].font.size.pt if runs[0].font.size else 10.5
+                        for line in para.text.split("\n"):
+                            if not any(0x0E00 <= ord(ch) <= 0x0E7F for ch in line):
+                                continue
+                            checked += 1
+                            w = text_width_pt(line, "Sarabun", size, bool(runs[0].bold)) * SAFETY
+                            if w > avail + 0.01:
+                                too_wide.append(f"{line} ({w:.1f} > {avail:.1f} pt)")
+        self.assertGreater(checked, 20)
+        self.assertEqual(too_wide, [])
+
     def test_deck_bars_under_budget_keep_their_colour(self):
         # AM1b walkthrough: PowerPoint inverts the fill of a negative bar
         # unless the series says not to — the under-budget bars came out white.

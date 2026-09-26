@@ -23,10 +23,16 @@ from docx.shared import Cm, Pt, RGBColor
 
 import docx_generator as dg  # /sandbox/scripts — shared, imported, not modified
 
+from . import thai_break
+from .fit import SAFETY, text_width_pt
 from .theme import FONT_FILES, rgb
 
 BODY_PT = 10.5
 SMALL_PT = 8.5
+# A table cell's left + right margins (_cell_margins: 90 twips each), in points.
+CELL_PAD_PT = 9.0
+MIN_CELL_PT = 6.5
+EMU_PER_PT = 12700
 
 
 def _rgb(hex6: str) -> RGBColor:
@@ -97,6 +103,56 @@ def _run(p, text, font, size=None, bold=False, color=None, superscript=False, it
         r.font.color.rgb = _rgb(color)
     if superscript:
         r.font.superscript = True
+    return r
+
+
+# ── Thai in table cells (AM-1b → AM-2) ────────────────────────────────────
+# Word without its Thai proofing tools treats every boundary between two Thai
+# characters as a place to break a line, so any Thai text Word has to wrap
+# in a table cell can break mid-word ("อ้างอิ|ง", "บริ|หาร"). The report
+# therefore never lets Word wrap Thai: each column is at least as wide as its
+# widest word, and a cell whose Thai text is wider than its column is broken
+# here — between words, found by libthai's dictionary (deliverables/
+# thai_break.py), or at spaces — into lines ending in an explicit line
+# break. A single word wider than its column gets a smaller size (down to
+# MIN_CELL_PT).
+
+
+def _is_thai(text: str) -> bool:
+    return any(0x0E00 <= ord(ch) <= 0x0E7F for ch in text)
+
+
+def _widest_word_pt(text: str, font: str, size: float, bold: bool) -> float:
+    return max((text_width_pt(w, font, size, bold) for w, _ in thai_break.words(text)), default=0.0) * SAFETY
+
+
+def _thai_lines(text: str, font: str, size: float, bold: bool, avail_pt: float) -> list[str]:
+    """Lines broken between words only, each no wider than avail_pt (a longer word stays whole)."""
+    lines, cur = [], ""
+    for word, spaced in thai_break.words(text):
+        cand = (cur + (" " if spaced else "") + word) if cur else word
+        if cur and text_width_pt(cand, font, size, bold) * SAFETY > avail_pt:
+            lines.append(cur)
+            cur = word
+        else:
+            cur = cand
+    return lines + ([cur] if cur else [])
+
+
+def _cell_text(p, text: str, font: str, size: float, width_emu: int, bold=False, color=None, pad_pt=CELL_PAD_PT):
+    """Text in a table cell that Word never has to wrap (see above)."""
+    if not _is_thai(text):
+        return _run(p, text, font, size, bold=bold, color=color)
+    avail = width_emu / EMU_PER_PT - pad_pt
+    while size > MIN_CELL_PT and _widest_word_pt(text, font, size, bold) > avail:
+        size = round(size - 0.5, 1)
+    lines = _thai_lines(text, font, size, bold, avail)
+    r = None
+    for i, line in enumerate(lines):
+        if i:
+            r.add_break()
+        r = _run(p, line, font, size, bold=bold, color=color)
+    r._am_last_line_pt = text_width_pt(lines[-1], font, size, bold) * SAFETY if lines else 0.0
     return r
 
 
@@ -228,12 +284,17 @@ class ReportWriter:
         t.alignment = WD_TABLE_ALIGNMENT.CENTER
         _borders(t, p["rule"], inside_h=False)
         _cell_margins(t, 110, 110, 120, 120)
+        sec = doc.sections[0]
+        tile = int((sec.page_width - sec.left_margin - sec.right_margin) / len(k))
+        t.autofit = False
+        pad = 12.0  # 120 twips each side
         for i, kp in enumerate(k):
             c = t.rows[0].cells[i]
+            c.width = tile
             _shade(c, p["surface"])
             lp = c.paragraphs[0]
             lp.paragraph_format.space_after = Pt(2)
-            _run(lp, kp["label"], self.font, 8.5, color=p["muted"])
+            _cell_text(lp, kp["label"], self.font, 8.5, tile, color=p["muted"], pad_pt=pad)
             vp = c.add_paragraph()
             vp.paragraph_format.space_after = Pt(1)
             _run(vp, kp["value"], self.font, 15, bold=True, color=p["primary"])
@@ -242,10 +303,15 @@ class ReportWriter:
             if kp["delta"]:
                 color = p["muted"] if kp["good"] is None else (p["positive"] if kp["good"] else p["negative"])
                 arrow = {"up": "▲ ", "down": "▼ ", "flat": ""}[kp["tone"]]
-                _run(dp, arrow + kp["delta"], self.font, 8, color=color)
+                last = _cell_text(dp, arrow + kp["delta"], self.font, 8, tile, color=color, pad_pt=pad)
             else:
-                _run(dp, "ไม่มีข้อมูลเปรียบเทียบ", self.font, 8, color=p["muted"])
-            _run(dp, f"  [{kp['cite']}]", self.font, 7, color=p["muted"])
+                last = _cell_text(dp, "ไม่มีข้อมูลเปรียบเทียบ", self.font, 8, tile, color=p["muted"], pad_pt=pad)
+            cite = f"  [{kp['cite']}]"
+            used = getattr(last, "_am_last_line_pt", None)
+            if used is not None and used + text_width_pt(cite, self.font, 7) * SAFETY > tile / EMU_PER_PT - pad:
+                last.add_break()      # the cite goes on its own line rather than making Word wrap Thai
+                cite = cite.strip()
+            _run(dp, cite, self.font, 7, color=p["muted"])
 
     # ── blocks ────────────────────────────────────────────────────────
     def heading(self, text, level=1):
@@ -294,6 +360,7 @@ class ReportWriter:
         _cell_margins(t)
         num_from = block.get("numeric_from")
         cite_col = block.get("cite_col")
+        widths = self._widths(t, block, size)
         hdr = t.rows[0]
         _repeat_header(hdr)
         for j, name in enumerate(cols):
@@ -303,7 +370,7 @@ class ReportWriter:
             cp.paragraph_format.space_after = Pt(0)
             if num_from is not None and j >= num_from and j != cite_col:
                 cp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            _run(cp, name, self.font, size, bold=True, color=p["on_primary"])
+            _cell_text(cp, name, self.font, size, widths[j], bold=True, color=p["on_primary"])
         strong = set(block.get("strong_rows") or [])
         for i, row in enumerate(rows):
             tr = t.rows[i + 1]
@@ -321,27 +388,34 @@ class ReportWriter:
                     cp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 text = "" if val is None else str(val)
                 color = p["muted"] if is_cite else (p["negative"] if text.startswith("(") and not is_cite else None)
-                _run(cp, text, self.font, 7 if is_cite else size, bold=i in strong and not is_cite, color=color)
-        self._widths(t, block)
+                _cell_text(cp, text, self.font, 7 if is_cite else size, widths[j], bold=i in strong and not is_cite,
+                           color=color)
         if block.get("caption"):
             cap = _para(doc, space_before=3, space_after=10)
             _run(cap, block["caption"], self.font, 8, color=p["muted"])
         else:
             _para(doc, space_after=6)
 
-    def _widths(self, t, block):
-        """Label columns get the room; numbers get a fixed width; the cite id a narrow one."""
+    def _widths(self, t, block, size) -> list[int]:
+        """Label columns get the room; numbers get a fixed width; the cite id a narrow one — and no
+        column is narrower than its widest word (header included), so Word never breaks a Thai word."""
         sec = self.doc.sections[0]
-        total = sec.page_width - sec.left_margin - sec.right_margin
+        total = int(sec.page_width - sec.left_margin - sec.right_margin)
         cols = block["columns"]
         num_from = block.get("numeric_from")
         cite_col = block.get("cite_col")
+
+        def need(j) -> int:
+            words = [(str(cols[j]), size, True)] + [
+                ("" if r[j] is None else str(r[j]), 7 if j == cite_col else size, False) for r in block["rows"]]
+            pt = max(_widest_word_pt(w, self.font, s, b) for w, s, b in words) + CELL_PAD_PT
+            return int(pt * EMU_PER_PT)
         widths = [None] * len(cols)
         for j, name in enumerate(cols):
             if j == cite_col:
-                widths[j] = Cm(1.15)
+                widths[j] = max(int(Cm(1.15)), need(j))
             elif num_from is not None and j >= num_from:
-                widths[j] = Cm(1.45) if name in ("%",) else Cm(2.15)
+                widths[j] = max(int(Cm(1.45) if name in ("%",) else Cm(2.15)), need(j))
         fixed = sum(w for w in widths if w is not None)
         free = [j for j, w in enumerate(widths) if w is None]
         if free:
@@ -352,6 +426,7 @@ class ReportWriter:
         for row in t.rows:
             for j, cell in enumerate(row.cells):
                 cell.width = widths[j]
+        return widths
 
     def chart(self, chart_id):
         spec = next((c for c in self.m["charts"] if c["id"] == chart_id), None)
