@@ -3,6 +3,8 @@
   "note": "Runs the whole agent on three bundled documents (a full tax invoice, a service invoice with withholding tax and an e-Tax XML receipt) and shows the real register before the user trusts it with their own documents. None of them needs a question.",
   "files": ["sample-data/ใบกำกับภาษี_IV6909-0015.pdf", "sample-data/ใบแจ้งหนี้ค่าบริการ_หักณที่จ่าย.pdf", "sample-data/eTax_ใบเสร็จ.xml"],
   "message": "ทำทะเบียนเอกสารซื้อจากไฟล์ตัวอย่าง",
+  "settings_note": "The identity the three sample documents are made out to (their printed buyer). A self-test run lays these over the install's own settings, so a person who set their real company still sees the sample register with no questions; a real run never uses them.",
+  "settings": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "company_tax_id": "0105563012343", "company_branch": "00000"},
   "formats": ["xlsx"],
   "expect": {
     "findings": [],
