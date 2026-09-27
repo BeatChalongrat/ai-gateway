@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 func TestGuardNumbersRefusesInventedFigures(t *testing.T) {
@@ -194,7 +196,7 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg := e.Packages["sran.financial-report"]
-	if pkg == nil || pkg.Version != "1.1.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
+	if pkg == nil || pkg.Version != "1.2.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
 		t.Fatalf("package not loaded: %+v", pkg)
 	}
 	if _, err := e.PackageFile(pkg, "sample-data/GL_2569-09.xlsx"); err != nil {
@@ -309,5 +311,51 @@ func TestGuardNumbersAcceptsTheSignInWords(t *testing.T) {
 		if err := GuardNumbers(bad, q, nil); err == nil {
 			t.Fatalf("%q must be refused", bad)
 		}
+	}
+}
+
+// AM3: a person's typed words about an invoice or an expense claim (an
+// extraction agent: narrative "rules", no text model declared) go only to a
+// model inside the organisation — never to the external fallback.
+func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[string]int{}
+	s, _ := fakeGateway(t, func(model string, n int) (int, string) {
+		mu.Lock()
+		seen[model]++
+		mu.Unlock()
+		if model == "qwen" {
+			return 502, ""
+		}
+		return 200, `{"choice": 1}`
+	})
+	m := &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "qwen", Fallback: "deepseek", SelfHosted: map[string]bool{"qwen": true},
+		Timeout: 5 * time.Second, HTTP: http.DefaultClient}
+	invoice := &Package{Manifest: am.Manifest{Narrative: "rules"}}
+	invoice.Manifest.Capabilities.Required = []string{"document.extract.e2"}
+	invoice.Manifest.Capabilities.Optional = []string{"model.vision"}
+	fin := &Package{}
+	fin.Manifest.Capabilities.Required = []string{"model.text"}
+	rcInv := &runCtx{r: &Runner{Model: m}, pkg: invoice}
+	rcFin := &runCtx{r: &Runner{Model: m}, pkg: fin}
+	if got := rcInv.textModels(); len(got) != 1 || got[0] != "qwen" {
+		t.Fatalf("the invoice agent's text models: %v", got)
+	}
+	if got := rcFin.textModels(); len(got) != 2 || got[1] != "deepseek" {
+		t.Fatalf("the financial report (its data sheet names both): %v", got)
+	}
+	q := am.Question{Key: "k", Question: "ผู้ซื้อไม่ตรง", Options: []am.Option{{Label: "ใช้ตามเอกสาร"}, {Label: "ตัดออก"}}}
+	if _, ok := rcInv.classify(context.Background(), q, "ใช้ได้"); ok {
+		t.Fatal("the self-hosted model failed: no answer, and the external one is never asked")
+	}
+	if seen["deepseek"] != 0 || seen["qwen"] == 0 {
+		t.Fatalf("calls: %v", seen)
+	}
+	// no self-hosted model at all: nothing is sent anywhere
+	m2 := &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "deepseek", Fallback: "gpt", Timeout: 5 * time.Second, HTTP: http.DefaultClient}
+	rc2 := &runCtx{r: &Runner{Model: m2}, pkg: invoice}
+	before := seen["deepseek"]
+	if _, ok := rc2.classify(context.Background(), q, "ใช้ได้"); ok || seen["deepseek"] != before {
+		t.Fatalf("an extraction agent with no self-hosted model sends nothing: %v", seen)
 	}
 }

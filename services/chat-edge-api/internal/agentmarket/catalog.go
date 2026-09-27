@@ -654,12 +654,29 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 		}
 		return false
 	}
-	// The text model: only an agent whose narrative is written by a model.
+	// The text model: an agent whose narrative is written by a model sends it
+	// the computed table (and a person's typed question or worded answer) —
+	// its primary and its fallback. Any other agent sends a person's typed
+	// words (with that run's table or card) only to a model inside the
+	// organisation, or to none (the runner's textModels).
+	const typed = " · และข้อความที่คุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค"
+	textDetail := func() (primary, fallback string, self map[string]bool) {
+		var det struct {
+			Primary    string          `json:"primary"`
+			Fallback   string          `json:"fallback"`
+			SelfHosted map[string]bool `json:"self_hosted"`
+		}
+		if b, ok := caps["model.text"]; ok {
+			_ = json.Unmarshal(b.Detail, &det)
+		}
+		return det.Primary, det.Fallback, det.SelfHosted
+	}
 	if uses("model.text") && m.Narrative != "rules" {
 		sees := inputs["model.text"]
 		if sees == "" {
 			sees = "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น (ไม่ใช่ไฟล์ต้นฉบับ) เพื่อเขียนคำบรรยายในรายงาน"
 		}
+		sees += typed
 		if b, ok := caps["model.text"]; ok {
 			var det struct {
 				Primary    string          `json:"primary"`
@@ -677,7 +694,20 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 			}
 		}
 	} else {
-		ds.NoModel = append(ds.NoModel, "คำบรรยายและสรุปในไฟล์เขียนด้วยกฎของ agent ไม่มีโมเดลภาษาใดเห็นข้อมูลของคุณ")
+		ds.NoModel = append(ds.NoModel, "คำบรรยายและสรุปในไฟล์เขียนด้วยกฎของ agent ไม่มีโมเดลภาษาใดเขียนหรือเห็นเอกสารของคุณ")
+		primary, fallback, self := textDetail()
+		inside := false
+		for _, x := range []string{primary, fallback} {
+			if x != "" && self[x] {
+				inside = true
+				ds.Models = append(ds.Models, DatasheetModel{Capability: "model.text", Model: x, Role: "questions", SelfHosted: true,
+					Sees: "เฉพาะเมื่อคุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค: ข้อความนั้นกับตารางหรือการ์ดของรอบนั้น — ส่งให้โมเดลในองค์กรเท่านั้น"})
+				break
+			}
+		}
+		if !inside {
+			ds.NoModel = append(ds.NoModel, "ข้อความที่คุณพิมพ์ไม่ถูกส่งให้โมเดลใด (ไม่มีโมเดลในองค์กร) — agent อ่านคำตอบจากคำสำคัญ หรือใช้ค่าแนะนำ")
+		}
 	}
 	if uses("model.vision") {
 		sees := inputs["model.vision"]

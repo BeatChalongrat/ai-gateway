@@ -359,13 +359,14 @@ func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, 
 		return "รอให้รอบนี้คำนวณเสร็จก่อนนะครับ แล้วถามได้เลย"
 	}
 	cv, _, err := rc.readComputed(ctx, ps.computed)
-	if err != nil || !r.Model.Available() {
-		return "ดูตัวเลขและที่มาได้ในหน้า “ขั้นตอนและที่มาของตัวเลข” ครับ (ตอนนี้ไม่มีโมเดลที่ตอบคำถามได้)"
+	models := rc.textModels()
+	if err != nil || !r.Model.Available() || len(models) == 0 {
+		return "ดูตัวเลขและที่มาได้ในไฟล์ของรอบนี้ และในหน้า “ขั้นตอนและที่มาของตัวเลข” ครับ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร และตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้)"
 	}
 	system := rc.pkg.Instructions + "\n\nตอนนี้ให้ตอบคำถามของผู้ใช้เกี่ยวกับตัวเลขของรอบนี้ สั้น ๆ 1–3 ประโยค ตอบเป็น JSON {\"answer\": \"...\"} ใช้ตัวเลขจากรายการที่อ้างได้เท่านั้น ถ้าข้อมูลไม่พอให้บอกตรง ๆ ว่าไม่พอ"
 	user := narrativePrompt(cv) + "\n\nคำถาม: " + text
 	var answer string
-	c, _, err := r.Model.Complete(ctx, system, user, func(s string) error {
+	c, _, err := r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
 		var v struct {
 			Answer string `json:"answer"`
 		}

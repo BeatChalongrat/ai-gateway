@@ -47,8 +47,12 @@ func (e *itEnv) setupExpenseInstall() am.Install {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	// AM3: the holiday rule runs only on the company's own calendar, confirmed
+	// (expense 1.1.0 fails closed on anything else); the fixture's dates are it.
+	holidays := `{"schema":"am3.holidays.v1","kind":"company","confirmed":true,"confirmed_by":"hr@example.test",` +
+		`"confirmed_at":"2026-09-28T00:00:00Z","dates":` + read("holidays.json") + `}`
 	for k, v := range map[string]string{"formats": `["xlsx"]`, "company": `"บริษัท สรานเทค โซลูชั่นส์ จำกัด"`,
-		"company_tax_id": `"0105563012343"`, "policy": read("policy.json"), "holidays": read("holidays.json")} {
+		"company_tax_id": `"0105563012343"`, "policy": read("policy.json"), "holidays": holidays} {
 		if err := e.store.SetDefault(ctx, tx, in.ID, am.Default{Key: k, Value: json.RawMessage(v), Source: "install"}); err != nil {
 			e.t.Fatal(err)
 		}

@@ -367,7 +367,8 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 // sentence the user typed. It can only return an option; it cannot invent
 // one, and it never decides what to ask.
 func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.Option, bool) {
-	if !rc.r.Model.Available() {
+	models := rc.textModels()
+	if !rc.r.Model.Available() || len(models) == 0 {
 		return am.Option{}, false
 	}
 	var opts strings.Builder
@@ -377,7 +378,7 @@ func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.
 	system := "คุณแปลคำตอบภาษาไทยของผู้ใช้ให้เป็นหนึ่งในตัวเลือกที่กำหนด ตอบเป็น JSON {\"choice\": หมายเลข} หรือ {\"choice\": null} ถ้าคำตอบไม่ตรงกับตัวเลือกใดชัดเจน ห้ามเดา"
 	user := fmt.Sprintf("คำถาม: %s\nตัวเลือก:\n%sคำตอบของผู้ใช้: %s", q.Question, opts.String(), text)
 	var choice *int
-	c, _, err := rc.r.Model.Complete(ctx, system, user, func(s string) error {
+	c, _, err := rc.r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
 		var v struct {
 			Choice *int `json:"choice"`
 		}

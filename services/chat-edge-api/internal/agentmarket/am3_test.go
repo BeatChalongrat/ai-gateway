@@ -645,7 +645,8 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(ds.Models) != 2 || !ds.Models[0].SelfHosted || ds.Models[1].SelfHosted || ds.Models[1].Model != "deepseek-v4-flash" ||
-		ds.Models[1].Role != "fallback" || !strings.Contains(ds.Models[0].Sees, "ไม่ใช่ไฟล์ต้นฉบับ") {
+		ds.Models[1].Role != "fallback" || !strings.Contains(ds.Models[0].Sees, "ไม่ใช่ไฟล์ต้นฉบับ") ||
+		!strings.Contains(ds.Models[1].Sees, "พิมพ์ถาม") {
 		t.Fatalf("the text model and its fallback, which runs outside: %+v", ds.Models)
 	}
 	if ds.Retention[0]["keep"] != float64(24) || len(ds.Never) != 1 || ds.Storage["backend"] != "local" {
@@ -655,8 +656,21 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	ds, _ = BuildDatasheet(Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)},
 		map[string]Binding{"model.vision": {Capability: "model.vision", Detail: vis}, "model.text": {Capability: "model.text", Detail: text}},
 		StatusPublished, time.Now())
-	if len(ds.Models) != 1 || ds.Models[0].Role != "vision" || !ds.Models[0].SelfHosted || !strings.Contains(ds.NoModel[0], "กฎ") {
-		t.Fatalf("an extraction agent: no text model sees the documents, only the self-hosted vision model: %+v %v", ds.Models, ds.NoModel)
+	// an extraction agent: no model writes or reads its documents' text; a
+	// person's typed words (and that run's table or card) go only to the
+	// in-organisation text model, never to the external fallback; scans and
+	// photos to the self-hosted vision model
+	if len(ds.Models) != 2 || ds.Models[0].Role != "questions" || ds.Models[0].Model != "qwen3.8-27b-fp8" || !ds.Models[0].SelfHosted ||
+		ds.Models[1].Role != "vision" || !ds.Models[1].SelfHosted || !strings.Contains(ds.NoModel[0], "กฎ") {
+		t.Fatalf("an extraction agent: %+v %v", ds.Models, ds.NoModel)
+	}
+	for _, m := range ds.Models {
+		if m.Model == "deepseek-v4-flash" {
+			t.Fatal("the external fallback never sees an extraction agent's data")
+		}
+	}
+	if !strings.Contains(ds.Models[0].Sees, "พิมพ์") || !strings.Contains(ds.Models[0].Sees, "ในองค์กรเท่านั้น") {
+		t.Fatalf("what the questions model sees, and when: %q", ds.Models[0].Sees)
 	}
 	last := ds.Retention[len(ds.Retention)-1]
 	if last["keep"] != float64(730) {
@@ -664,8 +678,9 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	}
 	ds, _ = BuildDatasheet(Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)}, map[string]Binding{},
 		StatusPublished, time.Now())
-	if len(ds.Models) != 0 || !strings.Contains(strings.Join(ds.NoModel, " "), "OCR") {
-		t.Fatalf("no self-hosted vision model: OCR only: %+v", ds.NoModel)
+	if len(ds.Models) != 0 || !strings.Contains(strings.Join(ds.NoModel, " "), "OCR") ||
+		!strings.Contains(strings.Join(ds.NoModel, " "), "ไม่ถูกส่งให้โมเดลใด") {
+		t.Fatalf("no self-hosted model: OCR only, and typed words go nowhere: %+v", ds.NoModel)
 	}
 }
 

@@ -107,6 +107,25 @@ func (rc *runCtx) selfTestSettings() {
 	}
 }
 
+// textModels are the models a person's typed words (a question about the
+// numbers, a card answered in a sentence) may be sent to, with that run's
+// table or card (AM3). An agent that declares a text model and has one write
+// its report (the financial report) uses its primary and fallback, as its
+// data sheet says; an extraction agent (narrative "rules": invoices, expense
+// claims) sends nothing to a model outside the organisation — only the
+// self-hosted ones, or none (a keyword reading and the defaults then).
+func (rc *runCtx) textModels() []string {
+	m := rc.pkg.Manifest
+	declared := false
+	for _, c := range append(append([]string{}, m.Capabilities.Required...), m.Capabilities.Optional...) {
+		declared = declared || c == "model.text"
+	}
+	if declared && m.Narrative != "rules" {
+		return rc.r.Model.Models()
+	}
+	return rc.r.Model.SelfHostedModels()
+}
+
 // ── catalog samples ──────────────────────────────────────────────────────
 
 // ensureSamples queues a sample for every released version that has none,

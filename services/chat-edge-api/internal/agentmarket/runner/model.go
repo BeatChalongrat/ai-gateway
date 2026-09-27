@@ -106,13 +106,38 @@ func (m *ModelClient) Available() bool {
 // empty or cut off at the output limit counts as no answer (the owner's
 // rule: the user never sees an empty answer — the caller then uses rules).
 func (m *ModelClient) Complete(ctx context.Context, system, user string, validate func(string) error) (Completion, []string, error) {
-	var tried []string
-	if !m.Available() {
-		return Completion{}, tried, ErrNoModel
+	return m.CompleteWith(ctx, m.Models(), system, user, validate)
+}
+
+// Models is the primary then the fallback.
+func (m *ModelClient) Models() []string {
+	if m == nil || m.Primary == "" {
+		return nil
 	}
 	models := []string{m.Primary}
 	if m.Fallback != "" && m.Fallback != m.Primary {
 		models = append(models, m.Fallback)
+	}
+	return models
+}
+
+// SelfHostedModels is Models() without any model that runs outside the organisation.
+func (m *ModelClient) SelfHostedModels() []string {
+	var out []string
+	for _, x := range m.Models() {
+		if m.SelfHosted[x] {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+
+// CompleteWith is Complete over the given models, in order (AM3: an agent
+// whose documents must stay in the organisation passes only self-hosted ones).
+func (m *ModelClient) CompleteWith(ctx context.Context, models []string, system, user string, validate func(string) error) (Completion, []string, error) {
+	var tried []string
+	if !m.Available() || len(models) == 0 {
+		return Completion{}, tried, ErrNoModel
 	}
 	release, err := m.acquire(ctx)
 	if err != nil {
