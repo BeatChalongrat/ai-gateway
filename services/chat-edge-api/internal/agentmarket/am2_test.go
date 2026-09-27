@@ -222,3 +222,46 @@ func TestPolicySettingSaysWhatIsWrong(t *testing.T) {
 		t.Fatalf("install with a bad tax ID: %d", code)
 	}
 }
+
+func TestMigration002DownUndoesItAndUpAppliesItAgain(t *testing.T) {
+	e := newEnv(t) // Migrate has applied 001 and 002
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	state := func() (string, bool, bool, bool) {
+		var table *string
+		var prev, scratch, recorded bool
+		_ = e.store.Pool.QueryRow(ctx, `SELECT to_regclass('agent_market.document_index')::text`).Scan(&table)
+		_ = e.store.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'agent_market'
+			AND table_name = 'agent_installs' AND column_name = 'previous_definition_id')`).Scan(&prev)
+		_ = e.store.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'agent_market'
+			AND table_name = 'agent_runs' AND column_name = 'scratch_purged_at')`).Scan(&scratch)
+		_ = e.store.Pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM agent_market.schema_migrations WHERE version = '002_document_index')`).Scan(&recorded)
+		s := ""
+		if table != nil {
+			s = *table
+		}
+		return s, prev, scratch, recorded
+	}
+	if tb, prev, scratch, rec := state(); tb == "" || !prev || !scratch || !rec {
+		t.Fatalf("after up: %q %v %v %v", tb, prev, scratch, rec)
+	}
+	down, err := migrationFS.ReadFile("migrations/002_document_index.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.Pool.Exec(ctx, string(down)); err != nil {
+		t.Fatal(err)
+	}
+	if tb, prev, scratch, rec := state(); tb != "" || prev || scratch || rec {
+		t.Fatalf("after down, 002 must be gone entirely: %q %v %v %v", tb, prev, scratch, rec)
+	}
+	applied, err := Migrate(ctx, e.store.Pool)
+	if err != nil || len(applied) != 1 || applied[0] != "002_document_index" {
+		t.Fatalf("up again: %v %v", applied, err)
+	}
+	if tb, prev, scratch, rec := state(); tb == "" || !prev || !scratch || !rec {
+		t.Fatalf("after up again: %q %v %v %v", tb, prev, scratch, rec)
+	}
+}
