@@ -211,6 +211,9 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 			to.Version, trim(joinLines(problems), 400)), map[string]any{"tone": "error"})
 		return
 	}
+	if cur, err := st.InstallByID(ctx, rc.install.ID); err == nil && cur.DefinitionID == to.ID {
+		return // already switched (a resumed run): switching again would lose the version to roll back to
+	}
 	if _, err := st.SwitchInstall(ctx, rc.install.ID, to, p.Bindings); err != nil {
 		_ = st.PostText(ctx, rc.run, "อัปเกรดไม่สำเร็จ: "+trim(err.Error(), 200), map[string]any{"tone": "error"})
 		return

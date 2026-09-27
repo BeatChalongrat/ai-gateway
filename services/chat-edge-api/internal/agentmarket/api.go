@@ -299,6 +299,13 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "BAD_JSON", "bad request body")
 		return
 	}
+	// A setting the person gave that we know and that is wrong is refused, not dropped.
+	for k, v := range req.Settings {
+		if validSettingKey(k) && !validSettingValue(k, v) {
+			writeErr(w, http.StatusBadRequest, "BAD_VALUE", settingProblem(k, v))
+			return
+		}
+	}
 	ctx := r.Context()
 	def, err := a.store.DefinitionBySlug(ctx, req.Slug)
 	if err != nil {
@@ -435,6 +442,18 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 		return len(HolidayProblems(raw)) == 0
 	}
 	return true
+}
+
+// settingProblem says what is wrong with a refused setting (for a table, which entries).
+func settingProblem(key string, v json.RawMessage) string {
+	msg := "ค่าไม่ถูกต้อง: " + settingLabel(key)
+	switch key {
+	case "policy":
+		msg += " — " + strings.Join(PolicyProblems(v), " · ")
+	case "holidays":
+		msg += " — " + strings.Join(HolidayProblems(v), " · ")
+	}
+	return msg
 }
 
 func settingLabel(k string) string {
@@ -606,14 +625,7 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validSettingValue(key, body.Value) {
-		msg := "ค่าไม่ถูกต้อง: " + settingLabel(key)
-		switch key { // say what is wrong with a table
-		case "policy":
-			msg += " — " + strings.Join(PolicyProblems(body.Value), " · ")
-		case "holidays":
-			msg += " — " + strings.Join(HolidayProblems(body.Value), " · ")
-		}
-		writeErr(w, http.StatusBadRequest, "BAD_VALUE", msg)
+		writeErr(w, http.StatusBadRequest, "BAD_VALUE", settingProblem(key, body.Value))
 		return
 	}
 	label := body.Label

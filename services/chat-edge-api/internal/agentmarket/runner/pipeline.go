@@ -186,10 +186,12 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false); err != nil {
 		return r.fail(ctx, run, "outputs", err)
 	}
+	// An upgrade's self-test switches the install before its run reads as
+	// succeeded: whoever sees "succeeded" finds the install already switched.
+	rc.finishUpgrade(context.Background(), computedRef, true, "")
 	if err := r.finish(rc, am.RunSucceeded, ""); err != nil {
 		return err
 	}
-	rc.finishUpgrade(context.Background(), computedRef, true, "")
 	rc.startNextRound(context.Background())
 	return nil
 }

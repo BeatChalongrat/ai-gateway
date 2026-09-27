@@ -210,4 +210,15 @@ func TestPolicySettingSaysWhatIsWrong(t *testing.T) {
 	if code != 400 || !strings.Contains(fmt.Sprint(body), "categories.meals.per_claim") {
 		t.Fatalf("a limit that is not an amount: %d %v", code, body)
 	}
+	// at install too: refused and said, never silently dropped
+	code, body = e.do("POST", "/installs", map[string]any{"slug": "sran.financial-report", "idempotency_key": "am2-bad-policy",
+		"settings": map[string]any{"policy": bad}})
+	if code != 400 || !strings.Contains(fmt.Sprint(body), "categories.meals.per_claim") {
+		t.Fatalf("install with a bad policy: %d %v", code, body)
+	}
+	code, _ = e.do("POST", "/installs", map[string]any{"slug": "sran.financial-report", "idempotency_key": "am2-bad-tax",
+		"settings": map[string]any{"company_tax_id": "0105563012340", "unknown_key": 1}})
+	if code != 400 {
+		t.Fatalf("install with a bad tax ID: %d", code)
+	}
 }
