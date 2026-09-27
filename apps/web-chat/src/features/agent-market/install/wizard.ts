@@ -2,7 +2,9 @@
 // install.questions. The financial report asks ["company", "theme",
 // "formats", "currency", "mapping"] and keeps AM1's five steps; the invoice
 // agent asks ["company_tax", "theme", "formats"] and gets company details →
-// theme → file set → self-test. The order is fixed, whatever the manifest's.
+// theme → file set → self-test; the expense audit asks ["company", "policy",
+// "theme", "formats"] and gets its policy table → theme (with the company
+// name) → file set → self-test. The order is fixed, whatever the manifest's.
 
 import type { AmKey } from "../i18n";
 import type { Manifest } from "../types";
@@ -15,12 +17,13 @@ export function installQuestions(manifest: Manifest | null | undefined): string[
   return qs?.length ? qs : LEGACY_QUESTIONS;
 }
 
-export type StepId = "source" | "mapping" | "company_tax" | "theme" | "formats" | "selftest";
+export type StepId = "source" | "mapping" | "company_tax" | "policy" | "theme" | "formats" | "selftest";
 
 export const STEP_LABEL: Record<StepId, AmKey> = {
   source: "install.step1",
   mapping: "install.step2",
   company_tax: "install.stepCompanyTax",
+  policy: "install.stepPolicy",
   theme: "install.step3",
   formats: "install.step4",
   selftest: "install.step5",
@@ -31,6 +34,7 @@ export function installSteps(manifest: Manifest | null | undefined): StepId[] {
   const out: StepId[] = [];
   if (qs.includes("mapping")) out.push("source", "mapping");
   if (qs.includes("company_tax")) out.push("company_tax");
+  if (qs.includes("policy")) out.push("policy");
   if (qs.includes("theme") || qs.includes("company")) out.push("theme");
   if (qs.includes("formats") || qs.includes("currency")) out.push("formats");
   out.push("selftest");

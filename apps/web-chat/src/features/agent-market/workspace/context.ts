@@ -29,4 +29,5 @@ export function useWorkspace(): WorkspaceCtx | null {
 
 export const runHref = (runId: string) => `/chat/agents/runs/${runId}`;
 export const settingsHref = (installId: string) => `/chat/agents/i/${installId}/settings`;
+export const dashboardHref = (installId: string) => `/chat/agents/i/${installId}/dashboard`;
 export const workspaceHref = (installId: string) => `/chat/agents/i/${installId}`;

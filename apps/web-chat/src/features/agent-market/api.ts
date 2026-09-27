@@ -20,11 +20,15 @@ import type {
   CatalogItem,
   Computed,
   Default,
+  Install,
   InstallDetail,
   InstallResponse,
+  AgentDashboard,
   InstallRow,
   Run,
   RunDetail,
+  RunExceptionRow,
+  UpgradeInfo,
   SavedTemplate,
   TemplateSlot,
   ThemeResponse,
@@ -219,6 +223,18 @@ export const amApi = {
   saveTemplate: (installId: string, body: { file_id: string; slots: TemplateSlot[]; mapping: Record<string, string> }) =>
     send<{ template: SavedTemplate }>("PUT", `/installs/${id(installId)}/template`, body),
   removeTemplate: (installId: string) => send<{ removed: boolean }>("DELETE", `/installs/${id(installId)}/template`),
+
+  /** AM2 phase F: what a run left for a person to decide, and a decision (one of the row's own choices). */
+  runExceptions: (runId: string) => call<{ exceptions: RunExceptionRow[] | null }>(`/runs/${id(runId)}/exceptions`),
+  decideException: (exceptionId: string, body: { choice: unknown; note?: string }) =>
+    send<{ exception: RunExceptionRow }>("POST", `/exceptions/${id(exceptionId)}/decision`, body),
+
+  /** AM2 phase G: versions (upgrade after a self-test of the new one; roll back) and the per-agent dashboard. */
+  upgradeInfo: (installId: string) => call<UpgradeInfo>(`/installs/${id(installId)}/upgrade`),
+  upgrade: (installId: string, definitionId: string) =>
+    send<{ run: Run }>("POST", `/installs/${id(installId)}/upgrade`, { definition_id: definitionId }),
+  rollback: (installId: string) => send<{ install: Install }>("POST", `/installs/${id(installId)}/rollback`),
+  dashboard: (installId: string, days: number) => call<AgentDashboard>(`/installs/${id(installId)}/dashboard?days=${days}`),
 
   theme: () => call<ThemeResponse>("/theme"),
   putTheme: (theme: { id: string; company?: string }) => send<{ version: number }>("PUT", "/theme", theme),

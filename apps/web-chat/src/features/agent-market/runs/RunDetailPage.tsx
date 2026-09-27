@@ -29,6 +29,7 @@ import { BackLink, Card, CheckLine, cls, ErrorPanel, FeatureGate, PageShell, Pag
 import { viaKey } from "../workspace/AgentQuestionCard";
 import { workspaceHref } from "../workspace/context";
 import { ArtifactRow, qualityOf } from "../workspace/OutputsCard";
+import { ExceptionsPanel, useRunExceptions } from "../exceptions/ExceptionsPanel";
 import { StepIcon } from "../workspace/ProgressCard";
 
 const ACTIVE = new Set(["queued", "running", "awaiting_input"]);
@@ -119,6 +120,8 @@ function RunDetailView({ runId }: { runId: string }) {
 
   const status = data?.run.status ?? "";
   const active = ACTIVE.has(status);
+  // what the run left for a person to decide (the expense audit): read once it has finished
+  const decisions = useRunExceptions(runId, !!data && !active);
 
   useEffect(() => {
     let alive = true;
@@ -180,7 +183,7 @@ function RunDetailView({ runId }: { runId: string }) {
     { id: "steps", key: "run.tab.steps", count: steps.length },
     { id: "questions", key: "run.tab.questions", count: cards.length },
     { id: "numbers", key: "run.tab.numbers" },
-    { id: "exceptions", key: "run.tab.exceptions", count: exceptions.length },
+    { id: "exceptions", key: "run.tab.exceptions", count: exceptions.length + (decisions.rows?.length ?? 0) },
     { id: "files", key: "run.tab.files", count: artifacts.length + files.length },
   ];
 
@@ -245,7 +248,12 @@ function RunDetailView({ runId }: { runId: string }) {
         ) : tab === "numbers" ? (
           computed ? <NumbersTab c={computed} /> : <Empty text={computedMissing || !active ? t("run.noComputed") : t("common.loading")} />
         ) : tab === "exceptions" ? (
-          <ExceptionsTab c={computed} />
+          <ExceptionsTab
+            c={computed}
+            decisions={
+              decisions.rows?.length ? <ExceptionsPanel rows={decisions.rows} onDecided={decisions.replace} onStale={decisions.reload} /> : null
+            }
+          />
         ) : (
           <FilesTab artifacts={artifacts} files={files} />
         )}
@@ -823,12 +831,21 @@ function variance(amount: string | null | undefined, pct: string | null | undefi
 
 // ── exceptions ─────────────────────────────────────────────────────────
 
-function ExceptionsTab({ c }: { c: Computed | null }) {
+function ExceptionsTab({ c, decisions }: { c: Computed | null; decisions: React.ReactNode }) {
   const t = useAmT();
   const list = c?.exceptions ?? [];
   const excluded = c?.excluded ?? [];
+  // an agent that leaves its exceptions for a person (the expense audit) shows them here, decisions and all
+  if (decisions && !list.length && !excluded.length) {
+    return (
+      <div className="flex flex-col gap-4" data-testid="am-run-exceptions">
+        {decisions}
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-4" data-testid="am-run-exceptions">
+      {decisions}
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-sm font-semibold text-text-primary">{t("run.tab.exceptions")}</h2>
         {list.length ? <Pill tone="warning">{String(list.length)}</Pill> : null}

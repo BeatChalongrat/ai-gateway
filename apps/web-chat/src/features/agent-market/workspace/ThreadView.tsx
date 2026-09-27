@@ -25,6 +25,7 @@ import type {
   UserTextPayload,
 } from "../types";
 import { AgentTile, cls, DOT } from "../ui";
+import { RunExceptions } from "../exceptions/ExceptionsPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { settingsHref, useWorkspace } from "./context";
 import { FileChip } from "./FileChips";
@@ -117,7 +118,16 @@ function AgentItem({ item }: { item: ThreadItem }) {
     }
     case "outputs": {
       const p = item.payload as OutputsPayload;
-      return p?.run_id ? <OutputsCard outputs={p} /> : null;
+      if (!p?.run_id) return null;
+      // what the run left for a person to decide sits under its files (a re-render has none of its own)
+      return p.rerender ? (
+        <OutputsCard outputs={p} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          <OutputsCard outputs={p} />
+          <RunExceptions runId={p.run_id} />
+        </div>
+      );
     }
     default:
       return null;

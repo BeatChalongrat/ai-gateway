@@ -9,9 +9,10 @@
 // customer's own template and its mapping.
 // Uninstall confirms inline — never a window.confirm.
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Pencil } from "lucide-react";
+import { ChartColumn, Pencil } from "lucide-react";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey, type AmT } from "../i18n";
@@ -19,13 +20,15 @@ import { formatCredits, formatDateTime, formatMoney } from "../format";
 import type { Default, InstallDetail, Manifest, ThemePreset } from "../types";
 import { BackLink, BTN_DANGER_OUTLINE, BTN_PRIMARY_SMALL, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin } from "../ui";
 import { notifyInstallsChanged } from "../useAgentMarket";
-import { workspaceHref } from "../workspace/context";
+import { dashboardHref, workspaceHref } from "../workspace/context";
 import { CURRENCIES } from "../install/steps";
 import { checkCompanyTax, COMPANY_TAX_KEYS, CompanyTaxFields, draftFromDefaults, saveCompanyTax, type CompanyTaxDraft } from "../install/CompanyTax";
 import { installQuestions } from "../install/wizard";
 import { formatTaxId } from "../typed";
 import { savedTemplateOf, takesTemplates } from "../template/mapping";
 import { TemplateSection } from "../template/TemplateSection";
+import { PolicySection } from "../policy/PolicySetup";
+import { UpgradeSection } from "../upgrade/UpgradeSection";
 
 const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
@@ -138,10 +141,12 @@ function Settings({ installId }: { installId: string }) {
 
   const defaults = detail.defaults ?? [];
   const companyTax = installQuestions(detail.manifest).includes("company_tax");
-  const companyKeys = new Set<string>(companyTax ? COMPANY_TAX_KEYS : []);
+  const asksPolicy = installQuestions(detail.manifest).includes("policy");
+  // keys shown by their own sections below, never as generic rows
+  const sectionKeys = new Set<string>([...(companyTax ? COMPANY_TAX_KEYS : []), ...(asksPolicy ? ["policy", "holidays"] : [])]);
   const remembered = defaults.filter(isRemembered);
   const settings = defaults
-    .filter((d) => !isRemembered(d) && !companyKeys.has(d.key) && !OWN_SECTION_KEYS.has(d.key))
+    .filter((d) => !isRemembered(d) && !sectionKeys.has(d.key) && !OWN_SECTION_KEYS.has(d.key))
     .sort((a, b) => {
       const ia = INSTALL_KEYS.indexOf(a.key);
       const ib = INSTALL_KEYS.indexOf(b.key);
@@ -164,8 +169,16 @@ function Settings({ installId }: { installId: string }) {
   return (
     <PageShell width="max-w-3xl">
       <BackLink href={workspaceHref(installId)}>{t("settings.back")}</BackLink>
-      <h1 className="mt-4 text-xl font-semibold tracking-tight text-text-primary">{t("settings.title")}</h1>
-      <p className="mt-1 text-sm text-text-secondary">{detail.install.title}</p>
+      <div className="mt-4 flex flex-wrap items-start gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold tracking-tight text-text-primary">{t("settings.title")}</h1>
+          <p className="mt-1 text-sm text-text-secondary">{detail.install.title}</p>
+        </div>
+        <Link href={dashboardHref(installId)} className={BTN_SMALL} data-testid="am-settings-dashboard">
+          <ChartColumn width={14} height={14} aria-hidden />
+          <span>{t("ws.dashboard")}</span>
+        </Link>
+      </div>
       <p className="mt-3 text-sm text-text-secondary" data-testid="am-budget">
         {t("settings.budget", { spent: formatCredits(detail.budget?.spent_this_month ?? 0), credits: formatCredits(detail.budget?.credits ?? 0) })}
       </p>
@@ -186,6 +199,8 @@ function Settings({ installId }: { installId: string }) {
 
       {companyTax ? <CompanyTaxSection installId={installId} defaults={defaults} onChanged={refresh} /> : null}
 
+      {asksPolicy ? <PolicySection installId={installId} manifest={detail.manifest} defaults={defaults} onChanged={refresh} /> : null}
+
       {takesTemplates(detail.manifest?.templates) ? (
         <TemplateSection installId={installId} spec={detail.manifest.templates!} saved={savedTemplateOf(defaults)} onChanged={refresh} />
       ) : null}
@@ -202,6 +217,8 @@ function Settings({ installId }: { installId: string }) {
           )}
         </div>
       </section>
+
+      <UpgradeSection installId={installId} onChanged={refresh} />
 
       <section className="mt-8 rounded-xl border border-status-danger/40 bg-bg-surface px-4 py-4" aria-labelledby="am-danger">
         <h2 id="am-danger" className="text-sm font-semibold text-text-primary">

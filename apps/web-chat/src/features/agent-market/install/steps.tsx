@@ -33,7 +33,7 @@ const POLL_LIMIT_MS = 30_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function StepHeader({ title, body }: { title: string; body?: string }) {
+export function StepHeader({ title, body }: { title: string; body?: string }) {
   return (
     <div>
       <h2 className="text-base font-semibold text-text-primary">{title}</h2>
@@ -42,7 +42,7 @@ function StepHeader({ title, body }: { title: string; body?: string }) {
   );
 }
 
-function Footer({ children }: { children: React.ReactNode }) {
+export function Footer({ children }: { children: React.ReactNode }) {
   return <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-4">{children}</div>;
 }
 

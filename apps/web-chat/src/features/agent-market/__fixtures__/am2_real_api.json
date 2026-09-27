@@ -1,0 +1,380 @@
+{
+ "captured": "test stack, AM2 probes (scripts/probes/AM2/am2.js), 2026-09-28",
+ "exceptions": {
+  "exceptions": [
+   {
+    "id": "7d7d59aa-01b6-45c7-a368-fb56fa2b2a9d",
+    "run_id": "830a3623-ee53-485d-8690-29754e3afe22",
+    "severity": "review",
+    "reason_code": "over_claim_limit",
+    "source_ref": {
+     "row": 3,
+     "bbox": "163.5,103.0,212.3,114.0",
+     "cell": "G3",
+     "fact": "within_claim_limit",
+     "page": 1,
+     "cells": {
+      "id": "A3",
+      "date": "D3",
+      "amount": "G3",
+      "receipt": "H3",
+      "category": "E3",
+      "merchant": "F3",
+      "vat_claim": "I3",
+      "description": "K3",
+      "employee_id": "B3",
+      "wht_deducted": "J3",
+      "employee_name": "C3"
+     },
+     "claim": "C02",
+     "limit": "1500.00",
+     "sheet": "claims_2569-10.xlsx",
+     "amount": "1980.00",
+     "detail": "เบิก 1,980.00 บาท เกินวงเงินค่าอาหารต่อครั้ง 1,500.00 บาท อยู่ 480.00 บาท",
+     "excess": "480.00",
+     "reason": "เกินวงเงินต่อครั้ง",
+     "receipt": "r_c02.pdf",
+     "subject": "C02",
+     "decision": {
+      "note": "[AM2] ทดสอบ",
+      "label": "อนุมัติเป็นกรณียกเว้น",
+      "choice": "approve_exception"
+     },
+     "raw_text": "ยอดรวม 1,980.00",
+     "claim_key": "C02",
+     "kb_context": [
+      {
+       "file": "policy_kb.docx",
+       "text": "ค่าอาหารในการปฏิบัติงานเบิกได้ตามความเหมาะสม โดยทั่วไปไม่ควรเกินประมาณ 2,000 บาทต่อครั้ง ทั้งนี้ขึ้นอยู่กับดุลยพินิจของผู้บังคับบัญชา",
+       "numbers": [
+        "2000.00"
+       ],
+       "paragraph": 2,
+       "used_as_limit": false
+      }
+     ],
+     "policy_ref": "categories.meals.per_claim",
+     "sheet_name": "เบิกค่าใช้จ่าย ต.ค. 69",
+     "limit_source": "policy_table",
+     "receipt_sha256": "df92d4f6b65bb18646c4e44ffaedeae101f3ed2557f388dfadfcb375e3fa477f"
+    },
+    "proposed_action": "ตัดสินว่าจะอนุมัติเกินวงเงินค่าอาหารต่อครั้ง 1,500.00 บาท เป็นกรณียกเว้น หรือเบิกได้เท่าวงเงิน (เกิน 480.00 บาท) — วงเงินจากตารางนโยบาย",
+    "choices": [
+     {
+      "label": "อนุมัติเป็นกรณียกเว้น",
+      "value": "approve_exception"
+     },
+     {
+      "label": "เบิกได้เท่าวงเงิน",
+      "value": "reimburse_up_to_limit"
+     },
+     {
+      "label": "ถามพนักงาน",
+      "value": "ask_employee"
+     },
+     {
+      "label": "ไม่เบิกจ่ายรายการนี้",
+      "value": "exclude_from_reimbursement"
+     }
+    ],
+    "status": "resolved",
+    "resolved_at": "2026-09-27T18:16:50.29427Z",
+    "created_at": "2026-09-27T18:16:49.373557Z"
+   },
+   {
+    "id": "59509cbb-1ebd-4745-9775-654f7dc3e0bb",
+    "run_id": "830a3623-ee53-485d-8690-29754e3afe22",
+    "severity": "review",
+    "reason_code": "over_period_limit",
+    "source_ref": {
+     "row": 17,
+     "bbox": "163.5,103.0,212.3,114.0",
+     "cell": "G17",
+     "fact": "within_period_limit",
+     "page": 1,
+     "after": "5430.00",
+     "cells": {
+      "id": "A17",
+      "date": "D17",
+      "amount": "G17",
+      "receipt": "H17",
+      "category": "E17",
+      "merchant": "F17",
+      "vat_claim": "I17",
+      "description": "K17",
+      "employee_id": "B17",
+      "wht_deducted": "J17",
+      "employee_name": "C17"
+     },
+     "claim": "C16",
+     "limit": "5000.00",
+     "month": "2026-10",
+     "sheet": "claims_2569-10.xlsx",
+     "amount": "1400.00",
+     "before": "4030.00",
+     "detail": "ค่าอาหารของพนักงานคนนี้ในเดือน 2026-10 รวม 5,430.00 บาท (รายการ C01, C02, C14, C16) เกินวงเงินต่อคนต่อเดือน 5,000.00 บาท — นับยอดที่เบิก ก่อนมีใครตัดสินข้อยกเว้น",
+     "reason": "เกินวงเงินต่อคนต่อเดือน",
+     "counted": [
+      "C01",
+      "C02",
+      "C14",
+      "C16"
+     ],
+     "receipt": "r_c16.pdf",
+     "subject": "C16",
+     "raw_text": "ยอดรวม 1,400.00",
+     "claim_key": "C16",
+     "kb_context": [
+      {
+       "file": "policy_kb.docx",
+       "text": "ค่าอาหารในการปฏิบัติงานเบิกได้ตามความเหมาะสม โดยทั่วไปไม่ควรเกินประมาณ 2,000 บาทต่อครั้ง ทั้งนี้ขึ้นอยู่กับดุลยพินิจของผู้บังคับบัญชา",
+       "numbers": [
+        "2000.00"
+       ],
+       "paragraph": 2,
+       "used_as_limit": false
+      }
+     ],
+     "policy_ref": "categories.meals.per_person_month",
+     "sheet_name": "เบิกค่าใช้จ่าย ต.ค. 69",
+     "limit_source": "policy_table",
+     "receipt_sha256": "fa9dbf798749fe8c03e374f0d9f8d0ea6fb4486df5e5f1f064cc386738785ea5"
+    },
+    "proposed_action": "ยอดค่าอาหารของพนักงานในเดือน 2026-10 รวม 5,430.00 บาท เกินวงเงิน 5,000.00 บาท ตัดสินว่าจะอนุมัติส่วนเกินหรือเบิกได้เท่าที่เหลือ 970.00 บาท",
+    "choices": [
+     {
+      "label": "อนุมัติเป็นกรณียกเว้น",
+      "value": "approve_exception"
+     },
+     {
+      "label": "เบิกได้เท่าวงเงินที่เหลือ",
+      "value": "reimburse_up_to_limit"
+     },
+     {
+      "label": "ถามพนักงาน",
+      "value": "ask_employee"
+     },
+     {
+      "label": "ไม่เบิกจ่ายรายการนี้",
+      "value": "exclude_from_reimbursement"
+     }
+    ],
+    "status": "open",
+    "created_at": "2026-09-27T18:16:49.373557Z"
+   },
+   {
+    "id": "18c0514f-d179-4331-99ab-265278dd160b",
+    "run_id": "830a3623-ee53-485d-8690-29754e3afe22",
+    "severity": "review",
+    "reason_code": "weekend_or_holiday",
+    "source_ref": {
+     "row": 8,
+     "bbox": "173.9,103.0,212.3,114.0",
+     "cell": "D8",
+     "fact": "weekend_holiday",
+     "page": 1,
+     "rule": "flag",
+     "cells": {
+      "id": "A8",
+      "date": "D8",
+      "amount": "G8",
+      "receipt": "H8",
+      "category": "E8",
+      "merchant": "F8",
+      "vat_claim": "I8",
+      "description": "K8",
+      "employee_id": "B8",
+      "wht_deducted": "J8",
+      "employee_name": "C8"
+     },
+     "claim": "C07",
+     "sheet": "claims_2569-10.xlsx",
+     "detail": "วันที่ 10 ต.ค. 2569 เป็นวันเสาร์",
+     "reason": "เบิกในวันหยุด",
+     "holiday": null,
+     "receipt": "r_c07.pdf",
+     "subject": "C07",
+     "weekday": "วันเสาร์",
+     "answered": "review",
+     "calendar": "install",
+     "raw_text": "ยอดรวม 600.00",
+     "claim_key": "C07",
+     "kb_context": [
+      {
+       "file": "policy_kb.docx",
+       "text": "การเบิกในวันหยุดให้แนบเหตุผลประกอบ",
+       "numbers": [],
+       "paragraph": 4,
+       "used_as_limit": false
+      }
+     ],
+     "policy_ref": "weekend_holiday",
+     "sheet_name": "เบิกค่าใช้จ่าย ต.ค. 69",
+     "receipt_sha256": "39cd6fca106b6d3717a23599b3c8ddeb0e232c55b2bfc368e408ae54abfb3089",
+     "calendar_covers_year": true
+    },
+    "proposed_action": "พิจารณาว่าค่าใช้จ่ายวันที่ 10 ต.ค. 2569 (วันเสาร์) เป็นงานของบริษัทหรือไม่ — กฎบอกได้แค่ว่าเป็นวันหยุด",
+    "choices": [
+     {
+      "label": "อนุมัติ เป็นงานของบริษัท",
+      "value": "approve_exception"
+     },
+     {
+      "label": "ถามพนักงาน",
+      "value": "ask_employee"
+     },
+     {
+      "label": "ไม่เบิกจ่ายรายการนี้",
+      "value": "exclude_from_reimbursement"
+     }
+    ],
+    "status": "open",
+    "created_at": "2026-09-27T18:16:49.373557Z"
+   }
+  ]
+ },
+ "dashboard": {
+  "since": "2026-08-28T18:18:06.14356208Z",
+  "days": 30,
+  "version": "1.0.0",
+  "runs": {
+   "total": 4,
+   "by_status": {
+    "cancelled": 1,
+    "succeeded": 3
+   },
+   "succeeded": 3,
+   "first_pass": 1,
+   "first_pass_rate": 0.3333333333333333
+  },
+  "time": {
+   "queue_p50_s": 0.256162,
+   "queue_p90_s": 0.8632556,
+   "work_p50_s": 46.374083,
+   "work_p90_s": 99.2010158,
+   "human_wait_p50_s": 0.709,
+   "human_wait_p90_s": 1.1474
+  },
+  "waiting": {
+   "runs": 0,
+   "oldest_run_s": null,
+   "open_exceptions": 0,
+   "oldest_exception_s": null
+  },
+  "questions": [
+   {
+    "key": "e2_low_confidence",
+    "count": 5
+   },
+   {
+    "key": "e2_duplicate",
+    "count": 3
+   },
+   {
+    "key": "e2_source_conflict",
+    "count": 2
+   }
+  ],
+  "exceptions": {
+   "open": 0,
+   "resolved": 0,
+   "noted": 0,
+   "by_reason": [],
+   "choices": []
+  },
+  "failures": [],
+  "confidence": {
+   "computed": 5,
+   "high": 65,
+   "low": 0,
+   "medium": 0,
+   "person": 0
+  },
+  "tiers": {
+   "digital": 3,
+   "etax": 1,
+   "photo": 1,
+   "scan": 2
+  },
+  "documents": 7,
+  "artifacts": [
+   {
+    "key": "xlsx",
+    "count": 3
+   }
+  ],
+  "versions": [
+   {
+    "version": "1.0.0",
+    "runs": 4,
+    "last_run_at": "2026-09-27T18:13:50.18789Z"
+   }
+  ],
+  "spend": {
+   "credits": 41316.5683,
+   "per_succeeded_run": 12617.390866666667,
+   "per_document": 5407.453228571429,
+   "budget_credits": 3000000
+  },
+  "models": [
+   {
+    "model": "qwen3.8-27b-fp8",
+    "self_hosted": true,
+    "runs": 2
+   }
+  ],
+  "last_self_test": {
+   "status": "succeeded",
+   "reason": "",
+   "version": "1.0.0",
+   "finished_at": "2026-09-27T18:10:28.098397Z"
+  }
+ },
+ "upgrade": {
+  "available": {
+   "checksum": "af21bc82ca89f1b372fa1bed7e63f52222229784e925801ac01513fe07d069c4",
+   "id": "65ed6482-1ed9-4080-9d12-6c94c3617aa6",
+   "name": "รายงานการเงิน + สไลด์ผู้บริหาร",
+   "released_at": "2026-09-26T14:51:56.181497Z",
+   "version": "1.1.0"
+  },
+  "changes": [
+   {
+    "what": "manifest",
+    "key": "inputs",
+    "before": "[{\"note\":\"จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)\",\"role\":\"primary\",\"label\":\"บัญชีแยกประเภทของเดือนที่จะปิด\",\"accept\":[\".xlsx\",\".csv\"],\"required\":true},{\"note\":\"ถ้ามี จะได้เทียบส่วนต่างให้\",\"role\":\"budget\",\"label\":\"งบประมาณของงวดนั้น\",\"accept\":[\".xlsx\",\".csv\"],\"required\":false},{\"note\":\"ถ้ามี จะได้ดูแนวโน้ม\",\"role\":\"prior\",\"label\":\"เดือนก่อนหน้า\",\"accept\":[\".xlsx\",\".csv\"],\"required\":false}]",
+    "after": "[{\"note\":\"จำเป็น (หรืองบทดลอง / งบกำไรขาดทุน)\",\"role\":\"primary\",\"label\":\"บัญชีแยกประเภทของเดือนที่จะปิด\",\"accept\":[\".xlsx\",\".xlsm\",\".csv\",\".txt\",\".pdf\"],\"required\":true},{\"note\":\"ถ้ามี จะได้เทียบส่วนต่างให้\",\"role\":\"budget\",\"label\":\"งบประมาณของงวดนั้น\",\"accept\":[\".xlsx\",\".xlsm\",\".csv\"],\"required\":false},{\"note\":\"ถ้ามี จะได้ดูแนวโน้ม\",\"role\":\"prior\",\"label\":\"เดือนก่อนหน้า\",\"accept\":[\".xlsx\",\".xlsm\"…"
+   },
+   {
+    "what": "manifest",
+    "key": "outputs",
+    "before": "[{\"label\":\"รายงาน .docx\",\"format\":\"docx\",\"default\":true},{\"label\":\"สไลด์ .pptx\",\"format\":\"pptx\",\"default\":true},{\"label\":\"ตารางตัวเลข .xlsx\",\"format\":\"xlsx\",\"default\":false}]",
+    "after": "[{\"label\":\"รายงาน .docx\",\"format\":\"docx\",\"default\":true},{\"label\":\"สไลด์ .pptx\",\"format\":\"pptx\",\"default\":true},{\"label\":\"ตารางตัวเลข .xlsx\",\"format\":\"xlsx\",\"default\":false},{\"label\":\"รายงาน PDF (แปลงจาก .docx)\",\"format\":\"pdf\",\"default\":false}]"
+   },
+   {
+    "what": "manifest",
+    "key": "templates",
+    "after": "{\"lists\":{\"lines\":{\"label\":\"งบกำไรขาดทุน\",\"aliases\":[\"line\",\"pl\",\"items\"],\"columns\":{\"label\":\"รายการ\",\"prior\":\"งวดก่อน\",\"budget\":\"งบประมาณ\",\"current\":\"งวดนี้\"}}},\"fields\":{\"period\":{\"label\":\"งวด\",\"aliases\":[\"month\",\"เดือน\"]},\"company\":{\"label\":\"ชื่อบริษัท\",\"aliases\":[\"company_name\",\"บริษัท\"]},\"revenue\":{\"label\":\"รายได้\",\"aliases\":[\"sales\",\"รายได้จากการขาย\"]},\"net_profit\":{\"label\":\"กำไรสุทธิ\",\"alia…"
+   },
+   {
+    "what": "capability",
+    "key": "optional",
+    "after": "deliverable.pdf"
+   }
+  ],
+  "current": {
+   "checksum": "ec051e0c81ebb49235406ad737fa85a46ca775635d6eb2ae83d488a63f0246fb",
+   "id": "71d08a34-11e2-4b0f-ada1-74b0064f8142",
+   "name": "รายงานการเงิน + สไลด์ผู้บริหาร",
+   "released_at": "2026-09-26T07:19:45.258823Z",
+   "version": "1.0.0"
+  },
+  "previous": {
+   "checksum": "af21bc82ca89f1b372fa1bed7e63f52222229784e925801ac01513fe07d069c4",
+   "id": "65ed6482-1ed9-4080-9d12-6c94c3617aa6",
+   "name": "รายงานการเงิน + สไลด์ผู้บริหาร",
+   "released_at": "2026-09-26T14:51:56.181497Z",
+   "version": "1.1.0"
+  }
+ }
+}

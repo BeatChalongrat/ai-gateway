@@ -37,6 +37,15 @@ export function formatMoney(v: unknown): string {
   return n === null ? String(v) : fmt(money, n);
 }
 
+const money2 = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** "1500.00" → "1,500.00" (a limit, an amount to the satang). Non-numbers pass through. */
+export function formatMoney2(v: unknown): string {
+  if (v === null || v === undefined || v === "") return DASH;
+  const n = numeric(v);
+  return n === null ? String(v) : fmt(money2, n);
+}
+
 /** "8.20" → "+8.2%". */
 export function formatSignedPct(v: unknown): string {
   const n = numeric(v);

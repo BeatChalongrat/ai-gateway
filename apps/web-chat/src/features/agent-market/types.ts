@@ -565,3 +565,141 @@ export interface Computed {
   source?: { files?: { file: string; sha256?: string; role?: string; rows?: number }[] } | null;
   balance?: { debit?: string; credit?: string; diff?: string } | null;
 }
+
+// ── AM2 phase F/G: the expense policy, run exceptions, upgrades, the dashboard ──
+
+/** One expense category of the policy table (limits are plain amounts as text). */
+export interface PolicyCategory {
+  label?: string;
+  per_claim?: string | number | null;
+  per_person_month?: string | number | null;
+  needs_purpose?: boolean;
+  /** percent, 0 < rate <= 100 */
+  wht_rate?: string | number | null;
+  wht_from?: string | number | null;
+  [k: string]: unknown;
+}
+
+/** Install setting "policy" (schema am2.expense_policy.v1): the only source of a limit. */
+export interface ExpensePolicy {
+  schema?: string;
+  /** "package_sample" until the person edits it, then "install" */
+  source?: string;
+  currency?: string;
+  receipt_required_above?: string | number | null;
+  approval_threshold?: string | number | null;
+  categories?: Record<string, PolicyCategory>;
+  prohibited_merchants?: string[];
+  weekend_holiday?: "flag" | "exception" | "allow" | string;
+  vat_claim_requires?: "full_tax_invoice" | "abbreviated_tax_invoice" | string;
+  [k: string]: unknown;
+}
+
+export interface ExceptionChoice {
+  label: string;
+  value: unknown;
+}
+
+export interface KbQuote {
+  file?: string;
+  paragraph?: number | string;
+  text?: string;
+  used_as_limit?: boolean;
+}
+
+/** What a run exception points at (the package's evidence plus subject / reason / detail). */
+export interface ExceptionSourceRef {
+  subject?: string;
+  reason?: string;
+  detail?: string;
+  claim?: string;
+  sheet_name?: string;
+  row?: number | string;
+  cell?: string;
+  receipt?: string | null;
+  page?: number | string | null;
+  raw_text?: string | null;
+  limit?: string | number | null;
+  limit_source?: string;
+  fact?: string;
+  kb_context?: KbQuote[] | null;
+  also_flagged?: { code: string; reason?: string; detail?: string }[] | null;
+  answered?: string;
+  decision?: { choice?: unknown; label?: string; note?: string } | null;
+  [k: string]: unknown;
+}
+
+export interface RunExceptionRow {
+  id: string;
+  run_id: string;
+  severity: "review" | "info" | string;
+  reason_code: string;
+  proposed_action?: string;
+  choices?: ExceptionChoice[] | null;
+  status: "open" | "resolved" | "noted" | string;
+  resolved_at?: string | null;
+  created_at: string;
+  source_ref?: ExceptionSourceRef | null;
+}
+
+export interface DefinitionSummary {
+  id: string;
+  version: string;
+  name?: string;
+  checksum?: string;
+  released_at?: string;
+}
+
+export interface VersionChange {
+  what: "manifest" | "capability" | "setting" | "instructions" | string;
+  key: string;
+  before?: string;
+  after?: string;
+}
+
+export interface UpgradeInfo {
+  current: DefinitionSummary;
+  previous?: DefinitionSummary | null;
+  available: DefinitionSummary | null;
+  changes?: VersionChange[] | null;
+}
+
+export interface DashCount {
+  key: string;
+  count: number;
+  open?: number;
+}
+
+/** GET /installs/{id}/dashboard (agentmarket/dashboard.go). */
+export interface AgentDashboard {
+  since: string;
+  days: number;
+  version: string;
+  runs: {
+    total: number;
+    by_status: Record<string, number>;
+    succeeded: number;
+    first_pass: number;
+    first_pass_rate: number | null;
+  };
+  time: {
+    queue_p50_s: number | null;
+    queue_p90_s: number | null;
+    work_p50_s: number | null;
+    work_p90_s: number | null;
+    human_wait_p50_s: number | null;
+    human_wait_p90_s: number | null;
+  };
+  waiting: { runs: number; oldest_run_s: number | null; open_exceptions: number; oldest_exception_s: number | null };
+  questions: DashCount[] | null;
+  exceptions: { open: number; resolved: number; noted: number; by_reason: DashCount[] | null; choices: DashCount[] | null };
+  failures: DashCount[] | null;
+  confidence: Record<string, number> | null;
+  tiers: Record<string, number> | null;
+  documents: number;
+  artifacts: DashCount[] | null;
+  versions: { version: string; runs: number; last_run_at: string }[] | null;
+  spend: { credits: number; per_succeeded_run: number | null; per_document: number | null; budget_credits: number };
+  models: { model: string; self_hosted: boolean; runs: number }[] | null;
+  last_self_test: { status: string; reason?: string; version?: string; finished_at?: string | null } | null;
+}

@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Plus, Settings } from "lucide-react";
+import { ChartColumn, ListChecks, Plus, Settings } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 
@@ -16,7 +16,7 @@ import type { InstallDetail, InstallRow, OutputsPayload, ProgressPayload, Thread
 import { AgentTile, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Spin } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged } from "../useAgentMarket";
 import { Composer, type ComposerHandle } from "./Composer";
-import { runHref, settingsHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
+import { dashboardHref, runHref, settingsHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
 import { ThreadView } from "./ThreadView";
 import { useThread } from "./useThread";
 import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
@@ -182,6 +182,10 @@ function Workspace({ installId }: { installId: string }) {
             ) : (
               <span className="hidden text-xs text-text-muted lg:inline">{t("ws.noRunYet")}</span>
             )}
+            <Link href={dashboardHref(installId)} className={BTN_SMALL} aria-label={t("ws.dashboard")} data-testid="am-ws-dashboard">
+              <ChartColumn width={15} height={15} aria-hidden />
+              <span className="hidden sm:inline">{t("ws.dashboard")}</span>
+            </Link>
             <Link
               href={settingsHref(installId)}
               className={BTN_SMALL}
