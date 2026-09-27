@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
-import { ChevronDown, CircleCheck, Download, Plus, TriangleAlert } from "lucide-react";
+import { BadgeCheck, ChevronDown, CircleCheck, Download, Plus, TriangleAlert } from "lucide-react";
 
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { formatBytes } from "@/lib/fileUtil";
@@ -16,7 +16,8 @@ import { useAmT, type AmKey } from "../i18n";
 import { extensionOf, formatCredits, formatMoney } from "../format";
 import type { OutputArtifact, OutputsPayload, QualityCheck } from "../types";
 import { BTN_SMALL, cls, Pill, Spin } from "../ui";
-import { runHref } from "./context";
+import { SignOffButton } from "../review/SignOff";
+import { runHref, useWorkspace } from "./context";
 
 export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
@@ -54,6 +55,8 @@ export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | n
 
 export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
   const t = useAmT();
+  const ws = useWorkspace();
+  const canSignOff = !!ws && !ws.selfTestRuns?.has(outputs.run_id);
   const artifacts = outputs.artifacts ?? [];
   const summary = outputs.summary ?? {};
   const period = outputs.period_label || summary.period_label || "";
@@ -81,7 +84,20 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
           </Pill>
         ) : null}
       </div>
-      {outputs.rerender ? <p className="mt-1 text-xs text-text-secondary">{t("outputs.rerender")}</p> : null}
+      {outputs.review ? (
+        <div className="mt-2 rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-xs text-text-primary" data-testid="am-outputs-review">
+          <p className="flex items-center gap-1.5 font-medium">
+            <BadgeCheck width={14} height={14} className="text-status-success" aria-hidden />
+            <span>{t("review.outputsBadge", { name: outputs.review.reviewer, when: outputs.review.at_label })}</span>
+          </p>
+          {outputs.review.note ? <p className="mt-0.5 text-text-secondary">{t("review.noteLine", { note: outputs.review.note })}</p> : null}
+          {outputs.review.skipped?.length ? (
+            <p className="mt-0.5 text-text-secondary">{t("review.skipped", { files: outputs.review.skipped.join(", ") })}</p>
+          ) : null}
+        </div>
+      ) : outputs.rerender ? (
+        <p className="mt-1 text-xs text-text-secondary">{t("outputs.rerender")}</p>
+      ) : null}
 
       {kpis.length ? (
         <dl className="mt-3 grid grid-cols-3 gap-2">
@@ -136,6 +152,7 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
         <MoreFilesMenu runId={outputs.run_id} />
+        {canSignOff && !outputs.review ? <SignOffButton runId={outputs.run_id} /> : null}
         <Link href={runHref(outputs.run_id)} className={BTN_SMALL}>
           {t("outputs.viewRun")}
         </Link>

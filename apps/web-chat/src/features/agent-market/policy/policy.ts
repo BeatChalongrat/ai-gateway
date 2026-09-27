@@ -238,8 +238,36 @@ export function checkHolidays(rows: HolidayRow[]): Record<string, AmKey> {
   return out;
 }
 
-/** The setting to save, or null for none (the package's Thai 2569 public holidays). */
-export function holidaysSetting(rows: HolidayRow[]): Record<string, string> | null {
-  if (!rows.length) return null;
-  return Object.fromEntries(rows.map((r) => [r.date, r.name.trim()]));
+/** AM3: a calendar the company confirmed as its own ({"kind":"company","confirmed":true}). Anything
+ *  else — a bare date map from AM2, an unconfirmed list — leaves the holiday check off. */
+export function holidaysConfirmed(v: unknown): boolean {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const c = v as { kind?: unknown; confirmed?: unknown };
+  return c.kind === "company" && c.confirmed === true;
+}
+
+export interface HolidaysSetting {
+  schema: "am3.holidays.v1";
+  kind: "company";
+  confirmed: true;
+  confirmed_by: string;
+  confirmed_at: string;
+  dates: Record<string, string>;
+}
+
+/**
+ * The setting to save, or null for none. The holiday rule is on only for a
+ * calendar the person confirms is the COMPANY's own (not the bank's, not the
+ * government's): unconfirmed, nothing is saved and only weekends are checked.
+ */
+export function holidaysSetting(rows: HolidayRow[], confirmed = false, by = "", at = new Date().toISOString()): HolidaysSetting | null {
+  if (!confirmed || !rows.length) return null;
+  return {
+    schema: "am3.holidays.v1",
+    kind: "company",
+    confirmed: true,
+    confirmed_by: by,
+    confirmed_at: at,
+    dates: Object.fromEntries(rows.map((r) => [r.date, r.name.trim()])),
+  };
 }

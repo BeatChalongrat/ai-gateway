@@ -125,3 +125,20 @@ export function elapsedBetween(start: string | null | undefined, end: string | n
 export function extensionOf(format: string): string {
   return format.startsWith(".") ? format : `.${format}`;
 }
+
+// ── AM3: what a run costs, in baht ───────────────────────────────────────
+
+const baht = new Intl.NumberFormat("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Credits → baht with the platform's rates (3,000,000 credits = 1 USD). */
+export function creditsToBaht(credits: number | null | undefined, pricing: { credits_per_usd: number; thb_per_usd: number }): number | null {
+  if (credits === null || credits === undefined || !Number.isFinite(credits) || pricing.credits_per_usd <= 0) return null;
+  return (credits / pricing.credits_per_usd) * pricing.thb_per_usd;
+}
+
+/** 0.4123 → "0.41"; below one satang → "< 0.01". */
+export function formatBaht(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
+  if (v > 0 && v < 0.01) return "< 0.01";
+  return baht.format(v);
+}

@@ -12,6 +12,8 @@
 import { useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
+import { useAuthStore } from "@/stores/authStore";
+
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { formatMoney } from "../format";
@@ -24,6 +26,7 @@ import {
   checkPolicy,
   draftFromPolicy,
   holidayRows,
+  holidaysConfirmed,
   holidaysSetting,
   policyFromDraft,
   type HolidayRow,
@@ -35,6 +38,8 @@ export interface PolicyState {
   holidays: HolidayRow[];
   /** a calendar was saved before (emptying it removes it) */
   hadHolidays: boolean;
+  /** AM3: the person confirmed these are the company's own holidays (the rule is off until then) */
+  confirmed: boolean;
 }
 
 /** What the install has, else the manifest's sample table. */
@@ -43,17 +48,31 @@ export function initialPolicy(defaults: Default[] | null | undefined, manifest: 
   const sample = manifest?.install?.defaults?.policy;
   const table = (stored && typeof stored === "object" ? stored : sample && typeof sample === "object" ? sample : null) as ExpensePolicy | null;
   const hol = (defaults ?? []).find((d) => d.key === "holidays")?.value;
-  return { draft: draftFromPolicy(table), holidays: holidayRows(hol), hadHolidays: hol !== undefined && hol !== null };
+  return {
+    draft: draftFromPolicy(table),
+    holidays: holidayRows(hol),
+    hadHolidays: hol !== undefined && hol !== null,
+    confirmed: holidaysConfirmed(hol),
+  };
 }
 
 export function policyReady(s: PolicyState): boolean {
   return Object.keys(checkPolicy(s.draft)).length === 0 && Object.keys(checkHolidays(s.holidays)).length === 0;
 }
 
-/** PUT the table, then the calendar (or DELETE it when emptied). */
+/** Who confirms the calendar (the signed-in person's email, when the page knows it). */
+function confirmer(): string {
+  try {
+    return useAuthStore.getState().user?.email ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** PUT the table, then the confirmed company calendar (or DELETE it when emptied or unconfirmed). */
 export async function savePolicy(installId: string, s: PolicyState): Promise<void> {
   await amApi.putDefault(installId, "policy", policyFromDraft(s.draft));
-  const cal = holidaysSetting(s.holidays);
+  const cal = holidaysSetting(s.holidays, s.confirmed, confirmer());
   if (cal) await amApi.putDefault(installId, "holidays", cal);
   else if (s.hadHolidays) await amApi.deleteDefault(installId, "holidays");
 }
@@ -83,7 +102,9 @@ function PolicyForm({
       />
       <HolidayEditor
         rows={state.holidays}
-        onChange={(holidays) => setState({ ...state, holidays })}
+        onChange={(holidays) => setState({ ...state, holidays, confirmed: holidays.length ? state.confirmed : false })}
+        confirmed={state.confirmed}
+        onConfirm={(confirmed) => setState({ ...state, confirmed })}
         problems={checkHolidays(state.holidays)}
         showAll={showAll}
         disabled={disabled}
@@ -230,7 +251,7 @@ export function PolicySection({
                 {d.categories.map((c) => c.label || c.code).join(" · ")}
               </div>
               <div className="mt-1 text-xs text-text-muted" data-testid="am-policy-holidays-line">
-                {saved.holidays.length ? t("policy.holidaysCount", { n: String(saved.holidays.length) }) : t("policy.holidaysPackage")}
+                {saved.confirmed && saved.holidays.length ? t("policy.holidaysCount", { n: String(saved.holidays.length) }) : t("policy.holidaysPackage")}
               </div>
               {d.source === "package_sample" ? <p className="mt-2 text-xs text-text-secondary">{t("policy.sample")}</p> : null}
             </div>

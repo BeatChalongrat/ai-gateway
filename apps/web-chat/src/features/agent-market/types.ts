@@ -44,6 +44,8 @@ export interface Manifest {
   photo_notice?: string;
   /** AM2: what the agent can put into the customer's own template. */
   templates?: TemplateSpec | null;
+  /** AM3: what a stranger reads before installing. */
+  guide?: ManifestGuide | null;
 }
 
 // ── the customer's own template (AM2 Phase E, agentmarket/template.go) ──
@@ -116,6 +118,11 @@ export interface CatalogAgent {
   manifest: Manifest;
   install_id?: string;
   sample_run_id?: string;
+  /** AM3: the organisation's catalog decision (absent before AM3 = published). */
+  status?: CatalogStatus | string;
+  status_reason?: string;
+  sample?: SampleSummary | null;
+  stats?: AgentStats | null;
 }
 
 export interface CatalogItem {
@@ -124,6 +131,11 @@ export interface CatalogItem {
   name: string;
   manifest: Manifest;
   checksum?: string;
+  status?: CatalogStatus | string;
+  status_reason?: string;
+  install_id?: string | null;
+  sample?: SampleSummary | null;
+  stats?: AgentStats | null;
 }
 
 export interface Install {
@@ -139,6 +151,8 @@ export interface Install {
   self_test_run_id?: string;
   created_at: string;
   updated_at?: string;
+  /** AM3: pinned to the top of the rail. */
+  pinned_at?: string | null;
 }
 
 export interface InstallRow extends Install {
@@ -160,7 +174,7 @@ export interface Default {
 }
 
 export type RunStatus = "queued" | "running" | "awaiting_input" | "succeeded" | "failed" | "cancelled";
-export type RunKind = "run" | "self_test" | "render" | "reply" | "mapping_preview";
+export type RunKind = "run" | "self_test" | "render" | "reply" | "mapping_preview" | "review";
 
 export interface Assumption {
   code: string;
@@ -370,6 +384,12 @@ export interface AgentTextPayload {
 export interface NoticePayload {
   text?: string;
   link?: "defaults" | string;
+  /** AM3: "warning" / "success" notices; "resume_budget" offers ลองต่อ. */
+  tone?: "warning" | "success" | string;
+  action?: "resume_budget" | string;
+  run_id?: string;
+  reason?: string;
+  contact?: Contact | null;
 }
 
 export interface CardPayload {
@@ -427,6 +447,8 @@ export interface OutputsPayload {
   model?: { model?: string; self_hosted?: boolean } | null;
   credits?: number;
   rerender?: boolean;
+  /** AM3: these files carry a reviewer's sign-off on their face. */
+  review?: { id: string; reviewer: string; at_label: string; note?: string; skipped?: string[] | null } | null;
 }
 
 // ── responses ──────────────────────────────────────────────────────────
@@ -434,6 +456,14 @@ export interface OutputsPayload {
 export interface Availability {
   available: boolean;
   runner?: { healthy?: boolean; seen_at?: string; version?: string };
+  /** AM3: the organisation's switch, this person's place in it, whom to ask. */
+  access?: AccessMode | string;
+  member?: boolean;
+  role?: OrgRole | string;
+  admin?: boolean;
+  publisher?: boolean;
+  contact?: Contact | null;
+  pricing?: Pricing | null;
 }
 
 export interface InstallResponse {
@@ -702,4 +732,291 @@ export interface AgentDashboard {
   spend: { credits: number; per_succeeded_run: number | null; per_document: number | null; budget_credits: number };
   models: { model: string; self_hosted: boolean; runs: number }[] | null;
   last_self_test: { status: string; reason?: string; version?: string; finished_at?: string | null } | null;
+}
+
+// ── AM3: self-serve (agentmarket/org.go, catalog.go, rail.go, budget.go,
+//    share.go, review.go, problems.go, admin.go) ────────────────────────
+
+export type AccessMode = "off" | "list" | "everyone";
+export type OrgRole = "member" | "publisher" | "admin" | "";
+
+export interface Contact {
+  name: string;
+  email: string;
+}
+
+export interface Pricing {
+  credits_per_usd: number;
+  thb_per_usd: number;
+}
+
+/** manifest.guide — what a stranger reads before installing (all optional). */
+export interface ManifestGuide {
+  for?: string;
+  how?: string[];
+  inputs?: Record<string, { good?: string[]; avoid?: string[]; sample?: string[] }>;
+  outputs?: Record<string, string>;
+  questions?: string;
+  model_inputs?: Record<string, string>;
+  never?: string[];
+  wrong_file?: string;
+  time_note?: string;
+}
+
+export type CatalogStatus = "published" | "unpublished" | "disabled";
+
+export interface SampleSummary {
+  run_id: string;
+  version: string;
+  status: RunStatus | string;
+  reason?: string;
+  credits: number;
+  seconds: number | null;
+  finished_at?: string | null;
+}
+
+export interface AgentStats {
+  runs: number;
+  users: number;
+  median_credits: number | null;
+  median_seconds: number | null;
+  per_document: number | null;
+  documents: number;
+}
+
+export interface CatalogSample {
+  sample: SampleSummary;
+  artifacts: Artifact[] | null;
+  files: AmFile[] | null;
+}
+
+export interface DatasheetModel {
+  capability: string;
+  sees: string;
+  model: string;
+  role: "primary" | "fallback" | "vision" | string;
+  self_hosted: boolean;
+}
+
+export interface DatasheetRetention {
+  what: string;
+  keep: number;
+  unit: "hours" | "days" | "while_installed" | "account_deletion" | string;
+}
+
+export interface Datasheet {
+  slug: string;
+  version: string;
+  name: string;
+  summary: string;
+  reads: { role: string; label: string; note?: string; required?: boolean; accept?: string[] }[] | null;
+  limits: { max_file_mb?: number; max_files?: number } | null;
+  produces: { format: string; label: string; default?: boolean }[] | null;
+  models: DatasheetModel[] | null;
+  no_model: string[] | null;
+  storage: { backend?: string; prefix?: string } | null;
+  retention: DatasheetRetention[] | null;
+  isolation: string[] | null;
+  permissions: { default?: string; denied?: string[] } | null;
+  never: string[] | null;
+  cannot: string;
+  status: CatalogStatus | string;
+  runner: { healthy?: boolean; version?: string; seen_at?: string } | null;
+  generated_at: string;
+}
+
+export interface RailInstall {
+  id: string;
+  slug: string;
+  title: string;
+  icon: string;
+  version: string;
+  pinned_at: string | null;
+  last_used_at: string | null;
+  waiting: number;
+  disabled: boolean;
+}
+
+export interface RailPrefs {
+  rail_collapsed?: boolean;
+  rail_show_all?: boolean;
+}
+
+export interface RailResponse {
+  installs: RailInstall[] | null;
+  waiting_total: number;
+  prefs: RailPrefs | null;
+  shared_unopened?: number;
+}
+
+export interface BudgetState {
+  user_limit: number;
+  user_spent: number;
+  user_own_limit: boolean;
+  department?: string;
+  department_limit?: number | null;
+  department_spent: number;
+  install_limit: number;
+  install_spent: number;
+  exhausted: "" | "user" | "department" | "install" | string;
+  contact: Contact;
+}
+
+export interface Review {
+  id: string;
+  run_id: string;
+  reviewer_email: string;
+  reviewer_name: string;
+  note: string;
+  via_share_id?: string;
+  stamp_run_id?: string;
+  artifact_versions?: Record<string, number> | null;
+  created_at: string;
+  stamp_status?: RunStatus | string;
+}
+
+export interface Share {
+  id: string;
+  run_id: string;
+  recipient_email: string;
+  can_review: boolean;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_opened_at: string | null;
+  opens: number;
+}
+
+export interface SharedItem {
+  id: string;
+  can_review: boolean;
+  created_at: string;
+  expires_at: string | null;
+  last_opened_at: string | null;
+  run_id: string;
+  run_status: string;
+  period: string | null;
+  finished_at: string | null;
+  agent: string;
+  slug: string;
+  owner: string;
+}
+
+export interface SharedRun {
+  share: Share;
+  owner: string;
+  agent: { title: string; name: string; slug: string; version: string };
+  run: {
+    id: string;
+    status: string;
+    status_reason?: string;
+    period: string | null;
+    created_at: string;
+    finished_at: string | null;
+    assumptions?: Assumption[] | null;
+    model_used?: string | null;
+    model_self_hosted?: boolean | null;
+  };
+  artifacts: Artifact[] | null;
+  exceptions: RunExceptionRow[] | null;
+  reviews: Review[] | null;
+  outputs?: OutputsPayload | null;
+}
+
+export interface Person {
+  email: string;
+  name: string;
+}
+
+export interface ProblemReport {
+  id: string;
+  ref: string;
+  email: string;
+  install_id?: string;
+  run_id?: string;
+  slug: string;
+  version: string;
+  run_status: string;
+  run_reason: string;
+  step: string;
+  step_error: string;
+  page: string;
+  text: string;
+  status: "open" | "closed" | string;
+  admin_note: string;
+  closed_by: string;
+  created_at: string;
+  closed_at?: string | null;
+}
+
+export interface OrgSettings {
+  org_id: string;
+  name: string;
+  access: AccessMode | string;
+  domains: string[] | null;
+  user_monthly_credits: number;
+  contact_name: string;
+  contact_email: string;
+  updated_by: string;
+  updated_at: string;
+}
+
+export interface OrgMember {
+  email: string;
+  user_id?: string;
+  display_name: string;
+  department: string;
+  role: OrgRole | string;
+  monthly_credits: number | null;
+  added_by: string;
+  created_at?: string;
+  updated_at?: string;
+  env_admin?: boolean;
+}
+
+export interface OrgDepartment {
+  name: string;
+  monthly_credits: number | null;
+  contact_name: string;
+  contact_email: string;
+  members: number;
+}
+
+export interface AdminOrg {
+  org: OrgSettings;
+  members: OrgMember[] | null;
+  departments: OrgDepartment[] | null;
+  pricing?: Pricing;
+}
+
+export interface SpendRow {
+  key: string;
+  email?: string;
+  name?: string;
+  department?: string;
+  runs: number;
+  succeeded: number;
+  failed: number;
+  waiting: number;
+  users?: number;
+  credits: number;
+  month_spent: number;
+  monthly_limit?: number | null;
+  last_run_at: string | null;
+}
+
+export interface AdminSpend {
+  days: number;
+  since: string;
+  by_user: SpendRow[] | null;
+  by_agent: SpendRow[] | null;
+  total_credits: number;
+  catalog_samples_credits: number;
+  pricing?: Pricing;
+}
+
+export interface AdminCatalogRow extends CatalogAgent {
+  changed_by?: string;
+  changed_at?: string | null;
+  installs: number;
 }

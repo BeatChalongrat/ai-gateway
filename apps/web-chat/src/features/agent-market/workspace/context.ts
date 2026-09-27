@@ -19,6 +19,8 @@ export interface WorkspaceCtx {
   /** A card's own drop slot took the files of the drop now in flight, so
    *  the workspace-wide drop zone must not stage them in the composer too. */
   claimDrop?: () => void;
+  /** AM3: self-test runs (their outputs card offers no sign-off). */
+  selfTestRuns?: ReadonlySet<string>;
 }
 
 export const WorkspaceContext = createContext<WorkspaceCtx | null>(null);

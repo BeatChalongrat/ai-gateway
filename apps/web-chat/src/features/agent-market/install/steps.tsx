@@ -5,20 +5,24 @@
 // computes a number.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileSpreadsheet, Link2, Upload } from "lucide-react";
+import { CircleHelp, FileSpreadsheet, Link2, TriangleAlert, Upload } from "lucide-react";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { tAm, useAmT, type AmKey } from "../i18n";
 import { formatInt } from "../format";
-import type { Manifest, MappingPreview, ProgressPayload, ThemePreset, ThreadItem } from "../types";
+import type { Artifact, Default, Manifest, MappingPreview, ProgressPayload, RunDetail, ThemePreset, ThreadItem } from "../types";
 import { BTN_PRIMARY, BTN_SECONDARY, cls, ErrorPanel, Pill, Spin } from "../ui";
 import { isUserItem } from "../thread";
 import { useAgentMarket } from "../useAgentMarket";
+import { ProblemButton } from "../problem/ProblemButton";
+import { savedTemplateOf } from "../template/mapping";
+import { TemplateSection } from "../template/TemplateSection";
 import { WorkspaceContext, type WorkspaceCtx } from "../workspace/context";
+import { ArtifactRow } from "../workspace/OutputsCard";
 import { ThreadView } from "../workspace/ThreadView";
 import { useThread } from "../workspace/useThread";
 import { checkCompanyTax, CompanyTaxFields, draftFromDefaults, EMPTY_COMPANY_TAX, saveCompanyTax, type CompanyTaxDraft } from "./CompanyTax";
-import { asksCurrency } from "./wizard";
+import { asksCurrency, STEP_WHY, type StepId } from "./wizard";
 
 export type PreviewState =
   | { status: "none" }
@@ -44,6 +48,28 @@ export function StepHeader({ title, body }: { title: string; body?: string }) {
 
 export function Footer({ children }: { children: React.ReactNode }) {
   return <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-4">{children}</div>;
+}
+
+/** AM3: why this step asks, and what happens if the answer is wrong or skipped (and where to fix it). */
+export function StepWhy({ step }: { step: StepId }) {
+  const t = useAmT();
+  const w = STEP_WHY[step];
+  return (
+    <div className="mb-4 flex flex-col gap-1.5 rounded-lg bg-bg-base px-3 py-2.5 text-xs leading-relaxed" data-testid="am-step-why" data-step={step}>
+      <p className="flex items-start gap-2 text-text-secondary">
+        <CircleHelp width={14} height={14} className="mt-px shrink-0 text-text-muted" aria-hidden />
+        <span>
+          <span className="font-medium text-text-primary">{t("wiz.whyLabel")}</span> {t(w.why)}
+        </span>
+      </p>
+      <p className="flex items-start gap-2 text-text-secondary">
+        <TriangleAlert width={14} height={14} className="mt-px shrink-0 text-text-muted" aria-hidden />
+        <span>
+          <span className="font-medium text-text-primary">{t("wiz.ifWrongLabel")}</span> {t(w.ifWrong)}
+        </span>
+      </p>
+    </div>
+  );
 }
 
 // ── 1 · data source ────────────────────────────────────────────────────
@@ -755,8 +781,9 @@ export function SelfTestStep({
     : [];
   const progress = mine.find((i) => i.kind === "progress")?.payload as ProgressPayload | undefined;
   const done = progress?.status === "succeeded" || mine.some((i) => i.kind === "outputs");
+  const failed = progress?.status === "failed" || progress?.status === "cancelled";
   const minutes = manifest.typical_run_seconds ? Math.max(1, Math.round(manifest.typical_run_seconds / 60)) : null;
-  const ctx: WorkspaceCtx = { installId, icon: manifest.icon, merge: thread.merge };
+  const ctx: WorkspaceCtx = { installId, icon: manifest.icon, merge: thread.merge, selfTestRuns: new Set(runId ? [runId] : []) };
 
   return (
     <div data-testid="am-step-selftest">
@@ -784,6 +811,27 @@ export function SelfTestStep({
           </WorkspaceContext.Provider>
         </div>
       ) : null}
+      {runId && done ? <SelfTestFiles runId={runId} /> : null}
+      {runId && failed && !done ? (
+        <div role="alert" className="mt-4 rounded-xl border border-status-danger/40 bg-status-danger/10 px-4 py-3 text-sm text-text-primary" data-testid="am-selftest-failed">
+          <p className="font-medium">{t("wiz.selftestFailed")}</p>
+          <p className="mt-1 text-text-secondary">{t("wiz.selftestFailedNext")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRunId(null);
+                void start();
+              }}
+              className={BTN_SECONDARY}
+              data-testid="am-selftest-again"
+            >
+              {t("wiz.selftestAgain")}
+            </button>
+            <ProblemButton target={{ kind: "run", runId }} />
+          </div>
+        </div>
+      ) : null}
       <Footer>
         {!runId ? (
           <button type="button" onClick={() => void start()} disabled={starting} className={BTN_PRIMARY} data-testid="am-selftest-start">
@@ -801,6 +849,121 @@ export function SelfTestStep({
           </button>
         ) : null}
         <button type="button" onClick={onBack} disabled={starting} className={cls(BTN_SECONDARY, "ml-auto")}>
+          {t("common.previous")}
+        </button>
+      </Footer>
+    </div>
+  );
+}
+
+// ── the self-test's actual files (AM3) ─────────────────────────────────
+
+function latestByFormat(all: Artifact[]): Artifact[] {
+  const best = new Map<string, Artifact>();
+  for (const a of all) {
+    const cur = best.get(a.format);
+    if (!cur || a.version > cur.version) best.set(a.format, a);
+  }
+  return [...best.values()];
+}
+
+/** The files the agent really made from its sample data — the moment a person decides whether to trust it. */
+export function SelfTestFiles({ runId }: { runId: string }) {
+  const t = useAmT();
+  const [arts, setArts] = useState<Artifact[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    let tries = 0;
+    const load = () => {
+      amApi.run(runId).then(
+        (d: RunDetail) => {
+          if (!alive) return;
+          const list = latestByFormat(d?.artifacts ?? []);
+          // the outputs card can arrive a moment before the run row reads succeeded
+          if (!list.length && tries++ < 5) {
+            setTimeout(load, 1500);
+            return;
+          }
+          setArts(list);
+        },
+        (err) => {
+          if (alive) setError(errorMessage(err));
+        },
+      );
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
+  return (
+    <section className="mt-4 rounded-xl border border-status-success/40 bg-status-success/10 px-4 py-3" data-testid="am-selftest-files" aria-labelledby="am-selftest-files-title">
+      <h3 id="am-selftest-files-title" className="text-sm font-semibold text-text-primary">
+        {t("wiz.selftestFilesTitle")}
+      </h3>
+      <p className="mt-0.5 text-xs text-text-secondary">{t("wiz.selftestFilesBody")}</p>
+      {error ? (
+        <div className="mt-2">
+          <ErrorPanel message={error} />
+        </div>
+      ) : arts === null ? (
+        <div className="mt-2 flex items-center gap-2 text-xs text-text-muted">
+          <Spin size={12} />
+          <span>{t("common.loading")}</span>
+        </div>
+      ) : arts.length ? (
+        <ul className="mt-2 flex flex-col divide-y divide-border-subtle rounded-lg border border-border-subtle bg-bg-surface">
+          {arts.map((a) => (
+            <ArtifactRow key={a.id} artifact={a} />
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-xs text-text-muted">{t("wiz.selftestNoFiles")}</p>
+      )}
+    </section>
+  );
+}
+
+// ── the company's own template (optional, AM3) ─────────────────────────
+
+export function TemplateStep({ installId, manifest, onBack, onNext }: { installId: string; manifest: Manifest; onBack: () => void; onNext: () => void }) {
+  const t = useAmT();
+  const [defaults, setDefaults] = useState<Default[] | null>(null);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    amApi.defaults(installId).then(
+      (r) => {
+        if (alive) setDefaults(r?.defaults ?? []);
+      },
+      () => {
+        if (alive) setDefaults([]);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [installId, n]);
+  const saved = savedTemplateOf(defaults);
+  return (
+    <div data-testid="am-step-template">
+      <StepHeader title={t("wiz.templateTitle")} body={t("wiz.templateBody")} />
+      <div className="mt-4">
+        {defaults === null ? (
+          <div className="flex items-center gap-2 text-sm text-text-secondary">
+            <Spin size={14} />
+            <span>{t("common.loading")}</span>
+          </div>
+        ) : (
+          <TemplateSection installId={installId} spec={manifest.templates ?? {}} saved={saved} onChanged={() => setN((x) => x + 1)} />
+        )}
+      </div>
+      <Footer>
+        <button type="button" onClick={onNext} className={BTN_PRIMARY} data-testid="am-template-next">
+          {saved ? t("common.next") : t("wiz.templateSkip")}
+        </button>
+        <button type="button" onClick={onBack} className={cls(BTN_SECONDARY, "ml-auto")}>
           {t("common.previous")}
         </button>
       </Footer>

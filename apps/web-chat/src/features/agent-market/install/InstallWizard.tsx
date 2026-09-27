@@ -24,11 +24,11 @@ import { notifyInstallsChanged } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
 import { PolicyStep } from "../policy/PolicySetup";
 import { AsksPanel, PreviewPanel } from "./panels";
-import { CompanyTaxStep, FormatsStep, MappingStep, SelfTestStep, SourceStep, ThemeStep, type PreviewState } from "./steps";
+import { CompanyTaxStep, FormatsStep, MappingStep, SelfTestStep, SourceStep, StepWhy, TemplateStep, ThemeStep, type PreviewState } from "./steps";
 import { installSteps, STEP_LABEL, themeAsksCompany, type StepId } from "./wizard";
 
 // The most steps any agent has (the stored step is clamped to the agent's own list).
-const MAX_STEPS = 7;
+const MAX_STEPS = 8;
 
 // One POST per idempotency key per page, even under StrictMode's double
 // mount (two concurrent inserts of one key would race the unique index).
@@ -232,6 +232,7 @@ function Wizard({ slug }: { slug: string }) {
       ) : (
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <Card className="min-w-0 px-4 py-5 sm:px-5">
+            <StepWhy step={current} />
             {current === "source" ? (
               <SourceStep
                 installId={installId}
@@ -250,6 +251,8 @@ function Wizard({ slug }: { slug: string }) {
               <ThemeStep installId={installId} askCompany={themeAsksCompany(manifest)} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
             ) : current === "formats" ? (
               <FormatsStep installId={installId} manifest={manifest} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
+            ) : current === "template" ? (
+              <TemplateStep installId={installId} manifest={manifest} onBack={() => setStep(at - 1)} onNext={() => setStep(at + 1)} />
             ) : (
               <SelfTestStep installId={installId} manifest={manifest} onBack={() => setStep(at - 1)} onFinish={finish} />
             )}

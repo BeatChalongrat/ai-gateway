@@ -7,6 +7,7 @@
 // name) → file set → self-test. The order is fixed, whatever the manifest's.
 
 import type { AmKey } from "../i18n";
+import { takesTemplates } from "../template/mapping";
 import type { Manifest } from "../types";
 
 /** What a manifest that declares no questions is asked: AM1's full wizard. */
@@ -17,7 +18,7 @@ export function installQuestions(manifest: Manifest | null | undefined): string[
   return qs?.length ? qs : LEGACY_QUESTIONS;
 }
 
-export type StepId = "source" | "mapping" | "company_tax" | "policy" | "theme" | "formats" | "selftest";
+export type StepId = "source" | "mapping" | "company_tax" | "policy" | "theme" | "formats" | "template" | "selftest";
 
 export const STEP_LABEL: Record<StepId, AmKey> = {
   source: "install.step1",
@@ -26,7 +27,20 @@ export const STEP_LABEL: Record<StepId, AmKey> = {
   policy: "install.stepPolicy",
   theme: "install.step3",
   formats: "install.step4",
+  template: "wiz.stepTemplate",
   selftest: "install.step5",
+};
+
+/** AM3: every step says why it is asked, and what happens if it is wrong or skipped (and where to fix it). */
+export const STEP_WHY: Record<StepId, { why: AmKey; ifWrong: AmKey }> = {
+  source: { why: "wiz.why.source", ifWrong: "wiz.ifWrong.source" },
+  mapping: { why: "wiz.why.mapping", ifWrong: "wiz.ifWrong.mapping" },
+  company_tax: { why: "wiz.why.company_tax", ifWrong: "wiz.ifWrong.company_tax" },
+  policy: { why: "wiz.why.policy", ifWrong: "wiz.ifWrong.policy" },
+  theme: { why: "wiz.why.theme", ifWrong: "wiz.ifWrong.theme" },
+  formats: { why: "wiz.why.formats", ifWrong: "wiz.ifWrong.formats" },
+  template: { why: "wiz.why.template", ifWrong: "wiz.ifWrong.template" },
+  selftest: { why: "wiz.why.selftest", ifWrong: "wiz.ifWrong.selftest" },
 };
 
 export function installSteps(manifest: Manifest | null | undefined): StepId[] {
@@ -37,6 +51,8 @@ export function installSteps(manifest: Manifest | null | undefined): StepId[] {
   if (qs.includes("policy")) out.push("policy");
   if (qs.includes("theme") || qs.includes("company")) out.push("theme");
   if (qs.includes("formats") || qs.includes("currency")) out.push("formats");
+  // AM3: the company's own template, for an agent that can fill one — optional, skippable.
+  if (takesTemplates(manifest?.templates)) out.push("template");
   out.push("selftest");
   return out;
 }

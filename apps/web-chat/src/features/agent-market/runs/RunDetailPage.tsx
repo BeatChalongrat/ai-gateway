@@ -24,13 +24,16 @@ import {
   formatSignedPct,
   signOf,
 } from "../format";
-import type { AmFile, Artifact, Clarification, Computed, ComputedLine, RunDetail, Step } from "../types";
+import type { AmFile, Artifact, Clarification, Computed, ComputedLine, Review, RunDetail, Step } from "../types";
 import { BackLink, Card, CheckLine, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin, type Tone } from "../ui";
 import { viaKey } from "../workspace/AgentQuestionCard";
 import { workspaceHref } from "../workspace/context";
 import { ArtifactRow, qualityOf } from "../workspace/OutputsCard";
 import { ExceptionsPanel, useRunExceptions } from "../exceptions/ExceptionsPanel";
 import { StepIcon } from "../workspace/ProgressCard";
+import { ProblemButton } from "../problem/ProblemButton";
+import { ReviewsList, SignOffButton } from "../review/SignOff";
+import { ShareButton } from "../share/ShareButton";
 
 const ACTIVE = new Set(["queued", "running", "awaiting_input"]);
 const POLL_MS = 3000;
@@ -122,6 +125,30 @@ function RunDetailView({ runId }: { runId: string }) {
   const active = ACTIVE.has(status);
   // what the run left for a person to decide (the expense audit): read once it has finished
   const decisions = useRunExceptions(runId, !!data && !active);
+  // AM3: who signed this run off (re-read after a sign-off, and while its stamp job works)
+  const [reviews, setReviews] = useState<Review[] | null>(null);
+  const [reviewsTick, setReviewsTick] = useState(0);
+  const finishedRun = status === "succeeded" && data?.run.kind === "run";
+  useEffect(() => {
+    if (!finishedRun) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () =>
+      amApi.reviews(runId).then(
+        (r) => {
+          if (!alive) return;
+          const list = r?.reviews ?? [];
+          setReviews(list);
+          if (list.some((x) => x.stamp_status === "queued" || x.stamp_status === "running")) timer = setTimeout(() => void load(), POLL_MS);
+        },
+        () => {},
+      );
+    void load();
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, finishedRun, reviewsTick]);
 
   useEffect(() => {
     let alive = true;
@@ -215,6 +242,24 @@ function RunDetailView({ runId }: { runId: string }) {
           </span>
         </Pill>
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="am-run-actions">
+        {finishedRun ? (
+          <SignOffButton
+            runId={runId}
+            onDone={() => {
+              setReviewsTick((n) => n + 1);
+            }}
+          />
+        ) : null}
+        {run.kind === "run" ? <ShareButton runId={runId} /> : null}
+        <ProblemButton target={{ kind: "run", runId }} />
+      </div>
+      {reviews && reviews.length ? (
+        <section className="mt-3" aria-label={t("review.listTitle")}>
+          <ReviewsList reviews={reviews} />
+        </section>
+      ) : null}
 
       <div role="tablist" aria-label={t("run.tabs")} className="scrollbar-thin mt-5 flex gap-1 overflow-x-auto border-b border-border-subtle">
         {tabs.map((tb) => (

@@ -10,6 +10,7 @@ import {
   draftFromPolicy,
   edited,
   holidayRows,
+  holidaysConfirmed,
   holidaysSetting,
   isIsoDay,
   moneyText,
@@ -135,7 +136,7 @@ describe("holidays", () => {
     expect(holidayRows(null)).toEqual([]);
   });
 
-  it("a real date, not twice, with a name; none saved means the package's calendar", () => {
+  it("a real date, not twice, with a name; saved only when the company confirmed it (AM3: fail closed)", () => {
     expect(isIsoDay("2026-02-29")).toBe(false);
     expect(isIsoDay("2028-02-29")).toBe(true);
     const rows = [
@@ -144,7 +145,26 @@ describe("holidays", () => {
       { id: "c", date: "2026-13-01", name: "" },
     ];
     expect(checkHolidays(rows)).toEqual({ "b.date": "policy.err.dateTwice", "c.date": "policy.err.date", "c.name": "policy.err.holidayName" });
-    expect(holidaysSetting([{ id: "a", date: "2026-10-23", name: " วันปิยมหาราช " }])).toEqual({ "2026-10-23": "วันปิยมหาราช" });
-    expect(holidaysSetting([])).toBeNull();
+    // unconfirmed: nothing is saved, so the holiday rule stays off (weekends are still checked)
+    expect(holidaysSetting([{ id: "a", date: "2026-10-23", name: " วันปิยมหาราช " }])).toBeNull();
+    expect(holidaysSetting([], true, "a@b.test")).toBeNull();
+    expect(holidaysSetting([{ id: "a", date: "2026-10-23", name: " วันปิยมหาราช " }], true, "a@b.test", "2026-09-28T03:00:00Z")).toEqual({
+      schema: "am3.holidays.v1",
+      kind: "company",
+      confirmed: true,
+      confirmed_by: "a@b.test",
+      confirmed_at: "2026-09-28T03:00:00Z",
+      dates: { "2026-10-23": "วันปิยมหาราช" },
+    });
+  });
+
+  it("only a confirmed company calendar turns the check on (an AM2 bare map does not)", () => {
+    expect(holidaysConfirmed({ "2026-10-23": "วันปิยมหาราช" })).toBe(false);
+    expect(holidaysConfirmed({ kind: "company", confirmed: false, dates: {} })).toBe(false);
+    expect(holidaysConfirmed({ kind: "government", confirmed: true, dates: {} })).toBe(false);
+    expect(holidaysConfirmed({ kind: "company", confirmed: true, dates: { "2026-10-23": "x" } })).toBe(true);
+    expect(holidayRows({ schema: "am3.holidays.v1", kind: "company", confirmed: true, dates: { "2026-10-23": "x" } }).map((r) => r.date)).toEqual([
+      "2026-10-23",
+    ]);
   });
 });

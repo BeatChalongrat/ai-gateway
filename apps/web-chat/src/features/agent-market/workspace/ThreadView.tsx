@@ -7,10 +7,12 @@
 // mockup (hidden below `sm`, where every pixel goes to the cards).
 
 import Link from "next/link";
+import { useState } from "react";
 import { Check } from "lucide-react";
 
 import { Markdown } from "@/components/chat/Markdown";
 
+import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { isUserItem } from "../thread";
 import type {
@@ -24,7 +26,7 @@ import type {
   UserFilesPayload,
   UserTextPayload,
 } from "../types";
-import { AgentTile, cls, DOT } from "../ui";
+import { AgentTile, BTN_SMALL, cls, DOT, Spin } from "../ui";
 import { RunExceptions } from "../exceptions/ExceptionsPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { settingsHref, useWorkspace } from "./context";
@@ -187,8 +189,10 @@ function Notice({ p }: { p: NoticePayload }) {
   const t = useAmT();
   const ws = useWorkspace();
   const text = splitNotice(p.text ?? "");
+  // AM3: a run waiting for budget (or an agent switched off) is said plainly, not in grey.
+  if (p.tone === "warning" || p.action === "resume_budget") return <WarningNotice p={p} text={text} />;
   return (
-    <p className={cls("flex flex-wrap items-center gap-x-1.5 text-xs text-text-muted")} data-testid="am-notice">
+    <p className={cls("flex flex-wrap items-center gap-x-1.5 text-xs", p.tone === "success" ? "text-status-success" : "text-text-muted")} data-testid="am-notice">
       <span>{text}</span>
       {p.link === "defaults" && ws ? (
         <>
@@ -199,5 +203,45 @@ function Notice({ p }: { p: NoticePayload }) {
         </>
       ) : null}
     </p>
+  );
+}
+
+/** AM3: a notice that needs the person — a run waiting for budget offers "ลองต่อ". */
+function WarningNotice({ p, text }: { p: NoticePayload; text: string }) {
+  const t = useAmT();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; ok: boolean } | null>(null);
+  const resume = () => {
+    if (!p.run_id) return;
+    setBusy(true);
+    setNote(null);
+    amApi.resume(p.run_id).then(
+      () => {
+        setBusy(false);
+        setNote({ text: t("budget.resumed"), ok: true });
+      },
+      (err) => {
+        setBusy(false);
+        setNote({ text: errorMessage(err), ok: false });
+      },
+    );
+  };
+  return (
+    <div role="status" className="rounded-xl border border-status-warning/40 bg-status-warning/10 px-4 py-2.5 text-sm text-text-primary" data-testid="am-notice" data-tone="warning">
+      <p className="whitespace-pre-wrap">{text}</p>
+      {p.action === "resume_budget" && p.run_id ? (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={resume} disabled={busy} className={BTN_SMALL} data-testid="am-resume-budget">
+            {busy ? <Spin size={12} /> : null}
+            <span>{t("budget.resume")}</span>
+          </button>
+          {note ? (
+            <span className={cls("text-xs", note.ok ? "text-status-success" : "text-text-secondary")} data-testid="am-resume-note">
+              {note.text}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

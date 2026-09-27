@@ -452,7 +452,7 @@ export function Sidebar({
             </span>
             <span>{t("project.new")}</span>
           </button>
-          <AgentRailSection onNavigate={onClose} />
+          <AgentRailSection onNavigate={onClose} search={search} />
 
           {searchExpanded || search ? (
             <div className="relative">

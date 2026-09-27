@@ -6,14 +6,16 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Settings2 } from "lucide-react";
 
 import { amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDate } from "../format";
-import type { CatalogAgent, InstallRow } from "../types";
-import { AgentTile, BTN_PRIMARY, BTN_SECONDARY, cls, ErrorPanel, FeatureGate, PageShell, Pill, Tag } from "../ui";
+import type { CatalogAgent, InstallRow, SharedItem } from "../types";
+import { AgentTile, BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Pill, Tag } from "../ui";
+import { useAgentMarket } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
+import { costLine } from "./trust";
 
 type Category = "all" | "finance" | "documents" | "reports";
 const CATEGORIES: { id: Category; key: AmKey }[] = [
@@ -58,8 +60,10 @@ export function MarketPage() {
 
 function Market() {
   const t = useAmT();
+  const snap = useAgentMarket();
   const [agents, setAgents] = useState<CatalogAgent[] | null>(null);
   const [installs, setInstalls] = useState<InstallRow[]>([]);
+  const [shared, setShared] = useState<SharedItem[]>([]);
   const [error, setError] = useState<unknown>(null);
   const [reload, setReload] = useState(0);
   const [cat, setCat] = useState<Category>("all");
@@ -74,6 +78,10 @@ function Market() {
     );
     amApi.installs().then(
       (r) => alive && setInstalls(r?.installs ?? []),
+      () => {},
+    );
+    amApi.sharedWithMe().then(
+      (r) => alive && setShared(r?.shared ?? []),
       () => {},
     );
     return () => {
@@ -106,6 +114,12 @@ function Market() {
           <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{t("market.title")}</h1>
           <p className="mt-1 text-sm text-text-secondary">{t("market.subtitle")}</p>
         </div>
+        {snap.publisher ? (
+          <Link href="/chat/agents/admin" className={BTN_SMALL} data-testid="am-admin-link">
+            <Settings2 width={14} height={14} aria-hidden />
+            <span>{t("admin.link")}</span>
+          </Link>
+        ) : null}
         <label className="relative block w-full sm:w-64">
           <span className="sr-only">{t("market.search")}</span>
           <Search width={15} height={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" aria-hidden />
@@ -120,6 +134,7 @@ function Market() {
       </div>
 
       {installs.length ? <MyAgents installs={installs} /> : null}
+      {shared.length ? <SharedWithMe items={shared} /> : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-2" role="group" aria-label={t("market.categories")}>
         {CATEGORIES.map((c) => (
@@ -174,9 +189,12 @@ function runTime(t: ReturnType<typeof useAmT>, seconds?: number): string | null 
 
 function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean }) {
   const t = useAmT();
+  const { pricing } = useAgentMarket();
   const m = agent.manifest ?? {};
   const installed = !!agent.install_id;
-  const time = runTime(t, m.typical_run_seconds);
+  const disabled = agent.status === "disabled";
+  const cost = costLine(t, agent.sample, pricing);
+  const time = cost ?? runTime(t, m.typical_run_seconds);
   const formats = formatsLabel(agent);
   return (
     <article
@@ -191,7 +209,9 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className={cls("font-semibold text-text-primary", featured ? "text-[17px]" : "text-[15px]")}>{agent.name}</h2>
-            {featured ? <Pill>{t("market.featured")}</Pill> : null}
+            {featured && !disabled ? <Pill>{t("market.featured")}</Pill> : null}
+            {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
+            {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
           </div>
           {m.summary ? <p className="mt-1 text-sm leading-relaxed text-text-secondary">{m.summary}</p> : null}
         </div>
@@ -200,15 +220,16 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
         <Tag>{t("market.tag.upload")}</Tag>
         {m.permissions?.default === "read_only" ? <Tag>{t("market.tag.readOnly")}</Tag> : null}
         {formats ? <Tag>{formats}</Tag> : null}
+        {agent.sample?.status === "succeeded" ? <Tag tone="success">{t("market.hasSample")}</Tag> : null}
       </div>
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
         {installed ? (
           <Link href={workspaceHref(agent.install_id!)} className={BTN_PRIMARY} data-testid="am-open-workspace">
             {t("market.open")}
           </Link>
-        ) : (
-          <Link href={`/chat/agents/install/${encodeURIComponent(agent.slug)}`} className={BTN_PRIMARY} data-testid="am-install">
-            {t("market.install")}
+        ) : disabled ? null : (
+          <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_PRIMARY} data-testid="am-install">
+            {t("market.readFirst")}
           </Link>
         )}
         <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
@@ -259,6 +280,39 @@ function MyAgents({ installs }: { installs: InstallRow[] }) {
                 </span>
               </span>
               {i.attention ? <Pill tone="warning">{t("rail.attention")}</Pill> : null}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function SharedWithMe({ items }: { items: SharedItem[] }) {
+  const t = useAmT();
+  const locale = useAmLocale();
+  return (
+    <section className="mt-6" aria-labelledby="am-shared">
+      <h2 id="am-shared" className="text-sm font-semibold text-text-primary">
+        {t("market.shared")}
+      </h2>
+      <ul className="mt-2 grid gap-2 sm:grid-cols-2" data-testid="am-shared-list">
+        {items.map((s) => (
+          <li key={s.id}>
+            <Link
+              href={`/chat/agents/shared/${s.id}`}
+              className="focus-ring flex items-center gap-3 rounded-xl border border-border bg-bg-surface px-3.5 py-3 transition-colors hover:border-border-strong"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-text-primary">
+                  {s.period ? `${s.agent} · ${s.period}` : s.agent}
+                </span>
+                <span className="block truncate text-xs text-text-muted">
+                  {t("market.sharedBy", { who: s.owner, when: formatDate(s.created_at, locale) })}
+                </span>
+              </span>
+              {s.can_review ? <Pill>{t("share.canReviewTag")}</Pill> : null}
+              {!s.last_opened_at ? <Pill tone="warning">{t("market.sharedNew")}</Pill> : null}
             </Link>
           </li>
         ))}

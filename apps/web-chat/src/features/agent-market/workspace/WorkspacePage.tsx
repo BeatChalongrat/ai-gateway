@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChartColumn, ListChecks, Plus, Settings } from "lucide-react";
+import { ChartColumn, ListChecks, Pin, PinOff, Plus, Settings } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 
@@ -15,6 +15,9 @@ import { useAmT } from "../i18n";
 import type { InstallDetail, InstallRow, OutputsPayload, ProgressPayload, ThreadItem } from "../types";
 import { AgentTile, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Spin } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged } from "../useAgentMarket";
+import { togglePin } from "../useRail";
+import { ProblemButton } from "../problem/ProblemButton";
+import { BudgetBanner } from "./BudgetBanner";
 import { Composer, type ComposerHandle } from "./Composer";
 import { dashboardHref, runHref, settingsHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
 import { ThreadView } from "./ThreadView";
@@ -56,6 +59,15 @@ function Workspace({ installId }: { installId: string }) {
   const installs = useInstalls();
   const thread = useThread(installId);
   const composerRef = useRef<ComposerHandle>(null);
+  const [pinnedAt, setPinnedAt] = useState<string | null | undefined>(undefined);
+
+  // AM3: "recently used" in the rail starts from opening the workspace.
+  useEffect(() => {
+    amApi.opened(installId).then(
+      () => {},
+      () => {},
+    );
+  }, [installId]);
 
   useEffect(() => {
     let alive = true;
@@ -92,6 +104,18 @@ function Workspace({ installId }: { installId: string }) {
 
   const manifest = detail?.manifest;
   const install = detail?.install ?? installs.find((i) => i.id === installId);
+  const pinned = pinnedAt !== undefined ? !!pinnedAt : !!detail?.install?.pinned_at;
+  const onPin = () => {
+    const was = pinned;
+    setPinnedAt(was ? null : new Date().toISOString());
+    togglePin(installId, was).then(
+      (at) => {
+        setPinnedAt(at);
+        notifyInstallsChanged();
+      },
+      () => setPinnedAt(was ? detail?.install?.pinned_at ?? new Date().toISOString() : null),
+    );
+  };
   const icon = manifest?.icon ?? installs.find((i) => i.id === installId)?.icon;
   const title = manifest?.greeting?.role || install?.title || "";
   const tagline = manifest?.greeting?.tagline || "";
@@ -116,6 +140,15 @@ function Workspace({ installId }: { installId: string }) {
     return null;
   }, [thread.items]);
 
+  // the self-tests in this thread (their files are the sample's, not to be signed off)
+  const selfTestSig = useMemo(
+    () =>
+      thread.items
+        .filter((i) => i.kind === "progress" && (i.payload as ProgressPayload)?.kind === "self_test")
+        .map((i) => (i.payload as ProgressPayload).run_id)
+        .join(","),
+    [thread.items],
+  );
   const claimedAt = useRef(0);
   const ctx: WorkspaceCtx = useMemo(
     () => ({
@@ -129,8 +162,9 @@ function Workspace({ installId }: { installId: string }) {
       claimDrop: () => {
         claimedAt.current = Date.now();
       },
+      selfTestRuns: new Set(selfTestSig ? selfTestSig.split(",") : []),
     }),
-    [installId, icon, title, thread.merge, accept, maxMb, photoNotice],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig],
   );
 
   const onDropFiles = useCallback((files: File[]) => {
@@ -182,6 +216,19 @@ function Workspace({ installId }: { installId: string }) {
             ) : (
               <span className="hidden text-xs text-text-muted lg:inline">{t("ws.noRunYet")}</span>
             )}
+            <button
+              type="button"
+              onClick={onPin}
+              aria-pressed={pinned}
+              aria-label={pinned ? t("rail.unpin", { name: title }) : t("rail.pin", { name: title })}
+              title={pinned ? t("ws.unpin") : t("ws.pin")}
+              className={BTN_SMALL}
+              data-testid="am-ws-pin"
+            >
+              {pinned ? <PinOff width={15} height={15} aria-hidden /> : <Pin width={15} height={15} aria-hidden />}
+              <span className="hidden lg:inline">{pinned ? t("ws.unpin") : t("ws.pin")}</span>
+            </button>
+            <ProblemButton target={{ kind: "install", installId }} compact />
             <Link href={dashboardHref(installId)} className={BTN_SMALL} aria-label={t("ws.dashboard")} data-testid="am-ws-dashboard">
               <ChartColumn width={15} height={15} aria-hidden />
               <span className="hidden sm:inline">{t("ws.dashboard")}</span>
@@ -207,6 +254,9 @@ function Workspace({ installId }: { installId: string }) {
               ) : null}
               <ThreadView items={thread.items} />
             </ThreadScroller>
+            <div className="px-4 md:px-8">
+              <BudgetBanner installId={installId} refreshKey={progressSig} />
+            </div>
             <Composer
               ref={composerRef}
               installId={installId}

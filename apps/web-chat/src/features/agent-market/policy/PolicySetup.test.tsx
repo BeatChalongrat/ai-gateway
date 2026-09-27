@@ -94,22 +94,41 @@ describe("PolicyStep (install wizard)", () => {
     expect(writes()).toEqual([]);
   });
 
-  it("a company calendar is saved as {date: name}", async () => {
+  it("a company calendar is saved only when confirmed as the company's own (AM3: holiday checks fail closed)", async () => {
     const onNext = vi.fn();
     render(<PolicyStep installId="i-1" manifest={EXPENSE_MANIFEST} onNext={onNext} />);
     await screen.findByTestId("am-policy-editor");
-    expect(screen.getByTestId("am-holidays").textContent).toContain("ถ้าไม่ใส่ จะใช้วันหยุดราชการไทยปี 2569 ที่มากับ agent");
+    expect(screen.getByTestId("am-holidays").textContent).toContain("ไม่ใช่วันหยุดธนาคารหรือวันหยุดราชการ");
+    expect(screen.getByTestId("am-holidays-state").textContent).toContain("การตรวจวันหยุดยังปิดอยู่");
+    fireEvent.click(screen.getByTestId("am-holiday-add"));
+    fireEvent.change(screen.getByTestId("am-holiday-date"), { target: { value: "2026-10-23" } });
+    fireEvent.change(screen.getByTestId("am-holiday-name"), { target: { value: "วันปิยมหาราช" } });
+    // not confirmed yet: still off
+    expect(screen.getByTestId("am-holidays-state").textContent).toContain("ยังปิดอยู่");
+    fireEvent.click(screen.getByTestId("am-holidays-confirm"));
+    expect(screen.getByTestId("am-holidays-state").textContent).toContain("เปิดตรวจวันหยุดแล้ว");
+    fireEvent.click(screen.getByTestId("am-policy-save"));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+    const w = writes();
+    expect(w.map((x) => [x.method, x.path])).toEqual([
+      ["PUT", "/agent-market/installs/i-1/defaults/policy"],
+      ["PUT", "/agent-market/installs/i-1/defaults/holidays"],
+    ]);
+    expect(w[1]!.body.value).toMatchObject({ schema: "am3.holidays.v1", kind: "company", confirmed: true, dates: { "2026-10-23": "วันปิยมหาราช" } });
+    // the sample was never edited: it is saved as the sample it is
+    expect(w[0]!.body.value.source).toBe("package_sample");
+  });
+
+  it("an unconfirmed calendar is not saved: the holiday rule stays off", async () => {
+    const onNext = vi.fn();
+    render(<PolicyStep installId="i-1" manifest={EXPENSE_MANIFEST} onNext={onNext} />);
+    await screen.findByTestId("am-policy-editor");
     fireEvent.click(screen.getByTestId("am-holiday-add"));
     fireEvent.change(screen.getByTestId("am-holiday-date"), { target: { value: "2026-10-23" } });
     fireEvent.change(screen.getByTestId("am-holiday-name"), { target: { value: "วันปิยมหาราช" } });
     fireEvent.click(screen.getByTestId("am-policy-save"));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
-    expect(writes().map((w) => [w.method, w.path, w.body?.value?.["2026-10-23"] ?? null])).toEqual([
-      ["PUT", "/agent-market/installs/i-1/defaults/policy", null],
-      ["PUT", "/agent-market/installs/i-1/defaults/holidays", "วันปิยมหาราช"],
-    ]);
-    // the sample was never edited: it is saved as the sample it is
-    expect(writes()[0]!.body.value.source).toBe("package_sample");
+    expect(writes().map((x) => x.path)).toEqual(["/agent-market/installs/i-1/defaults/policy"]);
   });
 
   it("the server's refusal is shown as written", async () => {
@@ -138,15 +157,18 @@ describe("PolicyStep (install wizard)", () => {
 describe("PolicySection (settings)", () => {
   it("summarises the table, marks the sample, and edits the same table", async () => {
     const onChanged = vi.fn();
-    const defaults = [def("policy", SAMPLE), def("holidays", { "2026-10-23": "วันปิยมหาราช" })];
+    const defaults = [
+      def("policy", SAMPLE),
+      def("holidays", { schema: "am3.holidays.v1", kind: "company", confirmed: true, confirmed_by: "", confirmed_at: "", dates: { "2026-10-23": "วันปิยมหาราช" } }),
+    ];
     render(<PolicySection installId="i-1" manifest={EXPENSE_MANIFEST} defaults={defaults} onChanged={onChanged} />);
     expect(screen.getByTestId("am-policy-summary").textContent).toBe("3 หมวด · ต้องมีใบเสร็จเมื่อเกิน 500 บาท · วงเงินอนุมัติ 3,000 บาท");
     expect(screen.getByText("ตารางตัวอย่าง")).toBeTruthy();
-    expect(screen.getByTestId("am-policy-holidays-line").textContent).toBe("วันหยุดของบริษัท 1 วัน");
+    expect(screen.getByTestId("am-policy-holidays-line").textContent).toBe("วันหยุดของบริษัท 1 วัน (ยืนยันแล้ว)");
 
     fireEvent.click(screen.getByTestId("am-policy-edit"));
     fireEvent.change(screen.getByTestId("am-policy-prohibited"), { target: { value: "คาสิโน" } });
-    // emptying the calendar removes it: the package's holidays apply again
+    // emptying the calendar removes it: holiday checks turn off (weekends stay)
     fireEvent.click(screen.getByRole("button", { name: "ลบวันหยุด 2026-10-23" }));
     fireEvent.click(screen.getByTestId("am-policy-submit"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());

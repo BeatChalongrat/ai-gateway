@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 
 import { amApi } from "./api";
+import type { Contact, Pricing } from "./types";
 
 export type AgentMarketState = "unknown" | "off" | "available" | "unavailable";
 
@@ -24,10 +25,21 @@ export interface AgentMarketSnapshot {
   state: AgentMarketState;
   /** The runner's last heartbeat is fresh (null = not known). */
   runnerHealthy: boolean | null;
+  /** AM3: this person's role in the organisation ("" = not on the list). */
+  role?: string;
+  admin?: boolean;
+  publisher?: boolean;
+  /** Whom to ask (access, budgets). */
+  contact?: Contact | null;
+  /** credits → baht for costs shown in the catalog. */
+  pricing?: Pricing | null;
 }
 
 const UNKNOWN: AgentMarketSnapshot = { state: "unknown", runnerHealthy: null };
 const OFF: AgentMarketSnapshot = { state: "off", runnerHealthy: null };
+
+/** 3,000,000 credits = 1 USD, 35 THB per USD unless the server says otherwise. */
+export const DEFAULT_PRICING: Pricing = { credits_per_usd: 3_000_000, thb_per_usd: 35 };
 
 let pending: Promise<AgentMarketSnapshot> | null = null;
 let known: AgentMarketSnapshot = UNKNOWN;
@@ -44,7 +56,15 @@ async function resolveAvailability(): Promise<AgentMarketSnapshot> {
   }
   try {
     const a = await amApi.availability();
-    return { state: a?.available === true ? "available" : "unavailable", runnerHealthy: a?.runner?.healthy ?? null };
+    return {
+      state: a?.available === true ? "available" : "unavailable",
+      runnerHealthy: a?.runner?.healthy ?? null,
+      role: typeof a?.role === "string" ? a.role : "",
+      admin: a?.admin === true,
+      publisher: a?.publisher === true,
+      contact: a?.contact ?? null,
+      pricing: a?.pricing && a.pricing.credits_per_usd > 0 ? a.pricing : null,
+    };
   } catch {
     return { state: "unavailable", runnerHealthy: null };
   }
@@ -70,7 +90,9 @@ export function useAgentMarket(): AgentMarketSnapshot {
     loadAgentMarket().then(
       (s) => {
         if (!alive) return;
-        setSnap((prev) => (prev.state === s.state && prev.runnerHealthy === s.runnerHealthy ? prev : s));
+        setSnap((prev) =>
+          prev.state === s.state && prev.runnerHealthy === s.runnerHealthy && prev.role === s.role && prev.admin === s.admin ? prev : s,
+        );
       },
       () => {},
     );

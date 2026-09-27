@@ -11,7 +11,9 @@
 
 import { useI18nStore } from "@/lib/i18n";
 
-const th = {
+import { am3En, am3Th } from "./i18n.am3";
+
+const thBase = {
   // common
   "common.back": "กลับ",
   "common.retry": "ลองใหม่",
@@ -32,14 +34,14 @@ const th = {
   "common.sep": " · ",
 
   // errors
-  "error.generic": "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง",
-  "error.network": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่",
-  "error.session": "เซสชันหมดอายุ เข้าสู่ระบบใหม่อีกครั้ง",
-  "error.upload": "อัปโหลดไฟล์ไม่สำเร็จ",
-  "error.aborted": "ยกเลิกการอัปโหลดแล้ว",
-  "error.uploadTimeout": "อัปโหลดนานเกินไป ลองใหม่อีกครั้ง",
-  "error.fileType": "รับเฉพาะไฟล์ {types}",
-  "error.fileTooLarge": "ไฟล์ใหญ่เกิน {mb} MB",
+  "error.generic": "เกิดข้อผิดพลาด — ลองใหม่อีกครั้ง ถ้ายังไม่ได้ให้กด “แจ้งปัญหา” ไฟล์และงานเดิมของคุณยังอยู่ครบ",
+  "error.network": "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจอินเทอร์เน็ตแล้วลองใหม่ ยังไม่มีอะไรถูกส่งหรือเปลี่ยน",
+  "error.session": "เซสชันหมดอายุ — เข้าสู่ระบบใหม่อีกครั้ง ข้อมูลของคุณยังอยู่ครบ",
+  "error.upload": "อัปโหลดไฟล์ไม่สำเร็จ — ลองส่งไฟล์อีกครั้ง ไฟล์นี้ยังไม่ถูกเก็บไว้",
+  "error.aborted": "ยกเลิกการอัปโหลดแล้ว — ส่งใหม่ได้เมื่อพร้อม ไฟล์นี้ยังไม่ถูกเก็บไว้",
+  "error.uploadTimeout": "อัปโหลดนานเกินไป — ลองใหม่ หรือแยกเป็นไฟล์เล็กลง ไฟล์นี้ยังไม่ถูกเก็บไว้",
+  "error.fileType": "agent นี้รับเฉพาะไฟล์ {types} — บันทึกเป็นชนิดนี้แล้วส่งใหม่ ยังไม่ได้ส่งอะไร",
+  "error.fileTooLarge": "ไฟล์ใหญ่เกิน {mb} MB — ลดขนาดหรือแยกไฟล์แล้วส่งใหม่ ยังไม่ได้ส่งอะไร",
 
   // availability gate
   "gate.title": "ยังไม่เปิดให้ใช้ Agent Market",
@@ -473,8 +475,8 @@ const th = {
   "policy.vat.abbreviated_tax_invoice": "ใบกำกับภาษีอย่างย่อก็ได้",
   "policy.prohibited": "ร้านค้าต้องห้าม",
   "policy.prohibitedHint": "หนึ่งคำต่อบรรทัด ร้านที่ชื่อมีคำเหล่านี้จะเป็นข้อยกเว้นรอคนตัดสิน",
-  "policy.holidays": "วันหยุดของบริษัท",
-  "policy.holidaysDefault": "ถ้าไม่ใส่ จะใช้วันหยุดราชการไทยปี 2569 ที่มากับ agent",
+  "policy.holidays": "วันหยุดของบริษัท — ไม่ใช่วันหยุดธนาคารหรือวันหยุดราชการ",
+  "policy.holidaysDefault": "ใส่วันหยุดตามประกาศของบริษัท แล้วติ๊กยืนยัน การตรวจวันหยุดจะเปิดหลังยืนยันเท่านั้น ส่วนวันเสาร์-อาทิตย์ตรวจเสมอ",
   "policy.holidayDate": "วันที่",
   "policy.holidayName": "ชื่อวันหยุด",
   "policy.addHoliday": "เพิ่มวันหยุด",
@@ -491,8 +493,8 @@ const th = {
   "policy.err.holidayName": "ใส่ชื่อวันหยุด",
   "policy.fix": "แก้ช่องที่มีข้อความสีแดงก่อนบันทึก",
   "policy.summary": "{n} หมวด · ต้องมีใบเสร็จเมื่อเกิน {receipt} บาท · วงเงินอนุมัติ {approval} บาท",
-  "policy.holidaysCount": "วันหยุดของบริษัท {n} วัน",
-  "policy.holidaysPackage": "ใช้วันหยุดราชการไทยปี 2569 ที่มากับ agent",
+  "policy.holidaysCount": "วันหยุดของบริษัท {n} วัน (ยืนยันแล้ว)",
+  "policy.holidaysPackage": "ยังไม่ได้ยืนยันวันหยุดของบริษัท — ตรวจเฉพาะวันเสาร์-อาทิตย์",
   "policy.edit": "แก้ไขตาราง",
   "policy.sampleBadge": "ตารางตัวอย่าง",
   "exq.title": "ข้อยกเว้นของรอบนี้",
@@ -731,6 +733,9 @@ const th = {
   "time.seconds": "{n} วินาที",
 } as const;
 
+// AM3's strings (self-serve) live in their own file, merged here.
+const th = { ...thBase, ...am3Th } as const;
+
 export type AmKey = keyof typeof th;
 
 const en: Record<AmKey, string> = {
@@ -752,14 +757,14 @@ const en: Record<AmKey, string> = {
   "common.hide": "Hide",
   "common.sep": " · ",
 
-  "error.generic": "Something went wrong. Please try again.",
-  "error.network": "Can't reach the server. Check your connection and try again.",
-  "error.session": "Your session expired. Please sign in again.",
-  "error.upload": "The upload failed",
-  "error.aborted": "Upload cancelled",
-  "error.uploadTimeout": "The upload took too long. Please try again.",
-  "error.fileType": "Only {types} files are accepted",
-  "error.fileTooLarge": "The file is larger than {mb} MB",
+  "error.generic": "Something went wrong — try again; if it keeps failing, press “Report a problem”. Your files and earlier work are all kept.",
+  "error.network": "Can't reach the server — check your connection and try again. Nothing was sent or changed.",
+  "error.session": "Your session expired — sign in again. Your data is all kept.",
+  "error.upload": "The upload failed — send the file again. It was not stored.",
+  "error.aborted": "Upload cancelled — send it again when ready. The file was not stored.",
+  "error.uploadTimeout": "The upload took too long — try again, or split it into smaller files. The file was not stored.",
+  "error.fileType": "This agent takes only {types} files — save it as one of these and send again. Nothing was sent.",
+  "error.fileTooLarge": "The file is larger than {mb} MB — make it smaller or split it, then send again. Nothing was sent.",
 
   "gate.title": "Agent Market isn't available",
   "gate.body": "This feature isn't enabled for this account or deployment. Ask your administrator if you need it.",
@@ -1181,8 +1186,8 @@ const en: Record<AmKey, string> = {
   "policy.vat.abbreviated_tax_invoice": "An abbreviated tax invoice is enough",
   "policy.prohibited": "Prohibited merchants",
   "policy.prohibitedHint": "One word per line; a merchant whose name contains one becomes an exception for a person",
-  "policy.holidays": "Company holidays",
-  "policy.holidaysDefault": "Left empty, the agent uses the Thai 2569 public holidays it comes with",
+  "policy.holidays": "Company holidays — not bank or government holidays",
+  "policy.holidaysDefault": "Enter the holidays your company announced, then tick to confirm. Holiday checks turn on only after that; weekends are always checked.",
   "policy.holidayDate": "Date",
   "policy.holidayName": "Holiday",
   "policy.addHoliday": "Add a holiday",
@@ -1199,8 +1204,8 @@ const en: Record<AmKey, string> = {
   "policy.err.holidayName": "Name the holiday",
   "policy.fix": "Fix the fields marked in red before saving",
   "policy.summary": "{n} categories · receipt required above {receipt} THB · approval threshold {approval} THB",
-  "policy.holidaysCount": "{n} company holidays",
-  "policy.holidaysPackage": "Using the Thai 2569 public holidays it comes with",
+  "policy.holidaysCount": "{n} company holidays (confirmed)",
+  "policy.holidaysPackage": "Company holidays not confirmed — only weekends are checked",
   "policy.edit": "Edit the table",
   "policy.sampleBadge": "Sample table",
   "exq.title": "This run's exceptions",
@@ -1435,6 +1440,7 @@ const en: Record<AmKey, string> = {
   "time.hours": "{n} h",
   "time.minutes": "{n} min",
   "time.seconds": "{n} s",
+  ...am3En,
 };
 
 export const amDictionaries = { th, en } as const;

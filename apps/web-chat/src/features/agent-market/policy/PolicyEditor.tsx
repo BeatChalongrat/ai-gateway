@@ -231,6 +231,8 @@ export function HolidayEditor({
   showAll,
   disabled = false,
   idPrefix = "am-holidays",
+  confirmed = false,
+  onConfirm,
 }: {
   rows: HolidayRow[];
   onChange: (rows: HolidayRow[]) => void;
@@ -238,13 +240,27 @@ export function HolidayEditor({
   showAll: boolean;
   disabled?: boolean;
   idPrefix?: string;
+  /** AM3: the person confirmed these are the company's own holidays. */
+  confirmed?: boolean;
+  onConfirm?: (v: boolean) => void;
 }) {
   const t = useAmT();
   const setRow = (rid: string, patch: Partial<HolidayRow>) => onChange(rows.map((r) => (r.id === rid ? { ...r, ...patch } : r)));
+  const on = confirmed && rows.length > 0;
   return (
     <fieldset disabled={disabled} data-testid="am-holidays">
       <legend className="text-sm font-medium text-text-primary">{t("policy.holidays")}</legend>
       <p className="mt-0.5 text-xs text-text-muted">{t("policy.holidaysDefault")}</p>
+      <p
+        className={cls(
+          "mt-2 rounded-lg border px-3 py-2 text-xs",
+          on ? "border-status-success/40 bg-status-success/10 text-text-primary" : "border-status-warning/40 bg-status-warning/10 text-text-primary",
+        )}
+        role="status"
+        data-testid="am-holidays-state"
+      >
+        {on ? t("policy.holidaysOn", { n: String(rows.length) }) : t("policy.holidaysOff")}
+      </p>
       {rows.length ? (
         <ul className="mt-2 flex flex-col gap-2">
           {rows.map((r) => {
@@ -298,6 +314,22 @@ export function HolidayEditor({
         <Plus width={14} height={14} aria-hidden />
         <span>{t("policy.addHoliday")}</span>
       </button>
+      {onConfirm ? (
+        <label className="mt-2 flex items-start gap-2 text-sm text-text-primary">
+          <input
+            type="checkbox"
+            checked={on}
+            disabled={!rows.length}
+            onChange={(e) => onConfirm(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-current"
+            data-testid="am-holidays-confirm"
+          />
+          <span>
+            {t("policy.holidaysConfirm")}
+            <span className="mt-0.5 block text-xs text-text-muted">{t("policy.holidaysConfirmHint")}</span>
+          </span>
+        </label>
+      ) : null}
     </fieldset>
   );
 }

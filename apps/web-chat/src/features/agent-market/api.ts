@@ -13,7 +13,24 @@ import { redirectToPortalLogin } from "@/lib/auth";
 
 import { tAm } from "./i18n";
 import type {
+  AdminCatalogRow,
+  AdminOrg,
+  AdminSpend,
   AmFile,
+  BudgetState,
+  CatalogSample,
+  Datasheet,
+  OrgDepartment,
+  OrgMember,
+  OrgSettings,
+  Person,
+  ProblemReport,
+  RailPrefs,
+  RailResponse,
+  Review,
+  Share,
+  SharedItem,
+  SharedRun,
   AnswerBody,
   Availability,
   CatalogAgent,
@@ -238,6 +255,72 @@ export const amApi = {
 
   theme: () => call<ThemeResponse>("/theme"),
   putTheme: (theme: { id: string; company?: string }) => send<{ version: number }>("PUT", "/theme", theme),
+
+  // ── AM3: self-serve ────────────────────────────────────────────────────
+
+  /** The left rail: my installs with pins, recent use and what waits for an answer. */
+  rail: () => call<RailResponse>("/rail"),
+  putPrefs: (prefs: RailPrefs) => send<{ prefs: RailPrefs }>("PUT", "/prefs", prefs),
+  pin: (installId: string) => send<{ pinned_at: string | null }>("PUT", `/installs/${id(installId)}/pin`),
+  unpin: (installId: string) => send<{ pinned_at: string | null }>("DELETE", `/installs/${id(installId)}/pin`),
+  opened: (installId: string) => send<{ ok: boolean }>("POST", `/installs/${id(installId)}/opened`),
+
+  /** The three monthly limits of an install (the workspace banner). */
+  budget: (installId: string) => call<{ budget: BudgetState; remaining: number }>(`/installs/${id(installId)}/budget`),
+  /** "ลองต่อ" on a run waiting for budget. */
+  resume: (runId: string) => send<{ resumed: boolean }>("POST", `/runs/${id(runId)}/resume`),
+
+  /** The catalog a stranger reads: real sample outputs and the data sheet. */
+  catalogSample: (slug: string) => call<CatalogSample>(`/catalog/${id(slug)}/sample`),
+  datasheet: (slug: string) => call<Datasheet>(`/catalog/${id(slug)}/datasheet`),
+  downloadSampleArtifact: (artifactId: string, filename: string) => saveBlob(`/sample-artifacts/${id(artifactId)}/download`, filename),
+  downloadSampleFile: (fileId: string, filename: string) => saveBlob(`/sample-files/${id(fileId)}/download`, filename),
+
+  /** Sign-off: a person's name on a finished run and its files. */
+  review: (runId: string, body: { name?: string; note?: string }) => send<{ review: Review; job: Run }>("POST", `/runs/${id(runId)}/review`, body),
+  reviews: (runId: string) => call<{ reviews: Review[] | null }>(`/runs/${id(runId)}/reviews`),
+
+  /** Sharing a run with a named colleague in the organisation (sign-in required). */
+  shares: (runId: string) => call<{ shares: Share[] | null }>(`/runs/${id(runId)}/shares`),
+  share: (runId: string, body: { email: string; can_review: boolean; expires_days?: number }) =>
+    send<{ share: Share; path: string }>("POST", `/runs/${id(runId)}/shares`, body),
+  revokeShare: (shareId: string) => send<{ revoked: boolean }>("DELETE", `/shares/${id(shareId)}`),
+  people: (q: string) => call<{ people: Person[] | null }>(`/people?q=${encodeURIComponent(q)}`),
+  sharedWithMe: () => call<{ shared: SharedItem[] | null }>("/shared"),
+  sharedRun: (shareId: string) => call<SharedRun>(`/shared/${id(shareId)}`),
+  downloadShared: (shareId: string, artifactId: string, filename: string) =>
+    saveBlob(`/shared/${id(shareId)}/artifacts/${id(artifactId)}/download`, filename),
+  sharedReview: (shareId: string, body: { name?: string; note?: string }) =>
+    send<{ review: Review; job: Run }>("POST", `/shared/${id(shareId)}/review`, body),
+  sharedProblem: (shareId: string, body: { text: string; page?: string }) =>
+    send<{ report: ProblemReport; message: string }>("POST", `/shared/${id(shareId)}/problem`, body),
+
+  /** "Report a problem": one sentence, the run and the page come along. */
+  runProblem: (runId: string, body: { text: string; page?: string }) =>
+    send<{ report: ProblemReport; message: string }>("POST", `/runs/${id(runId)}/problem`, body),
+  installProblem: (installId: string, body: { text: string; page?: string }) =>
+    send<{ report: ProblemReport; message: string }>("POST", `/installs/${id(installId)}/problem`, body),
+
+  /** The organisation's admins (and publishers for the catalog). */
+  adminOrg: () => call<AdminOrg>("/admin/org"),
+  adminPutOrg: (body: Partial<Pick<OrgSettings, "name" | "access" | "contact_name" | "contact_email">> & {
+    domains?: string[];
+    user_monthly_credits?: number | string;
+  }) => send<{ org: OrgSettings; resumed: number }>("PUT", "/admin/org", body),
+  adminPutMember: (email: string, body: { display_name?: string; department?: string; role?: string; monthly_credits?: number | string | null }) =>
+    send<{ member: OrgMember; created: boolean; resumed: number }>("PUT", `/admin/members/${id(email)}`, body),
+  adminDeleteMember: (email: string) => send<{ removed: boolean }>("DELETE", `/admin/members/${id(email)}`),
+  adminPutDepartment: (name: string, body: { monthly_credits?: number | string | null; contact_name?: string; contact_email?: string }) =>
+    send<{ department: OrgDepartment; resumed: number }>("PUT", `/admin/departments/${id(name)}`, body),
+  adminDeleteDepartment: (name: string) => send<{ removed: boolean }>("DELETE", `/admin/departments/${id(name)}`),
+  adminSpend: (days: number) => call<AdminSpend>(`/admin/spend?days=${days}`),
+  adminProblems: (status: "open" | "closed" | "all" = "all") => call<{ problems: ProblemReport[] | null }>(`/admin/problems?status=${status}`),
+  adminCloseProblem: (problemId: string, note: string) =>
+    send<{ problem: ProblemReport }>("POST", `/admin/problems/${id(problemId)}/close`, { note }),
+  adminCatalog: () => call<{ agents: AdminCatalogRow[] | null; admin: boolean }>("/admin/catalog"),
+  adminPutCatalog: (slug: string, body: { status: string; reason?: string }) =>
+    send<{ state: { slug: string; status: string; reason: string }; stopped_runs: number }>("PUT", `/admin/catalog/${id(slug)}`, body),
+  adminSample: (slug: string) => send<{ run: Run }>("POST", `/admin/catalog/${id(slug)}/sample`),
 };
 
 /** A fresh client id (idempotency key) for a message, a chip or an install. */

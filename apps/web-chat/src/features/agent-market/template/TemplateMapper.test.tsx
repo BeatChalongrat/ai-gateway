@@ -258,7 +258,7 @@ describe("TemplateSection", () => {
     fireEvent.change(screen.getByTestId("am-template-file"), { target: { files: [new File(["x"], "ฟอร์ม.docx")] } });
     expect(await screen.findByText("agent ตัวนี้ยังไม่รองรับแบบฟอร์มของคุณ")).toBeTruthy();
     fireEvent.change(screen.getByTestId("am-template-file"), { target: { files: [new File(["x"], "ฟอร์ม.pdf")] } });
-    expect(await screen.findByText("รับเฉพาะไฟล์ .docx .xlsx .xlsm .pptx")).toBeTruthy();
+    expect(await screen.findByText("agent นี้รับเฉพาะไฟล์ .docx .xlsx .xlsm .pptx — บันทึกเป็นชนิดนี้แล้วส่งใหม่ ยังไม่ได้ส่งอะไร")).toBeTruthy();
     expect(uploadTemplate).toHaveBeenCalledTimes(1);
   });
 });
