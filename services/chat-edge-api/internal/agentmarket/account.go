@@ -76,6 +76,19 @@ var exportDocs = []struct {
 		WHERE t.install_id IN (SELECT id FROM agent_market.agent_installs WHERE tenant_id = $1 AND user_id = $2)`},
 	{"document_index.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.document_index t
 		WHERE t.tenant_id = $1 AND t.user_id = $2`},
+	// AM3: the person's place on the access list, their rail preferences,
+	// the sign-offs they gave or their runs received, the shares they made or
+	// opened, and the problems they reported.
+	{"membership.json", `SELECT COALESCE(json_agg(t), '[]') FROM agent_market.org_members t
+		WHERE $1::uuid IS NOT NULL AND t.user_id = $2`},
+	{"preferences.json", `SELECT COALESCE(json_agg(t), '[]') FROM agent_market.user_prefs t
+		WHERE $1::uuid IS NOT NULL AND t.user_id = $2`},
+	{"reviews.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.run_reviews t
+		WHERE t.reviewer_user_id = $2 OR t.run_id IN (SELECT id FROM agent_market.agent_runs WHERE tenant_id = $1 AND user_id = $2)`},
+	{"shares.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.run_shares t
+		WHERE $1::uuid IS NOT NULL AND (t.owner_user_id = $2 OR t.recipient_user_id = $2)`},
+	{"problem_reports.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.problem_reports t
+		WHERE $1::uuid IS NOT NULL AND t.user_id = $2`},
 }
 
 // Export writes the user's Agent Market data in this tenant.
@@ -175,6 +188,16 @@ func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[stri
 		{"files", `DELETE FROM agent_market.agent_files WHERE user_id = $1`},
 		{"thread_items", `DELETE FROM agent_market.agent_thread_items WHERE user_id = $1`},
 		{"theme_creator_cleared", `UPDATE agent_market.agent_themes SET created_by = NULL WHERE created_by = $1`},
+		// AM3: their preferences, problem reports, the shares addressed to them
+		// (the ones they made went with their runs) and their access row. A
+		// sign-off they gave on someone else's run stays on that run's record
+		// (the name is printed on the signed files) without their email or id.
+		{"preferences", `DELETE FROM agent_market.user_prefs WHERE user_id = $1`},
+		{"problem_reports", `DELETE FROM agent_market.problem_reports WHERE user_id = $1`},
+		{"shares_received", `DELETE FROM agent_market.run_shares WHERE recipient_user_id = $1 OR owner_user_id = $1`},
+		{"reviews_anonymised", `UPDATE agent_market.run_reviews SET reviewer_user_id = '00000000-0000-0000-0000-000000000000',
+			reviewer_email = '' WHERE reviewer_user_id = $1`},
+		{"membership", `DELETE FROM agent_market.org_members WHERE user_id = $1`},
 	} {
 		tag, err := p.store.Pool.Exec(ctx, q.sql, userID)
 		if err != nil {

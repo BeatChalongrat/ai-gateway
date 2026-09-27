@@ -216,6 +216,10 @@ func (s *Store) PurgeInstalls(ctx context.Context, files storage.Backend, instal
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_market.agent_budget_ledger WHERE install_id = ANY($1)`, installs); err != nil {
 		return objects, 0, err
 	}
+	// AM3: reports about these installs' runs go with them (no key: they may be a share viewer's)
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_market.problem_reports WHERE install_id = ANY($1)`, installs); err != nil {
+		return objects, 0, err
+	}
 	tag, err := tx.Exec(ctx, `DELETE FROM agent_market.agent_installs WHERE id = ANY($1)`, installs)
 	if err != nil {
 		return objects, 0, err

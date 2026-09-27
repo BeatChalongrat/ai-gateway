@@ -803,3 +803,64 @@ func TestAM3Migration003DownUndoesAll(t *testing.T) {
 		t.Fatalf("up again: %v %v", did, err)
 	}
 }
+
+// ── export and delete cover what AM3 keeps about a person ────────────────
+
+func TestAM3ExportAndDeletionCoverTheNewRows(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	e.mustDo(200, "PUT", "/admin/org", map[string]any{"domains": []string{"example.test"}})
+	me := "me@example.test"
+	e.mustDo(200, "PUT", "/admin/members/"+me, map[string]any{"display_name": "ฉัน"})
+	e.publishFinancial()
+	in := e.installAs(me)
+	run, _ := e.succeededRun(in)
+	e.mustDo(200, "PUT", "/prefs", map[string]any{"rail_collapsed": true}, as(me)...)
+	e.mustDo(200, "POST", "/runs/"+run.ID.String()+"/problem", map[string]any{"text": "ตัวเลขผิด"}, as(me)...)
+	e.mustDo(200, "POST", "/runs/"+run.ID.String()+"/shares", map[string]any{"email": "boss@example.test", "can_review": true}, as(me)...)
+	// a sign-off I gave on someone else's run
+	theirs := e.install()
+	theirRun, _ := e.succeededRun(theirs)
+	out := e.mustDo(200, "POST", "/runs/"+theirRun.ID.String()+"/shares", map[string]any{"email": me, "can_review": true})
+	sid := out["share"].(map[string]any)["id"].(string)
+	e.mustDo(200, "GET", "/shared/"+sid, nil, as(me)...) // opened: the share learns my user id
+	e.mustDo(200, "POST", "/shared/"+sid+"/review", map[string]any{"name": "ฉัน ผู้ตรวจ"}, as(me)...)
+
+	p := NewAccountProvider(e.store, e.api.files)
+	got := map[string]string{}
+	if _, err := p.Export(ctx, in.TenantID, in.UserID, func(path string, r io.Reader) error {
+		b, _ := io.ReadAll(r)
+		got[path] = string(b)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for doc, want := range map[string]string{"membership.json": me, "preferences.json": "rail_collapsed", "problem_reports.json": "ตัวเลขผิด",
+		"shares.json": "boss@example.test", "reviews.json": "ฉัน ผู้ตรวจ"} {
+		if !strings.Contains(got[doc], want) {
+			t.Fatalf("export %s lacks %q: %s", doc, want, got[doc])
+		}
+	}
+	if _, err := p.Purge(ctx, in.UserID); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`SELECT count(*) FROM agent_market.user_prefs WHERE user_id = $1`,
+		`SELECT count(*) FROM agent_market.problem_reports WHERE user_id = $1`,
+		`SELECT count(*) FROM agent_market.run_shares WHERE recipient_user_id = $1 OR owner_user_id = $1`,
+		`SELECT count(*) FROM agent_market.run_reviews WHERE reviewer_user_id = $1`,
+		`SELECT count(*) FROM agent_market.org_members WHERE user_id = $1`} {
+		var n int
+		_ = e.store.Pool.QueryRow(ctx, q, in.UserID).Scan(&n)
+		if n != 0 {
+			t.Fatalf("%s: %d left", q, n)
+		}
+	}
+	var name, email string
+	if err := e.store.Pool.QueryRow(ctx, `SELECT reviewer_name, reviewer_email FROM agent_market.run_reviews WHERE run_id = $1`,
+		theirRun.ID).Scan(&name, &email); err != nil || name != "ฉัน ผู้ตรวจ" || email != "" {
+		t.Fatalf("my sign-off on their run stays on their record without my email: %q %q %v", name, email, err)
+	}
+}
