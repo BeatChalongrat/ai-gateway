@@ -31,14 +31,16 @@ ENV NEXT_PUBLIC_PORTAL_URL=$NEXT_PUBLIC_PORTAL_URL
 # (FIX20 §6.5: hosted mode — the desktop shell — is no longer a build arg.
 # lib/auth.ts detects the shell at runtime from window.sranHost, so ONE image
 # serves the browser and the Electron app.)
-# Build stamp for the update-available prompt. `next build` loads
-# next.config.js more than once, so the stamp must be computed ONCE here
-# and handed to the build via env — that guarantees the client bundle and
-# the /api/version route inline the SAME id for one image. Overridable
-# with --build-arg NEXT_PUBLIC_BUILD_ID=<git-sha> from CI; defaults to
-# the epoch second the build started.
+# Build stamp for the update-available prompt and /api/version. `next build`
+# loads next.config.js more than once, so the stamp is handed to the build
+# via env — the client bundle and the /api/version route inline the SAME id.
+# It is REQUIRED: an image built without it said an epoch second on
+# /api/version, and the live smoke failed after the swap — twice (AM1, AM2).
+# scripts/build-images.sh passes the revision it builds; by hand:
+#   --build-arg NEXT_PUBLIC_BUILD_ID=$(git rev-parse --short=7 HEAD)
 ARG NEXT_PUBLIC_BUILD_ID
-RUN NEXT_PUBLIC_BUILD_ID="${NEXT_PUBLIC_BUILD_ID:-$(date +%s)}" npm run build
+RUN test -n "$NEXT_PUBLIC_BUILD_ID" || { echo "NEXT_PUBLIC_BUILD_ID is required: build with scripts/build-images.sh web-chat, or pass --build-arg NEXT_PUBLIC_BUILD_ID=<git short sha>" >&2; exit 1; }
+RUN npm run build
 
 # --- runner --------------------------------------------------
 FROM node:20-alpine

@@ -80,7 +80,11 @@ ROOT=$(git rev-parse --show-toplevel)
 FULL=$(git -C "$ROOT" rev-parse --verify "${REV_IN}^{commit}")
 REVISION=$(git -C "$ROOT" rev-parse --short=7 "$FULL")
 CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-export REVISION CREATED
+# web-chat's version stamp is always the revision being built — never a value
+# left in the shell or .env from another build (the web-chat Dockerfile also
+# refuses to build without one).
+NEXT_PUBLIC_BUILD_ID=$REVISION
+export REVISION CREATED NEXT_PUBLIC_BUILD_ID
 
 if [ -z "$ENV_FILE" ] && [ -f "$ROOT/.env" ]; then ENV_FILE="$ROOT/.env"; fi
 ENV_ARGS=()
