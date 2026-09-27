@@ -1,4 +1,4 @@
-# Agent Market — operations (AM1b, AM2)
+# Agent Market — operations (AM1b, AM2, AM3)
 
 What runs, where it is bounded, how you see it, and how to take it out.
 Removal of the code: `REMOVAL.md`. Design: `ARCHITECTURE.md`.
@@ -106,6 +106,29 @@ person picks one of its own choices; nothing is rejected automatically, and
 there is no hidden "reject". The per-agent dashboard
 (`GET /installs/{id}/dashboard`) shows what is waiting and for how long.
 
+## The organisation (AM3)
+
+Who may use Agent Market, what they may spend, and what the catalog offers
+are the organisation's decisions, kept in the database by its admins
+(web: Agent Market → "จัดการ Agent Market"; API `/api/v1/agent-market/admin/*`).
+
+| What | Where | Notes |
+|---|---|---|
+| The switch | `org_settings.access`: `off` (admins only) · `list` (the people on the list) · `everyone` (every signed-in user) | first start: `list` seeded from `AGENT_MARKET_ALLOWED_EMAILS`, or `everyone` when that is empty (AM1's meaning) — once; the admins' settings win afterwards |
+| The people | `org_members`: email, name, department, role `member` · `publisher` · `admin`, personal monthly budget | the first admins: `AGENT_MARKET_ADMIN_EMAILS` (always admins, break-glass), or the pilot's allowed emails when unset; the last admin cannot be removed |
+| The organisation's email domains | `org_settings.domains` (`AGENT_MARKET_ORG_DOMAINS` seeds it) | a run can be shared only with someone at these domains or on the list |
+| Budgets | per person (the org default `user_monthly_credits`, `AGENT_MARKET_USER_BUDGET_CREDITS` seeds it; or the person's own), per department (`org_departments`, none = no limit), per install (AM1) — Bangkok month | a run that hits one **waits** (`awaiting_input`, `budget_user` / `budget_department` / `budget_install`) with a notice naming who to ask (the department's contact, else the organisation's); it goes on from where it stopped when an admin raises the limit (at once) or the hourly pass finds room (a new month) |
+| The catalog | `catalog_state` per agent: `published` · `unpublished` (only publishers and admins see it; every new package starts here) · `disabled` (admins only, with a reason people read) | disabling stops the agent's queued runs with a notice and refuses new installs, runs, answers and sign-offs, naming who disabled it; every run, file and decision stays |
+| Samples | the runner runs every released version's self-test once, under an install nobody owns (`status = 'catalog'`, nil tenant/user) | the catalog serves only those rows' files (`/sample-artifacts`, `/sample-files`); "สร้างตัวอย่างใหม่" makes one again; their spend shows apart on the spend page |
+| Data sheet | `GET /catalog/{slug}/datasheet` — the manifest (what it reads, `guide.model_inputs`) + what the runner binds (models, self-hosted or not, storage and retention: the `platform.storage` binding) | the same page for procurement and for the person clicking install |
+| Sign-off | `run_reviews` + a `review` job: the runner stamps the newest docx/pptx/xlsx with the reviewer's name, time and note (its own engine — the stamp changes no number), converts the PDF again, keeps the unsigned versions | a finished run with no open exception; its owner, or a colleague it was shared with "may review" |
+| Sharing | `run_shares`: a named colleague at the organisation's domains or on its list, signed in as that email; read only or may review; expiry; revocable; opens counted | never public (chat's share link is; a run's files are accounting data) |
+| Problems | `problem_reports`: the person's sentence + the run, its status, the step it stopped at and that step's error, the page | admins' page "ปัญหาที่แจ้ง"; the runner's `agent_market_problem_reports_open` gauge → alert `AgentMarketProblemReported` → the agent pager topic |
+
+A second organisation later is a row in `org_settings` whose `domains` its
+people sign in with — every AM3 table carries `org_id`; the people of the
+first organisation are resolved by default.
+
 ## Retention (AM2)
 
 The runner's hourly pass:
@@ -167,7 +190,8 @@ running their own engine, and settings offer the upgrade.
   `agent-runner`): `agent_market_runs{status}`, `agent_market_runs_finished_total{status}`,
   `agent_market_oldest_queued_seconds`, `agent_market_step_seconds_{sum,count}{step}`,
   `agent_market_credits_spent_total`, `agent_market_pool_{acquired,max}_conns`,
-  `agent_market_sandbox_ready`. The run counts are read from the database, so a
+  `agent_market_sandbox_ready`; AM3: `agent_market_problem_reports_open`,
+  `agent_market_runs_waiting_budget`. The run counts are read from the database, so a
   runner restart does not reset them.
 - **Dashboard**: Grafana → "Agent Market" (`infra/grafana/provisioning/dashboards/agent_market.json`).
 - **SLO and error budget**: 95 % of the agent runs that end, end succeeded
@@ -176,7 +200,8 @@ running their own engine, and settings offer the upgrade.
   (1 = untouched, 0 = spent, < 0 = SLO missed).
 - **Alerts** (`infra/prometheus/agent_market.yml`, all `channel="agent-market"`):
   budget burning, budget spent, runner down, queue stuck > 10 min, sandbox not
-  ready, pool saturated. Tested with `promtool test rules infra/prometheus/tests/agent_market_test.yml`.
+  ready, pool saturated; AM3: a problem someone reported (at once, until it is
+  closed), runs waiting for budget over an hour. Tested with `promtool test rules infra/prometheus/tests/agent_market_test.yml`.
 - **Its own pager topic (AM1c)**: Prometheus here has no Alertmanager, so
   ops-watch reads the firing `channel="agent-market"` alerts from Prometheus
   (`OPS_WATCH_PROMETHEUS_URL`) every tick and pages them on

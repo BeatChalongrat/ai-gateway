@@ -24,12 +24,18 @@ the AM2 report).
 | Document converter (AM2) | `services/doc-converter/` (LibreOffice: .docx → PDF, .xlsx recalculation), image `ai-gateway-doc-converter:*` (`scripts/agent-market/build-converter.sh`), service `doc-converter` and the internal network `converter` in `docker-compose.agent-market.yml` | step 1 + revert |
 | Stored engines (AM2) | every runner's engine zip under `agent-market/engines/<build>.zip` (a pinned install runs the engine it was released with) | step 4 (same prefix) |
 | Duplicate index, versions (AM2) | migration `002_document_index`: table `agent_market.document_index`, `agent_runs.scratch_purged_at`, `agent_installs.previous_definition_id` — inside the schema | step 3 |
+| The organisation, catalog, rail, sign-off, sharing, problems (AM3) | migration `003_self_serve`: tables `org_settings`, `org_members`, `org_departments`, `catalog_state`, `user_prefs`, `catalog_samples`, `run_reviews`, `run_shares`, `problem_reports`; `agent_installs.org_id / pinned_at / last_opened_at`; run kind `review`, install status `catalog` (the runner's sample installs) — inside the schema; its down script undoes all of it | step 3 |
 
-The only lines in existing files (the "seams") — all removed by the revert:
+The only lines in existing files (the "seams") — all removed by the revert
+(AM3 adds no new seam file: it changes lines inside the seams below — the
+Sidebar element, the compose env block, the smoke area and the Agent Market
+alert file; it reads the core's `identity.users` name and email by user id
+for display, and changes nothing there):
 
 - `services/chat-edge-api/cmd/server/main.go` — one import, one flag-gated block
 - `services/chat-edge-api/internal/router/router.go` — one field, one guarded mount
 - `docker-compose.webchat.yml` — the flag env lines on chat-edge and web-chat
+  (AM3: four more `AGENT_MARKET_*` seed settings on chat-edge)
 - `apps/web-chat/src/components/chat/Sidebar.tsx` — one import, one element
 - `apps/web-chat/tailwind.config.js` — one `content` path
 - `scripts/smoke/run.js` + `scripts/smoke/README.md` — the `agent_market` area
@@ -80,7 +86,8 @@ rm -rf data/agent-sandbox-runs
 
 # 5. Revoke the runner's key (portal → project "Agent Market runner" → revoke),
 #    then delete AGENT_MARKET_* (including AGENT_MARKET_NTFY_URL, AGENT_MARKET_VISION_MODEL,
-#    AGENT_MARKET_CONVERTER_URL and the retention windows), AGENT_RUNNER_*, AM_* from .env.
+#    AGENT_MARKET_CONVERTER_URL, the retention windows and AM3's ADMIN_EMAILS / ORG_DOMAINS /
+#    USER_BUDGET_CREDITS / THB_PER_USD), AGENT_RUNNER_*, AM_* from .env.
 
 # 6. Revert the code — every Agent Market commit, newest first — rebuild and redeploy as usual.
 git revert --no-edit $(git log --format=%h --grep='^AM[0-9]' main)
