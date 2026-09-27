@@ -103,22 +103,22 @@ var errNoTemplates = errors.New("this agent fills no templates")
 
 func (a *API) uploadTemplate(w http.ResponseWriter, r *http.Request) {
 	in, c, ok := a.ownedInstall(w, r)
-	if !ok {
+	if !ok || !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	if _, err := a.templateSpec(r, in); err != nil {
-		writeErr(w, http.StatusConflict, "NO_TEMPLATES", "agent ตัวนี้ยังไม่รองรับแบบฟอร์มของคุณ")
+		say(w, http.StatusConflict, "NO_TEMPLATES")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, a.cfg.MaxUploadBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeErr(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", fmt.Sprintf("ไฟล์ใหญ่เกิน %d MB", a.cfg.MaxUploadBytes>>20))
+		say(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", "mb", fmt.Sprint(a.cfg.MaxUploadBytes>>20))
 		return
 	}
 	defer r.MultipartForm.RemoveAll() //nolint:errcheck
 	fh, hdr, err := r.FormFile("file")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "NO_FILE", "file field required")
+		badRequest(w, "NO_FILE")
 		return
 	}
 	defer fh.Close()
@@ -130,7 +130,7 @@ func (a *API) uploadTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if kind == "" {
-		writeErr(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "แบบฟอร์มต้องเป็นไฟล์ .docx .xlsx หรือ .pptx")
+		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")
 		return
 	}
 	tmp, err := os.CreateTemp("", "am-template-*")
@@ -181,7 +181,7 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	spec, err := a.templateSpec(r, in)
 	if err != nil {
-		writeErr(w, http.StatusConflict, "NO_TEMPLATES", "agent ตัวนี้ยังไม่รองรับแบบฟอร์มของคุณ")
+		say(w, http.StatusConflict, "NO_TEMPLATES")
 		return
 	}
 	var body struct {
@@ -190,12 +190,12 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		Mapping map[string]string `json:"mapping"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil || body.FileID == uuid.Nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "file_id, slots and mapping required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	f, err := a.store.GetFile(r.Context(), c.TenantUUID, c.UserID, body.FileID)
 	if err != nil || f.InstallID != in.ID || f.Status == "removed" {
-		writeErr(w, http.StatusNotFound, "NO_FILE", "ไม่พบไฟล์แบบฟอร์มนี้")
+		say(w, http.StatusNotFound, "NO_TEMPLATE_FILE")
 		return
 	}
 	kind := ""
@@ -205,11 +205,11 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if kind == "" {
-		writeErr(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "แบบฟอร์มต้องเป็นไฟล์ .docx .xlsx หรือ .pptx")
+		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")
 		return
 	}
 	if msg := CheckTemplateMapping(body.Slots, body.Mapping, spec); msg != "" {
-		writeErr(w, http.StatusBadRequest, "BAD_MAPPING", msg)
+		say(w, http.StatusBadRequest, "BAD_MAPPING", "detail", msg)
 		return
 	}
 	defs, err := a.store.ListDefaults(r.Context(), in.ID)
@@ -247,7 +247,7 @@ func (a *API) getTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	t, ok := SavedTemplate(defs)
 	if !ok {
-		writeErr(w, http.StatusNotFound, "NO_TEMPLATE", "ยังไม่มีแบบฟอร์ม")
+		say(w, http.StatusNotFound, "NO_TEMPLATE")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"template": t})

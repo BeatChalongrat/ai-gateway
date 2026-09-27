@@ -437,16 +437,47 @@ func TestLateUploadResumesWithoutReparse(t *testing.T) {
 	}
 }
 
-func TestBudgetStopsOnlyAgentRuns(t *testing.T) {
+// AM3: a budget that runs out is a wait, never a failure: the run parks with
+// a notice that names who to ask, and goes on from where it stopped once
+// there is budget again (the hourly pass, or an admin's change).
+func TestBudgetParksTheRunAndItGoesOnWhenRaised(t *testing.T) {
 	e := newIT(t)
 	if e == nil {
 		return
 	}
-	e.setupInstall(1) // one credit
+	ctx := context.Background()
+	in := e.setupInstall(1) // one credit: the first costly step spends it
 	run := e.newRun("ปิดงบกันยายน", "sample-data/GL_2569-09.xlsx")
-	got := e.drive(e.runner("r1"), run.ID, 3*time.Minute, terminal)
-	if got.Status != am.RunFailed || got.StatusReason != "budget_exhausted" {
-		t.Fatalf("budget stop: %s %s", got.Status, got.StatusReason)
+	r := e.runner("r1")
+	got := e.drive(r, run.ID, 3*time.Minute, func(x am.Run) bool { return parked(x) || terminal(x) })
+	if got.Status != am.RunAwaitingInput || got.StatusReason != "budget_install" {
+		t.Fatalf("budget wait: %s %s", got.Status, got.StatusReason)
+	}
+	items, _ := e.store.ItemsAfter(ctx, in.ID, 0, 200)
+	var notice map[string]any
+	for _, it := range items {
+		var p map[string]any
+		_ = json.Unmarshal(it.Payload, &p)
+		if it.Kind == "notice" && p["action"] == "resume_budget" {
+			notice = p
+		}
+	}
+	if notice == nil || !strings.Contains(notice["text"].(string), "หยุดรอ") || !strings.Contains(notice["text"].(string), "ยังอยู่ครบ") {
+		t.Fatalf("the notice names the budget and who to ask: %v", notice)
+	}
+	parsed := countSteps(e.steps(run.ID), "parse:")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_installs SET budget_credits = 3000000 WHERE id = $1`, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := e.store.ResumeBudgetParked(ctx, ""); err != nil || n != 1 {
+		t.Fatalf("resumed: %d %v", n, err)
+	}
+	got = e.drive(r, run.ID, 4*time.Minute, terminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("after the budget was raised: %s %s", got.Status, got.StatusReason)
+	}
+	if countSteps(e.steps(run.ID), "parse:") != parsed {
+		t.Fatal("the run went on from where it stopped: the file was not parsed again")
 	}
 }
 

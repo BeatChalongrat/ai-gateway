@@ -33,8 +33,10 @@ type Config struct {
 	// Enabled — AGENT_MARKET_ENABLED. Off means absent: chat-edge registers
 	// no route, opens no pool and runs no query against agent_market.
 	Enabled bool
-	// AllowedEmails — AGENT_MARKET_ALLOWED_EMAILS: a comma list; empty lets
-	// every signed-in user in once the feature is enabled (pilot switch).
+	// AllowedEmails — AGENT_MARKET_ALLOWED_EMAILS: the AM1 pilot list. Since
+	// AM3 it only seeds the organisation's access list the day the
+	// organisation row is created (empty = access "everyone", as before);
+	// from then on the admins keep the list in the database (org.go).
 	AllowedEmails []string
 	// PoolMaxConns — the control plane's own Postgres pool (never chat's).
 	PoolMaxConns int
@@ -46,6 +48,21 @@ type Config struct {
 	StreamPoll time.Duration
 	// DefaultBudgetCredits — per install per month.
 	DefaultBudgetCredits float64
+	// AM3. AdminEmails — AGENT_MARKET_ADMIN_EMAILS: always admins of the
+	// organisation (break-glass; they can never lock themselves out). When
+	// unset, the people in AGENT_MARKET_ALLOWED_EMAILS become the first admins
+	// the day the organisation is created (org.go) — once, not every start.
+	AdminEmails []string
+	// OrgDomains — AGENT_MARKET_ORG_DOMAINS: the organisation's email
+	// domains (who counts as "in the organisation" for sharing a run). Empty:
+	// the domains of the allowed and admin emails.
+	OrgDomains []string
+	// UserBudgetCredits — the organisation's first per-person monthly budget
+	// (admins change it later; 3,000,000 credits ≈ 1 USD).
+	UserBudgetCredits float64
+	// CreditsPerUSD / THBPerUSD — how the catalog shows a run's cost in baht.
+	CreditsPerUSD float64
+	THBPerUSD     float64
 }
 
 // ConfigFromEnv reads the AGENT_MARKET_* variables with safe defaults.
@@ -59,22 +76,34 @@ func ConfigFromEnv() Config {
 		StreamPoll:       time.Duration(envInt("AGENT_MARKET_STREAM_POLL_MS", 800)) * time.Millisecond,
 		// Platform credits (USAGE_CREDITS_PER_USD = 3,000,000 per USD): 3,000,000 ≈ 1 USD per install per month.
 		DefaultBudgetCredits: float64(envInt("AGENT_MARKET_DEFAULT_BUDGET_CREDITS", 3000000)),
+		UserBudgetCredits:    float64(envInt("AGENT_MARKET_USER_BUDGET_CREDITS", 3000000)),
+		CreditsPerUSD:        float64(envInt("USAGE_CREDITS_PER_USD", 3000000)),
+		THBPerUSD:            float64(envInt("AGENT_MARKET_THB_PER_USD", 35)),
 	}
-	for _, e := range strings.Split(os.Getenv("AGENT_MARKET_ALLOWED_EMAILS"), ",") {
-		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
-			c.AllowedEmails = append(c.AllowedEmails, e)
+	c.AllowedEmails = emailList(os.Getenv("AGENT_MARKET_ALLOWED_EMAILS"))
+	c.AdminEmails = emailList(os.Getenv("AGENT_MARKET_ADMIN_EMAILS"))
+	for _, d := range strings.Split(os.Getenv("AGENT_MARKET_ORG_DOMAINS"), ",") {
+		if d = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(d), "@"))); d != "" {
+			c.OrgDomains = append(c.OrgDomains, d)
 		}
 	}
 	return c
 }
 
-// Allows reports whether a signed-in user may use the feature.
-func (c Config) Allows(email string) bool {
-	if len(c.AllowedEmails) == 0 {
-		return true
+func emailList(v string) []string {
+	var out []string
+	for _, e := range strings.Split(v, ",") {
+		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
+			out = append(out, e)
+		}
 	}
+	return out
+}
+
+// IsEnvAdmin reports a break-glass admin (AGENT_MARKET_ADMIN_EMAILS).
+func (c Config) IsEnvAdmin(email string) bool {
 	email = strings.ToLower(strings.TrimSpace(email))
-	for _, e := range c.AllowedEmails {
+	for _, e := range c.AdminEmails {
 		if e == email {
 			return true
 		}

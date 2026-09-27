@@ -29,7 +29,11 @@ type testEnv struct {
 	user  middleware.Caller
 }
 
-func newEnv(t *testing.T) *testEnv {
+func newEnv(t *testing.T) *testEnv { t.Helper(); return newEnvCfg(t, nil) }
+
+// newEnvCfg is newEnv with the configuration adjusted (AM3: access lists,
+// break-glass admins).
+func newEnvCfg(t *testing.T, mut func(*Config)) *testEnv {
 	t.Helper()
 	pool := testdb.Fresh(t)
 	if pool == nil {
@@ -47,6 +51,15 @@ func newEnv(t *testing.T) *testEnv {
 	cfg := ConfigFromEnv()
 	cfg.Enabled = true
 	cfg.StreamPoll = 50 * time.Millisecond
+	// AM3: the AM1/AM2 tests install agents they seed themselves, which the
+	// organisation has not published — their user is the organisation's admin
+	// (a publisher may install an unpublished agent). The AM3 tests sign in
+	// as plain members with the X-Test-Email header.
+	cfg.AllowedEmails = nil
+	cfg.AdminEmails = []string{"am1-test@example.test"}
+	if mut != nil {
+		mut(&cfg)
+	}
 	api := NewAPIWithStore(cfg, store, files, slog.Default())
 	e := &testEnv{t: t, store: store, api: api,
 		user: middleware.Caller{UserID: uuid.New(), TenantUUID: uuid.New(), Email: "am1-test@example.test"}}
@@ -56,6 +69,13 @@ func newEnv(t *testing.T) *testEnv {
 			c := e.user
 			if other := req.Header.Get("X-Test-User"); other != "" {
 				c = middleware.Caller{UserID: uuid.MustParse(other), TenantUUID: e.user.TenantUUID, Email: "other@example.test"}
+			}
+			if email := req.Header.Get("X-Test-Email"); email != "" { // AM3: a colleague signed in as themselves
+				c.Email = email
+				if req.Header.Get("X-Test-User") == "" {
+					c.UserID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(email))
+					c.TenantUUID = uuid.NewSHA1(uuid.NameSpaceDNS, []byte(email))
+				}
 			}
 			next.ServeHTTP(w, req.WithContext(middleware.WithCaller(req.Context(), c)))
 		})

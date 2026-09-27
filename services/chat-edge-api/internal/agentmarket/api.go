@@ -59,7 +59,16 @@ func NewAPI(ctx context.Context, cfg Config, dsn string, files storage.Backend, 
 		pool.Close()
 		return nil, err
 	}
-	return &API{cfg: cfg, store: NewStore(pool), files: files, log: log.With("component", "agent-market"), closeFn: pool.Close}, nil
+	store := NewStore(pool)
+	// AM3: the organisation's first access list, from the pilot's settings (once).
+	if created, err := store.EnsureOrg(ctx, cfg); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("agentmarket: organisation: %w", err)
+	} else if created {
+		log.Info("agent-market organisation created from AGENT_MARKET_ALLOWED_EMAILS / AGENT_MARKET_ADMIN_EMAILS",
+			"allowed", len(cfg.AllowedEmails), "admins", len(cfg.AdminEmails))
+	}
+	return &API{cfg: cfg, store: store, files: files, log: log.With("component", "agent-market"), closeFn: pool.Close}, nil
 }
 
 // AccountProvider is Agent Market's part of "export all my data" and of
@@ -96,11 +105,56 @@ func (a *API) Close() {
 
 // Routes mounts the control plane (inside chat-edge's authenticated group).
 func (a *API) Routes(r chi.Router) {
+	r.Use(a.signedIn)
 	r.Get("/availability", a.availability)
+	// AM3: a run shared with a named colleague — signed in as that person is
+	// enough (they need no Agent Market access of their own), never public.
+	r.Get("/shared", a.sharedWithMe)
+	r.Get("/shared/{id}", a.sharedRun)
+	r.Get("/shared/{id}/artifacts/{aid}/download", a.sharedArtifact)
+	r.Post("/shared/{id}/review", a.sharedReview)
+	r.Post("/shared/{id}/problem", a.sharedProblem)
 	r.Group(func(r chi.Router) {
 		r.Use(a.allowed)
 		r.Get("/catalog", a.catalog)
 		r.Get("/catalog/{slug}", a.catalogItem)
+		// AM3: what a stranger reads before installing — the agent's real
+		// outputs on its sample data, and the data sheet (what it reads,
+		// which models see what, where files live and for how long).
+		r.Get("/catalog/{slug}/sample", a.catalogSample)
+		r.Get("/catalog/{slug}/datasheet", a.datasheet)
+		r.Get("/sample-artifacts/{id}/download", a.sampleArtifact)
+		r.Get("/sample-files/{id}/download", a.sampleFile)
+		// AM3: the left rail (pins, recently used, what waits for an answer)
+		r.Get("/rail", a.rail)
+		r.Put("/prefs", a.putPrefs)
+		r.Put("/installs/{id}/pin", a.pin)
+		r.Delete("/installs/{id}/pin", a.unpin)
+		r.Post("/installs/{id}/opened", a.opened)
+		r.Get("/installs/{id}/budget", a.installBudget)
+		r.Post("/runs/{id}/resume", a.resumeBudget)
+		// AM3: sign-off, sharing inside the organisation, report a problem
+		r.Post("/runs/{id}/review", a.review)
+		r.Get("/runs/{id}/reviews", a.reviews)
+		r.Get("/runs/{id}/shares", a.listShares)
+		r.Post("/runs/{id}/shares", a.createShare)
+		r.Delete("/shares/{id}", a.revokeShare)
+		r.Get("/people", a.people)
+		r.Post("/runs/{id}/problem", a.runProblem)
+		r.Post("/installs/{id}/problem", a.installProblem)
+		// AM3: the organisation's admins (admin.go checks the role per route)
+		r.Get("/admin/org", a.adminOrg)
+		r.Put("/admin/org", a.adminPutOrg)
+		r.Put("/admin/members/{email}", a.adminPutMember)
+		r.Delete("/admin/members/{email}", a.adminDeleteMember)
+		r.Put("/admin/departments/{name}", a.adminPutDepartment)
+		r.Delete("/admin/departments/{name}", a.adminDeleteDepartment)
+		r.Get("/admin/spend", a.adminSpend)
+		r.Get("/admin/problems", a.adminProblems)
+		r.Post("/admin/problems/{id}/close", a.adminCloseProblem)
+		r.Get("/admin/catalog", a.adminCatalog)
+		r.Put("/admin/catalog/{slug}", a.adminPutCatalog)
+		r.Post("/admin/catalog/{slug}/sample", a.adminSample)
 		r.Post("/installs", a.install)
 		r.Get("/installs", a.listInstalls)
 		r.Get("/installs/{id}", a.getInstall)
@@ -152,7 +206,11 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 
 func (a *API) fail(w http.ResponseWriter, err error, what string) {
 	if errors.Is(err, ErrNotFound) {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", what+" not found")
+		name, ok := whatThai[what]
+		if !ok {
+			name = "รายการ"
+		}
+		say(w, http.StatusNotFound, "NOT_FOUND", "what", name)
 		return
 	}
 	if busy(err) {
@@ -160,11 +218,11 @@ func (a *API) fail(w http.ResponseWriter, err error, what string) {
 		// here — chat never waits on these pools.
 		a.log.Warn("agent-market busy", "what", what, "err", err)
 		w.Header().Set("Retry-After", "5")
-		writeErr(w, http.StatusServiceUnavailable, "AGENT_MARKET_BUSY", "ตอนนี้ระบบ agent ไม่ว่าง ลองใหม่อีกครั้งในอีกสักครู่")
+		say(w, http.StatusServiceUnavailable, "AGENT_MARKET_BUSY")
 		return
 	}
 	a.log.Error("agent-market request failed", "what", what, "err", err)
-	writeErr(w, http.StatusInternalServerError, "AGENT_MARKET_ERROR", "เกิดข้อผิดพลาดภายใน ลองใหม่อีกครั้ง")
+	say(w, http.StatusInternalServerError, "AGENT_MARKET_ERROR")
 }
 
 // busy is a database that did not get to the query in time: a lock wait or
@@ -190,15 +248,30 @@ func pathID(r *http.Request, name string) (uuid.UUID, bool) {
 	return id, err == nil
 }
 
-func (a *API) allowed(next http.Handler) http.Handler {
+// signedIn resolves the person's organisation access for every request (the
+// shared-run pages need a signed-in person only; the rest also need access).
+func (a *API) signedIn(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, ok := caller(r)
 		if !ok {
-			writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "sign in")
+			say(w, http.StatusUnauthorized, "UNAUTHORIZED")
 			return
 		}
-		if !a.cfg.Allows(c.Email) {
-			writeErr(w, http.StatusForbidden, "AGENT_MARKET_NOT_ALLOWED", "Agent Market is not enabled for this account")
+		acc, err := a.store.AccessFor(r.Context(), a.cfg, c.Email, c.UserID)
+		if err != nil {
+			a.fail(w, err, "access")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withAccess(r.Context(), acc)))
+	})
+}
+
+// allowed: the organisation lets this person use Agent Market (AM3: the
+// admins' access list, not an environment variable).
+func (a *API) allowed(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !accessOf(r).Allowed {
+			a.sayTo(w, r, http.StatusForbidden, "AGENT_MARKET_NOT_ALLOWED")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -209,7 +282,7 @@ func (a *API) ownedInstall(w http.ResponseWriter, r *http.Request) (Install, mid
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad install id")
+		badRequest(w, "BAD_ID")
 		return Install{}, c, false
 	}
 	in, err := a.store.GetInstall(r.Context(), c.TenantUUID, c.UserID, id)
@@ -223,63 +296,18 @@ func (a *API) ownedInstall(w http.ResponseWriter, r *http.Request) (Install, mid
 // ── availability, catalog ────────────────────────────────────────────────
 
 func (a *API) availability(w http.ResponseWriter, r *http.Request) {
-	c, _ := caller(r)
-	out := map[string]any{"available": a.cfg.Allows(c.Email)}
+	acc := accessOf(r)
+	// available decides every surface; the rest tells the web which ones
+	// (admin pages, publish buttons) and whom to ask when access is closed.
+	out := map[string]any{"available": acc.Allowed, "access": acc.Mode, "member": acc.Member, "role": acc.Role,
+		"admin": acc.Admin(), "publisher": acc.Publisher(), "contact": acc.Contact,
+		"pricing": map[string]float64{"credits_per_usd": a.cfg.CreditsPerUSD, "thb_per_usd": a.cfg.THBPerUSD}}
 	if st, err := a.store.LatestRunner(r.Context(), a.cfg.RunnerStaleAfter); err == nil {
 		out["runner"] = map[string]any{"healthy": st.Healthy, "seen_at": st.SeenAt, "version": st.Version}
 	} else {
 		out["runner"] = map[string]any{"healthy": false}
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-type catalogEntry struct {
-	Slug        string          `json:"slug"`
-	Version     string          `json:"version"`
-	Name        string          `json:"name"`
-	Manifest    json.RawMessage `json:"manifest"`
-	InstallID   *uuid.UUID      `json:"install_id,omitempty"`
-	SampleRunID *uuid.UUID      `json:"sample_run_id,omitempty"`
-}
-
-func (a *API) catalog(w http.ResponseWriter, r *http.Request) {
-	c, _ := caller(r)
-	defs, err := a.store.ListDefinitions(r.Context())
-	if err != nil {
-		a.fail(w, err, "catalog")
-		return
-	}
-	installs, err := a.store.ListInstalls(r.Context(), c.TenantUUID, c.UserID)
-	if err != nil {
-		a.fail(w, err, "catalog")
-		return
-	}
-	bySlug := map[string]uuid.UUID{}
-	for _, i := range installs {
-		if _, ok := bySlug[i.Slug]; !ok {
-			bySlug[i.Slug] = i.ID
-		}
-	}
-	out := []catalogEntry{}
-	for _, d := range defs {
-		e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: d.Manifest}
-		if id, ok := bySlug[d.Slug]; ok {
-			id := id
-			e.InstallID = &id
-		}
-		out = append(out, e)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
-}
-
-func (a *API) catalogItem(w http.ResponseWriter, r *http.Request) {
-	d, err := a.store.DefinitionBySlug(r.Context(), chi.URLParam(r, "slug"))
-	if err != nil {
-		a.fail(w, err, "agent")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"slug": d.Slug, "version": d.Version, "name": d.Name,
-		"manifest": d.Manifest, "checksum": d.Checksum, "instructions": d.Instructions})
 }
 
 // ── install ──────────────────────────────────────────────────────────────
@@ -296,13 +324,13 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	var req installReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "bad request body")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	// A setting the person gave that we know and that is wrong is refused, not dropped.
 	for k, v := range req.Settings {
 		if validSettingKey(k) && !validSettingValue(k, v) {
-			writeErr(w, http.StatusBadRequest, "BAD_VALUE", settingProblem(k, v))
+			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", settingProblem(k, v))
 			return
 		}
 	}
@@ -312,6 +340,10 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "agent")
 		return
 	}
+	// AM3: the organisation's catalog decides (published; never a disabled agent).
+	if !a.agentGate(w, r, def.Slug, true) {
+		return
+	}
 	m, err := ParseManifest(def.Manifest)
 	if err != nil {
 		a.fail(w, err, "manifest")
@@ -319,14 +351,14 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := a.store.LatestRunner(ctx, a.cfg.RunnerStaleAfter)
 	if err != nil {
-		writeErr(w, http.StatusServiceUnavailable, "RUNNER_DOWN", "ระบบประมวลผลของ agent ยังไม่พร้อม ลองใหม่ภายหลัง")
+		a.sayTo(w, r, http.StatusServiceUnavailable, "RUNNER_DOWN")
 		return
 	}
 	var available map[string]Binding
 	_ = json.Unmarshal(st.Capabilities, &available)
 	res, err := Resolve(m, available, 1)
 	if err != nil {
-		writeErr(w, http.StatusConflict, "CAPABILITY_MISSING", err.Error())
+		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", err.Error())
 		return
 	}
 	bindings, _ := json.Marshal(res)
@@ -343,7 +375,7 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	in, created, err := a.store.CreateInstall(ctx, tx, Install{
 		TenantID: c.TenantUUID, UserID: c.UserID, DefinitionID: def.ID, Slug: def.Slug, DefinitionVersion: def.Version,
 		Checksum: def.Checksum, Title: title, CapabilityBindings: bindings, BindingVersion: res.Version,
-		BudgetCredits: a.cfg.DefaultBudgetCredits,
+		BudgetCredits: a.cfg.DefaultBudgetCredits, OrgID: accessOf(r).OrgID,
 	}, strings.TrimSpace(req.IdempotencyKey))
 	if err != nil {
 		a.fail(w, err, "install")
@@ -510,7 +542,7 @@ func (a *API) startSelfTest(ctx context.Context, in Install, def Definition) (Ru
 
 func (a *API) selfTest(w http.ResponseWriter, r *http.Request) {
 	in, _, ok := a.ownedInstall(w, r)
-	if !ok {
+	if !ok || !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	def, err := a.store.DefinitionByID(r.Context(), in.DefinitionID)
@@ -581,7 +613,7 @@ func (a *API) removeInstall(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad install id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	if err := a.store.RemoveInstall(r.Context(), c.TenantUUID, c.UserID, id); err != nil {
@@ -613,7 +645,7 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 	}
 	key := chi.URLParam(r, "key")
 	if !validSettingKey(key) {
-		writeErr(w, http.StatusBadRequest, "BAD_KEY", "unknown setting")
+		badRequest(w, "BAD_KEY")
 		return
 	}
 	var body struct {
@@ -621,11 +653,11 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		Label string          `json:"label"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil || len(body.Value) == 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "value required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	if !validSettingValue(key, body.Value) {
-		writeErr(w, http.StatusBadRequest, "BAD_VALUE", settingProblem(key, body.Value))
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", settingProblem(key, body.Value))
 		return
 	}
 	label := body.Label
@@ -684,7 +716,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	}
 	fl, ok := w.(http.Flusher)
 	if !ok {
-		writeErr(w, http.StatusInternalServerError, "NO_STREAM", "streaming unsupported")
+		say(w, http.StatusInternalServerError, "AGENT_MARKET_ERROR")
 		return
 	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
@@ -740,14 +772,13 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, a.cfg.MaxUploadBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeErr(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE",
-			fmt.Sprintf("ไฟล์ใหญ่เกิน %d MB", a.cfg.MaxUploadBytes>>20))
+		say(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", "mb", strconv.FormatInt(a.cfg.MaxUploadBytes>>20, 10))
 		return
 	}
 	defer r.MultipartForm.RemoveAll() //nolint:errcheck
 	fh, hdr, err := r.FormFile("file")
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "NO_FILE", "file field required")
+		badRequest(w, "NO_FILE")
 		return
 	}
 	defer fh.Close()
@@ -768,11 +799,11 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !ok {
-		writeErr(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "รับไฟล์ "+strings.Join(accept, " "))
+		say(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_FILE", "types", strings.Join(accept, " "))
 		return
 	}
 	if hdr.Size > a.cfg.MaxUploadBytes {
-		writeErr(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", fmt.Sprintf("ไฟล์ใหญ่เกิน %d MB", a.cfg.MaxUploadBytes>>20))
+		say(w, http.StatusRequestEntityTooLarge, "UPLOAD_TOO_LARGE", "mb", strconv.FormatInt(a.cfg.MaxUploadBytes>>20, 10))
 		return
 	}
 	tmp, err := os.CreateTemp("", "am-upload-*")
@@ -823,21 +854,21 @@ type messageReq struct {
 // text answers an open card or becomes a reply job. Nothing executes here.
 func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	in, c, ok := a.ownedInstall(w, r)
-	if !ok {
+	if !ok || !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	var req messageReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "bad request body")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	req.Text = strings.TrimSpace(req.Text)
 	if req.Text == "" && len(req.FileIDs) == 0 {
-		writeErr(w, http.StatusBadRequest, "EMPTY", "text or files required")
+		badRequest(w, "EMPTY")
 		return
 	}
 	if len([]rune(req.Text)) > 4000 {
-		writeErr(w, http.StatusBadRequest, "TOO_LONG", "ข้อความยาวเกินไป")
+		say(w, http.StatusBadRequest, "TOO_LONG")
 		return
 	}
 	ctx := r.Context()
@@ -856,7 +887,7 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	for _, id := range req.FileIDs {
 		f, err := a.store.GetFile(ctx, c.TenantUUID, c.UserID, id)
 		if err != nil || f.InstallID != in.ID {
-			writeErr(w, http.StatusBadRequest, "BAD_FILE", "unknown file")
+			say(w, http.StatusBadRequest, "BAD_FILE")
 			return
 		}
 		files = append(files, f)
@@ -1108,12 +1139,12 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad card id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	var req answerReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "bad request body")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	ctx := r.Context()
@@ -1144,9 +1175,12 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "run")
 		return
 	}
+	if in, err := a.store.InstallByID(ctx, run.InstallID); err == nil && !a.agentGate(w, r, in.Slug, false) {
+		return
+	}
 	answers, texts, err := ResolveSubmission(questions, req.Answers, card.Moment, card.ID.String())
 	if err != nil {
-		writeErr(w, http.StatusUnprocessableEntity, "BAD_ANSWER", err.Error())
+		say(w, http.StatusUnprocessableEntity, "BAD_ANSWER", "detail", err.Error())
 		return
 	}
 	if strings.TrimSpace(req.Text) != "" && len(answers) == 0 {
@@ -1182,7 +1216,7 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 	if card.Blocking {
 		for _, q := range questions {
 			if _, ok := answers[q.Key]; !ok && q.Severity != "cosmetic" {
-				writeErr(w, http.StatusUnprocessableEntity, "ANSWER_REQUIRED", "ตอบให้ครบทุกข้อก่อนนะครับ")
+				say(w, http.StatusUnprocessableEntity, "ANSWER_REQUIRED")
 				return
 			}
 		}
@@ -1387,7 +1421,7 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad run id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	ctx := r.Context()
@@ -1435,7 +1469,7 @@ func (a *API) computed(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad run id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	ctx := r.Context()
@@ -1448,7 +1482,7 @@ func (a *API) computed(w http.ResponseWriter, r *http.Request) {
 	err = a.store.Pool.QueryRow(ctx, `SELECT output->>'computed_key' FROM agent_market.agent_run_steps
 		WHERE run_id = $1 AND name = 'compute' AND status = 'succeeded' ORDER BY seq DESC LIMIT 1`, run.ID).Scan(&key)
 	if err != nil || key == "" {
-		writeErr(w, http.StatusNotFound, "NOT_COMPUTED", "ยังไม่มีตารางที่คำนวณ")
+		say(w, http.StatusNotFound, "NOT_COMPUTED")
 		return
 	}
 	body, _, _, err := a.files.Download(ctx, key)
@@ -1466,7 +1500,7 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad run id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	run, err := a.store.RequestCancel(r.Context(), c.TenantUUID, c.UserID, id)
@@ -1500,14 +1534,14 @@ func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad run id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	var body struct {
 		Formats []string `json:"formats"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || len(body.Formats) == 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "formats required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	ctx := r.Context()
@@ -1517,7 +1551,10 @@ func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if run.Status != RunSucceeded {
-		writeErr(w, http.StatusConflict, "RUN_NOT_FINISHED", "รอให้รอบนี้เสร็จก่อน แล้วค่อยขอไฟล์เพิ่ม")
+		say(w, http.StatusConflict, "RUN_NOT_FINISHED")
+		return
+	}
+	if in, err := a.store.InstallByID(ctx, run.InstallID); err == nil && !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	offered := map[string]bool{"docx": true, "pptx": true, "xlsx": true}
@@ -1533,13 +1570,13 @@ func (a *API) formats(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, f := range body.Formats {
 		if !offered[f] {
-			writeErr(w, http.StatusBadRequest, "BAD_FORMAT", "unknown format "+f)
+			say(w, http.StatusBadRequest, "BAD_FORMAT", "format", f)
 			return
 		}
 		// A PDF is the report converted by LibreOffice (AM2): only while a
 		// runner offers the converter.
 		if f == "pdf" && !a.runnerOffers(ctx, "deliverable.pdf") {
-			writeErr(w, http.StatusConflict, "PDF_UNAVAILABLE", "ตอนนี้ยังแปลงเป็น PDF ไม่ได้ ตัวแปลงเอกสารยังไม่พร้อม")
+			say(w, http.StatusConflict, "PDF_UNAVAILABLE")
 			return
 		}
 	}
@@ -1560,13 +1597,16 @@ func (a *API) mappingPreview(w http.ResponseWriter, r *http.Request) {
 		FileID    uuid.UUID `json:"file_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "install_id and file_id required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	ctx := r.Context()
 	in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, body.InstallID)
 	if err != nil {
 		a.fail(w, err, "install")
+		return
+	}
+	if !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	if _, err := a.store.GetFile(ctx, c.TenantUUID, c.UserID, body.FileID); err != nil {
@@ -1617,7 +1657,7 @@ func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad artifact id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	art, err := a.store.GetArtifact(r.Context(), c.TenantUUID, c.UserID, id)
@@ -1625,24 +1665,14 @@ func (a *API) downloadArtifact(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "artifact")
 		return
 	}
-	body, _, _, err := a.files.Download(r.Context(), art.StorageKey)
-	if err != nil {
-		a.fail(w, err, "artifact")
-		return
-	}
-	defer body.Close()
-	w.Header().Set("Content-Type", artifactMime(art))
-	w.Header().Set("Content-Disposition", contentDisposition(art.Name))
-	w.Header().Set("Content-Length", strconv.FormatInt(art.Size, 10))
-	w.Header().Set("X-Content-SHA256", art.SHA256)
-	_, _ = io.Copy(w, body)
+	a.serveArtifact(w, r, art)
 }
 
 func (a *API) downloadFile(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad file id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	f, err := a.store.GetFile(r.Context(), c.TenantUUID, c.UserID, id)
@@ -1678,7 +1708,7 @@ func (a *API) putTheme(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	var body json.RawMessage
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "theme JSON required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	v, err := a.store.SaveTheme(r.Context(), c.TenantUUID, c.UserID, body, nil)

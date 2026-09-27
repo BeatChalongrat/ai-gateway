@@ -211,6 +211,7 @@ func run(log *slog.Logger) error {
 		ScratchTTL:              time.Duration(am.EnvInt("AGENT_MARKET_FAILED_SCRATCH_DAYS", 7)) * 24 * time.Hour,
 		RemovedTTL:              time.Duration(am.EnvInt("AGENT_MARKET_REMOVED_INSTALL_DAYS", 30)) * 24 * time.Hour,
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),
+		StorageBackend:          am.EnvString("STORAGE_BACKEND", "local"),
 	}
 
 	// The sweep that removes sandbox containers a killed runner left behind

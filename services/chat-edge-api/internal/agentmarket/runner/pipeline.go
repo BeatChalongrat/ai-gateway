@@ -19,11 +19,8 @@ import (
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
-// errParked / errDone end a pass without being failures.
-var (
-	errParked = errors.New("parked for input")
-	errBudget = errors.New("budget exhausted")
-)
+// errParked ends a pass without being a failure.
+var errParked = errors.New("parked for input")
 
 // runCtx is one pass over a run: everything the steps need.
 type runCtx struct {
@@ -226,6 +223,7 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	}
 	engineDefaults, remembered := am.DefaultsForEngine(defs)
 	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
+	rc.selfTestSettings()
 	return rc, rc.reloadAnswers(ctx)
 }
 
@@ -302,10 +300,10 @@ func (rc *runCtx) step(ctx context.Context, name, kind, key string, input any, c
 	}
 	rc.r.syncProgress(ctx, rc.run.ID)
 	if costly {
-		spent, err := rc.r.Store.SpentThisMonth(ctx, rc.install.ID)
-		if err == nil && spent >= rc.install.BudgetCredits {
-			_ = rc.r.Store.FinishStep(ctx, st.ID, "failed", nil, "budget_exhausted", "", "", 0)
-			return nil, errBudget
+		// AM3: the person's, their department's and the install's month.
+		if err := rc.budgetCheck(ctx); err != nil {
+			_ = rc.r.Store.FinishStep(ctx, st.ID, "failed", nil, "budget_paused: "+err.Error(), "", "", 0)
+			return nil, err
 		}
 	}
 	out, credits, script, model, err := fn(ctx)
@@ -623,8 +621,10 @@ func (r *Runner) fail(ctx context.Context, run am.Run, reason string, err error)
 }
 
 func (rc *runCtx) stepFailed(step string, err error) error {
-	if errors.Is(err, errBudget) {
-		return rc.r.fail(rc.ctx, rc.run, "budget_exhausted", err)
+	// A budget that ran out is a wait, never a failure (AM3).
+	var bp *errBudgetPark
+	if errors.As(err, &bp) {
+		return rc.r.parkForBudget(rc, bp)
 	}
 	if rc.runCtxCancelled(err) {
 		return err
@@ -636,24 +636,36 @@ func (rc *runCtx) runCtxCancelled(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "context")
 }
 
+// failureText is what the person reads when a run stops (AM3): what
+// happened, what to do next, and that their data is safe — in words, not a
+// stack trace. The technical detail stays in the run's steps for whoever
+// the "แจ้งปัญหา" button reaches.
 func failureText(reason string, err error) string {
+	const safe = " ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ"
+	const report = " ถ้าไม่แน่ใจว่าเกิดจากอะไร กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด"
 	switch reason {
 	case "budget_exhausted":
-		return "หยุดรอบนี้แล้วครับ งบเครดิตของ agent นี้สำหรับเดือนนี้หมดแล้ว (แชทปกติยังใช้ได้ตามเดิม) ปรับงบได้ในหน้าตั้งค่า"
+		return "หยุดรอบนี้ไว้ครับ งบเครดิตของ agent นี้สำหรับเดือนนี้หมดแล้ว — ขอเพิ่มงบจากผู้ดูแล Agent Market แล้วพิมพ์ “ทำรอบใหม่”" +
+			safe + " แชทปกติยังใช้ได้ตามเดิม"
 	case "quality_gate":
-		return "สร้างไฟล์ได้ แต่ไม่ผ่านด่านตรวจคุณภาพ จึงยังไม่ส่งให้ครับ: " + trim(err.Error(), 300)
+		return "สร้างไฟล์ได้ แต่ไม่ผ่านด่านตรวจคุณภาพ จึงยังไม่ส่งให้ครับ (" + trim(err.Error(), 300) + ") — " +
+			"ลองขอไฟล์ชนิดอื่น (เช่น .docx แทน PDF) หรือพิมพ์ “ทำรอบใหม่”" + safe + report
 	case "package_changed":
-		return "agent ถูกอัปเดตระหว่างรอบนี้ กรุณาเริ่มรอบใหม่อีกครั้งครับ"
+		return "agent ถูกอัปเดตระหว่างรอบนี้ ตัวเลขของรอบนี้จึงไม่ถูกส่ง — ส่งไฟล์เดิมอีกครั้งหรือพิมพ์ “ทำรอบใหม่”" + safe
 	case "sandbox_unavailable":
-		return "ส่วนคำนวณของ agent ยังไม่พร้อมใช้งาน ลองใหม่ภายหลังครับ"
+		return "ส่วนคำนวณของ agent ยังไม่พร้อมใช้งานในตอนนี้ — ลองใหม่ในอีกไม่กี่นาที (พิมพ์ “ทำรอบใหม่”)" + safe + report
 	case "engine_missing":
-		return "รุ่นของ agent ที่ติดตั้งไว้ไม่มีในระบบแล้วครับ อัปเกรดเป็นรุ่นใหม่ได้ในหน้าตั้งค่า"
+		return "รุ่นของ agent ที่ติดตั้งไว้ไม่มีในระบบแล้ว — อัปเกรดเป็นรุ่นใหม่ในหน้าตั้งค่า แล้วส่งไฟล์อีกครั้ง" + safe
+	case "no_period":
+		return "หางวด (เดือน) ของข้อมูลในไฟล์ไม่เจอ — ส่งไฟล์ที่มีคอลัมน์วันที่ หรือพิมพ์บอกงวด เช่น “ปิดงบเดือนกันยายน 2569”" + safe
+	case "too_many_rounds":
+		return "คำตอบกับไฟล์ในรอบนี้ยังขัดกันอยู่หลายครั้ง จึงหยุดไว้ก่อน — ตรวจคำตอบในการ์ดคำถามแล้วพิมพ์ “ทำรอบใหม่”" + safe + report
 	}
 	msg := "รอบนี้ทำไม่สำเร็จครับ"
 	if err != nil {
 		msg += " (" + trim(err.Error(), 240) + ")"
 	}
-	return msg + " ส่งไฟล์ใหม่หรือพิมพ์ “ทำรอบใหม่” ได้เลย"
+	return msg + " — ส่งไฟล์ใหม่หรือพิมพ์ “ทำรอบใหม่”" + safe + report
 }
 
 // ── self-test seed ───────────────────────────────────────────────────────

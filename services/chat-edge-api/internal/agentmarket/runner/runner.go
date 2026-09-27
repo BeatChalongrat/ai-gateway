@@ -52,6 +52,9 @@ type Runner struct {
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
 	Reaper *Reaper
+	// StorageBackend (AM3) is where files live ("local" = the organisation's
+	// own server, "s3" = its object store) — the data sheet says so.
+	StorageBackend string
 
 	engines   engineCache
 	running   atomic.Int32
@@ -130,6 +133,13 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		vd, _ := json.Marshal(map[string]any{"model": v, "self_hosted": true})
 		caps["model.vision"] = agentmarket.Binding{Capability: "model.vision", Impl: "gateway", Version: v, Detail: vd}
 	}
+	// AM3: where the files are kept and for how long (read by the data sheet;
+	// no package requires it).
+	backend := r.StorageBackend
+	if backend == "" {
+		backend = "local"
+	}
+	caps["platform.storage"] = r.storageCapability(backend)
 	// A model is optional at run time (rules write the narrative when none
 	// answers), but the capability says which models are bound.
 	detail, _ := json.Marshal(map[string]any{"primary": r.Model.Primary, "fallback": r.Model.Fallback,
@@ -157,6 +167,10 @@ func (r *Runner) housekeeping(ctx context.Context) {
 			r.Log.Info("retention pass", "staged_files", c.StagedFiles, "scratch_runs", c.ScratchRuns,
 				"scratch_objects", c.ScratchObjects, "removed_installs", c.RemovedInstalls, "removed_objects", c.RemovedObjects,
 				"index_rows", c.IndexRows)
+		}
+		// AM3: runs that waited for budget go on once there is room (a new month).
+		if n, err := r.Store.ResumeBudgetParked(ctx, ""); err == nil && n > 0 {
+			r.Log.Info("runs resumed after waiting for budget", "runs", n)
 		}
 		select {
 		case <-ctx.Done():
@@ -194,6 +208,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	r.heartbeat(ctx)
 	r.startReaper(ctx)
 	go r.housekeeping(ctx)
+	go r.ensureSamples(ctx) // AM3: every released version's sample for the catalog
 	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {
 		t := time.NewTicker(10 * time.Second)
@@ -305,6 +320,10 @@ func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 	}()
 	log := r.Log.With("run", run.ID, "kind", run.Kind, "attempt", run.Attempts)
 	log.Info("run claimed")
+	if run.Kind != agentmarket.KindMappingPreview && r.disabledStop(ctx, run) {
+		log.Info("run stopped: the agent is disabled")
+		return
+	}
 	var err error
 	switch run.Kind {
 	case agentmarket.KindRun, agentmarket.KindSelfTest:
@@ -315,6 +334,8 @@ func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 		err = r.replyJob(ctx, run, log)
 	case agentmarket.KindMappingPreview:
 		err = r.previewJob(ctx, run, log)
+	case agentmarket.KindReview:
+		err = r.reviewJob(ctx, run, log)
 	default:
 		err = r.Store.Finish(context.Background(), run.ID, r.ID, agentmarket.RunFailed, "unknown_kind")
 	}

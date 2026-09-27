@@ -105,7 +105,7 @@ func (a *API) runExceptions(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad run id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	ctx := r.Context()
@@ -113,30 +113,38 @@ func (a *API) runExceptions(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "run")
 		return
 	}
-	rows, err := a.store.Pool.Query(ctx, `SELECT `+exceptionCols+` FROM agent_market.agent_run_exceptions
-		WHERE run_id = $1 ORDER BY (status = 'open') DESC, created_at, id`, id)
+	out, err := a.store.RunExceptions(ctx, id)
 	if err != nil {
 		a.fail(w, err, "exceptions")
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]any{"exceptions": nonNil(out)})
+}
+
+// RunExceptions lists a run's exceptions, the open ones first.
+func (s *Store) RunExceptions(ctx context.Context, run uuid.UUID) ([]RunException, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT `+exceptionCols+` FROM agent_market.agent_run_exceptions
+		WHERE run_id = $1 ORDER BY (status = 'open') DESC, created_at, id`, run)
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
-	out := []RunException{}
+	var out []RunException
 	for rows.Next() {
 		e, err := scanException(rows)
 		if err != nil {
-			a.fail(w, err, "exceptions")
-			return
+			return nil, err
 		}
 		out = append(out, e)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"exceptions": out})
+	return out, rows.Err()
 }
 
 func (a *API) decideException(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	id, ok := pathID(r, "id")
 	if !ok {
-		writeErr(w, http.StatusBadRequest, "BAD_ID", "bad exception id")
+		badRequest(w, "BAD_ID")
 		return
 	}
 	var body struct {
@@ -144,7 +152,7 @@ func (a *API) decideException(w http.ResponseWriter, r *http.Request) {
 		Note   string          `json:"note"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || len(body.Choice) == 0 {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "choice required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	ctx := r.Context()
@@ -152,7 +160,7 @@ func (a *API) decideException(w http.ResponseWriter, r *http.Request) {
 		WHERE e.id = $1 AND EXISTS (SELECT 1 FROM agent_market.agent_runs r WHERE r.id = e.run_id AND r.tenant_id = $2 AND r.user_id = $3)`,
 		id, c.TenantUUID, c.UserID))
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+		a.fail(w, ErrNotFound, "exception")
 		return
 	}
 	if err != nil {
@@ -171,12 +179,12 @@ func (a *API) decideException(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if ex.Status != "open" {
-		writeErr(w, http.StatusConflict, "NOT_OPEN", "ข้อยกเว้นนี้ไม่ได้รอการตัดสินแล้ว")
+		say(w, http.StatusConflict, "NOT_OPEN")
 		return
 	}
 	if label == "" {
 		// only the exception's own choices: there is no hidden "reject"
-		writeErr(w, http.StatusBadRequest, "BAD_CHOICE", "ไม่มีตัวเลือกนี้")
+		say(w, http.StatusBadRequest, "BAD_CHOICE")
 		return
 	}
 	if len([]rune(body.Note)) > 1000 {
@@ -187,7 +195,7 @@ func (a *API) decideException(w http.ResponseWriter, r *http.Request) {
 			resolved_by = $2, resolved_at = now(), source_ref = source_ref || jsonb_build_object('decision', $3::jsonb)
 		WHERE id = $1 AND status = 'open' RETURNING `+exceptionCols, id, c.UserID, decision))
 	if errors.Is(err, pgx.ErrNoRows) { // decided a moment ago, elsewhere
-		writeErr(w, http.StatusConflict, "NOT_OPEN", "ข้อยกเว้นนี้ไม่ได้รอการตัดสินแล้ว")
+		say(w, http.StatusConflict, "NOT_OPEN")
 		return
 	}
 	if err != nil {

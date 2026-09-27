@@ -25,6 +25,13 @@ type Store struct {
 // NewStore wraps a pool that belongs to Agent Market alone.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{Pool: pool} }
 
+func orgOr(org string) string {
+	if org == "" {
+		return DefaultOrg
+	}
+	return org
+}
+
 func jsonOr(b json.RawMessage, def string) json.RawMessage {
 	if len(b) == 0 {
 		return json.RawMessage(def)
@@ -99,13 +106,13 @@ func (s *Store) DefinitionByID(ctx context.Context, id uuid.UUID) (Definition, e
 
 const installCols = `id, tenant_id, user_id, definition_id, slug, definition_version, checksum, title,
 	capability_bindings, binding_version, budget_credits::float8, status, self_test_run_id, created_at, updated_at,
-	previous_definition_id`
+	previous_definition_id, org_id, pinned_at, last_opened_at`
 
 func scanInstall(r pgx.Row) (Install, error) {
 	var i Install
 	err := r.Scan(&i.ID, &i.TenantID, &i.UserID, &i.DefinitionID, &i.Slug, &i.DefinitionVersion, &i.Checksum, &i.Title,
 		&i.CapabilityBindings, &i.BindingVersion, &i.BudgetCredits, &i.Status, &i.SelfTestRunID, &i.CreatedAt, &i.UpdatedAt,
-		&i.PreviousDefinitionID)
+		&i.PreviousDefinitionID, &i.OrgID, &i.PinnedAt, &i.LastOpenedAt)
 	return i, err
 }
 
@@ -126,11 +133,11 @@ func (s *Store) CreateInstall(ctx context.Context, tx pgx.Tx, in Install, idem s
 	}
 	row := tx.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_installs (tenant_id, user_id, definition_id, slug, definition_version, checksum,
-			title, capability_bindings, binding_version, budget_credits, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			title, capability_bindings, binding_version, budget_credits, idempotency_key, org_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING `+installCols,
 		in.TenantID, in.UserID, in.DefinitionID, in.Slug, in.DefinitionVersion, in.Checksum, in.Title,
-		jsonOr(in.CapabilityBindings, "{}"), in.BindingVersion, in.BudgetCredits, idemArg)
+		jsonOr(in.CapabilityBindings, "{}"), in.BindingVersion, in.BudgetCredits, idemArg, orgOr(in.OrgID))
 	i, err := scanInstall(row)
 	return i, err == nil, err
 }
@@ -544,7 +551,7 @@ func (s *Store) ClaimRun(ctx context.Context, runner string, lease time.Duration
 		WHERE r.id = (
 			SELECT id FROM agent_market.agent_runs
 			WHERE (status = 'queued' OR (status = 'running' AND lease_until < now()))
-			ORDER BY CASE kind WHEN 'reply' THEN 0 WHEN 'mapping_preview' THEN 0 WHEN 'render' THEN 1 ELSE 2 END, created_at
+			ORDER BY CASE kind WHEN 'reply' THEN 0 WHEN 'mapping_preview' THEN 0 WHEN 'render' THEN 1 WHEN 'review' THEN 1 ELSE 2 END, created_at
 			FOR UPDATE SKIP LOCKED LIMIT 1)
 		RETURNING `+runCols, runner, fmt.Sprintf("%d milliseconds", lease.Milliseconds())))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1015,11 +1022,12 @@ func (s *Store) PendingUserTexts(ctx context.Context, install uuid.UUID) ([]Thre
 
 // ── budget ───────────────────────────────────────────────────────────────
 
-// SpentThisMonth is the install's credits used since the first of the month (UTC).
+// SpentThisMonth is the install's credits used since the first of the month
+// (Bangkok's month since AM3, like the person's and department's budgets).
 func (s *Store) SpentThisMonth(ctx context.Context, install uuid.UUID) (float64, error) {
 	var v float64
 	err := s.Pool.QueryRow(ctx, `SELECT COALESCE(sum(credits), 0)::float8 FROM agent_market.agent_budget_ledger
-		WHERE install_id = $1 AND created_at >= date_trunc('month', now())`, install).Scan(&v)
+		WHERE install_id = $1 AND created_at >= `+monthStart, install).Scan(&v)
 	return v, err
 }
 

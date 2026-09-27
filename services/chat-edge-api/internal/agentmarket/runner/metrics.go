@@ -21,6 +21,9 @@ type MetricsSnapshot struct {
 	CreditsSpent              float64
 	PoolAcquired, PoolMax     int32
 	SandboxReady              bool
+	// AM3: reports people filed that nobody has closed yet (the pager's
+	// "someone reported a problem"), and runs waiting for budget.
+	ProblemsOpen, BudgetWaiting int64
 }
 
 // CollectMetrics reads the snapshot with a handful of aggregate queries.
@@ -55,6 +58,9 @@ func CollectMetrics(ctx context.Context, pool *pgxpool.Pool, sandboxReady bool) 
 		rows.Close()
 	}
 	_ = pool.QueryRow(ctx, `SELECT COALESCE(sum(credits), 0) FROM agent_market.agent_budget_ledger`).Scan(&s.CreditsSpent)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.problem_reports WHERE status = 'open'`).Scan(&s.ProblemsOpen)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE status = 'awaiting_input'
+		AND status_reason LIKE 'budget_%'`).Scan(&s.BudgetWaiting)
 	st := pool.Stat()
 	s.PoolAcquired, s.PoolMax = st.AcquiredConns(), st.MaxConns()
 	return s
@@ -90,6 +96,10 @@ func RenderMetrics(s MetricsSnapshot) string {
 	w("# TYPE agent_market_pool_acquired_conns gauge")
 	w("agent_market_pool_acquired_conns %d", s.PoolAcquired)
 	w("agent_market_pool_max_conns %d", s.PoolMax)
+	w("# TYPE agent_market_problem_reports_open gauge")
+	w("agent_market_problem_reports_open %d", s.ProblemsOpen)
+	w("# TYPE agent_market_runs_waiting_budget gauge")
+	w("agent_market_runs_waiting_budget %d", s.BudgetWaiting)
 	w("# TYPE agent_market_sandbox_ready gauge")
 	w("agent_market_sandbox_ready %d", map[bool]int{true: 1, false: 0}[s.SandboxReady])
 	return b.String()

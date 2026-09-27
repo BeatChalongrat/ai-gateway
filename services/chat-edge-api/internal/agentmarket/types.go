@@ -25,6 +25,8 @@ const (
 	KindRender         = "render"
 	KindReply          = "reply"
 	KindMappingPreview = "mapping_preview"
+	// KindReview re-issues a finished run's files with a reviewer's name on them (AM3).
+	KindReview = "review"
 )
 
 // IsTerminal reports a final run state.
@@ -66,6 +68,11 @@ type Install struct {
 	// PreviousDefinitionID is the version an upgrade replaced (AM2): a
 	// rollback points the install back at it.
 	PreviousDefinitionID *uuid.UUID `json:"previous_definition_id,omitempty"`
+	// AM3: the organisation whose budgets and catalog apply, the rail's pin,
+	// and when its owner last opened it ("recently used").
+	OrgID        string     `json:"-"`
+	PinnedAt     *time.Time `json:"pinned_at,omitempty"`
+	LastOpenedAt *time.Time `json:"last_opened_at,omitempty"`
 }
 
 // Default is a remembered answer or an install-time setting.

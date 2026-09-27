@@ -106,6 +106,17 @@ type OutputsPayload struct {
 	Model       map[string]any   `json:"model,omitempty"`
 	Credits     float64          `json:"credits"`
 	Rendered    bool             `json:"rerender,omitempty"`
+	// Review (AM3): these files carry a reviewer's sign-off on their face.
+	Review *OutputsReview `json:"review,omitempty"`
+}
+
+// OutputsReview is the sign-off an outputs card was re-issued with.
+type OutputsReview struct {
+	ID       string   `json:"id"`
+	Reviewer string   `json:"reviewer"`
+	AtLabel  string   `json:"at_label"`
+	Note     string   `json:"note,omitempty"`
+	Skipped  []string `json:"skipped,omitempty"` // files that could not carry the name (e.g. the customer's own template)
 }
 
 // OutputArtifact is one file on the outputs card.

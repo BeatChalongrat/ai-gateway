@@ -283,20 +283,20 @@ func atoiSafe(s string) int {
 
 func (a *API) startUpgrade(w http.ResponseWriter, r *http.Request) {
 	in, c, ok := a.ownedInstall(w, r)
-	if !ok {
+	if !ok || !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
 	var body struct {
 		DefinitionID uuid.UUID `json:"definition_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil || body.DefinitionID == uuid.Nil {
-		writeErr(w, http.StatusBadRequest, "BAD_JSON", "definition_id required")
+		badRequest(w, "BAD_JSON")
 		return
 	}
 	ctx := r.Context()
 	to, err := a.store.DefinitionByID(ctx, body.DefinitionID)
 	if err != nil || to.Slug != in.Slug || to.ID == in.DefinitionID || to.Status != "active" {
-		writeErr(w, http.StatusBadRequest, "BAD_VERSION", "รุ่นนี้ใช้กับ agent ตัวนี้ไม่ได้")
+		say(w, http.StatusBadRequest, "BAD_VERSION")
 		return
 	}
 	m, err := ParseManifest(to.Manifest)
@@ -306,14 +306,14 @@ func (a *API) startUpgrade(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := a.store.LatestRunner(ctx, a.cfg.RunnerStaleAfter)
 	if err != nil || !st.Healthy {
-		writeErr(w, http.StatusServiceUnavailable, "RUNNER_DOWN", "ระบบประมวลผลของ agent ยังไม่พร้อม ลองใหม่ภายหลัง")
+		a.sayTo(w, r, http.StatusServiceUnavailable, "RUNNER_DOWN")
 		return
 	}
 	var caps map[string]Binding
 	_ = json.Unmarshal(st.Capabilities, &caps)
 	res, err := Resolve(m, caps, in.BindingVersion+1)
 	if err != nil {
-		writeErr(w, http.StatusConflict, "MISSING_CAPABILITY", err.Error())
+		a.sayTo(w, r, http.StatusConflict, "MISSING_CAPABILITY", "detail", err.Error())
 		return
 	}
 	bindings, _ := json.Marshal(res)
@@ -337,7 +337,7 @@ func (a *API) rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if in.PreviousDefinitionID == nil {
-		writeErr(w, http.StatusConflict, "NO_PREVIOUS", "ยังไม่มีรุ่นก่อนหน้าให้ย้อนกลับ")
+		say(w, http.StatusConflict, "NO_PREVIOUS")
 		return
 	}
 	ctx := r.Context()
