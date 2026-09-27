@@ -76,7 +76,9 @@ function Shared({ shareId }: { shareId: string }) {
           </p>
           <h1 className="mt-1 text-lg font-semibold text-text-primary sm:text-xl">
             {data.agent.name || data.agent.title}
-            {run.period ? <span className="font-normal text-text-muted">{` · ${t("run.period", { period: run.period })}`}</span> : null}
+            {data.outputs?.period_label || run.period ? (
+              <span className="font-normal text-text-muted">{` · ${t("run.period", { period: data.outputs?.period_label || run.period || "" })}`}</span>
+            ) : null}
           </h1>
           <p className="mt-0.5 text-xs text-text-muted">
             {[t("run.agentVersion", { v: data.agent.version }), run.finished_at ? t("shared.finished", { when: formatDateTime(run.finished_at, locale) }) : null]

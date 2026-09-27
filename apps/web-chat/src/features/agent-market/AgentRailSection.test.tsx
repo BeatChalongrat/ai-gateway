@@ -126,7 +126,7 @@ describe("AgentRailSection", () => {
     expect(item.getAttribute("aria-current")).toBe("page");
     expect(item.textContent).toContain("ปิดงบการเงิน");
     expect(item.textContent).toContain("รอคำตอบของคุณ");
-    expect(screen.getByTestId("agent-rail-toggle").textContent).toContain("AGENT ของฉัน (1)");
+    expect(screen.getByTestId("agent-rail-toggle").textContent).toContain("Agent ของฉัน (1)");
     expect(screen.getByTestId("agent-rail-waiting-total").textContent).toContain("1");
   });
 

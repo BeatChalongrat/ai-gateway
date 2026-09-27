@@ -835,7 +835,7 @@ function ProblemRow({ p, reload }: { p: ProblemReport; reload: () => void }) {
       </p>
       {p.step ? (
         <p className="mt-0.5 text-xs text-text-secondary">
-          {t("admin.problems.step", { step: p.step })}
+          {t(p.run_status === "succeeded" ? "admin.problems.lastStep" : "admin.problems.step", { step: p.step })}
           {p.step_error ? <code className="ml-1 break-all rounded bg-bg-elevated px-1 py-0.5 text-[11px]">{p.step_error}</code> : null}
         </p>
       ) : null}

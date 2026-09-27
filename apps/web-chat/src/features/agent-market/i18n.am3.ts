@@ -6,7 +6,7 @@
 
 export const am3Th = {
   // left rail
-  "rail.mine": "AGENT ของฉัน ({n})",
+  "rail.mine": "Agent ของฉัน ({n})",
   "rail.all": "ดูทั้งหมด ({n})",
   "rail.pin": "ปักหมุด {name} ไว้บนสุด",
   "rail.unpin": "เลิกปักหมุด {name}",
@@ -336,6 +336,7 @@ export const am3Th = {
   "admin.problems.closed": "ปิดแล้ว",
   "admin.problems.runStatus": "สถานะรอบ {status} ({reason})",
   "admin.problems.step": "ขั้นตอนที่หยุด: {step}",
+  "admin.problems.lastStep": "รอบนี้ทำเสร็จแล้ว ขั้นตอนสุดท้าย: {step}",
   "admin.problems.openRun": "เปิดรอบงาน {id} (เฉพาะเจ้าของเปิดได้)",
   "admin.problems.note": "บันทึกของผู้ดูแล",
   "admin.problems.notePlaceholder": "ทำอะไรไปแล้ว เช่น แก้แล้วในรุ่นถัดไป",
@@ -661,6 +662,7 @@ export const am3En: Record<Am3Key, string> = {
   "admin.problems.closed": "Closed",
   "admin.problems.runStatus": "Run status {status} ({reason})",
   "admin.problems.step": "Stopped at: {step}",
+  "admin.problems.lastStep": "The run finished; last step: {step}",
   "admin.problems.openRun": "Open run {id} (only its owner can)",
   "admin.problems.note": "Admin note",
   "admin.problems.notePlaceholder": "What was done, e.g. fixed in the next version",
