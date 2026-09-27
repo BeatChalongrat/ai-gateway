@@ -37,7 +37,7 @@ def run(files: list[ParsedFile], roles: dict, period: str, computed: dict, *, an
             f"ยอดรวมเดบิต {fmt_money(Decimal(bal['debit']))} แต่เครดิต {fmt_money(Decimal(bal['credit']))} "
             f"({side} {fmt_money(abs(diff))} บาท)"
             + (f" เอกสารที่ไม่สมดุลคือ {', '.join(d['doc'] for d in docs[:3])}" if docs else "")
-            + " จะให้ทำอย่างไรครับ",
+            + " (ปกติสองฝั่งต้องเท่ากัน ส่วนต่างมักเกิดจากบางบรรทัดหายไปตอนส่งออกไฟล์) จะให้ทำอย่างไรครับ",
             [("ทำต่อ แสดงส่วนต่างในรายงาน", "continue", "รายงานจะระบุว่าไม่สมดุลและต่างกันเท่าไร"),
              ("หยุดก่อน จะส่งไฟล์ที่แก้แล้ว", "replace", "ผมจะรอไฟล์ใหม่ แล้วคำนวณใหม่")],
             "continue",

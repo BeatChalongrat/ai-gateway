@@ -171,7 +171,7 @@ def check_mapping(primary: ParsedFile, answers: dict) -> list[Finding]:
              + " ไม่เจอ ช่วยบอกผมว่าอยู่คอลัมน์ไหนครับ")
     options = [("ถูกต้อง ใช้ตามนี้", "accept", "จำการจับคู่นี้ไว้ใช้รอบหน้า")] if not missing else []
     options += [("ขอเลือกคอลัมน์เอง", "manual", "เปิดหน้าจับคู่คอลัมน์ เลือกด้วยการคลิก"),
-                ("ส่งไฟล์ใหม่แทน", "replace", "ใช้ไฟล์ที่ export ใหม่แล้ว")]
+                ("ส่งไฟล์ใหม่แทน", "replace", "ส่งออกไฟล์จากโปรแกรมบัญชีใหม่ แล้วส่งมาแทน")]
     return [finding(
         "unmapped_column", "blocking", "preflight", "จับคู่คอลัมน์",
         q, options, options[0][1],
@@ -210,7 +210,7 @@ def check_unreadable_dates(files, roles, answers: dict) -> tuple[list[Finding], 
             f"ในไฟล์ “{pf.name}” มี {fmt_int(n)} แถวที่มีรหัสบัญชีและจำนวนเงิน แต่ผมอ่านวันที่ไม่ออก "
             f"เช่น {', '.join('“' + e + '”' for e in examples[:3])} ถ้าคำนวณต่อ แถวเหล่านี้จะไม่ถูกนับ "
             f"รวม {fmt_money(amount)} บาท จะให้ทำอย่างไรครับ",
-            [("ส่งไฟล์ใหม่ที่วันที่เป็น วัน/เดือน/ปี", "replace", "export ใหม่ แล้วผมตรวจใหม่ตั้งแต่ต้น"),
+            [("ส่งไฟล์ใหม่ที่วันที่เป็น วัน/เดือน/ปี", "replace", "ส่งออกจากโปรแกรมบัญชีใหม่ แล้วผมตรวจใหม่ตั้งแต่ต้น"),
              ("ไม่นับแถวเหล่านี้ คำนวณต่อ", "exclude", f"ตัวเลขจะขาดไป {fmt_money(amount)} บาท และรายงานจะบอกไว้")],
             "replace",
             evidence={"file": pf.name, "rows": pf.unreadable_date_samples[:20],
@@ -302,6 +302,11 @@ def check_date_order(files, roles, answers: dict, defaults: dict, message: str,
     return out, assumptions
 
 
+# what each P&L line holds, for a person choosing one (AM3: the options had no description)
+GROUP_HINT = {"revenue": "รายได้หลักจากการขายสินค้าหรือให้บริการ", "other_income": "เช่น ดอกเบี้ยรับ กำไรจากอัตราแลกเปลี่ยน",
+              "cost_of_sales": "ต้นทุนของสินค้าหรือบริการที่ขาย", "operating_expenses": "เช่น เงินเดือน ค่าเช่า ค่าโฆษณา ค่าสาธารณูปโภค",
+              "finance_costs": "เช่น ดอกเบี้ยจ่าย ค่าธรรมเนียมเงินกู้", "income_tax": "ภาษีเงินได้นิติบุคคล"}
+
 _ACCOUNT_OPTIONS = {
     "income": ("other_income", "revenue"),
     "expense": ("operating_expenses", "cost_of_sales", "finance_costs"),
@@ -322,7 +327,7 @@ def check_accounts(chart: Chart) -> list[Finding]:
         by_number = range_default(code, chart)
         if by_number and by_number not in cands:
             cands = cands[:2] + [by_number]
-        options = [(GROUP_LABEL[g], g, "") for g in cands[:3]]
+        options = [(GROUP_LABEL[g], g, GROUP_HINT.get(g, "")) for g in cands[:3]]
         options.append(("ไม่ใช่บัญชีกำไรขาดทุน", NOT_PL, "ไม่นับในงบกำไรขาดทุน"))
         why = ("ชื่อบัญชีกับเลขบัญชีบอกคนละหมวด" if by_number and p["family"]
                else "ทั้งเลขบัญชีและชื่อบัญชีไม่พอจะบอกได้ว่าอยู่หมวดไหน")
@@ -366,6 +371,17 @@ def remembered_convention(pf: ParsedFile, defaults: dict):
     return conv.get(_dc_header(pf))
 
 
+def _dc_example(pf: ParsedFile, chart: Chart | None) -> str:
+    """A row from the person's own file that shows the convention: a revenue account's line (revenue sits on
+    the credit side), so the question can be answered by looking at the file rather than by knowing the export."""
+    for r in pf.rows:
+        if r.raw_indicator and group_of(r.account_code, chart) == "revenue":
+            shown = {"+": "เป็นเลขบวก", "-": "เป็นเลขลบ"}.get(r.raw_indicator, f"มีค่า “{r.raw_indicator}”")
+            return (f" ตัวอย่างจากไฟล์ของคุณ: แถว {r.row} บัญชี {r.account_code} เป็นบัญชีรายได้ ซึ่งปกติบันทึกฝั่งเครดิต "
+                    f"และในไฟล์{shown}")
+    return ""
+
+
 def check_dc(pf: ParsedFile, defaults: dict, answers: dict, chart: Chart | None = None) -> list[Finding]:
     if pf.dc_mode not in ("indicator", "signed") or pf.doc_type == "pl":
         return []
@@ -389,14 +405,15 @@ def check_dc(pf: ParsedFile, defaults: dict, answers: dict, chart: Chart | None 
         deb = next((k for k, v in guess.items() if v == "debit"), "?")
         cre = next((k for k, v in guess.items() if v == "credit"), "?")
         q = (f"คอลัมน์ “{header}” มีค่าเป็น {deb} กับ {cre} ผมเดาว่า {deb} = เดบิต และ {cre} = เครดิต "
-             "แต่ขอให้ยืนยันก่อน เพราะถ้าเดาผิด ตัวเลขทั้งรายงานจะกลับข้าง")
+             "แต่ขอให้ยืนยันก่อน เพราะถ้าเดาผิด ตัวเลขทั้งรายงานจะกลับข้าง (รายได้จะกลายเป็นติดลบ)"
+             + _dc_example(pf, chart))
         options = [(f"ใช่ {deb} คือเดบิต", guess, f"รายได้รวมจะเป็น {fmt_money(revenue_under(guess))}"),
                    (f"ไม่ใช่ {deb} คือเครดิต", flipped, f"รายได้รวมจะเป็น {fmt_money(revenue_under(flipped))}")]
         default = guess
     else:
         pos_d = revenue_under("positive_debit")
         q = (f"คอลัมน์ “{header}” มีทั้งเลขบวกและเลขลบ ผมเดาว่าเลขบวก = เดบิต เลขลบ = เครดิต "
-             "ขอให้ยืนยันก่อนเริ่มคำนวณครับ")
+             "ขอให้ยืนยันก่อนเริ่มคำนวณครับ ถ้าเดาผิด รายได้ในรายงานจะกลายเป็นติดลบ" + _dc_example(pf, chart))
         a, b = ("positive_debit", "positive_credit") if pos_d >= 0 else ("positive_credit", "positive_debit")
         label = {"positive_debit": "บวก = เดบิต", "positive_credit": "บวก = เครดิต"}
         options = [(f"ใช่ {label[a]}", a, f"รายได้รวมจะเป็น {fmt_money(revenue_under(a))}"),

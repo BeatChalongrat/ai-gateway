@@ -104,8 +104,30 @@ def cards_for(audits: list[ClaimAudit], answers: dict | None) -> list[Finding]:
     return [card(a, flag) for a in audits for flag in a.flags if key_for(flag, a.claim.key) not in answers]
 
 
+# the policy table's keys as the settings page names them (a card once said "categories.meals.per_claim")
+POLICY_KEY_TH = {"per_claim": "วงเงินต่อครั้ง", "per_person_month": "วงเงินต่อคนต่อเดือน", "wht_rate": "อัตราหัก ณ ที่จ่าย",
+                 "wht_from": "หัก ณ ที่จ่ายตั้งแต่ยอด", "needs_purpose": "ต้องระบุวัตถุประสงค์", "label": "ชื่อหมวด",
+                 "receipt_required_above": "ยอดที่ต้องมีใบเสร็จ", "approval_threshold": "วงเงินอนุมัติ",
+                 "prohibited_merchants": "ร้านต้องห้าม", "weekend_holiday": "การเบิกในวันหยุด",
+                 "vat_claim_requires": "เอกสารที่ใช้ขอคืน VAT", "currency": "สกุลเงิน", "categories": "หมวดค่าใช้จ่าย"}
+
+
+def plain_problem(p: str) -> str:
+    """'categories.meals.per_claim: ... ไม่ใช่จำนวนเงิน' → 'หมวด meals · วงเงินต่อครั้ง: ... ไม่ใช่จำนวนเงิน'."""
+    where, sep, rest = p.partition(": ")
+    if not sep or " " in where:
+        return p
+    parts = where.split(".")
+    if parts[0] == "categories" and len(parts) >= 2:
+        named = f"หมวด {parts[1]}" + (f" · {POLICY_KEY_TH.get(parts[2], parts[2])}" if len(parts) > 2 else "")
+    else:
+        named = POLICY_KEY_TH.get(parts[0], parts[0])
+    return f"{named}: {rest}"
+
+
 def no_policy(problems: list[str]) -> Finding:
-    listed = safe("; ".join(problems[:4]) + (f" และอีก {len(problems) - 4} ข้อ" if len(problems) > 4 else ""))
+    plain = [plain_problem(p) for p in problems]
+    listed = safe("; ".join(plain[:4]) + (f" และอีก {len(plain) - 4} ข้อ" if len(plain) > 4 else ""))
     return finding("expense_no_policy", "blocking", "preflight", "นโยบายการเบิก",
                    f"ยังตรวจไม่ได้: ตารางนโยบายการเบิกของ agent นี้ยังใช้ไม่ได้ ({listed}) ตั้งหรือแก้ตารางในหน้าตั้งค่า agent "
                    f"แล้วสั่งทำรอบนี้ต่อ ผมจะไม่เดาวงเงินเอง และจะไม่เอาวงเงินจากเอกสารระเบียบมาใช้แทน",
