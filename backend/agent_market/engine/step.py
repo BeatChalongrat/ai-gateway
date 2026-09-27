@@ -111,8 +111,17 @@ def run(req: dict) -> dict:
     from . import dataset
 
     op = req.get("op")
-    pkg = _load_package(req.get("package", ""))
     t0 = time.monotonic()
+    if op == "stamp_review":
+        # AM3: a reviewer's sign-off on the face of a run's files — a platform op
+        # (no package): the runner runs it with its current engine.
+        from ..deliverables import signoff
+
+        out = signoff.stamp_files(req.get("files") or [], req.get("review") or {}, JOB_IN, JOB_OUT)
+        out.update(ok=True, op=op, ms=int((time.monotonic() - t0) * 1000),
+                   engine=__import__("agent_market").ENGINE_VERSION)
+        return out
+    pkg = _load_package(req.get("package", ""))
     dump = getattr(pkg, "dump", dataset.dump)
     load = getattr(pkg, "load", dataset.load)
     if op == "parse":
