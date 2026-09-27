@@ -243,6 +243,13 @@ services:
       # Agent Market (docs/agent-market/) — off means absent: no route, no pool.
       - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
       - AGENT_MARKET_ALLOWED_EMAILS=${AGENT_MARKET_ALLOWED_EMAILS:-}
+      # AM3: break-glass admins, the organisation's domains, the first per-person
+      # budget, and the baht rate the catalog shows costs in (seeds only; the
+      # admins keep the access list and budgets in the database afterwards).
+      - AGENT_MARKET_ADMIN_EMAILS=${AGENT_MARKET_ADMIN_EMAILS:-}
+      - AGENT_MARKET_ORG_DOMAINS=${AGENT_MARKET_ORG_DOMAINS:-}
+      - AGENT_MARKET_USER_BUDGET_CREDITS=${AGENT_MARKET_USER_BUDGET_CREDITS:-3000000}
+      - AGENT_MARKET_THB_PER_USD=${AGENT_MARKET_THB_PER_USD:-35}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.

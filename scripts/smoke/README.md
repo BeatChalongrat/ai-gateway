@@ -76,7 +76,7 @@ test alert to the `[TEST]` topic, one 429 loop of empty bodies.
 | `desktop.turn` | with a session: a `[SMOKE]` chat through the app's own session, one turn typed into the composer, the answer read back and the assistant row `completed`, deleted by id | session in the app |
 | `desktop.closed` | the app closed and port 9333 closed; relaunched without the port when it was running before | — |
 | `agent_market.flag`, `agent_market.web_flag`, `agent_market.runner` | AM1: with `AGENT_MARKET_ENABLED` off the feature is absent (chat-edge `/api/v1/agent-market/*` → 404, web-chat `/api/agent-market` → `enabled:false`, no runner container); with it on, availability 200 and the runner's `/healthz` (docs/agent-market/) | — |
-| `agent_market.not_allowlisted` | AM1b: with the flag on and an allowlist that leaves the smoke account out, that account sees no agent surface (availability `available:false`, catalog 403) | `AGENT_MARKET_ALLOWED_EMAILS`, a session |
+| `agent_market.not_allowlisted` | AM1b/AM3: the organisation's gate agrees with itself for the smoke account — not on the list (access `list`, not a member, not an admin) → availability `available:false` and catalog 403; let in (access `everyone`, a member or an admin) → `available:true` and catalog 200. The list lives in the database since AM3 (the admins keep it) | a session |
 | `cleanup.chats` | every leftover chat deleted by id | — |
 
 Test stack: no front door, portal, admin-ui, web-chat, ops-watch or mcp-gateway — those

@@ -34,16 +34,23 @@ module.exports = async function agentMarket(R, session) {
   // AM1b: with an allowlist that leaves the smoke account out (the owner-only
   // pilot), that account must see no agent surface: availability says no and
   // the catalog refuses it (the web rail renders nothing when available=false).
+  // AM3: the list lives in the database now (the organisation's admins keep
+  // it), so the check asks the gate itself: whatever it says about this
+  // account (access mode, on the list, admin) must match what it lets through.
   await R.run("agent_market.not_allowlisted", async () => {
-    const allow = String(L.env("AGENT_MARKET_ALLOWED_EMAILS", "")).toLowerCase().split(",").map((e) => e.trim()).filter(Boolean);
-    const me = String(session?.email || L.env("SMOKE_EMAIL", "")).toLowerCase();
     if (!on) return { skip: true, detail: "flag off (the flag check covers it)" };
     if (!session) return { skip: true, detail: "no signed-in session in this run" };
-    if (!allow.length || allow.includes(me)) return { skip: true, detail: "the smoke account is allowlisted (or no allowlist): nothing to prove here" };
     const a = await L.http(edge, { headers: session.headers });
     const c = await L.http(`${L.API_BASE.edge}/api/v1/agent-market/catalog`, { headers: session.headers });
-    return { ok: a.status === 200 && a.json?.available === false && c.status === 403,
-      detail: `not allowlisted: availability ${a.status} available=${a.json?.available}, catalog ${c.status} (want false / 403)` };
+    const j = a.json || {};
+    const shouldBeIn = j.admin === true || j.access === "everyone" || (j.access === "list" && j.member === true);
+    if (a.status !== 200) return { ok: false, detail: `availability ${a.status}` };
+    if (shouldBeIn) {
+      return { ok: j.available === true && c.status === 200,
+        detail: `the organisation lets this account in (access=${j.access} member=${j.member} admin=${j.admin}): available=${j.available}, catalog ${c.status}` };
+    }
+    return { ok: j.available === false && c.status === 403,
+      detail: `not on the organisation's list (access=${j.access} member=${j.member}): availability available=${j.available}, catalog ${c.status} (want false / 403)` };
   });
 
   await R.run("agent_market.web_flag", async () => {

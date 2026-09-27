@@ -36,3 +36,40 @@ tests:
               channel: agent-market
             exp_annotations:
               summary: "Agent Market: a quarter of recent runs failed — the 14-day error budget is burning"
+  # AM3: a problem report pages at once and stops when it is closed.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_problem_reports_open'
+        values: '0 0 1 1 0'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: AgentMarketProblemReported
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: AgentMarketProblemReported
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: someone reported a problem with a run — read it on the admins' page (จัดการ Agent Market → ปัญหาที่แจ้ง)"
+      - eval_time: 4m
+        alertname: AgentMarketProblemReported
+        exp_alerts: []
+  # AM3: a run waiting for budget pages only after an hour.
+  - interval: 1m
+    input_series:
+      - series: 'agent_market_runs_waiting_budget'
+        values: '1x90'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AgentMarketRunsWaitingForBudget
+        exp_alerts: []
+      - eval_time: 80m
+        alertname: AgentMarketRunsWaitingForBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              channel: agent-market
+            exp_annotations:
+              summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"

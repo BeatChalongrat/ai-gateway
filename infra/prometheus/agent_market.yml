@@ -72,3 +72,22 @@ groups:
           channel: agent-market
         annotations:
           summary: "Agent Market: the runner's own DB pool is full (chat uses its own pool)"
+      # AM3: a person pressed "แจ้งปัญหา" (report a problem) and nobody has
+      # closed it yet — the admins' page lists it with the run and the step.
+      - alert: AgentMarketProblemReported
+        expr: agent_market_problem_reports_open > 0
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: someone reported a problem with a run — read it on the admins' page (จัดการ Agent Market → ปัญหาที่แจ้ง)"
+      # AM3: runs have waited more than an hour for a budget (someone is stuck
+      # until an admin raises a person's or a department's month).
+      - alert: AgentMarketRunsWaitingForBudget
+        expr: agent_market_runs_waiting_budget > 0
+        for: 1h
+        labels:
+          severity: warning
+          channel: agent-market
+        annotations:
+          summary: "Agent Market: runs have waited over an hour for budget — raise a person's or department's budget, or tell them"
