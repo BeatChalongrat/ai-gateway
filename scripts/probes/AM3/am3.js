@@ -107,7 +107,7 @@ async function download(who, url, file) {
 // the text of an OOXML file's parts (python's zipfile on the host)
 function ooxmlText(file) {
   const py = "import sys,zipfile,re;z=zipfile.ZipFile(sys.argv[1]);print('\\n'.join(re.sub(r'<[^>]+>',' ',z.read(n).decode('utf-8','ignore')) for n in z.namelist() if n.endswith('.xml')))";
-  return execFileSync(process.env.PYTHON || "python", ["-c", py, file], { encoding: "utf8", maxBuffer: 64 << 20 });
+  return execFileSync(process.env.PYTHON || "python", ["-c", py, file], { encoding: "utf8", maxBuffer: 64 << 20, env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
 }
 
 const cmds = {
