@@ -107,3 +107,28 @@ instructions), `checks/`, `scripts/`, `templates/`, `sample-data/`,
 `self-test.json`, `evals/` (cases + fixtures, not shipped in the runtime zip).
 The runtime zip is built deterministically; the package checksum is computed
 over the same bytes and stored on every install and run.
+
+## Self-serve (AM3)
+
+- **The organisation** sits in front of every route (`org.go`): each request
+  resolves the person's access — the org-wide switch (`off` / `list` /
+  `everyone`), their row on the list, their role (`member` / `publisher` /
+  `admin`) and whom to ask. Break-glass admins come from
+  `AGENT_MARKET_ADMIN_EMAILS`. A run shared with them is readable with a
+  sign-in alone (`/shared/*`), even without access of their own.
+- **Budgets** (`budget.go`) are checked by the runner before every costly
+  step: the person's month, their department's, the install's. One that runs
+  out parks the run like a question does — `awaiting_input`, no slot, no
+  spend — with a notice naming who to ask; the hourly pass and every admin
+  budget change resume what has room again.
+- **The catalog's owner** (`catalog.go`): `catalog_state` per agent; a
+  disabled agent's queued runs stop and nothing new starts (the control
+  plane refuses, and the runner re-checks at claim).
+- **Samples** are the runner's own: every released version's self-test,
+  once, under an install nobody owns (`status = 'catalog'`); the catalog and
+  the data sheet read them.
+- **Sign-off** is a job (`kind = 'review'`) like a re-render: the runner's
+  current engine stamps the parent run's newest files (op `stamp_review`) and
+  publishes them as the next version of each; no step of the run is re-run.
+- **Every error** a person can reach comes from one table (`messages.go`):
+  what happened, what to do next, whether their data is safe.
