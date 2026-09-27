@@ -54,7 +54,13 @@ func TestPDFOnlyWhenTheConverterCanMakeIt(t *testing.T) {
 		}
 		return false
 	}
-	if has(formatQuestion(nil, false)) || !has(formatQuestion(nil, true)) {
+	all := []string{"docx", "pptx", "xlsx", "pdf"}
+	if has(formatQuestion(all, false)) || !has(formatQuestion(all, true)) {
 		t.Fatal("the more-files card offers PDF exactly when it can be made")
+	}
+	// AM3: an agent that makes one workbook is never offered a report or slides it cannot make
+	inv := formatQuestion([]string{"xlsx"}, true)
+	if len(inv.Options) != 1 || string(inv.Options[0].Value) != `"xlsx"` || string(inv.Default) != `"xlsx"` {
+		t.Fatalf("the invoice agent's more-files card: %+v", inv.Options)
 	}
 }
