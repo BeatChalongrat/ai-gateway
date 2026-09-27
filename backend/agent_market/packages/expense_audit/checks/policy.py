@@ -6,8 +6,15 @@ Three inputs, three roles — kept apart on purpose:
     fixtures/expense/policy.json): every limit, threshold, rate and prohibited word a rule uses.
     A run reads the stored table and nothing else for a number. No table (or an incomplete one)
     means no audit: preflight asks for it, compute refuses — a limit is never guessed;
-  * the holiday calendar (install default ``holidays``, {ISO date: name}); without one, the
-    package's own Thai public-holiday calendar (data/holidays_th.json) — the output says which;
+  * the holiday calendar (install default ``holidays``). The holiday check fails CLOSED (AM3): it
+    runs only on the company's own calendar, confirmed by a person —
+    {"schema": "am3.holidays.v1", "kind": "company", "confirmed": true, "confirmed_by": …,
+    "confirmed_at": …, "dates": {ISO date: name}}. Anything else (no setting, an AM2 plain map,
+    another kind, not confirmed) turns the holiday check off and the output says so; weekends
+    are still checked (they need no calendar). Bank holidays, government holidays and a
+    company's own holidays are three different calendars and not interchangeable: for an
+    expense audit only the company's is right. The package's data/holidays_th.json is the
+    government calendar, a starting point a company may copy and confirm — never used by a rule;
   * a KB policy document (a .docx / .txt uploaded with the run): **context only**. Its paragraphs
     are quoted next to the category they talk about, a number in them that differs from the table
     is reported as a difference ("the table wins"), and nothing in it ever becomes a limit.
@@ -173,20 +180,32 @@ def load_policy(defaults: dict | None) -> tuple[Policy | None, list[str]]:
 
 @dataclass
 class Calendar:
-    dates: dict                            # date → name
-    source: str                            # install | package
+    dates: dict                            # date → name (empty while the check is off)
+    source: str                            # company | none
     years: set = field(default_factory=set)
     note: str = ""
     problems: list = field(default_factory=list)
+    active: bool = False                   # the holiday check runs only on a confirmed company calendar
+    reason: str = ""                       # why it is off: not_set | not_company | unconfirmed
+    confirmed_by: str = ""
+    confirmed_at: str = ""
 
     def holiday(self, d: _dt.date | None) -> str | None:
-        return None if d is None else self.dates.get(d)
+        return None if d is None or not self.active else self.dates.get(d)
 
     def covers(self, year: int) -> bool:
         return year in self.years
 
 
+OFF_NOTE = {
+    "not_set": "ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท",
+    "not_company": "ปฏิทินวันหยุดที่ตั้งไว้ไม่ได้ระบุว่าเป็นปฏิทินวันหยุดของบริษัท (วันหยุดธนาคารหรือวันหยุดราชการใช้แทนไม่ได้)",
+    "unconfirmed": "ปฏิทินวันหยุดของบริษัทที่ตั้งไว้ยังไม่ได้ยืนยัน",
+}
+
+
 def _package_calendar() -> dict:
+    """The government (ราชการ) calendar the package ships: a starting point to copy, never a rule's input."""
     try:
         from importlib.resources import files
 
@@ -209,23 +228,33 @@ def _parse_day(v) -> _dt.date | None:
         return TH.parse_date(str(v))
 
 
+def government_calendar() -> dict:
+    """The government calendar the package ships ({"dates": {ISO: name}, "source", "unverified"}), for
+    a person to copy into the company's own calendar and confirm. No rule reads it."""
+    return _package_calendar()
+
+
 def calendar_for(defaults: dict | None) -> Calendar:
-    """The install's calendar replaces the package's whole (a company keeps its own holidays)."""
+    """The holiday check's calendar: the company's own, confirmed by a person — or none (check off)."""
     raw = (defaults or {}).get("holidays")
-    if isinstance(raw, dict) and isinstance(raw.get("dates"), dict):
-        raw = raw["dates"]
-    if isinstance(raw, dict) and raw:
-        dates, problems = {}, []
-        for k, v in raw.items():
-            d = _parse_day(k)
-            if d is None:
-                problems.append(f"holidays: {k!r} ไม่ใช่วันที่")
-                continue
-            dates[d] = str(v or "วันหยุด")
-        return Calendar(dates, "install", {d.year for d in dates}, "ปฏิทินวันหยุดที่ตั้งไว้ใน agent", problems)
-    pkg = _package_calendar()
-    dates = {_dt.date.fromisoformat(k): v for k, v in pkg["dates"].items()}
-    return Calendar(dates, "package", set(pkg.get("years") or {d.year for d in dates}), pkg.get("source", ""))
+    if not raw:
+        return Calendar({}, "none", set(), OFF_NOTE["not_set"], reason="not_set")
+    if not isinstance(raw, dict) or raw.get("kind") != "company" or not isinstance(raw.get("dates"), dict):
+        # an AM2 plain {date: name} map, or a calendar of another kind: nobody said it is the company's
+        return Calendar({}, "none", set(), OFF_NOTE["not_company"], reason="not_company")
+    if raw.get("confirmed") is not True:
+        return Calendar({}, "none", set(), OFF_NOTE["unconfirmed"], reason="unconfirmed")
+    dates, problems = {}, []
+    for k, v in raw["dates"].items():
+        d = _parse_day(k)
+        if d is None:
+            problems.append(f"holidays: {k!r} ไม่ใช่วันที่")
+            continue
+        dates[d] = str(v or "วันหยุด")
+    years = {int(y) for y in raw.get("years") or [] if str(y).isdigit()} or {d.year for d in dates}
+    by, at = str(raw.get("confirmed_by") or "").strip(), str(raw.get("confirmed_at") or "").strip()
+    note = "ปฏิทินวันหยุดของบริษัท" + (f" ยืนยันโดย {by}" if by else "") + (f" เมื่อ {at[:10]}" if at else "")
+    return Calendar(dates, "company", years, note, problems, active=True, confirmed_by=by, confirmed_at=at)
 
 
 # ── the KB document: context only ───────────────────────────────────────────────

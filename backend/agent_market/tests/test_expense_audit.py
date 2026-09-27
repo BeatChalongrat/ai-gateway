@@ -31,6 +31,12 @@ def _load(name):
         return json.load(f)
 
 
+def _company(dates=None, **over):
+    """The company's own holiday calendar, confirmed by a person (AM3) — the only one the holiday check reads."""
+    return {"schema": "am3.holidays.v1", "kind": "company", "confirmed": True, "confirmed_by": "finance@example.test",
+            "confirmed_at": "2026-10-01T09:00:00+07:00", "dates": _load("holidays.json") if dates is None else dates, **over}
+
+
 def _policy(**patch):
     pol = _load("policy.json")
     for k, v in patch.items():
@@ -72,13 +78,84 @@ class Policy(unittest.TestCase):
         self.assertTrue(P.load_policy({"policy": got["policy"]})[1])       # incomplete until the owner fills it
 
     def test_calendar(self):
-        pkg = P.calendar_for({})
-        self.assertEqual(pkg.source, "package")
-        self.assertEqual(pkg.holiday(_dt.date(2026, 10, 13)), "วันนวมินทรมหาราช")
-        self.assertEqual(pkg.holiday(_dt.date(2026, 12, 7)), "ชดเชยวันพ่อแห่งชาติ")
-        own = P.calendar_for({"holidays": {"2026-10-16": "วันหยุดบริษัท"}})
-        self.assertEqual((own.source, own.holiday(_dt.date(2026, 10, 16)), own.holiday(_dt.date(2026, 10, 13))),
-                         ("install", "วันหยุดบริษัท", None))
+        own = P.calendar_for({"holidays": _company({"2026-10-16": "วันหยุดบริษัท"})})
+        self.assertEqual((own.source, own.active, own.holiday(_dt.date(2026, 10, 16)), own.holiday(_dt.date(2026, 10, 13))),
+                         ("company", True, "วันหยุดบริษัท", None))
+        self.assertIn("finance@example.test", own.note)
+
+
+class HolidayFailsClosed(unittest.TestCase):
+    """AM3 (note-AM2-three-loose-ends §3): an unverified holiday list inside a deterministic rule produces
+    confident, wrong audit exceptions. The holiday check runs only on the company's own calendar that a
+    person confirmed; without one it is off, the output says so, and weekends are still checked."""
+
+    TUE_HOLIDAY = "2026-10-13"   # วันนวมินทรมหาราช, a Tuesday
+    SATURDAY = "2026-10-10"
+
+    def test_no_calendar_means_no_holiday_check(self):
+        cal = P.calendar_for({})
+        self.assertEqual((cal.active, cal.reason, cal.source), (False, "not_set", "none"))
+        self.assertIsNone(cal.holiday(_dt.date(2026, 10, 13)))
+
+    def test_the_government_calendar_the_package_ships_is_never_a_rules_input(self):
+        self.assertIsNone(P.calendar_for({}).holiday(_dt.date(2026, 12, 7)))
+        gov = P.government_calendar()
+        self.assertEqual(gov["kind"], "government")
+        self.assertIn("ไม่ใช่วันหยุดธนาคาร", gov["source"])
+        self.assertIn("2026-07-30", gov["unverified"])                   # เข้าพรรษา: derived, not from an announcement
+        # the lunar dates checked against the 2569 bank-holiday list
+        for d, name in (("2026-03-03", "มาฆบูชา"), ("2026-05-31", "วิสาขบูชา"), ("2026-06-01", "วิสาขบูชา"), ("2026-07-29", "อาสาฬหบูชา")):
+            self.assertIn(name, gov["dates"][d])
+            self.assertIn(d, gov["checked"])
+
+    def test_a_plain_map_or_another_kind_is_not_the_company_calendar(self):
+        for raw in (_load("holidays.json"), {"dates": _load("holidays.json")}, _company(kind="bank"),
+                    {k: v for k, v in _company().items() if k != "kind"}):
+            cal = P.calendar_for({"holidays": raw})
+            self.assertEqual((cal.active, cal.reason), (False, "not_company"), raw)
+            self.assertIsNone(cal.holiday(_dt.date(2026, 10, 13)))
+
+    def test_an_unconfirmed_company_calendar_is_off(self):
+        for over in ({"confirmed": False}, {"confirmed": "yes"}):
+            cal = P.calendar_for({"holidays": _company(**over)})
+            self.assertEqual((cal.active, cal.reason), (False, "unconfirmed"))
+        self.assertTrue(P.calendar_for({"holidays": _company()}).active)
+
+    def _weekend_fact(self, date, holidays):
+        claim = _claim("C01", "E001", date, "taxi", "แท็กซี่", "300.00", desc="เดินทางไปพบลูกค้า")
+        cal = P.calendar_for({"holidays": holidays} if holidays is not None else {})
+        a = R.audit([claim], policy=_policy(), calendar=cal)[0]
+        return a.facts["weekend_holiday"]
+
+    def test_a_weekday_holiday_is_flagged_only_with_a_confirmed_company_calendar(self):
+        for holidays in (None, _load("holidays.json"), _company(confirmed=False)):
+            f = self._weekend_fact(self.TUE_HOLIDAY, holidays)
+            self.assertEqual((f.status, f.evidence["holiday_check"]), ("pass", "off"), holidays)
+        f = self._weekend_fact(self.TUE_HOLIDAY, _company())
+        self.assertEqual((f.status, f.code, f.evidence["holiday"], f.evidence["holiday_check"]),
+                         ("fail", "weekend_or_holiday", "วันนวมินทรมหาราช", "on"))
+
+    def test_weekends_are_still_checked_without_a_calendar(self):
+        f = self._weekend_fact(self.SATURDAY, None)
+        self.assertEqual((f.status, f.code, f.evidence["holiday_check"]), ("fail", "weekend_or_holiday", "off"))
+
+    def test_the_output_says_the_holiday_check_is_off(self):
+        from agent_market.packages.expense_audit.scripts.workbook import _calendar_line
+        from agent_market.tests import expensekit as K
+
+        res = K.run_case({"id": "cal_off", "expect": {}, "files": ["claims_2569-10.xlsx", "receipts/*.pdf"]}, defaults={**K.defaults_for({}), "holidays": _load("holidays.json")})
+        codes = {a["code"]: a["text"] for a in res["first"]["assumptions"]}
+        self.assertIn("holiday_check_off", codes)
+        self.assertIn("เสาร์–อาทิตย์", codes["holiday_check_off"])
+        self.assertNotIn("package_holiday_calendar", codes)
+        cal = res["computed"]["policy"]["calendar"]
+        self.assertEqual((cal["active"], cal["reason"], cal["dates"]), (False, "not_company", {}))
+        self.assertIn("ไม่ได้ใช้", _calendar_line(cal))
+        on = K.run_case({"id": "cal_on", "expect": {}, "files": ["claims_2569-10.xlsx", "receipts/*.pdf"]}, defaults={**K.defaults_for({}), "holidays": _company()})
+        codes = {a["code"]: a["text"] for a in on["first"]["assumptions"]}
+        self.assertIn("company_holiday_calendar", codes)
+        self.assertNotIn("holiday_check_off", codes)
+        self.assertIn("finance@example.test", _calendar_line(on["computed"]["policy"]["calendar"]))
 
     def test_the_kb_document_is_context_only(self):
         p = _policy()
@@ -95,7 +172,7 @@ class Policy(unittest.TestCase):
 class Rules(unittest.TestCase):
     def setUp(self):
         self.p = _policy()
-        self.cal = P.calendar_for({"holidays": _load("holidays.json")})
+        self.cal = P.calendar_for({"holidays": _company()})
 
     def audit(self, claims, **kw):
         return {a.claim.id: a for a in R.audit(claims, policy=self.p, calendar=self.cal, **kw)}
@@ -175,7 +252,7 @@ class Rules(unittest.TestCase):
 class Cards(unittest.TestCase):
     def setUp(self):
         self.p = _policy()
-        self.cal = P.calendar_for({"holidays": _load("holidays.json")})
+        self.cal = P.calendar_for({"holidays": _company()})
 
     def test_judgement_is_a_card_per_claim_and_a_skipped_card_goes_to_a_person(self):
         audits = R.audit([_claim("C07", "E4", "2026-10-10", "ค่าอาหาร", "ร้านกาแฟ", "450.00"),
@@ -277,7 +354,7 @@ class Hooks(unittest.TestCase):
         with open(os.path.join(os.path.dirname(EA.__file__), "agent.json"), encoding="utf-8") as f:
             m = json.load(f)
         self.assertEqual((m["id"], m["version"], m["python_package"], m["narrative"]),
-                         ("sran.expense-audit", "1.0.0", "expense_audit", "rules"))
+                         ("sran.expense-audit", "1.1.0", "expense_audit", "rules"))
         self.assertEqual(m["install"]["questions"], ["company", "policy", "theme", "formats"])
         self.assertEqual(sorted(m["capabilities"]["required"]),
                          sorted(["document.extract.e2", "compute.python.decimal", "deliverable.table.xlsx", "spreadsheet.read.xlsx"]))

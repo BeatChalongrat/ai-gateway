@@ -36,6 +36,14 @@ KB_TITLE = "บริบทจากเอกสารระเบียบ — 
 NOT_A_LIMIT = "ไม่ใช้ (บริบทเท่านั้น)"
 
 
+def _calendar_line(cal: dict) -> str:
+    """Which holiday calendar the audit used — or that the holiday check was off (AM3: fail closed)."""
+    if cal.get("active"):
+        return f"ปฏิทินวันหยุด: {cal.get('note') or 'ปฏิทินวันหยุดของบริษัท'}"
+    return (f"ปฏิทินวันหยุด: ไม่ได้ใช้ — {cal.get('note') or 'ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท'} "
+            "จึงยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ รอบนี้ตรวจเฉพาะวันเสาร์–อาทิตย์")
+
+
 def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
 
@@ -124,8 +132,7 @@ class ExpenseWorkbook:
             f"วงเงินทุกตัวมาจาก{src} (ชีต “นโยบายที่ใช้”) เอกสารระเบียบที่แนบมาใช้เป็นบริบทเท่านั้น ไม่เคยเป็นที่มาของวงเงิน",
             "ตัวเลขทุกตัวมาจากไฟล์รายการเบิก ตารางนโยบาย หรือใบเสร็จที่อ่านด้วยสคริปต์ (หรือผู้ใช้พิมพ์/ยืนยัน) "
             "โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใดในไฟล์นี้",
-            ("ปฏิทินวันหยุด: ที่ตั้งไว้ใน agent" if pol["calendar"]["source"] == "install"
-             else "ปฏิทินวันหยุด: ปฏิทินวันหยุดราชการที่มากับ agent (ยังไม่ได้ตั้งของบริษัท)"),
+            _calendar_line(pol["calendar"]),
         ]
         for m in c.get("models") or []:
             notes.append(f"โมเดลที่เห็นใบเสร็จ: {m['model']} ({'รันในองค์กร' if m['self_hosted'] else 'ผู้ให้บริการภายนอก'}) "
@@ -233,9 +240,13 @@ class ExpenseWorkbook:
         ws.cell(row=r + 3, column=2).number_format = MONEY
         r = r + 1 + len(settings) + 2
         cal = pol["calendar"]
-        self._section(ws, r, "วันหยุดในเดือนที่ตรวจ · " + ("ปฏิทินที่ตั้งไว้ใน agent" if cal["source"] == "install"
-                                                         else "ปฏิทินวันหยุดราชการที่มากับ agent"))
-        hol = [[d, n] for d, n in cal["dates"].items()] or [["-", "ไม่มีวันหยุดในเดือนที่ตรวจ"]]
+        if cal.get("active"):
+            self._section(ws, r, "วันหยุดในเดือนที่ตรวจ · " + (cal.get("note") or "ปฏิทินวันหยุดของบริษัท"))
+            hol = [[d, n] for d, n in cal["dates"].items()] or [["-", "ไม่มีวันหยุดในเดือนที่ตรวจ"]]
+        else:
+            self._section(ws, r, "ปฏิทินวันหยุด · ไม่ได้ใช้")
+            hol = [["-", f"ไม่ได้ตรวจวันหยุดนักขัตฤกษ์: {cal.get('note') or 'ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท'} "
+                         "ตรวจเฉพาะวันเสาร์–อาทิตย์"]]
         self._table(ws, r + 1, ["วันที่", "วันหยุด"], hol, freeze=False)
         r = r + 1 + len(hol) + 2
         self._section(ws, r, KB_TITLE)

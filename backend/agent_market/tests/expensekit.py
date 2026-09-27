@@ -76,13 +76,22 @@ def _patch(obj: dict, patch: dict) -> dict:
     return out
 
 
+def _resolve(v):
+    """"fixture:<file>" is the fixture as it is; "company:<file>" is that holiday list as the company's own
+    calendar, confirmed by a person (AM3: the holiday check reads nothing else)."""
+    if isinstance(v, str) and v.startswith("fixture:"):
+        return _load(os.path.join(FIX, v.split(":", 1)[1]))
+    if isinstance(v, str) and v.startswith("company:"):
+        return {"schema": "am3.holidays.v1", "kind": "company", "confirmed": True, "confirmed_by": "finance@example.test",
+                "confirmed_at": "2026-10-01T09:00:00+07:00", "dates": _load(os.path.join(FIX, v.split(":", 1)[1]))}
+    return v
+
+
 def defaults_for(case: dict) -> dict:
-    base = load_cases()["defaults"]
+    base = {**load_cases()["defaults"], **(case.get("defaults_set") or {})}
     out = {}
     for k, v in base.items():
-        if isinstance(v, str) and v.startswith("fixture:"):
-            v = _load(os.path.join(FIX, v.split(":", 1)[1]))
-        out[k] = v
+        out[k] = _resolve(v)
     if "policy" in out:
         out["policy"] = _patch(out["policy"], case.get("policy_patch"))
     for k in case.get("defaults_drop") or []:
@@ -184,6 +193,13 @@ def check(case: dict, res: dict) -> list[str]:
     want_cards = exp.get("first_cards", {})
     if {k: sorted(v) for k, v in got_cards.items()} != {k: sorted(v) for k, v in want_cards.items()}:
         errors.append(f"first cards {got_cards}, expected {want_cards}")
+    said = {a["code"] for a in res["first"].get("assumptions") or []}
+    for code in exp.get("assumptions") or []:
+        if code not in said:
+            errors.append(f"assumption {code} missing (said {sorted(said)})")
+    for code in exp.get("not_assumptions") or []:
+        if code in said:
+            errors.append(f"assumption {code} should not be said")
 
     # 2 · every claim: the golden outcome, facts and reason codes (unless the case changes the policy)
     outcomes, facts = {}, {}

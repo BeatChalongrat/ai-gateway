@@ -1,15 +1,15 @@
 {
  "schema": "agent.market.eval.v1",
  "package": "sran.expense-audit",
- "note": "Files are the Phase A expense pack (fixtures/expense), paths relative to it. Every expected value comes from its golden output (expected.json, written from the spec), never from this package: 'golden' checks every claim's outcome, facts and reason codes against it ('golden_except' lists the claims a case changes on purpose, with their new expectations). Cards: unanswered ones take their default, as a skipped card does. 'defaults' is the install: the stored policy table and holiday calendar; 'policy_patch' edits the table for one case (null deletes a key). Checked on every case, whatever it says: no outcome but pass / exception / question, every run exception open for a person with its choices, every limit a fact used equal to the table's, the KB document never a limit, the workbook's own quality gate.",
- "defaults": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "policy": "fixture:policy.json", "holidays": "fixture:holidays.json"},
+ "note": "Files are the Phase A expense pack (fixtures/expense), paths relative to it. Every expected value comes from its golden output (expected.json, written from the spec), never from this package: 'golden' checks every claim's outcome, facts and reason codes against it ('golden_except' lists the claims a case changes on purpose, with their new expectations). Cards: unanswered ones take their default, as a skipped card does. 'defaults' is the install: the stored policy table and holiday calendar ('company:holidays.json' = that list as the company's own calendar, confirmed by a person — AM3: the holiday check reads nothing else; 'defaults_set' replaces a default for one case); 'policy_patch' edits the table for one case (null deletes a key). Checked on every case, whatever it says: no outcome but pass / exception / question, every run exception open for a person with its choices, every limit a fact used equal to the table's, the KB document never a limit, the workbook's own quality gate.",
+ "defaults": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "policy": "fixture:policy.json", "holidays": "company:holidays.json"},
  "cases": [
   {
    "id": "golden_month_cards_skipped",
    "note": "The October 2569 claims, all 13 receipts and the KB policy document. Judgement is asked for exactly the three golden question claims (C07 Saturday, C08 วันนวมินทรมหาราช, C14 'ค่าอาหาร'); nothing about the receipts (their totals are read with certainty); every rule failure is an exception with its golden reason code. The cards are skipped, so each question claim goes to a person as a review exception. The KB says meals 'ประมาณ 2,000'; the table's 1,500 decides C02, and the KB paragraph is quoted next to it as context.",
    "files": ["claims_2569-10.xlsx", "receipts/*.pdf", "policy_kb.docx"],
    "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
-              "golden": true, "kb_quoted": true,
+              "golden": true, "kb_quoted": true, "assumptions": ["company_holiday_calendar"], "not_assumptions": ["holiday_check_off"],
               "info_codes": {"C07": [], "C08": [], "C14": []}}
   },
   {
@@ -75,6 +75,26 @@
    "proposals": {"r_c01.pdf": {"total": "999.00"}},
    "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C08": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
               "golden": true, "model_documents": 0}
+  },
+  {
+   "id": "holiday_calendar_not_confirmed_is_off",
+   "note": "AM3: the install holds the October holidays as a plain list (AM2's shape) that nobody confirmed as the company's calendar. The holiday check is off: C08 (Tuesday 13 Oct, วันนวมินทรมหาราช) is asked nothing and passes; C07 (a Saturday) is still asked — weekends need no calendar; the output says the holiday check was off.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "defaults_set": {"holidays": "fixture:holidays.json"},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C08"],
+              "outcomes": {"C08": "pass"}, "facts": {"C08": {"weekend_holiday": "pass"}}, "review_codes": {"C08": []},
+              "assumptions": ["holiday_check_off"], "not_assumptions": ["company_holiday_calendar"]}
+  },
+  {
+   "id": "no_holiday_calendar_weekends_still_checked",
+   "note": "AM3: no holiday calendar at all. Same as above: the government calendar the package ships is never used by the rule.",
+   "files": ["claims_2569-10.xlsx", "receipts/*.pdf"],
+   "defaults_set": {"holidays": null},
+   "expect": {"first_cards": {"C07": ["expense_weekend_holiday"], "C14": ["expense_vague_purpose"]},
+              "golden": true, "golden_except": ["C08"],
+              "outcomes": {"C08": "pass"}, "facts": {"C08": {"weekend_holiday": "pass"}}, "review_codes": {"C08": []},
+              "assumptions": ["holiday_check_off"]}
   }
  ]
 }

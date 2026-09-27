@@ -512,8 +512,10 @@ def _weekend(c: Claim, calendar: Calendar, policy: Policy) -> Fact:
         return Fact("weekend_holiday", "skip", detail="ไม่มีวันที่")
     wd = c.date.weekday()
     hol = calendar.holiday(c.date)
+    # the holiday part runs only on the company's own confirmed calendar (AM3: fail closed); weekends always
     ev = {"policy_ref": "weekend_holiday", "rule": policy.weekend_holiday, "weekday": WEEKDAY_TH[wd], "holiday": hol,
-          "calendar": calendar.source, "calendar_covers_year": calendar.covers(c.date.year)}
+          "calendar": calendar.source, "holiday_check": "on" if calendar.active else "off",
+          "calendar_covers_year": calendar.covers(c.date.year) if calendar.active else None}
     if wd < 5 and not hol:
         return Fact("weekend_holiday", "pass", detail=WEEKDAY_TH[wd], evidence=ev)
     what = " และ".join(x for x in ((WEEKDAY_TH[wd] if wd >= 5 else ""), (f"วันหยุด{hol}" if hol else "")) if x)

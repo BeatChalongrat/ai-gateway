@@ -135,13 +135,18 @@ def _assumptions(rv: Review) -> list[dict]:
                             f"— ใช้ตาราง เอกสารเป็นบริบทเท่านั้น"})
     cal = rv.calendar
     years = sorted({c.date.year for c in rv.claims if c.date})
-    if cal.source == "package":
-        out.append({"code": "package_holiday_calendar", "source": "rule",
-                    "text": "ยังไม่ได้ตั้งปฏิทินวันหยุดของบริษัท ใช้ปฏิทินวันหยุดราชการที่มากับ agent"})
-    for y in years:
-        if not cal.covers(y):
-            out.append({"code": "holiday_calendar_missing_year", "source": "rule",
-                        "text": f"ปฏิทินวันหยุดไม่มีปี {y + 543} ตรวจได้เฉพาะเสาร์–อาทิตย์ของปีนั้น"})
+    if not cal.active:
+        # fail closed (AM3): no holiday is flagged from a calendar nobody confirmed as the company's
+        out.append({"code": "holiday_check_off", "source": "rule", "changes_numbers": True,
+                    "text": f"ยังไม่ได้ตรวจวันหยุดนักขัตฤกษ์ ({cal.note}) รอบนี้ตรวจเฉพาะวันเสาร์–อาทิตย์ "
+                            "ตั้งและยืนยันปฏิทินวันหยุดของบริษัทได้ในหน้าตั้งค่า agent"})
+    else:
+        out.append({"code": "company_holiday_calendar", "source": "rule",
+                    "text": f"ตรวจวันหยุดตาม{cal.note} และวันเสาร์–อาทิตย์"})
+        for y in years:
+            if not cal.covers(y):
+                out.append({"code": "holiday_calendar_missing_year", "source": "rule",
+                            "text": f"ปฏิทินวันหยุดของบริษัทไม่มีปี {y + 543} ตรวจได้เฉพาะเสาร์–อาทิตย์ของปีนั้น"})
     for copy, orig in rv.same_file:
         out.append({"code": "same_file_twice", "source": "rule",
                     "text": f"{copy.name} เป็นไฟล์เดียวกับ {orig.name} (ไบต์ตรงกันทุกตัว) นับครั้งเดียว"})
