@@ -601,9 +601,13 @@ const phases = {
       kill();
       await waitFor(async () => !running(), 15000);
     }
-    if (!fs.existsSync(SETUP)) throw new Error(`no installer at ${SETUP}`);
-    const r = spawnSync(SETUP, ["/S"], { encoding: "utf8", timeout: 300000 });
-    log(`installer ${VERSION} /S exit ${r.status}`);
+    if (process.env.AM5_INSTALL === "0") {
+      log(`installer not run (AM5_INSTALL=0): the app that is installed is relaunched`);
+    } else {
+      if (!fs.existsSync(SETUP)) throw new Error(`no installer at ${SETUP}`);
+      const r = spawnSync(SETUP, ["/S"], { encoding: "utf8", timeout: 300000 });
+      log(`installer ${VERSION} /S exit ${r.status}`);
+    }
     await L.wait(3000);
     kill(); // a one-click NSIS may start the app: close it for the CDP launch
     await waitFor(async () => !running(), 15000);
@@ -627,7 +631,8 @@ const phases = {
     await journey(client);
   },
   async cleanup() {
-    const s = L.TARGET === "live" ? await connectDesktop() : await openWeb(L.TS_USER.email);
+    // "cleanup web": from the browser of its own (the app is not needed, and is not touched)
+    const s = L.TARGET === "live" && process.argv[3] !== "web" ? await connectDesktop() : await openWeb(process.env.AM5_EMAIL || L.TS_USER.email);
     if (!s.page.url().startsWith(WEB())) await s.page.goto(`${WEB()}/chat`, { waitUntil: "load" });
     // a test round's files are not kept for five years: its evidence is removed, with the reason
     for (const id of state.runs || []) {

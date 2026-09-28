@@ -72,6 +72,11 @@ both(os.path.join(AM4, "ui", "member_09_model_control.png"), os.path.join(tour, 
 both(os.path.join(AM4, "walk", "live", "desktop", "03-workspace-empty.png"), os.path.join(live, "desktop", "03-workspace-empty.png"),
      "before (AM4, live desktop): the workspace", "after (AM5, live desktop)", "workspace_before_after.png", 900)
 
+# the credits badge over the open model menu (the app's window at 125 %), and after
+for client, title in (("desktop", "desktop 0.1.0-e60"), ("web-125", "web, a window at 125 %")):
+    both(os.path.join(live, client, "20-model-menu-before-08ce3f1.png"), os.path.join(live, client, "20-model-menu.png"),
+         f"before (08ce3f1): {title}", "after (65cc6d0)", f"badge_before_after_{client}.png")
+
 for m in made:
     print(os.path.relpath(m, os.path.join(HERE, "..", "..", "..")))
 print(f"{len(made)} images")

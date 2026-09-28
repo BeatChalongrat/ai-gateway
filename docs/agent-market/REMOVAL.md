@@ -86,7 +86,10 @@ for display, and changes nothing there):
     the file the class now lives in).
   The chat's behaviour is what it was (its own tests pass unchanged apart from
   the two paths above); with the flag off the shared components are simply the
-  chat's.
+  chat's. One thing the chat gained with them and loses with the revert: the
+  composer no longer reads a difference of under one pixel between the window
+  and what is visible of it as a keyboard (the desktop app at 125 %), so its
+  menus are not drawn under the credits badge.
 - AM5 adds no table, no column and no migration: the matching engine
   (`backend/agent_market/engine/e3/`) and the bank reconciliation
   (`backend/agent_market/packages/bank_reconciliation/`) are files of the
