@@ -365,7 +365,7 @@ def judge(state: State, *, org: dict | None = None, history: list[dict] | None =
                      "page_quality": [{"page": p.number, "method": p.method, "ocr_confidence": p.ocr_conf, "dpi": p.dpi,
                                        "unit": p.unit, "width": round(p.width, 1), "height": round(p.height, 1)} for p in pages],
                      "image_transform": state.transform, "copy_mark": copy_mark, "vat_mode": vmode,
-                     "notice": ("รูปถ่ายใบเสร็จอ่านได้แบบพยายามที่สุดเท่านั้น (best-effort): ระบบอ่านแค่ผู้ขาย วันที่ ยอดรวม VAT "
+                     "notice": ("รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัดเท่านั้น: ระบบอ่านแค่ผู้ขาย วันที่ ยอดรวม VAT "
                                 "และเลขผู้เสียภาษี และจะถามกลับทุกครั้งที่ไม่มั่นใจ") if triage else None},
         "document_type": doc_type.to_dict(),
         "method": method,

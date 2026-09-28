@@ -58,10 +58,13 @@ def assign_roles(files: list[ParsedFile], answers: dict) -> dict[str, str]:
             ledgers.append(pf)
         else:
             roles[pf.name] = "unknown"
-    # Latest data wins primary; the rest are prior-period candidates.
+    # Latest data wins primary; the rest are prior-period candidates. A tie is
+    # broken by the file's content (more rows in that month, then its bytes'
+    # hash) — never by upload order or name (AM4).
     def latest(pf):
         ps = [r.period for r in pf.rows if r.period] or [pf.period_hint or ""]
-        return max(ps)
+        top = max(ps)
+        return (top, sum(1 for r in pf.rows if r.period == top), pf.sha256)
     ledgers.sort(key=latest, reverse=True)
     for i, pf in enumerate(ledgers):
         roles[pf.name] = "primary" if i == 0 else "prior"
@@ -472,17 +475,13 @@ def check_period(primary: ParsedFile, period: str | None, source: str, answers: 
         stray.append(r)
     if not stray:
         return out, assumptions
-    remembered = (defaults.get("answers") or {}).get("period_mixed")
     total = sum((r.debit for r in stray), Decimal(0))
     stray_months = sorted({r.period for r in stray})
     date_span = f"{min(r.date for r in stray).strftime('%d/%m')}–{max(r.date for r in stray).strftime('%d/%m')}"
     if answers.get("period_mixed") is not None:
         return out, assumptions
-    if remembered is not None:
-        assumptions.append({"code": "period_mixed", "source": "remembered", "value": remembered,
-                            "text": f"ใช้ค่าที่จำไว้: {'ตัดออก' if remembered == 'exclude' else 'นับรวม'} "
-                                    f"{fmt_int(len(stray))} รายการที่ลงวันที่นอกงวด ({', '.join(stray_months)})"})
-        return out, assumptions
+    # AM4: never answered from an earlier round — September's "leave the October rows out" must not
+    # quietly shape October. The question is about these rows, so it is not rememberable.
     label = period_label_th(period).split(" ")[0]
     others = ", ".join(period_label_th(p).split(" ")[0] for p in stray_months)
     out.append(finding(
@@ -496,7 +495,7 @@ def check_period(primary: ParsedFile, period: str | None, source: str, answers: 
                   "rows": [[r.row, r.date.isoformat(), r.doc_no, r.account_code, r.description[:40],
                             str(r.debit), str(r.credit)] for r in stray[:50]],
                   "columns": ["แถว", "วันที่", "เลขที่", "บัญชี", "คำอธิบาย", "เดบิต", "เครดิต"]},
-        rememberable=True, subject="", facts={"count": len(stray), "total": str(total), "period": period},
+        rememberable=False, subject="", facts={"count": len(stray), "total": str(total), "period": period},
     ))
     return out, assumptions
 
@@ -506,9 +505,11 @@ def check_currency(primary: ParsedFile, base: str, answers: dict, defaults: dict
     if not foreign or answers.get("currency_mixed") is not None:
         return [], []
     remembered = (defaults.get("answers") or {}).get("currency_mixed")
-    if remembered is not None:
+    # AM4: only the export's convention carries over ("the amounts are already baht"); leaving
+    # rows out is asked again every round.
+    if remembered == "amounts_in_base":
         return [], [{"code": "currency_mixed", "source": "remembered", "value": remembered,
-                     "text": "ใช้ค่าที่จำไว้เรื่องรายการสกุลเงินอื่น"}]
+                     "text": "ใช้ค่าที่จำไว้: ยอดเงินของรายการสกุลอื่นในไฟล์เป็นบาทแล้ว"}]
     rows = [r for r in primary.rows if r.currency != base]
     names = ", ".join(f"{c} {fmt_int(n)} รายการ" for c, n in foreign.items())
     return [finding(

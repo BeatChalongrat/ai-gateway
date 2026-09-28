@@ -201,7 +201,7 @@ class InvoiceWorkbook:
             notes.append(f"โมเดลที่เห็นเอกสาร: {m['model']} ({'รันในองค์กร' if m['self_hosted'] else 'ผู้ให้บริการภายนอก'}) "
                          f"อ่านซ้ำ {len(m['documents'])} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น")
         if any(d["tier"] == "photo" for d in self.c["documents"]):
-            notes.append("รูปถ่ายใบเสร็จอ่านแบบพยายามที่สุด (best-effort): บันทึกเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี")
+            notes.append("รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัด: บันทึกเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี")
         for n in notes:
             cell = ws.cell(row=r, column=1, value=n)
             cell.font = Font(name=self.font, size=9, color=self.p["muted"])

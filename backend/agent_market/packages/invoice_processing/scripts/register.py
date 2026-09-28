@@ -36,7 +36,7 @@ DOC_TYPE_TH = {
     "invoice": "ใบแจ้งหนี้", "credit_note": "ใบลดหนี้", "debit_note": "ใบเพิ่มหนี้", "wht_certificate": "หนังสือรับรองหัก ณ ที่จ่าย",
     "quotation": "ใบเสนอราคา", "unknown": "ไม่ทราบชนิด",
 }
-TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (best-effort)"}
+TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (อ่านได้เท่าที่ภาพชัด)"}
 
 # reason codes (the exceptions sheet and the report list them with these words)
 REASON_TH = {
@@ -238,6 +238,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
     quotable = {"documents": str(counts["documents"]), "included": str(counts["included"]),
                 "excluded": str(counts["excluded"]), "total_thb": fmt_money(totals["total"]),
                 "vat_thb": fmt_money(totals["vat_amount"])}
+    citations = _citations(documents, tot, exceptions)
     fallback = {"summary": (f"รอบนี้ได้รับเอกสาร {counts['documents']} ฉบับ บันทึกเข้าทะเบียน {counts['included']} ฉบับ "
                             f"ยอดรวม {fmt_money(totals['total'])} บาท ภาษีมูลค่าเพิ่ม {fmt_money(totals['vat_amount'])} บาท"
                             + (f" และมี {counts['excluded']} ฉบับที่ไม่ได้บันทึก ดูเหตุผลในชีตข้อยกเว้น" if counts["excluded"] else "")),
@@ -252,10 +253,58 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
             "index_entries": index, "models": models_list,
             "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback,
             # the runner's generic view of computed.json
-            "lines": [], "ratios": [], "top_movements": [], "citations": [],
+            "lines": [], "ratios": [], "top_movements": [], "citations": citations,
             "excluded": [{"code": e["code"], "reason": e["reason"], "name": e["name"]} for e in exceptions if e["severity"] == "excluded"],
             "source": {"documents": [{"name": d["name"], "sha256": d["sha256"], "tier": d["tier"]} for d in documents]},
             "script": "packages/invoice_processing/scripts/register.py"}
+
+
+def _citations(documents: list[dict], tot: dict, exceptions: list[dict]) -> list[dict]:
+    """How each figure of the summary sheet was made (AM4): the provenance an answer to "why is this
+    figure what it is" is built from, and nothing else — the same shape as the financial report's
+    citations. Every figure lists the documents it adds up (their own values) and the ones left out
+    (with the reason), so "why 0.00" is answered from the register, not guessed."""
+    included = [d for d in documents if d["status"] == "included"]
+    left_out = [{"file": e["name"], "reason": e["reason"]} for e in exceptions if e["severity"] == "excluded"]
+
+    def parts(field: str, note=None) -> list[dict]:
+        return [{"file": d["name"], "value": d.get(f"thb_{field}"), "note": note(d) if note else ""} for d in included]
+
+    def printed(field: str):
+        return lambda d: "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ" if d.get(f"thb_{field}") is None else "ตามที่เอกสารพิมพ์"
+
+    def payable_note(d: dict) -> str:
+        if d.get("thb_payable") is None:
+            return "ไม่มียอดรวม จึงไม่ได้นับ"
+        return ("ยอดรวมหักภาษีหัก ณ ที่จ่าย (เอกสารไม่ได้พิมพ์ยอดชำระสุทธิ)" if d.get("payable_computed")
+                else "ยอดชำระสุทธิตามที่เอกสารพิมพ์")
+
+    def c(cid: str, label: str, field: str, formula: str, aliases: list[str], note=None, value=None) -> dict:
+        return {"id": cid, "label": label, "value": value if value is not None else tot.get(field),
+                "formula": formula, "sources": parts(field, note), "left_out": left_out, "aliases": aliases,
+                "script": "packages/invoice_processing/scripts/register.py"}
+
+    return [
+        c("i1", "ยอดก่อน VAT (บาท)", "subtotal", "ผลรวมยอดก่อนภาษีมูลค่าเพิ่มของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
+          ["ยอดก่อน vat", "ยอดก่อนภาษี", "มูลค่าก่อนภาษี"], printed("subtotal")),
+        c("i2", "ภาษีมูลค่าเพิ่ม (บาท)", "vat_amount", "ผลรวมภาษีมูลค่าเพิ่มที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
+          ["ภาษีมูลค่าเพิ่ม", "vat", "ภาษีซื้อ"], printed("vat_amount")),
+        c("i3", "ยอดรวม (บาท)", "total", "ผลรวมยอดรวม (รวมภาษีมูลค่าเพิ่ม) ของเอกสารที่บันทึกเข้าทะเบียน เป็นเงินบาท",
+          ["ยอดรวม", "รวมทั้งสิ้น"], printed("total")),
+        c("i4", "หัก ณ ที่จ่าย (บาท)", "wht_amount", "ผลรวมภาษีหัก ณ ที่จ่ายที่เอกสารที่บันทึกเข้าทะเบียนพิมพ์ไว้ เป็นเงินบาท",
+          ["หัก ณ ที่จ่าย", "ภาษีหัก ณ ที่จ่าย", "wht"], printed("wht_amount")),
+        c("i5", "ยอดชำระสุทธิตามเอกสาร (บาท)", "net_payable",
+          "ผลรวมยอดชำระสุทธิเฉพาะที่เอกสารพิมพ์ไว้ เอกสารที่ไม่ได้พิมพ์ยอดนี้ไม่ถูกนับ (ยอดที่ต้องจ่ายจริงดูที่ “ยอดที่ต้องชำระ”)",
+          ["ยอดชำระสุทธิ", "ชำระสุทธิ", "net payable"], printed("net_payable")),
+        c("i6", "ยอดที่ต้องชำระ (บาท)", "payable",
+          "ของแต่ละฉบับ: ยอดชำระสุทธิที่เอกสารพิมพ์ไว้ ถ้าไม่ได้พิมพ์ ใช้ยอดรวมหักภาษีหัก ณ ที่จ่าย แล้วรวมทุกฉบับที่บันทึกเข้าทะเบียน",
+          ["ยอดที่ต้องชำระ", "ต้องชำระ", "ต้องจ่าย", "ยอดจ่าย"], payable_note),
+        {"id": "i7", "label": "จำนวนเอกสารที่บันทึกเข้าทะเบียน", "value": str(len(included)), "unit": "count",
+         "formula": "เอกสารที่ผ่านการตรวจและไม่มีคำถามค้าง ส่วนเอกสารที่ถูกตัดออกอยู่ในชีตข้อยกเว้นพร้อมเหตุผล",
+         "sources": [{"file": d["name"], "value": None, "note": "บันทึก"} for d in included], "left_out": left_out,
+         "aliases": ["บันทึก", "จำนวนเอกสาร", "กี่ฉบับ", "ไม่ได้บันทึก", "ตัดออก"],
+         "script": "packages/invoice_processing/scripts/register.py"},
+    ]
 
 
 def confidence_buckets(provenance: list[dict]) -> dict:

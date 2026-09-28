@@ -9,12 +9,18 @@ Context, applied the same way on every pass:
 
 The same file uploaded twice counts once (a receipt keeps every name it was uploaded under, so a
 claim that names the copy still finds it — and the duplicate rule sees the same bytes twice).
+
+AM4: a receipt is what it contains, not what it is called. A claim names its receipt's file in the
+claims sheet; when no upload has that name (the file was renamed before it was sent), the one
+unlinked receipt whose total and date equal the claim's is linked to it — and the files say so.
+Two or more such receipts, or none: nothing is guessed; the claim asks for its receipt as before.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 
 from ....engine.thai import fmt_money
 from . import cards as CARDS
@@ -43,6 +49,7 @@ class Review:
     conflicts: list = field(default_factory=list)
     missing_refs: list = field(default_factory=list)   # (claim, the file name it names) not uploaded
     unlinked: list = field(default_factory=list)        # receipts no claim names
+    content_links: list = field(default_factory=list)   # AM4: (claim, the name it names, the receipt linked by content)
 
 
 def _claims(sheets: list[Upload]) -> list[R.Claim]:
@@ -96,12 +103,33 @@ def review(uploads: list[Upload], *, defaults: dict | None, answers: dict | None
             continue
         linked_keys.add(u.key)
         vat[u.key] = vat.get(u.key, False) or c.vat_claim
+    # AM4: a renamed receipt — linked by what it says (total and date), only when exactly one fits
+    content_links = []
+    if missing:
+        free = [u for u in receipts if u.key not in linked_keys]
+        wanted = {}
+        for c, ref in missing:
+            wanted[id(c)] = [u for u in free if _same_receipt(u, c)]
+        still = []
+        for c, ref in missing:
+            cands = [u for u in wanted[id(c)] if u.key not in linked_keys]
+            # the receipt fits this claim alone, and this claim is the only one it fits
+            if len(cands) == 1 and sum(1 for cc, _ in missing if cands[0] in wanted[id(cc)]) == 1:
+                u = cands[0]
+                linked_keys.add(u.key)
+                vat[u.key] = vat.get(u.key, False) or c.vat_claim
+                aliases.setdefault(u.key, []).append(ref)
+                content_links.append((c, ref, u))
+            else:
+                still.append((c, ref))
+        missing = still
     rr = RC.review(receipts, vat_claimed=vat, aliases=aliases, answers=answers, defaults=defaults, today=today,
                    proposals=proposals)
     views = {k: RC.view(r, final=final) for k, r in rr.items()}
     audits = R.audit(claims, policy=policy, calendar=calendar, receipts=list(views.values()), history=history) if policy else []
     rv = Review(policy, problems, calendar, sheets, rr, views, kb, others, same_file, claims, audits,
-                missing_refs=missing, unlinked=[rr[u.key] for u in receipts if u.key not in linked_keys])
+                missing_refs=missing, unlinked=[rr[u.key] for u in receipts if u.key not in linked_keys],
+                content_links=content_links)
     if policy is not None:
         rv.context, rv.conflicts = P.kb_context(policy, kb, defaults.get("policy_kb"))
 
@@ -110,7 +138,7 @@ def review(uploads: list[Upload], *, defaults: dict | None, answers: dict | None
         rv.findings.append(CARDS.no_policy(problems))
     if not sheets:
         rv.findings.append(CARDS.missing_claims([u.name for u in others if u.data.get("reason") == "unrecognised_sheet"]))
-    for k in sorted(rr, key=lambda k: rr[k].up.name):
+    for k in sorted(rr):  # content order (the key is the bytes' hash), not the file names (AM4)
         if k in linked_keys:
             rv.findings += rr[k].findings
     rv.findings += CARDS.cards_for(audits, answers)
@@ -118,8 +146,28 @@ def review(uploads: list[Upload], *, defaults: dict | None, answers: dict | None
     return rv
 
 
+def _field(u: Upload, name: str):
+    f = ((u.data.get("extraction") or {}).get("fields") or {}).get(name) or {}
+    return f.get("normalized")
+
+
+def _same_receipt(u: Upload, c) -> bool:
+    """The receipt's own total and date are the claim's (a link by content, never by name)."""
+    total, date = _field(u, "total"), _field(u, "document_date")
+    if total is None or date is None or c.amount is None or c.date is None:
+        return False
+    try:
+        return Decimal(str(total)) == Decimal(str(c.amount)) and str(date)[:10] == c.date.isoformat()
+    except (InvalidOperation, ValueError):
+        return False
+
+
 def _assumptions(rv: Review) -> list[dict]:
     out = []
+    for c, ref, u in rv.content_links:
+        out.append({"code": "receipt_matched_by_content", "source": "rule",
+                    "text": f"รายการ {c.label} ระบุใบเสร็จ “{ref}” แต่ไม่มีไฟล์ชื่อนี้ — ใช้ “{u.name}” แทน "
+                            f"เพราะยอดรวมและวันที่ในใบเสร็จตรงกับรายการนี้ (และตรงกับรายการนี้เพียงรายการเดียว)"})
     p = rv.policy
     if p is not None and p.source == "package_sample":
         out.append({"code": "package_sample_policy", "source": "rule",

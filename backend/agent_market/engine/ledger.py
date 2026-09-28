@@ -141,9 +141,10 @@ def _is_skip_row(texts: list[str]) -> bool:
     return any(first.startswith(w) for w in _SKIP_WORDS)
 
 
-def _classify(hm: HeaderMap, sheet: Sheet, title: str, file_name: str) -> str:
+def _classify(hm: HeaderMap, sheet: Sheet, title: str) -> str:
+    """What the file is, from its columns and its own printed title — never its name (AM4)."""
     f = hm.fields
-    title_n = norm(title + " " + file_name)
+    title_n = norm(title)
     has_amounts = ("debit" in f and "credit" in f) or "amount" in f
     if "budget" in f or (hm.month_columns and "account_code" in f and not has_amounts):
         return "budget"
@@ -194,8 +195,9 @@ def parse_file(path: str, display_name: str, install_map: dict | None = None,
         return pf
     _, sheet, hm = best
     pf.sheet, pf.header = sheet.name, hm
-    pf.doc_type = _classify(hm, sheet, hm.title_text, wb.file_name)
-    pf.period_hint = find_period_in_text(hm.title_text) or find_period_in_text(wb.file_name)
+    pf.doc_type = _classify(hm, sheet, hm.title_text)
+    # A month printed in the sheet's title; one only in the file's name is not evidence (AM4).
+    pf.period_hint = find_period_in_text(hm.title_text)
     if pf.doc_type == "budget":
         _parse_budget(pf, sheet, hm)
     elif pf.doc_type in ("gl", "tb", "pl"):
@@ -229,7 +231,7 @@ def _parse_rows(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
         ind_values = sorted({str(_cell(r, ind_col)).strip() for r in body if _cell(r, ind_col) not in (None, "")}) \
             if ind_col is not None else []
         do = decide_date_order([_cell(r, f["date"]) for r in body], hm.header_of("date") or "",
-                               hm.headers, pf.name, ind_values[:8])
+                               hm.headers, ind_values[:8])
         pf.date_order = do.to_dict()
         order, order_source = do.order or "dmy", do.source
     indicators: dict[str, int] = {}

@@ -61,7 +61,7 @@ class Guide(unittest.TestCase):
 
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
-                         {"financial_report": "1.2.0", "invoice_processing": "1.1.1", "expense_audit": "1.1.0"})
+                         {"financial_report": "1.3.0", "invoice_processing": "1.2.0", "expense_audit": "1.2.0"})
 
 
 if __name__ == "__main__":

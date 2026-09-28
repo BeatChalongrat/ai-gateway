@@ -150,7 +150,10 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
                          "reason": f"บัญชีที่ยังไม่รู้หมวดในงบกำไรขาดทุน ({', '.join(sorted(codes))})",
                          "rows": [r.row for r in rows if r.account_code in codes]})
     base = defaults.get("currency", "THB")
-    cur_ans = answers.get("currency_mixed") or (defaults.get("answers") or {}).get("currency_mixed")
+    # AM4: a remembered answer carries only the export's convention ("the amounts are already baht");
+    # leaving rows out is this round's decision, asked again every round.
+    remembered_cur = (defaults.get("answers") or {}).get("currency_mixed")
+    cur_ans = answers.get("currency_mixed") or (remembered_cur if remembered_cur == "amounts_in_base" else None)
     if cur_ans == "exclude_foreign":
         foreign = [r for r in rows if r.currency != base]
         if foreign:
@@ -171,7 +174,8 @@ def prepare(files: list[ParsedFile], roles: dict, period: str, answers: dict, de
             history.append(r)
         else:
             strays.append(r)
-    pm = answers.get("period_mixed") or (defaults.get("answers") or {}).get("period_mixed")
+    # AM4: which stray rows to count is this round's decision — never an earlier round's answer.
+    pm = answers.get("period_mixed")
     if strays:
         if pm == "include":
             current += strays

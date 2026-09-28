@@ -68,6 +68,18 @@ def _date_of(doc: Doc):
     return str(v) if v else "9999-12-31"
 
 
+_COPY_RANK = {"original": 0, "unmarked": 1, "copy": 2}
+_TIER_RANK = {"etax": 0, "digital": 1, "scan": 2, "photo": 3}
+
+
+def _review_order(doc: Doc) -> tuple:
+    """The order documents are judged in, by content (AM4): date; then, between two copies of one
+    document, the original before one marked a copy and a clearer file before a worse one — so the
+    one recorded is the better record — then the bytes' hash (the key). Never a name or upload order."""
+    d = doc.extraction.get("document") or {}
+    return (_date_of(doc), _COPY_RANK.get(d.get("copy_mark"), 1), _TIER_RANK.get(d.get("tier"), 9), doc.key)
+
+
 def index_entry(doc: Doc, out: dict) -> dict:
     f = out["fields"]
 
@@ -112,7 +124,8 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
     hist = [h for h in (history or []) if isinstance(h, dict)]
     seen: dict[str, str] = {}
     res: list[Reviewed] = []
-    for doc in sorted(docs, key=lambda d: (_date_of(d), d.name, d.key)):
+    # which of two copies is kept follows what they are, never their names or upload order (AM4)
+    for doc in sorted(docs, key=_review_order):
         dec = D.for_document(doc.key, answers or {})
         if doc.sha256 in seen:
             res.append(Reviewed(doc, doc.extraction, dec, "excluded",

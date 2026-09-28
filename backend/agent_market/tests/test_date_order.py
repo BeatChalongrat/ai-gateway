@@ -57,17 +57,17 @@ class Rules(unittest.TestCase):
         self.assertEqual(decide_date_order([a.replace("/", "-") for a in amb], "Posting Date", SAP_HEADERS).order, "mdy")
         do = decide_date_order([a.replace("/", ".") for a in amb], "Posting Date", SAP_HEADERS)
         self.assertEqual((do.order, do.source), ("dmy", "sap"), "SAP writes DD.MM.YYYY with dots")
-        # the file name or S/H values mark an SAP export as well as its headers
+        # S/H values mark an SAP export as well as its headers; its file name does not (AM4)
         plain = ["Posting Date", "Account", "Amount", "D/C"]
-        self.assertEqual(decide_date_order(amb, "Posting Date", plain, "SAP_FBL3N_09-2026.xlsx").source, "sap")
-        self.assertEqual(decide_date_order(amb, "Posting Date", plain, "gl.xlsx", ["S", "H"]).source, "sap")
+        self.assertEqual(decide_date_order(amb, "Posting Date", plain).source, "undecided")
+        self.assertEqual(decide_date_order(amb, "Posting Date", plain, ["S", "H"]).source, "sap")
 
     def test_ambiguous_dates_under_thai_headers_are_day_first(self):
         do = decide_date_order(["05/09/2026", "01/09/2026"], "วันที่", ["วันที่", "รหัสบัญชี", "เดบิต", "เครดิต"])
         self.assertEqual((do.order, do.source), ("dmy", "thai"))
 
     def test_ambiguous_dates_with_nothing_to_decide_stay_undecided(self):
-        do = decide_date_order(["09/05/2026", "09/01/2026"], "Date", EN_HEADERS, "gl.xlsx")
+        do = decide_date_order(["09/05/2026", "09/01/2026"], "Date", EN_HEADERS)
         self.assertEqual((do.order, do.source), (None, "undecided"))
         # an English date header alone is not an SAP export
         self.assertEqual(decide_date_order(["09/05/2026"], "Posting Date", ["Posting Date", "Account", "Amount"]).source,
@@ -174,17 +174,17 @@ class ConflictingColumn(unittest.TestCase):
 
 
 class SapTieBreak(unittest.TestCase):
-    def test_an_sap_export_with_only_early_dates_is_read_month_first_and_says_so(self):
+    def test_an_sap_marker_only_in_the_name_is_not_evidence_the_agent_asks(self):
+        # AM4: until AM3 a file NAMED like an SAP export (generic English headers, every date ≤ 12)
+        # was read month-first without a question; the same file renamed was asked about. A name
+        # is a label the person typed — now both ask.
         path = _gl_csv(US_SEPT[:3], headers=["Posting Date", "G/L Account", "Account Name", "Text", "Debit", "Credit"])
-        # an SAP marker in the name only: the headers are generic English
         sap_path = os.path.join(os.path.dirname(path), "SAP_FBL3N_export.csv")
         os.replace(path, sap_path)
         pf = pkg.parse(sap_path, "SAP_FBL3N_export.csv", {})
-        self.assertEqual((pf.date_order["order"], pf.date_order["source"]), ("mdy", "sap"))
-        self.assertEqual({r.date for r in pf.rows}, {dt.date(2026, 9, 1), dt.date(2026, 9, 2), dt.date(2026, 9, 3)})
+        self.assertEqual((pf.date_order["order"], pf.date_order["source"]), (None, "undecided"))
         pre = pkg.preflight([pf], message="close September 2026", today=TODAY)
-        self.assertEqual(pre["findings"], [])
-        self.assertIn("date_order", [a["code"] for a in pre["assumptions"]])
+        self.assertIn("date_order", [f["code"] for f in pre["findings"]])
 
 
 if __name__ == "__main__":

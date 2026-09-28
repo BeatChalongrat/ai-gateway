@@ -331,7 +331,6 @@ _EN_DATE_HEADERS = frozenset(norm(h) for h in (
 _SAP_HEADERS = frozenset(norm(h) for h in (
     "Company Code", "CoCd", "Debit/Credit Ind.", "D/C Ind.", "S/H Ind.", "Amount in Local Currency",
     "Amount in LC", "Amount in Doc. Curr.", "LCurr", "Posting Key", "Pstng Date"))
-_SAP_FILE_RE = re.compile(r"(?<![a-z])(sap|fbl3n|fagll03|fbl1n|fbl5n|s4hana)(?![a-z])")
 
 
 @dataclass
@@ -360,14 +359,14 @@ class DateOrder:
                                                             "invalid", "separators", "samples")}}
 
 
-def is_sap_export(headers: list[str], file_name: str = "", indicator_values: list[str] | None = None) -> bool:
+def is_sap_export(headers: list[str], indicator_values: list[str] | None = None) -> bool:
+    """SAP by what the file holds — its headers or an S/H column; a file's name is only a label (AM4)."""
     keys = {norm(h) for h in headers if h}
     ind = {str(v).strip().upper() for v in (indicator_values or []) if str(v).strip()}
-    return bool(keys & _SAP_HEADERS) or bool(_SAP_FILE_RE.search((file_name or "").lower())) \
-        or bool(ind and ind <= {"S", "H"})
+    return bool(keys & _SAP_HEADERS) or bool(ind and ind <= {"S", "H"})
 
 
-def decide_date_order(values, header: str, headers: list[str], file_name: str = "",
+def decide_date_order(values, header: str, headers: list[str],
                       indicator_values: list[str] | None = None) -> DateOrder:
     """DD/MM or MM/DD for one column, from its own values first.
 
@@ -391,7 +390,7 @@ def decide_date_order(values, header: str, headers: list[str], file_name: str = 
     if _THAI_RE.search(header or "") or any(_THAI_RE.search(h or "") for h in headers):
         return DateOrder("dmy", "thai", ev, header)
     seps = ev["separators"]
-    if norm(header) in _EN_DATE_HEADERS and len(seps) == 1 and is_sap_export(headers, file_name, indicator_values):
+    if norm(header) in _EN_DATE_HEADERS and len(seps) == 1 and is_sap_export(headers, indicator_values):
         return DateOrder("dmy" if "." in seps else "mdy", "sap", ev, header)
     return DateOrder(None, "undecided", ev, header)
 

@@ -456,7 +456,7 @@
   },
   {
    "id": "period_mixed_remembered",
-   "note": "remembered policy applied silently and written as an assumption",
+   "note": "AM4: an earlier round's answer about stray rows is not applied — which rows to leave out is asked again every round",
    "files": [
     "period_mixed_sep.xlsx"
    ],
@@ -468,25 +468,10 @@
    },
    "answers": {},
    "expect": {
-    "findings": [],
-    "pl": {
-     "revenue": "12480300.00",
-     "other_income": "3820.55",
-     "cost_of_sales": "5755800.00",
-     "gross_profit": "6724500.00",
-     "operating_expenses": "3940100.00",
-     "finance_costs": "41250.00",
-     "income_tax": "0.00",
-     "total_expenses": "9737150.00",
-     "net_profit": "2746970.55",
-     "debit_total": "46748763.11",
-     "credit_total": "46748763.11",
-     "rows": 556
-    },
-    "period": "2026-09",
-    "assumption_codes": [
+    "findings": [
      "period_mixed"
-    ]
+    ],
+    "period": "2026-09"
    }
   },
   {

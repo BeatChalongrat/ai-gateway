@@ -57,6 +57,14 @@ def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | 
     st = self_test(package)
     defaults = self_test_defaults(package) if defaults is None else defaults
     formats = formats or st.get("formats") or ["xlsx"]
+    files = [(os.path.join(package_dir(package), rel), os.path.basename(rel)) for rel in st["files"]]
+    return run_files(package, files, defaults=defaults, formats=formats, message=st.get("message", ""),
+                     out_dir=out_dir)
+
+
+def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, formats: list[str],
+              message: str = "", out_dir: str | None = None) -> dict:
+    """The whole package on (path, the name the person gave the file) pairs, in upload order (AM4)."""
     out_dir = out_dir or tempfile.mkdtemp(prefix=f"am_sample_{package}_")
     base = tempfile.mkdtemp(prefix="am_sample_job_")
     inp, out = os.path.join(base, "in"), os.path.join(base, "out")
@@ -71,11 +79,10 @@ def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | 
 
     try:
         parsed = []
-        for i, rel in enumerate(st["files"]):
-            src = os.path.join(package_dir(package), rel)
+        for i, (src, display) in enumerate(files):
             name = f"in_{i:02d}{os.path.splitext(src)[1]}"
             shutil.copy(src, os.path.join(inp, name))
-            res = run({"op": "parse", "package": package, "file": {"name": os.path.basename(src), "input": name},
+            res = run({"op": "parse", "package": package, "file": {"name": display, "input": name},
                        "mapping": defaults.get("mapping") or {}})
             shutil.move(os.path.join(out, "parsed.json"), os.path.join(inp, f"parsed_{i:02d}.json"))
             parsed.append(f"parsed_{i:02d}.json")
@@ -87,7 +94,7 @@ def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | 
         answers: dict = {}
         first = None
         for _ in range(8):
-            pre = run({**req, "op": "preflight", "answers": answers, "message": st.get("message", "")})
+            pre = run({**req, "op": "preflight", "answers": answers, "message": message})
             if first is None:
                 first = pre
             new = [f for f in pre["findings"] if f["key"] not in answers]
@@ -110,6 +117,7 @@ def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | 
             shutil.copy(os.path.join(out, a["name"]), dst)
             paths[a["format"]] = dst
         return {"paths": paths, "render": rend, "first_findings": first["findings"], "answers": answers,
-                "computed": computed, "summary": comp.get("summary"), "out_dir": out_dir}
+                "computed": computed, "summary": comp.get("summary"), "out_dir": out_dir,
+                "roles": pre["roles"], "period": pre["period"], "assumptions": pre.get("assumptions") or []}
     finally:
         shutil.rmtree(base, ignore_errors=True)

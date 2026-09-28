@@ -107,7 +107,7 @@ FACT_CELL = {"claim_data": "amount", "category": "category", "within_claim_limit
              "receipt": "receipt", "receipt_amount": "amount", "duplicate": "id", "split_purchase": "amount",
              "prohibited_merchant": "merchant", "vat_document": "vat_claim", "wht": "wht_deducted",
              "weekend_holiday": "date", "purpose": "description"}
-TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (best-effort)"}
+TIER_TH = {"digital": "PDF ดิจิทัล", "etax": "e-Tax (XML)", "scan": "สแกน", "photo": "รูปถ่าย (อ่านได้เท่าที่ภาพชัด)"}
 OUTCOME_TH = {"pass": "ผ่าน", "exception": "ข้อยกเว้น รอคนตัดสิน", "question": "ต้องใช้วิจารณญาณ"}
 RESOLUTION_TH = {"accepted": "ผู้ใช้ยืนยันว่ารับได้", "typed": "ผู้ใช้ระบุวัตถุประสงค์", "ask_employee": "ให้ถามพนักงาน",
                  "review": "ส่งให้ผู้อนุมัติตัดสิน"}
@@ -245,7 +245,9 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
                        "choices": [], "status": "open"})
     receipts, index = [], []
     linked = {k for a in rv.audits if a.receipt for k in [a.receipt.key]}
-    for k, r in sorted(rv.receipts.items(), key=lambda kv: kv[1].up.name):
+    # content order — the receipt's own date and number, then its bytes' hash — never its file name (AM4)
+    for k, r in sorted(rv.receipts.items(), key=lambda kv: (rv.views[kv[0]].document_date or "",
+                                                           rv.views[kv[0]].document_number or "", kv[0])):
         v = rv.views[k]
         f = r.out.get("fields") or {}
         receipts.append({"doc_key": k, "name": r.up.name, "names": v.names, "sha256": r.up.sha256, "tier": v.tier,
@@ -311,12 +313,42 @@ def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, 
         "index_entries": index, "models": [m for m in models.values() if m["documents"]],
         "quotable": quotable, "quotable_ids": [], "fallback_narrative": fallback,
         # the runner's generic view of computed.json
-        "exceptions": run_ex, "excluded": [], "lines": [], "ratios": [], "top_movements": [], "citations": [],
+        "exceptions": run_ex, "excluded": [], "lines": [], "ratios": [], "top_movements": [],
+        "citations": _citations(claims, totals),
         "source": {"claims": [{"name": s.name, "sha256": s.sha256, "sheet": s.data["sheet"]} for s in rv.sheets],
                    "receipts": [{"name": r["name"], "sha256": r["sha256"], "tier": r["tier"]} for r in receipts],
                    "policy_documents": [{"name": u.name, "sha256": u.sha256, "used_as": "context"} for u in rv.kb]},
         "script": "packages/expense_audit/scripts/audit.py",
     }
+
+
+def _citations(claims: list[dict], totals: dict) -> list[dict]:
+    """How each amount of the summary sheet was made (AM4) — the provenance an answer to "why is this
+    figure what it is" is built from: which claims it adds up, each with its own amount and outcome."""
+    by = totals["claimed_by_outcome"]
+
+    def part(c: dict) -> dict:
+        who = c.get("employee_name") or c.get("employee_id") or ""
+        return {"file": c.get("sheet") or "", "sheet": c.get("sheet_name") or "", "row": c.get("row"),
+                "value": c.get("amount"), "note": f"{who} · {c.get('outcome_label') or ''}".strip(" ·")}
+
+    def c(cid: str, label: str, value, formula: str, rows: list[dict], aliases: list[str]) -> dict:
+        return {"id": cid, "label": label, "value": value, "formula": formula, "sources": [part(x) for x in rows],
+                "left_out": [], "aliases": aliases, "script": "packages/expense_audit/scripts/audit.py"}
+
+    with_amount = [x for x in claims if x.get("amount")]
+    return [
+        c("e1", "ยอดเบิกรวม (บาท)", totals["claimed"], "ผลรวมยอดเบิกของทุกรายการในไฟล์รายการเบิก ตามที่พนักงานกรอก",
+          with_amount, ["ยอดเบิกรวม", "ยอดเบิก", "เบิกรวม"]),
+        c("e2", "ยอดที่ผ่าน (บาท)", by["pass"], "ผลรวมยอดเบิกของรายการที่ผ่านทุกกฎในตารางนโยบาย",
+          [x for x in with_amount if x["outcome"] == "pass"], ["ยอดที่ผ่าน", "ผ่าน"]),
+        c("e3", "ยอดที่เป็นข้อยกเว้น (บาท)", by["exception"],
+          "ผลรวมยอดเบิกของรายการที่ไม่ผ่านกฎข้อใดข้อหนึ่ง รอคนตัดสินในชีตข้อยกเว้น",
+          [x for x in with_amount if x["outcome"] == "exception"], ["ข้อยกเว้น", "ไม่ผ่าน"]),
+        c("e4", "ยอดที่ต้องใช้วิจารณญาณ (บาท)", by["question"],
+          "ผลรวมยอดเบิกของรายการที่กฎตัดสินเองไม่ได้ จึงถามผู้ตรวจในการ์ดคำถาม",
+          [x for x in with_amount if x["outcome"] == "question"], ["วิจารณญาณ", "ต้องใช้วิจารณญาณ"]),
+    ]
 
 
 def summarize(computed: dict) -> dict:
