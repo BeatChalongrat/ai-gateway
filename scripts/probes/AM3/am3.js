@@ -327,12 +327,18 @@ const cmds = {
   },
 };
 
-const cmd = process.argv[2];
-if (!cmds[cmd]) {
-  console.log("usage: am3.js seed | setup | stranger | signoff | budget | disable | problem | rail | spend | cleanup");
-  process.exit(2);
+// AM4 reuses the helpers (scripts/probes/AM4/am4.js)
+module.exports = { L, PEOPLE, FIXTURES, PKG, call, j, send, upload, waitRun, finishWithDefaults, download, ooxmlText,
+  terminal, parked, openCards, log, check };
+
+if (require.main === module) {
+  const cmd = process.argv[2];
+  if (!cmds[cmd]) {
+    console.log("usage: am3.js seed | setup | stranger | signoff | budget | disable | problem | rail | spend | cleanup");
+    process.exit(2);
+  }
+  cmds[cmd]().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
 }
-cmds[cmd]().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});

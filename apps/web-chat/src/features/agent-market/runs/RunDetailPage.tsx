@@ -685,7 +685,7 @@ function Table({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NumbersTab({ c }: { c: Computed }) {
+export function NumbersTab({ c }: { c: Computed }) {
   const t = useAmT();
   const prior = !!c.has_prior;
   const budget = !!c.has_budget;
@@ -693,6 +693,8 @@ function NumbersTab({ c }: { c: Computed }) {
   const ratios = c.ratios ?? [];
   const accounts = c.accounts ?? [];
   const cites = c.citations ?? [];
+  // an account's group is the key of the line it adds up to: name it as that line does
+  const groupName = new Map(lines.map((l) => [l.key, l.label] as const));
   return (
     <div className="flex flex-col gap-6" data-testid="am-run-numbers">
       <section>
@@ -847,7 +849,7 @@ function NumbersTab({ c }: { c: Computed }) {
                   <td className={cls(TD, "max-w-[16rem] truncate")} title={a.name}>
                     {a.name}
                   </td>
-                  <td className={cls(TD, "text-text-secondary")}>{a.group}</td>
+                  <td className={cls(TD, "text-text-secondary")}>{(a.group && groupName.get(a.group)) || a.group}</td>
                   <td className={TDN}>{formatMoney(a.current)}</td>
                   {prior ? (
                     <>

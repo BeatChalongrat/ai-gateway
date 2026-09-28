@@ -15,7 +15,7 @@ export interface RoundInfo {
   status: string;
   period: string;
   artifacts: OutputArtifact[];
-  /** the item after which the divider sits: the files card, or the progress card of a round that ended without one */
+  /** the item after which the divider sits: the round's last item (files card, closing words, answers about it) */
   endItemId: string | null;
 }
 
@@ -45,7 +45,20 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
     const byFormat = new Map(r.artifacts.map((a) => [a.format, a] as const));
     for (const a of p.artifacts ?? []) byFormat.set(a.format, a);
     r.artifacts = [...byFormat.values()];
-    r.endItemId = it.id;
+  }
+  // the divider closes a round after its last item: the files card, the
+  // runner's closing words, answers to questions about it (all carry its id)
+  // — until "เริ่มรอบใหม่" closes it for good
+  const begun = new Set<string>();
+  const closed = new Set<string>();
+  for (const it of items) {
+    const rid = it.run_id ?? (it.payload as { run_id?: string } | null)?.run_id;
+    const r = rid ? rounds.get(rid) : undefined;
+    if (r && !closed.has(r.runId)) r.endItemId = it.id;
+    if (it.kind === "progress" && r) begun.add(r.runId);
+    if (it.kind === "notice" && (it.payload as NoticePayload | null)?.round_start) {
+      for (const b of begun) if (TERMINAL.has(rounds.get(b)!.status)) closed.add(b);
+    }
   }
   return rounds;
 }
@@ -83,11 +96,12 @@ export function segments(items: ThreadItem[]): Segment[] {
       return r.kind === "self_test" || rid !== lastRun;
     }),
   );
-  // "เริ่มรอบใหม่" already pressed after the latest round ended
-  let started = false;
+  // "เริ่มรอบใหม่" already pressed after the latest round ended — or an open
+  // chip is asking that very question: the divider does not offer it twice
+  let started = openIntent(items) !== null;
   if (lastRun) {
     const endAt = items.findIndex((it) => it.id === rounds.get(lastRun)!.endItemId);
-    started = items.some(
+    started ||= items.some(
       (it, i) => i > endAt && it.kind === "notice" && !!(it.payload as NoticePayload | null)?.round_start,
     );
   }

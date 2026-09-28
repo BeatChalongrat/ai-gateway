@@ -41,6 +41,9 @@ export function isRemembered(d: Default): boolean {
   return d.source === "answer" || d.key.startsWith("answers.") || REMEMBERED_KEYS.has(d.key);
 }
 
+/** The document themes' names (the control plane's /theme presets). */
+const THEME_NAMES: Record<string, AmKey> = { navy: "theme.preset.navy", teal: "theme.preset.teal", charcoal: "theme.preset.charcoal" };
+
 /** A default's value in words: mapping → "field ← header" lines, arrays joined, objects as k: v. */
 export function describeValue(d: Default, t: AmT, manifest?: Manifest): string[] {
   const v = d.value;
@@ -65,7 +68,7 @@ export function describeValue(d: Default, t: AmT, manifest?: Manifest): string[]
   if (Array.isArray(v)) return [v.map(String).join(", ")];
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
-    if (d.key === "theme" && typeof o.id === "string") return [o.id];
+    if (d.key === "theme" && typeof o.id === "string") return [THEME_NAMES[o.id] ? t(THEME_NAMES[o.id]!) : o.id];
     return Object.entries(o).map(([k, x]) => `${k}: ${typeof x === "object" ? JSON.stringify(x) : String(x)}`);
   }
   return [String(v)];

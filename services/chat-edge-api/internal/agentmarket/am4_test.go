@@ -3,6 +3,7 @@ package agentmarket
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -267,6 +268,20 @@ func TestThreadsKeepTheirOwnRounds(t *testing.T) {
 	if n := len(list["threads"].([]any)); n != 2 {
 		t.Fatalf("two threads listed: %d", n)
 	}
+	// both chats now have a September round: each is still told apart by its
+	// own name (the AM4 screen tour saw two rows reading "รอบ กันยายน 2569")
+	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET period = '2026-09' WHERE id = $1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, list = e.do("GET", "/installs/"+in.ID.String()+"/threads", nil)
+	titles := map[string]bool{}
+	for _, x := range list["threads"].([]any) {
+		title := x.(map[string]any)["title"].(string)
+		if titles[title] || !strings.Contains(title, "กันยายน 2569") || !strings.HasPrefix(title, "แชท") {
+			t.Fatalf("each chat named apart, with its latest round: %v", list["threads"])
+		}
+		titles[title] = true
+	}
 	// someone else's thread id is refused
 	if code, _ := e.do("GET", "/installs/"+in.ID.String()+"/thread?thread="+uuid.NewString(), nil); code != http.StatusNotFound {
 		t.Fatalf("unknown thread: %d", code)
@@ -484,5 +499,84 @@ func TestStorageSaysWhatIsKeptAndThatItIsNotTheArchive(t *testing.T) {
 	code, body := e.do("GET", "/installs/"+in.ID.String()+"/storage", nil)
 	if code != 200 || body["retention_years"].(float64) != 5 || !strings.Contains(body["not_archive"].(string), "ไม่ใช่ที่เก็บเอกสารของบริษัท") {
 		t.Fatalf("storage: %d %v", code, body)
+	}
+}
+
+// Removing an agent stops its unfinished rounds. Before AM4 a queued or parked
+// round of a removed install still ran (and was charged) once it was claimed
+// or resumed — the AM4 probe watched a self-test finish, and cost credits,
+// 20 s after its agent was removed; its files went to an install nobody sees.
+func TestRemovingAnAgentStopsItsUnfinishedRounds(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	in := e.install()
+	done := e.finishedRun(in, "2026-09", "ปิดงบเดือนกันยายน")
+	mk := func(status string) Run {
+		r, _, err := e.store.CreateRun(ctx, e.store.Pool, Run{InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID, Kind: KindRun,
+			DefinitionVersion: in.DefinitionVersion, Checksum: in.Checksum}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET status = $2,
+			awaiting_since = CASE WHEN $2 = 'awaiting_input' THEN now() END WHERE id = $1`, r.ID, status); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	queued, parked, running := mk("queued"), mk("awaiting_input"), mk("running")
+	if code, body := e.do("DELETE", "/installs/"+in.ID.String(), nil); code != 200 {
+		t.Fatalf("remove: %d %v", code, body)
+	}
+	for _, c := range []struct {
+		run    Run
+		status string
+		cancel bool
+	}{{queued, "cancelled", true}, {parked, "cancelled", true}, {running, "running", true}, {done, "succeeded", false}} {
+		got, err := e.store.RunByID(ctx, c.run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != c.status || got.CancelRequested != c.cancel {
+			t.Errorf("run %s after the agent was removed: status %s cancel %v, want %s %v", c.run.ID, got.Status, got.CancelRequested, c.status, c.cancel)
+		}
+	}
+	// a parked round cannot be resumed afterwards (a raised budget, a late answer)
+	if ok, err := e.store.Resume(ctx, e.store.Pool, parked.ID); err != nil || ok {
+		t.Fatalf("resumed a round of a removed agent: %v %v", ok, err)
+	}
+}
+
+// A guess at an outside model's cost is never the free in-house model's cost.
+// The catalog sample ran on the self-hosted model (price 0), so its cost cannot
+// be scaled to a priced model; the AM4 probe saw openai/gpt-4o (2.5/10 USD per
+// million tokens) offered at the sample's "≈0.02 บาท". No history, no price
+// ratio: no figure ("ยังไม่มีข้อมูลค่าใช้จ่าย"), not a wrong one.
+func TestAnOutsideModelIsNotPricedLikeTheFreeOne(t *testing.T) {
+	rm := RunnerModels{Catalog: []CatalogModel{
+		{ID: "qwen", SelfHosted: true},
+		{ID: "llama", SelfHosted: true},
+		{ID: "gpt", InPrice: 2.5, OutPrice: 10},
+		{ID: "flash", InPrice: 0.3, OutPrice: 2.5},
+	}}
+	for _, c := range []struct {
+		used, model string
+		want        float64
+		ok          bool
+	}{
+		{"qwen", "", 1000, true},            // auto: the sample's own cost
+		{"qwen", "qwen", 1000, true},        // the same model
+		{"", "gpt", 1000, true},             // the sample needed no model
+		{"qwen", "llama", 1000, true},       // free for free
+		{"flash", "gpt", 4464.3, true},      // priced to priced: scaled (12.5 / 2.8)
+		{"qwen", "gpt", 0, false},           // free to priced: unknown
+		{"qwen", "unknown-model", 0, false}, // no price at all: unknown
+	} {
+		got, ok := sampleCostFor(1000, c.used, c.model, rm)
+		if ok != c.ok || (ok && math.Abs(got-c.want) > 0.5) {
+			t.Errorf("sample on %q, priced for %q: %.1f %v, want %.1f %v", c.used, c.model, got, ok, c.want, c.ok)
+		}
 	}
 }

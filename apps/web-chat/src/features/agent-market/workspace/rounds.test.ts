@@ -64,6 +64,41 @@ describe("rounds in the workspace", () => {
     expect(div?.type === "divider" && div.started).toBe(true);
   });
 
+  it("the divider closes the round after its own last words — never above them", () => {
+    // the runner posts "เสร็จแล้วครับ …" after the files card, and answers to
+    // questions about the round carry its run id too (the AM4 screen tour saw
+    // the closing line below the divider, as if it began the next round)
+    const done = item("agent_text", 21, { text: "เสร็จแล้วครับ", run_id: "sep" }, "sep");
+    const ask = item("user_text", 22, { text: "ทำไมรายได้เป็นเท่านี้" }, "reply-job");
+    const answer = item("agent_text", 23, { text: "รายได้ = …", run_id: "sep" }, "sep");
+    const segs = segments([greeting, sepMsg, sep, sepOut, done, ask, answer]);
+    const idx = segs.findIndex((s) => s.type === "divider");
+    expect(segs[idx - 1]).toEqual({ type: "item", item: answer });
+    expect(idx).toBe(segs.length - 1);
+    // a round that ended without files: after its progress card (and its words)
+    const failed = item("progress", 30, { run_id: "f", kind: "run", status: "failed" }, "f");
+    const why = item("agent_text", 31, { text: "ไม่สำเร็จเพราะ…", run_id: "f" }, "f");
+    const segs2 = segments([greeting, failed, why]);
+    expect(segs2[segs2.length - 1]?.type).toBe("divider");
+    expect(segs2[segs2.length - 2]).toEqual({ type: "item", item: why });
+    // after เริ่มรอบใหม่ the round is closed: a later answer about it stays below the notice
+    const pressed = item("notice", 24, { text: "เริ่มรอบใหม่แล้ว", round_start: true });
+    const late = item("agent_text", 25, { text: "รายได้ = …", run_id: "sep" }, "sep");
+    const segs3 = segments([greeting, sepMsg, sep, sepOut, done, pressed, late]);
+    const d3 = segs3.findIndex((s) => s.type === "divider");
+    expect(segs3[d3 - 1]).toEqual({ type: "item", item: done });
+    expect(segs3[d3]?.type === "divider" && segs3[d3].started).toBe(true);
+  });
+
+  it("while the chip asks, the divider does not offer the same button again", () => {
+    const chip = item("intent", 60, { status: "open", text: "ทำเดือนตุลาคม" });
+    const div = segments([greeting, sepMsg, sep, sepOut, chip]).find((s) => s.type === "divider");
+    expect(div?.type === "divider" && div.started).toBe(true);
+    const answered = { ...chip, payload: { status: "chosen", choice: "about_last" } };
+    const div2 = segments([greeting, sepMsg, sep, sepOut, answered]).find((s) => s.type === "divider");
+    expect(div2?.type === "divider" && div2.started).toBe(false);
+  });
+
   it("an open chip is found; an answered one is not", () => {
     const chip = item("intent", 60, { status: "open", files: [{ id: "f3", name: "x.pdf", size: 1 }] });
     expect(openIntent([greeting, chip])?.id).toBe(chip.id);

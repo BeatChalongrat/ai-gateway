@@ -25,8 +25,11 @@ vi.mock("next/navigation", () => ({
 
 import { useI18nStore } from "@/lib/i18n";
 
+import { tAm } from "./i18n";
 import { QuickInstall } from "./install/QuickInstall";
 import { MarketPage } from "./market/MarketPage";
+import { NumbersTab } from "./runs/RunDetailPage";
+import { describeValue } from "./settings/SettingsPage";
 import type { Manifest, OutputsPayload, ThreadItem } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 import { WorkspaceContext, type WorkspaceCtx } from "./workspace/context";
@@ -225,6 +228,11 @@ describe("the market, one grid of equal cards", () => {
       expect(within(c).getByTestId("am-card-meta")).toBeTruthy();
       expect(within(c).getByTestId("am-card-actions")).toBeTruthy();
       expect(c.className).toContain("h-full");
+      // tags, price/time and actions are one block pinned to the bottom: the same height on every card of a row
+      // (the AM4 screen tour saw the tag rows 25 px apart when one title wrapped)
+      const bottom = within(c).getByTestId("am-card-bottom");
+      expect(bottom.className).toContain("mt-auto");
+      for (const id of ["am-card-tags", "am-card-meta", "am-card-actions"]) expect(bottom.contains(within(c).getByTestId(id))).toBe(true);
     }
     for (const s of within(grid).getAllByTestId("am-soon-card")) {
       expect(s.className).toContain("opacity-60");
@@ -247,5 +255,36 @@ describe("installing in one click", () => {
     expect(body.self_test).toBe(true);
     expect(body.slug).toBe("sran.invoice-processing");
     expect(screen.getByTestId("am-detail-install-custom").getAttribute("href")).toBe("/chat/agents/install/sran.invoice-processing");
+  });
+});
+
+// Found by the AM4 screen tour (results/ui/latin_words.json): two places still
+// showed an English word to a person — the account group on "ที่มาของตัวเลข"
+// (revenue, operating_expenses …) and the document theme in settings (navy).
+describe("no English left where a person reads", () => {
+  it("the accounts table names each group in Thai (the line it adds up to)", () => {
+    render(
+      <NumbersTab
+        c={{
+          lines: [
+            { key: "revenue", label: "รายได้จากการขายและบริการ", current: "100" },
+            { key: "operating_expenses", label: "ค่าใช้จ่ายในการขายและบริหาร", current: "40" },
+          ],
+          accounts: [
+            { code: "4100-01", name: "รายได้จากการขายสินค้า", group: "revenue", current: "100", rows: 3 },
+            { code: "5200-01", name: "เงินเดือน", group: "operating_expenses", current: "40", rows: 1 },
+          ],
+        } as never}
+      />,
+    );
+    const table = screen.getByTestId("am-run-numbers");
+    expect(table.textContent).toContain("ค่าใช้จ่ายในการขายและบริหาร");
+    expect(table.textContent).not.toMatch(/revenue|operating_expenses/);
+  });
+
+  it("the document theme is named in Thai", () => {
+    const d = { key: "theme", value: { id: "navy" }, source: "install", label: "ธีมเอกสาร" } as never;
+    expect(describeValue(d, tAm)).toEqual(["กรมท่า"]);
+    expect(describeValue({ key: "theme", value: { id: "teal" } } as never, tAm)).toEqual(["เขียวหยก"]);
   });
 });

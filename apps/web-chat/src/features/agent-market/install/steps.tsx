@@ -494,6 +494,9 @@ export function CompanyTaxStep({ installId, onNext }: { installId: string; onNex
 
 /** The document palettes (deliverables/theme.py): primary, accent, surface.
  *  These depict the DOCUMENT's colours, so they are values, not app tokens. */
+/** The presets when /theme cannot be read (the control plane's own list and names). */
+const FALLBACK_PRESETS = (["navy", "teal", "charcoal"] as const).map((id) => ({ id, name: tAm(`theme.preset.${id}`) }));
+
 const SWATCHES: Record<string, [string, string, string]> = {
   navy: ["#12264A", "#2F6FD6", "#F3F5F9"],
   teal: ["#0F4C4C", "#1C8C84", "#F2F7F6"],
@@ -524,11 +527,11 @@ export function ThemeStep({
     amApi.theme().then(
       (r) => {
         if (!alive) return;
-        setPresets(r?.presets?.length ? r.presets : [{ id: "navy", name: "navy" }]);
+        setPresets(r?.presets?.length ? r.presets : FALLBACK_PRESETS.slice(0, 1));
         if (r?.theme?.id) setPreset(String(r.theme.id));
         if (r?.theme?.company) setCompany((c) => c || String(r.theme!.company));
       },
-      () => alive && setPresets([{ id: "navy", name: "navy" }, { id: "teal", name: "teal" }, { id: "charcoal", name: "charcoal" }]),
+      () => alive && setPresets(FALLBACK_PRESETS),
     );
     amApi.defaults(installId).then(
       (r) => {

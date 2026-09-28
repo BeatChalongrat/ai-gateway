@@ -190,6 +190,21 @@ func (s *Store) RemoveInstall(ctx context.Context, tenant, user, id uuid.UUID) e
 	if err != nil {
 		return err
 	}
+	// AM4: its unfinished rounds stop — a queued or parked one is cancelled
+	// now (a raised budget or a late answer cannot resume it), a running one
+	// at its next step; none is charged or delivered to an install nobody sees.
+	if _, err := s.Pool.Exec(ctx, `
+		UPDATE agent_market.agent_runs SET cancel_requested = true,
+			status = CASE WHEN status IN ('queued', 'awaiting_input') THEN 'cancelled' ELSE status END,
+			status_reason = CASE WHEN status IN ('queued', 'awaiting_input') THEN 'cancelled_by_user' ELSE status_reason END,
+			finished_at = CASE WHEN status IN ('queued', 'awaiting_input') THEN now() ELSE finished_at END,
+			awaiting_ms = awaiting_ms + CASE WHEN status = 'awaiting_input' AND awaiting_since IS NOT NULL
+				THEN (extract(epoch FROM now() - awaiting_since) * 1000)::bigint ELSE 0 END,
+			awaiting_since = CASE WHEN status = 'awaiting_input' THEN NULL ELSE awaiting_since END,
+			updated_at = now()
+		WHERE install_id = $1 AND status IN ('queued', 'awaiting_input', 'running')`, id); err != nil {
+		return err
+	}
 	// The duplicate index goes with the install at once (AM2), not at expiry.
 	_, err = s.Pool.Exec(ctx, `DELETE FROM agent_market.document_index WHERE install_id = $1`, id)
 	return err

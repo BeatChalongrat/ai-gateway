@@ -252,12 +252,15 @@ function CardFrame({
     >
       <div className="flex min-h-[2.75rem] items-start gap-3">{head}</div>
       <div className="mt-3">{desc}</div>
-      {/* one row of tags on every card, whatever each one has */}
-      <div className="mt-3 flex h-6 flex-wrap gap-1.5 overflow-hidden" data-testid="am-card-tags">
-        {tags}
-      </div>
-      <div className="mt-auto pt-3">
-        <p className="min-h-[1.25rem] truncate text-xs text-text-muted" data-testid="am-card-meta">
+      {/* tags, price/time and actions: one block pinned to the bottom, so each
+          sits at the same height on every card of a row, however long the
+          name or the description above it */}
+      <div className="mt-auto pt-3" data-testid="am-card-bottom">
+        {/* one row of tags on every card, whatever each one has */}
+        <div className="flex h-6 flex-wrap gap-1.5 overflow-hidden" data-testid="am-card-tags">
+          {tags}
+        </div>
+        <p className="mt-3 min-h-[1.25rem] truncate text-xs text-text-muted" data-testid="am-card-meta">
           {meta}
         </p>
         <div className="mt-3 flex min-h-[2.25rem] flex-wrap items-center gap-2 border-t border-border-subtle pt-3" data-testid="am-card-actions">

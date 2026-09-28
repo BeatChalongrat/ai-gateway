@@ -55,11 +55,11 @@ type CatalogModel struct {
 
 // RunnerModels is what the runner publishes about models.
 type RunnerModels struct {
-	Primary    string         `json:"primary"`
-	Fallback   string         `json:"fallback"`
-	Vision     string         `json:"vision"`
+	Primary    string          `json:"primary"`
+	Fallback   string          `json:"fallback"`
+	Vision     string          `json:"vision"`
 	SelfHosted map[string]bool `json:"self_hosted"`
-	Catalog    []CatalogModel `json:"catalog"`
+	Catalog    []CatalogModel  `json:"catalog"`
 }
 
 // ModelOption is one row of the picker.
@@ -194,19 +194,13 @@ func (s *Store) modelCost(ctx context.Context, org, slug, model string, rm Runne
 	_ = s.Pool.QueryRow(ctx, q, args...).Scan(&credits, &secs)
 	if credits == nil {
 		if smp, err := s.CatalogSampleFor(ctx, slug); err == nil && smp.Status == RunSucceeded {
-			c := smp.Credits
 			var used string
 			_ = s.Pool.QueryRow(ctx, `SELECT COALESCE(model_used, '') FROM agent_market.agent_runs WHERE id = $1`, smp.RunID).Scan(&used)
-			if model != "" && used != "" && used != model {
-				a, okA := rm.find(model)
-				b, okB := rm.find(used)
-				if okA && okB && b.InPrice+b.OutPrice > 0 {
-					c = c * (a.InPrice + a.OutPrice) / (b.InPrice + b.OutPrice)
+			if c, ok := sampleCostFor(smp.Credits, used, model, rm); ok {
+				credits = &c
+				if secs == nil {
+					secs = smp.Seconds
 				}
-			}
-			credits = &c
-			if secs == nil {
-				secs = smp.Seconds
 			}
 		}
 	}
@@ -215,6 +209,31 @@ func (s *Store) modelCost(ctx context.Context, org, slug, model string, rm Runne
 	}
 	thb := math.Round(*credits/cfg.CreditsPerUSD*cfg.THBPerUSD*100) / 100
 	return &thb, secs
+}
+
+// sampleCostFor is the catalog sample's cost as a guess for one model: the
+// sample's own credits when it ran on that model (or on none), else scaled by
+// the two models' prices. A free model's cost says nothing about a priced
+// one, and a model without a price says nothing at all: then there is no
+// guess (the picker says it has no cost yet) rather than a wrong one.
+func sampleCostFor(credits float64, used, model string, rm RunnerModels) (float64, bool) {
+	if model == "" || used == "" || used == model {
+		return credits, true
+	}
+	a, okA := rm.find(model)
+	b, okB := rm.find(used)
+	if !okA || !okB {
+		return 0, false
+	}
+	pa, pb := a.InPrice+a.OutPrice, b.InPrice+b.OutPrice
+	switch {
+	case pb > 0:
+		return credits * pa / pb, true
+	case pa == 0:
+		return credits, true
+	default:
+		return 0, false
+	}
 }
 
 // Picker builds the picker for one install.
@@ -372,6 +391,6 @@ func (a *API) adminModels(w http.ResponseWriter, r *http.Request) {
 		seen = &t
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"catalog": nonNil(rm.Catalog), "curated": nonNil(o.AgentModels),
-		"defaults": map[string]string{"text": rm.Primary, "text_second": rm.Fallback, "vision": rm.Vision},
+		"defaults":    map[string]string{"text": rm.Primary, "text_second": rm.Fallback, "vision": rm.Vision},
 		"self_hosted": rm.SelfHosted, "documents_may_leave": o.DocumentsMayLeave, "seen_at": seen})
 }

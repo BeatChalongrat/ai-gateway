@@ -365,7 +365,6 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 	}
 }
 
-
 // AM4: every call tells the gateway never to answer with another model, and
 // an answer from a model other than the one asked for is not used.
 func TestAModelCallNeverTakesAnotherModelsAnswer(t *testing.T) {

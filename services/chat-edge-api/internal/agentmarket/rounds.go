@@ -164,23 +164,47 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 	}
 	defer rows.Close()
 	out := []Thread{}
+	var periods []string
 	for rows.Next() {
 		var t Thread
 		var period *string
 		if err := rows.Scan(&t.ID, &t.CreatedAt, &t.LastAt, &t.Rounds, &period, &t.Waiting); err != nil {
 			return nil, err
 		}
-		switch {
-		case period != nil && *period != "":
-			t.Title = "รอบ " + PeriodLabel(*period)
-		case t.ID == nil:
-			t.Title = "แชทแรก"
-		default:
-			t.Title = "แชทใหม่ · " + ThaiDate(t.CreatedAt)
+		p := ""
+		if period != nil {
+			p = *period
 		}
 		out = append(out, t)
+		periods = append(periods, p)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Every chat keeps a name of its own ("แชทแรก", "แชทใหม่ · 28 ก.ย. 2569",
+	// with the time when two began the same day); its latest round follows.
+	name := func(t Thread, withTime bool) string {
+		switch {
+		case t.ID == nil:
+			return "แชทแรก"
+		case withTime:
+			return "แชทใหม่ · " + ThaiDateTime(t.CreatedAt)
+		default:
+			return "แชทใหม่ · " + ThaiDate(t.CreatedAt)
+		}
+	}
+	sameDay := map[string]int{}
+	for _, t := range out {
+		sameDay[name(t, false)]++
+	}
+	for i := range out {
+		n := name(out[i], sameDay[name(out[i], false)] > 1)
+		if periods[i] != "" {
+			n += " · รอบ " + PeriodLabel(periods[i])
+		}
+		out[i].Title = n
+	}
+	return out, nil
 }
 
 // RoundStartedSince: "เริ่มรอบใหม่" was pressed in this thread after the given time.
