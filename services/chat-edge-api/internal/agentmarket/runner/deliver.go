@@ -65,8 +65,11 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 	if rc.pkg.Manifest.Narrative == "rules" {
 		return rc.rulesNarrative(ctx, computed, computeKey)
 	}
-	key := am.StepKey(rc.run.ID, "narrative", computeKey, rc.pkg.Checksum, rc.r.Model.Primary, rc.r.Model.Fallback)
-	out, err := rc.step(ctx, "narrative", "ai", key, map[string]any{"models": []string{rc.r.Model.Primary, rc.r.Model.Fallback}}, true,
+	// AM4: the round's choice first, then the runner's models — only those the
+	// organisation lets see the computed table (choice.go).
+	models := rc.writingModels()
+	key := am.StepKey(rc.run.ID, "narrative", computeKey, rc.pkg.Checksum, strings.Join(models, "|"))
+	out, err := rc.step(ctx, "narrative", "ai", key, map[string]any{"models": models}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
 			cv, _, err := rc.readComputed(ctx, computed)
 			if err != nil {
@@ -74,7 +77,7 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			}
 			user := narrativePrompt(cv)
 			var parsed map[string]any
-			c, tried, err := rc.r.Model.Complete(ctx, rc.pkg.Instructions, user, func(s string) error {
+			c, tried, err := rc.r.Model.CompleteWith(ctx, models, rc.pkg.Instructions, user, func(s string) error {
 				var v map[string]any
 				if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
 					return fmt.Errorf("ไม่ใช่ JSON")
@@ -114,7 +117,7 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			parsed["written_by"] = "model"
 			parsed["model"] = c.Model
 			nb, _ := json.Marshal(parsed)
-			self := rc.r.Model.SelfHosted[c.Model]
+			self := rc.r.Model.IsSelfHosted(c.Model)
 			model := c.Model
 			_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
 			return narrativeOut{Narrative: nb, Model: c.Model, SelfHosted: self, Tried: tried, Tokens: c.Tokens, CostUSD: c.CostUSD},
@@ -521,7 +524,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return err
 	}
 	out := am.OutputsPayload{RunID: artifactRun.String(), Summary: summary, Rendered: rerender,
-		Model: map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
+		Model: rc.modelLine(narrative)}
 	if run.Period != nil {
 		out.PeriodLabel = *run.Period
 	}
@@ -553,6 +556,28 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		text += " ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย " + narrative.Model + " (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)"
 	}
 	return st.PostText(ctx, run, text, nil)
+}
+
+// modelLine is what the outputs card always says about models (AM4): which
+// model saw the documents (or that none did), what the person chose, and —
+// plainly — when another model was used instead.
+func (rc *runCtx) modelLine(narrative narrativeOut) map[string]any {
+	line := map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted, "choice": rc.choice(),
+		"uses": am.ModelUse(rc.pkg.Manifest)}
+	switch am.ModelUse(rc.pkg.Manifest) {
+	case "vision":
+		used, notChosen := rc.visionModel()
+		line["chosen_model"] = rc.chosenModel()
+		line["vision_model"] = used
+		line["vision_self_hosted"] = used != "" && rc.r.Model.IsSelfHosted(used)
+		line["not_chosen"] = notChosen
+	case "text":
+		chosen := rc.chosenModel()
+		line["chosen_model"] = chosen
+		line["not_chosen"] = narrative.Model != "" && chosen != "" && !sameModel(narrative.Model, chosen)
+		line["written_by_rules"] = narrative.Model == ""
+	}
+	return line
 }
 
 // documentsNote says where an extraction agent's numbers came from and which
@@ -598,9 +623,13 @@ func (rc *runCtx) startNextRound(ctx context.Context) {
 	if err != nil || len(files) == 0 {
 		return
 	}
+	// AM4: the next round carries the install's settings and nothing of this
+	// one — not even its typed instruction: "ปิดงบเดือนกันยายน" typed for this
+	// round would close the next round's files as September too.
 	nr, _, err := st.CreateRun(ctx, st.Pool, am.Run{InstallID: rc.run.InstallID, TenantID: rc.run.TenantID, UserID: rc.run.UserID,
-		Kind: am.KindRun, Message: rc.run.Message, DefinitionVersion: rc.run.DefinitionVersion, Checksum: rc.run.Checksum,
-		EngineChecksum: rc.run.EngineChecksum, BindingVersion: rc.run.BindingVersion, Formats: rc.run.Formats}, "")
+		Kind: am.KindRun, DefinitionVersion: rc.run.DefinitionVersion, Checksum: rc.run.Checksum,
+		EngineChecksum: rc.run.EngineChecksum, BindingVersion: rc.run.BindingVersion, Formats: rc.run.Formats,
+		ThreadID: rc.run.ThreadID, ModelChoice: rc.run.ModelChoice}, "")
 	if err != nil {
 		rc.log.Error("next round failed", "err", err)
 		return

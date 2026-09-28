@@ -732,7 +732,7 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	ds.NoModel = append(ds.NoModel, "ตัวเลขทุกตัวคำนวณด้วยสคริปต์ ไม่มีโมเดลใดเป็นผู้กำหนดตัวเลข")
 	// Where the files are kept and for how long: the runner says (heartbeat).
 	storage := map[string]any{"backend": "local", "prefix": "agent-market/"}
-	retention := map[string]float64{"staged_hours": 48, "scratch_days": 7, "removed_days": 30}
+	retention := map[string]float64{"staged_hours": 30 * 24, "scratch_days": 7, "removed_days": 30}
 	if b, ok := caps["platform.storage"]; ok {
 		var det map[string]any
 		if json.Unmarshal(b.Detail, &det) == nil {
@@ -747,12 +747,17 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 		}
 	}
 	ds.Storage = storage
+	// AM4: an accounting archive — a finished round's evidence for the
+	// organisation's years (ApplyOrg sets them), everything else short.
 	ds.Retention = []map[string]any{
-		{"what": "ไฟล์ที่อัปโหลดแต่ไม่ได้ส่งให้ agent", "keep": retention["staged_hours"], "unit": "hours"},
-		{"what": "ไฟล์ชั่วคราวของรอบที่ล้มเหลวหรือยกเลิก", "keep": retention["scratch_days"], "unit": "days"},
-		{"what": "ไฟล์ต้นฉบับ ผลลัพธ์ และประวัติของรอบที่เสร็จ", "keep": 0, "unit": "while_installed"},
-		{"what": "ทุกอย่างของ agent ที่ถอนการติดตั้งแล้ว", "keep": retention["removed_days"], "unit": "days"},
-		{"what": "เมื่อลบบัญชีผู้ใช้", "keep": 0, "unit": "account_deletion"},
+		{"what": "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จ (หลักฐานว่าตัวเลขคำนวณจากไฟล์ใด)", "keep": float64(DefaultRetentionYears),
+			"unit": "years"},
+		{"what": "ข้อมูลของรอบที่ล้มเหลวหรือยกเลิก (ไฟล์ที่ส่งเข้าและข้อมูลชั่วคราว)", "keep": retention["scratch_days"], "unit": "days"},
+		{"what": "ไฟล์ที่อัปโหลดแต่ไม่ได้ใช้ในรอบใด", "keep": retention["staged_hours"] / 24, "unit": "days"},
+		{"what": "แชทและการตั้งค่าของ agent ที่ถอนการติดตั้งแล้ว (หลักฐานของรอบที่สำเร็จเก็บต่อตามข้อแรก)",
+			"keep": retention["removed_days"], "unit": "days"},
+		{"what": "เมื่อลบบัญชีผู้ใช้: แชทและการตั้งค่าส่วนตัวถูกลบ ส่วนหลักฐานของรอบที่สำเร็จเป็นขององค์กร เก็บต่อตามข้อแรก " +
+			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล", "keep": 0, "unit": "account_deletion"},
 	}
 	if days := int(m.IndexRetention().Hours() / 24); days > 0 {
 		ds.Retention = append(ds.Retention, map[string]any{"what": "สรุปเอกสารสำหรับตรวจเอกสารซ้ำ (เลขผู้เสียภาษี เลขที่ วันที่ ยอดรวม)",
@@ -765,6 +770,37 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	}
 	ds.Runner = map[string]any{}
 	return ds, nil
+}
+
+// ApplyOrg fills in the organisation's own decisions (AM4): how many years a
+// finished round's evidence is kept, and — while documents may not leave —
+// that a model outside the organisation is not used at all.
+func (ds *Datasheet) ApplyOrg(o OrgSettings) {
+	years := o.RetentionYears
+	if years <= 0 {
+		years = DefaultRetentionYears
+	}
+	for _, r := range ds.Retention {
+		if r["unit"] == "years" {
+			r["keep"] = float64(years)
+		}
+	}
+	if ds.Notes == nil {
+		ds.Notes = map[string]string{}
+	}
+	ds.Notes["not_archive"] = "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด"
+	if !o.DocumentsMayLeave {
+		kept := ds.Models[:0]
+		for _, m := range ds.Models {
+			if !m.SelfHosted {
+				ds.NoModel = append(ds.NoModel, "โมเดล "+m.Model+" อยู่นอกองค์กร จึงไม่ใช้ — องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร "+
+					"(ถ้าโมเดลในองค์กรไม่ตอบ คำบรรยายจะเขียนด้วยกฎของ agent แทน)")
+				continue
+			}
+			kept = append(kept, m)
+		}
+		ds.Models = kept
+	}
 }
 
 func (a *API) datasheet(w http.ResponseWriter, r *http.Request) {
@@ -790,6 +826,9 @@ func (a *API) datasheet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.fail(w, err, "agent")
 		return
+	}
+	if o, err := a.store.OrgSettingsFor(ctx, acc.OrgID); err == nil {
+		ds.ApplyOrg(o)
 	}
 	ds.Runner = runner
 	writeJSON(w, http.StatusOK, ds)

@@ -114,16 +114,26 @@ func (rc *runCtx) selfTestSettings() {
 // data sheet says; an extraction agent (narrative "rules": invoices, expense
 // claims) sends nothing to a model outside the organisation — only the
 // self-hosted ones, or none (a keyword reading and the defaults then).
+//
+// AM4: both follow the round's model choice and the organisation's rule — a
+// model outside the organisation only while documents may leave it.
 func (rc *runCtx) textModels() []string {
 	m := rc.pkg.Manifest
 	declared := false
 	for _, c := range append(append([]string{}, m.Capabilities.Required...), m.Capabilities.Optional...) {
 		declared = declared || c == "model.text"
 	}
+	all := rc.writingModels()
 	if declared && m.Narrative != "rules" {
-		return rc.r.Model.Models()
+		return all
 	}
-	return rc.r.Model.SelfHostedModels()
+	var inside []string
+	for _, x := range all {
+		if rc.r.Model.IsSelfHosted(x) {
+			inside = append(inside, x)
+		}
+	}
+	return inside
 }
 
 // ── catalog samples ──────────────────────────────────────────────────────
@@ -400,7 +410,7 @@ func (r *Runner) storeStamped(ctx context.Context, run am.Run, slug, period, for
 
 // storageCapability says where files live and how long (the data sheet's facts).
 func (r *Runner) storageCapability(backend string) am.Binding {
-	staged, scratch, removed := orDefault(r.StagedTTL, 48*time.Hour), orDefault(r.ScratchTTL, 7*24*time.Hour),
+	staged, scratch, removed := orDefault(r.StagedTTL, 30*24*time.Hour), orDefault(r.ScratchTTL, 7*24*time.Hour),
 		orDefault(r.RemovedTTL, 30*24*time.Hour)
 	d, _ := json.Marshal(map[string]any{"backend": backend, "prefix": "agent-market/",
 		"staged_hours": staged.Hours(), "scratch_days": scratch.Hours() / 24, "removed_days": removed.Hours() / 24})

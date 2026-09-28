@@ -178,6 +178,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/runs/{id}/exceptions", a.runExceptions)
 		r.Post("/exceptions/{id}/decision", a.decideException)
 		r.Post("/installs/{id}/messages", a.message)
+		a.roundRoutes(r) // AM4: threads, the round-boundary chip, "เริ่มรอบใหม่"
 		r.Post("/mapping-preview", a.mappingPreview)
 		r.Post("/cards/{id}/answer", a.answer)
 		r.Get("/runs/{id}", a.getRun)
@@ -692,8 +693,12 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	thread, ok := a.threadParam(w, r, in)
+	if !ok {
+		return
+	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	items, err := a.store.ItemsAfter(r.Context(), in.ID, after, 500)
+	items, err := a.store.ThreadItemsAfter(r.Context(), in.ID, thread, after, 500)
 	if err != nil {
 		a.fail(w, err, "thread")
 		return
@@ -711,6 +716,10 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request) {
 // new rows; a reconnect passes ?after=<last rev> and resumes exactly there.
 func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	in, _, ok := a.ownedInstall(w, r)
+	if !ok {
+		return
+	}
+	thread, ok := a.threadParam(w, r, in)
 	if !ok {
 		return
 	}
@@ -734,7 +743,7 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	deadline := time.NewTimer(10 * time.Minute) // the client reconnects with its cursor
 	defer deadline.Stop()
 	for {
-		items, err := a.store.ItemsAfter(ctx, in.ID, after, 200)
+		items, err := a.store.ThreadItemsAfter(ctx, in.ID, thread, after, 200)
 		if err != nil {
 			return
 		}
@@ -848,6 +857,10 @@ type messageReq struct {
 	Text     string      `json:"text"`
 	FileIDs  []uuid.UUID `json:"file_ids"`
 	ClientID string      `json:"client_id"`
+	// AM4: the thread it was typed in (nil = the first), and the model for
+	// this round only (empty = the install's own choice).
+	ThreadID    *uuid.UUID `json:"thread_id"`
+	ModelChoice string     `json:"model_choice"`
 }
 
 // message is the composer. It only routes: a file starts or resumes a run,
@@ -876,6 +889,12 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	if req.ClientID != "" {
 		clientID = &req.ClientID
 	}
+	if !a.threadOf(w, r, in, req.ThreadID) {
+		return
+	}
+	if req.ModelChoice != "" && !a.modelChoiceAllowed(w, r, in, req.ModelChoice) {
+		return
+	}
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "message")
@@ -903,7 +922,7 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		payload["files"] = fl
 		payload["status"] = "handled"
 	}
-	item, created, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, nil, kind, payload, clientID)
+	item, created, err := a.store.AddItemIn(ctx, tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, nil, kind, payload, clientID)
 	if err != nil {
 		a.fail(w, err, "message")
 		return
@@ -912,7 +931,7 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"item": item, "duplicate": true})
 		return
 	}
-	route, runID, err := a.route(ctx, tx, in, c, item, req.Text, files)
+	route, runID, err := a.route(ctx, tx, in, c, item, req.Text, files, roundOpts{thread: req.ThreadID, model: req.ModelChoice})
 	if err != nil {
 		a.fail(w, err, "message")
 		return
@@ -924,10 +943,28 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"item": item, "route": route, "run_id": runID})
 }
 
+// roundOpts: the thread a message was typed in, the model for this round, and
+// whether the person already said "start a new round" (the chip, the button).
+type roundOpts struct {
+	thread   *uuid.UUID
+	model    string
+	newRound bool
+}
+
 func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, item ThreadItem, text string,
-	files []File) (string, *uuid.UUID, error) {
-	latest, lerr := a.store.LatestRun(ctx, in.ID)
+	files []File, o roundOpts) (string, *uuid.UUID, error) {
+	latest, lerr := a.store.LatestRunIn(ctx, in.ID, o.thread)
 	hasLatest := lerr == nil
+	// AM4: after a finished round, a new one starts only when the person says
+	// so — the chip, or "เริ่มรอบใหม่" pressed since that round.
+	finished := hasLatest && latest.Status == RunSucceeded
+	if finished && !o.newRound {
+		started, err := a.store.RoundStartedSince(ctx, tx, in.ID, o.thread, latest.CreatedAt)
+		if err != nil {
+			return "", nil, err
+		}
+		o.newRound = started
+	}
 	ids := make([]uuid.UUID, 0, len(files))
 	for _, f := range files {
 		ids = append(ids, f.ID)
@@ -960,21 +997,16 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 			if _, err := a.store.AttachFiles(ctx, tx, c.TenantUUID, c.UserID, latest.ID, ids, "pending_decision"); err != nil {
 				return "", nil, err
 			}
-			if err := a.lateFileCard(ctx, tx, latest, files, false); err != nil {
+			if err := a.lateFileCard(ctx, tx, latest, files); err != nil {
 				return "", nil, err
 			}
 			return "late_file", &latest.ID, link(latest.ID, "late_file")
-		case hasLatest && latest.Status == RunSucceeded && time.Since(ptrTime(latest.FinishedAt)) < 24*time.Hour && !wantsNewRound(text):
-			// Numbers already reported: never slip the file into that round.
-			if _, err := a.store.AttachFiles(ctx, tx, c.TenantUUID, c.UserID, latest.ID, ids, "pending_decision"); err != nil {
-				return "", nil, err
-			}
-			if err := a.lateFileCard(ctx, tx, latest, files, true); err != nil {
-				return "", nil, err
-			}
-			return "late_file", &latest.ID, link(latest.ID, "late_file")
+		case finished && !o.newRound:
+			// AM4: files after a finished round — never slipped into that round,
+			// never silently a new one: ask (the files wait, unused, until then).
+			return "intent", nil, a.intentChip(ctx, tx, in, c, item, latest, text, files, o)
 		default:
-			run, err := a.newRun(ctx, tx, in, c, text, ids)
+			run, err := a.newRun(ctx, tx, in, c, text, ids, o)
 			if err != nil {
 				return "", nil, err
 			}
@@ -1004,9 +1036,21 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 			}
 		}
 	}
-	if !hasLatest || latest.Status == RunFailed || latest.Status == RunCancelled || wantsNewRound(text) && latest.Status == RunSucceeded {
-		if !hasLatest || wantsNewRound(text) {
-			run, err := a.newRun(ctx, tx, in, c, text, nil)
+	if finished {
+		switch {
+		case o.newRound && !ReadsAsAboutLastRound(text):
+			run, err := a.newRun(ctx, tx, in, c, text, nil, o)
+			if err != nil {
+				return "", nil, err
+			}
+			return "new_run", &run.ID, link(run.ID, "new_run")
+		case !o.newRound && !ReadsAsAboutLastRound(text) && !SocialOnly(text):
+			// AM4: an instruction after a finished round: ask, never guess.
+			return "intent", nil, a.intentChip(ctx, tx, in, c, item, latest, text, nil, o)
+		}
+	} else if !hasLatest || latest.Status == RunFailed || latest.Status == RunCancelled {
+		if o.newRound || wantsNewRound(text) {
+			run, err := a.newRun(ctx, tx, in, c, text, nil, o)
 			if err != nil {
 				return "", nil, err
 			}
@@ -1018,10 +1062,7 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 	if hasLatest {
 		parent = &latest.ID
 	}
-	params, _ := json.Marshal(map[string]any{"item_id": item.ID, "text": text})
-	job, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: in.ID, ParentRunID: parent, TenantID: c.TenantUUID,
-		UserID: c.UserID, Kind: KindReply, Message: text, Params: params, DefinitionVersion: in.DefinitionVersion,
-		Checksum: in.Checksum, BindingVersion: in.BindingVersion}, "")
+	job, err := a.replyJob(ctx, tx, in, c, item.ID, text, parent, o.thread)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1038,14 +1079,11 @@ func wantsNewRound(text string) bool {
 	return false
 }
 
-func ptrTime(t *time.Time) time.Time {
-	if t == nil {
-		return time.Time{}
-	}
-	return *t
-}
-
-func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, text string, fileIDs []uuid.UUID) (Run, error) {
+// newRun starts a round. It carries the install's settings and remembered
+// answers (the runner reads them) and nothing of an earlier round: no file,
+// no figure, no answer, no typed instruction (AM4).
+func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, text string, fileIDs []uuid.UUID,
+	o roundOpts) (Run, error) {
 	def, err := a.store.DefinitionByID(ctx, in.DefinitionID)
 	if err != nil {
 		return Run{}, err
@@ -1063,7 +1101,14 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 	if _, err := a.store.SupersedeInstallCards(ctx, tx, in.ID, "superseded"); err != nil {
 		return Run{}, err
 	}
-	if prev, err := a.store.LatestRun(ctx, in.ID); err == nil && !IsTerminal(prev.Status) {
+	model := o.model
+	if model == "" {
+		model = in.ModelChoice
+	}
+	if model == "" {
+		model = ModelAuto
+	}
+	if prev, err := a.store.LatestRunIn(ctx, in.ID, o.thread); err == nil && !IsTerminal(prev.Status) {
 		if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_runs SET cancel_requested = true,
 			status = CASE WHEN status IN ('queued','awaiting_input') THEN 'cancelled' ELSE status END,
 			status_reason = 'superseded_by_new_round', finished_at = CASE WHEN status IN ('queued','awaiting_input') THEN now() ELSE finished_at END
@@ -1073,7 +1118,7 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 	}
 	run, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: in.ID, TenantID: c.TenantUUID, UserID: c.UserID, Kind: KindRun,
 		Message: text, DefinitionVersion: def.Version, Checksum: def.Checksum, EngineChecksum: def.EngineChecksum,
-		BindingVersion: in.BindingVersion, Formats: formats}, "")
+		BindingVersion: in.BindingVersion, Formats: formats, ThreadID: o.thread, ModelChoice: &model}, "")
 	if err != nil {
 		return run, err
 	}
@@ -1088,31 +1133,23 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 	return run, err
 }
 
-func (a *API) lateFileCard(ctx context.Context, tx pgx.Tx, run Run, files []File, finished bool) error {
+// lateFileCard asks about files that arrived while a round was still working:
+// include them in this round, or keep them for the next one. (Files after a
+// round has finished get the round-boundary chip instead — rounds.go.)
+func (a *API) lateFileCard(ctx context.Context, tx pgx.Tx, run Run, files []File) error {
 	names := []string{}
 	fl := []map[string]any{}
 	for _, f := range files {
 		names = append(names, f.Name)
 		fl = append(fl, map[string]any{"id": f.ID, "name": f.Name, "size": f.Size})
 	}
-	var q Question
-	if finished {
-		q = Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: "ไฟล์เพิ่ม",
-			Question: fmt.Sprintf("ได้รับ %s แล้วครับ รอบก่อนหน้าส่งตัวเลขไปแล้ว จึงไม่ใส่เพิ่มในรอบนั้น จะให้ทำรอบใหม่แบบไหนครับ", strings.Join(names, ", ")),
-			Options: []Option{
-				{Label: "ทำรอบใหม่ ใช้ไฟล์เดิมร่วมด้วย", Description: "ไฟล์ของรอบก่อน + ไฟล์ใหม่", Value: json.RawMessage(`"new_round_with_previous"`)},
-				{Label: "ทำรอบใหม่ เฉพาะไฟล์นี้", Description: "เริ่มจากไฟล์ใหม่อย่างเดียว", Value: json.RawMessage(`"new_round_only_new"`)},
-			},
-			Default: json.RawMessage(`"new_round_with_previous"`), DefaultLabel: "ทำรอบใหม่ ใช้ไฟล์เดิมร่วมด้วย"}
-	} else {
-		q = Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: "ไฟล์เพิ่ม",
-			Question: fmt.Sprintf("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", strings.Join(names, ", ")),
-			Options: []Option{
-				{Label: "รวมในรอบนี้", Description: "ตรวจไฟล์ใหม่แล้วคำนวณก่อนส่งผล", Value: json.RawMessage(`"include"`)},
-				{Label: "เก็บไว้ทำรอบใหม่", Description: "รอบนี้ใช้ไฟล์เดิม แล้วเริ่มรอบใหม่ต่อทันที", Value: json.RawMessage(`"next_round"`)},
-			},
-			Default: json.RawMessage(`"include"`), DefaultLabel: "รวมในรอบนี้"}
-	}
+	q := Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: "ไฟล์เพิ่ม",
+		Question: fmt.Sprintf("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", strings.Join(names, ", ")),
+		Options: []Option{
+			{Label: "รวมในรอบนี้", Description: "ตรวจไฟล์ใหม่แล้วคำนวณก่อนส่งผล", Value: json.RawMessage(`"include"`)},
+			{Label: "เก็บไว้ทำรอบใหม่", Description: "รอบนี้ใช้ไฟล์เดิม รอบใหม่เริ่มต่อทันทีด้วยไฟล์นี้เท่านั้น", Value: json.RawMessage(`"next_round"`)},
+		},
+		Default: json.RawMessage(`"include"`), DefaultLabel: "รวมในรอบนี้"}
 	qs, _ := json.Marshal([]Question{q})
 	card, err := a.store.CreateCard(ctx, tx, Card{RunID: run.ID, InstallID: run.InstallID, TenantID: run.TenantID,
 		UserID: run.UserID, Moment: "run", Kind: "late_file", Blocking: false, Questions: qs})
@@ -1335,34 +1372,14 @@ func (a *API) applyLateFile(ctx context.Context, tx pgx.Tx, run Run, choice json
 		}
 		return a.store.MergeAnswers(ctx, tx, run.ID, map[string]Answer{"late_file": {Value: choice, Via: "card"}})
 	case "new_round_with_previous", "new_round_only_new":
+		// A card made before AM4. Either answer starts a round with only the
+		// new files: a new round never inherits an earlier round's files, nor
+		// its typed instruction (a month named there would close the wrong one).
 		in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, run.InstallID)
 		if err != nil {
 			return err
 		}
-		if v == "new_round_with_previous" {
-			prev, err := a.store.RunFiles(ctx, run.ID, "active")
-			if err != nil {
-				return err
-			}
-			// The previous files are copied as new rows onto the new run: the
-			// finished run's own record never changes.
-			nr, err := a.newRun(ctx, tx, in, c, run.Message, nil)
-			if err != nil {
-				return err
-			}
-			for _, f := range prev {
-				f.ID = uuid.New()
-				f.RunID = &nr.ID
-				f.Status = "active"
-				f.ClientID = nil
-				if _, err := a.store.CreateFile(ctx, tx, f); err != nil {
-					return err
-				}
-			}
-			_, err = tx.Exec(ctx, `UPDATE agent_market.agent_files SET status = 'active', run_id = $2 WHERE id = ANY($1)`, ids, nr.ID)
-			return err
-		}
-		nr, err := a.newRun(ctx, tx, in, c, run.Message, nil)
+		nr, err := a.newRun(ctx, tx, in, c, "", nil, roundOpts{thread: run.ThreadID})
 		if err != nil {
 			return err
 		}
@@ -1430,25 +1447,38 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "run")
 		return
 	}
+	out, what, err := a.runDetail(ctx, run)
+	if err != nil {
+		a.fail(w, err, what)
+		return
+	}
+	// AM4: the owner sees every time an admin opened this run, and why.
+	log, err := a.store.AccessLog(ctx, run.ID)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	out["access_log"] = log
+	writeJSON(w, http.StatusOK, out)
+}
+
+// runDetail is a run's page: its steps, questions, files in and out.
+func (a *API) runDetail(ctx context.Context, run Run) (map[string]any, string, error) {
 	steps, err := a.store.ListSteps(ctx, run.ID)
 	if err != nil {
-		a.fail(w, err, "steps")
-		return
+		return nil, "steps", err
 	}
 	cards, err := a.store.RunCards(ctx, run.ID)
 	if err != nil {
-		a.fail(w, err, "cards")
-		return
+		return nil, "cards", err
 	}
 	arts, err := a.store.RunArtifacts(ctx, run.ID)
 	if err != nil {
-		a.fail(w, err, "artifacts")
-		return
+		return nil, "artifacts", err
 	}
 	files, err := a.store.RunFiles(ctx, run.ID)
 	if err != nil {
-		a.fail(w, err, "files")
-		return
+		return nil, "files", err
 	}
 	children, _ := a.store.ChildRuns(ctx, run.ID)
 	for _, ch := range children {
@@ -1459,9 +1489,9 @@ func (a *API) getRun(w http.ResponseWriter, r *http.Request) {
 	steps, cards, arts, files, children = nonNil(steps), nonNil(cards), nonNil(arts), nonNil(files), nonNil(children)
 	in, _ := a.store.InstallByID(ctx, run.InstallID)
 	spent, _ := a.store.SpentThisMonth(ctx, run.InstallID)
-	writeJSON(w, http.StatusOK, map[string]any{"run": run, "steps": steps, "clarifications": cards, "artifacts": arts,
+	return map[string]any{"run": run, "steps": steps, "clarifications": cards, "artifacts": arts,
 		"files": files, "children": children, "install": map[string]any{"id": in.ID, "title": in.Title, "slug": in.Slug},
-		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}})
+		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}}, "", nil
 }
 
 // computed serves the run's computed table (the evidence view's numbers).
@@ -1478,8 +1508,14 @@ func (a *API) computed(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "run")
 		return
 	}
+	a.serveComputed(w, r, run)
+}
+
+// serveComputed writes a run's computed table (the owner's page; an admin's opened view).
+func (a *API) serveComputed(w http.ResponseWriter, r *http.Request, run Run) {
+	ctx := r.Context()
 	var key string
-	err = a.store.Pool.QueryRow(ctx, `SELECT output->>'computed_key' FROM agent_market.agent_run_steps
+	err := a.store.Pool.QueryRow(ctx, `SELECT output->>'computed_key' FROM agent_market.agent_run_steps
 		WHERE run_id = $1 AND name = 'compute' AND status = 'succeeded' ORDER BY seq DESC LIMIT 1`, run.ID).Scan(&key)
 	if err != nil || key == "" {
 		say(w, http.StatusNotFound, "NOT_COMPUTED")

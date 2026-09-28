@@ -100,25 +100,15 @@ func (rc *runCtx) extras(ctx context.Context, parsed []parsedFile) (runExtras, e
 	return x, err
 }
 
-// wantsVision: the package may use a vision model and the runner has a
-// self-hosted one.
-func (rc *runCtx) wantsVision() (string, bool) {
-	m := rc.r.Model
-	if m == nil || !m.Available() || m.VisionModel == "" || !m.SelfHosted[m.VisionModel] {
-		return "", false
-	}
-	caps := rc.pkg.Manifest.Capabilities
-	if !contains(caps.Optional, "model.vision") && !contains(caps.Required, "model.vision") {
-		return "", false
-	}
-	return m.VisionModel, true
-}
-
+// readDocuments has the round's vision model (AM4: the person's choice, as
+// the organisation allows — choice.go) read each scan or photo as a second
+// reader; never the source of a number, never a fallback model.
 func (rc *runCtx) readDocuments(ctx context.Context, parsed []parsedFile) (map[string]visionReading, error) {
-	model, ok := rc.wantsVision()
-	if !ok {
+	model, _ := rc.visionModel()
+	if model == "" {
 		return nil, nil
 	}
+	self := rc.r.Model.IsSelfHosted(model)
 	prompt, err := rc.engine.PackageFile(rc.pkg, "prompts/vision.md")
 	if err != nil {
 		return nil, nil // a package without a vision prompt reads no images
@@ -142,7 +132,7 @@ func (rc *runCtx) readDocuments(ctx context.Context, parsed []parsedFile) (map[s
 					}
 					images = append(images, b)
 				}
-				reading := visionReading{DocKey: docKey, Model: model, SelfHosted: true, Pages: len(images)}
+				reading := visionReading{DocKey: docKey, Model: model, SelfHosted: self, Pages: len(images)}
 				var fields map[string]string
 				c, err := rc.r.Model.Vision(ctx, model, string(prompt), images, func(s string) error {
 					f, err := visionJSON(s)
@@ -159,7 +149,6 @@ func (rc *runCtx) readDocuments(ctx context.Context, parsed []parsedFile) (map[s
 					return reading, credits, "", model, nil
 				}
 				reading.Fields = fields
-				self := true
 				_ = rc.r.Store.SetRunFields(ctx, rc.run.ID, nil, &model, &self)
 				return reading, credits, "", model, nil
 			})

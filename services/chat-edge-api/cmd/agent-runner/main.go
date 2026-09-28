@@ -207,7 +207,7 @@ func run(log *slog.Logger) error {
 		Poll:          time.Duration(am.EnvInt("AGENT_RUNNER_POLL_MS", 1000)) * time.Millisecond,
 		CreditsPerUSD: float64(am.EnvInt("AGENT_MARKET_CREDITS_PER_USD", 3000000)),
 		// Retention (AM2): unattached uploads, a failed run's scratch, a removed install.
-		StagedTTL:               time.Duration(am.EnvInt("AGENT_MARKET_STAGED_UPLOAD_HOURS", 48)) * time.Hour,
+		StagedTTL:               time.Duration(am.EnvInt("AGENT_MARKET_STAGED_UPLOAD_HOURS", 720)) * time.Hour,
 		ScratchTTL:              time.Duration(am.EnvInt("AGENT_MARKET_FAILED_SCRATCH_DAYS", 7)) * 24 * time.Hour,
 		RemovedTTL:              time.Duration(am.EnvInt("AGENT_MARKET_REMOVED_INSTALL_DAYS", 30)) * 24 * time.Hour,
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),

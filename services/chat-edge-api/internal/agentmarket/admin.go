@@ -128,6 +128,11 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		UserMonthlyCredits json.RawMessage `json:"user_monthly_credits"`
 		ContactName        *string         `json:"contact_name"`
 		ContactEmail       *string         `json:"contact_email"`
+		// AM4
+		DocumentsMayLeave *bool         `json:"documents_may_leave"`
+		AgentModels       *[]ModelEntry `json:"agent_models"`
+		RetentionYears    *int          `json:"retention_years"`
+		StorageWarnMB     *int          `json:"storage_warn_mb"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		badRequest(w, "BAD_JSON")
@@ -195,9 +200,50 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		}
 		o.ContactEmail = e
 	}
+	if body.DocumentsMayLeave != nil {
+		o.DocumentsMayLeave = *body.DocumentsMayLeave
+	}
+	if body.AgentModels != nil {
+		list := []ModelEntry{}
+		seen := map[string]bool{}
+		for _, e := range *body.AgentModels {
+			e.Model = strings.TrimSpace(e.Model)
+			if e.Model == "" || seen[e.Model] {
+				continue
+			}
+			if e.Outcome != OutcomeFast && e.Outcome != OutcomeAccurate {
+				say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ผลลัพธ์ของโมเดลต้องเป็น “เร็วและประหยัด” หรือ “แม่นที่สุด”")
+				return
+			}
+			seen[e.Model] = true
+			list = append(list, e)
+		}
+		if len(list) > 6 {
+			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "รายการโมเดลให้เลือกได้ไม่เกิน 6 ตัว — เลือกเฉพาะตัวที่คนในองค์กรต้องใช้จริง")
+			return
+		}
+		o.AgentModels = list
+	}
+	if body.RetentionYears != nil {
+		if *body.RetentionYears < 1 || *body.RetentionYears > 30 {
+			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี")
+			return
+		}
+		o.RetentionYears = *body.RetentionYears
+	}
+	if body.StorageWarnMB != nil {
+		if *body.StorageWarnMB < 50 || *body.StorageWarnMB > 1_000_000 {
+			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ขนาดที่เตือนต้องอยู่ระหว่าง 50 MB ถึง 1,000,000 MB")
+			return
+		}
+		o.StorageWarnMB = *body.StorageWarnMB
+	}
+	models, _ := json.Marshal(o.AgentModels)
 	if _, err := a.store.Pool.Exec(ctx, `UPDATE agent_market.org_settings SET name = $2, access = $3, domains = $4,
-		user_monthly_credits = $5, contact_name = $6, contact_email = $7, updated_by = $8, updated_at = now() WHERE org_id = $1`,
-		acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email)); err != nil {
+		user_monthly_credits = $5, contact_name = $6, contact_email = $7, updated_by = $8, updated_at = now(),
+		documents_may_leave = $9, agent_models = $10, retention_years = $11, storage_warn_mb = $12 WHERE org_id = $1`,
+		acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email),
+		o.DocumentsMayLeave, models, o.RetentionYears, o.StorageWarnMB); err != nil {
 		a.fail(w, err, "member")
 		return
 	}

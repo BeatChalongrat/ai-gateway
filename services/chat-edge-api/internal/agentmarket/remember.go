@@ -27,7 +27,7 @@ func (s *Store) RememberAnswers(ctx context.Context, q Querier, run Run, cardID 
 	cid := cardID
 	for _, qn := range questions {
 		a, ok := answers[qn.Key]
-		if !ok || !qn.Rememberable || (a.Via != "card" && a.Via != "text") {
+		if !ok || !qn.Rememberable || (a.Via != "card" && a.Via != "text") || !CarriesToNextRound(qn.Code, a.Value) {
 			continue
 		}
 		var key string
@@ -89,14 +89,35 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+// CarriesToNextRound: an answer that describes how the export is written (its
+// columns, its signs, that its amounts are already baht) carries to the next
+// round; one about THIS round's data does not (AM4). September's "leave the
+// October rows out" must not quietly leave rows out of October's file, nor
+// "drop the foreign-currency rows" drop next month's.
+func CarriesToNextRound(code string, value json.RawMessage) bool {
+	switch code {
+	case "period_mixed":
+		return false
+	case "currency_mixed":
+		var v string
+		_ = json.Unmarshal(value, &v)
+		return v == "amounts_in_base"
+	}
+	return true
+}
+
 // DefaultsForEngine shapes install defaults as the package code reads them:
-// {mapping, dc_convention, answers{code: value}, currency, formats, …}.
+// {mapping, dc_convention, answers{code: value}, currency, formats, …}. A
+// round-data answer an older version remembered is not passed on (AM4).
 func DefaultsForEngine(defs []Default) (map[string]any, map[string]json.RawMessage) {
 	out := map[string]any{}
 	remembered := map[string]json.RawMessage{}
 	answers := map[string]json.RawMessage{}
 	for _, d := range defs {
 		if len(d.Key) > 8 && d.Key[:8] == "answers." {
+			if !CarriesToNextRound(d.Key[8:], d.Value) {
+				continue
+			}
 			answers[d.Key[8:]] = d.Value
 			remembered[d.Key[8:]] = d.Value
 			continue

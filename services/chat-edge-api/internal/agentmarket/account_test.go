@@ -131,7 +131,10 @@ func TestAccountProviderExportsStopsAndPurges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts["objects"] != 3 || counts["installs"] != 1 || counts["document_index"] != 1 {
+	// AM4: the seeded round was cancelled at the request, so nothing of the
+	// organisation's is left in the install: it is erased whole (the
+	// duplicate index goes with it)
+	if counts["objects"] != 3 || counts["installs"] != 1 || counts["org_records_kept"] != 0 {
 		t.Fatalf("purge counts: %v", counts)
 	}
 	for _, k := range keys {

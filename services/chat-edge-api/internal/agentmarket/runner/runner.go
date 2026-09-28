@@ -47,7 +47,7 @@ type Runner struct {
 	SandboxCheck   func(context.Context) error
 	SandboxRecheck time.Duration
 	Now            func() time.Time
-	// Retention (AM2): 0 means the default (48 h, 7 days, 30 days).
+	// Retention (AM2; AM4): 0 means the default (30 days, 7 days, 30 days).
 	StagedTTL, ScratchTTL, RemovedTTL time.Duration
 	// Reaper removes the sandbox containers a killed runner left behind; nil
 	// means the default one built from Exec's sandbox (always on).
@@ -145,16 +145,18 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 	detail, _ := json.Marshal(map[string]any{"primary": r.Model.Primary, "fallback": r.Model.Fallback,
 		"self_hosted": r.Model.SelfHosted})
 	caps["model.text"] = agentmarket.Binding{Capability: "model.text", Impl: "gateway", Version: r.Model.Primary + "|" + r.Model.Fallback, Detail: detail}
+	// AM4: the models a person may pick from (the admin curates which).
+	caps["platform.models"] = r.modelsCapability(context.Background())
 	return caps
 }
 
 // housekeeping is the retention pass (AM2, agentmarket/retention.go): at
-// start, then every hour — uploads never attached after StagedTTL (48 h), a
-// failed or cancelled run's scratch after ScratchTTL (7 days), a removed
-// install after RemovedTTL (30 days, like a deleted chat), and the expired
+// start, then every hour — files never used in a round after StagedTTL (30 days), a
+// failed or cancelled round's data after ScratchTTL (7 days), a removed
+// install's conversation after RemovedTTL (30 days), finished rounds past the organisation's retention, and the expired
 // rows of the duplicate index.
 func (r *Runner) housekeeping(ctx context.Context) {
-	staged, scratch, removed := orDefault(r.StagedTTL, 48*time.Hour), orDefault(r.ScratchTTL, 7*24*time.Hour),
+	staged, scratch, removed := orDefault(r.StagedTTL, 30*24*time.Hour), orDefault(r.ScratchTTL, 7*24*time.Hour),
 		orDefault(r.RemovedTTL, 30*24*time.Hour)
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
@@ -164,7 +166,7 @@ func (r *Runner) housekeeping(ctx context.Context) {
 				r.Log.Warn("retention pass failed", "err", err)
 			}
 		} else if c != (agentmarket.RetentionCounts{}) {
-			r.Log.Info("retention pass", "staged_files", c.StagedFiles, "scratch_runs", c.ScratchRuns,
+			r.Log.Info("retention pass", "staged_files", c.StagedFiles, "scratch_runs", c.ScratchRuns, "expired_runs", c.ExpiredRuns,
 				"scratch_objects", c.ScratchObjects, "removed_installs", c.RemovedInstalls, "removed_objects", c.RemovedObjects,
 				"index_rows", c.IndexRows)
 		}

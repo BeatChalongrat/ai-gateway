@@ -263,7 +263,7 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 		if err := r.formatCard(ctx, *parent, rc.outputFormats(), rc.pdfOffered()); err != nil {
 			return r.fail(ctx, job, "reply", err)
 		}
-	case isQuestion(text) && parent != nil:
+	case (isQuestion(text) || asksWhy(text)) && parent != nil:
 		answer := r.answerQuestion(ctx, rc, *parent, text)
 		_ = post(answer)
 	default:
@@ -352,18 +352,30 @@ func (r *Runner) formatCard(ctx context.Context, run am.Run, outputs []string, p
 	return err
 }
 
-// answerQuestion answers from the run's computed table only, numbers guarded.
+// answerQuestion answers from the run's own record (AM4): a question about a
+// figure the round computed is answered from that figure's provenance, word
+// for word, never by a model (explain.go); a "why" the record cannot support
+// gets "I don't know". Anything else may go to a model, numbers guarded and
+// no cause given — it has no record of any cause.
 func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, text string) string {
 	ps, err := r.parentState(ctx, parent.ID)
 	if err != nil {
 		return "รอให้รอบนี้คำนวณเสร็จก่อนนะครับ แล้วถามได้เลย"
 	}
-	cv, _, err := rc.readComputed(ctx, ps.computed)
+	cv, raw, err := rc.readComputed(ctx, ps.computed)
+	if err == nil {
+		if ans := explainAnswer(text, raw); ans != "" {
+			return ans
+		}
+	} else if asksWhy(text) {
+		return dontKnow
+	}
 	models := rc.textModels()
 	if err != nil || !r.Model.Available() || len(models) == 0 {
 		return "ดูตัวเลขและที่มาได้ในไฟล์ของรอบนี้ และในหน้า “ขั้นตอนและที่มาของตัวเลข” ครับ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร และตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้)"
 	}
-	system := rc.pkg.Instructions + "\n\nตอนนี้ให้ตอบคำถามของผู้ใช้เกี่ยวกับตัวเลขของรอบนี้ สั้น ๆ 1–3 ประโยค ตอบเป็น JSON {\"answer\": \"...\"} ใช้ตัวเลขจากรายการที่อ้างได้เท่านั้น ถ้าข้อมูลไม่พอให้บอกตรง ๆ ว่าไม่พอ"
+	system := rc.pkg.Instructions + "\n\nตอนนี้ให้ตอบคำถามของผู้ใช้เกี่ยวกับตัวเลขของรอบนี้ สั้น ๆ 1–3 ประโยค ตอบเป็น JSON {\"answer\": \"...\"} ใช้ตัวเลขจากรายการที่อ้างได้เท่านั้น ถ้าข้อมูลไม่พอให้บอกตรง ๆ ว่าไม่พอ " +
+		"ห้ามบอกสาเหตุหรือเหตุผลว่าทำไมตัวเลขเป็นเช่นนั้น เพราะไม่มีบันทึกสาเหตุ ถ้าถูกถามว่าทำไม ให้ตอบว่าไม่ทราบ"
 	user := narrativePrompt(cv) + "\n\nคำถาม: " + text
 	var answer string
 	c, _, err := r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
@@ -375,6 +387,9 @@ func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, 
 		}
 		if err := GuardNumbers(v.Answer, cv.Quotable, cv.QuotableIDs); err != nil {
 			return err
+		}
+		if givesACause(v.Answer) {
+			return fmt.Errorf("ห้ามบอกสาเหตุของตัวเลข ตอบเฉพาะค่าที่อ้างได้ หรือบอกว่าไม่ทราบ")
 		}
 		answer = v.Answer
 		return nil

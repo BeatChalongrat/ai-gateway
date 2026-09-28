@@ -34,6 +34,9 @@ type runCtx struct {
 	remembered map[string]json.RawMessage
 	answers    map[string]am.Answer
 	log        *slog.Logger
+	// docsMayLeave (AM4): the organisation lets this round's data go to a
+	// model outside it. Off by default: only in-house models see anything.
+	docsMayLeave bool
 }
 
 // blobRef is a large step output kept in object storage.
@@ -222,7 +225,8 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 		return nil, err
 	}
 	engineDefaults, remembered := am.DefaultsForEngine(defs)
-	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log}
+	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log,
+		docsMayLeave: r.docsMayLeave(ctx, in.OrgID)}
 	rc.selfTestSettings()
 	return rc, rc.reloadAnswers(ctx)
 }

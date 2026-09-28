@@ -649,8 +649,20 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 		!strings.Contains(ds.Models[1].Sees, "พิมพ์ถาม") {
 		t.Fatalf("the text model and its fallback, which runs outside: %+v", ds.Models)
 	}
-	if ds.Retention[0]["keep"] != float64(24) || len(ds.Never) != 1 || ds.Storage["backend"] != "local" {
+	// AM4: a finished round's evidence for the organisation's years; unused files by the runner's own setting
+	if ds.Retention[0]["unit"] != "years" || ds.Retention[0]["keep"] != float64(5) || ds.Retention[2]["keep"] != float64(1) ||
+		len(ds.Never) != 1 || ds.Storage["backend"] != "local" {
 		t.Fatalf("retention and promises: %+v %+v", ds.Retention, ds.Never)
+	}
+	// AM4: while documents may not leave the organisation, the outside fallback is not used at all
+	inside := ds
+	inside.Models = append([]DatasheetModel{}, ds.Models...)
+	inside.NoModel = append([]string{}, ds.NoModel...)
+	inside.Retention = []map[string]any{{"unit": "years", "keep": float64(5)}}
+	inside.ApplyOrg(OrgSettings{RetentionYears: 7})
+	if len(inside.Models) != 1 || inside.Models[0].Model != "qwen3.8-27b-fp8" || inside.Retention[0]["keep"] != float64(7) ||
+		!strings.Contains(strings.Join(inside.NoModel, " "), "deepseek-v4-flash") || inside.Notes["not_archive"] == "" {
+		t.Fatalf("the organisation's own decisions: %+v %v %v", inside.Models, inside.NoModel, inside.Retention)
 	}
 	vis, _ := json.Marshal(map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true})
 	ds, _ = BuildDatasheet(Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)},

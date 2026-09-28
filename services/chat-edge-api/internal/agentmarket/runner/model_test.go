@@ -196,7 +196,7 @@ func TestEngineZipIsDeterministicAndChecksummed(t *testing.T) {
 		t.Fatal(err)
 	}
 	pkg := e.Packages["sran.financial-report"]
-	if pkg == nil || pkg.Version != "1.2.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
+	if pkg == nil || pkg.Version != "1.3.0" || len(pkg.Checksum) != 64 || pkg.Instructions == "" || len(pkg.SelfTest) == 0 {
 		t.Fatalf("package not loaded: %+v", pkg)
 	}
 	if _, err := e.PackageFile(pkg, "sample-data/GL_2569-09.xlsx"); err != nil {
@@ -341,8 +341,13 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 	if got := rcInv.textModels(); len(got) != 1 || got[0] != "qwen" {
 		t.Fatalf("the invoice agent's text models: %v", got)
 	}
-	if got := rcFin.textModels(); len(got) != 2 || got[1] != "deepseek" {
-		t.Fatalf("the financial report (its data sheet names both): %v", got)
+	// AM4: the outside fallback only while the organisation lets documents leave
+	if got := rcFin.textModels(); len(got) != 1 || got[0] != "qwen" {
+		t.Fatalf("documents stay inside: the financial report uses the in-house model only: %v", got)
+	}
+	rcFinOut := &runCtx{r: &Runner{Model: m}, pkg: fin, docsMayLeave: true}
+	if got := rcFinOut.textModels(); len(got) != 2 || got[1] != "deepseek" {
+		t.Fatalf("documents may leave: its primary then its fallback: %v", got)
 	}
 	q := am.Question{Key: "k", Question: "ผู้ซื้อไม่ตรง", Options: []am.Option{{Label: "ใช้ตามเอกสาร"}, {Label: "ตัดออก"}}}
 	if _, ok := rcInv.classify(context.Background(), q, "ใช้ได้"); ok {
@@ -357,5 +362,56 @@ func TestExtractionAgentsSendTypedWordsOnlyInsideTheOrganisation(t *testing.T) {
 	before := seen["deepseek"]
 	if _, ok := rc2.classify(context.Background(), q, "ใช้ได้"); ok || seen["deepseek"] != before {
 		t.Fatalf("an extraction agent with no self-hosted model sends nothing: %v", seen)
+	}
+}
+
+
+// AM4: every call tells the gateway never to answer with another model, and
+// an answer from a model other than the one asked for is not used.
+func TestAModelCallNeverTakesAnotherModelsAnswer(t *testing.T) {
+	var header string
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		header = r.Header.Get(FallbackOptOutHeader)
+		b, _ := json.Marshal(map[string]any{"model": "deepseek-v4-flash", "choices": []any{map[string]any{
+			"message": map[string]any{"content": `{"ok":true}`}, "finish_reason": "stop"}}, "usage": map[string]any{"total_tokens": 10}})
+		_, _ = w.Write(b)
+	}))
+	t.Cleanup(s.Close)
+	m := &ModelClient{BaseURL: s.URL, APIKey: "k", Primary: "qwen3.8-27b-fp8", SelfHosted: map[string]bool{"qwen3.8-27b-fp8": true},
+		Timeout: 5 * time.Second, HTTP: http.DefaultClient}
+	if _, _, err := m.CompleteWith(context.Background(), []string{"qwen3.8-27b-fp8"}, "s", "u", nil); err == nil {
+		t.Fatal("an answer by another model must not be used")
+	}
+	if header != FallbackOptOutValue {
+		t.Fatalf("the request opts out of the gateway's rescue: %q", header)
+	}
+	if !sameModel("sranai/qwen3.8-27b-fp8", "qwen3.8-27b-fp8") || sameModel("deepseek-v4-flash", "qwen3.8-27b-fp8") {
+		t.Fatal("sameModel")
+	}
+}
+
+// AM4: the round's choice picks the vision model, as the organisation allows.
+func TestTheRoundsChoiceReadsTheScansAsTheOrganisationAllows(t *testing.T) {
+	m := &ModelClient{BaseURL: "http://x", APIKey: "k", Primary: "qwen", VisionModel: "qwen", SelfHosted: map[string]bool{"qwen": true}}
+	m.catalog.models = []am.CatalogModel{{ID: "qwen", SelfHosted: true, Vision: true}, {ID: "gpt-vision", Vision: true}, {ID: "deepseek"}}
+	m.catalog.fetched = time.Now()
+	pkg := &Package{}
+	pkg.Manifest.Capabilities.Optional = []string{"model.vision"}
+	choose := func(c string, leave bool) (string, bool) {
+		rc := &runCtx{r: &Runner{Model: m}, pkg: pkg, docsMayLeave: leave}
+		rc.run.ModelChoice = &c
+		return rc.visionModel()
+	}
+	if got, not := choose(am.ModelAuto, false); got != "qwen" || not {
+		t.Fatalf("auto: %s %v", got, not)
+	}
+	if got, not := choose("gpt-vision", false); got != "qwen" || !not {
+		t.Fatalf("an outside model while documents stay inside: the in-house one, and it says so: %s %v", got, not)
+	}
+	if got, not := choose("gpt-vision", true); got != "gpt-vision" || not {
+		t.Fatalf("allowed: %s %v", got, not)
+	}
+	if got, not := choose("deepseek", true); got != "qwen" || !not {
+		t.Fatalf("a model that cannot read images is not given scans: %s %v", got, not)
 	}
 }

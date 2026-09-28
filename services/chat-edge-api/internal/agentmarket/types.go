@@ -73,6 +73,8 @@ type Install struct {
 	OrgID        string     `json:"-"`
 	PinnedAt     *time.Time `json:"pinned_at,omitempty"`
 	LastOpenedAt *time.Time `json:"last_opened_at,omitempty"`
+	// AM4: the model the person picked for reading documents ("auto" or a curated choice).
+	ModelChoice string `json:"model_choice"`
 }
 
 // Default is a remembered answer or an install-time setting.
@@ -120,6 +122,11 @@ type Run struct {
 	StartedAt         *time.Time      `json:"started_at"`
 	FinishedAt        *time.Time      `json:"finished_at"`
 	UpdatedAt         time.Time       `json:"updated_at"`
+	// AM4: the thread the round belongs to (nil = the install's first thread),
+	// the model choice it ran with, and an admin's removal of its evidence.
+	ThreadID          *uuid.UUID `json:"thread_id,omitempty"`
+	ModelChoice       *string    `json:"model_choice,omitempty"`
+	EvidenceRemovedAt *time.Time `json:"evidence_removed_at,omitempty"`
 }
 
 // Step is one row of the run's audit trail.
@@ -215,6 +222,8 @@ type ThreadItem struct {
 	Rev       int64           `json:"rev"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+	// ThreadID (AM4): nil = the install's first thread.
+	ThreadID *uuid.UUID `json:"thread_id,omitempty"`
 }
 
 // Question is one question inside a card (the shape the web QuestionCard renders).

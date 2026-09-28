@@ -27,12 +27,12 @@ import (
 //	        the bytes of every uploaded and generated file.
 //	Stop    at the deletion request: queued, waiting and running runs are
 //	        cancelled, open cards closed.
-//	Purge   objects first (uploads, artifacts, step blobs), then every row
-//	        (the install cascade reaches runs, steps, cards, artifacts,
-//	        approvals, exceptions, files, thread and index; the credit
-//	        ledger has no user column and goes by install). Kept: the
-//	        workspace's theme (it belongs to the tenant; its creator link is
-//	        cleared).
+//	Purge   the person's part (AM4): conversations, settings, unused files,
+//	        failed rounds, preferences, reports, shares, access row. A
+//	        finished round's evidence is the organisation's accounting record
+//	        and stays for its retention; an install left with none is erased
+//	        whole. Kept too: the workspace's theme (it belongs to the tenant;
+//	        its creator link is cleared).
 //
 // A user deleted while the flag was off is swept when it is on again
 // (SweepDeletedUsers).
@@ -139,7 +139,7 @@ func (p *AccountProvider) Export(ctx context.Context, tenantID, userID uuid.UUID
 		}
 	}
 	lines := []string{"agent-market/  agent ที่ติดตั้ง การตั้งค่า รอบทำงาน ขั้นตอน คำถามและคำตอบ ข้อยกเว้น ไฟล์ที่ส่งเข้าไปและไฟล์ที่ agent สร้าง" +
-		" / installed agents, settings, runs, steps, questions and answers, exceptions, files in and out"}
+		" / installed agents, settings, runs, steps, questions and answers, exceptions, files in and out", DeletionNote}
 	if missing > 0 {
 		lines = append(lines, fmt.Sprintf("agent-market/  อ่านไฟล์ไม่ได้ %d ไฟล์ / %d files could not be read (%s)", missing, missing, firstErr))
 	}
@@ -164,34 +164,57 @@ func (p *AccountProvider) Stop(ctx context.Context, userID uuid.UUID) (map[strin
 	return map[string]int{"runs_stopped": int(tag.RowsAffected()), "cards_closed": int(cards.RowsAffected())}, nil
 }
 
-// Purge erases everything Agent Market keeps for the user, in every tenant.
+// Purge erases what Agent Market keeps for the PERSON, in every tenant: their
+// conversations, their installs' settings and remembered answers, files never
+// used in a round, failed or cancelled rounds, preferences, problem reports,
+// shares and their place on the access list (AM4). A finished round's
+// evidence — the files sent in, the files made and the computed table behind
+// them — is the organisation's accounting record, not the person's: it stays
+// for the organisation's retention (retention.go), and removing it earlier is
+// an admin's decision with a reason (access.go). Their installs are marked
+// removed; an install with no such record left is erased whole.
 func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[string]int, error) {
 	counts := map[string]int{}
-	tag, err := p.store.Pool.Exec(ctx, `DELETE FROM agent_market.document_index WHERE user_id = $1`, userID)
-	if err != nil {
-		return nil, err
-	}
-	counts["document_index"] = int(tag.RowsAffected())
 	installs, err := p.store.ids(ctx, `SELECT id FROM agent_market.agent_installs WHERE user_id = $1`, userID)
 	if err != nil {
 		return counts, err
 	}
 	if len(installs) > 0 {
-		counts["objects"], counts["installs"], err = p.store.PurgeInstalls(ctx, p.files, installs)
+		counts["objects"], err = p.store.purgePersonal(ctx, p.files, installs)
 		if err != nil {
 			return counts, err
 		}
+		if _, err := p.store.Pool.Exec(ctx, `UPDATE agent_market.agent_installs SET status = 'removed',
+			removed_at = COALESCE(removed_at, now()), pinned_at = NULL WHERE id = ANY($1) AND status <> 'removed'`, installs); err != nil {
+			return counts, err
+		}
+		empty, err := p.store.ids(ctx, `SELECT i.id FROM agent_market.agent_installs i WHERE i.id = ANY($1)
+			AND NOT EXISTS (SELECT 1 FROM agent_market.agent_runs r WHERE r.install_id = i.id AND r.kind = 'run'
+				AND r.status = 'succeeded' AND r.evidence_removed_at IS NULL)`, installs)
+		if err != nil {
+			return counts, err
+		}
+		if len(empty) > 0 {
+			objs, n, err := p.store.PurgeInstalls(ctx, p.files, empty)
+			counts["objects"] += objs
+			counts["installs"] = n
+			if err != nil {
+				return counts, err
+			}
+		}
+		var kept int
+		_ = p.store.Pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE install_id = ANY($1) AND kind = 'run'
+			AND status = 'succeeded' AND evidence_removed_at IS NULL`, installs).Scan(&kept)
+		counts["org_records_kept"] = kept
 	}
-	// anything of the user's outside their installs (none in normal use), and the theme's creator link
 	for _, q := range []struct{ kind, sql string }{
-		{"runs", `DELETE FROM agent_market.agent_runs WHERE user_id = $1`},
-		{"files", `DELETE FROM agent_market.agent_files WHERE user_id = $1`},
-		{"thread_items", `DELETE FROM agent_market.agent_thread_items WHERE user_id = $1`},
+		{"thread_items", `DELETE FROM agent_market.agent_thread_items WHERE user_id = $1
+			AND NOT (kind IN ('progress', 'outputs') AND run_id IN (SELECT id FROM agent_market.agent_runs WHERE status = 'succeeded'))`},
 		{"theme_creator_cleared", `UPDATE agent_market.agent_themes SET created_by = NULL WHERE created_by = $1`},
 		// AM3: their preferences, problem reports, the shares addressed to them
-		// (the ones they made went with their runs) and their access row. A
-		// sign-off they gave on someone else's run stays on that run's record
-		// (the name is printed on the signed files) without their email or id.
+		// or made by them, and their access row. A sign-off they gave on someone
+		// else's run stays on that run's record (the name is printed on the
+		// signed files) without their email or id.
 		{"preferences", `DELETE FROM agent_market.user_prefs WHERE user_id = $1`},
 		{"problem_reports", `DELETE FROM agent_market.problem_reports WHERE user_id = $1`},
 		{"shares_received", `DELETE FROM agent_market.run_shares WHERE recipient_user_id = $1 OR owner_user_id = $1`},
@@ -207,6 +230,13 @@ func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[stri
 	}
 	return counts, nil
 }
+
+// DeletionNote is what a person reads about their Agent Market data when
+// they delete their account (the export's README carries it too).
+const DeletionNote = "agent-market/  เมื่อลบบัญชี แชทกับ agent การตั้งค่า และไฟล์ที่ไม่ได้ใช้จะถูกลบ ส่วนไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จ" +
+	"เป็นหลักฐานทางบัญชีขององค์กร เก็บไว้ตามระยะเวลาที่องค์กรกำหนด การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล" +
+	" / on account deletion, your agent chats, settings and unused files are deleted; the files in and out of finished rounds" +
+	" are the organisation's accounting records and are kept for its retention period — only an admin can remove them earlier"
 
 func collectKeys(v any, keys map[string]bool) {
 	switch t := v.(type) {

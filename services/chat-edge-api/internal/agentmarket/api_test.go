@@ -272,16 +272,14 @@ func TestMessageWithFileStartsARunAndAnsweringIsIdempotent(t *testing.T) {
 	if string(answers["period_mixed"].Value) != `"exclude"` {
 		t.Fatal("the recorded answer must not change")
 	}
-	// The answer was offered as an install default.
+	// AM4: "leave the stray rows out" is about THIS round's data: it is not
+	// remembered for the next round (before AM4 it became the install's
+	// default and quietly shaped the next month).
 	defs, _ := e.store.ListDefaults(ctx, in.ID)
-	found := false
 	for _, d := range defs {
-		if d.Key == "answers.period_mixed" && string(d.Value) == `"exclude"` && d.Source == "answer" {
-			found = true
+		if d.Key == "answers.period_mixed" {
+			t.Fatalf("a round-data answer must not be remembered: %+v", defs)
 		}
-	}
-	if !found {
-		t.Fatalf("answer must be remembered as a default: %+v", defs)
 	}
 }
 
@@ -391,7 +389,12 @@ func TestNewRoundClosesCardsLeftOnEarlierRuns(t *testing.T) {
 	}
 	code, body := e.do("POST", "/installs/"+in.ID.String()+"/messages", map[string]any{"text": "ปิดงบเดือนตุลาคม",
 		"file_ids": []string{f.ID.String()}, "client_id": "c-new-round"})
-	if code != 200 || body["route"] != "new_run" {
+	if code != 200 || body["route"] != "intent" {
+		t.Fatalf("files after a finished round ask first (AM4): %d %v", code, body)
+	}
+	chip := lastOfKind(e.threadItems(in, ""), "intent")
+	code, body = e.do("POST", "/intents/"+chip["id"].(string), map[string]any{"choice": "new_round"})
+	if code != 200 || body["run_id"] == nil {
 		t.Fatalf("new round: %d %v", code, body)
 	}
 	for name, c := range map[string]Card{"card of an older finished run": late, "card of the latest finished run": asked} {

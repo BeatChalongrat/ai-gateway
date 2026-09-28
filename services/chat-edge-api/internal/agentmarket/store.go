@@ -106,13 +106,13 @@ func (s *Store) DefinitionByID(ctx context.Context, id uuid.UUID) (Definition, e
 
 const installCols = `id, tenant_id, user_id, definition_id, slug, definition_version, checksum, title,
 	capability_bindings, binding_version, budget_credits::float8, status, self_test_run_id, created_at, updated_at,
-	previous_definition_id, org_id, pinned_at, last_opened_at`
+	previous_definition_id, org_id, pinned_at, last_opened_at, model_choice`
 
 func scanInstall(r pgx.Row) (Install, error) {
 	var i Install
 	err := r.Scan(&i.ID, &i.TenantID, &i.UserID, &i.DefinitionID, &i.Slug, &i.DefinitionVersion, &i.Checksum, &i.Title,
 		&i.CapabilityBindings, &i.BindingVersion, &i.BudgetCredits, &i.Status, &i.SelfTestRunID, &i.CreatedAt, &i.UpdatedAt,
-		&i.PreviousDefinitionID, &i.OrgID, &i.PinnedAt, &i.LastOpenedAt)
+		&i.PreviousDefinitionID, &i.OrgID, &i.PinnedAt, &i.LastOpenedAt, &i.ModelChoice)
 	return i, err
 }
 
@@ -356,7 +356,7 @@ func (s *Store) PendingFiles(ctx context.Context, run uuid.UUID) ([]File, error)
 const runCols = `id, install_id, parent_run_id, tenant_id, user_id, kind, status, status_reason, period, message, params,
 	definition_version, checksum, engine_checksum, binding_version, formats, answers, assumptions, cancel_requested,
 	lease_owner, lease_until, attempts, credits_spent::float8, model_used, model_self_hosted, awaiting_since, awaiting_ms,
-	created_at, started_at, finished_at, updated_at`
+	created_at, started_at, finished_at, updated_at, thread_id, model_choice, evidence_removed_at`
 
 func scanRun(r pgx.Row) (Run, error) {
 	var x Run
@@ -364,7 +364,7 @@ func scanRun(r pgx.Row) (Run, error) {
 		&x.Period, &x.Message, &x.Params, &x.DefinitionVersion, &x.Checksum, &x.EngineChecksum, &x.BindingVersion,
 		&x.Formats, &x.Answers, &x.Assumptions, &x.CancelRequested, &x.LeaseOwner, &x.LeaseUntil, &x.Attempts,
 		&x.CreditsSpent, &x.ModelUsed, &x.ModelSelfHosted, &x.AwaitingSince, &x.AwaitingMS, &x.CreatedAt, &x.StartedAt,
-		&x.FinishedAt, &x.UpdatedAt)
+		&x.FinishedAt, &x.UpdatedAt, &x.ThreadID, &x.ModelChoice, &x.EvidenceRemovedAt)
 	return x, err
 }
 
@@ -394,12 +394,15 @@ func (s *Store) CreateRun(ctx context.Context, q Querier, r Run, idem string) (R
 	}
 	x, err := scanRun(q.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_runs (id, install_id, parent_run_id, tenant_id, user_id, kind, status, period, message,
-			params, definition_version, checksum, engine_checksum, binding_version, formats, answers, idempotency_key)
-		VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			params, definition_version, checksum, engine_checksum, binding_version, formats, answers, idempotency_key,
+			thread_id, model_choice)
+		VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+			COALESCE($17::uuid, (SELECT p.thread_id FROM agent_market.agent_runs p WHERE p.id = $3)),
+			COALESCE($18::text, (SELECT p.model_choice FROM agent_market.agent_runs p WHERE p.id = $3)))
 		RETURNING `+runCols,
 		r.ID, r.InstallID, r.ParentRunID, r.TenantID, r.UserID, r.Kind, r.Period, r.Message, jsonOr(r.Params, "{}"),
 		r.DefinitionVersion, r.Checksum, r.EngineChecksum, r.BindingVersion, jsonOr(r.Formats, "[]"),
-		jsonOr(r.Answers, "{}"), idemArg))
+		jsonOr(r.Answers, "{}"), idemArg, r.ThreadID, r.ModelChoice))
 	return x, err == nil, err
 }
 
@@ -459,7 +462,18 @@ func (s *Store) ChildRuns(ctx context.Context, parent uuid.UUID) ([]Run, error) 
 	return out, rows.Err()
 }
 
-// LatestRun returns the install's newest full run (any status), or ErrNotFound.
+// LatestRunIn returns a thread's newest full run (AM4: nil = the first thread), or ErrNotFound.
+func (s *Store) LatestRunIn(ctx context.Context, install uuid.UUID, thread *uuid.UUID) (Run, error) {
+	x, err := scanRun(s.Pool.QueryRow(ctx, `SELECT `+runCols+` FROM agent_market.agent_runs
+		WHERE install_id = $1 AND kind = 'run' AND thread_id IS NOT DISTINCT FROM $2::uuid ORDER BY created_at DESC LIMIT 1`,
+		install, thread))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return x, ErrNotFound
+	}
+	return x, err
+}
+
+// LatestRun returns the install's newest full run in any thread (any status), or ErrNotFound.
 func (s *Store) LatestRun(ctx context.Context, install uuid.UUID) (Run, error) {
 	x, err := scanRun(s.Pool.QueryRow(ctx, `SELECT `+runCols+` FROM agent_market.agent_runs
 		WHERE install_id = $1 AND kind = 'run' ORDER BY created_at DESC LIMIT 1`, install))
@@ -924,27 +938,34 @@ func (s *Store) GetArtifact(ctx context.Context, tenant, user, id uuid.UUID) (Ar
 
 // ── thread ───────────────────────────────────────────────────────────────
 
-const itemCols = `id, install_id, run_id, kind, payload, client_id, rev, created_at, updated_at`
+const itemCols = `id, install_id, run_id, kind, payload, client_id, rev, created_at, updated_at, thread_id`
 
 func scanItem(r pgx.Row) (ThreadItem, error) {
 	var t ThreadItem
-	err := r.Scan(&t.ID, &t.InstallID, &t.RunID, &t.Kind, &t.Payload, &t.ClientID, &t.Rev, &t.CreatedAt, &t.UpdatedAt)
+	err := r.Scan(&t.ID, &t.InstallID, &t.RunID, &t.Kind, &t.Payload, &t.ClientID, &t.Rev, &t.CreatedAt, &t.UpdatedAt, &t.ThreadID)
 	return t, err
 }
 
 // AddItem appends to the workspace thread. With a client id it is
-// idempotent: a resent message returns the first item.
+// idempotent: a resent message returns the first item. An item about a run
+// goes to that run's thread (AM4); one about no run to the first thread.
 func (s *Store) AddItem(ctx context.Context, q Querier, install, tenant, user uuid.UUID, run *uuid.UUID, kind string,
 	payload any, clientID *string) (ThreadItem, bool, error) {
+	return s.AddItemIn(ctx, q, install, nil, tenant, user, run, kind, payload, clientID)
+}
+
+// AddItemIn is AddItem into a named thread (AM4: nil with a run = the run's thread).
+func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thread *uuid.UUID, tenant, user uuid.UUID,
+	run *uuid.UUID, kind string, payload any, clientID *string) (ThreadItem, bool, error) {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return ThreadItem{}, false, err
 	}
 	t, err := scanItem(q.QueryRow(ctx, `
-		INSERT INTO agent_market.agent_thread_items (install_id, tenant_id, user_id, run_id, kind, payload, client_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO agent_market.agent_thread_items (install_id, tenant_id, user_id, run_id, kind, payload, client_id, thread_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, (SELECT r.thread_id FROM agent_market.agent_runs r WHERE r.id = $4)))
 		ON CONFLICT (install_id, client_id) WHERE client_id IS NOT NULL DO NOTHING
-		RETURNING `+itemCols, install, tenant, user, run, kind, b, clientID))
+		RETURNING `+itemCols, install, tenant, user, run, kind, b, clientID, thread))
 	if errors.Is(err, pgx.ErrNoRows) && clientID != nil {
 		cur, err2 := scanItem(q.QueryRow(ctx, `SELECT `+itemCols+` FROM agent_market.agent_thread_items
 			WHERE install_id = $1 AND client_id = $2`, install, *clientID))
@@ -972,10 +993,16 @@ func (s *Store) PatchItem(ctx context.Context, q Querier, id uuid.UUID, patch ma
 	return err
 }
 
-// ItemsAfter returns the thread from a cursor (the event stream's resume point).
+// ItemsAfter returns the install's first thread from a cursor (the event stream's resume point).
 func (s *Store) ItemsAfter(ctx context.Context, install uuid.UUID, after int64, limit int) ([]ThreadItem, error) {
+	return s.ThreadItemsAfter(ctx, install, nil, after, limit)
+}
+
+// ThreadItemsAfter is ItemsAfter for one thread (AM4: nil = the first thread).
+func (s *Store) ThreadItemsAfter(ctx context.Context, install uuid.UUID, thread *uuid.UUID, after int64, limit int) ([]ThreadItem, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT `+itemCols+` FROM agent_market.agent_thread_items
-		WHERE install_id = $1 AND rev > $2 ORDER BY rev LIMIT $3`, install, after, limit)
+		WHERE install_id = $1 AND thread_id IS NOT DISTINCT FROM $4::uuid AND rev > $2 ORDER BY rev LIMIT $3`,
+		install, after, limit, thread)
 	if err != nil {
 		return nil, err
 	}

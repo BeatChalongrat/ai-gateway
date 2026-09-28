@@ -48,7 +48,18 @@ type ModelClient struct {
 	sem     chan struct{}
 	// Yielded is the total time spent yielding to chat (reported per step).
 	Yielded atomic.Int64
+	// catalog is the gateway's model catalogue (AM4, choice.go).
+	catalog catalogCache
 }
+
+// FallbackOptOut is the request header that tells the gateway never to answer
+// with another model (AM4): a round's documents go to the model the
+// organisation allowed and to no other, whatever the gateway's own rescue
+// policy for that model.
+const (
+	FallbackOptOutHeader = "X-Sran-Fallback"
+	FallbackOptOutValue  = "off"
+)
 
 func (m *ModelClient) acquire(ctx context.Context) (func(), error) {
 	m.semOnce.Do(func() {
@@ -233,6 +244,7 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	req.Header.Set("Authorization", "Bearer "+m.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Client-Name", "agent-runner")
+	req.Header.Set(FallbackOptOutHeader, FallbackOptOutValue)
 	start := time.Now()
 	resp, err := m.HTTP.Do(req)
 	if err != nil {
@@ -294,8 +306,20 @@ func (m *ModelClient) send(ctx context.Context, model string, messages any, temp
 	if used == "" {
 		used = model
 	}
+	if !sameModel(used, model) {
+		// AM4: an answer from a model other than the one asked for is never
+		// used — the organisation allowed that model, not this one.
+		return spent, fmt.Errorf("answered by %s instead of %s", used, model)
+	}
 	return Completion{Model: used, Content: content, CostUSD: cost, Tokens: out.Usage.TotalTokens, Cached: out.Cached,
 		FinishedBy: out.Choices[0].FinishReason, Elapsed: time.Since(start)}, nil
+}
+
+// sameModel compares a response's model with the one asked for (a gateway
+// may add a provider prefix: "sranai/qwen3.8-27b-fp8").
+func sameModel(got, want string) bool {
+	g, w := strings.ToLower(strings.TrimSpace(got)), strings.ToLower(strings.TrimSpace(want))
+	return g == w || strings.HasSuffix(g, "/"+w)
 }
 
 var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
