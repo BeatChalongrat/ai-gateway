@@ -316,11 +316,11 @@ class DeckWriter:
         exc = c["exceptions"]
         from .content import EXC_LABEL
 
-        items = [f"[{e['code']}] {e['title']} — {e['detail']}" for e in exc[:5]] or [
+        # what kind of item, in Thai (the code is in the full report's รหัสเหตุผล column, for whoever maintains it)
+        items = [f"{EXC_LABEL.get(e['code'], 'ต้องตรวจ')}: {e['title']} — {e['detail']}" for e in exc[:5]] or [
             "ไม่พบรายการผิดปกติตามกฎที่ตั้งไว้"]
         self.bullets(f"รายการที่ต้องตรวจ ({len(exc)})", items, [e["cite"] for e in exc[:5] if e.get("cite")],
                      body="ระบบไม่แก้ตัวเลขเอง ทุกข้อมีแถวต้นทางในรายงานฉบับเต็ม")
-        _ = EXC_LABEL
         nar = m["narrative"]
         self.bullets("สิ่งที่ควรทำต่อ", nar.get("next_steps", [])[:5], [])
         assumptions = [a["text"] for a in m["assumptions"]][:6]

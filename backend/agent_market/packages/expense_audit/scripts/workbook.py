@@ -33,6 +33,26 @@ DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_p
 METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "hybrid": "ข้อความ + OCR",
              "typed_by_person": "ผู้ใช้พิมพ์", "confirmed_by_person": "ผู้ใช้ยืนยัน"}
 KB_TITLE = "บริบทจากเอกสารระเบียบ — ไม่ใช่ที่มาของวงเงิน"
+# AM4: where in the policy table a limit came from, in the words of the นโยบายที่ใช้ sheet
+POLICY_FIELD_TH = {"per_claim": "วงเงินต่อครั้ง", "per_person_month": "วงเงินต่อคนต่อเดือน", "needs_purpose": "ต้องระบุวัตถุประสงค์",
+                   "wht_rate": "หัก ณ ที่จ่าย (%)", "wht_from": "หักตั้งแต่ (บาท)",
+                   "receipt_required_above": "ต้องมีใบเสร็จเมื่อยอดเกิน", "approval_threshold": "วงเงินอนุมัติ",
+                   "weekend_holiday": "เบิกในวันหยุด", "vat_claim_requires": "ขอคืนภาษีซื้อต้องใช้",
+                   "prohibited_merchants": "ร้านต้องห้าม"}
+
+
+def policy_ref_th(ref, categories: dict) -> str | None:
+    """"categories.meals.per_claim" → "นโยบาย › อาหาร › วงเงินต่อครั้ง" (the policy table, not a code)."""
+    if not ref:
+        return ref
+    parts = str(ref).split(".")
+    words = ["นโยบาย"]
+    if parts[0] == "categories" and len(parts) > 1:
+        cat = categories.get(parts[1]) or {}
+        words.append(str(cat.get("label") or parts[1]))
+        parts = parts[2:]
+    words += [POLICY_FIELD_TH.get(p, p) for p in parts]
+    return " › ".join(words)
 NOT_A_LIMIT = "ไม่ใช้ (บริบทเท่านั้น)"
 
 
@@ -166,14 +186,15 @@ class ExpenseWorkbook:
 
     def facts(self):
         ws = self.wb.create_sheet("ผลตรวจแต่ละกฎ")
-        self._title(ws, "ผลตรวจแต่ละกฎ (ข้อเท็จจริง)", "กฎตรวจด้วยสคริปต์ ไม่ใช้โมเดล · วงเงินอ้างอิงจากตารางนโยบายเท่านั้น (อ้างอิงนโยบาย = ตำแหน่งในตาราง)")
+        self._title(ws, "ผลตรวจแต่ละกฎ (ข้อเท็จจริง)", "กฎตรวจด้วยสคริปต์ ไม่ใช้โมเดล · วงเงินอ้างอิงจากตารางนโยบายเท่านั้น (อ้างอิงนโยบาย = ช่องในแผ่น “นโยบายที่ใช้”)")
         rows = []
+        cats = self.c["policy"]["table"].get("categories") or {}
         for c in self.c["claims"]:
             for f, fd in c["facts"].items():
                 ev = fd.get("evidence") or {}
                 rows.append([c["id"] or c["key"], FACT_TH[f], f, STATUS_TH[fd["status"]], fd.get("code"),
                              DISPOSITION_TH.get(fd.get("disposition")) if fd["status"] == "fail" else None, fd.get("detail") or None,
-                             ev.get("policy_ref"), _num(ev.get("limit")), _num(ev.get("amount"))])
+                             policy_ref_th(ev.get("policy_ref"), cats), _num(ev.get("limit")), _num(ev.get("amount"))])
         self._table(ws, 4, ["เลขที่เบิก", "กฎ", "รหัสกฎ", "ผล", "รหัสเหตุผล", "ผลที่ตามมา", "รายละเอียด", "อ้างอิงนโยบาย",
                             "วงเงิน/เกณฑ์จากตาราง", "ยอดที่ตรวจ"], rows,
                     [10, 16, 20, 9, 26, 20, 60, 30, 14, 13], money_cols=(9, 10), wrap_cols=(7,))
@@ -182,6 +203,7 @@ class ExpenseWorkbook:
         ws = self.wb.create_sheet("ข้อยกเว้น")
         self._title(ws, "ข้อยกเว้น", "“รอคนตัดสิน” = ยังไม่มีใครตัดสิน ทางเลือกทุกข้อเป็นของคน ไม่มีข้อใดเลือกไว้ให้ · “บันทึกไว้” = ผู้ใช้ตัดสินแล้วระหว่างตรวจ หรือไม่ต้องตัดสิน")
         rows = []
+        cats = self.c["policy"]["table"].get("categories") or {}
         for i, e in enumerate(self.c["run_exceptions"], start=1):
             s = e["source_ref"]
             where = " · ".join(str(x) for x in (s.get("sheet"), f"แถว {s['row']}" if s.get("row") else None, s.get("receipt"),
@@ -191,7 +213,7 @@ class ExpenseWorkbook:
             also = ", ".join(a["reason"] for a in s.get("also_flagged") or [])
             rows.append([i, s.get("claim") or e["subject"], e["reason_code"], e["reason"], SEVERITY_TH[e["severity"]],
                          e.get("detail") or None, e["proposed_action"], " / ".join(ch["label"] for ch in e["choices"]) or None,
-                         where or None, s.get("policy_ref"), _num(s.get("limit")), also or None, kb or None])
+                         where or None, policy_ref_th(s.get("policy_ref"), cats), _num(s.get("limit")), also or None, kb or None])
         self._table(ws, 4, ["ลำดับ", "รายการ", "รหัสเหตุผล", "เหตุผล", "สถานะ", "รายละเอียด", "สิ่งที่เสนอให้ทำ", "ทางเลือกของผู้ตัดสิน",
                             "ที่มา", "อ้างอิงนโยบาย", "วงเงิน/เกณฑ์จากตาราง", "ตั้งข้อสังเกตด้วย", "บริบทจากเอกสารระเบียบ (ไม่ใช่วงเงิน)"],
                     rows, [6, 10, 26, 26, 12, 50, 50, 44, 40, 28, 14, 24, 50], money_cols=(11,), wrap_cols=(6, 7, 8, 9, 13))
@@ -250,7 +272,8 @@ class ExpenseWorkbook:
         self._table(ws, r + 1, ["วันที่", "วันหยุด"], hol, freeze=False)
         r = r + 1 + len(hol) + 2
         self._section(ws, r, KB_TITLE)
-        ctx = [[k["file"], k["paragraph"], k["text"], ", ".join(k["categories"]) or None, ", ".join(k["numbers"]) or None,
+        ctx = [[k["file"], k["paragraph"], k["text"],
+                ", ".join(str((cats.get(x) or {}).get("label") or x) for x in k["categories"]) or None, ", ".join(k["numbers"]) or None,
                 NOT_A_LIMIT] for k in pol["context"]]
         self._table(ws, r + 1, ["ไฟล์", "ย่อหน้า", "ข้อความ", "หมวดที่กล่าวถึง", "ตัวเลขในข้อความ", "ใช้เป็นวงเงิน"],
                     ctx or [["-", None, "ไม่มีเอกสารระเบียบแนบมา", None, None, NOT_A_LIMIT]], freeze=False, wrap_cols=(3,))
@@ -260,7 +283,7 @@ class ExpenseWorkbook:
         for cf in pol["conflicts"]:
             table_says = f"ตารางกำหนด {cf['table']} บาท" if cf["table"] else "ตารางไม่ได้กำหนดวงเงินนี้"
             self._note(ws, r, f"ต่างจากตาราง: {cf['file']} ย่อหน้า {cf['paragraph']} กล่าวถึง{cf['label']} {cf['document']} บาท "
-                              f"แต่{table_says} ({cf['policy_ref']}) — การตรวจใช้ตาราง", cols=6, height=24)
+                              f"แต่{table_says} ({policy_ref_th(cf['policy_ref'], cats)}) — การตรวจใช้ตาราง", cols=6, height=24)
             r += 1
 
     def write(self, path: str) -> dict:

@@ -98,8 +98,11 @@ class XlsxWriter:
         heads = ["รหัส", "ชื่อบัญชี", "หมวด", "งวดนี้", "งวดก่อน", "เปลี่ยนแปลง", "%", "งบประมาณ", "ต่างจากงบ", "จำนวนรายการ", "อ้างอิง"]
         self._header(ws, 4, heads)
         r = 5
+        # an account's group is the key of the line it adds up to: named as that line is (AM4)
+        group_name = {ln["key"]: ln["label"] for ln in self.c.get("lines") or []}
         for a in self.c["accounts"]:
-            vals = [a["code"], a["name"], a["group"], _num(a["current"]), _num(a["prior"]), _num(a["var_prior"]),
+            vals = [a["code"], a["name"], group_name.get(a["group"], a["group"]), _num(a["current"]), _num(a["prior"]),
+                    _num(a["var_prior"]),
                     _num(a["var_prior_pct"]), _num(a["budget"]), _num(a["var_budget"]), a["rows"], a["cite"]]
             for j, v in enumerate(vals, start=1):
                 ws.cell(row=r, column=j, value=v)

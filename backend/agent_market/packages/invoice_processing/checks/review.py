@@ -138,7 +138,8 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
         if dec.excluded:
             asked = cards.findings_for(doc.key, doc.extraction) + cards.findings_for(doc.key, out)
             f = next((x for x in asked if x.key == dec.excluded["key"]), None)
-            detail = (f.evidence.get("question") if f else "") or ""
+            # the card's question as the person read it (evidence["question"] is the engine's English reason)
+            detail = (f.question if f else "") or ""
             if dec.excluded.get("reupload"):
                 detail = (detail + " · ขอไฟล์ที่ชัดกว่า").strip(" ·")
             res.append(Reviewed(doc, out, dec, "excluded",

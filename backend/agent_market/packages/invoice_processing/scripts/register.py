@@ -125,7 +125,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         exclusion = r.exclusion
         if r.status == "pending":
             exclusion = {"code": "unresolved_question", "decided_by": "rule",
-                         "detail": "; ".join(x.evidence.get("question") or x.header for x in r.findings)[:400]}
+                         "detail": "; ".join(x.question or x.header for x in r.findings)[:400]}
         dtype = out["document_type"]["normalized"] or "unknown"
         row = {"doc_key": doc.key, "name": doc.name, "status": status, "tier": tier, "tier_label": TIER_TH.get(tier, tier),
                "method": out["method"], "document_type": dtype, "document_type_label": DOC_TYPE_TH.get(dtype, dtype),

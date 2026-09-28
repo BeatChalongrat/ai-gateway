@@ -24,7 +24,21 @@ SHEETS = ("สรุป", "ทะเบียน", "รายการสิน�
 DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_person": "ผู้ใช้พิมพ์", "confirmed_by_person": "ผู้ใช้ยืนยัน",
               "computed": "คำนวณจากค่าในเอกสาร", "model_proposal": "โมเดลเสนอ (ยังไม่ยืนยัน)"}
 METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "typed_by_person": "ผู้ใช้พิมพ์",
-             "confirmed_by_person": "ผู้ใช้ยืนยัน", "chosen_by_person": "ผู้ใช้เลือก"}
+             "confirmed_by_person": "ผู้ใช้ยืนยัน", "chosen_by_person": "ผู้ใช้เลือก",
+             # AM4: the rest a person could meet in the ที่มา sheet
+             "document_scan": "ตรวจทั้งเอกสาร", "default": "ค่าตั้งต้น", "hybrid": "ข้อความใน PDF และ OCR"}
+
+
+def method_th(method) -> str:
+    """How a value was read, in Thai ("computed:sum_of_lines" → คำนวณจากรายการในเอกสาร)."""
+    m = str(method or "")
+    if m in METHOD_TH:
+        return METHOD_TH[m]
+    if m.startswith("computed:"):
+        return "คำนวณจากรายการในเอกสาร" if "lines" in m else "คำนวณจากค่าในเอกสาร"
+    if m.startswith("vision:"):
+        return f"โมเดล {m.split(':', 1)[1]} อ่านจากภาพ"
+    return m
 STATUS_TH = {"pass": "ผ่าน", "fail": "ไม่ผ่าน", "skip": "ไม่เกี่ยว"}
 
 # AM3: what each check looks at, in words that do not sound like a finding (a stranger read the
@@ -245,7 +259,7 @@ class InvoiceWorkbook:
         for p in self.c["provenance"]:
             vision = "; ".join(f"{c['method']}: {c['value']}" for c in p.get("candidates") or [])
             rows.append([p["name"], p["label"], p["value"] if not isinstance(p["value"], (int, float)) else str(p["value"]),
-                         p["confidence"], METHOD_TH.get(p["method"], p["method"]), p["page"], p["bbox"], p["raw_text"],
+                         p["confidence"], method_th(p["method"]), p["page"], p["bbox"], p["raw_text"],
                          DECIDED_TH.get(p["decided_by"], p["decided_by"]),
                          ", ".join(CHECK_NAME_TH.get(c, c) for c in p["checks"] if c in CHECK_NAME_TH) or None, vision or None])
         self._table(ws, 4, ["ไฟล์", "ช่อง", "ค่า", "ความมั่นใจ", "อ่านด้วย", "หน้า", "ตำแหน่ง", "ข้อความในเอกสาร",
