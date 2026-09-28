@@ -118,7 +118,7 @@ async function fetchFile(page, url) {
 }
 
 // ── the register checked against the golden output of the two documents ──
-function checkRegister(file) {
+function checkRegister(file, answers) {
   const py = [
     "import sys,json",
     "from openpyxl import load_workbook",
@@ -126,24 +126,25 @@ function checkRegister(file) {
     "print(json.dumps({ws.title:[[None if c is None else str(c) for c in r] for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets},ensure_ascii=False))",
   ].join("\n");
   const sheets = JSON.parse(execFileSync(process.env.PYTHON || "python", ["-c", py, file], { encoding: "utf8", maxBuffer: 64 << 20, env: { ...process.env, PYTHONIOENCODING: "utf-8" } }));
-  const text = JSON.stringify(sheets);
+  const register = JSON.stringify(sheets["ทะเบียน"] || []);
+  const exceptions = (sheets["ข้อยกเว้น"] || []).filter((r) => r && r[0]);
+  const has = (text, v) => { const n = Number(v); return text.includes(v) || (Number.isFinite(n) && (text.includes(n.toFixed(2)) || text.includes(String(n)))); };
   const out = [];
   for (const f of FILES) {
-    const g = JSON.parse(fs.readFileSync(path.join(GOLD, f.src.replace(/\.[a-z]+$/, ".json")), "utf8"));
-    const gf = g.truth || {};
-    const want = {};
-    // f02's printed VAT is wrong on purpose: the card decides what is recorded, so its VAT and total are not golden
+    const g = JSON.parse(fs.readFileSync(path.join(GOLD, f.src.replace(/\.[a-z]+$/, ".json")), "utf8")).truth || {};
+    const val = (k) => (g[k] && typeof g[k] === "object" ? (g[k].value ?? g[k].normalized) : g[k]);
+    const excludedByAnswer = f.src.startsWith("f02") && answers.some((a) => /ตัด/.test(a));
+    if (excludedByAnswer) {
+      // the person chose to leave it out: not in the register, listed as not recorded, in Thai
+      const row = exceptions.find((r) => r[0] === f.name);
+      const ok = !register.includes(String(val("document_number"))) && !!row && row[3] === "ไม่ได้บันทึก" && !/[A-Za-z]{4,}/.test(String(row[4] || "").replace(/VAT|PDF/g, ""));
+      out.push({ document: f.name, expected: "left out (the answer given)", found: { not_in_register: !register.includes(String(val("document_number"))), listed_as_not_recorded: !!row && row[3] === "ไม่ได้บันทึก", reason: row && row[2], detail_thai: ok } });
+      continue;
+    }
     const keys = f.src.startsWith("f02") ? ["document_number", "seller_tax_id", "subtotal"] : ["document_number", "seller_tax_id", "subtotal", "vat_amount", "total"];
-    for (const k of keys) {
-      const v = gf[k] && typeof gf[k] === "object" ? (gf[k].value ?? gf[k].normalized) : gf[k];
-      if (v !== undefined && v !== null && v !== "") want[k] = String(v);
-    }
     const found = {};
-    for (const [k, v] of Object.entries(want)) {
-      const n = Number(v);
-      found[k] = text.includes(v) || (Number.isFinite(n) && (text.includes(n.toFixed(2)) || text.includes(String(n))));
-    }
-    out.push({ document: f.name, want, found });
+    for (const k of keys) if (val(k) != null && val(k) !== "") found[`${k}=${val(k)}`] = has(register, String(val(k)));
+    out.push({ document: f.name, expected: "in the register with its golden values", found });
   }
   return { sheets: Object.keys(sheets), docs: out, ok: out.every((d) => Object.values(d.found).every(Boolean)) };
 }
@@ -215,6 +216,7 @@ async function journey(client) {
   // the round's own state (the self-test's files card is on the page too): a question → click it; done → its files
   let cards = 0;
   const seen = new Set();
+  const answers = [];
   const TERMINAL = ["succeeded", "failed", "cancelled"];
   for (;;) {
     const d = await waitFor(async () => {
@@ -243,7 +245,9 @@ async function journey(client) {
       const opts = it.locator('[data-testid="question-option"]');
       let o = opts.first();
       for (let m = 0; m < (await opts.count()); m++) if (want && (await opts.nth(m).innerText()).includes(want)) { o = opts.nth(m); break; }
-      log(`${tag} card ${cards} q${k + 1}: ${(qs[k]?.question || "").slice(0, 90)} → ${(await o.innerText()).replace(/\s+/g, " ").slice(0, 60)}`);
+      const chosen = (await o.innerText()).replace(/\s+/g, " ").slice(0, 80);
+      answers.push(chosen);
+      log(`${tag} card ${cards} q${k + 1}: ${(qs[k]?.question || "").slice(0, 90)} → ${chosen}`);
       await click(o);
     }
     await click(cardEl.locator('[data-testid="question-submit"]'), `ส่งคำตอบ (card ${cards})`);
@@ -255,26 +259,33 @@ async function journey(client) {
   await outs.scrollIntoViewIfNeeded();
   mark("files card");
   await shot("06-files");
-  // 6. the register: one click on the file (fetched through the same link: a
-  // native save dialog cannot be driven over CDP)
+  // 6. the register: one click on its download button. The web client clicks it and keeps the download;
+  // in the desktop app the click is counted and the same file is fetched through the same URL (a native
+  // save dialog cannot be driven over CDP, and must not be left open in the owner's app)
   const d = (await api(page, `/runs/${run.id}`)).body;
   const art = (d.artifacts || []).find((a) => a.format === "xlsx");
-  const link = outs.locator('[data-testid="am-artifact"] a[href*="/download"]').first();
-  const href = (await link.getAttribute("href").catch(() => null)) || `${EDGE()}/api/v1/agent-market/artifacts/${art.id}/download`;
-  clicks += 1;
-  log(`${tag} click ${clicks}: the register (${art.name})`);
-  const buf = await fetchFile(page, href.startsWith("http") ? href : new URL(href, WEB()).toString());
   const file = path.join(dir, art.name);
-  fs.writeFileSync(file, buf);
+  const btn = outs.locator('[data-testid="am-artifact"][data-format="xlsx"] button').first();
+  let buf;
+  if (client === "web") {
+    const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 60000 }), click(btn, `the register (${art.name})`)]);
+    await dl.saveAs(file);
+    buf = fs.readFileSync(file);
+  } else {
+    clicks += 1;
+    log(`${tag} click ${clicks}: the register (${art.name}) — fetched through its download URL`);
+    buf = await fetchFile(page, `${EDGE()}/api/v1/agent-market/artifacts/${art.id}/download`);
+    fs.writeFileSync(file, buf);
+  }
   mark("report in hand");
   const total = Number(((Date.now() - t1) / 1000).toFixed(1));
-  const check = checkRegister(file);
+  const check = checkRegister(file, answers);
   log(`${tag}: register ${art.name} ${buf.length} bytes; golden values ${check.ok ? "ALL found" : "NOT all found"}: ${JSON.stringify(check.docs.map((x) => x.found))}`);
   // the header's one action and the seen-by line, for the screenshots
   await page.locator('[data-testid="am-ws-view-run"]').first().scrollIntoViewIfNeeded().catch(() => null);
   await shot("07-workspace-after");
   const seenBy = await outs.locator('[data-testid="am-outputs-seen-by"]').innerText().catch(() => "");
-  const res = { client: tag, web_build: version, install: installId, run: run.id, run_status: d.run.status, question_cards: cards,
+  const res = { client: tag, web_build: version, install: installId, run: run.id, run_status: d.run.status, question_cards: cards, answers,
     seconds_from_market_to_report: total, clicks, marks, register: art.name, register_ok: check.ok, check, seen_by: seenBy };
   fs.writeFileSync(path.join(dir, "journey.json"), JSON.stringify(res, null, 1));
   log(`${tag}: ${total} s, ${clicks} clicks, ${cards} question card(s), report correct: ${check.ok}`);

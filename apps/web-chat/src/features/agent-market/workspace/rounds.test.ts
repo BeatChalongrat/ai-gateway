@@ -99,6 +99,29 @@ describe("rounds in the workspace", () => {
     expect(div2?.type === "divider" && div2.started).toBe(false);
   });
 
+  it("files sent before the self-test's card appeared: the self-test never swallows the person's round", () => {
+    // the AM4 walkthrough on the test stack: "ใช้ค่าแนะนำทั้งหมด", files dropped at once; the self-test's
+    // progress card came after the person's files, and by position the finished (folded) self-test took
+    // the person's question card, files and closing words with it — the workspace showed none of them
+    const msg = item("user_files", 100, { files: [{ id: "f9", name: "ใบกำกับ.pdf", size: 1 }] }, "mine");
+    const mine = item("progress", 100, { run_id: "mine", kind: "run", status: "succeeded" }, "mine");
+    const hello = item("greeting", 107, { text: "สวัสดีครับ" });
+    const st = item("progress", 107, { run_id: "st2", kind: "self_test", status: "succeeded" }, "st2");
+    const ask = item("card", 164, { questions: [] }, "mine");
+    const stOut = item("outputs", 187, { run_id: "st2", artifacts: [{ id: "s", name: "sample.xlsx", format: "xlsx", size: 1, version: 1 }] }, "st2");
+    const stDone = item("agent_text", 187, { text: "ทดสอบเสร็จ", run_id: "st2" }, "st2");
+    const out = item("outputs", 194, { run_id: "mine", period_label: "กันยายน 2569", artifacts: [{ id: "m", name: "register.xlsx", format: "xlsx", size: 1, version: 1 }] }, "mine");
+    const done = item("agent_text", 194, { text: "เสร็จแล้วครับ", run_id: "mine" }, "mine");
+    const segs = segments([msg, mine, hello, st, ask, stOut, stDone, out, done]);
+    const shown = segs.filter((x) => x.type === "item").map((x) => (x.type === "item" ? x.item.id : ""));
+    expect(shown).toEqual([msg.id, mine.id, hello.id, ask.id, out.id, done.id]);
+    const folded = segs.find((x) => x.type === "folded");
+    expect(folded?.type === "folded" && folded.items.map((i) => i.id)).toEqual([st.id, stOut.id, stDone.id]);
+    const div = segs.find((x) => x.type === "divider");
+    expect(div?.type === "divider" && div.round.runId).toBe("mine");
+    expect(segs[segs.length - 1]?.type).toBe("divider");
+  });
+
   it("an open chip is found; an answered one is not", () => {
     const chip = item("intent", 60, { status: "open", files: [{ id: "f3", name: "x.pdf", size: 1 }] });
     expect(openIntent([greeting, chip])?.id).toBe(chip.id);

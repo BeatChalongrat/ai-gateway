@@ -63,22 +63,30 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
   return rounds;
 }
 
-/** The round an item belongs to, by position: from a round's progress card up
- *  to the next round's first item. Items before the first round (the greeting)
- *  belong to none. */
+/** The round each item belongs to. An item carrying a round's run id is that
+ *  round's, wherever it sits (a self-test that started after the person's
+ *  round must not take the person's card and files with it when it folds).
+ *  An item without one (the greeting, a notice, a typed question) belongs to
+ *  the person's round begun most recently before it — a self-test's only when
+ *  no round of the person's has begun yet. Items before any round belong to none. */
 function positions(items: ThreadItem[], rounds: Map<string, RoundInfo>): (string | null)[] {
-  // a round starts at its first item carrying its run id (the person's message
-  // linked to it, else its progress card)
-  const firstIndex = new Map<string, number>();
+  const out: (string | null)[] = new Array(items.length).fill(null);
+  const begun = new Set<string>();
+  let currentRun: string | null = null;
+  let currentSelfTest: string | null = null;
   items.forEach((it, i) => {
     const rid = it.run_id ?? (it.payload as { run_id?: string } | null)?.run_id;
-    if (rid && rounds.has(rid) && !firstIndex.has(rid)) firstIndex.set(rid, i);
-  });
-  const starts = [...firstIndex.entries()].sort((a, b) => a[1] - b[1]);
-  const out: (string | null)[] = new Array(items.length).fill(null);
-  starts.forEach(([rid, start], k) => {
-    const end = k + 1 < starts.length ? starts[k + 1]![1] : items.length;
-    for (let i = start; i < end; i++) out[i] = rid;
+    const r = rid ? rounds.get(rid) : undefined;
+    if (r) {
+      out[i] = r.runId;
+      if (!begun.has(r.runId)) {
+        begun.add(r.runId);
+        if (r.kind === "run") currentRun = r.runId;
+        else currentSelfTest = r.runId;
+      }
+      return;
+    }
+    out[i] = currentRun ?? currentSelfTest;
   });
   return out;
 }
