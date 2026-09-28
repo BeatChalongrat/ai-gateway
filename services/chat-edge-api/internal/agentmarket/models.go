@@ -211,11 +211,24 @@ func curated(o OrgSettings, rm RunnerModels, use string) []ModelEntry {
 	if use == "text" && rm.Fallback != "" && rm.Fallback != rm.Primary {
 		out = append(out, ModelEntry{Model: rm.Fallback, Outcome: OutcomeFast})
 	}
+	// the menu stays a short list: what does not fit is one click away, in
+	// "เลือกโมเดลเอง", where every model inside the organisation can be picked
+	own := 0
 	for _, id := range rm.inHouse(use) {
+		if id == rm.autoModel(use) {
+			continue
+		}
+		if own++; own > MaxOwnRows {
+			break
+		}
 		out = append(out, ModelEntry{Model: id, Outcome: OutcomeOwn})
 	}
 	return out
 }
+
+// MaxOwnRows is how many in-house models the menu names beside "อัตโนมัติ"
+// until an admin curates the list.
+const MaxOwnRows = 3
 
 // inHouse is every model inside the organisation that can do this job, once
 // each, in a stable order: the runner's own models first, then its catalogue's.

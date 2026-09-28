@@ -1,8 +1,12 @@
 "use client";
 
 // /chat/agents/i/[installId] — the agent workspace (board 3), the primary
-// surface: an inner rail of my agents (md+), the agent's header, the thread
-// (loaded, then followed live) and the composer.
+// surface: the agent's header, the thread (loaded, then followed live) and
+// the composer, in the column the chat uses.
+//
+// AM5: the workspace had a list of my agents of its own beside the app's
+// sidebar, which lists the same agents: two navigation columns, and the
+// agent's column 100 px off the chat's. The sidebar is the one list.
 //
 // AM4: one obvious action in the header — "ที่มาของตัวเลข" — and everything
 // else (other chats, pin, overview, settings, report a problem) in one menu;
@@ -12,7 +16,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Plus } from "lucide-react";
+import { ListChecks } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 
@@ -24,7 +28,7 @@ import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../use
 import { togglePin } from "../useRail";
 import { BudgetBanner } from "./BudgetBanner";
 import { Composer, type ComposerHandle } from "./Composer";
-import { provenanceHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
+import { provenanceHref, WorkspaceContext, type WorkspaceCtx } from "./context";
 import { EmptyDrop } from "./EmptyDrop";
 import { ModelControl, useModelPicker } from "./ModelControl";
 import { hasOwnRound, latestRound } from "./rounds";
@@ -201,10 +205,9 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
   return (
     <WorkspaceContext.Provider value={ctx}>
       <div className="flex min-h-0 flex-1" data-testid="am-workspace">
-        <Rail installs={installs} activeId={installId} />
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2.5 md:px-6">
-            <div className="md:hidden">
+            <div className="shrink-0" data-testid="am-ws-tile">
               <AgentTile icon={icon} size={28} />
             </div>
             <div className="min-w-0 flex-1">
@@ -316,64 +319,3 @@ function ThreadScroller({ items, status, children }: { items: ThreadItem[]; stat
     </div>
   );
 }
-
-/** AM4: the workspace's own list is capped like the left rail (the rest are one click away). */
-export const RAIL_CAP = 6;
-
-export function railShown(installs: InstallRow[], activeId: string): InstallRow[] {
-  const head = installs.slice(0, RAIL_CAP);
-  if (head.some((i) => i.id === activeId)) return head;
-  const active = installs.find((i) => i.id === activeId);
-  return active ? [...head.slice(0, RAIL_CAP - 1), active] : head;
-}
-
-function Rail({ installs, activeId }: { installs: InstallRow[]; activeId: string }) {
-  const t = useAmT();
-  const shown = railShown(installs, activeId);
-  return (
-    <nav aria-label={t("ws.agentsNav")} className="hidden w-[200px] shrink-0 flex-col gap-0.5 border-r border-border-subtle px-2 py-4 md:flex" data-testid="am-rail">
-      <div className="px-2.5 pb-2 text-[11px] font-medium tracking-wide text-text-muted">{t("ws.myAgents")}</div>
-      {shown.map((i) => {
-        const active = i.id === activeId;
-        return (
-          <Link
-            key={i.id}
-            href={workspaceHref(i.id)}
-            aria-current={active ? "page" : undefined}
-            className={cls(
-              "focus-ring flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] transition-colors hover:bg-bg-elevated hover:text-text-primary",
-              active ? "bg-bg-elevated font-medium text-text-primary" : "text-text-secondary",
-            )}
-          >
-            <AgentTile icon={i.icon} size={24} quiet={!active} />
-            <span className="min-w-0 flex-1 truncate">{i.title}</span>
-            {i.attention ? (
-              <span className="h-2 w-2 shrink-0 rounded-full bg-status-warning" title={t("rail.attention")}>
-                <span className="sr-only">{t("rail.attention")}</span>
-              </span>
-            ) : null}
-          </Link>
-        );
-      })}
-      {installs.length > shown.length ? (
-        <Link
-          href="/chat/agents/mine"
-          className="focus-ring rounded-lg px-2.5 py-1.5 text-[12px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
-          data-testid="am-rail-all"
-        >
-          {t("rail.all", { n: String(installs.length) })}
-        </Link>
-      ) : null}
-      <Link
-        href="/chat/agents"
-        className="focus-ring mt-1 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-      >
-        <span className="inline-flex h-6 w-6 items-center justify-center" aria-hidden>
-          <Plus width={15} height={15} />
-        </span>
-        <span>{t("ws.addFromMarket")}</span>
-      </Link>
-    </nav>
-  );
-}
-

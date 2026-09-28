@@ -20,7 +20,7 @@
 // the organisation does not allow locked (`gate`), chat models only
 // (`chatOnly`) and no Auto row of the chat's (`hideAuto`).
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
 import { hasToolsCap, hasVisionCap } from "@/lib/visionGate";
 import { BrainCircuit, ImagePlus, Search, Sparkles, X, Eye } from "lucide-react";
@@ -262,8 +262,17 @@ export function ModelTrigger({
   );
 }
 
+/** Room a model menu keeps between itself and the window's edge. */
+const POPOVER_EDGE_GAP = 8;
+
 /** The shell a model menu opens in: a popover above the pill, a bottom
- *  sheet (with its dimmed backdrop) below 640 px. */
+ *  sheet (with its dimmed backdrop) below 640 px.
+ *
+ *  AM5 — the popover opens to the right of its pill, and to the left of
+ *  it when that would leave the window: the pill sits at the right end
+ *  of the composer, and a composer near the window's edge (a narrow
+ *  window, the agent workspace) put a third of the menu off screen and
+ *  made the page scroll sideways. Measured before the first paint. */
 export function ModelPopover({
   label,
   onClose,
@@ -275,6 +284,13 @@ export function ModelPopover({
   children: ReactNode;
   testId?: string;
 }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [align, setAlign] = useState<"start" | "end">("start");
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === "undefined") return;
+    if (el.getBoundingClientRect().right > window.innerWidth - POPOVER_EDGE_GAP) setAlign("end");
+  }, []);
   return (
     <>
       {/* Mobile-only backdrop — the dropdown becomes a bottom sheet
@@ -285,17 +301,20 @@ export function ModelPopover({
         className="fixed inset-0 z-30 bg-black/55 backdrop-blur-sm sm:hidden"
       />
       <div
+        ref={ref}
         role="listbox"
         aria-label={label}
         data-testid={testId}
-        className="
+        data-align={align}
+        className={`
               popover-appear sheet-up z-40 flex flex-col overflow-hidden
               border border-border bg-bg-surface text-xs shadow-2xl
               fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-2xl safe-bottom
-              sm:absolute sm:bottom-full sm:left-0 sm:inset-x-auto sm:mb-2
+              sm:absolute sm:bottom-full sm:inset-x-auto sm:mb-2
+              ${align === "end" ? "sm:right-0" : "sm:left-0"}
               sm:w-[min(320px,92vw)] sm:max-h-[420px] sm:rounded-xl
               sm:sheet-up:animate-none
-            "
+            `}
       >
         <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
           <span className="h-1 w-10 rounded-full bg-border" />

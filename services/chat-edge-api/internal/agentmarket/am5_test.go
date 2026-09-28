@@ -121,6 +121,15 @@ func TestModelPickerShowsInHouseModelsThatDiffer(t *testing.T) {
 			t.Fatalf("an in-house model is a row a person can pick: %v", om)
 		}
 	}
+	// an organisation with many models of its own: the menu stays short, the rest is in "เลือกโมเดลเอง"
+	many := RunnerModels{Primary: "qwen", Vision: "qwen", SelfHosted: map[string]bool{"qwen": true}, Catalog: []CatalogModel{{ID: "qwen", SelfHosted: true}}}
+	for _, id := range []string{"m1", "m2", "m3", "m4", "m5", "m6"} {
+		many.Catalog = append(many.Catalog, CatalogModel{ID: id, SelfHosted: true})
+	}
+	short := e.store.Picker(context.Background(), e.api.cfg, Install{Slug: "sran.financial-report"}, mustManifest(t, textManifest), OrgSettings{}, RunnerModelsFrom(capsOf(many)))
+	if len(short.Options) != 1+MaxOwnRows || len(short.Custom) != 7 || short.SingleInHouse {
+		t.Fatalf("a short menu, everything in the picker: %d rows, %d in the picker", len(short.Options), len(short.Custom))
+	}
 	// the organisation's own list with the same model under two outcomes is still one row
 	if code, body := e.do("PUT", "/admin/org", map[string]any{"agent_models": []map[string]any{
 		{"model": "qwen", "outcome": "accurate"}, {"model": "typhoon", "outcome": "fast"}, {"model": "typhoon", "outcome": "accurate"}}}); code != 200 {
@@ -181,4 +190,19 @@ func TestChooseYourOwnModelKeepsOutsideModelsLocked(t *testing.T) {
 	if c := customOf(p, "gpt-4o"); c == nil || c["allowed"] != true {
 		t.Fatalf("documents may leave: outside models are allowed: %v", c)
 	}
+}
+
+func mustManifest(t *testing.T, raw string) Manifest {
+	t.Helper()
+	m, err := ParseManifest(json.RawMessage(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func capsOf(rm RunnerModels) json.RawMessage {
+	d, _ := json.Marshal(rm)
+	b, _ := json.Marshal(map[string]Binding{"platform.models": {Capability: "platform.models", Impl: "gateway", Detail: d}})
+	return b
 }
