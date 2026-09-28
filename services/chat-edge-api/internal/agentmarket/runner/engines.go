@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -200,7 +201,7 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 	if err != nil {
 		return
 	}
-	const kept = " ยังใช้รุ่นเดิมอยู่ตามปกติ ไฟล์และผลงานเดิมยังอยู่ครบ ถ้าต้องการให้ผู้ดูแลตรวจ กด “แจ้งปัญหา”"
+	const kept = upgradeKept
 	if !passed {
 		// why is the failed round's own sentence (am.Failure.What), already said in the thread
 		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน: %s",
@@ -208,11 +209,10 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 		return
 	}
 	if problems := rc.selfTestExpectations(ctx, computed); len(problems) > 0 {
-		// what differed is kept for the run page; the person reads how many
-		rc.r.logger().Warn("upgrade self-test differs", "run", rc.run.ID, "to", to.Version, "problems", problems)
-		rc.r.noteStep(ctx, rc.run, "self_test_expect", joinLines(problems))
-		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ ผลทดสอบกับข้อมูลตัวอย่างต่างจากที่รุ่นนี้กำหนดไว้ %d จุด",
-			to.Version, len(problems))+kept, map[string]any{"tone": "error"})
+		// the person reads why, in words; names and values are kept for the run page
+		rc.r.logger().Warn("upgrade self-test differs", "run", rc.run.ID, "to", to.Version, "problems", expectDetail(problems))
+		rc.r.noteStep(ctx, rc.run, "self_test_expect", expectDetail(problems))
+		_ = st.PostText(ctx, rc.run, upgradeRefused(to.Version, problems), map[string]any{"tone": "error"})
 		return
 	}
 	if cur, err := st.InstallByID(ctx, rc.install.ID); err == nil && cur.DefinitionID == to.ID {
@@ -250,10 +250,52 @@ func joinLines(xs []string) string {
 	return out
 }
 
+const upgradeKept = " ยังใช้รุ่นเดิมอยู่ตามปกติ ไฟล์และผลงานเดิมยังอยู่ครบ ถ้าต้องการให้ผู้ดูแลตรวจ กด “แจ้งปัญหา”"
+
+// expectProblem is one way a self-test missed what its version expects.
+// Words is what a person reads (the period, a question that should not have
+// been asked). A figure has none: its name is the engine's, so figures are
+// counted for the person. Detail is the whole of it, for the run page.
+type expectProblem struct {
+	Words  string
+	Figure bool
+	Detail string
+}
+
+// upgradeRefused is what a person reads when an upgrade's self-test differs
+// from what the new version expects: why, in words.
+func upgradeRefused(version string, problems []expectProblem) string {
+	var said []string
+	figures := 0
+	for _, p := range problems {
+		if p.Figure {
+			figures++
+		} else if w := am.ForPerson(p.Words); w != "" {
+			said = append(said, w)
+		}
+	}
+	if figures > 0 {
+		said = append(said, fmt.Sprintf("ตัวเลขสรุป %d ค่าไม่ตรงกับที่รุ่นนี้กำหนด", figures))
+	}
+	if len(said) == 0 {
+		said = append(said, "ผลทดสอบต่างจากที่รุ่นนี้กำหนดไว้")
+	}
+	return fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ ผลทดสอบกับข้อมูลตัวอย่างไม่ตรงตามที่รุ่นนี้กำหนด: %s", version, strings.Join(said, " · ")) + upgradeKept
+}
+
+// expectDetail is everything that differed, names and values, for the run.
+func expectDetail(problems []expectProblem) string {
+	var out []string
+	for _, p := range problems {
+		out = append(out, p.Detail)
+	}
+	return joinLines(out)
+}
+
 // selfTestExpectations compares a self-test run with its package's
 // self-test.json "expect": no questions asked, the period, and the numbers
 // it names (P&L lines by key, or totals).
-func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []string {
+func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []expectProblem {
 	var st struct {
 		Expect struct {
 			Findings *[]json.RawMessage         `json:"findings"`
@@ -263,25 +305,31 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 		} `json:"expect"`
 	}
 	if json.Unmarshal(rc.pkg.SelfTest, &st) != nil {
-		return []string{"self-test.json อ่านไม่ได้"}
+		return []expectProblem{{Words: "อ่านสิ่งที่รุ่นนี้กำหนดไว้ไม่ได้", Detail: "self-test.json อ่านไม่ได้"}}
 	}
-	var out []string
+	var out []expectProblem
 	exp := st.Expect
 	if exp.Findings != nil && len(*exp.Findings) == 0 {
 		if cards, _ := rc.r.Store.RunCards(ctx, rc.run.ID); len(cards) > 0 {
-			out = append(out, fmt.Sprintf("ถาม %d คำถาม (คาดว่าไม่ถาม)", len(cards)))
+			out = append(out, expectProblem{Words: fmt.Sprintf("ถาม %d คำถาม ทั้งที่ข้อมูลตัวอย่างไม่ควรมีคำถาม", len(cards)),
+				Detail: fmt.Sprintf("ถาม %d คำถาม (คาดว่าไม่ถาม)", len(cards))})
 		}
 	}
 	run, _ := rc.r.Store.RunByID(ctx, rc.run.ID)
 	if exp.Period != "" && (run.Period == nil || *run.Period != exp.Period) {
-		out = append(out, "งวดไม่ตรง ("+exp.Period+")")
+		got := ""
+		if run.Period != nil {
+			got = *run.Period
+		}
+		out = append(out, expectProblem{Words: "งวดของผลทดสอบไม่ตรงกับที่รุ่นนี้กำหนด (" + exp.Period + ")",
+			Detail: "งวดไม่ตรง: ได้ " + got + " คาด " + exp.Period})
 	}
 	if len(exp.Lines) == 0 && len(exp.Totals) == 0 {
 		return out
 	}
 	_, data, err := rc.readComputed(ctx, computed)
 	if err != nil {
-		return append(out, "อ่านผลคำนวณไม่ได้")
+		return append(out, expectProblem{Words: "อ่านผลคำนวณของการทดสอบไม่ได้", Detail: "อ่านผลคำนวณไม่ได้"})
 	}
 	var c struct {
 		Lines []struct {
@@ -297,18 +345,25 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 			if l.Key == k && l.Current != nil {
 				found = true
 				if *l.Current != want {
-					out = append(out, fmt.Sprintf("%s = %s (คาด %s)", k, *l.Current, want))
+					out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf("%s = %s (คาด %s)", k, *l.Current, want)})
 				}
 			}
 		}
 		if !found {
-			out = append(out, k+" ไม่มีในผลคำนวณ")
+			out = append(out, expectProblem{Figure: true, Detail: k + " ไม่มีในผลคำนวณ"})
 		}
 	}
 	for k, want := range exp.Totals {
 		if got, ok := c.Totals[k]; !ok || !am.JSONEqual(got, want) {
-			out = append(out, fmt.Sprintf("%s = %s (คาด %s)", k, string(got), string(want)))
+			out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf("%s = %s (คาด %s)", k, string(got), string(want))})
 		}
 	}
+	// a map is walked in no order: the run's record and the person's count are the same every time
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Figure != out[j].Figure {
+			return !out[i].Figure
+		}
+		return out[i].Figure && out[i].Detail < out[j].Detail
+	})
 	return out
 }
