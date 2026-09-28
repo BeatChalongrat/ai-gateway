@@ -168,9 +168,14 @@ export function ComposerFrame({
     if (typeof window === "undefined") return;
     const vv = window.visualViewport;
     if (!vv) return;
+    // AM5 — under one pixel is the window's own rounding, not a keyboard:
+    // at 125 % the desktop app's window is 889.6 px tall and innerHeight
+    // says 890. Moving the composer by that 0.4 px put a transform on it,
+    // and a transformed box keeps its menus under whatever floats above it
+    // (the credits badge was drawn over the open model menu).
     const sync = () => {
       const overlap = window.innerHeight - vv.height - vv.offsetTop;
-      setKeyboardInset(Math.max(0, overlap));
+      setKeyboardInset(overlap >= 1 ? Math.round(overlap) : 0);
     };
     sync();
     vv.addEventListener("resize", sync);

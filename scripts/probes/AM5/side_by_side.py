@@ -54,8 +54,9 @@ def both(left, right, title_l, title_r, name, height=None):
 
 
 live = os.path.join(RES, "walk", "live")
-for step in ("00-chat", "01-market", "02-agent-page", "03-workspace-empty", "04-model-menu", "5a-files-staged", "06-files-tied",
-             "08-does-not-tie", "09-draft-files"):
+for step in ("00-chat", "01-market", "02-agent-page", "03-workspace-empty", "5a-files-staged", "06-files-tied",
+             "08-does-not-tie", "09-draft-files", "20-model-menu", "21-model-choose-your-own", "22-question-card",
+             "23-left-out", "24-restored"):
     both(os.path.join(live, "desktop", f"{step}.png"), os.path.join(live, "web", f"{step}.png"),
          f"desktop 0.1.0-e60 · {step}", f"web · {step}", f"live_{step}.png")
 

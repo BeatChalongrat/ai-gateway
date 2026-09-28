@@ -10,6 +10,8 @@
 //   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js open            # desktop: install e60, relaunch with CDP 9333
 //   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js journey desktop # in the owner's desktop app
 //   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js journey web     # the same in a browser of its own
+//   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js invoice desktop # phases A–C with the invoice agent ("invoice web menu": the model menu only)
+//   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js legacy          # what the owner's own agents' threads say today, read only
 //   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js cleanup         # remove the walkthrough's installs (by id) and its rounds' evidence
 //   SMOKE_TARGET=live node scripts/probes/AM5/walkthrough.js close           # relaunch the app without the debugging port
 //
@@ -96,14 +98,17 @@ async function connectDesktop() {
   if (!page) throw new Error("no signed-in page over CDP");
   return { browser, page, close: async () => browser.close() };
 }
+// AM5_WINDOW=1536x889@1.25 — the web client in a window like the desktop app's on a display at
+// 125 %: 889.6 px tall, which the page is told is 890 (the credits badge over the model menu)
+const WINDOW = /^(\d+)x(\d+)@([\d.]+)$/.exec(process.env.AM5_WINDOW || "");
 // the web client: a browser of its own, signed in with a short-lived session for the same account
 async function openWeb(email) {
   const who = L.TARGET === "live"
     ? { id: L.gsql(`select id from portal_users where email='${email}'`).trim() }
     : L.TS_USER;
   const token = L.mintPortalToken(who, 3600);
-  const browser = await pw().chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 1360, height: 900 }, locale: "th-TH", ignoreHTTPSErrors: true, acceptDownloads: true });
+  const browser = await pw().chromium.launch(WINDOW ? { args: [`--force-device-scale-factor=${WINDOW[3]}`, `--window-size=${WINDOW[1]},${WINDOW[2]}`] } : {});
+  const ctx = await browser.newContext({ viewport: WINDOW ? null : { width: 1360, height: 900 }, locale: "th-TH", ignoreHTTPSErrors: true, acceptDownloads: true });
   await ctx.addCookies([{ name: "portal_access_token", value: token, domain: "localhost", path: "/", httpOnly: true, sameSite: "Lax", secure: L.TARGET === "live" }]);
   const page = await ctx.newPage();
   return { browser, page, close: async () => browser.close() };
@@ -125,6 +130,21 @@ async function fetchFile(page, url) {
     return btoa(s);
   }, url);
   return Buffer.from(b64, "base64");
+}
+
+/** A screenshot with the page's animations and caret held still — in the desktop app a plain one
+ *  timed out (20 s) on a page with a question card while this one took a second. Tried twice; a
+ *  screenshot that cannot be taken is said, and the journey goes on. */
+async function capture(page, file, opts, say) {
+  for (let i = 0; i < 2; i++) {
+    try {
+      await page.screenshot({ path: file, timeout: 20000, animations: "disabled", caret: "hide", ...opts });
+      return true;
+    } catch (e) {
+      if (i === 1) say(`no screenshot ${path.basename(file)} (${String(e.message).slice(0, 40)})`);
+    }
+  }
+  return false;
 }
 
 /** What the composer on this page measures: the same numbers on both pages mean the same box. */
@@ -195,7 +215,7 @@ async function journey(client) {
   const t0 = Date.now();
   const mark = (what) => { const sec = ((Date.now() - t0) / 1000).toFixed(1); marks.push({ what, s: Number(sec), clicks }); log(`${tag} +${sec}s clicks=${clicks} ${what}`); };
   const check = (ok, what, detail = "") => { checks.push({ ok: !!ok, what, detail: String(detail).slice(0, 300) }); log(`${tag} ${ok ? "PASS" : "FAIL"} ${what}${detail ? ` — ${String(detail).slice(0, 160)}` : ""}`); };
-  const shot = async (name, opts = {}) => { await page.screenshot({ path: path.join(dir, `${name}.png`), ...opts }); };
+  const shot = (name, opts = {}) => capture(page, path.join(dir, `${name}.png`), opts, (m) => log(`${tag}: ${m}`));
   const click = async (loc, what) => { await loc.first().click({ timeout: 30000 }); clicks += 1; if (what) log(`${tag} click ${clicks}: ${what}`); };
   const words = async (loc) => (await loc.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
 
@@ -238,9 +258,15 @@ async function journey(client) {
   // A. the workspace's composer is the chat's
   const wsComposer = await measureComposer(page);
   fs.writeFileSync(path.join(dir, "composer.json"), JSON.stringify({ chat: chatComposer, workspace: wsComposer }, null, 1));
-  for (const part of ["root", "column", "pill", "textarea", "attach"]) {
-    check(JSON.stringify(chatComposer?.[part]) === JSON.stringify(wsComposer?.[part]), `composer ${part}: the workspace's is the chat's`, JSON.stringify(wsComposer?.[part]));
+  // The chat page is opened empty here (none of the owner's chats is opened), and an empty chat
+  // puts its composer in its narrower opening column (720 px); a conversation and the workspace use
+  // the thread's column (768 px — measured equal, thread against thread, by ui.js on the test
+  // stack). So the box itself is compared, and its width is recorded.
+  const box = (p) => (p ? { ...p, w: undefined, x: undefined } : p);
+  for (const part of ["root", "pill", "textarea", "attach"]) {
+    check(JSON.stringify(box(chatComposer?.[part])) === JSON.stringify(box(wsComposer?.[part])), `composer ${part}: the workspace's is the chat's`, JSON.stringify(wsComposer?.[part]));
   }
+  log(`${tag}: composer column — empty chat ${JSON.stringify(chatComposer?.column)} · workspace ${JSON.stringify(wsComposer?.column)}`);
   check(!(await page.locator('[data-testid="am-rail"]').count()), "the workspace has no list of agents of its own");
   // B. the model menu
   const control = page.locator('[data-testid="am-model-control"]');
@@ -399,7 +425,173 @@ async function journey(client) {
   return res;
 }
 
+// ── phases A–C on the live system: the invoice agent ─────────────────────
+// the model menu, what the first card recommends, the list of what was left
+// out and one click back. (A round that fails is not staged on the live
+// system: that would mean breaking its sandbox. ui.js does it on the test stack.)
+const E2_DOCS = path.join(L.ROOT, "backend", "agent_market", "fixtures", "e2", "docs");
+const INVOICES = [
+  { src: "d01_clean_full_tax_invoice.pdf", name: "ใบกำกับภาษี ก.ย.69 ร้านเครื่องเขียน.pdf" },
+  { src: "f02_vat_mismatch.pdf", name: "ใบกำกับภาษี ค่าบริการ ก.ย.69.pdf" },
+];
+async function invoiceJourney(client, only) {
+  const email = process.env.AM5_EMAIL || (L.TARGET === "live" ? "" : L.TS_USER.email);
+  const s = client === "desktop" ? await connectDesktop() : await openWeb(email || process.env.OWNER_EMAIL);
+  const { page } = s;
+  const tag = `${client}/invoice`;
+  const dir = path.join(OUT, client === "web" && WINDOW ? `web-${WINDOW[3] * 100}` : client);
+  fs.mkdirSync(dir, { recursive: true });
+  const checks = [];
+  const check = (ok, what, detail = "") => { checks.push({ ok: !!ok, what, detail: String(detail).slice(0, 300) }); log(`${tag} ${ok ? "PASS" : "FAIL"} ${what}${detail ? ` — ${String(detail).slice(0, 160)}` : ""}`); };
+  // a screenshot of a window that is covered or minimised can time out over CDP: the journey goes on
+  const shot = (name, opts = {}) => capture(page, path.join(dir, `${name}.png`), opts, (m) => log(`${tag}: ${m}`));
+  const words = async (loc) => (await loc.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+
+  await page.goto(`${WEB()}/chat/agents`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="am-market-grid"]', { timeout: 60000 });
+  const card = page.locator('[data-testid="am-agent-card"]').filter({ hasText: "ใบกำกับ" });
+  await card.locator('[data-testid="am-install"]').first().click({ timeout: 30000 });
+  await page.waitForSelector('[data-testid="am-detail-install"]', { timeout: 60000 });
+  await page.locator('[data-testid="am-detail-install"]').first().click({ timeout: 30000 });
+  await page.waitForURL(/\/chat\/agents\/i\//, { timeout: 60000 });
+  const installId = page.url().split("/chat/agents/i/")[1].split(/[?#/]/)[0];
+  state.installs = [...new Set([...(state.installs || []), installId])];
+  save();
+  await page.waitForSelector('[data-testid="am-empty-pick"]', { timeout: 60000 });
+  await L.wait(1500);
+  check(!(await page.locator('[data-testid="am-rail"]').count()), "the workspace has no list of agents of its own");
+
+  // B. the model menu
+  await page.locator('[data-testid="am-model-control"]').first().click({ timeout: 15000 });
+  await page.waitForSelector('[data-testid="am-model-menu"]', { timeout: 15000 });
+  await L.wait(800);
+  await shot("20-model-menu");
+  const rows = await page.locator('[data-testid="am-model-option"]').evaluateAll((els) => els.map((e) => ({ model: e.getAttribute("data-model"), text: e.innerText.replace(/\s+/g, " ").trim() })));
+  fs.writeFileSync(path.join(dir, "model_menu.json"), JSON.stringify({ rows, single: await words(page.locator('[data-testid="am-model-single"]')) }, null, 1));
+  check(rows.length > 0 && new Set(rows.map((r) => r.model)).size === rows.length, "no two rows of the model menu are the same model", rows.map((r) => r.text).join(" | "));
+  const inHouse = rows.filter((r) => /ในองค์กร/.test(r.text)).length;
+  if (inHouse === 1) check((await words(page.locator('[data-testid="am-model-single"]'))) === "ตอนนี้องค์กรมีโมเดลในองค์กรตัวเดียว", "one in-house model is said in one line");
+  const fits = await page.evaluate(() => {
+    const r = document.querySelector('[data-testid="am-model-menu"]').getBoundingClientRect();
+    const d = document.documentElement;
+    return { left: Math.round(r.left), right: Math.round(r.right), window: window.innerWidth, sideways: d.scrollWidth > d.clientWidth + 1 };
+  });
+  check(fits.left >= 0 && fits.right <= fits.window && !fits.sideways, "the model menu opens inside the window", JSON.stringify(fits));
+  // what is on top at 121 points of the menu: the menu, or something drawn over it
+  const over = await page.evaluate(() => {
+    const menu = document.querySelector('[data-testid="am-model-menu"]');
+    const r = menu.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const found = new Set();
+    for (let i = 1; i < 12; i++) {
+      for (let j = 1; j < 12; j++) {
+        const el = document.elementFromPoint(r.left + (r.width * i) / 12, r.top + (r.height * j) / 12);
+        if (el && !menu.contains(el)) found.add((el.closest("[data-testid]") || el).getAttribute("data-testid") || el.tagName.toLowerCase());
+      }
+    }
+    return { over: [...found], window: `${window.innerHeight} px, visible ${vv ? vv.height : "?"} px, scale ${window.devicePixelRatio}`,
+      composer: getComputedStyle(document.querySelector('[data-testid="composer-root"]')).transform };
+  });
+  check(!over.over.length, "nothing is drawn over the open model menu", `${over.over.join(", ") || "nothing"} · window ${over.window} · composer transform ${over.composer}`);
+  await page.locator('[data-testid="am-model-custom"]').click({ timeout: 10000 });
+  await L.wait(1200);
+  await shot("21-model-choose-your-own");
+  check(await page.locator('[data-testid="am-model-menu"] input[type="text"]').count(), "“เลือกโมเดลเอง” opens the chat's picker (its search box)");
+  const locked = await page.locator('[data-testid="am-model-menu"] [data-testid="model-row-disabled"]').count();
+  log(`${tag}: ${locked} model(s) outside the organisation, locked with the reason`);
+  await page.keyboard.press("Escape");
+  await L.wait(400);
+  if (only === "menu") {
+    fs.writeFileSync(path.join(dir, "model_menu_checks.json"), JSON.stringify({ client, install: installId, checks, model_menu: rows }, null, 1));
+    log(`${tag} (the model menu only): ${checks.filter((c) => c.ok).length} pass, ${checks.filter((c) => !c.ok).length} fail`);
+    await s.close();
+    return;
+  }
+
+  // C. the first card a person meets, skipped — the day-one trap
+  const buffers = INVOICES.map((f) => ({ name: f.name, mimeType: "application/pdf", buffer: fs.readFileSync(path.join(E2_DOCS, f.src)) }));
+  const [chooser] = await Promise.all([page.waitForEvent("filechooser", { timeout: 30000 }), page.locator('[data-testid="am-empty-pick"]').first().click({ timeout: 30000 })]);
+  await chooser.setFiles(buffers);
+  await page.waitForSelector('[data-testid="composer-chip-row"]', { timeout: 60000 }).catch(() => null);
+  await L.wait(2000);
+  await page.locator('[data-testid="am-composer-input"]').fill("[AM5] ทำทะเบียนซื้อเดือนกันยายน");
+  const before = ((await api(page, `/installs/${installId}/runs`)).body?.runs || []).filter((r) => r.kind === "run").map((r) => r.id);
+  await page.locator('[data-testid="am-composer-send"]').click({ timeout: 30000 });
+  const run = await waitFor(async () => ((await api(page, `/installs/${installId}/runs`)).body?.runs || []).find((r) => r.kind === "run" && !before.includes(r.id)), 90000, 1000);
+  if (!run) throw new Error("no round started");
+  state.runs = [...new Set([...(state.runs || []), run.id])];
+  save();
+  const status = (want, ms) => waitFor(async () => { const d = (await api(page, `/runs/${run.id}`)).body; return d && d.run && want(d) ? d : null; }, ms, 1500);
+  const parked = await status((d) => d.run.status === "awaiting_input" || ["succeeded", "failed"].includes(d.run.status), 900000);
+  check(parked && parked.run.status === "awaiting_input", "the invoice whose VAT does not add up asks its question", parked && parked.run.status);
+  const q = page.locator('[data-testid="am-question-card"]').last();
+  await q.waitFor({ state: "visible", timeout: 90000 });
+  await q.scrollIntoViewIfNeeded();
+  await L.wait(1200);
+  await shot("22-question-card");
+  const qtext = await words(q);
+  check(/ค่าแนะนำ: บันทึกตามเอกสาร/.test(qtext) && !/ค่าแนะนำ: ตัดเอกสารนี้ออก/.test(qtext), "the card recommends recording the purchase, not leaving it out", qtext.slice(0, 200));
+  check(/เอกสารที่ยังไม่ได้รวม/.test(qtext), "and says what skipping does");
+  await q.locator('[data-testid="question-skip"]').click({ timeout: 15000 });
+  const done = await status((d) => ["succeeded", "failed"].includes(d.run.status), 900000);
+  check(done && done.run.status === "succeeded", "the round finishes", done && done.run.status);
+  const list = page.locator('[data-testid="am-not-included"]').last();
+  await list.waitFor({ state: "visible", timeout: 120000 });
+  await list.scrollIntoViewIfNeeded();
+  await L.wait(1200);
+  await shot("23-left-out");
+  const ltext = await words(list);
+  check(ltext.includes(INVOICES[1].name) && /เอกสารที่ยังไม่ได้รวม \(1\)/.test(ltext), "the invoice that was left out is on the round's list", ltext.slice(0, 200));
+  await list.locator('[data-testid="am-restore"]').first().click({ timeout: 15000 });
+  const v2 = await status((d) => d.run.status === "succeeded" && (d.artifacts || []).some((a) => a.format === "xlsx" && a.version >= 2), 900000);
+  check(!!v2, "one click brings it back: the same round delivers the next version");
+  await L.wait(3000);
+  const last = page.locator('[data-testid="am-outputs"]:visible').last();
+  await last.scrollIntoViewIfNeeded();
+  await L.wait(800);
+  await shot("24-restored");
+  check(!(await last.locator('[data-testid="am-not-included"]').count()), "nothing is left out on the newest files card");
+  const thread = await words(page.locator('[data-testid="am-workspace"]'));
+  check(!/Traceback|TypeError|KeyError|object is not|NoneType|_failed\b/.test(thread), "nothing technical anywhere in the workspace");
+  fs.writeFileSync(path.join(dir, "invoice_journey.json"), JSON.stringify({ client, install: installId, run: run.id, checks, model_menu: rows }, null, 1));
+  const bad = checks.filter((c) => !c.ok);
+  log(`${tag}: ${checks.length - bad.length} pass, ${bad.length} fail`);
+  await s.close();
+}
+
+// What the threads of the agents the owner already had say today, read only (GET): the two failed
+// rounds on the owner's screen were written with the error's text; they must read without it now.
+// Nothing is opened, marked or changed; nothing of a thread is printed — only counts.
+async function legacy() {
+  const s = await connectDesktop();
+  const { page } = s;
+  const installs = ((await api(page, "/installs")).body?.installs || []).filter((i) => !(state.installs || []).includes(i.id));
+  let items = 0, failedRounds = 0, withFailure = 0;
+  const hits = [];
+  for (const i of installs) {
+    const t = (await api(page, `/installs/${i.id}/thread`)).body?.items || [];
+    for (const it of t) {
+      const p = it.payload || {};
+      const texts = [];
+      if (it.kind === "agent_text" || it.kind === "notice") texts.push(p.text || "", ...Object.entries(p.failure || {}).filter(([k, v]) => k !== "reason" && typeof v === "string").map(([, v]) => v));
+      if (it.kind === "progress") for (const st of p.steps || []) texts.push(st.label || "", st.detail || "");
+      if (it.kind === "agent_text" && p.tone === "error") { failedRounds += 1; if (p.failure) withFailure += 1; }
+      items += texts.length ? 1 : 0;
+      for (const x of texts) if (/\b[A-Z][A-Za-z]*(?:Error|Exception)\b|NoneType|Traceback|not iterable|object is not|engine step failed|sandbox:|dial tcp|SQLSTATE|\b[a-z]+(?:_[a-z0-9]+)*_failed\b/.test(x)) hits.push(it.kind);
+    }
+  }
+  log(`legacy: ${installs.length} install(s) the owner already had, ${items} item(s) a person reads, ${failedRounds} failed-round message(s) (${withFailure} with the four parts) — technical text in ${hits.length} item(s)`);
+  fs.writeFileSync(path.join(OUT, "legacy.json"), JSON.stringify({ installs: installs.length, items, failed_rounds: failedRounds, with_four_parts: withFailure, technical: hits.length }, null, 1));
+  await s.close();
+}
+
 const phases = {
+  async invoice() {
+    await invoiceJourney(process.argv[3] || "desktop", process.argv[4]); // "menu": the model menu only, no round
+  },
+  async legacy() {
+    await legacy();
+  },
   async open() {
     const wasRunning = running();
     state.wasRunning = wasRunning;

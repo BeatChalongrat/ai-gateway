@@ -5,6 +5,13 @@
 //   * the model menu opened to the right of its pill whatever room there
 //     was, so in the workspace it ran off the window's edge and the page
 //     scrolled sideways.
+// And what the walkthrough in the desktop app found that the tour in a browser
+// had not: the credits badge was drawn over the open model menu. The app's
+// window at 125 % is 889.6 px tall and says 890; the composer read the 0.4 px
+// as a keyboard and moved itself by a transform, and a transformed box keeps
+// its menus under whatever floats above it.
+import { createRef } from "react";
+
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +27,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/chat/agents/i/i-1",
 }));
 
+import { ComposerFrame } from "@/components/chat/ComposerFrame";
 import { ModelPopover } from "@/components/chat/ModelSelector";
 
 import type { Manifest } from "../types";
@@ -115,5 +123,27 @@ describe("the model menu opens where there is room", () => {
     expect(menu.getAttribute("data-align")).toBe("end");
     expect(menu.className).toContain("sm:right-0");
     expect(menu.className).not.toContain("sm:left-0");
+  });
+});
+
+describe("the composer is lifted by a keyboard, not by a window's rounding", () => {
+  const composer = (windowHeight: number, visibleHeight: number) => {
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: windowHeight });
+    vi.stubGlobal("visualViewport", { height: visibleHeight, offsetTop: 0, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    render(
+      <ComposerFrame textareaRef={createRef<HTMLTextAreaElement>()} value="" onChange={() => {}} placeholder="พิมพ์" canSend={false} onSubmit={() => {}} />,
+    );
+    return screen.getByTestId("composer-root");
+  };
+
+  it("a window 889.6 px tall that says 890 is not a keyboard: nothing is transformed, the menus stay above the badge", () => {
+    const root = composer(890, 889.5999755859375);
+    expect(root.style.transform).toBe("");
+    expect(root.getAttribute("style")).toBeNull();
+  });
+
+  it("a keyboard still lifts it, by whole pixels", () => {
+    const root = composer(800, 459.6);
+    expect(root.style.transform).toBe("translateY(-340px)");
   });
 });
