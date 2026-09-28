@@ -236,7 +236,7 @@ class ProviderDispatcher:
 
         _hops = list(getattr(route, "fallbacks", None) or [])
         if _hops and not await _fb_policy_mod.is_enabled_async():
-            logger.warning("fallback_disabled", reason="kill_switch", path="layer1", hops=len(_hops))
+            logger.warning("fallback_disabled", reason=_fb_policy_mod.disabled_reason(), path="layer1", hops=len(_hops))
             _hops = []
         _meta = getattr(payload, "metadata", None)
         _allowed = _fb_policy_mod.allowed_set(

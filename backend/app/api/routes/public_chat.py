@@ -537,6 +537,15 @@ async def chat_completions(
     Every early return or raise inside the pipeline releases the slot.
     """
     from fastapi.responses import JSONResponse as _ArmourResponse
+    from app.services.gateway import fallback_policy as _fb_opt
+
+    # ``X-Sran-Fallback: off`` — the caller takes the model it named or that
+    # model's own error, never another model (fallback_policy "per-request
+    # opt-out"). Set before anything else so every task this request starts,
+    # the stream body included, sees it; it lives and dies with the request.
+    if _fb_opt.header_opts_out(request.headers.get(_fb_opt.OPT_OUT_HEADER)):
+        _fb_opt.opt_out_request()
+        logger.info("fallback_request_opt_out", model=payload.model, stream=bool(payload.stream))
 
     reg = inflight_registry()
     hard_s = float(settings.request_hard_timeout_seconds)
@@ -3221,11 +3230,12 @@ async def _chat_completions_impl(
                         _fb_record_decision(_fb_decision)
                     _fb_switch_on = await _fb_policy_mod.is_enabled_async()
                     if isinstance(stream_exc, _GwErr) and _fb_decision.walks and not _fb_switch_on:
-                        log.warning("fallback_disabled", reason="kill_switch", error_code=_stream_code)
+                        _fb_off = _fb_policy_mod.disabled_reason()
+                        log.warning("fallback_disabled", reason=_fb_off, error_code=_stream_code)
                         _fb_log_outcome(
                             log, path="stream", requested_model=_stream_original_model,
                             outcome="disabled", attempts=len(_stream_fallback_attempts),
-                            time_spent_s=0.0, reason="kill_switch",
+                            time_spent_s=0.0, reason=_fb_off,
                         )
                     elif isinstance(stream_exc, _GwErr) and not _fb_decision.walks:
                         _fb_log_outcome(

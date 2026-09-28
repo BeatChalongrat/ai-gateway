@@ -402,6 +402,9 @@ MAX_FALLBACK_CANDIDATES = int(_NS_LIMITS["max_candidates"])
 # the user gets the error at ~30s instead of ~50s. The budget never
 # aborts an attempt already in flight beyond its own shrunken timeout,
 # so a slow-but-succeeding rescue is not killed retroactively.
+# A model whose own wait does not fit this ceiling (the self-hosted box: a
+# 30 s read timeout) carries its own wait and turn ceiling in the policy's
+# ``model_limits``; ``run`` reads the ceiling of the model that was asked for.
 FALLBACK_TOTAL_BUDGET_S = float(_NS_LIMITS["total_budget_s"])
 
 # Don't bother opening an attempt with less than this much runway — a
@@ -727,8 +730,8 @@ class FallbackOrchestrator:
             FALLBACK_ATTEMPT_TIMEOUT_S if attempt_timeout_s is None else attempt_timeout_s
         )
 
-    def _limits(self, policy: dict, kind: str) -> dict:
-        lim = policy_mod.limits(kind, policy)
+    def _limits(self, policy: dict, kind: str, model: str | None = None) -> dict:
+        lim = policy_mod.limits(kind, policy, model=model)
         if self._explicit_max is not None:
             lim["max_candidates"] = self._explicit_max
         if self._explicit_timeout is not None and kind == "non_stream":
@@ -775,9 +778,10 @@ class FallbackOrchestrator:
         # FIX125 M7 — the kill switch, the policy and the spend read below
         # touch the DB on a cache miss: off the event loop.
         if not await policy_mod.is_enabled_async():
-            log.warning("fallback_disabled", reason="kill_switch")
+            _off = policy_mod.disabled_reason()
+            log.warning("fallback_disabled", reason=_off)
             log_outcome(log, path=path, requested_model=original_model, outcome="disabled",
-                        attempts=0, time_spent_s=0.0, reason="kill_switch")
+                        attempts=0, time_spent_s=0.0, reason=_off)
             if original_error is not None:
                 raise original_error
             raise ProviderError(
@@ -786,7 +790,10 @@ class FallbackOrchestrator:
             )
 
         policy = await policy_mod.effective_policy_async(ctx.tenant_id)
-        lim = self._limits(policy, "non_stream")
+        # The turn ceiling of the model that was asked for: a model whose own
+        # wait is longer than the kind's ceiling carries its own in
+        # ``model_limits`` (it covers that wait plus the walk's attempts).
+        lim = self._limits(policy, "non_stream", model=original_model)
         max_candidates = int(lim["max_candidates"])
         attempt_timeout_s = float(lim["attempt_timeout_s"])
         total_budget_s = lim.get("total_budget_s")

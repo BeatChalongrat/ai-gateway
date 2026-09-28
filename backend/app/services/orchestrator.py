@@ -36,6 +36,7 @@ from app.core.exceptions import (
     DLPViolationError,
     GuardrailViolationError,
     ModerationViolationError,
+    ProviderTimeoutError,
     RateLimitExceededError,
 )
 from app.domain.dlp import DetectionResult, EnforcementAction, EnforcementDecision
@@ -125,6 +126,7 @@ from app.services.semantic_router import (
 from app.services.gateway.fallback_orchestrator import (
     FallbackOrchestrator,
     clear_provider_health,
+    fallback_billing,
     is_fallback_eligible,
     mark_provider_unhealthy,
 )
@@ -1167,6 +1169,9 @@ class GatewayOrchestrator:
         original_provider = route.provider_name
         original_model = route.model_name
         fallback_result = None
+        # The requested model's own failure when the walk rescued the turn —
+        # the first entry of the attempt log, as on the streaming path.
+        primary_failure: dict | None = None
         # H1 (connection release): commit the read-only pre-provider work so
         # the async session's pooled connection returns to the pool and is
         # NOT held during the ~1-3s provider dispatch below. Post-dispatch
@@ -1235,14 +1240,26 @@ class GatewayOrchestrator:
                     # keep the token.
                     span_map[_calc_outcome.token] = _calc_outcome.raw_value
             else:
+                # The requested model's own wait on this path, when the
+                # fallback policy gives it one (``model_limits``): the
+                # attempt — the adapter's same-model retries included — is
+                # cut there and fails as ``provider_timeout``, so the walk
+                # below starts while the turn still has time. ``None`` (every
+                # model without an entry) = the adapter's timeout and retries.
+                from app.services.gateway import fallback_policy as _fb_policy_mod
+
+                try:
+                    _primary_wait_s = _fb_policy_mod.primary_timeout_s(
+                        route.model_name, "non_stream",
+                        await _fb_policy_mod.effective_policy_async(ctx.tenant_id),
+                    )
+                except Exception as _wait_read_exc:  # noqa: BLE001 — a policy read never breaks dispatch
+                    log.warning("primary_wait_policy_unreadable", error=str(_wait_read_exc)[:200])
+                    _primary_wait_s = None
                 with record_phase("provider"), LLM_PROVIDER_LATENCY.labels(
                     provider=route.provider_name
                 ).time():
-                    (
-                        provider_response,
-                        used_provider,
-                        used_model,
-                    ) = await self.provider_dispatcher.dispatch_with_fallback(
+                    _dispatch = self.provider_dispatcher.dispatch_with_fallback(
                         route=route,
                         payload=payload,
                         messages=messages_to_send,
@@ -1250,6 +1267,31 @@ class GatewayOrchestrator:
                         key_resolver=_resolve_fallback_key,
                         invalidate_key=_invalidate_key,
                     )
+                    if _primary_wait_s is None:
+                        (provider_response, used_provider, used_model) = await _dispatch
+                    else:
+                        try:
+                            (
+                                provider_response,
+                                used_provider,
+                                used_model,
+                            ) = await asyncio.wait_for(_dispatch, timeout=_primary_wait_s)
+                        except asyncio.TimeoutError as _wait_exc:
+                            log.warning(
+                                "primary_wait_exceeded",
+                                provider=route.provider_name,
+                                model=route.model_name,
+                                wait_s=_primary_wait_s,
+                            )
+                            raise ProviderTimeoutError(
+                                f"Provider '{route.provider_name}' gave no answer for "
+                                f"'{route.model_name}' within {_primary_wait_s:g} s.",
+                                details={
+                                    "provider": route.provider_name,
+                                    "model": route.model_name,
+                                    "wait_s": _primary_wait_s,
+                                },
+                            ) from _wait_exc
             # If Layer-1 fallback fired, rewrite the route so the rest
             # of the pipeline (DLP scan, request_log row, response
             # headers) reports the vendor that actually answered.
@@ -1295,6 +1337,18 @@ class GatewayOrchestrator:
                     model=route.model_name,
                     error_code=getattr(exc, "code", None),
                 )
+                from datetime import datetime as _dt, timezone as _tz
+
+                from app.services.gateway.fallback_orchestrator import FallbackAttempt
+
+                primary_failure = FallbackAttempt(
+                    provider=original_provider,
+                    model=original_model,
+                    error_code=str(getattr(exc, "code", None) or "provider_error"),
+                    error_message=str(exc)[:200],
+                    latency_ms=(time.perf_counter() - t_provider) * 1000,
+                    attempted_at=_dt.now(_tz.utc),
+                ).to_dict()
                 fallback = self._get_fallback_orchestrator()
                 from app.observability.metrics import (
                     LLM_PROVIDER_LATENCY as _LLM_LAT,
@@ -1356,6 +1410,13 @@ class GatewayOrchestrator:
                 if provider_response.usage else 0
             ),
         )
+        # A rescued turn's attempt log: the requested model's failure, then
+        # each candidate that failed before the one that answered.
+        fallback_failures: list[dict] = []
+        if fallback_result is not None:
+            if primary_failure is not None:
+                fallback_failures.append(primary_failure)
+            fallback_failures.extend(a.to_dict() for a in fallback_result.attempts)
 
         # 7. Estimate usage (falls back to heuristic when provider doesn't report usage)
         if provider_response.usage:
@@ -2167,11 +2228,11 @@ class GatewayOrchestrator:
             )
             # JSONB column handles serialization — pass the list, not
             # a json.dumps string (would double-encode).
-            fallback_attempts_list: list[dict] | None = None
-            if fallback_result and fallback_result.attempts:
-                fallback_attempts_list = [
-                    a.to_dict() for a in fallback_result.attempts
-                ]
+            # The requested model's failure first, then every candidate that
+            # failed — the list the streaming path records.
+            fallback_attempts_list: list[dict] | None = (
+                list(fallback_failures) if fallback_failures else None
+            )
 
             from app.domain.observability import resolved_log_model
 
@@ -2403,6 +2464,25 @@ class GatewayOrchestrator:
                 ),
                 reasoning_downgraded=True if _downgrade_reason else None,
                 reasoning_downgrade_reason=_downgrade_reason,
+                # A rescued turn says so in the body, with the fields of the
+                # streaming path's ``fallback_info`` frame: the model asked
+                # for, the one that answered, what was tried, and that the
+                # answering model's price is the one charged.
+                fallback_info=(
+                    {
+                        "requested_model": original_model,
+                        "actual_model": _served,
+                        "reason": (
+                            "Primary model unavailable "
+                            f"({fallback_failures[-1]['error_code'] if fallback_failures else 'error'})"
+                        ),
+                        "attempts": fallback_failures
+                        + [{"model": route.model_name, "status": "success"}],
+                        "billing": fallback_billing(original_model, route.model_name),
+                    }
+                    if fallback_result is not None
+                    else None
+                ),
             )
             if _downgrade_reason:
                 log.info(
@@ -2445,6 +2525,9 @@ class GatewayOrchestrator:
             # project. Drop it before write; the reasoning_tokens count is a
             # non-sensitive integer and may stay for cost display.
             cache_response.pop("reasoning_content", None)
+            # The entry is stored under the ANSWERING model: a later request
+            # that names that model must not replay this turn's rescue notice.
+            cache_response.pop("fallback_info", None)
             await self.cache_service.set_async(
                 model=route.model_name,
                 messages=cache_messages,

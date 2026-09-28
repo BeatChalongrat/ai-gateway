@@ -185,6 +185,12 @@
       "min_attempt_runway_s": 2.0
     }
   },
+  "model_limits": {
+    "_comment": "Per-model ceilings on the NON-STREAMING path (the public API's default), for a model whose own wait does not fit the turn ceiling above. `primary_timeout_s` = the most the gateway waits for the requested model itself, its adapter's same-model retries included, before the walk starts (the attempt is cut and counts as provider_timeout); `total_budget_s` replaces limits.non_stream.total_budget_s on a turn whose requested model is this one, so the walk still has time after the primary gave up. A model not listed (and a null value) keeps the adapter's own timeout and retries and the ceilings above, unchanged; the streaming path (web, desktop) is not read from here. Keyed like the chains (exact id, then the bare alias). qwen3.8-27b-fp8 (the self-hosted box), measured 2026-09-28 06:52-07:02Z: the box took requests and gave nothing; a named-qwen API call waited ~91 s (the 30 s read timeout, tried three times) and then the 25 s turn ceiling was already spent, so no candidate opened and the caller got 502 while the same turn on the web was rescued in 32 s. 30 s = the read timeout it already had, tried ONCE: for a non-streaming call the first byte is the whole answer, and the box delivers real answers close to that (AM2 bench, non-streaming: 47 reasoning-off answers 6.7-28.2 s, median ~14 s; reasoning-on single answers up to 30.6 s), so a shorter wait would cut answers the box does give; the two retries re-send the prompt to a box that just gave nothing for 30 s. 50 s = 30 s + the walk's two attempts at attempt_timeout_s (10 s each): the allowance a primary that fails fast already gets inside total_budget_s.",
+    "non_stream": {
+      "qwen3.8-27b-fp8": {"primary_timeout_s": 30.0, "total_budget_s": 50.0}
+    }
+  },
   "cost_cap": {
     "_comment": "Where a spend ceiling plugs in. OFF by default. FIX124 - KEEP OFF until a price-0 requested model is handled: the ratio rule compares against the requested model's catalogue price, and for the free in-house models (and every model whose price was never entered) that price is 0, so `candidate_price > 0 x ratio` refuses EVERY priced rescue - the explicit-model rescue would silently stop working for exactly the models that need it. Turning this on needs a rule for price 0 first (e.g. compare against a named floor band). max_cost_ratio_vs_requested: a candidate whose input-token price exceeds the requested model's price × ratio is skipped (1.0 = never a dearer model). tenant_daily_usd: a tenant whose estimated spend over the last 24 h (request_logs.estimated_cost_usd) is at or above this figure gets no fallback attempts at all. Either may be set per tenant.",
     "enabled": false,
@@ -209,7 +215,7 @@
     "bands": ["low", "medium", "high", "xhigh", "max"]
   },
   "kill_switch": {
-    "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy.",
+    "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy. The same switch for ONE request: a caller that sends the header `X-Sran-Fallback: off` (also false / 0 / no / none) gets the model it named or that model's own error, never another model, on both paths (the Agent Market runner's in-organisation calls); a model's own wait (`model_limits`) still applies.",
     "setting_key": "fallback_enabled",
     "default": true
   },
@@ -222,6 +228,7 @@
       "chains.context_window",
       "chains.content_policy",
       "limits",
+      "model_limits",
       "breaker",
       "cost_cap",
       "opt_in",

@@ -380,6 +380,14 @@ class ChatCompletionsResponse(BaseModel):
     reasoning_downgraded: Optional[bool] = None
     reasoning_downgrade_reason: Optional[str] = None
 
+    # A request the model it named could not answer, answered by another
+    # model through the fallback walk: ``requested_model``, ``actual_model``
+    # (also ``model`` above), ``reason``, ``attempts`` (the failures, then the
+    # model that answered) and ``billing`` (the answering model's price is the
+    # one charged) — the fields of the streaming ``fallback_info`` frame.
+    # None, and so absent from the wire, on every other response.
+    fallback_info: Optional[Dict[str, Any]] = None
+
     # NOTE (Phase 4A.2.2 / F2): the internal canonical artifact extension
     # is intentionally NOT a field on this public model, so it never appears
     # in the public OpenAPI schema. For managed internal-trusted WebChat

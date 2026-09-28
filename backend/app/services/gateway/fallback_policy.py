@@ -37,6 +37,7 @@ import copy
 import json
 import threading
 import time
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -229,10 +230,48 @@ def rescue_order(policy: dict | None = None) -> tuple[str, str]:
     return str(row.get("rule", "router_ranking")), str(row.get("requested_price_unknown_band", "low"))
 
 
-def limits(kind: str, policy: dict | None = None) -> dict:
-    """``kind`` is ``non_stream`` or ``stream``."""
+def limits(kind: str, policy: dict | None = None, *, model: str | None = None) -> dict:
+    """``kind`` is ``non_stream`` or ``stream``.
+
+    With ``model`` (the requested model of the turn), a number the policy's
+    ``model_limits`` gives that model replaces the kind's ``total_budget_s``;
+    a model without an entry gets the kind's limits unchanged."""
     pol = policy or base_policy()
-    return dict(pol["limits"][kind])
+    out = dict(pol["limits"][kind])
+    if model:
+        budget = _model_limit(pol, kind, model).get("total_budget_s")
+        if _is_number(budget):
+            out["total_budget_s"] = float(budget)
+    return out
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _model_limit(pol: dict, kind: str, model: str) -> dict:
+    """The ``model_limits`` entry for ``model`` on ``kind`` (exact id first,
+    then the bare alias, as the chains are keyed), or ``{}``."""
+    table = (pol.get("model_limits") or {}).get(kind) or {}
+    if not isinstance(table, dict) or not model:
+        return {}
+    entry = table.get(model)
+    if entry is None:
+        from app.services.providers.model_tiers import _alias
+
+        entry = table.get(_alias(model))
+    return entry if isinstance(entry, dict) else {}
+
+
+def primary_timeout_s(model: str | None, kind: str = "non_stream", policy: dict | None = None) -> float | None:
+    """The most the gateway waits for ``model`` itself on ``kind`` before
+    the fallback walk starts (its adapter's same-model retries included), or
+    ``None`` = no ceiling of its own: the adapter's timeout and retries, as
+    before ``model_limits`` existed."""
+    if not model:
+        return None
+    value = _model_limit(policy or base_policy(), kind, model).get("primary_timeout_s")
+    return float(value) if _is_number(value) and value > 0 else None
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +313,50 @@ def kill_switch_key() -> str:
     return base_policy()["kill_switch"]["setting_key"]
 
 
+# ---------------------------------------------------------------------------
+# The per-request opt-out: the kill switch for ONE request
+# ---------------------------------------------------------------------------
+#
+# A caller that must get the model it named or nothing — the Agent Market
+# runner's in-organisation calls: company documents must never reach another
+# model, least of all one outside — sends ``X-Sran-Fallback: off``. The route
+# marks the request here, and every place that asks the kill switch (the
+# Layer-1 hops, the non-streaming walk, the explicit model's rescue list, the
+# streaming pre-check swap and the in-stream swap) then answers "off" for this
+# request alone: the named model answers, or its own error comes back. The
+# model's own wait (``model_limits``) still applies. A context variable so it
+# follows the request into its tasks and worker threads and nowhere else.
+
+OPT_OUT_HEADER = "X-Sran-Fallback"
+_OPT_OUT_VALUES = frozenset({"off", "false", "0", "no", "none"})
+
+_request_opt_out: ContextVar[bool] = ContextVar("fallback_request_opt_out", default=False)
+
+
+def header_opts_out(value: str | None) -> bool:
+    """True when an ``X-Sran-Fallback`` header value switches fallback off."""
+    return value is not None and value.strip().lower() in _OPT_OUT_VALUES
+
+
+def opt_out_request() -> Token:
+    """Switch fallback off for the current request (and the tasks it starts)."""
+    return _request_opt_out.set(True)
+
+
+def request_opted_out() -> bool:
+    return _request_opt_out.get()
+
+
+def disabled_reason() -> str:
+    """Why ``is_enabled`` said no: the request's own opt-out or the switch."""
+    return "request_opt_out" if _request_opt_out.get() else "kill_switch"
+
+
 def is_enabled() -> bool:
-    """The kill switch. Absent row or any read error → the file's default."""
+    """The kill switch. Absent row or any read error → the file's default.
+    A request that opted out (``X-Sran-Fallback: off``) always gets ``False``."""
+    if _request_opt_out.get():
+        return False
     default = bool(base_policy()["kill_switch"].get("default", True))
 
     def _load() -> bool:
@@ -417,6 +498,26 @@ def validate_override(data: Any, *, is_tenant: bool) -> dict:
                         _check_number(f"limits.{kind}.{k}", v, allow_none=True)
                     else:
                         raise ValueError(f"limits.{kind}.{k} is not a known limit")
+        elif key == "model_limits":
+            if key not in overridable or not isinstance(value, dict):
+                raise ValueError("model_limits must be an object")
+            for kind, table in value.items():
+                # Only the non-streaming path reads this section.
+                if kind != "non_stream" or not isinstance(table, dict):
+                    raise ValueError("model_limits keys are non_stream → {model: {limits}}")
+                for model, entry in table.items():
+                    if not isinstance(model, str) or not model or not isinstance(entry, dict):
+                        raise ValueError(f"model_limits.{kind}: each model maps to an object")
+                    for k, v in entry.items():
+                        if k == "primary_timeout_s":
+                            if v is not None:
+                                _check_number(f"model_limits.{kind}.{model}.{k}", v)
+                                if v <= 0:
+                                    raise ValueError(f"model_limits.{kind}.{model}.{k} must be > 0 (null = none)")
+                        elif k == "total_budget_s":
+                            _check_number(f"model_limits.{kind}.{model}.{k}", v, allow_none=True)
+                        else:
+                            raise ValueError(f"model_limits.{kind}.{model}.{k} is not a known limit")
         elif key == "breaker":
             if key not in overridable or not isinstance(value, dict):
                 raise ValueError("breaker must be an object")
@@ -536,6 +637,8 @@ def _fresh(key: str) -> bool:
 
 
 async def is_enabled_async() -> bool:
+    if _request_opt_out.get():
+        return False
     if _fresh("kill_switch"):
         return is_enabled()
     return await asyncio.to_thread(is_enabled)
