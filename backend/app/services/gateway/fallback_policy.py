@@ -317,9 +317,9 @@ def kill_switch_key() -> str:
 # The per-request opt-out: the kill switch for ONE request
 # ---------------------------------------------------------------------------
 #
-# A caller that must get the model it named or nothing — the Agent Market
-# runner's in-organisation calls: company documents must never reach another
-# model, least of all one outside — sends ``X-Sran-Fallback: off``. The route
+# A caller that must get the model it named or nothing — one whose company
+# documents must never reach another model, least of all one outside the
+# organisation — sends ``X-Sran-Fallback: off``. The route
 # marks the request here, and every place that asks the kill switch (the
 # Layer-1 hops, the non-streaming walk, the explicit model's rescue list, the
 # streaming pre-check swap and the in-stream swap) then answers "off" for this

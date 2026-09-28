@@ -215,7 +215,7 @@
     "bands": ["low", "medium", "high", "xhigh", "max"]
   },
   "kill_switch": {
-    "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy. The same switch for ONE request: a caller that sends the header `X-Sran-Fallback: off` (also false / 0 / no / none) gets the model it named or that model's own error, never another model, on both paths (the Agent Market runner's in-organisation calls); a model's own wait (`model_limits`) still applies.",
+    "_comment": "system_settings row `fallback_enabled`. Absent or `true` = fallback runs as this file says; `false` = no chain is walked anywhere (Layer-1 same-tier hops, the cross-provider chain, the streaming pre-check swap and the in-stream swap are all off) and every failure surfaces as the primary's own error. Read through a 30 s cache that the admin route clears on write, so a flip takes effect on the next turn without a deploy. The same switch for ONE request: a caller that sends the header `X-Sran-Fallback: off` (also false / 0 / no / none) gets the model it named or that model's own error, never another model, on both paths (for data meant for one in-organisation model only); a model's own wait (`model_limits`) still applies.",
     "setting_key": "fallback_enabled",
     "default": true
   },

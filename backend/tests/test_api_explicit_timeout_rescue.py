@@ -22,7 +22,7 @@ response says who answered and at whose price, the answering model's price is
 charged, and a turn that fails entirely is not charged.
 
 And the other side of it: a caller whose data must never reach another model
-(the Agent Market runner's in-organisation calls) sends ``X-Sran-Fallback:
+(company documents meant for an in-organisation model only) sends ``X-Sran-Fallback:
 off`` and gets the model it named or that model's own error — on both paths,
 for that request only.
 """
@@ -362,8 +362,8 @@ def test_api_turn_where_every_model_is_down_is_an_error_and_is_not_charged(api):
 
 # ---------------------------------------------------------------------------
 # The per-request opt-out: ``X-Sran-Fallback: off`` — the model named, or its
-# own error; never another model (the Agent Market runner's in-organisation
-# calls: company documents must not reach any other model).
+# own error; never another model (for a caller whose company documents must
+# not reach any other model).
 # ---------------------------------------------------------------------------
 
 def test_the_opt_out_header_values():
