@@ -3,7 +3,8 @@
     extract(path, name, org=..., history=..., today=..., proposals=..., ocr=...)
 
 Sources, strongest first: the ETDA XML of an e-Tax document (embedded in the
-PDF or alone) → the PDF text layer → OCR of the page image (scans at
+PDF or alone) → the PDF text layer (with the Thai marks it lost put back
+where the document proves them, marks.py) → OCR of the page image (scans at
 300 DPI, photos deskewed and upscaled). A model's reading ("proposals",
 e.g. the vision fallback) is only ever a *candidate*: it can raise the
 confidence of a value a deterministic source also read, or become the
@@ -24,7 +25,7 @@ import os
 from decimal import Decimal
 
 from . import checks as C
-from . import etax, parse
+from . import etax, marks, parse
 from . import thai_text as T
 from dataclasses import asdict, dataclass
 
@@ -51,12 +52,29 @@ def _default_ocr():
     return extract_text.ocr_image_words, extract_text.render_page
 
 
+def _restore_marks(path: str, words: list, fonts: dict, ocr) -> None:
+    """Thai marks the text layer lost, put back where the document proves them (marks.py). Without
+    Tesseract, or on any failure, the words stay as the layer wrote them."""
+    if not any(w.lost for w in words):
+        return
+    try:
+        ocr_fn, render = ocr or _default_ocr()
+    except Exception:  # noqa: BLE001 — no OCR in this environment: the font alone
+        ocr_fn, render = None, None
+    try:
+        marks.restore(path, words, fonts, ocr_fn, render)
+    except Exception:  # noqa: BLE001 — a repair that fails leaves the text layer as it was
+        pass
+
+
 def _read_pdf(path: str, ocr) -> tuple[list, list[Page], str]:
-    words, pages = pdf_text_words(path)
+    fonts: dict = {}
+    words, pages = pdf_text_words(path, fonts)
     by_page: dict[int, int] = {}
     for w in words:
         by_page[w.page] = by_page.get(w.page, 0) + len(w.text)
     scanned = [p for p in pages if by_page.get(p.number, 0) < MIN_TEXT_CHARS]
+    _restore_marks(path, [w for w in words if w.page not in {p.number for p in scanned}], fonts, ocr)
     if not scanned:
         return words, pages, "pdf_text"
     ocr_fn, render = ocr or _default_ocr()

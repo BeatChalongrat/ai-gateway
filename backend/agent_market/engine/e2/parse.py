@@ -84,8 +84,11 @@ def _src(line: Line, s: int, e: int, raw: str | None = None) -> Source:
 
 def _field(value, normalized, line: Line, s: int, e: int, *, raw: str | None = None, anchored: bool = True) -> Field:
     conf = line.conf(s, e)
+    checks = [] if anchored else ["unlabelled"]
+    if any(w.restored for w in line.words_in(s, e)):
+        checks.append("thai_marks_restored")      # marks the text layer lost, put back (marks.py)
     return Field(value=value, normalized=normalized, confidence=conf if anchored else conf * 0.9,
-                 source=_src(line, s, e, raw=raw), checks=[] if anchored else ["unlabelled"])
+                 source=_src(line, s, e, raw=raw), checks=checks)
 
 
 # ── document type and title ─────────────────────────────────────────────────
@@ -198,7 +201,8 @@ def party_from(text: str) -> tuple[int, int, dict] | None:
         m = re.search(r"(?:Pte\.?\s*Ltd\.?|Co\.?,?\s*Ltd\.?|Limited|Inc\.?)", text[s:], re.I)
         e = s + m.end()
         s = 0
-    name = text[s:e].strip()
+    # a name cut before "(สำนักงานใหญ่)" leaves its opening bracket behind
+    name = re.sub(r"\s*\(\s*$", "", text[s:e]).strip()
     if not name:
         return None
     lf = T.legal_form(name)

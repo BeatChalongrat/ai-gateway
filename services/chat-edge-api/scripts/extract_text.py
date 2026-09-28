@@ -126,7 +126,7 @@ def _emit(text: str, meta: dict | None = None) -> None:
     sys.stdout.flush()
 
 
-def ocr_image_words(image, config: str | None = None) -> dict:
+def ocr_image_words(image, config: str | None = None, lang: str | None = None) -> dict:
     """OCR one image in ONE Tesseract pass and keep what it measured.
 
     Returns ``{"width", "height", "words": [...]}`` where every word is
@@ -137,13 +137,15 @@ def ocr_image_words(image, config: str | None = None) -> dict:
     (Agent Market E2, AM2) needs the boxes and the per-word confidence, so
     the collapse now happens in the caller that wants flat text.
     ``config`` overrides the Tesseract flags (default OCR_CONFIG), e.g. a
-    page segmentation mode for a receipt photo.
+    page segmentation mode for a receipt photo; ``lang`` the languages
+    (default OCR_LANGS), e.g. ``tha`` alone for a Thai word cut from a page
+    (Agent Market E2 re-reading the Thai marks a text layer lost, AM4).
     """
     import pytesseract
 
     data = pytesseract.image_to_data(
         image,
-        lang=OCR_LANGS,
+        lang=lang or OCR_LANGS,
         config=config or OCR_CONFIG,
         output_type=pytesseract.Output.DICT,
     )

@@ -206,7 +206,8 @@ def legal_form(name: str) -> dict | None:
         m = rx.search(sk)
         if not m or m.start(1) == m.end(1):
             continue
-        core = n[idx[m.start(1)]: idx[m.end(1) - 1] + 1]
+        # the core ends after the marks of its last consonant ("โซลูชั่นส์", not "โซลูชั่นส")
+        core = n[idx[m.start(1)]: _end(n, idx[m.end(1) - 1] + 1)]
         core = re.sub(r"\s+", " ", core).strip(" .,:()")
         if core:
             return {"legal_form": form, "core": core, "key": core_key(core)}
@@ -355,6 +356,8 @@ def detect_currency(text: str) -> str:
 # past the next consonant. Consonants, leading vowels (เ แ โ ใ ไ) and
 # spacing vowels keep their order. So labels are matched on the *skeleton*
 # (marks and spaces removed, ำ → า) and mapped back to the original text.
+# The text a field records gets its lost marks back where the document
+# proves them (marks.py).
 
 _MARKS = set("ัิีึืฺุู็่้๊๋์ํ๎")
 
