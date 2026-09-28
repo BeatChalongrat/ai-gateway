@@ -13,7 +13,7 @@ import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import type { ModelPicker } from "../types";
 import { cls, ErrorPanel, Spin } from "../ui";
-import { optionLine, useModelPicker } from "../workspace/ModelControl";
+import { collapseOptions, optionFacts, useModelPicker } from "../workspace/ModelControl";
 import { useStorage } from "../workspace/UploadInfo";
 
 export function ModelSection({ installId }: { installId: string }) {
@@ -47,7 +47,7 @@ export function ModelSection({ installId }: { installId: string }) {
         <>
           <p className="mt-1 text-xs text-text-muted">{t("model.sectionBody")}</p>
           <div role="radiogroup" aria-labelledby="am-models" className="mt-2.5 flex flex-col gap-2">
-            {(picker.options ?? []).map((o) => {
+            {collapseOptions(picker.options ?? []).map((o) => {
               const selected = o.id === picker.choice;
               return (
                 <button
@@ -75,12 +75,17 @@ export function ModelSection({ installId }: { installId: string }) {
                     <span>{o.label}</span>
                     {saving === o.id ? <Spin size={12} /> : null}
                   </span>
-                  <span className="pl-5 text-xs text-text-muted">{optionLine(t, o).split(" · ").slice(1).join(" · ")}</span>
+                  <span className="pl-5 text-xs text-text-muted">{optionFacts(t, o)}</span>
                   {o.disabled && o.reason ? <span className="pl-5 text-xs text-status-warning">{o.reason}</span> : null}
                 </button>
               );
             })}
           </div>
+          {picker.single_in_house ? (
+            <p className="mt-2 text-xs text-text-secondary" data-testid="am-settings-model-single">
+              {picker.notice || t("model.single")}
+            </p>
+          ) : null}
           <p className="mt-2 text-xs text-text-muted">
             {picker.documents_may_leave ? t("model.policyOutside") : t("model.policyInside")}
           </p>

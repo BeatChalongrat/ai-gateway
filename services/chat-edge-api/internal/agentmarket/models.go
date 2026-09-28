@@ -27,6 +27,15 @@ import (
 // The choice never changes a check and never becomes the source of a
 // number: it buys a better reading of a bad scan and better prose, nothing
 // else.
+//
+// AM5: a row is a choice only when it resolves to a model no other row does.
+// The live menu offered "อัตโนมัติ" and "แม่นที่สุด" as the same model at the
+// same price, with the only different row locked. Rows that resolve to the
+// model "อัตโนมัติ" already is, or to each other, collapse; an organisation
+// with one model of its own is told so in one line instead of a padded list;
+// the in-house models the runner really has are rows when they differ; and
+// "เลือกโมเดลเอง" opens the chat's own picker, each of whose rows this file
+// allows or locks (Custom).
 
 // ModelAuto is the default choice.
 const ModelAuto = "auto"
@@ -75,6 +84,16 @@ type ModelOption struct {
 	Reason     string   `json:"reason,omitempty"`
 }
 
+// CustomModel is one model of the runner's catalogue as "เลือกโมเดลเอง" may
+// offer it: allowed, or locked with the reason a person reads on the row.
+type CustomModel struct {
+	ID         string `json:"id"`
+	SelfHosted bool   `json:"self_hosted"`
+	Vision     bool   `json:"vision"`
+	Allowed    bool   `json:"allowed"`
+	Reason     string `json:"reason,omitempty"`
+}
+
 // ModelPicker is what the agent's settings page and the composer show.
 type ModelPicker struct {
 	Uses              string        `json:"uses"` // vision | text | none
@@ -83,9 +102,29 @@ type ModelPicker struct {
 	Options           []ModelOption `json:"options"`
 	DocumentsMayLeave bool          `json:"documents_may_leave"`
 	Note              string        `json:"note"`
+	// AM5: the organisation has exactly one model of its own that can do this
+	// agent's job (Notice says so in one line), and what "เลือกโมเดลเอง" may offer.
+	SingleInHouse bool          `json:"single_in_house"`
+	Notice        string        `json:"notice"`
+	Custom        []CustomModel `json:"custom"`
+	// LockedReason is what a row of the chat's picker says for a model the
+	// runner does not have at all.
+	LockedReason string `json:"locked_reason"`
 }
 
 var outcomeLabel = map[string]string{ModelAuto: "อัตโนมัติ (แนะนำ)", OutcomeFast: "เร็วและประหยัด", OutcomeAccurate: "แม่นที่สุด"}
+
+// OutcomeOwn is a row for a model nobody gave an outcome: an in-house model
+// the runner has, or one a person chose by hand. Its label is its name.
+const OutcomeOwn = "own"
+
+const (
+	reasonOutside   = "โมเดลนี้อยู่นอกองค์กร และองค์กรยังไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร — ผู้ดูแลเปิดได้ในหน้าผู้ดูแล"
+	reasonNoVision  = "โมเดลนี้อ่านภาพไม่ได้ agent นี้ต้องใช้โมเดลที่อ่านสแกนและรูปถ่ายได้"
+	reasonNotListed = "โมเดลนี้ไม่อยู่ในรายการที่องค์กรเลือกไว้"
+	reasonUnknown   = "agent ยังใช้โมเดลนี้ไม่ได้ เลือกจากโมเดลที่ไม่ได้ล็อกไว้"
+	noticeSingle    = "ตอนนี้องค์กรมีโมเดลในองค์กรตัวเดียว"
+)
 
 // ModelUse is what a model does for this agent: read scans (vision), write
 // the report's words (text), or nothing.
@@ -159,21 +198,61 @@ func (rm RunnerModels) autoModel(use string) string {
 	return rm.Primary
 }
 
-// curated is the organisation's list, or — until an admin curates one — the
-// runner's own models: its main model as "แม่นที่สุด" and, for writing, its
-// second model as "เร็วและประหยัด".
+// curated is the organisation's list, or — until an admin curates one — what
+// the runner really has: for writing, its second model as "เร็วและประหยัด",
+// then every other model inside the organisation that can do the job, each
+// under its own name. (The runner's main model is what "อัตโนมัติ" already
+// is; it is not a second row.)
 func curated(o OrgSettings, rm RunnerModels, use string) []ModelEntry {
 	if len(o.AgentModels) > 0 {
 		return o.AgentModels
 	}
 	out := []ModelEntry{}
-	if m := rm.autoModel(use); m != "" {
-		out = append(out, ModelEntry{Model: m, Outcome: OutcomeAccurate})
-	}
 	if use == "text" && rm.Fallback != "" && rm.Fallback != rm.Primary {
 		out = append(out, ModelEntry{Model: rm.Fallback, Outcome: OutcomeFast})
 	}
+	for _, id := range rm.inHouse(use) {
+		out = append(out, ModelEntry{Model: id, Outcome: OutcomeOwn})
+	}
 	return out
+}
+
+// inHouse is every model inside the organisation that can do this job, once
+// each, in a stable order: the runner's own models first, then its catalogue's.
+func (rm RunnerModels) inHouse(use string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id == "" || seen[id] || !rm.SelfHosted[id] || !rm.canRead(use, id) {
+			return
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	add(rm.autoModel(use))
+	if use == "text" {
+		add(rm.Fallback)
+	}
+	ids := make([]string, 0, len(rm.Catalog))
+	for _, c := range rm.Catalog {
+		ids = append(ids, c.ID)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		add(id)
+	}
+	return out
+}
+
+// lock is why a model may not be given this agent's documents now ("" = it may).
+func (rm RunnerModels) lock(use, id string, docsMayLeave bool) string {
+	switch {
+	case !rm.SelfHosted[id] && !docsMayLeave:
+		return reasonOutside
+	case !rm.canRead(use, id):
+		return reasonNoVision
+	}
+	return ""
 }
 
 // modelCost is a rough cost and time per run for one model: the
@@ -258,44 +337,83 @@ func (s *Store) Picker(ctx context.Context, cfg Config, in Install, m Manifest, 
 		autoOpt.CostTHB, autoOpt.Seconds = s.modelCost(ctx, in.OrgID, in.Slug, "", rm, cfg)
 	}
 	p.Options = append(p.Options, autoOpt)
+	p.Custom = []CustomModel{}
 	if use == "none" {
 		return p
 	}
-	seen := map[string]bool{}
-	for _, e := range curated(o, rm, use) {
-		if e.Model == "" || seen[e.Model] || !rm.canRead(use, e.Model) {
-			continue
+	// A model named outright that is the one "อัตโนมัติ" resolves to is that row.
+	if p.Choice != ModelAuto && p.Choice == auto {
+		p.Choice = ModelAuto
+	}
+	// one row per model: what "อัตโนมัติ" is, is not offered again under another name
+	seen := map[string]bool{auto: true}
+	row := func(e ModelEntry) {
+		if e.Model == "" || seen[e.Model] {
+			return
+		}
+		why := rm.lock(use, e.Model, o.DocumentsMayLeave)
+		if why == reasonNoVision {
+			return // a model that cannot do this agent's job is not a row of its menu
 		}
 		seen[e.Model] = true
 		opt := ModelOption{ID: e.Model, Outcome: e.Outcome, Label: outcomeLabel[e.Outcome], Model: e.Model,
-			SelfHosted: rm.SelfHosted[e.Model]}
+			SelfHosted: rm.SelfHosted[e.Model], Disabled: why != "", Reason: why}
 		if opt.Label == "" {
 			opt.Label = e.Model
 		}
 		opt.CostTHB, opt.Seconds = s.modelCost(ctx, in.OrgID, in.Slug, e.Model, rm, cfg)
-		if !opt.SelfHosted && !o.DocumentsMayLeave {
-			opt.Disabled = true
-			opt.Reason = "โมเดลนี้อยู่นอกองค์กร และองค์กรยังไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร — ผู้ดูแลเปิดได้ในหน้าผู้ดูแล"
-		}
 		p.Options = append(p.Options, opt)
+	}
+	for _, e := range curated(o, rm, use) {
+		row(e)
+	}
+	// a model the person chose by hand ("เลือกโมเดลเอง") is a row too, so the menu can name it
+	if p.Choice != ModelAuto {
+		row(ModelEntry{Model: p.Choice, Outcome: OutcomeOwn})
 	}
 	sort.SliceStable(p.Options[1:], func(i, j int) bool {
 		return p.Options[1+i].Outcome == OutcomeFast && p.Options[1+j].Outcome != OutcomeFast
 	})
+	if own := rm.inHouse(use); len(own) == 1 {
+		p.SingleInHouse, p.Notice = true, noticeSingle
+	}
+	p.LockedReason = reasonUnknown
+	ids := map[string]bool{}
+	add := func(id string, vision bool) {
+		if id == "" || ids[id] {
+			return
+		}
+		ids[id] = true
+		why := rm.lock(use, id, o.DocumentsMayLeave)
+		p.Custom = append(p.Custom, CustomModel{ID: id, SelfHosted: rm.SelfHosted[id], Vision: vision, Allowed: why == "", Reason: why})
+	}
+	for _, c := range rm.Catalog {
+		add(c.ID, c.Vision || c.ID == rm.Vision)
+	}
+	add(rm.Primary, rm.Primary == rm.Vision)
+	add(rm.Fallback, rm.Fallback == rm.Vision)
+	add(rm.Vision, true)
+	sort.SliceStable(p.Custom, func(i, j int) bool { return p.Custom[i].ID < p.Custom[j].ID })
 	return p
 }
 
-// ChoiceAllowed: the choice is on the install's picker and not disabled.
+// ChoiceAllowed: the choice is a row of the install's menu that is not
+// locked, or a model "เลือกโมเดลเอง" allows.
 func (p ModelPicker) ChoiceAllowed(choice string) (bool, string) {
 	for _, o := range p.Options {
-		if o.ID == choice {
+		if o.ID == choice || (o.ID == ModelAuto && o.Model != "" && o.Model == choice) {
 			if o.Disabled {
 				return false, o.Reason
 			}
 			return true, ""
 		}
 	}
-	return false, "โมเดลนี้ไม่อยู่ในรายการที่องค์กรเลือกไว้"
+	for _, c := range p.Custom {
+		if c.ID == choice {
+			return c.Allowed, c.Reason
+		}
+	}
+	return false, reasonNotListed
 }
 
 func (a *API) pickerFor(ctx context.Context, in Install) (ModelPicker, error) {

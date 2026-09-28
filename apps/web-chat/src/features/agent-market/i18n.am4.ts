@@ -85,6 +85,11 @@ export const am4Th = {
   "model.policyInside": "องค์กรไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร จึงใช้ได้เฉพาะโมเดลในองค์กร",
   "model.policyOutside": "องค์กรอนุญาตให้ส่งเอกสารให้โมเดลนอกองค์กรได้",
   "model.loadFailed": "โหลดรายการโมเดลไม่สำเร็จ",
+  "model.single": "ตอนนี้องค์กรมีโมเดลในองค์กรตัวเดียว",
+  "model.custom": "เลือกโมเดลเอง",
+  "model.customHint": "ค้นหาจากโมเดลทั้งหมด โมเดลนอกองค์กรยังล็อกไว้ตามนโยบายขององค์กร",
+  "model.customBack": "กลับไปตัวเลือกของ agent",
+  "model.lockedUnknown": "agent ยังใช้โมเดลนี้ไม่ได้ เลือกจากโมเดลที่ไม่ได้ล็อกไว้",
 
   // what is kept, for how long, and whose it is
   "storage.title": "ไฟล์ที่เก็บไว้",

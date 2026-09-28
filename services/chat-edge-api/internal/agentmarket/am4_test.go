@@ -322,8 +322,9 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 		t.Fatalf("picker: %d %v", code, p)
 	}
 	opts := p["options"].([]any)
-	if len(opts) != 3 || opts[0].(map[string]any)["label"] != "อัตโนมัติ (แนะนำ)" {
-		t.Fatalf("auto first, then the curated choices: %v", opts)
+	// AM5: two rows, not three — "แม่นที่สุด" was the model "อัตโนมัติ" already is
+	if len(opts) != 2 || opts[0].(map[string]any)["label"] != "อัตโนมัติ (แนะนำ)" {
+		t.Fatalf("auto first, then the choices that differ from it: %v", opts)
 	}
 	var outside map[string]any
 	for _, o := range opts {

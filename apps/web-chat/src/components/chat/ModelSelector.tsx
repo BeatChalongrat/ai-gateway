@@ -12,8 +12,15 @@
 // affordance). Popular/Recent are tracked locally in localStorage. The
 // outer shell (mobile bottom sheet / desktop popover, backdrop, theme
 // tokens) is unchanged from the previous flat-list version.
+//
+// AM5 — the pill (ModelTrigger), the shell (ModelPopover), the picker
+// (ModelPicker) and a row (ModelRow) are exported: an agent's workspace has
+// the same model control, not a second one. Its menu lists the agent's own
+// choices as rows, and its "choose your own" is this picker — with the rows
+// the organisation does not allow locked (`gate`), chat models only
+// (`chatOnly`) and no Auto row of the chat's (`hideAuto`).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
 import { hasToolsCap, hasVisionCap } from "@/lib/visionGate";
 import { BrainCircuit, ImagePlus, Search, Sparkles, X, Eye } from "lucide-react";
@@ -174,46 +181,114 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
+      <ModelTrigger
+        label={triggerLabel}
+        fullLabel={fullLabel}
+        auto={isAuto}
+        compact={compact}
         disabled={disabled}
+        open={open}
         onClick={() => setOpen((v) => !v)}
-        className={`focus-ring flex max-w-full items-center gap-1 rounded-full text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 ${
-          compact ? "px-2 py-1" : "px-2.5 py-1.5"
-        }`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        // FIX86 Part D — the full name is one hover away; the pill itself
-        // stays one line (it wrapped to three at 390 px).
-        title={fullLabel}
-      >
-        {isAuto ? (
-          <Sparkles width={12} height={12} className="shrink-0 text-text-muted" aria-hidden />
-        ) : null}
-        <span
-          className="block max-w-[6rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
-          data-testid="model-trigger-label"
-        >
-          {triggerLabel}
-        </span>
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" aria-hidden className="text-text-muted">
-          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
+      />
 
       {open ? (
-        <>
-          {/* Mobile-only backdrop — the dropdown becomes a bottom sheet
-              below 640px, so we dim the layer behind it. */}
-          <div
-            aria-hidden
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-30 bg-black/55 backdrop-blur-sm sm:hidden"
+        <ModelPopover label={t("a11y.models")} onClose={() => setOpen(false)}>
+          <ModelPicker
+            models={models}
+            activeId={activeId}
+            isAuto={isAuto}
+            onPickAuto={pickAuto}
+            onPickModel={pickModel}
+            needsVision={Boolean(needsVision)}
+            t={t}
           />
-          <div
-            role="listbox"
-            aria-label={t("a11y.models")}
-            className="
+        </ModelPopover>
+      ) : null}
+    </div>
+  );
+}
+
+/** The pill in the composer: the model's name and a chevron. */
+export function ModelTrigger({
+  label,
+  fullLabel,
+  auto,
+  compact,
+  disabled,
+  open,
+  onClick,
+  ariaLabel,
+  testId,
+}: {
+  label: string;
+  /** FIX86 Part D — the full name is one hover away; the pill itself
+   *  stays one line (it wrapped to three at 390 px). */
+  fullLabel: string;
+  auto?: boolean;
+  compact?: boolean;
+  disabled?: boolean;
+  open: boolean;
+  onClick: () => void;
+  ariaLabel?: string;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`focus-ring flex max-w-full items-center gap-1 rounded-full text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40 ${
+        compact ? "px-2 py-1" : "px-2.5 py-1.5"
+      }`}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      aria-label={ariaLabel}
+      title={fullLabel}
+      data-testid={testId}
+    >
+      {auto ? (
+        <Sparkles width={12} height={12} className="shrink-0 text-text-muted" aria-hidden />
+      ) : null}
+      <span
+        className="block max-w-[6rem] truncate font-medium text-text-primary sm:max-w-[14rem]"
+        data-testid="model-trigger-label"
+      >
+        {label}
+      </span>
+      <svg width={10} height={10} viewBox="0 0 24 24" fill="none" aria-hidden className="text-text-muted">
+        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
+/** The shell a model menu opens in: a popover above the pill, a bottom
+ *  sheet (with its dimmed backdrop) below 640 px. */
+export function ModelPopover({
+  label,
+  onClose,
+  children,
+  testId,
+}: {
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <>
+      {/* Mobile-only backdrop — the dropdown becomes a bottom sheet
+          below 640px, so we dim the layer behind it. */}
+      <div
+        aria-hidden
+        onClick={onClose}
+        className="fixed inset-0 z-30 bg-black/55 backdrop-blur-sm sm:hidden"
+      />
+      <div
+        role="listbox"
+        aria-label={label}
+        data-testid={testId}
+        className="
               popover-appear sheet-up z-40 flex flex-col overflow-hidden
               border border-border bg-bg-surface text-xs shadow-2xl
               fixed inset-x-0 bottom-0 max-h-[70vh] rounded-t-2xl safe-bottom
@@ -221,24 +296,14 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
               sm:w-[min(320px,92vw)] sm:max-h-[420px] sm:rounded-xl
               sm:sheet-up:animate-none
             "
-          >
-            <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
-              <span className="h-1 w-10 rounded-full bg-border" />
-            </div>
+      >
+        <div className="flex justify-center pt-2 sm:hidden" aria-hidden>
+          <span className="h-1 w-10 rounded-full bg-border" />
+        </div>
 
-            <ModelPicker
-              models={models}
-              activeId={activeId}
-              isAuto={isAuto}
-              onPickAuto={pickAuto}
-              onPickModel={pickModel}
-              needsVision={Boolean(needsVision)}
-              t={t}
-            />
-          </div>
-        </>
-      ) : null}
-    </div>
+        {children}
+      </div>
+    </>
   );
 }
 
@@ -246,7 +311,7 @@ export function ModelSelector({ activeModelId, disabled, compact, onPick, needsV
 // Mounted only while the popover is open, so search + expanded-group
 // state resets cleanly on every open.
 
-function ModelPicker({
+export function ModelPicker({
   models: allModels,
   activeId,
   isAuto,
@@ -254,6 +319,9 @@ function ModelPicker({
   onPickModel,
   needsVision,
   t,
+  gate,
+  chatOnly = false,
+  hideAuto = false,
 }: {
   models: ModelEntry[];
   activeId: string | null;
@@ -262,14 +330,23 @@ function ModelPicker({
   onPickModel: (m: ModelEntry) => void;
   needsVision: boolean;
   t: ReturnType<typeof useT>;
+  /** Why a model may not be picked here (the row is locked and says so), or undefined. */
+  gate?: (m: ModelEntry) => string | undefined;
+  /** Chat models only: no video / audio / voice sections. */
+  chatOnly?: boolean;
+  /** The surface has its own "automatic" choice; the chat's Auto row is not offered. */
+  hideAuto?: boolean;
 }) {
   const [search, setSearch] = useState("");
   // FIX47 Part C — the picker offers the models an admin marked
   // show_in_chat (plus the one this conversation already uses, so the
   // pill can still name it). The rest stay in the store for lookups.
   const models = useMemo(
-    () => allModels.filter((m) => m.show_in_chat !== false || m.id === activeId),
-    [allModels, activeId],
+    () =>
+      allModels.filter(
+        (m) => (m.show_in_chat !== false || m.id === activeId) && (!chatOnly || !m.model_kind || m.model_kind === "chat"),
+      ),
+    [allModels, activeId, chatOnly],
   );
   // FIX47 Part C4 — per-row state for the message being composed: a
   // model that cannot read the attached image is disabled with the
@@ -279,10 +356,11 @@ function ModelPicker({
   // specialised.
   const rowState = (m: ModelEntry) => {
     const chat = !m.model_kind || m.model_kind === "chat";
-    const blocked = chat && needsVision && !hasVisionCap(m);
+    const locked = gate?.(m);
+    const blocked = Boolean(locked) || (chat && needsVision && !hasVisionCap(m));
     return {
       disabled: blocked,
-      disabledReason: blocked ? t("model.cantReadImages") : undefined,
+      disabledReason: locked ?? (blocked ? t("model.cantReadImages") : undefined),
       sub: chat && !hasToolsCap(m) ? `${m.provider} · ${t("model.subGeneralQA")}` : m.provider,
     };
   };
@@ -381,7 +459,7 @@ function ModelPicker({
       return next;
     });
 
-  const showAuto = !searching || "auto".includes(search.trim().toLowerCase());
+  const showAuto = !hideAuto && (!searching || "auto".includes(search.trim().toLowerCase()));
   const noModels = models.length === 0;
 
   return (
@@ -503,7 +581,7 @@ function ModelPicker({
             learn a key is needed. Hidden when searching unless they match. */}
         {MEDIA_KIND_SECTIONS.map(({ kind, labelKey }) => {
           const items = mediaByKind[kind];
-          if (searching && items.length === 0) return null;
+          if (chatOnly || (searching && items.length === 0)) return null;
           return (
             <Section
               key={`kind-${kind}`}
@@ -741,7 +819,7 @@ const TIER_LABEL_KEY: Record<"free" | "low" | "medium" | "high" | "xhigh" | "max
   max: "model.tier.max",
 };
 
-function ModelRow({
+export function ModelRow({
   label, sub, selected, onClick, leading, reasoning, imageGen, vision, mediaKind, tier,
   description, contextWindow, inputPrice, outputPrice, disabled, disabledReason,
 }: RowProps) {

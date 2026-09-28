@@ -513,6 +513,15 @@ export interface ModelOption {
   reason?: string;
 }
 
+/** AM5: one model of the runner's catalogue as "เลือกโมเดลเอง" may offer it. */
+export interface CustomModel {
+  id: string;
+  self_hosted: boolean;
+  vision: boolean;
+  allowed: boolean;
+  reason?: string;
+}
+
 export interface ModelPicker {
   uses: "vision" | "text" | "none" | string;
   reads: string;
@@ -520,6 +529,12 @@ export interface ModelPicker {
   options: ModelOption[] | null;
   documents_may_leave: boolean;
   note: string;
+  /** AM5: the organisation has one model of its own for this job (notice says so in one line). */
+  single_in_house?: boolean;
+  notice?: string;
+  /** AM5: what "เลือกโมเดลเอง" may offer, and what a model missing from it says. */
+  custom?: CustomModel[] | null;
+  locked_reason?: string;
 }
 
 /** AM4: what an install keeps and for how long. */
