@@ -82,7 +82,7 @@ export const am3Th = {
   "cost.perDocument": "เฉลี่ยต่อเอกสาร: {credits} เครดิต (≈ {baht} บาท)",
   "cost.typical": "ใช้เวลาราว {time} ต่อรอบ",
   "cost.unknown": "ยังไม่มีตัวเลขค่าใช้จ่าย — จะเห็นหลังรอบแรก",
-  "cost.note": "คิดจากเครดิตของ agent เอง ไม่หักเครดิตแชทของคุณ",
+  "cost.note": "ตัดจากงบเครดิต Agent Market ที่ผู้ดูแลกำหนดให้คุณแต่ละเดือน ไม่หักเครดิตที่ใช้แชท",
   "cost.cardLine": "ตัวอย่างจริง ≈ {baht} บาท · {time}",
   "cost.cardLineNoTime": "ตัวอย่างจริง ≈ {baht} บาท",
 
@@ -121,7 +121,7 @@ export const am3Th = {
   "wiz.ifWrong.company_tax": "ถ้าเลขผิด ใบกำกับที่ถูกต้องจะถูกถามว่า “ไม่ได้ออกในนามบริษัท” — แก้ได้ภายหลังในหน้าตั้งค่า",
   "wiz.why.policy": "วงเงินทุกข้อที่ใช้ตรวจการเบิกมาจากตารางนี้เท่านั้น ไม่ได้มาจากเอกสารระเบียบหรือจากโมเดล",
   "wiz.ifWrong.policy": "ถ้าวงเงินผิด รายการจะถูกยกเป็นข้อยกเว้นให้คนตัดสิน ไม่มีรายการใดถูกปฏิเสธอัตโนมัติ — แก้ตารางได้ภายหลังในหน้าตั้งค่า",
-  "wiz.why.theme": "ชื่อบริษัทและสีจะอยู่บนรายงานและสไลด์ที่ agent ทำ",
+  "wiz.why.theme": "ชื่อบริษัทและสีจะอยู่บนไฟล์ที่ agent ทำ",
   "wiz.ifWrong.theme": "ไม่กระทบตัวเลขใด ๆ — เปลี่ยนได้ภายหลัง แล้วขอไฟล์ใหม่จากตัวเลขชุดเดิมได้",
   "wiz.why.formats": "เลือกไฟล์ที่อยากได้ทุกรอบ เพื่อไม่ต้องบอกซ้ำทุกครั้ง",
   "wiz.ifWrong.formats": "ขอไฟล์ชนิดอื่นเพิ่มได้ในห้องทำงานเสมอ โดยไม่คำนวณใหม่",
@@ -139,6 +139,7 @@ export const am3Th = {
   "wiz.selftestFailed": "การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน",
   "wiz.selftestFailedNext": "ไฟล์และข้อมูลของคุณไม่ได้ถูกใช้หรือเปลี่ยนแปลง — ลองใหม่อีกครั้ง ถ้ายังไม่ผ่านให้กด “แจ้งปัญหา” หรือข้ามไปก่อนแล้วทดสอบภายหลัง",
   "wiz.selftestAgain": "ทดสอบอีกครั้ง",
+  "wiz.installedDone": "ติดตั้งเสร็จแล้ว — agent พร้อมใช้กับไฟล์ของคุณ กด “เข้าห้องทำงาน” แล้วแนบไฟล์ได้เลย",
 
   // holidays (the expense audit): the company's own calendar, off until confirmed
   "policy.holidaysOn": "เปิดตรวจวันหยุดแล้ว: ใช้วันหยุดของบริษัท {n} วันที่ยืนยันไว้ และตรวจวันเสาร์-อาทิตย์ด้วย",
@@ -418,7 +419,7 @@ export const am3En: Record<Am3Key, string> = {
   "cost.perDocument": "Per document on average: {credits} credits (≈ {baht} THB)",
   "cost.typical": "About {time} a run",
   "cost.unknown": "No cost figures yet — you will see them after the first run",
-  "cost.note": "Charged to the agent's own credits, not your chat credits",
+  "cost.note": "Charged to the monthly Agent Market budget your admin gives you, not to your chat credits",
   "cost.cardLine": "Real sample ≈ {baht} THB · {time}",
   "cost.cardLineNoTime": "Real sample ≈ {baht} THB",
 
@@ -455,7 +456,7 @@ export const am3En: Record<Am3Key, string> = {
   "wiz.ifWrong.company_tax": "A wrong number makes correct invoices ask “not made out to the company”. Fix it later in settings.",
   "wiz.why.policy": "Every limit the expense check uses comes from this table only — never from a policy document or a model.",
   "wiz.ifWrong.policy": "A wrong limit raises items as exceptions for a person to decide; nothing is rejected automatically. Edit the table later in settings.",
-  "wiz.why.theme": "The company name and colours go on the reports and decks the agent makes.",
+  "wiz.why.theme": "The company name and colours go on the files the agent makes.",
   "wiz.ifWrong.theme": "It changes no number. Change it later and ask for new files from the same numbers.",
   "wiz.why.formats": "The files you want every time, so you do not have to say it each run.",
   "wiz.ifWrong.formats": "You can always ask for another file type in the workspace, without recomputing.",
@@ -473,6 +474,7 @@ export const am3En: Record<Am3Key, string> = {
   "wiz.selftestFailed": "The test on sample data did not pass",
   "wiz.selftestFailedNext": "Your files and data were not used or changed. Try again; if it still fails, press “Report a problem”, or skip and test later.",
   "wiz.selftestAgain": "Test again",
+  "wiz.installedDone": "Installed — the agent is ready for your own files. Press “Go to the workspace” and attach them.",
 
   "policy.holidaysOn": "Holiday checks are on: the {n} company holidays you confirmed, plus Saturdays and Sundays",
   "policy.holidaysOff": "Holiday checks are off until the company confirms its own holiday calendar — only Saturdays and Sundays are checked now",

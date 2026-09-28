@@ -8,13 +8,15 @@ the quality gate reopens the file and checks the register adds up to computed.js
 
 from __future__ import annotations
 
+import ast
+import re
 from decimal import Decimal
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from ....engine.e2.cards import CHECK_TH
+from ....engine.e2.cards import CHECK_TH, FIELD_TH
 from .register import DOC_TYPE_TH, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -24,6 +26,104 @@ DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_p
 METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "typed_by_person": "ผู้ใช้พิมพ์",
              "confirmed_by_person": "ผู้ใช้ยืนยัน", "chosen_by_person": "ผู้ใช้เลือก"}
 STATUS_TH = {"pass": "ผ่าน", "fail": "ไม่ผ่าน", "skip": "ไม่เกี่ยว"}
+
+# AM3: what each check looks at, in words that do not sound like a finding (a stranger read the
+# card headers "VAT ไม่ตรง" / "duplicate" beside "ผ่าน" as problems with their documents).
+CHECK_NAME_TH = {
+    "seller_tax_id_format": "เลขผู้เสียภาษีผู้ขายถูกรูปแบบ", "buyer_tax_id_format": "เลขผู้เสียภาษีผู้ซื้อถูกรูปแบบ",
+    "document_date": "วันที่เอกสารสมเหตุสมผล", "line_arithmetic": "จำนวน × ราคา = ยอดรายการ",
+    "subtotal_sum": "ผลรวมรายการ = ยอดก่อน VAT", "discount_arithmetic": "ส่วนลดคำนวณถูก",
+    "vat_7_percent": "VAT = 7% ของฐาน", "grand_total": "ยอดก่อน VAT + VAT = ยอดรวม", "wht": "หัก ณ ที่จ่ายสอดคล้องกัน",
+    "currency": "สกุลเงินบาท", "required_fields": "มีช่องที่เอกสารชนิดนี้ต้องมีครบ", "buyer_match": "ออกในนามบริษัทเรา",
+    "duplicate": "ไม่ซ้ำกับเอกสารที่เคยบันทึก", "original_copy": "เป็นต้นฉบับ (ไม่ใช่สำเนา)",
+    "amount_in_words": "จำนวนเงินตัวอักษร = ยอดรวม", "document_type": "ชนิดเอกสารชัดเจน",
+}
+_MSG_TH = {
+    "not printed": "เอกสารไม่ได้พิมพ์ค่านี้", "no date found": "ไม่พบวันที่ในเอกสาร",
+    "a date in the future or implausibly old": "วันที่อยู่ในอนาคตหรือเก่าผิดปกติ",
+    "no quantity × price rows": "เอกสารไม่มีรายการแบบจำนวน × ราคา", "no line amounts": "เอกสารไม่มียอดรายการ",
+    "no subtotal to compare the lines with": "ไม่มียอดก่อน VAT ให้เทียบกับผลรวมรายการ",
+    "no VAT on this document": "เอกสารนี้ไม่มี VAT", "no base to check the VAT against": "ไม่มีฐานให้ตรวจ VAT",
+    "no withholding tax on this document": "เอกสารนี้ไม่มีหัก ณ ที่จ่าย",
+    "the 13th digit does not match the other twelve (mod-11 check digit)": "หลักที่ 13 ไม่ตรงกับ 12 หลักแรก (หลักตรวจสอบ)",
+    "only a full tax invoice with a buyer tax ID is matched against the organisation":
+        "ตรวจเฉพาะใบกำกับภาษีเต็มรูปที่มีเลขผู้เสียภาษีผู้ซื้อ",
+    "made out to another tax ID: input VAT cannot be claimed on it": "ออกในนามเลขผู้เสียภาษีอื่น ขอคืนภาษีซื้อไม่ได้",
+    "marked สำเนา / copy": "พิมพ์ว่า สำเนา", "the amount in words is not the total": "จำนวนเงินตัวอักษรไม่เท่ากับยอดรวม",
+    "13 digits with a valid check digit": "13 หลัก หลักตรวจสอบถูกต้อง", "not seen before": "ไม่เคยพบมาก่อน",
+    "a known document type": "ชนิดเอกสารที่รู้จัก", "a date": "มีวันที่", "a VAT base": "มีฐานภาษี",
+    "subtotal + VAT": "ยอดก่อน VAT + VAT", "THB": "บาท", "original": "ต้นฉบับ", "copy": "สำเนา", "unmarked": "ไม่ได้พิมพ์ว่าสำเนา",
+    "a withholding amount (the net payable is not the total)": "ยอดหัก ณ ที่จ่าย (เพราะยอดสุทธิไม่เท่ากับยอดรวม)",
+    "rate × base = WHT; total − WHT = net": "อัตรา × ฐาน = หัก ณ ที่จ่าย; ยอดรวม − หัก ณ ที่จ่าย = ยอดสุทธิ",
+    "no net payable": "เอกสารไม่ได้พิมพ์ยอดสุทธิ", "quantity × unit price = amount": "จำนวน × ราคาต่อหน่วย = ยอดรายการ",
+}
+_KEY_TH = {"net": "ยอดสุทธิ", "total": "ยอดรวม", "wht": "หัก ณ ที่จ่าย", "rate": "อัตรา (%)", "match": "ตรงกันที่",
+           "name": "เอกสารเดิม", "row": "บรรทัด", "expected": "ควรเป็น", "printed": "พิมพ์"}
+_MATCH_TH = {"document number": "เลขที่เอกสาร", "date and total": "วันที่และยอดรวม"}
+_FORM_TH = {"company_limited": "บริษัทจำกัด", "public_company": "บริษัทมหาชน", "limited_partnership": "ห้างหุ้นส่วนจำกัด",
+            "sole_proprietor": "บุคคลธรรมดา/ร้าน"}
+
+
+def msg_th(text) -> str | None:
+    """An engine check's English message or value, in Thai (numbers kept as they are)."""
+    if text in (None, ""):
+        return text
+    if isinstance(text, dict) and "core" in text:  # a party name: the name as read, and its legal form
+        form = _FORM_TH.get(str(text.get("legal_form") or ""), "")
+        return " ".join(x for x in (str(text.get("core") or "").replace("\x00", ""), f"({form})" if form else "") if x)
+    if isinstance(text, dict):
+        return "; ".join(f"{_KEY_TH.get(k, FIELD_TH.get(k, k))} {msg_th(v) if v is not None else '—'}" for k, v in text.items())
+    if isinstance(text, (list, tuple)):
+        return ", ".join(FIELD_TH.get(str(x), msg_th(x) or "") for x in text)
+    s = str(text)
+    if s in _MSG_TH:
+        return _MSG_TH[s]
+    if s in DOC_TYPE_TH:
+        return DOC_TYPE_TH[s]
+    if s in _MATCH_TH:
+        return _MATCH_TH[s]
+    rules = (
+        (r"^row (\S+): (\S+) printed, (\S+) computed$", lambda m: f"บรรทัด {m[1]}: พิมพ์ {m[2]} คำนวณได้ {m[3]}"),
+        (r"^VAT should be (\S+) at (\S+)% of the base$", lambda m: f"VAT ควรเป็น {m[1]} ({m[2]}% ของฐาน)"),
+        (r"^net payable (\S+) is not the total (\S+), and no withholding amount was read$",
+         lambda m: f"ยอดสุทธิ {m[1]} ไม่เท่ากับยอดรวม {m[2]} และไม่พบยอดหัก ณ ที่จ่าย"),
+        (r"^amounts are in (\S+): the THB amount needs an exchange-rate source$",
+         lambda m: f"ยอดเป็นสกุล {m[1]} ต้องมีอัตราแลกเปลี่ยนก่อนบันทึกเป็นบาท"),
+        (r"^missing for a (\S+): (.+)$",
+         lambda m: "เอกสารชนิดนี้ขาด: " + ", ".join(FIELD_TH.get(x.strip(), x.strip()) for x in m[2].split(","))),
+        (r"^same supplier and (.+) as (.+)$", lambda m: f"ผู้ขายเดียวกันและ{_MATCH_TH.get(m[1], m[1])}ตรงกับ {m[2]}"),
+        (r"^(\w+):(\S+) read (.+), the document text (.+)$",
+         lambda m: (f"โมเดล {m[2]}" if m[1] == "vision" else m[1]) + f" อ่านได้ {_val(m[3])} แต่ข้อความในเอกสารเป็น {_val(m[4])}"),
+        (r"^not after (\S+)$", lambda m: f"ไม่เกิน {m[1]}"),
+        (r"^(\S+)% of (\S+) is (\S+), printed (\S+)$", lambda m: f"{m[1]}% ของ {m[2]} = {m[3]} แต่พิมพ์ {m[4]}"),
+        (r"^total − WHT = (\S+), net printed (\S+)$", lambda m: f"ยอดรวม − หัก ณ ที่จ่าย = {m[1]} แต่พิมพ์ยอดสุทธิ {m[2]}"),
+    )
+    parts = []
+    for part in s.split("; "):
+        for pat, fn in rules:
+            m = re.match(pat, part)
+            if m:
+                parts.append(fn(m))
+                break
+        else:
+            parts.append(_MSG_TH.get(part, part))
+    return "; ".join(parts)
+
+
+def _val(text: str) -> str:
+    """A value the engine printed with repr (a party name is a dict): shown the way msg_th shows it."""
+    try:
+        v = ast.literal_eval(text)
+    except (ValueError, SyntaxError):
+        return text
+    return msg_th(v) if isinstance(v, (dict, list, tuple)) else text
+
+
+def check_name(code: str) -> str:
+    if code.startswith("source_agreement:"):
+        f = code.split(":", 1)[1]
+        return f"{FIELD_TH.get(f, f)} อ่านจากสองแหล่งตรงกัน"
+    return CHECK_NAME_TH.get(code) or CHECK_TH.get(code, (code,))[0]
 
 
 def _num(v):
@@ -87,7 +187,7 @@ class InvoiceWorkbook:
             ["ข้อยกเว้นทั้งหมด", t["exceptions"]], ["คำถามที่ตอบแล้ว", t["questions_answered"]],
             ["ยอดก่อน VAT (บาท)", _num(t["thb"]["subtotal"])], ["ภาษีมูลค่าเพิ่ม (บาท)", _num(t["thb"]["vat_amount"])],
             ["ยอดรวม (บาท)", _num(t["thb"]["total"])], ["หัก ณ ที่จ่าย (บาท)", _num(t["thb"]["wht_amount"])],
-            ["ยอดชำระสุทธิ (บาท)", _num(t["thb"]["net_payable"])],
+            ["ยอดที่ต้องชำระ (บาท)", _num(t["thb"].get("payable", t["thb"]["net_payable"]))],
         ]
         self._table(ws, 4, ["รายการ", "ค่า"], rows, [36, 22])
         for r in range(10, 15):           # the five baht rows (the counts stay integers)
@@ -95,6 +195,7 @@ class InvoiceWorkbook:
         r = 4 + len(rows) + 2
         notes = ["ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ (ข้อความใน PDF / e-Tax XML / OCR) หรือผู้ใช้พิมพ์หรือยืนยัน "
                  "โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใดในไฟล์นี้",
+                 "ยอดที่ต้องชำระ = ยอดสุทธิที่เอกสารพิมพ์ ถ้าไม่ได้พิมพ์ = ยอดรวม − หัก ณ ที่จ่าย (ไม่มีหัก ณ ที่จ่าย = ยอดรวม)",
                  "ที่มาของทุกค่าอยู่ในชีต “ที่มา”: หน้า ตำแหน่งบนหน้า ข้อความที่พิมพ์ และความมั่นใจ"]
         for m in self.c.get("models") or []:
             notes.append(f"โมเดลที่เห็นเอกสาร: {m['model']} ({'รันในองค์กร' if m['self_hosted'] else 'ผู้ให้บริการภายนอก'}) "
@@ -113,14 +214,15 @@ class InvoiceWorkbook:
         ws = self.wb.create_sheet("ทะเบียน")
         self._title(ws, "ทะเบียนเอกสาร", "เฉพาะเอกสารที่บันทึก ยอด “บาท” แปลงด้วยอัตราที่ผู้ใช้ระบุเมื่อเป็นเงินตราต่างประเทศ")
         heads = ["ลำดับ", "วันที่", "เลขที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขผู้เสียภาษีผู้ขาย", "สาขา", "ผู้ซื้อ",
-                 "เลขผู้เสียภาษีผู้ซื้อ", "สกุลเงิน", "ยอดก่อน VAT", "VAT", "ยอดรวม", "หัก ณ ที่จ่าย", "ยอดสุทธิ",
+                 "เลขผู้เสียภาษีผู้ซื้อ", "สกุลเงิน", "ยอดก่อน VAT", "VAT", "ยอดรวม", "หัก ณ ที่จ่าย", "ยอดที่ต้องชำระ",
                  "อัตราแลกเปลี่ยน", "ยอดก่อน VAT (บาท)", "VAT (บาท)", "ยอดรวม (บาท)", "ที่มา", "ไฟล์"]
         rows = []
         for i, d in enumerate([d for d in self.c["documents"] if d["status"] == "included"], start=1):
             rows.append([i, d["document_date"], d["document_number"], d["document_type_label"], d["seller_name"],
                          d["seller_tax_id"], d["seller_branch"], d["buyer_name"], d["buyer_tax_id"], d["currency"],
                          _num(d["subtotal"]), _num(d["vat_amount"]), _num(d["total"]), _num(d["wht_amount"]),
-                         _num(d["net_payable"]), _num(d["fx_rate"]), _num(d["thb_subtotal"]), _num(d["thb_vat_amount"]),
+                         _num(d.get("payable", d["net_payable"])), _num(d["fx_rate"]), _num(d["thb_subtotal"]),
+                         _num(d["thb_vat_amount"]),
                          _num(d["thb_total"]), d["tier_label"], d["name"]])
         self._table(ws, 4, heads, rows, [6, 11, 16, 18, 30, 16, 8, 26, 16, 8, 14, 12, 14, 12, 14, 10, 16, 12, 16, 16, 30],
                     money_cols=(11, 12, 13, 14, 15, 17, 18, 19))
@@ -144,7 +246,8 @@ class InvoiceWorkbook:
             vision = "; ".join(f"{c['method']}: {c['value']}" for c in p.get("candidates") or [])
             rows.append([p["name"], p["label"], p["value"] if not isinstance(p["value"], (int, float)) else str(p["value"]),
                          p["confidence"], METHOD_TH.get(p["method"], p["method"]), p["page"], p["bbox"], p["raw_text"],
-                         DECIDED_TH.get(p["decided_by"], p["decided_by"]), ", ".join(p["checks"]), vision or None])
+                         DECIDED_TH.get(p["decided_by"], p["decided_by"]),
+                         ", ".join(CHECK_NAME_TH.get(c, c) for c in p["checks"] if c in CHECK_NAME_TH) or None, vision or None])
         self._table(ws, 4, ["ไฟล์", "ช่อง", "ค่า", "ความมั่นใจ", "อ่านด้วย", "หน้า", "ตำแหน่ง", "ข้อความในเอกสาร",
                             "ผู้กำหนด", "ผ่านการตรวจ", "โมเดลอ่านได้ (อ้างอิง)"], rows,
                     [28, 18, 28, 10, 14, 6, 24, 36, 18, 36, 28], wrap_cols=(8, 10))
@@ -161,11 +264,20 @@ class InvoiceWorkbook:
     def checks(self):
         ws = self.wb.create_sheet("การตรวจ")
         self._title(ws, "การตรวจตัวเลขของแต่ละเอกสาร", "ตรวจด้วยกฎ ไม่ใช้โมเดล: เลขผู้เสียภาษี วันที่ จำนวน×ราคา ผลรวม VAT 7% ยอดรวม หัก ณ ที่จ่าย ฯลฯ")
-        rows = [[c["name"], CHECK_TH.get(c["code"], (c["code"],))[0], c["code"], STATUS_TH.get(c["status"], c["status"]),
-                 None if c.get("expected") is None else str(c["expected"]), None if c.get("actual") is None else str(c["actual"]),
-                 c.get("message") or ""] for c in self.c["checks"]]
-        self._table(ws, 4, ["ไฟล์", "การตรวจ", "รหัส", "ผล", "ควรเป็น", "ที่พบ", "หมายเหตุ"], rows,
-                    [30, 18, 22, 10, 20, 20, 40], wrap_cols=(7,))
+        def note(c):
+            m = msg_th(c.get("message")) or ""
+            try:
+                differs = Decimal(str(c["expected"])) != Decimal(str(c["actual"]))
+            except Exception:  # noqa: BLE001 — not two amounts
+                differs = False
+            if not m and c["status"] == "pass" and differs:
+                m = "ต่างกันไม่เกิน 1 สตางค์ จากการปัดเศษ ถือว่าตรง"
+            return m
+        rows = [[c["name"], check_name(c["code"]), STATUS_TH.get(c["status"], c["status"]),
+                 None if c.get("expected") is None else msg_th(c["expected"]), None if c.get("actual") is None else msg_th(c["actual"]),
+                 note(c), c["code"]] for c in self.c["checks"]]
+        self._table(ws, 4, ["ไฟล์", "ตรวจอะไร", "ผล", "ควรเป็น", "ที่พบ", "หมายเหตุ", "รหัส (สำหรับผู้ดูแล)"], rows,
+                    [30, 30, 10, 22, 22, 44, 20], wrap_cols=(6,))
 
     def write(self, path: str) -> dict:
         self.summary()

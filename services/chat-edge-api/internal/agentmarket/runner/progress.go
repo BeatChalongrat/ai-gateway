@@ -130,9 +130,9 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 		add(s.Name, label, st, detail)
 	}
 	if s, ok := latest["compute"]; ok {
-		add("compute", "คำนวณด้วยสคริปต์ metrics.py แบบทศนิยมแม่นยำ", status(s.Status), "")
+		add("compute", "คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)", status(s.Status), "")
 	} else {
-		add("compute", "คำนวณด้วยสคริปต์ metrics.py แบบทศนิยมแม่นยำ", "pending", "")
+		add("compute", "คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)", "pending", "")
 	}
 	if s, ok := latest["postcompute"]; ok {
 		detail := ""
@@ -158,7 +158,7 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 				detail += " ในองค์กร"
 			}
 		} else if s.Status == "succeeded" {
-			detail = "เขียนจากกฎ (ไม่มีโมเดลที่ตอบได้)"
+			detail = "เขียนจากกฎของ agent"
 		}
 		add("narrative", "เขียนคำอธิบาย", status(s.Status), detail)
 	} else {
@@ -176,7 +176,7 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 				detail = "ธีม “" + th.Name + "”"
 			}
 		}
-		add("render", "สร้างรายงานและสไลด์", status(s.Status), detail)
+		add("render", "สร้างไฟล์ผลลัพธ์", status(s.Status), detail)
 		q := qualitySummary(o)
 		if s.Status == "failed" {
 			add("quality", "ตรวจคุณภาพเอกสาร", "failed", trim(s.Error, 160))
@@ -184,7 +184,7 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 			add("quality", "ตรวจคุณภาพเอกสาร", status(s.Status), q)
 		}
 	} else {
-		add("render", "สร้างรายงานและสไลด์", "pending", "")
+		add("render", "สร้างไฟล์ผลลัพธ์", "pending", "")
 	}
 	if run.Status == am.RunFailed {
 		for i := range p.Steps {

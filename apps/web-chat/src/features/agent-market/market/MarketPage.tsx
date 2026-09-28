@@ -232,9 +232,11 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
             {t("market.readFirst")}
           </Link>
         )}
-        <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
-          {t("market.details")}
-        </Link>
+        {installed || disabled ? (
+          <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
+            {t("market.details")}
+          </Link>
+        ) : null}
         <div className="flex-1" />
         {time ? <span className="text-xs text-text-muted">{time}</span> : null}
       </div>

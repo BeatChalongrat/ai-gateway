@@ -24,6 +24,7 @@ vi.mock("next/navigation", () => ({
 
 import { useI18nStore } from "@/lib/i18n";
 
+import { AsksPanel } from "./install/panels";
 import { AgentDetailPage } from "./market/AgentDetailPage";
 import { DatasheetPage } from "./market/DatasheetPage";
 import { costLine } from "./market/trust";
@@ -166,6 +167,14 @@ describe("the agent's page, for a stranger", () => {
     render(<AgentDetailPage slug="sran.invoice-processing" />);
     expect((await screen.findByTestId("am-detail-disabled")).textContent).toContain("กำลังแก้ยอด VAT");
     expect(screen.queryByTestId("am-detail-install")).toBeNull();
+  });
+});
+
+describe("what the agent asks for", () => {
+  it("names the files this agent makes, not a report and deck it never makes", () => {
+    render(<AsksPanel manifest={invoice} />);
+    expect(document.body.textContent).toContain("ทะเบียน .xlsx");
+    expect(document.body.textContent).not.toContain("สไลด์");
   });
 });
 

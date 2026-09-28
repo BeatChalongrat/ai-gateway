@@ -205,4 +205,14 @@ func TestInvoiceSelfTestIgnoresTheStrangersOwnTaxID(t *testing.T) {
 		t.Fatalf("the self-test on the sample data asks nothing whatever the person's company: %s %s, %d card(s)",
 			got.Status, got.StatusReason, len(cards))
 	}
+	// its files say they are the sample's (a person's own register once had the sample's exact name)
+	arts, _ := e.store.RunArtifacts(ctx, run.ID)
+	if len(arts) == 0 {
+		t.Fatal("the self-test delivers its files")
+	}
+	for _, a := range arts {
+		if !strings.HasPrefix(a.Name, SamplePrefix) {
+			t.Fatalf("a self-test file is named as a sample: %s", a.Name)
+		}
+	}
 }

@@ -801,7 +801,7 @@ export function SelfTestStep({
         <div className="mt-4" aria-live="polite" data-testid="am-selftest-thread">
           <WorkspaceContext.Provider value={ctx}>
             {mine.length ? (
-              <ThreadView items={mine} />
+              <ThreadView items={done ? mine.filter((i) => i.kind !== "outputs") : mine} />
             ) : (
               <div className="flex items-center gap-2 text-sm text-text-secondary">
                 <Spin size={14} />
@@ -812,6 +812,11 @@ export function SelfTestStep({
         </div>
       ) : null}
       {runId && done ? <SelfTestFiles runId={runId} /> : null}
+      {runId && done ? (
+        <p className="mt-3 text-sm font-medium text-text-primary" data-testid="am-installed-done">
+          {t("wiz.installedDone")}
+        </p>
+      ) : null}
       {runId && failed && !done ? (
         <div role="alert" className="mt-4 rounded-xl border border-status-danger/40 bg-status-danger/10 px-4 py-3 text-sm text-text-primary" data-testid="am-selftest-failed">
           <p className="font-medium">{t("wiz.selftestFailed")}</p>

@@ -193,6 +193,9 @@ func narrativePrompt(cv computedView) string {
 
 // ── render (+ quality gate) ──────────────────────────────────────────────
 
+// SamplePrefix starts the name of every file a self-test makes (AM3).
+const SamplePrefix = "sample_"
+
 type renderedArt struct {
 	Name          string          `json:"name"`
 	Format        string          `json:"format"`
@@ -243,6 +246,18 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			period = *parent.Period
 		}
 	}
+	parentRun := rc.run
+	if artifactRun != rc.run.ID {
+		if p, err := st.RunByID(ctx, artifactRun); err == nil {
+			parentRun = p
+		}
+	}
+	// AM3: a self-test's files (and the catalog's samples) say so in their
+	// name — a stranger's own register once had the sample's exact name.
+	prefix := ""
+	if parentRun.Kind == am.KindSelfTest {
+		prefix = SamplePrefix
+	}
 	names := map[string]string{}
 	versions := map[string]int{}
 	for _, f := range formats {
@@ -251,13 +266,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			return renderOut{}, "", err
 		}
 		versions[f] = v
-		names[f] = am.ArtifactName(rc.install.Slug, period, f, v)
-	}
-	parentRun := rc.run
-	if artifactRun != rc.run.ID {
-		if p, err := st.RunByID(ctx, artifactRun); err == nil {
-			parentRun = p
-		}
+		names[f] = prefix + am.ArtifactName(rc.install.Slug, period, f, v)
 	}
 	var assumptions []am.Assumption
 	_ = json.Unmarshal(parentRun.Assumptions, &assumptions)
@@ -289,7 +298,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			return renderOut{}, "", err
 		}
 		versions["template"] = v
-		names["template"] = am.TemplateArtifactName(rc.install.Slug, period, tpl.Kind, v)
+		names["template"] = prefix + am.TemplateArtifactName(rc.install.Slug, period, tpl.Kind, v)
 		tplKey = map[string]any{"sha256": tpl.SHA256, "version": tpl.Version, "mapping": tpl.Mapping}
 	}
 	keyParts := []any{computeKey, narrKey, formats, names, themeVersion, theme, pres, assumptions}

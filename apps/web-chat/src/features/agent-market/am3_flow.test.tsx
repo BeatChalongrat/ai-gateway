@@ -94,7 +94,14 @@ describe("the install wizard, for someone alone", () => {
   it("the self-test ends on the actual files it made", async () => {
     handler = (path) => {
       if (path === "/agent-market/installs/i-1") return json({ install: { id: "i-1", self_test_run_id: "r-1", slug: "x", title: "x", created_at: "", definition_version: "1" }, manifest: {}, defaults: [], budget: { credits: 1, spent_this_month: 0 } });
-      if (path.startsWith("/agent-market/installs/i-1/thread")) return json({ items: selfTestThread("succeeded"), cursor: 1 });
+      if (path.startsWith("/agent-market/installs/i-1/thread"))
+        return json({
+          items: [
+            ...selfTestThread("succeeded"),
+            { id: "o-1", install_id: "i-1", run_id: "r-1", kind: "outputs", payload: { run_id: "r-1", artifacts: [{ id: "a-1", format: "docx", name: "financial_2026-09_report_v1.docx", version: 1 }] }, rev: 2, created_at: "" },
+          ],
+          cursor: 2,
+        });
       if (path === "/agent-market/runs/r-1")
         return json({
           run: { id: "r-1", status: "succeeded", kind: "self_test" },
@@ -110,6 +117,9 @@ describe("the install wizard, for someone alone", () => {
     expect(panel.textContent).toContain("ไฟล์จริงที่ agent ทำจากข้อมูลตัวอย่าง");
     await waitFor(() => expect(within(panel).getAllByTestId("am-artifact")).toHaveLength(2));
     expect(panel.textContent).toContain("financial_2026-09_deck_v1.pptx");
+    // the files are listed once (not again as an outputs card above), and the wizard says it is done
+    expect(screen.queryByTestId("am-outputs")).toBeNull();
+    expect(screen.getByTestId("am-installed-done").textContent).toContain("ติดตั้งเสร็จแล้ว");
   });
 
   it("a failed self-test says what to do, that nothing of yours was touched, and offers a report", async () => {

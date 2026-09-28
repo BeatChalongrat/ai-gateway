@@ -116,6 +116,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
     totals = {"subtotal": Decimal(0), "vat_amount": Decimal(0), "total": Decimal(0), "wht_amount": Decimal(0),
               "net_payable": Decimal(0)}
     by_currency: dict[str, dict] = {}
+    payable = Decimal(0)  # AM3: the amount to pay (printed net payable, else total − withholding)
     for r in reviewed:
         doc, out = r.doc, r.out
         f = out["fields"]
@@ -140,6 +141,16 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         for n in totals:
             v = _dec((f.get(n) or {}).get("normalized"))
             row[f"thb_{n}"] = _s(_q2(v * rate)) if v is not None and rate is not None else None
+        # AM3: what is actually to be paid — the net payable the document printed, else its total less
+        # any withholding (a document with none: its total). net_payable itself stays as printed.
+        row["payable"] = row.get("net_payable")
+        row["payable_computed"] = False
+        if row["payable"] is None and row.get("total") is not None:
+            row["payable"] = _s(_q2(Decimal(str(row["total"])) - Decimal(str(row.get("wht_amount") or 0))))
+            row["payable_computed"] = True
+        row["thb_payable"] = row["thb_net_payable"]
+        if row["thb_payable"] is None and row["thb_total"] is not None:
+            row["thb_payable"] = _s(_q2(Decimal(row["thb_total"]) - Decimal(row["thb_wht_amount"] or 0)))
         documents.append(row)
         checks += [{"doc_key": doc.key, "name": doc.name, **c} for c in out["deterministic_checks"]]
         if status == "excluded":
@@ -157,6 +168,8 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
             v = row[f"thb_{n}"]
             if v is not None:
                 totals[n] += Decimal(v)
+        if row["thb_payable"] is not None:
+            payable += Decimal(row["thb_payable"])
         cur = by_currency.setdefault(currency, {"documents": 0, "total": Decimal(0), "vat_amount": Decimal(0)})
         cur["documents"] += 1
         for n in ("total", "vat_amount"):
@@ -218,6 +231,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
             m["documents"].append(d["name"])
     models_list = [m for m in models.values() if m["documents"]]
     tot = {k: _s(_q2(v)) for k, v in totals.items()}
+    tot["payable"] = _s(_q2(payable))
     counts = {"documents": len(documents), "included": len(included), "excluded": len(documents) - len(included),
               "exceptions": len(exceptions), "questions_answered": sum(d["answered"] for d in documents)}
     label = period_label_th(period)

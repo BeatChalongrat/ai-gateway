@@ -27,6 +27,7 @@ vi.mock("next/navigation", () => ({
 import { useI18nStore } from "@/lib/i18n";
 
 import { AgentRailSection } from "./AgentRailSection";
+import { amDictionaries } from "./i18n";
 import type { RailInstall } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 
@@ -128,6 +129,11 @@ describe("AgentRailSection", () => {
     expect(item.textContent).toContain("รอคำตอบของคุณ");
     expect(screen.getByTestId("agent-rail-toggle").textContent).toContain("Agent ของฉัน (1)");
     expect(screen.getByTestId("agent-rail-waiting-total").textContent).toContain("1");
+  });
+
+  it("the workspace's own list of agents is named the same way (not “AGENT ของฉัน”)", () => {
+    expect(amDictionaries.th["ws.myAgents"]).toBe("Agent ของฉัน");
+    expect(amDictionaries.en["ws.myAgents"]).toBe("My agents");
   });
 
   it("pinned first, then recently used, about five — never alphabetical; a waiting agent past the cap still shows", async () => {

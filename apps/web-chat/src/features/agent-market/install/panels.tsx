@@ -52,13 +52,15 @@ export function PreviewPanel({ preview }: { preview: PreviewState }) {
 
 export function AsksPanel({ manifest }: { manifest: Manifest }) {
   const t = useAmT();
+  // the files this agent really makes (an invoice agent makes no deck)
+  const files = (manifest.outputs ?? []).map((o) => o.label).filter(Boolean).join(" · ");
   return (
     <Card>
       <h2 className="text-sm font-semibold text-text-primary">{t("asks.title")}</h2>
       <ul className="mt-2.5 flex flex-col gap-2">
         <CheckLine>{t("asks.read")}</CheckLine>
         <CheckLine>{t("asks.compute")}</CheckLine>
-        <CheckLine>{t("asks.write")}</CheckLine>
+        <CheckLine>{files ? t("asks.write", { files }) : t("asks.writeAny")}</CheckLine>
         {manifest.cannot ? <CheckLine ok={false}>{manifest.cannot}</CheckLine> : null}
       </ul>
     </Card>
