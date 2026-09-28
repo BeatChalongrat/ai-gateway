@@ -106,10 +106,10 @@ export function AgentQuestionCard({
     <div className="flex flex-col" data-testid="am-question-card" data-card-id={card.card_id}>
       {card.intro ? <p className="mb-1 text-[15px] leading-relaxed text-text-primary">{card.intro}</p> : null}
       {card.files?.length ? (
-        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+        <div className="mb-1 flex flex-col gap-1.5">
           <span className="text-xs text-text-muted">{t("card.lateFiles")}</span>
           {card.files.map((f) => (
-            <FileChip key={f.id} name={f.name} size={f.size} />
+            <FileChip key={f.id} id={f.id} name={f.name} size={f.size} />
           ))}
         </div>
       ) : null}

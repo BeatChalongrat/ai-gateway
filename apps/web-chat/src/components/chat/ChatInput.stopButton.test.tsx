@@ -115,10 +115,12 @@ describe("FIX75 — the stop button", () => {
     expect(send.className).toContain("composer-send-fill");
     expect(send.className).not.toContain("stop-halo"); // the halo is streaming-only
     expect(send.style.background).toBe("");
-    // one class name in the source, used by both branches
-    const src = fs.readFileSync(path.join(__dirname, "ChatInput.tsx"), "utf8");
+    // one class name in the source, used by both branches (AM5: the button
+    // is the shared frame's, which the chat and an agent's workspace render)
+    const src = fs.readFileSync(path.join(__dirname, "ComposerFrame.tsx"), "utf8");
     expect(src.match(/composer-send-fill/g)?.length).toBeGreaterThanOrEqual(2);
     expect(src).not.toMatch(/bg-status-danger-solid/);
+    expect(fs.readFileSync(path.join(__dirname, "ChatInput.tsx"), "utf8")).not.toMatch(/bg-status-danger-solid/);
   });
 
   it("the halo moves nothing: box-shadow only, streaming only, 2.4 s ease-in-out", () => {

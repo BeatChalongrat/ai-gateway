@@ -15,22 +15,20 @@
 // shared component imports the CSS in its own module so only markdown-
 // rendering routes pay for it — see Markdown.tsx for the rationale.)
 
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Copy, PenLine, RotateCcw } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { ArrowRightLeft, PenLine, RotateCcw } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 
 import type { FallbackAttempt, FileAttachment, Message } from "@/lib/types";
-import { copyTextToClipboard } from "@/lib/clipboard";
 import { toast } from "@/components/ui/Toast";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
-import { useI18nStore, useT } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import { fallbackNotice, knownNotRetryable, localizeErrorCode } from "@/lib/errorMessages";
 import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { lossNoticeFromSources } from "@/lib/compaction";
-import { splitTerminalBlocks } from "@/lib/terminalText";
 import { STOP_REASON_NOTICE_KEY } from "@/lib/terminalCause";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useModelStore } from "@/stores/modelStore";
@@ -54,6 +52,19 @@ import { SearchingIndicator } from "./SearchingIndicator";
 import { SourcesCard } from "./SourcesCard";
 import { KnowledgeCitationScope, KnowledgePendingNotice, KnowledgeSourcesRow } from "./KnowledgeSources";
 import { MessageAttachments } from "./MessageAttachments";
+import {
+  ActionButton,
+  AssistantProse,
+  CollapsibleUserText,
+  CopyAction,
+  ErrorCard,
+  ErrorCardAction,
+  MessageTime,
+  NoteCard,
+  UserMessageRow,
+  UserTextPill,
+  useCopyText,
+} from "./MessageParts";
 import { MessageMemoryMarkers } from "./MemoryMarkers";
 import { PptxPlanCard } from "./PptxPlanCard";
 import { linkedGeneratedFile } from "./planCardUI";
@@ -133,7 +144,7 @@ function MessageBubbleImpl({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const editRef = useRef<HTMLTextAreaElement>(null);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy: copyMessageContent } = useCopyText(message.content);
 
   // Voice output — only the auto-read effect uses this now; the
   // manual speaker button was removed from the action row to match
@@ -201,22 +212,6 @@ function MessageBubbleImpl({
     setEditing(false);
   }
 
-  // FIX47.6 Part D — no silent failure: the copy either shows the ✓
-  // state or says why it didn't. The old empty catch hid every failure;
-  // in the desktop shell writeText is refused (permission-denied) and
-  // copy did nothing at all, measured live. The shared helper also runs
-  // the execCommand fallback on refusal (not only on absence) and
-  // honours its boolean.
-  async function copyMessageContent() {
-    const ok = await copyTextToClipboard(message.content);
-    if (ok) {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } else {
-      toast(t("msg.copyFailed"));
-    }
-  }
-
   // ───────────────────────────── USER ─────────────────────────────
   if (isUser) {
     // File-only sends now reach this branch with content="" — the
@@ -233,29 +228,13 @@ function MessageBubbleImpl({
       // rather than a phantom pill.
       return null;
     }
-    // No entrance animation on the user's own row: the text has just left
-    // the composer and is being scrolled to the anchor at the same moment,
-    // and a bubble fading in from transparent while it moves reads as
-    // "vanished, then reappeared somewhere else" (measured frame by frame
-    // in FIX47.5). The reply row keeps its fade — nothing of the user's is
-    // in flight there.
+    // The row and the bubble are MessageParts' (an agent's workspace shows
+    // the person's messages with the same ones). The reply row keeps its
+    // fade — nothing of the user's is in flight there.
     return (
-      <div className="group flex w-full justify-end">
-        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
-          {/* Attachments render ABOVE the text bubble (matches Claude /
-              ChatGPT) so the image/file the user sent reads first. */}
-          {hasFiles ? (
-            <MessageAttachments files={message.files!} />
-          ) : null}
-
+      <UserMessageRow attachments={hasFiles ? <MessageAttachments files={message.files!} /> : null}>
           {hasText ? (
-            // FIX107 A1 — max-w-full: a line with nowhere to break (a
-            // terminal table's border) used to set the bubble's width and
-            // push it past the column and off the screen.
-            <div
-              className="max-w-full rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm"
-              style={{ borderRadius: "20px" }}
-            >
+            <UserTextPill>
               {editing ? (
                 <div className="flex w-full flex-col gap-2">
                   <textarea
@@ -298,7 +277,7 @@ function MessageBubbleImpl({
               ) : (
                 <CollapsibleUserText content={message.content} />
               )}
-            </div>
+            </UserTextPill>
           ) : null}
 
           {/* User message actions — copy + edit, revealed on hover.
@@ -307,15 +286,7 @@ function MessageBubbleImpl({
               message after the fact. */}
           {!editing ? (
             <div className="message-actions flex items-center gap-0.5">
-              {hasText ? (
-                <ActionButton
-                  ariaLabel={copied ? t("a11y.copied") : t("a11y.copyMessage")}
-                  onClick={copyMessageContent}
-                  tone={copied ? "success" : "muted"}
-                >
-                  {copied ? <CheckIcon /> : <CopyIcon />}
-                </ActionButton>
-              ) : null}
+              {hasText ? <CopyAction copied={copied} onCopy={copyMessageContent} /> : null}
               {/* FIX11 §3: editing now FORKS in the desktop app too — the host
                   carries the edited message's id through the turn and forks via
                   chat-edge /edit (server-authoritative branching), so the ◀ n/m ▶
@@ -342,8 +313,7 @@ function MessageBubbleImpl({
               onSwitch={onSwitchBranch}
             />
           ) : null}
-        </div>
-      </div>
+      </UserMessageRow>
     );
   }
 
@@ -435,9 +405,8 @@ function MessageBubbleImpl({
       ) : null}
 
       {/* Body */}
-      <div
+      <AssistantProse
         ref={bodyRef}
-        className="prose-chat relative w-full text-text-primary"
         onMouseUp={readSelection}
         onKeyUp={readSelection}
         onBlur={(e) => {
@@ -460,7 +429,7 @@ function MessageBubbleImpl({
           </button>
         ) : null}
         <AssistantContent message={message} convId={convId} />
-      </div>
+      </AssistantProse>
 
       {/* B1 — error bubble. Renders a distinct, red-tinted notice when
           the stream failed terminally (instead of leaving a blank
@@ -512,19 +481,19 @@ function MessageBubbleImpl({
           answer: the row waits (reconnecting) or offers to be loaded
           (awaiting_reload). Neither is a failure card. */}
       {message.reconnecting ? (
-        <div role="status" data-testid="reconnecting-notice" className="mt-1 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+        <NoteCard data-testid="reconnecting-notice">
           {t("msg.reconnecting")}
-        </div>
+        </NoteCard>
       ) : null}
       {/* FIX131 E2 — the service is restarting; the request goes out again
           by itself. A state of the service, not a failure. */}
       {message.restart_wait ? (
-        <div role="status" data-testid="restart-wait-notice" className="mt-1 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+        <NoteCard data-testid="restart-wait-notice">
           {t("msg.serverRestarting")}
-        </div>
+        </NoteCard>
       ) : null}
       {message.awaiting_reload ? (
-        <div role="status" data-testid="awaiting-reload-notice" className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary">
+        <NoteCard data-testid="awaiting-reload-notice" className="flex flex-wrap items-center gap-2">
           <span>{t("msg.awaitingReload")}</span>
           <button
             type="button"
@@ -534,7 +503,7 @@ function MessageBubbleImpl({
           >
             {t("msg.loadAnswer")}
           </button>
-        </div>
+        </NoteCard>
       ) : null}
       {message.status === "completed" && !message.isStreaming && message.stop_reason && message.stop_reason in STOP_REASON_NOTICE_KEY ? (
         <StopReasonNotice
@@ -677,13 +646,7 @@ function MessageBubbleImpl({
             message.isStreaming ? "pointer-events-none opacity-0" : "opacity-100"
           }`}
         >
-          <ActionButton
-            ariaLabel={copied ? t("a11y.copied") : t("a11y.copyMessage")}
-            onClick={copyMessageContent}
-            tone={copied ? "success" : "muted"}
-          >
-            {copied ? <CheckIcon /> : <CopyIcon />}
-          </ActionButton>
+          <CopyAction copied={copied} onCopy={copyMessageContent} />
           {showFeedback ? (
             <FeedbackButtons
               convId={convId}
@@ -721,147 +684,9 @@ function MessageBubbleImpl({
   );
 }
 
-// P2 — long USER message collapse. A user message taller than
-// USER_COLLAPSE_THRESHOLD_LINES rendered line-boxes starts collapsed to
-// USER_COLLAPSE_VISIBLE_LINES with a Show more / Show less toggle; at or
-// under the threshold it renders exactly as before, with no toggle.
-// Decided from the RENDERED height (scrollHeight vs. line-height), never
-// from "\n" count — Thai text wraps, so one logical line can occupy many
-// line-boxes. Assistant replies never collapse (this component is only
-// reachable from the user branch), and edit mode replaces it with the
-// full-text textarea. Display-only: copy/export read message.content
-// from the store, untouched by the cap.
-const USER_COLLAPSE_THRESHOLD_LINES = 12;
-const USER_COLLAPSE_VISIBLE_LINES = 8; // must match globals.css .user-msg-text.is-collapsed
-
-function CollapsibleUserText({ content }: { content: string }) {
-  const t = useT();
-  const [expanded, setExpanded] = useState(false);
-  const [canCollapse, setCanCollapse] = useState(false);
-  const textRef = useRef<HTMLSpanElement>(null);
-
-  // Measure before paint so a long message never flashes full-height,
-  // then re-measure on reflow (window/sidebar width changes) via
-  // ResizeObserver — no polling. scrollHeight reports the full content
-  // height even while the CSS cap is applied, so one measurement path
-  // serves both states.
-  useLayoutEffect(() => {
-    const el = textRef.current;
-    if (!el) return;
-    const measure = () => {
-      const lineHeight = parseFloat(window.getComputedStyle(el).lineHeight);
-      if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
-      // Half-line tolerance: an exactly-threshold-height message must
-      // NOT collapse, and integer scrollHeight rounding must not flip it.
-      setCanCollapse(
-        el.scrollHeight >
-          lineHeight * USER_COLLAPSE_THRESHOLD_LINES + lineHeight / 2,
-      );
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [content]);
-
-  const collapsed = canCollapse && !expanded;
-  const segments = splitTerminalBlocks(content);
-  return (
-    <>
-      <span
-        ref={textRef}
-        className={`user-msg-text whitespace-pre-wrap break-words${
-          collapsed ? " is-collapsed" : ""
-        }`}
-      >
-        {segments.length === 1 && segments[0]!.kind === "text"
-          ? content
-          : segments.map((s, i) =>
-              s.kind === "terminal" ? (
-                <span key={i} className="user-msg-terminal" data-testid="user-msg-terminal">
-                  {s.text}
-                </span>
-              ) : (
-                <span key={i}>{s.text}</span>
-              ),
-            )}
-      </span>
-      {canCollapse ? (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={(e) => {
-            const btn = e.currentTarget;
-            const willCollapse = expanded;
-            setExpanded(!expanded);
-            // Collapsing a very long message pulls the toggle up — keep
-            // it (and the message tail the user was at) in view with the
-            // minimal scroll. Never fired on expand, so reading position
-            // is preserved there.
-            if (willCollapse) {
-              requestAnimationFrame(() =>
-                btn.scrollIntoView?.({ block: "nearest" }),
-              );
-            }
-          }}
-          className="user-msg-toggle focus-ring"
-        >
-          {expanded ? t("msg.showLess") : t("msg.showMore")}
-        </button>
-      ) : null}
-    </>
-  );
-}
-
-// Phase 7 — per-message timestamp. The data was always on the message
-// (created_at) but never rendered, so a long conversation gave no sense
-// of when anything happened.
-//
-// Compact by design: time-only for today ("14:32"), date + time once
-// it's older, with the FULL localized timestamp on hover/screen-reader
-// via <time title>. Rendered in the browser's local zone (Asia/Bangkok
-// for these users) because toLocaleTimeString resolves the host zone —
-// the server stores UTC.
-export function formatMessageTime(
-  createdAt: string | undefined,
-  locale: string,
-  now: Date = new Date(),
-): { short: string; full: string } | null {
-  if (!createdAt) return null;
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return null;
-  const tag = locale === "th" ? "th-TH" : "en-US";
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  const time = d.toLocaleTimeString(tag, {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const short = sameDay
-    ? time
-    : `${d.toLocaleDateString(tag, { day: "numeric", month: "short" })} ${time}`;
-  return { short, full: d.toLocaleString(tag) };
-}
-
-function MessageTime({ createdAt }: { createdAt?: string }) {
-  const locale = useI18nStore((s) => s.locale);
-  const parts = formatMessageTime(createdAt, locale);
-  if (!parts) return null;
-  return (
-    <time
-      dateTime={createdAt}
-      title={parts.full}
-      className="ml-2 text-[11px] text-text-muted"
-      data-testid="message-time"
-    >
-      {parts.short}
-    </time>
-  );
-}
+// The time under a message and its format live in MessageParts; tests and
+// callers keep importing the format from here.
+export { formatMessageTime } from "./MessageParts";
 
 // Subtle per-message metadata: "GPT-4o · 342 tokens · 1.2s". Tokens
 // come from the message_complete SSE frame (persisted server-side, so
@@ -907,11 +732,12 @@ function StopReasonNotice({ reason, toolRounds, onContinue }: { reason: keyof ty
       ? toolRounds ? t("msg.stopToolLimit", { n: String(toolRounds) }) : t("msg.stopToolLimitNoCount")
       : t(STOP_REASON_NOTICE_KEY[reason]);
   return (
-    <div
+    <NoteCard
+      tone="warning"
       role="note"
       data-testid="stop-reason-notice"
       data-stop-reason={reason}
-      className="mt-1 flex flex-wrap items-center gap-2 rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-text-secondary"
+      className="flex flex-wrap items-center gap-2"
     >
       <span>{text}</span>
       {reason === "tool_use" && onContinue ? (
@@ -924,7 +750,7 @@ function StopReasonNotice({ reason, toolRounds, onContinue }: { reason: keyof ty
           {t("msg.continue")}
         </button>
       ) : null}
-    </div>
+    </NoteCard>
   );
 }
 
@@ -956,88 +782,57 @@ function ErrorNotice({
     ? outputLimitAlternative(switchFromModel, models) : null;
   const hasAttempts = Array.isArray(attempts) && attempts.length > 0;
   return (
-    <div
-      role="alert"
-      className="mt-1 rounded-lg border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-sm text-status-danger"
-    >
-      <div className="flex items-start gap-2">
-        <WarningIcon />
-        <span className="leading-snug">{message}</span>
-      </div>
-      {alternative && convId ? (
-        <button
-          type="button"
-          disabled={switching}
-          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline disabled:opacity-50"
-          onClick={async () => {
-            setSwitching(true);
-            try { await setConversationModel(convId, alternative.id); }
-            catch { toast(t("chat.toast.modelChangeFailed")); }
-            finally { setSwitching(false); }
-          }}
-        >
-          <ArrowRightLeft size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 break-words">{t("error.switchModel", { model: alternative.name || alternative.id })}</span>
-        </button>
-      ) : null}
-      {onRetry ? (
-        <button
-          type="button"
-          data-testid="retry-interrupted"
-          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline"
-          onClick={onRetry}
-        >
-          <RotateCcw size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 break-words">{t("common.retry")}</span>
-        </button>
-      ) : null}
-      {offerNewMessage ? (
-        <button
-          type="button"
-          data-testid="new-message-instead"
-          className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline"
-          onClick={() => focusComposer()}
-        >
-          <PenLine size={14} className="shrink-0" aria-hidden="true" />
-          <span className="min-w-0 break-words">{t("error.sendNewMessage")}</span>
-        </button>
-      ) : null}
-      {referenceId ? (
-        <div className="mt-1.5 flex max-w-full items-center gap-1.5 pl-6 text-[11px] text-status-danger/80" data-testid="error-reference">
-          <span>{t("error.referenceId")}</span>
-          <code className="min-w-0 select-all break-all font-mono">{referenceId}</code>
-          <button
-            type="button"
-            aria-label={t("error.copyReference")}
-            title={t("error.copyReference")}
-            className="inline-flex shrink-0 items-center rounded p-0.5 hover:bg-status-danger/10"
-            onClick={async () => {
-              const ok = await copyTextToClipboard(referenceId);
-              toast(t(ok ? "error.referenceCopied" : "toast.copyFailed"));
-            }}
-          >
-            <Copy size={12} aria-hidden="true" />
-          </button>
-        </div>
-      ) : null}
-      {hasAttempts ? (
-        <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">
-          <summary className="cursor-pointer select-none">
-            {t("msg.attempts", { n: String(attempts!.length) })}
-          </summary>
-          <ul className="mt-1 space-y-0.5">
-            {attempts!.map((a, i) => (
-              <li key={i}>
-                {a.model ?? a.provider ?? "model"}
-                {a.status === "success"
-                  ? ` — ${t("msg.attemptOk")}`
-                  : ` — ${a.error_code ? localizeErrorCode(a.error_code) : t("msg.attemptFail")}`}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-    </div>
+    <ErrorCard
+      message={message}
+      referenceId={referenceId}
+      actions={
+        <>
+          {alternative && convId ? (
+            <ErrorCardAction
+              disabled={switching}
+              icon={<ArrowRightLeft size={14} className="shrink-0" aria-hidden="true" />}
+              onClick={async () => {
+                setSwitching(true);
+                try { await setConversationModel(convId, alternative.id); }
+                catch { toast(t("chat.toast.modelChangeFailed")); }
+                finally { setSwitching(false); }
+              }}
+            >
+              {t("error.switchModel", { model: alternative.name || alternative.id })}
+            </ErrorCardAction>
+          ) : null}
+          {onRetry ? (
+            <ErrorCardAction testId="retry-interrupted" icon={<RotateCcw size={14} className="shrink-0" aria-hidden="true" />} onClick={onRetry}>
+              {t("common.retry")}
+            </ErrorCardAction>
+          ) : null}
+          {offerNewMessage ? (
+            <ErrorCardAction testId="new-message-instead" icon={<PenLine size={14} className="shrink-0" aria-hidden="true" />} onClick={() => focusComposer()}>
+              {t("error.sendNewMessage")}
+            </ErrorCardAction>
+          ) : null}
+        </>
+      }
+      detail={
+        hasAttempts ? (
+          <details className="mt-1.5 pl-6 text-[11px] text-status-danger/80">
+            <summary className="cursor-pointer select-none">
+              {t("msg.attempts", { n: String(attempts!.length) })}
+            </summary>
+            <ul className="mt-1 space-y-0.5">
+              {attempts!.map((a, i) => (
+                <li key={i}>
+                  {a.model ?? a.provider ?? "model"}
+                  {a.status === "success"
+                    ? ` — ${t("msg.attemptOk")}`
+                    : ` — ${a.error_code ? localizeErrorCode(a.error_code) : t("msg.attemptFail")}`}
+                </li>
+              ))}
+            </ul>
+          </details>
+        ) : null
+      }
+    />
   );
 }
 
@@ -1130,93 +925,8 @@ function ImageAttachFailedNotice({ filenames }: { filenames: string[] }) {
   );
 }
 
-function WarningIcon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="mt-0.5 shrink-0"
-      aria-hidden="true"
-    >
-      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-      <line x1="12" y1="9" x2="12" y2="13" />
-      <line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  );
-}
-
-function ActionButton({
-  ariaLabel,
-  onClick,
-  children,
-  tone = "muted",
-}: {
-  ariaLabel: string;
-  onClick: () => void;
-  children: React.ReactNode;
-  tone?: "muted" | "success";
-}) {
-  const colorClass =
-    tone === "success"
-      ? "text-status-success"
-      : "text-text-muted hover:text-text-secondary";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      className={`focus-ring tap-44 rounded p-1.5 transition-colors hover:bg-bg-elevated ${colorClass}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-// Icon set — Lucide-style 18px / stroke-1.5 stroke icons. All four
-// share weight + cap so the assistant action row reads as one row
-// of related controls instead of a grab-bag of paths.
-function CopyIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <rect x="9" y="9" width="13" height="13" rx="2" />
-      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
-    </svg>
-  );
-}
-function CheckIcon() {
-  return (
-    <svg
-      width={18}
-      height={18}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden
-    >
-      <path d="M5 13l4 4L19 7" />
-    </svg>
-  );
-}
+// Icon set — Lucide-style stroke icons, the same weight + cap as the copy
+// and check icons in MessageParts.
 function EditIcon() {
   return (
     <svg

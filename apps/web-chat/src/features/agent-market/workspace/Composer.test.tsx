@@ -4,7 +4,7 @@
 //   * the agent's photo_notice shows under the chips while a photo (.jpg,
 //     .jpeg, .png) is attached — never for a PDF, never for an agent
 //     without a notice — and it does not block sending.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { upload } = vi.hoisted(() => ({ upload: vi.fn() }));
@@ -94,7 +94,9 @@ describe("Composer", () => {
     await waitFor(() => expect(send.disabled).toBe(false));
     expect(screen.getByTestId("am-photo-notice")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "เอาไฟล์ receipt.JPG ออก" }));
+    // AM5: the chip is the chat's file card; its remove button is the chat's
+    const photo = screen.getAllByTestId("am-staged-chip").find((c) => c.getAttribute("data-name") === "receipt.JPG")!;
+    fireEvent.click(within(photo).getByRole("button", { name: "นำไฟล์ออก" }));
     expect(screen.queryByTestId("am-photo-notice")).toBeNull();
   });
 

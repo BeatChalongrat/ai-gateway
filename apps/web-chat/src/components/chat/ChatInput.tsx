@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { useComposerHeightProbe } from "@/hooks/useBottomInset";
 import { useDismissable } from "@/hooks/useDismissable";
 
 import { BrainCircuit, Clapperboard, ImagePlus } from "lucide-react";
@@ -34,7 +33,6 @@ import {
 import { gateImagesForVision, modelAcceptsImages, offerVisionSwitch, visionAlternative } from "@/lib/visionGate";
 import { detectImageIntent } from "@/lib/imageIntent";
 import { tOutside, useT } from "@/lib/i18n";
-import { shouldSendOnEnter } from "@/lib/keyboard";
 import {
   applySlashAvailability,
   filterSlashCommands,
@@ -47,7 +45,6 @@ import {
   EDIT_MESSAGE_EVENT,
   VOICE_TOGGLE_EVENT,
   lastEditableUserMessageId,
-  maxTextareaHeight,
   shouldEditLastOnArrowUp,
 } from "@/lib/composerShortcuts";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
@@ -56,6 +53,7 @@ import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 import { useVoiceStore } from "@/stores/voiceStore";
 
+import { ComposerFrame } from "./ComposerFrame";
 import { FilePreviewCard } from "./FilePreviewCard";
 import { FolderChip } from "./FolderChip";
 import { KBSelector } from "./KBSelector";
@@ -369,16 +367,12 @@ export function ChatInput({
   // workspace default ceiling lives in admin settings. Tier = a ceiling,
   // never a forced band — Auto picks the cheapest adequate model itself.
   const isAutoModel = activeModelId === AUTO_MODEL_ID || !activeModelId;
-  const [isMobile, setIsMobile] = useState(false);
-  // Distance (px) the on-screen keyboard is occluding the bottom of
-  // the layout viewport. Updated from visualViewport.resize so the
-  // composer floats just above the keyboard on iOS / Android.
-  const [keyboardInset, setKeyboardInset] = useState(0);
+  // AM5 — the box itself (the docked root, the pill, the text box and how
+  // far it grows, the keyboard inset, the IME guard, send/stop) is
+  // ComposerFrame, which an agent's workspace renders too. What stays here
+  // is what only the chat has.
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // FIX86 — the ONE producer of the vertical axis: whatever this box
-  // measures, every bottom-floating element sits above it.
-  const composerRootRef = useRef<HTMLDivElement>(null);
   // FIX89 Part B — the "+" is a MENU on the desktop, where connectors exist:
   // attach files, or open the connectors page (Claude reaches its connector
   // directory from the composer the same way). In a plain browser there is no
@@ -387,13 +381,6 @@ export function ChatInput({
   // straight to the file picker.
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
-  useComposerHeightProbe(composerRootRef);
-  // Explicit IME composition tracking (Phase 4, Thai IME). WebView2's native
-  // KeyboardEvent.isComposing can be unreliable in an embedded control, so we
-  // also track composition via compositionstart/end and OR it into the
-  // Enter-to-send guard. This guarantees Enter during composition commits the
-  // candidate rather than submitting a half-formed word.
-  const composingRef = useRef(false);
 
   // ── Voice input ────────────────────────────────────────────
   // Two hooks because the user can flip the input method in voice
@@ -417,78 +404,9 @@ export function ChatInput({
     voiceInputMethod === "whisper" ||
     (voiceInputMethod === "web-speech" && !webSpeech.isSupported);
   const voiceSupported = useWhisperPath ? whisper.isSupported : webSpeech.isSupported;
-  // FIX89 Part A — the cap is a relationship, not two magic numbers: about
-  // half of the window the composer is actually in, minus the composer's own
-  // chrome, floored at what the cap used to be so it can only grow. Measured
-  // here (not assumed) and re-measured whenever the window or the chrome
-  // changes; `visualViewport` is what shrinks when a soft keyboard opens.
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [chromeHeight, setChromeHeight] = useState(0);
-  const maxTextareaHeightPx = maxTextareaHeight(viewportHeight, chromeHeight, isMobile);
   const closeAttachMenu = useCallback(() => setAttachMenuOpen(false), []);
   useDismissable(attachMenuRef, attachMenuOpen, closeAttachMenu);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const vv = window.visualViewport;
-    const sync = () => setViewportHeight(vv?.height ?? window.innerHeight);
-    sync();
-    window.addEventListener("resize", sync);
-    vv?.addEventListener("resize", sync);
-    return () => {
-      window.removeEventListener("resize", sync);
-      vv?.removeEventListener("resize", sync);
-    };
-  }, []);
-
-  // The chrome around the text area (toolbar row, padding, chips): the box's
-  // height minus the text area's. A ResizeObserver keeps it live, so a second
-  // row of attachment chips takes its room out of the text area's share
-  // rather than pushing the box past half the window.
-  useEffect(() => {
-    const root = composerRootRef.current;
-    const ta = taRef.current;
-    if (!root || !ta || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      const next = Math.max(0, Math.round(root.getBoundingClientRect().height - ta.getBoundingClientRect().height));
-      setChromeHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(root);
-    ro.observe(ta);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mql = window.matchMedia("(max-width: 639px)");
-    const sync = () => setIsMobile(mql.matches);
-    sync();
-    mql.addEventListener("change", sync);
-    return () => mql.removeEventListener("change", sync);
-  }, []);
-
-  // visualViewport tracks the layout-viewport overlap with the
-  // soft keyboard on mobile. When it shrinks, the difference vs
-  // window.innerHeight is the keyboard overlay height — push the
-  // composer up by that amount so the textarea stays visible.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const sync = () => {
-      const overlap = window.innerHeight - vv.height - vv.offsetTop;
-      setKeyboardInset(Math.max(0, overlap));
-    };
-    sync();
-    vv.addEventListener("resize", sync);
-    vv.addEventListener("scroll", sync);
-    return () => {
-      vv.removeEventListener("resize", sync);
-      vv.removeEventListener("scroll", sync);
-    };
-  }, []);
   // Render bucket: when conversationId is present, follow it; when
   // it's null we read from the DRAFT bucket so files staged before
   // ensureConv resolves still produce chips. Both buckets carry the
@@ -516,14 +434,6 @@ export function ChatInput({
   // whenever the resolved model supports it. The ThinkingBlock in
   // MessageBubble still renders the reasoning output whenever the model
   // produces it — display is preserved, the manual toggle is removed.
-
-  // Auto-grow up to the device's max line count.
-  useEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, maxTextareaHeightPx)}px`;
-  }, [text, maxTextareaHeightPx]);
 
   useEffect(() => {
     if (!injectedText) return;
@@ -859,7 +769,8 @@ export function ChatInput({
     taRef.current?.focus();
   }
 
-  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  /** The keys the chat handles before the frame's Enter-to-send. */
+  function onKeyDownFirst(e: React.KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean {
     // Slash menu owns the arrow keys + Enter while it is open, so the
     // user can drive it without leaving the keyboard. Esc closes it by
     // clearing the token (the menu is derived from the text).
@@ -867,28 +778,28 @@ export function ChatInput({
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setSlashIndex((i) => (slashCommands.length ? (i + 1) % slashCommands.length : 0));
-        return;
+        return true;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         setSlashIndex((i) =>
           slashCommands.length ? (i - 1 + slashCommands.length) % slashCommands.length : 0,
         );
-        return;
+        return true;
       }
       if (e.key === "Escape") {
         e.preventDefault();
         setText("");
-        return;
+        return true;
       }
       if ((e.key === "Enter" || e.key === "Tab") && slashCommands.length > 0) {
         const native = e.nativeEvent as KeyboardEvent;
         // Still respect the IME guard (Phase 7): during composition
         // Enter commits a candidate and must not run a command.
-        if (e.key === "Enter" && (native.isComposing || native.keyCode === 229 || composingRef.current)) return;
+        if (e.key === "Enter" && (native.isComposing || native.keyCode === 229 || composing)) return true;
         e.preventDefault();
         runSlashCommand(slashCommands[Math.min(slashIndex, slashCommands.length - 1)]);
-        return;
+        return true;
       }
     }
 
@@ -913,25 +824,10 @@ export function ChatInput({
       if (messageId) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent(EDIT_MESSAGE_EVENT, { detail: { messageId } }));
-        return;
+        return true;
       }
     }
-
-    // Phase 7 — the IME composition guard lives in shouldSendOnEnter:
-    // during composition Enter commits the candidate and must NOT send.
-    const native = e.nativeEvent as KeyboardEvent;
-    if (
-      shouldSendOnEnter({
-        key: e.key,
-        shiftKey: e.shiftKey,
-        // OR in the explicitly-tracked composition state (WebView2 robustness).
-        isComposing: native.isComposing || composingRef.current,
-        keyCode: native.keyCode,
-      })
-    ) {
-      e.preventDefault();
-      submit();
-    }
+    return false;
   }
 
   // ── File upload pipeline ─────────────────────────────────
@@ -1194,22 +1090,33 @@ export function ChatInput({
   }
 
   return (
-    <div
-      ref={composerRootRef}
-      data-testid="composer-root"
-      className="safe-bottom bg-bg-base px-3 py-3 md:px-6 md:py-4"
-      style={
-        keyboardInset > 0
-          ? { transform: `translateY(-${keyboardInset}px)`, transition: "transform 150ms ease-out" }
-          : undefined
+    <ComposerFrame
+      textareaRef={taRef}
+      value={text}
+      onChange={setText}
+      disabled={disabled}
+      placeholder={
+        streaming
+          ? t("input.placeholder.streaming")
+          : isReadingDocument
+            ? t("input.placeholder.reading")
+            : isUploading
+              ? t("input.placeholder.uploading")
+              : imageMode
+              ? t("input.placeholder.image")
+              : t("input.placeholder")
       }
-    >
-      <div className="mx-auto flex w-full max-w-chat flex-col gap-2">
-        {/* Recording mode replaces the composer pill with a
-            full-width recording bar. Same outer container — the
-            decision is purely render-level so flex/scroll constraints
-            from the parent don't shift. */}
-        {isRecording || whisper.isTranscribing ? (
+      streaming={streaming}
+      canSend={canSend}
+      onSubmit={submit}
+      onStop={onStop}
+      onKeyDownFirst={onKeyDownFirst}
+      /* Recording mode replaces the composer pill with a full-width
+         recording bar. Same outer container — the decision is purely
+         render-level so flex/scroll constraints from the parent don't
+         shift. */
+      above={
+        isRecording || whisper.isTranscribing ? (
           <RecordingBar
             transcript={voiceTranscript}
             interimTranscript={voiceInterim}
@@ -1218,25 +1125,11 @@ export function ChatInput({
             stream={null}
             onStop={stopVoice}
           />
-        ) : null}
-
-        {/* Composer pill — Claude-style.
-            Pending files (when any) sit at the top of the pill so the
-            container visibly grows when the user attaches something.
-            Row textarea → row toolbar follows underneath.
-            Decoupling the buttons from the textarea row sidesteps
-            every "send is misaligned with first line" problem — the
-            send button now sits in its own row with its own padding
-            and only competes with the model pill for vertical
-            alignment. */}
-        <div
-          className="relative flex flex-col border border-border bg-bg-surface transition-colors focus-within:border-border-strong"
-          style={{
-            borderRadius: 24,
-            boxShadow: "0 2px 12px rgba(0, 0, 0, 0.18)",
-            display: isRecording || whisper.isTranscribing ? "none" : undefined,
-          }}
-        >
+        ) : null
+      }
+      pillHidden={isRecording || whisper.isTranscribing}
+      pillTop={
+        <>
           {/* Phase 10 — slash quick actions, floating above the pill. */}
           {slashOpen ? (
             <SlashMenu
@@ -1366,350 +1259,221 @@ export function ChatInput({
               {t("input.imageIntent.blocked", { model: activeModel?.name ?? activeModelId ?? "" })}
             </div>
           ) : null}
-
-          {/* Row 1: textarea, full width */}
-          <div className="px-4 pt-3">
-            <textarea
-              ref={taRef}
-              data-shortcut="composer"
-              rows={1}
-              value={text}
-              disabled={disabled}
-              placeholder={
-                streaming
-                  ? t("input.placeholder.streaming")
-                  : isReadingDocument
-                    ? t("input.placeholder.reading")
-                    : isUploading
-                      ? t("input.placeholder.uploading")
-                      : imageMode
-                      ? t("input.placeholder.image")
-                      : t("input.placeholder")
-              }
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={onKeyDown}
-              onCompositionStart={() => {
-                composingRef.current = true;
-              }}
-              onCompositionEnd={() => {
-                composingRef.current = false;
-              }}
-              className="w-full resize-none bg-transparent text-[15px] leading-relaxed text-text-primary placeholder:text-text-placeholder focus:outline-none disabled:opacity-60"
-              style={{
-                maxHeight: maxTextareaHeightPx,
-                transition: "height 100ms ease-out",
-              }}
-            />
-          </div>
-
-          {/* Row 2: attach · folders · permission mode (left) · model + send (right).
-              Left is what you bring INTO the turn and under what rules (content,
-              folders, permission mode); right is how it goes OUT (image/video
-              mode, model, voice, send). FIX25b moved the two desktop controls
-              left for that reason — keep constraints-on-the-turn here. */}
-          <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
-            {/* Left — attach button. The plus mark replaces the
-                paperclip per the Claude reference; same behaviour.
-                Renders even on the landing page where no
-                conversation exists yet — the click handler delegates
-                to handleFiles, which eager-creates a conv via
-                onRequestConversation before kicking off the upload.
-                Hidden only when no upload path is wired (no
-                conversation in props AND no provider callback). */}
-            <div className="flex min-w-0 items-center gap-1.5">
-              {conversationId || onRequestConversation ? (
-                <div className="relative" ref={attachMenuRef}>
+        </>
+      }
+      /* Left — attach button. The plus mark replaces the paperclip per the
+         Claude reference; same behaviour. Renders even on the landing page
+         where no conversation exists yet — the click handler delegates to
+         handleFiles, which eager-creates a conv via onRequestConversation
+         before kicking off the upload. Hidden only when no upload path is
+         wired (no conversation in props AND no provider callback). */
+      attach={
+        conversationId || onRequestConversation
+          ? {
+              label: hosted ? t("input.attachMenu.aria") : acceptsImages ? t("input.attach") : t("input.attachNoImages"),
+              onClick: () => (hosted ? setAttachMenuOpen((v) => !v) : fileInputRef.current?.click()),
+              disabled: streaming || disabled,
+              menu: hosted
+                ? {
+                    open: attachMenuOpen,
+                    containerRef: attachMenuRef,
+                    content: (
+                <div
+                  role="menu"
+                  aria-label={t("input.attachMenu.aria")}
+                  data-testid="attach-menu"
+                  className="popover-appear absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-lg"
+                >
                   <button
                     type="button"
-                    onClick={() => (hosted ? setAttachMenuOpen((v) => !v) : fileInputRef.current?.click())}
-                    aria-label={hosted ? t("input.attachMenu.aria") : acceptsImages ? t("input.attach") : t("input.attachNoImages")}
-                    title={hosted ? t("input.attachMenu.aria") : acceptsImages ? t("input.attach") : t("input.attachNoImages")}
-                    aria-haspopup={hosted ? "menu" : undefined}
-                    aria-expanded={hosted ? attachMenuOpen : undefined}
-                    disabled={streaming || disabled}
-                    data-testid="attach-button"
-                    className="focus-ring tap-44 inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    role="menuitem"
+                    data-testid="attach-menu-files"
+                    className="block w-full px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
                   >
-                    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path
-                        d="M12 5v14M5 12h14"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                    <span className="block font-medium">{t("input.attachMenu.files")}</span>
+                    <span className="block text-xs text-text-muted">{t("input.attachMenu.filesHint")}</span>
                   </button>
-                  {hosted && attachMenuOpen ? (
-                    <div
-                      role="menu"
-                      aria-label={t("input.attachMenu.aria")}
-                      data-testid="attach-menu"
-                      className="popover-appear absolute bottom-full left-0 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-border bg-bg-surface shadow-lg"
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        data-testid="attach-menu-files"
-                        className="block w-full px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
-                        onClick={() => {
-                          setAttachMenuOpen(false);
-                          fileInputRef.current?.click();
-                        }}
-                      >
-                        <span className="block font-medium">{t("input.attachMenu.files")}</span>
-                        <span className="block text-xs text-text-muted">{t("input.attachMenu.filesHint")}</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        data-testid="attach-menu-connectors"
-                        className="block w-full border-t border-border px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
-                        onClick={() => {
-                          setAttachMenuOpen(false);
-                          router.push("/chat/connectors");
-                        }}
-                      >
-                        <span className="block font-medium">{t("input.attachMenu.connectors")}</span>
-                        <span className="block text-xs text-text-muted">{t("input.attachMenu.connectorsHint")}</span>
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {/* FIX25/25b — desktop only: the granted folders and the permission
-                  mode (both render nothing in a plain browser). Control-plane
-                  ops only; the model never sees them. */}
-              {hosted ? (
-                <>
-                  <FolderChip disabled={disabled} />
-                  <PermissionModeSelector disabled={disabled} />
-                </>
-              ) : null}
-            </div>
-
-            {/* Right — KB selector + model selector pill + send/stop.
-                FIX128 D4 — min-w-0 lets this group give way on a 360 px
-                screen (the model label truncates) instead of pushing the
-                send button past the composer's clipped edge. */}
-            <div className="flex min-w-0 items-center gap-1.5">
-              {onKBPick && (kbAvailable || activeKBId) ? (
-                <KBSelector
-                  conversationId={conversationId}
-                  activeKBId={activeKBId ?? null}
-                  onPick={onKBPick}
-                  disabled={streaming}
-                />
-              ) : null}
-              {/* FIX65 — a model that cannot make images has no 🎨 at all.
-                  FIX47.6 kept the button visible-but-disabled so a model
-                  did not look broken; that worry belonged to a picker
-                  that offered every model. Vendor models in the picker
-                  now pass a floor (vision + tools + streaming) and the
-                  operator's own models sit under a group that says what
-                  each one can do, so an absent button is the honest
-                  shape — the same rule as 🎬 below, on both clients (the
-                  desktop renders this page). Typing an image request at
-                  such a model still gets the FIX62 held notice, never a
-                  silent no-op. */}
-              {!streaming && canGenerateImages ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setImageMode((v) => !v);
-                    setVideoMode(false);
-                  }}
-                  aria-label={t("input.imageMode")}
-                  title={t("input.imageMode")}
-                  aria-pressed={imageMode}
-                  disabled={disabled}
-                  data-testid="image-mode-button"
-                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    imageMode
-                      ? "bg-violet-500/15 text-violet-400"
-                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
-                  }`}
-                >
-                  <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
-                </button>
-              ) : null}
-              {!isAutoModel && activeModel && conversationId && !streaming ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!canToggleReasoning) return;
-                    void setConversationReasoning(conversationId, {
-                      reasoning_enabled: !reasoningOn,
-                    });
-                  }}
-                  aria-label={
-                    alwaysThinks
-                      ? t("input.reasoning.alwaysOn")
-                      : canReason
-                        ? t("input.reasoning")
-                        : t("input.reasoning.unsupported")
-                  }
-                  title={
-                    alwaysThinks
-                      ? t("input.reasoning.alwaysOn")
-                      : canReason
-                        ? t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")
-                        : t("input.reasoning.unsupported")
-                  }
-                  aria-pressed={reasoningOn}
-                  aria-disabled={!canToggleReasoning || undefined}
-                  disabled={disabled || !canToggleReasoning}
-                  data-testid="reasoning-toggle"
-                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    reasoningOn
-                      ? "bg-blue-500/15 text-blue-400"
-                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
-                  }`}
-                >
-                  <BrainCircuit className="h-[18px] w-[18px]" aria-hidden />
-                </button>
-              ) : null}
-              {/* FIX9 Part B: video gen isn't wired in the desktop app. FIX34.1
-                  Part F: so the desktop gets NO button, not a disabled one with
-                  a "not available here yet" tooltip — same rule as the web.
-                  FIX65 — and the same rule now covers the MODEL: a model
-                  that cannot drive the video tool has no button either,
-                  like 🎨 above (one rule, both clients). */}
-              {videoFeatureAvailable && canGenerateVideos && !streaming && !hosted ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVideoMode((v) => !v);
-                    setImageMode(false);
-                  }}
-                  aria-label={t("input.videoMode")}
-                  title={t("input.videoMode")}
-                  aria-pressed={videoMode}
-                  disabled={disabled}
-                  data-testid="video-mode-button"
-                  className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    videoMode
-                      ? "bg-rose-500/15 text-rose-400"
-                      : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
-                  }`}
-                >
-                  <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
-                </button>
-              ) : null}
-              <ModelSelector
-                activeModelId={activeModelId}
-                disabled={streaming}
-                compact
-                onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
-                needsVision={pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))}
-              />
-              {voiceSupported && !streaming ? (
-                <button
-                  type="button"
-                  onClick={startVoice}
-                  aria-label={t("input.voice")}
-                  title={t("input.voice")}
-                  disabled={disabled}
-                  className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-                  </svg>
-                </button>
-              ) : null}
-              {/* Send/stop is ONE persistent button whose command, label
-                  and icon swap on ``streaming`` — never two sibling
-                  elements that mount/unmount. Swapping elements dropped
-                  keyboard focus to <body> for mouse-click senders when
-                  the stream started or ended (the focused element left
-                  the DOM), which is exactly the DataTrigger-on-IsStreaming
-                  shape the desktop composer uses on its single Button.
-                  ChatGPT-style send state: when something is typed, the
-                  circle inverts to the foreground colour so the icon pops
-                  without using the accent green; the disabled state stays
-                  muted on the same neutral surface as the composer chrome.
-
-                  FIX75 — the STOP state uses the same inverted fill, from
-                  the same place: the ``composer-send-fill`` class in
-                  globals.css (fill --text-primary, icon --bg-primary,
-                  hover --accent-hover). It used to be the error red
-                  (--error-solid), which is 2.77:1 against the composer
-                  surface in the dark theme (WCAG 1.4.11 wants 3:1) and
-                  spent the failure colour on a routine, reversible action.
-                  One class for both states so they cannot drift apart
-                  again. While streaming, ``stop-halo`` adds a breathing
-                  box-shadow ring (colour and spread only — the button's
-                  box never moves or resizes, so the target stays under
-                  the cursor; static ring under prefers-reduced-motion).
-                  The label and the square icon carry "stop" now that
-                  the colour does not.
-
-                  The disabled state's inline style references the RAW
-                  CSS variables that ``globals.css`` defines under
-                  [data-theme="dark"] and the light-mode root.
-                  ``--bg-base`` / ``--bg-elevated`` only exist as Tailwind
-                  aliases (see tailwind.config.js), so we use
-                  ``--bg-surface-hover`` here. */}
-              <button
-                type="button"
-                onClick={streaming ? onStop : submit}
-                disabled={!streaming && !canSend}
-                aria-label={streaming ? t("input.stop") : t("input.send")}
-                className={`focus-ring tap-44 flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors duration-150 ${
-                  streaming
-                    ? "composer-send-fill stop-halo"
-                    : canSend
-                      ? "composer-send-fill"
-                      : "disabled:cursor-not-allowed"
-                }`}
-                style={
-                  streaming || canSend
-                    ? undefined
-                    : {
-                        background: "var(--bg-surface-hover)",
-                        color: "var(--text-tertiary)",
-                      }
-                }
-              >
-                {streaming ? (
-                  <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                    <rect x="6.5" y="6.5" width="11" height="11" rx="3" />
-                  </svg>
-                ) : (
-                  <svg
-                    width={16}
-                    height={16}
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    aria-hidden
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-testid="attach-menu-connectors"
+                    className="block w-full border-t border-border px-4 py-3 text-left text-sm text-text-primary hover:bg-bg-base"
+                    onClick={() => {
+                      setAttachMenuOpen(false);
+                      router.push("/chat/connectors");
+                    }}
                   >
-                    <path
-                      d="M8 14V2M8 2L3 7M8 2L13 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-
+                    <span className="block font-medium">{t("input.attachMenu.connectors")}</span>
+                    <span className="block text-xs text-text-muted">{t("input.attachMenu.connectorsHint")}</span>
+                  </button>
+                </div>
+                    ),
+                  }
+                : undefined,
+            }
+          : undefined
+      }
+      /* FIX25/25b — desktop only: the granted folders and the permission
+         mode (both render nothing in a plain browser). Control-plane ops
+         only; the model never sees them. Left is what you bring INTO the
+         turn and under what rules; right is how it goes OUT (image/video
+         mode, model, voice, send). */
+      leftTools={
+        hosted ? (
+          <>
+            <FolderChip disabled={disabled} />
+            <PermissionModeSelector disabled={disabled} />
+          </>
+        ) : null
+      }
+      rightTools={
+        <>
+          {onKBPick && (kbAvailable || activeKBId) ? (
+            <KBSelector
+              conversationId={conversationId}
+              activeKBId={activeKBId ?? null}
+              onPick={onKBPick}
+              disabled={streaming}
+            />
+          ) : null}
+          {/* FIX65 — a model that cannot make images has no 🎨 at all.
+              FIX47.6 kept the button visible-but-disabled so a model
+              did not look broken; that worry belonged to a picker
+              that offered every model. Vendor models in the picker
+              now pass a floor (vision + tools + streaming) and the
+              operator's own models sit under a group that says what
+              each one can do, so an absent button is the honest
+              shape — the same rule as 🎬 below, on both clients (the
+              desktop renders this page). Typing an image request at
+              such a model still gets the FIX62 held notice, never a
+              silent no-op. */}
+          {!streaming && canGenerateImages ? (
+            <button
+              type="button"
+              onClick={() => {
+                setImageMode((v) => !v);
+                setVideoMode(false);
+              }}
+              aria-label={t("input.imageMode")}
+              title={t("input.imageMode")}
+              aria-pressed={imageMode}
+              disabled={disabled}
+              data-testid="image-mode-button"
+              className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                imageMode
+                  ? "bg-violet-500/15 text-violet-400"
+                  : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+              }`}
+            >
+              <ImagePlus className="h-[18px] w-[18px]" aria-hidden />
+            </button>
+          ) : null}
+          {!isAutoModel && activeModel && conversationId && !streaming ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (!canToggleReasoning) return;
+                void setConversationReasoning(conversationId, {
+                  reasoning_enabled: !reasoningOn,
+                });
+              }}
+              aria-label={
+                alwaysThinks
+                  ? t("input.reasoning.alwaysOn")
+                  : canReason
+                    ? t("input.reasoning")
+                    : t("input.reasoning.unsupported")
+              }
+              title={
+                alwaysThinks
+                  ? t("input.reasoning.alwaysOn")
+                  : canReason
+                    ? t(reasoningOn ? "input.reasoning.on" : "input.reasoning.off")
+                    : t("input.reasoning.unsupported")
+              }
+              aria-pressed={reasoningOn}
+              aria-disabled={!canToggleReasoning || undefined}
+              disabled={disabled || !canToggleReasoning}
+              data-testid="reasoning-toggle"
+              className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                reasoningOn
+                  ? "bg-blue-500/15 text-blue-400"
+                  : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+              }`}
+            >
+              <BrainCircuit className="h-[18px] w-[18px]" aria-hidden />
+            </button>
+          ) : null}
+          {/* FIX9 Part B: video gen isn't wired in the desktop app. FIX34.1
+              Part F: so the desktop gets NO button, not a disabled one with
+              a "not available here yet" tooltip — same rule as the web.
+              FIX65 — and the same rule now covers the MODEL: a model
+              that cannot drive the video tool has no button either,
+              like 🎨 above (one rule, both clients). */}
+          {videoFeatureAvailable && canGenerateVideos && !streaming && !hosted ? (
+            <button
+              type="button"
+              onClick={() => {
+                setVideoMode((v) => !v);
+                setImageMode(false);
+              }}
+              aria-label={t("input.videoMode")}
+              title={t("input.videoMode")}
+              aria-pressed={videoMode}
+              disabled={disabled}
+              data-testid="video-mode-button"
+              className={`focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                videoMode
+                  ? "bg-rose-500/15 text-rose-400"
+                  : "text-text-muted hover:bg-bg-elevated hover:text-text-primary"
+              }`}
+            >
+              <Clapperboard className="h-[18px] w-[18px]" aria-hidden />
+            </button>
+          ) : null}
+          <ModelSelector
+            activeModelId={activeModelId}
+            disabled={streaming}
+            compact
+            onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
+            needsVision={pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))}
+          />
+          {voiceSupported && !streaming ? (
+            <button
+              type="button"
+              onClick={startVoice}
+              aria-label={t("input.voice")}
+              title={t("input.voice")}
+              disabled={disabled}
+              className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+              </svg>
+            </button>
+          ) : null}
+        </>
+      }
+      footer={
         <p className="text-center text-[11px] text-text-muted">
           {t("input.footer")}
         </p>
-      </div>
-
-      {/* Phase 10 — the cheatsheet the /shortcuts action opens. The
-          global ? / Cmd+/ binding opens the copy mounted by the chat
-          layout; this one keeps the composer self-contained. */}
-      <ShortcutsDialog
-        open={shortcutsOpen}
-        onClose={() => setShortcutsOpen(false)}
-      />
-    </div>
+      }
+      /* Phase 10 — the cheatsheet the /shortcuts action opens. The global
+         ? / Cmd+/ binding opens the copy mounted by the chat layout; this
+         one keeps the composer self-contained. */
+      after={
+        <ShortcutsDialog
+          open={shortcutsOpen}
+          onClose={() => setShortcutsOpen(false)}
+        />
+      }
+    />
   );
 }
 

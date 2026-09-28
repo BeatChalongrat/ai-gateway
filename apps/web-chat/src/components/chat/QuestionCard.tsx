@@ -21,24 +21,52 @@
 //     (whose job is: my own answer to THIS question).
 
 import { MessageCircleQuestion } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { useT } from "@/lib/i18n";
 import type { PendingQuestion, QuestionAnswerPayload } from "@/lib/types";
 
 const OTHER = "__other__";
-const MAX_FREE_TEXT = 2000;
+export const MAX_FREE_TEXT = 2000;
+
+/** What a surface's own "Something else" field is given to render with. */
+export interface OtherFieldProps {
+  id: string;
+  value: string;
+  /** Why the value cannot go out yet — shown once the person has left the
+   *  field or tried to answer; null before that, and when the value is fine. */
+  problem: string | null;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onChange: (value: string) => void;
+  onBlur: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+}
+
+/** AM5 — a question whose "Something else" is a value of a kind (an amount,
+ *  a tax ID, a date): the surface that asks it brings the field and the
+ *  check; the card is the same card. An invalid value gets its reason in
+ *  line and the card does not send until it is fixed. */
+export interface OtherField {
+  check: (text: string) => string | null;
+  render: (props: OtherFieldProps) => ReactNode;
+}
 
 export function QuestionCard({
   question,
+  others,
   onAnswer,
 }: {
   question: PendingQuestion;
+  /** Per question (same order): its own "Something else" field, or null for the plain text box. */
+  others?: Array<OtherField | null>;
   onAnswer: (answer: QuestionAnswerPayload) => void;
 }) {
   const t = useT();
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [otherText, setOtherText] = useState<Record<number, string>>({});
+  const [left, setLeft] = useState<Record<number, boolean>>({});
+  const [tried, setTried] = useState(false);
+  const otherRefs = useRef<Record<number, HTMLInputElement | null>>({});
   const [reply, setReply] = useState("");
   const [replyOpen, setReplyOpen] = useState(false);
   const [sent, setSent] = useState(false);
@@ -62,12 +90,27 @@ export function QuestionCard({
     return out;
   };
 
+  /** Why question qi's own field cannot go out yet (null: fine, or nothing typed). */
+  const problemOf = (qi: number): string | null => {
+    const other = others?.[qi];
+    if (!other || !(picked[qi] ?? []).includes(OTHER)) return null;
+    const txt = (otherText[qi] ?? "").trim();
+    if (!txt) return null; // unanswered: the every-question rule below already holds the card
+    return other.check(txt);
+  };
+
   const replyText = reply.trim().slice(0, MAX_FREE_TEXT);
   const allAnswered = question.questions.every((_, qi) => answerOf(qi).length > 0);
   const canSubmit = !sent && (replyText.length > 0 || allAnswered);
 
   const submit = () => {
     if (!canSubmit) return;
+    const bad = question.questions.findIndex((_, qi) => problemOf(qi) !== null);
+    if (bad >= 0) {
+      setTried(true);
+      otherRefs.current[bad]?.focus();
+      return;
+    }
     setSent(true);
     const answers: Record<string, string[]> = {};
     question.questions.forEach((q, qi) => {
@@ -194,6 +237,7 @@ export function QuestionCard({
       // nothing is the FIX92 defect waiting to happen in reverse.
       className="my-2 rounded-xl border border-border bg-bg-surface px-4 py-3 shadow-lg focus:outline-none"
       data-testid="question-card"
+      data-typed={others?.some(Boolean) ? "true" : undefined}
       data-prompt-id={question.promptId}
       data-active-question={activeQi}
     >
@@ -219,6 +263,7 @@ export function QuestionCard({
         // readable. Nothing about which question is active changes here;
         // this is the same activeQi the keys already used.
         const back = many && qi !== activeQi && !sent;
+        const own = others?.[qi] ?? null;
         return (
           <fieldset key={qi} className="mt-3" data-testid="question-item" data-active={many && qi === activeQi ? "true" : undefined} disabled={sent}>
             <legend className={`flex flex-wrap items-center gap-2 text-sm ${back ? "text-text-secondary" : "text-text-primary"}`}>
@@ -280,7 +325,24 @@ export function QuestionCard({
                 </span>
                 <span className="font-medium">{t("question.other")}</span>
               </button>
-              {otherOn ? (
+              {otherOn && own ? (
+                own.render({
+                  id: `${question.promptId}-${qi}`,
+                  value: otherText[qi] ?? "",
+                  problem: tried || left[qi] ? problemOf(qi) : null,
+                  inputRef: (el) => {
+                    otherRefs.current[qi] = el;
+                  },
+                  onChange: (v) => setOtherText((p) => ({ ...p, [qi]: v })),
+                  onBlur: () => setLeft((p) => (p[qi] ? p : { ...p, [qi]: true })),
+                  onKeyDown: (e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      submit();
+                    }
+                  },
+                })
+              ) : otherOn ? (
                 <input
                   type="text"
                   autoFocus

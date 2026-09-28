@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react";
 
-import { AlertTriangle, Download, Eye } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 
 import { api } from "@/lib/api";
 import { isUnreadable, unreadableMessageKey } from "@/lib/fileExtraction";
@@ -20,7 +20,7 @@ import { downloadFromObjectUrl, formatBytes, isImageMime } from "@/lib/fileUtil"
 import { useT } from "@/lib/i18n";
 import type { FileAttachment } from "@/lib/types";
 import { openLightbox } from "@/components/ui/ImageLightbox";
-import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { AttachmentCard } from "./AttachmentCard";
 import { AuthedImage } from "./AuthedImage";
 import { previewKindFor, useFilePreviewOpener } from "./FilePreviewModal";
 import { VideoPlayer } from "./VideoPlayer";
@@ -146,13 +146,9 @@ function ImageThumb({ file }: { file: FileAttachment }) {
 // (api.downloadFile), whose 401 → refresh → retry survives
 // portal_access_token expiry where a bare <a download> could not.
 //
-// FIX110 — the name has opened the preview since Phase 10, but nothing
-// said so: no label, no icon, and the hover tint was shared with the
-// download button, so "download only" was a fair reading of the card.
-// The size line now ends with "· Open" (an eye) for a file the viewer can
-// show; for one it cannot (previewKindFor → unsupported) the name simply
-// downloads — no affordance that leads to "no preview for this type".
-// Same height either way: the second line already existed.
+// The card itself is AttachmentCard (an agent's workspace shows the files a
+// person sent with the same one); what is the chat's is how a file is
+// previewed and fetched.
 function FileCard({
   file,
   onPreview,
@@ -172,61 +168,28 @@ function FileCard({
     }
   };
   return (
-    <div className="group flex w-full max-w-[300px] items-center gap-1 rounded-lg border border-border bg-bg-secondary pr-1 transition-colors hover:border-border-strong hover:bg-bg-elevated">
-      <button
-        type="button"
-        onClick={previewable ? onPreview : () => void download()}
-        disabled={!previewable && busy}
-        data-testid={previewable ? "file-card-preview" : "file-card-name-download"}
-        className="focus-ring flex min-w-0 flex-1 items-center gap-3 p-3 text-left"
-        title={previewable ? `${t("common.open")} · ${file.filename}` : file.filename}
-      >
-        <FileTypeBadge
-          filename={file.filename}
-          contentType={file.content_type}
-          size="md"
-          className="shrink-0"
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-text-primary">
-            {file.filename}
+    <AttachmentCard
+      filename={file.filename}
+      contentType={file.content_type}
+      sizeBytes={file.file_size_bytes}
+      onOpen={previewable ? onPreview : undefined}
+      onDownload={() => void download()}
+      busy={busy}
+      downloadLabel={`Download ${file.filename}`}
+      note={
+        /* FIX131 — a file the server could not read says so on the
+           sent message too (after a reload), and why. */
+        isUnreadable(file.extraction_status, file.filename) ? (
+          <span
+            data-testid="file-card-unreadable"
+            data-reason={file.unreadable_reason ?? "unknown"}
+            className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-status-warning"
+          >
+            <AlertTriangle className="mt-px h-3 w-3 flex-shrink-0" aria-hidden />
+            <span>{t(unreadableMessageKey(file.unreadable_reason))}</span>
           </span>
-          <span className="block text-xs text-text-muted">
-            {formatBytes(file.file_size_bytes)}
-            {previewable ? (
-              <span
-                data-testid="file-card-open-hint"
-                className="ml-1.5 inline-flex items-center gap-0.5 text-text-secondary group-hover:text-text-primary"
-              >
-                · <Eye className="h-3 w-3" aria-hidden />
-                {t("common.open")}
-              </span>
-            ) : null}
-          </span>
-          {/* FIX131 — a file the server could not read says so on the
-              sent message too (after a reload), and why. */}
-          {isUnreadable(file.extraction_status, file.filename) ? (
-            <span
-              data-testid="file-card-unreadable"
-              data-reason={file.unreadable_reason ?? "unknown"}
-              className="mt-0.5 flex items-start gap-1 text-[11px] leading-snug text-status-warning"
-            >
-              <AlertTriangle className="mt-px h-3 w-3 flex-shrink-0" aria-hidden />
-              <span>{t(unreadableMessageKey(file.unreadable_reason))}</span>
-            </span>
-          ) : null}
-        </span>
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        aria-label={`Download ${file.filename}`}
-        data-testid="file-card-download"
-        onClick={() => void download()}
-        className="focus-ring shrink-0 rounded-md p-2 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary disabled:opacity-60"
-      >
-        <Download className="h-4 w-4" aria-hidden />
-      </button>
-    </div>
+        ) : null
+      }
+    />
   );
 }

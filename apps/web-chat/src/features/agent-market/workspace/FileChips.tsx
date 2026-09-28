@@ -1,22 +1,39 @@
 "use client";
 
-import { Camera, X } from "lucide-react";
+// Files in an agent's workspace are the chat's files (AM5): a file being
+// staged is the chat's file card (FilePreviewCard — thumbnail or type badge,
+// upload progress, the reason it failed, remove and try again), a file that
+// was sent is the chat's attachment card (AttachmentCard). What is the
+// agent's own is where a file is fetched from, and the note on photos.
 
-import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
-import { formatBytes } from "@/lib/fileUtil";
+import { useState } from "react";
+import { Camera } from "lucide-react";
 
+import { AttachmentCard } from "@/components/chat/AttachmentCard";
+import { FilePreviewCard } from "@/components/chat/FilePreviewCard";
+
+import { amApi } from "../api";
 import { useAmT } from "../i18n";
-import { cls, Spin } from "../ui";
-import type { Staged } from "./useUploads";
+import { cls, Thai } from "../ui";
+import { toPending, type Staged } from "./useUploads";
 
-/** A sent file: name + size (user messages, late-file cards). */
-export function FileChip({ name, size }: { name: string; size?: number }) {
+/** A sent file (the person's message, a late-file card). With its id it downloads. */
+export function FileChip({ id, name, size }: { id?: string; name: string; size?: number }) {
+  const t = useAmT();
+  const [busy, setBusy] = useState(false);
+  const download = id
+    ? () => {
+        setBusy(true);
+        amApi.downloadFile(id, name).then(
+          () => setBusy(false),
+          () => setBusy(false),
+        );
+      }
+    : undefined;
   return (
-    <span className="inline-flex max-w-full items-center gap-2 rounded-lg border border-border bg-bg-base px-2.5 py-1.5 text-xs text-text-primary">
-      <FileTypeBadge filename={name} size="sm" />
-      <span className="min-w-0 truncate">{name}</span>
-      {typeof size === "number" ? <span className="shrink-0 text-text-muted">{formatBytes(size)}</span> : null}
-    </span>
+    <Thai>
+      <AttachmentCard filename={name} sizeBytes={size} onDownload={download} busy={busy} downloadLabel={t("common.downloadNamed", { name })} />
+    </Thai>
   );
 }
 
@@ -31,38 +48,17 @@ export function PhotoNotice({ text, className }: { text: string; className?: str
   );
 }
 
-/** A file being staged: upload progress, error, remove. */
-export function StagedChip({ item, onRemove }: { item: Staged; onRemove: () => void }) {
-  const t = useAmT();
+/** A file being staged: upload progress, error, remove, try again. */
+export function StagedChip({ item, onRemove, onRetry }: { item: Staged; onRemove: () => void; onRetry?: () => void }) {
   return (
-    <span
-      className={cls(
-        "inline-flex max-w-full items-center gap-2 rounded-lg border bg-bg-base py-1.5 pl-2.5 pr-1 text-xs",
-        item.status === "error" ? "border-status-danger/50" : "border-border",
-      )}
-      data-testid="am-staged-chip"
-      data-status={item.status}
-    >
-      <FileTypeBadge filename={item.name} size="sm" />
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate text-text-primary">{item.name}</span>
-        <span className={cls("truncate", item.status === "error" ? "text-status-danger" : "text-text-muted")}>
-          {item.status === "uploading"
-            ? t("composer.uploading", { pct: String(item.progress) })
-            : item.status === "error"
-              ? item.error
-              : formatBytes(item.size)}
-        </span>
-      </span>
-      {item.status === "uploading" ? <Spin size={13} /> : null}
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={t("composer.removeFile", { name: item.name })}
-        className="focus-ring inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-bg-elevated hover:text-text-primary"
-      >
-        <X width={13} height={13} aria-hidden />
-      </button>
-    </span>
+    <div className="contents" data-testid="am-staged-chip" data-status={item.status} data-name={item.name}>
+      <Thai>
+        <FilePreviewCard
+          pending={toPending(item)}
+          onRemove={onRemove}
+          onRetry={item.status === "error" && item.retryable !== false ? onRetry : undefined}
+        />
+      </Thai>
+    </div>
   );
 }

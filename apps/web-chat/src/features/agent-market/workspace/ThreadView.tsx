@@ -1,16 +1,30 @@
 "use client";
 
-// The agent workspace thread. Same idiom as the app's chat: the person's
-// messages are right-aligned bubbles (bg-bubble-user, rounded 20 px); the
-// agent's side is plain text and cards in the column. Consecutive agent
-// items share one identity tile, the way one assistant turn reads in the
-// mockup (hidden below `sm`, where every pixel goes to the cards).
+// The agent workspace thread is the app's chat thread (AM5): the person's
+// messages are the chat's bubble with the chat's attachment cards and copy
+// on it, the agent's words are the chat's answer body with copy and the
+// time under it, a failed turn is the chat's failed-turn card, a state the
+// person should know about is the chat's note. They are the same components
+// (components/chat/MessageParts), not look-alikes. On top of that surface
+// sit the things only an agent has: the greeting, question cards, the
+// progress of a round, its files and numbers, round dividers.
 
 import Link from "next/link";
 import { useState } from "react";
 import { Check } from "lucide-react";
 
 import { Markdown } from "@/components/chat/Markdown";
+import {
+  AssistantProse,
+  CollapsibleUserText,
+  CopyAction,
+  ErrorCard,
+  MessageTime,
+  NoteCard,
+  UserMessageRow,
+  UserTextPill,
+  useCopyText,
+} from "@/components/chat/MessageParts";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
@@ -26,7 +40,7 @@ import type {
   UserFilesPayload,
   UserTextPayload,
 } from "../types";
-import { AgentTile, BTN_SMALL, cls, DOT, Spin } from "../ui";
+import { BTN_SMALL, cls, DOT, Spin, Thai } from "../ui";
 import { RunExceptions } from "../exceptions/ExceptionsPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { settingsHref, useWorkspace } from "./context";
@@ -83,27 +97,25 @@ export function ThreadView({ items }: { items: ThreadItem[] }) {
 }
 
 export function ThreadItems({ items }: { items: ThreadItem[] }) {
-  const ws = useWorkspace();
   const groups = groupItems(items);
   return (
-    <div className="flex flex-col gap-5">
-      {groups.map((g) =>
-        g.side === "user" ? (
-          <UserItem key={g.items[0]!.id} item={g.items[0]!} />
-        ) : (
-          <div key={g.items[0]!.id} className="flex gap-3" data-testid="am-agent-group">
-            <div className="hidden pt-0.5 sm:block">
-              <AgentTile icon={ws?.icon} size={28} />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
+    <Thai>
+      <div className="flex flex-col gap-5">
+        {groups.map((g) =>
+          g.side === "user" ? (
+            <UserItem key={g.items[0]!.id} item={g.items[0]!} />
+          ) : (
+            // Like the chat's answers: in the column, no avatar (the header
+            // already says which agent this is).
+            <div key={g.items[0]!.id} className="flex w-full min-w-0 flex-col gap-3" data-testid="am-agent-group">
               {g.items.map((it) => (
                 <AgentItem key={it.id} item={it} />
               ))}
             </div>
-          </div>
-        ),
-      )}
-    </div>
+          ),
+        )}
+      </div>
+    </Thai>
   );
 }
 
@@ -111,24 +123,35 @@ function UserItem({ item }: { item: ThreadItem }) {
   const p = (item.payload ?? {}) as UserTextPayload & UserFilesPayload;
   const files = item.kind === "user_files" ? p.files ?? [] : [];
   const text = (p.text ?? "").trim();
+  const { copied, copy } = useCopyText(text);
   if (!text && files.length === 0) return null;
   return (
-    <div className="flex w-full justify-end" data-testid="am-user-item" data-item-id={item.id}>
-      <div className="flex max-w-[85%] flex-col items-end gap-1.5">
-        {files.length ? (
-          <div className="flex flex-wrap justify-end gap-1.5">
+    <UserMessageRow
+      data-testid="am-user-item"
+      data-item-id={item.id}
+      attachments={
+        files.length ? (
+          <div className="mt-1 flex flex-col gap-1.5">
             {files.map((f) => (
-              <FileChip key={f.id} name={f.name} size={f.size} />
+              <FileChip key={f.id} id={f.id} name={f.name} size={f.size} />
             ))}
           </div>
-        ) : null}
-        {text ? (
-          <div className="max-w-full whitespace-pre-wrap break-words rounded-bubble bg-bubble-user px-4 py-2.5 text-[15px] leading-relaxed text-text-primary shadow-sm">
-            {text}
+        ) : null
+      }
+      below={
+        text ? (
+          <div className="message-actions flex items-center gap-0.5">
+            <CopyAction copied={copied} onCopy={copy} />
           </div>
-        ) : null}
-      </div>
-    </div>
+        ) : null
+      }
+    >
+      {text ? (
+        <UserTextPill>
+          <CollapsibleUserText content={text} />
+        </UserTextPill>
+      ) : null}
+    </UserMessageRow>
   );
 }
 
@@ -137,7 +160,7 @@ function AgentItem({ item }: { item: ThreadItem }) {
     case "greeting":
       return <Greeting p={(item.payload ?? {}) as GreetingPayload} />;
     case "agent_text":
-      return <AgentText p={(item.payload ?? {}) as AgentTextPayload} />;
+      return <AgentText p={(item.payload ?? {}) as AgentTextPayload} at={item.created_at} />;
     case "notice":
       return <Notice p={(item.payload ?? {}) as NoticePayload} />;
     case "card": {
@@ -196,19 +219,28 @@ function Greeting({ p }: { p: GreetingPayload }) {
   );
 }
 
-function AgentText({ p }: { p: AgentTextPayload }) {
+function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
   const text = p.text ?? "";
+  const { copied, copy } = useCopyText(text);
   if (!text.trim()) return null;
   if (p.tone === "error") {
     return (
-      <div role="alert" className="rounded-xl border border-status-danger/40 bg-status-danger/10 px-4 py-2.5 text-sm text-text-primary" data-testid="am-agent-text" data-tone="error">
-        <div className="whitespace-pre-wrap">{text}</div>
+      <div data-testid="am-agent-text" data-tone="error">
+        <ErrorCard message={<span className="whitespace-pre-wrap">{text}</span>} />
       </div>
     );
   }
   return (
-    <div className="prose-chat w-full text-text-primary" data-testid="am-agent-text">
-      <Markdown>{text}</Markdown>
+    <div className="flex w-full flex-col gap-1.5">
+      <AssistantProse data-testid="am-agent-text">
+        <Markdown>{text}</Markdown>
+      </AssistantProse>
+      <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
+          <CopyAction copied={copied} onCopy={copy} />
+        </div>
+        <MessageTime createdAt={at} />
+      </div>
     </div>
   );
 }
@@ -260,7 +292,7 @@ function WarningNotice({ p, text }: { p: NoticePayload; text: string }) {
     );
   };
   return (
-    <div role="status" className="rounded-xl border border-status-warning/40 bg-status-warning/10 px-4 py-2.5 text-sm text-text-primary" data-testid="am-notice" data-tone="warning">
+    <NoteCard tone="warning" data-testid="am-notice" data-tone="warning">
       <p className="whitespace-pre-wrap">{text}</p>
       {p.action === "resume_budget" && p.run_id ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -275,6 +307,6 @@ function WarningNotice({ p, text }: { p: NoticePayload; text: string }) {
           ) : null}
         </div>
       ) : null}
-    </div>
+    </NoteCard>
   );
 }

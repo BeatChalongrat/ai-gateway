@@ -22,12 +22,20 @@ import {
 } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/Skeleton";
+import { LocaleScope } from "@/lib/i18n";
 
 import { useAmT } from "./i18n";
 import { useAgentMarket } from "./useAgentMarket";
 
 export function cls(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
+}
+
+/** AM5: the app's own components (the composer, a message, a file card, the
+ *  model picker) read in Thai inside Agent Market, whatever the app's
+ *  language — the surface is Thai (AM4) and shows them, not copies of them. */
+export function Thai({ children }: { children: ReactNode }) {
+  return <LocaleScope locale="th">{children}</LocaleScope>;
 }
 
 /** Middle dot separator, kept out of JSX text. */
@@ -147,7 +155,7 @@ export function FeatureGate({ children }: { children: ReactNode }) {
   const { state } = useAgentMarket();
   if (state === "unknown") return <PageSkeleton />;
   if (state !== "available") return <NotAvailable />;
-  return <>{children}</>;
+  return <Thai>{children}</Thai>;
 }
 
 export function ErrorPanel({ message, onRetry, title }: { message: string; onRetry?: () => void; title?: string }) {

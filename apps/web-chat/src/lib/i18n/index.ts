@@ -16,7 +16,7 @@
 // post-hydration re-renders see Thai. The locale change also writes
 // ``lang`` on <html> so screen readers + Google Translate detect it.
 
-import { useEffect } from "react";
+import { createContext, createElement, useContext, useEffect, type ReactNode } from "react";
 import { create } from "zustand";
 
 import { dictionaries, type DictKey, type Locale } from "./dict";
@@ -80,6 +80,24 @@ export const useI18nStore = create<I18nState>((set, get) => ({
   },
 }));
 
+// LocaleScope — a part of the screen that reads in one language whatever
+// the app's language is. A surface written for one audience (a Thai
+// accountant's workspace) renders the shared chat components inside it in
+// its own language instead of keeping translated copies of them. Outside a
+// scope nothing changes: useT follows the store.
+const LocaleScopeContext = createContext<Locale | null>(null);
+
+export function LocaleScope({ locale, children }: { locale: Locale; children: ReactNode }) {
+  return createElement(LocaleScopeContext.Provider, { value: locale }, children);
+}
+
+/** The language this part of the screen reads in: its scope's, else the app's. */
+export function useLocale(): Locale {
+  const scoped = useContext(LocaleScopeContext);
+  const stored = useI18nStore((s) => s.locale);
+  return scoped ?? stored;
+}
+
 // useT — returns the translation function for the active locale.
 // The function falls back to ``en`` for any missing key so a
 // partial Thai dictionary degrades gracefully to English instead
@@ -88,8 +106,9 @@ export const useI18nStore = create<I18nState>((set, get) => ({
 // Optional ``vars`` object substitutes ``{name}``-style placeholders
 // — used by the empty-state greeting which needs the user's name.
 export function useT(): (key: DictKey, vars?: Record<string, string>) => string {
-  const locale = useI18nStore((s) => s.locale);
-  const dict = dictionaries[locale];
+  const scoped = useContext(LocaleScopeContext);
+  const stored = useI18nStore((s) => s.locale);
+  const dict = dictionaries[scoped ?? stored];
   return (key, vars) => {
     const raw = dict[key] ?? dictionaries.en[key] ?? key;
     if (!vars) return raw;

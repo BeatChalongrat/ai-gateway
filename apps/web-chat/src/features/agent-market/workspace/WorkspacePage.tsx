@@ -236,7 +236,7 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
               <ThreadView items={thread.items} />
               {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} /> : null}
             </ThreadScroller>
-            <div className="px-4 md:px-8">
+            <div className="px-4 md:px-10">
               <BudgetBanner installId={installId} refreshKey={progressSig} />
             </div>
             <Composer
@@ -291,7 +291,7 @@ function ThreadScroller({ items, status, children }: { items: ThreadItem[]; stat
         const el = e.currentTarget;
         atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
       }}
-      className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8"
+      className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-10"
       aria-live="polite"
       aria-busy={status === "loading"}
       aria-label={t("ws.threadAria")}

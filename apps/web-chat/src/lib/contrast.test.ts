@@ -131,8 +131,9 @@ describe("FIX44 — bg/text token pairs are readable in both themes", () => {
   const pairs = pairsInSource();
   it("finds the pairs it is meant to police (sanity: the FIX43.1 fixes and a FIX45 tint are among them)", () => {
     expect(pairs.some((p) => p.file.endsWith("UpdateBanner.tsx") && p.bg === "accent" && p.text === "bg-base")).toBe(true);
-    // the error card: bg-status-danger/10 + text-status-danger (MessageBubble)
-    expect(pairs.some((p) => p.file.endsWith("MessageBubble.tsx") && p.bg === "status-danger" && p.alpha === 0.1 && p.text === "status-danger")).toBe(true);
+    // the error card: bg-status-danger/10 + text-status-danger (the chat's
+    // failed-turn card; since AM5 in MessageParts, which an agent's workspace shows too)
+    expect(pairs.some((p) => p.file.endsWith("MessageParts.tsx") && p.bg === "status-danger" && p.alpha === 0.1 && p.text === "status-danger")).toBe(true);
     expect(pairs.length).toBeGreaterThan(20);
   });
 
@@ -228,8 +229,9 @@ describe("FIX75 — solid-filled controls are visible against the surface they s
   const fills = solidControlFills();
 
   it("sees the composer's send/stop fill and the danger buttons", () => {
-    expect(fills.some((f) => f.file.endsWith("ChatInput.tsx") && f.fill === "text-primary")).toBe(true);
-    expect(fills.some((f) => f.file.endsWith("ChatInput.tsx") && f.fill === "status-danger-solid")).toBe(false); // the FIX75 defect
+    // since AM5 the button is ComposerFrame's (the chat and an agent's workspace render it)
+    expect(fills.some((f) => f.file.endsWith("ComposerFrame.tsx") && f.fill === "text-primary")).toBe(true);
+    expect(fills.some((f) => /(ComposerFrame|ChatInput)\.tsx$/.test(f.file) && f.fill === "status-danger-solid")).toBe(false); // the FIX75 defect
     expect(fills.some((f) => f.fill === "status-danger-solid")).toBe(true);
   });
 

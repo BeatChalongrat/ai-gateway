@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { PendingFile } from "@/stores/chatStore";
+
 import { amApi, errorMessage, newClientId } from "../api";
 import { tAm } from "../i18n";
 import type { Manifest } from "../types";
@@ -44,8 +46,25 @@ export interface Staged {
   size: number;
   status: "uploading" | "done" | "error";
   progress: number;
+  /** The file itself: the chip's thumbnail, and what "try again" sends. */
+  file?: File;
   fileId?: string;
   error?: string;
+  /** false: sending the same file again cannot work (a type the agent does not take, too large). */
+  retryable?: boolean;
+}
+
+/** AM5: a staged file as the chat's file card takes it (FilePreviewCard). */
+export function toPending(s: Staged): PendingFile {
+  return {
+    id: s.localId,
+    file: s.file ?? new File([], s.name),
+    serverId: s.fileId,
+    status: s.status === "done" ? "ready" : s.status,
+    progress: s.progress,
+    error: s.error,
+    retryable: s.retryable,
+  };
 }
 
 function extOf(name: string): string {
@@ -84,8 +103,11 @@ export function useUploads(installId: string | null, opts: { accept?: string[]; 
       for (const file of files) {
         const localId = newClientId();
         const reason = rejectReason(file, accept, maxMb);
-        const base: Staged = { localId, name: file.name, size: file.size, status: reason ? "error" : "uploading", progress: 0 };
-        if (reason) base.error = reason;
+        const base: Staged = { localId, name: file.name, size: file.size, status: reason ? "error" : "uploading", progress: 0, file };
+        if (reason) {
+          base.error = reason;
+          base.retryable = false;
+        }
         setItems((cur) => [...cur, base]);
         if (reason) continue;
         const ctrl = new AbortController();
@@ -117,6 +139,16 @@ export function useUploads(installId: string | null, opts: { accept?: string[]; 
     setItems((cur) => cur.filter((s) => s.localId !== localId));
   }, []);
 
+  /** "ลองใหม่" on a failed chip: the same file, sent again as a new chip. */
+  const retry = useCallback(
+    (localId: string) => {
+      const file = items.find((s) => s.localId === localId)?.file;
+      remove(localId);
+      if (file) add([file]);
+    },
+    [items, remove, add],
+  );
+
   const clear = useCallback(() => {
     for (const c of aborts.current.values()) c.abort();
     aborts.current.clear();
@@ -127,5 +159,5 @@ export function useUploads(installId: string | null, opts: { accept?: string[]; 
   const failed = items.some((s) => s.status === "error");
   const ids = items.filter((s) => s.status === "done" && s.fileId).map((s) => s.fileId as string);
 
-  return { items, add, remove, clear, uploading, failed, ids, accept, maxMb };
+  return { items, add, remove, retry, clear, uploading, failed, ids, accept, maxMb };
 }

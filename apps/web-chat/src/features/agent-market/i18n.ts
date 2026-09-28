@@ -369,6 +369,9 @@ const thBase = {
   "composer.chips": "ไฟล์ที่แนบ",
   "composer.sendFailed": "ส่งข้อความไม่สำเร็จ",
   "composer.drop": "วางไฟล์เพื่อส่งให้ agent",
+  "composer.blockedOne": "ยังส่งไม่ได้: ไฟล์ {name} แนบไม่สำเร็จ — เอาออกแล้วแนบใหม่ หรือกดลองใหม่ที่ไฟล์",
+  "composer.blockedMany": "ยังส่งไม่ได้: มี {n} ไฟล์ที่แนบไม่สำเร็จ — เอาออกแล้วแนบใหม่ หรือกดลองใหม่ที่ไฟล์",
+  "composer.removeFailed": "เอาไฟล์ที่ไม่สำเร็จออก",
 
   // settings
   "settings.title": "ค่าที่จำไว้และการตั้งค่า",

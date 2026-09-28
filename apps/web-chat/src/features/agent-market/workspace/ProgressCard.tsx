@@ -2,11 +2,15 @@
 
 // A run's inline progress card. The runner rebuilds its lines from the step
 // rows, so the card always says what the audit trail says. Elapsed time
-// ticks locally while the run is working (from started_at).
+// ticks locally while the run is working (from started_at). While the round
+// works, the card's title is the app's own "working" indicator (AM5: the
+// chat's CatIndicator), not a spinner of its own.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Check, Pause, X } from "lucide-react";
+
+import { CatIndicator } from "@/components/chat/CatIndicator";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
@@ -130,10 +134,13 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
       data-status={status}
     >
       <div className="flex items-center gap-2">
-        {active && status !== "awaiting_input" ? <Spin size={14} /> : null}
         <div className="min-w-0">
           <div className="text-sm font-semibold text-text-primary" data-testid="am-progress-title">
-            {t(TITLE[status] ?? "progress.title.running")}
+            {active && status !== "awaiting_input" ? (
+              <CatIndicator label={t(TITLE[status] ?? "progress.title.running")} />
+            ) : (
+              t(TITLE[status] ?? "progress.title.running")
+            )}
           </div>
           {progress.kind === "self_test" ? <div className="text-xs text-text-muted">{t("progress.selfTest")}</div> : null}
         </div>

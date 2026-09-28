@@ -175,9 +175,9 @@ function RequestSlot({ q, attempts, submit }: { q: Question; attempts: number; s
       </div>
 
       {uploads.items.length ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
+        <div className="mt-2 flex flex-wrap gap-2">
           {uploads.items.map((s) => (
-            <StagedChip key={s.localId} item={s} onRemove={() => uploads.remove(s.localId)} />
+            <StagedChip key={s.localId} item={s} onRemove={() => uploads.remove(s.localId)} onRetry={() => uploads.retry(s.localId)} />
           ))}
         </div>
       ) : null}

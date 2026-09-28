@@ -21,10 +21,11 @@ export function CatIndicator({
   labelKey,
   label,
 }: {
-  labelKey: DictKey;
+  labelKey?: DictKey;
   /** Pre-resolved label text — overrides labelKey. Used by
    *  ToolActivityIndicator, whose generic fallback needs a {tool}
-   *  variable that a bare dict key can't carry. */
+   *  variable that a bare dict key can't carry, and by an agent's
+   *  workspace, whose words are its own. */
   label?: string;
 }) {
   const t = useT();
@@ -49,7 +50,7 @@ export function CatIndicator({
         <path fill="currentColor" d={CAT_HEAD} />
       </svg>
       <span className="shimmer-text text-sm font-medium">
-        {label ?? t(labelKey)}
+        {label ?? (labelKey ? t(labelKey) : "")}
       </span>
     </div>
   );
