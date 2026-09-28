@@ -1,6 +1,7 @@
 """The register as .xlsx — the deliverable a bookkeeper checks and keys from.
 
-Sheets: สรุป · ทะเบียน (one row per recorded document) · รายการสินค้า · ที่มา (every value: page,
+Sheets: สรุป · ทะเบียน (one row per recorded document) · เอกสารที่ยังไม่ได้รวม (AM5: every document
+left out of the register, why, and how it comes back) · รายการสินค้า · ที่มา (every value: page,
 box, method, printed text, confidence, who decided it) · ข้อยกเว้น (reason-coded) · การตรวจ (each
 document's deterministic checks). Amounts are numbers, not text, so a reader can sum them again;
 the quality gate reopens the file and checks the register adds up to computed.json.
@@ -20,7 +21,8 @@ from ....engine.e2.cards import CHECK_TH, FIELD_TH
 from .register import DOC_TYPE_TH, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
-SHEETS = ("สรุป", "ทะเบียน", "รายการสินค้า", "ที่มา", "ข้อยกเว้น", "การตรวจ")
+NOT_INCLUDED = "เอกสารที่ยังไม่ได้รวม"
+SHEETS = ("สรุป", "ทะเบียน", NOT_INCLUDED, "รายการสินค้า", "ที่มา", "ข้อยกเว้น", "การตรวจ")
 DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_person": "ผู้ใช้พิมพ์", "confirmed_by_person": "ผู้ใช้ยืนยัน",
               "computed": "คำนวณจากค่าในเอกสาร", "model_proposal": "โมเดลเสนอ (ยังไม่ยืนยัน)"}
 METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "typed_by_person": "ผู้ใช้พิมพ์",
@@ -197,7 +199,8 @@ class InvoiceWorkbook:
                     " · ".join(x for x in (c.get("company"), f"เลขผู้เสียภาษี {c['company_tax_id']}" if c.get("company_tax_id") else None,
                                             f"จัดทำ {c['prepared_on']}") if x))
         rows = [
-            ["เอกสารที่ได้รับ", t["documents"]], ["บันทึกเข้าทะเบียน", t["included"]], ["ไม่ได้บันทึก (ดูข้อยกเว้น)", t["excluded"]],
+            ["เอกสารที่ได้รับ", t["documents"]], ["บันทึกเข้าทะเบียน", t["included"]],
+            [f"{NOT_INCLUDED} (ดูแผ่นชื่อเดียวกัน)", t["excluded"]],
             ["ข้อยกเว้นทั้งหมด", t["exceptions"]], ["คำถามที่ตอบแล้ว", t["questions_answered"]],
             ["ยอดก่อน VAT (บาท)", _num(t["thb"]["subtotal"])], ["ภาษีมูลค่าเพิ่ม (บาท)", _num(t["thb"]["vat_amount"])],
             ["ยอดรวม (บาท)", _num(t["thb"]["total"])], ["หัก ณ ที่จ่าย (บาท)", _num(t["thb"]["wht_amount"])],
@@ -211,6 +214,9 @@ class InvoiceWorkbook:
                  "โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใดในไฟล์นี้",
                  "ยอดที่ต้องชำระ = ยอดสุทธิที่เอกสารพิมพ์ ถ้าไม่ได้พิมพ์ = ยอดรวม − หัก ณ ที่จ่าย (ไม่มีหัก ณ ที่จ่าย = ยอดรวม)",
                  "ที่มาของทุกค่าอยู่ในชีต “ที่มา”: หน้า ตำแหน่งบนหน้า ข้อความที่พิมพ์ และความมั่นใจ"]
+        if t["excluded"]:
+            notes.insert(0, f"มี{NOT_INCLUDED} {t['excluded']} ฉบับ ยอดในไฟล์นี้ยังไม่รวมเอกสารเหล่านั้น "
+                            f"ดูเหตุผลและวิธีนำกลับมารวมในแผ่น “{NOT_INCLUDED}”")
         for m in self.c.get("models") or []:
             notes.append(f"โมเดลที่เห็นเอกสาร: {m['model']} ({'รันในองค์กร' if m['self_hosted'] else 'ผู้ให้บริการภายนอก'}) "
                          f"อ่านซ้ำ {len(m['documents'])} ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น")
@@ -243,6 +249,14 @@ class InvoiceWorkbook:
         for r in range(5, 5 + len(rows)):
             for j in (6, 9):
                 ws.cell(row=r, column=j).number_format = "@"
+
+    def not_included(self):
+        ws = self.wb.create_sheet(NOT_INCLUDED)
+        rows = [[e["name"], e["reason"], e.get("detail") or "", e["how"]] for e in self.c.get("not_included") or []]
+        self._title(ws, NOT_INCLUDED,
+                    "เอกสารในแผ่นนี้ไม่อยู่ในทะเบียน และไม่ได้นับในยอดรวมของรอบนี้ · นำกลับมารวมได้จากห้องทำงานของ agent"
+                    if rows else "รอบนี้ไม่มีเอกสารที่ถูกตัดออก เอกสารที่ส่งมาทุกฉบับอยู่ในทะเบียน")
+        self._table(ws, 4, ["ไฟล์", "เหตุผล", "รายละเอียด", "การนำกลับมารวม"], rows, [36, 30, 64, 44], wrap_cols=(3, 4))
 
     def line_items(self):
         ws = self.wb.create_sheet("รายการสินค้า")
@@ -296,6 +310,7 @@ class InvoiceWorkbook:
     def write(self, path: str) -> dict:
         self.summary()
         self.register()
+        self.not_included()
         self.line_items()
         self.provenance()
         self.exceptions()
@@ -326,6 +341,11 @@ def check(path: str, computed: dict) -> list[dict]:
     ex = [r for r in wb["ข้อยกเว้น"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.exceptions", len(ex) == len(computed["exceptions"]) and all(r[1] in REASON_TH for r in ex),
                   f"{len(ex)} รายการ", "ข้อยกเว้นครบและมีรหัสเหตุผล"))
+    left = [r for r in wb[NOT_INCLUDED].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    want_left = sorted(e["name"] for e in computed.get("not_included") or [])
+    out.append(ck("xlsx.not_included", sorted(r[0] for r in left) == want_left and all(r[1] and r[3] for r in left)
+                  and len(want_left) == computed["totals"]["excluded"],
+                  f"{len(left)} ฉบับ / {computed['totals']['excluded']} ฉบับ", "เอกสารที่ยังไม่ได้รวมอยู่ในรายการครบทุกฉบับ"))
     unknown = sorted({d["document_type"] for d in computed["documents"] if d["document_type"] not in DOC_TYPE_TH})
     out.append(ck("xlsx.doc_types", not unknown, ", ".join(unknown) or "ครบ", "ชนิดเอกสารมีชื่อไทย"))
     return out

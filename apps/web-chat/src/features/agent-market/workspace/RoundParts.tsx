@@ -85,6 +85,11 @@ export function RoundDivider({ round, latest, started }: { round: RoundInfo; lat
           ))}
         </div>
       ) : null}
+      {round.notIncluded > 0 ? (
+        <p className="text-center text-xs text-status-warning" data-testid="am-round-left-out">
+          {t("left.round", { n: String(round.notIncluded) })}
+        </p>
+      ) : null}
       {latest && !started ? (
         <div className="flex flex-col items-center gap-1">
           <button type="button" onClick={start} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-round-start">
@@ -129,6 +134,11 @@ export function FoldedRound({ round, children }: { round: RoundInfo; children: R
             <FileLink key={a.id} a={a} />
           ))}
         </div>
+      ) : null}
+      {!open && round.notIncluded > 0 && round.kind === "run" ? (
+        <p className="text-center text-xs text-status-warning" data-testid="am-round-left-out">
+          {t("left.round", { n: String(round.notIncluded) })}
+        </p>
       ) : null}
       {open ? <div className="flex flex-col gap-5 border-l-2 border-border-subtle pl-3">{children}</div> : null}
     </div>

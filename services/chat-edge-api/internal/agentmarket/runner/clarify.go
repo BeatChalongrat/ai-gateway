@@ -34,17 +34,9 @@ func (rc *runCtx) clarify(ctx context.Context, moment string, findings []am.Find
 	if err != nil {
 		return actNone, err
 	}
-	asked, open := map[string]bool{}, map[string]bool{}
+	asked, open := askedKeys(cards, rc.answers)
 	openFiles := false
 	for _, c := range cards {
-		var qs []am.Question
-		_ = json.Unmarshal(c.Questions, &qs)
-		for _, q := range qs {
-			asked[q.Key] = true
-			if c.Status == "open" || c.Status == "interpreting" {
-				open[q.Key] = true
-			}
-		}
 		if c.Kind == "request_files" && (c.Status == "open" || c.Status == "interpreting") {
 			openFiles = true
 		}
@@ -485,4 +477,27 @@ func (rc *runCtx) lastPrimary(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// askedKeys is which questions this run has already put to the person, and
+// which of them are still open. A question is asked once per run — except
+// one whose card was superseded and whose answer is no longer on the run
+// (AM5: a document brought back from "เอกสารที่ยังไม่ได้รวม" whose question
+// has to be answered after all): that one is asked again.
+func askedKeys(cards []am.Card, answers map[string]am.Answer) (asked, open map[string]bool) {
+	asked, open = map[string]bool{}, map[string]bool{}
+	for _, c := range cards {
+		var qs []am.Question
+		_ = json.Unmarshal(c.Questions, &qs)
+		for _, q := range qs {
+			if _, answered := answers[q.Key]; c.Status == "superseded" && !answered {
+				continue
+			}
+			asked[q.Key] = true
+			if c.Status == "open" || c.Status == "interpreting" {
+				open[q.Key] = true
+			}
+		}
+	}
+	return asked, open
 }

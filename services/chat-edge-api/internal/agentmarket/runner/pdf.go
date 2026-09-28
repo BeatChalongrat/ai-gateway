@@ -39,6 +39,20 @@ const (
 	maxThaiParagraphs = 400
 )
 
+// converterDown is what a check says when the document converter did not
+// answer; what it answered instead is kept on the run (technical).
+const converterDown = "ตัวแปลงเอกสารของระบบไม่ตอบในตอนนี้"
+
+// technical keeps an error that a quality check could only summarise: in the
+// log and on the run, where the run page and a problem report show it.
+func (rc *runCtx) technical(ctx context.Context, what string, err error) {
+	if err == nil {
+		return
+	}
+	rc.r.logger().Warn("quality check", "run", rc.run.ID, "check", what, "err", err)
+	rc.r.noteStep(ctx, rc.run, "check:"+what, err.Error())
+}
+
 type gateCheck struct {
 	Name   string `json:"name"`
 	OK     bool   `json:"ok"`
@@ -54,11 +68,13 @@ func (rc *runCtx) pdfFromDocx(ctx context.Context, name string, docx []byte) ([]
 	}
 	pdf, err := rc.r.Converter.Convert(ctx, name, docx, "pdf")
 	if err != nil {
-		return nil, []gateCheck{{Name: "pdf.convert", Label: "แปลงเป็น PDF", Detail: trim(err.Error(), 160)}}
+		rc.technical(ctx, "pdf.convert", err)
+		return nil, []gateCheck{{Name: "pdf.convert", Label: "แปลงเป็น PDF", Detail: converterDown}}
 	}
 	chk, err := rc.r.Converter.Check(ctx, pdf)
 	if err != nil {
-		return nil, []gateCheck{{Name: "pdf.check", Label: "ตรวจ PDF", Detail: trim(err.Error(), 160)}}
+		rc.technical(ctx, "pdf.check", err)
+		return nil, []gateCheck{{Name: "pdf.check", Label: "ตรวจ PDF", Detail: converterDown}}
 	}
 	return pdf, pdfGate(docx, chk)
 }
@@ -79,7 +95,7 @@ func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPat
 	var why []string
 	for _, c := range checks {
 		if !c.OK {
-			why = append(why, "pdf: "+c.Label+" ("+trim(c.Detail, 120)+")")
+			why = append(why, checkLine("pdf", c.Label, c.Detail))
 		}
 	}
 	if pdf == nil || len(why) > 0 {

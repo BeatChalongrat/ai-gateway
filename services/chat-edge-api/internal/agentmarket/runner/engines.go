@@ -200,26 +200,43 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 	if err != nil {
 		return
 	}
-	var problems []string
+	const kept = " ยังใช้รุ่นเดิมอยู่ตามปกติ ไฟล์และผลงานเดิมยังอยู่ครบ ถ้าต้องการให้ผู้ดูแลตรวจ กด “แจ้งปัญหา”"
 	if !passed {
-		problems = append(problems, why)
-	} else {
-		problems = rc.selfTestExpectations(ctx, computed)
+		// why is the failed round's own sentence (am.Failure.What), already said in the thread
+		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน: %s",
+			to.Version, am.ForPerson(why))+kept, map[string]any{"tone": "error"})
+		return
 	}
-	if len(problems) > 0 {
-		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน: %s ยังใช้รุ่นเดิมอยู่",
-			to.Version, trim(joinLines(problems), 400)), map[string]any{"tone": "error"})
+	if problems := rc.selfTestExpectations(ctx, computed); len(problems) > 0 {
+		// what differed is kept for the run page; the person reads how many
+		rc.r.logger().Warn("upgrade self-test differs", "run", rc.run.ID, "to", to.Version, "problems", problems)
+		rc.r.noteStep(ctx, rc.run, "self_test_expect", joinLines(problems))
+		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ ผลทดสอบกับข้อมูลตัวอย่างต่างจากที่รุ่นนี้กำหนดไว้ %d จุด",
+			to.Version, len(problems))+kept, map[string]any{"tone": "error"})
 		return
 	}
 	if cur, err := st.InstallByID(ctx, rc.install.ID); err == nil && cur.DefinitionID == to.ID {
 		return // already switched (a resumed run): switching again would lose the version to roll back to
 	}
 	if _, err := st.SwitchInstall(ctx, rc.install.ID, to, p.Bindings); err != nil {
-		_ = st.PostText(ctx, rc.run, "อัปเกรดไม่สำเร็จ: "+trim(err.Error(), 200), map[string]any{"tone": "error"})
+		rc.r.logger().Warn("upgrade switch failed", "run", rc.run.ID, "to", to.Version, "err", err)
+		rc.r.noteStep(ctx, rc.run, "upgrade_switch", err.Error())
+		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ทดสอบรุ่น %s ผ่านแล้ว แต่สลับไปใช้รุ่นใหม่ไม่สำเร็จ — กดอัปเกรดอีกครั้งในหน้าตั้งค่า", to.Version)+kept,
+			map[string]any{"tone": "error"})
 		return
 	}
 	_ = st.PostText(ctx, rc.run, fmt.Sprintf("อัปเกรดเป็นรุ่น %s แล้วครับ ผ่านการทดสอบกับข้อมูลตัวอย่างตรงตามที่รุ่นนี้กำหนด "+
 		"รอบที่ทำไปแล้วยังเป็นของรุ่นเดิม และย้อนกลับได้ในหน้าตั้งค่า", to.Version), nil)
+}
+
+// noteStep keeps a technical detail on the run (the run page and a problem
+// report show a run's steps), for something that is not a step's own failure.
+func (r *Runner) noteStep(ctx context.Context, run am.Run, name, detail string) {
+	st, done, err := r.Store.BeginStep(ctx, run.ID, name, "check", am.StepKey(run.ID, name, detail), json.RawMessage(`{}`))
+	if err != nil || done {
+		return
+	}
+	_ = r.Store.FinishStep(ctx, st.ID, "failed", nil, am.TrimText(detail, 1500), "", "", 0)
 }
 
 func joinLines(xs []string) string {

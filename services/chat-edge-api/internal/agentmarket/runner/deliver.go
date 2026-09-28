@@ -78,27 +78,8 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			user := narrativePrompt(cv)
 			var parsed map[string]any
 			c, tried, err := rc.r.Model.CompleteWith(ctx, models, rc.pkg.Instructions, user, func(s string) error {
-				var v map[string]any
-				if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
-					return fmt.Errorf("ไม่ใช่ JSON")
-				}
-				sum, _ := v["summary"].(string)
-				if strings.TrimSpace(sum) == "" {
-					return fmt.Errorf("ไม่มี summary")
-				}
-				var all []string
-				all = append(all, sum)
-				for _, k := range []string{"movements", "watch", "next_steps"} {
-					arr, _ := v[k].([]any)
-					if len(arr) > 6 {
-						v[k] = arr[:6]
-					}
-					for _, x := range arr {
-						s, _ := x.(string)
-						all = append(all, s)
-					}
-				}
-				if err := GuardNumbers(strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
+				v, err := checkNarrative(s, cv)
+				if err != nil {
 					return err
 				}
 				parsed = v
@@ -106,8 +87,11 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			})
 			if err != nil {
 				// No model answered: the rules write it. The report says so.
-				var fb map[string]any
+				fb := map[string]any{} // a package without a fallback narrative: never a nil map
 				_ = json.Unmarshal(cv.Fallback, &fb)
+				if fb == nil {
+					fb = map[string]any{}
+				}
 				fb["written_by"] = "rules"
 				nb, _ := json.Marshal(fb)
 				// Refused answers were still paid for: the budget counts them.
@@ -128,6 +112,39 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 	}
 	var n narrativeOut
 	return n, key, json.Unmarshal(out, &n)
+}
+
+// checkNarrative reads a model's answer as the report's words, or says why
+// it cannot be used (the model is asked again, then the next model).
+func checkNarrative(s string, cv computedView) (map[string]any, error) {
+	var v map[string]any
+	if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
+		return nil, fmt.Errorf("ไม่ใช่ JSON")
+	}
+	sum, _ := v["summary"].(string)
+	if strings.TrimSpace(sum) == "" {
+		return nil, fmt.Errorf("ไม่มี summary")
+	}
+	var all []string
+	all = append(all, sum)
+	// AM5: each list is a list of sentences, whatever the model sent — a list
+	// left null (or a sentence, or a number among the sentences) reached the
+	// report's renderer as it was, and the round failed on it.
+	for _, k := range []string{"movements", "watch", "next_steps"} {
+		arr, _ := v[k].([]any)
+		lines := []any{}
+		for _, x := range arr {
+			if s, ok := x.(string); ok && strings.TrimSpace(s) != "" && len(lines) < 6 {
+				lines = append(lines, s)
+				all = append(all, s)
+			}
+		}
+		v[k] = lines
+	}
+	if err := GuardNumbers(strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // rulesNarrative is the package's own summary (computed.json
@@ -384,7 +401,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				if !q.Passed {
 					for _, c := range q.Checks {
 						if !c.OK {
-							failed = append(failed, meta.Format+": "+c.Label+" ("+trim(c.Detail, 120)+")")
+							failed = append(failed, checkLine(meta.Format, c.Label, c.Detail))
 						}
 					}
 					continue
@@ -445,7 +462,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 		})
 	if err != nil {
 		if strings.Contains(err.Error(), "quality gate") {
-			return renderOut{}, key, &qualityErr{err}
+			return renderOut{}, key, &qualityErr{error: err, failed: gateLines(err)}
 		}
 		return renderOut{}, key, err
 	}
@@ -453,7 +470,11 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	return ro, key, json.Unmarshal(out, &ro)
 }
 
-type qualityErr struct{ error }
+type qualityErr struct {
+	error
+	// failed are the checks that did not pass, as the package words them.
+	failed []string
+}
 
 // ── publish ──────────────────────────────────────────────────────────────
 
@@ -645,4 +666,47 @@ func (rc *runCtx) startNextRound(ctx context.Context) {
 	_, _, _ = st.AddItem(ctx, st.Pool, nr.InstallID, nr.TenantID, nr.UserID, &rid, "progress",
 		am.Progress{RunID: nr.ID.String(), Kind: am.KindRun, Status: am.RunQueued}, nil)
 	_ = st.PostText(ctx, nr, "เริ่มรอบใหม่ด้วยไฟล์ที่เก็บไว้ครับ", nil)
+}
+
+// checkLine is one failed check as the quality gate's error and the person's
+// message carry it: the file's format, the check's label, and its detail
+// when the detail is something a person can read.
+func checkLine(format, label, detail string) string {
+	line := formatThai(format) + ": " + label
+	if d := am.ForPerson(am.TrimText(detail, 120)); d != "" {
+		line += " (" + d + ")"
+	}
+	return line
+}
+
+func formatThai(format string) string {
+	switch format {
+	case "docx":
+		return "รายงาน"
+	case "pptx":
+		return "สไลด์"
+	case "xlsx":
+		return "ตาราง"
+	case "pdf":
+		return "PDF"
+	case "template":
+		return "แบบฟอร์ม"
+	}
+	return "ไฟล์"
+}
+
+// gateLines reads the failed checks back out of a quality gate's error.
+func gateLines(err error) []string {
+	s := strings.TrimPrefix(err.Error(), "engine step failed: ")
+	i := strings.Index(s, "quality gate: ")
+	if i < 0 {
+		return nil
+	}
+	var out []string
+	for _, l := range strings.Split(s[i+len("quality gate: "):], "; ") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
 }

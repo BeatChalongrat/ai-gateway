@@ -245,6 +245,10 @@ type Question struct {
 	// the card's own box is the answer as {"typed": text}; the package that
 	// asked validates it deterministically — never a model's reading of it.
 	Input json.RawMessage `json:"input,omitempty"`
+	// AM5: the answer the card recommends ("" = it recommends nothing), and
+	// whether skipping the question leaves its subject out of the result.
+	RecommendedLabel string `json:"recommended_label,omitempty"`
+	LeavesOut        bool   `json:"leaves_out,omitempty"`
 }
 
 // Option is one clickable answer. Value is what the check acts on.

@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 // ModelClient calls the model gateway with Agent Market's OWN API key — a
@@ -383,12 +385,8 @@ func (m *ModelClient) chatBusy(ctx context.Context) (bool, bool) {
 	return busy, true
 }
 
-func trim(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
+// trim cuts s to n bytes without splitting a character (Thai is three bytes a letter).
+func trim(s string, n int) string { return am.TrimText(s, n) }
 
 // ── the number guard ─────────────────────────────────────────────────────
 

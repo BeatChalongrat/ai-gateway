@@ -11,6 +11,8 @@ computed.json (schema ``invoice.register.v1``):
   provenance[]  every recorded value: where it came from (page, box, method, printed text), its
                 confidence, the checks it passed, and who decided it (document / person / computed)
   exceptions[]  reason-coded: why a document was left out, or what was recorded about one kept in
+  not_included[] AM5 "เอกสารที่ยังไม่ได้รวม": every document left out, why, and what bringing it back
+                takes — {"set": answers to give, "drop": answers to take back}; the round keeps the list
   checks[]      each document's deterministic checks
   totals        counts and THB sums of the recorded documents
   index_entries what the duplicate index keeps for the recorded documents (written by the runner
@@ -60,6 +62,10 @@ REASON_TH = {
     "line_items_unverified": "รายการสินค้าบางบรรทัดอ่านได้ไม่มั่นใจ ยอดหัวเอกสารยังถูกต้อง",
 }
 KEEP_NOTES = ("accepted_as_printed", "field_absent", "foreign_currency", "not_duplicate_by_person", "copy_not_original")
+# AM5: what bringing a document back does, as the list says it
+HOW_RECORD = "นำกลับมารวมได้: บันทึกตามที่เอกสารพิมพ์ พร้อมข้อยกเว้นให้ผู้ตรวจดู"
+HOW_ASK = "นำกลับมารวมได้: ต้องตอบคำถามของเอกสารนี้ก่อน"
+HOW_NONE = "ไม่ต้องนำกลับ: ไฟล์เดียวกันนี้อยู่ในทะเบียนแล้ว"
 REGISTER_FIELDS = ("seller_name", "seller_tax_id", "seller_branch", "buyer_name", "buyer_tax_id", "buyer_branch",
                    "document_number", "document_date", "due_date", "currency", "sum_lines", "discount", "subtotal",
                    "vat_amount", "total", "wht_amount", "net_payable")
@@ -113,6 +119,7 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
             today: _dt.date | None = None, history: list | None = None, proposals: dict | None = None) -> dict:
     reviewed = R.review(docs, answers=answers, defaults=defaults, today=today, history=history, proposals=proposals)
     documents, lines, prov, exceptions, checks, index = [], [], [], [], [], []
+    not_included = []
     totals = {"subtotal": Decimal(0), "vat_amount": Decimal(0), "total": Decimal(0), "wht_amount": Decimal(0),
               "net_payable": Decimal(0)}
     by_currency: dict[str, dict] = {}
@@ -125,7 +132,8 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         exclusion = r.exclusion
         if r.status == "pending":
             exclusion = {"code": "unresolved_question", "decided_by": "rule",
-                         "detail": "; ".join(x.question or x.header for x in r.findings)[:400]}
+                         "detail": "; ".join(x.question or x.header for x in r.findings)[:400],
+                         "restore": {"set": {}, "drop": []}}
         dtype = out["document_type"]["normalized"] or "unknown"
         row = {"doc_key": doc.key, "name": doc.name, "status": status, "tier": tier, "tier_label": TIER_TH.get(tier, tier),
                "method": out["method"], "document_type": dtype, "document_type_label": DOC_TYPE_TH.get(dtype, dtype),
@@ -161,6 +169,12 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
                                "codes": exclusion.get("codes", [exclusion["code"]]),
                                "severity": "excluded", "decided_by": exclusion.get("decided_by", "rule"),
                                "subject": exclusion.get("subject")})
+            restore = exclusion.get("restore")
+            how = HOW_NONE if restore is None else HOW_ASK if (restore["drop"] or not restore["set"]) else HOW_RECORD
+            not_included.append({"doc_key": doc.key, "name": doc.name, "code": exclusion["code"],
+                                 "reason": REASON_TH.get(exclusion["code"], exclusion["code"]), "detail": detail,
+                                 "decided_by": exclusion.get("decided_by", "rule"), "how": how,
+                                 "can_restore": restore is not None, "restore": restore or {"set": {}, "drop": []}})
             continue
         # recorded
         index.append(R.index_entry(doc, out))
@@ -241,12 +255,13 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
     citations = _citations(documents, tot, exceptions)
     fallback = {"summary": (f"รอบนี้ได้รับเอกสาร {counts['documents']} ฉบับ บันทึกเข้าทะเบียน {counts['included']} ฉบับ "
                             f"ยอดรวม {fmt_money(totals['total'])} บาท ภาษีมูลค่าเพิ่ม {fmt_money(totals['vat_amount'])} บาท"
-                            + (f" และมี {counts['excluded']} ฉบับที่ไม่ได้บันทึก ดูเหตุผลในชีตข้อยกเว้น" if counts["excluded"] else "")),
+                            + (f" และมี {counts['excluded']} ฉบับที่ยังไม่ได้รวม ดูรายการ “เอกสารที่ยังไม่ได้รวม”" if counts["excluded"] else "")),
                 "movements": [], "watch": sorted({e["reason"] for e in exceptions}), "next_steps": []}
     return {"schema": SCHEMA, "period": period, "period_label": label,
             "prepared_on": (today or _dt.date.today()).isoformat(), "company": (defaults or {}).get("company") or "",
             "company_tax_id": (R.org_from(defaults or {}) or {}).get("tax_id"),
             "documents": documents, "line_items": lines, "provenance": prov, "exceptions": exceptions, "checks": checks,
+            "not_included": not_included,
             "totals": {**counts, "thb": tot, "by_currency": {k: {"documents": v["documents"], "total": _s(_q2(v["total"])),
                                                                   "vat_amount": _s(_q2(v["vat_amount"]))}
                                                               for k, v in sorted(by_currency.items())}},
@@ -336,4 +351,7 @@ def summarize(computed: dict) -> dict:
             "total_thb": t["thb"]["total"], "vat_thb": t["thb"]["vat_amount"],
             "models": [{"model": m["model"], "self_hosted": m["self_hosted"], "documents": len(m["documents"])}
                        for m in computed["models"]],
-            "excluded_list": [{"code": e["code"], "reason": e["reason"], "name": e["name"]} for e in computed["excluded"]]}
+            "excluded_list": [{"code": e["code"], "reason": e["reason"], "name": e["name"]} for e in computed["excluded"]],
+            # AM5: what the round's files card lists under "เอกสารที่ยังไม่ได้รวม" (what restoring takes stays in computed.json)
+            "not_included": [{k: e[k] for k in ("doc_key", "name", "reason", "detail", "how", "can_restore")}
+                             for e in computed.get("not_included") or []]}

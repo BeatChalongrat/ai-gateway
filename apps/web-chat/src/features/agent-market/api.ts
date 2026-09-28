@@ -234,6 +234,11 @@ export const amApi = {
   run: (runId: string) => call<RunDetail>(`/runs/${id(runId)}`),
   computed: (runId: string) => call<Computed>(`/runs/${id(runId)}/computed`),
   cancelRun: (runId: string) => send<{ run: Run }>("POST", `/runs/${id(runId)}/cancel`),
+  /** AM5: a failed round, tried again with the files it had (a new round; its progress card comes back). */
+  retry: (runId: string) => send<{ run: Run; item?: ThreadItem }>("POST", `/runs/${id(runId)}/retry`),
+  /** AM5: a document the round left out, brought back; the same round computes again. */
+  restore: (runId: string, docKey: string) =>
+    send<{ changed: boolean; asks: boolean; doc_key: string; name: string }>("POST", `/runs/${id(runId)}/restore`, { doc_key: docKey }),
   formats: (runId: string, formats: string[]) => send<{ job: Run }>("POST", `/runs/${id(runId)}/formats`, { formats }),
 
   downloadArtifact: (artifactId: string, filename: string) => saveBlob(`/artifacts/${id(artifactId)}/download`, filename),

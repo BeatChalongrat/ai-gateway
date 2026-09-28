@@ -102,9 +102,11 @@ func (rc *runCtx) recalcTemplate(ctx context.Context, path, name string, meta, q
 	} else if data, err := os.ReadFile(path); err != nil {
 		return quality, err
 	} else if out, err := rc.r.Converter.Convert(ctx, filepath.Base(name), data, "xlsx"); err != nil {
-		check["detail"] = "คำนวณล่วงหน้าไม่สำเร็จ (" + trim(err.Error(), 100) + ") Excel จะคำนวณเมื่อเปิดไฟล์"
+		rc.technical(ctx, "template.recalculate", err)
+		check["detail"] = "คำนวณล่วงหน้าไม่สำเร็จ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์"
 	} else if merged, n, bad, err := mergeCachedValues(data, out); err != nil {
-		check["detail"] = "อ่านผลคำนวณไม่ได้ (" + trim(err.Error(), 100) + ") Excel จะคำนวณเมื่อเปิดไฟล์"
+		rc.technical(ctx, "template.merge", err)
+		check["detail"] = "อ่านผลคำนวณล่วงหน้าไม่ได้ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์"
 	} else if err := os.WriteFile(path, merged, 0o644); err != nil {
 		return quality, err
 	} else if len(bad) > 0 {

@@ -15,6 +15,8 @@ export interface RoundInfo {
   status: string;
   period: string;
   artifacts: OutputArtifact[];
+  /** AM5: how many documents the round's newest files card still lists as left out */
+  notIncluded: number;
   /** the item after which the divider sits: the round's last item (files card, closing words, answers about it) */
   endItemId: string | null;
 }
@@ -33,7 +35,7 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
     const p = (it.payload ?? {}) as ProgressPayload;
     const kind = p.kind ?? "run";
     if (!p.run_id || (kind !== "run" && kind !== "self_test")) continue;
-    rounds.set(p.run_id, { runId: p.run_id, kind, status: p.status, period: "", artifacts: [], endItemId: it.id });
+    rounds.set(p.run_id, { runId: p.run_id, kind, status: p.status, period: "", artifacts: [], notIncluded: 0, endItemId: it.id });
   }
   for (const it of items) {
     if (it.kind !== "outputs") continue;
@@ -45,6 +47,8 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
     const byFormat = new Map(r.artifacts.map((a) => [a.format, a] as const));
     for (const a of p.artifacts ?? []) byFormat.set(a.format, a);
     r.artifacts = [...byFormat.values()];
+    // a files card made from a computed table carries the round's list; a re-render or a sign-off does not
+    if (p.summary && Array.isArray(p.summary.not_included)) r.notIncluded = p.summary.not_included.length;
   }
   // the divider closes a round after its last item: the files card, the
   // runner's closing words, answers to questions about it (all carry its id)
@@ -161,4 +165,22 @@ export function openIntent(items: ThreadItem[]): ThreadItem | null {
     if (it.kind === "intent" && (it.payload as IntentPayload | null)?.status === "open") return it;
   }
   return null;
+}
+
+/** AM5: the files cards a newer one of the same round has replaced (their
+ *  "เอกสารที่ยังไม่ได้รวม" list is history; the newest card's is the round's). */
+export function supersededOutputs(items: ThreadItem[]): Set<string> {
+  const newest = new Map<string, string>();
+  for (const it of items) {
+    if (it.kind !== "outputs") continue;
+    const p = (it.payload ?? {}) as OutputsPayload;
+    if (p.run_id && p.summary && Array.isArray(p.summary.not_included)) newest.set(p.run_id, it.id);
+  }
+  const out = new Set<string>();
+  for (const it of items) {
+    if (it.kind !== "outputs") continue;
+    const p = (it.payload ?? {}) as OutputsPayload;
+    if (p.run_id && newest.has(p.run_id) && newest.get(p.run_id) !== it.id) out.add(it.id);
+  }
+  return out;
 }

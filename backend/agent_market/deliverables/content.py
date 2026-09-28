@@ -279,9 +279,22 @@ def apply_presentation(computed: dict, pres: dict) -> dict:
     return c
 
 
+def sentences(narrative: dict, key: str) -> list:
+    """One of a narrative's lists, as a list of sentences. A model may leave a
+    list null, send one sentence instead of a list, or put something that is
+    not a sentence among them (AM5: a null list reached the loop below and the
+    round failed on it); none of that is the report's problem."""
+    value = narrative.get(key)
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [t for t in value if isinstance(t, str) and t.strip()]
+
+
 def build(computed: dict, req: dict) -> dict:
     computed = apply_presentation(computed, req.get("presentation") or {})
-    narrative = req.get("narrative") or computed["fallback_narrative"]
+    narrative = dict(req.get("narrative") or computed["fallback_narrative"])
+    for key in ("movements", "watch", "next_steps"):
+        narrative[key] = sentences(narrative, key)  # the report and the deck both read these
     assumptions = list(req.get("assumptions") or [])
     for e in computed["excluded"]:
         assumptions.append({"code": e["code"], "source": "answer", "text": f"ไม่นับ{e['reason']}",
@@ -357,7 +370,8 @@ def build(computed: dict, req: dict) -> dict:
         {"key": "charts", "title": "แนวโน้มและองค์ประกอบ", "blocks": [{"type": "chart", "chart": c["id"]} for c in charts(computed)]},
         {"key": "movements", "title": "รายการเคลื่อนไหวสำคัญ", "blocks": [b for b in (
             movement_table(computed),
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in narrative.get("movements", [])]} if narrative.get("movements") else None,
+            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "movements")]}
+            if sentences(narrative, "movements") else None,
         ) if b]},
         {"key": "accounts", "title": "รายละเอียดรายบัญชี", "blocks": [account_table(computed)]},
         {"key": "exceptions", "title": "รายการที่ต้องตรวจสอบ", "blocks": [
@@ -365,9 +379,9 @@ def build(computed: dict, req: dict) -> dict:
             exceptions_table(computed)]},
         {"key": "insights", "title": "ข้อสังเกตและสิ่งที่ควรทำต่อ", "blocks": [
             {"type": "subheading", "text": "สิ่งที่ควรดู"},
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in narrative.get("watch", [])]},
+            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "watch")]},
             {"type": "subheading", "text": "สิ่งที่ควรทำต่อ"},
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in narrative.get("next_steps", [])]},
+            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "next_steps")]},
         ]},
         {"key": "assumptions", "title": "ข้อสมมติที่ใช้ในรอบนี้", "blocks": [
             {"type": "bullets", "items": [[(a["text"] + _assumption_tag(a), None)] for a in assumptions]},

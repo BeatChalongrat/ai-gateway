@@ -45,6 +45,7 @@ class Decisions:
     accepted_checks: set = field(default_factory=set)    # failed checks the person accepted as printed
     doc_type: str | None = None
     excluded: dict | None = None                         # the main reason: {code, subject, key, reupload, codes}
+    excluding: list = field(default_factory=list)        # AM5: every answer that leaves the document out [(key, value)]
     fx_rate: Decimal | None = None
     invalid: dict = field(default_factory=dict)          # field → (the card's key, the reason the typed value failed)
     notes: list = field(default_factory=list)            # exceptions recorded while the document stays in
@@ -125,6 +126,7 @@ def _note(d: Decisions, code: str, subject: str, detail: str = "") -> None:
 def _apply(d: Decisions, key: str, val) -> None:
     code, _, subject = split_key(key)
     if val in ("exclude", "reupload"):
+        d.excluding.append((key, val))
         _exclude(d, EXCLUDED_BY.get(code, "excluded_by_person"), subject, key, val == "reupload")
         return
     if code in ("e2_low_confidence", "e2_source_conflict", "e2_field_missing", "e2_typed_invalid") and subject != "fx_rate":
@@ -181,3 +183,31 @@ def _apply(d: Decisions, key: str, val) -> None:
         _note(d, "copy_not_original", "copy", "เอกสารเป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ")
     elif code == "e2_doc_type" and val in DOC_TYPES:
         d.doc_type = val
+
+
+# AM5 — bringing a document back. An answer that left it out is replaced by
+# the card's other answer when that one needs nothing more from the person
+# (recorded as printed with an exception; "not a duplicate"; "a copy, record
+# it"), and is taken back — so its question is asked again — when the
+# document cannot be recorded without a value or a choice of theirs.
+BRING_BACK = {"e2_check_failed": ("accept_as_printed", "บันทึกตามเอกสาร มีข้อยกเว้น"),
+              "e2_duplicate": ("include", "ไม่ซ้ำ นับรวม"), "e2_copy": ("ok", "บันทึก พร้อมหมายเหตุ")}
+
+
+def restore_of(dec: Decisions) -> dict:
+    """{"set": {key: {value, label, code}}, "drop": [keys]} for a document a card left out."""
+    out = {"set": {}, "drop": []}
+    for key, _ in sorted(dec.excluding):
+        code, _, subject = split_key(key)
+        alt = BRING_BACK.get(code)
+        if alt and not (code == "e2_check_failed" and subject in ("currency", "fx_rate", "buyer_match")):
+            out["set"][key] = {"value": alt[0], "label": alt[1], "code": code}
+        else:
+            out["drop"].append(key)
+    # a typed value that was asked again belongs to the question it corrects
+    for key in list(out["drop"]):
+        code, doc, subject = split_key(key)
+        if code == "e2_typed_invalid":
+            out["drop"] += [k for k in (f"e2_field_missing:{doc}:{subject}", f"e2_low_confidence:{doc}:{subject}",
+                                        f"e2_source_conflict:{doc}:{subject}") if k not in out["drop"]]
+    return out

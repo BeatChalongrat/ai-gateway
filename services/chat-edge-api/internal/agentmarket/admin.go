@@ -811,7 +811,8 @@ func (a *API) adminSample(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(st.Capabilities, &caps)
 	res, err := Resolve(m, caps, 1)
 	if err != nil {
-		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", err.Error())
+		a.log.Warn("catalog sample refused", "slug", m.ID, "err", err)
+		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingThai(err))
 		return
 	}
 	b, _ := json.Marshal(res)

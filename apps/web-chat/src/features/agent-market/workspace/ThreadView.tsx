@@ -10,8 +10,8 @@
 // progress of a round, its files and numbers, round dividers.
 
 import Link from "next/link";
-import { useState } from "react";
-import { Check } from "lucide-react";
+import { createContext, useContext, useMemo, useState } from "react";
+import { Check, ListChecks, RotateCcw } from "lucide-react";
 
 import { Markdown } from "@/components/chat/Markdown";
 import {
@@ -19,6 +19,7 @@ import {
   CollapsibleUserText,
   CopyAction,
   ErrorCard,
+  ErrorCardAction,
   MessageTime,
   NoteCard,
   UserMessageRow,
@@ -29,9 +30,11 @@ import {
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { isUserItem } from "../thread";
+import { ProblemButton } from "../problem/ProblemButton";
 import type {
   AgentTextPayload,
   CardPayload,
+  Failure,
   GreetingPayload,
   NoticePayload,
   OutputsPayload,
@@ -43,13 +46,17 @@ import type {
 import { BTN_SMALL, cls, DOT, Spin, Thai } from "../ui";
 import { RunExceptions } from "../exceptions/ExceptionsPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
-import { settingsHref, useWorkspace } from "./context";
+import { runHref, settingsHref, useWorkspace } from "./context";
 import { FileChip } from "./FileChips";
 import { OutputsCard } from "./OutputsCard";
 import { ProgressCard } from "./ProgressCard";
 import { RequestFilesCard } from "./RequestFilesCard";
+import { personText } from "./personText";
 import { FoldedRound, IntentChip, RoundDivider } from "./RoundParts";
-import { segments } from "./rounds";
+import { segments, supersededOutputs } from "./rounds";
+
+/** AM5: the files cards a newer one of the same round has replaced. */
+const Superseded = createContext<ReadonlySet<string>>(new Set());
 
 const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent"]);
 
@@ -69,6 +76,15 @@ export function groupItems(items: ThreadItem[]): Group[] {
 
 /** AM4: the thread as rounds — a finished round closed by its divider, older ones folded. */
 export function ThreadView({ items }: { items: ThreadItem[] }) {
+  const replaced = useMemo(() => supersededOutputs(items), [items]);
+  return (
+    <Superseded.Provider value={replaced}>
+      <Rounds items={items} />
+    </Superseded.Provider>
+  );
+}
+
+function Rounds({ items }: { items: ThreadItem[] }) {
   const segs = segments(items);
   const out: React.ReactNode[] = [];
   let run: ThreadItem[] = [];
@@ -156,6 +172,7 @@ function UserItem({ item }: { item: ThreadItem }) {
 }
 
 function AgentItem({ item }: { item: ThreadItem }) {
+  const replaced = useContext(Superseded);
   switch (item.kind) {
     case "greeting":
       return <Greeting p={(item.payload ?? {}) as GreetingPayload} />;
@@ -182,7 +199,7 @@ function AgentItem({ item }: { item: ThreadItem }) {
         <OutputsCard outputs={p} />
       ) : (
         <div className="flex flex-col gap-3">
-          <OutputsCard outputs={p} />
+          <OutputsCard outputs={p} superseded={replaced.has(item.id)} />
           <RunExceptions runId={p.run_id} />
         </div>
       );
@@ -223,13 +240,7 @@ function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
   const text = p.text ?? "";
   const { copied, copy } = useCopyText(text);
   if (!text.trim()) return null;
-  if (p.tone === "error") {
-    return (
-      <div data-testid="am-agent-text" data-tone="error">
-        <ErrorCard message={<span className="whitespace-pre-wrap">{text}</span>} />
-      </div>
-    );
-  }
+  if (p.tone === "error") return <FailedRound p={p} />;
   return (
     <div className="flex w-full flex-col gap-1.5">
       <AssistantProse data-testid="am-agent-text">
@@ -245,6 +256,94 @@ function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
   );
 }
 
+/** AM5 — a round that did not work, on the chat's failed-turn card: what
+ *  happened, what to try next, whether the files are safe, whether anything
+ *  was charged — and the ways forward. Never the error's own text, a type
+ *  name or a step id: the server sends none, and whatever an older row still
+ *  holds is taken out here. The technical detail is on the round's page and
+ *  goes along with "แจ้งปัญหา". */
+function FailedRound({ p }: { p: AgentTextPayload }) {
+  const t = useAmT();
+  const ws = useWorkspace();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const f: Failure | null = p.failure ?? null;
+  const say = (s: string | undefined) => personText(s ?? "");
+  const what = f ? say(f.what) || t("failed.generic") : say(p.text) || t("failed.generic");
+  const next = f ? say(f.next) : "";
+  const files = f ? say(f.files) : "";
+  const charged = f ? say(f.charged) : "";
+  const runId = p.run_id;
+  const retry = () => {
+    if (!runId) return;
+    setBusy(true);
+    setNote(null);
+    amApi.retry(runId).then(
+      (r) => {
+        setBusy(false);
+        if (r?.item) ws?.merge([r.item]);
+        setNote({ text: t("failed.retried"), error: false });
+      },
+      (err) => {
+        setBusy(false);
+        setNote({ text: errorMessage(err), error: true });
+      },
+    );
+  };
+  const retried = !!note && !note.error;
+  return (
+    <div data-testid="am-failed-round" data-tone="error" aria-label={t("failed.aria")}>
+      <ErrorCard
+        message={
+          <span className="whitespace-pre-wrap" data-testid="am-failed-what">
+            {what}
+          </span>
+        }
+        actions={
+          <>
+            {next ? (
+              <p className="mt-1.5 pl-6 text-text-primary" data-testid="am-failed-next">
+                {next}
+              </p>
+            ) : null}
+            {files ? (
+              <p className="mt-1 pl-6 text-xs text-text-secondary" data-testid="am-failed-files">
+                {files}
+              </p>
+            ) : null}
+            {charged ? (
+              <p className="mt-0.5 pl-6 text-xs text-text-secondary" data-testid="am-failed-charged">
+                {charged}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-center gap-x-4 pl-6">
+              {f?.can_retry && runId && !retried ? (
+                <ErrorCardAction testId="am-failed-retry" disabled={busy} icon={busy ? <Spin size={14} /> : <RotateCcw size={14} className="shrink-0" aria-hidden />} onClick={retry}>
+                  {busy ? t("failed.retrying") : t("failed.retry")}
+                </ErrorCardAction>
+              ) : null}
+              {runId ? (
+                <Link href={runHref(runId)} className="mt-2 inline-flex max-w-full items-center gap-2 text-left underline" data-testid="am-failed-run">
+                  <ListChecks size={14} className="shrink-0" aria-hidden />
+                  <span className="min-w-0 break-words">{t("failed.run")}</span>
+                </Link>
+              ) : null}
+            </div>
+            {note ? (
+              <p role={note.error ? "alert" : "status"} className="mt-1.5 pl-6 text-xs text-text-primary" data-testid="am-failed-note">
+                {note.text}
+              </p>
+            ) : null}
+            <div className="mt-2 pl-6 text-text-primary">
+              {runId ? <ProblemButton target={{ kind: "run", runId }} /> : ws ? <ProblemButton target={{ kind: "install", installId: ws.installId }} /> : null}
+            </div>
+          </>
+        }
+      />
+    </div>
+  );
+}
+
 /** "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้" → the text, then "แก้ได้" as a link. */
 export function splitNotice(text: string): string {
   return text.replace(/\s*[··]?\s*แก้ได้\s*$/u, "").trim();
@@ -253,7 +352,8 @@ export function splitNotice(text: string): string {
 function Notice({ p }: { p: NoticePayload }) {
   const t = useAmT();
   const ws = useWorkspace();
-  const text = splitNotice(p.text ?? "");
+  const text = splitNotice(personText(p.text ?? ""));
+  if (!text) return null;
   // AM3: a run waiting for budget (or an agent switched off) is said plainly, not in grey.
   if (p.tone === "warning" || p.action === "resume_budget") return <WarningNotice p={p} text={text} />;
   return (

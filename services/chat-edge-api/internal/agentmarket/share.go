@@ -400,6 +400,7 @@ func (a *API) sharedRun(w http.ResponseWriter, r *http.Request) {
 	var summary json.RawMessage
 	_ = a.store.Pool.QueryRow(ctx, `SELECT payload FROM agent_market.agent_thread_items WHERE run_id = $1 AND kind = 'outputs'
 		ORDER BY rev DESC LIMIT 1`, run.ID).Scan(&summary)
+	summary = GuardItem("outputs", summary)
 	owner := a.store.DisplayName(ctx, in.OrgID, in.UserID, "")
 	var agentName string
 	if d, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {

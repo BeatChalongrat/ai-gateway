@@ -609,19 +609,75 @@ func (r *Runner) finish(rc *runCtx, status, reason string) error {
 // runner shutdown or a lost lease): then the run is left exactly as it is,
 // its lease expires, and the next runner resumes it from the first
 // unfinished step. A graceful stop must never turn into a failed run.
+//
+// AM5: what the person reads is built from the reason's code and facts about
+// the round (am.FailureFor) — never from the error. The error goes to the log
+// and to the run's steps, which the run page and a problem report show.
 func (r *Runner) fail(ctx context.Context, run am.Run, reason string, err error) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
 	bg := context.Background()
 	_ = r.Store.Finish(bg, run.ID, r.ID, am.RunFailed, reason)
-	_ = r.Store.PostText(bg, run, failureText(reason, err), map[string]any{"tone": "error"})
+	r.recordFailure(bg, run, reason, err)
+	f := r.failure(bg, run, reason, err)
+	_ = r.Store.PostText(bg, run, f.Text(), map[string]any{"tone": "error", "failure": f})
 	if run.Kind == am.KindSelfTest {
 		// an upgrade's self-test that fails leaves the install on its version
-		(&runCtx{r: r, run: run}).finishUpgrade(bg, blobRef{}, false, failureText(reason, err))
+		(&runCtx{r: r, run: run}).finishUpgrade(bg, blobRef{}, false, f.What)
 	}
 	r.syncProgress(bg, run.ID)
 	return err
+}
+
+// failure is the failed round as a person reads it: the reason's own
+// sentences, what the round has been charged (read now — the run the caller
+// holds is the one it claimed), and whether its files can be tried again.
+func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err error) am.Failure {
+	facts := am.FailureFacts{Kind: run.Kind, Credits: run.CreditsSpent, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24)}
+	if cur, e := r.Store.RunByID(ctx, run.ID); e == nil {
+		facts.Credits = cur.CreditsSpent
+	}
+	if run.Kind == am.KindRun {
+		if files, e := r.Store.RunFiles(ctx, run.ID, "active"); e == nil && len(files) > 0 {
+			facts.HasFiles = true
+		}
+	}
+	var qe *qualityErr
+	if errors.As(err, &qe) {
+		facts.FailedChecks = qe.failed
+	}
+	return am.FailureFor(reason, facts)
+}
+
+// recordFailure keeps the error itself for the run page and the problem
+// report when no step of the run holds it (the run stopped between steps).
+func (r *Runner) recordFailure(ctx context.Context, run am.Run, reason string, err error) {
+	if err == nil {
+		return
+	}
+	r.logger().Warn("run failed", "run", run.ID, "reason", reason, "err", err)
+	steps, e := r.Store.ListSteps(ctx, run.ID)
+	if e != nil {
+		return
+	}
+	for _, s := range steps {
+		if s.Status == "failed" {
+			return // the step that failed already says why
+		}
+	}
+	st, done, e := r.Store.BeginStep(ctx, run.ID, "stopped", "check", am.StepKey(run.ID, "stopped", reason), json.RawMessage(`{}`))
+	if e != nil || done {
+		return
+	}
+	_ = r.Store.FinishStep(ctx, st.ID, "failed", nil, am.TrimText(reason+": "+err.Error(), 1500), "", "", 0)
+}
+
+func (r *Runner) logger() *slog.Logger {
+	if r.Log != nil {
+		return r.Log
+	}
+	return slog.Default()
 }
 
 func (rc *runCtx) stepFailed(step string, err error) error {
@@ -638,38 +694,6 @@ func (rc *runCtx) stepFailed(step string, err error) error {
 
 func (rc *runCtx) runCtxCancelled(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) && strings.Contains(err.Error(), "context")
-}
-
-// failureText is what the person reads when a run stops (AM3): what
-// happened, what to do next, and that their data is safe — in words, not a
-// stack trace. The technical detail stays in the run's steps for whoever
-// the "แจ้งปัญหา" button reaches.
-func failureText(reason string, err error) string {
-	const safe = " ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ"
-	const report = " ถ้าไม่แน่ใจว่าเกิดจากอะไร กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด"
-	switch reason {
-	case "budget_exhausted":
-		return "หยุดรอบนี้ไว้ครับ งบเครดิตของ agent นี้สำหรับเดือนนี้หมดแล้ว — ขอเพิ่มงบจากผู้ดูแล Agent Market แล้วพิมพ์ “ทำรอบใหม่”" +
-			safe + " แชทปกติยังใช้ได้ตามเดิม"
-	case "quality_gate":
-		return "สร้างไฟล์ได้ แต่ไม่ผ่านด่านตรวจคุณภาพ จึงยังไม่ส่งให้ครับ (" + trim(err.Error(), 300) + ") — " +
-			"ลองขอไฟล์ชนิดอื่น (เช่น .docx แทน PDF) หรือพิมพ์ “ทำรอบใหม่”" + safe + report
-	case "package_changed":
-		return "agent ถูกอัปเดตระหว่างรอบนี้ ตัวเลขของรอบนี้จึงไม่ถูกส่ง — ส่งไฟล์เดิมอีกครั้งหรือพิมพ์ “ทำรอบใหม่”" + safe
-	case "sandbox_unavailable":
-		return "ส่วนคำนวณของ agent ยังไม่พร้อมใช้งานในตอนนี้ — ลองใหม่ในอีกไม่กี่นาที (พิมพ์ “ทำรอบใหม่”)" + safe + report
-	case "engine_missing":
-		return "รุ่นของ agent ที่ติดตั้งไว้ไม่มีในระบบแล้ว — อัปเกรดเป็นรุ่นใหม่ในหน้าตั้งค่า แล้วส่งไฟล์อีกครั้ง" + safe
-	case "no_period":
-		return "หางวด (เดือน) ของข้อมูลในไฟล์ไม่เจอ — ส่งไฟล์ที่มีคอลัมน์วันที่ หรือพิมพ์บอกงวด เช่น “ปิดงบเดือนกันยายน 2569”" + safe
-	case "too_many_rounds":
-		return "คำตอบกับไฟล์ในรอบนี้ยังขัดกันอยู่หลายครั้ง จึงหยุดไว้ก่อน — ตรวจคำตอบในการ์ดคำถามแล้วพิมพ์ “ทำรอบใหม่”" + safe + report
-	}
-	msg := "รอบนี้ทำไม่สำเร็จครับ"
-	if err != nil {
-		msg += " (" + trim(err.Error(), 240) + ")"
-	}
-	return msg + " — ส่งไฟล์ใหม่หรือพิมพ์ “ทำรอบใหม่”" + safe + report
 }
 
 // ── self-test seed ───────────────────────────────────────────────────────

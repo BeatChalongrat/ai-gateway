@@ -9,7 +9,16 @@ Go side, so a malformed finding fails the step instead of reaching a user.
     { code, severity: blocking|cosmetic, moment: preflight|postcompute,
       header (≤12 chars), question, options[2..4]{label, description, value},
       default, evidence{...}, rememberable, kind: question|request_files,
-      subject (what this finding is about — a file, a column, an account) }
+      subject (what this finding is about — a file, a column, an account),
+      recommended (AM5, optional: the answer the card recommends — one of the
+      option values; absent = the card recommends nothing),
+      leaves_out (AM5: what a skipped card records leaves something out of
+      the result, so the card says that this is what skipping does) }
+
+``default`` is what a card that is skipped records; ``recommended`` is what
+the card advises. They were one field until AM5, and a card whose safe
+default was "leave the document out" therefore *recommended* leaving a real
+purchase out of the month.
 """
 
 from __future__ import annotations
@@ -60,6 +69,10 @@ class Finding:
     # "hint": ...}); the typed words come back as {"typed": "..."} and are
     # validated by the package, never interpreted by a model.
     input: dict | None = None
+    # AM5: the answer the card recommends (an option's value), or None.
+    recommended: Any = None
+    # AM5: a skipped card leaves its subject out of the result.
+    leaves_out: bool = False
 
     @property
     def key(self) -> str:
@@ -103,6 +116,8 @@ def validate(f: Finding) -> None:
         values = [o.value for o in f.options]
         if f.default not in values:
             raise FindingError(f"{f.code}: default {f.default!r} is not an option value")
+        if f.recommended is not None and f.recommended not in values:
+            raise FindingError(f"{f.code}: recommended {f.recommended!r} is not an option value")
         labels = [o.label for o in f.options]
         if len(set(labels)) != len(labels):
             raise FindingError(f"{f.code}: duplicate option labels")

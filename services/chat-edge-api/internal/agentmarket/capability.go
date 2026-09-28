@@ -2,6 +2,7 @@ package agentmarket
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -192,7 +193,57 @@ func Resolve(m Manifest, available map[string]Binding, version int) (Resolution,
 	sort.Strings(res.Missing)
 	sort.Strings(res.Optional)
 	if len(res.Missing) > 0 {
-		return res, fmt.Errorf("ติดตั้งไม่ได้: ระบบยังไม่มีความสามารถที่ agent นี้ต้องใช้ (%s)", strings.Join(res.Missing, ", "))
+		return res, &MissingCapabilities{IDs: res.Missing}
 	}
 	return res, nil
+}
+
+// MissingCapabilities is what Resolve returns when the runner lacks
+// something the agent requires. Error() is for the log; Thai() is what a
+// person reads — the parts named in words, never by their ids (AM5).
+type MissingCapabilities struct{ IDs []string }
+
+func (m *MissingCapabilities) Error() string {
+	return "missing capabilities: " + strings.Join(m.IDs, ", ")
+}
+
+// capabilityThai names a capability for a person.
+var capabilityThai = map[string]string{
+	"spreadsheet.read.xlsx":   "การอ่านไฟล์ Excel",
+	"document.extract.e2":     "การอ่านใบกำกับภาษีและใบเสร็จ",
+	"document.match.e3":       "การจับคู่รายการของสองตาราง",
+	"compute.python.decimal":  "ส่วนคำนวณ",
+	"model.text":              "โมเดลที่เขียนคำบรรยาย",
+	"model.vision":            "โมเดลที่อ่านสแกนและรูปถ่าย",
+	"deliverable.report.docx": "การสร้างรายงาน Word",
+	"deliverable.report.pdf":  "การแปลงรายงานเป็น PDF",
+	"deliverable.deck.pptx":   "การสร้างสไลด์ PowerPoint",
+	"deliverable.table.xlsx":  "การสร้างตาราง Excel",
+	"deliverable.template":    "การกรอกแบบฟอร์มของบริษัท",
+}
+
+// Thai lists the missing parts in words.
+func (m *MissingCapabilities) Thai() string {
+	var out []string
+	seen := map[string]bool{}
+	for _, id := range m.IDs {
+		name, ok := capabilityThai[id]
+		if !ok {
+			name = "ส่วนประกอบหนึ่งของระบบ"
+		}
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// missingThai is what a capability error says to a person.
+func missingThai(err error) string {
+	var m *MissingCapabilities
+	if errors.As(err, &m) {
+		return m.Thai()
+	}
+	return "ส่วนประกอบหนึ่งของระบบ"
 }

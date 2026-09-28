@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -257,13 +258,20 @@ func (r *Runner) Start(ctx context.Context) error {
 				inflight.Add(-1)
 				r.running.Add(-1)
 				if p := recover(); p != nil {
-					r.Log.Error("run panicked", "run", run.ID, "panic", p)
-					_ = r.Store.Finish(context.Background(), run.ID, r.ID, agentmarket.RunFailed, "internal_error")
+					r.crashed(run, p)
 				}
 			}()
 			r.execute(ctx, run)
 		}(run)
 	}
+}
+
+// crashed ends a run whose code panicked. AM5: it is a failed round like any
+// other — said in the thread, the progress card brought up to date — not a
+// round that silently stops moving.
+func (r *Runner) crashed(run agentmarket.Run, p any) {
+	r.logger().Error("run panicked", "run", run.ID, "panic", p)
+	_ = r.fail(nil, run, "internal_error", fmt.Errorf("panic: %v", p))
 }
 
 // startReaper removes what a killed runner left behind before the first
@@ -339,7 +347,7 @@ func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 	case agentmarket.KindReview:
 		err = r.reviewJob(ctx, run, log)
 	default:
-		err = r.Store.Finish(context.Background(), run.ID, r.ID, agentmarket.RunFailed, "unknown_kind")
+		err = r.fail(nil, run, "unknown_kind", fmt.Errorf("unknown run kind %q", run.Kind))
 	}
 	if err != nil && ctx.Err() != nil {
 		// Cancelled (or the lease went away): record cancel if it was asked for.

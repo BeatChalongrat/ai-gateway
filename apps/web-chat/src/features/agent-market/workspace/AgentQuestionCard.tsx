@@ -98,7 +98,7 @@ export function AgentQuestionCard({
   };
 
   const rememberable = questions.some((q) => q.rememberable);
-  const details = questions.filter((q) => q.default_label || hasEvidence(q));
+  const details = questions.filter((q) => recommendationOf(q) || q.leaves_out || hasEvidence(q));
   const inputs = questions.map((q) => questionInput(q.input));
   const cardKey = `${card.card_id}:${attempts}:${remount}`;
 
@@ -125,14 +125,19 @@ export function AgentQuestionCard({
             <li key={q.key} className="text-xs">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                 <span className="rounded bg-bg-elevated px-1.5 py-0.5 text-[11px] font-medium text-text-secondary">{q.header}</span>
-                {q.default_label ? (
+                {recommendationOf(q) ? (
                   <span className="text-text-secondary" data-testid="am-default-line">
                     {q.severity === "cosmetic"
-                      ? t("card.default.cosmetic", { label: q.default_label })
-                      : t("card.default.blocking", { label: q.default_label })}
+                      ? t("card.default.cosmetic", { label: recommendationOf(q) })
+                      : t("card.recommended", { label: recommendationOf(q) })}
                   </span>
                 ) : null}
               </div>
+              {q.leaves_out ? (
+                <p className="mt-1 text-text-secondary" data-testid="am-skip-line">
+                  {t("card.skipLeavesOut")}
+                </p>
+              ) : null}
               <EvidenceSource evidence={q.evidence} />
               <Evidence evidence={q.evidence} />
             </li>
@@ -148,6 +153,15 @@ export function AgentQuestionCard({
       {rememberable ? <p className="mt-1.5 text-xs text-text-muted">{t("card.remember")}</p> : null}
     </div>
   );
+}
+
+/** AM5: what the card recommends. What a skipped card records (`default`) is
+ *  a recommendation only for a card that does not leave anything out by it:
+ *  a card whose skip leaves a document out recommends what it says it
+ *  recommends (`recommended_label`), or nothing. */
+export function recommendationOf(q: Question): string {
+  if (q.recommended_label) return q.recommended_label;
+  return q.leaves_out ? "" : q.default_label ?? "";
 }
 
 function hasEvidence(q: Question): boolean {

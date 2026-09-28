@@ -313,7 +313,8 @@ func (a *API) startUpgrade(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(st.Capabilities, &caps)
 	res, err := Resolve(m, caps, in.BindingVersion+1)
 	if err != nil {
-		a.sayTo(w, r, http.StatusConflict, "MISSING_CAPABILITY", "detail", err.Error())
+		a.log.Warn("upgrade refused", "install", in.ID, "err", err)
+		a.sayTo(w, r, http.StatusConflict, "MISSING_CAPABILITY", "detail", missingThai(err))
 		return
 	}
 	bindings, _ := json.Marshal(res)

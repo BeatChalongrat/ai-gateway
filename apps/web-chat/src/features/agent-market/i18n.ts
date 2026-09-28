@@ -12,6 +12,7 @@
 
 import { am3Th } from "./i18n.am3";
 import { am4Th } from "./i18n.am4";
+import { am5Th } from "./i18n.am5";
 
 const thBase = {
   // common
@@ -741,7 +742,7 @@ const thBase = {
 } as const;
 
 // AM3's strings (self-serve) and AM4's live in their own files, merged here.
-const th = { ...thBase, ...am3Th, ...am4Th } as const;
+const th = { ...thBase, ...am3Th, ...am4Th, ...am5Th } as const;
 
 export type AmKey = keyof typeof th;
 

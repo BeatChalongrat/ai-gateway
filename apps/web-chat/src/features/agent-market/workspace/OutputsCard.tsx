@@ -14,10 +14,11 @@ import { formatBytes } from "@/lib/fileUtil";
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { extensionOf, formatCredits, formatMoney } from "../format";
-import type { OutputArtifact, OutputsPayload, QualityCheck } from "../types";
+import type { NotIncluded, OutputArtifact, OutputsPayload, QualityCheck } from "../types";
 import { BTN_SMALL, cls, Pill, Spin } from "../ui";
 import { SignOffButton } from "../review/SignOff";
 import { provenanceHref, useWorkspace } from "./context";
+import { personText } from "./personText";
 
 export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
@@ -53,7 +54,14 @@ export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | n
   return { pass: checks.filter((c) => c.ok).length, total: checks.length, checks };
 }
 
-export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
+export function OutputsCard({
+  outputs,
+  superseded = false,
+}: {
+  outputs: OutputsPayload;
+  /** AM5: a newer files card of the same round exists below (this one's list is history). */
+  superseded?: boolean;
+}) {
   const t = useAmT();
   const ws = useWorkspace();
   const canSignOff = !!ws && !ws.selfTestRuns?.has(outputs.run_id);
@@ -118,6 +126,8 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
         </ul>
       ) : null}
 
+      <LeftOut runId={outputs.run_id} docs={outputs.summary?.not_included ?? []} superseded={superseded} />
+
       <SeenBy outputs={outputs} />
 
       {hasDetails ? (
@@ -150,8 +160,8 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
                           <TriangleAlert width={14} height={14} className="mt-px shrink-0 text-status-warning" aria-hidden />
                         )}
                         <span className="min-w-0 text-text-secondary">
-                          <span className="text-text-primary">{c.label || c.name}</span>
-                          {c.detail ? <span>{` · ${c.detail}`}</span> : null}
+                          <span className="text-text-primary">{personText(c.label ?? "") || t("outputs.check")}</span>
+                          {personText(c.detail ?? "") ? <span>{` · ${personText(c.detail ?? "")}`}</span> : null}
                         </span>
                       </li>
                     ))}
@@ -174,6 +184,73 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
         </Link>
       </div>
     </div>
+  );
+}
+
+/** AM5 — "เอกสารที่ยังไม่ได้รวม": every document the round left out, why, and
+ *  one click to bring it back. The list is the round's own (its computed
+ *  table), so it is there after a reload, on the other client, next month. */
+export function LeftOut({ runId, docs, superseded }: { runId: string; docs: NotIncluded[]; superseded: boolean }) {
+  const t = useAmT();
+  if (!docs.length) return null;
+  return (
+    <section
+      className="mt-3 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2.5"
+      aria-label={t("left.title", { n: String(docs.length) })}
+      data-testid="am-not-included"
+    >
+      <h3 className="text-sm font-semibold text-text-primary" data-testid="am-not-included-title">
+        {t("left.title", { n: String(docs.length) })}
+      </h3>
+      <p className="mt-0.5 text-xs text-text-secondary">{superseded ? t("left.superseded") : t("left.body")}</p>
+      <ul className="mt-2 flex flex-col divide-y divide-border-subtle">
+        {docs.map((d) => (
+          <LeftOutRow key={d.doc_key} runId={runId} doc={d} superseded={superseded} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function LeftOutRow({ runId, doc, superseded }: { runId: string; doc: NotIncluded; superseded: boolean }) {
+  const t = useAmT();
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ text: string; error: boolean } | null>(null);
+  const restore = () => {
+    setBusy(true);
+    setNote(null);
+    amApi.restore(runId, doc.doc_key).then(
+      (r) => {
+        setBusy(false);
+        setNote({ text: r?.asks ? t("left.restoredAsk") : t("left.restored"), error: false });
+      },
+      (err) => {
+        setBusy(false);
+        setNote({ text: errorMessage(err), error: true });
+      },
+    );
+  };
+  const done = !!note && !note.error;
+  return (
+    <li className="flex flex-wrap items-start gap-x-3 gap-y-1.5 py-2" data-testid="am-not-included-row" data-doc={doc.doc_key}>
+      <FileTypeBadge filename={doc.name} size="sm" />
+      <div className="min-w-0 flex-1">
+        <div className="break-words text-sm text-text-primary">{doc.name}</div>
+        <div className="text-xs text-text-secondary">{doc.detail ? `${doc.reason} · ${doc.detail}` : doc.reason}</div>
+        <div className="text-[11px] text-text-muted">{doc.how}</div>
+        {note ? (
+          <div role={note.error ? "alert" : "status"} className={cls("mt-1 text-xs", note.error ? "text-status-danger" : "text-status-success")} data-testid="am-restore-note">
+            {note.text}
+          </div>
+        ) : null}
+      </div>
+      {doc.can_restore && !superseded && !done ? (
+        <button type="button" onClick={restore} disabled={busy} className={BTN_SMALL} data-testid="am-restore">
+          {busy ? <Spin size={12} /> : null}
+          <span>{busy ? t("left.restoring") : t("left.restore")}</span>
+        </button>
+      ) : null}
+    </li>
   );
 }
 

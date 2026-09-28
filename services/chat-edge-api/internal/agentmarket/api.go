@@ -184,6 +184,8 @@ func (a *API) Routes(r chi.Router) {
 		r.Get("/runs/{id}", a.getRun)
 		r.Get("/runs/{id}/computed", a.computed)
 		r.Post("/runs/{id}/cancel", a.cancel)
+		r.Post("/runs/{id}/retry", a.retry)     // AM5: a failed round, tried again with the files it had
+		r.Post("/runs/{id}/restore", a.restore) // AM5: a document that was left out, brought back
 		r.Post("/runs/{id}/formats", a.formats)
 		r.Get("/artifacts/{id}/download", a.downloadArtifact)
 		r.Get("/files/{id}/download", a.downloadFile)
@@ -201,7 +203,15 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeErr sends a message a person reads. AM5: whatever a caller put into
+// it, nothing technical leaves (the last line of defence; the callers name
+// things in words).
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
+	if LooksLikeError(msg) {
+		if msg = ForPerson(msg); msg == "" {
+			msg = userMessages["AGENT_MARKET_ERROR"]
+		}
+	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
 }
 
@@ -359,7 +369,8 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(st.Capabilities, &available)
 	res, err := Resolve(m, available, 1)
 	if err != nil {
-		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", err.Error())
+		a.log.Warn("install refused", "slug", m.ID, "err", err)
+		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingThai(err))
 		return
 	}
 	bindings, _ := json.Marshal(res)
@@ -1217,7 +1228,7 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 	}
 	answers, texts, err := ResolveSubmission(questions, req.Answers, card.Moment, card.ID.String())
 	if err != nil {
-		say(w, http.StatusUnprocessableEntity, "BAD_ANSWER", "detail", err.Error())
+		say(w, http.StatusUnprocessableEntity, "BAD_ANSWER", "detail", answerProblem(err))
 		return
 	}
 	if strings.TrimSpace(req.Text) != "" && len(answers) == 0 {

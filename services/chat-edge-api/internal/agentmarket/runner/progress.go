@@ -179,7 +179,9 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 		add("render", "สร้างไฟล์ผลลัพธ์", status(s.Status), detail)
 		q := qualitySummary(o)
 		if s.Status == "failed" {
-			add("quality", "ตรวจคุณภาพเอกสาร", "failed", trim(s.Error, 160))
+			// AM5: which line failed is said here; why is said by the round's
+			// message (in words) and by the run page (in full).
+			add("quality", "ตรวจคุณภาพเอกสาร", "failed", "")
 		} else if q != "" {
 			add("quality", "ตรวจคุณภาพเอกสาร", status(s.Status), q)
 		}

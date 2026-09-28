@@ -3,6 +3,7 @@ package agentmarket
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -50,6 +51,11 @@ type Finding struct {
 	Subject      string          `json:"subject"`
 	Request      json.RawMessage `json:"request"`
 	Input        json.RawMessage `json:"input"`
+	// AM5: what the card recommends (one of its options' values; absent =
+	// nothing), and whether skipping it leaves its subject out of the result.
+	// Default is what a skipped card records — not a recommendation.
+	Recommended json.RawMessage `json:"recommended"`
+	LeavesOut   bool            `json:"leaves_out"`
 }
 
 // Blocking reports whether the answer changes a number or which rows count.
@@ -80,6 +86,9 @@ func (f Finding) Validate() error {
 	}
 	if !found {
 		return fmt.Errorf("%s: default is not an option", f.Key)
+	}
+	if rec := nullIfEmpty(f.Recommended); rec != nil && !validOption(f, rec) {
+		return fmt.Errorf("%s: what the card recommends is not one of its options", f.Key)
 	}
 	low := strings.ToLower(f.Question)
 	for _, w := range []string{"password", "รหัสผ่าน", "token", "โทเคน", "otp", "เลขบัตรประชาชน"} {
@@ -255,11 +264,16 @@ func Plan(in PlanInput) (PlanResult, error) {
 }
 
 func questionOf(f Finding) Question {
-	return Question{
+	q := Question{
 		Key: f.Key, Code: f.Code, Severity: f.Severity, Header: f.Header, Question: f.Question,
 		Options: f.Options, Default: f.Default, DefaultLabel: labelFor(f, f.Default),
 		Evidence: f.Evidence, Rememberable: f.Rememberable, Request: f.Request, Input: nullIfEmpty(f.Input),
+		LeavesOut: f.LeavesOut,
 	}
+	if rec := nullIfEmpty(f.Recommended); rec != nil {
+		q.RecommendedLabel = labelFor(f, rec)
+	}
+	return q
 }
 
 func nullIfEmpty(b json.RawMessage) json.RawMessage {
@@ -357,7 +371,7 @@ func ResolveSubmission(questions []Question, sub map[string]Submitted, moment, c
 			v = b
 		} else {
 			if len(values) != 1 {
-				return nil, nil, fmt.Errorf("%s: one answer expected", q.Key)
+				return nil, nil, &oneAnswerErr{header: q.Header, key: q.Key}
 			}
 			v = values[0]
 		}
@@ -426,4 +440,18 @@ func negated(text, word string) bool {
 func normalizeThai(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	return strings.Join(strings.Fields(s), "")
+}
+
+// oneAnswerErr: a question that takes one answer was given several.
+type oneAnswerErr struct{ header, key string }
+
+func (e *oneAnswerErr) Error() string { return e.key + ": one answer expected" }
+
+// answerProblem is why an answer was not taken, as the person reads it.
+func answerProblem(err error) string {
+	var one *oneAnswerErr
+	if errors.As(err, &one) {
+		return "คำถาม “" + one.header + "” รับคำตอบได้ข้อเดียว"
+	}
+	return "คำตอบนี้ใช้ไม่ได้"
 }

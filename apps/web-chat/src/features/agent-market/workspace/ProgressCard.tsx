@@ -18,6 +18,7 @@ import { elapsedBetween, formatDuration } from "../format";
 import type { ProgressPayload, ProgressStepStatus } from "../types";
 import { BTN_SMALL, cls, Spin } from "../ui";
 import { runHref } from "./context";
+import { personText } from "./personText";
 
 const TITLE: Record<string, AmKey> = {
   queued: "progress.title.queued",
@@ -160,8 +161,8 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
                 <StepIcon status={s.status} />
               </span>
               <span className={cls("min-w-0 flex-1", s.status === "running" ? "text-text-primary" : s.status === "pending" ? "text-text-muted" : "text-text-secondary")}>
-                <span>{s.label}</span>
-                {s.detail ? <span className="text-text-muted">{` · ${s.detail}`}</span> : null}
+                <span>{personText(s.label) || t(STEP_STATUS[s.status] ?? "stepStatus.pending")}</span>
+                {personText(s.detail ?? "") ? <span className="text-text-muted">{` · ${personText(s.detail ?? "")}`}</span> : null}
                 <span className="sr-only">{` (${t(STEP_STATUS[s.status] ?? "stepStatus.pending")})`}</span>
               </span>
             </li>

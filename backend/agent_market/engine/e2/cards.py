@@ -10,6 +10,15 @@ Every financial card's *default* — what a skipped card records — is to leave
 the document out as an exception, never to accept the number. A card that
 takes a typed value says so (``input``); the typed words come back as
 ``{"typed": ...}`` and are checked by ``typed.parse`` before anything uses them.
+
+AM5: what a skipped card records is not what the card *recommends*. A card
+about a real purchase whose numbers do not add up (the VAT is not 7% of the
+base) recommends recording it as printed, with an exception for whoever
+reviews — leaving it out would lose the purchase. A card that needs the
+person to look at the document (an unclear value, a missing one, the kind of
+document, an invoice in another company's name) recommends nothing. Every
+card whose skip leaves the document out says so (``leaves_out``), and the
+document then goes on the round's "เอกสารที่ยังไม่ได้รวม" list.
 """
 
 from __future__ import annotations
@@ -61,6 +70,12 @@ INPUT_KIND = {"money": "money", "tax_id": "tax_id", "date": "date", "code": "tex
 INPUT_HINT = {"money": "พิมพ์ตัวเลข เช่น 12,850.70", "tax_id": "พิมพ์เลข 13 หลัก", "date": "พิมพ์วันที่ เช่น 15/09/2569",
               "rate": "พิมพ์ตัวเลข เช่น 36.25", "text": "พิมพ์ตามที่เห็นในเอกสาร"}
 EXCLUDE = ("ตัดเอกสารนี้ออก", "exclude", "ไม่นำเอกสารนี้เข้าทะเบียน บันทึกเป็นข้อยกเว้นให้คนตรวจ")
+LEAVES_OUT = ("exclude", "reupload")
+# failed checks of a real purchase: recording it as printed (with an exception) loses nothing.
+# Not among them: an invoice in another company's name (it may not be this company's purchase)
+# and a foreign currency (it needs a rate first).
+RECORD_AS_PRINTED = ("line_arithmetic", "subtotal_sum", "discount_arithmetic", "vat_7_percent", "grand_total", "wht",
+                     "seller_tax_id_format", "buyer_tax_id_format", "document_date", "amount_in_words")
 
 
 def _doc_label(doc: dict) -> str:
@@ -205,7 +220,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             else:
                 options = [("ไม่มีในเอกสาร", "absent", "เอกสารไม่ได้พิมพ์ค่านี้"), EXCLUDE]
             out.append(finding(f"e2_{code}", "blocking", "preflight", HEADER.get(field, "ค่าในเอกสาร"), text,
-                               options, "exclude", evidence=ev, subject=subj,
+                               options, "exclude", evidence=ev, subject=subj, leaves_out=True,
                                input={"kind": INPUT_KIND[kind], "hint": INPUT_HINT[INPUT_KIND[kind]]},
                                facts={"field": field, "proposed": shown}))
         elif code == "field_missing" and field in FIELD_KINDS:
@@ -221,7 +236,7 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
                 text = f"{label}: ไม่พบ{what}ในเอกสาร ช่วยพิมพ์ค่าที่เห็น หรือยืนยันว่าเอกสารไม่ได้พิมพ์ไว้{note}"
             out.append(finding("e2_field_missing", "blocking", "preflight", HEADER.get(field, "ค่าที่ขาด"), text,
                                [("ไม่มีในเอกสาร", "absent", "บันทึกเป็นข้อยกเว้น: เอกสารไม่ครบ"), EXCLUDE], "exclude",
-                               evidence=ev, subject=subj,
+                               evidence=ev, subject=subj, leaves_out=True,
                                input={"kind": INPUT_KIND[kind], "hint": INPUT_HINT[INPUT_KIND[kind]]}, facts={"field": field}))
         elif code == "check_failed":
             head, why = CHECK_TH.get(subject, ("ตรวจไม่ผ่าน", "ตัวเลขในเอกสารไม่ผ่านการตรวจ"))
@@ -234,7 +249,8 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
                 opts = [("ระบุอัตราแลกเปลี่ยน", "rate", "พิมพ์อัตรา เช่น 36.25"), EXCLUDE]
                 inp = {"kind": "rate", "hint": "พิมพ์อัตราแลกเปลี่ยนเป็นบาทต่อ 1 หน่วย เช่น 36.25"}
             out.append(finding("e2_check_failed", "blocking", "preflight", head, text, opts, "exclude",
-                               evidence=ev, subject=subj, input=inp, facts={"check": subject}))
+                               evidence=ev, subject=subj, input=inp, facts={"check": subject}, leaves_out=True,
+                               recommended="accept_as_printed" if subject in RECORD_AS_PRINTED else None))
         elif code == "duplicate_candidate":
             m = (q.get("evidence") or {}).get("match") or {}
             if isinstance(m, dict) and m.get("name"):
@@ -246,26 +262,27 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
             out.append(finding("e2_duplicate", "blocking", "preflight", "เอกสารซ้ำ", text,
                                [("ซ้ำ ตัดออก", "exclude", "ไม่นำฉบับนี้เข้าทะเบียนอีก"),
                                 ("ไม่ซ้ำ นับรวม", "include", "เป็นเอกสารคนละฉบับ นำเข้าทะเบียนด้วย")],
-                               "exclude", evidence=ev, subject=subj))
+                               # the same purchase is already in the register: leaving the copy out loses nothing
+                               "exclude", evidence=ev, subject=subj, leaves_out=True, recommended="exclude"))
         elif code == "copy_not_original":
             # blocking: whether a copy is recorded changes which documents count (a cosmetic answer never
             # reaches the numbers); skipped → left out, like every other E2 card
             out.append(finding("e2_copy", "blocking", "preflight", "สำเนา",
                                f"{label}: เอกสารนี้เป็นสำเนา ขอคืนภาษีซื้อต้องใช้ต้นฉบับ บันทึกไว้หรือไม่",
                                [("บันทึก พร้อมหมายเหตุ", "ok", "บันทึกตามเดิม พร้อมข้อยกเว้นว่าเป็นสำเนา"), EXCLUDE], "exclude",
-                               evidence=ev, subject=subj))
+                               evidence=ev, subject=subj, leaves_out=True, recommended="ok"))
         elif code == "document_type_unknown":
             out.append(finding("e2_doc_type", "blocking", "preflight", "ชนิดเอกสาร",
                                f"{label}: หัวเอกสารไม่ได้บอกชัดว่าเป็นเอกสารชนิดไหน ดูหัวกระดาษแล้วเลือกให้หน่อย",
                                [("ใบกำกับภาษีเต็มรูป", "full_tax_invoice", "มีชื่อ ที่อยู่ และเลขผู้เสียภาษีของผู้ซื้อ"),
                                 ("ใบกำกับภาษีอย่างย่อ", "abbreviated_tax_invoice", "ไม่มีชื่อผู้ซื้อ เช่น บิลจากร้านค้าปลีก"),
                                 ("ใบเสร็จรับเงิน", "receipt", "ใบเสร็จที่ไม่ใช่ใบกำกับภาษี"), EXCLUDE],
-                               "exclude", evidence=ev, subject=subj))
+                               "exclude", evidence=ev, subject=subj, leaves_out=True))
         elif code == "page_quality":
             out.append(finding("e2_page_quality", "blocking", "preflight", "ภาพไม่ชัด",
                                f"{label}: หน้า {subject[1:]} ภาพไม่ชัดพอ ตัวเลขเงินที่อ่านจากหน้านี้อาจผิด",
                                [("อัปโหลดไฟล์ที่ชัดกว่า", "reupload", "สแกนใหม่ที่ 300 DPI แล้วส่งมาแทน"), EXCLUDE],
-                               "exclude", evidence=ev, subject=subj))
+                               "exclude", evidence=ev, subject=subj, leaves_out=True))
     return out
 
 

@@ -130,7 +130,7 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
         if doc.sha256 in seen:
             res.append(Reviewed(doc, doc.extraction, dec, "excluded",
                                 {"code": "same_file_twice", "detail": f"ไฟล์เดียวกับ {seen[doc.sha256]} (ไบต์ตรงกันทุกตัว)",
-                                 "decided_by": "rule"}))
+                                 "decided_by": "rule", "restore": None}))
             continue
         seen[doc.sha256] = doc.name
         out = rejudge(doc.extraction, org=org, history=hist, today=today, proposals=proposals_for(doc, proposals),
@@ -145,7 +145,7 @@ def review(docs: list[Doc], *, answers: dict | None, defaults: dict | None, toda
             res.append(Reviewed(doc, out, dec, "excluded",
                                 {"code": dec.excluded["code"], "codes": dec.excluded.get("codes", [dec.excluded["code"]]),
                                  "detail": detail, "decided_by": "card", "subject": dec.excluded.get("subject"),
-                                 "reupload": dec.excluded.get("reupload", False)}))
+                                 "reupload": dec.excluded.get("reupload", False), "restore": D.restore_of(dec)}))
             continue
         fs = cards.findings_for(doc.key, out) + _invalid_cards(doc, out, dec)
         res.append(Reviewed(doc, out, dec, "pending" if fs else "included", findings=fs))

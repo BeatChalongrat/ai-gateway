@@ -955,9 +955,15 @@ func (s *Store) GetArtifact(ctx context.Context, tenant, user, id uuid.UUID) (Ar
 
 const itemCols = `id, install_id, run_id, kind, payload, client_id, rev, created_at, updated_at, thread_id`
 
+// scanItem reads one thread item. AM5: whatever the row holds, what leaves
+// here is safe for a person to read (GuardItem) — a row written before the
+// runner stopped pasting errors into the thread included.
 func scanItem(r pgx.Row) (ThreadItem, error) {
 	var t ThreadItem
 	err := r.Scan(&t.ID, &t.InstallID, &t.RunID, &t.Kind, &t.Payload, &t.ClientID, &t.Rev, &t.CreatedAt, &t.UpdatedAt, &t.ThreadID)
+	if err == nil {
+		t.Payload = GuardItem(t.Kind, t.Payload)
+	}
 	return t, err
 }
 
@@ -976,6 +982,7 @@ func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thr
 	if err != nil {
 		return ThreadItem{}, false, err
 	}
+	b = GuardItem(kind, b) // AM5: nothing technical is stored where a person reads
 	t, err := scanItem(q.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_thread_items (install_id, tenant_id, user_id, run_id, kind, payload, client_id, thread_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, (SELECT r.thread_id FROM agent_market.agent_runs r WHERE r.id = $4)))

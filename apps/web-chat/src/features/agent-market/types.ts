@@ -309,6 +309,11 @@ export interface Question {
   rememberable?: boolean;
   request?: FileRequest[] | null;
   input?: QuestionInput | null;
+  /** AM5: the answer the card recommends (absent: it recommends nothing) —
+   *  not what skipping it records, which is `default`. */
+  recommended_label?: string;
+  /** AM5: skipping the question leaves its subject out of the result. */
+  leaves_out?: boolean;
 }
 
 export interface AnswerRecord {
@@ -383,10 +388,34 @@ export interface UserFilesPayload {
   files?: { id: string; name: string; size: number }[] | null;
 }
 
+/** AM5: a failed round as a person reads it (the server builds it from the
+ *  reason's code, never from an error's text; `reason` is never shown). */
+export interface Failure {
+  reason: string;
+  what: string;
+  next: string;
+  files: string;
+  charged: string;
+  credits: number;
+  can_retry: boolean;
+  failed_checks?: string[] | null;
+}
+
 export interface AgentTextPayload {
   text?: string;
   run_id?: string;
   tone?: "error" | string;
+  failure?: Failure | null;
+}
+
+/** AM5: a document the round left out ("เอกสารที่ยังไม่ได้รวม"). */
+export interface NotIncluded {
+  doc_key: string;
+  name: string;
+  reason: string;
+  detail?: string;
+  how: string;
+  can_restore: boolean;
 }
 
 export interface NoticePayload {
@@ -467,6 +496,8 @@ export interface OutputsPayload {
     net_profit?: string | null;
     rows_used?: number;
     exceptions?: number;
+    /** AM5: the documents this round left out. */
+    not_included?: NotIncluded[] | null;
     [k: string]: unknown;
   } | null;
   model?: OutputsModel | null;

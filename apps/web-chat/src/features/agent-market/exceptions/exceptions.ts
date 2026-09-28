@@ -74,10 +74,11 @@ export function evidenceParts(ref: ExceptionSourceRef | null | undefined, money:
   return out;
 }
 
-/** A row's reason in words: the package's own Thai sentence, else the feature's label, else the code. */
+/** A row's reason in words: the package's own Thai sentence, else the feature's label — never the
+ *  code (AM5: a code is the engine's name for the reason, not a person's). */
 export function reasonText(row: Pick<RunExceptionRow, "reason_code" | "source_ref">, label: (k: AmKey) => string): string {
   const own = str(row.source_ref?.reason);
   if (own) return own;
   const k = reasonLabelKey(row.reason_code);
-  return k ? label(k) : row.reason_code;
+  return label(k ?? "reason.unknown");
 }

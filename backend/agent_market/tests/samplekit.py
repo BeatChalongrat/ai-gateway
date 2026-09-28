@@ -63,8 +63,9 @@ def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | 
 
 
 def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, formats: list[str],
-              message: str = "", out_dir: str | None = None) -> dict:
-    """The whole package on (path, the name the person gave the file) pairs, in upload order (AM4)."""
+              message: str = "", out_dir: str | None = None, answers: dict | None = None) -> dict:
+    """The whole package on (path, the name the person gave the file) pairs, in upload order (AM4).
+    answers are the ones the person has already given (AM5); a card they do not answer is skipped."""
     out_dir = out_dir or tempfile.mkdtemp(prefix=f"am_sample_{package}_")
     base = tempfile.mkdtemp(prefix="am_sample_job_")
     inp, out = os.path.join(base, "in"), os.path.join(base, "out")
@@ -91,7 +92,7 @@ def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, for
                 if os.path.exists(p):
                     os.remove(p)
         req = {"package": package, "parsed": parsed, "defaults": defaults, "today": TODAY.isoformat()}
-        answers: dict = {}
+        answers = dict(answers or {})
         first = None
         for _ in range(8):
             pre = run({**req, "op": "preflight", "answers": answers, "message": message})

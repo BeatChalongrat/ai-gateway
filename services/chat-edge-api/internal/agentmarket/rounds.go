@@ -556,3 +556,313 @@ func (a *API) installStorage(w http.ResponseWriter, r *http.Request) {
 		"personal_delete": "ถ้าลบบัญชี แชทและการตั้งค่าของคุณจะถูกลบ แต่ไฟล์ของรอบที่สำเร็จเป็นหลักฐานทางบัญชีขององค์กร เก็บต่อตามระยะที่องค์กรกำหนด " +
 			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล"})
 }
+
+// ── a failed round, tried again (AM5) ────────────────────────────────────
+//
+// A failed round was a dead end: typing "ทำรอบใหม่" started a round with no
+// files at all. "ลองใหม่ด้วยไฟล์เดิม" starts the same round again — the files
+// it had, the instruction it was given, the answers the person had already
+// clicked, the model and the thread — as a new run. The failed run stays as
+// it ended (its steps are what a problem report shows); its files move to
+// the new run, which is where they are needed and where retention now counts
+// them from.
+
+func (a *API) retry(w http.ResponseWriter, r *http.Request) {
+	c, _ := caller(r)
+	id, ok := pathID(r, "id")
+	if !ok {
+		badRequest(w, "BAD_ID")
+		return
+	}
+	ctx := r.Context()
+	failed, err := a.store.GetRun(ctx, c.TenantUUID, c.UserID, id)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, failed.InstallID)
+	if err != nil {
+		a.fail(w, err, "install")
+		return
+	}
+	if !a.agentGate(w, r, in.Slug, false) {
+		return
+	}
+	idem := "retry:" + failed.ID.String()
+	// a second click: the round the first click started
+	if again, err := a.store.RunByIdempotency(ctx, in.ID, idem); err == nil {
+		a.writeRetry(w, ctx, again)
+		return
+	}
+	if failed.Kind != KindRun || failed.Status != RunFailed {
+		say(w, http.StatusConflict, "NOT_FAILED")
+		return
+	}
+	files, err := a.store.RunFiles(ctx, failed.ID, "active")
+	if err != nil {
+		a.fail(w, err, "file")
+		return
+	}
+	if len(files) == 0 {
+		say(w, http.StatusConflict, "NOTHING_TO_RETRY", "days", "7")
+		return
+	}
+	if latest, err := a.store.LatestRunIn(ctx, in.ID, failed.ThreadID); err == nil && !IsTerminal(latest.Status) {
+		say(w, http.StatusConflict, "ROUND_IN_PROGRESS")
+		return
+	}
+	def, err := a.store.DefinitionByID(ctx, in.DefinitionID)
+	if err != nil {
+		a.fail(w, err, "agent")
+		return
+	}
+	tx, err := a.store.Pool.Begin(ctx)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := a.store.SupersedeInstallCards(ctx, tx, in.ID, "superseded"); err != nil {
+		a.fail(w, err, "card")
+		return
+	}
+	params, _ := json.Marshal(map[string]any{"retry_of": failed.ID})
+	// the install's current version: a retry after an upgrade runs the upgraded agent
+	run, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: in.ID, TenantID: c.TenantUUID, UserID: c.UserID, Kind: KindRun,
+		Message: failed.Message, Params: params, DefinitionVersion: def.Version, Checksum: def.Checksum, EngineChecksum: def.EngineChecksum,
+		BindingVersion: in.BindingVersion, Formats: failed.Formats, Answers: failed.Answers, ThreadID: failed.ThreadID,
+		ModelChoice: failed.ModelChoice}, idem)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_files SET run_id = $2 WHERE run_id = $1 AND status = 'active'`, failed.ID, run.ID); err != nil {
+		a.fail(w, err, "file")
+		return
+	}
+	rid := run.ID
+	names := make([]string, 0, len(files))
+	for _, f := range files {
+		names = append(names, f.Name)
+	}
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "notice",
+		map[string]any{"text": fmt.Sprintf("ลองรอบนี้ใหม่ด้วยไฟล์เดิม %d ไฟล์: %s", len(names), strings.Join(names, ", ")),
+			"run_id": run.ID.String(), "retry_of": failed.ID.String()}, nil); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "progress",
+		Progress{RunID: run.ID.String(), Kind: KindRun, Status: RunQueued}, nil); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	a.writeRetry(w, ctx, run)
+}
+
+func (a *API) writeRetry(w http.ResponseWriter, ctx context.Context, run Run) {
+	out := map[string]any{"run": run}
+	if it, err := a.store.ItemFor(ctx, run.InstallID, "progress", "run_id", run.ID.String()); err == nil {
+		out["item"] = it
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// RunByIdempotency finds the run an idempotency key already made.
+func (s *Store) RunByIdempotency(ctx context.Context, install uuid.UUID, key string) (Run, error) {
+	x, err := scanRun(s.Pool.QueryRow(ctx, `SELECT `+runCols+` FROM agent_market.agent_runs
+		WHERE install_id = $1 AND idempotency_key = $2`, install, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return x, ErrNotFound
+	}
+	return x, err
+}
+
+// ── a document that was left out, brought back (AM5) ─────────────────────
+//
+// A round keeps the list of what it left out ("เอกสารที่ยังไม่ได้รวม",
+// computed.json not_included), and each entry says what bringing the
+// document back takes: answers to give in place of the ones that left it out
+// (recorded as printed, with an exception), or answers to take back so that
+// the document's question is asked again. The control plane applies exactly
+// that to the round's answers and lets the same round compute again: the
+// files come out as the next version, and the list is the new round's.
+// Which answers, and what they mean, is the package's; nothing here knows
+// what an invoice is.
+
+type restoreSpec struct {
+	Set map[string]struct {
+		Value json.RawMessage `json:"value"`
+		Label string          `json:"label"`
+		Code  string          `json:"code"`
+	} `json:"set"`
+	Drop []string `json:"drop"`
+}
+
+type leftOut struct {
+	DocKey     string      `json:"doc_key"`
+	Name       string      `json:"name"`
+	CanRestore bool        `json:"can_restore"`
+	Restore    restoreSpec `json:"restore"`
+}
+
+// leftOutOf reads the round's list from its newest computed table.
+func (a *API) leftOutOf(ctx context.Context, run Run) ([]leftOut, error) {
+	var key string
+	err := a.store.Pool.QueryRow(ctx, `SELECT output->>'computed_key' FROM agent_market.agent_run_steps
+		WHERE run_id = $1 AND name = 'compute' AND status = 'succeeded' ORDER BY seq DESC LIMIT 1`, run.ID).Scan(&key)
+	if err != nil || key == "" {
+		return nil, ErrNotFound
+	}
+	body, _, _, err := a.files.Download(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	defer body.Close()
+	var c struct {
+		NotIncluded []leftOut `json:"not_included"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(&c); err != nil {
+		return nil, err
+	}
+	return c.NotIncluded, nil
+}
+
+func (a *API) restore(w http.ResponseWriter, r *http.Request) {
+	c, _ := caller(r)
+	id, ok := pathID(r, "id")
+	if !ok {
+		badRequest(w, "BAD_ID")
+		return
+	}
+	var req struct {
+		DocKey string `json:"doc_key"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || strings.TrimSpace(req.DocKey) == "" {
+		badRequest(w, "BAD_JSON")
+		return
+	}
+	ctx := r.Context()
+	run, err := a.store.GetRun(ctx, c.TenantUUID, c.UserID, id)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, run.InstallID)
+	if err != nil {
+		a.fail(w, err, "install")
+		return
+	}
+	if !a.agentGate(w, r, in.Slug, false) {
+		return
+	}
+	if run.Kind != KindRun || run.Status != RunSucceeded {
+		say(w, http.StatusConflict, "ROUND_NOT_DONE")
+		return
+	}
+	list, err := a.leftOutOf(ctx, run)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	var doc *leftOut
+	for i := range list {
+		if list[i].DocKey == req.DocKey {
+			doc = &list[i]
+		}
+	}
+	if doc == nil {
+		say(w, http.StatusNotFound, "NOT_LEFT_OUT")
+		return
+	}
+	if !doc.CanRestore {
+		say(w, http.StatusConflict, "ALREADY_INCLUDED")
+		return
+	}
+	tx, err := a.store.Pool.Begin(ctx)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	drop := map[string]bool{}
+	for _, k := range doc.Restore.Drop {
+		drop[k] = true
+	}
+	if len(drop) > 0 {
+		keys := make([]string, 0, len(drop))
+		for k := range drop {
+			keys = append(keys, k)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_runs SET answers = answers - $2::text[], updated_at = now() WHERE id = $1`,
+			run.ID, keys); err != nil {
+			a.fail(w, err, "run")
+			return
+		}
+		// the question those answers belonged to may be asked again
+		cards, err := a.store.RunCards(ctx, run.ID)
+		if err != nil {
+			a.fail(w, err, "card")
+			return
+		}
+		for _, cd := range cards {
+			var qs []Question
+			_ = json.Unmarshal(cd.Questions, &qs)
+			mine := false
+			for _, q := range qs {
+				mine = mine || drop[q.Key]
+			}
+			if !mine || cd.Status == "superseded" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_run_clarifications SET status = 'superseded' WHERE id = $1`, cd.ID); err != nil {
+				a.fail(w, err, "card")
+				return
+			}
+			cd.Status = "superseded"
+			if err := a.store.SyncCardItem(ctx, tx, cd); err != nil && !errors.Is(err, ErrNotFound) {
+				a.fail(w, err, "card")
+				return
+			}
+		}
+	}
+	set := map[string]Answer{}
+	for k, v := range doc.Restore.Set {
+		set[k] = Answer{Value: v.Value, Label: v.Label, Moment: "preflight", Via: "card", Code: v.Code}
+	}
+	if err := a.store.MergeAnswers(ctx, tx, run.ID, set); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	asks := len(drop) > 0 || len(set) == 0
+	text := fmt.Sprintf("นำ “%s” กลับมารวมในรอบนี้แล้ว กำลังคำนวณใหม่ ไฟล์ชุดใหม่จะเป็นรุ่นถัดไป เอกสารนี้บันทึกตามที่พิมพ์ พร้อมข้อยกเว้นให้ผู้ตรวจดู", doc.Name)
+	if asks {
+		text = fmt.Sprintf("นำ “%s” กลับมาแล้ว ต้องตอบคำถามของเอกสารนี้ก่อนจึงจะรวมได้ คำถามจะขึ้นด้านล่าง", doc.Name)
+	}
+	rid := run.ID
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "notice",
+		map[string]any{"text": text, "run_id": run.ID.String(), "restored": doc.DocKey}, nil); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	resumed, err := a.store.Resume(ctx, tx, run.ID)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if !resumed {
+		say(w, http.StatusConflict, "ROUND_NOT_DONE")
+		return
+	}
+	if it, err := a.store.ItemFor(ctx, run.InstallID, "progress", "run_id", run.ID.String()); err == nil {
+		_ = a.store.PatchItem(ctx, tx, it.ID, map[string]any{"status": RunQueued})
+	}
+	if err := tx.Commit(ctx); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"changed": true, "asks": asks, "doc_key": doc.DocKey, "name": doc.Name})
+}
