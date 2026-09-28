@@ -63,8 +63,9 @@ def resolve(key: str, files: dict, roles: dict) -> str:
 
 
 def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None = None, message: str = "",
-              today: str = "2026-11-02", preparer: str = "ผู้จัดทำ ตัวอย่าง") -> dict:
-    """paths: [(path on disk, the name the person gave the file)]."""
+              today: str = "2026-11-02", preparer: str = "ผู้จัดทำ ตัวอย่าง", answered_by: str | None = None) -> dict:
+    """paths: [(path on disk, the name the person gave the file)]. ``answered_by``: the name of the
+    person who answers the cards (the runner reads it from each card)."""
     job = Job()
     try:
         parsed, files = [], {}
@@ -99,7 +100,11 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         out = {"files": files, "asked": asked, "answers": given, "preflight": pre, "stops_at": stop}
         if stop:
             return out
-        comp = job.run({**req, "op": "compute", "roles": pre["roles"], "period": pre["period"], "answers": given})
+        creq = {**req, "op": "compute", "roles": pre["roles"], "period": pre["period"], "answers": given}
+        if answered_by:
+            defaulted = {f["key"] for f in asked if given.get(f["key"]) == f["default"]}
+            creq["answered_by"] = {k: {"name": answered_by, "via": "card"} for k in given if k not in defaulted}
+        comp = job.run(creq)
         with open(os.path.join(job.out, "computed.json"), "rb") as f:
             raw = f.read()
         computed = json.loads(raw)

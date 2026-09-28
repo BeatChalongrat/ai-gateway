@@ -37,7 +37,8 @@ L_DIFF, L_VERDICT = "ผลต่าง", "ผลการกระทบยอ�
 L_PREPARER, L_REVIEWER = "ผู้จัดทำ", "ผู้สอบทาน"
 TIED, NOT_TIED = "ลงตัว", "ยังไม่ลงตัว"
 DRAFT_MARK = "ร่าง — ยังไม่ลงตัว ห้ามใช้เป็นงบกระทบยอดที่เสร็จแล้ว"
-NOT_REVIEWED = "ยังไม่ได้สอบทาน (ผู้สอบทานต้องเป็นคนละคนกับผู้จัดทำ ลงชื่อได้ในหน้ารอบนี้)"
+# true before a sign-off and after it: the stamp adds the sheet, it rewrites no other
+NOT_REVIEWED = "ชื่อและวันที่ของผู้สอบทานอยู่ในชีต “ตรวจทาน” ซึ่งเพิ่มเมื่อผู้สอบทานลงชื่อ (ต้องเป็นคนละคนกับผู้จัดทำ)"
 CONFIRMED_TH = {"rule": "กฎ (ตรงกันทุกตัว)", "person": "คนยืนยัน"}
 DECIDED_TH = {"rule": "กฎ", "person": "คนตัดสิน"}
 SEVERITY_TH = {"review": "รอคนตัดสิน", "info": "บันทึกไว้"}
@@ -49,6 +50,11 @@ BALANCE_FROM = {"row": "แถวยอดยกมา/ยกไปในไฟ�
 
 def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
+
+
+def who(kind: str, name: str, words: dict) -> str:
+    """ "คนยืนยัน: สมหญิง ผู้ตรวจ" — the person by name when the runner knew who answered the card."""
+    return f"{words[kind]}: {name}" if kind == "person" and name else words[kind]
 
 
 def _where(s: dict) -> str:
@@ -215,7 +221,8 @@ class BankWorkbook:
         for n, i in enumerate(items, start=1):
             rows.append([n, SIDE_TH[i["side"]], i["type_label"], E3C.date_th(i["date"]), i["ref"], i["description"],
                          _num(i["amount"]), _num(i["effect"]), i["age_days"], i["bucket_label"], FROM_TH[i["from"]],
-                         "; ".join(_where(s) for s in i["sources"]), DECIDED_TH[i["decided_by"]], i["note"]])
+                         "; ".join(_where(s) for s in i["sources"]), who(i["decided_by"], i.get("decided_by_name") or "", DECIDED_TH),
+                         i["note"]])
         return rows
 
     def reconciling(self):
@@ -232,7 +239,7 @@ class BankWorkbook:
         heads = ["คู่ที่", "ขั้น", "วิธีจับคู่", "รูปแบบ", "ผู้ยืนยัน", "วันที่ (บัญชี)", "รายการ (บัญชี)", "เลขอ้างอิง (บัญชี)", "จำนวนเงิน (บัญชี)",
                  "หลักฐาน (บัญชี)", "วันที่ (ธนาคาร)", "รายการ (ธนาคาร)", "เลขอ้างอิง (ธนาคาร)", "จำนวนเงิน (ธนาคาร)", "หลักฐาน (ธนาคาร)",
                  "ผลต่าง", "ห่างกัน (วัน)"]
-        self._table(ws, 4, heads, [self._pair_row(n, m, CONFIRMED_TH[m["confirmed"]]) for n, m in
+        self._table(ws, 4, heads, [self._pair_row(n, m, who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)) for n, m in
                                    enumerate(self.c["match"]["groups"]["matched"], start=1)],
                     [7, 18, 32, 9, 16, 14, 36, 16, 16, 40, 14, 36, 16, 16, 40, 12, 10], money_cols=(9, 14, 16), wrap_cols=(7, 10, 12, 15))
 
@@ -421,7 +428,8 @@ def check(path: str, computed: dict) -> list[dict]:
                       f"{got} / {st[side]['adjustments']}", f"รายการปรับปรุง{label}รวมแล้วเท่ากับในงบ"))
     pairs = [r for r in wb[S_PAIRS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     matched = computed["match"]["groups"]["matched"]
-    ok = len(pairs) == len(matched) and all(r[1] and r[2] and r[4] == CONFIRMED_TH[m["confirmed"]] for r, m in zip(pairs, matched))
+    ok = len(pairs) == len(matched) and all(r[1] and r[2] and r[4] == who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)
+                                            for r, m in zip(pairs, matched))
     ok = ok and all(m["confirmed"] == "person" for m in matched if m["tier"] != "exact")
     out.append(ck("xlsx.pairs", ok, f"{len(pairs)} คู่", "ทุกคู่บอกขั้น วิธีจับคู่ และผู้ยืนยัน ขั้นที่ไม่ตรงกันทุกตัวมีคนยืนยัน"))
     sus = [r for r in wb[S_SUSPECT].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]

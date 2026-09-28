@@ -318,6 +318,46 @@ class Cards(unittest.TestCase):
         self.assertIsNone(by["-0.50"]["recommended"])
 
 
+class WhoConfirmed(unittest.TestCase):
+    """Every pair records its pass, its tier and who confirmed it."""
+
+    def run_as(self, name):
+        cases = K.load_cases()
+        case = next(c for c in cases["cases"] if c["id"] == "candidates_confirmed_by_a_person")
+        return K.run_files([(os.path.join(FIX, n), n) for n in case["files"]], defaults=cases["defaults"], answers=case["answers"],
+                           today=cases["today"], answered_by=name)
+
+    def test_a_pair_a_person_confirmed_names_that_person(self):
+        res = self.run_as("สมหญิง ผู้ตรวจ")
+        matched = res["computed"]["match"]["groups"]["matched"]
+        by_person = [m for m in matched if m["confirmed"] == "person"]
+        self.assertEqual([(m["pass"], m["tier"], m["confirmed_by"]) for m in by_person],
+                         [("amount_date", "amount_date", "สมหญิง ผู้ตรวจ")] * 2)
+        self.assertTrue(all(m["confirmed_by"] == "" for m in matched if m["confirmed"] == "rule"))
+        pairs = [r for r in res["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None]
+        self.assertEqual(sorted({r[4] for r in pairs}), ["กฎ (ตรงกันทุกตัว)", "คนยืนยัน: สมหญิง ผู้ตรวจ"])
+        self.assertEqual([r[1] for r in pairs if r[4].startswith("คนยืนยัน")], ["ยอดและวันที่ใกล้กัน"] * 2)
+        self.assertEqual(K.invariants(res), [])
+        # the fifty satang the person accepted are theirs too
+        err = next(i for i in res["computed"]["items"] if i["type"] == "posting_error")
+        self.assertEqual((err["decided_by"], err["decided_by_name"]), ("person", "สมหญิง ผู้ตรวจ"))
+
+    def test_without_a_name_it_still_says_a_person_did(self):
+        _, res = result("candidates_confirmed_by_a_person")
+        pairs = [r for r in res["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None]
+        self.assertEqual(sorted({r[4] for r in pairs}), ["กฎ (ตรงกันทุกตัว)", "คนยืนยัน"])
+
+    def test_the_name_is_the_runners_never_the_answers(self):
+        # the package reads the name from what the runner hands it, keyed by the answer: a name for an
+        # answer that decided nothing names nobody
+        from agent_market.packages.bank_reconciliation.scripts.reconcile import name_of
+
+        self.assertEqual(name_of({"e3_candidate:k1~b1": {"name": "  สมหญิง   ผู้ตรวจ "}}, "e3_candidate:k1~b1"), "สมหญิง ผู้ตรวจ")
+        self.assertEqual(name_of({"e3_candidate:k1~b1": {"name": "x"}}, "e3_candidate:k2~b2"), "")
+        self.assertEqual(name_of(None, "e3_candidate:k1~b1"), "")
+        self.assertEqual(name_of({"k": None}, "k"), "")
+
+
 class SelfTest(unittest.TestCase):
     def test_the_sample_month_asks_nothing_and_ties(self):
         st = S.self_test("bank_reconciliation")
@@ -332,6 +372,7 @@ class SelfTest(unittest.TestCase):
         m = S.manifest("bank_reconciliation")
         self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "rules"))
         self.assertTrue(m["completion_gate"])
+        self.assertTrue(m["record_who_answered"])
         self.assertEqual(m["review"], {"separate_reviewer": True})
         self.assertIn("document.match.e3", m["capabilities"]["required"])
         self.assertEqual(pkg.VERSION, m["version"])

@@ -60,8 +60,10 @@ def preflight(files: list[Upload], *, message: str = "", defaults: dict | None =
     return _pre.run(files, message=message, defaults=defaults, answers=answers, today=today)
 
 
-def compute(files, roles, period, *, answers=None, defaults=None, today=None) -> dict:
-    return _rec.compute(files, roles, period, answers=answers, defaults=defaults, today=today)
+def compute(files, roles, period, *, answers=None, defaults=None, today=None, answered_by=None) -> dict:
+    """``answered_by``: who answered each card ({answer key: {name}}), from the runner — a pair a
+    person confirmed names that person."""
+    return _rec.compute(files, roles, period, answers=answers, defaults=defaults, today=today, answered_by=answered_by)
 
 
 def postcompute(files, roles, period, computed, *, answers=None, defaults=None) -> dict:

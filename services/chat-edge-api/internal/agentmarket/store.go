@@ -821,6 +821,26 @@ func (s *Store) CloseCard(ctx context.Context, q Querier, id uuid.UUID, status s
 	return c, err == nil, err
 }
 
+// CardAnswerers is who answered each card of a run (AM5): card id → user.
+// A card nobody answered (skipped by default, closed by an upload) is absent.
+func (s *Store) CardAnswerers(ctx context.Context, run uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT id, answered_by FROM agent_market.agent_run_clarifications
+		WHERE run_id = $1 AND answered_by IS NOT NULL`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]uuid.UUID{}
+	for rows.Next() {
+		var card, by uuid.UUID
+		if err := rows.Scan(&card, &by); err != nil {
+			return nil, err
+		}
+		out[card] = by
+	}
+	return out, rows.Err()
+}
+
 // MarkInterpreting parks free text on an open card for the runner to read.
 func (s *Store) MarkInterpreting(ctx context.Context, q Querier, id uuid.UUID, text string, partial json.RawMessage) (Card, bool, error) {
 	c, err := scanCard(q.QueryRow(ctx, `

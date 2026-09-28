@@ -42,6 +42,7 @@
   },
   "narrative": "rules",
   "completion_gate": true,
+  "record_who_answered": true,
   "review": {"separate_reviewer": true},
   "guide": {
     "for": "สำหรับผู้ทำบัญชีที่ต้องกระทบยอดเงินฝากธนาคารทุกสิ้นเดือน และอยากได้งบกระทบยอดที่ผู้สอบทานตรวจตามหลักฐานได้ทุกบรรทัด",

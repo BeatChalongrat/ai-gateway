@@ -83,7 +83,10 @@ type Manifest struct {
 	// delivered as a draft and is not a success. Review.SeparateReviewer: the
 	// person who signs a run is not the person who prepared it.
 	CompletionGate bool `json:"completion_gate"`
-	Review         struct {
+	// RecordWhoAnswered: the compute step is handed the name of whoever
+	// answered each card (a confirmed pair names the person who confirmed it).
+	RecordWhoAnswered bool `json:"record_who_answered"`
+	Review            struct {
 		SeparateReviewer bool `json:"separate_reviewer"`
 	} `json:"review"`
 }

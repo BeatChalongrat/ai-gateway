@@ -61,6 +61,9 @@ def _extra(req: dict, fn, with_today: bool = False) -> dict:
             out[k] = _read_json(req[k])
     if with_today and req.get("today") and _accepts(fn, "today"):
         out["today"] = _dt.date.fromisoformat(req["today"])
+    # AM5: who answered each card ({answer key: {name, via}}), for a package that records it
+    if with_today and isinstance(req.get("answered_by"), dict) and _accepts(fn, "answered_by"):
+        out["answered_by"] = req["answered_by"]
     return out
 
 

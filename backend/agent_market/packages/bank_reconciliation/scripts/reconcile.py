@@ -74,6 +74,12 @@ def f2(v) -> str:
     return f"{Decimal(v):.2f}"
 
 
+def name_of(answered_by: dict | None, key: str | None) -> str:
+    """Who gave the answer a decision came from — as the runner read it from the card."""
+    who = (answered_by or {}).get(key or "")
+    return " ".join(str((who or {}).get("name") or "").split())[:120]
+
+
 def _item(n: int, side: str | None, kind: str, ln, effect: Decimal | None, *, by: str = "rule", key: str | None = None,
           end: _dt.date, sources: list | None = None, note: str = "") -> dict:
     age = (end - ln.date).days
@@ -364,11 +370,16 @@ def _not_included(rv: Review) -> list[dict]:
     return out
 
 
-def compute(uploads, roles, period, *, answers=None, defaults=None, today=None) -> dict:
+def compute(uploads, roles, period, *, answers=None, defaults=None, today=None, answered_by=None) -> dict:
     rv = review(uploads, defaults=defaults, answers=answers, today=today, period=period)
     if not rv.ready:
         raise ValueError("the reconciliation has no statement or no ledger to work from")
     items = items_of(rv)
+    # who decided: a pair a person confirmed and an item a person classified name that person
+    for m in rv.match["groups"]["matched"]:
+        m["confirmed_by"] = name_of(answered_by, m["decision_key"]) if m["confirmed"] == "person" else ""
+    for i in items:
+        i["decided_by_name"] = name_of(answered_by, i["decision_key"]) if i["decided_by"] == "person" else ""
     st = statement_of(rv, items)
     gate = gate_of(rv, st, items)
     journal = journal_of(rv, items)

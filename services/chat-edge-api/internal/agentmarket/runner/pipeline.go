@@ -262,6 +262,42 @@ func (rc *runCtx) reloadAnswers(ctx context.Context) error {
 	return nil
 }
 
+// answeredBy is who answered each card of the run, by the answer's key, for
+// a package whose manifest asks for it (nil otherwise): the name a document
+// prints, read from the card — never from what the answer says. An answer
+// nobody gave (a default, a remembered value) has no name.
+func (rc *runCtx) answeredBy(ctx context.Context) map[string]map[string]string {
+	if rc.pkg == nil || !rc.pkg.Manifest.RecordWhoAnswered {
+		return nil
+	}
+	out := map[string]map[string]string{}
+	by, err := rc.r.Store.CardAnswerers(ctx, rc.run.ID)
+	if err != nil {
+		return out
+	}
+	names := map[uuid.UUID]string{}
+	for k, a := range rc.answers {
+		if a.Via != "card" && a.Via != "text" {
+			continue
+		}
+		card, err := uuid.Parse(a.CardID)
+		if err != nil {
+			continue
+		}
+		user, ok := by[card]
+		if !ok {
+			continue
+		}
+		name, seen := names[user]
+		if !seen {
+			name = rc.r.Store.DisplayName(ctx, rc.install.OrgID, user, "")
+			names[user] = name
+		}
+		out[k] = map[string]string{"name": name, "via": a.Via}
+	}
+	return out
+}
+
 // answerValues is what the package code reads: finding key → value.
 // Cosmetic answers stay out of anything that decides a number.
 func (rc *runCtx) answerValues(moments ...string) map[string]json.RawMessage {
@@ -523,6 +559,11 @@ func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre prefligh
 	if pre.Today != "" {
 		parts = append(parts, pre.Today)
 	}
+	// AM5: who answered each card, for a package that records it
+	who := rc.answeredBy(ctx)
+	if who != nil {
+		parts = append(parts, map[string]any{"answered_by": who})
+	}
 	key := am.StepKey(rc.run.ID, "compute", append(parts, x.keyParts()...)...)
 	out, err := rc.step(ctx, "compute", "compute", key, map[string]any{"period": *pre.Period, "roles": pre.Roles, "answers": answers}, true,
 		func(ctx context.Context) (any, float64, string, string, error) {
@@ -535,6 +576,9 @@ func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre prefligh
 				"roles": pre.Roles, "period": *pre.Period, "answers": answers, "defaults": rc.defaults}
 			if pre.Today != "" {
 				req["today"] = pre.Today
+			}
+			if who != nil {
+				req["answered_by"] = who
 			}
 			res, err := rc.exec(ctx, req, x.attach(req, inputs))
 			if err != nil {

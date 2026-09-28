@@ -239,3 +239,71 @@ func TestAReconciliationThatDoesNotTieIsNotCalledASuccess(t *testing.T) {
 	}
 	readable(t, "a round that does not tie", e.visibleThread())
 }
+
+func TestAPairAPersonConfirmedNamesThatPerson(t *testing.T) {
+	e := newIT(t)
+	if e == nil {
+		return
+	}
+	in := e.setupBankInstall()
+	ctx := context.Background()
+	// the person who will answer has a name in the organisation
+	if _, err := e.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_settings (org_id) VALUES ('default') ON CONFLICT DO NOTHING`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_members (org_id, email, user_id, display_name)
+		VALUES ('default', 'am5-it@example.test', $1, 'สมหญิง ผู้จัดทำ')`, in.UserID); err != nil {
+		t.Fatal(err)
+	}
+	srv := e.api()
+	run := e.bankRun("kbank_sep_candidates.xlsx", "ledger_sep_candidates.xlsx")
+	e.drive(e.runner("r1"), run.ID, 5*time.Minute, parked)
+	cards, _ := e.store.RunCards(ctx, run.ID)
+	if len(cards) != 1 {
+		t.Fatalf("one card: %d", len(cards))
+	}
+	var qs []am.Question
+	_ = json.Unmarshal(cards[0].Questions, &qs)
+	if len(qs) != 2 || qs[0].Code != "e3_candidate" || qs[0].DefaultLabel != "ยังไม่แน่ใจ" {
+		t.Fatalf("two proposed pairs, neither matched by default: %+v", qs)
+	}
+	answers := map[string]any{}
+	for _, q := range qs {
+		answers[q.Key] = map[string]any{"labels": []string{"เป็นรายการเดียวกัน"}}
+	}
+	if code, body := post(t, srv, "/cards/"+cards[0].ID.String()+"/answer", map[string]any{"answers": answers}); code != 200 {
+		t.Fatalf("answer: %d %v", code, body)
+	}
+	got := e.drive(e.runner("r1"), run.ID, 5*time.Minute, terminal)
+	if got.Status != am.RunSucceeded {
+		t.Fatalf("confirmed, it ties: %s %s", got.Status, got.StatusReason)
+	}
+	var c struct {
+		Match struct {
+			Groups struct {
+				Matched []struct {
+					Pass, Tier, Confirmed string
+					ConfirmedBy           string `json:"confirmed_by"`
+				} `json:"matched"`
+			} `json:"groups"`
+		} `json:"match"`
+	}
+	if err := json.Unmarshal(e.computedOf(run.ID), &c); err != nil {
+		t.Fatal(err)
+	}
+	byPerson := 0
+	for _, m := range c.Match.Groups.Matched {
+		switch {
+		case m.Tier == "exact" && (m.Confirmed != "rule" || m.ConfirmedBy != ""):
+			t.Fatalf("an exact pair is a rule's: %+v", m)
+		case m.Tier != "exact" && (m.Confirmed != "person" || m.ConfirmedBy != "สมหญิง ผู้จัดทำ" || m.Pass == ""):
+			t.Fatalf("a pair below exact names its pass, its tier and who confirmed it: %+v", m)
+		}
+		if m.Confirmed == "person" {
+			byPerson++
+		}
+	}
+	if byPerson != 2 || len(c.Match.Groups.Matched) != 12 {
+		t.Fatalf("%d pairs, %d by a person", len(c.Match.Groups.Matched), byPerson)
+	}
+}
