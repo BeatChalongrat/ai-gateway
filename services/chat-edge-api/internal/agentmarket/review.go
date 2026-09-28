@@ -92,6 +92,13 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		badRequest(w, "BAD_JSON")
 		return
 	}
+	if run.Kind == KindRun && (run.Status == RunFailed || run.Status == RunCancelled) {
+		// AM5: a round that ended without succeeding (a reconciliation that does
+		// not tie) is not "still running" — waiting will not make it reviewable
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ไม่สำเร็จ ไฟล์ของรอบนี้เป็นร่าง",
+			"next", "แก้สาเหตุแล้วเริ่มรอบใหม่ให้สำเร็จก่อน แล้วค่อยตรวจทานรอบนั้น")
+		return
+	}
 	if run.Kind != KindRun || run.Status != RunSucceeded {
 		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ยังทำไม่เสร็จ", "next", "รอให้รอบนี้เสร็จก่อน แล้วค่อยตรวจทาน")
 		return

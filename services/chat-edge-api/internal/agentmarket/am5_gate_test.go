@@ -140,6 +140,17 @@ func TestAReconciliationIsSignedBySomeoneWhoDidNotPrepareIt(t *testing.T) {
 	if p["preparer"] == p["reviewer"] || p["reviewer"] == "" {
 		t.Fatalf("two names on the stamp: %v", p)
 	}
+	// a round that did not succeed (a reconciliation that does not tie) is not "still running":
+	// the refusal says what it is, to whoever asks
+	loose, _ := e.succeededRun(in)
+	if _, err := e.store.Pool.Exec(context.Background(), `UPDATE agent_market.agent_runs SET status = 'failed', status_reason = 'not_tied'
+		WHERE id = $1`, loose.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, body := e.do("POST", "/runs/"+loose.ID.String()+"/review", map[string]any{})
+	if c, m := errMsg(body); code != 409 || c != "NOT_REVIEWABLE" || !strings.Contains(m, "ไม่สำเร็จ") || strings.Contains(m, "ยังทำไม่เสร็จ") {
+		t.Fatalf("signing a round that did not succeed: %d %v", code, body)
+	}
 	// an agent that does not ask for it keeps AM3's rule: its owner may sign
 	fin := e.install()
 	own, _ := e.succeededRun(fin)
