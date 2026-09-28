@@ -174,6 +174,7 @@ export const am4Th = {
   "admin.retention.warn": "เตือนเมื่อพื้นที่ของแต่ละ agent เกิน (MB)",
   "admin.retention.saved": "บันทึกแล้ว",
   "admin.retention.notArchive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับต้องเก็บตามระบบเดิมของบริษัท",
+  "step.script.rules": "เขียนจากกฎ ไม่ใช้โมเดล",
 } as const;
 
 export type Am4Key = keyof typeof am4Th;

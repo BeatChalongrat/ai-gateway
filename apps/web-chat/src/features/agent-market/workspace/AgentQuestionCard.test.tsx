@@ -243,7 +243,7 @@ describe("AgentQuestionCard (typed input, AM2)", () => {
     expect(screen.queryByTestId("am-evidence-source")).toBeNull();
   });
 
-  it("a card without any input keeps the app's own QuestionCard", () => {
+  it("a card without any input: no typed hint, the app's own words for “something else”", () => {
     render(<AgentQuestionCard card={open} />);
     expect(screen.getByTestId("question-card").getAttribute("data-typed")).toBeNull();
     fireEvent.click(screen.getByTestId("question-other"));
@@ -253,5 +253,23 @@ describe("AgentQuestionCard (typed input, AM2)", () => {
   it("an answer given by typing says so", () => {
     render(<AgentQuestionCard card={{ ...typedCard, status: "answered", answer: { "d1:total": { label: "12,850.00", via: "typed" } } }} />);
     expect(screen.getByTestId("am-answer-row").textContent).toBe("ยอดรวม12,850.00พิมพ์ค่า");
+  });
+});
+
+// AM4: the live walkthrough in the owner's desktop app (English) showed the
+// agent's question card as "The assistant has a question … Something else …
+// Reply in your own words instead … Skip · Answer": the shared chat card
+// follows the app's language. Inside an agent's workspace it is Thai.
+describe("AgentQuestionCard in an English app", () => {
+  it("asks in Thai, every word of the card", () => {
+    useI18nStore.setState({ locale: "en" });
+    render(<AgentQuestionCard card={{ ...open, questions: [dc, lang] }} />);
+    const card = screen.getByTestId("am-question-card");
+    const text = card.textContent ?? "";
+    expect(text).toContain("ผู้ช่วยมีคำถาม");
+    expect(text).toContain("อย่างอื่น");
+    for (const en of ["The assistant has a question", "Something else", "Reply in your own words", "Skip", "Answer", "choose"]) {
+      expect(text).not.toContain(en);
+    }
   });
 });

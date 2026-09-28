@@ -28,7 +28,7 @@ import { useI18nStore } from "@/lib/i18n";
 import { tAm } from "./i18n";
 import { QuickInstall } from "./install/QuickInstall";
 import { MarketPage } from "./market/MarketPage";
-import { NumbersTab } from "./runs/RunDetailPage";
+import { NumbersTab, scriptLabel } from "./runs/RunDetailPage";
 import { describeValue } from "./settings/SettingsPage";
 import type { Manifest, OutputsPayload, ThreadItem } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
@@ -286,5 +286,16 @@ describe("no English left where a person reads", () => {
     const d = { key: "theme", value: { id: "navy" }, source: "install", label: "ธีมเอกสาร" } as never;
     expect(describeValue(d, tAm)).toEqual(["กรมท่า"]);
     expect(describeValue({ key: "theme", value: { id: "teal" } } as never, tAm)).toEqual(["เขียวหยก"]);
+  });
+});
+
+// The live walkthrough in the owner's (English) desktop app: the run page's
+// step list said "fallback_narrative" for the narrative step of an agent whose
+// words come from rules. A script's file name reads as a name; that did not.
+describe("the run page's steps", () => {
+  it("say how the words were written, in Thai", () => {
+    expect(scriptLabel("fallback_narrative", tAm)).toBe(tAm("step.script.rules"));
+    expect(tAm("step.script.rules")).toMatch(/[฀-๿]/);
+    expect(scriptLabel("metrics.py@1.1.0", tAm)).toBe("metrics.py@1.1.0");
   });
 });

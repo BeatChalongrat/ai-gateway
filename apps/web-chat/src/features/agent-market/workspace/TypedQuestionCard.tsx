@@ -16,13 +16,22 @@
 import { MessageCircleQuestion } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { useT } from "@/lib/i18n";
+import { dictionaries, type DictKey } from "@/lib/i18n/dict";
 import type { PendingQuestion, QuestionAnswerPayload } from "@/lib/types";
 
 import { useAmT, type AmKey } from "../i18n";
 import { checkTyped } from "../typed";
 import type { InputKind } from "../types";
 import { cls } from "../ui";
+
+// AM4: an agent's card is Thai whatever the app's language (the shared card
+// follows the app: the live walkthrough in an English desktop app showed
+// "The assistant has a question … Skip · Answer" inside the workspace). The
+// words are the app's own Thai ones, read from its dictionary.
+function tTh(key: DictKey, vars?: Record<string, string>): string {
+  const raw = dictionaries.th[key] ?? dictionaries.en[key] ?? key;
+  return vars ? raw.replace(/\{(\w+)\}/g, (_, name: string) => (vars[name] !== undefined ? vars[name] : `{${name}}`)) : raw;
+}
 
 const OTHER = "__other__";
 const MAX_FREE_TEXT = 2000;
@@ -39,7 +48,7 @@ export function TypedQuestionCard({
   inputs: CardInput[];
   onAnswer: (answer: QuestionAnswerPayload) => void;
 }) {
-  const t = useT();
+  const t = tTh;
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [otherText, setOtherText] = useState<Record<number, string>>({});
   const [left, setLeft] = useState<Record<number, boolean>>({});
@@ -181,7 +190,7 @@ export function TypedQuestionCard({
       title={t("question.keyHint")}
       className="my-2 rounded-xl border border-border bg-bg-surface px-4 py-3 shadow-lg focus:outline-none"
       data-testid="question-card"
-      data-typed="true"
+      data-typed={inputs.some(Boolean) ? "true" : undefined}
       data-prompt-id={question.promptId}
       data-active-question={activeQi}
     >

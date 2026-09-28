@@ -547,6 +547,12 @@ function StepsTab({ steps }: { steps: Step[] }) {
   );
 }
 
+/** A step's script: a file name reads as a name; the runner's own rule-written narrative is said in Thai (AM4). */
+const SCRIPT_KEY: Record<string, AmKey> = { fallback_narrative: "step.script.rules" };
+export function scriptLabel(script: string, t: AmT): string {
+  return SCRIPT_KEY[script] ? t(SCRIPT_KEY[script]!) : script;
+}
+
 function StepRow({ s }: { s: Step }) {
   const t = useAmT();
   const [open, setOpen] = useState(false);
@@ -562,7 +568,7 @@ function StepRow({ s }: { s: Step }) {
         ? formatDuration(s.duration_ms, t)
         : null,
     s.attempt && s.attempt > 1 ? t("step.attempt", { n: String(s.attempt) }) : null,
-    s.script_id || null,
+    s.script_id ? scriptLabel(s.script_id, t) : null,
     s.model_id || null,
     s.credits ? t("step.credits", { n: formatCredits(s.credits) }) : null,
   ].filter(Boolean) as string[];

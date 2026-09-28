@@ -13,11 +13,13 @@
 // TypedQuestionCard instead — the same card whose "something else" box shows
 // the hint and checks the value before sending. Evidence that names a page
 // or the text read there (E2 cards) also gets a one-line source.
+// AM4: every card renders TypedQuestionCard — the same markup, keys and
+// answers as the app's card, but always in Thai (the app's card follows the
+// app's language).
 
 import { useEffect, useState } from "react";
 import { CircleCheck, MessageCircleQuestion } from "lucide-react";
 
-import { QuestionCard } from "@/components/chat/QuestionCard";
 import type { QuestionAnswerPayload } from "@/lib/types";
 
 import { amApi, errorMessage } from "../api";
@@ -98,7 +100,6 @@ export function AgentQuestionCard({
   const rememberable = questions.some((q) => q.rememberable);
   const details = questions.filter((q) => q.default_label || hasEvidence(q));
   const inputs = questions.map((q) => questionInput(q.input));
-  const typed = inputs.some(Boolean);
   const cardKey = `${card.card_id}:${attempts}:${remount}`;
 
   return (
@@ -117,11 +118,7 @@ export function AgentQuestionCard({
           <Pill tone="warning">{t("card.attempt", { n: String(attempts) })}</Pill>
         </div>
       ) : null}
-      {typed ? (
-        <TypedQuestionCard key={cardKey} question={toPendingQuestion(card)} inputs={inputs} onAnswer={onAnswer} />
-      ) : (
-        <QuestionCard key={cardKey} question={toPendingQuestion(card)} onAnswer={onAnswer} />
-      )}
+      <TypedQuestionCard key={cardKey} question={toPendingQuestion(card)} inputs={inputs} onAnswer={onAnswer} />
       {details.length ? (
         <ul className="flex flex-col gap-2 rounded-xl border border-border-subtle px-4 py-2.5" data-testid="am-question-details">
           {details.map((q) => (
