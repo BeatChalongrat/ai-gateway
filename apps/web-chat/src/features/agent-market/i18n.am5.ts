@@ -28,4 +28,17 @@ export const am5Th = {
   "left.round": "ยังมีเอกสารที่ไม่ได้รวม {n} ฉบับ",
   "reason.unknown": "เหตุผลที่ agent บันทึกไว้",
   "outputs.check": "การตรวจของระบบ",
+
+  // the bank reconciliation: its gate, its three numbers, who matched what
+  "outputs.draft": "ร่าง — รอบนี้ยังไม่นับว่าสำเร็จ",
+  "outputs.draftNext": "ควรทำต่อ: {next}",
+  "outputs.adjustedBank": "ยอดหลังปรับปรุงของธนาคาร",
+  "outputs.adjustedBook": "ยอดหลังปรับปรุงของบัญชี",
+  "outputs.difference": "ผลต่าง",
+  "outputs.matchLine": "จับคู่ได้ {matched} คู่ · ตามกฎ {rule} · คนยืนยัน {person} · รายการกระทบยอด {items}",
+  "outputs.suspect": "น่าสงสัย {n}",
+  "step.gate": "ตรวจว่างานครบตามเกณฑ์ของ agent",
+  "step.stopped": "รอบหยุดก่อนถึงขั้นตอนถัดไป",
+  "settings.yes": "ใช่",
+  "settings.no": "ไม่",
 } as const;

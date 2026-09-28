@@ -29,7 +29,8 @@ const CATEGORIES: { id: Category; key: AmKey }[] = [
 export const COMING_SOON: { id: string; icon: string; name: AmKey; desc: AmKey; cats: Category[]; slug?: string }[] = [
   { id: "invoice", icon: "invoice", name: "soon.invoice.name", desc: "soon.invoice.desc", cats: ["documents", "finance"],
     slug: "sran.invoice-processing" },
-  { id: "bank", icon: "bank", name: "soon.bank.name", desc: "soon.bank.desc", cats: ["finance"] },
+  { id: "bank", icon: "bank", name: "soon.bank.name", desc: "soon.bank.desc", cats: ["finance"],
+    slug: "sran.bank-reconciliation" },
   { id: "expense", icon: "expense", name: "soon.expense.name", desc: "soon.expense.desc", cats: ["finance"],
     slug: "sran.expense-audit" },
   { id: "po", icon: "po", name: "soon.po.name", desc: "soon.po.desc", cats: ["finance", "documents"] },

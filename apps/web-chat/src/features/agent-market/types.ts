@@ -505,6 +505,10 @@ export interface OutputsPayload {
   rerender?: boolean;
   /** AM3: these files carry a reviewer's sign-off on their face. */
   review?: { id: string; reviewer: string; at_label: string; note?: string; skipped?: string[] | null } | null;
+  /** AM5: the agent's own gate did not pass (a reconciliation that does not tie) — the files are a draft. */
+  draft?: boolean;
+  /** AM5: what the agent's gate said, in its words. */
+  gate?: { passed: boolean; what: string; next?: string } | null;
 }
 
 /** AM4: what the files card always says about models. */

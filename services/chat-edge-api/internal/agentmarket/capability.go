@@ -77,6 +77,15 @@ type Manifest struct {
 	// Templates (AM2 Phase E): the fields and lists the agent can put into a
 	// customer's own template (template.go); absent means it fills none.
 	Templates json.RawMessage `json:"templates,omitempty"`
+	// AM5. CompletionGate: the package's computed table says whether the
+	// round's work passes (computed.json "gate": the bank reconciliation's
+	// two adjusted balances are equal). A round whose gate does not pass is
+	// delivered as a draft and is not a success. Review.SeparateReviewer: the
+	// person who signs a run is not the person who prepared it.
+	CompletionGate bool `json:"completion_gate"`
+	Review         struct {
+		SeparateReviewer bool `json:"separate_reviewer"`
+	} `json:"review"`
 }
 
 // defaultUploadTypes is what an agent that declares no input types accepts

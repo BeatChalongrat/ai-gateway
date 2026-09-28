@@ -337,8 +337,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			req := map[string]any{"op": "render", "package": rc.pkg.PyPackage, "computed": "computed.json", "formats": pyFormats,
 				"names": names, "theme": theme, "narrative": json.RawMessage(narrative.Narrative), "assumptions": assumptions,
 				"presentation": pres,
-				"run":          map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version},
-				"model_info":   map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
+				"run": map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version,
+					"preparer": rc.preparer(ctx, parentRun)},
+				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
 			if tpl != nil {
 				tpath, tclean, err := rc.r.Files.OpenLocalCopy(ctx, tplFile.StorageKey)
 				if err != nil {
@@ -470,6 +471,12 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	return ro, key, json.Unmarshal(out, &ro)
 }
 
+// preparer is who prepared the round, as a document names them (AM5: the
+// reconciliation statement says who prepared it and when).
+func (rc *runCtx) preparer(ctx context.Context, run am.Run) string {
+	return rc.r.Store.DisplayName(ctx, rc.install.OrgID, run.UserID, "")
+}
+
 type qualityErr struct {
 	error
 	// failed are the checks that did not pass, as the package words them.
@@ -538,7 +545,7 @@ func (rc *runCtx) publish(ctx context.Context, artifactRun uuid.UUID, ro renderO
 
 // postOutputs puts the delivered files in the chat.
 func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts []am.Artifact, summary map[string]any,
-	narrative narrativeOut, rerender bool) error {
+	narrative narrativeOut, rerender bool, gate *gateView) error {
 	st := rc.r.Store
 	run, err := st.RunByID(ctx, artifactRun)
 	if err != nil {
@@ -553,6 +560,10 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		out.PeriodLabel = v
 	}
 	out.Credits = run.CreditsSpent
+	if gate != nil {
+		out.Gate = &am.OutputsGate{Passed: gate.Passed, What: am.ForPerson(gate.What), Next: am.ForPerson(gate.Next)}
+		out.Draft = !gate.Passed
+	}
 	sort.Slice(arts, func(i, j int) bool { return formatOrder(arts[i].Format) < formatOrder(arts[j].Format) })
 	for _, a := range arts {
 		out.Artifacts = append(out.Artifacts, am.OutputArtifact{ID: a.ID.String(), Name: a.Name, Format: a.Format, Size: a.Size,
@@ -562,7 +573,14 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 	if _, _, err := st.AddItem(ctx, st.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "outputs", out, nil); err != nil {
 		return err
 	}
+	if out.Draft {
+		// the round is not a success: the message that follows says so, in the gate's words
+		return nil
+	}
 	text := "เสร็จแล้วครับ"
+	if gate != nil && out.Gate.What != "" {
+		text += " " + out.Gate.What
+	}
 	if rc.pkg.Manifest.Narrative == "rules" {
 		text += " " + documentsNote(summary)
 		return st.PostText(ctx, run, text, nil)

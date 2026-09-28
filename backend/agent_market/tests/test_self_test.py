@@ -61,7 +61,7 @@ class EverySelfTest(unittest.TestCase):
     """Whatever company the person set, every package's self-test asks nothing."""
 
     def test_every_package(self):
-        for pkg in ("financial_report", "invoice_processing", "expense_audit"):
+        for pkg in ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation"):
             st = S.self_test(pkg)
             self.assertTrue(set(st.get("settings") or {}) <= IDENTITY_KEYS, pkg)
             res = S.render_sample(pkg, defaults=S.self_test_defaults(pkg, SOMEONE_ELSE))

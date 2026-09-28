@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -447,7 +448,66 @@ func validSettingKey(k string) bool {
 		"policy", "holidays", "policy_kb": // AM2: the expense audit's policy table and calendar
 		return true
 	}
+	if _, ok := matchSettings[k]; ok { // AM5: the tolerances of the matching engine
+		return true
+	}
+	if _, ok := accountSettings[k]; ok { // AM5: the account a reconciliation is headed with
+		return true
+	}
 	return strings.HasPrefix(k, "answers.")
+}
+
+// matchSetting is one tolerance of the matching engine (AM5,
+// backend/agent_market/engine/e3/match.py SETTINGS: the same bounds — a
+// value the engine could not use is refused where it is typed).
+type matchSetting struct {
+	label    string
+	kind     string // money | int | ratio | bool
+	min, max float64
+}
+
+var matchSettings = map[string]matchSetting{
+	"match_amount_tolerance":  {"ผลต่างของยอดที่ยอมให้เสนอเป็นคู่ (บาท)", "money", 0, 1000},
+	"match_date_window_days":  {"วันที่ห่างกันได้ไม่เกิน (วัน)", "int", 0, 31},
+	"match_fuzzy_threshold":   {"ความคล้ายของชื่อหรือเลขอ้างอิงอย่างน้อย (0.50–1.00)", "ratio", 0.5, 1},
+	"match_fuzzy_window_days": {"วันที่ห่างกันได้เมื่อจับคู่จากชื่อ (วัน)", "int", 0, 366},
+	"match_ask_above":         {"ถามเมื่อรายการที่ไม่มีคู่มียอดตั้งแต่ (บาท)", "money", 0, 1e12},
+	"match_max_group":         {"จำนวนรายการมากที่สุดที่รวมยอดเป็นคู่เดียว (2–6)", "int", 2, 6},
+	"match_auto_same_day":     {"จับคู่เองเมื่อวันที่และยอดตรงกันและมีรายการเดียว", "bool", 0, 0},
+}
+
+var accountSettings = map[string]string{
+	"bank_name":           "ธนาคาร",
+	"bank_account_number": "เลขที่บัญชีธนาคาร",
+	"bank_account_name":   "ชื่อบัญชีธนาคาร",
+	"bank_gl_code":        "รหัสบัญชีแยกประเภทของบัญชีธนาคารนี้",
+}
+
+// validMatchSetting: a number (typed as text or as a number) within the
+// setting's bounds; a whole number where days or rows are counted.
+func validMatchSetting(m matchSetting, raw json.RawMessage) bool {
+	if m.kind == "bool" {
+		var b bool
+		if json.Unmarshal(raw, &b) == nil {
+			return true
+		}
+		var s string
+		return json.Unmarshal(raw, &s) == nil && (s == "true" || s == "false")
+	}
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		var n json.Number
+		if json.Unmarshal(raw, &n) != nil {
+			return false
+		}
+		s = n.String()
+	}
+	s = strings.ReplaceAll(strings.TrimSpace(s), ",", "")
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < m.min || v > m.max {
+		return false
+	}
+	return m.kind != "int" || v == math.Trunc(v)
 }
 
 // validSettingValue checks the settings a number depends on (AM2): the
@@ -485,7 +545,20 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 	case "holidays":
 		return len(HolidayProblems(raw)) == 0
 	}
+	if m, ok := matchSettings[k]; ok {
+		return validMatchSetting(m, raw)
+	}
+	if _, ok := accountSettings[k]; ok {
+		return json.Unmarshal(raw, &s) == nil && len([]rune(s)) <= 40+80*btoi(k != "bank_account_number" && k != "bank_gl_code")
+	}
 	return true
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // settingProblem says what is wrong with a refused setting (for a table, which entries).
@@ -530,6 +603,12 @@ func settingLabel(k string) string {
 		return "ปฏิทินวันหยุด"
 	case "policy_kb":
 		return "เอกสารระเบียบ (ใช้เป็นบริบทเท่านั้น)"
+	}
+	if m, ok := matchSettings[k]; ok {
+		return m.label
+	}
+	if l, ok := accountSettings[k]; ok {
+		return l
 	}
 	return k
 }

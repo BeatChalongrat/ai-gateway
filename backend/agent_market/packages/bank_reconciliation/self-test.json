@@ -1,0 +1,13 @@
+{
+  "schema": "agent.market.selftest.v1",
+  "note": "Runs the whole agent on a bundled month (September 2569) of one current account: the bank's statement and the company's ledger of it. Ten pairs are matched by rule (six by the day and amount, four cheques by number and amount), two cheques are outstanding, one deposit is in transit, and the bank's fees, interest and the tax withheld on it become drafted entries. It asks nothing, the two adjusted balances are equal, and the real working paper is shown before the user trusts it with their own account.",
+  "files": ["sample-data/statement_2569-09.xlsx", "sample-data/สมุดบัญชีเงินฝาก_2569-09.xlsx"],
+  "message": "กระทบยอดเงินฝากธนาคารจากไฟล์ตัวอย่าง",
+  "formats": ["xlsx"],
+  "expect": {
+    "findings": [],
+    "period": "2026-09",
+    "totals": {"matched": 10, "by_rule": 10, "by_person": 0, "items": 7, "suspect": 0, "tied": true, "difference": "0.00",
+               "adjusted_bank": "1538519.65", "adjusted_book": "1538519.65"}
+  }
+}

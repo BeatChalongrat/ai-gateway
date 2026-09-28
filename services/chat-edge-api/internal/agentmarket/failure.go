@@ -49,6 +49,13 @@ type FailureFacts struct {
 	// FailedChecks are the quality gate's failed checks, in the package's own
 	// Thai words ("รายงาน: หัวข้อครบทุกส่วน").
 	FailedChecks []string
+	// GateWhat and GateNext are the package's own sentences for a round whose
+	// completion gate did not pass ("ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") — read
+	// from its computed table, never from an error. Draft: the round's files
+	// were delivered, marked as a draft.
+	GateWhat string
+	GateNext string
+	Draft    bool
 }
 
 type failureCopy struct {
@@ -61,6 +68,7 @@ const (
 	nextRetry   = "กด “ลองใหม่ด้วยไฟล์เดิม” ได้เลย ถ้ายังไม่สำเร็จอีกให้กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด"
 	nextLater   = "รอสักครู่แล้วกด “ลองใหม่ด้วยไฟล์เดิม” ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”"
 	nextNewFile = "ตรวจว่าไฟล์เปิดได้ตามปกติ ไม่ได้ตั้งรหัสผ่าน แล้วส่งไฟล์มาใหม่ หรือกด “ลองใหม่ด้วยไฟล์เดิม”"
+	nextDraft   = "เปิดไฟล์ร่างของรอบนี้เพื่อดูสาเหตุ แก้ไขแล้วส่งไฟล์มาใหม่เพื่อเริ่มรอบใหม่"
 )
 
 // failureCopies: one entry per reason a run can stop with. A reason without
@@ -85,7 +93,11 @@ var failureCopies = map[string]failureCopy{
 	"self_test_seed":      {"เตรียมข้อมูลตัวอย่างสำหรับทดสอบไม่สำเร็จ", "กดทดสอบกับข้อมูลตัวอย่างอีกครั้งในหน้าตั้งค่า ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”", false},
 	"bad_format":          {"ชนิดไฟล์ที่ขอยังสร้างให้ไม่ได้", "เลือกชนิดไฟล์อื่นจาก “ขอไฟล์เพิ่ม”", false},
 	"internal_error":      {"ระบบของ agent หยุดทำงานกลางรอบนี้", nextRetry, true},
-	"":                    {"รอบนี้ทำไม่สำเร็จ", nextRetry, true},
+	// AM5: the package's own gate. The same files give the same result, so
+	// trying again with them is not offered.
+	"not_tied":        {"งบกระทบยอดยังไม่ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชียังไม่เท่ากัน", nextDraft, false},
+	"gate_not_passed": {"งานของรอบนี้ยังไม่ผ่านเกณฑ์ของ agent จึงยังไม่นับว่าสำเร็จ", nextDraft, false},
+	"":                {"รอบนี้ทำไม่สำเร็จ", nextRetry, true},
 }
 
 // FailureReasons lists every reason with its own sentence (tests walk it).
@@ -105,6 +117,18 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 	c, ok := failureCopies[reason]
 	if !ok {
 		c = failureCopies[""]
+		if facts.GateWhat != "" || facts.Draft {
+			c = failureCopies["gate_not_passed"]
+		}
+	}
+	// a gate's sentences are the package's, and pass the same guard as
+	// everything else a person reads: what is left of an error's text is
+	// nothing, and the reason's own sentence stands
+	if what := ForPerson(facts.GateWhat); what != "" && !LooksTechnical(what) {
+		c.what = what
+	}
+	if next := ForPerson(facts.GateNext); next != "" && !LooksTechnical(next) {
+		c.next = next
 	}
 	f := Failure{Reason: reason, What: c.what, Next: c.next, Credits: facts.Credits}
 	f.CanRetry = c.retry && facts.HasFiles && facts.Kind == KindRun
@@ -124,6 +148,11 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 		f.What += " (ข้อที่ไม่ผ่าน: " + strings.Join(f.Failed, " · ") + ")"
 	}
 	switch {
+	case facts.Draft && facts.KeepDays > 0:
+		f.Files = fmt.Sprintf("ไฟล์ร่างของรอบนี้ส่งให้แล้ว มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %d วัน "+
+			"ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", facts.KeepDays)
+	case facts.Draft:
+		f.Files = "ไฟล์ร่างของรอบนี้ส่งให้แล้ว มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ"
 	case !facts.HasFiles:
 		f.Files = "ผลงานของรอบก่อน ๆ ยังอยู่ครบ ไม่มีอะไรถูกลบหรือแก้ไข"
 	case facts.KeepDays > 0:

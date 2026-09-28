@@ -10,7 +10,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKGS = os.path.join(os.path.dirname(HERE), "packages")
-PACKAGES = ("financial_report", "invoice_processing", "expense_audit")
+PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation")
 GUIDE_KEYS = {"for", "how", "inputs", "outputs", "questions", "model_inputs", "never", "wrong_file", "time_note"}
 # words a person outside accounting IT would stop at
 JARGON = re.compile(r"materiality|D/C|S/H|debit/credit convention|cosmetic|schema|checksum|sandbox|E2\b", re.I)
@@ -61,7 +61,8 @@ class Guide(unittest.TestCase):
 
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
-                         {"financial_report": "1.3.2", "invoice_processing": "1.3.0", "expense_audit": "1.2.1"})
+                         {"financial_report": "1.3.2", "invoice_processing": "1.3.0", "expense_audit": "1.2.1",
+                          "bank_reconciliation": "1.0.0"})
 
 
 if __name__ == "__main__":

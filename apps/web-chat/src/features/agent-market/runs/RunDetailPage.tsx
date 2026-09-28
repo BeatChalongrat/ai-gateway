@@ -104,6 +104,10 @@ export function stepLabel(name: string, t: AmT): string {
       return t("step.render");
     case "publish":
       return t("step.publish");
+    case "gate":
+      return t("step.gate");
+    case "stopped":
+      return t("step.stopped");
   }
   return name;
 }

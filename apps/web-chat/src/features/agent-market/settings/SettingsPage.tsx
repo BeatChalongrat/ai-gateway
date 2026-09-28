@@ -16,7 +16,7 @@ import { ChartColumn, Pencil } from "lucide-react";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey, type AmT } from "../i18n";
-import { formatCredits, formatDateTime, formatMoney } from "../format";
+import { formatCredits, formatDateTime, formatMoney, formatMoney2 } from "../format";
 import type { Default, InstallDetail, Manifest, ThemePreset } from "../types";
 import { BackLink, BTN_DANGER_OUTLINE, BTN_PRIMARY_SMALL, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin } from "../ui";
 import { notifyInstallsChanged } from "../useAgentMarket";
@@ -64,6 +64,8 @@ export function describeValue(d: Default, t: AmT, manifest?: Manifest): string[]
     return [v.map((f) => labels.get(String(f)) ?? String(f)).join(", ")];
   }
   if (d.key === "materiality") return [formatMoney(v)];
+  if (MATCH_MONEY.has(d.key)) return [formatMoney2(v)];
+  if (d.key === "match_auto_same_day") return [v === true || v === "true" ? t("settings.yes") : t("settings.no")];
   if (d.key === "language") return [v === "th" ? t("lang.th") : v === "en" ? t("lang.en") : String(v)];
   if (Array.isArray(v)) return [v.map(String).join(", ")];
   if (typeof v === "object") {
@@ -365,9 +367,24 @@ function CompanyTaxSection({ installId, defaults, onChanged }: { installId: stri
   );
 }
 
-type Editor = "text" | "number" | "currency" | "formats" | "theme" | "language" | null;
+type Editor = "text" | "number" | "currency" | "formats" | "theme" | "language" | "yesno" | null;
 
-function editorFor(key: string): Editor {
+// AM5: the matching engine's tolerances and the account a reconciliation is headed with
+const MATCH_NUMBERS = new Set([
+  "match_amount_tolerance",
+  "match_date_window_days",
+  "match_fuzzy_threshold",
+  "match_fuzzy_window_days",
+  "match_ask_above",
+  "match_max_group",
+]);
+const MATCH_MONEY = new Set(["match_amount_tolerance", "match_ask_above"]);
+const ACCOUNT_TEXTS = new Set(["bank_name", "bank_account_number", "bank_account_name", "bank_gl_code"]);
+
+export function editorFor(key: string): Editor {
+  if (MATCH_NUMBERS.has(key)) return "number";
+  if (key === "match_auto_same_day") return "yesno";
+  if (ACCOUNT_TEXTS.has(key)) return "text";
   switch (key) {
     case "company":
       return "text";
@@ -515,8 +532,10 @@ function EditValue({
   const [text, setText] = useState(() => (typeof initial === "string" || typeof initial === "number" ? String(initial) : ""));
   const [formats, setFormats] = useState<string[]>(() => (Array.isArray(initial) ? initial.map(String) : []));
   const [theme, setTheme] = useState(() => (initial && typeof initial === "object" && "id" in (initial as object) ? String((initial as { id: unknown }).id) : "navy"));
+  const [yes, setYes] = useState(() => initial === true || initial === "true");
   const numberOk = editor !== "number" || /^\d+(\.\d+)?$/.test(text.trim());
-  const valid = editor === "formats" ? formats.length > 0 : editor === "theme" ? !!theme : text.trim().length > 0 && numberOk;
+  const valid =
+    editor === "formats" ? formats.length > 0 : editor === "theme" ? !!theme : editor === "yesno" ? true : text.trim().length > 0 && numberOk;
 
   const value = () => {
     switch (editor) {
@@ -524,6 +543,8 @@ function EditValue({
         return (manifest.outputs ?? []).map((o) => o.format).filter((f) => formats.includes(f));
       case "theme":
         return { id: theme };
+      case "yesno":
+        return yes ? "true" : "false";
       default:
         return text.trim();
     }
@@ -554,6 +575,11 @@ function EditValue({
               {c}
             </option>
           ))}
+        </select>
+      ) : editor === "yesno" ? (
+        <select value={yes ? "true" : "false"} onChange={(e) => setYes(e.target.value === "true")} aria-label={d.label || d.key} className={field}>
+          <option value="true">{t("settings.yes")}</option>
+          <option value="false">{t("settings.no")}</option>
         </select>
       ) : editor === "language" ? (
         <select value={text || "th"} onChange={(e) => setText(e.target.value)} aria-label={d.label || d.key} className={field}>

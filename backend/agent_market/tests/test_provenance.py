@@ -21,7 +21,8 @@ def _sum(parts: list[dict]) -> Decimal:
 class Provenance(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.runs = {p: S.render_sample(p, formats=["xlsx"]) for p in ("financial_report", "invoice_processing", "expense_audit")}
+        cls.runs = {p: S.render_sample(p, formats=["xlsx"])
+                    for p in ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation")}
 
     def _cites(self, package: str) -> dict:
         cites = {c["id"]: c for c in self.runs[package]["computed"]["citations"]}
@@ -51,6 +52,21 @@ class Provenance(unittest.TestCase):
         # the net payable counts only documents that print one — and each part says so
         notes = {p["note"] for p in cites["i5"]["sources"]}
         self.assertTrue(notes <= {"ตามที่เอกสารพิมพ์", "เอกสารไม่ได้พิมพ์ค่านี้ จึงไม่ได้นับ"}, notes)
+
+    def test_the_reconciliation_figures_add_up_from_their_rows(self):
+        comp = self.runs["bank_reconciliation"]["computed"]
+        st = comp["statement"]
+        cites = self._cites("bank_reconciliation")
+        for n, side in ((1, "bank"), (2, "book")):
+            balance, adjusted = cites[f"b{n}"], cites[f"a{n}"]
+            self.assertEqual(balance["value"], st[side]["balance"])
+            self.assertEqual(adjusted["value"], st[side]["adjusted"])
+            # the balance is a cell of the file; the adjusted balance is that balance and every reconciling item
+            self.assertTrue(balance["sources"] and balance["sources"][0]["file"] and balance["sources"][0]["row"], side)
+            self.assertEqual(Decimal(balance["value"]) + _sum(adjusted["sources"]), Decimal(adjusted["value"]), side)
+            self.assertTrue(all(p["file"] and p["row"] and p["note"] for p in adjusted["sources"]), side)
+        self.assertEqual(cites["d1"]["value"], "0.00")
+        self.assertEqual(Decimal(cites["a1"]["value"]) - Decimal(cites["a2"]["value"]), Decimal(cites["d1"]["value"]))
 
     def test_the_expense_summary_amounts_add_up_from_their_claims(self):
         comp = self.runs["expense_audit"]["computed"]

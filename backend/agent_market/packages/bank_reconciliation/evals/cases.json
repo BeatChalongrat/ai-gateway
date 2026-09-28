@@ -1,0 +1,1042 @@
+{
+ "schema": "agent.market.eval.v1",
+ "package": "sran.bank-reconciliation",
+ "note": "Files are in evals/fixtures, written by tools/make_bank_fixtures.py. Every expected value comes from the scenario (what each line truly is) and plain addition in that generator, never from this package. Answers: a key names a row as {file}.sheet.row; unanswered cards take their default, as a skipped card does. Checked on every case, whatever it says: every row of both files is in exactly one of the four groups; every pair below the exact tier was confirmed by a person; a round whose adjusted balances differ is never a success; every drafted entry balances; the working paper passed its own quality gate; the same input gives the same computed.json, byte for byte.",
+ "defaults": {
+  "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
+  "bank_name": "ธนาคารกสิกรไทย",
+  "bank_account_number": "123-4-56789-0",
+  "bank_account_name": "บจก. สยามตัวอย่างการค้า"
+ },
+ "today": "2026-11-02",
+ "cases": [
+  {
+   "id": "clean_kbank_layout",
+   "note": "ถอนเงิน/ฝากเงิน, dates as 01-09-69 (Buddhist era, two digits), cheque numbers only inside the text: the clean month. Six pairs by the day and amount, four cheques by number and amount presented two or three days later. Interest and the 1% withheld on it in one drafted entry.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "newest_row_first",
+   "note": "The newest row first, a cheque column, dates as 30/09/2569: the opening balance is the one before the oldest row.",
+   "files": [
+    "scb_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "english_headers_date_cells",
+   "note": "Date / Particulars / Withdrawal / Deposit / Balance, real date cells, BALANCE B/F and C/F lines.",
+   "files": [
+    "bbl_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "csv_cp874_bank_debit_credit",
+   "note": "A CP874 CSV whose columns are เดบิต/เครดิต. The heading says รายการเดินบัญชี, so a debit is money out — the opposite of the ledger's debit in the other file.",
+   "files": [
+    "ktb_sep.csv",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "one_signed_amount_column",
+   "note": "One amount column, a withdrawal written as a negative number.",
+   "files": [
+    "signed_sep.csv",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "ledger_without_balance_column",
+   "note": "The ledger has no balance column; its ยอดยกมา is written in the debit column.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep_no_balance.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "general_ledger_several_accounts",
+   "note": "The ledger file is the whole general ledger. One account's name says it is a bank account; its rows are used, the receivable and the rent account are not.",
+   "files": [
+    "kbank_sep.xlsx",
+    "gl_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "does_not_tie_statement_rows_missing",
+   "note": "Two rows of the statement are not in the file (a page missing) while its running balance still counts them. The reconciliation must NOT be called a success: it says ยังไม่ลงตัว ต่างกัน 21,435.00 บาท, names the break in the running balance, and still delivers the working paper marked as a draft.",
+   "files": [
+    "kbank_sep_page_missing.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1517119.65",
+    "adjusted_book": "1538554.65",
+    "difference": "-21435.00",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท",
+    "asked": [],
+    "matched": 9,
+    "tiers": {
+     "exact": 9,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "outstanding_payment": 1,
+     "deposit_in_transit": 1,
+     "bank_fee": 1,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 2,
+    "review": [
+     "statement_gap"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "success": false
+   }
+  },
+  {
+   "id": "items_carried_in_and_cleared",
+   "note": "October. Three items come in from September's list: the cheque 10001205 is presented (by number and amount, a rule), the deposit of 40,660.00 reaches the bank a day later under another text (a person confirms it), the cheque 10001206 is still outstanding and is carried on.",
+   "files": [
+    "kbank_oct.xlsx",
+    "ledger_oct.xlsx",
+    "carried_from_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_candidate:{carried_from_sep.xlsx}.0.7~{kbank_oct.xlsx}.0.8": "match"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1479769.65",
+    "book_balance": "1421119.65",
+    "adjusted_bank": "1420919.65",
+    "adjusted_book": "1420919.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_candidate"
+    ],
+    "matched": 6,
+    "tiers": {
+     "exact": 5,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "bank_fee": 1
+    },
+    "journal": 1,
+    "review": [],
+    "not_included": [],
+    "period": "2026-10",
+    "carried_cleared": 2,
+    "carried_open": 1
+   }
+  },
+  {
+   "id": "does_not_tie_opening_unexplained",
+   "note": "October without September's list. The opening balances differ by 1,070.00 and nothing explains it; the person says there is no list. Not a success: ยังไม่ลงตัว ต่างกัน 1,070.00 บาท, and the next step asks for the list.",
+   "files": [
+    "kbank_oct.xlsx",
+    "ledger_oct.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "bankrec_carried": "proceed_without"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1479769.65",
+    "book_balance": "1421119.65",
+    "adjusted_bank": "1453019.65",
+    "adjusted_book": "1451949.65",
+    "difference": "1070.00",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 1,070.00 บาท",
+    "asked": [
+     "bankrec_carried"
+    ],
+    "matched": 4,
+    "tiers": {
+     "exact": 4,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 1,
+     "bank_fee": 1,
+     "unrecorded_receipt": 1,
+     "unrecorded_payment": 1
+    },
+    "journal": 3,
+    "review": [
+     "opening_unexplained"
+    ],
+    "not_included": [],
+    "period": "2026-10",
+    "success": false
+   }
+  },
+  {
+   "id": "candidates_confirmed_by_a_person",
+   "note": "Two payments the rules will not match by themselves: one reaches the bank two days later, one differs by fifty satang. Each is a question; the person confirms both. The pairs record the tier and that a person confirmed; the fifty satang become a drafted entry.",
+   "files": [
+    "kbank_sep_candidates.xlsx",
+    "ledger_sep_candidates.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_candidate:{ledger_sep_candidates.xlsx}.0.13~{kbank_sep_candidates.xlsx}.0.14": "match",
+    "e3_candidate:{ledger_sep_candidates.xlsx}.0.16~{kbank_sep_candidates.xlsx}.0.17": "match"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1531350.15",
+    "book_balance": "1529278.15",
+    "adjusted_bank": "1530280.15",
+    "adjusted_book": "1530280.15",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_candidate",
+     "e3_candidate"
+    ],
+    "matched": 12,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 2,
+     "fuzzy": 0
+    },
+    "by_person": 2,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "posting_error": 1
+    },
+    "journal": 4,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "candidates_skipped_stay_suspect",
+   "note": "The same files, both cards skipped. A skipped card never matches a pair: the four rows stay suspect, in neither adjusted balance, each pair an exception for a person — and the fifty satang show as the difference.",
+   "files": [
+    "kbank_sep_candidates.xlsx",
+    "ledger_sep_candidates.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1531350.15",
+    "book_balance": "1529278.15",
+    "adjusted_bank": "1530280.15",
+    "adjusted_book": "1530280.65",
+    "difference": "-0.50",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 0.50 บาท",
+    "asked": [
+     "e3_candidate",
+     "e3_candidate"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 2,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [
+     "match_unconfirmed",
+     "match_unconfirmed"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "success": false
+   }
+  },
+  {
+   "id": "large_row_without_partner_skipped",
+   "note": "75,000.00 came into the account and the ledger does not have it. From 50,000.00 up a person is asked what a row is; the card is skipped, so nobody has said — the row is in neither adjusted balance and the round does not tie.",
+   "files": [
+    "kbank_sep_large.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1614589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1613519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "75000.00",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 75,000.00 บาท",
+    "asked": [
+     "e3_unmatched"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "unclassified": 1
+    },
+    "journal": 3,
+    "review": [
+     "unclassified_item"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "success": false
+   }
+  },
+  {
+   "id": "large_row_without_partner_answered",
+   "note": "The same files; the person says the receipt is to be recorded. It becomes a book-side item with a drafted entry through a suspense account, and the reconciliation ties.",
+   "files": [
+    "kbank_sep_large.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_unmatched:{kbank_sep_large.xlsx}.0.18": "book"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1614589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1613519.65",
+    "adjusted_book": "1613519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_unmatched"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "unrecorded_receipt": 1
+    },
+    "journal": 4,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "three_cheques_one_deposit",
+   "note": "Three cheques recorded one by one, deposited as one line of 58,850.00: many rows to one, proposed and confirmed.",
+   "files": [
+    "kbank_sep_group.xlsx",
+    "ledger_sep_group.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_candidate:{ledger_sep_group.xlsx}.0.13+{ledger_sep_group.xlsx}.0.14+{ledger_sep_group.xlsx}.0.15~{kbank_sep_group.xlsx}.0.14": "match"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_candidate"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 9,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09",
+    "shapes": {
+     "N:1": 1
+    }
+   }
+  },
+  {
+   "id": "file_that_does_not_say_whose_it_is",
+   "note": "เดบิต/เครดิต and nothing else. The agent does not guess which side wrote it (the signs are opposite): it asks, and the person says it is the ledger of the company. This ledger has no cheque numbers, so the four cheques cannot be matched by a rule: they are proposed together and confirmed by one answer that names each pair.",
+   "files": [
+    "kbank_sep.xlsx",
+    "bare_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "bankrec_side:{bare_sep.xlsx:key}": "book",
+    "e3_confirm_all": "match"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "bankrec_side",
+     "e3_confirm_all"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 6,
+     "amount_date": 4,
+     "fuzzy": 0
+    },
+    "by_person": 4,
+    "suspect": 0,
+    "items": {
+     "outstanding_payment": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "file_set_aside_waits_for_the_ledger",
+   "note": "The same card skipped: the file is set aside, never read as one side or the other, and the agent asks for the ledger. Nothing is reconciled from a guess.",
+   "files": [
+    "kbank_sep.xlsx",
+    "bare_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "asked": [
+     "bankrec_side",
+     "missing_file"
+    ],
+    "stops_at": "missing_file"
+   }
+  },
+  {
+   "id": "file_set_aside_is_on_the_list",
+   "note": "Three files; the one that does not say whose it is is skipped. The round is reconciled from the other two, and the file is on the list of what the round did not include, with what bringing it back takes.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep.xlsx",
+    "bare_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "bankrec_side"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [
+     "bare_sep.xlsx"
+    ],
+    "period": "2026-09",
+    "can_restore": [
+     "bare_sep.xlsx"
+    ]
+   }
+  },
+  {
+   "id": "recorded_after_the_cut_off",
+   "note": "The bank paid cheque 10001204 on 28 September; the ledger records it on 2 October. The October row is matched with nothing (cut-off); the September payment is a book-side item; the pair across the cut-off is an exception.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep_cutoff.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1555172.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 9,
+    "tiers": {
+     "exact": 9,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "unrecorded_payment": 1
+    },
+    "journal": 4,
+    "review": [
+     "cut_off"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "outside_period": 1
+   }
+  },
+  {
+   "id": "stale_cheque_carried_in",
+   "note": "A cheque of 12 February is still not presented at 30 September: 230 days, stale. It still reconciles (it is outstanding), and it is an exception: cancel or reissue.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep_stale.xlsx",
+    "carried_stale.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1533237.15",
+    "adjusted_bank": "1534239.65",
+    "adjusted_book": "1534239.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 3,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [
+     "stale_cheque"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "stale": 1,
+    "carried_cleared": 0,
+    "carried_open": 1
+   }
+  },
+  {
+   "id": "does_not_tie_recorded_twice",
+   "note": "Cheque 10001202 is in the ledger twice; the bank paid it once. The second row is not taken for an outstanding cheque: it is suspect, and the round does not tie by its amount.",
+   "files": [
+    "kbank_sep.xlsx",
+    "ledger_sep_twice.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1528957.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1529959.65",
+    "difference": "8560.00",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 8,560.00 บาท",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 1,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [
+     "possible_duplicate"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "success": false
+   }
+  },
+  {
+   "id": "outside_the_default_window",
+   "note": "A payment reaches the bank five days after the ledger's date. The default window is three days: the two rows are not offered as a pair; each is a reconciling item on its own side.",
+   "files": [
+    "kbank_sep_window.xlsx",
+    "ledger_sep_window.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1524609.65",
+    "book_balance": "1522537.15",
+    "adjusted_bank": "1508559.65",
+    "adjusted_book": "1508559.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "outstanding_payment": 1,
+     "unrecorded_payment": 1
+    },
+    "journal": 4,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09"
+   }
+  },
+  {
+   "id": "the_installs_own_window",
+   "note": "The same files with the install's window set to seven days: the pair is proposed, a person confirms it.",
+   "files": [
+    "kbank_sep_window.xlsx",
+    "ledger_sep_window.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_candidate:{ledger_sep_window.xlsx}.0.11~{kbank_sep_window.xlsx}.0.13": "match"
+   },
+   "defaults": {
+    "match_date_window_days": 7
+   },
+   "expect": {
+    "bank_balance": "1524609.65",
+    "book_balance": "1522537.15",
+    "adjusted_bank": "1523539.65",
+    "adjusted_book": "1523539.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_candidate"
+    ],
+    "matched": 11,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 1,
+     "fuzzy": 0
+    },
+    "by_person": 1,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09",
+    "window": 7
+   }
+  },
+  {
+   "id": "pdf_is_not_read_and_says_so",
+   "note": "A PDF beside the two files: it is not read (this agent reads the Excel or CSV export), the round says which file it did not use and why, and the file is on the round's list of what was not included.",
+   "files": [
+    "statement_sep.pdf",
+    "kbank_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [
+     "statement_sep.pdf"
+    ],
+    "period": "2026-09"
+   }
+  }
+ ]
+}

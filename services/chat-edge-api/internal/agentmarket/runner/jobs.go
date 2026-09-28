@@ -118,7 +118,7 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 		}
 	}
 	_ = r.Store.SetFormats(ctx, r.Store.Pool, ps.run.ID, current)
-	if err := rc.postOutputs(ctx, ps.run.ID, arts, ps.summary, ps.narrative, true); err != nil {
+	if err := rc.postOutputs(ctx, ps.run.ID, arts, ps.summary, ps.narrative, true, nil); err != nil {
 		return r.fail(ctx, job, "outputs", err)
 	}
 	return r.finish(rc, am.RunSucceeded, "")

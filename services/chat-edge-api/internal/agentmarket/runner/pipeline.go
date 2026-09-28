@@ -175,6 +175,22 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err != nil {
 		return rc.stepFailed("publish", err)
 	}
+	// AM5: the package's own verdict on the round (a reconciliation that does
+	// not tie). Not passed: the files go out as a draft, what a person must
+	// decide is recorded, and the round is not a success.
+	gate, err := rc.completionGate(ctx, computedRef, computeKey)
+	if err != nil {
+		return r.fail(ctx, run, "gate_not_passed", err)
+	}
+	if gate != nil && !gate.Passed {
+		if err := rc.recordExceptions(ctx, computedRef); err != nil {
+			return r.fail(ctx, run, "exceptions", err)
+		}
+		if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false, gate); err != nil {
+			return r.fail(ctx, run, "outputs", err)
+		}
+		return r.fail(ctx, run, gate.Reason(), &gateErr{gate: *gate, draft: len(arts) > 0})
+	}
 	// The documents this run recorded join the install's duplicate index.
 	if err := rc.recordIndex(ctx, computedRef); err != nil {
 		return r.fail(ctx, run, "index", err)
@@ -183,7 +199,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := rc.recordExceptions(ctx, computedRef); err != nil {
 		return r.fail(ctx, run, "exceptions", err)
 	}
-	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false); err != nil {
+	if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false, gate); err != nil {
 		return r.fail(ctx, run, "outputs", err)
 	}
 	// An upgrade's self-test switches the install before its run reads as
@@ -646,6 +662,10 @@ func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err err
 	var qe *qualityErr
 	if errors.As(err, &qe) {
 		facts.FailedChecks = qe.failed
+	}
+	var ge *gateErr
+	if errors.As(err, &ge) {
+		facts.GateWhat, facts.GateNext, facts.Draft = ge.gate.What, ge.gate.Next, ge.draft
 	}
 	return am.FailureFor(reason, facts)
 }

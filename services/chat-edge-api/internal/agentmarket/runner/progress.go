@@ -188,6 +188,12 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 	} else {
 		add("render", "สร้างไฟล์ผลลัพธ์", "pending", "")
 	}
+	// AM5: the package's own verdict on the round, in its words.
+	if s, ok := latest["gate"]; ok {
+		var g gateView
+		_ = json.Unmarshal(s.Output, &g)
+		add("gate", "ตรวจว่างานของรอบนี้ครบตามเกณฑ์ของ agent", status(s.Status), am.ForPerson(g.What))
+	}
 	if run.Status == am.RunFailed {
 		for i := range p.Steps {
 			if p.Steps[i].Status == "running" {

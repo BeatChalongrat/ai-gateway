@@ -123,6 +123,9 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 		// AM2: invoices and receipts read into fields with boxes and confidence
 		// (text layer, e-Tax XML, Tesseract tha+eng on page images).
 		caps["document.extract.e2"] = agentmarket.Binding{Capability: "document.extract.e2", Impl: "engine:e2+tesseract", Version: eng + "|" + img}
+		// AM5: two tables matched into four groups by ordered passes; only an
+		// exact pass accepts a pair by itself (engine/e3). No model.
+		caps["document.match.e3"] = agentmarket.Binding{Capability: "document.match.e3", Impl: "engine:e3", Version: eng}
 	}
 	// A PDF is the finished report converted by LibreOffice (doc-converter).
 	if r.Converter.Available() {

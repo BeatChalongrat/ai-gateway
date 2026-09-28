@@ -108,6 +108,18 @@ type OutputsPayload struct {
 	Rendered    bool             `json:"rerender,omitempty"`
 	// Review (AM3): these files carry a reviewer's sign-off on their face.
 	Review *OutputsReview `json:"review,omitempty"`
+	// Draft (AM5): the package's completion gate did not pass — the files are
+	// delivered for the person to see why, and say "draft" on their face.
+	// Gate is what the gate said, in the package's words.
+	Draft bool         `json:"draft,omitempty"`
+	Gate  *OutputsGate `json:"gate,omitempty"`
+}
+
+// OutputsGate is a package's completion gate as the files card shows it.
+type OutputsGate struct {
+	Passed bool   `json:"passed"`
+	What   string `json:"what"`
+	Next   string `json:"next,omitempty"`
 }
 
 // OutputsReview is the sign-off an outputs card was re-issued with.

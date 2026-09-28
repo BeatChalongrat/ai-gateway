@@ -104,6 +104,16 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	if !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
+	// AM5: an agent may ask that its work is signed by someone who did not
+	// prepare it (a bank reconciliation). Who a person is is who is signed
+	// in — the name typed on the form is only what the stamp prints.
+	if def, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
+		if m, err := ParseManifest(def.Manifest); err == nil && m.Review.SeparateReviewer &&
+			(c.UserID == run.UserID || c.UserID == in.UserID) {
+			say(w, http.StatusConflict, "SAME_PERSON")
+			return
+		}
+	}
 	var open int
 	if err := a.store.Pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_run_exceptions WHERE run_id = $1 AND status = 'open'`,
 		run.ID).Scan(&open); err != nil {

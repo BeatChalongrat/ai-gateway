@@ -61,6 +61,38 @@ for display, and changes nothing there):
   confidence), `excel_executor.py` (fills a workbook's named ranges, input cells
   only), `docx_generator.py` (markers, repeating rows, content controls). Each
   change is additive: chat's calls and outputs are unchanged.
+- AM5, the chat's own components (the agent workspace stopped being a copy of
+  the chat's surface: what both show is one component, so these files of the
+  chat were edited, and the revert puts each back as it was):
+  - `apps/web-chat/src/components/chat/ChatInput.tsx` — its shell moved to the new
+    `ComposerFrame.tsx` (the text box, its growth, Enter, the attach button, the
+    send and stop button, the keyboard inset); ChatInput fills the frame's slots.
+  - `apps/web-chat/src/components/chat/MessageBubble.tsx` — its parts moved to the
+    new `MessageParts.tsx` (the person's bubble and its collapse, the assistant's
+    prose, copy, the time, the failed-turn card, the note card).
+  - `apps/web-chat/src/components/chat/MessageAttachments.tsx` — its file card moved
+    to the new `AttachmentCard.tsx`.
+  - `apps/web-chat/src/components/chat/ModelSelector.tsx` — exports its pill, its
+    popover and its picker; the popover opens to the left of its pill when
+    opening to the right would leave the window.
+  - `apps/web-chat/src/components/chat/QuestionCard.tsx` — an optional typed
+    field per question (`others`), and `data-typed`.
+  - `apps/web-chat/src/components/chat/CatIndicator.tsx` — the label's key is optional.
+  - `apps/web-chat/src/lib/i18n/index.ts` — `LocaleScope` / `useLocale`: a part of
+    the page may read the dictionary in a language of its own (Agent Market is
+    Thai whatever the app's language).
+  - tests that read a class by its file: `apps/web-chat/src/lib/contrast.test.ts`,
+    `apps/web-chat/src/components/chat/ChatInput.stopButton.test.tsx` (they name
+    the file the class now lives in).
+  The chat's behaviour is what it was (its own tests pass unchanged apart from
+  the two paths above); with the flag off the shared components are simply the
+  chat's.
+- AM5 adds no table, no column and no migration: the matching engine
+  (`backend/agent_market/engine/e3/`) and the bank reconciliation
+  (`backend/agent_market/packages/bank_reconciliation/`) are files of the
+  engine; the runner's completion gate is a step of a run (`kind = 'check'`)
+  and a reason (`not_tied`) on a failed run; the install's tolerances are rows
+  of `agent_defaults`. All inside the schema, all gone with steps 3 and 6.
 
 ## Steps
 

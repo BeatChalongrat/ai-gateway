@@ -132,3 +132,44 @@ over the same bytes and stored on every install and run.
   publishes them as the next version of each; no step of the run is re-run.
 - **Every error** a person can reach comes from one table (`messages.go`):
   what happened, what to do next, whether their data is safe.
+
+## One surface, and what a person reads (AM5)
+
+- **The workspace is the chat's surface.** The composer, the message bubbles,
+  the file cards, the failed-turn card, the working indicator, the question
+  card and the model menu are the chat's components
+  (`components/chat/ComposerFrame.tsx`, `MessageParts.tsx`,
+  `AttachmentCard.tsx`, `ModelSelector.tsx`, `QuestionCard.tsx`,
+  `CatIndicator.tsx`), configured. What only an agent has — round dividers,
+  the files card, the list of documents not included, the run link — is an
+  addition beside them. The workspace has no navigation of its own: the app's
+  sidebar is the one list of agents.
+- **No error text reaches a person.** What a failed round says is built from
+  its reason's code and facts about the round (`failure.go` `FailureFor` — it
+  takes no error); the error itself is kept on the run's steps for the run page
+  and the problem report. Whatever is written to or read from the thread passes
+  `GuardItem`; the web applies the same rule once more (`personText`).
+- **A document left out is on a list.** `computed.json` `not_included`: why,
+  and what bringing it back takes; `POST /runs/{id}/restore` applies it and the
+  same round computes again.
+
+## Matching (E3) and the completion gate (AM5)
+
+- **E3** (`backend/agent_market/engine/e3/`): two tables of rows in, four
+  groups out (matched · missing · extra · suspect), every row with its file,
+  sheet, row and cells. Ordered passes in three tiers — `exact`,
+  `amount_date`, `fuzzy`. Only a pass of the exact tier accepts a pair by
+  itself (`Pass` refuses `auto` for any other tier); every other pair is a
+  proposal a person confirms through the clarification engine, and records its
+  pass, tier and who confirmed it. Tolerances are install settings
+  (`match_*`, validated in `api.go` with the engine's own bounds). No model, no
+  clock, no set order: the same input and answers give the same bytes.
+- **A package's completion gate.** A manifest with `"completion_gate": true`
+  puts its verdict in `computed.json` (`gate: {passed, code, what, next}`). The
+  runner reads it after the files are made (`runner/gate.go`, a step of the
+  run). Not passed: the files are delivered as a draft, the run ends `failed`
+  with the gate's code, and the person reads the package's own sentence. The
+  bank reconciliation's gate is `adjusted bank balance = adjusted book balance`.
+- **Separate reviewer.** A manifest with `"review": {"separate_reviewer": true}`
+  is signed by someone who did not prepare the run (`review.go`): who a person
+  is is who is signed in, never the name typed on the form.

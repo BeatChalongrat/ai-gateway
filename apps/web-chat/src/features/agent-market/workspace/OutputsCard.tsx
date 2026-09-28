@@ -13,7 +13,7 @@ import { formatBytes } from "@/lib/fileUtil";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
-import { extensionOf, formatCredits, formatMoney } from "../format";
+import { extensionOf, formatCredits, formatMoney, formatMoney2 } from "../format";
 import type { NotIncluded, OutputArtifact, OutputsPayload, QualityCheck } from "../types";
 import { BTN_SMALL, cls, Pill, Spin } from "../ui";
 import { SignOffButton } from "../review/SignOff";
@@ -75,12 +75,23 @@ export function OutputsCard({
   const [detailsOpen, setDetailsOpen] = useState(!!ws?.admin);
   const detailsId = useId();
 
-  const allKpis: { key: AmKey; value: unknown }[] = [
-    { key: "outputs.revenue", value: summary.revenue },
-    { key: "outputs.expenses", value: summary.total_expenses },
-    { key: "outputs.netProfit", value: summary.net_profit },
-  ];
+  // AM5: a reconciliation's three numbers are its two adjusted balances and what is between them
+  const reconciliation = summary.kind === "bank_reconciliation";
+  const allKpis: { key: AmKey; value: unknown }[] = reconciliation
+    ? [
+        { key: "outputs.adjustedBank", value: summary.adjusted_bank },
+        { key: "outputs.adjustedBook", value: summary.adjusted_book },
+        { key: "outputs.difference", value: summary.difference },
+      ]
+    : [
+        { key: "outputs.revenue", value: summary.revenue },
+        { key: "outputs.expenses", value: summary.total_expenses },
+        { key: "outputs.netProfit", value: summary.net_profit },
+      ];
   const kpis = allKpis.filter((k) => k.value !== undefined && k.value !== null);
+  const gate = outputs.gate ?? null;
+  const isDraft = !!outputs.draft;
+  const count = (v: unknown) => (typeof v === "number" ? String(v) : "0");
   const modelLine = outputs.model?.model ? `${outputs.model.model} · ${outputs.model.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}` : null;
   const creditLine = outputs.credits ? t("outputs.credits", { n: formatCredits(outputs.credits) }) : null;
   const hasDetails = q.total > 0 || !!creditLine || !!modelLine;
@@ -107,15 +118,46 @@ export function OutputsCard({
         <p className="mt-1 text-xs text-text-secondary">{t("outputs.rerender")}</p>
       ) : null}
 
+      {isDraft ? (
+        <div role="alert" className="mt-2 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2.5" data-testid="am-outputs-draft">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-text-primary">
+            <TriangleAlert width={15} height={15} className="shrink-0 text-status-warning" aria-hidden />
+            <span>{t("outputs.draft")}</span>
+          </p>
+          {personText(gate?.what ?? "") ? <p className="mt-1 text-sm text-text-primary">{personText(gate?.what ?? "")}</p> : null}
+          {personText(gate?.next ?? "") ? <p className="mt-0.5 text-xs text-text-secondary">{t("outputs.draftNext", { next: personText(gate?.next ?? "") })}</p> : null}
+        </div>
+      ) : gate?.passed && personText(gate.what) ? (
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-text-primary" data-testid="am-outputs-gate">
+          <CircleCheck width={14} height={14} className="shrink-0 text-status-success" aria-hidden />
+          <span>{personText(gate.what)}</span>
+        </p>
+      ) : null}
+
       {kpis.length ? (
-        <dl className="mt-3 grid grid-cols-3 gap-2">
+        <dl className="mt-3 grid grid-cols-3 gap-2" data-testid="am-outputs-kpis">
           {kpis.map((k) => (
             <div key={String(k.key)} className="min-w-0 rounded-lg bg-bg-base px-2.5 py-2">
               <dt className="truncate text-[11px] text-text-muted">{t(k.key)}</dt>
-              <dd className="truncate text-sm font-semibold tabular-nums text-text-primary sm:text-base">{formatMoney(k.value)}</dd>
+              <dd className="truncate text-sm font-semibold tabular-nums text-text-primary sm:text-base">
+                {/* a reconciliation is read to the satang */}
+                {reconciliation ? formatMoney2(k.value) : formatMoney(k.value)}
+              </dd>
             </div>
           ))}
         </dl>
+      ) : null}
+
+      {reconciliation ? (
+        <p className="mt-2 text-xs text-text-secondary" data-testid="am-outputs-match">
+          {t("outputs.matchLine", {
+            matched: count(summary.matched),
+            rule: count(summary.by_rule),
+            person: count(summary.by_person),
+            items: count(summary.items),
+          })}
+          {Number(summary.suspect) > 0 ? ` · ${t("outputs.suspect", { n: count(summary.suspect) })}` : ""}
+        </p>
       ) : null}
 
       {artifacts.length ? (
@@ -177,8 +219,9 @@ export function OutputsCard({
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
-        <MoreFilesMenu runId={outputs.run_id} />
-        {canSignOff && !outputs.review ? <SignOffButton runId={outputs.run_id} /> : null}
+        {/* a draft is neither signed nor made into other files: the round was not a success */}
+        {!isDraft ? <MoreFilesMenu runId={outputs.run_id} /> : null}
+        {canSignOff && !outputs.review && !isDraft ? <SignOffButton runId={outputs.run_id} /> : null}
         <Link href={provenanceHref(outputs.run_id)} className={BTN_SMALL}>
           {t("ws.provenance")}
         </Link>
