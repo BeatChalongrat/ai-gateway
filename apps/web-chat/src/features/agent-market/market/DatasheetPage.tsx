@@ -39,10 +39,12 @@ export function keepText(r: DatasheetRetention, t: (k: AmKey, v?: Record<string,
       return t("ds.keepHours", { n: String(r.keep) });
     case "days":
       return t("ds.keepDays", { n: String(r.keep) });
+    case "years":
+      return t("ds.keepYears", { n: String(r.keep) });
     case "while_installed":
       return t("ds.keepWhileInstalled");
     case "account_deletion":
-      return t("ds.keepAccountDeletion");
+      return t("ds.keepOrgRecord");
   }
   return String(r.keep);
 }
@@ -143,6 +145,11 @@ function Sheet({ slug }: { slug: string }) {
               ))}
             </tbody>
           </table>
+          {sheet.notes?.not_archive ? (
+            <p className="mt-2 text-xs text-text-secondary" data-testid="am-ds-not-archive">
+              {sheet.notes.not_archive}
+            </p>
+          ) : null}
         </section>
 
         <section>

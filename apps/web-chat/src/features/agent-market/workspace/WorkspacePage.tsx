@@ -3,31 +3,41 @@
 // /chat/agents/i/[installId] — the agent workspace (board 3), the primary
 // surface: an inner rail of my agents (md+), the agent's header, the thread
 // (loaded, then followed live) and the composer.
+//
+// AM4: one obvious action in the header — "ที่มาของตัวเลข" — and everything
+// else (other chats, pin, overview, settings, report a problem) in one menu;
+// an empty workspace says in one loud sentence what to drop in; a finished
+// round closes with a divider and "เริ่มรอบใหม่"; ?thread=<id> shows another
+// chat with the same agent.
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChartColumn, ListChecks, Pin, PinOff, Plus, Settings } from "lucide-react";
+import { ListChecks, Plus } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
-import type { InstallDetail, InstallRow, OutputsPayload, ProgressPayload, ThreadItem } from "../types";
+import type { InstallDetail, InstallRow, ProgressPayload, ThreadItem } from "../types";
 import { AgentTile, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Spin } from "../ui";
-import { notifyInstallsChanged, onInstallsChanged } from "../useAgentMarket";
+import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
 import { togglePin } from "../useRail";
-import { ProblemButton } from "../problem/ProblemButton";
 import { BudgetBanner } from "./BudgetBanner";
 import { Composer, type ComposerHandle } from "./Composer";
-import { dashboardHref, runHref, settingsHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
+import { provenanceHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
+import { EmptyDrop } from "./EmptyDrop";
+import { ModelControl, useModelPicker } from "./ModelControl";
+import { hasOwnRound, latestRound } from "./rounds";
 import { ThreadView } from "./ThreadView";
+import { UploadInfo } from "./UploadInfo";
 import { useThread } from "./useThread";
 import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 
-export function WorkspacePage({ installId }: { installId: string }) {
+export function WorkspacePage({ installId, threadId = null }: { installId: string; threadId?: string | null }) {
   return (
     <FeatureGate>
-      <Workspace installId={installId} />
+      <Workspace installId={installId} threadId={threadId || null} />
     </FeatureGate>
   );
 }
@@ -51,15 +61,18 @@ function useInstalls(): InstallRow[] {
   return rows;
 }
 
-function Workspace({ installId }: { installId: string }) {
+function Workspace({ installId, threadId }: { installId: string; threadId: string | null }) {
   const t = useAmT();
+  const snap = useAgentMarket();
   const [detail, setDetail] = useState<InstallDetail | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [reload, setReload] = useState(0);
   const installs = useInstalls();
-  const thread = useThread(installId);
+  const thread = useThread(installId, threadId);
   const composerRef = useRef<ComposerHandle>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null | undefined>(undefined);
+  const [picker, setPicker] = useModelPicker(installId);
+  const [roundModel, setRoundModel] = useState<string | null>(null);
 
   // AM3: "recently used" in the rail starts from opening the workspace.
   useEffect(() => {
@@ -124,21 +137,9 @@ function Workspace({ installId }: { installId: string }) {
   const maxMb = manifest?.limits?.max_file_mb || DEFAULT_MAX_MB;
   const photoNotice = manifest?.photo_notice || undefined;
 
-  // The latest run with a progress card is the one "ดูขั้นตอน…" opens.
-  const latestRunId = useMemo(() => {
-    for (let i = thread.items.length - 1; i >= 0; i--) {
-      const it = thread.items[i]!;
-      if (it.kind === "progress") return (it.payload as ProgressPayload)?.run_id ?? it.run_id ?? null;
-    }
-    return null;
-  }, [thread.items]);
-  const lastModel = useMemo(() => {
-    for (let i = thread.items.length - 1; i >= 0; i--) {
-      const it = thread.items[i]!;
-      if (it.kind === "outputs") return (it.payload as OutputsPayload)?.model ?? null;
-    }
-    return null;
-  }, [thread.items]);
+  // AM4: "ที่มาของตัวเลข" opens the latest round of the person's own files.
+  const latest = useMemo(() => latestRound(thread.items), [thread.items]);
+  const empty = thread.status !== "loading" && !hasOwnRound(thread.items);
 
   // the self-tests in this thread (their files are the sample's, not to be signed off)
   const selfTestSig = useMemo(
@@ -163,8 +164,11 @@ function Workspace({ installId }: { installId: string }) {
         claimedAt.current = Date.now();
       },
       selfTestRuns: new Set(selfTestSig ? selfTestSig.split(",") : []),
+      threadId,
+      focusComposer: () => composerRef.current?.focus(),
+      admin: snap.admin,
     }),
-    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig, threadId, snap.admin],
   );
 
   const onDropFiles = useCallback((files: File[]) => {
@@ -207,41 +211,18 @@ function Workspace({ installId }: { installId: string }) {
               <h1 className="min-h-[1.5rem] truncate text-base font-semibold text-text-primary">{title}</h1>
               {tagline ? <p className="truncate text-xs text-text-muted">{tagline}</p> : null}
             </div>
-            {latestRunId ? (
-              <Link href={runHref(latestRunId)} className={BTN_SMALL} data-testid="am-ws-view-run">
+            {latest ? (
+              <Link
+                href={provenanceHref(latest.runId)}
+                className={BTN_SMALL}
+                title={t("ws.provenanceTitle")}
+                data-testid="am-ws-view-run"
+              >
                 <ListChecks width={15} height={15} aria-hidden />
-                <span className="hidden sm:inline">{t("ws.viewRun")}</span>
-                <span className="sm:hidden">{t("ws.viewRunShort")}</span>
+                <span>{t("ws.provenance")}</span>
               </Link>
-            ) : (
-              <span className="hidden text-xs text-text-muted lg:inline">{t("ws.noRunYet")}</span>
-            )}
-            <button
-              type="button"
-              onClick={onPin}
-              aria-pressed={pinned}
-              aria-label={pinned ? t("rail.unpin", { name: title }) : t("rail.pin", { name: title })}
-              title={pinned ? t("ws.unpin") : t("ws.pin")}
-              className={BTN_SMALL}
-              data-testid="am-ws-pin"
-            >
-              {pinned ? <PinOff width={15} height={15} aria-hidden /> : <Pin width={15} height={15} aria-hidden />}
-              <span className="hidden lg:inline">{pinned ? t("ws.unpin") : t("ws.pin")}</span>
-            </button>
-            <ProblemButton target={{ kind: "install", installId }} compact />
-            <Link href={dashboardHref(installId)} className={BTN_SMALL} aria-label={t("ws.dashboard")} data-testid="am-ws-dashboard">
-              <ChartColumn width={15} height={15} aria-hidden />
-              <span className="hidden sm:inline">{t("ws.dashboard")}</span>
-            </Link>
-            <Link
-              href={settingsHref(installId)}
-              className={BTN_SMALL}
-              aria-label={t("ws.settings")}
-              data-testid="am-ws-settings"
-            >
-              <Settings width={15} height={15} aria-hidden />
-              <span className="hidden sm:inline">{t("ws.settings")}</span>
-            </Link>
+            ) : null}
+            <WorkspaceMenu installId={installId} threadId={threadId} pinned={pinned} onPin={onPin} />
           </header>
 
           <AttachmentDropZone onFiles={onDropFiles} className="flex min-h-0 flex-1 flex-col">
@@ -253,6 +234,7 @@ function Workspace({ installId }: { installId: string }) {
                 <ErrorPanel message={errorMessage(thread.error)} title={t("ws.loadFailed")} onRetry={thread.retry} />
               ) : null}
               <ThreadView items={thread.items} />
+              {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} /> : null}
             </ThreadScroller>
             <div className="px-4 md:px-8">
               <BudgetBanner installId={installId} refreshKey={progressSig} />
@@ -260,17 +242,21 @@ function Workspace({ installId }: { installId: string }) {
             <Composer
               ref={composerRef}
               installId={installId}
-              onSent={onSent}
+              onSent={(item) => {
+                setRoundModel(null);
+                onSent(item);
+              }}
               accept={accept}
               maxMb={maxMb}
               photoNotice={photoNotice}
+              threadId={threadId}
+              modelChoice={roundModel}
+              tools={<ModelControl installId={installId} picker={picker} onPicker={setPicker} roundChoice={roundModel} onRoundChoice={setRoundModel} />}
               footer={
-                <p className="text-center text-[11px] text-text-muted" data-testid="am-ws-footer">
-                  {manifest?.cannot}
-                  {lastModel?.model ? (
-                    <span className="whitespace-nowrap">{` · ${lastModel.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}`}</span>
-                  ) : null}
-                </p>
+                <div className="flex flex-col items-center gap-0.5" data-testid="am-ws-footer">
+                  {manifest?.cannot ? <p className="text-center text-[11px] text-text-muted">{manifest.cannot}</p> : null}
+                  {!empty ? <UploadInfo manifest={manifest} center /> : null}
+                </div>
               }
             />
           </AttachmentDropZone>
@@ -331,12 +317,23 @@ function ThreadScroller({ items, status, children }: { items: ThreadItem[]; stat
   );
 }
 
+/** AM4: the workspace's own list is capped like the left rail (the rest are one click away). */
+export const RAIL_CAP = 6;
+
+export function railShown(installs: InstallRow[], activeId: string): InstallRow[] {
+  const head = installs.slice(0, RAIL_CAP);
+  if (head.some((i) => i.id === activeId)) return head;
+  const active = installs.find((i) => i.id === activeId);
+  return active ? [...head.slice(0, RAIL_CAP - 1), active] : head;
+}
+
 function Rail({ installs, activeId }: { installs: InstallRow[]; activeId: string }) {
   const t = useAmT();
+  const shown = railShown(installs, activeId);
   return (
     <nav aria-label={t("ws.agentsNav")} className="hidden w-[200px] shrink-0 flex-col gap-0.5 border-r border-border-subtle px-2 py-4 md:flex" data-testid="am-rail">
       <div className="px-2.5 pb-2 text-[11px] font-medium tracking-wide text-text-muted">{t("ws.myAgents")}</div>
-      {installs.map((i) => {
+      {shown.map((i) => {
         const active = i.id === activeId;
         return (
           <Link
@@ -358,6 +355,15 @@ function Rail({ installs, activeId }: { installs: InstallRow[]; activeId: string
           </Link>
         );
       })}
+      {installs.length > shown.length ? (
+        <Link
+          href="/chat/agents/mine"
+          className="focus-ring rounded-lg px-2.5 py-1.5 text-[12px] text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
+          data-testid="am-rail-all"
+        >
+          {t("rail.all", { n: String(installs.length) })}
+        </Link>
+      ) : null}
       <Link
         href="/chat/agents"
         className="focus-ring mt-1 flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"

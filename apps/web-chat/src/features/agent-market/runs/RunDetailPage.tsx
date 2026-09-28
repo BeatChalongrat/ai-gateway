@@ -4,8 +4,12 @@
 // did, step by step; what it asked; every number with the file, sheet and
 // cells it came from; what needs review; every file, every version.
 // Refreshes itself while the run is still working.
+//
+// AM4: ?tab=numbers opens it on "ที่มาของตัวเลข" (the workspace header's one
+// action). ?as=admin is an admin's view of someone else's run, after stating
+// a reason (the owner is told; the owner's page lists every opening).
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
 import { formatBytes } from "@/lib/fileUtil";
@@ -39,6 +43,8 @@ const ACTIVE = new Set(["queued", "running", "awaiting_input"]);
 const POLL_MS = 3000;
 
 type Tab = "overview" | "steps" | "questions" | "numbers" | "exceptions" | "files";
+const TABS: readonly Tab[] = ["overview", "steps", "questions", "numbers", "exceptions", "files"];
+const isTab = (x: string | null | undefined): x is Tab => !!x && (TABS as readonly string[]).includes(x);
 
 const STATUS_TONE: Record<string, Tone> = {
   succeeded: "success",
@@ -102,15 +108,20 @@ export function stepLabel(name: string, t: AmT): string {
   return name;
 }
 
-export function RunDetailPage({ runId }: { runId: string }) {
+export function RunDetailPage({ runId, initialTab, asAdmin = false }: { runId: string; initialTab?: string | null; asAdmin?: boolean }) {
   return (
     <FeatureGate>
-      <RunDetailView runId={runId} />
+      <RunDetailView runId={runId} initialTab={initialTab} asAdmin={asAdmin} />
     </FeatureGate>
   );
 }
 
-function RunDetailView({ runId }: { runId: string }) {
+/** AM4: the file downloads of the page — the owner's, or an admin's (reason-gated) ones. */
+const RunDownloads = createContext<{ artifact?: (id: string, name: string) => Promise<void>; file: (id: string, name: string) => Promise<void> }>({
+  file: (id, name) => amApi.downloadFile(id, name),
+});
+
+function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialTab?: string | null; asAdmin: boolean }) {
   const t = useAmT();
   const locale = useAmLocale();
   const [data, setData] = useState<RunDetail | null>(null);
@@ -118,19 +129,29 @@ function RunDetailView({ runId }: { runId: string }) {
   const [computedMissing, setComputedMissing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [reload, setReload] = useState(0);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "overview");
   const tabsId = useId();
+  const downloads = useMemo(
+    () =>
+      asAdmin
+        ? {
+            artifact: (id: string, name: string) => amApi.adminDownloadRunArtifact(runId, id, name),
+            file: (id: string, name: string) => amApi.adminDownloadRunFile(runId, id, name),
+          }
+        : { file: (id: string, name: string) => amApi.downloadFile(id, name) },
+    [asAdmin, runId],
+  );
 
   const status = data?.run.status ?? "";
   const active = ACTIVE.has(status);
   // what the run left for a person to decide (the expense audit): read once it has finished
-  const decisions = useRunExceptions(runId, !!data && !active);
+  const decisions = useRunExceptions(runId, !!data && !active && !asAdmin);
   // AM3: who signed this run off (re-read after a sign-off, and while its stamp job works)
   const [reviews, setReviews] = useState<Review[] | null>(null);
   const [reviewsTick, setReviewsTick] = useState(0);
   const finishedRun = status === "succeeded" && data?.run.kind === "run";
   useEffect(() => {
-    if (!finishedRun) return;
+    if (!finishedRun || asAdmin) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () =>
@@ -148,19 +169,19 @@ function RunDetailView({ runId }: { runId: string }) {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [runId, finishedRun, reviewsTick]);
+  }, [runId, finishedRun, reviewsTick, asAdmin]);
 
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       try {
-        const d = await amApi.run(runId);
+        const d = asAdmin ? await amApi.adminRun(runId) : await amApi.run(runId);
         if (!alive) return;
         setData(d);
         setError(null);
         try {
-          const c = await amApi.computed(runId);
+          const c = asAdmin ? await amApi.adminRunComputed(runId) : await amApi.computed(runId);
           if (alive) {
             setComputed(c);
             setComputedMissing(false);
@@ -178,7 +199,7 @@ function RunDetailView({ runId }: { runId: string }) {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [runId, reload]);
+  }, [runId, reload, asAdmin]);
 
   const steps = useMemo(() => [...(data?.steps ?? [])].sort((a, b) => Date.parse(a.started_at ?? "") - Date.parse(b.started_at ?? "") || a.seq - b.seq), [data]);
   const cards = data?.clarifications ?? [];
@@ -243,8 +264,29 @@ function RunDetailView({ runId }: { runId: string }) {
         </Pill>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="am-run-actions">
-        {finishedRun ? (
+      {asAdmin ? (
+        <p role="note" className="mt-3 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary" data-testid="am-run-admin-view">
+          {t("run.adminView")}
+        </p>
+      ) : null}
+      {run.evidence_removed_at ? (
+        <p role="note" className="mt-3 rounded-lg border border-border bg-bg-surface px-3 py-2 text-xs text-text-secondary">
+          {t("run.evidenceRemoved")}
+        </p>
+      ) : null}
+      {data.access_log?.length && !asAdmin ? (
+        <section className="mt-3 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2" aria-label={t("run.accessLog")} data-testid="am-run-access-log">
+          <h2 className="text-xs font-semibold text-text-primary">{t("run.accessLog")}</h2>
+          <ul className="mt-1 flex flex-col gap-0.5 text-xs text-text-secondary">
+            {data.access_log.map((a) => (
+              <li key={a.opened_at}>{t("run.accessLine", { who: a.admin_name || a.admin_email, when: a.at_label, reason: a.reason })}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="am-run-actions" hidden={asAdmin}>
+        {finishedRun && !asAdmin ? (
           <SignOffButton
             runId={runId}
             onDone={() => {
@@ -252,8 +294,8 @@ function RunDetailView({ runId }: { runId: string }) {
             }}
           />
         ) : null}
-        {run.kind === "run" ? <ShareButton runId={runId} /> : null}
-        <ProblemButton target={{ kind: "run", runId }} />
+        {run.kind === "run" && !asAdmin ? <ShareButton runId={runId} /> : null}
+        {!asAdmin ? <ProblemButton target={{ kind: "run", runId }} /> : null}
       </div>
       {reviews && reviews.length ? (
         <section className="mt-3" aria-label={t("review.listTitle")}>
@@ -300,7 +342,9 @@ function RunDetailView({ runId }: { runId: string }) {
             }
           />
         ) : (
-          <FilesTab artifacts={artifacts} files={files} />
+          <RunDownloads.Provider value={downloads}>
+            <FilesTab artifacts={artifacts} files={files} />
+          </RunDownloads.Provider>
         )}
       </div>
     </PageShell>
@@ -944,7 +988,7 @@ function FilesTab({ artifacts, files }: { artifacts: Artifact[]; files: AmFile[]
         {sorted.length ? (
           <ul className="mt-2.5 flex flex-col divide-y divide-border-subtle rounded-lg border border-border-subtle">
             {sorted.map((a) => (
-              <ArtifactRow key={a.id} artifact={a} />
+              <ArtifactRowIn key={a.id} a={a} />
             ))}
           </ul>
         ) : (
@@ -967,14 +1011,28 @@ function FilesTab({ artifacts, files }: { artifacts: Artifact[]; files: AmFile[]
   );
 }
 
+function ArtifactRowIn({ a }: { a: Artifact }) {
+  const dl = useContext(RunDownloads);
+  return <ArtifactRow artifact={a} download={dl.artifact ? () => dl.artifact!(a.id, a.name) : undefined} />;
+}
+
+const FILE_STATUS: Record<string, AmKey> = {
+  active: "file.status.active",
+  removed: "file.status.removed",
+  pending_decision: "file.status.pending",
+  next_round: "file.status.nextRound",
+  staged: "file.status.staged",
+};
+
 function InputFileRow({ f }: { f: AmFile }) {
   const t = useAmT();
+  const dl = useContext(RunDownloads);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const download = () => {
     setBusy(true);
     setError(null);
-    amApi.downloadFile(f.id, f.name).then(
+    dl.file(f.id, f.name).then(
       () => setBusy(false),
       (err) => {
         setBusy(false);
@@ -989,7 +1047,9 @@ function InputFileRow({ f }: { f: AmFile }) {
           {f.name}
         </div>
         <div className="truncate font-mono text-[11px] text-text-muted" title={f.sha256}>
-          {[formatBytes(f.size), f.sha256 ? `sha256 ${f.sha256.slice(0, 12)}…` : null, f.status].filter(Boolean).join(" · ")}
+          {[formatBytes(f.size), f.sha256 ? `sha256 ${f.sha256.slice(0, 12)}…` : null, f.status ? t(FILE_STATUS[f.status] ?? "file.status.active") : null]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
         {error ? (
           <div role="alert" className="text-[11px] text-status-danger">

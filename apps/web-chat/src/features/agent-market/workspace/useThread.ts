@@ -45,7 +45,8 @@ const sleep = (ms: number, signal: AbortSignal) =>
     );
   });
 
-export function useThread(installId: string | null): ThreadState {
+/** AM4: threadId = the conversation on screen (null = the install's first). */
+export function useThread(installId: string | null, threadId: string | null = null): ThreadState {
   const [items, setItems] = useState<ThreadItem[]>([]);
   const [status, setStatus] = useState<ThreadStatus>("loading");
   const [error, setError] = useState<unknown>(null);
@@ -76,7 +77,7 @@ export function useThread(installId: string | null): ThreadState {
       try {
         let after = 0;
         for (;;) {
-          const page = await amApi.thread(installId, after);
+          const page = await amApi.thread(installId, after, threadId);
           if (stop.signal.aborted) return;
           const got = page?.items ?? [];
           merge(got);
@@ -108,7 +109,7 @@ export function useThread(installId: string | null): ThreadState {
         let planned = false;
         try {
           arm();
-          const res = await amApi.events(installId, cursorRef.current, conn.signal);
+          const res = await amApi.events(installId, cursorRef.current, conn.signal, threadId);
           if (res.status === 401 || res.status === 403 || res.status === 404) {
             setError(new Error(`events ${res.status}`));
             setStatus("error");
@@ -147,7 +148,7 @@ export function useThread(installId: string | null): ThreadState {
     };
     void run();
     return () => stop.abort();
-  }, [installId, attempt, merge]);
+  }, [installId, threadId, attempt, merge]);
 
   return { items, status, error, merge, retry };
 }

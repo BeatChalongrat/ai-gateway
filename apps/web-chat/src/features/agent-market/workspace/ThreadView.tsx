@@ -34,8 +34,10 @@ import { FileChip } from "./FileChips";
 import { OutputsCard } from "./OutputsCard";
 import { ProgressCard } from "./ProgressCard";
 import { RequestFilesCard } from "./RequestFilesCard";
+import { FoldedRound, IntentChip, RoundDivider } from "./RoundParts";
+import { segments } from "./rounds";
 
-const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs"]);
+const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent"]);
 
 type Group = { side: "user" | "agent"; items: ThreadItem[] };
 
@@ -51,7 +53,36 @@ export function groupItems(items: ThreadItem[]): Group[] {
   return groups;
 }
 
+/** AM4: the thread as rounds — a finished round closed by its divider, older ones folded. */
 export function ThreadView({ items }: { items: ThreadItem[] }) {
+  const segs = segments(items);
+  const out: React.ReactNode[] = [];
+  let run: ThreadItem[] = [];
+  const flush = () => {
+    if (run.length) out.push(<ThreadItems key={`g-${run[0]!.id}`} items={run} />);
+    run = [];
+  };
+  for (const s of segs) {
+    if (s.type === "item") {
+      run.push(s.item);
+      continue;
+    }
+    flush();
+    if (s.type === "divider") {
+      out.push(<RoundDivider key={`d-${s.round.runId}`} round={s.round} latest={s.latest} started={s.started} />);
+    } else {
+      out.push(
+        <FoldedRound key={`f-${s.round.runId}`} round={s.round}>
+          <ThreadItems items={s.items} />
+        </FoldedRound>,
+      );
+    }
+  }
+  flush();
+  return <div className="flex flex-col gap-5">{out}</div>;
+}
+
+export function ThreadItems({ items }: { items: ThreadItem[] }) {
   const ws = useWorkspace();
   const groups = groupItems(items);
   return (
@@ -118,6 +149,8 @@ function AgentItem({ item }: { item: ThreadItem }) {
       const p = item.payload as ProgressPayload;
       return p?.run_id ? <ProgressCard progress={p} /> : null;
     }
+    case "intent":
+      return <IntentChip item={item} />;
     case "outputs": {
       const p = item.payload as OutputsPayload;
       if (!p?.run_id) return null;

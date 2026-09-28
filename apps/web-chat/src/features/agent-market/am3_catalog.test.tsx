@@ -157,8 +157,9 @@ describe("the agent's page, for a stranger", () => {
     expect(cost).toContain("5 รอบ"); // the organisation's own median (≥ 3 runs)
     expect(cost).toContain("1 นาทีต่อหน้า");
     // the install button is inside the same box, after the models
-    const install = within(before).getByTestId("am-detail-install");
-    expect(install.getAttribute("href")).toBe("/chat/agents/install/sran.invoice-processing");
+    // AM4: one click with the recommended settings, the step-by-step wizard one link away
+    expect(within(before).getByTestId("am-detail-install").textContent).toContain("ใช้ค่าแนะนำทั้งหมด");
+    expect(within(before).getByTestId("am-detail-install-custom").getAttribute("href")).toBe("/chat/agents/install/sran.invoice-processing");
     expect(within(before).getByTestId("am-datasheet-link").getAttribute("href")).toBe("/chat/agents/sran.invoice-processing/datasheet");
   });
 

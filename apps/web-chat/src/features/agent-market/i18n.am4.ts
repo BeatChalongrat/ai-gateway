@@ -1,0 +1,179 @@
+// Agent Market AM4 (make it simple) — the feature's new strings, merged into
+// i18n.ts. Thai only: the whole surface is Thai whatever the app's language.
+
+export const am4Th = {
+  // the workspace header: one obvious action, everything else in one menu
+  "ws.provenance": "ที่มาของตัวเลข",
+  "ws.provenanceTitle": "ตัวเลขทุกตัวของรอบล่าสุดมาจากไฟล์ไหน แถวไหน และคิดอย่างไร",
+  "ws.more": "ตัวเลือกเพิ่มเติม",
+  "ws.menu.newChat": "แชทใหม่กับ agent นี้",
+  "ws.menu.chats": "แชทกับ agent นี้",
+  "ws.menu.pin": "ปักหมุดไว้บนสุดของแถบด้านซ้าย",
+  "ws.menu.unpin": "เลิกปักหมุด",
+  "ws.menu.overview": "ภาพรวมการทำงาน",
+  "ws.menu.settings": "ตั้งค่า agent",
+  "ws.menu.problem": "แจ้งปัญหา",
+  "ws.chatRounds": "{n} รอบ",
+  "ws.chatWaiting": "รอคำตอบ",
+  "ws.chatCurrent": "แชทที่เปิดอยู่",
+  "ws.newChatFailed": "เปิดแชทใหม่ไม่สำเร็จ",
+
+  // an empty workspace: one sentence, the loudest thing on the page
+  "empty.pick": "เลือกไฟล์",
+  "empty.drop": "หรือลากไฟล์มาวางตรงนี้",
+  "empty.fallback": "ส่งไฟล์ที่ต้องการให้ agent ทำมาได้เลย",
+  "empty.needs": "ที่ต้องใช้",
+
+  // where people upload
+  "upload.scanTip": "ถ้าเป็นเอกสารกระดาษ สแกนที่ 300 DPI อ่านได้แม่นกว่ารูปถ่ายจากมือถือเสมอ และไม่มีค่าใช้จ่ายเพิ่ม",
+  "upload.notArchive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — เก็บต้นฉบับไว้ตามเดิม ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด",
+  "upload.keepYears": "ไฟล์ของรอบที่สำเร็จเก็บ {years} ปีตามที่องค์กรกำหนด",
+  "upload.infoLabel": "ไฟล์ที่ส่งเก็บไว้นานเท่าไร",
+
+  // a finished round: a divider, its files, and the next round one click away
+  "round.done": "รอบ {period} · เสร็จ",
+  "round.doneNoPeriod": "รอบนี้เสร็จแล้ว",
+  "round.failed": "รอบ {period} · ไม่สำเร็จ",
+  "round.failedNoPeriod": "รอบนี้ไม่สำเร็จ",
+  "round.cancelled": "รอบนี้ถูกยกเลิก",
+  "round.start": "เริ่มรอบใหม่",
+  "round.starting": "กำลังเริ่ม…",
+  "round.carry": "รอบใหม่ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ ไม่ใช้ไฟล์ ตัวเลข หรือคำตอบของรอบก่อน",
+  "round.show": "ดูรอบนี้",
+  "round.hide": "ย่อรอบนี้",
+  "round.files": "ไฟล์ของรอบนี้",
+  "round.selfTest": "ทดสอบกับข้อมูลตัวอย่าง · เสร็จ",
+  "round.startFailed": "เริ่มรอบใหม่ไม่สำเร็จ",
+
+  // the round-boundary chip: never guess what the person meant
+  "intent.title": "เริ่มรอบใหม่?",
+  "intent.bodyFiles": "ได้รับไฟล์หลังจากรอบ{period}เสร็จแล้ว — จะเริ่มรอบใหม่ด้วยไฟล์นี้ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.bodyText": "รอบ{period}เสร็จไปแล้ว — ข้อความนี้เป็นการเริ่มรอบใหม่ หรือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.new": "เริ่มรอบใหม่",
+  "intent.about": "ถามเกี่ยวกับรอบที่แล้ว",
+  "intent.fresh": "ไม่ต้องลบแชทเพื่อเริ่มใหม่ — รอบเก่ายังเก็บไว้ครบพร้อมที่มาของตัวเลข และรอบใหม่ไม่ใช้ไฟล์หรือตัวเลขของรอบเก่า",
+  "intent.chosenNew": "เริ่มรอบใหม่แล้ว",
+  "intent.chosenAbout": "ถือเป็นคำถามเกี่ยวกับรอบที่แล้ว",
+  "intent.failed": "ส่งคำตอบไม่สำเร็จ",
+
+  // the run panel: the one line that always shows, the rest folded for members
+  "outputs.details": "รายละเอียดการตรวจ เครดิต และโมเดล",
+  "outputs.seenBy": "เอกสารที่เป็นสแกนหรือรูปถ่ายอ่านโดย {model} ({where})",
+  "outputs.seenNone": "ไม่มีโมเดลใดเห็นเอกสาร — ทุกค่าอ่านจากไฟล์และคำนวณด้วยสคริปต์",
+  "outputs.writtenBy": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายเขียนโดย {model} ({where}) จากตารางที่คำนวณแล้ว",
+  "outputs.writtenByRules": "ไม่มีโมเดลใดเห็นไฟล์ต้นฉบับ · คำบรรยายเขียนด้วยกฎของ agent (ไม่มีโมเดลที่องค์กรอนุญาตตอบได้)",
+  "outputs.notChosen": "คุณเลือก {chosen} ไว้ แต่รอบนี้ใช้ {used} แทน — {why}",
+  "outputs.notChosenWhy": "โมเดลที่เลือกไม่ตอบ หรือองค์กรไม่อนุญาตให้ใช้ในตอนนี้",
+  "outputs.noneInstead": "คุณเลือก {chosen} ไว้ แต่รอบนี้ไม่มีโมเดลที่องค์กรอนุญาต จึงอ่านด้วยสคริปต์บนเครื่องขององค์กรเท่านั้น",
+  "where.inOrg": "ในองค์กร",
+  "where.outside": "นอกองค์กร",
+
+  // the model picker
+  "model.label": "โมเดลที่อ่านเอกสาร",
+  "model.labelText": "โมเดลที่เขียนคำบรรยาย",
+  "model.aria": "เลือกโมเดลสำหรับรอบนี้",
+  "model.cost": "≈{baht} บาท",
+  "model.costNone": "ยังไม่มีข้อมูลค่าใช้จ่าย",
+  "model.thisRound": "ใช้กับรอบนี้",
+  "model.default": "ค่าตั้งต้นของ agent นี้",
+  "model.saveDefault": "ใช้เป็นค่าตั้งต้น",
+  "model.saved": "บันทึกเป็นค่าตั้งต้นแล้ว",
+  "model.disabledTitle": "เลือกไม่ได้",
+  "model.none": "agent นี้ไม่ส่งเอกสารให้โมเดลใด",
+  "model.sectionTitle": "โมเดลที่ใช้",
+  "model.sectionBody": "ส่วนใหญ่ไม่ต้องเปลี่ยน “อัตโนมัติ (แนะนำ)” เลือกให้ตามงานของ agent — ตัวเลือกอื่นผู้ดูแลองค์กรเป็นคนกำหนด",
+  "model.policyInside": "องค์กรไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร จึงใช้ได้เฉพาะโมเดลในองค์กร",
+  "model.policyOutside": "องค์กรอนุญาตให้ส่งเอกสารให้โมเดลนอกองค์กรได้",
+  "model.loadFailed": "โหลดรายการโมเดลไม่สำเร็จ",
+
+  // what is kept, for how long, and whose it is
+  "storage.title": "ไฟล์ที่เก็บไว้",
+  "storage.used": "ใช้พื้นที่ {size} (ไฟล์ที่ส่งเข้า {uploads} · ไฟล์ผลลัพธ์ {outputs})",
+  "storage.warn": "ใช้พื้นที่ใกล้ {limit} ที่องค์กรตั้งไว้แล้ว — สแกนและรูปถ่ายใช้พื้นที่มากกว่าไฟล์รายงานหลายเท่า แจ้งผู้ดูแลถ้าต้องการเพิ่ม",
+  "storage.deleteNote": "ถ้าลบบัญชี: แชทและการตั้งค่าของคุณถูกลบ ส่วนไฟล์ของรอบที่สำเร็จเป็นหลักฐานทางบัญชีขององค์กร เก็บต่อตามระยะที่องค์กรกำหนด",
+
+  // the market grid
+  "market.more": "ดูเพิ่ม",
+  "market.less": "ย่อ",
+  "market.soonNote": "ยังใช้ไม่ได้",
+
+  // installing in one click
+  "install.recommended": "ใช้ค่าแนะนำทั้งหมด",
+  "install.recommendedBody": "ติดตั้งด้วยค่าที่ใช้กันทั่วไป แล้วทดสอบกับข้อมูลตัวอย่างทันที — ค่าทุกอย่างแก้ภายหลังได้ในหน้าตั้งค่าของ agent",
+  "install.custom": "ตั้งค่าเองทีละขั้น",
+  "install.recommending": "กำลังติดตั้ง…",
+  "install.recommendedFailed": "ติดตั้งไม่สำเร็จ",
+  "install.doneSelfTest": "ติดตั้งเสร็จแล้ว กำลังทดสอบกับข้อมูลตัวอย่าง — ผลจะขึ้นในห้องทำงานในไม่กี่วินาที",
+
+  // the run page
+  "run.provenanceTitle": "ที่มาของตัวเลข",
+  "run.accessLog": "ผู้ดูแลที่เปิดดูรอบนี้",
+  "run.accessLine": "{who} · {when} · เหตุผล: “{reason}”",
+  "run.adminView": "มุมมองผู้ดูแล — เปิดดูรอบงานของคนอื่นด้วยเหตุผลที่ระบุไว้ เจ้าของรอบได้รับแจ้งแล้ว สิทธิ์นี้หมดอายุใน 1 ชั่วโมง",
+  "run.evidenceRemoved": "ไฟล์ของรอบนี้ถูกผู้ดูแลลบก่อนครบระยะเก็บ — บันทึกว่ารอบนี้เคยทำยังอยู่",
+  "ds.keepYears": "{n} ปี (นับจากวันที่รอบเสร็จ)",
+  "ds.keepOrgRecord": "แชทและการตั้งค่า: ลบ · หลักฐานของรอบที่สำเร็จ: เก็บต่อ",
+  "file.status.active": "ใช้ในรอบนี้",
+  "file.status.removed": "ลบแล้ว",
+  "file.status.pending": "รอตัดสินใจ",
+  "file.status.nextRound": "เก็บไว้รอบถัดไป",
+  "file.status.staged": "ยังไม่ได้ใช้",
+
+  // the admins' page
+  "admin.tab.runs": "รอบงานทั้งหมด",
+  "admin.tab.models": "โมเดลและการเก็บข้อมูล",
+  "admin.runs.title": "รอบงานของทุกคนในองค์กร",
+  "admin.runs.body":
+    "เห็นเฉพาะสถานะ ค่าใช้จ่าย โมเดล และขั้นตอนที่หยุด — ไฟล์ ตัวเลข และคำตอบของคนอื่นเปิดได้ทีละรอบ ต้องบอกเหตุผล ระบบบันทึกไว้ และแจ้งเจ้าของรอบทุกครั้ง",
+  "admin.runs.filter": "สถานะ",
+  "admin.runs.all": "ทั้งหมด",
+  "admin.runs.failedOnly": "ไม่สำเร็จ",
+  "admin.runs.waiting": "รอคำตอบ",
+  "admin.runs.none": "ยังไม่มีรอบงานในองค์กร",
+  "admin.runs.person": "ผู้ทำ",
+  "admin.runs.agent": "agent",
+  "admin.runs.status": "สถานะ",
+  "admin.runs.cost": "ค่าใช้จ่าย",
+  "admin.runs.baht": "{baht} บาท",
+  "admin.runs.model": "โมเดล",
+  "admin.runs.stopped": "หยุดที่ขั้นตอน",
+  "admin.runs.open": "เปิดดูพร้อมเหตุผล",
+  "admin.runs.openNow": "เปิดดู (สิทธิ์ยังไม่หมดอายุ)",
+  "admin.runs.opened": "เคยเปิดดู {n} ครั้ง",
+  "admin.runs.reasonTitle": "ทำไมต้องเปิดดูรอบนี้",
+  "admin.runs.reasonBody":
+    "นี่คือข้อมูลงานของคนอื่น (อาจเป็นเงินเดือนหรือข้อมูลคู่ค้า) — เหตุผลนี้ถูกบันทึกไว้ และส่งให้เจ้าของรอบเห็นทันที สิทธิ์เปิดดูอยู่ได้ 1 ชั่วโมง",
+  "admin.runs.reasonPlaceholder": "เช่น ตรวจปัญหาที่ผู้ใช้แจ้งเรื่องยอดไม่ตรง",
+  "admin.runs.reasonShort": "บอกเหตุผลอย่างน้อย 8 ตัวอักษร",
+  "admin.runs.confirmOpen": "เปิดดูและแจ้งเจ้าของรอบ",
+  "admin.runs.removeEvidence": "ลบไฟล์ของรอบนี้ก่อนครบระยะเก็บ",
+  "admin.runs.removeTitle": "ลบไฟล์ของรอบนี้",
+  "admin.runs.removeBody":
+    "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบนี้เป็นหลักฐานทางบัญชีขององค์กร การลบก่อนครบระยะเก็บย้อนกลับไม่ได้ — บอกเหตุผล เจ้าของรอบจะเห็นข้อความนี้",
+  "admin.runs.confirmRemove": "ลบไฟล์",
+  "admin.runs.removed": "ลบไฟล์แล้ว {n} ไฟล์ — บันทึกว่ารอบนี้เคยทำยังอยู่",
+  "admin.models.leaveTitle": "ส่งเอกสารให้โมเดลนอกองค์กรได้หรือไม่",
+  "admin.models.leaveOff": "ไม่อนุญาต (ค่าเริ่มต้น) — เอกสารและตัวเลขเห็นได้เฉพาะโมเดลที่รันในองค์กร",
+  "admin.models.leaveOn": "อนุญาต — คนในองค์กรเลือกโมเดลนอกองค์กรที่อยู่ในรายการด้านล่างได้",
+  "admin.models.leaveBody":
+    "การส่งเอกสารบัญชีออกนอกองค์กรเป็นการตัดสินใจขององค์กร ไม่ใช่ของ agent — ถ้าปิดไว้ สแกนที่อ่านไม่ออกจะกลายเป็นคำถามขอสแกนที่ชัดกว่า และคำบรรยายรายงานจะเขียนด้วยกฎเมื่อโมเดลในองค์กรไม่ตอบ",
+  "admin.models.listTitle": "โมเดลที่คนในองค์กรเลือกได้",
+  "admin.models.listBody": "“อัตโนมัติ (แนะนำ)” มีให้เสมอ เลือกเพิ่มได้ไม่เกิน 6 ตัว บอกว่าแต่ละตัวให้ผลแบบไหน ไม่ใช่ชื่อรุ่น",
+  "admin.models.fast": "เร็วและประหยัด",
+  "admin.models.accurate": "แม่นที่สุด",
+  "admin.models.off": "ไม่ให้เลือก",
+  "admin.models.readsImages": "อ่านภาพได้",
+  "admin.models.textOnly": "ข้อความเท่านั้น",
+  "admin.models.price": "{in} / {out} USD ต่อล้านโทเคน",
+  "admin.models.noCatalog": "ยังไม่ได้รับรายการโมเดลจากส่วนประมวลผลของ agent — ลองใหม่ในอีกไม่กี่นาที",
+  "admin.models.defaultsLine": "ตอนนี้ “อัตโนมัติ” ใช้ {vision} อ่านภาพ และ {text} เขียนคำบรรยาย",
+  "admin.retention.title": "เก็บหลักฐานทางบัญชีกี่ปี",
+  "admin.retention.body":
+    "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จเก็บไว้ตามจำนวนปีนี้ นับจากวันที่รอบเสร็จ แนวปฏิบัติในไทยเก็บเอกสารบัญชีอย่างน้อย 5 ปี (บางกรณี 7–10 ปี) — ยืนยันตัวเลขกับผู้รับรองบัญชีของบริษัทก่อนตั้ง",
+  "admin.retention.years": "จำนวนปี",
+  "admin.retention.warn": "เตือนเมื่อพื้นที่ของแต่ละ agent เกิน (MB)",
+  "admin.retention.saved": "บันทึกแล้ว",
+  "admin.retention.notArchive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับต้องเก็บตามระบบเดิมของบริษัท",
+} as const;
+
+export type Am4Key = keyof typeof am4Th;

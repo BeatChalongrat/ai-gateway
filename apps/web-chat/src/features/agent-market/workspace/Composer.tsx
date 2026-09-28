@@ -21,6 +21,9 @@ const MAX_HEIGHT = 200;
 
 export interface ComposerHandle {
   addFiles: (files: File[]) => void;
+  /** AM4: open the file picker (the empty state's "เลือกไฟล์"). */
+  pickFiles: () => void;
+  focus: () => void;
 }
 
 interface Props {
@@ -32,9 +35,17 @@ interface Props {
   photoNotice?: string;
   /** Footer line under the pill: what the agent cannot do + the model note. */
   footer?: React.ReactNode;
+  /** AM4: the thread the message goes to, and the model for this round only. */
+  threadId?: string | null;
+  modelChoice?: string | null;
+  /** AM4: a compact control in the toolbar (the model picker). */
+  tools?: React.ReactNode;
 }
 
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ installId, onSent, accept, maxMb, photoNotice, footer }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
+  { installId, onSent, accept, maxMb, photoNotice, footer, threadId, modelChoice, tools },
+  ref,
+) {
   const t = useAmT();
   const acceptList = accept?.length ? accept : DEFAULT_ACCEPT;
   const uploads = useUploads(installId, { accept: acceptList, maxMb });
@@ -51,7 +62,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ in
   useComposerHeightProbe(rootRef);
 
   const addFiles = uploads.add;
-  useImperativeHandle(ref, () => ({ addFiles }), [addFiles]);
+  useImperativeHandle(
+    ref,
+    () => ({ addFiles, pickFiles: () => fileRef.current?.click(), focus: () => taRef.current?.focus() }),
+    [addFiles],
+  );
 
   // Auto-grow up to MAX_HEIGHT, then scroll inside.
   useEffect(() => {
@@ -69,7 +84,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ in
     setSending(true);
     setError(null);
     amApi
-      .message(installId, { text: trimmed.slice(0, MAX_TEXT), file_ids: uploads.ids, client_id: clientId.current })
+      .message(installId, {
+        text: trimmed.slice(0, MAX_TEXT),
+        file_ids: uploads.ids,
+        client_id: clientId.current,
+        thread_id: threadId ?? null,
+        ...(modelChoice ? { model_choice: modelChoice } : {}),
+      })
       .then(
         (res) => {
           setText("");
@@ -85,7 +106,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ in
           setError(errorMessage(err));
         },
       );
-  }, [canSend, installId, trimmed, uploads, onSent]);
+  }, [canSend, installId, trimmed, uploads, onSent, threadId, modelChoice]);
 
   return (
     <div ref={rootRef} className="safe-bottom shrink-0 bg-bg-base px-3 pb-3 pt-2 md:px-6 md:pb-4">
@@ -154,6 +175,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ in
                 <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
             </button>
+            <div className="flex min-w-0 flex-1 items-center">{tools}</div>
             <button
               type="button"
               onClick={send}

@@ -21,6 +21,12 @@ export interface WorkspaceCtx {
   claimDrop?: () => void;
   /** AM3: self-test runs (their outputs card offers no sign-off). */
   selfTestRuns?: ReadonlySet<string>;
+  /** AM4: the thread on screen (null = the install's first). */
+  threadId?: string | null;
+  /** AM4: put the cursor in the composer (after "เริ่มรอบใหม่"). */
+  focusComposer?: () => void;
+  /** AM4: an admin sees the run panel's details open. */
+  admin?: boolean;
 }
 
 export const WorkspaceContext = createContext<WorkspaceCtx | null>(null);
@@ -32,4 +38,7 @@ export function useWorkspace(): WorkspaceCtx | null {
 export const runHref = (runId: string) => `/chat/agents/runs/${runId}`;
 export const settingsHref = (installId: string) => `/chat/agents/i/${installId}/settings`;
 export const dashboardHref = (installId: string) => `/chat/agents/i/${installId}/dashboard`;
-export const workspaceHref = (installId: string) => `/chat/agents/i/${installId}`;
+export const workspaceHref = (installId: string, threadId?: string | null) =>
+  threadId ? `/chat/agents/i/${installId}?thread=${encodeURIComponent(threadId)}` : `/chat/agents/i/${installId}`;
+/** AM4: the run page opened on its numbers ("ที่มาของตัวเลข"). */
+export const provenanceHref = (runId: string) => `/chat/agents/runs/${runId}?tab=numbers`;

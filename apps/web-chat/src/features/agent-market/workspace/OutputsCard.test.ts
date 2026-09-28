@@ -14,7 +14,6 @@ describe("output formats", () => {
   it("a delivered PDF and a filled template have labels", () => {
     expect(amDictionaries.th[FORMAT_KEYS.pdf!]).toBe("รายงาน PDF");
     expect(amDictionaries.th[FORMAT_KEYS.template!]).toBe("แบบฟอร์มของคุณ");
-    expect(amDictionaries.en[FORMAT_KEYS.template!]).toBe("Your template");
   });
 
   it("a row labels only what its file name does not say", () => {

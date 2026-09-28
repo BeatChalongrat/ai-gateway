@@ -5,7 +5,7 @@
 // button; the planned ones are shown as "เร็ว ๆ นี้" without one.
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings2 } from "lucide-react";
 
 import { amApi, errorMessage } from "../api";
@@ -158,16 +158,19 @@ function Market() {
       <div className="mt-4">
         {error ? <ErrorPanel title={t("market.loadFailed")} message={errorMessage(error)} onRetry={() => setReload((n) => n + 1)} /> : null}
         {!agents && !error ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
-            <div className="skeleton h-48 rounded-xl sm:col-span-2" />
-            <div className="skeleton h-48 rounded-xl" />
+          <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+            <div className="skeleton h-64 rounded-xl" />
+            <div className="skeleton h-64 rounded-xl" />
+            <div className="skeleton h-64 rounded-xl" />
           </div>
         ) : null}
         {agents ? (
           total === 0 ? (
             <p className="py-10 text-center text-sm text-text-muted">{t("market.empty")}</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="am-market-grid">
+            // AM4: one grid of equal cards — every row the same height, every
+            // card's parts in the same place, the ones that work first.
+            <div className="grid auto-rows-fr gap-4 sm:grid-cols-2 lg:grid-cols-3" data-testid="am-market-grid">
               {real.map((a, i) => (
                 <AgentCard key={a.slug} agent={a} featured={i === 0} />
               ))}
@@ -187,6 +190,84 @@ function runTime(t: ReturnType<typeof useAmT>, seconds?: number): string | null 
   return seconds >= 60 ? t("market.runTimeMin", { n: String(Math.round(seconds / 60)) }) : t("market.runTimeSec", { n: String(seconds) });
 }
 
+/** A description clamped to three lines, with "ดูเพิ่ม" when it is longer. */
+export function Clamp({ text, lines = 3 }: { text: string; lines?: 3 | 4 }) {
+  const t = useAmT();
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el && !open) setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [text, open]);
+  return (
+    <div className="min-h-[4.5rem]">
+      <p
+        ref={ref}
+        className={cls("text-sm leading-relaxed text-text-secondary", open ? "" : lines === 4 ? "line-clamp-4" : "line-clamp-3")}
+        data-testid="am-card-desc"
+      >
+        {text}
+      </p>
+      {overflows || open ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="focus-ring mt-0.5 rounded text-xs text-text-secondary underline underline-offset-2 hover:text-text-primary"
+          data-testid="am-card-more"
+        >
+          {open ? t("market.less") : t("market.more")}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The frame every catalog card shares: the same parts in the same places. */
+function CardFrame({
+  soon = false,
+  head,
+  desc,
+  tags,
+  meta,
+  actions,
+  testId,
+}: {
+  soon?: boolean;
+  head: React.ReactNode;
+  desc: React.ReactNode;
+  tags: React.ReactNode;
+  meta: React.ReactNode;
+  actions: React.ReactNode;
+  testId: string;
+}) {
+  return (
+    <article
+      className={cls(
+        "flex h-full flex-col rounded-xl border p-5",
+        soon ? "border-dashed border-border-subtle bg-bg-base opacity-60" : "border-border bg-bg-surface shadow-sm",
+      )}
+      data-testid={testId}
+    >
+      <div className="flex min-h-[2.75rem] items-start gap-3">{head}</div>
+      <div className="mt-3">{desc}</div>
+      {/* one row of tags on every card, whatever each one has */}
+      <div className="mt-3 flex h-6 flex-wrap gap-1.5 overflow-hidden" data-testid="am-card-tags">
+        {tags}
+      </div>
+      <div className="mt-auto pt-3">
+        <p className="min-h-[1.25rem] truncate text-xs text-text-muted" data-testid="am-card-meta">
+          {meta}
+        </p>
+        <div className="mt-3 flex min-h-[2.25rem] flex-wrap items-center gap-2 border-t border-border-subtle pt-3" data-testid="am-card-actions">
+          {actions}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean }) {
   const t = useAmT();
   const { pricing } = useAgentMarket();
@@ -197,64 +278,75 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
   const time = cost ?? runTime(t, m.typical_run_seconds);
   const formats = formatsLabel(agent);
   return (
-    <article
-      className={cls(
-        "flex flex-col gap-3 rounded-xl border bg-bg-surface p-5",
-        featured ? "border-border-strong sm:col-span-2" : "border-border",
-      )}
-      data-testid="am-agent-card"
-    >
-      <div className="flex items-start gap-3.5">
-        <AgentTile icon={m.icon} size={featured ? 42 : 38} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className={cls("font-semibold text-text-primary", featured ? "text-[17px]" : "text-[15px]")}>{agent.name}</h2>
-            {featured && !disabled ? <Pill>{t("market.featured")}</Pill> : null}
-            {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
-            {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
+    <CardFrame
+      testId="am-agent-card"
+      head={
+        <>
+          <AgentTile icon={m.icon} size={38} />
+          <div className="min-w-0 flex-1">
+            <h2 className="line-clamp-2 text-[15px] font-semibold leading-snug text-text-primary">{agent.name}</h2>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {featured && !disabled ? <Pill>{t("market.featured")}</Pill> : null}
+              {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
+              {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
+            </div>
           </div>
-          {m.summary ? <p className="mt-1 text-sm leading-relaxed text-text-secondary">{m.summary}</p> : null}
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <Tag>{t("market.tag.upload")}</Tag>
-        {m.permissions?.default === "read_only" ? <Tag>{t("market.tag.readOnly")}</Tag> : null}
-        {formats ? <Tag>{formats}</Tag> : null}
-        {agent.sample?.status === "succeeded" ? <Tag tone="success">{t("market.hasSample")}</Tag> : null}
-      </div>
-      <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
-        {installed ? (
-          <Link href={workspaceHref(agent.install_id!)} className={BTN_PRIMARY} data-testid="am-open-workspace">
-            {t("market.open")}
-          </Link>
-        ) : disabled ? null : (
-          <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_PRIMARY} data-testid="am-install">
-            {t("market.readFirst")}
-          </Link>
-        )}
-        {installed || disabled ? (
-          <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
-            {t("market.details")}
-          </Link>
-        ) : null}
-        <div className="flex-1" />
-        {time ? <span className="text-xs text-text-muted">{time}</span> : null}
-      </div>
-    </article>
+        </>
+      }
+      desc={m.summary ? <Clamp text={m.summary} /> : <div className="min-h-[4.5rem]" />}
+      tags={
+        <>
+          <Tag>{t("market.tag.upload")}</Tag>
+          {m.permissions?.default === "read_only" ? <Tag>{t("market.tag.readOnly")}</Tag> : null}
+          {formats ? <Tag>{formats}</Tag> : null}
+          {agent.sample?.status === "succeeded" ? <Tag tone="success">{t("market.hasSample")}</Tag> : null}
+        </>
+      }
+      meta={time ?? ""}
+      actions={
+        <>
+          {installed ? (
+            <Link href={workspaceHref(agent.install_id!)} className={BTN_PRIMARY} data-testid="am-open-workspace">
+              {t("market.open")}
+            </Link>
+          ) : disabled ? null : (
+            <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_PRIMARY} data-testid="am-install">
+              {t("market.readFirst")}
+            </Link>
+          )}
+          {installed || disabled ? (
+            <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
+              {t("market.details")}
+            </Link>
+          ) : null}
+        </>
+      }
+    />
   );
 }
 
 function SoonCard({ icon, name, desc }: { icon: string; name: string; desc: string }) {
   const t = useAmT();
   return (
-    <article className="flex flex-col gap-2.5 rounded-xl border border-border-subtle bg-bg-base p-5" data-testid="am-soon-card">
-      <div className="flex items-center justify-between gap-2">
-        <AgentTile icon={icon} size={36} quiet />
-        <Pill>{t("market.soon")}</Pill>
-      </div>
-      <h2 className="text-[15px] font-semibold text-text-secondary">{name}</h2>
-      <p className="text-sm leading-relaxed text-text-muted">{desc}</p>
-    </article>
+    <CardFrame
+      soon
+      testId="am-soon-card"
+      head={
+        <>
+          <AgentTile icon={icon} size={38} quiet />
+          <div className="min-w-0 flex-1">
+            <h2 className="line-clamp-2 text-[15px] font-semibold leading-snug text-text-secondary">{name}</h2>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              <Pill>{t("market.soon")}</Pill>
+            </div>
+          </div>
+        </>
+      }
+      desc={<Clamp text={desc} />}
+      tags={null}
+      meta=""
+      actions={<span className="text-xs text-text-muted">{t("market.soonNote")}</span>}
+    />
   );
 }
 

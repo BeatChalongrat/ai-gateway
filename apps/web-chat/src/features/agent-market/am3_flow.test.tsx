@@ -64,12 +64,11 @@ const withTemplates: Manifest = {
 };
 
 describe("the install wizard, for someone alone", () => {
-  it("every step there is has a why and an if-wrong line, in Thai and English", () => {
+  it("every step there is has a why and an if-wrong line, in Thai", () => {
     const steps: StepId[] = ["source", "mapping", "company_tax", "policy", "theme", "formats", "template", "selftest"];
     for (const s of steps) {
       for (const key of [STEP_WHY[s].why, STEP_WHY[s].ifWrong]) {
         expect(amDictionaries.th[key].length).toBeGreaterThan(20);
-        expect(amDictionaries.en[key].length).toBeGreaterThan(20);
       }
     }
   });

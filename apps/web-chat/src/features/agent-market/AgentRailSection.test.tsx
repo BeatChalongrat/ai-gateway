@@ -133,7 +133,7 @@ describe("AgentRailSection", () => {
 
   it("the workspace's own list of agents is named the same way (not “AGENT ของฉัน”)", () => {
     expect(amDictionaries.th["ws.myAgents"]).toBe("Agent ของฉัน");
-    expect(amDictionaries.en["ws.myAgents"]).toBe("My agents");
+    expect("en" in amDictionaries).toBe(false); // AM4: the surface is Thai whatever the app's language
   });
 
   it("pinned first, then recently used, about five — never alphabetical; a waiting agent past the cap still shows", async () => {

@@ -20,6 +20,7 @@ import { AmError, amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { extensionOf } from "../format";
 import type { AmFile, Artifact, CatalogItem, InstallRow, Manifest } from "../types";
+import { QuickInstall } from "../install/QuickInstall";
 import {
   AgentTile,
   BackLink,
@@ -318,9 +319,7 @@ function Detail({ slug }: { slug: string }) {
               ) : disabled ? (
                 <p className="text-xs text-text-secondary">{t("guide.cannotInstallDisabled")}</p>
               ) : (
-                <Link href={`/chat/agents/install/${encodeURIComponent(item.slug)}`} className={BTN_PRIMARY} data-testid="am-detail-install">
-                  {t("market.install")}
-                </Link>
+                <QuickInstall slug={item.slug} />
               )}
               <Link href={`/chat/agents/${encodeURIComponent(item.slug)}/datasheet`} className={BTN_SECONDARY} data-testid="am-datasheet-link">
                 <FileText width={15} height={15} aria-hidden />

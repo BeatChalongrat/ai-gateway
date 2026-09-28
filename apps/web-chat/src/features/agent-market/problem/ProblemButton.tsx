@@ -33,13 +33,33 @@ function currentPage(): string {
 export function ProblemButton({ target, className, compact = false }: { target: ProblemTarget; className?: string; compact?: boolean }) {
   const t = useAmT();
   const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cls(BTN_SMALL, className)}
+        aria-label={compact ? t("problem.button") : undefined}
+        data-testid="am-problem-open"
+      >
+        <MessageSquareWarning width={14} height={14} aria-hidden />
+        <span className={compact ? "hidden sm:inline" : undefined}>{t("problem.button")}</span>
+      </button>
+      <ProblemDialog target={target} open={open} onClose={() => setOpen(false)} />
+    </>
+  );
+}
+
+/** AM4: the dialog alone — the workspace opens it from its "more" menu. */
+export function ProblemDialog({ target, open, onClose }: { target: ProblemTarget; open: boolean; onClose: () => void }) {
+  const t = useAmT();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
   const close = () => {
-    setOpen(false);
+    onClose();
     if (done) {
       setDone(null);
       setText("");
@@ -65,61 +85,49 @@ export function ProblemButton({ target, className, compact = false }: { target: 
   };
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={cls(BTN_SMALL, className)}
-        aria-label={compact ? t("problem.button") : undefined}
-        data-testid="am-problem-open"
-      >
-        <MessageSquareWarning width={14} height={14} aria-hidden />
-        <span className={compact ? "hidden sm:inline" : undefined}>{t("problem.button")}</span>
-      </button>
-      <AmDialog open={open} onClose={close} title={t("problem.title")} description={t("problem.body")} testId="am-problem-dialog">
-        {done ? (
-          <div className="flex flex-col gap-3">
-            <p role="status" className="rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-sm text-text-primary" data-testid="am-problem-done">
-              {done}
-            </p>
-            <button type="button" onClick={close} className={BTN_SMALL}>
-              {t("common.close")}
+    <AmDialog open={open} onClose={close} title={t("problem.title")} description={t("problem.body")} testId="am-problem-dialog">
+      {done ? (
+        <div className="flex flex-col gap-3">
+          <p role="status" className="rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-sm text-text-primary" data-testid="am-problem-done">
+            {done}
+          </p>
+          <button type="button" onClick={close} className={BTN_SMALL}>
+            {t("common.close")}
+          </button>
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) submit();
+          }}
+          className="flex flex-col gap-3"
+        >
+          <label className="block text-sm">
+            <span className="text-text-secondary">{t("problem.label")}</span>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={3}
+              maxLength={2000}
+              placeholder={t("problem.placeholder")}
+              className="focus-ring mt-1 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
+              data-testid="am-problem-text"
+            />
+          </label>
+          <p className="text-[11px] text-text-muted">{t("problem.attached")}</p>
+          {error ? <ErrorPanel message={error} /> : null}
+          <div className="flex gap-2">
+            <button type="submit" disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-problem-send">
+              {busy ? <Spin size={12} /> : null}
+              <span>{t("problem.send")}</span>
+            </button>
+            <button type="button" onClick={close} disabled={busy} className={BTN_SMALL}>
+              {t("common.cancel")}
             </button>
           </div>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!busy) submit();
-            }}
-            className="flex flex-col gap-3"
-          >
-            <label className="block text-sm">
-              <span className="text-text-secondary">{t("problem.label")}</span>
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={3}
-                maxLength={2000}
-                placeholder={t("problem.placeholder")}
-                className="focus-ring mt-1 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-                data-testid="am-problem-text"
-              />
-            </label>
-            <p className="text-[11px] text-text-muted">{t("problem.attached")}</p>
-            {error ? <ErrorPanel message={error} /> : null}
-            <div className="flex gap-2">
-              <button type="submit" disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-problem-send">
-                {busy ? <Spin size={12} /> : null}
-                <span>{t("problem.send")}</span>
-              </button>
-              <button type="button" onClick={close} disabled={busy} className={BTN_SMALL}>
-                {t("common.cancel")}
-              </button>
-            </div>
-          </form>
-        )}
-      </AmDialog>
-    </>
+        </form>
+      )}
+    </AmDialog>
   );
 }

@@ -13,6 +13,12 @@ import { redirectToPortalLogin } from "@/lib/auth";
 
 import { tAm } from "./i18n";
 import type {
+  AdminModels,
+  AgentThread,
+  ModelEntry,
+  ModelPicker,
+  RunMeta,
+  StorageInfo,
   AdminCatalogRow,
   AdminOrg,
   AdminSpend,
@@ -187,6 +193,8 @@ function uploadOnce<T>(path: string, file: File, opts: UploadOptions, retried: b
 }
 
 const id = (s: string) => encodeURIComponent(s);
+/** AM4: the thread a workspace shows (absent = the install's first). */
+const threadQ = (thread?: string | null) => (thread ? `&thread=${encodeURIComponent(thread)}` : "");
 
 export const amApi = {
   availability: () => call<Availability>("/availability"),
@@ -207,15 +215,15 @@ export const amApi = {
 
   selfTest: (installId: string) => send<{ run: Run }>("POST", `/installs/${id(installId)}/self-test`),
   runs: (installId: string) => call<{ runs: Run[] | null }>(`/installs/${id(installId)}/runs`),
-  thread: (installId: string, after = 0) =>
-    call<{ items: ThreadItem[] | null; cursor: number }>(`/installs/${id(installId)}/thread?after=${after}`),
+  thread: (installId: string, after = 0, thread?: string | null) =>
+    call<{ items: ThreadItem[] | null; cursor: number }>(`/installs/${id(installId)}/thread?after=${after}${threadQ(thread)}`),
   /** The raw SSE response; the caller parses it (lib/stream parseSSE). */
-  events: (installId: string, after: number, signal: AbortSignal) =>
-    api.raw(`${BASE}/installs/${id(installId)}/events?after=${after}`, { signal }),
+  events: (installId: string, after: number, signal: AbortSignal, thread?: string | null) =>
+    api.raw(`${BASE}/installs/${id(installId)}/events?after=${after}${threadQ(thread)}`, { signal }),
 
   upload: (installId: string, file: File, opts: UploadOptions = {}) =>
     uploadOnce(`${BASE}/installs/${id(installId)}/files`, file, opts, false, (b) => (b as { file?: AmFile } | null)?.file),
-  message: (installId: string, body: { text: string; file_ids: string[]; client_id: string }) =>
+  message: (installId: string, body: { text: string; file_ids: string[]; client_id: string; thread_id?: string | null; model_choice?: string }) =>
     send<{ item: ThreadItem; route?: string; run_id?: string; duplicate?: boolean }>("POST", `/installs/${id(installId)}/messages`, body),
 
   mappingPreview: (installId: string, fileId: string) =>
@@ -306,6 +314,10 @@ export const amApi = {
   adminPutOrg: (body: Partial<Pick<OrgSettings, "name" | "access" | "contact_name" | "contact_email">> & {
     domains?: string[];
     user_monthly_credits?: number | string;
+    documents_may_leave?: boolean;
+    agent_models?: ModelEntry[];
+    retention_years?: number;
+    storage_warn_mb?: number;
   }) => send<{ org: OrgSettings; resumed: number }>("PUT", "/admin/org", body),
   adminPutMember: (email: string, body: { display_name?: string; department?: string; role?: string; monthly_credits?: number | string | null }) =>
     send<{ member: OrgMember; created: boolean; resumed: number }>("PUT", `/admin/members/${id(email)}`, body),
@@ -321,6 +333,33 @@ export const amApi = {
   adminPutCatalog: (slug: string, body: { status: string; reason?: string }) =>
     send<{ state: { slug: string; status: string; reason: string }; stopped_runs: number }>("PUT", `/admin/catalog/${id(slug)}`, body),
   adminSample: (slug: string) => send<{ run: Run }>("POST", `/admin/catalog/${id(slug)}/sample`),
+
+  // ── AM4: rounds, threads, the model a round reads documents with ────────
+
+  threads: (installId: string) => call<{ threads: AgentThread[] | null }>(`/installs/${id(installId)}/threads`),
+  newThread: (installId: string) => send<{ thread: AgentThread }>("POST", `/installs/${id(installId)}/threads`),
+  /** "เริ่มรอบใหม่": the next files (or instruction) in this thread start the next round. */
+  startRound: (installId: string, threadId?: string | null) =>
+    send<{ item: ThreadItem }>("POST", `/installs/${id(installId)}/rounds`, { thread_id: threadId ?? null }),
+  /** The round-boundary chip's answer. */
+  answerIntent: (itemId: string, choice: "new_round" | "about_last") =>
+    send<{ changed: boolean; choice?: string; run_id?: string }>("POST", `/intents/${id(itemId)}`, { choice }),
+  models: (installId: string) => call<ModelPicker>(`/installs/${id(installId)}/models`),
+  putModel: (installId: string, choice: string) => send<ModelPicker>("PUT", `/installs/${id(installId)}/model`, { choice }),
+  storage: (installId: string) => call<StorageInfo>(`/installs/${id(installId)}/storage`),
+
+  // an admin: metadata of every run; a run's content only after stating a reason (its owner is told)
+  adminModels: () => call<AdminModels>("/admin/models"),
+  adminRuns: (status = "all") => call<{ runs: RunMeta[] | null; grant_minutes: number }>(`/admin/runs?status=${encodeURIComponent(status)}`),
+  adminOpenRun: (runId: string, reason: string) => send<{ opened: boolean; expires_at: string }>("POST", `/admin/runs/${id(runId)}/open`, { reason }),
+  adminRun: (runId: string) => call<RunDetail>(`/admin/runs/${id(runId)}`),
+  adminRunComputed: (runId: string) => call<Computed>(`/admin/runs/${id(runId)}/computed`),
+  adminDownloadRunArtifact: (runId: string, artifactId: string, filename: string) =>
+    saveBlob(`/admin/runs/${id(runId)}/artifacts/${id(artifactId)}/download`, filename),
+  adminDownloadRunFile: (runId: string, fileId: string, filename: string) =>
+    saveBlob(`/admin/runs/${id(runId)}/files/${id(fileId)}/download`, filename),
+  adminRemoveEvidence: (runId: string, reason: string) =>
+    send<{ removed_objects: number }>("POST", `/admin/runs/${id(runId)}/remove-evidence`, { reason }),
 };
 
 /** A fresh client id (idempotency key) for a message, a chip or an install. */

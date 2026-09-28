@@ -17,7 +17,7 @@ import { extensionOf, formatCredits, formatMoney } from "../format";
 import type { OutputArtifact, OutputsPayload, QualityCheck } from "../types";
 import { BTN_SMALL, cls, Pill, Spin } from "../ui";
 import { SignOffButton } from "../review/SignOff";
-import { runHref, useWorkspace } from "./context";
+import { provenanceHref, useWorkspace } from "./context";
 
 export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
@@ -61,8 +61,11 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
   const summary = outputs.summary ?? {};
   const period = outputs.period_label || summary.period_label || "";
   const q = qualityOf(artifacts);
-  const [checksOpen, setChecksOpen] = useState(false);
-  const checksId = useId();
+  // AM4: checks, credits and model names are trust signals, not daily reading —
+  // folded for members, open for admins. Which model saw the documents is not
+  // folded: that line always shows.
+  const [detailsOpen, setDetailsOpen] = useState(!!ws?.admin);
+  const detailsId = useId();
 
   const allKpis: { key: AmKey; value: unknown }[] = [
     { key: "outputs.revenue", value: summary.revenue },
@@ -70,6 +73,9 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
     { key: "outputs.netProfit", value: summary.net_profit },
   ];
   const kpis = allKpis.filter((k) => k.value !== undefined && k.value !== null);
+  const modelLine = outputs.model?.model ? `${outputs.model.model} · ${outputs.model.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}` : null;
+  const creditLine = outputs.credits ? t("outputs.credits", { n: formatCredits(outputs.credits) }) : null;
+  const hasDetails = q.total > 0 || !!creditLine || !!modelLine;
 
   return (
     <div className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-outputs">
@@ -77,12 +83,6 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
         <div className="min-w-0 flex-1 text-sm font-semibold text-text-primary">
           {period ? t("outputs.title", { period }) : t("outputs.titleNoPeriod")}
         </div>
-        {q.total > 0 ? (
-          <Pill tone={q.pass === q.total ? "success" : "warning"}>
-            {q.pass === q.total ? <CircleCheck width={12} height={12} aria-hidden /> : <TriangleAlert width={12} height={12} aria-hidden />}
-            <span>{t("outputs.quality", { pass: String(q.pass), total: String(q.total) })}</span>
-          </Pill>
-        ) : null}
       </div>
       {outputs.review ? (
         <div className="mt-2 rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-xs text-text-primary" data-testid="am-outputs-review">
@@ -102,7 +102,7 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
       {kpis.length ? (
         <dl className="mt-3 grid grid-cols-3 gap-2">
           {kpis.map((k) => (
-            <div key={k.key} className="min-w-0 rounded-lg bg-bg-base px-2.5 py-2">
+            <div key={String(k.key)} className="min-w-0 rounded-lg bg-bg-base px-2.5 py-2">
               <dt className="truncate text-[11px] text-text-muted">{t(k.key)}</dt>
               <dd className="truncate text-sm font-semibold tabular-nums text-text-primary sm:text-base">{formatMoney(k.value)}</dd>
             </div>
@@ -118,34 +118,50 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
         </ul>
       ) : null}
 
-      {q.total > 0 ? (
+      <SeenBy outputs={outputs} />
+
+      {hasDetails ? (
         <div className="mt-2">
           <button
             type="button"
-            aria-expanded={checksOpen}
-            aria-controls={checksId}
-            onClick={() => setChecksOpen((v) => !v)}
+            aria-expanded={detailsOpen}
+            aria-controls={detailsId}
+            onClick={() => setDetailsOpen((v) => !v)}
             className="focus-ring inline-flex items-center gap-1 rounded-md py-0.5 text-xs text-text-secondary hover:text-text-primary"
+            data-testid="am-outputs-details"
           >
-            <ChevronDown width={14} height={14} aria-hidden className={cls("transition-transform", checksOpen ? "rotate-180" : "")} />
-            <span>{t("outputs.checks")}</span>
+            <ChevronDown width={14} height={14} aria-hidden className={cls("transition-transform", detailsOpen ? "rotate-180" : "")} />
+            <span>{t("outputs.details")}</span>
           </button>
-          {checksOpen ? (
-            <ul id={checksId} className="mt-1.5 flex flex-col gap-1">
-              {q.checks.map((c, i) => (
-                <li key={`${c.name ?? c.label}-${i}`} className="flex items-start gap-2 text-xs">
-                  {c.ok ? (
-                    <CircleCheck width={14} height={14} className="mt-px shrink-0 text-status-success" aria-hidden />
-                  ) : (
-                    <TriangleAlert width={14} height={14} className="mt-px shrink-0 text-status-warning" aria-hidden />
-                  )}
-                  <span className="min-w-0 text-text-secondary">
-                    <span className="text-text-primary">{c.label || c.name}</span>
-                    {c.detail ? <span>{` · ${c.detail}`}</span> : null}
-                  </span>
-                </li>
-              ))}
-            </ul>
+          {detailsOpen ? (
+            <div id={detailsId} className="mt-1.5 flex flex-col gap-1.5" data-testid="am-outputs-details-body">
+              {q.total > 0 ? (
+                <div>
+                  <Pill tone={q.pass === q.total ? "success" : "warning"}>
+                    {q.pass === q.total ? <CircleCheck width={12} height={12} aria-hidden /> : <TriangleAlert width={12} height={12} aria-hidden />}
+                    <span>{t("outputs.quality", { pass: String(q.pass), total: String(q.total) })}</span>
+                  </Pill>
+                  <ul className="mt-1.5 flex flex-col gap-1">
+                    {q.checks.map((c, i) => (
+                      <li key={`${c.name ?? c.label}-${i}`} className="flex items-start gap-2 text-xs">
+                        {c.ok ? (
+                          <CircleCheck width={14} height={14} className="mt-px shrink-0 text-status-success" aria-hidden />
+                        ) : (
+                          <TriangleAlert width={14} height={14} className="mt-px shrink-0 text-status-warning" aria-hidden />
+                        )}
+                        <span className="min-w-0 text-text-secondary">
+                          <span className="text-text-primary">{c.label || c.name}</span>
+                          {c.detail ? <span>{` · ${c.detail}`}</span> : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              {modelLine || creditLine ? (
+                <p className="text-[11px] text-text-muted">{[modelLine, creditLine].filter(Boolean).join(" · ")}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       ) : null}
@@ -153,31 +169,63 @@ export function OutputsCard({ outputs }: { outputs: OutputsPayload }) {
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
         <MoreFilesMenu runId={outputs.run_id} />
         {canSignOff && !outputs.review ? <SignOffButton runId={outputs.run_id} /> : null}
-        <Link href={runHref(outputs.run_id)} className={BTN_SMALL}>
-          {t("outputs.viewRun")}
+        <Link href={provenanceHref(outputs.run_id)} className={BTN_SMALL}>
+          {t("ws.provenance")}
         </Link>
-        <div className="flex-1" />
-        {outputs.model?.model ? (
-          <span className="text-[11px] text-text-muted">
-            {outputs.model.model}
-            {` · `}
-            {outputs.model.self_hosted ? t("ws.modelInOrg") : t("ws.modelExternal")}
-          </span>
-        ) : null}
-        {outputs.credits ? <span className="text-[11px] text-text-muted">{t("outputs.credits", { n: formatCredits(outputs.credits) })}</span> : null}
       </div>
     </div>
   );
 }
 
-export function ArtifactRow({ artifact }: { artifact: Pick<OutputArtifact, "id" | "name" | "format" | "size" | "version"> }) {
+/** AM4: the one line that always shows — which model saw the documents (or that none did). */
+export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
+  const t = useAmT();
+  const m = outputs.model ?? {};
+  const where = (self?: boolean) => (self ? t("where.inOrg") : t("where.outside"));
+  const summaryModels = (outputs.summary?.models as { model?: string; self_hosted?: boolean }[] | undefined) ?? [];
+  const models = summaryModels.filter((x) => !!x.model);
+  const lines: string[] = [];
+  if (m.uses === "text") {
+    lines.push(m.model ? t("outputs.writtenBy", { model: m.model, where: where(m.self_hosted) }) : t("outputs.writtenByRules"));
+  } else if (models.length) {
+    for (const x of models) lines.push(t("outputs.seenBy", { model: x.model ?? "", where: where(x.self_hosted) }));
+  } else {
+    lines.push(t("outputs.seenNone"));
+  }
+  if (m.not_chosen && m.chosen_model) {
+    const used = m.uses === "text" ? m.model : m.vision_model;
+    lines.push(
+      used
+        ? t("outputs.notChosen", { chosen: m.chosen_model, used, why: t("outputs.notChosenWhy") })
+        : t("outputs.noneInstead", { chosen: m.chosen_model }),
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-col gap-0.5" data-testid="am-outputs-seen-by">
+      {lines.map((l) => (
+        <p key={l} className="text-xs text-text-secondary">
+          {l}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+export function ArtifactRow({
+  artifact,
+  download: downloadWith,
+}: {
+  artifact: Pick<OutputArtifact, "id" | "name" | "format" | "size" | "version">;
+  /** AM4: an admin's reason-gated download instead of the owner's. */
+  download?: () => Promise<void>;
+}) {
   const t = useAmT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const download = () => {
     setBusy(true);
     setError(null);
-    amApi.downloadArtifact(artifact.id, artifact.name).then(
+    (downloadWith ? downloadWith() : amApi.downloadArtifact(artifact.id, artifact.name)).then(
       () => setBusy(false),
       (err) => {
         setBusy(false);

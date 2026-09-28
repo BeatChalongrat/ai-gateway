@@ -32,13 +32,18 @@ import {
 } from "../ui";
 import { DEFAULT_PRICING, useAgentMarket } from "../useAgentMarket";
 import { runHref } from "../workspace/context";
+import { ModelsTab, RunsTab } from "./Am4Tabs";
 
-export type AdminTab = "access" | "departments" | "spend" | "catalog" | "problems";
+export type AdminTab = "access" | "departments" | "spend" | "runs" | "models" | "catalog" | "problems";
 
 const TABS: { id: AdminTab; key: AmKey; adminOnly: boolean }[] = [
   { id: "access", key: "admin.tab.access", adminOnly: true },
   { id: "departments", key: "admin.tab.departments", adminOnly: true },
   { id: "spend", key: "admin.tab.spend", adminOnly: true },
+  // AM4: every run as metadata (content opens one run at a time, with a reason)
+  { id: "runs", key: "admin.tab.runs", adminOnly: true },
+  // AM4: documents leaving the organisation, the models people may pick, retention
+  { id: "models", key: "admin.tab.models", adminOnly: true },
   { id: "catalog", key: "admin.tab.catalog", adminOnly: false },
   { id: "problems", key: "admin.tab.problems", adminOnly: true },
 ];
@@ -97,6 +102,10 @@ function Admin() {
           <DepartmentsTab pricing={p} />
         ) : tab === "spend" ? (
           <SpendTab pricing={p} />
+        ) : tab === "runs" ? (
+          <RunsTab pricing={p} />
+        ) : tab === "models" ? (
+          <ModelsTabLoader />
         ) : tab === "catalog" ? (
           <CatalogTab admin={!!admin} />
         ) : (
@@ -108,6 +117,13 @@ function Admin() {
 }
 
 const FIELD = "focus-ring w-full rounded-lg border border-border bg-bg-base px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted";
+
+function ModelsTabLoader() {
+  const { org, error, reload } = useOrg();
+  if (error) return <ErrorPanel message={errorMessage(error)} onRetry={reload} />;
+  if (!org) return <Spin size={14} />;
+  return <ModelsTab org={org.org} onSaved={reload} />;
+}
 
 function useOrg(): { org: AdminOrg | null; error: unknown; reload: () => void } {
   const [org, setOrg] = useState<AdminOrg | null>(null);

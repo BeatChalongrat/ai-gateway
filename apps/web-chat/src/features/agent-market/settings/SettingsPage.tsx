@@ -29,6 +29,7 @@ import { savedTemplateOf, takesTemplates } from "../template/mapping";
 import { TemplateSection } from "../template/TemplateSection";
 import { PolicySection } from "../policy/PolicySetup";
 import { UpgradeSection } from "../upgrade/UpgradeSection";
+import { ModelSection, StorageSection } from "./ModelSection";
 
 const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
@@ -217,6 +218,10 @@ function Settings({ installId }: { installId: string }) {
           )}
         </div>
       </section>
+
+      <ModelSection installId={installId} />
+
+      <StorageSection installId={installId} />
 
       <UpgradeSection installId={installId} onChanged={refresh} />
 

@@ -153,6 +153,8 @@ export interface Install {
   updated_at?: string;
   /** AM3: pinned to the top of the rail. */
   pinned_at?: string | null;
+  /** AM4: the model the person picked for reading documents ("auto" or a curated choice). */
+  model_choice?: string;
 }
 
 export interface InstallRow extends Install {
@@ -203,6 +205,10 @@ export interface Run {
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
+  /** AM4: the thread (absent = the first), the model choice it ran with, an admin's removal of its files. */
+  thread_id?: string | null;
+  model_choice?: string | null;
+  evidence_removed_at?: string | null;
 }
 
 export interface Step {
@@ -338,7 +344,7 @@ export interface Clarification {
 
 // ── thread ─────────────────────────────────────────────────────────────
 
-export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs";
+export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs" | "intent";
 
 export interface ThreadItem {
   id: string;
@@ -350,6 +356,8 @@ export interface ThreadItem {
   rev: number;
   created_at: string;
   updated_at?: string;
+  /** AM4: absent = the install's first thread. */
+  thread_id?: string | null;
 }
 
 export interface GreetingPayload {
@@ -390,6 +398,23 @@ export interface NoticePayload {
   run_id?: string;
   reason?: string;
   contact?: Contact | null;
+  /** AM4: "เริ่มรอบใหม่" was pressed; an admin opened this run (with a reason). */
+  round_start?: boolean;
+  access?: boolean;
+}
+
+/** AM4: the question at a round boundary — start a new round, or ask about the last one. */
+export interface IntentPayload {
+  status: "open" | "chosen" | string;
+  choice?: "new_round" | "about_last" | string;
+  text?: string;
+  files?: { id: string; name: string; size: number }[] | null;
+  item_id?: string;
+  last_round?: { run_id?: string; period_label?: string } | null;
+  fresh?: boolean;
+  model_choice?: string;
+  run_id?: string;
+  note?: string;
 }
 
 export interface CardPayload {
@@ -444,11 +469,117 @@ export interface OutputsPayload {
     exceptions?: number;
     [k: string]: unknown;
   } | null;
-  model?: { model?: string; self_hosted?: boolean } | null;
+  model?: OutputsModel | null;
   credits?: number;
   rerender?: boolean;
   /** AM3: these files carry a reviewer's sign-off on their face. */
   review?: { id: string; reviewer: string; at_label: string; note?: string; skipped?: string[] | null } | null;
+}
+
+/** AM4: what the files card always says about models. */
+export interface OutputsModel {
+  model?: string;
+  self_hosted?: boolean;
+  /** what a model does for this agent: vision (reads scans) | text (writes the words) | none */
+  uses?: "vision" | "text" | "none" | string;
+  choice?: string;
+  chosen_model?: string;
+  not_chosen?: boolean;
+  vision_model?: string;
+  vision_self_hosted?: boolean;
+  written_by_rules?: boolean;
+}
+
+/** AM4: one conversation with an installed agent (the first has no id). */
+export interface AgentThread {
+  id: string | null;
+  title: string;
+  created_at: string;
+  last_at: string;
+  rounds: number;
+  waiting: boolean;
+}
+
+/** AM4: one row of the model picker. */
+export interface ModelOption {
+  id: string;
+  outcome: "auto" | "fast" | "accurate" | string;
+  label: string;
+  model: string;
+  self_hosted: boolean;
+  cost_thb: number | null;
+  seconds: number | null;
+  disabled: boolean;
+  reason?: string;
+}
+
+export interface ModelPicker {
+  uses: "vision" | "text" | "none" | string;
+  reads: string;
+  choice: string;
+  options: ModelOption[] | null;
+  documents_may_leave: boolean;
+  note: string;
+}
+
+/** AM4: what an install keeps and for how long. */
+export interface StorageInfo {
+  storage: { uploads: number; outputs: number; total: number; warn_bytes: number; warn: boolean };
+  retention_years: number;
+  retention: string;
+  not_archive: string;
+  personal_delete: string;
+}
+
+/** AM4: an admin's opening of someone's run, as its owner sees it. */
+export interface AccessEntry {
+  admin_name: string;
+  admin_email: string;
+  reason: string;
+  opened_at: string;
+  at_label: string;
+}
+
+/** AM4: what an admin sees of any run — never its files, figures or answers. */
+export interface RunMeta {
+  id: string;
+  agent: string;
+  slug: string;
+  person: string;
+  email: string;
+  status: RunStatus | string;
+  reason: string;
+  period_label: string;
+  credits: number;
+  model: string;
+  model_self_hosted: boolean | null;
+  stopped_at_step?: string;
+  created_at: string;
+  finished_at?: string | null;
+  open_now: boolean;
+  times_opened: number;
+}
+
+export interface CatalogModel {
+  id: string;
+  vision: boolean;
+  self_hosted: boolean;
+  input_price_per_1m: number;
+  output_price_per_1m: number;
+}
+
+export interface ModelEntry {
+  model: string;
+  outcome: "fast" | "accurate" | string;
+}
+
+export interface AdminModels {
+  catalog: CatalogModel[] | null;
+  curated: ModelEntry[] | null;
+  defaults: { text?: string; text_second?: string; vision?: string };
+  self_hosted: Record<string, boolean> | null;
+  documents_may_leave: boolean;
+  seen_at?: string | null;
 }
 
 // ── responses ──────────────────────────────────────────────────────────
@@ -488,6 +619,8 @@ export interface RunDetail {
   children: Run[] | null;
   install: { id: string; title: string; slug: string };
   budget: { credits: number; spent_this_month: number };
+  /** AM4: every time an admin opened this run, and why. */
+  access_log?: AccessEntry[] | null;
 }
 
 export interface ThemePreset {
@@ -801,7 +934,7 @@ export interface DatasheetModel {
 export interface DatasheetRetention {
   what: string;
   keep: number;
-  unit: "hours" | "days" | "while_installed" | "account_deletion" | string;
+  unit: "hours" | "days" | "years" | "while_installed" | "account_deletion" | string;
 }
 
 export interface Datasheet {
@@ -823,6 +956,8 @@ export interface Datasheet {
   status: CatalogStatus | string;
   runner: { healthy?: boolean; version?: string; seen_at?: string } | null;
   generated_at: string;
+  /** AM4: e.g. not_archive — this is not the company's document archive. */
+  notes?: Record<string, string> | null;
 }
 
 export interface RailInstall {
@@ -959,6 +1094,11 @@ export interface OrgSettings {
   contact_email: string;
   updated_by: string;
   updated_at: string;
+  /** AM4 */
+  documents_may_leave?: boolean;
+  agent_models?: ModelEntry[] | null;
+  retention_years?: number;
+  storage_warn_mb?: number;
 }
 
 export interface OrgMember {
