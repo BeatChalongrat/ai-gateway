@@ -39,6 +39,8 @@ const EXE = path.join(process.env.LOCALAPPDATA || "", "Programs", "sran-desktop"
 const LOGF = path.join(process.env.APPDATA || "", "SranDesktop-Electron", "logs", "shell.log");
 const PROCS = ["SRAN Desktop.exe", "SranDesktop.ToolsSidecar.exe", "SranDesktop.BrowserHost.exe"];
 const SETUP = path.join(L.ROOT, "apps", "desktop", "release", `SRAN Desktop Setup ${VERSION}.exe`);
+// AM7: the card that walks it tags what it makes (default [AM6])
+const TAG = process.env.AM6_TAG || "[AM6]";
 const OUT = path.join(__dirname, "results", "walk", L.TARGET);
 const STATE = path.join(OUT, "state.json");
 fs.mkdirSync(OUT, { recursive: true });
@@ -399,7 +401,7 @@ async function journey(client) {
     x.check(true, "the agent offers no model menu");
   }
   // A. the sample month
-  const r1 = await sendFiles(x, installId, SAMPLE, "[AM6] ตรวจใบแจ้งหนี้กับใบสั่งซื้อ เดือนกันยายน 2569", 5);
+  const r1 = await sendFiles(x, installId, SAMPLE, TAG + " ตรวจใบแจ้งหนี้กับใบสั่งซื้อ เดือนกันยายน 2569", 5);
   x.check(r1.estimate.length > 0, "with files staged, the cost is said before sending", r1.estimate);
   const gone = !(await page.locator('[data-testid="am-composer-suggestions"]:visible').count());
   x.check(gone, "the suggestions are gone once a round is underway");
@@ -471,7 +473,7 @@ async function journey(client) {
   x.check(/ไม่มีอะไรทำงานเอง/.test(note), "it says nothing runs without a person", note);
   const soon = thaiSoon(3);
   const form = page.locator('[data-testid="am-reminder-form"]');
-  await form.locator("input").first().fill("[AM6] ตรวจใบแจ้งหนี้");
+  await form.locator("input").first().fill(TAG + " ตรวจใบแจ้งหนี้");
   await form.locator("select").first().selectOption("week");
   await form.locator("select").nth(1).selectOption(String(soon.weekday));
   await form.locator('input[type="time"]').fill(soon.time);
@@ -546,7 +548,7 @@ async function bank(client) {
   save();
   await page.waitForSelector('[data-testid="am-empty-pick"]', { timeout: 60000 });
   // E. a statement as a PDF
-  const r1 = await sendFiles(x, installId, BANK_PDF, "[AM6] กระทบยอดเงินฝากธนาคาร ก.ย. 2569 (Statement เป็น PDF)", 3);
+  const r1 = await sendFiles(x, installId, BANK_PDF, TAG + " กระทบยอดเงินฝากธนาคาร ก.ย. 2569 (Statement เป็น PDF)", 3);
   const d1 = await finish(x, r1.runId, 3);
   x.mark(`round 1: ${d1.run.status}`);
   x.check(d1.run.status === "succeeded" && d1.asked.length === 0, "a statement as a PDF: it ties and asks nothing", `${d1.run.status} · ${d1.asked.length} question(s)`);
@@ -557,7 +559,7 @@ async function bank(client) {
   await x.shot("04-pdf-ties");
   x.check(/1,538,519\.65/.test(await x.words(o1.locator('[data-testid="am-outputs-kpis"]'))), "the adjusted balances from the PDF, to the satang");
   // F. a month that does not tie: finished, open — not an error
-  const r2 = await sendFiles(x, installId, BANK_OPEN, "[AM6] กระทบยอดเงินฝากธนาคาร ก.ย. 2569 (รายการเดินบัญชีขาดหน้า)", 5);
+  const r2 = await sendFiles(x, installId, BANK_OPEN, TAG + " กระทบยอดเงินฝากธนาคาร ก.ย. 2569 (รายการเดินบัญชีขาดหน้า)", 5);
   const d2 = await finish(x, r2.runId, 5);
   x.mark(`round 2: ${d2.run.status} ${d2.detail.run.outcome || ""}`);
   x.check(d2.detail.run.outcome === "completed_open", "a month that does not tie is finished and open, not failed", `${d2.run.status} · ${d2.detail.run.outcome}`);
@@ -667,7 +669,7 @@ const phases = {
     }
     for (const id of state.runs || []) {
       // AM7: the chat app has no admin route any more — the admin door (scripts/probes/AM7/admin_door.js)
-      const r = await require("../AM7/admin_door.js").removeEvidence(id, "[AM6] รอบทดสอบของการเดินตรวจ AM6 ไม่ใช่งานจริง");
+      const r = await require("../AM7/admin_door.js").removeEvidence(id, TAG + " รอบทดสอบของการเดินตรวจ AM6 ไม่ใช่งานจริง");
       log(`evidence of round ${id} removed: ${r.status}`);
     }
     for (const id of state.installs || []) {
