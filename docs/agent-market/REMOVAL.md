@@ -96,6 +96,37 @@ for display, and changes nothing there):
   engine; the runner's completion gate is a step of a run (`kind = 'check'`)
   and a reason (`not_tied`) on a failed run; the install's tolerances are rows
   of `agent_defaults`. All inside the schema, all gone with steps 3 and 6.
+- AM6, migration `005_am6` (inside the schema; its down script undoes all of
+  it): ledger `voided_at` / `void_reason` and index `agent_budget_charged`;
+  runs `credits_cost`, `gate_open`, `delivered_at`; `document_index.detail`;
+  tables `reminders`, `notifications`, `email_drafts`, `email_sends`.
+- AM6, the chat's own components (the agent workspace uses the chat's; the
+  revert puts each back as it was):
+  - `apps/web-chat/src/components/chat/ChatInput.tsx` — dictation moved to the new
+    `components/chat/Dictation.tsx`, which the workspace composer uses too.
+  - `apps/web-chat/src/components/chat/ModelSelector.tsx` — optional `quietGate`,
+    `notice`, `hidden` / `hiddenLine`; `shortLabel` exported. Without them the chat's
+    menu is what it was.
+  - `apps/web-chat/src/components/chat/KBSelector.tsx` — optional `standalone`.
+  - `apps/web-chat/src/components/chat/UpdateBanner.tsx` — its strip exported as
+    `BannerStrip` (same markup), which Agent Market's notifications use.
+  - `apps/web-chat/src/components/ui/Button.tsx` — `size="sm"` and `ButtonLink`;
+    `components/ui/Modal.tsx` — an optional `testId`. (Agent Market's own copies of a
+    button kit and a dialog were deleted: the feature uses the app's.)
+  - `apps/web-chat/src/app/chat/layout.tsx` — one element: Agent Market's
+    notification host, rendered only when Agent Market is available.
+- AM6, the desktop app: `apps/desktop/src/main/agent-notify.ts` (new; polls
+  Agent Market's notifications while the app runs, and shows them as Windows
+  notifications that open a page of the app's own origin),
+  `apps/desktop/src/main/chat-edge-client.ts` (two methods),
+  `apps/desktop/src/main/index.ts` (start, stop, the sign-in hook, the toast),
+  `apps/desktop/docs/agent-notifications.md`. With the flag off the poll gets
+  404 and shows nothing; the revert removes it, and the desktop app is rebuilt.
+- AM6, the core's knowledge base: `services/chat-edge-api/cmd/server/main.go`
+  passes the chat's knowledge retrieval to Agent Market inside the flag-gated
+  block (one closure); nothing in the knowledge service changed.
+- AM6, observability: `infra/prometheus/agent_market.yml` (+ its test) counts a
+  run that finished open (`status="completed_open"`) as delivered.
 
 ## Steps
 

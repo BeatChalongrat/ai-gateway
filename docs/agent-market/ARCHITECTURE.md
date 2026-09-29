@@ -104,7 +104,8 @@ files never say a default was used for something the person chose.
 
 `packages/<name>/`: `agent.json` (manifest), `AGENT.md` (narrative
 instructions), `checks/`, `scripts/`, `templates/`, `sample-data/`,
-`self-test.json`, `evals/` (cases + fixtures, not shipped in the runtime zip).
+`self-test.json`, `evals/` (`cases.json` ships in the runtime zip; `evals/fixtures/`
+does not — see `runner/engine.go` `BuildZip` for every directory it leaves out).
 The runtime zip is built deterministically; the package checksum is computed
 over the same bytes and stored on every install and run.
 
@@ -173,3 +174,89 @@ over the same bytes and stored on every install and run.
 - **Separate reviewer.** A manifest with `"review": {"separate_reviewer": true}`
   is signed by someone who did not prepare the run (`review.go`): who a person
   is is who is signed in, never the name typed on the form.
+
+## Invoice ↔ PO matching, charging, and what reaches a person (AM6)
+
+- **The invoice ↔ PO agent** (`packages/po_matching`, `sran.invoice-po-matching`)
+  matches at line level, never header level, and one E3 run per document links
+  each invoice line to a PO line (custom passes: PO line number, item code,
+  description by skeleton, then amount/date and fuzzy tiers a person confirms).
+  The depth is decided per line from the files: three-way where a receipt line
+  exists, two-way otherwise, and every line, the batch summary and the
+  workbook's face say which one was used and why. Quantities are compared
+  cumulatively per PO line (billed so far ≤ received so far ≤ ordered +
+  allowance). Duplicates are searched across the whole document index
+  (`detail` per entry) including a fuzzy pass, and are never counted. Three
+  outcomes per invoice — ผ่าน · ติดเงื่อนไข (with a reason code) · ต้องให้คนตัดสิน;
+  the agent marks nothing approved for payment, the best it says is
+  "พร้อมเสนออนุมัติ". GR/IR is reported, never posted. Tolerances and the
+  install's receipt practice (`ap_gr_practice`) are declared settings
+  (`install.settings`), recorded on every line they decided.
+- **Declared settings, scope, jurisdiction.** A manifest declares its settings
+  (`install.settings`: key, kind, bounds, label) and says `scope`
+  (`generic` | `org-specific`) and `jurisdiction`. The control plane validates
+  them on registration and serves `declared` with an install's defaults.
+- **Generic by default.** `scripts/agent-market/generic-check.sh` opens every
+  file of a package (workbooks and documents unzipped, PDF text and metadata
+  read), runs its self-test and looks into what it delivered, and walks the rest
+  of the runtime zip (the engine) the same way; any name, id, tax id, host or
+  mail of this repository's owner fails it. The publisher's namespace in a
+  package id is reported apart. `scripts/probes/AM6/fresh_install.js` installs
+  every agent on a test stack whose `agent_market` schema was just created and
+  downloads what each self-test delivered for the same check.
+- **Bank statements as PDF** go through E2's words: `engine/e2/grid.py` rebuilds
+  a statement's table from word positions (amount columns by right edges, text
+  columns by left edges, repeated headers dropped). A page without a text layer
+  is not read — it becomes a question, never a guess.
+- **Charge for work delivered.** A run's `outcome` is derived and never stored
+  in `status`: `completed`, `completed_open` (the package's gate did not pass,
+  its draft was delivered — "เสร็จแล้ว · ยังไม่ลงตัว"), `failed`, `cancelled`.
+  `gate_open` is set by the runner when it ends a run on its gate; it is never
+  worked out from a reason code. A run that delivered nothing has its ledger
+  rows voided (`voided_at`, `void_reason`) and no budget counts them;
+  `credits_cost` keeps what the platform paid. `GET /installs/{id}/estimate`
+  says what a round costs before it starts.
+- **Only text built for a person reaches a person.** The rule is positive
+  (`persontext.go`, `reads.go`, `schema.go`): every thread item kind declares
+  the fields a person reads and each is a `PersonText` built by the server or
+  a package's declared summary key; anything else is withheld from the surface
+  and kept for the run page.
+- **The model picker is the chat's menu** (`components/chat/ModelSelector.tsx`)
+  with nothing added: อัตโนมัติ is one row, a model the policy blocks cannot be
+  chosen and says why once, and models that cannot do the job are one line at
+  the end of their group. The workspace composer keeps attach, dictation, the
+  model control and send; ฐานความรู้ is offered only in ask mode and is never the
+  source of a number in a deliverable.
+
+## Reminders, notifications and e-mail (AM6)
+
+- **Nothing runs without a person.** A reminder is a schedule on an install
+  (`reminders.go`): when it falls due, the runner's minute pass
+  (`runner/reminders.go`) opens a round that *waits for files* — status
+  `awaiting_input`, a `request_files` card listing the agent's inputs — and
+  writes a notification. No step, no engine, no model, no charge: the round
+  starts only when a person sends its files on that card, and it is theirs.
+  There is no agent principal and no unattended execution.
+- **At most one waiting round per reminder.** The next firing closes a round
+  that still has no file (charged nothing) and opens the next period's. One
+  follow-up three days later, then silence. Snooze moves the firing (or the
+  follow-up); skip leaves a period out; stop fires nothing more. A round parked
+  on a question for over four hours, whose install nobody opened since, gets
+  one notification and one follow-up the same way. Every write carries a dedupe
+  key and the pass takes rows `FOR UPDATE SKIP LOCKED`: a restart or a second
+  runner never doubles a round or a notification. A reminder of an agent the
+  organisation disabled opens nothing until the agent is back.
+- **Notifications** (`notify.go`) are rows the clients poll: the web shows them
+  in the chat's banner strip (and as a browser notification when the person
+  allowed it); the desktop app polls them while it runs, tray included, and
+  shows a Windows notification whose click opens a page of the app's own
+  origin (`apps/desktop/src/main/agent-notify.ts`). Nothing is e-mailed.
+- **E-mail** (`email.go`): a delivered round (completed or finished open) can
+  be drafted as a mail — subject, a short Thai summary with its figures, the
+  round's own files. The draft never has a recipient, and the text taken from
+  a round passes a sanitiser that removes addresses, links and `mailto:`, so a
+  document cannot choose where the mail goes, what it links to or what it
+  attaches. Sending takes a configured `MailConnector`, the person typing the
+  recipients and approving that exact message (`body_sha256`); every send is
+  logged: who approved it, to whom, which files. No connector is configured in
+  this product: the draft is copied and sent by the person.

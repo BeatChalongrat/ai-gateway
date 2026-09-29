@@ -196,6 +196,8 @@ running their own engine, and settings offer the upgrade.
 - **Dashboard**: Grafana → "Agent Market" (`infra/grafana/provisioning/dashboards/agent_market.json`).
 - **SLO and error budget**: 95 % of the agent runs that end, end succeeded
   (cancelled by the person excluded), rolling 14 days (Prometheus keeps 15).
+  AM6: a run that finished open — its draft delivered, its package's gate not
+  passed — is `status="completed_open"`: it ended, and it is not a failure.
   Budget = 5 %. Recording rule `agent_market:error_budget_remaining:ratio14d`
   (1 = untouched, 0 = spent, < 0 = SLO missed).
 - **Alerts** (`infra/prometheus/agent_market.yml`, all `channel="agent-market"`):
@@ -213,6 +215,28 @@ running their own engine, and settings offer the upgrade.
   (`classify_smoke`), and the core `TargetDown` rule excludes
   `job="agent-runner"`. Test: `docker compose -p ai-gateway exec ops-watch
   python -m app.ops.agent_market_alerts test` (one `[TEST]` alert, agent topic only).
+
+## Reminders, notifications and e-mail (AM6)
+
+- **Nothing runs without a person.** A reminder only opens a round that waits
+  for files and tells its owner; the round runs when that person sends the
+  files. The runner's minute pass does it (`runner/reminders.go`): with the
+  runner stopped, nothing falls due, and the first pass after it starts
+  catches up (one round per reminder, never one per missed minute).
+- **Who is told, and how**: in the app (the web's banner strip, a browser
+  notification if the person allowed it) and, while the desktop app runs, as a
+  Windows notification. Nothing reaches a person who has neither open: e-mail
+  delivery is off in production (`EMAIL_DELIVERY=disabled`), so no reminder is
+  e-mailed.
+- **What to look at**: `agent_market.reminders` (`next_due_at`, `fired_period`,
+  `waiting_run_id`, `followup_sent_at`), `agent_market.notifications`
+  (`shown_web_at`, `shown_desktop_at`, `dismissed_at`). The runner logs each
+  pass that did something (`reminders pass`).
+- **E-mail**: drafts only. No mail connector is configured, so "ส่ง" answers
+  that the draft is to be copied (`NO_MAIL_CONNECTOR`). A send, once a
+  connector exists, is logged in `agent_market.email_sends` (who approved it,
+  to whom, which files); the log stays with its round, and a person's account
+  deletion blanks their id and address in it.
 
 ## Going live (AM1b order)
 
