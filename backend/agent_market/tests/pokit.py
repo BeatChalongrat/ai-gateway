@@ -120,7 +120,7 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": PACKAGE, "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": BOOK}, "theme": {"id": "navy"},
-                        "run": {"date": today, "preparer": preparer, "agent_version": "1.0.0"}})
+                        "run": {"date": today, "preparer": preparer, "agent_version": "1.0.1"}})
         book = os.path.join(job.out, BOOK)
         keep = keep or os.environ.get("POKIT_KEEP")
         if keep:
