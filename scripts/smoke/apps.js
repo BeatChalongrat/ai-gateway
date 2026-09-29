@@ -144,6 +144,7 @@ module.exports = async function apps(R) {
   // ── admin-ui ────────────────────────────────────────────────────────────────
   const adminEmail = L.env("SMOKE_ADMIN_EMAIL");
   const adminPassword = L.env("SMOKE_ADMIN_PASSWORD");
+  let adminSession = null;
   if (!adminEmail || !adminPassword) {
     R.skip("admin.login", "no SMOKE_ADMIN_EMAIL / SMOKE_ADMIN_PASSWORD in .env (the owner's admin account is never used)");
   } else {
@@ -151,6 +152,7 @@ module.exports = async function apps(R) {
       const r = await L.tryHttp(`${base.gw}/auth/session/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: adminEmail, password: adminPassword }) });
       if (r.status !== 200) return { ok: false, detail: `${base.gw}/auth/session/login → ${r.status || r.error} ${r.json?.error?.code || ""}` };
       const s = L.cookieSession(r.setCookie, "admin-cookie");
+      adminSession = s;
       // The smoke admin is a least-privilege "viewer": it signs in and reads its own
       // session, and the admin surface answers it 403 (RBAC) — never 401 (no session).
       const me = await L.tryHttp(`${base.gw}/auth/session/me`, { headers: s.headers });
@@ -159,6 +161,17 @@ module.exports = async function apps(R) {
       return { ok: me.status === 200 && (q.status === 200 || q.status === 403), detail: `login 200 (cookies ${s.names.join(",")}); /auth/session/me → ${me.status || me.error} role=${role}; /admin/requests?limit=1 → ${q.status || q.error} (200 admin / 403 viewer)` };
     });
   }
+  // AM7 — Agent Market's admin page is in the admin app: the page is served, and the proxy's road to
+  // chat-edge's admin door knows the roles (the smoke viewer is refused there, never let through).
+  await R.run("admin.agent_market", async () => {
+    if (!L.T.hasWebApps || !base.admin) return { skip: true, detail: "no admin-ui on this target" };
+    if (!adminSession) return { skip: true, detail: "no admin session in this run" };
+    const page = await L.tryHttp(`${base.admin}/agent-market`, { headers: adminSession.headers });
+    const door = await L.tryHttp(`${base.admin}/api/chat-edge/agent-market/me`, { headers: adminSession.headers });
+    const none = await L.tryHttp(`${base.admin}/api/chat-edge/agent-market/me`);
+    return { ok: page.status === 200 && door.status === 403 && none.status === 401,
+      detail: `${base.admin}/agent-market → ${page.status || page.error} (want 200); its API as the viewer → ${door.status || door.error} ${door.json?.error?.code || ""} (want 403); with no session → ${none.status || none.error} (want 401)` };
+  });
   await R.run("admin.requests_unauth", async () => {
     const r = await L.tryHttp(`${base.gw}/admin/requests?limit=1`);
     return { ok: r.status === 401, detail: `${base.gw}/admin/requests?limit=1 (no session) → ${r.status || r.error} (want 401)` };

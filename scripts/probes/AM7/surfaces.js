@@ -11,6 +11,8 @@
 //              stack's sink, the test message sent and read back from the sink's API
 //   pages      a screenshot of every section of the admin app's page, as an admin
 //   gone       after phase 4: the chat app has no admin page, link or button; its API no admin route
+//   send       the journey's round (AM6 walkthrough on the test stack): its draft sent through the relay, read at the
+//              sink; and the reminder the journey set, e-mailed by the runner
 //
 //   SMOKE_TARGET=test node scripts/probes/AM7/surfaces.js both|audit|publisher|mail|pages|gone
 //
@@ -297,6 +299,68 @@ async function mail() {
   if (!m || list.total <= before) throw new Error("the test message did not arrive at the sink");
 }
 
+// the whole path in the chat app: the journey's round → its draft → recipients typed → the dialog → confirm → the
+// message at the sink (only the relay is simulated) — then the reminder the journey set, e-mailed by the runner
+async function send() {
+  const st = JSON.parse(fs.readFileSync(path.join(L.ROOT, "scripts", "probes", "AM6", "results", "walk", "test", "state.json"), "utf8"));
+  const install = st.installs[st.installs.length - 1];
+  if (!install) throw new Error("no install from the journey (run the AM6 journey on the test stack first)");
+  const before = (await (await fetch(`${SINK}/api/v1/messages`)).json()).total || 0;
+  const web = await chatApp();
+  // the round whose draft the journey made (the first); a round opens by the link a notification carries
+  const round = st.runs[0];
+  await web.goto(`${WEB}/chat/agents/i/${install}?thread=main&run=${round}`, { waitUntil: "domcontentloaded" });
+  const card = web.locator('[data-testid="am-email-draft"]').last();
+  // a newer round folds the earlier ones: unfold them
+  await web.getByTestId("am-thread").waitFor({ timeout: 60000 });
+  await web.waitForTimeout(2000);
+  for (const folded of await web.getByTestId("am-round-folded").all()) {
+    const toggle = folded.locator("button").first();
+    if (await toggle.count()) await toggle.click().catch(() => {});
+  }
+  try {
+    await card.waitFor({ timeout: 60000 });
+  } catch (e) {
+    await shot(web, "send_00_no_draft.png");
+    const kinds = await web.locator("[data-testid]").evaluateAll((els) => [...new Set(els.map((x) => x.getAttribute("data-testid")))].slice(0, 80));
+    out("send_page_testids.json", kinds);
+    throw e;
+  }
+  await card.scrollIntoViewIfNeeded();
+  const subject = (await card.getByTestId("am-email-subject").textContent()).trim();
+  const files = await card.locator('[data-testid="am-email-draft"] [download], [data-testid^="am-attachment"]').count().catch(() => 0);
+  const to = card.getByLabel("ถึง", { exact: true });
+  await to.fill("cfo@fix128.test");
+  await card.getByRole("button", { name: "ส่งอีเมลนี้" }).click();
+  const dialog = web.getByTestId("am-email-confirm");
+  await dialog.waitFor({ timeout: 30000 });
+  const shown = { to: await dialog.getByTestId("am-email-confirm-to").textContent(), files: await dialog.getByTestId("am-email-confirm-files").textContent() };
+  await shot(web, "send_01_dialog.png");
+  await dialog.getByRole("button", { name: "ยืนยันและส่ง" }).click();
+  const sent = card.getByTestId("am-email-sent");
+  await sent.waitFor({ timeout: 90000 });
+  await web.waitForTimeout(1500);
+  await shot(web, "send_02_sent.png");
+  const list = await (await fetch(`${SINK}/api/v1/messages`)).json();
+  const m = (list.messages || []).find((x) => (x.To || []).some((t) => t.Address === "cfo@fix128.test"));
+  const full = m ? await (await fetch(`${SINK}/api/v1/message/${m.ID}`)).json() : null;
+  const reminders = (list.messages || []).filter((x) => (x.To || []).some((t) => t.Address === L.TS_USER.email));
+  const result = {
+    subject, shown, sent_line: (await sent.textContent()).trim(), sink_before: before, sink_after: list.total,
+    received: full ? { subject: full.Subject, to: (full.To || []).map((x) => x.Address), cc: (full.Cc || []).map((x) => x.Address),
+      reply_to: (full.ReplyTo || []).map((x) => x.Address), from: full.From?.Address,
+      attachments: (full.Attachments || []).map((a) => `${a.FileName} (${a.Size} B)`), text_head: (full.Text || "").slice(0, 400) } : null,
+    reminder_emails: reminders.map((x) => ({ subject: x.Subject, to: (x.To || []).map((t) => t.Address), at: x.Created })),
+    draft_files_seen: files,
+  };
+  out("send.json", result);
+  log(`draft "${subject}" → dialog to=${shown.to} files=${shown.files}`);
+  log(`sent line: ${result.sent_line}`);
+  log(`sink ${before} → ${list.total}; received: ${JSON.stringify(result.received && { subject: result.received.subject, to: result.received.to, reply_to: result.received.reply_to, attachments: result.received.attachments })}`);
+  log(`reminder e-mails to ${L.TS_USER.email}: ${reminders.length} ${reminders.map((x) => x.Subject).join(" | ")}`);
+  if (!full || full.Subject !== subject || (full.To || []).length !== 1) throw new Error("the approved message did not arrive as sent");
+}
+
 async function pages() {
   const { page } = await adminApp("admin");
   for (const s of ["access", "departments", "spend", "models", "catalog", "problems", "runs", "mail"]) {
@@ -343,8 +407,8 @@ async function gone() {
   browser = await pw().chromium.launch();
   const what = process.argv[2];
   try {
-    const f = { both, audit, publisher, mail, pages, gone }[what];
-    if (!f) throw new Error("usage: surfaces.js both|audit|publisher|mail|pages|gone");
+    const f = { both, audit, publisher, mail, pages, gone, send }[what];
+    if (!f) throw new Error("usage: surfaces.js both|audit|publisher|mail|pages|gone|send");
     await f();
   } finally {
     await browser.close();

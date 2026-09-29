@@ -33,7 +33,8 @@ const { spawn, spawnSync, execFileSync } = require("node:child_process");
 const L = require("../../smoke/lib.js");
 
 const PORT = 9333;
-const VERSION = "0.1.0-e61";
+// AM7: the desktop build of the checkout (was pinned to e61)
+const VERSION = require(path.join(L.ROOT, "apps", "desktop", "package.json")).version;
 const EXE = path.join(process.env.LOCALAPPDATA || "", "Programs", "sran-desktop", "SRAN Desktop.exe");
 const LOGF = path.join(process.env.APPDATA || "", "SranDesktop-Electron", "logs", "shell.log");
 const PROCS = ["SRAN Desktop.exe", "SranDesktop.ToolsSidecar.exe", "SranDesktop.BrowserHost.exe"];
