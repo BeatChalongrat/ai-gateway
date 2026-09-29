@@ -214,6 +214,10 @@ func run(log *slog.Logger) error {
 		StorageBackend:          am.EnvString("STORAGE_BACKEND", "local"),
 	}
 
+	// AM7: a person's reminders also go by e-mail through the organisation's
+	// relay, once an admin set it up (the password from AGENT_MARKET_SMTP_PASSWORD).
+	r.Mailer = am.NewSMTPMailer(store, log)
+
 	// The sweep that removes sandbox containers a killed runner left behind
 	// (AM1c): at start, then every AGENT_RUNNER_SWEEP_SECONDS.
 	r.Reaper = runner.NewReaper(sb, r.Exec.Limits.Wall, log)

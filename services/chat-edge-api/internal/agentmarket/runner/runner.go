@@ -56,6 +56,9 @@ type Runner struct {
 	// StorageBackend (AM3) is where files live ("local" = the organisation's
 	// own server, "s3" = its object store) — the data sheet says so.
 	StorageBackend string
+	// Mailer (AM7) e-mails each new notification to its person, once, through
+	// the organisation's relay; nil = in-app and tray only.
+	Mailer *agentmarket.SMTPMailer
 
 	engines   engineCache
 	running   atomic.Int32

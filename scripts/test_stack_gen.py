@@ -81,6 +81,23 @@ IMAGES = {
 # (read-only): the chat DB migrations the Postgres init applies.
 KEEP_BIND_TARGETS = {"/docker-entrypoint-initdb.d", "/docker-entrypoint-initdb.d/02-chat-edge.sh", "/chat-edge-migrations"}
 
+# AM7 — services the test stack has that the live stack does not.
+#
+# mail-sink: a local SMTP sink (Mailpit). Agent Market's mail relay is set to
+# it on the admin page — host mail-sink, port 1025, no encryption, no user —
+# so an approved message, the admin's test message and a reminder are
+# composed, sent over SMTP and received for real; only the relay is
+# simulated. What arrived: http://127.0.0.1:18025 (UI and /api/v1/messages).
+# It is the only SMTP server reachable from here: the owner's relay password
+# is redirected (TS_AGENT_MARKET_SMTP_PASSWORD, empty).
+EXTRA_SERVICES = {
+    "mail-sink": {
+        "image": "axllent/mailpit:v1.27",
+        "environment": {"MP_MAX_MESSAGES": "500", "MP_SMTP_DISABLE_RDNS": "true"},
+        "ports": ["127.0.0.1:18025:8025", "127.0.0.1:11025:1025"],
+    },
+}
+
 TEST_ENV = {
     # Nothing in the test stack may run a turn's code in a host container, and
     # nothing may call back into the live stack: the real chat-edge reaches the
@@ -111,7 +128,9 @@ DROP_ENV = {"chat-edge-api": {"SANDBOX_HOST_WORKDIR", "SANDBOX_SECCOMP_PATH", "S
 # bucket). Each value becomes its TS_ twin: "${ALERT_NTFY_URL:-}" ->
 # "${TS_ALERT_NTFY_URL:-}" (default kept), a literal -> "${TS_<KEY>:-}".
 # Unset TS_ variables = log only / off-site not configured.
-REDIRECT_ENV_KEYS = {"RESEND_API_KEY"}
+# AM7: AGENT_MARKET_SMTP_PASSWORD is the customer's mail relay password — the
+# test stack's Agent Market sends to the local sink below, never the relay.
+REDIRECT_ENV_KEYS = {"RESEND_API_KEY", "AGENT_MARKET_SMTP_PASSWORD"}
 REDIRECT_ENV_PREFIXES = ("ALERT_", "BACKUP_OFFSITE_")
 
 # If any of these survive into the generated file, generation fails: each one
@@ -119,7 +138,7 @@ REDIRECT_ENV_PREFIXES = ("ALERT_", "BACKUP_OFFSITE_")
 # (a live alert/off-site variable, or a public ntfy topic written literally).
 LIVE_REFERENCES = ["host.docker.internal", "localhost:8080", "localhost:8081", "localhost:4000",
                    "localhost:5433", "localhost:6380", "ai-gateway_", "ai-gateway-", "/var/run/docker.sock",
-                   "${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/"]
+                   "${ALERT_", "${RESEND_API_KEY", "${BACKUP_OFFSITE_", "ntfy.sh/", "${AGENT_MARKET_SMTP_PASSWORD"]
 
 
 def redirect_env(key: str, value):
@@ -212,6 +231,9 @@ def main() -> int:
         if isinstance(svc["labels"], dict):
             svc["labels"]["sran.test-stack"] = "true"
         out_services[name] = svc
+
+    for name, extra in EXTRA_SERVICES.items():
+        out_services[name] = {**extra, "restart": "on-failure", "labels": {"sran.test-stack": "true"}}
 
     volumes = {"ts_postgres_data": {}, "ts_pgdata_webchat": {}, "ts_chat_edge_uploads": {}, "ts_backups": {},
                "ts_backend_uploads": {}}

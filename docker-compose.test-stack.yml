@@ -616,7 +616,8 @@
         "AGENT_MARKET_ADMIN_EMAILS": "${AGENT_MARKET_ADMIN_EMAILS:-}",
         "AGENT_MARKET_ORG_DOMAINS": "${AGENT_MARKET_ORG_DOMAINS:-}",
         "AGENT_MARKET_USER_BUDGET_CREDITS": "${AGENT_MARKET_USER_BUDGET_CREDITS:-3000000}",
-        "AGENT_MARKET_THB_PER_USD": "${AGENT_MARKET_THB_PER_USD:-35}"
+        "AGENT_MARKET_THB_PER_USD": "${AGENT_MARKET_THB_PER_USD:-35}",
+        "AGENT_MARKET_SMTP_PASSWORD": "${TS_AGENT_MARKET_SMTP_PASSWORD:-}"
       },
       "healthcheck": {
         "interval": "10s",
@@ -739,6 +740,21 @@
           "read_only": true
         }
       ],
+      "labels": {
+        "sran.test-stack": "true"
+      }
+    },
+    "mail-sink": {
+      "image": "axllent/mailpit:v1.27",
+      "environment": {
+        "MP_MAX_MESSAGES": "500",
+        "MP_SMTP_DISABLE_RDNS": "true"
+      },
+      "ports": [
+        "127.0.0.1:18025:8025",
+        "127.0.0.1:11025:1025"
+      ],
+      "restart": "on-failure",
       "labels": {
         "sran.test-stack": "true"
       }

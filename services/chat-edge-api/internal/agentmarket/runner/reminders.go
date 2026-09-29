@@ -26,6 +26,16 @@ func (r *Runner) reminders(ctx context.Context) {
 			r.logger().Info("reminders pass", "fired", p.Fired, "skipped", p.Skipped, "closed_without_files", p.Cancelled,
 				"follow_ups", p.FollowUps, "waiting", p.Waiting, "waiting_follow_ups", p.WaitingFollowUps)
 		}
+		// AM7: each new notification also goes to its person by e-mail, once, when a relay is set up
+		if r.Mailer != nil {
+			if p, err := r.Mailer.NotificationsPass(ctx); err != nil {
+				if ctx.Err() == nil {
+					r.logger().Warn("reminders e-mail pass failed", "err", err)
+				}
+			} else if p != (am.NotificationsPassResult{}) {
+				r.logger().Info("reminders e-mail pass", "sent", p.Sent, "failed", p.Failed, "no_relay", p.Skipped)
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return

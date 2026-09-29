@@ -51,6 +51,10 @@ type MailMessage struct {
 	Subject     string
 	Body        string
 	Attachments []MailAttachment
+	// AM7: a reply goes to the person who approved the message; Org picks
+	// the relay (mail.go).
+	ReplyTo string
+	Org     string
 }
 
 // MailAttachment is one of the round's own artifacts.
@@ -388,11 +392,24 @@ func (s *Store) sendsOf(ctx context.Context, draft uuid.UUID) ([]EmailSend, erro
 	return out, rows.Err()
 }
 
+// mailConnector is what an approved message goes through: a connector set in
+// the configuration (tests), else the organisation's relay once an admin set
+// it up (AM7, mail.go); nil = none yet.
+func (a *API) mailConnector(ctx context.Context, org string) MailConnector {
+	if a.cfg.Mail != nil {
+		return a.cfg.Mail
+	}
+	if a.smtp.ready(ctx, org) {
+		return a.smtp
+	}
+	return nil
+}
+
 // complete adds what the draft says about sending, and its sends.
-func (a *API) complete(ctx context.Context, d EmailDraft) (EmailDraft, error) {
-	d.CanSend = a.cfg.Mail != nil
+func (a *API) complete(ctx context.Context, org string, d EmailDraft) (EmailDraft, error) {
+	d.CanSend = a.mailConnector(ctx, org) != nil
 	if !d.CanSend {
-		d.CannotSendReason = Text("ยังไม่มีตัวเชื่อมต่ออีเมลในระบบ คัดลอกข้อความนี้ไปส่งจากอีเมลของคุณได้")
+		d.CannotSendReason = Text(mailNotSetUp)
 	}
 	sent, err := a.store.sendsOf(ctx, d.ID)
 	d.Sent = sent
@@ -436,7 +453,7 @@ func (a *API) emailDraft(w http.ResponseWriter, r *http.Request) {
 		d, err = a.store.saveDraft(ctx, d)
 	}
 	if err == nil {
-		d, err = a.complete(ctx, d)
+		d, err = a.complete(ctx, accessOf(r).OrgID, d)
 	}
 	if err == nil {
 		err = a.postDraft(ctx, d)
@@ -472,7 +489,7 @@ func (a *API) getEmailDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := a.complete(r.Context(), d)
+	d, err := a.complete(r.Context(), accessOf(r).OrgID, d)
 	if err != nil {
 		a.fail(w, err, "draft")
 		return
@@ -562,11 +579,13 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 		sayMail(w, http.StatusConflict, "DRAFT_CHANGED")
 		return
 	}
-	if a.cfg.Mail == nil {
+	ctx := r.Context()
+	org := accessOf(r).OrgID
+	conn := a.mailConnector(ctx, org)
+	if conn == nil {
 		sayMail(w, http.StatusConflict, "NO_MAIL_CONNECTOR")
 		return
 	}
-	ctx := r.Context()
 	run, err := a.store.GetRun(ctx, c.TenantUUID, c.UserID, d.RunID)
 	if err != nil {
 		a.fail(w, err, "run")
@@ -582,7 +601,7 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 	for _, art := range arts {
 		byID[art.ID] = art
 	}
-	msg := MailMessage{To: to, Cc: cc, Subject: d.Subject.String(), Body: d.Body.String()}
+	msg := MailMessage{To: to, Cc: cc, Subject: d.Subject.String(), Body: d.Body.String(), ReplyTo: normEmail(c.Email), Org: org}
 	type logged struct {
 		ArtifactID uuid.UUID `json:"artifact_id"`
 		Name       string    `json:"name"`
@@ -609,7 +628,7 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 		attached = append(attached, logged{ArtifactID: art.ID, Name: name, Size: int64(len(data)), SHA256: art.SHA256, Format: art.Format})
 	}
 	if sendErr == nil {
-		sendErr = a.cfg.Mail.Send(ctx, msg)
+		sendErr = conn.Send(ctx, msg)
 	}
 	status, errText := "sent", ""
 	if sendErr != nil {
@@ -627,10 +646,16 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "draft")
 		return
 	}
-	if cur, err := a.complete(ctx, d); err == nil {
+	if cur, err := a.complete(ctx, org, d); err == nil {
 		_ = a.postDraft(ctx, cur)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"send": send})
+	out := map[string]any{"send": send}
+	if sendErr != nil {
+		// AM7: why it did not go, as a sentence; the draft is still there to copy
+		code, vars := mailFailure(sendErr, false)
+		out["message"] = mailSentence(code, vars...)
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *API) readArtifact(ctx context.Context, art Artifact) ([]byte, error) {

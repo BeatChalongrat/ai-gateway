@@ -46,6 +46,8 @@ type API struct {
 	// auditor takes every admin change into the admin audit log (AM7,
 	// audit.go); nil = no admin change can be made.
 	auditor Auditor
+	// smtp is the organisation's mail relay (AM7, mail.go).
+	smtp *SMTPMailer
 }
 
 // NewAPI opens the control plane's own small pool and applies the
@@ -75,7 +77,8 @@ func NewAPI(ctx context.Context, cfg Config, dsn string, files storage.Backend, 
 		log.Info("agent-market organisation created from AGENT_MARKET_ALLOWED_EMAILS / AGENT_MARKET_ADMIN_EMAILS",
 			"allowed", len(cfg.AllowedEmails), "admins", len(cfg.AdminEmails))
 	}
-	return &API{cfg: cfg, store: store, files: files, log: log.With("component", "agent-market"), closeFn: pool.Close}, nil
+	return &API{cfg: cfg, store: store, files: files, log: log.With("component", "agent-market"), closeFn: pool.Close,
+		smtp: NewSMTPMailer(store, log)}, nil
 }
 
 // AccountProvider is Agent Market's part of "export all my data" and of
@@ -101,7 +104,8 @@ func (a *API) AccountProvider() *AccountProvider {
 // NewAPIWithStore is for tests.
 func NewAPIWithStore(cfg Config, store *Store, files storage.Backend, log *slog.Logger) *API {
 	// AM7: admin changes need an audit log; a test that does not look at it keeps none
-	return &API{cfg: cfg, store: store, files: files, log: log, closeFn: func() {}, auditor: DiscardAuditor{}}
+	return &API{cfg: cfg, store: store, files: files, log: log, closeFn: func() {}, auditor: DiscardAuditor{},
+		smtp: &SMTPMailer{store: store, Password: func() string { return "" }, Log: log}}
 }
 
 // Close releases the pool.

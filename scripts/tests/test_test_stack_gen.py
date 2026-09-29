@@ -166,3 +166,37 @@ class GeneratedTestStackTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgentMarketMailSinkTest(unittest.TestCase):
+    """AM7 — Agent Market's mail relay on the test stack is a local sink.
+
+    The approved-send path, the admin's test message and reminders are proved
+    there against a real SMTP conversation; only the relay is simulated. The
+    customer's relay password (AGENT_MARKET_SMTP_PASSWORD) never reaches a
+    test-stack container: it becomes its empty TS_ twin like every other
+    owner destination.
+    """
+
+    _generate = GeneratedTestStackTest._generate
+
+    def _doc(self) -> dict:
+        merged = _merged()
+        merged["services"]["chat-edge-api"] = _svc({"AGENT_MARKET_SMTP_PASSWORD": "${AGENT_MARKET_SMTP_PASSWORD:-}"})
+        rc, doc, written = self._generate(merged)
+        self.assertEqual(rc, 0, written)
+        return doc
+
+    def test_the_stack_ships_its_own_mail_sink_on_loopback(self):
+        sink = self._doc()["services"].get("mail-sink")
+        self.assertIsNotNone(sink, "the test stack has no mail sink")
+        self.assertTrue(sink["image"].startswith("axllent/mailpit:"))
+        self.assertTrue(sink["ports"])
+        for p in sink["ports"]:
+            self.assertTrue(p.startswith("127.0.0.1:"), p)
+        self.assertEqual(sink["labels"], {"sran.test-stack": "true"})
+
+    def test_the_relay_password_is_never_the_owners(self):
+        env = self._doc()["services"]["chat-edge-api"]["environment"]
+        self.assertEqual(env["AGENT_MARKET_SMTP_PASSWORD"], "${TS_AGENT_MARKET_SMTP_PASSWORD:-}")
+        self.assertIn("${AGENT_MARKET_SMTP_PASSWORD", gen.LIVE_REFERENCES)

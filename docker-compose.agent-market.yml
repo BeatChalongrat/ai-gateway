@@ -79,6 +79,10 @@ services:
       - SANDBOX_HOST_WORKDIR=${AM_SANDBOX_HOST_DIR:-${PWD}/data/agent-sandbox-runs}
       - SANDBOX_RUNTIME=${SANDBOX_RUNTIME:-}
       - AGENT_MARKET_CONVERTER_URL=${AGENT_MARKET_CONVERTER_URL:-http://doc-converter:8096}
+      # AM7: a person's reminders also go by e-mail once an admin set up the
+      # relay (admin-ui › Agent Market › อีเมล); the link in them points here.
+      - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
+      - AGENT_MARKET_WEB_URL=${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
     volumes:
       # The docker socket launches the per-step sandbox containers (the same
       # privilege chat-edge holds for run_python); no model input reaches argv.

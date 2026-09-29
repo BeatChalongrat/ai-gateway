@@ -250,6 +250,9 @@ services:
       - AGENT_MARKET_ORG_DOMAINS=${AGENT_MARKET_ORG_DOMAINS:-}
       - AGENT_MARKET_USER_BUDGET_CREDITS=${AGENT_MARKET_USER_BUDGET_CREDITS:-3000000}
       - AGENT_MARKET_THB_PER_USD=${AGENT_MARKET_THB_PER_USD:-35}
+      # AM7: the organisation's mail relay — host, port, TLS mode, username and
+      # sender are set on admin-ui › Agent Market › อีเมล; the password only here.
+      - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.

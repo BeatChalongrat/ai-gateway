@@ -181,7 +181,7 @@ func TestTheServerBuildsTheDraftFromTheRound(t *testing.T) {
 	}
 	sum := sha256.Sum256([]byte(body))
 	if d["body_sha256"] != hex.EncodeToString(sum[:]) || d["run_id"] != run.ID.String() || d["can_send"] != false ||
-		d["cannot_send_reason"] != "ยังไม่มีตัวเชื่อมต่ออีเมลในระบบ คัดลอกข้อความนี้ไปส่งจากอีเมลของคุณได้" || d["created_at"] == nil {
+		d["cannot_send_reason"] != mailNotSetUp || d["created_at"] == nil { // AM7: says who can set the relay up
 		t.Fatalf("the draft: %v", d)
 	}
 	if sent, ok := d["sent"].([]any); !ok || len(sent) != 0 {
@@ -295,7 +295,7 @@ func TestSendingNeedsApprovalRecipientsTheSameDraftAndAConnector(t *testing.T) {
 			400, "BAD_RECIPIENT", ""},
 		{map[string]any{"to": []string{"a@b.example"}, "body_sha256": strings.Repeat("0", 64), "approve": true}, 409, "DRAFT_CHANGED", ""},
 		{map[string]any{"to": []string{"a@b.example"}, "body_sha256": h, "approve": true}, 409, "NO_MAIL_CONNECTOR",
-			"ยังไม่มีตัวเชื่อมต่ออีเมลในระบบ คัดลอกข้อความนี้ไปส่งจากอีเมลของคุณได้"},
+			mailNotSetUp}, // AM7: the card's sentence — who can set the relay up, and copy meanwhile
 	} {
 		code, body := e.do("POST", path, c.body)
 		got, msg := errMsg(body)
