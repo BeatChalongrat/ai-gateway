@@ -96,26 +96,27 @@ func (rc *runCtx) recalcTemplate(ctx context.Context, path, name string, meta, q
 	if err := json.Unmarshal(quality, &q); err != nil {
 		return quality, err
 	}
-	check := map[string]any{"name": "template.recalculated", "ok": true, "label": "คำนวณสูตรในแบบฟอร์มใหม่"}
+	check := gateCheck{Name: "template.recalculated", OK: true, Label: am.Text("คำนวณสูตรในแบบฟอร์มใหม่")}
 	if !rc.r.Converter.Available() {
-		check["detail"] = "Excel จะคำนวณสูตรใหม่เมื่อเปิดไฟล์ (ยังไม่มีตัวแปลงเอกสาร)"
+		check.Detail = am.Text("Excel จะคำนวณสูตรใหม่เมื่อเปิดไฟล์ (ยังไม่มีตัวแปลงเอกสาร)")
 	} else if data, err := os.ReadFile(path); err != nil {
 		return quality, err
 	} else if out, err := rc.r.Converter.Convert(ctx, filepath.Base(name), data, "xlsx"); err != nil {
 		rc.technical(ctx, "template.recalculate", err)
-		check["detail"] = "คำนวณล่วงหน้าไม่สำเร็จ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์"
+		check.Detail = am.Text("คำนวณล่วงหน้าไม่สำเร็จ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์")
 	} else if merged, n, bad, err := mergeCachedValues(data, out); err != nil {
 		rc.technical(ctx, "template.merge", err)
-		check["detail"] = "อ่านผลคำนวณล่วงหน้าไม่ได้ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์"
+		check.Detail = am.Text("อ่านผลคำนวณล่วงหน้าไม่ได้ Excel จะคำนวณสูตรเองเมื่อเปิดไฟล์")
 	} else if err := os.WriteFile(path, merged, 0o644); err != nil {
 		return quality, err
 	} else if len(bad) > 0 {
-		check["ok"] = false
-		check["detail"] = "สูตรให้ค่าผิดพลาด: " + strings.Join(bad, ", ")
+		// the cells are the person's own template's
+		check.OK = false
+		check.Detail = am.Text("สูตรให้ค่าผิดพลาด: %s", am.Name(strings.Join(bad, ", ")))
 	} else {
-		check["detail"] = fmt.Sprintf("คำนวณสูตรใหม่ด้วย LibreOffice แล้ว %d สูตร", n)
+		check.Detail = am.Text("คำนวณสูตรใหม่ด้วย LibreOffice แล้ว %s สูตร", am.Count(n))
 	}
-	if ok, _ := check["ok"].(bool); !ok {
+	if !check.OK {
 		q["passed"] = false
 	}
 	checks, _ := q["checks"].([]any)

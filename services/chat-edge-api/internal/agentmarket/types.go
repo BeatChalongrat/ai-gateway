@@ -73,8 +73,12 @@ type Install struct {
 	OrgID        string     `json:"-"`
 	PinnedAt     *time.Time `json:"pinned_at,omitempty"`
 	LastOpenedAt *time.Time `json:"last_opened_at,omitempty"`
-	// AM4: the model the person picked for reading documents ("auto" or a curated choice).
+	// AM4: the model the person picked for reading documents ("auto" or a model's id).
 	ModelChoice string `json:"model_choice"`
+	// AM6: what the agent's manifest says of itself — "generic" or
+	// "org-specific", and whose law and practice its rules follow.
+	Scope        string `json:"scope"`
+	Jurisdiction string `json:"jurisdiction"`
 }
 
 // Default is a remembered answer or an install-time setting.
@@ -127,6 +131,57 @@ type Run struct {
 	ThreadID          *uuid.UUID `json:"thread_id,omitempty"`
 	ModelChoice       *string    `json:"model_choice,omitempty"`
 	EvidenceRemovedAt *time.Time `json:"evidence_removed_at,omitempty"`
+	// AM6: CreditsSpent is what the person was charged; CreditsCost is what
+	// the platform paid (the same for a round that delivered its work, more
+	// for one that did not). GateOpen: the round ended on its package's gate
+	// with its draft delivered — recorded by the runner when it ended the run,
+	// never read from the reason. DeliveredAt: when it last delivered its work.
+	CreditsCost float64    `json:"credits_cost"`
+	GateOpen    bool       `json:"gate_open"`
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
+}
+
+// What a run came to (AM6). The database keeps the statuses it always had —
+// a round whose gate did not pass is "failed" with the gate's code, which is
+// what refuses a sign-off and keeps its documents out of the duplicate index.
+// What a person is told, and whether the round is charged, goes by the
+// outcome.
+const (
+	OutcomeCompleted     = "completed"      // succeeded
+	OutcomeCompletedOpen = "completed_open" // the work was delivered as a draft; the package's gate did not pass
+	OutcomeFailed        = "failed"         // nothing was delivered
+	OutcomeCancelled     = "cancelled"
+)
+
+// Outcome is what the run came to: completed, completed_open, failed or
+// cancelled — or, while it has not ended, its status.
+func (r Run) Outcome() string { return OutcomeOf(r.Status, r.GateOpen) }
+
+// OutcomeOf is Outcome for a row read without its Run.
+func OutcomeOf(status string, gateOpen bool) string {
+	switch {
+	case status == RunSucceeded:
+		return OutcomeCompleted
+	case status == RunFailed && gateOpen:
+		return OutcomeCompletedOpen
+	}
+	return status
+}
+
+// Delivered: the round delivered its work, and is charged for it.
+func (r Run) Delivered() bool {
+	o := r.Outcome()
+	return o == OutcomeCompleted || o == OutcomeCompletedOpen
+}
+
+// MarshalJSON sends a run with its outcome: whatever carries a run's status
+// carries what the run came to.
+func (r Run) MarshalJSON() ([]byte, error) {
+	type plain Run
+	return json.Marshal(struct {
+		plain
+		Outcome string `json:"outcome"`
+	}{plain(r), r.Outcome()})
 }
 
 // Step is one row of the run's audit trail.
@@ -264,10 +319,13 @@ type Answer struct {
 	Label  string          `json:"label"`
 	Moment string          `json:"moment"`
 	CardID string          `json:"card_id,omitempty"`
-	Via    string          `json:"via"` // card | text | default | reprompt_default | remembered
+	Via    string          `json:"via"` // card | text | default | reprompt_default | remembered | skip | action
 	// Cosmetic answers change presentation only: they re-render, never recompute.
 	Cosmetic bool   `json:"cosmetic,omitempty"`
 	Code     string `json:"code,omitempty"`
+	// By (AM6) is who gave an answer no card carries: one given with an action
+	// on the round's files (via "action" — a receipt confirmed in this system).
+	By *uuid.UUID `json:"by,omitempty"`
 }
 
 // Assumption is a line the report prints under "ข้อสมมติที่ใช้ในรอบนี้".

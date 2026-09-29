@@ -53,10 +53,9 @@ func (r *Runner) parkForBudget(rc *runCtx, e *errBudgetPark) error {
 	if err := r.Store.Park(bg, rc.run.ID, r.ID, "budget_"+e.st.Exhausted); err != nil {
 		return err
 	}
-	rid := rc.run.ID
-	_, _, _ = r.Store.AddItem(bg, r.Store.Pool, rc.run.InstallID, rc.run.TenantID, rc.run.UserID, &rid, "notice",
-		map[string]any{"text": am.BudgetNotice(e.st), "tone": "warning", "action": "resume_budget", "run_id": rc.run.ID.String(),
-			"reason": "budget_" + e.st.Exhausted, "contact": e.st.Contact}, nil)
+	contact := e.st.Contact
+	_ = r.Store.AddNotice(bg, r.Store.Pool, rc.run, am.Notice{Text: am.BudgetNotice(e.st), Tone: "warning", Action: "resume_budget",
+		Reason: "budget_" + e.st.Exhausted, Contact: &contact})
 	r.syncProgress(bg, rc.run.ID)
 	rc.log.Info("run waits for budget", "which", e.st.Exhausted)
 	return nil
@@ -75,12 +74,8 @@ func (r *Runner) disabledStop(ctx context.Context, run am.Run) bool {
 	}
 	bg := context.Background()
 	_ = r.Store.Finish(bg, run.ID, r.ID, am.RunCancelled, "agent_disabled")
-	text := "ผู้ดูแลปิด agent นี้ไว้ชั่วคราว งานนี้จึงหยุดก่อนเริ่ม"
-	if st.Reason != "" {
-		text += " (" + st.Reason + ")"
-	}
-	text += " — ไฟล์และประวัติของคุณยังอยู่ครบ"
-	_ = r.Store.PostText(bg, run, text, map[string]any{"tone": "warning"})
+	text := am.Text("ผู้ดูแลปิด agent นี้ไว้ชั่วคราว งานนี้จึงหยุดก่อนเริ่ม%s — ไฟล์และประวัติของคุณยังอยู่ครบ", am.Aside(st.Reason))
+	_ = r.Store.PostAgentText(bg, run, am.AgentText{Text: text, Tone: "warning"})
 	r.syncProgress(bg, run.ID)
 	return true
 }
@@ -360,14 +355,26 @@ func (r *Runner) reviewJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	}
 	vb, _ := json.Marshal(versions)
 	_, _ = r.Store.Pool.Exec(ctx, `UPDATE agent_market.run_reviews SET artifact_versions = $2 WHERE id = $1`, p.ReviewID, vb)
+	// the files of the round are its own: their names are readable in what is said of them
+	var names []string
+	for _, a := range latest {
+		names = append(names, a.Name)
+	}
+	var notSigned []am.PersonText
+	for _, s := range so.Skipped {
+		if t := am.LabelFromPackage(s, am.NoText, names...); !t.Empty() {
+			notSigned = append(notSigned, t)
+		}
+	}
 	payload := am.OutputsPayload{RunID: ps.run.ID.String(), Summary: ps.summary, Rendered: true,
-		Model: map[string]any{"model": ps.narrative.Model, "self_hosted": ps.narrative.SelfHosted}, Credits: ps.run.CreditsSpent,
-		Review: &am.OutputsReview{ID: p.ReviewID.String(), Reviewer: p.Reviewer, AtLabel: p.AtLabel, Note: p.Note, Skipped: so.Skipped}}
+		Model: &am.OutputsModel{Model: ps.narrative.Model, SelfHosted: ps.narrative.SelfHosted}, Credits: ps.run.CreditsSpent,
+		Review: &am.OutputsReview{ID: p.ReviewID.String(), Reviewer: p.Reviewer, AtLabel: am.LabelFromPackage(p.AtLabel, am.NoText), Note: p.Note,
+			Skipped: notSigned}}
 	if ps.run.Period != nil {
-		payload.PeriodLabel = *ps.run.Period
+		payload.PeriodLabel = am.Text("%s", am.Period(*ps.run.Period))
 	}
 	if v, ok := ps.summary["period_label"].(string); ok {
-		payload.PeriodLabel = v
+		payload.PeriodLabel = am.LabelFromPackage(v, payload.PeriodLabel)
 	}
 	for _, a := range arts {
 		payload.Artifacts = append(payload.Artifacts, am.OutputArtifact{ID: a.ID.String(), Name: a.Name, Format: a.Format, Size: a.Size,
@@ -376,15 +383,15 @@ func (r *Runner) reviewJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	rid := ps.run.ID
 	bg := context.Background()
 	if len(arts) > 0 {
-		if _, _, err := r.Store.AddItem(bg, r.Store.Pool, ps.run.InstallID, ps.run.TenantID, ps.run.UserID, &rid, "outputs", payload, nil); err != nil {
+		if _, _, err := r.Store.AddItem(bg, r.Store.Pool, ps.run.InstallID, ps.run.TenantID, ps.run.UserID, &rid, payload, nil); err != nil {
 			return r.fail(ctx, job, "outputs", err)
 		}
 	}
-	text := "ไฟล์ที่มีชื่อผู้ตรวจทาน (" + p.Reviewer + ") พร้อมแล้วครับ ตัวเลขเหมือนฉบับเดิมทุกตัว ฉบับก่อนตรวจทานยังเก็บไว้ในประวัติ"
-	if len(so.Skipped) > 0 {
-		text += " · ไฟล์ที่ใส่ชื่อไม่ได้: " + strings.Join(so.Skipped, ", ")
+	text := am.Text("ไฟล์ที่มีชื่อผู้ตรวจทาน (%s) พร้อมแล้วครับ ตัวเลขเหมือนฉบับเดิมทุกตัว ฉบับก่อนตรวจทานยังเก็บไว้ในประวัติ", am.Name(p.Reviewer))
+	if len(notSigned) > 0 {
+		text = am.Text("%s · ไฟล์ที่ใส่ชื่อไม่ได้: %s", am.Words(text), am.Words(am.Join(", ", notSigned...)))
 	}
-	_ = r.Store.PostText(bg, ps.run, text, map[string]any{"review_id": p.ReviewID.String()})
+	_ = r.Store.PostAgentText(bg, ps.run, am.AgentText{Text: text, ReviewID: p.ReviewID.String()})
 	return r.finish(rc, am.RunSucceeded, "")
 }
 

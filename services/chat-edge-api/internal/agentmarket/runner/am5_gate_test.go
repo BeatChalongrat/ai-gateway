@@ -15,6 +15,10 @@ import (
 // are not, the working paper is still delivered (as a draft) and the round is
 // not a success: it ends failed with the gate's code, and what the person
 // reads is the package's sentence, "ยังไม่ลงตัว ต่างกัน X บาท".
+//
+// AM6: nor is it a failure. The database's status is what it was; what the
+// person reads is a finished round that stays open ("เสร็จแล้ว · ยังไม่ลงตัว"),
+// and the gate's line on the progress card reads "open", not "failed".
 
 const notTied = `{"schema":"bank.reconciliation.v1","gate":{"passed":false,"code":"not_tied","difference":"-21435.00",
 "what":"ยังไม่ลงตัว ต่างกัน 21,435.00 บาท","next":"ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร",
@@ -64,12 +68,15 @@ func TestARoundWhoseGateDoesNotPassIsNotASuccess(t *testing.T) {
 	if got.Status != am.RunFailed || got.StatusReason != "not_tied" {
 		t.Fatalf("not a success: %s %s", got.Status, got.StatusReason)
 	}
-	text, f := lastFailure(t, e, run)
-	if f["what"] != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || !strings.HasPrefix(text, "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") {
-		t.Fatalf("it says so: %q %v", text, f)
+	// AM6: said as a finished round that does not tie, not as an error
+	p := lastAgentText(t, e, run)
+	text, _ := p["text"].(string)
+	f, _ := p["completion"].(map[string]any)
+	if f == nil || f["what"] != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || !strings.Contains(text, "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") {
+		t.Fatalf("it says so: %q %v", text, p)
 	}
-	if f["next"] != "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร" || f["can_retry"] != false {
-		t.Fatalf("and what to do next — not to try the same files again: %v", f)
+	if f["next"] != "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร" || p["failure"] != nil || f["can_retry"] != nil {
+		t.Fatalf("and what to do next — not to try the same files again: %v", p)
 	}
 	if s, _ := f["files"].(string); !strings.Contains(s, "ร่าง") {
 		t.Fatalf("the draft is there: %v", f["files"])
@@ -111,10 +118,11 @@ func TestTheProgressCardShowsTheGate(t *testing.T) {
 			line = &p.Steps[i]
 		}
 	}
-	if line == nil || line.Status != "failed" || line.Detail != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || line.Label == "" {
+	// AM6: a gate that was checked and did not pass is a verdict ("open"), not a step that failed
+	if line == nil || line.Status != "open" || line.Detail.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || line.Label.Empty() {
 		t.Fatalf("%+v", p.Steps)
 	}
-	if strings.Contains(line.Label+line.Detail, "not_tied") || strings.Contains(line.Label+line.Detail, "gate") {
+	if said := line.Label.String() + line.Detail.String(); strings.Contains(said, "not_tied") || strings.Contains(said, "gate") {
 		t.Fatalf("in words: %+v", line)
 	}
 	// a run without a gate has no such line
@@ -126,7 +134,7 @@ func TestTheProgressCardShowsTheGate(t *testing.T) {
 	ok := BuildProgress(am.Run{Kind: am.KindRun, Status: am.RunSucceeded}, []am.Step{{Name: "gate", Status: "succeeded",
 		Output: json.RawMessage(`{"passed":true,"code":"tied","what":"ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชีเท่ากัน"}`)}}, now)
 	for _, s := range ok.Steps {
-		if s.Key == "gate" && (s.Status != "done" || !strings.HasPrefix(s.Detail, "ลงตัว")) {
+		if s.Key == "gate" && (s.Status != "done" || !strings.HasPrefix(s.Detail.String(), "ลงตัว")) {
 			t.Fatalf("%+v", s)
 		}
 	}

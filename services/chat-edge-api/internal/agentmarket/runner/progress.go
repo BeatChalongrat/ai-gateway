@@ -3,7 +3,6 @@ package runner
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -33,7 +32,7 @@ func (r *Runner) syncProgress(ctx context.Context, runID uuid.UUID) {
 
 // BuildProgress turns step rows into the progress card's lines.
 func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
-	p := am.Progress{RunID: run.ID.String(), Kind: run.Kind, Status: run.Status, Reason: run.StatusReason,
+	p := am.Progress{RunID: run.ID.String(), Kind: run.Kind, Status: run.Status, Outcome: run.Outcome(), Reason: run.StatusReason,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt, AwaitingMS: run.AwaitingMS}
 	if run.StartedAt != nil {
 		end := now
@@ -80,9 +79,12 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 			latest[s.Name] = s
 		}
 	}
-	add := func(key, label, st, detail string) {
+	// every line is built here from the step rows: a label of the platform's,
+	// and a detail made of counts, names and the package's own words
+	add := func(key string, label am.PersonText, st string, detail am.PersonText) {
 		p.Steps = append(p.Steps, am.ProgressStep{Key: key, Label: label, Status: st, Detail: detail})
 	}
+	none := am.NoText
 	if len(names) > 0 {
 		st := "done"
 		if parsing > 0 {
@@ -91,81 +93,81 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 		if parseFailed > 0 {
 			st = "failed"
 		}
-		add("parse", fmt.Sprintf("อ่านไฟล์ %d ไฟล์", len(names)), st, strings.Join(names, ", "))
+		add("parse", am.Text("อ่านไฟล์ %s ไฟล์", am.Count(len(names))), st, am.Text("%s", am.FileNames(names)))
 	} else {
-		add("parse", "อ่านไฟล์", "pending", "")
+		add("parse", am.Text("อ่านไฟล์"), "pending", none)
 	}
 	if s, ok := latest["preflight"]; ok {
-		detail := ""
+		detail := none
 		var o struct {
 			Stats map[string]any `json:"stats"`
 		}
 		if json.Unmarshal(s.Output, &o) == nil && o.Stats != nil {
 			if n := numberOf(o.Stats["rows"]); n > 0 {
-				detail = thousands(n) + " แถว"
+				detail = am.Text("%s แถว", am.Count(int(n)))
 				if d, c := strOf(o.Stats["debit_total"]), strOf(o.Stats["credit_total"]); d != "" && d == c {
-					detail += " · เดบิตเครดิตสมดุล"
+					detail = am.Text("%s แถว · เดบิตเครดิตสมดุล", am.Count(int(n)))
 				}
 			}
 		}
-		add("preflight", "ตรวจความครบถ้วน", status(s.Status), detail)
+		add("preflight", am.Text("ตรวจความครบถ้วน"), status(s.Status), detail)
 	} else {
-		add("preflight", "ตรวจความครบถ้วน", "pending", "")
+		add("preflight", am.Text("ตรวจความครบถ้วน"), "pending", none)
 	}
 	for _, s := range clar {
-		label := "ถามคุณก่อนคำนวณ"
+		label := am.Text("ถามคุณก่อนคำนวณ")
 		if strings.Contains(s.Name, "postcompute") {
-			label = "ถามเรื่องที่ตัวเลขชี้ให้เห็น"
+			label = am.Text("ถามเรื่องที่ตัวเลขชี้ให้เห็น")
 		}
 		st := status(s.Status)
-		detail := ""
+		detail := none
 		if st == "done" {
-			detail = "ได้คำตอบแล้ว"
+			detail = am.Text("ได้คำตอบแล้ว")
 			if s.DurationMS != nil {
-				detail += " · รอ " + humanMS(*s.DurationMS)
+				detail = am.Text("ได้คำตอบแล้ว · รอ %s", am.Words(humanMS(*s.DurationMS)))
 			}
 		} else if st == "waiting" {
-			detail = "รอคำตอบของคุณ"
+			detail = am.Text("รอคำตอบของคุณ")
 		}
 		add(s.Name, label, st, detail)
 	}
 	if s, ok := latest["compute"]; ok {
-		add("compute", "คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)", status(s.Status), "")
+		add("compute", am.Text("คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)"), status(s.Status), none)
 	} else {
-		add("compute", "คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)", "pending", "")
+		add("compute", am.Text("คำนวณตัวเลขด้วยสคริปต์ (ไม่ใช้โมเดล)"), "pending", none)
 	}
 	if s, ok := latest["postcompute"]; ok {
-		detail := ""
+		detail := none
 		if c, ok := latest["compute"]; ok {
 			var o struct {
 				Summary map[string]any `json:"summary"`
 			}
 			if json.Unmarshal(c.Output, &o) == nil && o.Summary != nil {
-				detail = fmt.Sprintf("พบ %d รายการ", numberOf(o.Summary["exceptions"]))
+				detail = am.Text("พบ %s รายการ", am.Count(int(numberOf(o.Summary["exceptions"]))))
 			}
 		}
-		add("postcompute", "ตรวจกฎหารายการผิดปกติ", status(s.Status), detail)
+		add("postcompute", am.Text("ตรวจกฎหารายการผิดปกติ"), status(s.Status), detail)
 	} else {
-		add("postcompute", "ตรวจกฎหารายการผิดปกติ", "pending", "")
+		add("postcompute", am.Text("ตรวจกฎหารายการผิดปกติ"), "pending", none)
 	}
 	if s, ok := latest["narrative"]; ok {
 		var o narrativeOut
 		_ = json.Unmarshal(s.Output, &o)
-		detail := ""
-		if o.Model != "" {
-			detail = o.Model
-			if o.SelfHosted {
-				detail += " ในองค์กร"
-			}
-		} else if s.Status == "succeeded" {
-			detail = "เขียนจากกฎของ agent"
+		detail := none
+		switch {
+		case o.Model != "" && o.SelfHosted:
+			detail = am.Text("โมเดล %s ในองค์กร", am.ModelName(o.Model))
+		case o.Model != "":
+			detail = am.Text("โมเดล %s", am.ModelName(o.Model))
+		case s.Status == "succeeded":
+			detail = am.Text("เขียนจากกฎของ agent")
 		}
-		add("narrative", "เขียนคำอธิบาย", status(s.Status), detail)
+		add("narrative", am.Text("เขียนคำอธิบาย"), status(s.Status), detail)
 	} else {
-		add("narrative", "เขียนคำอธิบาย", "pending", "")
+		add("narrative", am.Text("เขียนคำอธิบาย"), "pending", none)
 	}
 	if s, ok := latest["render"]; ok {
-		detail := ""
+		detail := none
 		var o renderOut
 		if json.Unmarshal(s.Output, &o) == nil {
 			var th struct {
@@ -173,28 +175,35 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 			}
 			_ = json.Unmarshal(o.Theme, &th)
 			if th.Name != "" {
-				detail = "ธีม “" + th.Name + "”"
+				detail = am.Text("ธีม “%s”", am.Typed(th.Name, 60))
 			}
 		}
-		add("render", "สร้างไฟล์ผลลัพธ์", status(s.Status), detail)
+		add("render", am.Text("สร้างไฟล์ผลลัพธ์"), status(s.Status), detail)
 		q := qualitySummary(o)
 		if s.Status == "failed" {
 			// AM5: which line failed is said here; why is said by the round's
 			// message (in words) and by the run page (in full).
-			add("quality", "ตรวจคุณภาพเอกสาร", "failed", "")
-		} else if q != "" {
-			add("quality", "ตรวจคุณภาพเอกสาร", status(s.Status), q)
+			add("quality", am.Text("ตรวจคุณภาพเอกสาร"), "failed", none)
+		} else if !q.Empty() {
+			add("quality", am.Text("ตรวจคุณภาพเอกสาร"), status(s.Status), q)
 		}
 	} else {
-		add("render", "สร้างไฟล์ผลลัพธ์", "pending", "")
+		add("render", am.Text("สร้างไฟล์ผลลัพธ์"), "pending", none)
 	}
-	// AM5: the package's own verdict on the round, in its words.
+	// AM5: the package's own verdict on the round, in its words. AM6: a gate
+	// that was checked and did not pass is a verdict, not a step that failed —
+	// its line reads "open".
 	if s, ok := latest["gate"]; ok {
 		var g gateView
 		_ = json.Unmarshal(s.Output, &g)
-		add("gate", "ตรวจว่างานของรอบนี้ครบตามเกณฑ์ของ agent", status(s.Status), am.ForPerson(g.What))
+		st := status(s.Status)
+		if st == "failed" {
+			st = "open"
+		}
+		what, _ := g.words()
+		add("gate", am.Text("ตรวจว่างานของรอบนี้ครบตามเกณฑ์ของ agent"), st, what)
 	}
-	if run.Status == am.RunFailed {
+	if run.Status == am.RunFailed && !run.GateOpen {
 		for i := range p.Steps {
 			if p.Steps[i].Status == "running" {
 				p.Steps[i].Status = "failed"
@@ -204,7 +213,7 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 	return p
 }
 
-func qualitySummary(o renderOut) string {
+func qualitySummary(o renderOut) am.PersonText {
 	pass, total := 0, 0
 	for _, a := range o.Artifacts {
 		var q struct {
@@ -221,20 +230,20 @@ func qualitySummary(o renderOut) string {
 		}
 	}
 	if total == 0 {
-		return ""
+		return am.NoText
 	}
-	return fmt.Sprintf("ผ่าน %d จาก %d ข้อ", pass, total)
+	return am.Text("ผ่าน %s จาก %s ข้อ", am.Count(pass), am.Count(total))
 }
 
-func humanMS(ms int64) string {
+func humanMS(ms int64) am.PersonText {
 	d := time.Duration(ms) * time.Millisecond
 	switch {
 	case d < time.Minute:
-		return fmt.Sprintf("%d วินาที", int(d.Seconds()))
+		return am.Text("%s วินาที", am.Count(int(d.Seconds())))
 	case d < time.Hour:
-		return fmt.Sprintf("%d นาที", int(d.Minutes()))
+		return am.Text("%s นาที", am.Count(int(d.Minutes())))
 	case d < 48*time.Hour:
-		return fmt.Sprintf("%d ชั่วโมง", int(d.Hours()))
+		return am.Text("%s ชั่วโมง", am.Count(int(d.Hours())))
 	}
-	return fmt.Sprintf("%d วัน", int(d.Hours()/24))
+	return am.Text("%s วัน", am.Count(int(d.Hours()/24)))
 }

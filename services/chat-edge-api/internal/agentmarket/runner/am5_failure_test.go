@@ -110,8 +110,7 @@ func (e *failEnv) round(kind string, withFile bool) am.Run {
 		}
 	}
 	rid := run.ID
-	if _, _, err := e.store.AddItem(ctx, e.store.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "progress",
-		map[string]any{"run_id": run.ID.String(), "kind": kind, "status": "queued"}, nil); err != nil {
+	if _, _, err := e.store.AddItem(ctx, e.store.Pool, run.InstallID, run.TenantID, run.UserID, &rid, am.QueuedProgress(run), nil); err != nil {
 		e.t.Fatal(err)
 	}
 	claimed, err := e.store.ClaimRun(ctx, e.r.ID, time.Minute)
@@ -249,20 +248,21 @@ func TestAFailedRoundSaysWhatItChargedAndThatTheFilesAreKept(t *testing.T) {
 	free := e.round(am.KindRun, true)
 	_ = e.r.fail(ctx, free, "parse_failed", errors.New(rawErrors[0]))
 	_, f := lastFailure(t, e, free)
-	if f["charged"] != "รอบนี้ไม่ได้คิดเครดิต" || f["credits"].(float64) != 0 {
+	if f["charged"] != "รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้" || f["credits"].(float64) != 0 {
 		t.Fatalf("nothing was charged: %v", f)
 	}
 	if f["can_retry"] != true || !strings.Contains(f["files"].(string), "ยังอยู่ครบ") || !strings.Contains(f["files"].(string), "7 วัน") {
 		t.Fatalf("the files are safe for 7 days and the round can be tried again with them: %v", f)
 	}
-	// two steps finished and were charged before the third failed
+	// AM6: two steps finished before the third failed — the round delivered nothing, so it is charged
+	// nothing, and says so (AM5 charged the finished steps: 12.5 credits)
 	paid := e.round(am.KindRun, true)
 	_ = e.store.Charge(ctx, paid.InstallID, paid.ID, "k-parse", 1, "", nil)
 	_ = e.store.Charge(ctx, paid.InstallID, paid.ID, "k-compute", 11.5, "", nil)
 	_ = e.r.fail(ctx, paid, "render_failed", errors.New(rawErrors[0]))
 	_, f = lastFailure(t, e, paid)
-	if f["credits"].(float64) != 12.5 || !strings.Contains(f["charged"].(string), "12.5 เครดิต") {
-		t.Fatalf("what the finished steps cost is said: %v", f)
+	if f["credits"].(float64) != 0 || f["charged"] != "รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้" {
+		t.Fatalf("a round that delivered nothing is not charged: %v", f)
 	}
 	// a round without a file of the person's (a self-test) offers no "same files"
 	st := e.round(am.KindSelfTest, false)
@@ -357,30 +357,36 @@ func TestANarrativeWithANullListIsAnEmptyList(t *testing.T) {
 }
 
 // No call that writes to the thread, a progress line or a quality check may
-// be handed an error's text: the rule is checked in the source, so a new
-// failure path cannot bring the leak back.
+// be handed an error's text. AM5 checked it in the source, line by line.
+// AM6: it does not compile — every writer takes an am.PersonText
+// (TestThreadWritersTakeTextBuiltForAPerson, in the package that owns the
+// type) — and what is left to check in the source is the one way a string
+// becomes a PersonText: a fact, or a package's or a model's sentence. None of
+// them may be handed an error.
 func TestNoErrorTextIsWrittenWhereAPersonReads(t *testing.T) {
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	writes := regexp.MustCompile(`PostText\(|PostNotice\(|\badd\("|Detail:|\["detail"\]|Label:|failureText\(`)
-	raw := regexp.MustCompile(`\.Error\(\)|\bs\.Error\b|\berr\)`)
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
+	for _, dir := range []string{".", ".."} {
+		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, line := range strings.Split(string(src), "\n") {
-			code := line
-			if j := strings.Index(code, "//"); j >= 0 {
-				code = code[:j]
+		makes := regexp.MustCompile(`\b(?:am\.)?(?:Text|Join|Name|Typed|Theirs|Aside|FileName|FileNames|Email|ModelName|Version|Said|FromPackage|FromModel)\(`)
+		raw := regexp.MustCompile(`\.Error\(\)|\bs\.Error\b|\berr\)|\berr,`)
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
 			}
-			if writes.MatchString(code) && raw.MatchString(code) {
-				t.Errorf("%s:%d writes an error's text where a person reads: %s", f, i+1, strings.TrimSpace(line))
+			src, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, line := range strings.Split(string(src), "\n") {
+				code := line
+				if j := strings.Index(code, "//"); j >= 0 {
+					code = code[:j]
+				}
+				if makes.MatchString(code) && raw.MatchString(code) {
+					t.Errorf("%s:%d makes a text for a person out of an error: %s", f, i+1, strings.TrimSpace(line))
+				}
 			}
 		}
 	}

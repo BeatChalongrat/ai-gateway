@@ -129,10 +129,9 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		ContactName        *string         `json:"contact_name"`
 		ContactEmail       *string         `json:"contact_email"`
 		// AM4
-		DocumentsMayLeave *bool         `json:"documents_may_leave"`
-		AgentModels       *[]ModelEntry `json:"agent_models"`
-		RetentionYears    *int          `json:"retention_years"`
-		StorageWarnMB     *int          `json:"storage_warn_mb"`
+		DocumentsMayLeave *bool `json:"documents_may_leave"`
+		RetentionYears    *int  `json:"retention_years"`
+		StorageWarnMB     *int  `json:"storage_warn_mb"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&body); err != nil {
 		badRequest(w, "BAD_JSON")
@@ -203,27 +202,6 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 	if body.DocumentsMayLeave != nil {
 		o.DocumentsMayLeave = *body.DocumentsMayLeave
 	}
-	if body.AgentModels != nil {
-		list := []ModelEntry{}
-		seen := map[string]bool{}
-		for _, e := range *body.AgentModels {
-			e.Model = strings.TrimSpace(e.Model)
-			if e.Model == "" || seen[e.Model] {
-				continue
-			}
-			if e.Outcome != OutcomeFast && e.Outcome != OutcomeAccurate {
-				say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ผลลัพธ์ของโมเดลต้องเป็น “เร็วและประหยัด” หรือ “แม่นที่สุด”")
-				return
-			}
-			seen[e.Model] = true
-			list = append(list, e)
-		}
-		if len(list) > 6 {
-			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "รายการโมเดลให้เลือกได้ไม่เกิน 6 ตัว — เลือกเฉพาะตัวที่คนในองค์กรต้องใช้จริง")
-			return
-		}
-		o.AgentModels = list
-	}
 	if body.RetentionYears != nil {
 		if *body.RetentionYears < 1 || *body.RetentionYears > 30 {
 			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี")
@@ -238,12 +216,11 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		}
 		o.StorageWarnMB = *body.StorageWarnMB
 	}
-	models, _ := json.Marshal(o.AgentModels)
 	if _, err := a.store.Pool.Exec(ctx, `UPDATE agent_market.org_settings SET name = $2, access = $3, domains = $4,
 		user_monthly_credits = $5, contact_name = $6, contact_email = $7, updated_by = $8, updated_at = now(),
-		documents_may_leave = $9, agent_models = $10, retention_years = $11, storage_warn_mb = $12 WHERE org_id = $1`,
+		documents_may_leave = $9, retention_years = $10, storage_warn_mb = $11 WHERE org_id = $1`,
 		acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email),
-		o.DocumentsMayLeave, models, o.RetentionYears, o.StorageWarnMB); err != nil {
+		o.DocumentsMayLeave, o.RetentionYears, o.StorageWarnMB); err != nil {
 		a.fail(w, err, "member")
 		return
 	}
@@ -465,19 +442,24 @@ func (a *API) adminDeleteDepartment(w http.ResponseWriter, r *http.Request) {
 
 // SpendRow is one person or one agent over the window.
 type SpendRow struct {
-	Key        string     `json:"key"` // user id or slug
-	Email      string     `json:"email,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	Department string     `json:"department,omitempty"`
-	Runs       int64      `json:"runs"`
-	Succeeded  int64      `json:"succeeded"`
-	Failed     int64      `json:"failed"`
-	Waiting    int64      `json:"waiting"`
-	Users      int64      `json:"users,omitempty"`
-	Credits    float64    `json:"credits"`
-	MonthSpent float64    `json:"month_spent"`
-	Limit      *float64   `json:"monthly_limit,omitempty"`
-	LastRunAt  *time.Time `json:"last_run_at"`
+	Key        string `json:"key"` // user id or slug
+	Email      string `json:"email,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Department string `json:"department,omitempty"`
+	Runs       int64  `json:"runs"`
+	Succeeded  int64  `json:"succeeded"`
+	// AM6: CompletedOpen are the rounds that delivered their draft while the
+	// agent's gate did not pass; Failed the ones that delivered nothing.
+	CompletedOpen int64   `json:"completed_open"`
+	Failed        int64   `json:"failed"`
+	Waiting       int64   `json:"waiting"`
+	Users         int64   `json:"users,omitempty"`
+	Credits       float64 `json:"credits"` // what was charged
+	// CostNotCharged (AM6): what the platform paid for rounds that delivered nothing.
+	CostNotCharged float64    `json:"cost_not_charged"`
+	MonthSpent     float64    `json:"month_spent"`
+	Limit          *float64   `json:"monthly_limit,omitempty"`
+	LastRunAt      *time.Time `json:"last_run_at"`
 }
 
 func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
@@ -503,7 +485,8 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 	// runs (the person's work: kind run; the catalog's samples are counted apart)
 	rows, err := a.store.Pool.Query(ctx, `
 		SELECT i.user_id::text, i.slug, count(*),
-			count(*) FILTER (WHERE r.status = 'succeeded'), count(*) FILTER (WHERE r.status = 'failed'),
+			count(*) FILTER (WHERE r.status = 'succeeded'), count(*) FILTER (WHERE r.status = 'failed' AND NOT r.gate_open),
+			count(*) FILTER (WHERE r.status = 'failed' AND r.gate_open),
 			count(*) FILTER (WHERE r.status = 'awaiting_input'), max(r.created_at)
 		FROM agent_market.agent_runs r JOIN agent_market.agent_installs i ON i.id = r.install_id
 		WHERE i.org_id = $1 AND i.status <> 'catalog' AND r.kind = 'run' AND r.created_at >= $2
@@ -515,9 +498,9 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 	userSlugs := map[string]map[string]bool{}
 	for rows.Next() {
 		var uid, slug string
-		var n, ok, fail, wait int64
+		var n, ok, fail, open, wait int64
 		var last *time.Time
-		if err := rows.Scan(&uid, &slug, &n, &ok, &fail, &wait, &last); err != nil {
+		if err := rows.Scan(&uid, &slug, &n, &ok, &fail, &open, &wait, &last); err != nil {
 			rows.Close()
 			a.fail(w, err, "spend")
 			return
@@ -526,6 +509,7 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 			x.Runs += n
 			x.Succeeded += ok
 			x.Failed += fail
+			x.CompletedOpen += open
 			x.Waiting += wait
 			if last != nil && (x.LastRunAt == nil || last.After(*x.LastRunAt)) {
 				l := *last
@@ -539,11 +523,14 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	// credits: every job (a self-test, a re-render and a sign-off cost too),
-	// over the window and over this (Bangkok) month
+	// over the window and over this (Bangkok) month. AM6: what was charged is
+	// the rows that are not voided; the voided ones are what the platform paid
+	// for rounds that delivered nothing, shown apart.
 	rows, err = a.store.Pool.Query(ctx, `
 		SELECT i.user_id::text, i.slug,
-			COALESCE(sum(l.credits) FILTER (WHERE l.created_at >= $2), 0)::float8,
-			COALESCE(sum(l.credits) FILTER (WHERE l.created_at >= `+monthStart+`), 0)::float8
+			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NULL AND l.created_at >= $2), 0)::float8,
+			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NULL AND l.created_at >= `+monthStart+`), 0)::float8,
+			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NOT NULL AND l.created_at >= $2), 0)::float8
 		FROM agent_market.agent_budget_ledger l JOIN agent_market.agent_installs i ON i.id = l.install_id
 		WHERE i.org_id = $1 AND i.status <> 'catalog' AND l.created_at >= LEAST($2, `+monthStart+`)
 		GROUP BY 1, 2`, org, since)
@@ -553,8 +540,8 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 	}
 	for rows.Next() {
 		var uid, slug string
-		var credits, month float64
-		if err := rows.Scan(&uid, &slug, &credits, &month); err != nil {
+		var credits, month, free float64
+		if err := rows.Scan(&uid, &slug, &credits, &month, &free); err != nil {
 			rows.Close()
 			a.fail(w, err, "spend")
 			return
@@ -562,6 +549,7 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 		for _, x := range []*SpendRow{get(users, uid), get(agents, slug)} {
 			x.Credits += credits
 			x.MonthSpent += month
+			x.CostNotCharged += free
 		}
 	}
 	rows.Close()
@@ -611,12 +599,13 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 		})
 		return out
 	}
-	var total float64
+	var total, free float64
 	for _, x := range users {
 		total += x.Credits
+		free += x.CostNotCharged
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"days": days, "since": since, "by_user": flat(users), "by_agent": flat(agents),
-		"total_credits": total, "catalog_samples_credits": samples,
+		"total_credits": total, "total_cost_not_charged": free, "catalog_samples_credits": samples,
 		"pricing": map[string]float64{"credits_per_usd": a.cfg.CreditsPerUSD, "thb_per_usd": a.cfg.THBPerUSD}})
 }
 

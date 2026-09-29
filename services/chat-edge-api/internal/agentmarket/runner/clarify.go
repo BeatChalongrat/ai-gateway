@@ -135,24 +135,23 @@ func (rc *runCtx) createCard(ctx context.Context, moment string, plan *am.CardPl
 	}
 	intro := cardIntro(moment, plan, pre, len(plan.Questions))
 	rid := rc.run.ID
-	if intro != "" {
-		if _, _, err := st.AddItem(ctx, st.Pool, rc.run.InstallID, rc.run.TenantID, rc.run.UserID, &rid, "agent_text",
-			map[string]any{"text": intro, "run_id": rid.String()}, nil); err != nil {
+	if !intro.Empty() {
+		if err := st.PostText(ctx, rc.run, intro); err != nil {
 			return err
 		}
 	}
-	_, _, err = st.AddItem(ctx, st.Pool, rc.run.InstallID, rc.run.TenantID, rc.run.UserID, &rid, "card",
-		am.CardItemPayload(card, "", cardNote(plan)), nil)
+	_, _, err = st.AddItem(ctx, st.Pool, rc.run.InstallID, rc.run.TenantID, rc.run.UserID, &rid,
+		am.CardItemPayload(card, am.NoText, cardNote(plan)), nil)
 	return err
 }
 
 // cardNote is the line under a card. A blocking card has none: the web card
 // itself says a rememberable answer becomes next round's default.
-func cardNote(plan *am.CardPlan) string {
+func cardNote(plan *am.CardPlan) am.PersonText {
 	if plan.Blocking {
-		return ""
+		return am.NoText
 	}
-	return "ผมใช้ค่าตั้งต้นไปก่อนแล้ว ตอบภายหลังได้ จะสร้างไฟล์ใหม่ให้โดยไม่คำนวณใหม่"
+	return am.Text("ผมใช้ค่าตั้งต้นไปก่อนแล้ว ตอบภายหลังได้ จะสร้างไฟล์ใหม่ให้โดยไม่คำนวณใหม่")
 }
 
 func keysOf(qs []am.Question) []string {
@@ -163,26 +162,25 @@ func keysOf(qs []am.Question) []string {
 	return k
 }
 
-func cardIntro(moment string, plan *am.CardPlan, pre preflightOut, n int) string {
+func cardIntro(moment string, plan *am.CardPlan, pre preflightOut, n int) am.PersonText {
 	if plan.Kind == "request_files" {
-		return "ยังขาดไฟล์ที่ต้องใช้ครับ ลากไฟล์มาวางในช่องด้านล่าง หรือในแชทได้เลย"
+		return am.Text("ยังขาดไฟล์ที่ต้องใช้ครับ ลากไฟล์มาวางในช่องด้านล่าง หรือในแชทได้เลย")
 	}
 	if !plan.Blocking {
-		return fmt.Sprintf("มี %d เรื่องเล็ก ๆ เรื่องการแสดงผล ผมใช้ค่าตั้งต้นไปก่อน ตอบภายหลังได้ครับ", n)
+		return am.Text("มี %s เรื่องเล็ก ๆ เรื่องการแสดงผล ผมใช้ค่าตั้งต้นไปก่อน ตอบภายหลังได้ครับ", am.Count(n))
 	}
 	if moment == "postcompute" {
-		return fmt.Sprintf("คำนวณเสร็จแล้ว แต่ตัวเลขชี้ให้เห็น %d เรื่องที่ต้องให้คุณตัดสินก่อนทำรายงานครับ", n)
+		return am.Text("คำนวณเสร็จแล้ว แต่ตัวเลขชี้ให้เห็น %s เรื่องที่ต้องให้คุณตัดสินก่อนทำรายงานครับ", am.Count(n))
 	}
+	ask := am.Text("มี %s เรื่องที่ผมไม่แน่ใจ ขอถามก่อนเริ่มคำนวณครับ", am.Count(n))
 	rows := numberOf(pre.Stats["rows"])
-	intro := ""
-	if rows > 0 {
-		intro = fmt.Sprintf("อ่านครบแล้ว %s รายการ", thousands(rows))
-		if d, c := strOf(pre.Stats["debit_total"]), strOf(pre.Stats["credit_total"]); d != "" && d == c {
-			intro += " เดบิตกับเครดิตสมดุลดี"
-		}
-		intro += " "
+	if rows <= 0 {
+		return ask
 	}
-	return intro + fmt.Sprintf("มี %d เรื่องที่ผมไม่แน่ใจ ขอถามก่อนเริ่มคำนวณครับ", n)
+	if d, c := strOf(pre.Stats["debit_total"]), strOf(pre.Stats["credit_total"]); d != "" && d == c {
+		return am.Text("อ่านครบแล้ว %s รายการ เดบิตกับเครดิตสมดุลดี %s", am.Count(int(rows)), am.Words(ask))
+	}
+	return am.Text("อ่านครบแล้ว %s รายการ %s", am.Count(int(rows)), am.Words(ask))
 }
 
 func numberOf(v any) int64 {
@@ -308,12 +306,12 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 				}
 				c.Status, c.Attempts = "open", c.Attempts+1
 				_ = st.SyncCardItem(ctx, st.Pool, c)
-				labels := []string{}
+				labels := []am.PersonText{}
 				for _, q := range missing {
-					labels = append(labels, "“"+q.Header+"”")
+					labels = append(labels, am.Text("“%s”", am.Said(q.Header, am.Text("คำถามนี้"))))
 				}
-				_ = st.PostText(ctx, rc.run, fmt.Sprintf("ขอโทษครับ ผมยังจับไม่ได้ว่า “%s” ตอบเรื่อง %s ว่าอย่างไร ช่วยกดเลือกจากปุ่มในการ์ดด้านบนได้ไหมครับ (ถามซ้ำครั้งที่ %d จาก %d)",
-					trim(text, 80), strings.Join(labels, ", "), c.Attempts, am.MaxReprompts), nil)
+				_ = st.PostText(ctx, rc.run, am.Text("ขอโทษครับ ผมยังจับไม่ได้ว่า “%s” ตอบเรื่อง %s ว่าอย่างไร ช่วยกดเลือกจากปุ่มในการ์ดด้านบนได้ไหมครับ (ถามซ้ำครั้งที่ %s จาก %s)",
+					am.Typed(text, 80), am.Words(am.Join(", ", labels...)), am.Count(c.Attempts), am.Count(am.MaxReprompts)))
 				parked = true
 				continue
 			}
@@ -346,7 +344,7 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 			return false, err
 		}
 		if n, err := st.RememberAnswers(ctx, st.Pool, rc.run, c.ID, qs, answers); err == nil && n > 0 {
-			_ = st.PostNotice(ctx, rc.run, "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้", "defaults")
+			_ = st.PostNotice(ctx, rc.run, am.Text("จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้"), "defaults")
 		}
 	}
 	if err := rc.settleClarifySteps(ctx); err != nil {

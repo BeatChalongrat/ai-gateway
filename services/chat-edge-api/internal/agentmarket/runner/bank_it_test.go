@@ -77,7 +77,7 @@ func (e *itEnv) bankRun(files ...string) am.Run {
 		}
 	}
 	rid := run.ID
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "progress", am.Progress{RunID: run.ID.String()}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, am.Progress{RunID: run.ID.String()}, nil)
 	return run
 }
 
@@ -203,12 +203,17 @@ func TestAReconciliationThatDoesNotTieIsNotCalledASuccess(t *testing.T) {
 	if got.Status != am.RunFailed || got.StatusReason != "not_tied" {
 		t.Fatalf("%s %s", got.Status, got.StatusReason)
 	}
-	text, f := lastFailure(t, &failEnv{t: t, store: e.store, install: e.install}, got)
-	if !strings.HasPrefix(text, "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") || f["what"] != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" {
-		t.Fatalf("it says so: %q %v", text, f)
+	// AM6: it finished open — its work delivered, charged like any other — and says so, not as an error
+	if got.Outcome() != am.OutcomeCompletedOpen || !got.GateOpen {
+		t.Fatalf("outcome %s gate_open %v", got.Outcome(), got.GateOpen)
 	}
-	if f["can_retry"] != false || !strings.Contains(f["next"].(string), "รายการเดินบัญชีฉบับเต็ม") {
-		t.Fatalf("and what to do next: %v", f)
+	p := lastAgentText(t, &failEnv{t: t, store: e.store, install: e.install}, got)
+	c, _ := p["completion"].(map[string]any)
+	if p["tone"] != "open" || p["failure"] != nil || c == nil || c["title"] != "เสร็จแล้ว · ยังไม่ลงตัว" || c["what"] != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" {
+		t.Fatalf("it says so: %v", p)
+	}
+	if !strings.Contains(c["next"].(string), "รายการเดินบัญชีฉบับเต็ม") {
+		t.Fatalf("and what to do next: %v", c)
 	}
 	// the working paper is delivered, as a draft
 	outs := e.outputsOf(run.ID)

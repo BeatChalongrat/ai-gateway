@@ -554,14 +554,15 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 	out := am.OutputsPayload{RunID: artifactRun.String(), Summary: summary, Rendered: rerender,
 		Model: rc.modelLine(narrative)}
 	if run.Period != nil {
-		out.PeriodLabel = *run.Period
+		out.PeriodLabel = am.Text("%s", am.Period(*run.Period))
 	}
 	if v, ok := summary["period_label"].(string); ok {
-		out.PeriodLabel = v
+		out.PeriodLabel = am.LabelFromPackage(v, out.PeriodLabel)
 	}
 	out.Credits = run.CreditsSpent
 	if gate != nil {
-		out.Gate = &am.OutputsGate{Passed: gate.Passed, What: am.ForPerson(gate.What), Next: am.ForPerson(gate.Next)}
+		what, next := gate.words()
+		out.Gate = &am.OutputsGate{Passed: gate.Passed, What: what, Next: next}
 		out.Draft = !gate.Passed
 	}
 	sort.Slice(arts, func(i, j int) bool { return formatOrder(arts[i].Format) < formatOrder(arts[j].Format) })
@@ -570,51 +571,52 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 			Version: a.Version, Quality: a.Validation})
 	}
 	rid := artifactRun
-	if _, _, err := st.AddItem(ctx, st.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "outputs", out, nil); err != nil {
+	if _, _, err := st.AddItem(ctx, st.Pool, run.InstallID, run.TenantID, run.UserID, &rid, out, nil); err != nil {
 		return err
 	}
 	if out.Draft {
-		// the round is not a success: the message that follows says so, in the gate's words
+		// the gate did not pass: the message that follows says what the round came to, in the gate's words
 		return nil
 	}
-	text := "เสร็จแล้วครับ"
-	if gate != nil && out.Gate.What != "" {
-		text += " " + out.Gate.What
+	text := am.Text("เสร็จแล้วครับ")
+	if gate != nil && !out.Gate.What.Empty() {
+		text = am.Text("เสร็จแล้วครับ %s", am.Words(out.Gate.What))
 	}
-	if rc.pkg.Manifest.Narrative == "rules" {
-		text += " " + documentsNote(summary)
-		return st.PostText(ctx, run, text, nil)
+	switch {
+	case rc.pkg.Manifest.Narrative == "rules":
+		text = am.Text("%s %s", am.Words(text), am.Words(documentsNote(summary)))
+	case rerender:
+		text = am.Text("สร้างไฟล์เพิ่มจากตัวเลขชุดเดิมแล้วครับ ไม่ได้คำนวณใหม่ ตัวเลขและที่มาตรงกับรายงานเดิมทุกตัว")
+	case narrative.Model == "":
+		text = am.Text("%s คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม", am.Words(text))
+	case narrative.SelfHosted:
+		text = am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s ที่รันในองค์กร", am.Words(text), am.ModelName(narrative.Model))
+	default:
+		text = am.Text("%s ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย %s (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)",
+			am.Words(text), am.ModelName(narrative.Model))
 	}
-	if rerender {
-		text = "สร้างไฟล์เพิ่มจากตัวเลขชุดเดิมแล้วครับ ไม่ได้คำนวณใหม่ ตัวเลขและที่มาตรงกับรายงานเดิมทุกตัว"
-	} else if narrative.Model == "" {
-		text += " คำอธิบายในรอบนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ ตัวเลขทุกตัวยังมาจากสคริปต์เหมือนเดิม"
-	} else if narrative.SelfHosted {
-		text += " ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย " + narrative.Model + " ที่รันในองค์กร"
-	} else {
-		text += " ตัวเลขทุกตัวมาจากสคริปต์ คำอธิบายเขียนด้วย " + narrative.Model + " (ผู้ให้บริการภายนอก เห็นเฉพาะตารางที่คำนวณแล้ว)"
-	}
-	return st.PostText(ctx, run, text, nil)
+	return st.PostText(ctx, run, text)
 }
 
 // modelLine is what the outputs card always says about models (AM4): which
 // model saw the documents (or that none did), what the person chose, and —
 // plainly — when another model was used instead.
-func (rc *runCtx) modelLine(narrative narrativeOut) map[string]any {
-	line := map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted, "choice": rc.choice(),
-		"uses": am.ModelUse(rc.pkg.Manifest)}
-	switch am.ModelUse(rc.pkg.Manifest) {
+func (rc *runCtx) modelLine(narrative narrativeOut) *am.OutputsModel {
+	line := &am.OutputsModel{Model: narrative.Model, SelfHosted: narrative.SelfHosted, Choice: rc.choice(),
+		Uses: am.ModelUse(rc.pkg.Manifest)}
+	flag := func(v bool) *bool { return &v }
+	switch line.Uses {
 	case "vision":
 		used, notChosen := rc.visionModel()
-		line["chosen_model"] = rc.chosenModel()
-		line["vision_model"] = used
-		line["vision_self_hosted"] = used != "" && rc.r.Model.IsSelfHosted(used)
-		line["not_chosen"] = notChosen
+		line.ChosenModel = rc.chosenModel()
+		line.VisionModel = used
+		line.VisionSelfHosted = flag(used != "" && rc.r.Model.IsSelfHosted(used))
+		line.NotChosen = flag(notChosen)
 	case "text":
 		chosen := rc.chosenModel()
-		line["chosen_model"] = chosen
-		line["not_chosen"] = narrative.Model != "" && chosen != "" && !sameModel(narrative.Model, chosen)
-		line["written_by_rules"] = narrative.Model == ""
+		line.ChosenModel = chosen
+		line.NotChosen = flag(narrative.Model != "" && chosen != "" && !sameModel(narrative.Model, chosen))
+		line.WrittenByRules = flag(narrative.Model == "")
 	}
 	return line
 }
@@ -622,8 +624,8 @@ func (rc *runCtx) modelLine(narrative narrativeOut) map[string]any {
 // documentsNote says where an extraction agent's numbers came from and which
 // model saw the documents (AM2: the report names it and whether it runs in
 // the organisation).
-func documentsNote(summary map[string]any) string {
-	text := "ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ หรือเป็นค่าที่คุณพิมพ์/ยืนยัน โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใด"
+func documentsNote(summary map[string]any) am.PersonText {
+	text := am.Text("ตัวเลขทุกตัวอ่านจากเอกสารด้วยสคริปต์ หรือเป็นค่าที่คุณพิมพ์/ยืนยัน โมเดลไม่ได้เป็นผู้กำหนดตัวเลขใด")
 	models, _ := summary["models"].([]any)
 	for _, m := range models {
 		mm, _ := m.(map[string]any)
@@ -631,12 +633,12 @@ func documentsNote(summary map[string]any) string {
 		if name == "" {
 			continue
 		}
-		where := "ผู้ให้บริการภายนอก"
+		where := am.Text("ผู้ให้บริการภายนอก")
 		if self, _ := mm["self_hosted"].(bool); self {
-			where = "รันในองค์กร"
+			where = am.Text("รันในองค์กร")
 		}
-		text += fmt.Sprintf(" · โมเดลที่เห็นเอกสาร: %s (%s) อ่านซ้ำ %d ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
-			name, where, int(numberOf(mm["documents"])))
+		text = am.Text("%s · โมเดลที่เห็นเอกสาร: %s (%s) อ่านซ้ำ %s ฉบับที่เป็นสแกนหรือรูปถ่าย เพื่อเทียบกับ OCR เท่านั้น",
+			am.Words(text), am.ModelName(name), am.Words(where), am.Count(int(numberOf(mm["documents"]))))
 	}
 	return text
 }
@@ -681,17 +683,17 @@ func (rc *runCtx) startNextRound(ctx context.Context) {
 		return
 	}
 	rid := nr.ID
-	_, _, _ = st.AddItem(ctx, st.Pool, nr.InstallID, nr.TenantID, nr.UserID, &rid, "progress",
-		am.Progress{RunID: nr.ID.String(), Kind: am.KindRun, Status: am.RunQueued}, nil)
-	_ = st.PostText(ctx, nr, "เริ่มรอบใหม่ด้วยไฟล์ที่เก็บไว้ครับ", nil)
+	_, _, _ = st.AddItem(ctx, st.Pool, nr.InstallID, nr.TenantID, nr.UserID, &rid, am.QueuedProgress(nr), nil)
+	_ = st.PostText(ctx, nr, am.Text("เริ่มรอบใหม่ด้วยไฟล์ที่เก็บไว้ครับ"))
 }
 
 // checkLine is one failed check as the quality gate's error and the person's
 // message carry it: the file's format, the check's label, and its detail
-// when the detail is something a person can read.
+// when the detail is something a person can read. (What a person is shown of
+// the whole line is decided once more where it is said: am.FailureFor.)
 func checkLine(format, label, detail string) string {
 	line := formatThai(format) + ": " + label
-	if d := am.ForPerson(am.TrimText(detail, 120)); d != "" {
+	if d := am.ShownToPerson(am.TrimText(detail, 120)); d != "" {
 		line += " (" + d + ")"
 	}
 	return line

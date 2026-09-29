@@ -22,10 +22,16 @@ import (
 //
 // The runner reads it after the files are made. Passed: the round goes on
 // as any other. Not passed: the files are still delivered — marked as a
-// draft, so that the person can see why — and the round ends failed with
-// the gate's code; what the person reads is the package's sentence. The
+// draft, so that the person can see why — and the round ends with the
+// gate's code; what the person reads is the package's sentence. The
 // verdict is arithmetic done by the package's script: no model is asked,
 // and nothing here can turn a gate that did not pass into one that did.
+//
+// AM6: such a round delivered its work. The database keeps the status it
+// always gave it (failed, with the gate's code: no sign-off, nothing into the
+// duplicate index); what the round came to is "completed, open"
+// (am.Run.Outcome), it is charged like any other, and what it says in the
+// thread is "เสร็จแล้ว · ยังไม่ลงตัว" — not an error (endOpen, pipeline.go).
 
 // gateView is a package's verdict on its own round.
 type gateView struct {
@@ -44,6 +50,11 @@ func (g gateView) Reason() string {
 		return g.Code
 	}
 	return "gate_not_passed"
+}
+
+// words are the gate's own sentences as a person is shown them.
+func (g gateView) words() (what, next am.PersonText) {
+	return am.GateWords(g.Passed, g.Reason(), g.What, g.Next)
 }
 
 // gateOf reads the gate of a computed table: nil when the table has none.
@@ -72,8 +83,8 @@ func gateOf(computed []byte) (*gateView, error) {
 	return &gateView{Passed: *raw.Passed, Code: raw.Code, What: raw.What, Next: raw.Next}, nil
 }
 
-// gateErr is a gate that did not pass, as fail() carries it: the failure a
-// person reads is built from the gate's own sentences.
+// gateErr is a gate that did not pass, as the round's ending carries it: what
+// a person reads is built from the gate's own sentences.
 type gateErr struct {
 	gate  gateView
 	draft bool // the round's files were delivered as a draft

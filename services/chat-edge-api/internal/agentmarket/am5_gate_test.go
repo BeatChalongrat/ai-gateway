@@ -14,7 +14,8 @@ import (
 //   - A round whose package says its work does not pass (the two adjusted
 //     balances differ) is not a success: what the person reads is the
 //     package's own sentence — "ยังไม่ลงตัว ต่างกัน X บาท" — and what to do
-//     next, never an error's text.
+//     next, never an error's text. (AM6: nor is it a failure. It delivered
+//     its draft and is a completed round that stays open.)
 //   - A reconciliation is signed by a reviewer who is not its preparer.
 //   - The tolerances of the match are the install's settings.
 
@@ -68,42 +69,53 @@ func TestTheManifestSaysItsGateAndWhoMaySignIt(t *testing.T) {
 }
 
 func TestAGateThatDoesNotPassReadsAsThePackageSaidIt(t *testing.T) {
-	facts := FailureFacts{Kind: KindRun, HasFiles: true, KeepDays: 7, Credits: 3,
-		GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท", GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร", Draft: true}
-	f := FailureFor("not_tied", facts)
-	if f.What != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || f.Next != "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร" {
-		t.Fatalf("the package's own sentences: %q · %q", f.What, f.Next)
+	// AM6: the draft was delivered — a completed round that stays open, in the package's own sentences
+	c := CompletionFor("not_tied", CompletionFacts{KeepDays: 7, Credits: 3,
+		GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท", GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร"})
+	if c.What.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || c.Next.String() != "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร" {
+		t.Fatalf("the package's own sentences: %q · %q", c.What, c.Next)
 	}
-	if f.CanRetry {
-		t.Fatal("the same files give the same difference: trying again is not offered")
+	if c.Title.String() != "เสร็จแล้ว · ยังไม่ลงตัว" || c.Code != "not_tied" {
+		t.Fatalf("finished, and it does not tie: %q", c.Title)
 	}
-	if !strings.Contains(f.Files, "ร่าง") || !strings.Contains(f.Files, "7 วัน") {
-		t.Fatalf("the draft was delivered and the files are kept: %q", f.Files)
+	if !strings.Contains(c.Files.String(), "ร่าง") || !strings.Contains(c.Files.String(), "7 วัน") {
+		t.Fatalf("the draft was delivered and the files are kept: %q", c.Files)
 	}
-	if !strings.Contains(f.Charged, "3") {
-		t.Fatalf("what was charged: %q", f.Charged)
+	if c.Credits != 3 || !strings.Contains(c.Charged.String(), "3 เครดิต") || !strings.Contains(c.Charged.String(), "แม้ยอดจะยังไม่ลงตัว") {
+		t.Fatalf("what was charged, and that it is charged although it does not tie: %q", c.Charged)
 	}
-	if !strings.HasPrefix(f.Text(), "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") {
-		t.Fatalf("the round's message starts with it: %q", f.Text())
+	if !strings.HasPrefix(c.Text().String(), "เสร็จแล้ว · ยังไม่ลงตัว — ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") {
+		t.Fatalf("the round's message starts with it: %q", c.Text())
 	}
-	// a package cannot put an error's text on the screen through its gate
-	for _, bad := range []string{"TypeError: 'NoneType' object is not iterable", "compute_failed: KeyError 'statement'", ""} {
-		g := FailureFor("not_tied", FailureFacts{Kind: KindRun, HasFiles: true, GateWhat: bad, GateNext: bad, Draft: true})
-		if g.What == "" || g.Next == "" || LooksTechnical(g.What) || LooksTechnical(g.Next) || strings.Contains(g.What, "Error") {
+	// a package cannot put an error's text on the screen through its gate — of a shape the old list knew, or not
+	for _, bad := range append([]string{"TypeError: 'NoneType' object is not iterable", "compute_failed: KeyError 'statement'", ""}, neverListed...) {
+		g := CompletionFor("not_tied", CompletionFacts{GateWhat: bad, GateNext: bad})
+		if g.What.Empty() || g.Next.Empty() || !ReadsForPerson(g.What.String()) || !ReadsForPerson(g.Next.String()) ||
+			strings.Contains(g.What.String(), "Error") || (bad != "" && strings.Contains(g.Text().String(), bad)) {
 			t.Fatalf("%q reached the person: %q · %q", bad, g.What, g.Next)
 		}
+		f := FailureFor("not_tied", FailureFacts{Kind: KindRun, HasFiles: true, GateWhat: bad, GateNext: bad})
+		if f.What.Empty() || f.Next.Empty() || !ReadsForPerson(f.Text().String()) || (bad != "" && strings.Contains(f.Text().String(), bad)) {
+			t.Fatalf("%q reached the person: %q", bad, f.Text())
+		}
 	}
-	// a reason the runner has no sentence for still reads as a round that did not pass
-	h := FailureFor("some_other_gate", FailureFacts{Kind: KindRun, HasFiles: true, GateWhat: "งานยังไม่ครบ", GateNext: "ส่งไฟล์ที่ขาด", Draft: false})
-	if h.What != "งานยังไม่ครบ" || h.CanRetry {
+	// a gate the platform has no name for still reads as finished, in the package's words
+	h := CompletionFor("some_other_gate", CompletionFacts{GateWhat: "งานยังไม่ครบ", GateNext: "ส่งไฟล์ที่ขาด"})
+	if h.What.String() != "งานยังไม่ครบ" || h.Title.String() != "เสร็จแล้ว · ยังไม่ผ่านเกณฑ์ของ agent" {
 		t.Fatalf("%+v", h)
 	}
-	found := false
-	for _, r := range FailureReasons() {
-		found = found || r == "not_tied"
+	// a gate that did not pass with nothing delivered is a failure, and free: the gate's own words,
+	// and the same files are not offered again (they give the same verdict)
+	f := FailureFor("not_tied", FailureFacts{Kind: KindRun, HasFiles: true, KeepDays: 7,
+		GateWhat: "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท", GateNext: "ขอรายการเดินบัญชีฉบับเต็มของงวดนี้จากธนาคาร"})
+	if f.What.String() != "ยังไม่ลงตัว ต่างกัน 21,435.00 บาท" || f.CanRetry || f.Credits != 0 || !strings.Contains(f.Charged.String(), "ไม่คิดเครดิต") {
+		t.Fatalf("%+v", f)
 	}
-	if !found {
-		t.Fatal("not_tied has a sentence of its own")
+	// a round that does not tie is not among the failures any more
+	for _, r := range FailureReasons() {
+		if r == "not_tied" || r == "gate_not_passed" {
+			t.Fatalf("%s is not a failure: it has a completion of its own", r)
+		}
 	}
 }
 
@@ -181,7 +193,7 @@ func TestTheTolerancesOfTheMatchAreInstallSettings(t *testing.T) {
 		if got := validSettingValue(c.key, json.RawMessage(c.value)); got != c.ok {
 			t.Fatalf("%s = %s: valid %v, want %v", c.key, c.value, got, c.ok)
 		}
-		if l := settingLabel(c.key); l == c.key || LooksTechnical(l) {
+		if l := settingLabel(c.key); l == c.key || LooksTechnical(l) || !ReadsForPerson(l) {
 			t.Fatalf("%s is named in words: %q", c.key, l)
 		}
 	}

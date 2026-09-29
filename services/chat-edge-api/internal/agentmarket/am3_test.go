@@ -232,7 +232,7 @@ func TestAM3BudgetsNameWhoToAskAndParkedRunsGoOn(t *testing.T) {
 	if err != nil || st.Exhausted != BudgetUser || st.Contact.Name != "ฝ่ายไอที" {
 		t.Fatalf("the person's month is used up, ask the organisation's contact: %+v %v", st, err)
 	}
-	note := BudgetNotice(st)
+	note := BudgetNotice(st).String()
 	for _, want := range []string{"งบเครดิตของคุณ", "1,200", "1,000", "ฝ่ายไอที", "it@example.test", "ลองต่อ", "ยังอยู่ครบ"} {
 		if !strings.Contains(note, want) {
 			t.Fatalf("notice lacks %q: %s", want, note)
@@ -261,7 +261,7 @@ func TestAM3BudgetsNameWhoToAskAndParkedRunsGoOn(t *testing.T) {
 	inV := e.installAs(v)
 	e.charge(inV, 4000)
 	st, _ = e.store.Budget(ctx, in)
-	if st.Exhausted != BudgetDepartment || st.Contact.Name != "หัวหน้าบัญชี" || !strings.Contains(BudgetNotice(st), "แผนกบัญชี") {
+	if st.Exhausted != BudgetDepartment || st.Contact.Name != "หัวหน้าบัญชี" || !strings.Contains(BudgetNotice(st).String(), "แผนกบัญชี") {
 		t.Fatalf("the department's month is used up, ask the department's contact: %+v", st)
 	}
 	// "none" is a valid department limit

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 
@@ -93,14 +94,15 @@ func (s *Store) Budget(ctx context.Context, in Install) (BudgetState, error) {
 			if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(sum(l.credits), 0)::float8 FROM agent_market.agent_budget_ledger l
 				JOIN agent_market.agent_installs i ON i.id = l.install_id
 				JOIN agent_market.org_members m ON m.user_id = i.user_id AND m.org_id = i.org_id
-				WHERE i.org_id = $1 AND m.department = $2 AND l.created_at >= `+monthStart, org, st.Department).Scan(&st.DeptSpent); err != nil {
+				WHERE i.org_id = $1 AND m.department = $2 AND l.voided_at IS NULL AND l.created_at >= `+monthStart,
+				org, st.Department).Scan(&st.DeptSpent); err != nil {
 				return st, err
 			}
 		}
 	}
 	if err := s.Pool.QueryRow(ctx, `SELECT COALESCE(sum(l.credits), 0)::float8 FROM agent_market.agent_budget_ledger l
 		JOIN agent_market.agent_installs i ON i.id = l.install_id
-		WHERE i.user_id = $1 AND i.org_id = $2 AND l.created_at >= `+monthStart, in.UserID, org).Scan(&st.UserSpent); err != nil {
+		WHERE i.user_id = $1 AND i.org_id = $2 AND l.voided_at IS NULL AND l.created_at >= `+monthStart, in.UserID, org).Scan(&st.UserSpent); err != nil {
 		return st, err
 	}
 	st.InstallLimit = in.BudgetCredits
@@ -137,7 +139,7 @@ func budgetWhich(st BudgetState) string {
 }
 
 // BudgetNotice is the thread's notice when a run waits for budget.
-func BudgetNotice(st BudgetState) string {
+func BudgetNotice(st BudgetState) PersonText {
 	used, limit := st.UserSpent, st.UserLimit
 	switch st.Exhausted {
 	case BudgetDepartment:
@@ -148,9 +150,9 @@ func BudgetNotice(st BudgetState) string {
 	case BudgetInstall:
 		used, limit = st.InstallSpent, st.InstallLimit
 	}
-	return fmt.Sprintf("หยุดรอไว้ก่อนครับ: งบเครดิต%sเดือนนี้ใช้หมดแล้ว (ใช้ไป %s จาก %s เครดิต) — ขอเพิ่มได้จาก %s "+
+	return Text("หยุดรอไว้ก่อนครับ: งบเครดิต%sเดือนนี้ใช้หมดแล้ว (ใช้ไป %s จาก %s เครดิต) — ขอเพิ่มได้จาก %s "+
 		"เมื่อมีงบแล้ว รอบนี้จะทำต่อจากจุดเดิมเอง (หรือกด “ลองต่อ”) ไฟล์และคำตอบที่ให้ไว้ยังอยู่ครบ และแชทปกติยังใช้ได้ตามเดิม",
-		budgetWhich(st), groupDigits(used), groupDigits(limit), st.Contact.Label())
+		Name(budgetWhich(st)), Credits(math.Round(used)), Credits(math.Round(limit)), ContactFact(st.Contact))
 }
 
 // groupDigits prints a credit amount with thousands separators.
@@ -210,7 +212,7 @@ func (s *Store) ResumeBudgetParked(ctx context.Context, org string) (int, error)
 			continue
 		}
 		if ok, err := s.Resume(ctx, s.Pool, run.ID); err == nil && ok {
-			_ = s.PostNotice(ctx, run, "มีงบเครดิตแล้ว รอบนี้ทำต่อจากจุดเดิมครับ", "")
+			_ = s.PostNotice(ctx, run, Text("มีงบเครดิตแล้ว รอบนี้ทำต่อจากจุดเดิมครับ"), "")
 			n++
 		}
 	}

@@ -92,10 +92,18 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		badRequest(w, "BAD_JSON")
 		return
 	}
+	if run.Kind == KindRun && run.Outcome() == OutcomeCompletedOpen {
+		// AM6: a reconciliation that does not tie is a finished round, not a
+		// failed one — and still a draft nobody signs: the round to sign is the
+		// next one that ties
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้เสร็จแล้วแต่ยังไม่ลงตัว ไฟล์ของรอบนี้เป็นร่าง",
+			"next", "แก้สาเหตุแล้วเริ่มรอบใหม่ รอบที่ลงตัวคือรอบที่ตรวจทานและลงชื่อได้")
+		return
+	}
 	if run.Kind == KindRun && (run.Status == RunFailed || run.Status == RunCancelled) {
-		// AM5: a round that ended without succeeding (a reconciliation that does
-		// not tie) is not "still running" — waiting will not make it reviewable
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ไม่สำเร็จ ไฟล์ของรอบนี้เป็นร่าง",
+		// AM5: a round that ended without succeeding is not "still running" —
+		// waiting will not make it reviewable
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ไม่สำเร็จ ยังไม่มีไฟล์ให้ตรวจทาน",
 			"next", "แก้สาเหตุแล้วเริ่มรอบใหม่ให้สำเร็จก่อน แล้วค่อยตรวจทานรอบนั้น")
 		return
 	}
@@ -195,14 +203,12 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	rev.StampRunID = &job.ID
-	text := "ตรวจทานแล้วโดย " + name + " · " + ThaiDateTime(now)
+	text := Text("ตรวจทานแล้วโดย %s · %s — กำลังใส่ชื่อผู้ตรวจทานลงในไฟล์ ไฟล์ฉบับก่อนตรวจทานยังเก็บไว้", Name(name), When(now))
 	if note != "" {
-		text += " · หมายเหตุ: " + note
+		text = Text("ตรวจทานแล้วโดย %s · %s · หมายเหตุ: “%s” — กำลังใส่ชื่อผู้ตรวจทานลงในไฟล์ ไฟล์ฉบับก่อนตรวจทานยังเก็บไว้",
+			Name(name), When(now), Typed(note, 500))
 	}
-	text += " — กำลังใส่ชื่อผู้ตรวจทานลงในไฟล์ ไฟล์ฉบับก่อนตรวจทานยังเก็บไว้"
-	rid := run.ID
-	if _, _, err := a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, "notice",
-		map[string]any{"text": text, "run_id": run.ID.String(), "review_id": rev.ID.String(), "tone": "success"}, nil); err != nil {
+	if err := a.store.AddNotice(ctx, tx, run, Notice{Text: text, ReviewID: rev.ID.String(), Tone: "success"}); err != nil {
 		a.fail(w, err, "run")
 		return
 	}

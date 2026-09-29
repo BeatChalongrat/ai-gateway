@@ -174,6 +174,14 @@ func (r *Runner) housekeeping(ctx context.Context) {
 				"scratch_objects", c.ScratchObjects, "removed_installs", c.RemovedInstalls, "removed_objects", c.RemovedObjects,
 				"index_rows", c.IndexRows)
 		}
+		// AM6: a round that ended without delivering, by whatever path, is charged nothing.
+		if n, err := r.Store.SettleAll(ctx); err != nil {
+			if ctx.Err() == nil {
+				r.Log.Warn("settling ended runs failed", "err", err)
+			}
+		} else if n > 0 {
+			r.Log.Info("runs that delivered nothing were settled", "runs", n)
+		}
 		// AM3: runs that waited for budget go on once there is room (a new month).
 		if n, err := r.Store.ResumeBudgetParked(ctx, ""); err == nil && n > 0 {
 			r.Log.Info("runs resumed after waiting for budget", "runs", n)
@@ -214,6 +222,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	r.heartbeat(ctx)
 	r.startReaper(ctx)
 	go r.housekeeping(ctx)
+	go r.reminders(ctx)     // AM6: reminders open rounds that wait for files; nothing runs without a person
 	go r.ensureSamples(ctx) // AM3: every released version's sample for the catalog
 	go r.watchSandbox(ctx, func() { r.heartbeat(ctx) })
 	go func() {

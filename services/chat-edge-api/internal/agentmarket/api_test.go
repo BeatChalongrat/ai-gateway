@@ -206,8 +206,8 @@ func (e *testEnv) openCard(run Run, blocking bool) Card {
 		e.t.Fatal(err)
 	}
 	rid := run.ID
-	if _, _, err := e.store.AddItem(context.Background(), e.store.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "card",
-		CardItemPayload(c, "", ""), nil); err != nil {
+	if _, _, err := e.store.AddItem(context.Background(), e.store.Pool, run.InstallID, run.TenantID, run.UserID, &rid,
+		CardItemPayload(c, NoText, NoText), nil); err != nil {
 		e.t.Fatal(err)
 	}
 	return c
@@ -462,8 +462,8 @@ func TestEventStreamResumesFromCursor(t *testing.T) {
 	ctx := context.Background()
 	_, th := e.do("GET", "/installs/"+in.ID.String()+"/thread", nil)
 	cursor := int64(th["cursor"].(float64))
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, "agent_text", map[string]any{"text": "a"}, nil)
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, "agent_text", map[string]any{"text": "b"}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, AgentText{Text: Text("ข้อความแรก")}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, AgentText{Text: Text("ข้อความที่สอง")}, nil)
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(cctx, "GET", e.srv.URL+"/agent-market/installs/"+in.ID.String()+"/events?after="+itoa(int(cursor)), nil)

@@ -102,7 +102,7 @@ func (e *testEnv) computedRun(in Install) Run {
 			e.t.Fatal(err)
 		}
 		rid := run.ID
-		if _, _, err := e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "card", CardItemPayload(card, "", ""), nil); err != nil {
+		if _, _, err := e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, CardItemPayload(card, NoText, NoText), nil); err != nil {
 			e.t.Fatal(err)
 		}
 		if _, _, err := e.store.CloseCard(ctx, e.store.Pool, card.ID, "answered", json.RawMessage(`{}`), "card", nil); err != nil {

@@ -9,11 +9,14 @@
 #
 # SLO: 95 % of the agent runs that end, end succeeded (cancelled by the person
 # excluded), over a rolling 14 days (retention is 15 d). Error budget: 5 %.
+# AM6: a run that finished open — its draft delivered, its package's gate not
+# passed (a reconciliation that does not tie) — delivered its work: it counts
+# as a run that ended, never as a failure (status="completed_open").
 groups:
   - name: agent-market
     rules:
       - record: agent_market:runs_ended:increase14d
-        expr: sum(increase(agent_market_runs_finished_total{status=~"succeeded|failed"}[14d]))
+        expr: sum(increase(agent_market_runs_finished_total{status=~"succeeded|completed_open|failed"}[14d]))
       - record: agent_market:runs_failed:increase14d
         expr: sum(increase(agent_market_runs_finished_total{status="failed"}[14d]))
       # 1 = untouched budget, 0 = spent, below 0 = SLO missed
@@ -26,7 +29,7 @@ groups:
           sum(increase(agent_market_runs_finished_total{status="failed"}[6h])) >= 3
           and
           sum(increase(agent_market_runs_finished_total{status="failed"}[6h]))
-            / clamp_min(sum(increase(agent_market_runs_finished_total{status=~"succeeded|failed"}[6h])), 1) > 0.25
+            / clamp_min(sum(increase(agent_market_runs_finished_total{status=~"succeeded|completed_open|failed"}[6h])), 1) > 0.25
         labels:
           severity: warning
           channel: agent-market

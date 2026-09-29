@@ -15,10 +15,11 @@ import (
 type MetricsSnapshot struct {
 	Queued, Running, Awaiting int64
 	OldestQueuedSeconds       float64
-	Finished                  map[string]int64   // succeeded | failed | cancelled (kinds run + self_test)
+	Finished                  map[string]int64   // succeeded | completed_open | failed | cancelled (kinds run + self_test)
 	StepSeconds               map[string]float64 // succeeded steps, by step name without its subject
 	StepCount                 map[string]int64
 	CreditsSpent              float64
+	CreditsCost               float64
 	PoolAcquired, PoolMax     int32
 	SandboxReady              bool
 	// AM3: reports people filed that nobody has closed yet (the pager's
@@ -34,8 +35,11 @@ func CollectMetrics(ctx context.Context, pool *pgxpool.Pool, sandboxReady bool) 
 		count(*) FILTER (WHERE status='awaiting_input'),
 		COALESCE(EXTRACT(EPOCH FROM now() - min(created_at) FILTER (WHERE status='queued')), 0)
 		FROM agent_market.agent_runs`).Scan(&s.Queued, &s.Running, &s.Awaiting, &s.OldestQueuedSeconds)
-	if rows, err := pool.Query(ctx, `SELECT status, count(*) FROM agent_market.agent_runs
-		WHERE kind IN ('run', 'self_test') AND status IN ('succeeded', 'failed', 'cancelled') GROUP BY status`); err == nil {
+	// AM6: a run that ended on its package's gate with its draft delivered finished open — work
+	// delivered, which the SLO counts as a run that ended and never as a failure
+	if rows, err := pool.Query(ctx, `SELECT CASE WHEN status = 'failed' AND gate_open THEN 'completed_open' ELSE status END, count(*)
+		FROM agent_market.agent_runs
+		WHERE kind IN ('run', 'self_test') AND status IN ('succeeded', 'failed', 'cancelled') GROUP BY 1`); err == nil {
 		for rows.Next() {
 			var st string
 			var n int64
@@ -57,7 +61,9 @@ func CollectMetrics(ctx context.Context, pool *pgxpool.Pool, sandboxReady bool) 
 		}
 		rows.Close()
 	}
-	_ = pool.QueryRow(ctx, `SELECT COALESCE(sum(credits), 0) FROM agent_market.agent_budget_ledger`).Scan(&s.CreditsSpent)
+	// AM6: what people were charged, and what the platform paid (a voided row is a cost, not a charge)
+	_ = pool.QueryRow(ctx, `SELECT COALESCE(sum(credits) FILTER (WHERE voided_at IS NULL), 0), COALESCE(sum(credits), 0)
+		FROM agent_market.agent_budget_ledger`).Scan(&s.CreditsSpent, &s.CreditsCost)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.problem_reports WHERE status = 'open'`).Scan(&s.ProblemsOpen)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE status = 'awaiting_input'
 		AND status_reason LIKE 'budget_%'`).Scan(&s.BudgetWaiting)
@@ -78,7 +84,7 @@ func RenderMetrics(s MetricsSnapshot) string {
 	w("# TYPE agent_market_oldest_queued_seconds gauge")
 	w("agent_market_oldest_queued_seconds %s", num(s.OldestQueuedSeconds))
 	w("# TYPE agent_market_runs_finished_total counter")
-	for _, st := range []string{"succeeded", "failed", "cancelled"} {
+	for _, st := range []string{"succeeded", "completed_open", "failed", "cancelled"} {
 		w(`agent_market_runs_finished_total{status="%s"} %d`, st, s.Finished[st])
 	}
 	w("# TYPE agent_market_step_seconds summary")
@@ -93,6 +99,8 @@ func RenderMetrics(s MetricsSnapshot) string {
 	}
 	w("# TYPE agent_market_credits_spent_total counter")
 	w("agent_market_credits_spent_total %s", num(s.CreditsSpent))
+	w("# TYPE agent_market_credits_cost_total counter")
+	w("agent_market_credits_cost_total %s", num(s.CreditsCost))
 	w("# TYPE agent_market_pool_acquired_conns gauge")
 	w("agent_market_pool_acquired_conns %d", s.PoolAcquired)
 	w("agent_market_pool_max_conns %d", s.PoolMax)

@@ -191,7 +191,7 @@ func (e *itEnv) newRun(message string, files ...string) am.Run {
 		e.addFile(run, f)
 	}
 	rid := run.ID
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "progress", am.Progress{RunID: run.ID.String()}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, am.Progress{RunID: run.ID.String()}, nil)
 	return run
 }
 

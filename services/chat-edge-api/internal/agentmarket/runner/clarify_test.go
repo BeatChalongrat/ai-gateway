@@ -10,10 +10,10 @@ import (
 // The web card already says, under a rememberable question, that the answer
 // is kept as next round's default. The card's own note must not repeat it.
 func TestBlockingCardCarriesNoRepeatedRememberNote(t *testing.T) {
-	if n := cardNote(&am.CardPlan{Kind: "questions", Blocking: true}); n != "" {
+	if n := cardNote(&am.CardPlan{Kind: "questions", Blocking: true}); !n.Empty() {
 		t.Fatalf("a blocking card's note would print twice on screen: %q", n)
 	}
-	if n := cardNote(&am.CardPlan{Kind: "questions", Blocking: false}); n == "" {
+	if n := cardNote(&am.CardPlan{Kind: "questions", Blocking: false}); n.Empty() {
 		t.Fatal("a non-blocking card says the run went on with the defaults")
 	}
 }

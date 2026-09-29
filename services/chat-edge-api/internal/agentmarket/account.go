@@ -89,6 +89,15 @@ var exportDocs = []struct {
 		WHERE $1::uuid IS NOT NULL AND (t.owner_user_id = $2 OR t.recipient_user_id = $2)`},
 	{"problem_reports.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.problem_reports t
 		WHERE $1::uuid IS NOT NULL AND t.user_id = $2`},
+	// AM6: reminders, notifications, e-mail drafts, and the sends of the person's rounds or that they approved
+	{"reminders.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.reminders t
+		WHERE t.tenant_id = $1 AND t.user_id = $2`},
+	{"notifications.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.notifications t
+		WHERE t.tenant_id = $1 AND t.user_id = $2`},
+	{"email_drafts.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.email_drafts t
+		WHERE t.tenant_id = $1 AND t.user_id = $2`},
+	{"email_sends.json", `SELECT COALESCE(json_agg(t ORDER BY t.created_at), '[]') FROM agent_market.email_sends t
+		WHERE t.approved_by_user_id = $2 OR t.run_id IN (SELECT id FROM agent_market.agent_runs WHERE tenant_id = $1 AND user_id = $2)`},
 }
 
 // Export writes the user's Agent Market data in this tenant.
@@ -156,12 +165,27 @@ func (p *AccountProvider) Stop(ctx context.Context, userID uuid.UUID) (map[strin
 	if err != nil {
 		return nil, err
 	}
+	// AM6: a round that was stopped delivered nothing, and is charged nothing
+	if _, err := p.store.Pool.Exec(ctx, fmt.Sprintf(settleSQL, `r.user_id = $1`), userID); err != nil {
+		return nil, err
+	}
 	cards, err := p.store.Pool.Exec(ctx, `UPDATE agent_market.agent_run_clarifications SET status = 'cancelled'
 		WHERE user_id = $1 AND status IN ('open', 'interpreting')`, userID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]int{"runs_stopped": int(tag.RowsAffected()), "cards_closed": int(cards.RowsAffected())}, nil
+	// AM6: no reminder of theirs falls due any more, and nothing is shown to them any more
+	reminders, err := p.store.Pool.Exec(ctx, `UPDATE agent_market.reminders SET status = 'stopped', updated_at = now()
+		WHERE user_id = $1 AND status = 'active'`, userID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.store.Pool.Exec(ctx, `UPDATE agent_market.notifications SET dismissed_at = now()
+		WHERE user_id = $1 AND dismissed_at IS NULL`, userID); err != nil {
+		return nil, err
+	}
+	return map[string]int{"runs_stopped": int(tag.RowsAffected()), "cards_closed": int(cards.RowsAffected()),
+		"reminders_stopped": int(reminders.RowsAffected())}, nil
 }
 
 // Purge erases what Agent Market keeps for the PERSON, in every tenant: their
@@ -190,7 +214,7 @@ func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[stri
 		}
 		empty, err := p.store.ids(ctx, `SELECT i.id FROM agent_market.agent_installs i WHERE i.id = ANY($1)
 			AND NOT EXISTS (SELECT 1 FROM agent_market.agent_runs r WHERE r.install_id = i.id AND r.kind = 'run'
-				AND r.status = 'succeeded' AND r.evidence_removed_at IS NULL)`, installs)
+				AND `+kept("r")+` AND r.evidence_removed_at IS NULL)`, installs)
 		if err != nil {
 			return counts, err
 		}
@@ -202,14 +226,14 @@ func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[stri
 				return counts, err
 			}
 		}
-		var kept int
+		var records int
 		_ = p.store.Pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE install_id = ANY($1) AND kind = 'run'
-			AND status = 'succeeded' AND evidence_removed_at IS NULL`, installs).Scan(&kept)
-		counts["org_records_kept"] = kept
+			AND `+kept("")+` AND evidence_removed_at IS NULL`, installs).Scan(&records)
+		counts["org_records_kept"] = records
 	}
 	for _, q := range []struct{ kind, sql string }{
 		{"thread_items", `DELETE FROM agent_market.agent_thread_items WHERE user_id = $1
-			AND NOT (kind IN ('progress', 'outputs') AND run_id IN (SELECT id FROM agent_market.agent_runs WHERE status = 'succeeded'))`},
+			AND NOT (kind IN ('progress', 'outputs') AND run_id IN (SELECT id FROM agent_market.agent_runs WHERE ` + kept("") + `))`},
 		{"theme_creator_cleared", `UPDATE agent_market.agent_themes SET created_by = NULL WHERE created_by = $1`},
 		// AM3: their preferences, problem reports, the shares addressed to them
 		// or made by them, and their access row. A sign-off they gave on someone
@@ -221,6 +245,14 @@ func (p *AccountProvider) Purge(ctx context.Context, userID uuid.UUID) (map[stri
 		{"reviews_anonymised", `UPDATE agent_market.run_reviews SET reviewer_user_id = '00000000-0000-0000-0000-000000000000',
 			reviewer_email = '' WHERE reviewer_user_id = $1`},
 		{"membership", `DELETE FROM agent_market.org_members WHERE user_id = $1`},
+		// AM6: their reminders, notifications and e-mail drafts. What was sent, to whom and with which
+		// files is the organisation's record of what left it: it stays with its round, and no longer
+		// names the person who approved it by id or address (as a sign-off does not).
+		{"reminders", `DELETE FROM agent_market.reminders WHERE user_id = $1`},
+		{"notifications", `DELETE FROM agent_market.notifications WHERE user_id = $1`},
+		{"email_drafts", `DELETE FROM agent_market.email_drafts WHERE user_id = $1`},
+		{"email_sends_anonymised", `UPDATE agent_market.email_sends SET approved_by_user_id = '00000000-0000-0000-0000-000000000000',
+			approved_by_email = '' WHERE approved_by_user_id = $1`},
 	} {
 		tag, err := p.store.Pool.Exec(ctx, q.sql, userID)
 		if err != nil {

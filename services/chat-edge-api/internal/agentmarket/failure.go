@@ -1,15 +1,12 @@
 package agentmarket
 
 import (
-	"encoding/json"
-	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 )
 
-// ── What a person reads when a round does not work (AM5) ─────────────────
+// ── What a person reads when a round does not work (AM5, AM6) ────────────
 //
 // The live screen showed a failed round with "'NoneType' object is not
 // iterable" in it: the runner pasted the error's own text into the thread
@@ -20,47 +17,53 @@ import (
 //     facts about the round (FailureFor) — the function takes no error, so
 //     no caller can hand it one. The error's text goes where it belongs: the
 //     run's step rows (the run page) and the problem report.
-//  2. Whatever is written to, or read from, the thread passes ForPerson: an
-//     exception, a type name, a stack frame, a transport error or a step id
-//     is taken out before it is stored or sent — including rows written
-//     before this rule existed.
+//  2. AM6: whatever writes to the thread takes a PersonText (persontext.go),
+//     and whatever leaves the thread is what its kind's schema declares
+//     (schema.go), each text as ShownToPerson shows it (reads.go). AM5 took
+//     out the error shapes it knew; that list is kept below as a second look
+//     that can only withhold more, and decides nothing.
 //
 // A failed round says four things, in Thai: what happened, what to try
-// next, whether the files are safe, and whether anything was charged.
+// next, whether the files are safe, and that nothing was charged.
+//
+// AM6: a round whose package gate did not pass and whose draft was delivered
+// is not a failed round. It delivered its work — the files, and how much is
+// unexplained — and says so (CompletionFor): "เสร็จแล้ว · ยังไม่ลงตัว".
 
 // Failure is a failed round as a person reads it.
 type Failure struct {
-	Reason   string   `json:"reason"` // the code; the web never shows it
-	What     string   `json:"what"`
-	Next     string   `json:"next"`
-	Files    string   `json:"files"`
-	Charged  string   `json:"charged"`
-	Credits  float64  `json:"credits"`
-	CanRetry bool     `json:"can_retry"`
-	Failed   []string `json:"failed_checks,omitempty"`
+	Reason   string       `json:"reason"` // the code; the web never shows it
+	What     PersonText   `json:"what"`
+	Next     PersonText   `json:"next"`
+	Files    PersonText   `json:"files"`
+	Charged  PersonText   `json:"charged"`
+	Credits  float64      `json:"credits"`
+	CanRetry bool         `json:"can_retry"`
+	Failed   []PersonText `json:"failed_checks,omitempty"`
 }
 
 // FailureFacts is what the four sentences depend on besides the reason.
 type FailureFacts struct {
-	Kind     string  // the run's kind
-	Credits  float64 // credits the round has spent (steps that finished before it stopped)
-	HasFiles bool    // the round has files of the person's that a retry can use
-	KeepDays int     // how long a failed round's files are kept (0 = unknown)
+	Kind string // the run's kind
+	// Credits is what the round is still charged after it ended: nothing,
+	// unless an earlier pass of the same round was delivered (a document
+	// brought back into a finished round, whose second pass then failed).
+	Credits  float64
+	HasFiles bool // the round has files of the person's that a retry can use
+	KeepDays int  // how long a failed round's files are kept (0 = unknown)
 	// FailedChecks are the quality gate's failed checks, in the package's own
 	// Thai words ("รายงาน: หัวข้อครบทุกส่วน").
 	FailedChecks []string
 	// GateWhat and GateNext are the package's own sentences for a round whose
-	// completion gate did not pass ("ยังไม่ลงตัว ต่างกัน 21,435.00 บาท") — read
-	// from its computed table, never from an error. Draft: the round's files
-	// were delivered, marked as a draft.
+	// completion gate did not pass and that delivered nothing — read from its
+	// computed table, never from an error.
 	GateWhat string
 	GateNext string
-	Draft    bool
 }
 
 type failureCopy struct {
-	what  string
-	next  string
+	what  wording
+	next  wording
 	retry bool // trying again with the same files can work
 }
 
@@ -69,10 +72,13 @@ const (
 	nextLater   = "รอสักครู่แล้วกด “ลองใหม่ด้วยไฟล์เดิม” ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”"
 	nextNewFile = "ตรวจว่าไฟล์เปิดได้ตามปกติ ไม่ได้ตั้งรหัสผ่าน แล้วส่งไฟล์มาใหม่ หรือกด “ลองใหม่ด้วยไฟล์เดิม”"
 	nextDraft   = "เปิดไฟล์ร่างของรอบนี้เพื่อดูสาเหตุ แก้ไขแล้วส่งไฟล์มาใหม่เพื่อเริ่มรอบใหม่"
+	nextFixed   = "แก้สาเหตุแล้วส่งไฟล์มาใหม่เพื่อเริ่มรอบใหม่ ถ้าไม่แน่ใจว่าต้องแก้อะไรให้กด “แจ้งปัญหา”"
 )
 
 // failureCopies: one entry per reason a run can stop with. A reason without
-// an entry reads as the last one ("").
+// an entry reads as the last one (""). AM6: a gate that did not pass is not
+// among them — a round that delivered its draft is a completed round
+// (CompletionFor), and one that delivered nothing says the gate's own words.
 var failureCopies = map[string]failureCopy{
 	"parse_failed":        {"อ่านไฟล์ที่ส่งมาไม่สำเร็จ", nextNewFile, true},
 	"vision_failed":       {"อ่านเอกสารที่เป็นสแกนหรือรูปถ่ายไม่สำเร็จ", "ส่งเป็น PDF จากระบบหรือสแกน 200–300 DPI ถ้ามี หรือกด “ลองใหม่ด้วยไฟล์เดิม”", true},
@@ -93,11 +99,7 @@ var failureCopies = map[string]failureCopy{
 	"self_test_seed":      {"เตรียมข้อมูลตัวอย่างสำหรับทดสอบไม่สำเร็จ", "กดทดสอบกับข้อมูลตัวอย่างอีกครั้งในหน้าตั้งค่า ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”", false},
 	"bad_format":          {"ชนิดไฟล์ที่ขอยังสร้างให้ไม่ได้", "เลือกชนิดไฟล์อื่นจาก “ขอไฟล์เพิ่ม”", false},
 	"internal_error":      {"ระบบของ agent หยุดทำงานกลางรอบนี้", nextRetry, true},
-	// AM5: the package's own gate. The same files give the same result, so
-	// trying again with them is not offered.
-	"not_tied":        {"งบกระทบยอดยังไม่ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชียังไม่เท่ากัน", nextDraft, false},
-	"gate_not_passed": {"งานของรอบนี้ยังไม่ผ่านเกณฑ์ของ agent จึงยังไม่นับว่าสำเร็จ", nextDraft, false},
-	"":                {"รอบนี้ทำไม่สำเร็จ", nextRetry, true},
+	"":                    {"รอบนี้ทำไม่สำเร็จ", nextRetry, true},
 }
 
 // FailureReasons lists every reason with its own sentence (tests walk it).
@@ -117,73 +119,143 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 	c, ok := failureCopies[reason]
 	if !ok {
 		c = failureCopies[""]
-		if facts.GateWhat != "" || facts.Draft {
-			c = failureCopies["gate_not_passed"]
-		}
 	}
-	// a gate's sentences are the package's, and pass the same guard as
-	// everything else a person reads: what is left of an error's text is
-	// nothing, and the reason's own sentence stands
-	if what := ForPerson(facts.GateWhat); what != "" && !LooksTechnical(what) {
-		c.what = what
+	what, next := Text(c.what), Text(c.next)
+	if facts.GateWhat != "" || facts.GateNext != "" {
+		// the package's gate did not pass and nothing was delivered: the same
+		// files give the same verdict, and the sentences are the package's —
+		// what a person is shown of them, or the platform's own
+		c.retry = false
+		what = FromPackage(facts.GateWhat, Text("งานของรอบนี้ยังไม่ผ่านเกณฑ์ของ agent และยังไม่ได้ส่งไฟล์ให้"))
+		next = FromPackage(facts.GateNext, Text(nextFixed))
 	}
-	if next := ForPerson(facts.GateNext); next != "" && !LooksTechnical(next) {
-		c.next = next
-	}
-	f := Failure{Reason: reason, What: c.what, Next: c.next, Credits: facts.Credits}
+	f := Failure{Reason: reason, What: what, Next: next, Credits: facts.Credits}
 	f.CanRetry = c.retry && facts.HasFiles && facts.Kind == KindRun
 	if !f.CanRetry && c.retry {
 		// nothing of the person's to try again with (a self-test, a follow-up job)
-		f.Next = "ลองอีกครั้ง ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด"
+		f.Next = Text("ลองอีกครั้ง ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา” ผู้ดูแลจะเห็นรอบนี้พร้อมขั้นตอนที่หยุด")
 		if facts.Kind == KindRun {
-			f.Next = "ส่งไฟล์มาใหม่เพื่อเริ่มรอบนี้อีกครั้ง ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”"
+			f.Next = Text("ส่งไฟล์มาใหม่เพื่อเริ่มรอบนี้อีกครั้ง ถ้ายังไม่สำเร็จให้กด “แจ้งปัญหา”")
 		}
 	}
 	for _, x := range facts.FailedChecks {
-		if x = ForPerson(x); x != "" {
-			f.Failed = append(f.Failed, x)
+		if t := FromPackage(x, NoText); !t.Empty() {
+			f.Failed = append(f.Failed, t)
 		}
 	}
 	if len(f.Failed) > 0 {
-		f.What += " (ข้อที่ไม่ผ่าน: " + strings.Join(f.Failed, " · ") + ")"
+		f.What = Text("%s (ข้อที่ไม่ผ่าน: %s)", Words(f.What), Words(Join(" · ", f.Failed...)))
 	}
 	switch {
-	case facts.Draft && facts.KeepDays > 0:
-		f.Files = fmt.Sprintf("ไฟล์ร่างของรอบนี้ส่งให้แล้ว มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %d วัน "+
-			"ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", facts.KeepDays)
-	case facts.Draft:
-		f.Files = "ไฟล์ร่างของรอบนี้ส่งให้แล้ว มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ"
 	case !facts.HasFiles:
-		f.Files = "ผลงานของรอบก่อน ๆ ยังอยู่ครบ ไม่มีอะไรถูกลบหรือแก้ไข"
+		f.Files = Text("ผลงานของรอบก่อน ๆ ยังอยู่ครบ ไม่มีอะไรถูกลบหรือแก้ไข")
 	case facts.KeepDays > 0:
-		f.Files = fmt.Sprintf("ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %d วัน ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", facts.KeepDays)
+		f.Files = Text("ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %s วัน ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", Count(facts.KeepDays))
 	default:
-		f.Files = "ไฟล์ที่ส่งมาในรอบนี้และผลงานของรอบก่อน ๆ ยังอยู่ครบ"
+		f.Files = Text("ไฟล์ที่ส่งมาในรอบนี้และผลงานของรอบก่อน ๆ ยังอยู่ครบ")
 	}
+	// AM6: a round that delivered nothing is charged nothing
+	f.Charged = Text("รอบนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้")
 	if facts.Credits > 0 {
-		f.Charged = "รอบนี้ใช้ไป " + formatCredits(facts.Credits) + " เครดิต สำหรับขั้นตอนที่ทำเสร็จก่อนจะหยุด ขั้นตอนที่ไม่สำเร็จไม่คิดเครดิต"
-	} else {
-		f.Charged = "รอบนี้ไม่ได้คิดเครดิต"
+		f.Charged = Text("ครั้งนี้ไม่คิดเครดิต เพราะยังไม่ได้ส่งงานให้ ส่วน %s เครดิตที่คิดไปแล้วเป็นของไฟล์ชุดที่ส่งให้ก่อนหน้านี้", Credits(facts.Credits))
 	}
 	return f
 }
 
 // Text is the failure as one paragraph (a thread item's text; the web shows
 // the four parts on the chat's failed-turn card).
-func (f Failure) Text() string {
-	return f.What + " — " + f.Next + " " + f.Files + " " + f.Charged
+func (f Failure) Text() PersonText {
+	return Text("%s — %s %s %s", Words(f.What), Words(f.Next), Words(f.Files), Words(f.Charged))
 }
 
-func formatCredits(c float64) string {
-	s := strconv.FormatFloat(c, 'f', 2, 64)
-	s = strings.TrimRight(strings.TrimRight(s, "0"), ".")
-	if s == "" {
-		return "0"
+// ── a round that finished with its gate open (AM6) ───────────────────────
+
+// Completion is a round that delivered its work while its package's gate did
+// not pass, as a person reads it: not an error.
+type Completion struct {
+	Code    string     `json:"code"` // the gate's code; the web never shows it
+	Title   PersonText `json:"title"`
+	What    PersonText `json:"what"`
+	Next    PersonText `json:"next"`
+	Files   PersonText `json:"files"`
+	Charged PersonText `json:"charged"`
+	Credits float64    `json:"credits"`
+}
+
+// CompletionFacts is what the sentences depend on besides the gate's code.
+type CompletionFacts struct {
+	Credits  float64 // what the round was charged
+	KeepDays int     // how long the round's own files are kept (0 = unknown)
+	// GateWhat and GateNext are the package's own sentences, read from its
+	// computed table.
+	GateWhat string
+	GateNext string
+}
+
+// GateNotTied is the code of a reconciliation whose two balances differ.
+const GateNotTied = "not_tied"
+
+// CompletionTitle is how such a round is named.
+func CompletionTitle(code string) PersonText {
+	if code == GateNotTied {
+		return Text("เสร็จแล้ว · ยังไม่ลงตัว")
 	}
-	return s
+	return Text("เสร็จแล้ว · ยังไม่ผ่านเกณฑ์ของ agent")
 }
 
-// ── the guard ────────────────────────────────────────────────────────────
+// openWhat is the platform's own sentence for a gate, when nothing of the
+// package's can be shown.
+func openWhat(code string) PersonText {
+	if code == GateNotTied {
+		return Text("งบกระทบยอดยังไม่ลงตัว ยอดหลังปรับปรุงของธนาคารและของบัญชียังไม่เท่ากัน")
+	}
+	return Text("งานของรอบนี้ยังไม่ผ่านเกณฑ์ของ agent")
+}
+
+// GateWords are a package gate's own sentences as a person is shown them (the
+// files card, the progress card). A gate that did not pass always says
+// something: the platform's own sentence when nothing of the package's can be
+// shown.
+func GateWords(passed bool, code, what, next string) (PersonText, PersonText) {
+	if passed {
+		return FromPackage(what, NoText), FromPackage(next, NoText)
+	}
+	return FromPackage(what, openWhat(code)), FromPackage(next, NoText)
+}
+
+// CompletionFor builds what a person reads. It takes the gate's code, the
+// package's sentences and facts about the round — never an error.
+func CompletionFor(code string, facts CompletionFacts) Completion {
+	c := Completion{Code: code, Title: CompletionTitle(code), Credits: facts.Credits,
+		What: FromPackage(facts.GateWhat, openWhat(code)), Next: FromPackage(facts.GateNext, Text(nextDraft))}
+	c.Files = Text("ไฟล์ของรอบนี้ส่งให้แล้วเป็นฉบับร่าง มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาและผลงานของรอบก่อน ๆ ยังอยู่ครบ")
+	if facts.KeepDays > 0 {
+		c.Files = Text("ไฟล์ของรอบนี้ส่งให้แล้วเป็นฉบับร่าง มีคำว่า “ร่าง” กำกับบนหน้าแรก ไฟล์ที่ส่งมาในรอบนี้ยังอยู่ครบและเก็บไว้ให้อีก %s วัน "+
+			"ผลงานของรอบก่อน ๆ ไม่ถูกแตะต้อง", Count(facts.KeepDays))
+	}
+	switch {
+	case facts.Credits <= 0:
+		c.Charged = Text("รอบนี้ไม่ได้ใช้เครดิต")
+	case code == GateNotTied:
+		c.Charged = Text("รอบนี้ใช้ไป %s เครดิต งานของรอบนี้เสร็จและส่งไฟล์ให้แล้ว จึงคิดเครดิตตามปกติ แม้ยอดจะยังไม่ลงตัว", Credits(facts.Credits))
+	default:
+		c.Charged = Text("รอบนี้ใช้ไป %s เครดิต งานของรอบนี้เสร็จและส่งไฟล์ให้แล้ว จึงคิดเครดิตตามปกติ แม้งานจะยังไม่ผ่านเกณฑ์ของ agent",
+			Credits(facts.Credits))
+	}
+	return c
+}
+
+// Text is the completion as one paragraph (a thread item's text).
+func (c Completion) Text() PersonText {
+	return Text("%s — %s %s %s %s", Words(c.Title), Words(c.What), Words(c.Next), Words(c.Files), Words(c.Charged))
+}
+
+// ── the list of AM5 ──────────────────────────────────────────────────────
+//
+// What follows is AM5's list of error shapes. It decides nothing since AM6:
+// what a person is shown is decided by reads.go, which then asks this list
+// once more (LooksLikeError) and withholds what it knows — it can only ever
+// take more out. writeErr, the last line of an HTTP message, still uses it.
 
 // errorText is what an error looks like: an exception or its type, a stack
 // frame, a transport or database error, an address.
@@ -226,10 +298,8 @@ func LooksLikeError(s string) bool {
 	return false
 }
 
-// LooksTechnical: the text carries something only an engineer can read — an
-// error's own words, or the engine's names for things. This is the rule for
-// what the agent says in the thread: a failure, a notice, a progress line, a
-// check.
+// LooksTechnical: the text carries something the AM5 list knows — an error's
+// own words, or the engine's names for things.
 func LooksTechnical(s string) bool {
 	if LooksLikeError(s) {
 		return true
@@ -245,9 +315,9 @@ func LooksTechnical(s string) bool {
 
 var parenthetical = regexp.MustCompile(`\s*[(（][^()（）]*[)）]`)
 
-// ForPerson returns text a person may read: a parenthesis that carries
-// technical detail is taken out of its sentence; if what remains is still
-// technical there is nothing to show ("").
+// ForPerson is AM5's repair: a parenthesis that carries what its list knows
+// is taken out of its sentence; if what remains still does there is nothing
+// to show (""). Only writeErr uses it now.
 func ForPerson(s string) string {
 	if !LooksTechnical(s) {
 		return s
@@ -278,71 +348,4 @@ func TrimText(s string, n int) string {
 		n--
 	}
 	return s[:n] + "…"
-}
-
-// GuardItem makes a thread item's payload safe to read, whoever wrote it and
-// when. Only the agent's side is touched; what a person typed is theirs.
-func GuardItem(kind string, payload json.RawMessage) json.RawMessage {
-	switch kind {
-	case "agent_text", "notice", "progress", "outputs":
-	default:
-		return payload
-	}
-	var p map[string]any
-	if err := json.Unmarshal(payload, &p); err != nil {
-		return payload
-	}
-	changed := false
-	clean := func(m map[string]any, key, otherwise string) {
-		s, ok := m[key].(string)
-		if !ok || !LooksTechnical(s) {
-			return
-		}
-		out := ForPerson(s)
-		if out == "" {
-			out = otherwise
-		}
-		m[key] = out
-		changed = true
-	}
-	switch kind {
-	case "agent_text":
-		if tone, _ := p["tone"].(string); tone == "error" {
-			reason := ""
-			if f, ok := p["failure"].(map[string]any); ok {
-				reason, _ = f["reason"].(string)
-			}
-			clean(p, "text", FailureFor(reason, FailureFacts{Kind: KindRun}).What)
-		}
-	case "notice":
-		clean(p, "text", "")
-	case "progress":
-		steps, _ := p["steps"].([]any)
-		for _, s := range steps {
-			if m, ok := s.(map[string]any); ok {
-				clean(m, "detail", "")
-			}
-		}
-	case "outputs":
-		arts, _ := p["artifacts"].([]any)
-		for _, a := range arts {
-			am, _ := a.(map[string]any)
-			q, _ := am["quality"].(map[string]any)
-			checks, _ := q["checks"].([]any)
-			for _, c := range checks {
-				if m, ok := c.(map[string]any); ok {
-					clean(m, "detail", "")
-					clean(m, "label", "การตรวจของระบบ")
-				}
-			}
-		}
-	}
-	if !changed {
-		return payload
-	}
-	out, err := json.Marshal(p)
-	if err != nil {
-		return payload
-	}
-	return out
 }

@@ -195,20 +195,22 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 	if err != nil {
 		return r.fail(ctx, job, "load", err)
 	}
+	// AM6: a question asked in ask mode may carry what the person's knowledge
+	// base holds on it (the control plane read it). This job is the only one
+	// that reads it: no step of a round ever sees it.
 	var params struct {
-		ItemID uuid.UUID `json:"item_id"`
-		Text   string    `json:"text"`
+		ItemID    uuid.UUID            `json:"item_id"`
+		Text      string               `json:"text"`
+		Knowledge *am.KnowledgeContext `json:"knowledge"`
 	}
 	_ = json.Unmarshal(job.Params, &params)
-	post := func(text string) error {
-		target := job
-		if job.ParentRunID != nil {
-			if p, err := r.Store.RunByID(ctx, *job.ParentRunID); err == nil {
-				target = p
-			}
+	target := job
+	if job.ParentRunID != nil {
+		if p, err := r.Store.RunByID(ctx, *job.ParentRunID); err == nil {
+			target = p
 		}
-		return r.Store.PostText(ctx, target, text, nil)
 	}
+	post := func(text am.PersonText) error { return r.Store.PostText(ctx, target, text) }
 	var parent *am.Run
 	if job.ParentRunID != nil {
 		if p, err := r.Store.RunByID(ctx, *job.ParentRunID); err == nil {
@@ -219,23 +221,23 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 	low := strings.ToLower(text)
 	switch {
 	case strings.Contains(low, "ภาษาอังกฤษ") || strings.Contains(low, "english"):
-		_ = post("ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป")
+		_ = post(am.Text("ตอนนี้ agent ตัวนี้ทำเอกสารเป็นภาษาไทยเท่านั้นครับ ภาษาอังกฤษจะมาในรุ่นถัดไป"))
 	case asksForPDF(text) && !rc.pdfOffered() && len(detectFormats(text)) == 0:
-		_ = post("agent ตัวนี้ยังทำไฟล์ PDF ไม่ได้ในตอนนี้ครับ " +
-			"ระหว่างนี้เปิดไฟล์ที่ได้แล้วสั่ง “บันทึกเป็น PDF” ได้เลย")
+		_ = post(am.Text("agent ตัวนี้ยังทำไฟล์ PDF ไม่ได้ในตอนนี้ครับ " +
+			"ระหว่างนี้เปิดไฟล์ที่ได้แล้วสั่ง “บันทึกเป็น PDF” ได้เลย"))
 	case len(detectFormatsFor(text, rc.pdfOffered())) > 0 && len(rc.allowedOf(detectFormatsFor(text, rc.pdfOffered()))) == 0:
 		// asked for a kind of file this agent does not make (AM3: say so, never fail a render)
-		_ = post("agent ตัวนี้ทำไฟล์ได้เฉพาะ " + formatNames(rc.outputFormats()) + " ครับ — ถ้าต้องการไฟล์แบบอื่น " +
-			"เปิดไฟล์ที่ได้แล้วบันทึกเป็นแบบที่ต้องการได้เลย ไฟล์เดิมของรอบนี้ยังอยู่ครบ")
+		_ = post(am.Text("agent ตัวนี้ทำไฟล์ได้เฉพาะ %s ครับ — ถ้าต้องการไฟล์แบบอื่น "+
+			"เปิดไฟล์ที่ได้แล้วบันทึกเป็นแบบที่ต้องการได้เลย ไฟล์เดิมของรอบนี้ยังอยู่ครบ", am.Words(formatNames(rc.outputFormats()))))
 	case len(detectFormatsFor(text, rc.pdfOffered())) > 0:
 		formats := rc.allowedOf(detectFormatsFor(text, rc.pdfOffered()))
 		switch {
 		case parent == nil:
-			need := "ไฟล์"
+			need := am.Text("ไฟล์")
 			if in := rc.pkg.Manifest.Inputs; len(in) > 0 {
-				need = in[0].Label
+				need = am.LabelFromPackage(in[0].Label, need)
 			}
-			_ = post("ยังไม่มีรอบไหนให้ทำไฟล์ครับ ส่ง" + need + "มาได้เลย แล้วผมจะทำให้ตามรูปแบบที่ขอ")
+			_ = post(am.Text("ยังไม่มีรอบไหนให้ทำไฟล์ครับ ส่ง%sมาได้เลย แล้วผมจะทำให้ตามรูปแบบที่ขอ", am.Words(need)))
 		case parent.Status == am.RunSucceeded:
 			params, _ := json.Marshal(map[string]any{"formats": formats, "why": "message"})
 			pid := parent.ID
@@ -245,7 +247,7 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 				BindingVersion: parent.BindingVersion}, ""); err != nil {
 				return r.fail(ctx, job, "reply", err)
 			}
-			_ = post(fmt.Sprintf("ได้ครับ กำลังสร้าง %s จากตัวเลขชุดเดิมของรอบนี้ ไม่คำนวณใหม่", formatNames(formats)))
+			_ = post(am.Text("ได้ครับ กำลังสร้าง %s จากตัวเลขชุดเดิมของรอบนี้ ไม่คำนวณใหม่", am.Words(formatNames(formats))))
 		case !am.IsTerminal(parent.Status):
 			var cur []string
 			_ = json.Unmarshal(parent.Formats, &cur)
@@ -255,39 +257,47 @@ func (r *Runner) replyJob(ctx context.Context, job am.Run, log *slog.Logger) err
 				}
 			}
 			_ = r.Store.SetFormats(ctx, r.Store.Pool, parent.ID, cur)
-			_ = post(fmt.Sprintf("รับทราบครับ จะส่ง %s ให้ด้วยเมื่อรอบนี้เสร็จ", formatNames(formats)))
+			_ = post(am.Text("รับทราบครับ จะส่ง %s ให้ด้วยเมื่อรอบนี้เสร็จ", am.Words(formatNames(formats))))
 		default:
-			_ = post("รอบก่อนหน้าไม่สำเร็จ จึงยังทำไฟล์เพิ่มไม่ได้ครับ ส่งไฟล์ใหม่หรือพิมพ์ “ทำรอบใหม่” ได้เลย")
+			if parent.Outcome() == am.OutcomeCompletedOpen {
+				_ = post(am.Text("ไฟล์ของรอบก่อนหน้าเป็นฉบับร่าง จึงยังทำไฟล์เพิ่มจากรอบนั้นไม่ได้ครับ แก้สาเหตุแล้วส่งไฟล์ใหม่เพื่อเริ่มรอบใหม่ได้เลย"))
+			} else {
+				_ = post(am.Text("รอบก่อนหน้าไม่สำเร็จ จึงยังทำไฟล์เพิ่มไม่ได้ครับ ส่งไฟล์ใหม่หรือพิมพ์ “ทำรอบใหม่” ได้เลย"))
+			}
 		}
 	case wantsMoreFiles(text) && parent != nil && parent.Status == am.RunSucceeded:
 		if err := r.formatCard(ctx, *parent, rc.outputFormats(), rc.pdfOffered()); err != nil {
 			return r.fail(ctx, job, "reply", err)
 		}
 	case (isQuestion(text) || asksWhy(text)) && parent != nil:
-		answer := r.answerQuestion(ctx, rc, *parent, text)
-		_ = post(answer)
+		_ = r.Store.PostAgentText(ctx, target, r.answerWith(ctx, rc, *parent, text, params.Knowledge))
+	case (isQuestion(text) || asksWhy(text)) && params.Knowledge != nil:
+		// no round to ask about yet: the knowledge base alone answers
+		_ = r.Store.PostAgentText(ctx, target, r.answerFromKnowledge(ctx, rc, text, params.Knowledge))
 	default:
+		// what the agent is, needs and cannot do is its manifest's: the package's own words
 		m := rc.pkg.Manifest
-		var needs []string
+		var needs []am.PersonText
 		for _, in := range m.Inputs {
-			needs = append(needs, in.Label)
+			needs = append(needs, am.LabelFromPackage(in.Label, am.NoText))
 		}
-		_ = post(fmt.Sprintf("ผมทำ%sครับ ส่งไฟล์มาได้เลย (%s) หรือถามเกี่ยวกับตัวเลขของรอบล่าสุดได้ %s",
-			m.Name, strings.Join(needs, " · "), m.Cannot))
+		_ = post(am.Text("ผมทำ%sครับ ส่งไฟล์มาได้เลย (%s) หรือถามเกี่ยวกับตัวเลขของรอบล่าสุดได้ %s",
+			am.Said(m.Name, am.Text("งานของ agent นี้")), am.Words(am.Join(" · ", needs...)), am.Said(m.Cannot, am.NoText)))
 	}
 	if params.ItemID != uuid.Nil {
-		_ = r.Store.PatchItem(ctx, r.Store.Pool, params.ItemID, map[string]any{"status": "handled"})
+		_ = r.Store.PatchItem(ctx, r.Store.Pool, params.ItemID, am.ItemPatch{Status: "handled"})
 	}
 	return r.finish(rc, am.RunSucceeded, "")
 }
 
-func formatNames(fs []string) string {
-	names := map[string]string{"docx": "รายงาน .docx", "pptx": "สไลด์ .pptx", "xlsx": "ตารางตัวเลข .xlsx", "pdf": "รายงาน PDF"}
-	var out []string
+func formatNames(fs []string) am.PersonText {
+	names := map[string]am.PersonText{"docx": am.Text("รายงาน .docx"), "pptx": am.Text("สไลด์ .pptx"),
+		"xlsx": am.Text("ตารางตัวเลข .xlsx"), "pdf": am.Text("รายงาน PDF")}
+	var out []am.PersonText
 	for _, f := range fs {
 		out = append(out, names[f])
 	}
-	return strings.Join(out, " และ ")
+	return am.Join(" และ ", out...)
 }
 
 // formatQuestion is the "which extra files" question: only what this agent
@@ -347,8 +357,8 @@ func (r *Runner) formatCard(ctx context.Context, run am.Run, outputs []string, p
 		return err
 	}
 	rid := run.ID
-	_, _, err = r.Store.AddItem(ctx, r.Store.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "card",
-		am.CardItemPayload(card, "", "สร้างจากตัวเลขชุดเดิม ไม่คำนวณใหม่"), nil)
+	_, _, err = r.Store.AddItem(ctx, r.Store.Pool, run.InstallID, run.TenantID, run.UserID, &rid,
+		am.CardItemPayload(card, am.NoText, am.Text("สร้างจากตัวเลขชุดเดิม ไม่คำนวณใหม่")), nil)
 	return err
 }
 
@@ -357,26 +367,126 @@ func (r *Runner) formatCard(ctx context.Context, run am.Run, outputs []string, p
 // for word, never by a model (explain.go); a "why" the record cannot support
 // gets "I don't know". Anything else may go to a model, numbers guarded and
 // no cause given — it has no record of any cause.
-func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, text string) string {
+//
+// AM6: an answer is what a person is shown of it — the record's words with
+// the person's own files and sheets, or a model's sentence; and a model's
+// call that gave no usable answer is a cost of the platform's, not a charge:
+// the person got the sentence that says so, not an answer.
+func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, text string) am.PersonText {
+	return r.answerWith(ctx, rc, parent, text, nil).Text
+}
+
+// noModel is what a question gets when no model inside the organisation can answer it.
+const noModel = "ดูตัวเลขและที่มาได้ในไฟล์ของรอบนี้ และในหน้า “ขั้นตอนและที่มาของตัวเลข” ครับ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร และตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้)"
+
+// answerWith is answerQuestion with what the person's knowledge base holds on
+// the question (AM6; nil = nothing). The model is asked with the round's
+// figures and the passages; the passages explain, they never replace a figure
+// of the round, and a number quoted from them word for word (a limit of the
+// policy) is a quotation, not a computed figure. An answer the model wrote
+// with the passages says so (Knowledge): it is not part of the round's files.
+// A figure the round's record explains is still answered from the record.
+func (r *Runner) answerWith(ctx context.Context, rc *runCtx, parent am.Run, text string, k *am.KnowledgeContext) am.AgentText {
 	ps, err := r.parentState(ctx, parent.ID)
 	if err != nil {
-		return "รอให้รอบนี้คำนวณเสร็จก่อนนะครับ แล้วถามได้เลย"
+		if k != nil {
+			return r.answerFromKnowledge(ctx, rc, text, k)
+		}
+		return am.AgentText{Text: am.Text("รอให้รอบนี้คำนวณเสร็จก่อนนะครับ แล้วถามได้เลย")}
 	}
 	cv, raw, err := rc.readComputed(ctx, ps.computed)
-	if err == nil {
-		if ans := explainAnswer(text, raw); ans != "" {
-			return ans
+	switch {
+	case err == nil:
+		// a "why" the record cannot support may still be one the passages answer
+		if ans, theirs := explainAnswer(text, raw); ans != "" && (k == nil || ans != dontKnow) {
+			return am.AgentText{Text: am.FromPackage(ans, am.Text(dontKnow), theirs...)}
 		}
-	} else if asksWhy(text) {
-		return dontKnow
+	case k != nil:
+		return r.answerFromKnowledge(ctx, rc, text, k)
+	case asksWhy(text):
+		return am.AgentText{Text: am.Text(dontKnow)}
 	}
 	models := rc.textModels()
 	if err != nil || !r.Model.Available() || len(models) == 0 {
-		return "ดูตัวเลขและที่มาได้ในไฟล์ของรอบนี้ และในหน้า “ขั้นตอนและที่มาของตัวเลข” ครับ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร และตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้)"
+		if k != nil {
+			return withoutModel(am.Text(noModel), k)
+		}
+		return am.AgentText{Text: am.Text(noModel)}
 	}
 	system := rc.pkg.Instructions + "\n\nตอนนี้ให้ตอบคำถามของผู้ใช้เกี่ยวกับตัวเลขของรอบนี้ สั้น ๆ 1–3 ประโยค ตอบเป็น JSON {\"answer\": \"...\"} ใช้ตัวเลขจากรายการที่อ้างได้เท่านั้น ถ้าข้อมูลไม่พอให้บอกตรง ๆ ว่าไม่พอ " +
 		"ห้ามบอกสาเหตุหรือเหตุผลว่าทำไมตัวเลขเป็นเช่นนั้น เพราะไม่มีบันทึกสาเหตุ ถ้าถูกถามว่าทำไม ให้ตอบว่าไม่ทราบ"
-	user := narrativePrompt(cv) + "\n\nคำถาม: " + text
+	user := narrativePrompt(cv)
+	quotable := cv.Quotable
+	if k != nil {
+		// what the model is told about passages from the person's knowledge base, beside the round's figures
+		const knowledgeRules = " ด้านล่างมีข้อความจากฐานความรู้ของผู้ใช้ (เช่น ผังบัญชี ศูนย์ต้นทุน นโยบาย) ใช้เพื่ออธิบายความหมายเท่านั้น " +
+			"ข้อความจากฐานความรู้ไม่ใช่ตัวเลขของรอบนี้ และใช้แทนตัวเลขของรอบนี้ไม่ได้ ตัวเลขของรอบนี้ต้องมาจากรายการที่อ้างได้เท่านั้น " +
+			"ตัวเลขจากฐานความรู้ (เช่น วงเงินในนโยบาย) ยกมาได้ตรงตัวอักษร และต้องบอกว่ามาจากฐานความรู้"
+		system += knowledgeRules
+		user += "\n\n" + k.Text
+		quotable = knowledgeGuard(cv.Quotable, k)
+	}
+	user += "\n\nคำถาม: " + text
+	said, ok := r.askModel(ctx, rc, models, system, user, func(answer string) error {
+		if err := GuardNumbers(answer, quotable, cv.QuotableIDs); err != nil {
+			return err
+		}
+		if givesACause(answer) {
+			return fmt.Errorf("ห้ามบอกสาเหตุของตัวเลข ตอบเฉพาะค่าที่อ้างได้ หรือบอกว่าไม่ทราบ")
+		}
+		return nil
+	})
+	if !ok {
+		return am.AgentText{Text: am.Text("ผมยังตอบคำถามนี้จากตัวเลขที่มีได้ไม่มั่นใจครับ ดูรายละเอียดได้ในหน้า “ขั้นตอนและที่มาของตัวเลข”")}
+	}
+	return am.AgentText{Text: said, Knowledge: k.Shown()}
+}
+
+// answerFromKnowledge answers a question from the person's knowledge base
+// alone (AM6): there is no round to ask about yet, or its figures cannot be
+// read. Every number of the answer must be one of the passages', word for word.
+func (r *Runner) answerFromKnowledge(ctx context.Context, rc *runCtx, text string, k *am.KnowledgeContext) am.AgentText {
+	models := rc.textModels()
+	if !r.Model.Available() || len(models) == 0 {
+		return withoutModel(am.Text("ตอนนี้ไม่มีโมเดลในองค์กรที่ตอบคำถามได้ (agent ตัวนี้ไม่ส่งข้อมูลของคุณให้โมเดลนอกองค์กร)"), k)
+	}
+	system := rc.pkg.Instructions + "\n\nตอนนี้ให้ตอบคำถามของผู้ใช้จากข้อความในฐานความรู้ด้านล่างเท่านั้น สั้น ๆ 1–3 ประโยค ตอบเป็น JSON {\"answer\": \"...\"} " +
+		"ถ้าข้อความไม่มีคำตอบ ให้บอกตรง ๆ ว่าฐานความรู้ไม่มีคำตอบ ตัวเลขใช้ได้เฉพาะที่อยู่ในข้อความ ยกมาตรงตัวอักษร"
+	quotable := knowledgeGuard(nil, k)
+	said, ok := r.askModel(ctx, rc, models, system, k.Text+"\n\nคำถาม: "+text, func(answer string) error {
+		return GuardNumbers(answer, quotable, nil)
+	})
+	if !ok {
+		return withoutModel(am.Text("ผมยังตอบคำถามนี้จากฐานความรู้ได้ไม่มั่นใจครับ"), k)
+	}
+	return am.AgentText{Text: said, Knowledge: k.Shown()}
+}
+
+// withoutModel is a sentence of the platform's, and where in the knowledge
+// base the passages that were found are.
+func withoutModel(said am.PersonText, k *am.KnowledgeContext) am.AgentText {
+	return am.AgentText{Text: am.Text("%s — ส่วนที่เกี่ยวข้องในคลังความรู้ %s: %s", am.Words(said), am.Name(k.Base), k.Titles()),
+		Knowledge: k.Shown()}
+}
+
+// knowledgeGuard is the round's quotable figures with every number the
+// passages hold, as they are written: a number of the passages is a quotation.
+func knowledgeGuard(quotable map[string]string, k *am.KnowledgeContext) map[string]string {
+	out := make(map[string]string, len(quotable))
+	for key, v := range quotable {
+		out[key] = v
+	}
+	for i, n := range numRe.FindAllString(k.Text, -1) {
+		out[fmt.Sprintf("passage_%d", i)] = normalizeNumberToken(n)
+	}
+	return out
+}
+
+// askModel asks the models for {"answer": "..."} that passes check: what a
+// person is shown of it, and whether there is one. A call that gave no usable
+// answer is a cost of the platform's, not a charge (AM6): the person got the
+// sentence that says so, not an answer.
+func (r *Runner) askModel(ctx context.Context, rc *runCtx, models []string, system, user string, check func(string) error) (am.PersonText, bool) {
 	var answer string
 	c, _, err := r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
 		var v struct {
@@ -385,22 +495,26 @@ func (r *Runner) answerQuestion(ctx context.Context, rc *runCtx, parent am.Run, 
 		if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil || strings.TrimSpace(v.Answer) == "" {
 			return fmt.Errorf("ไม่ใช่ JSON ที่มี answer")
 		}
-		if err := GuardNumbers(v.Answer, cv.Quotable, cv.QuotableIDs); err != nil {
+		if err := check(v.Answer); err != nil {
 			return err
-		}
-		if givesACause(v.Answer) {
-			return fmt.Errorf("ห้ามบอกสาเหตุของตัวเลข ตอบเฉพาะค่าที่อ้างได้ หรือบอกว่าไม่ทราบ")
 		}
 		answer = v.Answer
 		return nil
 	})
-	if c.CostUSD > 0 { // paid whether or not an answer was usable
-		_ = r.Store.Charge(ctx, rc.install.ID, rc.run.ID, "reply", c.CostUSD*r.CreditsPerUSD, c.Model, nil)
+	said := am.NoText
+	if err == nil {
+		said = am.FromModel(answer, am.NoText)
 	}
-	if err != nil {
-		return "ผมยังตอบคำถามนี้จากตัวเลขที่มีได้ไม่มั่นใจครับ ดูรายละเอียดได้ในหน้า “ขั้นตอนและที่มาของตัวเลข”"
+	credits := c.CostUSD * r.CreditsPerUSD
+	switch {
+	case c.CostUSD <= 0:
+	case said.Empty():
+		// the platform paid for the call; the person got no answer of it
+		_ = r.Store.CostOnly(ctx, rc.install.ID, rc.run.ID, "reply", credits, c.Model, nil, "no_usable_answer")
+	default:
+		_ = r.Store.Charge(ctx, rc.install.ID, rc.run.ID, "reply", credits, c.Model, nil)
 	}
-	return answer
+	return said, !said.Empty()
 }
 
 // previewJob reads a sample export for the install wizard's column mapping.

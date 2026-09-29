@@ -76,7 +76,7 @@ func (e *itEnv) invoiceRun(files ...string) am.Run {
 		}
 	}
 	rid := run.ID
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "progress", am.Progress{RunID: run.ID.String()}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, am.Progress{RunID: run.ID.String()}, nil)
 	return run
 }
 

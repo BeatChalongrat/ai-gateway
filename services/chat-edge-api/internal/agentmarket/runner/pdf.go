@@ -53,28 +53,31 @@ func (rc *runCtx) technical(ctx context.Context, what string, err error) {
 	rc.r.noteStep(ctx, rc.run, "check:"+what, err.Error())
 }
 
+// gateCheck is one check of a file the runner makes itself (a PDF, a
+// template's formulas), in the shape a package's own checks have. Its label
+// and detail are read on the files card: texts for a person.
 type gateCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
-	Label  string `json:"label"`
+	Name   string        `json:"name"`
+	OK     bool          `json:"ok"`
+	Detail am.PersonText `json:"detail"`
+	Label  am.PersonText `json:"label"`
 }
 
 // pdfFromDocx converts and checks; a converter that cannot be reached is a
 // failed check (the PDF is not delivered), not a crash.
 func (rc *runCtx) pdfFromDocx(ctx context.Context, name string, docx []byte) ([]byte, []gateCheck) {
 	if !rc.r.Converter.Available() {
-		return nil, []gateCheck{{Name: "pdf.convert", Label: "แปลงเป็น PDF", Detail: "ยังไม่มีตัวแปลงเอกสารในระบบ"}}
+		return nil, []gateCheck{{Name: "pdf.convert", Label: am.Text("แปลงเป็น PDF"), Detail: am.Text("ยังไม่มีตัวแปลงเอกสารในระบบ")}}
 	}
 	pdf, err := rc.r.Converter.Convert(ctx, name, docx, "pdf")
 	if err != nil {
 		rc.technical(ctx, "pdf.convert", err)
-		return nil, []gateCheck{{Name: "pdf.convert", Label: "แปลงเป็น PDF", Detail: converterDown}}
+		return nil, []gateCheck{{Name: "pdf.convert", Label: am.Text("แปลงเป็น PDF"), Detail: am.Text(converterDown)}}
 	}
 	chk, err := rc.r.Converter.Check(ctx, pdf)
 	if err != nil {
 		rc.technical(ctx, "pdf.check", err)
-		return nil, []gateCheck{{Name: "pdf.check", Label: "ตรวจ PDF", Detail: converterDown}}
+		return nil, []gateCheck{{Name: "pdf.check", Label: am.Text("ตรวจ PDF"), Detail: am.Text(converterDown)}}
 	}
 	return pdf, pdfGate(docx, chk)
 }
@@ -95,7 +98,7 @@ func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPat
 	var why []string
 	for _, c := range checks {
 		if !c.OK {
-			why = append(why, checkLine("pdf", c.Label, c.Detail))
+			why = append(why, checkLine("pdf", c.Label.String(), c.Detail.String()))
 		}
 	}
 	if pdf == nil || len(why) > 0 {
@@ -123,11 +126,11 @@ func pdfGate(docx []byte, chk CheckResult) []gateCheck {
 			bad = append(bad, fmt.Sprint(i+1))
 		}
 	}
-	pages := gateCheck{Name: "pdf.pages", Label: "ทุกหน้าแสดงผลได้",
+	pages := gateCheck{Name: "pdf.pages", Label: am.Text("ทุกหน้าแสดงผลได้"),
 		OK:     chk.Pages > 0 && chk.RenderedPages == want && len(chk.PageInk) == want && len(bad) == 0,
-		Detail: fmt.Sprintf("%d หน้า แสดงผลได้ %d หน้า", chk.Pages, chk.RenderedPages)}
+		Detail: am.Text("%s หน้า แสดงผลได้ %s หน้า", am.Count(chk.Pages), am.Count(chk.RenderedPages))}
 	if len(bad) > 0 {
-		pages.Detail += " · หน้าว่างหรือผิดปกติ: " + strings.Join(bad, ", ")
+		pages.Detail = am.Text("%s · หน้าว่างหรือผิดปกติ: %s", am.Words(pages.Detail), am.Name(strings.Join(bad, ", ")))
 	}
 	paras := docxThaiParagraphs(docx)
 	text := thaiKey(chk.RawText)
@@ -137,13 +140,13 @@ func pdfGate(docx []byte, chk CheckResult) []gateCheck {
 			missing = append(missing, p)
 		}
 	}
-	thai := gateCheck{Name: "pdf.thai", Label: "ภาษาไทยใน PDF ตรงกับรายงาน", OK: len(paras) > 0 && len(missing) == 0,
-		Detail: fmt.Sprintf("ตรง %d จาก %d ย่อหน้า", len(paras)-len(missing), len(paras))}
+	thai := gateCheck{Name: "pdf.thai", Label: am.Text("ภาษาไทยใน PDF ตรงกับรายงาน"), OK: len(paras) > 0 && len(missing) == 0,
+		Detail: am.Text("ตรง %s จาก %s ย่อหน้า", am.Count(len(paras)-len(missing)), am.Count(len(paras)))}
 	if len(missing) > 0 {
-		thai.Detail += " · ไม่ตรง เช่น “" + trim(missing[0], 60) + "”"
+		thai.Detail = am.Text("%s · ไม่ตรง เช่น “%s”", am.Words(thai.Detail), am.Typed(missing[0], 60))
 	}
 	if len(paras) == 0 {
-		thai.Detail = "ไม่พบข้อความภาษาไทยในรายงาน"
+		thai.Detail = am.Text("ไม่พบข้อความภาษาไทยในรายงาน")
 	}
 	return []gateCheck{pages, thai}
 }

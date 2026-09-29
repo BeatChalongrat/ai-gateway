@@ -52,6 +52,19 @@ type RetentionCounts struct {
 // DefaultRetentionYears is the organisation's default (org_settings.retention_years).
 const DefaultRetentionYears = 5
 
+// kept is the condition of a round whose evidence is the organisation's
+// record: it succeeded — or, AM6, it finished with its gate open and its
+// draft delivered. That round was charged for work delivered; it is kept
+// exactly as a succeeded one is, never purged as a failed round's scratch.
+// alias names the runs' table in the query ("" = none).
+func kept(alias string) string {
+	p := ""
+	if alias != "" {
+		p = alias + "."
+	}
+	return "(" + p + "status = 'succeeded' OR (" + p + "gate_open AND " + p + "delivered_at IS NOT NULL))"
+}
+
 // Retention runs one pass. staged: a file never used in a round; scratch: a
 // failed or cancelled round's data; removed: a removed install's conversation.
 func (s *Store) Retention(ctx context.Context, files storage.Backend, staged, scratch, removed time.Duration) (RetentionCounts, error) {
@@ -97,7 +110,7 @@ func (s *Store) Retention(ctx context.Context, files storage.Backend, staged, sc
 
 	// a failed or cancelled round's data: its step blobs and its uploads
 	scratchRuns, err := s.ids(ctx, `SELECT id FROM agent_market.agent_runs
-		WHERE status IN ('failed', 'cancelled') AND scratch_purged_at IS NULL
+		WHERE status IN ('failed', 'cancelled') AND NOT `+kept("")+` AND scratch_purged_at IS NULL
 		  AND finished_at < now() - make_interval(secs => $1::double precision) LIMIT 200`, scratch.Seconds())
 	if err != nil {
 		return c, err
@@ -132,7 +145,7 @@ func (s *Store) Retention(ctx context.Context, files storage.Backend, staged, sc
 	expired, err := s.ids(ctx, `SELECT r.id FROM agent_market.agent_runs r
 		JOIN agent_market.agent_installs i ON i.id = r.install_id
 		LEFT JOIN agent_market.org_settings o ON o.org_id = i.org_id
-		WHERE r.kind = 'run' AND r.status = 'succeeded' AND i.status <> 'catalog'
+		WHERE r.kind = 'run' AND `+kept("r")+` AND i.status <> 'catalog'
 		  AND r.finished_at < now() - make_interval(years => COALESCE(o.retention_years, $1))
 		LIMIT 100`, DefaultRetentionYears)
 	if err != nil {
@@ -156,12 +169,12 @@ func (s *Store) Retention(ctx context.Context, files storage.Backend, staged, sc
 	}
 	var empty []uuid.UUID
 	for _, id := range gone {
-		kept, err := s.ids(ctx, `SELECT id FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'succeeded'
+		evidence, err := s.ids(ctx, `SELECT id FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND `+kept("")+`
 			AND evidence_removed_at IS NULL`, id)
 		if err != nil {
 			return c, err
 		}
-		if len(kept) == 0 {
+		if len(evidence) == 0 {
 			empty = append(empty, id)
 			continue
 		}
@@ -305,6 +318,11 @@ func (s *Store) purgeRuns(ctx context.Context, files storage.Backend, runs []uui
 		`DELETE FROM agent_market.agent_files WHERE run_id = ANY($1)`,
 		`DELETE FROM agent_market.agent_budget_ledger WHERE run_id = ANY($1)`,
 		`DELETE FROM agent_market.problem_reports WHERE run_id = ANY($1)`,
+		// AM6: what a notification, a draft or a send said about a round goes with the round
+		`DELETE FROM agent_market.notifications WHERE run_id = ANY($1)`,
+		`DELETE FROM agent_market.email_drafts WHERE run_id = ANY($1)`,
+		`DELETE FROM agent_market.email_sends WHERE run_id = ANY($1)`,
+		`UPDATE agent_market.reminders SET waiting_run_id = NULL WHERE waiting_run_id = ANY($1)`,
 		`DELETE FROM agent_market.agent_runs WHERE parent_run_id = ANY($1)`,
 		`DELETE FROM agent_market.agent_runs WHERE id = ANY($1)`,
 	} {
@@ -322,7 +340,7 @@ func (s *Store) purgeRuns(ctx context.Context, files storage.Backend, runs []uui
 func (s *Store) purgePersonal(ctx context.Context, files storage.Backend, installs []uuid.UUID) (int, error) {
 	n := 0
 	lost, err := s.ids(ctx, `SELECT id FROM agent_market.agent_runs WHERE install_id = ANY($1) AND kind = 'run'
-		AND status IN ('failed', 'cancelled')`, installs)
+		AND status IN ('failed', 'cancelled') AND NOT `+kept("")+``, installs)
 	if err != nil {
 		return 0, err
 	}
@@ -359,11 +377,16 @@ func (s *Store) purgePersonal(ctx context.Context, files storage.Backend, instal
 	for _, q := range []string{
 		// the conversation: everything but a finished round's own progress and files card
 		`DELETE FROM agent_market.agent_thread_items WHERE install_id = ANY($1)
-			AND NOT (kind IN ('progress', 'outputs') AND run_id IN (SELECT id FROM agent_market.agent_runs WHERE status = 'succeeded'))`,
+			AND NOT (kind IN ('progress', 'outputs') AND run_id IN (SELECT id FROM agent_market.agent_runs WHERE ` + kept("") + `))`,
 		`UPDATE agent_market.agent_thread_items SET thread_id = NULL WHERE install_id = ANY($1)`,
 		`UPDATE agent_market.agent_runs SET thread_id = NULL WHERE install_id = ANY($1)`,
 		`DELETE FROM agent_market.agent_threads WHERE install_id = ANY($1)`,
 		`DELETE FROM agent_market.agent_install_defaults WHERE install_id = ANY($1)`,
+		// AM6: the install's reminders, notifications and e-mail drafts are the person's (a send
+		// log is the organisation's and stays with its round)
+		`DELETE FROM agent_market.reminders WHERE install_id = ANY($1)`,
+		`DELETE FROM agent_market.notifications WHERE install_id = ANY($1)`,
+		`DELETE FROM agent_market.email_drafts WHERE install_id = ANY($1)`,
 	} {
 		if _, err := s.Pool.Exec(ctx, q, installs); err != nil {
 			return n, err
@@ -421,6 +444,18 @@ func (s *Store) PurgeInstalls(ctx context.Context, files storage.Backend, instal
 	// AM3: reports about these installs' runs go with them (no key: they may be a share viewer's)
 	if _, err := tx.Exec(ctx, `DELETE FROM agent_market.problem_reports WHERE install_id = ANY($1)`, installs); err != nil {
 		return objects, 0, err
+	}
+	// AM6: reminders, notifications, drafts and the send log (by the installs' runs: no key reaches it)
+	for _, q := range []string{
+		`DELETE FROM agent_market.email_sends WHERE run_id IN (SELECT id FROM agent_market.agent_runs WHERE install_id = ANY($1))
+			OR draft_id IN (SELECT id FROM agent_market.email_drafts WHERE install_id = ANY($1))`,
+		`DELETE FROM agent_market.email_drafts WHERE install_id = ANY($1)`,
+		`DELETE FROM agent_market.notifications WHERE install_id = ANY($1)`,
+		`DELETE FROM agent_market.reminders WHERE install_id = ANY($1)`,
+	} {
+		if _, err := tx.Exec(ctx, q, installs); err != nil {
+			return objects, 0, err
+		}
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM agent_market.agent_installs WHERE id = ANY($1)`, installs)
 	if err != nil {

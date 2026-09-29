@@ -40,6 +40,9 @@ type API struct {
 	log       *slog.Logger
 	closeFn   func()
 	sweepOnce sync.Once
+	// knowledge reads a person's knowledge base for a question asked in ask
+	// mode (AM6, knowledge.go); nil = none is read.
+	knowledge Knowledge
 }
 
 // NewAPI opens the control plane's own small pool and applies the
@@ -133,6 +136,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Delete("/installs/{id}/pin", a.unpin)
 		r.Post("/installs/{id}/opened", a.opened)
 		r.Get("/installs/{id}/budget", a.installBudget)
+		r.Get("/installs/{id}/estimate", a.estimate) // AM6: what a round costs, said before it starts
 		r.Post("/runs/{id}/resume", a.resumeBudget)
 		// AM3: sign-off, sharing inside the organisation, report a problem
 		r.Post("/runs/{id}/review", a.review)
@@ -180,13 +184,16 @@ func (a *API) Routes(r chi.Router) {
 		r.Post("/exceptions/{id}/decision", a.decideException)
 		r.Post("/installs/{id}/messages", a.message)
 		a.roundRoutes(r) // AM4: threads, the round-boundary chip, "เริ่มรอบใหม่"
+		// AM6: reminders, notifications, e-mail drafts (reminders.go, notify.go, email.go)
+		a.reminderMailRoutes(r)
 		r.Post("/mapping-preview", a.mappingPreview)
 		r.Post("/cards/{id}/answer", a.answer)
 		r.Get("/runs/{id}", a.getRun)
 		r.Get("/runs/{id}/computed", a.computed)
 		r.Post("/runs/{id}/cancel", a.cancel)
-		r.Post("/runs/{id}/retry", a.retry)     // AM5: a failed round, tried again with the files it had
-		r.Post("/runs/{id}/restore", a.restore) // AM5: a document that was left out, brought back
+		r.Post("/runs/{id}/retry", a.retry)       // AM5: a failed round, tried again with the files it had
+		r.Post("/runs/{id}/restore", a.restore)   // AM5: a document that was left out, brought back
+		r.Post("/runs/{id}/receipts", a.receipts) // AM6: a receipt confirmed in this system
 		r.Post("/runs/{id}/formats", a.formats)
 		r.Get("/artifacts/{id}/download", a.downloadArtifact)
 		r.Get("/files/{id}/download", a.downloadFile)
@@ -339,13 +346,6 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	// A setting the person gave that we know and that is wrong is refused, not dropped.
-	for k, v := range req.Settings {
-		if validSettingKey(k) && !validSettingValue(k, v) {
-			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", settingProblem(k, v))
-			return
-		}
-	}
 	ctx := r.Context()
 	def, err := a.store.DefinitionBySlug(ctx, req.Slug)
 	if err != nil {
@@ -360,6 +360,19 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.fail(w, err, "manifest")
 		return
+	}
+	// A setting the person gave that we know and that is wrong is refused, not
+	// dropped. AM6: what is known is the platform's settings and the ones this
+	// agent's manifest declares.
+	rules := rulesOf(m)
+	for k, v := range req.Settings {
+		if !rules.known(k) {
+			continue
+		}
+		if _, code, problem := rules.check(k, v); problem != "" {
+			say(w, http.StatusBadRequest, code, "detail", problem)
+			return
+		}
 	}
 	st, err := a.store.LatestRunner(ctx, a.cfg.RunnerStaleAfter)
 	if err != nil {
@@ -403,11 +416,15 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 			settings[k] = v
 		}
 		for k, v := range settings {
-			if !validSettingKey(k) || !validSettingValue(k, v) {
+			if !rules.known(k) {
 				continue
 			}
-			if err := a.store.SetDefault(ctx, tx, in.ID, Default{Key: k, Value: v, Source: "install",
-				Label: settingLabel(k), Note: "ตั้งตอนติดตั้ง"}); err != nil {
+			kept, _, problem := rules.check(k, v)
+			if problem != "" {
+				continue
+			}
+			if err := a.store.SetDefault(ctx, tx, in.ID, Default{Key: k, Value: kept, Source: "install",
+				Label: rules.label(k), Note: "ตั้งตอนติดตั้ง"}); err != nil {
 				a.fail(w, err, "install")
 				return
 			}
@@ -420,7 +437,7 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, nil, "greeting", GreetingFor(m), nil); err != nil {
+		if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, nil, GreetingFor(m), nil); err != nil {
 			a.fail(w, err, "install")
 			return
 		}
@@ -626,8 +643,7 @@ func (a *API) startSelfTest(ctx context.Context, in Install, def Definition) (Ru
 		return run, err
 	}
 	rid := run.ID
-	_, _, err = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "progress",
-		Progress{RunID: run.ID.String(), Kind: KindSelfTest, Status: RunQueued}, nil)
+	_, _, err = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, &rid, QueuedProgress(run), nil)
 	return run, err
 }
 
@@ -726,7 +742,13 @@ func (a *API) listDefaults(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "defaults")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(list)})
+	// AM6: the settings the agent's manifest declares, each with its value here
+	rules, err := a.rulesFor(r.Context(), in)
+	if err != nil {
+		a.fail(w, err, "defaults")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(list), "declared": rules.values(list)})
 }
 
 func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
@@ -734,8 +756,14 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// a setting is the platform's, or one the install's own agent declares (AM6)
+	rules, err := a.rulesFor(r.Context(), in)
+	if err != nil {
+		a.fail(w, err, "default")
+		return
+	}
 	key := chi.URLParam(r, "key")
-	if !validSettingKey(key) {
+	if !rules.known(key) {
 		badRequest(w, "BAD_KEY")
 		return
 	}
@@ -747,15 +775,17 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	if !validSettingValue(key, body.Value) {
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", settingProblem(key, body.Value))
+	kept, code, problem := rules.check(key, body.Value)
+	if problem != "" {
+		say(w, http.StatusBadRequest, code, "detail", problem)
 		return
 	}
+	// a declared setting is named as its manifest names it
 	label := body.Label
-	if label == "" {
-		label = settingLabel(key)
+	if _, declared := rules.declared[key]; label == "" || declared {
+		label = rules.label(key)
 	}
-	if err := a.store.SetDefault(r.Context(), a.store.Pool, in.ID, Default{Key: key, Value: body.Value, Source: "settings",
+	if err := a.store.SetDefault(r.Context(), a.store.Pool, in.ID, Default{Key: key, Value: kept, Source: "settings",
 		Label: label, Note: "แก้ในหน้าค่าที่จำไว้"}); err != nil {
 		a.fail(w, err, "default")
 		return
@@ -947,10 +977,11 @@ type messageReq struct {
 	Text     string      `json:"text"`
 	FileIDs  []uuid.UUID `json:"file_ids"`
 	ClientID string      `json:"client_id"`
-	// AM4: the thread it was typed in (nil = the first), and the model for
-	// this round only (empty = the install's own choice).
-	ThreadID    *uuid.UUID `json:"thread_id"`
-	ModelChoice string     `json:"model_choice"`
+	// AM4: the thread it was typed in (nil = the first). AM6: a message names
+	// no model — a round runs with the install's choice; it may name a
+	// knowledge base, read only when the message is a question (knowledge.go).
+	ThreadID        *uuid.UUID `json:"thread_id"`
+	KnowledgeBaseID *uuid.UUID `json:"knowledge_base_id"`
 }
 
 // message is the composer. It only routes: a file starts or resumes a run,
@@ -982,9 +1013,6 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	if !a.threadOf(w, r, in, req.ThreadID) {
 		return
 	}
-	if req.ModelChoice != "" && !a.modelChoiceAllowed(w, r, in, req.ModelChoice) {
-		return
-	}
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "message")
@@ -1001,18 +1029,11 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		}
 		files = append(files, f)
 	}
-	kind := "user_text"
-	payload := map[string]any{"text": req.Text, "status": "pending"}
+	payload := UserMessage{Text: req.Text, Status: "pending"}
 	if len(files) > 0 {
-		kind = "user_files"
-		fl := []map[string]any{}
-		for _, f := range files {
-			fl = append(fl, map[string]any{"id": f.ID, "name": f.Name, "size": f.Size})
-		}
-		payload["files"] = fl
-		payload["status"] = "handled"
+		payload.Files, payload.Status = FileRefs(files), "handled"
 	}
-	item, created, err := a.store.AddItemIn(ctx, tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, nil, kind, payload, clientID)
+	item, created, err := a.store.AddItemIn(ctx, tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, nil, payload, clientID)
 	if err != nil {
 		a.fail(w, err, "message")
 		return
@@ -1021,24 +1042,39 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"item": item, "duplicate": true})
 		return
 	}
-	route, runID, err := a.route(ctx, tx, in, c, item, req.Text, files, roundOpts{thread: req.ThreadID, model: req.ModelChoice})
+	o := roundOpts{thread: req.ThreadID}
+	if len(files) == 0 {
+		o.knowledge = req.KnowledgeBaseID
+	}
+	route, runID, err := a.route(ctx, tx, in, c, item, req.Text, files, o)
 	if err != nil {
 		a.fail(w, err, "message")
 		return
+	}
+	out := map[string]any{"item": item, "route": route, "run_id": runID}
+	if len(files) > 0 && req.KnowledgeBaseID != nil {
+		// AM6: a knowledge base answers questions; it never feeds a round's figures
+		note := Text("ข้อความนี้แนบไฟล์ จึงไม่ได้ใช้คลังความรู้ — คลังความรู้ใช้ตอบคำถามเท่านั้น ตัวเลขในเอกสารมาจากไฟล์และการคำนวณของ agent")
+		if _, _, err := a.store.AddItemIn(ctx, tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, runID, Notice{Text: note}, nil); err != nil {
+			a.fail(w, err, "message")
+			return
+		}
+		out["notice"] = note
 	}
 	if err := tx.Commit(ctx); err != nil {
 		a.fail(w, err, "message")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": item, "route": route, "run_id": runID})
+	writeJSON(w, http.StatusOK, out)
 }
 
-// roundOpts: the thread a message was typed in, the model for this round, and
-// whether the person already said "start a new round" (the chip, the button).
+// roundOpts: the thread a message was typed in, whether the person already
+// said "start a new round" (the chip, the button), and the knowledge base a
+// question was asked with (AM6: read only if the message becomes a reply).
 type roundOpts struct {
-	thread   *uuid.UUID
-	model    string
-	newRound bool
+	thread    *uuid.UUID
+	newRound  bool
+	knowledge *uuid.UUID
 }
 
 func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, item ThreadItem, text string,
@@ -1152,7 +1188,13 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 	if hasLatest {
 		parent = &latest.ID
 	}
-	job, err := a.replyJob(ctx, tx, in, c, item.ID, text, parent, o.thread)
+	// AM6: only here is a knowledge base read — the message is a question the
+	// agent answers, not a round's input
+	var k *KnowledgeContext
+	if o.knowledge != nil && len(files) == 0 {
+		k = a.knowledgeFor(ctx, c, *o.knowledge, text)
+	}
+	job, err := a.replyJob(ctx, tx, in, c, item.ID, text, parent, o.thread, k)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1191,10 +1233,8 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 	if _, err := a.store.SupersedeInstallCards(ctx, tx, in.ID, "superseded"); err != nil {
 		return Run{}, err
 	}
-	model := o.model
-	if model == "" {
-		model = in.ModelChoice
-	}
+	// AM6: the model is the install's choice, as it is when the round starts
+	model := in.ModelChoice
 	if model == "" {
 		model = ModelAuto
 	}
@@ -1202,7 +1242,11 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 		if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_runs SET cancel_requested = true,
 			status = CASE WHEN status IN ('queued','awaiting_input') THEN 'cancelled' ELSE status END,
 			status_reason = 'superseded_by_new_round', finished_at = CASE WHEN status IN ('queued','awaiting_input') THEN now() ELSE finished_at END
-			WHERE id = $1`, prev.ID); err != nil {
+		WHERE id = $1`, prev.ID); err != nil {
+			return Run{}, err
+		}
+		// AM6: a round that was stopped delivered nothing, and is charged nothing
+		if err := a.store.Settle(ctx, tx, prev.ID); err != nil {
 			return Run{}, err
 		}
 	}
@@ -1218,8 +1262,7 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 		}
 	}
 	rid := run.ID
-	_, _, err = a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "progress",
-		Progress{RunID: run.ID.String(), Kind: KindRun, Status: RunQueued}, nil)
+	_, _, err = a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, QueuedProgress(run), nil)
 	return run, err
 }
 
@@ -1228,13 +1271,11 @@ func (a *API) newRun(ctx context.Context, tx pgx.Tx, in Install, c middleware.Ca
 // round has finished get the round-boundary chip instead — rounds.go.)
 func (a *API) lateFileCard(ctx context.Context, tx pgx.Tx, run Run, files []File) error {
 	names := []string{}
-	fl := []map[string]any{}
 	for _, f := range files {
 		names = append(names, f.Name)
-		fl = append(fl, map[string]any{"id": f.ID, "name": f.Name, "size": f.Size})
 	}
 	q := Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: "ไฟล์เพิ่ม",
-		Question: fmt.Sprintf("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", strings.Join(names, ", ")),
+		Question: Text("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", FileNames(names)).String(),
 		Options: []Option{
 			{Label: "รวมในรอบนี้", Description: "ตรวจไฟล์ใหม่แล้วคำนวณก่อนส่งผล", Value: json.RawMessage(`"include"`)},
 			{Label: "เก็บไว้ทำรอบใหม่", Description: "รอบนี้ใช้ไฟล์เดิม รอบใหม่เริ่มต่อทันทีด้วยไฟล์นี้เท่านั้น", Value: json.RawMessage(`"next_round"`)},
@@ -1246,11 +1287,10 @@ func (a *API) lateFileCard(ctx context.Context, tx pgx.Tx, run Run, files []File
 	if err != nil {
 		return err
 	}
-	p := CardItemPayload(card, "", "")
-	fb, _ := json.Marshal(fl)
-	p.Files = fb
+	p := CardItemPayload(card, NoText, NoText)
+	p.Files = FileRefs(files)
 	rid := run.ID
-	_, _, err = a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, "card", p, nil)
+	_, _, err = a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, p, nil)
 	return err
 }
 
@@ -1291,6 +1331,8 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "card")
 		return
 	}
+	// AM6: what the person clicked is a label as they were sent it
+	questions = ShownQuestions(questions)
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "card")
@@ -1394,9 +1436,7 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "remember")
 			return
 		} else if n > 0 {
-			rid := run.ID
-			if _, _, err := a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, "notice",
-				map[string]any{"text": "จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้", "link": "defaults", "run_id": run.ID.String()}, nil); err != nil {
+			if err := a.store.AddNotice(ctx, tx, run, Notice{Text: Text("จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้"), Link: "defaults"}); err != nil {
 				a.fail(w, err, "notice")
 				return
 			}
@@ -1637,7 +1677,7 @@ func (a *API) cancel(w http.ResponseWriter, r *http.Request) {
 	if run.Status == RunCancelled {
 		_, _ = a.store.SupersedeOpenCards(r.Context(), a.store.Pool, run.ID, "cancelled")
 		if it, err := a.store.ItemFor(r.Context(), run.InstallID, "progress", "run_id", run.ID.String()); err == nil {
-			_ = a.store.PatchItem(r.Context(), a.store.Pool, it.ID, map[string]any{"status": RunCancelled})
+			_ = a.store.PatchItem(r.Context(), a.store.Pool, it.ID, ItemPatch{Status: RunCancelled, Outcome: OutcomeCancelled})
 		}
 	}
 	// Cancelling twice returns the same state, never an error.

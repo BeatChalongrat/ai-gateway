@@ -3,6 +3,8 @@ package runner
 import (
 	"strings"
 	"testing"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 // The AM3 stranger's question, word for word, about an invoice register whose
@@ -23,7 +25,11 @@ const invoiceComputed = `{"citations": [
 ], "excluded": [{"code": "unreadable_page", "reason": "ภาพไม่ชัด", "name": "รูปใบเสร็จ.jpg"}]}`
 
 func TestAWhyAboutAFigureIsAnsweredFromItsRecordNeverAModel(t *testing.T) {
-	ans := explainAnswer(strangerQuestion, []byte(invoiceComputed))
+	ans, theirs := explainAnswer(strangerQuestion, []byte(invoiceComputed))
+	// AM6: what the record says is sent as it is — it reads as written for a person
+	if !am.ReadsForPerson(ans, theirs...) {
+		t.Fatalf("the answer reads as written for a person: %q", am.ShownToPerson(ans, theirs...))
+	}
 	for _, want := range []string{"ยอดชำระสุทธิตามเอกสาร (บาท) = 0.00 บาท", "เอกสารไม่ได้พิมพ์ค่านี้", "ยอดที่ต้องชำระ (บาท) = 102,970.91 บาท",
 		"12,850.70", "90,120.21", "รูปใบเสร็จ.jpg", "ไม่ได้มาจากโมเดล"} {
 		if !strings.Contains(ans, want) {
@@ -36,15 +42,15 @@ func TestAWhyAboutAFigureIsAnsweredFromItsRecordNeverAModel(t *testing.T) {
 }
 
 func TestAWhyNoRecordSupportsGetsIDontKnow(t *testing.T) {
-	if ans := explainAnswer("ทำไมกำไรขั้นต้นลดลงจากเดือนก่อน", []byte(invoiceComputed)); ans != dontKnow {
+	if ans, _ := explainAnswer("ทำไมกำไรขั้นต้นลดลงจากเดือนก่อน", []byte(invoiceComputed)); ans != dontKnow || !am.ReadsForPerson(ans) {
 		t.Fatalf("no record of that figure: %q", ans)
 	}
 	// an older package with no records at all
-	if ans := explainAnswer("ทำไมยอดเป็นศูนย์", []byte(`{"quotable": {}}`)); ans != dontKnow {
+	if ans, _ := explainAnswer("ทำไมยอดเป็นศูนย์", []byte(`{"quotable": {}}`)); ans != dontKnow {
 		t.Fatalf("older package: %q", ans)
 	}
 	// a question that is not a why and names no figure goes on to a model (under the guards)
-	if ans := explainAnswer("สรุปให้หน่อย", []byte(invoiceComputed)); ans != "" {
+	if ans, _ := explainAnswer("สรุปให้หน่อย", []byte(invoiceComputed)); ans != "" {
 		t.Fatalf("not a figure question: %q", ans)
 	}
 }
@@ -56,7 +62,10 @@ func TestAReportLineIsPreferredOverTheAccountItIsMadeOf(t *testing.T) {
 	 {"id": "c9", "label": "รายได้จากการขายและบริการ", "value": "12480300.00", "formula": "ผลรวมบัญชีหมวดรายได้", "derived_from": ["c1"]},
 	 {"id": "c10", "label": "รายได้อื่น", "value": "3820.55", "formula": "ผลรวมบัญชีหมวดรายได้อื่น", "derived_from": []}
 	], "excluded": [{"code": "period_mixed", "reason": "ลงวันที่นอกงวด (12 รายการ)"}]}`
-	ans := explainAnswer("ทำไมรายได้เดือนนี้ถึงเป็นแบบนี้", []byte(fin))
+	ans, theirs := explainAnswer("ทำไมรายได้เดือนนี้ถึงเป็นแบบนี้", []byte(fin))
+	if !am.ReadsForPerson(ans, theirs...) {
+		t.Fatalf("the answer reads as written for a person: %q", am.ShownToPerson(ans, theirs...))
+	}
 	if !strings.HasPrefix(ans, "**รายได้จากการขายและบริการ = 12,480,300.00 บาท**") || !strings.Contains(ans, "4100-01") ||
 		!strings.Contains(ans, "ลงวันที่นอกงวด") {
 		t.Fatalf("the report's line, its parts and what was left out:\n%s", ans)

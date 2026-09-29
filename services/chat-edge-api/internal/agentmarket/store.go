@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -104,15 +105,21 @@ func (s *Store) DefinitionByID(ctx context.Context, id uuid.UUID) (Definition, e
 
 // ── installs ─────────────────────────────────────────────────────────────
 
+// installCols ends with what the install's own version of its agent says of
+// its scope and jurisdiction (AM6): read from that version's manifest, not
+// kept on the install.
 const installCols = `id, tenant_id, user_id, definition_id, slug, definition_version, checksum, title,
 	capability_bindings, binding_version, budget_credits::float8, status, self_test_run_id, created_at, updated_at,
-	previous_definition_id, org_id, pinned_at, last_opened_at, model_choice`
+	previous_definition_id, org_id, pinned_at, last_opened_at, model_choice,
+	COALESCE((SELECT d.manifest->>'scope' FROM agent_market.agent_definitions d WHERE d.id = agent_installs.definition_id), ''),
+	COALESCE((SELECT d.manifest->>'jurisdiction' FROM agent_market.agent_definitions d WHERE d.id = agent_installs.definition_id), '')`
 
 func scanInstall(r pgx.Row) (Install, error) {
 	var i Install
 	err := r.Scan(&i.ID, &i.TenantID, &i.UserID, &i.DefinitionID, &i.Slug, &i.DefinitionVersion, &i.Checksum, &i.Title,
 		&i.CapabilityBindings, &i.BindingVersion, &i.BudgetCredits, &i.Status, &i.SelfTestRunID, &i.CreatedAt, &i.UpdatedAt,
-		&i.PreviousDefinitionID, &i.OrgID, &i.PinnedAt, &i.LastOpenedAt, &i.ModelChoice)
+		&i.PreviousDefinitionID, &i.OrgID, &i.PinnedAt, &i.LastOpenedAt, &i.ModelChoice, &i.Scope, &i.Jurisdiction)
+	i.Scope, i.Jurisdiction = ScopeOf(i.Scope), strings.TrimSpace(i.Jurisdiction)
 	return i, err
 }
 
@@ -203,6 +210,10 @@ func (s *Store) RemoveInstall(ctx context.Context, tenant, user, id uuid.UUID) e
 			awaiting_since = CASE WHEN status = 'awaiting_input' THEN NULL ELSE awaiting_since END,
 			updated_at = now()
 		WHERE install_id = $1 AND status IN ('queued', 'awaiting_input', 'running')`, id); err != nil {
+		return err
+	}
+	// AM6: a round that was stopped delivered nothing, and is charged nothing
+	if err := s.SettleInstall(ctx, s.Pool, id); err != nil {
 		return err
 	}
 	// The duplicate index goes with the install at once (AM2), not at expiry.
@@ -371,7 +382,8 @@ func (s *Store) PendingFiles(ctx context.Context, run uuid.UUID) ([]File, error)
 const runCols = `id, install_id, parent_run_id, tenant_id, user_id, kind, status, status_reason, period, message, params,
 	definition_version, checksum, engine_checksum, binding_version, formats, answers, assumptions, cancel_requested,
 	lease_owner, lease_until, attempts, credits_spent::float8, model_used, model_self_hosted, awaiting_since, awaiting_ms,
-	created_at, started_at, finished_at, updated_at, thread_id, model_choice, evidence_removed_at`
+	created_at, started_at, finished_at, updated_at, thread_id, model_choice, evidence_removed_at,
+	credits_cost::float8, gate_open, delivered_at`
 
 func scanRun(r pgx.Row) (Run, error) {
 	var x Run
@@ -379,7 +391,8 @@ func scanRun(r pgx.Row) (Run, error) {
 		&x.Period, &x.Message, &x.Params, &x.DefinitionVersion, &x.Checksum, &x.EngineChecksum, &x.BindingVersion,
 		&x.Formats, &x.Answers, &x.Assumptions, &x.CancelRequested, &x.LeaseOwner, &x.LeaseUntil, &x.Attempts,
 		&x.CreditsSpent, &x.ModelUsed, &x.ModelSelfHosted, &x.AwaitingSince, &x.AwaitingMS, &x.CreatedAt, &x.StartedAt,
-		&x.FinishedAt, &x.UpdatedAt, &x.ThreadID, &x.ModelChoice, &x.EvidenceRemovedAt)
+		&x.FinishedAt, &x.UpdatedAt, &x.ThreadID, &x.ModelChoice, &x.EvidenceRemovedAt,
+		&x.CreditsCost, &x.GateOpen, &x.DeliveredAt)
 	return x, err
 }
 
@@ -514,6 +527,12 @@ func (s *Store) RequestCancel(ctx context.Context, tenant, user, id uuid.UUID) (
 	if errors.Is(err, pgx.ErrNoRows) {
 		return x, ErrNotFound
 	}
+	if err == nil && x.Status == RunCancelled {
+		// AM6: a cancelled round delivered nothing, and is charged nothing
+		if err = s.Settle(ctx, s.Pool, x.ID); err == nil {
+			x, err = s.RunByID(ctx, x.ID)
+		}
+	}
 	return x, err
 }
 
@@ -610,12 +629,29 @@ func (s *Store) Park(ctx context.Context, run uuid.UUID, runner, reason string) 
 	return err
 }
 
-// Finish ends a run in a terminal state.
+// Finish ends a run in a terminal state. AM6: a run that ends succeeded has
+// delivered its work (delivered_at); one that ends any other way delivered
+// nothing in this pass, and what the pass was charged is voided (Settle).
 func (s *Store) Finish(ctx context.Context, run uuid.UUID, runner, status, reason string) error {
-	_, err := s.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET status = $3, status_reason = $4, finished_at = now(),
+	return s.finish(ctx, run, runner, status, reason, false)
+}
+
+// FinishOpen ends a run whose package gate did not pass and whose draft was
+// delivered: the status the database has always given it (failed, with the
+// gate's code), marked as delivered work — a completed round that stays open
+// (Run.Outcome), charged like any other.
+func (s *Store) FinishOpen(ctx context.Context, run uuid.UUID, runner, gateCode string) error {
+	return s.finish(ctx, run, runner, RunFailed, gateCode, true)
+}
+
+func (s *Store) finish(ctx context.Context, run uuid.UUID, runner, status, reason string, open bool) error {
+	if _, err := s.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET status = $3, status_reason = $4, finished_at = now(),
+		gate_open = $5, delivered_at = CASE WHEN $5 OR $3 = 'succeeded' THEN now() ELSE delivered_at END,
 		lease_owner = NULL, lease_until = NULL, updated_at = now()
-		WHERE id = $1 AND (lease_owner = $2 OR $2 = '')`, run, runner, status, reason)
-	return err
+		WHERE id = $1 AND (lease_owner = $2 OR $2 = '')`, run, runner, status, reason, open); err != nil {
+		return err
+	}
+	return s.Settle(ctx, s.Pool, run)
 }
 
 // SetRunFields updates the period / model facts the runner learns.
@@ -975,14 +1011,15 @@ func (s *Store) GetArtifact(ctx context.Context, tenant, user, id uuid.UUID) (Ar
 
 const itemCols = `id, install_id, run_id, kind, payload, client_id, rev, created_at, updated_at, thread_id`
 
-// scanItem reads one thread item. AM5: whatever the row holds, what leaves
-// here is safe for a person to read (GuardItem) — a row written before the
-// runner stopped pasting errors into the thread included.
+// scanItem reads one thread item. Whatever the row holds, what leaves here
+// is what the item's kind declares for a person (AM6: ForClient, schema.go) —
+// a row written before the rule existed included. The row itself is not
+// changed: what was written stays where an engineer can find it.
 func scanItem(r pgx.Row) (ThreadItem, error) {
 	var t ThreadItem
 	err := r.Scan(&t.ID, &t.InstallID, &t.RunID, &t.Kind, &t.Payload, &t.ClientID, &t.Rev, &t.CreatedAt, &t.UpdatedAt, &t.ThreadID)
 	if err == nil {
-		t.Payload = GuardItem(t.Kind, t.Payload)
+		t.Payload = ForClient(t.Kind, t.Payload)
 	}
 	return t, err
 }
@@ -990,19 +1027,25 @@ func scanItem(r pgx.Row) (ThreadItem, error) {
 // AddItem appends to the workspace thread. With a client id it is
 // idempotent: a resent message returns the first item. An item about a run
 // goes to that run's thread (AM4); one about no run to the first thread.
-func (s *Store) AddItem(ctx context.Context, q Querier, install, tenant, user uuid.UUID, run *uuid.UUID, kind string,
-	payload any, clientID *string) (ThreadItem, bool, error) {
-	return s.AddItemIn(ctx, q, install, nil, tenant, user, run, kind, payload, clientID)
+//
+// AM6: the payload is one of the thread's own shapes (ItemPayload, thread.go)
+// — its kind is the shape's, and its texts are PersonTexts.
+func (s *Store) AddItem(ctx context.Context, q Querier, install, tenant, user uuid.UUID, run *uuid.UUID,
+	payload ItemPayload, clientID *string) (ThreadItem, bool, error) {
+	return s.AddItemIn(ctx, q, install, nil, tenant, user, run, payload, clientID)
 }
 
 // AddItemIn is AddItem into a named thread (AM4: nil with a run = the run's thread).
 func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thread *uuid.UUID, tenant, user uuid.UUID,
-	run *uuid.UUID, kind string, payload any, clientID *string) (ThreadItem, bool, error) {
+	run *uuid.UUID, payload ItemPayload, clientID *string) (ThreadItem, bool, error) {
+	if payload == nil {
+		return ThreadItem{}, false, errors.New("agentmarket: a thread item without a payload")
+	}
+	kind := payload.itemKind()
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return ThreadItem{}, false, err
 	}
-	b = GuardItem(kind, b) // AM5: nothing technical is stored where a person reads
 	t, err := scanItem(q.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_thread_items (install_id, tenant_id, user_id, run_id, kind, payload, client_id, thread_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, (SELECT r.thread_id FROM agent_market.agent_runs r WHERE r.id = $4)))
@@ -1017,7 +1060,7 @@ func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thr
 }
 
 // UpdateItem replaces an item's payload and moves it to the stream's head.
-func (s *Store) UpdateItem(ctx context.Context, id uuid.UUID, payload any) error {
+func (s *Store) UpdateItem(ctx context.Context, id uuid.UUID, payload ItemPayload) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -1028,7 +1071,7 @@ func (s *Store) UpdateItem(ctx context.Context, id uuid.UUID, payload any) error
 }
 
 // PatchItem merges keys into an item's payload (e.g. a card's status).
-func (s *Store) PatchItem(ctx context.Context, q Querier, id uuid.UUID, patch map[string]any) error {
+func (s *Store) PatchItem(ctx context.Context, q Querier, id uuid.UUID, patch ItemPatch) error {
 	b, _ := json.Marshal(patch)
 	_, err := q.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = payload || $2::jsonb,
 		rev = nextval('agent_market.thread_rev'), updated_at = now() WHERE id = $1`, id, b)
@@ -1091,25 +1134,106 @@ func (s *Store) PendingUserTexts(ctx context.Context, install uuid.UUID) ([]Thre
 
 // ── budget ───────────────────────────────────────────────────────────────
 
-// SpentThisMonth is the install's credits used since the first of the month
-// (Bangkok's month since AM3, like the person's and department's budgets).
+// SpentThisMonth is the install's credits charged since the first of the
+// month (Bangkok's month since AM3, like the person's and department's
+// budgets). AM6: a voided row is a cost the platform paid, not a charge.
 func (s *Store) SpentThisMonth(ctx context.Context, install uuid.UUID) (float64, error) {
 	var v float64
 	err := s.Pool.QueryRow(ctx, `SELECT COALESCE(sum(credits), 0)::float8 FROM agent_market.agent_budget_ledger
-		WHERE install_id = $1 AND created_at >= `+monthStart, install).Scan(&v)
+		WHERE install_id = $1 AND voided_at IS NULL AND created_at >= `+monthStart, install).Scan(&v)
 	return v, err
 }
 
+// ── charging (AM6) ───────────────────────────────────────────────────────
+//
+// The rule: charge for work delivered, not for whether the numbers agreed.
+// Every step's cost is written to the ledger when the step finishes, as it
+// always was — the ledger is what the platform paid. What a person is
+// charged is the rows that are not voided:
+//
+//   - a round that ends succeeded, or with its gate open and its draft
+//     delivered, keeps its rows: it delivered its work;
+//   - a round that ends any other way (failed, cancelled) delivered nothing
+//     in that pass: the rows written since its last delivery are voided —
+//     kept, with when and why — and the run is charged only what it
+//     delivered before (nothing, for a round's first pass);
+//   - a cost that arrives after such an ending (the runner was mid-step when
+//     the round was cancelled) is written voided.
+//
+// agent_runs.credits_spent is what the person was charged; credits_cost is
+// what the platform paid. A budget sums rows that are not voided.
+
 // Charge records a step's credits once (idempotent on run + step key).
 func (s *Store) Charge(ctx context.Context, install, run uuid.UUID, stepKey string, credits float64, model string, detail any) error {
-	b, _ := json.Marshal(detail)
-	tag, err := s.Pool.Exec(ctx, `INSERT INTO agent_market.agent_budget_ledger (install_id, run_id, step_key, credits, model, detail)
-		VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (run_id, step_key) DO NOTHING`, install, run, stepKey, credits, model, b)
-	if err != nil || tag.RowsAffected() == 0 {
-		return err
+	return s.charge(ctx, install, run, stepKey, credits, model, detail, "")
+}
+
+// CostOnly records what a step cost the platform without charging anyone:
+// the row is kept, voided from the start, with why (a reply whose model gave
+// no usable answer — the person got the canned sentence, not an answer).
+func (s *Store) CostOnly(ctx context.Context, install, run uuid.UUID, stepKey string, credits float64, model string, detail any,
+	why string) error {
+	if why == "" {
+		why = "not_delivered"
 	}
-	_, err = s.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET credits_spent = credits_spent + $2 WHERE id = $1`, run, credits)
+	return s.charge(ctx, install, run, stepKey, credits, model, detail, why)
+}
+
+func (s *Store) charge(ctx context.Context, install, run uuid.UUID, stepKey string, credits float64, model string, detail any,
+	void string) error {
+	b, _ := json.Marshal(detail)
+	_, err := s.Pool.Exec(ctx, `
+		WITH r AS (
+			SELECT id, CASE WHEN $7::text <> '' THEN $7::text
+				WHEN status IN ('failed', 'cancelled') AND NOT gate_open
+					THEN status || ': ' || COALESCE(NULLIF(status_reason, ''), 'ended') END AS void
+			FROM agent_market.agent_runs WHERE id = $2
+		), row AS (
+			INSERT INTO agent_market.agent_budget_ledger (install_id, run_id, step_key, credits, model, detail, voided_at, void_reason)
+			SELECT $1, $2, $3, $4, $5, $6, CASE WHEN r.void IS NOT NULL THEN now() END, COALESCE(r.void, '') FROM r
+			ON CONFLICT (run_id, step_key) DO NOTHING
+			RETURNING credits, voided_at
+		)
+		UPDATE agent_market.agent_runs u SET credits_cost = u.credits_cost + row.credits,
+			credits_spent = u.credits_spent + CASE WHEN row.voided_at IS NULL THEN row.credits ELSE 0 END
+		FROM row WHERE u.id = $2`, install, run, stepKey, credits, model, b, void)
 	return err
+}
+
+const settleSQL = `
+	WITH ended AS (
+		SELECT r.id, r.status || ': ' || COALESCE(NULLIF(r.status_reason, ''), 'ended') AS why, r.delivered_at
+		FROM agent_market.agent_runs r WHERE r.status IN ('failed', 'cancelled') AND NOT r.gate_open AND %s
+	), voided AS (
+		UPDATE agent_market.agent_budget_ledger l SET voided_at = now(), void_reason = e.why
+		FROM ended e WHERE l.run_id = e.id AND l.voided_at IS NULL AND (e.delivered_at IS NULL OR l.created_at > e.delivered_at)
+		RETURNING l.run_id, l.credits
+	)
+	UPDATE agent_market.agent_runs u SET credits_spent = GREATEST(u.credits_spent - v.credits, 0)
+	FROM (SELECT run_id, sum(credits) AS credits FROM voided GROUP BY run_id) v WHERE u.id = v.run_id`
+
+// Settle applies the rule to runs that have ended: what a round was charged
+// for a pass that delivered nothing is voided. Ending twice voids once.
+func (s *Store) Settle(ctx context.Context, q Querier, runs ...uuid.UUID) error {
+	if len(runs) == 0 {
+		return nil
+	}
+	_, err := q.Exec(ctx, fmt.Sprintf(settleSQL, `r.id = ANY($1)`), runs)
+	return err
+}
+
+// SettleInstall is Settle for every ended run of an install.
+func (s *Store) SettleInstall(ctx context.Context, q Querier, install uuid.UUID) error {
+	_, err := q.Exec(ctx, fmt.Sprintf(settleSQL, `r.install_id = $1`), install)
+	return err
+}
+
+// SettleAll is Settle for every ended run (the runner's hourly pass): a
+// round ended by a path that did not settle it is settled here.
+func (s *Store) SettleAll(ctx context.Context) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, fmt.Sprintf(settleSQL, `EXISTS (SELECT 1 FROM agent_market.agent_budget_ledger l
+		WHERE l.run_id = r.id AND l.voided_at IS NULL AND (r.delivered_at IS NULL OR l.created_at > r.delivered_at))`))
+	return tag.RowsAffected(), err
 }
 
 // ── runner heartbeat ─────────────────────────────────────────────────────

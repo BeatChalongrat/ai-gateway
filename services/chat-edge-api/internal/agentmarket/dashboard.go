@@ -24,15 +24,18 @@ import (
 
 // Dashboard is the whole view.
 type Dashboard struct {
-	Since        time.Time        `json:"since"`
-	Days         int              `json:"days"`
-	Version      string           `json:"version"`
-	Runs         DashRuns         `json:"runs"`
-	Time         DashTimes        `json:"time"`
-	Waiting      DashWaiting      `json:"waiting"`
-	Questions    []DashCount      `json:"questions"`
-	Exceptions   DashExceptions   `json:"exceptions"`
-	Failures     []DashCount      `json:"failures"`
+	Since      time.Time      `json:"since"`
+	Days       int            `json:"days"`
+	Version    string         `json:"version"`
+	Runs       DashRuns       `json:"runs"`
+	Time       DashTimes      `json:"time"`
+	Waiting    DashWaiting    `json:"waiting"`
+	Questions  []DashCount    `json:"questions"`
+	Exceptions DashExceptions `json:"exceptions"`
+	Failures   []DashCount    `json:"failures"`
+	// Open (AM6): the rounds that finished with their gate open, by the gate's
+	// code — what the agent found and said, counted apart from what failed.
+	Open         []DashCount      `json:"open"`
 	Confidence   map[string]int64 `json:"confidence"`
 	Tiers        map[string]int64 `json:"tiers"`
 	Documents    int64            `json:"documents"`
@@ -50,9 +53,15 @@ type DashCount struct {
 }
 
 type DashRuns struct {
-	Total         int64            `json:"total"`
-	ByStatus      map[string]int64 `json:"by_status"`
-	Succeeded     int64            `json:"succeeded"`
+	Total     int64            `json:"total"`
+	ByStatus  map[string]int64 `json:"by_status"`
+	Succeeded int64            `json:"succeeded"`
+	// AM6: a round that delivered its draft while its gate did not pass is a
+	// completed round — "found a 21,435 baht difference" is not the agent
+	// failing. Failed counts the rounds that delivered nothing.
+	CompletedOpen int64            `json:"completed_open"`
+	Failed        int64            `json:"failed"`
+	ByOutcome     map[string]int64 `json:"by_outcome"`
 	FirstPass     int64            `json:"first_pass"` // succeeded without a single question card
 	FirstPassRate *float64         `json:"first_pass_rate"`
 }
@@ -89,10 +98,13 @@ type DashVersion struct {
 }
 
 type DashSpend struct {
-	Credits       float64  `json:"credits"`
-	PerRun        *float64 `json:"per_succeeded_run"`
-	PerDocument   *float64 `json:"per_document"`
-	BudgetCredits float64  `json:"budget_credits"`
+	Credits float64 `json:"credits"` // what was charged
+	// CostNotCharged (AM6): what the platform paid for rounds that delivered
+	// nothing (a crash, a cancel) — a cost, charged to nobody.
+	CostNotCharged float64  `json:"cost_not_charged"`
+	PerRun         *float64 `json:"per_succeeded_run"`
+	PerDocument    *float64 `json:"per_document"`
+	BudgetCredits  float64  `json:"budget_credits"`
 }
 
 type DashModel struct {
@@ -103,6 +115,7 @@ type DashModel struct {
 
 type DashSelfTest struct {
 	Status   string     `json:"status"`
+	Outcome  string     `json:"outcome"`
 	Reason   string     `json:"reason"`
 	Version  string     `json:"version"`
 	Finished *time.Time `json:"finished_at"`
@@ -110,29 +123,33 @@ type DashSelfTest struct {
 
 // Dashboard builds the view of one install since a moment.
 func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Dashboard, error) {
-	d := Dashboard{Since: since, Version: in.DefinitionVersion, Runs: DashRuns{ByStatus: map[string]int64{}},
-		Confidence: map[string]int64{}, Tiers: map[string]int64{}, Questions: []DashCount{}, Failures: []DashCount{},
+	d := Dashboard{Since: since, Version: in.DefinitionVersion, Runs: DashRuns{ByStatus: map[string]int64{}, ByOutcome: map[string]int64{}},
+		Confidence: map[string]int64{}, Tiers: map[string]int64{}, Questions: []DashCount{}, Failures: []DashCount{}, Open: []DashCount{},
 		Artifacts: []DashCount{}, Versions: []DashVersion{}, Models: []DashModel{},
 		Exceptions: DashExceptions{ByReason: []DashCount{}, Choices: []DashCount{}}}
 	id := in.ID
 	// runs by status (the person's runs; self-tests, previews and replies are not work)
-	rows, err := s.Pool.Query(ctx, `SELECT status, count(*) FROM agent_market.agent_runs
-		WHERE install_id = $1 AND kind = 'run' AND created_at >= $2 GROUP BY status`, id, since)
+	rows, err := s.Pool.Query(ctx, `SELECT status, gate_open, count(*) FROM agent_market.agent_runs
+		WHERE install_id = $1 AND kind = 'run' AND created_at >= $2 GROUP BY status, gate_open`, id, since)
 	if err != nil {
 		return d, err
 	}
 	for rows.Next() {
 		var st string
+		var open bool
 		var n int64
-		if err := rows.Scan(&st, &n); err != nil {
+		if err := rows.Scan(&st, &open, &n); err != nil {
 			rows.Close()
 			return d, err
 		}
-		d.Runs.ByStatus[st] = n
+		d.Runs.ByStatus[st] += n
+		d.Runs.ByOutcome[OutcomeOf(st, open)] += n
 		d.Runs.Total += n
 	}
 	rows.Close()
 	d.Runs.Succeeded = d.Runs.ByStatus[RunSucceeded]
+	d.Runs.CompletedOpen = d.Runs.ByOutcome[OutcomeCompletedOpen]
+	d.Runs.Failed = d.Runs.ByOutcome[OutcomeFailed]
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs r
 		WHERE r.install_id = $1 AND r.kind = 'run' AND r.status = 'succeeded' AND r.created_at >= $2
 		  AND NOT EXISTS (SELECT 1 FROM agent_market.agent_run_clarifications c WHERE c.run_id = r.id AND c.kind = 'questions')`,
@@ -194,9 +211,15 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		id, since); err != nil {
 		return d, err
 	}
-	// why runs failed (the reason the runner recorded, its first line)
+	// why runs failed (the reason the runner recorded, its first line) — and,
+	// apart from them, the rounds that finished with their gate open
 	if d.Failures, err = s.counts(ctx, `SELECT left(split_part(coalesce(nullif(status_reason, ''), 'unknown'), E'\n', 1), 120), count(*), 0
-		FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'failed' AND created_at >= $2
+		FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'failed' AND NOT gate_open AND created_at >= $2
+		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, id, since); err != nil {
+		return d, err
+	}
+	if d.Open, err = s.counts(ctx, `SELECT left(coalesce(nullif(status_reason, ''), 'gate_not_passed'), 120), count(*), 0
+		FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND status = 'failed' AND gate_open AND created_at >= $2
 		GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 20`, id, since); err != nil {
 		return d, err
 	}
@@ -258,9 +281,11 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 		d.Versions = append(d.Versions, v)
 	}
 	vrows.Close()
-	// spend (every kind: a self-test costs too)
-	if err := s.Pool.QueryRow(ctx, `SELECT coalesce(sum(credits_spent), 0)::float8 FROM agent_market.agent_runs
-		WHERE install_id = $1 AND created_at >= $2`, id, since).Scan(&d.Spend.Credits); err != nil {
+	// spend (every kind: a self-test costs too): what was charged, and what
+	// the platform paid without charging
+	if err := s.Pool.QueryRow(ctx, `SELECT coalesce(sum(credits_spent), 0)::float8,
+			coalesce(sum(greatest(credits_cost - credits_spent, 0)), 0)::float8 FROM agent_market.agent_runs
+		WHERE install_id = $1 AND created_at >= $2`, id, since).Scan(&d.Spend.Credits, &d.Spend.CostNotCharged); err != nil {
 		return d, err
 	}
 	var succeededSpend float64
@@ -295,10 +320,12 @@ func (s *Store) Dashboard(ctx context.Context, in Install, since time.Time) (Das
 	mrows.Close()
 	// the last self-test (any time)
 	var st DashSelfTest
-	err = s.Pool.QueryRow(ctx, `SELECT status, status_reason, definition_version, finished_at FROM agent_market.agent_runs
+	var open bool
+	err = s.Pool.QueryRow(ctx, `SELECT status, gate_open, status_reason, definition_version, finished_at FROM agent_market.agent_runs
 		WHERE install_id = $1 AND kind = 'self_test' ORDER BY created_at DESC LIMIT 1`, id).
-		Scan(&st.Status, &st.Reason, &st.Version, &st.Finished)
+		Scan(&st.Status, &open, &st.Reason, &st.Version, &st.Finished)
 	if err == nil {
+		st.Outcome = OutcomeOf(st.Status, open)
 		d.LastSelfTest = &st
 	}
 	return d, nil

@@ -327,22 +327,32 @@ const dontKnow = "ผมไม่ทราบว่าทำไมตัวเ�
 
 // explainAnswer is the answer to a question about the round's figures, or ""
 // when it is not about a figure the record knows and does not ask why (then
-// a model may answer it, under the number guard).
-func explainAnswer(text string, computed []byte) string {
+// a model may answer it, under the number guard). theirs is what the answer
+// names of the person's own: the files, sheets and cells of the figures.
+func explainAnswer(text string, computed []byte) (answer string, theirs []string) {
 	p := parseProvenance(computed)
 	figs := matchFigures(text, p)
 	if len(figs) == 0 {
 		if asksWhy(text) {
-			return dontKnow
+			return dontKnow, nil
 		}
-		return ""
+		return "", nil
 	}
 	parts := make([]string, 0, len(figs)+1)
 	for _, c := range figs {
 		parts = append(parts, explainFigure(c, p))
+		for _, s := range c.Sources {
+			theirs = append(theirs, s.File, s.Sheet, s.Cells)
+		}
+		for _, l := range c.LeftOut {
+			theirs = append(theirs, l.File)
+		}
+	}
+	for _, e := range p.Excluded {
+		theirs = append(theirs, e.Name)
 	}
 	parts = append(parts, explainFooter)
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n\n"), theirs
 }
 
 // causal words a model's answer may not use: it has no record of any cause.

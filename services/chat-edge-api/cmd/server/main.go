@@ -825,6 +825,27 @@ func main() {
 		} else {
 			handlers.AgentMarket = amAPI
 			service.RegisterAccountDataProvider(amAPI.AccountProvider()) // AM2: export and account deletion reach agent_market
+			// AM6: a question asked in an agent's ask mode may name the person's
+			// knowledge base; it is read through the chat's own retrieval, which
+			// reads a knowledge base only for its owner.
+			amAPI.SetKnowledge(agentmarket.KnowledgeFunc(func(ctx context.Context, tenant, user, kb uuid.UUID, query string,
+				maxTokens int) (string, []agentmarket.KnowledgeSource, string, error) {
+				text, found := ragSvc.BuildContext(ctx, service.RAGRequest{TenantID: tenant, UserID: user, KBID: kb, Query: query, MaxTokens: maxTokens})
+				var sources []agentmarket.KnowledgeSource
+				for _, s := range found {
+					if s.SourceType == service.SourceTypeKnowledgeChunk {
+						sources = append(sources, agentmarket.KnowledgeSourceFrom(s.DisplayLabel, s.Metadata))
+					}
+				}
+				if len(sources) == 0 {
+					return "", nil, "", nil
+				}
+				base, err := knowledgeRepo.GetKB(ctx, tenant, kb)
+				if err != nil {
+					return "", nil, "", err
+				}
+				return text, sources, base.Name, nil
+			}))
 			defer amAPI.Close()
 		}
 		amCancel()

@@ -176,8 +176,10 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		return rc.stepFailed("publish", err)
 	}
 	// AM5: the package's own verdict on the round (a reconciliation that does
-	// not tie). Not passed: the files go out as a draft, what a person must
-	// decide is recorded, and the round is not a success.
+	// not tie). Not passed: the files go out as a draft and what a person must
+	// decide is recorded. AM6: the round delivered its work — it ends
+	// completed and open, not failed (endOpen); only a gate that did not pass
+	// with nothing delivered is a failure.
 	gate, err := rc.completionGate(ctx, computedRef, computeKey)
 	if err != nil {
 		return r.fail(ctx, run, "gate_not_passed", err)
@@ -189,7 +191,10 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if err := rc.postOutputs(ctx, rc.run.ID, arts, summary, narrative, false, gate); err != nil {
 			return r.fail(ctx, run, "outputs", err)
 		}
-		return r.fail(ctx, run, gate.Reason(), &gateErr{gate: *gate, draft: len(arts) > 0})
+		if len(arts) > 0 {
+			return r.endOpen(ctx, run, *gate)
+		}
+		return r.fail(ctx, run, gate.Reason(), &gateErr{gate: *gate})
 	}
 	// The documents this run recorded join the install's duplicate index.
 	if err := rc.recordIndex(ctx, computedRef); err != nil {
@@ -204,7 +209,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	}
 	// An upgrade's self-test switches the install before its run reads as
 	// succeeded: whoever sees "succeeded" finds the install already switched.
-	rc.finishUpgrade(context.Background(), computedRef, true, "")
+	rc.finishUpgrade(context.Background(), computedRef, true, am.NoText)
 	if err := r.finish(rc, am.RunSucceeded, ""); err != nil {
 		return err
 	}
@@ -240,7 +245,9 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	if err != nil {
 		return nil, err
 	}
-	engineDefaults, remembered := am.DefaultsForEngine(defs)
+	// AM6: the install's settings — the ones its agent declares included — over
+	// the defaults of the manifest of the version the run is pinned to
+	engineDefaults, remembered := am.EngineDefaults(pkg.Manifest, defs)
 	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log,
 		docsMayLeave: r.docsMayLeave(ctx, in.OrgID)}
 	rc.selfTestSettings()
@@ -265,7 +272,9 @@ func (rc *runCtx) reloadAnswers(ctx context.Context) error {
 // answeredBy is who answered each card of the run, by the answer's key, for
 // a package whose manifest asks for it (nil otherwise): the name a document
 // prints, read from the card — never from what the answer says. An answer
-// nobody gave (a default, a remembered value) has no name.
+// nobody gave (a default, a remembered value) has no name. AM6: an answer
+// given with an action on the round's files (a receipt confirmed in this
+// system) carries no card; it names the signed-in person who gave it.
 func (rc *runCtx) answeredBy(ctx context.Context) map[string]map[string]string {
 	if rc.pkg == nil || !rc.pkg.Manifest.RecordWhoAnswered {
 		return nil
@@ -277,15 +286,21 @@ func (rc *runCtx) answeredBy(ctx context.Context) map[string]map[string]string {
 	}
 	names := map[uuid.UUID]string{}
 	for k, a := range rc.answers {
-		if a.Via != "card" && a.Via != "text" {
-			continue
-		}
-		card, err := uuid.Parse(a.CardID)
-		if err != nil {
-			continue
-		}
-		user, ok := by[card]
-		if !ok {
+		var user uuid.UUID
+		switch {
+		case a.Via == "action" && a.By != nil:
+			user = *a.By
+		case a.Via == "card" || a.Via == "text":
+			card, err := uuid.Parse(a.CardID)
+			if err != nil {
+				continue
+			}
+			u, ok := by[card]
+			if !ok {
+				continue
+			}
+			user = u
+		default:
 			continue
 		}
 		name, seen := names[user]
@@ -673,15 +688,23 @@ func (r *Runner) finish(rc *runCtx, status, reason string) error {
 // AM5: what the person reads is built from the reason's code and facts about
 // the round (am.FailureFor) — never from the error. The error goes to the log
 // and to the run's steps, which the run page and a problem report show.
+//
+// AM6: a round that fails delivered nothing, and is charged nothing: ending
+// it voids what its steps were charged (Store.Finish), and the round says so.
 func (r *Runner) fail(ctx context.Context, run am.Run, reason string, err error) error {
 	if ctx != nil && ctx.Err() != nil {
 		return ctx.Err()
+	}
+	// a gate that did not pass with its draft delivered is not a failure
+	var ge *gateErr
+	if errors.As(err, &ge) && ge.draft {
+		return r.endOpen(ctx, run, ge.gate)
 	}
 	bg := context.Background()
 	_ = r.Store.Finish(bg, run.ID, r.ID, am.RunFailed, reason)
 	r.recordFailure(bg, run, reason, err)
 	f := r.failure(bg, run, reason, err)
-	_ = r.Store.PostText(bg, run, f.Text(), map[string]any{"tone": "error", "failure": f})
+	_ = r.Store.PostAgentText(bg, run, am.AgentText{Text: f.Text(), Tone: "error", Failure: &f})
 	if run.Kind == am.KindSelfTest {
 		// an upgrade's self-test that fails leaves the install on its version
 		(&runCtx{r: r, run: run}).finishUpgrade(bg, blobRef{}, false, f.What)
@@ -690,11 +713,43 @@ func (r *Runner) fail(ctx context.Context, run am.Run, reason string, err error)
 	return err
 }
 
+// endOpen ends a round whose package's gate did not pass and whose draft was
+// delivered (AM6). The round did its work: it read the files, matched what
+// matched, made the draft and said how much is unexplained. It is charged
+// like any round that delivers, it is not an error in the thread, and its
+// progress card ends finished. What stays as it was: the run's status in the
+// database (failed, with the gate's code), so nobody signs a draft and
+// nothing of it enters the duplicate index.
+func (r *Runner) endOpen(ctx context.Context, run am.Run, gate gateView) error {
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	bg := context.Background()
+	_ = r.Store.FinishOpen(bg, run.ID, r.ID, gate.Reason())
+	// the verdict stays on the run's steps, for the run page
+	r.keepOnRun(bg, run, gate.Reason(), (&gateErr{gate: gate, draft: true}).Error())
+	r.logger().Info("run finished with its gate open", "run", run.ID, "gate", gate.Reason())
+	facts := am.CompletionFacts{Credits: run.CreditsSpent, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24),
+		GateWhat: gate.What, GateNext: gate.Next}
+	if cur, e := r.Store.RunByID(bg, run.ID); e == nil {
+		facts.Credits = cur.CreditsSpent
+	}
+	c := am.CompletionFor(gate.Reason(), facts)
+	_ = r.Store.PostAgentText(bg, run, am.AgentText{Text: c.Text(), Tone: "open", Completion: &c})
+	if run.Kind == am.KindSelfTest {
+		// an upgrade's self-test whose gate does not pass leaves the install on its version
+		(&runCtx{r: r, run: run}).finishUpgrade(bg, blobRef{}, false, c.What)
+	}
+	r.syncProgress(bg, run.ID)
+	return nil
+}
+
 // failure is the failed round as a person reads it: the reason's own
-// sentences, what the round has been charged (read now — the run the caller
-// holds is the one it claimed), and whether its files can be tried again.
+// sentences, what the round is still charged now that it has ended (nothing,
+// unless an earlier pass of it was delivered), and whether its files can be
+// tried again.
 func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err error) am.Failure {
-	facts := am.FailureFacts{Kind: run.Kind, Credits: run.CreditsSpent, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24)}
+	facts := am.FailureFacts{Kind: run.Kind, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24)}
 	if cur, e := r.Store.RunByID(ctx, run.ID); e == nil {
 		facts.Credits = cur.CreditsSpent
 	}
@@ -709,7 +764,7 @@ func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err err
 	}
 	var ge *gateErr
 	if errors.As(err, &ge) {
-		facts.GateWhat, facts.GateNext, facts.Draft = ge.gate.What, ge.gate.Next, ge.draft
+		facts.GateWhat, facts.GateNext = ge.gate.What, ge.gate.Next
 	}
 	return am.FailureFor(reason, facts)
 }
@@ -721,6 +776,12 @@ func (r *Runner) recordFailure(ctx context.Context, run am.Run, reason string, e
 		return
 	}
 	r.logger().Warn("run failed", "run", run.ID, "reason", reason, "err", err)
+	r.keepOnRun(ctx, run, reason, reason+": "+err.Error())
+}
+
+// keepOnRun writes why a run ended onto its steps, unless a step of the run
+// says so already.
+func (r *Runner) keepOnRun(ctx context.Context, run am.Run, reason, why string) {
 	steps, e := r.Store.ListSteps(ctx, run.ID)
 	if e != nil {
 		return
@@ -734,7 +795,7 @@ func (r *Runner) recordFailure(ctx context.Context, run am.Run, reason string, e
 	if e != nil || done {
 		return
 	}
-	_ = r.Store.FinishStep(ctx, st.ID, "failed", nil, am.TrimText(reason+": "+err.Error(), 1500), "", "", 0)
+	_ = r.Store.FinishStep(ctx, st.ID, "failed", nil, am.TrimText(why, 1500), "", "", 0)
 }
 
 func (r *Runner) logger() *slog.Logger {

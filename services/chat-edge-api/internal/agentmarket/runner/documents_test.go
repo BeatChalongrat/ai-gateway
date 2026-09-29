@@ -50,11 +50,11 @@ func TestExtrasLeaveAM1StepKeysUnchanged(t *testing.T) {
 }
 
 func TestOutputsSayWhichModelSawTheDocuments(t *testing.T) {
-	plain := documentsNote(map[string]any{})
+	plain := documentsNote(map[string]any{}).String()
 	if !strings.Contains(plain, "โมเดลไม่ได้เป็นผู้กำหนดตัวเลข") || strings.Contains(plain, "โมเดลที่เห็นเอกสาร") {
 		t.Fatalf("no model: %s", plain)
 	}
-	note := documentsNote(map[string]any{"models": []any{map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true, "documents": float64(3)}}})
+	note := documentsNote(map[string]any{"models": []any{map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true, "documents": float64(3)}}}).String()
 	if !strings.Contains(note, "qwen3.8-27b-fp8 (รันในองค์กร)") || !strings.Contains(note, "3 ฉบับ") {
 		t.Fatalf("model named: %s", note)
 	}

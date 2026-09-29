@@ -63,6 +63,9 @@ type Config struct {
 	// CreditsPerUSD / THBPerUSD — how the catalog shows a run's cost in baht.
 	CreditsPerUSD float64
 	THBPerUSD     float64
+	// Mail (AM6) sends an e-mail the person approved (email.go). There is no
+	// mail connector in the product: nil, and a draft says it cannot be sent.
+	Mail MailConnector
 }
 
 // ConfigFromEnv reads the AGENT_MARKET_* variables with safe defaults.

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 func testDocx(t *testing.T, body string) []byte {
@@ -71,7 +73,7 @@ func TestPdfGate(t *testing.T) {
 		for _, c := range pdfGate(docx, chk) {
 			if !c.OK {
 				failed++
-				if strings.Contains(c.Detail, "[]") {
+				if strings.Contains(c.Detail.String(), "[]") || !am.ReadsForPerson(c.Detail.String()) {
 					t.Fatalf("%s: detail reads as Thai, not internals: %s", name, c.Detail)
 				}
 			}

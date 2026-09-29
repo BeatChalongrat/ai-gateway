@@ -54,6 +54,10 @@ type Manifest struct {
 	Install struct {
 		Defaults  map[string]json.RawMessage `json:"defaults"`
 		Questions []string                   `json:"questions"`
+		// Settings (AM6): the settings the agent declares — what an install of
+		// it may set beside the platform's own, each with its kind and bounds
+		// (settings.go).
+		Settings []DeclaredSetting `json:"settings"`
 	} `json:"install"`
 	Permissions struct {
 		Default string   `json:"default"`
@@ -89,7 +93,31 @@ type Manifest struct {
 	Review            struct {
 		SeparateReviewer bool `json:"separate_reviewer"`
 	} `json:"review"`
+	// AM6. Scope: "generic" — the agent holds nothing of one company, and any
+	// organisation can install it as it is — or "org-specific". A manifest that
+	// does not say reads as org-specific (ScopeSaid): an agent is not offered
+	// as generic on nobody's word. Jurisdiction: whose law and practice its
+	// rules follow ("TH").
+	Scope        string `json:"scope"`
+	Jurisdiction string `json:"jurisdiction"`
 }
+
+// What a manifest says of its scope.
+const (
+	ScopeGeneric     = "generic"
+	ScopeOrgSpecific = "org-specific"
+)
+
+// ScopeOf reads a scope as written: only "generic" is generic.
+func ScopeOf(said string) string {
+	if said == ScopeGeneric {
+		return ScopeGeneric
+	}
+	return ScopeOrgSpecific
+}
+
+// ScopeSaid is the agent's scope, org-specific when its manifest does not say.
+func (m Manifest) ScopeSaid() string { return ScopeOf(m.Scope) }
 
 // defaultUploadTypes is what an agent that declares no input types accepts
 // (AM1's spreadsheets and PDFs).
@@ -142,6 +170,15 @@ func ParseManifest(raw json.RawMessage) (Manifest, error) {
 		if !strings.Contains(c, ".") {
 			return m, fmt.Errorf("manifest: capability %q is not namespaced", c)
 		}
+	}
+	switch m.Scope {
+	case "", ScopeGeneric, ScopeOrgSpecific:
+	default:
+		return m, fmt.Errorf("manifest: scope %q is neither %q nor %q", m.Scope, ScopeGeneric, ScopeOrgSpecific)
+	}
+	m.Jurisdiction = strings.TrimSpace(m.Jurisdiction)
+	if err := checkDeclared(m.Install.Settings); err != nil {
+		return m, fmt.Errorf("manifest: %w", err)
 	}
 	return m, nil
 }

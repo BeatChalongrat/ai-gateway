@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -191,7 +190,7 @@ func (rc *runCtx) upgradeTarget() (upgradeParams, bool) {
 
 // finishUpgrade switches the install to the version its self-test ran —
 // only when the run passed and its package's own expectations hold.
-func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bool, why string) {
+func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bool, why am.PersonText) {
 	p, ok := rc.upgradeTarget()
 	if !ok {
 		return
@@ -201,18 +200,18 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 	if err != nil {
 		return
 	}
-	const kept = upgradeKept
+	kept := am.Words(am.Text(upgradeKept))
 	if !passed {
-		// why is the failed round's own sentence (am.Failure.What), already said in the thread
-		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน: %s",
-			to.Version, am.ForPerson(why))+kept, map[string]any{"tone": "error"})
+		// why is the round's own sentence (am.Failure.What, am.Completion.What), already said in the thread
+		_ = st.PostAgentText(ctx, rc.run, am.AgentText{Tone: "error", Text: am.Text(
+			"ยังไม่อัปเกรดเป็นรุ่น %s ครับ การทดสอบกับข้อมูลตัวอย่างไม่ผ่าน: %s %s", am.Version(to.Version), am.Words(why), kept)})
 		return
 	}
 	if problems := rc.selfTestExpectations(ctx, computed); len(problems) > 0 {
 		// the person reads why, in words; names and values are kept for the run page
 		rc.r.logger().Warn("upgrade self-test differs", "run", rc.run.ID, "to", to.Version, "problems", expectDetail(problems))
 		rc.r.noteStep(ctx, rc.run, "self_test_expect", expectDetail(problems))
-		_ = st.PostText(ctx, rc.run, upgradeRefused(to.Version, problems), map[string]any{"tone": "error"})
+		_ = st.PostAgentText(ctx, rc.run, am.AgentText{Tone: "error", Text: upgradeRefused(to.Version, problems)})
 		return
 	}
 	if cur, err := st.InstallByID(ctx, rc.install.ID); err == nil && cur.DefinitionID == to.ID {
@@ -221,12 +220,12 @@ func (rc *runCtx) finishUpgrade(ctx context.Context, computed blobRef, passed bo
 	if _, err := st.SwitchInstall(ctx, rc.install.ID, to, p.Bindings); err != nil {
 		rc.r.logger().Warn("upgrade switch failed", "run", rc.run.ID, "to", to.Version, "err", err)
 		rc.r.noteStep(ctx, rc.run, "upgrade_switch", err.Error())
-		_ = st.PostText(ctx, rc.run, fmt.Sprintf("ทดสอบรุ่น %s ผ่านแล้ว แต่สลับไปใช้รุ่นใหม่ไม่สำเร็จ — กดอัปเกรดอีกครั้งในหน้าตั้งค่า", to.Version)+kept,
-			map[string]any{"tone": "error"})
+		_ = st.PostAgentText(ctx, rc.run, am.AgentText{Tone: "error", Text: am.Text(
+			"ทดสอบรุ่น %s ผ่านแล้ว แต่สลับไปใช้รุ่นใหม่ไม่สำเร็จ — กดอัปเกรดอีกครั้งในหน้าตั้งค่า %s", am.Version(to.Version), kept)})
 		return
 	}
-	_ = st.PostText(ctx, rc.run, fmt.Sprintf("อัปเกรดเป็นรุ่น %s แล้วครับ ผ่านการทดสอบกับข้อมูลตัวอย่างตรงตามที่รุ่นนี้กำหนด "+
-		"รอบที่ทำไปแล้วยังเป็นของรุ่นเดิม และย้อนกลับได้ในหน้าตั้งค่า", to.Version), nil)
+	_ = st.PostText(ctx, rc.run, am.Text("อัปเกรดเป็นรุ่น %s แล้วครับ ผ่านการทดสอบกับข้อมูลตัวอย่างตรงตามที่รุ่นนี้กำหนด "+
+		"รอบที่ทำไปแล้วยังเป็นของรุ่นเดิม และย้อนกลับได้ในหน้าตั้งค่า", am.Version(to.Version)))
 }
 
 // noteStep keeps a technical detail on the run (the run page and a problem
@@ -250,37 +249,38 @@ func joinLines(xs []string) string {
 	return out
 }
 
-const upgradeKept = " ยังใช้รุ่นเดิมอยู่ตามปกติ ไฟล์และผลงานเดิมยังอยู่ครบ ถ้าต้องการให้ผู้ดูแลตรวจ กด “แจ้งปัญหา”"
+const upgradeKept = "ยังใช้รุ่นเดิมอยู่ตามปกติ ไฟล์และผลงานเดิมยังอยู่ครบ ถ้าต้องการให้ผู้ดูแลตรวจ กด “แจ้งปัญหา”"
 
 // expectProblem is one way a self-test missed what its version expects.
 // Words is what a person reads (the period, a question that should not have
 // been asked). A figure has none: its name is the engine's, so figures are
 // counted for the person. Detail is the whole of it, for the run page.
 type expectProblem struct {
-	Words  string
+	Words  am.PersonText
 	Figure bool
 	Detail string
 }
 
 // upgradeRefused is what a person reads when an upgrade's self-test differs
 // from what the new version expects: why, in words.
-func upgradeRefused(version string, problems []expectProblem) string {
-	var said []string
+func upgradeRefused(version string, problems []expectProblem) am.PersonText {
+	var said []am.PersonText
 	figures := 0
 	for _, p := range problems {
 		if p.Figure {
 			figures++
-		} else if w := am.ForPerson(p.Words); w != "" {
-			said = append(said, w)
+		} else if !p.Words.Empty() {
+			said = append(said, p.Words)
 		}
 	}
 	if figures > 0 {
-		said = append(said, fmt.Sprintf("ตัวเลขสรุป %d ค่าไม่ตรงกับที่รุ่นนี้กำหนด", figures))
+		said = append(said, am.Text("ตัวเลขสรุป %s ค่าไม่ตรงกับที่รุ่นนี้กำหนด", am.Count(figures)))
 	}
 	if len(said) == 0 {
-		said = append(said, "ผลทดสอบต่างจากที่รุ่นนี้กำหนดไว้")
+		said = append(said, am.Text("ผลทดสอบต่างจากที่รุ่นนี้กำหนดไว้"))
 	}
-	return fmt.Sprintf("ยังไม่อัปเกรดเป็นรุ่น %s ครับ ผลทดสอบกับข้อมูลตัวอย่างไม่ตรงตามที่รุ่นนี้กำหนด: %s", version, strings.Join(said, " · ")) + upgradeKept
+	return am.Text("ยังไม่อัปเกรดเป็นรุ่น %s ครับ ผลทดสอบกับข้อมูลตัวอย่างไม่ตรงตามที่รุ่นนี้กำหนด: %s %s", am.Version(version),
+		am.Words(am.Join(" · ", said...)), am.Words(am.Text(upgradeKept)))
 }
 
 // expectDetail is everything that differed, names and values, for the run.
@@ -305,13 +305,13 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 		} `json:"expect"`
 	}
 	if json.Unmarshal(rc.pkg.SelfTest, &st) != nil {
-		return []expectProblem{{Words: "อ่านสิ่งที่รุ่นนี้กำหนดไว้ไม่ได้", Detail: "self-test.json อ่านไม่ได้"}}
+		return []expectProblem{{Words: am.Text("อ่านสิ่งที่รุ่นนี้กำหนดไว้ไม่ได้"), Detail: "self-test.json อ่านไม่ได้"}}
 	}
 	var out []expectProblem
 	exp := st.Expect
 	if exp.Findings != nil && len(*exp.Findings) == 0 {
 		if cards, _ := rc.r.Store.RunCards(ctx, rc.run.ID); len(cards) > 0 {
-			out = append(out, expectProblem{Words: fmt.Sprintf("ถาม %d คำถาม ทั้งที่ข้อมูลตัวอย่างไม่ควรมีคำถาม", len(cards)),
+			out = append(out, expectProblem{Words: am.Text("ถาม %s คำถาม ทั้งที่ข้อมูลตัวอย่างไม่ควรมีคำถาม", am.Count(len(cards))),
 				Detail: fmt.Sprintf("ถาม %d คำถาม (คาดว่าไม่ถาม)", len(cards))})
 		}
 	}
@@ -321,7 +321,7 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 		if run.Period != nil {
 			got = *run.Period
 		}
-		out = append(out, expectProblem{Words: "งวดของผลทดสอบไม่ตรงกับที่รุ่นนี้กำหนด (" + exp.Period + ")",
+		out = append(out, expectProblem{Words: am.Text("งวดของผลทดสอบไม่ตรงกับที่รุ่นนี้กำหนด (%s)", am.Name(exp.Period)),
 			Detail: "งวดไม่ตรง: ได้ " + got + " คาด " + exp.Period})
 	}
 	if len(exp.Lines) == 0 && len(exp.Totals) == 0 {
@@ -329,7 +329,7 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 	}
 	_, data, err := rc.readComputed(ctx, computed)
 	if err != nil {
-		return append(out, expectProblem{Words: "อ่านผลคำนวณของการทดสอบไม่ได้", Detail: "อ่านผลคำนวณไม่ได้"})
+		return append(out, expectProblem{Words: am.Text("อ่านผลคำนวณของการทดสอบไม่ได้"), Detail: "อ่านผลคำนวณไม่ได้"})
 	}
 	var c struct {
 		Lines []struct {

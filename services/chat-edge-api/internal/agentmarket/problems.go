@@ -109,9 +109,9 @@ func (s *Store) fileProblem(ctx context.Context, org string, user uuid.UUID, ema
 }
 
 // problemNotice is what the person sees in their thread (and why it matters).
-func problemNotice(p ProblemReport) string {
-	return "ส่งเรื่องถึงผู้ดูแล Agent Market แล้ว (เลขอ้างอิง #" + p.Ref + ") พร้อมรอบงาน ขั้นตอนที่หยุด และข้อความของคุณ " +
-		"— ผู้ดูแลจะเห็นในหน้าผู้ดูแลและได้รับแจ้งเตือน ข้อมูลและไฟล์ของคุณยังอยู่ครบ ไม่มีอะไรถูกเปลี่ยน"
+func problemNotice(p ProblemReport) PersonText {
+	return Text("ส่งเรื่องถึงผู้ดูแล Agent Market แล้ว (เลขอ้างอิง #%s) พร้อมรอบงาน ขั้นตอนที่หยุด และข้อความของคุณ "+
+		"— ผู้ดูแลจะเห็นในหน้าผู้ดูแลและได้รับแจ้งเตือน ข้อมูลและไฟล์ของคุณยังอยู่ครบ ไม่มีอะไรถูกเปลี่ยน", Name(p.Ref))
 }
 
 func (a *API) runProblem(w http.ResponseWriter, r *http.Request) {
@@ -161,8 +161,7 @@ func (a *API) installProblem(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "problem")
 		return
 	}
-	if _, _, err := a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, nil, "notice",
-		map[string]any{"text": problemNotice(p)}, nil); err != nil {
+	if _, _, err := a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, nil, Notice{Text: problemNotice(p)}, nil); err != nil {
 		a.log.Warn("problem notice not posted", "err", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"report": p, "message": problemNotice(p)})

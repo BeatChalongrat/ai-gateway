@@ -2,7 +2,6 @@ package agentmarket
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -50,12 +49,12 @@ type OrgSettings struct {
 	UpdatedBy          string    `json:"updated_by"`
 	UpdatedAt          time.Time `json:"updated_at"`
 	// AM4: may documents go to a model outside the organisation (off by
-	// default); the models people may pick; how many years accounting
-	// records are kept; when a person's storage use gets a warning.
-	DocumentsMayLeave bool         `json:"documents_may_leave"`
-	AgentModels       []ModelEntry `json:"agent_models"`
-	RetentionYears    int          `json:"retention_years"`
-	StorageWarnMB     int          `json:"storage_warn_mb"`
+	// default); how many years accounting records are kept; when a person's
+	// storage use gets a warning. (AM6: the organisation keeps no list of
+	// models any more — the column agent_models stays where it is, unread.)
+	DocumentsMayLeave bool `json:"documents_may_leave"`
+	RetentionYears    int  `json:"retention_years"`
+	StorageWarnMB     int  `json:"storage_warn_mb"`
 }
 
 // Member is one person on the access list.
@@ -265,18 +264,13 @@ func (s *Store) firstAdmin(ctx context.Context, org string) Contact {
 // OrgSettingsFor reads one organisation.
 func (s *Store) OrgSettingsFor(ctx context.Context, org string) (OrgSettings, error) {
 	var o OrgSettings
-	var models json.RawMessage
 	err := s.Pool.QueryRow(ctx, `SELECT org_id, name, access, domains, user_monthly_credits::float8, contact_name, contact_email,
-		updated_by, updated_at, documents_may_leave, agent_models, retention_years, storage_warn_mb
+		updated_by, updated_at, documents_may_leave, retention_years, storage_warn_mb
 		FROM agent_market.org_settings WHERE org_id = $1`, org).
 		Scan(&o.OrgID, &o.Name, &o.Access, &o.Domains, &o.UserMonthlyCredits, &o.ContactName, &o.ContactEmail, &o.UpdatedBy,
-			&o.UpdatedAt, &o.DocumentsMayLeave, &models, &o.RetentionYears, &o.StorageWarnMB)
+			&o.UpdatedAt, &o.DocumentsMayLeave, &o.RetentionYears, &o.StorageWarnMB)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, ErrNotFound
-	}
-	_ = json.Unmarshal(models, &o.AgentModels)
-	if o.AgentModels == nil {
-		o.AgentModels = []ModelEntry{}
 	}
 	return o, err
 }

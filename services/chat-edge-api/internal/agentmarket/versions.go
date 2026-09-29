@@ -327,8 +327,7 @@ func (a *API) startUpgrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rid := run.ID
-	_, _, _ = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "progress",
-		Progress{RunID: run.ID.String(), Kind: KindSelfTest, Status: RunQueued}, nil)
+	_, _, _ = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, &rid, QueuedProgress(run), nil)
 	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
 }
 
@@ -352,7 +351,7 @@ func (a *API) rollback(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "rollback")
 		return
 	}
-	_, _, _ = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, nil, "agent_text",
-		map[string]any{"text": "ย้อนกลับไปใช้รุ่น " + prev.Version + " แล้วครับ รอบที่ทำไปแล้วยังเป็นของรุ่นที่ใช้ตอนนั้น"}, nil)
+	_, _, _ = a.store.AddItem(ctx, a.store.Pool, in.ID, in.TenantID, in.UserID, nil,
+		AgentText{Text: Text("ย้อนกลับไปใช้รุ่น %s แล้วครับ รอบที่ทำไปแล้วยังเป็นของรุ่นที่ใช้ตอนนั้น", Version(prev.Version))}, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"install": out})
 }

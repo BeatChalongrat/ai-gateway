@@ -238,30 +238,35 @@ func (s *Store) ItemByID(ctx context.Context, tenant, user, id uuid.UUID) (Threa
 
 // IntentPayload is the round-boundary chip as the thread shows it.
 type IntentPayload struct {
-	Status    string           `json:"status"` // open | chosen
-	Choice    string           `json:"choice,omitempty"`
-	Text      string           `json:"text,omitempty"`
-	Files     []map[string]any `json:"files,omitempty"`
-	ItemID    string           `json:"item_id"`
-	LastRound map[string]any   `json:"last_round"`
-	Fresh     bool             `json:"fresh,omitempty"`
-	Model     string           `json:"model_choice,omitempty"`
-	RunID     string           `json:"run_id,omitempty"`
-	Note      string           `json:"note,omitempty"`
+	Status    string      `json:"status"` // open | chosen
+	Choice    string      `json:"choice,omitempty"`
+	Text      string      `json:"text,omitempty"` // what the person typed
+	Files     []FileRef   `json:"files,omitempty"`
+	ItemID    string      `json:"item_id"`
+	LastRound IntentRound `json:"last_round"`
+	Fresh     bool        `json:"fresh,omitempty"`
+	RunID     string      `json:"run_id,omitempty"`
+	Note      PersonText  `json:"note,omitzero"`
+}
+
+// IntentRound is the round a chip asks about.
+type IntentRound struct {
+	RunID       string     `json:"run_id"`
+	PeriodLabel PersonText `json:"period_label"`
 }
 
 func (a *API) intentChip(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, item ThreadItem, last Run,
 	text string, files []File, o roundOpts) error {
-	p := IntentPayload{Status: "open", Text: text, ItemID: item.ID.String(), Fresh: wantsFreshStart(text), Model: o.model,
-		LastRound: map[string]any{"run_id": last.ID.String(), "period_label": periodOf(last)}}
-	for _, f := range files {
-		p.Files = append(p.Files, map[string]any{"id": f.ID, "name": f.Name, "size": f.Size})
+	p := IntentPayload{Status: "open", Text: text, ItemID: item.ID.String(), Fresh: wantsFreshStart(text),
+		LastRound: IntentRound{RunID: last.ID.String(), PeriodLabel: Text("%s", Name(periodOf(last)))}}
+	if len(files) > 0 {
+		p.Files = FileRefs(files)
 	}
 	// The person's message waits on the chip (the files stay unused until then).
-	if err := a.store.PatchItem(ctx, tx, item.ID, map[string]any{"status": "handled", "handled_as": "intent"}); err != nil {
+	if err := a.store.PatchItem(ctx, tx, item.ID, ItemPatch{Status: "handled", HandledAs: "intent"}); err != nil {
 		return err
 	}
-	_, _, err := a.store.AddItemIn(ctx, tx, in.ID, o.thread, c.TenantUUID, c.UserID, nil, "intent", p, nil)
+	_, _, err := a.store.AddItemIn(ctx, tx, in.ID, o.thread, c.TenantUUID, c.UserID, nil, p, nil)
 	return err
 }
 
@@ -347,7 +352,7 @@ func (a *API) createThread(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "thread")
 		return
 	}
-	if _, _, err := a.store.AddItemIn(ctx, tx, in.ID, &id, c.TenantUUID, c.UserID, nil, "greeting", GreetingFor(m), nil); err != nil {
+	if _, _, err := a.store.AddItemIn(ctx, tx, in.ID, &id, c.TenantUUID, c.UserID, nil, GreetingFor(m), nil); err != nil {
 		a.fail(w, err, "thread")
 		return
 	}
@@ -377,9 +382,9 @@ func (a *API) startRound(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusConflict, "ROUND_IN_PROGRESS")
 		return
 	}
-	item, _, err := a.store.AddItemIn(ctx, a.store.Pool, in.ID, body.ThreadID, c.TenantUUID, c.UserID, nil, "notice",
-		map[string]any{"text": "เริ่มรอบใหม่แล้ว — ส่งไฟล์ของรอบนี้ได้เลย ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ " +
-			"ส่วนไฟล์ ตัวเลข และคำตอบของรอบก่อนไม่ถูกนำมาใช้", "round_start": true, "tone": "success"}, nil)
+	item, _, err := a.store.AddItemIn(ctx, a.store.Pool, in.ID, body.ThreadID, c.TenantUUID, c.UserID, nil,
+		Notice{Text: Text("เริ่มรอบใหม่แล้ว — ส่งไฟล์ของรอบนี้ได้เลย ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ " +
+			"ส่วนไฟล์ ตัวเลข และคำตอบของรอบก่อนไม่ถูกนำมาใช้"), RoundStart: true, Tone: "success"}, nil)
 	if err != nil {
 		a.fail(w, err, "round")
 		return
@@ -438,16 +443,13 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	patch := map[string]any{"status": "chosen", "choice": body.Choice}
-	o := roundOpts{thread: item.ThreadID, model: p.Model, newRound: true}
+	patch := ItemPatch{Status: "chosen", Choice: body.Choice}
+	o := roundOpts{thread: item.ThreadID, newRound: true}
 	switch body.Choice {
 	case "new_round":
 		var ids []uuid.UUID
 		for _, f := range p.Files {
-			fid, err := uuid.Parse(fmt.Sprint(f["id"]))
-			if err != nil {
-				continue
-			}
+			fid := f.ID
 			f, err := a.store.GetFile(ctx, c.TenantUUID, c.UserID, fid)
 			if err != nil || f.RunID != nil {
 				say(w, http.StatusGone, "BAD_FILE")
@@ -466,7 +468,7 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		patch["run_id"] = run.ID.String()
+		patch.RunID = run.ID.String()
 	case "about_last":
 		last, err := a.store.LatestRunIn(ctx, in.ID, item.ThreadID)
 		if err != nil {
@@ -474,7 +476,7 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.TrimSpace(p.Text) != "" {
-			job, err := a.replyJob(ctx, tx, in, c, source, p.Text, &last.ID, item.ThreadID)
+			job, err := a.replyJob(ctx, tx, in, c, source, p.Text, &last.ID, item.ThreadID, nil)
 			if err != nil {
 				a.fail(w, err, "run")
 				return
@@ -487,10 +489,12 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(p.Files) > 0 {
-			patch["note"] = "ไฟล์ที่แนบมาไม่ได้ใส่ในรอบที่แล้ว เพราะรอบนั้นส่งตัวเลขไปแล้ว — ไฟล์ที่ไม่ได้ใช้ในรอบใดจะเก็บไว้ 30 วัน " +
-				"ถ้าจะใช้ ให้กด “เริ่มรอบใหม่”"
+			note := Text("ไฟล์ที่แนบมาไม่ได้ใส่ในรอบที่แล้ว เพราะรอบนั้นส่งตัวเลขไปแล้ว — ไฟล์ที่ไม่ได้ใช้ในรอบใดจะเก็บไว้ 30 วัน " +
+				"ถ้าจะใช้ ให้กด “เริ่มรอบใหม่”")
+			patch.Note = &note
 		} else if strings.TrimSpace(p.Text) == "" {
-			patch["note"] = "พิมพ์คำถามเกี่ยวกับรอบที่แล้วได้เลย"
+			note := Text("พิมพ์คำถามเกี่ยวกับรอบที่แล้วได้เลย")
+			patch.Note = &note
 		}
 	}
 	if err := a.store.PatchItem(ctx, tx, item.ID, patch); err != nil {
@@ -501,14 +505,23 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "chip")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"changed": true, "choice": body.Choice, "run_id": patch["run_id"]})
+	var started any
+	if patch.RunID != "" {
+		started = patch.RunID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"changed": true, "choice": body.Choice, "run_id": started})
 }
 
 // replyJob queues a small job that answers a typed message about a round
-// (a question about its figures, a file in another form).
+// (a question about its figures, a file in another form). AM6: a question
+// asked with a knowledge base carries what was found — on this job only.
 func (a *API) replyJob(ctx context.Context, q Querier, in Install, c middleware.Caller, itemID uuid.UUID, text string,
-	parent *uuid.UUID, thread *uuid.UUID) (Run, error) {
-	params, _ := json.Marshal(map[string]any{"item_id": itemID, "text": text})
+	parent *uuid.UUID, thread *uuid.UUID, k *KnowledgeContext) (Run, error) {
+	p := map[string]any{"item_id": itemID, "text": text}
+	if k != nil {
+		p["knowledge"] = k
+	}
+	params, _ := json.Marshal(p)
 	job, _, err := a.store.CreateRun(ctx, q, Run{InstallID: in.ID, ParentRunID: parent, TenantID: c.TenantUUID,
 		UserID: c.UserID, Kind: KindReply, Message: text, Params: params, DefinitionVersion: in.DefinitionVersion,
 		Checksum: in.Checksum, BindingVersion: in.BindingVersion, ThreadID: thread}, "")
@@ -524,7 +537,6 @@ func (a *API) roundRoutes(r chi.Router) {
 	r.Get("/installs/{id}/models", a.installModels)
 	r.Put("/installs/{id}/model", a.putInstallModel)
 	r.Get("/installs/{id}/storage", a.installStorage)
-	r.Get("/admin/models", a.adminModels)
 	a.accessRoutes(r)
 }
 
@@ -562,10 +574,11 @@ func (a *API) installStorage(w http.ResponseWriter, r *http.Request) {
 // A failed round was a dead end: typing "ทำรอบใหม่" started a round with no
 // files at all. "ลองใหม่ด้วยไฟล์เดิม" starts the same round again — the files
 // it had, the instruction it was given, the answers the person had already
-// clicked, the model and the thread — as a new run. The failed run stays as
-// it ended (its steps are what a problem report shows); its files move to
-// the new run, which is where they are needed and where retention now counts
-// them from.
+// clicked and the thread — as a new run, with the model the install has now
+// (AM6: someone who changed the model because the round failed gets the model
+// they chose). The failed run stays as it ended (its steps are what a problem
+// report shows); its files move to the new run, which is where they are
+// needed and where retention now counts them from.
 
 func (a *API) retry(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
@@ -594,7 +607,9 @@ func (a *API) retry(w http.ResponseWriter, r *http.Request) {
 		a.writeRetry(w, ctx, again)
 		return
 	}
-	if failed.Kind != KindRun || failed.Status != RunFailed {
+	// AM6: a round that finished with its gate open did not fail — the same
+	// files give the same difference, and a second round of them is charged again
+	if failed.Kind != KindRun || failed.Status != RunFailed || failed.Outcome() == OutcomeCompletedOpen {
 		say(w, http.StatusConflict, "NOT_FAILED")
 		return
 	}
@@ -627,11 +642,15 @@ func (a *API) retry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	params, _ := json.Marshal(map[string]any{"retry_of": failed.ID})
+	model := in.ModelChoice
+	if model == "" {
+		model = ModelAuto
+	}
 	// the install's current version: a retry after an upgrade runs the upgraded agent
 	run, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: in.ID, TenantID: c.TenantUUID, UserID: c.UserID, Kind: KindRun,
 		Message: failed.Message, Params: params, DefinitionVersion: def.Version, Checksum: def.Checksum, EngineChecksum: def.EngineChecksum,
 		BindingVersion: in.BindingVersion, Formats: failed.Formats, Answers: failed.Answers, ThreadID: failed.ThreadID,
-		ModelChoice: failed.ModelChoice}, idem)
+		ModelChoice: &model}, idem)
 	if err != nil {
 		a.fail(w, err, "run")
 		return
@@ -645,14 +664,13 @@ func (a *API) retry(w http.ResponseWriter, r *http.Request) {
 	for _, f := range files {
 		names = append(names, f.Name)
 	}
-	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "notice",
-		map[string]any{"text": fmt.Sprintf("ลองรอบนี้ใหม่ด้วยไฟล์เดิม %d ไฟล์: %s", len(names), strings.Join(names, ", ")),
-			"run_id": run.ID.String(), "retry_of": failed.ID.String()}, nil); err != nil {
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid,
+		Notice{Text: Text("ลองรอบนี้ใหม่ด้วยไฟล์เดิม %s ไฟล์: %s", Count(len(names)), FileNames(names)),
+			RunID: run.ID.String(), RetryOf: failed.ID.String()}, nil); err != nil {
 		a.fail(w, err, "run")
 		return
 	}
-	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "progress",
-		Progress{RunID: run.ID.String(), Kind: KindRun, Status: RunQueued}, nil); err != nil {
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, QueuedProgress(run), nil); err != nil {
 		a.fail(w, err, "run")
 		return
 	}
@@ -711,24 +729,49 @@ type leftOut struct {
 
 // leftOutOf reads the round's list from its newest computed table.
 func (a *API) leftOutOf(ctx context.Context, run Run) ([]leftOut, error) {
+	var c struct {
+		NotIncluded []leftOut `json:"not_included"`
+	}
+	if err := a.decodeComputed(ctx, run, &c); err != nil {
+		return nil, err
+	}
+	return c.NotIncluded, nil
+}
+
+// decodeComputed reads the round's newest computed table into v.
+func (a *API) decodeComputed(ctx context.Context, run Run, v any) error {
 	var key string
 	err := a.store.Pool.QueryRow(ctx, `SELECT output->>'computed_key' FROM agent_market.agent_run_steps
 		WHERE run_id = $1 AND name = 'compute' AND status = 'succeeded' ORDER BY seq DESC LIMIT 1`, run.ID).Scan(&key)
 	if err != nil || key == "" {
-		return nil, ErrNotFound
+		return ErrNotFound
 	}
 	body, _, _, err := a.files.Download(ctx, key)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer body.Close()
-	var c struct {
-		NotIncluded []leftOut `json:"not_included"`
+	return json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(v)
+}
+
+// computeAgain lets a finished round compute again with what was just
+// recorded on it (a document brought back, a receipt confirmed): the thread
+// says what changed, and the round's progress card is working again. false:
+// the round could not be resumed (it was stopped).
+func (a *API) computeAgain(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, run Run, n Notice) (bool, error) {
+	rid := run.ID
+	n.RunID = run.ID.String()
+	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, n, nil); err != nil {
+		return false, err
 	}
-	if err := json.NewDecoder(io.LimitReader(body, 64<<20)).Decode(&c); err != nil {
-		return nil, err
+	resumed, err := a.store.Resume(ctx, tx, run.ID)
+	if err != nil || !resumed {
+		return false, err
 	}
-	return c.NotIncluded, nil
+	if it, err := a.store.ItemFor(ctx, run.InstallID, "progress", "run_id", run.ID.String()); err == nil {
+		_ = a.store.PatchItem(ctx, tx, it.ID, ItemPatch{Status: RunQueued, Outcome: RunQueued})
+	}
+	return true, nil
 }
 
 func (a *API) restore(w http.ResponseWriter, r *http.Request) {
@@ -838,17 +881,12 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	asks := len(drop) > 0 || len(set) == 0
-	text := fmt.Sprintf("นำ “%s” กลับมารวมในรอบนี้แล้ว กำลังคำนวณใหม่ ไฟล์ชุดใหม่จะเป็นรุ่นถัดไป เอกสารนี้บันทึกตามที่พิมพ์ พร้อมข้อยกเว้นให้ผู้ตรวจดู", doc.Name)
+	text := Text("นำ “%s” กลับมารวมในรอบนี้แล้ว กำลังคำนวณใหม่ ไฟล์ชุดใหม่จะเป็นรุ่นถัดไป เอกสารนี้บันทึกตามที่พิมพ์ พร้อมข้อยกเว้นให้ผู้ตรวจดู",
+		Typed(doc.Name, 160))
 	if asks {
-		text = fmt.Sprintf("นำ “%s” กลับมาแล้ว ต้องตอบคำถามของเอกสารนี้ก่อนจึงจะรวมได้ คำถามจะขึ้นด้านล่าง", doc.Name)
+		text = Text("นำ “%s” กลับมาแล้ว ต้องตอบคำถามของเอกสารนี้ก่อนจึงจะรวมได้ คำถามจะขึ้นด้านล่าง", Typed(doc.Name, 160))
 	}
-	rid := run.ID
-	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, "notice",
-		map[string]any{"text": text, "run_id": run.ID.String(), "restored": doc.DocKey}, nil); err != nil {
-		a.fail(w, err, "run")
-		return
-	}
-	resumed, err := a.store.Resume(ctx, tx, run.ID)
+	resumed, err := a.computeAgain(ctx, tx, in, c, run, Notice{Text: text, Restored: doc.DocKey})
 	if err != nil {
 		a.fail(w, err, "run")
 		return
@@ -857,12 +895,156 @@ func (a *API) restore(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusConflict, "ROUND_NOT_DONE")
 		return
 	}
-	if it, err := a.store.ItemFor(ctx, run.InstallID, "progress", "run_id", run.ID.String()); err == nil {
-		_ = a.store.PatchItem(ctx, tx, it.ID, map[string]any{"status": RunQueued})
-	}
 	if err := tx.Commit(ctx); err != nil {
 		a.fail(w, err, "run")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"changed": true, "asks": asks, "doc_key": doc.DocKey, "name": doc.Name})
+}
+
+// ── a receipt confirmed in this system (AM6) ─────────────────────────────
+//
+// A company that received goods but has no receipt file for them (it keeps
+// its receipts in no system, or the file did not come) confirms the receipt
+// of a PO line here. The round's computed table offers the lines it may
+// (receipt_offers: goods tested two ways for want of a receipt); the answer
+// is recorded on the round as given by the signed-in person — an action, not
+// a card, so it names them itself (Answer.By) — and the same round computes
+// again the way a restored document does. Which lines, and what a receipt
+// changes, is the package's.
+
+type receiptOffer struct {
+	Key         string          `json:"key"`
+	PO          string          `json:"po"`
+	LineNo      json.RawMessage `json:"line_no"`
+	Unit        string          `json:"unit"`
+	Description string          `json:"description"`
+}
+
+// receiptQuantity reads what was received: "all", or a number of at least 0
+// with at most six decimals (as the package reads {"typed": …}).
+func receiptQuantity(raw json.RawMessage) (json.RawMessage, string, bool) {
+	var s string
+	if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) == "all" {
+		return json.RawMessage(`"all"`), "", true
+	}
+	v, whole, decimals, ok := writtenAs(raw, false)
+	if !ok || v < 0 || len(decimals) > 6 {
+		return nil, "", false
+	}
+	typed := whole
+	if decimals != "" {
+		typed += "." + decimals
+	}
+	return mustJSON(map[string]string{"typed": typed}), typed, true
+}
+
+func (a *API) receipts(w http.ResponseWriter, r *http.Request) {
+	c, _ := caller(r)
+	id, ok := pathID(r, "id")
+	if !ok {
+		badRequest(w, "BAD_ID")
+		return
+	}
+	var req struct {
+		Key      string          `json:"key"`
+		Quantity json.RawMessage `json:"quantity"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || strings.TrimSpace(req.Key) == "" {
+		badRequest(w, "BAD_JSON")
+		return
+	}
+	ctx := r.Context()
+	run, err := a.store.GetRun(ctx, c.TenantUUID, c.UserID, id)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	in, err := a.store.GetInstall(ctx, c.TenantUUID, c.UserID, run.InstallID)
+	if err != nil {
+		a.fail(w, err, "install")
+		return
+	}
+	if !a.agentGate(w, r, in.Slug, false) {
+		return
+	}
+	switch {
+	case !IsTerminal(run.Status):
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ยังทำอยู่", "next", "รอให้รอบนี้เสร็จก่อน แล้วค่อยยืนยันการรับของ")
+		return
+	case run.Kind != KindRun || run.Status != RunSucceeded:
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ไม่สำเร็จ", "next", "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น")
+		return
+	}
+	var computed struct {
+		Offers []receiptOffer `json:"receipt_offers"`
+	}
+	if err := a.decodeComputed(ctx, run, &computed); errors.Is(err, ErrNotFound) {
+		say(w, http.StatusNotFound, "NOT_COMPUTED")
+		return
+	} else if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if len(computed.Offers) == 0 {
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ไม่มีรายการที่ยืนยันการรับของในระบบได้",
+			"next", "ส่งใบรับของเป็นไฟล์ในรอบใหม่แทน")
+		return
+	}
+	var offer *receiptOffer
+	for i := range computed.Offers {
+		if computed.Offers[i].Key == req.Key {
+			offer = &computed.Offers[i]
+		}
+	}
+	if offer == nil {
+		say(w, http.StatusNotFound, "NOT_OFFERED")
+		return
+	}
+	value, typed, ok := receiptQuantity(req.Quantity)
+	if !ok {
+		say(w, http.StatusBadRequest, "BAD_QUANTITY")
+		return
+	}
+	var line any
+	_ = json.Unmarshal(offer.LineNo, &line)
+	po, lineNo := Name(offer.PO), Name(strings.TrimSpace(fmt.Sprint(line)))
+	label := Text("รับครบตามใบสั่งซื้อ")
+	text := Text("ยืนยันแล้วว่าได้รับของตาม %s บรรทัด %s ครบตามที่สั่ง กำลังคำนวณรอบนี้ใหม่ ไฟล์ชุดใหม่จะเป็นรุ่นถัดไป", po, lineNo)
+	if typed != "" {
+		got := Join(" ", Text("%s", Name(typed)), LabelFromPackage(offer.Unit, NoText))
+		label = Text("รับ %s", Words(got))
+		text = Text("ยืนยันแล้วว่าได้รับของตาม %s บรรทัด %s จำนวน %s กำลังคำนวณรอบนี้ใหม่ ไฟล์ชุดใหม่จะเป็นรุ่นถัดไป", po, lineNo, Words(got))
+	}
+	code, _, _ := strings.Cut(req.Key, ":")
+	by := c.UserID
+	tx, err := a.store.Pool.Begin(ctx)
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := a.store.MergeAnswers(ctx, tx, run.ID, map[string]Answer{req.Key: {Value: value, Label: label.String(), Moment: "run",
+		Via: "action", Code: code, By: &by}}); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	resumed, err := a.computeAgain(ctx, tx, in, c, run, Notice{Text: text})
+	if err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if !resumed {
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ถูกหยุดไว้", "next", "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	if run, err = a.store.RunByID(ctx, run.ID); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"run": run})
 }

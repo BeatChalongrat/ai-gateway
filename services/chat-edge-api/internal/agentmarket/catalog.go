@@ -112,16 +112,17 @@ func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, 
 		rows.Close()
 		for _, x := range list {
 			rid := x.id
-			text := "ผู้ดูแลปิด agent นี้ไว้ชั่วคราว รอบนี้จึงยังไม่เริ่ม"
-			if reason != "" {
-				text += " (" + reason + ")"
-			}
-			text += " — ไฟล์ที่ส่งมายังอยู่ครบ เมื่อเปิดใช้อีกครั้งให้ส่งใหม่หรือพิมพ์ “ทำรอบใหม่”"
-			if _, _, err := s.AddItem(ctx, tx, x.install, x.tenant, x.user, &rid, "notice",
-				map[string]any{"text": text, "tone": "warning", "run_id": x.id.String(), "reason": "agent_disabled"}, nil); err != nil {
+			text := Text("ผู้ดูแลปิด agent นี้ไว้ชั่วคราว รอบนี้จึงยังไม่เริ่ม%s — ไฟล์ที่ส่งมายังอยู่ครบ เมื่อเปิดใช้อีกครั้งให้ส่งใหม่หรือพิมพ์ “ทำรอบใหม่”",
+				Aside(reason))
+			if _, _, err := s.AddItem(ctx, tx, x.install, x.tenant, x.user, &rid,
+				Notice{Text: text, Tone: "warning", RunID: x.id.String(), Reason: "agent_disabled"}, nil); err != nil {
 				return 0, err
 			}
-			if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = payload || '{"status":"cancelled"}'::jsonb,
+			// AM6: a round that never started delivered nothing, and is charged nothing
+			if err := s.Settle(ctx, tx, x.id); err != nil {
+				return 0, err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = payload || '{"status":"cancelled","outcome":"cancelled"}'::jsonb,
 				rev = nextval('agent_market.thread_rev'), updated_at = now()
 				WHERE install_id = $1 AND kind = 'progress' AND payload->>'run_id' = $2`, x.install, x.id.String()); err != nil {
 				return 0, err
@@ -170,6 +171,7 @@ type SampleSummary struct {
 	RunID      uuid.UUID  `json:"run_id"`
 	Version    string     `json:"version"`
 	Status     string     `json:"status"`
+	Outcome    string     `json:"outcome"`
 	Reason     string     `json:"reason,omitempty"`
 	Credits    float64    `json:"credits"`
 	Seconds    *float64   `json:"seconds"`
@@ -180,8 +182,9 @@ type SampleSummary struct {
 // first; an older version's sample stands in while the newest is not made yet).
 func (s *Store) CatalogSampleFor(ctx context.Context, slug string) (SampleSummary, error) {
 	var x SampleSummary
+	var open bool
 	err := s.Pool.QueryRow(ctx, `
-		SELECT r.id, d.version, r.status, r.status_reason, r.credits_spent::float8,
+		SELECT r.id, d.version, r.status, r.gate_open, r.status_reason, r.credits_cost::float8,
 			CASE WHEN r.finished_at IS NOT NULL AND r.started_at IS NOT NULL
 				THEN extract(epoch FROM r.finished_at - r.started_at) - r.awaiting_ms / 1000.0 END,
 			r.finished_at
@@ -190,10 +193,11 @@ func (s *Store) CatalogSampleFor(ctx context.Context, slug string) (SampleSummar
 		JOIN agent_market.agent_runs r ON r.id = c.run_id
 		WHERE d.slug = $1
 		ORDER BY (r.status = 'succeeded') DESC, string_to_array(d.version, '.')::int[] DESC, c.created_at DESC
-		LIMIT 1`, slug).Scan(&x.RunID, &x.Version, &x.Status, &x.Reason, &x.Credits, &x.Seconds, &x.FinishedAt)
+		LIMIT 1`, slug).Scan(&x.RunID, &x.Version, &x.Status, &open, &x.Reason, &x.Credits, &x.Seconds, &x.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return x, ErrNotFound
 	}
+	x.Outcome = OutcomeOf(x.Status, open)
 	return x, err
 }
 
@@ -221,10 +225,14 @@ func (s *Store) CreateCatalogSample(ctx context.Context, def Definition, binding
 			uuid.Nil, def.ID, def.Slug, def.Version, def.Checksum, title, jsonOr(bindings, "{}"), bindingVersion).Scan(&install)
 		if err == nil {
 			if m, perr := ParseManifest(def.Manifest); perr == nil {
+				rules := rulesOf(m)
 				for k, v := range m.Install.Defaults {
-					if validSettingKey(k) && validSettingValue(k, v) {
-						if err = s.SetDefault(ctx, tx, install, Default{Key: k, Value: v, Source: "install",
-							Label: settingLabel(k), Note: "ตัวอย่างในแคตตาล็อก"}); err != nil {
+					if !rules.known(k) {
+						continue
+					}
+					if kept, _, problem := rules.check(k, v); problem == "" {
+						if err = s.SetDefault(ctx, tx, install, Default{Key: k, Value: kept, Source: "install",
+							Label: rules.label(k), Note: "ตัวอย่างในแคตตาล็อก"}); err != nil {
 							break
 						}
 					}
@@ -473,6 +481,9 @@ type catalogEntry struct {
 	StatusReason string          `json:"status_reason,omitempty"`
 	Sample       *SampleSummary  `json:"sample,omitempty"`
 	Stats        *AgentStats     `json:"stats,omitempty"`
+	// AM6: what the agent's manifest says of itself (capability.go)
+	Scope        string `json:"scope"`
+	Jurisdiction string `json:"jurisdiction"`
 }
 
 // visible: a member sees published and disabled agents (a disabled one says
@@ -486,7 +497,11 @@ func (a *API) entryFor(ctx context.Context, acc Access, d Definition, states map
 	if !ok {
 		st = CatalogState{Status: StatusUnpublished}
 	}
-	e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: d.Manifest, Status: st.Status, StatusReason: st.Reason}
+	e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: d.Manifest, Status: st.Status, StatusReason: st.Reason,
+		Scope: ScopeOrgSpecific}
+	if m, err := ParseManifest(d.Manifest); err == nil {
+		e.Scope, e.Jurisdiction = m.ScopeSaid(), m.Jurisdiction
+	}
 	if id, ok := installs[d.Slug]; ok {
 		id := id
 		e.InstallID = &id
@@ -573,7 +588,8 @@ func (a *API) catalogItem(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"slug": d.Slug, "version": d.Version, "name": d.Name,
 		"manifest": d.Manifest, "checksum": d.Checksum, "instructions": d.Instructions, "status": e.Status,
-		"status_reason": e.StatusReason, "install_id": e.InstallID, "sample": e.Sample, "stats": e.Stats})
+		"status_reason": e.StatusReason, "install_id": e.InstallID, "sample": e.Sample, "stats": e.Stats,
+		"scope": e.Scope, "jurisdiction": e.Jurisdiction})
 }
 
 // ── the data sheet ───────────────────────────────────────────────────────
@@ -616,6 +632,9 @@ type Datasheet struct {
 	Runner      map[string]any    `json:"runner"`
 	Generated   time.Time         `json:"generated_at"`
 	Notes       map[string]string `json:"notes,omitempty"`
+	// AM6: what the agent's manifest says of itself (capability.go)
+	Scope        string `json:"scope"`
+	Jurisdiction string `json:"jurisdiction"`
 }
 
 // BuildDatasheet assembles the sheet (a function of its inputs, for tests).
@@ -629,6 +648,7 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	}
 	_ = json.Unmarshal(d.Manifest, &extra)
 	ds := Datasheet{Slug: d.Slug, Version: d.Version, Name: d.Name, Summary: m.Summary, Status: status, Generated: now,
+		Scope: m.ScopeSaid(), Jurisdiction: m.Jurisdiction,
 		Limits: map[string]int{"max_file_mb": m.Limits.MaxFileMB, "max_files": m.Limits.MaxFiles},
 		Cannot: m.Cannot, Models: []DatasheetModel{}, NoModel: []string{}, Never: []string{},
 		Permissions: map[string]any{"default": m.Permissions.Default, "denied": nonNil(m.Permissions.Denied)}}

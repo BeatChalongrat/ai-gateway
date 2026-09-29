@@ -92,9 +92,11 @@ type RunMeta struct {
 	Person      string     `json:"person"`
 	Email       string     `json:"email"`
 	Status      string     `json:"status"`
+	Outcome     string     `json:"outcome"` // AM6: completed | completed_open | failed | cancelled, or the status while it runs
 	Reason      string     `json:"reason"`
 	Period      string     `json:"period_label"`
-	Credits     float64    `json:"credits"`
+	Credits     float64    `json:"credits"` // what the person was charged
+	Cost        float64    `json:"cost"`    // AM6: what the platform paid (more than Credits for a round that delivered nothing)
 	Model       string     `json:"model"`
 	SelfHosted  *bool      `json:"model_self_hosted"`
 	StoppedAt   string     `json:"stopped_at_step,omitempty"`
@@ -107,7 +109,8 @@ type RunMeta struct {
 // OrgRuns lists the organisation's runs as metadata, newest first.
 func (s *Store) OrgRuns(ctx context.Context, org string, admin uuid.UUID, status string, limit int) ([]RunMeta, error) {
 	q := `SELECT r.id, i.title, i.slug, COALESCE(m.display_name, ''), COALESCE(m.email, ''), r.status, r.status_reason,
-			COALESCE(r.period, ''), r.credits_spent::float8, COALESCE(r.model_used, ''), r.model_self_hosted,
+			COALESCE(r.period, ''), r.credits_spent::float8, r.credits_cost::float8, r.gate_open,
+			COALESCE(r.model_used, ''), r.model_self_hosted,
 			COALESCE((SELECT st.name FROM agent_market.agent_run_steps st WHERE st.run_id = r.id AND st.status = 'failed'
 				ORDER BY st.seq DESC LIMIT 1), ''),
 			r.created_at, r.finished_at,
@@ -135,10 +138,12 @@ func (s *Store) OrgRuns(ctx context.Context, org string, admin uuid.UUID, status
 	for rows.Next() {
 		var m RunMeta
 		var period string
-		if err := rows.Scan(&m.ID, &m.Agent, &m.Slug, &m.Person, &m.Email, &m.Status, &m.Reason, &period, &m.Credits, &m.Model,
-			&m.SelfHosted, &m.StoppedAt, &m.CreatedAt, &m.FinishedAt, &m.OpenedByMe, &m.TimesOpened); err != nil {
+		var open bool
+		if err := rows.Scan(&m.ID, &m.Agent, &m.Slug, &m.Person, &m.Email, &m.Status, &m.Reason, &period, &m.Credits, &m.Cost, &open,
+			&m.Model, &m.SelfHosted, &m.StoppedAt, &m.CreatedAt, &m.FinishedAt, &m.OpenedByMe, &m.TimesOpened); err != nil {
 			return nil, err
 		}
+		m.Outcome = OutcomeOf(m.Status, open)
 		if period != "" {
 			m.Period = PeriodLabel(period)
 		}
@@ -209,15 +214,13 @@ func (a *API) adminOpenRun(w http.ResponseWriter, r *http.Request) {
 		if who == "" {
 			who = normEmail(c.Email)
 		}
-		rid := run.ID
 		label := periodOf(run)
 		if label != "" {
 			label = " " + label
 		}
-		text := "ผู้ดูแล " + who + " เปิดดูรอบ" + label + " ของคุณ เมื่อ " + ThaiDateTime(time.Now()) + " เหตุผล: “" + reason +
-			"” — ทุกครั้งที่ผู้ดูแลเปิดดูรอบของคุณ ระบบจะแจ้งที่นี่ และหน้าที่มาของตัวเลขของรอบนั้นมีรายการไว้ทั้งหมด"
-		if _, _, err := a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, "notice",
-			map[string]any{"text": text, "tone": "warning", "access": true, "run_id": run.ID.String()}, nil); err != nil {
+		text := Text("ผู้ดูแล %s เปิดดูรอบ%s ของคุณ เมื่อ %s เหตุผล: “%s” — ทุกครั้งที่ผู้ดูแลเปิดดูรอบของคุณ ระบบจะแจ้งที่นี่ "+
+			"และหน้าที่มาของตัวเลขของรอบนั้นมีรายการไว้ทั้งหมด", Name(who), Name(label), When(time.Now()), Typed(reason, 500))
+		if err := a.store.AddNotice(ctx, tx, run, Notice{Text: text, Tone: "warning", Access: true}); err != nil {
 			a.fail(w, err, "run")
 			return
 		}
@@ -376,10 +379,9 @@ func (a *API) adminRemoveEvidence(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "run")
 		return
 	}
-	rid := run.ID
-	_, _, _ = a.store.AddItem(ctx, a.store.Pool, run.InstallID, run.TenantID, run.UserID, &rid, "notice",
-		map[string]any{"text": "ผู้ดูแล " + normEmail(c.Email) + " ลบไฟล์ของรอบนี้ (ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์) ก่อนครบระยะเก็บ เหตุผล: “" +
-			reason + "” — บันทึกว่ารอบนี้เคยทำยังอยู่", "tone": "warning", "run_id": run.ID.String()}, nil)
+	_ = a.store.AddNotice(ctx, a.store.Pool, run, Notice{Tone: "warning",
+		Text: Text("ผู้ดูแล %s ลบไฟล์ของรอบนี้ (ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์) ก่อนครบระยะเก็บ เหตุผล: “%s” — บันทึกว่ารอบนี้เคยทำยังอยู่",
+			Email(normEmail(c.Email)), Typed(reason, 500))})
 	writeJSON(w, http.StatusOK, map[string]any{"removed_objects": n})
 }
 

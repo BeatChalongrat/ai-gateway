@@ -204,6 +204,7 @@ func (rc *runCtx) download(ctx context.Context, key string) ([]byte, error) {
 
 // recordIndex keeps a succeeded run's documents in the install's duplicate
 // index (never a self-test's). Idempotent: a resumed run writes nothing twice.
+// AM6: a round that computes again replaces what it recorded (docindex.go).
 func (rc *runCtx) recordIndex(ctx context.Context, computed blobRef) error {
 	retention := rc.pkg.Manifest.IndexRetention()
 	if retention <= 0 || rc.run.Kind == am.KindSelfTest {

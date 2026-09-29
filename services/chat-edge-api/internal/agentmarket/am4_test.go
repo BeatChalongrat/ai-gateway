@@ -3,7 +3,6 @@ package agentmarket
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"net/http"
 	"strings"
 	"testing"
@@ -294,6 +293,9 @@ const textManifest = `{"schema_version":"agent.market.v1","id":"sran.financial-r
 "capabilities":{"required":["spreadsheet.read.xlsx","deliverable.report.docx","model.text"]},
 "install":{"defaults":{"formats":["docx"]}},"permissions":{"default":"read_only"},"cannot":"อ่านอย่างเดียว"}`
 
+// AM6: the menu lists models by their ids (am6_models_test.go); what AM4
+// decided stays — a model outside the organisation can be chosen only once
+// the organisation lets documents leave, and the choice is the install's.
 func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	e := newEnv(t)
 	if e == nil {
@@ -321,25 +323,11 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	if code != 200 || p["choice"] != "auto" || p["uses"] != "text" {
 		t.Fatalf("picker: %d %v", code, p)
 	}
-	opts := p["options"].([]any)
-	// AM5: two rows, not three — "แม่นที่สุด" was the model "อัตโนมัติ" already is
-	if len(opts) != 2 || opts[0].(map[string]any)["label"] != "อัตโนมัติ (แนะนำ)" {
-		t.Fatalf("auto first, then the choices that differ from it: %v", opts)
-	}
-	var outside map[string]any
-	for _, o := range opts {
-		if om := o.(map[string]any); om["model"] == "deepseek" {
-			outside = om
-		}
-	}
-	if outside == nil || outside["disabled"] != true || !strings.Contains(outside["reason"].(string), "นอกองค์กร") {
-		t.Fatalf("an outside model is shown disabled with the reason: %v", outside)
+	if got := menuOf(t, p); got != "deepseek=blocked qwen=allowed" || !strings.Contains(p["blocked_reason"].(string), "นอกองค์กร") {
+		t.Fatalf("an outside model is shown blocked, with the reason: %s %q", got, p["blocked_reason"])
 	}
 	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
 		t.Fatalf("an outside model cannot be picked while documents stay inside: %d", code)
-	}
-	if code, _ := e.do("POST", "/installs/"+id+"/messages", map[string]any{"text": "ปิดงบ", "model_choice": "deepseek", "client_id": "m"}); code != http.StatusConflict {
-		t.Fatalf("nor for one round: %d", code)
 	}
 	// the admin lets documents leave: now it can be picked, and it is remembered for the install
 	if code, body := e.do("PUT", "/admin/org", map[string]any{"documents_may_leave": true}); code != 200 {
@@ -464,8 +452,8 @@ func TestAPersonalDeleteKeepsTheOrganisationsRecords(t *testing.T) {
 		Name: "report_v1.docx", Version: 1, StorageKey: art, Size: 1, SHA256: "b", ProducedByStep: "k"}, in.TenantID, in.UserID); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, "user_text", map[string]any{"text": "คุยเรื่องส่วนตัว"}, nil)
-	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, "outputs", map[string]any{"run_id": done.ID.String()}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, nil, UserMessage{Text: "คุยเรื่องส่วนตัว"}, nil)
+	_, _, _ = e.store.AddItem(ctx, e.store.Pool, in.ID, in.TenantID, in.UserID, &rid, OutputsPayload{RunID: done.ID.String()}, nil)
 	p := NewAccountProvider(e.store, e.api.files)
 	counts, err := p.Purge(ctx, in.UserID)
 	if err != nil {
@@ -547,37 +535,5 @@ func TestRemovingAnAgentStopsItsUnfinishedRounds(t *testing.T) {
 	// a parked round cannot be resumed afterwards (a raised budget, a late answer)
 	if ok, err := e.store.Resume(ctx, e.store.Pool, parked.ID); err != nil || ok {
 		t.Fatalf("resumed a round of a removed agent: %v %v", ok, err)
-	}
-}
-
-// A guess at an outside model's cost is never the free in-house model's cost.
-// The catalog sample ran on the self-hosted model (price 0), so its cost cannot
-// be scaled to a priced model; the AM4 probe saw openai/gpt-4o (2.5/10 USD per
-// million tokens) offered at the sample's "≈0.02 บาท". No history, no price
-// ratio: no figure ("ยังไม่มีข้อมูลค่าใช้จ่าย"), not a wrong one.
-func TestAnOutsideModelIsNotPricedLikeTheFreeOne(t *testing.T) {
-	rm := RunnerModels{Catalog: []CatalogModel{
-		{ID: "qwen", SelfHosted: true},
-		{ID: "llama", SelfHosted: true},
-		{ID: "gpt", InPrice: 2.5, OutPrice: 10},
-		{ID: "flash", InPrice: 0.3, OutPrice: 2.5},
-	}}
-	for _, c := range []struct {
-		used, model string
-		want        float64
-		ok          bool
-	}{
-		{"qwen", "", 1000, true},            // auto: the sample's own cost
-		{"qwen", "qwen", 1000, true},        // the same model
-		{"", "gpt", 1000, true},             // the sample needed no model
-		{"qwen", "llama", 1000, true},       // free for free
-		{"flash", "gpt", 4464.3, true},      // priced to priced: scaled (12.5 / 2.8)
-		{"qwen", "gpt", 0, false},           // free to priced: unknown
-		{"qwen", "unknown-model", 0, false}, // no price at all: unknown
-	} {
-		got, ok := sampleCostFor(1000, c.used, c.model, rm)
-		if ok != c.ok || (ok && math.Abs(got-c.want) > 0.5) {
-			t.Errorf("sample on %q, priced for %q: %.1f %v, want %.1f %v", c.used, c.model, got, ok, c.want, c.ok)
-		}
 	}
 }

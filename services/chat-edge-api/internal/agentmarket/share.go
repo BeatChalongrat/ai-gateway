@@ -169,14 +169,11 @@ func (a *API) createShare(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "share")
 		return
 	}
-	what := "ดูได้อย่างเดียว"
+	text := Text("แชร์รอบนี้ให้ %s (ดูได้อย่างเดียว) — ผู้รับต้องเข้าสู่ระบบด้วยอีเมลนี้จึงจะเปิดได้ ยกเลิกได้ทุกเมื่อ", Email(email))
 	if body.CanReview {
-		what = "ดูและตรวจทานได้"
+		text = Text("แชร์รอบนี้ให้ %s (ดูและตรวจทานได้) — ผู้รับต้องเข้าสู่ระบบด้วยอีเมลนี้จึงจะเปิดได้ ยกเลิกได้ทุกเมื่อ", Email(email))
 	}
-	rid := run.ID
-	if _, _, err := a.store.AddItem(ctx, tx, run.InstallID, run.TenantID, run.UserID, &rid, "notice",
-		map[string]any{"text": "แชร์รอบนี้ให้ " + email + " (" + what + ") — ผู้รับต้องเข้าสู่ระบบด้วยอีเมลนี้จึงจะเปิดได้ ยกเลิกได้ทุกเมื่อ",
-			"run_id": run.ID.String(), "share_id": sh.ID.String()}, nil); err != nil {
+	if err := a.store.AddNotice(ctx, tx, run, Notice{Text: text, ShareID: sh.ID.String()}); err != nil {
 		a.fail(w, err, "share")
 		return
 	}
@@ -235,7 +232,7 @@ func (a *API) revokeShare(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "share")
 			return
 		}
-		_ = a.store.PostNotice(ctx, run, "ยกเลิกการแชร์ให้ "+sh.RecipientEmail+" แล้ว ลิงก์เดิมเปิดไม่ได้อีก", "")
+		_ = a.store.PostNotice(ctx, run, Text("ยกเลิกการแชร์ให้ %s แล้ว ลิงก์เดิมเปิดไม่ได้อีก", Email(sh.RecipientEmail)), "")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"revoked": true})
 }
@@ -320,7 +317,7 @@ func (a *API) openShare(w http.ResponseWriter, r *http.Request) (Share, Run, boo
 func (a *API) sharedWithMe(w http.ResponseWriter, r *http.Request) {
 	c, _ := caller(r)
 	rows, err := a.store.Pool.Query(r.Context(), `
-		SELECT s.id, s.can_review, s.created_at, s.expires_at, s.last_opened_at, r.id, r.status, r.period, r.finished_at,
+		SELECT s.id, s.can_review, s.created_at, s.expires_at, s.last_opened_at, r.id, r.status, r.gate_open, r.period, r.finished_at,
 			i.title, i.slug, s.owner_user_id, i.org_id
 		FROM agent_market.run_shares s
 		JOIN agent_market.agent_runs r ON r.id = s.run_id
@@ -340,6 +337,7 @@ func (a *API) sharedWithMe(w http.ResponseWriter, r *http.Request) {
 		LastOpenedAt *time.Time `json:"last_opened_at"`
 		RunID        uuid.UUID  `json:"run_id"`
 		RunStatus    string     `json:"run_status"`
+		RunOutcome   string     `json:"run_outcome"` // AM6: what the run came to
 		Period       *string    `json:"period"`
 		FinishedAt   *time.Time `json:"finished_at"`
 		Agent        string     `json:"agent"`
@@ -351,11 +349,13 @@ func (a *API) sharedWithMe(w http.ResponseWriter, r *http.Request) {
 	var list []item
 	for rows.Next() {
 		var x item
-		if err := rows.Scan(&x.ID, &x.CanReview, &x.CreatedAt, &x.ExpiresAt, &x.LastOpenedAt, &x.RunID, &x.RunStatus, &x.Period,
+		var open bool
+		if err := rows.Scan(&x.ID, &x.CanReview, &x.CreatedAt, &x.ExpiresAt, &x.LastOpenedAt, &x.RunID, &x.RunStatus, &open, &x.Period,
 			&x.FinishedAt, &x.Agent, &x.Slug, &x.owner, &x.org); err != nil {
 			a.fail(w, err, "share")
 			return
 		}
+		x.RunOutcome = OutcomeOf(x.RunStatus, open)
 		list = append(list, x)
 	}
 	rows.Close()
@@ -400,7 +400,9 @@ func (a *API) sharedRun(w http.ResponseWriter, r *http.Request) {
 	var summary json.RawMessage
 	_ = a.store.Pool.QueryRow(ctx, `SELECT payload FROM agent_market.agent_thread_items WHERE run_id = $1 AND kind = 'outputs'
 		ORDER BY rev DESC LIMIT 1`, run.ID).Scan(&summary)
-	summary = GuardItem("outputs", summary)
+	if len(summary) > 0 {
+		summary = ForClient("outputs", summary) // the files card, as the run's owner is sent it
+	}
 	owner := a.store.DisplayName(ctx, in.OrgID, in.UserID, "")
 	var agentName string
 	if d, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
@@ -408,7 +410,7 @@ func (a *API) sharedRun(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"share": sh, "owner": owner, "agent": map[string]any{"title": in.Title,
 		"name": agentName, "slug": in.Slug, "version": run.DefinitionVersion},
-		"run": map[string]any{"id": run.ID, "status": run.Status, "status_reason": run.StatusReason, "period": run.Period,
+		"run": map[string]any{"id": run.ID, "status": run.Status, "outcome": run.Outcome(), "status_reason": run.StatusReason, "period": run.Period,
 			"created_at": run.CreatedAt, "finished_at": run.FinishedAt, "assumptions": run.Assumptions, "model_used": run.ModelUsed,
 			"model_self_hosted": run.ModelSelfHosted},
 		"artifacts": nonNil(latestArtifacts(arts)), "exceptions": nonNil(exc), "reviews": nonNil(reviews), "outputs": summary})
