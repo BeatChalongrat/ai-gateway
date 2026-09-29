@@ -168,9 +168,11 @@ module.exports = async function apps(R) {
     if (!adminSession) return { skip: true, detail: "no admin session in this run" };
     const page = await L.tryHttp(`${base.admin}/agent-market`, { headers: adminSession.headers });
     const door = await L.tryHttp(`${base.admin}/api/chat-edge/agent-market/me`, { headers: adminSession.headers });
+    // no session: the admin app's middleware sends the request to sign in before the proxy sees it
     const none = await L.tryHttp(`${base.admin}/api/chat-edge/agent-market/me`);
-    return { ok: page.status === 200 && door.status === 403 && none.status === 401,
-      detail: `${base.admin}/agent-market → ${page.status || page.error} (want 200); its API as the viewer → ${door.status || door.error} ${door.json?.error?.code || ""} (want 403); with no session → ${none.status || none.error} (want 401)` };
+    const toLogin = none.status === 307 && /\/login/.test(none.headers.get("location") || "");
+    return { ok: page.status === 200 && door.status === 403 && (none.status === 401 || toLogin),
+      detail: `${base.admin}/agent-market → ${page.status || page.error} (want 200); its API as the viewer → ${door.status || door.error} ${door.json?.error?.code || ""} (want 403); with no session → ${none.status || none.error}${toLogin ? " to sign-in" : ""} (want 401 or 307 to sign-in)` };
   });
   await R.run("admin.requests_unauth", async () => {
     const r = await L.tryHttp(`${base.gw}/admin/requests?limit=1`);
