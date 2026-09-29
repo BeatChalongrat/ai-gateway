@@ -19,6 +19,13 @@
 // choices as rows, and its "choose your own" is this picker — with the rows
 // the organisation does not allow locked (`gate`), chat models only
 // (`chatOnly`) and no Auto row of the chat's (`hideAuto`).
+//
+// AM6 — the agent's menu is this picker and nothing else. What an agent has
+// to say is not written on the rows: a locked row says nothing on itself
+// (`quietGate`) and its reason is one line under the search box (`notice`);
+// a model that cannot do the agent's job is not listed (`hidden`) and is
+// counted in the last line of its group (`hiddenLine`). All four are
+// optional, and the chat passes none of them.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDismissable } from "@/hooks/useDismissable";
@@ -341,6 +348,10 @@ export function ModelPicker({
   gate,
   chatOnly = false,
   hideAuto = false,
+  quietGate = false,
+  notice,
+  hidden,
+  hiddenLine,
 }: {
   models: ModelEntry[];
   activeId: string | null;
@@ -355,6 +366,16 @@ export function ModelPicker({
   chatOnly?: boolean;
   /** The surface has its own "automatic" choice; the chat's Auto row is not offered. */
   hideAuto?: boolean;
+  /** AM6 — a row locked by `gate` says nothing on itself (no reason under
+   *  the name, none on hover): the reason is said once, by `notice`. */
+  quietGate?: boolean;
+  /** AM6 — one line under the search box. With `quietGate` it is the reason
+   *  for the locked rows, and shows while one of them is on the list. */
+  notice?: ReactNode;
+  /** AM6 — a model this surface cannot use at all: not listed. */
+  hidden?: (m: ModelEntry) => boolean;
+  /** AM6 — the last line of a provider group that has hidden models. */
+  hiddenLine?: (count: number) => ReactNode;
 }) {
   const [search, setSearch] = useState("");
   // FIX47 Part C — the picker offers the models an admin marked
@@ -379,7 +400,7 @@ export function ModelPicker({
     const blocked = Boolean(locked) || (chat && needsVision && !hasVisionCap(m));
     return {
       disabled: blocked,
-      disabledReason: locked ?? (blocked ? t("model.cantReadImages") : undefined),
+      disabledReason: quietGate && locked ? undefined : (locked ?? (blocked ? t("model.cantReadImages") : undefined)),
       sub: chat && !hasToolsCap(m) ? `${m.provider} · ${t("model.subGeneralQA")}` : m.provider,
     };
   };
@@ -405,6 +426,10 @@ export function ModelPicker({
 
   const filtered = useMemo(() => filterModels(models, search), [models, search]);
   const searching = search.trim().length > 0;
+  // AM6 — the rows a surface cannot use are taken out after the chat's own
+  // rules have run, so a group keeps the place and the count it has in the
+  // chat and only its rows differ.
+  const listed = (rows: ModelEntry[]) => (hidden ? rows.filter((m) => !hidden(m)) : rows);
 
   // Popular: most-selected (usage>0), desc, top N. Recent: last-selected
   // order. Both read once per render from localStorage; only shown when
@@ -480,6 +505,7 @@ export function ModelPicker({
 
   const showAuto = !hideAuto && (!searching || "auto".includes(search.trim().toLowerCase()));
   const noModels = models.length === 0;
+  const showNotice = Boolean(notice) && (!quietGate || listed(filtered).some((m) => Boolean(gate?.(m))));
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -512,6 +538,11 @@ export function ModelPicker({
             </button>
           ) : null}
         </div>
+        {showNotice ? (
+          <p className="px-1 pt-2 text-[11px] leading-snug text-status-warning" data-testid="model-picker-notice">
+            {notice}
+          </p>
+        ) : null}
       </div>
 
       <div className="scrollbar-thin flex-1 overflow-y-auto py-1">
@@ -551,9 +582,9 @@ export function ModelPicker({
           </div>
         ) : null}
 
-        {popular.length > 0 ? (
+        {listed(popular).length > 0 ? (
           <Section title={t("model.popular")}>
-            {popular.map((m) => (
+            {listed(popular).map((m) => (
               <ModelRow
                 key={`pop-${m.id}`}
                 label={m.name}
@@ -573,9 +604,9 @@ export function ModelPicker({
           </Section>
         ) : null}
 
-        {recent.length > 0 ? (
+        {listed(recent).length > 0 ? (
           <Section title={t("model.recent")}>
-            {recent.map((m) => (
+            {listed(recent).map((m) => (
               <ModelRow
                 key={`rec-${m.id}`}
                 label={m.name}
@@ -644,15 +675,17 @@ export function ModelPicker({
                 <div className="text-[11px] font-semibold text-text-secondary">{title}</div>
                 <div className="text-[10px] text-text-muted">{hint}</div>
               </div>
-              {groups.map(([provider, group]) => {
+              {groups.map(([provider, all]) => {
+                const group = listed(all);
                 const isExpanded = searching || expanded.has(provider);
                 const preview = isExpanded ? group : group.slice(0, PROVIDER_PREVIEW_COUNT);
                 const hiddenCount = group.length - preview.length;
+                const unusable = all.length - group.length;
                 return (
                   <Section
                     key={provider}
                     title={provider}
-                    count={group.length}
+                    count={all.length}
                   >
                     {preview.map((m) => {
                       const state = rowState(m);
@@ -683,6 +716,11 @@ export function ModelPicker({
                       >
                         {t("model.showMore", { n: String(hiddenCount) })}
                       </button>
+                    ) : null}
+                    {unusable > 0 && hiddenLine ? (
+                      <p className="px-3 py-2 text-[11px] text-text-muted" data-testid="model-group-hidden">
+                        {hiddenLine(unusable)}
+                      </p>
                     ) : null}
                   </Section>
                 );
@@ -945,6 +983,7 @@ export function ModelRow({
   );
 }
 
-function shortLabel(name: string): string {
+/** The name as the pill writes it. */
+export function shortLabel(name: string): string {
   return name.replace(/^anthropic\//, "").replace(/^openai\//, "").trim();
 }

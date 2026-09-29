@@ -4,9 +4,18 @@
 // the chat renders) — the same docked box, text area, "+", send, keyboard
 // and IME behaviour — configured with what an agent takes: text and files,
 // the agent's own upload endpoint and accept list, and its model control.
-// What the chat has and an agent does not (voice, slash commands, image and
-// video modes, the knowledge base, the desktop's folders and permission
-// mode) is simply not passed in.
+//
+// AM6 — what the chat's composer has was decided one by one:
+//   kept      attach, dictation (the chat's own, ./Dictation), the model
+//             control, send;
+//   added     the knowledge chip (the chat's KBSelector), in ask mode only —
+//             while no file is staged. Knowledge answers a question; it is
+//             never the source of a number in a deliverable, so a message
+//             with files never names a knowledge base;
+//   left out  folders and projects, and what an agent has no use for (slash
+//             commands, image and video modes, the permission mode).
+// The placeholder is short, like the chat's. What it used to spell out is a
+// row of suggestions above the box, which go once a round is underway.
 //
 // Files upload the moment they are added; Send posts the text with their
 // ids. The server echoes the message into the thread. Typed-but-unsent text
@@ -15,13 +24,20 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { ComposerFrame } from "@/components/chat/ComposerFrame";
+import { DictationButton, useDictation } from "@/components/chat/Dictation";
+import { KBSelector } from "@/components/chat/KBSelector";
+import { Button } from "@/components/ui/Button";
+import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStore";
+import { useT } from "@/lib/i18n";
 
 import { amApi, errorMessage, newClientId } from "../api";
 import { useAmT } from "../i18n";
 import type { ThreadItem } from "../types";
 import { Thai } from "../ui";
+import { EstimateLine } from "./Estimate";
 import { PhotoNotice, StagedChip } from "./FileChips";
+import { useAgentKnowledge } from "./knowledge";
 import { DEFAULT_ACCEPT, hasImage, useUploads } from "./useUploads";
 
 const MAX_TEXT = 4000;
@@ -42,16 +58,29 @@ interface Props {
   photoNotice?: string;
   /** Footer line under the pill: what the agent cannot do + the model note. */
   footer?: React.ReactNode;
-  /** AM4: the thread the message goes to, and the model for this round only. */
+  /** AM4: the thread the message goes to. */
   threadId?: string | null;
-  modelChoice?: string | null;
   /** AM4: the model control, beside send where the chat's model picker sits. */
   tools?: React.ReactNode;
+  /** AM6: the agent's short name, for the placeholder. */
+  agentName?: string;
+  /** AM6: the agent is at work in this thread: no suggestions. */
+  roundUnderway?: boolean;
+  /** AM6: the person's latest round has ended and left files: there is something to ask about. */
+  finishedRound?: boolean;
+  /** AM6: what a round costs, said above the box while files are staged and no round is underway. */
+  estimate?: string | null;
 }
 
 /** Where this agent chat's unsent text is kept (the app's draft store). */
 export function draftKeyFor(installId: string, threadId?: string | null): string {
   return `agent:${installId}:${threadId || "first"}`;
+}
+
+/** A file is going up: the chat's own words for it, from the app's dictionary. */
+function useUploadingPlaceholder(): string {
+  const t = useT();
+  return t("input.placeholder.uploading");
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(props, ref) {
@@ -73,11 +102,15 @@ function ComposerBody({
   photoNotice,
   footer,
   threadId,
-  modelChoice,
   tools,
+  agentName,
+  roundUnderway = false,
+  finishedRound = false,
+  estimate,
   handle,
 }: Props & { handle: React.ForwardedRef<ComposerHandle> }) {
   const t = useAmT();
+  const uploadingPlaceholder = useUploadingPlaceholder();
   const acceptList = accept?.length ? accept : DEFAULT_ACCEPT;
   const uploads = useUploads(installId, { accept: acceptList, maxMb });
   const draftKey = draftKeyFor(installId, threadId);
@@ -87,13 +120,18 @@ function ComposerBody({
   const clientId = useRef(newClientId());
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dictation = useDictation({ setText, textareaRef: taRef });
+
+  // Ask mode: the message being composed has no file. Only then is there a
+  // knowledge chip, and only then does the message name a knowledge base.
+  const kbAvailable = useKnowledgeAvailable();
+  const [kbId, pickKb] = useAgentKnowledge(installId);
+  const asking = uploads.items.length === 0;
+  const kbOffered = kbAvailable || !!kbId;
 
   const addFiles = uploads.add;
-  useImperativeHandle(
-    handle,
-    () => ({ addFiles, pickFiles: () => fileRef.current?.click(), focus: () => taRef.current?.focus() }),
-    [addFiles],
-  );
+  const pickFiles = useCallback(() => fileRef.current?.click(), []);
+  useImperativeHandle(handle, () => ({ addFiles, pickFiles, focus: () => taRef.current?.focus() }), [addFiles, pickFiles]);
 
   // The draft: saved a second after the last key, and when the page goes.
   const textRef = useRef(text);
@@ -125,7 +163,7 @@ function ComposerBody({
         file_ids: uploads.ids,
         client_id: clientId.current,
         thread_id: threadId ?? null,
-        ...(modelChoice ? { model_choice: modelChoice } : {}),
+        ...(asking && kbId ? { knowledge_base_id: kbId } : {}),
       })
       .then(
         (res) => {
@@ -144,7 +182,19 @@ function ComposerBody({
           setError(errorMessage(err));
         },
       );
-  }, [canSend, installId, trimmed, uploads, onSent, threadId, modelChoice, draftKey]);
+  }, [canSend, installId, trimmed, uploads, onSent, threadId, draftKey, asking, kbId]);
+
+  /** A suggestion's sentence goes into the box, to be edited before it is sent. */
+  const suggest = (sentence: string) => {
+    setText(sentence);
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.focus();
+    requestAnimationFrame(() => ta.setSelectionRange(ta.value.length, ta.value.length));
+  };
+
+  const suggesting = !roundUnderway && asking && !trimmed && !dictation.active;
+  const name = agentName?.trim();
 
   return (
     <ComposerFrame
@@ -152,12 +202,36 @@ function ComposerBody({
       value={text}
       onChange={setText}
       maxLength={MAX_TEXT}
-      placeholder={t("composer.placeholder")}
+      placeholder={uploads.uploading ? uploadingPlaceholder : name ? t("composer.placeholderTo", { name }) : t("composer.placeholderAgent")}
       textareaLabel={t("composer.label")}
       textareaTestId="am-composer-input"
       sendTestId="am-composer-send"
       canSend={canSend}
       onSubmit={send}
+      above={
+        <>
+          {dictation.bar}
+          {!asking && !roundUnderway ? <EstimateLine line={estimate} /> : null}
+          {suggesting ? (
+            <div role="group" aria-label={t("composer.suggest.aria")} className="flex flex-wrap items-center justify-center gap-2" data-testid="am-composer-suggestions">
+              <Button type="button" variant="secondary" size="sm" onClick={pickFiles}>
+                {t("composer.suggest.attach")}
+              </Button>
+              {finishedRound ? (
+                <>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => suggest(t("composer.suggest.askText"))}>
+                    {t("composer.suggest.ask")}
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => suggest(t("composer.suggest.formats"))}>
+                    {t("composer.suggest.formats")}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      }
+      pillHidden={dictation.active}
       pillTop={
         <>
           <input
@@ -214,9 +288,24 @@ function ComposerBody({
           ) : null}
         </>
       }
-      attach={{ label: t("composer.attach"), onClick: () => fileRef.current?.click() }}
-      rightTools={tools}
-      footer={footer}
+      attach={{ label: t("composer.attach"), onClick: pickFiles }}
+      rightTools={
+        <>
+          {kbOffered && asking ? <KBSelector conversationId={null} standalone activeKBId={kbId} onPick={pickKb} /> : null}
+          {tools}
+          {dictation.supported ? <DictationButton onStart={dictation.start} /> : null}
+        </>
+      }
+      footer={
+        <>
+          {kbOffered && !asking ? (
+            <p className="text-center text-[11px] text-text-muted" data-testid="am-kb-ask-only">
+              {t("knowledge.askOnly")}
+            </p>
+          ) : null}
+          {footer}
+        </>
+      }
     />
   );
 }

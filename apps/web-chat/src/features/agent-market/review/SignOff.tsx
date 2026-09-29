@@ -9,12 +9,14 @@
 import { useState } from "react";
 import { BadgeCheck } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+
 import { amApi, errorMessage } from "../api";
-import { AmDialog } from "../dialog";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDateTime } from "../format";
 import type { Review } from "../types";
-import { BTN_PRIMARY_SMALL, BTN_SMALL, cls, ErrorPanel, Pill, Spin, type Tone } from "../ui";
+import { ErrorPanel, Pill, Thai, type Tone } from "../ui";
 
 export function SignOffButton({
   runId,
@@ -63,66 +65,67 @@ export function SignOffButton({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={small ? BTN_SMALL : cls(BTN_SMALL, "px-3.5 py-2 text-sm")} data-testid="am-signoff-open">
+      <Button type="button" variant="secondary" size={small ? "sm" : "md"} onClick={() => setOpen(true)} data-testid="am-signoff-open">
         <BadgeCheck width={14} height={14} aria-hidden />
         <span>{t("review.button")}</span>
-      </button>
-      <AmDialog open={open} onClose={close} title={t("review.title")} description={t("review.body")} testId="am-signoff-dialog">
-        {done ? (
-          <div className="flex flex-col gap-3">
-            <p role="status" className="rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-sm text-text-primary" data-testid="am-signoff-done">
-              {t("review.done", { name: done.reviewer_name })}
-            </p>
-            <button type="button" onClick={close} className={BTN_SMALL}>
-              {t("common.close")}
-            </button>
-          </div>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!busy) submit();
-            }}
-            className="flex flex-col gap-3"
-          >
-            <label className="block text-sm">
-              <span className="text-text-secondary">{t("review.name")}</span>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={120}
-                placeholder={t("review.namePlaceholder")}
-                className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-                data-testid="am-signoff-name"
-              />
-              <span className="mt-1 block text-[11px] text-text-muted">{t("review.nameHint")}</span>
-            </label>
-            <label className="block text-sm">
-              <span className="text-text-secondary">{t("review.note")}</span>
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                rows={2}
-                maxLength={500}
-                placeholder={t("review.notePlaceholder")}
-                className="focus-ring mt-1 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-                data-testid="am-signoff-note"
-              />
-            </label>
-            <p className="text-[11px] leading-relaxed text-text-muted">{t("review.what")}</p>
-            {error ? <ErrorPanel message={error} /> : null}
-            <div className="flex gap-2">
-              <button type="submit" disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-signoff-send">
-                {busy ? <Spin size={12} /> : null}
-                <span>{t("review.send")}</span>
-              </button>
-              <button type="button" onClick={close} disabled={busy} className={BTN_SMALL}>
-                {t("common.cancel")}
-              </button>
+      </Button>
+      <Thai>
+        <Modal open={open} onClose={close} title={t("review.title")} description={t("review.body")} testId="am-signoff-dialog">
+          {done ? (
+            <div className="flex flex-col gap-3">
+              <p role="status" className="rounded-lg border border-status-success/40 bg-status-success/10 px-3 py-2 text-sm text-text-primary" data-testid="am-signoff-done">
+                {t("review.done", { name: done.reviewer_name })}
+              </p>
+              <Button type="button" variant="secondary" size="sm" onClick={close}>
+                {t("common.close")}
+              </Button>
             </div>
-          </form>
-        )}
-      </AmDialog>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!busy) submit();
+              }}
+              className="flex flex-col gap-3"
+            >
+              <label className="block text-sm">
+                <span className="text-text-secondary">{t("review.name")}</span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  maxLength={120}
+                  placeholder={t("review.namePlaceholder")}
+                  className="focus-ring mt-1 w-full rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
+                  data-testid="am-signoff-name"
+                />
+                <span className="mt-1 block text-[11px] text-text-muted">{t("review.nameHint")}</span>
+              </label>
+              <label className="block text-sm">
+                <span className="text-text-secondary">{t("review.note")}</span>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  rows={2}
+                  maxLength={500}
+                  placeholder={t("review.notePlaceholder")}
+                  className="focus-ring mt-1 w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
+                  data-testid="am-signoff-note"
+                />
+              </label>
+              <p className="text-[11px] leading-relaxed text-text-muted">{t("review.what")}</p>
+              {error ? <ErrorPanel message={error} /> : null}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" loading={busy} data-testid="am-signoff-send">
+                  <span>{t("review.send")}</span>
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={close} disabled={busy}>
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      </Thai>
     </>
   );
 }

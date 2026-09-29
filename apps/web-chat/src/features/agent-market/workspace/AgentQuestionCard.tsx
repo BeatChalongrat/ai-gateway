@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import { CircleCheck, MessageCircleQuestion } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import type { QuestionAnswerPayload } from "@/lib/types";
 
 import { amApi, errorMessage } from "../api";
@@ -27,7 +28,7 @@ import { useAmT, type AmKey } from "../i18n";
 import { toAnswerBody, toPendingQuestion } from "../questions";
 import { questionInput } from "../typed";
 import type { AnswerBody, AnswerRecord, CardPayload, Question } from "../types";
-import { cls, Pill, Spin } from "../ui";
+import { cls, Pill } from "../ui";
 import { Evidence, EvidenceSource } from "./Evidence";
 import { FileChip } from "./FileChips";
 import { TypedQuestionCard } from "./TypedQuestionCard";
@@ -180,7 +181,7 @@ function PendingCard({ questions, label }: { questions: Question[]; label: strin
         ))}
       </ul>
       <div role="status" className="mt-2.5 flex items-center gap-2 text-xs text-text-secondary">
-        <Spin size={13} />
+        <Spinner size={13} />
         <span>{label}</span>
       </div>
     </div>

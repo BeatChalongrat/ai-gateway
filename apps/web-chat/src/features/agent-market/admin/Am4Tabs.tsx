@@ -8,30 +8,26 @@
 // is recorded, the run's owner is told, and it lasts an hour. No global read.
 //
 // โมเดลและการเก็บข้อมูล: whether documents may go to a model outside the
-// organisation (off by default), which models people may pick (named by
-// outcome), and how many years the organisation's accounting records are kept.
+// organisation (off by default), and how many years the organisation's
+// accounting records are kept. AM6 — an admin no longer names models by
+// outcome: the agent's model menu is the chat's, and this switch is the
+// policy it follows.
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { amApi, errorMessage } from "../api";
-import { AmDialog } from "../dialog";
 import { creditsToBaht, formatBaht, formatDateTime } from "../format";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
+import { outcomeKey, outcomeOf, outcomeTone } from "../outcome";
 import { stepLabel } from "../runs/RunDetailPage";
-import type { AdminModels, ModelEntry, OrgSettings, Pricing, RunMeta } from "../types";
-import { BTN_DANGER_OUTLINE, BTN_PRIMARY_SMALL, BTN_SMALL, cls, ErrorPanel, Pill, Spin, type Tone } from "../ui";
+import type { OrgSettings, Pricing, RunMeta } from "../types";
+import { cls, ErrorPanel, Pill, Thai } from "../ui";
 
-const STATUS: Record<string, { key: AmKey; tone: Tone }> = {
-  queued: { key: "progress.title.queued", tone: "neutral" },
-  running: { key: "progress.title.running", tone: "neutral" },
-  awaiting_input: { key: "progress.title.awaiting_input", tone: "warning" },
-  succeeded: { key: "progress.title.succeeded", tone: "success" },
-  failed: { key: "progress.title.failed", tone: "danger" },
-  cancelled: { key: "progress.title.cancelled", tone: "neutral" },
-};
-
-const UNKNOWN_STATUS: { key: AmKey; tone: Tone } = { key: "progress.title.running", tone: "neutral" };
 const FILTERS: readonly { id: string; key: AmKey }[] = [
   { id: "all", key: "admin.runs.all" },
   { id: "failed", key: "admin.runs.failedOnly" },
@@ -83,35 +79,36 @@ function ReasonDialog({
     );
   };
   return (
-    <AmDialog open={open} onClose={onClose} title={title} description={body} testId="am-admin-reason">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!busy) submit();
-        }}
-        className="flex flex-col gap-3"
-      >
-        <textarea
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          rows={3}
-          maxLength={500}
-          placeholder={t("admin.runs.reasonPlaceholder")}
-          className="focus-ring w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
-          data-testid="am-admin-reason-text"
-        />
-        {error ? <ErrorPanel message={error} /> : null}
-        <div className="flex gap-2">
-          <button type="submit" disabled={busy} className={danger ? BTN_DANGER_OUTLINE : BTN_PRIMARY_SMALL} data-testid="am-admin-reason-go">
-            {busy ? <Spin size={12} /> : null}
-            <span>{confirm}</span>
-          </button>
-          <button type="button" onClick={onClose} disabled={busy} className={BTN_SMALL}>
-            {t("common.cancel")}
-          </button>
-        </div>
-      </form>
-    </AmDialog>
+    <Thai>
+      <Modal open={open} onClose={onClose} title={title} description={body} testId="am-admin-reason">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!busy) submit();
+          }}
+          className="flex flex-col gap-3"
+        >
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={3}
+            maxLength={500}
+            placeholder={t("admin.runs.reasonPlaceholder")}
+            className="focus-ring w-full resize-y rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-muted"
+            data-testid="am-admin-reason-text"
+          />
+          {error ? <ErrorPanel message={error} /> : null}
+          <div className="flex gap-2">
+            <Button type="submit" variant={danger ? "danger" : "primary"} size={danger ? "md" : "sm"} loading={busy} data-testid="am-admin-reason-go">
+              <span>{confirm}</span>
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={busy}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </Thai>
   );
 }
 
@@ -168,7 +165,7 @@ export function RunsTab({ pricing }: { pricing: Pricing }) {
       ) : null}
       <div className="mt-3">
         {error ? <ErrorPanel message={errorMessage(error)} onRetry={() => setReload((n) => n + 1)} /> : null}
-        {!rows && !error ? <Spin size={14} /> : null}
+        {!rows && !error ? <Spinner size={14} /> : null}
         {rows && !rows.length ? <p className="text-sm text-text-muted">{t("admin.runs.none")}</p> : null}
         {rows && rows.length ? (
           <div className="overflow-x-auto rounded-xl border border-border-subtle">
@@ -185,7 +182,8 @@ export function RunsTab({ pricing }: { pricing: Pricing }) {
               </thead>
               <tbody className="divide-y divide-border-subtle">
                 {rows.map((r) => {
-                  const st = STATUS[r.status] ?? UNKNOWN_STATUS;
+                  // AM6: a run is named by what it came to (a round that finished open is no failure)
+                  const outcome = outcomeOf(r);
                   return (
                     <tr key={r.id} data-testid="am-admin-run">
                       <td className="px-3 py-2 align-top">
@@ -197,7 +195,9 @@ export function RunsTab({ pricing }: { pricing: Pricing }) {
                         {r.period_label ? <div className="text-xs text-text-muted">{r.period_label}</div> : null}
                       </td>
                       <td className="px-3 py-2 align-top">
-                        <Pill tone={st.tone}>{t(st.key)}</Pill>
+                        <span data-testid="am-admin-run-status" data-outcome={outcome}>
+                          <Pill tone={outcomeTone(outcome)}>{t(outcomeKey(outcome, r.reason) ?? "progress.title.running")}</Pill>
+                        </span>
                         {r.stopped_at_step ? (
                           <div className="mt-1 text-xs text-text-muted">{`${t("admin.runs.stopped")}: ${stepLabel(r.stopped_at_step, t)}`}</div>
                         ) : null}
@@ -209,13 +209,13 @@ export function RunsTab({ pricing }: { pricing: Pricing }) {
                       <td className="px-3 py-2 align-top">
                         <div className="flex flex-col items-start gap-1">
                           {r.open_now ? (
-                            <button type="button" onClick={() => router.push(adminRunHref(r.id))} className={BTN_SMALL} data-testid="am-admin-run-view">
+                            <Button type="button" variant="secondary" size="sm" onClick={() => router.push(adminRunHref(r.id))} data-testid="am-admin-run-view">
                               {t("admin.runs.openNow")}
-                            </button>
+                            </Button>
                           ) : (
-                            <button type="button" onClick={() => setOpening(r)} className={BTN_SMALL} data-testid="am-admin-run-open">
+                            <Button type="button" variant="secondary" size="sm" onClick={() => setOpening(r)} data-testid="am-admin-run-open">
                               {t("admin.runs.open")}
-                            </button>
+                            </Button>
                           )}
                           {r.times_opened ? <span className="text-[11px] text-text-muted">{t("admin.runs.opened", { n: String(r.times_opened) })}</span> : null}
                           {FINISHED.has(r.status) ? (
@@ -267,40 +267,19 @@ export function RunsTab({ pricing }: { pricing: Pricing }) {
 
 export function ModelsTab({ org, onSaved }: { org: OrgSettings; onSaved: () => void }) {
   const t = useAmT();
-  const [data, setData] = useState<AdminModels | null>(null);
-  const [error, setError] = useState<unknown>(null);
   const [leave, setLeave] = useState(!!org.documents_may_leave);
-  const [curated, setCurated] = useState<ModelEntry[]>(org.agent_models ?? []);
   const [years, setYears] = useState(String(org.retention_years ?? 5));
   const [warnMb, setWarnMb] = useState(String(org.storage_warn_mb ?? 2048));
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    amApi.adminModels().then(
-      (r) => alive && setData(r),
-      (err) => alive && setError(err),
-    );
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const outcomeOf = (id: string) => curated.find((c) => c.model === id)?.outcome ?? "";
-  const setOutcome = (id: string, outcome: string) =>
-    setCurated((cur) => {
-      const rest = cur.filter((c) => c.model !== id);
-      return outcome ? [...rest, { model: id, outcome }] : rest;
-    });
-
   const save = () => {
     setBusy(true);
     setSaved(null);
     setSaveError(null);
     amApi
-      .adminPutOrg({ documents_may_leave: leave, agent_models: curated, retention_years: Number(years), storage_warn_mb: Number(warnMb) })
+      .adminPutOrg({ documents_may_leave: leave, retention_years: Number(years), storage_warn_mb: Number(warnMb) })
       .then(
         () => {
           setBusy(false);
@@ -314,7 +293,6 @@ export function ModelsTab({ org, onSaved }: { org: OrgSettings; onSaved: () => v
       );
   };
 
-  const catalog = (data?.catalog ?? []).slice().sort((a, b) => Number(b.self_hosted) - Number(a.self_hosted) || a.id.localeCompare(b.id));
   return (
     <div className="flex flex-col gap-8" data-testid="am-admin-models">
       <section aria-labelledby="am-leave">
@@ -330,56 +308,6 @@ export function ModelsTab({ org, onSaved }: { org: OrgSettings; onSaved: () => v
             </label>
           ))}
         </div>
-      </section>
-
-      <section aria-labelledby="am-curated">
-        <h2 id="am-curated" className="text-sm font-semibold text-text-primary">
-          {t("admin.models.listTitle")}
-        </h2>
-        <p className="mt-0.5 max-w-3xl text-xs text-text-muted">{t("admin.models.listBody")}</p>
-        {data?.defaults?.vision || data?.defaults?.text ? (
-          <p className="mt-1 text-xs text-text-muted">
-            {t("admin.models.defaultsLine", { vision: data.defaults.vision || "—", text: data.defaults.text || "—" })}
-          </p>
-        ) : null}
-        {error ? (
-          <div className="mt-2">
-            <ErrorPanel message={errorMessage(error)} />
-          </div>
-        ) : null}
-        {data && !catalog.length ? <p className="mt-2 text-sm text-text-muted">{t("admin.models.noCatalog")}</p> : null}
-        {catalog.length ? (
-          <ul className="mt-2.5 flex flex-col divide-y divide-border-subtle rounded-xl border border-border-subtle">
-            {catalog.map((m) => (
-              <li key={m.id} className="flex flex-wrap items-center gap-3 px-3 py-2" data-testid="am-admin-model">
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm text-text-primary">{m.id}</div>
-                  <div className="text-[11px] text-text-muted">
-                    {[
-                      m.self_hosted ? t("where.inOrg") : t("where.outside"),
-                      m.vision ? t("admin.models.readsImages") : t("admin.models.textOnly"),
-                      m.input_price_per_1m || m.output_price_per_1m
-                        ? t("admin.models.price", { in: String(m.input_price_per_1m), out: String(m.output_price_per_1m) })
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </div>
-                </div>
-                <select
-                  value={outcomeOf(m.id)}
-                  onChange={(e) => setOutcome(m.id, e.target.value)}
-                  aria-label={m.id}
-                  className="focus-ring rounded-lg border border-border bg-bg-base px-2 py-1 text-sm text-text-primary"
-                >
-                  <option value="">{t("admin.models.off")}</option>
-                  <option value="fast">{t("admin.models.fast")}</option>
-                  <option value="accurate">{t("admin.models.accurate")}</option>
-                </select>
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </section>
 
       <section aria-labelledby="am-retention">
@@ -401,10 +329,9 @@ export function ModelsTab({ org, onSaved }: { org: OrgSettings; onSaved: () => v
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <button type="button" onClick={save} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-admin-models-save">
-          {busy ? <Spin size={12} /> : null}
+        <Button type="button" size="sm" onClick={save} loading={busy} data-testid="am-admin-models-save">
           <span>{t("common.save")}</span>
-        </button>
+        </Button>
         {saved ? (
           <span role="status" className="text-xs text-status-success">
             {saved}

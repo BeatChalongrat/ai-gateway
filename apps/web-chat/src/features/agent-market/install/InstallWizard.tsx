@@ -11,15 +11,16 @@
 // from the manifest's install.questions (./wizard.ts): the financial report
 // keeps its five, the invoice agent asks company details instead of a source.
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { Check } from "lucide-react";
 
+import { Button, ButtonLink } from "@/components/ui/Button";
+
 import { AmError, amApi, errorMessage, newClientId } from "../api";
 import { useAmT } from "../i18n";
 import type { CatalogItem, InstallResponse, InstallRow, Manifest } from "../types";
-import { BackLink, BTN_PRIMARY, BTN_SECONDARY, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton } from "../ui";
+import { BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton } from "../ui";
 import { notifyInstallsChanged } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
 import { PolicyStep } from "../policy/PolicySetup";
@@ -195,12 +196,12 @@ function Wizard({ slug }: { slug: string }) {
           <h1 className="text-base font-semibold text-text-primary">{t("install.already.title")}</h1>
           <p className="mt-1 text-sm text-text-secondary">{t("install.already.body")}</p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Link href={workspaceHref(boot.existing.id)} className={BTN_PRIMARY}>
+            <ButtonLink href={workspaceHref(boot.existing.id)}>
               {t("market.open")}
-            </Link>
-            <button type="button" onClick={() => setAgain(true)} className={BTN_SECONDARY}>
+            </ButtonLink>
+            <Button type="button" variant="secondary" onClick={() => setAgain(true)}>
               {t("install.already.again")}
-            </button>
+            </Button>
           </div>
         </Card>
       </PageShell>

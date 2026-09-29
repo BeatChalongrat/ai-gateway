@@ -10,7 +10,7 @@
 // reloads but the next version shows again. Hosted mode only: a plain browser
 // never receives the notice and renders nothing.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { useHostedMode } from "@/hooks/useHostedMode";
@@ -57,23 +57,50 @@ export function UpdateBanner() {
   };
 
   return (
+    <BannerStrip data-testid="update-banner" onDismiss={dismiss} dismissLabel={t("update.desktopDismiss")}>
+      {t("update.available", { latest: notice.latest, current: notice.current })}{" "}
+      <span className="text-text-muted">{t("update.howTo")}</span>
+    </BannerStrip>
+  );
+}
+
+/** The chat's banner strip under the top bar: a line (or two) and a close
+ *  button, until the person closes it. AM6 — exported so that what else the
+ *  chat has to tell a person in a strip (an agent's notification) is this
+ *  strip, not a copy of it; `actions` sit before the close button, and
+ *  `wrap` lets them go under the text on a narrow screen. */
+export function BannerStrip({
+  children,
+  actions,
+  onDismiss,
+  dismissLabel,
+  wrap = false,
+  ...rest
+}: {
+  children: ReactNode;
+  actions?: ReactNode;
+  onDismiss?: () => void;
+  dismissLabel?: string;
+  wrap?: boolean;
+} & Omit<HTMLAttributes<HTMLDivElement>, "children" | "className">) {
+  return (
     <div
       role="status"
-      data-testid="update-banner"
-      className="mx-3 mt-1 flex shrink-0 items-center gap-3 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-xs text-text-secondary md:mx-4"
+      {...rest}
+      className={`mx-3 mt-1 flex shrink-0 items-center gap-3 rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2 text-xs text-text-secondary md:mx-4${wrap ? " flex-wrap" : ""}`}
     >
-      <span className="min-w-0 flex-1">
-        {t("update.available", { latest: notice.latest, current: notice.current })}{" "}
-        <span className="text-text-muted">{t("update.howTo")}</span>
-      </span>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label={t("update.desktopDismiss")}
-        className="focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      <span className="min-w-0 flex-1">{children}</span>
+      {actions}
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+          className="focus-ring rounded-md p-1 text-text-muted transition-colors hover:bg-bg-surface hover:text-text-primary"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
     </div>
   );
 }

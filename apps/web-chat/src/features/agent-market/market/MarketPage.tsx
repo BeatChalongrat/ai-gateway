@@ -8,14 +8,16 @@ import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Search, Settings2 } from "lucide-react";
 
+import { ButtonLink } from "@/components/ui/Button";
+
 import { amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDate } from "../format";
 import type { CatalogAgent, InstallRow, SharedItem } from "../types";
-import { AgentTile, BTN_PRIMARY, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Pill, Tag } from "../ui";
+import { AgentTile, cls, ErrorPanel, FeatureGate, PageShell, Pill, Tag } from "../ui";
 import { useAgentMarket } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
-import { costLine } from "./trust";
+import { costLine, ScopeLine } from "./trust";
 
 type Category = "all" | "finance" | "documents" | "reports";
 const CATEGORIES: { id: Category; key: AmKey }[] = [
@@ -116,10 +118,10 @@ function Market() {
           <p className="mt-1 text-sm text-text-secondary">{t("market.subtitle")}</p>
         </div>
         {snap.publisher ? (
-          <Link href="/chat/agents/admin" className={BTN_SMALL} data-testid="am-admin-link">
+          <ButtonLink href="/chat/agents/admin" variant="secondary" size="sm" data-testid="am-admin-link">
             <Settings2 width={14} height={14} aria-hidden />
             <span>{t("admin.link")}</span>
-          </Link>
+          </ButtonLink>
         ) : null}
         <label className="relative block w-full sm:w-64">
           <span className="sr-only">{t("market.search")}</span>
@@ -294,6 +296,7 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
               {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
               {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
             </div>
+            <ScopeLine scope={agent.scope ?? m.scope} jurisdiction={agent.jurisdiction ?? m.jurisdiction} className="mt-1 text-[11px]" />
           </div>
         </>
       }
@@ -310,18 +313,18 @@ function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean
       actions={
         <>
           {installed ? (
-            <Link href={workspaceHref(agent.install_id!)} className={BTN_PRIMARY} data-testid="am-open-workspace">
+            <ButtonLink href={workspaceHref(agent.install_id!)} data-testid="am-open-workspace">
               {t("market.open")}
-            </Link>
+            </ButtonLink>
           ) : disabled ? null : (
-            <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_PRIMARY} data-testid="am-install">
+            <ButtonLink href={`/chat/agents/${encodeURIComponent(agent.slug)}`} data-testid="am-install">
               {t("market.readFirst")}
-            </Link>
+            </ButtonLink>
           )}
           {installed || disabled ? (
-            <Link href={`/chat/agents/${encodeURIComponent(agent.slug)}`} className={BTN_SECONDARY}>
+            <ButtonLink href={`/chat/agents/${encodeURIComponent(agent.slug)}`} variant="secondary">
               {t("market.details")}
-            </Link>
+            </ButtonLink>
           ) : null}
         </>
       }

@@ -15,6 +15,22 @@ import type { CatalogSample, Datasheet, DatasheetModel, Manifest, Pricing, Sampl
 import { cls } from "../ui";
 import { DEFAULT_PRICING } from "../useAgentMarket";
 
+const SCOPE_KEYS: Record<string, AmKey> = { generic: "scope.generic", "org-specific": "scope.org" };
+const JURISDICTION_KEYS: Record<string, AmKey> = { TH: "jurisdiction.TH" };
+
+/** AM6 — whom an agent is made for, and whose law and tax it follows, when
+ *  the server says (an older server does not: then nothing is said). */
+export function ScopeLine({ scope, jurisdiction, className }: { scope?: string | null; jurisdiction?: string | null; className?: string }) {
+  const t = useAmT();
+  const words = [scope && SCOPE_KEYS[scope] ? t(SCOPE_KEYS[scope]!) : "", jurisdiction && JURISDICTION_KEYS[jurisdiction] ? t(JURISDICTION_KEYS[jurisdiction]!) : ""].filter(Boolean);
+  if (!words.length) return null;
+  return (
+    <p className={cls("text-xs text-text-muted", className)} data-testid="am-scope">
+      {words.join(" · ")}
+    </p>
+  );
+}
+
 export function useDatasheet(slug: string): { sheet: Datasheet | null; error: unknown } {
   const [sheet, setSheet] = useState<Datasheet | null>(null);
   const [error, setError] = useState<unknown>(null);

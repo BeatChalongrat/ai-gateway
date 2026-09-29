@@ -8,17 +8,22 @@
 // agent with a templates block gets "แบบฟอร์มของคุณ" (../template): the
 // customer's own template and its mapping.
 // Uninstall confirms inline — never a window.confirm.
+//
+// AM6 — the settings an agent declares are rendered from what the server
+// sends ("ค่าที่ใช้ตรวจ", ./DeclaredSettings), and listed there only; the
+// install's reminders ("เตือนให้ทำรอบ", ./Reminders) sit under its model.
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ChartColumn, Pencil } from "lucide-react";
 
+import { Button, ButtonLink } from "@/components/ui/Button";
+
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey, type AmT } from "../i18n";
 import { formatCredits, formatDateTime, formatMoney, formatMoney2 } from "../format";
-import type { Default, InstallDetail, Manifest, ThemePreset } from "../types";
-import { BackLink, BTN_DANGER_OUTLINE, BTN_PRIMARY_SMALL, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin } from "../ui";
+import type { DeclaredSetting, Default, InstallDetail, Manifest, ThemePreset } from "../types";
+import { BackLink, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { notifyInstallsChanged } from "../useAgentMarket";
 import { dashboardHref, workspaceHref } from "../workspace/context";
 import { CURRENCIES } from "../install/steps";
@@ -29,7 +34,9 @@ import { savedTemplateOf, takesTemplates } from "../template/mapping";
 import { TemplateSection } from "../template/TemplateSection";
 import { PolicySection } from "../policy/PolicySetup";
 import { UpgradeSection } from "../upgrade/UpgradeSection";
+import { DeclaredSection } from "./DeclaredSettings";
 import { ModelSection, StorageSection } from "./ModelSection";
+import { RemindersSection } from "./Reminders";
 
 const INSTALL_KEYS = ["company", "formats", "currency", "materiality", "theme", "language", "fiscal_year_start"];
 const REMEMBERED_KEYS = new Set(["mapping", "dc_convention"]);
@@ -107,6 +114,7 @@ function Settings({ installId }: { installId: string }) {
   const [error, setError] = useState<unknown>(null);
   const [reload, setReload] = useState(0);
   const [presets, setPresets] = useState<ThemePreset[]>([]);
+  const [declared, setDeclared] = useState<DeclaredSetting[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -120,6 +128,10 @@ function Settings({ installId }: { installId: string }) {
     );
     amApi.theme().then(
       (r) => alive && setPresets(r?.presets ?? []),
+      () => {},
+    );
+    amApi.defaults(installId).then(
+      (r) => alive && setDeclared(r?.declared ?? []),
       () => {},
     );
     return () => {
@@ -149,8 +161,12 @@ function Settings({ installId }: { installId: string }) {
   const companyTax = installQuestions(detail.manifest).includes("company_tax");
   const asksPolicy = installQuestions(detail.manifest).includes("policy");
   // keys shown by their own sections below, never as generic rows
-  const sectionKeys = new Set<string>([...(companyTax ? COMPANY_TAX_KEYS : []), ...(asksPolicy ? ["policy", "holidays"] : [])]);
-  const remembered = defaults.filter(isRemembered);
+  const sectionKeys = new Set<string>([
+    ...(companyTax ? COMPANY_TAX_KEYS : []),
+    ...(asksPolicy ? ["policy", "holidays"] : []),
+    ...declared.map((d) => d.key),
+  ]);
+  const remembered = defaults.filter((d) => isRemembered(d) && !sectionKeys.has(d.key));
   const settings = defaults
     .filter((d) => !isRemembered(d) && !sectionKeys.has(d.key) && !OWN_SECTION_KEYS.has(d.key))
     .sort((a, b) => {
@@ -180,10 +196,10 @@ function Settings({ installId }: { installId: string }) {
           <h1 className="text-xl font-semibold tracking-tight text-text-primary">{t("settings.title")}</h1>
           <p className="mt-1 text-sm text-text-secondary">{detail.install.title}</p>
         </div>
-        <Link href={dashboardHref(installId)} className={BTN_SMALL} data-testid="am-settings-dashboard">
+        <ButtonLink href={dashboardHref(installId)} variant="secondary" size="sm" data-testid="am-settings-dashboard">
           <ChartColumn width={14} height={14} aria-hidden />
           <span>{t("ws.dashboard")}</span>
-        </Link>
+        </ButtonLink>
       </div>
       <p className="mt-3 text-sm text-text-secondary" data-testid="am-budget">
         {t("settings.budget", { spent: formatCredits(detail.budget?.spent_this_month ?? 0), credits: formatCredits(detail.budget?.credits ?? 0) })}
@@ -211,6 +227,8 @@ function Settings({ installId }: { installId: string }) {
         <TemplateSection installId={installId} spec={detail.manifest.templates!} saved={savedTemplateOf(defaults)} onChanged={refresh} />
       ) : null}
 
+      <DeclaredSection installId={installId} settings={declared} onChanged={refresh} />
+
       <section className="mt-8" aria-labelledby="am-install-settings">
         <h2 id="am-install-settings" className="text-sm font-semibold text-text-primary">
           {t("settings.installTime")}
@@ -225,6 +243,8 @@ function Settings({ installId }: { installId: string }) {
       </section>
 
       <ModelSection installId={installId} />
+
+      <RemindersSection installId={installId} />
 
       <StorageSection installId={installId} />
 
@@ -246,25 +266,18 @@ function Settings({ installId }: { installId: string }) {
               {t("settings.uninstallConfirm")}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => void uninstall()}
-                disabled={removing}
-                className="focus-ring inline-flex items-center gap-2 rounded-lg bg-status-danger-solid px-3.5 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
-                data-testid="am-uninstall-yes"
-              >
-                {removing ? <Spin size={14} /> : null}
+              <Button type="button" variant="danger" onClick={() => void uninstall()} loading={removing} data-testid="am-uninstall-yes">
                 <span>{removing ? t("settings.uninstalling") : t("settings.uninstallYes")}</span>
-              </button>
-              <button type="button" onClick={() => setConfirming(false)} disabled={removing} className={BTN_SECONDARY}>
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => setConfirming(false)} disabled={removing}>
                 {t("common.cancel")}
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
-          <button type="button" onClick={() => setConfirming(true)} className={cls(BTN_DANGER_OUTLINE, "mt-3")} data-testid="am-uninstall">
+          <Button type="button" variant="danger" onClick={() => setConfirming(true)} className="mt-3" data-testid="am-uninstall">
             {t("settings.uninstall")}
-          </button>
+          </Button>
         )}
       </section>
     </PageShell>
@@ -323,19 +336,20 @@ function CompanyTaxSection({ installId, defaults, onChanged }: { installId: stri
                 </div>
               ))}
             </dl>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setDraft(saved);
                 setError(null);
                 setEditing(true);
               }}
-              className={BTN_SMALL}
               aria-label={t("settings.companyTaxEdit")}
               data-testid="am-company-tax-edit"
             >
               <Pencil width={13} height={13} aria-hidden />
-            </button>
+            </Button>
           </div>
         ) : (
           <form
@@ -347,13 +361,12 @@ function CompanyTaxSection({ installId, defaults, onChanged }: { installId: stri
           >
             <CompanyTaxFields draft={draft} onChange={setDraft} idPrefix="am-settings-company" disabled={busy} />
             <div className="flex gap-2">
-              <button type="submit" disabled={!check.value || busy} className={BTN_PRIMARY_SMALL} data-testid="am-company-tax-submit">
-                {busy ? <Spin size={12} /> : null}
+              <Button type="submit" size="sm" loading={busy} disabled={!check.value} data-testid="am-company-tax-submit">
                 <span>{busy ? t("common.saving") : t("common.save")}</span>
-              </button>
-              <button type="button" onClick={() => setEditing(false)} disabled={busy} className={BTN_SMALL}>
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)} disabled={busy}>
                 {t("common.cancel")}
-              </button>
+              </Button>
             </div>
           </form>
         )}
@@ -495,14 +508,13 @@ function DefaultRow({
         {!editing ? (
           <div className="flex shrink-0 gap-1.5">
             {editor ? (
-              <button type="button" onClick={() => setEditing(true)} disabled={busy} className={BTN_SMALL} aria-label={t("settings.editAria", { label })}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(true)} disabled={busy} aria-label={t("settings.editAria", { label })}>
                 <Pencil width={13} height={13} aria-hidden />
-              </button>
+              </Button>
             ) : null}
-            <button type="button" onClick={() => void clear()} disabled={busy} className={BTN_SMALL} aria-label={t("settings.clearAria", { label })} data-testid="am-default-clear">
-              {busy ? <Spin size={12} /> : null}
+            <Button type="button" variant="secondary" size="sm" onClick={() => void clear()} loading={busy} aria-label={t("settings.clearAria", { label })} data-testid="am-default-clear">
               <span aria-hidden>{t("settings.clear")}</span>
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -610,13 +622,12 @@ function EditValue({
         </div>
       )}
       <div className="flex gap-2">
-        <button type="submit" disabled={!valid || busy} className={BTN_PRIMARY_SMALL}>
-          {busy ? <Spin size={12} /> : null}
+        <Button type="submit" size="sm" loading={busy} disabled={!valid}>
           <span>{busy ? t("common.saving") : t("common.save")}</span>
-        </button>
-        <button type="button" onClick={onCancel} disabled={busy} className={BTN_SMALL}>
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel} disabled={busy}>
           {t("common.cancel")}
-        </button>
+        </Button>
       </div>
     </form>
   );

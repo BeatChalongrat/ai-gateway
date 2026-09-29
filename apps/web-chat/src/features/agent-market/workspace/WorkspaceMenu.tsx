@@ -9,11 +9,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { ChartColumn, Check, MessageSquarePlus, MessageSquareWarning, MoreHorizontal, Pin, PinOff, Settings } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { ProblemDialog } from "../problem/ProblemButton";
 import type { AgentThread } from "../types";
-import { BTN_SMALL, cls, Spin } from "../ui";
+import { cls } from "../ui";
 import { dashboardHref, settingsHref, workspaceHref } from "./context";
 
 const ITEM =
@@ -80,19 +83,20 @@ export function WorkspaceMenu({
 
   return (
     <div ref={ref} className="relative">
-      <button
+      <Button
         type="button"
+        variant="secondary"
+        size="sm"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={t("ws.more")}
         title={t("ws.more")}
         onClick={() => setOpen((v) => !v)}
-        className={BTN_SMALL}
         data-testid="am-ws-more"
       >
         <MoreHorizontal width={16} height={16} aria-hidden />
-      </button>
+      </Button>
       {open ? (
         <div
           id={menuId}
@@ -101,7 +105,7 @@ export function WorkspaceMenu({
           data-testid="am-ws-menu"
         >
           <button type="button" role="menuitem" onClick={newChat} disabled={busy} className={ITEM} data-testid="am-ws-new-chat">
-            {busy ? <Spin size={14} /> : <MessageSquarePlus width={15} height={15} aria-hidden />}
+            {busy ? <Spinner size={14} /> : <MessageSquarePlus width={15} height={15} aria-hidden />}
             <span>{t("ws.menu.newChat")}</span>
           </button>
           {threads && threads.length > 1 ? (

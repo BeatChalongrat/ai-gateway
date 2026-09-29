@@ -7,6 +7,8 @@
 
 import { Plus, Trash2 } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+
 import { useAmT, type AmKey } from "../i18n";
 import { cls } from "../ui";
 import {
@@ -146,15 +148,10 @@ export function PolicyEditor({
           ))}
         </ul>
         {showAll && problems.categories ? <Problem id={id("categories-err")} k={problems.categories} /> : null}
-        <button
-          type="button"
-          onClick={() => set({ categories: [...draft.categories, emptyCategory()] })}
-          className="focus-ring mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
-          data-testid="am-policy-add-category"
-        >
+        <Button type="button" variant="ghost" onClick={() => set({ categories: [...draft.categories, emptyCategory()] })} className="mt-2" data-testid="am-policy-add-category">
           <Plus width={14} height={14} aria-hidden />
           <span>{t("policy.addCategory")}</span>
-        </button>
+        </Button>
       </fieldset>
 
       <fieldset disabled={disabled}>
@@ -305,15 +302,10 @@ export function HolidayEditor({
           })}
         </ul>
       ) : null}
-      <button
-        type="button"
-        onClick={() => onChange([...rows, { id: rowId("hol"), date: "", name: "" }])}
-        className="focus-ring mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
-        data-testid="am-holiday-add"
-      >
+      <Button type="button" variant="ghost" onClick={() => onChange([...rows, { id: rowId("hol"), date: "", name: "" }])} className="mt-2" data-testid="am-holiday-add">
         <Plus width={14} height={14} aria-hidden />
         <span>{t("policy.addHoliday")}</span>
-      </button>
+      </Button>
       {onConfirm ? (
         <label className="mt-2 flex items-start gap-2 text-sm text-text-primary">
           <input

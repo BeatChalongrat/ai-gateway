@@ -13,11 +13,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { CircleCheck, MessageCircleQuestion } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT } from "../i18n";
 import { formatDateTime, formatMoney2 } from "../format";
 import type { RunExceptionRow } from "../types";
-import { BTN_SMALL, Pill, Spin } from "../ui";
+import { Pill } from "../ui";
 import { evidenceParts, groupExceptions, reasonText } from "./exceptions";
 
 /** A run's exceptions, loaded once `enabled` (a finished run). */
@@ -231,17 +233,18 @@ function OpenRow({ row, onDecided, onStale }: { row: RunExceptionRow; onDecided:
       {choices.length ? (
         <div className="mt-2 flex flex-wrap gap-1.5" data-testid="am-exception-choices">
           {choices.map((c, i) => (
-            <button
+            <Button
               key={`${c.label}-${i}`}
               type="button"
+              variant="secondary"
+              size="sm"
+              loading={busy === i}
               disabled={busy !== null}
               onClick={() => void decide(i)}
-              className={BTN_SMALL}
               data-testid="am-exception-choice"
             >
-              {busy === i ? <Spin size={12} /> : null}
               <span>{c.label}</span>
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}

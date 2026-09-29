@@ -56,6 +56,8 @@ beforeEach(() => {
     return handler(path, init);
   });
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ enabled: true }) })));
+  // Modal reads matchMedia for its mobile sheet; jsdom has none.
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
   // AM4: the owner's app is in English — the agents must still read Thai
   useI18nStore.setState({ locale: "en" });
 });
@@ -82,7 +84,7 @@ function workspaceHandler(items: ThreadItem[]): Handler {
     if (path === "/agent-market/installs") return json({ installs: [{ id: "i-1", slug: "sran.financial-report", title: "ปิดงบการเงิน", created_at: "" }] });
     if (path === "/agent-market/installs/i-1") return json({ install: { id: "i-1", slug: "sran.financial-report", title: "ปิดงบการเงิน" }, manifest, defaults: [], budget: { credits: 0, spent_this_month: 0 } });
     if (path.startsWith("/agent-market/installs/i-1/thread")) return json({ items, cursor: 99 });
-    if (path === "/agent-market/installs/i-1/models") return json({ uses: "text", reads: "", choice: "auto", documents_may_leave: false, note: "", options: [] });
+    if (path === "/agent-market/installs/i-1/models") return json({ uses: "text", choice: "auto", auto_model: "", models: [], blocked_reason: "", hidden_reason: "", reads: "", note: "" });
     if (path === "/agent-market/installs/i-1/storage")
       return json({ storage: { uploads: 0, outputs: 0, total: 0, warn_bytes: 1, warn: false }, retention_years: 5, retention: "", not_archive: "", personal_delete: "" });
     if (path === "/agent-market/installs/i-1/budget") return json({ budget: { tight: null }, remaining: 1 });

@@ -20,6 +20,10 @@
 // A chat inside a project whose KB the server uses (conversation KB ?? the
 // project's) shows that KB too, marked as the project's; it is changed on
 // the project page, so it has no ×.
+//
+// AM6 — an agent's workspace has no conversation and keeps the choice
+// itself (per agent, for questions only): it asks for the chip as it is with
+// `standalone`. The chat never passes it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
@@ -39,6 +43,8 @@ interface Props {
   /** Async — caller wires this to chatStore.setConversationKB. */
   onPick: (kbId: string | null) => Promise<void>;
   disabled?: boolean;
+  /** AM6 — shown without a conversation: the caller keeps the choice. */
+  standalone?: boolean;
 }
 
 export function KBSelector({
@@ -47,6 +53,7 @@ export function KBSelector({
 
   onPick,
   disabled,
+  standalone = false,
 }: Props) {
   const t = useT();
   const knowledgeBases = useKnowledgeStore((s) => s.knowledgeBases);
@@ -76,7 +83,7 @@ export function KBSelector({
     if ((open || shownKBId) && !loaded && !loading) void loadKBs();
   }, [open, shownKBId, loaded, loading, loadKBs]);
 
-  if (!conversationId) return null;
+  if (!conversationId && !standalone) return null;
 
   const activeKB = activeKBId
     ? knowledgeBases.find((k) => k.id === activeKBId)

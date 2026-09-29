@@ -13,10 +13,12 @@
 import { useState } from "react";
 import { Lock } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import type { SavedTemplate, TemplateInspect, TemplateSlot, TemplateSpec } from "../types";
-import { BTN_PRIMARY_SMALL, BTN_SMALL, cls, ErrorPanel, Pill, Spin } from "../ui";
+import { cls, ErrorPanel, Pill } from "../ui";
 import {
   buildMapping,
   chooseList,
@@ -150,14 +152,13 @@ export function TemplateMapper({
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {slots.length ? (
-          <button type="button" onClick={() => void save()} disabled={saving || mapped === 0} className={BTN_PRIMARY_SMALL} data-testid="am-template-save">
-            {saving ? <Spin size={12} /> : null}
+          <Button type="button" size="sm" onClick={() => void save()} loading={saving} disabled={mapped === 0} data-testid="am-template-save">
             <span>{saving ? t("common.saving") : t("tpl.map.save")}</span>
-          </button>
+          </Button>
         ) : null}
-        <button type="button" onClick={onCancel} disabled={saving} className={BTN_SMALL} data-testid="am-template-cancel">
+        <Button type="button" variant="secondary" size="sm" onClick={onCancel} disabled={saving} data-testid="am-template-cancel">
           {t("common.cancel")}
-        </button>
+        </Button>
       </div>
     </div>
   );

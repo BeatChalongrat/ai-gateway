@@ -21,6 +21,7 @@ import { Sidebar } from "@/components/chat/Sidebar";
 import { ModeResetBanner } from "@/components/chat/ModeResetBanner";
 import { TurnNotSavedBanner } from "@/components/chat/TurnNotSavedBanner";
 import { UpdateBanner } from "@/components/chat/UpdateBanner";
+import { AgentNotifications } from "@/features/agent-market/notify/AgentNotifications";
 import { SessionChecking, SessionUnreachable } from "@/components/ui/SessionUnreachable";
 import {
   useKeyboardShortcuts,
@@ -269,6 +270,8 @@ export default function ChatLayout({
         <ModeResetBanner />
         {/* FIX121 C4 — "this turn was not saved to the server" (desktop only). */}
         <TurnNotSavedBanner />
+        {/* AM6 — an agent's reminder or question, until acted on or closed (only where Agent Market is available). */}
+        <AgentNotifications />
 
         {children}
 

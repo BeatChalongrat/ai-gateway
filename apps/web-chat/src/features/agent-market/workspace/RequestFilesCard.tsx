@@ -8,11 +8,14 @@
 import { useEffect, useRef, useState } from "react";
 import { FileUp } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { amApi, errorMessage, newClientId } from "../api";
 import { useAmT } from "../i18n";
 import { isWaitOption, toAnswerBody } from "../questions";
 import type { AnswerBody, CardPayload, Question } from "../types";
-import { BTN_SECONDARY, cls, Pill, Spin } from "../ui";
+import { cls, Pill } from "../ui";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { useWorkspace } from "./context";
 import { PhotoNotice, StagedChip } from "./FileChips";
@@ -67,7 +70,8 @@ function RequestSlot({ q, attempts, submit }: { q: Question; attempts: number; s
     setPhase("sending");
     setError(null);
     amApi
-      .message(ws.installId, { text: "", file_ids: uploads.ids, client_id: clientId.current })
+      // AM6: to the thread the card is in (a reminder's round may be in a thread of its own)
+      .message(ws.installId, { text: "", file_ids: uploads.ids, client_id: clientId.current, thread_id: ws.threadId ?? null })
       .then(
         (res) => {
           if (res?.item) ws.merge([res.item]);
@@ -185,7 +189,7 @@ function RequestSlot({ q, attempts, submit }: { q: Question; attempts: number; s
 
       {phase === "sending" || phase === "sent" || phase === "answering" ? (
         <div role="status" className="mt-2 flex items-center gap-2 text-xs text-text-secondary">
-          {phase === "sent" ? null : <Spin size={13} />}
+          {phase === "sent" ? null : <Spinner size={13} />}
           <span>{phase === "sent" ? t("req.sent") : phase === "sending" ? t("req.sending") : t("card.sending")}</span>
         </div>
       ) : null}
@@ -198,9 +202,9 @@ function RequestSlot({ q, attempts, submit }: { q: Question; attempts: number; s
       {buttons.length ? (
         <div className="mt-3 flex flex-wrap gap-2" data-testid="am-request-options">
           {buttons.map((o) => (
-            <button key={o.label} type="button" disabled={busy} onClick={() => choose(o.label)} className={BTN_SECONDARY} title={o.description || undefined}>
+            <Button key={o.label} type="button" variant="secondary" disabled={busy} onClick={() => choose(o.label)} title={o.description || undefined}>
               {o.label}
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}

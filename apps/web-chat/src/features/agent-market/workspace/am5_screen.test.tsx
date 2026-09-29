@@ -61,13 +61,15 @@ beforeEach(() => {
     if (path === "/agent-market/installs/i-1") return json({ install: { id: "i-1", slug: "sran.financial-report", title: "ปิดงบการเงิน" }, manifest, defaults: [], budget: { credits: 0, spent_this_month: 0 } });
     if (path.startsWith("/agent-market/installs/i-1/thread"))
       return json({ items: [{ id: "g", install_id: "i-1", kind: "greeting", payload: { text: "สวัสดีครับ" }, rev: 1, created_at: new Date().toISOString() }], cursor: 9 });
-    if (path === "/agent-market/installs/i-1/models") return json({ uses: "text", reads: "", choice: "auto", documents_may_leave: false, note: "", options: [] });
+    if (path === "/agent-market/installs/i-1/models") return json({ uses: "text", choice: "auto", auto_model: "", models: [], blocked_reason: "", hidden_reason: "", reads: "", note: "" });
     if (path === "/agent-market/installs/i-1/storage")
       return json({ storage: { uploads: 0, outputs: 0, total: 0, warn_bytes: 1, warn: false }, retention_years: 5, retention: "", not_archive: "", personal_delete: "" });
     if (path === "/agent-market/installs/i-1/budget") return json({ budget: { tight: null }, remaining: 1 });
     return json({ ok: true });
   });
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ enabled: true }) })));
+  // Modal reads matchMedia for its mobile sheet; jsdom has none.
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
 });
 afterEach(() => {
   cleanup();

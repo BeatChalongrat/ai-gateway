@@ -43,23 +43,19 @@ import {
 import { toast, toastError } from "@/components/ui/Toast";
 import {
   EDIT_MESSAGE_EVENT,
-  VOICE_TOGGLE_EVENT,
   lastEditableUserMessageId,
   shouldEditLastOnArrowUp,
 } from "@/lib/composerShortcuts";
-import { useVoiceInput } from "@/hooks/useVoiceInput";
-import { useWhisperInput } from "@/hooks/useWhisperInput";
 import { useChatStore } from "@/stores/chatStore";
 import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
-import { useVoiceStore } from "@/stores/voiceStore";
 
 import { ComposerFrame } from "./ComposerFrame";
+import { DictationButton, useDictation } from "./Dictation";
 import { FilePreviewCard } from "./FilePreviewCard";
 import { FolderChip } from "./FolderChip";
 import { KBSelector } from "./KBSelector";
 import { ModelSelector } from "./ModelSelector";
 import { PermissionModeSelector } from "./PermissionModeSelector";
-import { RecordingBar } from "./RecordingBar";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { SlashMenu } from "./SlashMenu";
 import { AudioGenForm } from "../media/AudioGenForm";
@@ -382,28 +378,6 @@ export function ChatInput({
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
 
-  // ── Voice input ────────────────────────────────────────────
-  // Two hooks because the user can flip the input method in voice
-  // settings; we always wire both and dispatch based on the active
-  // method at start-time. Browser support flags guard the toggle so
-  // unsupported paths fall back automatically.
-  const voiceInputMethod = useVoiceStore((s) => s.inputMethod);
-  const isRecording = useVoiceStore((s) => s.isRecording);
-  const voiceTranscript = useVoiceStore((s) => s.transcript);
-  const voiceInterim = useVoiceStore((s) => s.interimTranscript);
-  const voiceError = useVoiceStore((s) => s.error);
-  const recordingDuration = useVoiceStore((s) => s.recordingDuration);
-  const setRecordingDuration = useVoiceStore((s) => s.setRecordingDuration);
-  const resetVoiceTranscript = useVoiceStore((s) => s.resetTranscript);
-  const setVoiceError = useVoiceStore((s) => s.setError);
-  const webSpeech = useVoiceInput();
-  const whisper = useWhisperInput();
-  // Pick whichever hook backs the active method; fall back to the
-  // other if the chosen one isn't supported in this browser.
-  const useWhisperPath =
-    voiceInputMethod === "whisper" ||
-    (voiceInputMethod === "web-speech" && !webSpeech.isSupported);
-  const voiceSupported = useWhisperPath ? whisper.isSupported : webSpeech.isSupported;
   const closeAttachMenu = useCallback(() => setAttachMenuOpen(false), []);
   useDismissable(attachMenuRef, attachMenuOpen, closeAttachMenu);
 
@@ -449,51 +423,11 @@ export function ChatInput({
     });
   }, [injectedText, onInjectedTextConsumed]);
 
-  // Run the recording-duration counter while isRecording. setInterval
-  // is preferred over requestAnimationFrame here — we render once per
-  // second, not once per frame, and the duration only updates the
-  // chip text so the cost is bounded.
-  useEffect(() => {
-    if (!isRecording) {
-      setRecordingDuration(0);
-      return;
-    }
-    const startedAt = Date.now();
-    const id = window.setInterval(() => {
-      setRecordingDuration(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, [isRecording, setRecordingDuration]);
-
-  // Surface voice errors as toasts. Reset the store error after we
-  // surface it so the same message doesn't pop twice on re-render.
-  useEffect(() => {
-    if (!voiceError) return;
-    toast(voiceError);
-    setVoiceError(null);
-  }, [voiceError, setVoiceError]);
-
-  // When the recording stops AND a final transcript came back, merge
-  // it into the textarea. We append (with a separator) so any
-  // typed-then-dictated combo doesn't blow away the user's earlier
-  // input.
-  useEffect(() => {
-    if (isRecording) return;
-    if (!voiceTranscript.trim()) return;
-    setText((cur) => {
-      const sep = cur && !cur.endsWith(" ") ? " " : "";
-      return cur + sep + voiceTranscript.trim();
-    });
-    resetVoiceTranscript();
-    requestAnimationFrame(() => {
-      const ta = taRef.current;
-      if (ta) {
-        ta.focus();
-        const end = ta.value.length;
-        ta.setSelectionRange(end, end);
-      }
-    });
-  }, [isRecording, voiceTranscript, resetVoiceTranscript]);
+  // ── Voice input ────────────────────────────────────────────
+  // AM6 — dictation is shared with the agent workspace's composer
+  // (./Dictation): the recorders, the counter, the transcript landing in
+  // the box, the recording bar and the microphone are the same there.
+  const dictation = useDictation({ setText, textareaRef: taRef, streaming });
 
   /** FIX88 Part B — focus the composer after a send unless the device is
    *  touch or the composer already has it. Reads activeElement after one
@@ -565,37 +499,6 @@ export function ChatInput({
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
-
-  const startVoice = () => {
-    // Optional haptic on mobile — supported on Android Chrome.
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try {
-        (navigator as Navigator & { vibrate?: (p: number | number[]) => boolean }).vibrate?.(10);
-      } catch {
-        /* nothing */
-      }
-    }
-    if (useWhisperPath) {
-      void whisper.start();
-    } else {
-      webSpeech.start();
-    }
-  };
-
-  const stopVoice = () => {
-    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
-      try {
-        (navigator as Navigator & { vibrate?: (p: number | number[]) => boolean }).vibrate?.(10);
-      } catch {
-        /* nothing */
-      }
-    }
-    if (useWhisperPath) {
-      void whisper.stop();
-    } else {
-      webSpeech.stop();
-    }
-  };
 
   const isUploading = pendingFiles.some((p) => p.status === "uploading");
   // Extraction is a SEPARATE, non-blocking phase: the upload resolves
@@ -1041,24 +944,6 @@ export function ChatInput({
     return () => el.removeEventListener("paste", onPaste);
   }, []);
 
-  // FIX34 Part D — Ctrl+Shift+V (global shortcut) toggles the recorder. The
-  // hook dispatches an event because the recorder lives here.
-  const voiceRef = useRef({ start: startVoice, stop: stopVoice, supported: voiceSupported, recording: isRecording, streaming });
-  voiceRef.current = { start: startVoice, stop: stopVoice, supported: voiceSupported, recording: isRecording, streaming };
-  useEffect(() => {
-    const onToggle = () => {
-      const v = voiceRef.current;
-      if (!v.supported) {
-        toast(tOutside("input.voice.unsupported"));
-        return;
-      }
-      if (v.recording) v.stop();
-      else if (!v.streaming) v.start();
-    };
-    window.addEventListener(VOICE_TOGGLE_EVENT, onToggle);
-    return () => window.removeEventListener(VOICE_TOGGLE_EVENT, onToggle);
-  }, []);
-
   // Sprint 2A.5 — direct-dispatch path: a media model renders its gen form
   // in place of the chat composer. The ModelSelector stays visible so the
   // user can switch back to a chat model.
@@ -1111,23 +996,8 @@ export function ChatInput({
       onSubmit={submit}
       onStop={onStop}
       onKeyDownFirst={onKeyDownFirst}
-      /* Recording mode replaces the composer pill with a full-width
-         recording bar. Same outer container — the decision is purely
-         render-level so flex/scroll constraints from the parent don't
-         shift. */
-      above={
-        isRecording || whisper.isTranscribing ? (
-          <RecordingBar
-            transcript={voiceTranscript}
-            interimTranscript={voiceInterim}
-            elapsedSec={recordingDuration}
-            isTranscribing={whisper.isTranscribing}
-            stream={null}
-            onStop={stopVoice}
-          />
-        ) : null
-      }
-      pillHidden={isRecording || whisper.isTranscribing}
+      above={dictation.bar}
+      pillHidden={dictation.active}
       pillTop={
         <>
           {/* Phase 10 — slash quick actions, floating above the pill. */}
@@ -1442,21 +1312,7 @@ export function ChatInput({
             onPick={onModelPick ? (m) => onModelPick(m.id) : undefined}
             needsVision={pendingFiles.some((p) => p.status !== "error" && isImageFile(p.file))}
           />
-          {voiceSupported && !streaming ? (
-            <button
-              type="button"
-              onClick={startVoice}
-              aria-label={t("input.voice")}
-              title={t("input.voice")}
-              disabled={disabled}
-              className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="9" y="3" width="6" height="11" rx="3" />
-                <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-              </svg>
-            </button>
-          ) : null}
+          {dictation.supported && !streaming ? <DictationButton onStart={dictation.start} disabled={disabled} /> : null}
         </>
       }
       footer={

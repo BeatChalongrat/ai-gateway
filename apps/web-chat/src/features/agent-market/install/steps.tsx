@@ -7,11 +7,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleHelp, FileSpreadsheet, Link2, TriangleAlert, Upload } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { AmError, amApi, errorMessage } from "../api";
 import { tAm, useAmT, type AmKey } from "../i18n";
 import { formatInt } from "../format";
 import type { Artifact, Default, Manifest, MappingPreview, ProgressPayload, RunDetail, ThemePreset, ThreadItem } from "../types";
-import { BTN_PRIMARY, BTN_SECONDARY, cls, ErrorPanel, Pill, Spin } from "../ui";
+import { cls, ErrorPanel, Pill } from "../ui";
 import { isUserItem } from "../thread";
 import { useAgentMarket } from "../useAgentMarket";
 import { ProblemButton } from "../problem/ProblemButton";
@@ -176,9 +179,9 @@ export function SourceStep({
           </div>
           <p className="text-xs text-text-secondary">{t("source.upload.body")}</p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
-            <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} className={BTN_SECONDARY}>
+            <Button type="button" variant="secondary" disabled={busy} onClick={() => inputRef.current?.click()}>
               {preview.status === "ready" ? t("source.replace") : t("source.choose")}
-            </button>
+            </Button>
             <span className="text-xs text-text-muted">{t("source.drop")}</span>
           </div>
           <input
@@ -220,12 +223,12 @@ export function SourceStep({
       </div>
 
       <Footer>
-        <button type="button" onClick={onNext} disabled={preview.status !== "ready"} className={BTN_PRIMARY} data-testid="am-source-next">
+        <Button type="button" onClick={onNext} disabled={preview.status !== "ready"} data-testid="am-source-next">
           {t("common.next")}
-        </button>
-        <button type="button" onClick={onSkip} disabled={busy} className={BTN_SECONDARY}>
+        </Button>
+        <Button type="button" variant="secondary" onClick={onSkip} disabled={busy}>
           {t("source.skip")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -237,7 +240,7 @@ function StatusLine({ name, text, busy = false }: { name: string; text: string; 
       <FileSpreadsheet width={16} height={16} className="shrink-0 text-text-muted" aria-hidden />
       <span className="min-w-0 truncate text-text-primary">{name}</span>
       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">{text}</span>
-      {busy ? <Spin size={13} /> : null}
+      {busy ? <Spinner size={13} /> : null}
     </div>
   );
 }
@@ -390,23 +393,22 @@ export function MappingStep({ installId, preview, onBack, onNext }: { installId:
       ) : null}
       <Footer>
         {pv ? (
-          <button type="button" onClick={() => void save()} disabled={saving || missing.size > 0} className={BTN_PRIMARY} data-testid="am-mapping-save">
-            {saving ? <Spin size={14} /> : null}
+          <Button type="button" onClick={() => void save()} loading={saving} disabled={missing.size > 0} data-testid="am-mapping-save">
             <span>{saving ? t("common.saving") : t("mapping.saveNext")}</span>
-          </button>
+          </Button>
         ) : (
-          <button type="button" onClick={onNext} className={BTN_PRIMARY}>
+          <Button type="button" onClick={onNext}>
             {t("common.next")}
-          </button>
+          </Button>
         )}
         {pv ? (
-          <button type="button" onClick={onNext} disabled={saving} className={BTN_SECONDARY}>
+          <Button type="button" variant="secondary" onClick={onNext} disabled={saving}>
             {t("source.skip")}
-          </button>
+          </Button>
         ) : null}
-        <button type="button" onClick={onBack} disabled={saving} className={cls(BTN_SECONDARY, "ml-auto")}>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={saving} className="ml-auto">
           {t("common.previous")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -481,10 +483,9 @@ export function CompanyTaxStep({ installId, onNext }: { installId: string; onNex
         </div>
       ) : null}
       <Footer>
-        <button type="button" onClick={() => void save()} disabled={saving || !check.value} className={BTN_PRIMARY} data-testid="am-company-tax-save">
-          {saving ? <Spin size={14} /> : null}
+        <Button type="button" onClick={() => void save()} loading={saving} disabled={!check.value} data-testid="am-company-tax-save">
           <span>{saving ? t("common.saving") : t("common.next")}</span>
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -615,13 +616,12 @@ export function ThemeStep({
         </div>
       ) : null}
       <Footer>
-        <button type="button" onClick={() => void save()} disabled={saving} className={BTN_PRIMARY} data-testid="am-theme-save">
-          {saving ? <Spin size={14} /> : null}
+        <Button type="button" onClick={() => void save()} loading={saving} data-testid="am-theme-save">
           <span>{saving ? t("common.saving") : t("common.next")}</span>
-        </button>
-        <button type="button" onClick={onBack} disabled={saving} className={cls(BTN_SECONDARY, "ml-auto")}>
+        </Button>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={saving} className="ml-auto">
           {t("common.previous")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -714,19 +714,18 @@ export function FormatsStep({ installId, manifest, onBack, onNext }: { installId
         </div>
       ) : null}
       <Footer>
-        <button
+        <Button
           type="button"
           onClick={() => void save()}
-          disabled={saving || formats.length === 0 || !materialityOk}
-          className={BTN_PRIMARY}
+          loading={saving}
+          disabled={formats.length === 0 || !materialityOk}
           data-testid="am-formats-save"
         >
-          {saving ? <Spin size={14} /> : null}
           <span>{saving ? t("common.saving") : t("common.next")}</span>
-        </button>
-        <button type="button" onClick={onBack} disabled={saving} className={cls(BTN_SECONDARY, "ml-auto")}>
+        </Button>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={saving} className="ml-auto">
           {t("common.previous")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -807,7 +806,7 @@ export function SelfTestStep({
               <ThreadView items={done ? mine.filter((i) => i.kind !== "outputs") : mine} />
             ) : (
               <div className="flex items-center gap-2 text-sm text-text-secondary">
-                <Spin size={14} />
+                <Spinner size={14} />
                 <span>{t("selftest.starting")}</span>
               </div>
             )}
@@ -825,40 +824,39 @@ export function SelfTestStep({
           <p className="font-medium">{t("wiz.selftestFailed")}</p>
           <p className="mt-1 text-text-secondary">{t("wiz.selftestFailedNext")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
+              variant="secondary"
               onClick={() => {
                 setRunId(null);
                 void start();
               }}
-              className={BTN_SECONDARY}
               data-testid="am-selftest-again"
             >
               {t("wiz.selftestAgain")}
-            </button>
+            </Button>
             <ProblemButton target={{ kind: "run", runId }} />
           </div>
         </div>
       ) : null}
       <Footer>
         {!runId ? (
-          <button type="button" onClick={() => void start()} disabled={starting} className={BTN_PRIMARY} data-testid="am-selftest-start">
-            {starting ? <Spin size={14} /> : null}
+          <Button type="button" onClick={() => void start()} loading={starting} data-testid="am-selftest-start">
             <span>{starting ? t("selftest.starting") : t("selftest.start")}</span>
-          </button>
+          </Button>
         ) : (
-          <button type="button" onClick={() => onFinish()} className={done ? BTN_PRIMARY : BTN_SECONDARY} data-testid="am-selftest-enter">
+          <Button type="button" variant={done ? "primary" : "secondary"} onClick={() => onFinish()} data-testid="am-selftest-enter">
             {t("selftest.enter")}
-          </button>
+          </Button>
         )}
         {!runId ? (
-          <button type="button" onClick={() => onFinish()} className={BTN_SECONDARY} data-testid="am-selftest-skip">
+          <Button type="button" variant="secondary" onClick={() => onFinish()} data-testid="am-selftest-skip">
             {t("selftest.skip")}
-          </button>
+          </Button>
         ) : null}
-        <button type="button" onClick={onBack} disabled={starting} className={cls(BTN_SECONDARY, "ml-auto")}>
+        <Button type="button" variant="secondary" onClick={onBack} disabled={starting} className="ml-auto">
           {t("common.previous")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );
@@ -917,7 +915,7 @@ export function SelfTestFiles({ runId }: { runId: string }) {
         </div>
       ) : arts === null ? (
         <div className="mt-2 flex items-center gap-2 text-xs text-text-muted">
-          <Spin size={12} />
+          <Spinner size={12} />
           <span>{t("common.loading")}</span>
         </div>
       ) : arts.length ? (
@@ -960,7 +958,7 @@ export function TemplateStep({ installId, manifest, onBack, onNext }: { installI
       <div className="mt-4">
         {defaults === null ? (
           <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <Spin size={14} />
+            <Spinner size={14} />
             <span>{t("common.loading")}</span>
           </div>
         ) : (
@@ -968,12 +966,12 @@ export function TemplateStep({ installId, manifest, onBack, onNext }: { installI
         )}
       </div>
       <Footer>
-        <button type="button" onClick={onNext} className={BTN_PRIMARY} data-testid="am-template-next">
+        <Button type="button" onClick={onNext} data-testid="am-template-next">
           {saved ? t("common.next") : t("wiz.templateSkip")}
-        </button>
-        <button type="button" onClick={onBack} className={cls(BTN_SECONDARY, "ml-auto")}>
+        </Button>
+        <Button type="button" variant="secondary" onClick={onBack} className="ml-auto">
           {t("common.previous")}
-        </button>
+        </Button>
       </Footer>
     </div>
   );

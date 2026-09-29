@@ -3,6 +3,10 @@
 // Small shared pieces of the Agent Market screens. Everything here uses the
 // app's theme tokens only (tailwind.config.js), so light and dark follow the
 // app's data-theme switch.
+//
+// AM6 — buttons, the spinner and the dialog are the app's (components/ui:
+// Button and ButtonLink, Spinner, Modal), imported where they are used. What
+// is left here is what the app has no component for.
 
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -15,12 +19,12 @@ import {
   Check,
   ClipboardCheck,
   FolderOpen,
-  LoaderCircle,
   Receipt,
   Table2,
   TriangleAlert,
 } from "lucide-react";
 
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { LocaleScope } from "@/lib/i18n";
 
@@ -105,10 +109,6 @@ export function Card({ children, className }: { children: ReactNode; className?:
   return <section className={cls("rounded-xl border border-border bg-bg-surface px-4 py-4", className)}>{children}</section>;
 }
 
-export function Spin({ size = 14 }: { size?: number }) {
-  return <LoaderCircle width={size} height={size} className="shrink-0 animate-spin" aria-hidden />;
-}
-
 // ── states ──────────────────────────────────────────────────────────────
 
 export function PageSkeleton() {
@@ -138,12 +138,9 @@ export function NotAvailable() {
         </span>
         <h1 className="mt-4 text-lg font-semibold text-text-primary">{t("gate.title")}</h1>
         <p className="mt-1.5 text-sm text-text-secondary">{t("gate.body")}</p>
-        <Link
-          href="/chat"
-          className="focus-ring mt-6 inline-flex items-center rounded-lg border border-border px-3.5 py-2 text-sm text-text-primary hover:bg-bg-elevated"
-        >
+        <ButtonLink href="/chat" variant="secondary" className="mt-6">
           {t("gate.backToChat")}
-        </Link>
+        </ButtonLink>
       </div>
     </PageShell>
   );
@@ -168,13 +165,9 @@ export function ErrorPanel({ message, onRetry, title }: { message: string; onRet
         <div className={title ? "mt-0.5 text-text-secondary" : undefined}>{message}</div>
       </div>
       {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="focus-ring shrink-0 rounded-md border border-border bg-bg-surface px-2.5 py-1 text-xs font-medium text-text-primary hover:bg-bg-elevated"
-        >
+        <Button type="button" variant="secondary" size="sm" className="shrink-0" onClick={onRetry}>
           {t("common.retry")}
-        </button>
+        </Button>
       ) : null}
     </div>
   );
@@ -234,15 +227,3 @@ export function CheckLine({ children, ok = true }: { children: ReactNode; ok?: b
     </li>
   );
 }
-
-/** Primary / secondary link-buttons in the app's idiom (inverted primary). */
-export const BTN_PRIMARY =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-lg bg-text-primary px-3.5 py-2 text-sm font-medium text-bg-base transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40";
-export const BTN_SECONDARY =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-transparent px-3.5 py-2 text-sm text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-50";
-export const BTN_PRIMARY_SMALL =
-  "focus-ring inline-flex items-center justify-center gap-1.5 rounded-lg bg-text-primary px-2.5 py-1.5 text-xs font-medium text-bg-base transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40";
-export const BTN_DANGER_OUTLINE =
-  "focus-ring inline-flex items-center justify-center gap-2 rounded-lg border border-status-danger/40 bg-transparent px-3.5 py-2 text-sm text-status-danger transition-colors hover:bg-status-danger/10 disabled:cursor-not-allowed disabled:opacity-50";
-export const BTN_SMALL =
-  "focus-ring inline-flex items-center justify-center gap-1.5 rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-50";

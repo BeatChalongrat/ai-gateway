@@ -24,6 +24,8 @@ interface Props {
   description?: string;
   footer?: React.ReactNode;
   maxWidth?: number;
+  /** AM6 — a test id for the dialog itself; none unless a caller asks. */
+  testId?: string;
   children: React.ReactNode;
 }
 
@@ -34,6 +36,7 @@ export function Modal({
   description,
   footer,
   maxWidth = 480,
+  testId,
   children,
 }: Props) {
   const t = useT();
@@ -104,6 +107,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        data-testid={testId}
         onClick={onClose}
         className="fixed inset-0 z-40 flex items-end justify-center bg-black/65 backdrop-blur-sm"
       >
@@ -134,6 +138,7 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      data-testid={testId}
       onClick={onClose}
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/65 px-4 backdrop-blur-sm"
     >

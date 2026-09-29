@@ -13,10 +13,16 @@ import { redirectToPortalLogin } from "@/lib/auth";
 
 import { tAm } from "./i18n";
 import type {
-  AdminModels,
+  AgentModels,
   AgentThread,
-  ModelEntry,
-  ModelPicker,
+  AmNotification,
+  DeclaredSetting,
+  EmailDraft,
+  EmailSend,
+  Estimate,
+  Reminder,
+  ReminderRule,
+  RemindersResponse,
   RunMeta,
   StorageInfo,
   AdminCatalogRow,
@@ -207,7 +213,9 @@ export const amApi = {
   getInstall: (installId: string) => call<InstallDetail>(`/installs/${id(installId)}`),
   removeInstall: (installId: string) => send<{ removed: boolean }>("DELETE", `/installs/${id(installId)}`),
 
-  defaults: (installId: string) => call<{ defaults: Default[] | null }>(`/installs/${id(installId)}/defaults`),
+  /** AM6: declared = the settings the agent's manifest declares, each with its current value. */
+  defaults: (installId: string) =>
+    call<{ defaults: Default[] | null; declared?: DeclaredSetting[] | null }>(`/installs/${id(installId)}/defaults`),
   putDefault: (installId: string, key: string, value: unknown, label?: string) =>
     send<{ saved: boolean }>("PUT", `/installs/${id(installId)}/defaults/${id(key)}`, label ? { value, label } : { value }),
   deleteDefault: (installId: string, key: string) =>
@@ -223,7 +231,8 @@ export const amApi = {
 
   upload: (installId: string, file: File, opts: UploadOptions = {}) =>
     uploadOnce(`${BASE}/installs/${id(installId)}/files`, file, opts, false, (b) => (b as { file?: AmFile } | null)?.file),
-  message: (installId: string, body: { text: string; file_ids: string[]; client_id: string; thread_id?: string | null; model_choice?: string }) =>
+  /** AM6: knowledge_base_id goes with a question only (no files): knowledge answers, it never feeds a deliverable. */
+  message: (installId: string, body: { text: string; file_ids: string[]; client_id: string; thread_id?: string | null; knowledge_base_id?: string }) =>
     send<{ item: ThreadItem; route?: string; run_id?: string; duplicate?: boolean }>("POST", `/installs/${id(installId)}/messages`, body),
 
   mappingPreview: (installId: string, fileId: string) =>
@@ -320,7 +329,6 @@ export const amApi = {
     domains?: string[];
     user_monthly_credits?: number | string;
     documents_may_leave?: boolean;
-    agent_models?: ModelEntry[];
     retention_years?: number;
     storage_warn_mb?: number;
   }) => send<{ org: OrgSettings; resumed: number }>("PUT", "/admin/org", body),
@@ -339,7 +347,7 @@ export const amApi = {
     send<{ state: { slug: string; status: string; reason: string }; stopped_runs: number }>("PUT", `/admin/catalog/${id(slug)}`, body),
   adminSample: (slug: string) => send<{ run: Run }>("POST", `/admin/catalog/${id(slug)}/sample`),
 
-  // ── AM4: rounds, threads, the model a round reads documents with ────────
+  // ── AM4: rounds, threads, the agent's model ─────────────────────────────
 
   threads: (installId: string) => call<{ threads: AgentThread[] | null }>(`/installs/${id(installId)}/threads`),
   newThread: (installId: string) => send<{ thread: AgentThread }>("POST", `/installs/${id(installId)}/threads`),
@@ -349,12 +357,11 @@ export const amApi = {
   /** The round-boundary chip's answer. */
   answerIntent: (itemId: string, choice: "new_round" | "about_last") =>
     send<{ changed: boolean; choice?: string; run_id?: string }>("POST", `/intents/${id(itemId)}`, { choice }),
-  models: (installId: string) => call<ModelPicker>(`/installs/${id(installId)}/models`),
-  putModel: (installId: string, choice: string) => send<ModelPicker>("PUT", `/installs/${id(installId)}/model`, { choice }),
+  models: (installId: string) => call<AgentModels>(`/installs/${id(installId)}/models`),
+  putModel: (installId: string, choice: string) => send<AgentModels>("PUT", `/installs/${id(installId)}/model`, { choice }),
   storage: (installId: string) => call<StorageInfo>(`/installs/${id(installId)}/storage`),
 
   // an admin: metadata of every run; a run's content only after stating a reason (its owner is told)
-  adminModels: () => call<AdminModels>("/admin/models"),
   adminRuns: (status = "all") => call<{ runs: RunMeta[] | null; grant_minutes: number }>(`/admin/runs?status=${encodeURIComponent(status)}`),
   adminOpenRun: (runId: string, reason: string) => send<{ opened: boolean; expires_at: string }>("POST", `/admin/runs/${id(runId)}/open`, { reason }),
   adminRun: (runId: string) => call<RunDetail>(`/admin/runs/${id(runId)}`),
@@ -365,6 +372,37 @@ export const amApi = {
     saveBlob(`/admin/runs/${id(runId)}/files/${id(fileId)}/download`, filename),
   adminRemoveEvidence: (runId: string, reason: string) =>
     send<{ removed_objects: number }>("POST", `/admin/runs/${id(runId)}/remove-evidence`, { reason }),
+
+  // ── AM6: the cost before a round, a receipt, reminders, notifications, e-mail ──
+
+  /** What a round of this agent usually costs, said before it starts. */
+  estimate: (installId: string) => call<Estimate>(`/installs/${id(installId)}/estimate`),
+  /** A receipt a person confirms here ("all" or a quantity, as text); the same round computes again. */
+  confirmReceipt: (runId: string, key: string, quantity: string) =>
+    send<{ run: Run }>("POST", `/runs/${id(runId)}/receipts`, { key, quantity }),
+
+  reminders: (installId: string) => call<RemindersResponse>(`/installs/${id(installId)}/reminders`),
+  addReminder: (installId: string, body: { label: string; rule: ReminderRule }) =>
+    send<{ reminder: Reminder }>("POST", `/installs/${id(installId)}/reminders`, body),
+  snoozeReminder: (reminderId: string, days: 1 | 3 | 7) =>
+    send<{ reminder: Reminder }>("POST", `/reminders/${id(reminderId)}/snooze`, { days }),
+  skipReminder: (reminderId: string) => send<{ reminder: Reminder }>("POST", `/reminders/${id(reminderId)}/skip`),
+  stopReminder: (reminderId: string) => send<{ reminder: Reminder }>("POST", `/reminders/${id(reminderId)}/stop`),
+  resumeReminder: (reminderId: string) => send<{ reminder: Reminder }>("POST", `/reminders/${id(reminderId)}/resume`),
+  deleteReminder: (reminderId: string) => send<null>("DELETE", `/reminders/${id(reminderId)}`),
+
+  /** What this surface has not shown yet, newest first. */
+  notifications: (surface: "web" | "desktop") => call<{ notifications: AmNotification[] | null }>(`/notifications?surface=${surface}`),
+  notificationShown: (notificationId: string, surface: "web" | "desktop") =>
+    send<null>("POST", `/notifications/${id(notificationId)}/shown`, { surface }),
+  dismissNotification: (notificationId: string) => send<null>("POST", `/notifications/${id(notificationId)}/dismiss`),
+
+  /** A drafted e-mail about a finished round (also a thread item of kind email_draft). */
+  draftEmail: (runId: string) => send<{ draft: EmailDraft }>("POST", `/runs/${id(runId)}/email-draft`),
+  emailDraft: (draftId: string) => call<{ draft: EmailDraft }>(`/email-drafts/${id(draftId)}`),
+  /** Sent only with the person's approval of this very text (its hash) and the recipients they typed. */
+  sendEmail: (draftId: string, body: { to: string[]; cc: string[]; body_sha256: string; approve: true }) =>
+    send<{ send: EmailSend }>("POST", `/email-drafts/${id(draftId)}/send`, body),
 };
 
 /** A fresh client id (idempotency key) for a message, a chip or an install. */

@@ -1,278 +1,148 @@
 "use client";
 
-// Which model reads this round's documents — the app's own model control
-// (AM5: the chat's pill, popover, rows and picker from
-// components/chat/ModelSelector), holding the agent's choices.
+// The agent's model — the chat's model control (components/chat/ModelSelector:
+// the pill, the popover and the picker), with nothing of the agent's own
+// inside the menu.
 //
-// "อัตโนมัติ (แนะนำ)" first; below it only rows that resolve to a DIFFERENT
-// model, each saying what both an engineer and an accountant need — the
-// outcome, the real model, inside or outside the organisation, a rough cost
-// and time. Two rows never resolve to the same model (the server collapses
-// them; this collapses again, so an older server cannot bring the defect
-// back), and an organisation with one model of its own is told so in one
-// line instead of a padded list. A model outside the organisation is shown
-// locked with the reason until the organisation lets documents leave.
-// "เลือกโมเดลเอง" opens the chat's picker — search and provider groups —
-// with the same lock on every outside model. The pick applies to this round;
-// "ใช้เป็นค่าตั้งต้น" keeps it for the agent.
+// AM6 — the menu is exactly the chat's: the search box, the models this
+// person's chat lists, grouped by provider, "อัตโนมัติ" as the first row, a
+// tick on the current one. Picking a row sets the agent's model, the way
+// picking in a chat sets the conversation's. The rows of AM4 and AM5 (an
+// outcome, a cost and a time, "ในองค์กร", a reason on every locked row, a
+// second list behind "เลือกโมเดลเอง", a choice for one round) are gone.
+//
+// Two things the agent has to say are not on the rows. A model the
+// organisation does not allow is drawn as the chat draws a model that cannot
+// be used, and the reason is one line under the search box. A model that
+// cannot do the agent's job is not listed, and the last line of its group
+// says how many and why — a list that hides things without a word reads as
+// a bug.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Lock, SlidersHorizontal } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { ModelPicker as ChatModelPicker, ModelPopover, ModelRow, ModelTrigger } from "@/components/chat/ModelSelector";
+import { ModelPicker, ModelPopover, ModelTrigger, shortLabel } from "@/components/chat/ModelSelector";
+import { toastError } from "@/components/ui/Toast";
 import { useDismissable } from "@/hooks/useDismissable";
 import { useT } from "@/lib/i18n";
-import type { ModelEntry as ChatModel } from "@/lib/types";
-import { useModelStore } from "@/stores/modelStore";
+import type { ModelEntry } from "@/lib/types";
+import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
 import { amApi, errorMessage } from "../api";
-import { formatDuration } from "../format";
 import { useAmT } from "../i18n";
-import type { ModelOption, ModelPicker } from "../types";
-import { Spin, Thai } from "../ui";
+import type { AgentModels } from "../types";
+import { Thai } from "../ui";
 
-/** What a row says under its name: the real model, where it runs, cost, time. */
-export function optionFacts(t: ReturnType<typeof useAmT>, o: ModelOption): string {
-  const parts: string[] = [];
-  if (o.model && o.model !== o.label) parts.push(o.model);
-  parts.push(o.self_hosted ? t("where.inOrg") : t("where.outside"));
-  parts.push(o.cost_thb != null ? t("model.cost", { baht: o.cost_thb.toFixed(2) }) : t("model.costNone"));
-  if (o.seconds != null && o.seconds > 0) parts.push(formatDuration(o.seconds * 1000, t));
-  return parts.join(" · ");
-}
-
-export function optionLine(t: ReturnType<typeof useAmT>, o: ModelOption): string {
-  return `${o.label} · ${optionFacts(t, o)}`;
-}
-
-/** One row per model: a row that resolves to a model an earlier row already
- *  is (first of all the one "อัตโนมัติ" resolves to) is not a choice. */
-export function collapseOptions(options: ModelOption[]): ModelOption[] {
-  const seen = new Set<string>();
-  const out: ModelOption[] = [];
-  for (const o of options) {
-    const key = o.model || o.id;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(o);
-  }
-  return out;
-}
-
-export function useModelPicker(installId: string | null): [ModelPicker | null, (p: ModelPicker) => void] {
-  const [picker, setPicker] = useState<ModelPicker | null>(null);
+export function useAgentModels(installId: string | null): [AgentModels | null, (m: AgentModels) => void] {
+  const [models, setModels] = useState<AgentModels | null>(null);
   useEffect(() => {
     if (!installId) return;
     let alive = true;
     amApi.models(installId).then(
-      (p) => alive && setPicker(p),
+      (m) => alive && setModels(m),
       () => {},
     );
     return () => {
       alive = false;
     };
   }, [installId]);
-  return [picker, setPicker];
+  return [models, setModels];
 }
 
-export function ModelControl(props: {
+interface Props {
   installId: string;
-  picker: ModelPicker | null;
-  onPicker: (p: ModelPicker) => void;
-  roundChoice: string | null;
-  onRoundChoice: (choice: string | null) => void;
-}) {
-  const { picker } = props;
-  if (!picker || picker.uses === "none" || !(picker.options ?? []).length) return null;
+  models: AgentModels | null;
+  onModels: (m: AgentModels) => void;
+}
+
+export function ModelControl(props: Props) {
+  const { models } = props;
+  if (!models || models.uses === "none") return null;
   return (
     <Thai>
-      <Control {...props} picker={picker} />
+      <Control {...props} models={models} />
     </Thai>
   );
 }
 
-function Control({
-  installId,
-  picker,
-  onPicker,
-  roundChoice,
-  onRoundChoice,
-}: {
-  installId: string;
-  picker: ModelPicker;
-  onPicker: (p: ModelPicker) => void;
-  roundChoice: string | null;
-  onRoundChoice: (choice: string | null) => void;
-}) {
+function Control({ installId, models, onModels }: Props & { models: AgentModels }) {
   const t = useAmT();
   const tChat = useT();
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  // the row just picked, until the server has answered
+  const [picked, setPicked] = useState<string | null>(null);
+  const asked = useRef(0);
   const ref = useRef<HTMLDivElement>(null);
   const chatModels = useModelStore((s) => s.models);
 
-  const close = useCallback(() => {
-    setOpen(false);
-    setCustom(false);
-  }, []);
+  const close = useCallback(() => setOpen(false), []);
   useDismissable(ref, open, close);
 
-  // "เลือกโมเดลเอง" lists the app's catalogue: load it the first time it opens.
+  // The list is the app's catalogue: load it the first time the menu opens.
   useEffect(() => {
-    if (!custom) return;
+    if (!open) return;
     const s = useModelStore.getState();
     if (!s.loaded && !s.loading) void s.loadModels();
-  }, [custom]);
+  }, [open]);
 
-  const options = collapseOptions(picker.options ?? []);
-  const auto = options[0]!;
-  // a model named outright that is the one "อัตโนมัติ" resolves to is that row
-  const same = (id: string) => (id === auto.model ? auto.id : id);
-  const current = same(roundChoice ?? picker.choice);
-  const byHand: ModelOption | null =
-    options.some((o) => o.id === current) || !current
-      ? null
-      : { id: current, outcome: "own", label: current, model: current, self_hosted: !!picker.custom?.find((c) => c.id === current)?.self_hosted, cost_thb: null, seconds: null, disabled: false };
-  const chosen = options.find((o) => o.id === current) ?? byHand ?? auto;
-  const label = picker.uses === "text" ? t("model.labelText") : t("model.label");
+  const allowed = useMemo(() => new Map((models.models ?? []).map((m) => [m.id, m.allowed] as const)), [models.models]);
+  const current = picked ?? (models.choice || AUTO_MODEL_ID);
+  const isAuto = current === AUTO_MODEL_ID;
+  const name = isAuto ? tChat("model.auto.name") : (chatModels.find((m) => m.id === current)?.name ?? current);
+  const label = models.uses === "text" ? t("model.labelText") : t("model.label");
+  const blocked = models.blocked_reason || t("model.blocked");
 
-  const pick = (id: string) => {
-    onRoundChoice(same(id) === same(picker.choice) ? null : id);
-    setNote(null);
+  const pick = (choice: string) => {
     close();
-  };
-
-  const saveDefault = () => {
-    setSaving(true);
-    setNote(null);
-    amApi.putModel(installId, current).then(
-      (p) => {
-        setSaving(false);
-        onPicker(p);
-        onRoundChoice(null);
-        setNote(t("model.saved"));
+    if (choice === current) return;
+    setPicked(choice);
+    // a second pick before the first is answered: the last one asked is the one shown
+    const mine = ++asked.current;
+    amApi.putModel(installId, choice).then(
+      (next) => {
+        if (mine !== asked.current) return;
+        if (next) onModels(next);
+        setPicked(null);
       },
       (err) => {
-        setSaving(false);
-        setNote(errorMessage(err));
+        if (mine !== asked.current) return;
+        // nothing was saved: the pill goes back to the model the agent still uses
+        setPicked(null);
+        toastError(errorMessage(err));
       },
     );
   };
 
-  /** The reason a row of the chat's picker is locked here (undefined: it may be picked). */
-  const gate = (m: ChatModel): string | undefined => {
-    const c = (picker.custom ?? []).find((x) => x.id === m.id);
-    if (!c) return picker.locked_reason || t("model.lockedUnknown");
-    return c.allowed ? undefined : c.reason || t("model.lockedUnknown");
-  };
-
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      <div ref={ref} className="relative">
-        <ModelTrigger
-          label={chosen.label}
-          fullLabel={optionLine(t, chosen)}
-          auto={chosen.id === auto.id}
-          compact
-          open={open}
-          onClick={() => (open ? close() : setOpen(true))}
-          ariaLabel={`${label}: ${chosen.label}`}
-          testId="am-model-control"
-        />
-        {open ? (
-          <ModelPopover label={t("model.aria")} onClose={close} testId="am-model-menu">
-            {custom ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setCustom(false)}
-                  className="focus-ring flex shrink-0 items-center gap-1 border-b border-border px-3 py-2 text-left text-[12px] text-text-secondary hover:text-text-primary"
-                  data-testid="am-model-back"
-                >
-                  <ChevronLeft width={14} height={14} aria-hidden />
-                  <span>{t("model.customBack")}</span>
-                </button>
-                <ChatModelPicker
-                  models={chatModels}
-                  activeId={chosen.model || null}
-                  isAuto={false}
-                  onPickAuto={() => pick(auto.id)}
-                  onPickModel={(m) => pick(m.id)}
-                  needsVision={picker.uses === "vision"}
-                  t={tChat}
-                  gate={gate}
-                  chatOnly
-                  hideAuto
-                />
-                <p className="shrink-0 border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
-                  {picker.documents_may_leave ? t("model.policyOutside") : t("model.policyInside")}
-                </p>
-              </>
-            ) : (
-              <div className="scrollbar-thin flex-1 overflow-y-auto py-1">
-                <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-text-muted">{label}</p>
-                {options.map((o) => (
-                  <div key={o.id} data-testid="am-model-option" data-model={o.model}>
-                    <ModelRow
-                      label={o.id === same(picker.choice) ? `${o.label} (${t("model.default")})` : o.label}
-                      sub={optionFacts(t, o)}
-                      selected={o.id === current}
-                      disabled={o.disabled}
-                      disabledReason={o.reason}
-                      leading={o.disabled ? <Lock width={12} height={12} className="mt-1 text-text-muted" aria-hidden /> : undefined}
-                      onClick={() => pick(o.id)}
-                    />
-                  </div>
-                ))}
-                {byHand ? (
-                  <div data-testid="am-model-option" data-model={byHand.model}>
-                    <ModelRow label={byHand.label} sub={optionFacts(t, byHand)} selected onClick={() => pick(byHand.id)} />
-                  </div>
-                ) : null}
-                {picker.single_in_house ? (
-                  <p className="px-3 py-1.5 text-[11px] text-text-secondary" data-testid="am-model-single">
-                    {picker.notice || t("model.single")}
-                  </p>
-                ) : null}
-                <div className="border-t border-border" data-testid="am-model-custom-row">
-                  <button
-                    type="button"
-                    onClick={() => setCustom(true)}
-                    className="focus-ring flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-bg-elevated/60"
-                    data-testid="am-model-custom"
-                  >
-                    <SlidersHorizontal width={13} height={13} className="mt-1 shrink-0 text-text-muted" aria-hidden />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium leading-snug text-text-primary">{t("model.custom")}</span>
-                      <span className="block text-[11px] text-text-muted">{t("model.customHint")}</span>
-                    </span>
-                  </button>
-                </div>
-                <p className="border-t border-border px-3 py-1.5 text-[11px] text-text-muted">
-                  {picker.documents_may_leave ? t("model.policyOutside") : t("model.policyInside")}
-                </p>
-              </div>
-            )}
-          </ModelPopover>
-        ) : null}
-      </div>
-      {roundChoice && same(roundChoice) !== same(picker.choice) ? (
-        <span className="hidden items-center gap-1 text-[11px] text-text-muted sm:inline-flex">
-          <span className="whitespace-nowrap">{t("model.thisRound")}</span>
-          <button
-            type="button"
-            onClick={saveDefault}
-            disabled={saving}
-            className="focus-ring whitespace-nowrap rounded underline underline-offset-2 hover:text-text-primary"
-            data-testid="am-model-save-default"
-          >
-            {saving ? <Spin size={10} /> : t("model.saveDefault")}
-          </button>
-        </span>
+    <div ref={ref} className="relative">
+      <ModelTrigger
+        label={isAuto ? name : shortLabel(name)}
+        fullLabel={name}
+        auto={isAuto}
+        compact
+        open={open}
+        onClick={() => setOpen((v) => !v)}
+        ariaLabel={`${label}: ${name}`}
+        testId="am-model-control"
+      />
+      {open ? (
+        <ModelPopover label={tChat("a11y.models")} onClose={close} testId="am-model-menu">
+          <ModelPicker
+            models={chatModels}
+            activeId={current}
+            isAuto={isAuto}
+            onPickAuto={() => pick(AUTO_MODEL_ID)}
+            onPickModel={(m: ModelEntry) => pick(m.id)}
+            needsVision={false}
+            t={tChat}
+            chatOnly
+            gate={(m) => (allowed.get(m.id) === false ? blocked : undefined)}
+            quietGate
+            notice={blocked}
+            hidden={(m) => !allowed.has(m.id)}
+            hiddenLine={(n) => (models.hidden_reason ? t("model.hiddenWhy", { n: String(n), why: models.hidden_reason }) : t("model.hidden", { n: String(n) }))}
+          />
+        </ModelPopover>
       ) : null}
-      {note ? <span className="hidden text-[11px] text-text-muted sm:inline">{note}</span> : null}
     </div>
   );
 }

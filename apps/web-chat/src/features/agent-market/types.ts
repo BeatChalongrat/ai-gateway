@@ -46,7 +46,13 @@ export interface Manifest {
   templates?: TemplateSpec | null;
   /** AM3: what a stranger reads before installing. */
   guide?: ManifestGuide | null;
+  /** AM6: whom the agent is made for, and whose law and tax it follows. */
+  scope?: AgentScope | string;
+  jurisdiction?: string;
 }
+
+/** AM6: generic = any company; org-specific = written for this organisation. */
+export type AgentScope = "generic" | "org-specific";
 
 // ── the customer's own template (AM2 Phase E, agentmarket/template.go) ──
 
@@ -123,6 +129,9 @@ export interface CatalogAgent {
   status_reason?: string;
   sample?: SampleSummary | null;
   stats?: AgentStats | null;
+  /** AM6 */
+  scope?: AgentScope | string;
+  jurisdiction?: string;
 }
 
 export interface CatalogItem {
@@ -136,6 +145,9 @@ export interface CatalogItem {
   install_id?: string | null;
   sample?: SampleSummary | null;
   stats?: AgentStats | null;
+  /** AM6 */
+  scope?: AgentScope | string;
+  jurisdiction?: string;
 }
 
 export interface Install {
@@ -153,7 +165,7 @@ export interface Install {
   updated_at?: string;
   /** AM3: pinned to the top of the rail. */
   pinned_at?: string | null;
-  /** AM4: the model the person picked for reading documents ("auto" or a curated choice). */
+  /** AM4: the agent's model ("auto" or a model id). AM6: set from the model menu, the way a chat's is. */
   model_choice?: string;
 }
 
@@ -176,6 +188,10 @@ export interface Default {
 }
 
 export type RunStatus = "queued" | "running" | "awaiting_input" | "succeeded" | "failed" | "cancelled";
+/** AM6: what a run came to — or, while it has not ended, its status. A round
+ *  that delivered its draft while the agent's gate did not pass is
+ *  completed_open: finished, charged, and not a failure. */
+export type RunOutcome = "completed" | "completed_open" | "failed" | "cancelled" | RunStatus;
 export type RunKind = "run" | "self_test" | "render" | "reply" | "mapping_preview" | "review";
 
 export interface Assumption {
@@ -191,6 +207,8 @@ export interface Run {
   parent_run_id?: string;
   kind: RunKind | string;
   status: RunStatus | string;
+  /** AM6: absent from a server older than AM6 (the status then says it). */
+  outcome?: RunOutcome | string;
   status_reason?: string;
   period?: string | null;
   message?: string;
@@ -199,15 +217,18 @@ export interface Run {
   answers?: unknown;
   assumptions?: Assumption[] | null;
   credits_spent?: number;
+  /** AM6: what the platform paid; the round ended on its gate with its draft delivered; when it delivered. */
+  credits_cost?: number;
+  gate_open?: boolean;
+  delivered_at?: string | null;
   model_used?: string | null;
   model_self_hosted?: boolean | null;
   awaiting_ms?: number;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
-  /** AM4: the thread (absent = the first), the model choice it ran with, an admin's removal of its files. */
+  /** AM4: the thread (absent = the first), an admin's removal of its files. */
   thread_id?: string | null;
-  model_choice?: string | null;
   evidence_removed_at?: string | null;
 }
 
@@ -349,7 +370,7 @@ export interface Clarification {
 
 // ── thread ─────────────────────────────────────────────────────────────
 
-export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs" | "intent";
+export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs" | "intent" | "email_draft";
 
 export interface ThreadItem {
   id: string;
@@ -401,11 +422,34 @@ export interface Failure {
   failed_checks?: string[] | null;
 }
 
+/** AM6: what an answer drew from a knowledge base (asked for in ask mode only). */
+export interface AgentKnowledge {
+  base: string;
+  sources: { title: string; locator?: string }[] | null;
+}
+
+/** AM6: a round that delivered its work while the agent's gate did not pass
+ *  (a reconciliation that does not tie). A result, not a failure; `code` is
+ *  never shown. */
+export interface Completion {
+  code: string;
+  title: string;
+  what: string;
+  next: string;
+  files: string;
+  charged: string;
+  credits: number;
+}
+
 export interface AgentTextPayload {
   text?: string;
   run_id?: string;
-  tone?: "error" | string;
+  /** error: the round failed; open (AM6): it finished with its gate open */
+  tone?: "error" | "open" | string;
   failure?: Failure | null;
+  completion?: Completion | null;
+  /** AM6: the answer used a knowledge base — never part of a deliverable. */
+  knowledge?: AgentKnowledge | null;
 }
 
 /** AM5: a document the round left out ("เอกสารที่ยังไม่ได้รวม"). */
@@ -441,7 +485,6 @@ export interface IntentPayload {
   item_id?: string;
   last_round?: { run_id?: string; period_label?: string } | null;
   fresh?: boolean;
-  model_choice?: string;
   run_id?: string;
   note?: string;
 }
@@ -462,12 +505,14 @@ export interface CardPayload {
   files?: { id: string; name: string; size: number }[] | null;
 }
 
-export type ProgressStepStatus = "pending" | "running" | "done" | "waiting" | "failed" | "skipped";
+/** AM6: open = the step finished and left a note (a gate that was checked and did not pass). */
+export type ProgressStepStatus = "pending" | "running" | "done" | "waiting" | "failed" | "skipped" | "open";
 
 export interface ProgressPayload {
   run_id: string;
   kind?: string;
   status: RunStatus | string;
+  outcome?: RunOutcome | string;
   reason?: string;
   started_at?: string | null;
   finished_at?: string | null;
@@ -535,41 +580,24 @@ export interface AgentThread {
   waiting: boolean;
 }
 
-/** AM4: one row of the model picker. */
-export interface ModelOption {
-  id: string;
-  outcome: "auto" | "fast" | "accurate" | string;
-  label: string;
-  model: string;
-  self_hosted: boolean;
-  cost_thb: number | null;
-  seconds: number | null;
-  disabled: boolean;
-  reason?: string;
-}
-
-/** AM5: one model of the runner's catalogue as "เลือกโมเดลเอง" may offer it. */
-export interface CustomModel {
-  id: string;
-  self_hosted: boolean;
-  vision: boolean;
-  allowed: boolean;
-  reason?: string;
-}
-
-export interface ModelPicker {
+/** AM6: the agent's model, and what the chat's model menu needs to know to
+ *  serve as the agent's (GET /installs/{id}/models, PUT /installs/{id}/model). */
+export interface AgentModels {
+  /** what a model does for this agent; none: it sends nothing to a model, and has no model control */
   uses: "vision" | "text" | "none" | string;
-  reads: string;
+  /** the install's model: "auto" or a model id */
   choice: string;
-  options: ModelOption[] | null;
-  documents_may_leave: boolean;
+  /** what "อัตโนมัติ" resolves to now ("" when unknown) */
+  auto_model: string;
+  /** every model that can do this agent's job; allowed false: the organisation's policy does not allow it */
+  models: { id: string; allowed: boolean }[] | null;
+  /** why a model is not allowed, said once ("" when nothing is blocked) */
+  blocked_reason: string;
+  /** why a model cannot do this agent's job */
+  hidden_reason: string;
+  /** what the model does for this agent (the settings page's sentence) */
+  reads: string;
   note: string;
-  /** AM5: the organisation has one model of its own for this job (notice says so in one line). */
-  single_in_house?: boolean;
-  notice?: string;
-  /** AM5: what "เลือกโมเดลเอง" may offer, and what a model missing from it says. */
-  custom?: CustomModel[] | null;
-  locked_reason?: string;
 }
 
 /** AM4: what an install keeps and for how long. */
@@ -598,9 +626,12 @@ export interface RunMeta {
   person: string;
   email: string;
   status: RunStatus | string;
+  outcome?: RunOutcome | string;
   reason: string;
   period_label: string;
+  /** what the person was charged; cost (AM6): what the platform paid */
   credits: number;
+  cost?: number;
   model: string;
   model_self_hosted: boolean | null;
   stopped_at_step?: string;
@@ -608,28 +639,6 @@ export interface RunMeta {
   finished_at?: string | null;
   open_now: boolean;
   times_opened: number;
-}
-
-export interface CatalogModel {
-  id: string;
-  vision: boolean;
-  self_hosted: boolean;
-  input_price_per_1m: number;
-  output_price_per_1m: number;
-}
-
-export interface ModelEntry {
-  model: string;
-  outcome: "fast" | "accurate" | string;
-}
-
-export interface AdminModels {
-  catalog: CatalogModel[] | null;
-  curated: ModelEntry[] | null;
-  defaults: { text?: string; text_second?: string; vision?: string };
-  self_hosted: Record<string, boolean> | null;
-  documents_may_leave: boolean;
-  seen_at?: string | null;
 }
 
 // ── responses ──────────────────────────────────────────────────────────
@@ -774,9 +783,29 @@ export interface Computed {
   accounts?: ComputedAccount[] | null;
   exceptions?: ComputedException[] | null;
   excluded?: { code: string; reason: string; rows?: number | number[] }[] | null;
+  /** AM6: the agent's own verdict on the round, and the receipts a person may confirm here. */
+  gate?: { passed: boolean; code?: string; what?: string; next?: string } | null;
+  receipt_offers?: ReceiptOffer[] | null;
   citations?: Citation[] | null;
   source?: { files?: { file: string; sha256?: string; role?: string; rows?: number }[] } | null;
   balance?: { debit?: string; credit?: string; diff?: string } | null;
+}
+
+/** AM6: a purchase-order line billed without a receipt on file — a person who
+ *  knows the goods came may say so here (offered, never required). */
+export interface ReceiptOffer {
+  akey?: string;
+  key: string;
+  po: string;
+  line_no?: number | string | null;
+  item_code?: string | null;
+  description?: string | null;
+  ordered?: string | number | null;
+  unit?: string | null;
+  billed?: string | number | null;
+  file?: string;
+  sheet?: string;
+  row?: number | string | null;
 }
 
 // ── AM2 phase F/G: the expense policy, run exceptions, upgrades, the dashboard ──
@@ -892,6 +921,10 @@ export interface AgentDashboard {
     total: number;
     by_status: Record<string, number>;
     succeeded: number;
+    /** AM6: rounds that delivered their draft with the gate open; failed then counts what delivered nothing. */
+    completed_open?: number;
+    failed?: number;
+    by_outcome?: Record<string, number>;
     first_pass: number;
     first_pass_rate: number | null;
   };
@@ -907,14 +940,17 @@ export interface AgentDashboard {
   questions: DashCount[] | null;
   exceptions: { open: number; resolved: number; noted: number; by_reason: DashCount[] | null; choices: DashCount[] | null };
   failures: DashCount[] | null;
+  /** AM6: the rounds that finished with their gate open, by the gate's code. */
+  open?: DashCount[] | null;
   confidence: Record<string, number> | null;
   tiers: Record<string, number> | null;
   documents: number;
   artifacts: DashCount[] | null;
   versions: { version: string; runs: number; last_run_at: string }[] | null;
-  spend: { credits: number; per_succeeded_run: number | null; per_document: number | null; budget_credits: number };
+  /** cost_not_charged (AM6): what the platform paid for rounds that delivered nothing. */
+  spend: { credits: number; cost_not_charged?: number; per_succeeded_run: number | null; per_document: number | null; budget_credits: number };
   models: { model: string; self_hosted: boolean; runs: number }[] | null;
-  last_self_test: { status: string; reason?: string; version?: string; finished_at?: string | null } | null;
+  last_self_test: { status: string; outcome?: string; reason?: string; version?: string; finished_at?: string | null } | null;
 }
 
 // ── AM3: self-serve (agentmarket/org.go, catalog.go, rail.go, budget.go,
@@ -952,6 +988,7 @@ export interface SampleSummary {
   run_id: string;
   version: string;
   status: RunStatus | string;
+  outcome?: RunOutcome | string;
   reason?: string;
   credits: number;
   seconds: number | null;
@@ -1008,6 +1045,9 @@ export interface Datasheet {
   generated_at: string;
   /** AM4: e.g. not_archive — this is not the company's document archive. */
   notes?: Record<string, string> | null;
+  /** AM6 */
+  scope?: AgentScope | string;
+  jurisdiction?: string;
 }
 
 export interface RailInstall {
@@ -1094,6 +1134,7 @@ export interface SharedRun {
   run: {
     id: string;
     status: string;
+    outcome?: RunOutcome | string;
     status_reason?: string;
     period: string | null;
     created_at: string;
@@ -1146,7 +1187,6 @@ export interface OrgSettings {
   updated_at: string;
   /** AM4 */
   documents_may_leave?: boolean;
-  agent_models?: ModelEntry[] | null;
   retention_years?: number;
   storage_warn_mb?: number;
 }
@@ -1186,10 +1226,14 @@ export interface SpendRow {
   department?: string;
   runs: number;
   succeeded: number;
+  /** AM6: delivered with the gate open; failed then counts what delivered nothing. */
+  completed_open?: number;
   failed: number;
   waiting: number;
   users?: number;
   credits: number;
+  /** AM6: what the platform paid for rounds that delivered nothing. */
+  cost_not_charged?: number;
   month_spent: number;
   monthly_limit?: number | null;
   last_run_at: string | null;
@@ -1201,6 +1245,8 @@ export interface AdminSpend {
   by_user: SpendRow[] | null;
   by_agent: SpendRow[] | null;
   total_credits: number;
+  /** AM6 */
+  total_cost_not_charged?: number;
   catalog_samples_credits: number;
   pricing?: Pricing;
 }
@@ -1209,4 +1255,104 @@ export interface AdminCatalogRow extends CatalogAgent {
   changed_by?: string;
   changed_at?: string | null;
   installs: number;
+}
+
+// ── AM6: the cost before a round, declared settings, reminders, notifications, e-mail ──
+
+/** GET /installs/{id}/estimate — `line` is the one sentence shown before a round starts. */
+export interface Estimate {
+  basis: "own_runs" | "sample" | "none" | string;
+  basis_runs: number;
+  credits: number | null;
+  thb: number | null;
+  seconds: number | null;
+  line: string;
+}
+
+export type SettingKind = "money" | "percent" | "int" | "ratio" | "choice" | "text";
+
+/** A setting the agent's manifest declares, with its current value. */
+export interface DeclaredSetting {
+  key: string;
+  label: string;
+  kind: SettingKind | string;
+  min?: number | null;
+  max?: number | null;
+  default?: string | null;
+  help?: string;
+  choices?: { value: string; label: string }[] | null;
+  max_length?: number | null;
+  value: unknown;
+  set: boolean;
+}
+
+/** weekday 1 = Monday; the time is Thai time */
+export type ReminderRule = { every: "month"; day: number; time: string } | { every: "week"; weekday: number; time: string };
+
+export interface Reminder {
+  id: string;
+  install_id: string;
+  label: string;
+  rule: ReminderRule;
+  rule_text: string;
+  status: "active" | "stopped" | string;
+  next_due_at?: string | null;
+  next_due_text: string;
+  snoozed_until: string | null;
+  skipped_period: string | null;
+  waiting_run_id: string | null;
+  period_label: string | null;
+}
+
+export interface ReminderReaches {
+  in_app?: boolean;
+  desktop?: boolean;
+  browser?: boolean;
+  email?: boolean;
+}
+
+export interface RemindersResponse {
+  reminders: Reminder[] | null;
+  reaches: ReminderReaches | null;
+  note: string;
+}
+
+export type NotificationKind = "reminder_due" | "reminder_followup" | "waiting" | "waiting_followup";
+
+export interface AmNotification {
+  id: string;
+  kind: NotificationKind | string;
+  title: string;
+  body: string;
+  /** a path of the web app */
+  link: string;
+  install_id: string;
+  run_id: string | null;
+  reminder_id: string | null;
+  agent_name: string;
+  created_at: string;
+}
+
+export interface EmailSend {
+  id: string;
+  draft_id: string;
+  to: string[] | null;
+  cc: string[] | null;
+  status: "sent" | "failed" | string;
+  at: string;
+  approved_by: { name: string; email: string } | null;
+}
+
+/** A drafted e-mail. It never carries a recipient: those come from the person. */
+export interface EmailDraft {
+  id: string;
+  run_id: string;
+  subject: string;
+  body: string;
+  attachments: { artifact_id: string; name: string; size: number; format: string }[] | null;
+  can_send: boolean;
+  cannot_send_reason?: string;
+  body_sha256: string;
+  created_at: string;
+  sent: EmailSend[] | null;
 }

@@ -6,9 +6,11 @@
 
 import { FileUp } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+
 import { useAmT } from "../i18n";
 import type { Manifest } from "../types";
-import { BTN_PRIMARY } from "../ui";
+import { EstimateLine } from "./Estimate";
 import { UploadInfo } from "./UploadInfo";
 
 /** "ส่ง<the first required input>มาได้เลย" — from the agent's own manifest. */
@@ -19,7 +21,16 @@ export function dropSentence(manifest: Manifest | null | undefined): string | nu
   return `ส่ง${main.label.trim()}มาได้เลย`;
 }
 
-export function EmptyDrop({ manifest, onPick }: { manifest: Manifest | null | undefined; onPick: () => void }) {
+export function EmptyDrop({
+  manifest,
+  onPick,
+  estimate,
+}: {
+  manifest: Manifest | null | undefined;
+  onPick: () => void;
+  /** AM6: what a round costs, in the server's sentence (absent: not known, nothing is said). */
+  estimate?: string | null;
+}) {
   const t = useAmT();
   const sentence = dropSentence(manifest) ?? t("empty.fallback");
   const inputs = manifest?.inputs ?? [];
@@ -37,11 +48,12 @@ export function EmptyDrop({ manifest, onPick }: { manifest: Manifest | null | un
       </h2>
       {main?.note ? <p className="max-w-xl text-sm text-text-secondary">{main.note}</p> : null}
       <div className="flex flex-col items-center gap-1.5">
-        <button type="button" onClick={onPick} className={BTN_PRIMARY} data-testid="am-empty-pick">
+        <Button type="button" onClick={onPick} data-testid="am-empty-pick">
           {t("empty.pick")}
-        </button>
+        </Button>
         <span className="text-xs text-text-muted">{t("empty.drop")}</span>
       </div>
+      <EstimateLine line={estimate} center />
       {optional.length ? (
         <p className="max-w-xl text-xs text-text-muted">
           {`${t("common.optional")}: ${optional.map((i) => i.label).join(" · ")}`}

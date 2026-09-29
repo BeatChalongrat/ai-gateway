@@ -14,6 +14,7 @@ import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT } from "../i18n";
 import { extensionOf, formatDate, formatDateTime } from "../format";
 import { groupExceptions, reasonText } from "../exceptions/exceptions";
+import { outcomeKey, outcomeOf, outcomeTone } from "../outcome";
 import type { RunExceptionRow, SharedRun } from "../types";
 import { BackLink, Card, ErrorPanel, NotAvailable, PageShell, PageSkeleton, Pill, type Tone } from "../ui";
 import { useAgentMarket } from "../useAgentMarket";
@@ -28,7 +29,6 @@ export function SharedRunPage({ shareId }: { shareId: string }) {
   return <Shared shareId={shareId} />;
 }
 
-const STATUS_TONE: Record<string, Tone> = { succeeded: "success", failed: "danger", awaiting_input: "warning" };
 
 function Shared({ shareId }: { shareId: string }) {
   const t = useAmT();
@@ -86,9 +86,12 @@ function Shared({ shareId }: { shareId: string }) {
               .join(" · ")}
           </p>
         </div>
-        <Pill tone={STATUS_TONE[run.status] ?? "neutral"} size="md">
-          {t(`progress.title.${run.status}` as "progress.title.succeeded")}
-        </Pill>
+        {/* AM6: named by what the run came to */}
+        <span data-testid="am-shared-status" data-outcome={outcomeOf(run)}>
+          <Pill tone={outcomeTone(outcomeOf(run))} size="md">
+            {t(outcomeKey(outcomeOf(run), run.status_reason) ?? "progress.title.running")}
+          </Pill>
+        </span>
       </div>
 
       <p className="mt-3 rounded-lg border border-border bg-bg-surface px-3 py-2 text-xs text-text-secondary">

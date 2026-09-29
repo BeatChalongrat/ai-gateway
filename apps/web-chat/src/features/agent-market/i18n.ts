@@ -13,6 +13,7 @@
 import { am3Th } from "./i18n.am3";
 import { am4Th } from "./i18n.am4";
 import { am5Th } from "./i18n.am5";
+import { am6Th } from "./i18n.am6";
 
 const thBase = {
   // common
@@ -361,7 +362,6 @@ const thBase = {
   "outputs.credits": "ใช้เครดิต {n}",
 
   // composer
-  "composer.placeholder": "แนบไฟล์ด้วยปุ่ม + หรือพิมพ์ เช่น ถามเกี่ยวกับตัวเลขของรอบล่าสุด หรือ “ทำรอบใหม่”",
   "composer.label": "ข้อความถึง agent",
   "composer.attach": "แนบไฟล์",
   "composer.send": "ส่ง",
@@ -742,7 +742,7 @@ const thBase = {
 } as const;
 
 // AM3's strings (self-serve) and AM4's live in their own files, merged here.
-const th = { ...thBase, ...am3Th, ...am4Th, ...am5Th } as const;
+const th = { ...thBase, ...am3Th, ...am4Th, ...am5Th, ...am6Th } as const;
 
 export type AmKey = keyof typeof th;
 

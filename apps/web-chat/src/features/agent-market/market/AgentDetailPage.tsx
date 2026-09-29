@@ -9,11 +9,12 @@
 // install button, before it is pressed); what it will never do; what it asks
 // and what happens with a wrong file; and the data sheet.
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CircleCheck, CircleX, Download, FileText, ShieldCheck, TriangleAlert } from "lucide-react";
 
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { Spinner } from "@/components/ui/Spinner";
 import { formatBytes } from "@/lib/fileUtil";
 
 import { AmError, amApi, errorMessage } from "../api";
@@ -21,26 +22,11 @@ import { useAmT, type AmKey } from "../i18n";
 import { extensionOf } from "../format";
 import type { AmFile, Artifact, CatalogItem, InstallRow, Manifest } from "../types";
 import { QuickInstall } from "../install/QuickInstall";
-import {
-  AgentTile,
-  BackLink,
-  BTN_PRIMARY,
-  BTN_SECONDARY,
-  BTN_SMALL,
-  Card,
-  CheckLine,
-  cls,
-  ErrorPanel,
-  FeatureGate,
-  PageShell,
-  PageSkeleton,
-  Pill,
-  Spin,
-} from "../ui";
+import { AgentTile, BackLink, Card, CheckLine, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { useAgentMarket } from "../useAgentMarket";
 import { runHref, workspaceHref } from "../workspace/context";
 import { formatsLabel } from "./MarketPage";
-import { CostLines, ModelList, useDatasheet, useSample } from "./trust";
+import { CostLines, ModelList, ScopeLine, useDatasheet, useSample } from "./trust";
 
 const DENY_KEYS = new Set(["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]);
 
@@ -122,6 +108,7 @@ function Detail({ slug }: { slug: string }) {
             {t("detail.version", { v: item.version })}
             {formats ? ` · ${formats}` : null}
           </p>
+          <ScopeLine scope={item.scope ?? m.scope} jurisdiction={item.jurisdiction ?? m.jurisdiction} className="mt-0.5" />
           {m.summary ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-text-secondary">{m.summary}</p> : null}
         </div>
       </div>
@@ -302,7 +289,7 @@ function Detail({ slug }: { slug: string }) {
                 <ModelList models={sheet.models ?? []} noModel={sheet.no_model ?? []} compact />
               ) : (
                 <div className="flex items-center gap-2 text-xs text-text-muted">
-                  <Spin size={12} />
+                  <Spinner size={12} />
                   <span>{t("common.loading")}</span>
                 </div>
               )}
@@ -313,22 +300,22 @@ function Detail({ slug }: { slug: string }) {
             </div>
             <div className="mt-5 flex flex-col gap-2">
               {installed ? (
-                <Link href={workspaceHref(installed.id)} className={BTN_PRIMARY}>
+                <ButtonLink href={workspaceHref(installed.id)}>
                   {t("market.open")}
-                </Link>
+                </ButtonLink>
               ) : disabled ? (
                 <p className="text-xs text-text-secondary">{t("guide.cannotInstallDisabled")}</p>
               ) : (
                 <QuickInstall slug={item.slug} />
               )}
-              <Link href={`/chat/agents/${encodeURIComponent(item.slug)}/datasheet`} className={BTN_SECONDARY} data-testid="am-datasheet-link">
+              <ButtonLink href={`/chat/agents/${encodeURIComponent(item.slug)}/datasheet`} variant="secondary" data-testid="am-datasheet-link">
                 <FileText width={15} height={15} aria-hidden />
                 <span>{t("guide.datasheet")}</span>
-              </Link>
+              </ButtonLink>
               {installed?.self_test_run_id ? (
-                <Link href={runHref(installed.self_test_run_id)} className={BTN_SMALL}>
+                <ButtonLink href={runHref(installed.self_test_run_id)} variant="secondary" size="sm">
                   {t("detail.sampleOpen")}
-                </Link>
+                </ButtonLink>
               ) : null}
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-text-muted">{t("guide.installNote")}</p>
@@ -348,9 +335,11 @@ function UnpublishedBanner({ slug, onDone }: { slug: string; onDone: () => void 
     <div className="mt-4 rounded-xl border border-border bg-bg-elevated px-4 py-3 text-sm text-text-primary" data-testid="am-detail-unpublished">
       <p>{t("guide.unpublished")}</p>
       {publisher ? (
-        <button
+        <Button
           type="button"
-          disabled={busy}
+          variant="secondary"
+          size="sm"
+          loading={busy}
           onClick={() => {
             setBusy(true);
             setError(null);
@@ -365,12 +354,11 @@ function UnpublishedBanner({ slug, onDone }: { slug: string; onDone: () => void 
               },
             );
           }}
-          className={cls(BTN_SMALL, "mt-2")}
+          className="mt-2"
           data-testid="am-detail-publish"
         >
-          {busy ? <Spin size={12} /> : null}
           <span>{t("admin.catalog.publish")}</span>
-        </button>
+        </Button>
       ) : null}
       {error ? <p className="mt-2 text-xs text-status-danger">{error}</p> : null}
     </div>
@@ -430,7 +418,7 @@ export function DownloadRow({ name, size, ext, label, download }: { name: string
         aria-label={t("common.downloadNamed", { name })}
         className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
       >
-        {busy ? <Spin size={15} /> : <Download width={16} height={16} aria-hidden />}
+        {busy ? <Spinner size={15} /> : <Download width={16} height={16} aria-hidden />}
       </button>
     </li>
   );

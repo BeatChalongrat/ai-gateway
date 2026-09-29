@@ -10,12 +10,14 @@
 
 import { Printer } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+
 import { errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDateTime } from "../format";
 import type { DatasheetRetention } from "../types";
-import { BackLink, BTN_SMALL, CheckLine, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
-import { ModelList, useDatasheet } from "./trust";
+import { BackLink, CheckLine, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
+import { ModelList, ScopeLine, useDatasheet } from "./trust";
 
 const DENY_KEYS = new Set(["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]);
 
@@ -80,12 +82,13 @@ function Sheet({ slug }: { slug: string }) {
             <p className="text-[11px] font-medium tracking-wide text-text-muted">{t("ds.kicker")}</p>
             <h1 className="mt-1 text-xl font-semibold tracking-tight">{sheet.name}</h1>
             <p className="mt-0.5 text-xs text-text-muted">{`${sheet.slug} · ${t("detail.version", { v: sheet.version })}`}</p>
+            <ScopeLine scope={sheet.scope} jurisdiction={sheet.jurisdiction} className="mt-0.5" />
             {sheet.summary ? <p className="mt-2 text-sm leading-relaxed text-text-secondary">{sheet.summary}</p> : null}
           </div>
-          <button type="button" onClick={() => window.print()} className={`${BTN_SMALL} print:hidden`} data-testid="am-ds-print">
+          <Button type="button" variant="secondary" size="sm" onClick={() => window.print()} className="print:hidden" data-testid="am-ds-print">
             <Printer width={14} height={14} aria-hidden />
             <span>{t("ds.print")}</span>
-          </button>
+          </Button>
         </header>
 
         <section>

@@ -7,12 +7,16 @@
 // one reads without scrolling past every month before it. A self-test folds
 // as soon as it has finished: it is the sample's round, not the person's.
 
+import { outcomeOf } from "../outcome";
 import type { IntentPayload, NoticePayload, OutputArtifact, OutputsPayload, ProgressPayload, ThreadItem } from "../types";
 
 export interface RoundInfo {
   runId: string;
   kind: "run" | "self_test" | string;
   status: string;
+  /** AM6: what the round came to (the status, from a server that sends no outcome) and its reason's code */
+  outcome: string;
+  reason: string;
   period: string;
   artifacts: OutputArtifact[];
   /** AM5: how many documents the round's newest files card still lists as left out */
@@ -35,7 +39,17 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
     const p = (it.payload ?? {}) as ProgressPayload;
     const kind = p.kind ?? "run";
     if (!p.run_id || (kind !== "run" && kind !== "self_test")) continue;
-    rounds.set(p.run_id, { runId: p.run_id, kind, status: p.status, period: "", artifacts: [], notIncluded: 0, endItemId: it.id });
+    rounds.set(p.run_id, {
+      runId: p.run_id,
+      kind,
+      status: p.status,
+      outcome: outcomeOf(p),
+      reason: p.reason ?? "",
+      period: "",
+      artifacts: [],
+      notIncluded: 0,
+      endItemId: it.id,
+    });
   }
   for (const it of items) {
     if (it.kind !== "outputs") continue;
@@ -156,6 +170,23 @@ export function latestRound(items: ThreadItem[]): RoundInfo | null {
     if (r && r.kind === "run") last = r;
   }
   return last;
+}
+
+/** AM6: the agent is at work in this thread — a run of any kind is queued,
+ *  running or waiting for an answer (the composer's suggestions step aside). */
+export function roundUnderway(items: ThreadItem[]): boolean {
+  return items.some((it) => {
+    if (it.kind !== "progress") return false;
+    const p = (it.payload ?? {}) as ProgressPayload;
+    return !!p.run_id && !TERMINAL.has(p.status);
+  });
+}
+
+/** AM6: the person's latest round has ended and left files: there are
+ *  figures to ask about and another format to ask for. */
+export function hasFinishedRound(items: ThreadItem[]): boolean {
+  const last = latestRound(items);
+  return !!last && TERMINAL.has(last.status) && last.artifacts.length > 0;
 }
 
 /** An open round-boundary chip in the thread. */

@@ -5,29 +5,25 @@
 // ticks locally while the run is working (from started_at). While the round
 // works, the card's title is the app's own "working" indicator (AM5: the
 // chat's CatIndicator), not a spinner of its own.
+//
+// AM6 — the title and the colour go by what the run came to: a round that
+// delivered its draft while the agent's gate did not pass is finished, with
+// a note on the gate's line, and is not drawn as a failure.
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Check, Pause, X } from "lucide-react";
 
 import { CatIndicator } from "@/components/chat/CatIndicator";
+import { Button, ButtonLink } from "@/components/ui/Button";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { elapsedBetween, formatDuration } from "../format";
+import { outcomeKey, outcomeOf } from "../outcome";
 import type { ProgressPayload, ProgressStepStatus } from "../types";
-import { BTN_SMALL, cls, Spin } from "../ui";
+import { cls } from "../ui";
 import { runHref } from "./context";
 import { personText } from "./personText";
-
-const TITLE: Record<string, AmKey> = {
-  queued: "progress.title.queued",
-  running: "progress.title.running",
-  awaiting_input: "progress.title.awaiting_input",
-  succeeded: "progress.title.succeeded",
-  failed: "progress.title.failed",
-  cancelled: "progress.title.cancelled",
-};
 
 const STEP_STATUS: Record<string, AmKey> = {
   done: "stepStatus.done",
@@ -36,6 +32,7 @@ const STEP_STATUS: Record<string, AmKey> = {
   failed: "stepStatus.failed",
   pending: "stepStatus.pending",
   skipped: "stepStatus.skipped",
+  open: "stepStatus.open",
 };
 
 const REASON: Record<string, AmKey> = {
@@ -72,6 +69,13 @@ export function StepIcon({ status }: { status: ProgressStepStatus | string }) {
           <X width={15} height={15} strokeWidth={2.5} />
         </span>
       );
+    case "open":
+      // AM6: the step finished and left a note — a check, in the colour of a note
+      return (
+        <span className={cls(box, "text-status-warning")} aria-hidden data-step-icon="open">
+          <Check width={15} height={15} strokeWidth={2.5} />
+        </span>
+      );
     case "skipped":
       return (
         <span className={cls(box, "text-text-muted")} aria-hidden>
@@ -101,6 +105,8 @@ function useNow(active: boolean): number {
 export function ProgressCard({ progress, hideRunLink = false }: { progress: ProgressPayload; hideRunLink?: boolean }) {
   const t = useAmT();
   const status = progress.status;
+  const outcome = outcomeOf(progress);
+  const title = t(outcomeKey(outcome, progress.reason) ?? "progress.title.running");
   const active = ACTIVE.has(status);
   const ticking = status === "running" && !!progress.started_at;
   const now = useNow(ticking);
@@ -129,19 +135,17 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
     <div
       className={cls(
         "rounded-xl border bg-bg-surface px-4 py-3",
-        status === "failed" ? "border-status-danger/40" : status === "awaiting_input" ? "border-status-warning/40" : "border-border",
+        outcome === "failed" ? "border-status-danger/40" : status === "awaiting_input" ? "border-status-warning/40" : "border-border",
       )}
       data-testid="am-progress"
       data-status={status}
+      data-outcome={outcome}
+      data-run={progress.run_id}
     >
       <div className="flex items-center gap-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-text-primary" data-testid="am-progress-title">
-            {active && status !== "awaiting_input" ? (
-              <CatIndicator label={t(TITLE[status] ?? "progress.title.running")} />
-            ) : (
-              t(TITLE[status] ?? "progress.title.running")
-            )}
+            {active && status !== "awaiting_input" ? <CatIndicator label={title} /> : title}
           </div>
           {progress.kind === "self_test" ? <div className="text-xs text-text-muted">{t("progress.selfTest")}</div> : null}
         </div>
@@ -183,15 +187,14 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
       {!hideRunLink || active ? (
         <div className="mt-3 flex flex-wrap gap-2 border-t border-border-subtle pt-3">
           {!hideRunLink ? (
-            <Link href={runHref(progress.run_id)} className={BTN_SMALL}>
+            <ButtonLink href={runHref(progress.run_id)} variant="secondary" size="sm">
               {t("progress.viewAll")}
-            </Link>
+            </ButtonLink>
           ) : null}
           {active ? (
-            <button type="button" onClick={cancel} disabled={cancelling} className={BTN_SMALL} data-testid="am-progress-cancel">
-              {cancelling ? <Spin size={12} /> : null}
+            <Button type="button" variant="secondary" size="sm" onClick={cancel} loading={cancelling} data-testid="am-progress-cancel">
               <span>{cancelling ? t("progress.cancelling") : t("progress.cancel")}</span>
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}

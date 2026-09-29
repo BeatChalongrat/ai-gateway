@@ -12,13 +12,15 @@
 import { useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 import { useAuthStore } from "@/stores/authStore";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { formatMoney } from "../format";
 import type { Default, ExpensePolicy, Manifest } from "../types";
-import { BTN_PRIMARY, BTN_PRIMARY_SMALL, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, Pill, Spin } from "../ui";
+import { ErrorPanel, Pill } from "../ui";
 import { Footer, StepHeader } from "../install/steps";
 import { HolidayEditor, PolicyEditor } from "./PolicyEditor";
 import {
@@ -161,7 +163,7 @@ export function PolicyStep({ installId, manifest, onBack, onNext }: { installId:
           <PolicyForm state={state} setState={setState} showAll={showAll} disabled={saving} idPrefix="am-policy" />
         ) : (
           <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <Spin size={14} />
+            <Spinner size={14} />
             <span>{t("common.loading")}</span>
           </div>
         )}
@@ -172,14 +174,13 @@ export function PolicyStep({ installId, manifest, onBack, onNext }: { installId:
         </div>
       ) : null}
       <Footer>
-        <button type="button" onClick={() => void save()} disabled={saving || !state} className={BTN_PRIMARY} data-testid="am-policy-save">
-          {saving ? <Spin size={14} /> : null}
+        <Button type="button" onClick={() => void save()} loading={saving} disabled={!state} data-testid="am-policy-save">
           <span>{saving ? t("common.saving") : t("common.next")}</span>
-        </button>
+        </Button>
         {onBack ? (
-          <button type="button" onClick={onBack} disabled={saving} className={cls(BTN_SECONDARY, "ml-auto")}>
+          <Button type="button" variant="secondary" onClick={onBack} disabled={saving} className="ml-auto">
             {t("common.previous")}
-          </button>
+          </Button>
         ) : null}
       </Footer>
     </div>
@@ -255,20 +256,21 @@ export function PolicySection({
               </div>
               {d.source === "package_sample" ? <p className="mt-2 text-xs text-text-secondary">{t("policy.sample")}</p> : null}
             </div>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setState(initialPolicy(defaults, manifest));
                 setShowAll(false);
                 setError(null);
                 setEditing(true);
               }}
-              className={BTN_SMALL}
               data-testid="am-policy-edit"
             >
               <Pencil width={13} height={13} aria-hidden />
               <span>{t("policy.edit")}</span>
-            </button>
+            </Button>
           </div>
         ) : (
           <form
@@ -284,13 +286,12 @@ export function PolicySection({
               </div>
             ) : null}
             <div className="mt-4 flex gap-2">
-              <button type="submit" disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-policy-submit">
-                {busy ? <Spin size={12} /> : null}
+              <Button type="submit" size="sm" loading={busy} data-testid="am-policy-submit">
                 <span>{busy ? t("common.saving") : t("common.save")}</span>
-              </button>
-              <button type="button" onClick={() => setEditing(false)} disabled={busy} className={BTN_SMALL}>
+              </Button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setEditing(false)} disabled={busy}>
                 {t("common.cancel")}
-              </button>
+              </Button>
             </div>
           </form>
         )}

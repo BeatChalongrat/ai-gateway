@@ -10,13 +10,15 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { Spinner } from "@/components/ui/Spinner";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { tAm, useAmLocale, useAmT } from "../i18n";
 import { formatDate } from "../format";
 import type { SavedTemplate, TemplateInspect, TemplateSpec } from "../types";
-import { BTN_PRIMARY_SMALL, BTN_SMALL, ErrorPanel, Spin } from "../ui";
+import { ErrorPanel } from "../ui";
 import { mappedCount } from "./mapping";
 import { TemplateMapper } from "./TemplateMapper";
 
@@ -164,7 +166,7 @@ export function TemplateSection({
             <div aria-live="polite">
               {phase.kind === "uploading" || phase.kind === "reading" ? (
                 <div role="status" className="mt-3 flex items-center gap-2 text-xs text-text-secondary">
-                  <Spin size={13} />
+                  <Spinner size={13} />
                   <span className="min-w-0 truncate">
                     {`${phase.name} · ${phase.kind === "uploading" ? t("tpl.uploading", { pct: String(phase.pct) }) : t("tpl.reading")}`}
                   </span>
@@ -183,30 +185,30 @@ export function TemplateSection({
                   {t("tpl.stopConfirm")}
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => void remove()} disabled={removing} className={BTN_PRIMARY_SMALL} data-testid="am-template-stop-yes">
-                    {removing ? <Spin size={12} /> : null}
+                  <Button type="button" size="sm" onClick={() => void remove()} loading={removing} data-testid="am-template-stop-yes">
                     <span>{removing ? t("tpl.stopping") : t("tpl.stopYes")}</span>
-                  </button>
-                  <button type="button" onClick={() => setConfirming(false)} disabled={removing} className={BTN_SMALL}>
+                  </Button>
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setConfirming(false)} disabled={removing}>
                     {t("common.cancel")}
-                  </button>
+                  </Button>
                 </div>
               </div>
             ) : (
               <div className="mt-3 flex flex-wrap gap-2">
-                <button
+                <Button
                   type="button"
+                  variant={saved ? "secondary" : "primary"}
+                  size="sm"
                   onClick={() => inputRef.current?.click()}
                   disabled={busy}
-                  className={saved ? BTN_SMALL : BTN_PRIMARY_SMALL}
                   data-testid="am-template-upload"
                 >
                   {saved ? t("tpl.replace") : t("tpl.upload")}
-                </button>
+                </Button>
                 {saved ? (
-                  <button type="button" onClick={() => setConfirming(true)} disabled={busy} className={BTN_SMALL} data-testid="am-template-stop">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => setConfirming(true)} disabled={busy} data-testid="am-template-stop">
                     {t("tpl.stop")}
-                  </button>
+                  </Button>
                 ) : null}
               </div>
             )}

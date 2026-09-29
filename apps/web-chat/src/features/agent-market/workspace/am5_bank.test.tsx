@@ -66,6 +66,8 @@ const tied: OutputsPayload = {
 
 beforeEach(() => {
   useI18nStore.setState({ locale: "en" });
+  // Modal reads matchMedia for its mobile sheet; jsdom has none.
+  window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
 });
 afterEach(cleanup);
 

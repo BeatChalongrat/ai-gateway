@@ -11,25 +11,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { creditsToBaht, formatBaht, formatCredits, formatDateTime } from "../format";
 import type { AdminCatalogRow, AdminOrg, AdminSpend, OrgMember, Pricing, ProblemReport, SpendRow } from "../types";
-import {
-  AgentTile,
-  BackLink,
-  BTN_DANGER_OUTLINE,
-  BTN_PRIMARY_SMALL,
-  BTN_SMALL,
-  Card,
-  cls,
-  ErrorPanel,
-  FeatureGate,
-  PageShell,
-  Pill,
-  Spin,
-  type Tone,
-} from "../ui";
+import { AgentTile, BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, Pill, type Tone } from "../ui";
 import { DEFAULT_PRICING, useAgentMarket } from "../useAgentMarket";
 import { runHref } from "../workspace/context";
 import { ModelsTab, RunsTab } from "./Am4Tabs";
@@ -42,7 +31,7 @@ const TABS: { id: AdminTab; key: AmKey; adminOnly: boolean }[] = [
   { id: "spend", key: "admin.tab.spend", adminOnly: true },
   // AM4: every run as metadata (content opens one run at a time, with a reason)
   { id: "runs", key: "admin.tab.runs", adminOnly: true },
-  // AM4: documents leaving the organisation, the models people may pick, retention
+  // AM4: documents leaving the organisation, retention
   { id: "models", key: "admin.tab.models", adminOnly: true },
   { id: "catalog", key: "admin.tab.catalog", adminOnly: false },
   { id: "problems", key: "admin.tab.problems", adminOnly: true },
@@ -121,7 +110,7 @@ const FIELD = "focus-ring w-full rounded-lg border border-border bg-bg-base px-3
 function ModelsTabLoader() {
   const { org, error, reload } = useOrg();
   if (error) return <ErrorPanel message={errorMessage(error)} onRetry={reload} />;
-  if (!org) return <Spin size={14} />;
+  if (!org) return <Spinner size={14} />;
   return <ModelsTab org={org.org} onSaved={reload} />;
 }
 
@@ -257,10 +246,9 @@ function AccessTab({ pricing }: { pricing: Pricing }) {
           </label>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={save} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-admin-org-save">
-            {busy ? <Spin size={12} /> : null}
+          <Button type="button" size="sm" onClick={save} loading={busy} data-testid="am-admin-org-save">
             <span>{t("common.save")}</span>
-          </button>
+          </Button>
           {msg ? <Note msg={msg} /> : null}
         </div>
       </Card>
@@ -332,10 +320,9 @@ function People({ org, reload, pricing }: { org: AdminOrg; reload: () => void; p
           ))}
         </select>
         <input value={add.budget} onChange={(e) => setAdd({ ...add, budget: e.target.value })} placeholder={t("admin.people.budgetDefault")} aria-label={t("admin.people.budget")} inputMode="numeric" className={FIELD} />
-        <button type="submit" disabled={busy || !add.email.trim()} className={BTN_PRIMARY_SMALL} data-testid="am-admin-add-save">
-          {busy ? <Spin size={12} /> : null}
+        <Button type="submit" size="sm" loading={busy} disabled={!add.email.trim()} data-testid="am-admin-add-save">
           <span>{t("admin.people.add")}</span>
-        </button>
+        </Button>
       </form>
       <datalist id="am-admin-depts">
         {depts.map((d) => (
@@ -446,15 +433,14 @@ function PersonRow({ m, reload, defaultBudget, pricing }: { m: OrgMember; reload
         <td className="whitespace-nowrap py-2">
           <div className="flex gap-1.5">
             {changed ? (
-              <button type="button" onClick={save} disabled={busy} className={BTN_PRIMARY_SMALL}>
-                {busy ? <Spin size={12} /> : null}
+              <Button type="button" size="sm" onClick={save} loading={busy}>
                 <span>{t("common.save")}</span>
-              </button>
+              </Button>
             ) : null}
             {!m.env_admin ? (
-              <button type="button" onClick={remove} disabled={busy} className={BTN_SMALL} aria-label={t("admin.people.removeFor", { email: m.email })}>
+              <Button type="button" variant="secondary" size="sm" onClick={remove} disabled={busy} aria-label={t("admin.people.removeFor", { email: m.email })}>
                 <Trash2 width={13} height={13} aria-hidden />
-              </button>
+              </Button>
             ) : null}
           </div>
         </td>
@@ -507,9 +493,9 @@ function DepartmentsTab({ pricing }: { pricing: Pricing }) {
           <input value={add.budget} onChange={(e) => setAdd({ ...add, budget: e.target.value })} placeholder={t("admin.dept.noLimit")} aria-label={t("admin.dept.budget")} inputMode="numeric" className={FIELD} />
           <input value={add.contact_name} onChange={(e) => setAdd({ ...add, contact_name: e.target.value })} placeholder={t("admin.dept.contactName")} aria-label={t("admin.dept.contactName")} className={FIELD} />
           <input type="email" value={add.contact_email} onChange={(e) => setAdd({ ...add, contact_email: e.target.value })} placeholder={t("admin.dept.contactEmail")} aria-label={t("admin.dept.contactEmail")} className={FIELD} />
-          <button type="submit" disabled={!add.name.trim()} className={BTN_PRIMARY_SMALL} data-testid="am-admin-dept-add">
+          <Button type="submit" size="sm" disabled={!add.name.trim()} data-testid="am-admin-dept-add">
             {t("admin.dept.add")}
-          </button>
+          </Button>
         </form>
         {msg ? (
           <div className="mt-2">
@@ -528,19 +514,20 @@ function DepartmentsTab({ pricing }: { pricing: Pricing }) {
                     ? t("admin.dept.noLimit")
                     : t("admin.dept.limitLine", { credits: formatCredits(d.monthly_credits), baht: bahtPerMonth(d.monthly_credits, pricing) })}
                 </span>
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
+                  size="sm"
                   onClick={() =>
                     amApi.adminDeleteDepartment(d.name).then(
                       () => reload(),
                       (err) => setMsg({ text: errorMessage(err), ok: false }),
                     )
                   }
-                  className={BTN_SMALL}
                   aria-label={t("admin.dept.removeFor", { name: d.name })}
                 >
                   <Trash2 width={13} height={13} aria-hidden />
-                </button>
+                </Button>
               </div>
               <p className="mt-0.5 text-xs text-text-muted">
                 {d.contact_name || d.contact_email ? t("admin.dept.contactLine", { who: [d.contact_name, d.contact_email].filter(Boolean).join(" · ") }) : t("admin.dept.noContact")}
@@ -596,6 +583,15 @@ function SpendTab({ pricing }: { pricing: Pricing }) {
           <p className="text-sm text-text-primary" data-testid="am-admin-spend-total">
             {t("admin.spend.total", { credits: formatCredits(data.total_credits), baht: formatBaht(creditsToBaht(data.total_credits, p)), n: String(data.days) })}
           </p>
+          {/* AM6: what the platform paid for rounds that delivered nothing, charged to nobody */}
+          {typeof data.total_cost_not_charged === "number" ? (
+            <p className="text-xs text-text-muted" data-testid="am-admin-spend-not-charged-total">
+              {t("admin.spend.totalNotCharged", {
+                credits: formatCredits(data.total_cost_not_charged),
+                baht: formatBaht(creditsToBaht(data.total_cost_not_charged, p)),
+              })}
+            </p>
+          ) : null}
           <Card>
             <h2 className="text-sm font-semibold text-text-primary">{t("admin.spend.byUser")}</h2>
             <SpendTable rows={data.by_user ?? []} kind="user" pricing={p} locale={locale} />
@@ -616,6 +612,8 @@ function SpendTab({ pricing }: { pricing: Pricing }) {
 function SpendTable({ rows, kind, pricing, locale }: { rows: SpendRow[]; kind: "user" | "agent"; pricing: Pricing; locale: string }) {
   const t = useAmT();
   if (!rows.length) return <p className="mt-2 text-sm text-text-muted">{t("admin.spend.none")}</p>;
+  // AM6: a server that counts rounds finished open sends them apart from failures
+  const counted = rows.some((r) => typeof r.completed_open === "number");
   return (
     <div className="scrollbar-thin mt-2 overflow-x-auto">
       <table className="w-full border-collapse text-sm" data-testid={`am-admin-spend-${kind}`}>
@@ -623,8 +621,9 @@ function SpendTable({ rows, kind, pricing, locale }: { rows: SpendRow[]; kind: "
           <tr className="border-b border-border-subtle text-left text-[11px] text-text-muted">
             <th className="py-1.5 pr-3 font-medium">{kind === "user" ? t("admin.spend.person") : t("admin.spend.agent")}</th>
             <th className="py-1.5 pr-3 text-right font-medium">{t("admin.spend.runs")}</th>
-            <th className="py-1.5 pr-3 text-right font-medium">{t("admin.spend.okFailWait")}</th>
+            <th className="py-1.5 pr-3 text-right font-medium">{counted ? t("admin.spend.outcomes") : t("admin.spend.okFailWait")}</th>
             <th className="py-1.5 pr-3 text-right font-medium">{t("admin.spend.credits")}</th>
+            {counted ? <th className="py-1.5 pr-3 text-right font-medium">{t("admin.spend.notCharged")}</th> : null}
             <th className="py-1.5 pr-3 text-right font-medium">{t("admin.spend.month")}</th>
             <th className="py-1.5 font-medium">{t("admin.spend.lastRun")}</th>
           </tr>
@@ -641,11 +640,18 @@ function SpendTable({ rows, kind, pricing, locale }: { rows: SpendRow[]; kind: "
                 )}
               </td>
               <td className="py-1.5 pr-3 text-right tabular-nums">{r.runs}</td>
-              <td className="py-1.5 pr-3 text-right tabular-nums text-text-secondary">{`${r.succeeded} / ${r.failed} / ${r.waiting}`}</td>
+              <td className="py-1.5 pr-3 text-right tabular-nums text-text-secondary" data-testid="am-admin-spend-outcomes">
+                {counted ? `${r.succeeded} / ${r.completed_open ?? 0} / ${r.failed} / ${r.waiting}` : `${r.succeeded} / ${r.failed} / ${r.waiting}`}
+              </td>
               <td className="py-1.5 pr-3 text-right tabular-nums">
                 {formatCredits(r.credits)}
                 <span className="block text-[11px] text-text-muted">{`≈ ${formatBaht(creditsToBaht(r.credits, pricing))}`}</span>
               </td>
+              {counted ? (
+                <td className="py-1.5 pr-3 text-right tabular-nums text-text-secondary" data-testid="am-admin-spend-not-charged">
+                  {formatCredits(r.cost_not_charged ?? 0)}
+                </td>
+              ) : null}
               <td className="py-1.5 pr-3 text-right tabular-nums">
                 {formatCredits(r.month_spent)}
                 {r.monthly_limit ? <span className="block text-[11px] text-text-muted">{t("admin.spend.ofLimit", { limit: formatCredits(r.monthly_limit) })}</span> : null}
@@ -755,24 +761,24 @@ function CatalogRow({ row, admin, reload }: { row: AdminCatalogRow; admin: boole
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {status === "unpublished" ? (
-          <button type="button" onClick={() => act({ status: "published" })} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-admin-publish">
+          <Button type="button" size="sm" onClick={() => act({ status: "published" })} disabled={busy} data-testid="am-admin-publish">
             {t("admin.catalog.publish")}
-          </button>
+          </Button>
         ) : null}
         {status === "published" ? (
-          <button type="button" onClick={() => act({ status: "unpublished" })} disabled={busy} className={BTN_SMALL}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => act({ status: "unpublished" })} disabled={busy}>
             {t("admin.catalog.unpublish")}
-          </button>
+          </Button>
         ) : null}
         {admin && status === "disabled" ? (
-          <button type="button" onClick={() => act({ status: "published" })} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-admin-enable">
+          <Button type="button" size="sm" onClick={() => act({ status: "published" })} disabled={busy} data-testid="am-admin-enable">
             {t("admin.catalog.enable")}
-          </button>
+          </Button>
         ) : null}
-        <button type="button" onClick={sample} disabled={busy} className={BTN_SMALL}>
+        <Button type="button" variant="secondary" size="sm" onClick={sample} disabled={busy}>
           {t("admin.catalog.remakeSample")}
-        </button>
-        {busy ? <Spin size={12} /> : null}
+        </Button>
+        {busy ? <Spinner size={12} /> : null}
       </div>
       {admin && status !== "disabled" ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -784,9 +790,9 @@ function CatalogRow({ row, admin, reload }: { row: AdminCatalogRow; admin: boole
             className={cls(FIELD, "min-w-[14rem] flex-1")}
             data-testid="am-admin-disable-reason"
           />
-          <button type="button" onClick={() => act({ status: "disabled", reason })} disabled={busy} className={BTN_DANGER_OUTLINE} data-testid="am-admin-disable">
+          <Button type="button" variant="danger" onClick={() => act({ status: "disabled", reason })} disabled={busy} data-testid="am-admin-disable">
             {t("admin.catalog.disable")}
-          </button>
+          </Button>
         </div>
       ) : null}
       {admin && status !== "disabled" ? <p className="mt-1 text-[11px] text-text-muted">{t("admin.catalog.disableHint")}</p> : null}
@@ -863,9 +869,11 @@ function ProblemRow({ p, reload }: { p: ProblemReport; reload: () => void }) {
       {open ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t("admin.problems.notePlaceholder")} aria-label={t("admin.problems.note")} className={cls(FIELD, "min-w-[14rem] flex-1")} />
-          <button
+          <Button
             type="button"
-            disabled={busy}
+            variant="secondary"
+            size="sm"
+            loading={busy}
             onClick={() => {
               setBusy(true);
               setMsg(null);
@@ -880,12 +888,10 @@ function ProblemRow({ p, reload }: { p: ProblemReport; reload: () => void }) {
                 },
               );
             }}
-            className={BTN_SMALL}
             data-testid="am-admin-problem-close"
           >
-            {busy ? <Spin size={12} /> : null}
             <span>{t("admin.problems.close")}</span>
-          </button>
+          </Button>
         </div>
       ) : p.admin_note ? (
         <p className="mt-1 text-xs text-text-muted">{t("admin.problems.closedNote", { who: p.closed_by, note: p.admin_note })}</p>
@@ -899,7 +905,7 @@ function Loading() {
   const t = useAmT();
   return (
     <div className="flex items-center gap-2 text-sm text-text-secondary" role="status">
-      <Spin size={14} />
+      <Spinner size={14} />
       <span>{t("common.loading")}</span>
     </div>
   );

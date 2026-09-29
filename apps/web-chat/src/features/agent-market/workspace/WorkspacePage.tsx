@@ -13,38 +13,48 @@
 // an empty workspace says in one loud sentence what to drop in; a finished
 // round closes with a divider and "เริ่มรอบใหม่"; ?thread=<id> shows another
 // chat with the same agent.
+//
+// AM6: ?run=<id> brings that round into view once the thread has loaded — a
+// notification's link, a reminder's waiting round. A round of another chat
+// with the agent opens that chat on it.
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ListChecks } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
+import { ButtonLink } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import type { InstallDetail, InstallRow, ProgressPayload, ThreadItem } from "../types";
-import { AgentTile, BTN_SECONDARY, BTN_SMALL, cls, ErrorPanel, FeatureGate, PageShell, Spin } from "../ui";
+import { AgentTile, ErrorPanel, FeatureGate, PageShell } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
 import { togglePin } from "../useRail";
 import { BudgetBanner } from "./BudgetBanner";
 import { Composer, type ComposerHandle } from "./Composer";
-import { provenanceHref, WorkspaceContext, type WorkspaceCtx } from "./context";
+import { provenanceHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
 import { EmptyDrop } from "./EmptyDrop";
-import { ModelControl, useModelPicker } from "./ModelControl";
-import { hasOwnRound, latestRound } from "./rounds";
+import { useEstimate } from "./Estimate";
+import { ModelControl, useAgentModels } from "./ModelControl";
+import { hasFinishedRound, hasOwnRound, latestRound, roundUnderway } from "./rounds";
 import { ThreadView } from "./ThreadView";
 import { UploadInfo } from "./UploadInfo";
 import { useThread } from "./useThread";
 import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
-export function WorkspacePage({ installId, threadId = null }: { installId: string; threadId?: string | null }) {
+export function WorkspacePage({ installId, threadId = null, runId = null }: { installId: string; threadId?: string | null; runId?: string | null }) {
   return (
     <FeatureGate>
-      <Workspace installId={installId} threadId={threadId || null} />
+      <Workspace installId={installId} threadId={threadId || null} runId={runId || null} />
     </FeatureGate>
   );
 }
+
+/** A run id as it may stand in a selector (ids are uuids). */
+const RUN_ID = /^[\w-]{1,80}$/;
 
 function useInstalls(): InstallRow[] {
   const [rows, setRows] = useState<InstallRow[]>([]);
@@ -65,8 +75,9 @@ function useInstalls(): InstallRow[] {
   return rows;
 }
 
-function Workspace({ installId, threadId }: { installId: string; threadId: string | null }) {
+function Workspace({ installId, threadId, runId }: { installId: string; threadId: string | null; runId: string | null }) {
   const t = useAmT();
+  const router = useRouter();
   const snap = useAgentMarket();
   const [detail, setDetail] = useState<InstallDetail | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -75,8 +86,9 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
   const thread = useThread(installId, threadId);
   const composerRef = useRef<ComposerHandle>(null);
   const [pinnedAt, setPinnedAt] = useState<string | null | undefined>(undefined);
-  const [picker, setPicker] = useModelPicker(installId);
-  const [roundModel, setRoundModel] = useState<string | null>(null);
+  const [models, setModels] = useAgentModels(installId);
+  // AM6: what a round costs, said where a person decides to start one.
+  const estimate = useEstimate(installId);
 
   // AM3: "recently used" in the rail starts from opening the workspace.
   useEffect(() => {
@@ -144,6 +156,9 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
   // AM4: "ที่มาของตัวเลข" opens the latest round of the person's own files.
   const latest = useMemo(() => latestRound(thread.items), [thread.items]);
   const empty = thread.status !== "loading" && !hasOwnRound(thread.items);
+  // AM6: the composer's suggestions go while the agent is at work, and two of them need a round to ask about.
+  const underway = useMemo(() => roundUnderway(thread.items), [thread.items]);
+  const finished = useMemo(() => hasFinishedRound(thread.items), [thread.items]);
 
   // the self-tests in this thread (their files are the sample's, not to be signed off)
   const selfTestSig = useMemo(
@@ -175,6 +190,28 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
     [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig, threadId, snap.admin],
   );
 
+  // ?run=<id>: once, when the thread has loaded — the thread moving on afterwards does not pull the reader back
+  const broughtRun = useRef<string | null>(null);
+  useEffect(() => {
+    if (!runId || !RUN_ID.test(runId) || broughtRun.current === runId) return;
+    if (thread.status !== "live" && thread.status !== "reconnecting") return;
+    broughtRun.current = runId;
+    const el = document.querySelector(`[data-testid="am-thread"] [data-run="${runId}"]`);
+    if (el) {
+      el.scrollIntoView?.({ block: "start" });
+      return;
+    }
+    amApi.run(runId).then(
+      (d) => {
+        const run = d?.run;
+        const other = run?.thread_id ?? null;
+        if (!run || run.install_id !== installId || other === threadId) return;
+        router.replace(`${workspaceHref(installId, other)}${other ? "&" : "?"}run=${encodeURIComponent(runId)}`);
+      },
+      () => {},
+    );
+  }, [runId, thread.status, thread.items, installId, threadId, router]);
+
   const onDropFiles = useCallback((files: File[]) => {
     if (Date.now() - claimedAt.current < 300) return; // a card's slot took them
     composerRef.current?.addFiles(files);
@@ -194,9 +231,9 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
         <div className="mt-16 flex flex-col items-center text-center" data-testid="am-ws-not-found">
           <h1 className="text-lg font-semibold text-text-primary">{t("ws.notFound.title")}</h1>
           <p className="mt-1.5 text-sm text-text-secondary">{t("ws.notFound.body")}</p>
-          <Link href="/chat/agents" className={cls(BTN_SECONDARY, "mt-6")}>
+          <ButtonLink href="/chat/agents" variant="secondary" className="mt-6">
             {t("ws.backToMarket")}
-          </Link>
+          </ButtonLink>
         </div>
       </PageShell>
     );
@@ -215,15 +252,16 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
               {tagline ? <p className="truncate text-xs text-text-muted">{tagline}</p> : null}
             </div>
             {latest ? (
-              <Link
+              <ButtonLink
                 href={provenanceHref(latest.runId)}
-                className={BTN_SMALL}
+                variant="secondary"
+                size="sm"
                 title={t("ws.provenanceTitle")}
                 data-testid="am-ws-view-run"
               >
                 <ListChecks width={15} height={15} aria-hidden />
                 <span>{t("ws.provenance")}</span>
-              </Link>
+              </ButtonLink>
             ) : null}
             <WorkspaceMenu installId={installId} threadId={threadId} pinned={pinned} onPin={onPin} />
           </header>
@@ -237,7 +275,7 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
                 <ErrorPanel message={errorMessage(thread.error)} title={t("ws.loadFailed")} onRetry={thread.retry} />
               ) : null}
               <ThreadView items={thread.items} />
-              {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} /> : null}
+              {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} estimate={estimate} /> : null}
             </ThreadScroller>
             <div className="px-4 md:px-10">
               <BudgetBanner installId={installId} refreshKey={progressSig} />
@@ -245,16 +283,17 @@ function Workspace({ installId, threadId }: { installId: string; threadId: strin
             <Composer
               ref={composerRef}
               installId={installId}
-              onSent={(item) => {
-                setRoundModel(null);
-                onSent(item);
-              }}
+              onSent={onSent}
               accept={accept}
               maxMb={maxMb}
               photoNotice={photoNotice}
               threadId={threadId}
-              modelChoice={roundModel}
-              tools={<ModelControl installId={installId} picker={picker} onPicker={setPicker} roundChoice={roundModel} onRoundChoice={setRoundModel} />}
+              agentName={manifest?.short_name || manifest?.name || install?.title}
+              roundUnderway={underway}
+              finishedRound={finished}
+              // the empty workspace says it itself, once
+              estimate={empty ? null : estimate}
+              tools={<ModelControl installId={installId} models={models} onModels={setModels} />}
               footer={
                 <div className="flex flex-col items-center gap-0.5" data-testid="am-ws-footer">
                   {manifest?.cannot ? <p className="text-center text-[11px] text-text-muted">{manifest.cannot}</p> : null}
@@ -304,14 +343,14 @@ function ThreadScroller({ items, status, children }: { items: ThreadItem[]; stat
       <div className="mx-auto flex w-full max-w-chat flex-col gap-4 pb-10">
         {status === "loading" && !items.length ? (
           <div className="flex items-center gap-2 text-sm text-text-muted">
-            <Spin size={14} />
+            <Spinner size={14} />
             <span>{t("common.loading")}</span>
           </div>
         ) : null}
         {children}
         {status === "reconnecting" ? (
           <div role="status" className="flex items-center gap-2 self-center text-xs text-text-muted">
-            <Spin size={12} />
+            <Spinner size={12} />
             <span>{t("ws.reconnecting")}</span>
           </div>
         ) : null}

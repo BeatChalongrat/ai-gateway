@@ -3,22 +3,30 @@
 // The delivered-files card: the period, the quality gate, the three key
 // numbers, each file with its version and a download, and "more files"
 // (a re-render from the SAME computed numbers — nothing is recomputed).
+//
+// AM6 — a round that finished open is a draft that is done, not an alert;
+// the invoice ↔ PO agent says how deep its lines were tested (./PoMatch);
+// a finished round's card offers "ร่างอีเมล" (./EmailDraftCard).
 
-import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { BadgeCheck, ChevronDown, CircleCheck, Download, Plus, TriangleAlert } from "lucide-react";
 
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { Spinner } from "@/components/ui/Spinner";
 import { formatBytes } from "@/lib/fileUtil";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT, type AmKey } from "../i18n";
 import { extensionOf, formatCredits, formatMoney, formatMoney2 } from "../format";
+import { COMPLETED_OPEN, delivered } from "../outcome";
 import type { NotIncluded, OutputArtifact, OutputsPayload, QualityCheck } from "../types";
-import { BTN_SMALL, cls, Pill, Spin } from "../ui";
+import { cls, Pill } from "../ui";
 import { SignOffButton } from "../review/SignOff";
 import { provenanceHref, useWorkspace } from "./context";
+import { DraftEmailButton } from "./EmailDraftCard";
 import { personText } from "./personText";
+import { PO_KIND, PoSummary, ReceiptOffers } from "./PoMatch";
 
 export const FORMAT_KEYS: Record<string, AmKey> = {
   xlsx: "outputs.fmt.xlsx",
@@ -57,14 +65,21 @@ export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | n
 export function OutputsCard({
   outputs,
   superseded = false,
+  outcome,
 }: {
   outputs: OutputsPayload;
   /** AM5: a newer files card of the same round exists below (this one's list is history). */
   superseded?: boolean;
+  /** AM6: what the card's round came to (absent: the card stands outside a thread's rounds). */
+  outcome?: string;
 }) {
   const t = useAmT();
   const ws = useWorkspace();
   const canSignOff = !!ws && !ws.selfTestRuns?.has(outputs.run_id);
+  // AM6: the round finished and delivered this draft — said as a state, not raised as an alert
+  const finishedOpen = outcome === COMPLETED_OPEN;
+  // AM6: a drafted e-mail about the round's own files card (not a re-render's, not a replaced one)
+  const canDraftEmail = canSignOff && !!outcome && delivered(outcome) && !outputs.rerender && !superseded;
   const artifacts = outputs.artifacts ?? [];
   const summary = outputs.summary ?? {};
   const period = outputs.period_label || summary.period_label || "";
@@ -77,6 +92,8 @@ export function OutputsCard({
 
   // AM5: a reconciliation's three numbers are its two adjusted balances and what is between them
   const reconciliation = summary.kind === "bank_reconciliation";
+  // AM6: the invoice ↔ PO agent's counts and how deep its lines were tested
+  const po = summary.kind === PO_KIND;
   const allKpis: { key: AmKey; value: unknown }[] = reconciliation
     ? [
         { key: "outputs.adjustedBank", value: summary.adjusted_bank },
@@ -88,7 +105,7 @@ export function OutputsCard({
         { key: "outputs.expenses", value: summary.total_expenses },
         { key: "outputs.netProfit", value: summary.net_profit },
       ];
-  const kpis = allKpis.filter((k) => k.value !== undefined && k.value !== null);
+  const kpis = po ? [] : allKpis.filter((k) => k.value !== undefined && k.value !== null);
   const gate = outputs.gate ?? null;
   const isDraft = !!outputs.draft;
   const count = (v: unknown) => (typeof v === "number" ? String(v) : "0");
@@ -119,10 +136,10 @@ export function OutputsCard({
       ) : null}
 
       {isDraft ? (
-        <div role="alert" className="mt-2 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2.5" data-testid="am-outputs-draft">
+        <div role={finishedOpen ? "status" : "alert"} className="mt-2 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2.5" data-testid="am-outputs-draft">
           <p className="flex items-center gap-1.5 text-sm font-semibold text-text-primary">
             <TriangleAlert width={15} height={15} className="shrink-0 text-status-warning" aria-hidden />
-            <span>{t("outputs.draft")}</span>
+            <span>{finishedOpen ? t("outputs.draftDone") : t("outputs.draft")}</span>
           </p>
           {personText(gate?.what ?? "") ? <p className="mt-1 text-sm text-text-primary">{personText(gate?.what ?? "")}</p> : null}
           {personText(gate?.next ?? "") ? <p className="mt-0.5 text-xs text-text-secondary">{t("outputs.draftNext", { next: personText(gate?.next ?? "") })}</p> : null}
@@ -160,6 +177,8 @@ export function OutputsCard({
         </p>
       ) : null}
 
+      {po ? <PoSummary summary={summary} /> : null}
+
       {artifacts.length ? (
         <ul className="mt-3 flex flex-col divide-y divide-border-subtle rounded-lg border border-border-subtle">
           {artifacts.map((a) => (
@@ -169,6 +188,8 @@ export function OutputsCard({
       ) : null}
 
       <LeftOut runId={outputs.run_id} docs={outputs.summary?.not_included ?? []} superseded={superseded} />
+
+      {po && Number(summary.receipt_offers) > 0 && !superseded && !outputs.rerender ? <ReceiptOffers runId={outputs.run_id} /> : null}
 
       <SeenBy outputs={outputs} />
 
@@ -219,14 +240,29 @@ export function OutputsCard({
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
-        {/* a draft is neither signed nor made into other files: the round was not a success */}
+        {/* a draft is neither signed nor made into other files: the agent's gate did not pass */}
         {!isDraft ? <MoreFilesMenu runId={outputs.run_id} /> : null}
         {canSignOff && !outputs.review && !isDraft ? <SignOffButton runId={outputs.run_id} /> : null}
-        <Link href={provenanceHref(outputs.run_id)} className={BTN_SMALL}>
+        <ButtonLink href={provenanceHref(outputs.run_id)} variant="secondary" size="sm">
           {t("ws.provenance")}
-        </Link>
+        </ButtonLink>
+        {canDraftEmail ? <DraftEmailButton runId={outputs.run_id} /> : null}
+        {canSignOff && !outputs.review && isDraft ? <SignOffUnavailable why={gate?.what} /> : null}
       </div>
     </div>
+  );
+}
+
+/** AM6 — a round whose files are a draft is not signed: said where the
+ *  sign-off would be, with the agent's own sentence as the reason. */
+export function SignOffUnavailable({ why }: { why?: string | null }) {
+  const t = useAmT();
+  const reason = personText(why ?? "");
+  return (
+    // order-last + w-full: its own line under the row's buttons.
+    <p className="order-last w-full text-[11px] text-text-muted" data-testid="am-signoff-unavailable">
+      {reason ? t("review.unavailableWhy", { why: reason }) : t("review.unavailable")}
+    </p>
   );
 }
 
@@ -288,10 +324,9 @@ function LeftOutRow({ runId, doc, superseded }: { runId: string; doc: NotInclude
         ) : null}
       </div>
       {doc.can_restore && !superseded && !done ? (
-        <button type="button" onClick={restore} disabled={busy} className={BTN_SMALL} data-testid="am-restore">
-          {busy ? <Spin size={12} /> : null}
+        <Button type="button" variant="secondary" size="sm" onClick={restore} loading={busy} data-testid="am-restore">
           <span>{busy ? t("left.restoring") : t("left.restore")}</span>
-        </button>
+        </Button>
       ) : null}
     </li>
   );
@@ -380,7 +415,7 @@ export function ArtifactRow({
         aria-label={t("common.downloadNamed", { name: artifact.name })}
         className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
       >
-        {busy ? <Spin size={15} /> : <Download width={16} height={16} aria-hidden />}
+        {busy ? <Spinner size={15} /> : <Download width={16} height={16} aria-hidden />}
       </button>
     </li>
   );
@@ -429,19 +464,20 @@ function MoreFilesMenu({ runId }: { runId: string }) {
   return (
     <>
       <div ref={ref} className="relative">
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={open ? menuId : undefined}
-          disabled={busy}
+          loading={busy}
           onClick={() => setOpen((v) => !v)}
-          className={BTN_SMALL}
           data-testid="am-more-files"
         >
-          {busy ? <Spin size={12} /> : <Plus width={13} height={13} aria-hidden />}
+          {busy ? null : <Plus width={13} height={13} aria-hidden />}
           <span>{t("outputs.moreFiles")}</span>
-        </button>
+        </Button>
         {open ? (
           <div id={menuId} role="menu" className="absolute bottom-full left-0 z-20 mb-1.5 w-52 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-lg">
             {MORE_FORMATS.map((fmt) => (

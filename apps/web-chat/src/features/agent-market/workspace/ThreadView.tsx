@@ -8,11 +8,16 @@
 // (components/chat/MessageParts), not look-alikes. On top of that surface
 // sit the things only an agent has: the greeting, question cards, the
 // progress of a round, its files and numbers, round dividers.
+//
+// AM6 — a round that delivered its work while the agent's gate did not pass
+// (a reconciliation that does not tie) is a result: it is said on the chat's
+// note, never on the failed-turn card.
 
 import Link from "next/link";
 import { createContext, useContext, useMemo, useState } from "react";
 import { Check, ListChecks, RotateCcw } from "lucide-react";
 
+import { KnowledgeSourcesRow } from "@/components/chat/KnowledgeSources";
 import { Markdown } from "@/components/chat/Markdown";
 import {
   AssistantProse,
@@ -26,14 +31,20 @@ import {
   UserTextPill,
   useCopyText,
 } from "@/components/chat/MessageParts";
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+import type { ContextSource } from "@/lib/types";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import { isUserItem } from "../thread";
 import { ProblemButton } from "../problem/ProblemButton";
 import type {
+  AgentKnowledge,
   AgentTextPayload,
   CardPayload,
+  Completion,
+  EmailDraft,
   Failure,
   GreetingPayload,
   NoticePayload,
@@ -43,22 +54,25 @@ import type {
   UserFilesPayload,
   UserTextPayload,
 } from "../types";
-import { BTN_SMALL, cls, DOT, Spin, Thai } from "../ui";
+import { cls, DOT, Thai } from "../ui";
 import { RunExceptions } from "../exceptions/ExceptionsPanel";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { runHref, settingsHref, useWorkspace } from "./context";
+import { EmailDraftCard } from "./EmailDraftCard";
 import { FileChip } from "./FileChips";
 import { OutputsCard } from "./OutputsCard";
 import { ProgressCard } from "./ProgressCard";
 import { RequestFilesCard } from "./RequestFilesCard";
 import { personText } from "./personText";
 import { FoldedRound, IntentChip, RoundDivider } from "./RoundParts";
-import { segments, supersededOutputs } from "./rounds";
+import { roundsOf, segments, supersededOutputs, type RoundInfo } from "./rounds";
 
 /** AM5: the files cards a newer one of the same round has replaced. */
 const Superseded = createContext<ReadonlySet<string>>(new Set());
+/** AM6: the thread's rounds — a files card is read with what its round came to. */
+const Rounds = createContext<ReadonlyMap<string, RoundInfo>>(new Map());
 
-const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent"]);
+const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent", "email_draft"]);
 
 type Group = { side: "user" | "agent"; items: ThreadItem[] };
 
@@ -77,14 +91,17 @@ export function groupItems(items: ThreadItem[]): Group[] {
 /** AM4: the thread as rounds — a finished round closed by its divider, older ones folded. */
 export function ThreadView({ items }: { items: ThreadItem[] }) {
   const replaced = useMemo(() => supersededOutputs(items), [items]);
+  const rounds = useMemo(() => roundsOf(items), [items]);
   return (
     <Superseded.Provider value={replaced}>
-      <Rounds items={items} />
+      <Rounds.Provider value={rounds}>
+        <RoundList items={items} />
+      </Rounds.Provider>
     </Superseded.Provider>
   );
 }
 
-function Rounds({ items }: { items: ThreadItem[] }) {
+function RoundList({ items }: { items: ThreadItem[] }) {
   const segs = segments(items);
   const out: React.ReactNode[] = [];
   let run: ThreadItem[] = [];
@@ -173,6 +190,7 @@ function UserItem({ item }: { item: ThreadItem }) {
 
 function AgentItem({ item }: { item: ThreadItem }) {
   const replaced = useContext(Superseded);
+  const rounds = useContext(Rounds);
   switch (item.kind) {
     case "greeting":
       return <Greeting p={(item.payload ?? {}) as GreetingPayload} />;
@@ -194,15 +212,20 @@ function AgentItem({ item }: { item: ThreadItem }) {
     case "outputs": {
       const p = item.payload as OutputsPayload;
       if (!p?.run_id) return null;
+      const round = rounds.get(p.run_id);
       // what the run left for a person to decide sits under its files (a re-render has none of its own)
       return p.rerender ? (
-        <OutputsCard outputs={p} />
+        <OutputsCard outputs={p} outcome={round?.outcome} />
       ) : (
         <div className="flex flex-col gap-3">
-          <OutputsCard outputs={p} superseded={replaced.has(item.id)} />
+          <OutputsCard outputs={p} superseded={replaced.has(item.id)} outcome={round?.outcome} />
           <RunExceptions runId={p.run_id} />
         </div>
       );
+    }
+    case "email_draft": {
+      const d = item.payload as EmailDraft;
+      return d?.id ? <EmailDraftCard draft={d} /> : null;
     }
     default:
       return null;
@@ -236,9 +259,39 @@ function Greeting({ p }: { p: GreetingPayload }) {
   );
 }
 
+/** AM6 — an answer's knowledge sources as the chat's sources row reads them
+ *  (one entry per source; where in the file sits in the passage's place). */
+function knowledgeSources(k: AgentKnowledge): ContextSource[] {
+  return (k.sources ?? [])
+    .filter((s) => !!s?.title)
+    .map((s, i) => ({
+      id: `knowledge-${i}`,
+      source_type: "knowledge_chunk" as ContextSource["source_type"],
+      display_label: s.title,
+      metadata: { filename: s.title, excerpt: s.locator ?? "", rank: i },
+      created_at: "",
+    }));
+}
+
+/** AM6 — under an answer that used a knowledge base: which one, that it is
+ *  not part of the report, and the sources, listed as the chat lists them. */
+function AnswerKnowledge({ knowledge }: { knowledge: AgentKnowledge }) {
+  const t = useAmT();
+  const sources = useMemo(() => knowledgeSources(knowledge), [knowledge]);
+  return (
+    <div data-testid="am-agent-knowledge">
+      <p className="text-[11px] text-text-muted" data-testid="am-agent-knowledge-line">
+        {t("knowledge.from", { base: knowledge.base })}
+      </p>
+      <KnowledgeSourcesRow message={{ context_sources: sources }} />
+    </div>
+  );
+}
+
 function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
   const text = p.text ?? "";
   const { copied, copy } = useCopyText(text);
+  if (p.tone === "open" && p.completion) return <OpenRound c={p.completion} runId={p.run_id} />;
   if (!text.trim()) return null;
   if (p.tone === "error") return <FailedRound p={p} />;
   return (
@@ -246,6 +299,7 @@ function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
       <AssistantProse data-testid="am-agent-text">
         <Markdown>{text}</Markdown>
       </AssistantProse>
+      {p.knowledge?.base ? <AnswerKnowledge knowledge={p.knowledge} /> : null}
       <div className="flex items-center gap-1">
         <div className="flex items-center gap-0.5">
           <CopyAction copied={copied} onCopy={copy} />
@@ -253,6 +307,40 @@ function AgentText({ p, at }: { p: AgentTextPayload; at?: string }) {
         <MessageTime createdAt={at} />
       </div>
     </div>
+  );
+}
+
+/** AM6 — a round that finished with its gate open, on the chat's note: the
+ *  server's title as its heading, then what the agent found, what to do
+ *  next, where the files are and what was charged. It is a result — the
+ *  round did its work and was charged for it — so it is no alert, has no
+ *  error colour, and does not offer the same files again: they would give
+ *  the same result. */
+function OpenRound({ c, runId }: { c: Completion; runId?: string }) {
+  const t = useAmT();
+  const say = (s: string | undefined) => personText(s ?? "");
+  const title = say(c.title) || t(c.code === "not_tied" ? "outcome.open.notTied" : "outcome.open.gate");
+  const lines: { id: string; text: string; look: string }[] = [
+    { id: "am-open-what", text: say(c.what), look: "mt-1 text-text-primary" },
+    { id: "am-open-next", text: say(c.next), look: "mt-1 text-text-primary" },
+    { id: "am-open-files", text: say(c.files), look: "mt-1.5 text-xs" },
+    { id: "am-open-charged", text: say(c.charged), look: "mt-0.5 text-xs" },
+  ].filter((l) => !!l.text);
+  return (
+    <NoteCard data-testid="am-round-open" data-tone="open">
+      <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+      {lines.map((l) => (
+        <p key={l.id} className={cls("whitespace-pre-wrap", l.look)} data-testid={l.id}>
+          {l.text}
+        </p>
+      ))}
+      {runId ? (
+        <Link href={runHref(runId)} className="focus-ring mt-2 inline-flex max-w-full items-center gap-2 rounded text-left text-xs underline underline-offset-2 hover:text-text-primary" data-testid="am-open-run">
+          <ListChecks size={14} className="shrink-0" aria-hidden />
+          <span className="min-w-0 break-words">{t("failed.run")}</span>
+        </Link>
+      ) : null}
+    </NoteCard>
   );
 }
 
@@ -318,7 +406,7 @@ function FailedRound({ p }: { p: AgentTextPayload }) {
             ) : null}
             <div className="flex flex-wrap items-center gap-x-4 pl-6">
               {f?.can_retry && runId && !retried ? (
-                <ErrorCardAction testId="am-failed-retry" disabled={busy} icon={busy ? <Spin size={14} /> : <RotateCcw size={14} className="shrink-0" aria-hidden />} onClick={retry}>
+                <ErrorCardAction testId="am-failed-retry" disabled={busy} icon={busy ? <Spinner size={14} /> : <RotateCcw size={14} className="shrink-0" aria-hidden />} onClick={retry}>
                   {busy ? t("failed.retrying") : t("failed.retry")}
                 </ErrorCardAction>
               ) : null}
@@ -396,10 +484,9 @@ function WarningNotice({ p, text }: { p: NoticePayload; text: string }) {
       <p className="whitespace-pre-wrap">{text}</p>
       {p.action === "resume_budget" && p.run_id ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={resume} disabled={busy} className={BTN_SMALL} data-testid="am-resume-budget">
-            {busy ? <Spin size={12} /> : null}
+          <Button type="button" variant="secondary" size="sm" onClick={resume} loading={busy} data-testid="am-resume-budget">
             <span>{t("budget.resume")}</span>
-          </button>
+          </Button>
           {note ? (
             <span className={cls("text-xs", note.ok ? "text-status-success" : "text-text-secondary")} data-testid="am-resume-note">
               {note.text}

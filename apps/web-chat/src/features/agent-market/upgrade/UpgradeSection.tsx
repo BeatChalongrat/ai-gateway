@@ -12,11 +12,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleCheck, TriangleAlert } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
+import { Spinner } from "@/components/ui/Spinner";
+
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDate } from "../format";
 import type { UpgradeInfo, VersionChange } from "../types";
-import { BTN_PRIMARY_SMALL, BTN_SMALL, ErrorPanel, Spin } from "../ui";
+import { ErrorPanel } from "../ui";
 import { runHref, workspaceHref } from "../workspace/context";
 import { diffLine, groupChanges, TERMINAL, upgradeOutcome, type UpgradeOutcome } from "./upgrade";
 
@@ -156,7 +159,7 @@ export function UpgradeSection({
           <ErrorPanel message={errorMessage(loadError)} onRetry={() => void load().catch((err) => setLoadError(err))} />
         ) : !info ? (
           <div className="flex items-center gap-2 text-sm text-text-secondary">
-            <Spin size={13} />
+            <Spinner size={13} />
             <span>{t("common.loading")}</span>
           </div>
         ) : (
@@ -195,7 +198,7 @@ export function UpgradeSection({
                 <p className="mt-2 text-xs text-text-secondary">{t("upg.how")}</p>
                 {phase.kind === "testing" || phase.kind === "starting" ? (
                   <div role="status" className="mt-2 flex flex-wrap items-center gap-2 text-sm text-text-secondary" data-testid="am-upgrade-testing">
-                    <Spin size={13} />
+                    <Spinner size={13} />
                     <span>{t("upg.testing", { v: available.version })}</span>
                     {phase.kind === "testing" ? (
                       <Link href={runHref(phase.runId)} className="text-xs underline underline-offset-2 hover:text-text-primary">
@@ -204,9 +207,9 @@ export function UpgradeSection({
                     ) : null}
                   </div>
                 ) : (
-                  <button type="button" onClick={() => void upgrade()} disabled={busy} className={`${BTN_PRIMARY_SMALL} mt-2`} data-testid="am-upgrade-start">
+                  <Button type="button" size="sm" onClick={() => void upgrade()} disabled={busy} className="mt-2" data-testid="am-upgrade-start">
                     {t("upg.start")}
-                  </button>
+                  </Button>
                 )}
               </div>
             ) : !available ? (
@@ -217,10 +220,9 @@ export function UpgradeSection({
 
             {previous ? (
               <div className="mt-3 border-t border-border-subtle pt-3">
-                <button type="button" onClick={() => void rollback()} disabled={busy} className={BTN_SMALL} data-testid="am-upgrade-rollback">
-                  {rolling ? <Spin size={12} /> : null}
+                <Button type="button" variant="secondary" size="sm" onClick={() => void rollback()} loading={rolling} disabled={busy} data-testid="am-upgrade-rollback">
                   <span>{t("upg.rollback", { v: previous.version })}</span>
-                </button>
+                </Button>
               </div>
             ) : null}
 

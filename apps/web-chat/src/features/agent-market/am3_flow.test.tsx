@@ -51,6 +51,8 @@ beforeEach(() => {
     return handler(path, init);
   });
   vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ enabled: true }) })));
+  // Modal reads matchMedia for its mobile sheet; jsdom has none.
+  vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener: () => {}, removeEventListener: () => {} }));
   useI18nStore.setState({ locale: "th" });
 });
 afterEach(() => {

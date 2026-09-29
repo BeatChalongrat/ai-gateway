@@ -8,19 +8,27 @@
 import { useState } from "react";
 import { ChevronDown, Download, RotateCcw } from "lucide-react";
 
+import { Button } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
+import { Spinner } from "@/components/ui/Spinner";
 
 import { amApi, errorMessage } from "../api";
 import { extensionOf } from "../format";
 import { useAmT } from "../i18n";
+import { COMPLETED_OPEN, outcomeKey } from "../outcome";
 import type { IntentPayload, OutputArtifact, ThreadItem } from "../types";
-import { BTN_PRIMARY_SMALL, BTN_SMALL, cls, Spin } from "../ui";
+import { cls } from "../ui";
 import { useWorkspace } from "./context";
 import type { RoundInfo } from "./rounds";
 
 function roundLabel(t: ReturnType<typeof useAmT>, round: RoundInfo): string {
   if (round.kind === "self_test") return t("round.selfTest");
   if (round.status === "succeeded") return round.period ? t("round.done", { period: round.period }) : t("round.doneNoPeriod");
+  // AM6: a round that delivered its draft with the gate open is finished, with a note
+  if (round.outcome === COMPLETED_OPEN) {
+    const state = t(outcomeKey(round.outcome, round.reason) ?? "outcome.open.gate");
+    return round.period ? t("round.open", { period: round.period, state }) : t("round.openNoPeriod", { state });
+  }
   if (round.status === "cancelled") return t("round.cancelled");
   return round.period ? t("round.failed", { period: round.period }) : t("round.failedNoPeriod");
 }
@@ -44,7 +52,7 @@ function FileLink({ a }: { a: OutputArtifact }) {
     >
       <FileTypeBadge extension={extensionOf(a.format)} filename={a.name} size="sm" />
       <span className="truncate">{a.name}</span>
-      {busy ? <Spin size={11} /> : <Download width={12} height={12} aria-hidden className="shrink-0" />}
+      {busy ? <Spinner size={11} /> : <Download width={12} height={12} aria-hidden className="shrink-0" />}
     </button>
   );
 }
@@ -72,7 +80,7 @@ export function RoundDivider({ round, latest, started }: { round: RoundInfo; lat
     );
   };
   return (
-    <div className="flex flex-col gap-2 py-1" data-testid="am-round-divider" data-status={round.status}>
+    <div className="flex flex-col gap-2 py-1" data-testid="am-round-divider" data-status={round.status} data-outcome={round.outcome} data-run={round.runId}>
       <div className="flex items-center gap-3" role="separator" aria-label={roundLabel(t, round)}>
         <span className="h-px flex-1 bg-border" aria-hidden />
         <span className="shrink-0 text-xs font-medium text-text-secondary">{roundLabel(t, round)}</span>
@@ -92,10 +100,10 @@ export function RoundDivider({ round, latest, started }: { round: RoundInfo; lat
       ) : null}
       {latest && !started ? (
         <div className="flex flex-col items-center gap-1">
-          <button type="button" onClick={start} disabled={busy} className={BTN_PRIMARY_SMALL} data-testid="am-round-start">
-            {busy ? <Spin size={12} /> : <RotateCcw width={13} height={13} aria-hidden />}
+          <Button type="button" size="sm" onClick={start} loading={busy} data-testid="am-round-start">
+            {busy ? null : <RotateCcw width={13} height={13} aria-hidden />}
             <span>{busy ? t("round.starting") : t("round.start")}</span>
-          </button>
+          </Button>
           <p className="text-center text-[11px] text-text-muted">{t("round.carry")}</p>
           {error ? (
             <p role="alert" className="text-center text-xs text-status-danger">
@@ -113,7 +121,7 @@ export function FoldedRound({ round, children }: { round: RoundInfo; children: R
   const t = useAmT();
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-col gap-2" data-testid="am-round-folded" data-open={open ? "true" : "false"}>
+    <div className="flex flex-col gap-2" data-testid="am-round-folded" data-open={open ? "true" : "false"} data-outcome={round.outcome} data-run={round.runId}>
       <div className="flex items-center gap-3">
         <span className="h-px flex-1 bg-border-subtle" aria-hidden />
         <button
@@ -187,14 +195,12 @@ export function IntentChip({ item }: { item: ThreadItem }) {
       </p>
       {p.fresh ? <p className="mt-1.5 text-xs text-text-secondary">{t("intent.fresh")}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" onClick={() => choose("new_round")} disabled={!!busy} className={BTN_PRIMARY_SMALL} data-testid="am-intent-new">
-          {busy === "new_round" ? <Spin size={12} /> : null}
+        <Button type="button" size="sm" onClick={() => choose("new_round")} loading={busy === "new_round"} disabled={!!busy} data-testid="am-intent-new">
           <span>{t("intent.new")}</span>
-        </button>
-        <button type="button" onClick={() => choose("about_last")} disabled={!!busy} className={BTN_SMALL} data-testid="am-intent-about">
-          {busy === "about_last" ? <Spin size={12} /> : null}
+        </Button>
+        <Button type="button" variant="secondary" size="sm" onClick={() => choose("about_last")} loading={busy === "about_last"} disabled={!!busy} data-testid="am-intent-about">
           <span>{t("intent.about")}</span>
-        </button>
+        </Button>
       </div>
       <p className="mt-2 text-[11px] text-text-muted">{t("round.carry")}</p>
       {error ? (

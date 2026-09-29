@@ -7,15 +7,22 @@
 // asks, the exceptions it leaves and what people decided, why runs failed,
 // how sure its readings were, what it spent and which models saw the work
 // (in the organisation or not). Plain CSS bars, no chart library.
+//
+// AM6 — a round that delivered its draft while the agent's gate did not pass
+// is counted apart from the rounds that failed, and what the platform paid
+// for rounds that delivered nothing is shown as charged to nobody.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Spinner } from "@/components/ui/Spinner";
+
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { DASH, formatCredits, formatDate, formatDateTime, formatInt } from "../format";
+import { COMPLETED_OPEN, NOT_TIED, outcomeKey } from "../outcome";
 import type { AgentDashboard, InstallDetail } from "../types";
-import { BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin } from "../ui";
+import { BackLink, Card, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { reasonLabelKey } from "../exceptions/exceptions";
 import { settingsHref, workspaceHref } from "../workspace/context";
 import { bars, CONFIDENCE_ORDER, formatRate, formatSeconds, isEmpty, RANGES, recordBars, TIER_ORDER, type Bar } from "./dashboard";
@@ -37,12 +44,26 @@ const TIME_ROWS: [AmKey, TimeKey, TimeKey][] = [
 
 const STATUS_KEYS: Record<string, AmKey> = {
   succeeded: "progress.title.succeeded",
+  completed: "progress.title.succeeded",
   failed: "progress.title.failed",
   cancelled: "progress.title.cancelled",
   awaiting_input: "progress.title.awaiting_input",
   running: "progress.title.running",
   queued: "progress.title.queued",
 };
+
+/** AM6: the one gate every open round of the window ended on (its code), or
+ *  "" when they ended on more than one: a count of them all is then named
+ *  by the agent's gate, not by one of them. */
+function openReason(d: AgentDashboard): string {
+  const keys = (d.open ?? []).filter((o) => o.count > 0).map((o) => o.key);
+  return keys.length === 1 ? keys[0]! : "";
+}
+
+/** The words for rounds that finished open, where they stand in a line of counts. */
+function openCountKey(d: AgentDashboard): AmKey {
+  return openReason(d) === NOT_TIED ? "outcome.open.notTiedCount" : "outcome.open.gateCount";
+}
 
 function Dashboard({ installId }: { installId: string }) {
   const t = useAmT();
@@ -104,7 +125,10 @@ function Dashboard({ installId }: { installId: string }) {
   if (!data) return <PageSkeleton />;
 
   const title = detail?.install.title ?? "";
-  const failed = data.runs.by_status?.failed ?? 0;
+  // AM6: a server that counts rounds finished open sends failures without them
+  const counted = typeof data.runs.completed_open === "number";
+  const failed = counted ? data.runs.failed ?? 0 : data.runs.by_status?.failed ?? 0;
+  const notCharged = data.spend.cost_not_charged ?? 0;
   const perDoc = data.spend.per_document ?? data.spend.per_succeeded_run;
   const reasonLabel = (key: string) => {
     const k = reasonLabelKey(key);
@@ -139,7 +163,7 @@ function Dashboard({ installId }: { installId: string }) {
             </button>
           ))}
         </div>
-        {loading ? <Spin size={14} /> : null}
+        {loading ? <Spinner size={14} /> : null}
       </div>
 
       {isEmpty(data) ? (
@@ -153,7 +177,20 @@ function Dashboard({ installId }: { installId: string }) {
       ) : (
         <>
           <div className="mt-6 grid grid-cols-2 gap-3 lg:grid-cols-5" data-testid="am-dash-kpis">
-            <Tile label={t("dash.kpi.runs")} value={formatInt(data.runs.total)} sub={t("dash.kpi.runsSub", { ok: formatInt(data.runs.succeeded), failed: formatInt(failed) })} />
+            <Tile
+              label={t("dash.kpi.runs")}
+              value={formatInt(data.runs.total)}
+              sub={
+                counted
+                  ? t("dash.kpi.runsSubOpen", {
+                      ok: formatInt(data.runs.succeeded),
+                      state: t(openCountKey(data)),
+                      open: formatInt(data.runs.completed_open),
+                      failed: formatInt(failed),
+                    })
+                  : t("dash.kpi.runsSub", { ok: formatInt(data.runs.succeeded), failed: formatInt(failed) })
+              }
+            />
             <Tile
               label={t("dash.kpi.firstPass")}
               value={formatRate(data.runs.first_pass_rate)}
@@ -177,6 +214,11 @@ function Dashboard({ installId }: { installId: string }) {
               sub={t("dash.kpi.spendSub", { credits: formatCredits(data.spend.credits), budget: formatCredits(data.spend.budget_credits) })}
             />
           </div>
+          {notCharged > 0 ? (
+            <p className="mt-2 text-xs text-text-muted" data-testid="am-dash-not-charged">
+              {t("dash.costNotCharged", { credits: formatCredits(notCharged) })}
+            </p>
+          ) : null}
 
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             <Card>
@@ -231,6 +273,14 @@ function Dashboard({ installId }: { installId: string }) {
               <h2 className="text-sm font-semibold text-text-primary">{t("dash.failures")}</h2>
               <Bars rows={bars(data.failures)} label={(k) => k} empty={t("dash.noFailures")} testId="am-dash-failures" />
             </Card>
+
+            {data.open?.length ? (
+              <Card>
+                <h2 className="text-sm font-semibold text-text-primary">{t("dash.open")}</h2>
+                {/* the gate's code names the words; it is never shown itself */}
+                <Bars rows={bars(data.open)} label={(k) => t(outcomeKey(COMPLETED_OPEN, k) ?? "outcome.open.gate")} testId="am-dash-open" />
+              </Card>
+            ) : null}
 
             {Object.keys(data.confidence ?? {}).length ? (
               <Card>
@@ -348,11 +398,13 @@ function Bars({ rows, label, empty, testId }: { rows: Bar[]; label: (key: string
 
 function StatusLine({ d }: { d: AgentDashboard }) {
   const t = useAmT();
-  const entries = Object.entries(d.runs.by_status ?? {}).filter(([, n]) => n > 0);
+  // AM6: by what the runs came to, when the server says it
+  const entries = Object.entries(d.runs.by_outcome ?? d.runs.by_status ?? {}).filter(([, n]) => n > 0);
   if (!entries.length) return null;
+  const name = (s: string) => (s === COMPLETED_OPEN ? t(openCountKey(d)) : STATUS_KEYS[s] ? t(STATUS_KEYS[s]!) : s);
   return (
-    <p className="mt-2 text-xs text-text-muted">
-      {entries.map(([s, n]) => `${STATUS_KEYS[s] ? t(STATUS_KEYS[s]!) : s} ${formatInt(n)}`).join(" · ")}
+    <p className="mt-2 text-xs text-text-muted" data-testid="am-dash-states">
+      {entries.map(([s, n]) => `${name(s)} ${formatInt(n)}`).join(" · ")}
     </p>
   );
 }
@@ -362,11 +414,13 @@ function SelfTestLine({ d }: { d: AgentDashboard }) {
   const locale = useAmLocale();
   const st = d.last_self_test;
   if (!st) return null;
-  const status = STATUS_KEYS[st.status] ? t(STATUS_KEYS[st.status]!) : st.status;
+  // AM6: a self-test that finished open is named so; its reason is a code, and the name has said it
+  const open = st.outcome === COMPLETED_OPEN;
+  const status = open ? t(outcomeKey(COMPLETED_OPEN, st.reason) ?? "outcome.open.gate") : STATUS_KEYS[st.status] ? t(STATUS_KEYS[st.status]!) : st.status;
   return (
     <p className="mt-2 text-xs text-text-muted" data-testid="am-dash-selftest">
       {t("dash.selfTest", { status, v: st.version ?? "", when: st.finished_at ? formatDateTime(st.finished_at, locale) : "—" })}
-      {st.reason ? ` · ${st.reason}` : null}
+      {st.reason && !open ? ` · ${st.reason}` : null}
     </p>
   );
 }

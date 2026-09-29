@@ -8,10 +8,16 @@
 // AM4: ?tab=numbers opens it on "ที่มาของตัวเลข" (the workspace header's one
 // action). ?as=admin is an admin's view of someone else's run, after stating
 // a reason (the owner is told; the owner's page lists every opening).
+//
+// AM6 — the run's state goes by what it came to. A round that delivered its
+// draft while the agent's gate did not pass is finished, with a note: its
+// gate is a step that left a verdict, not one that failed. It is still not
+// signed, and the page says why.
 
 import { createContext, useContext, useEffect, useId, useMemo, useState } from "react";
 import { ChevronDown, Download } from "lucide-react";
 
+import { Spinner } from "@/components/ui/Spinner";
 import { formatBytes } from "@/lib/fileUtil";
 
 import { AmError, amApi, errorMessage } from "../api";
@@ -28,11 +34,12 @@ import {
   formatSignedPct,
   signOf,
 } from "../format";
+import { COMPLETED_OPEN, outcomeKey, outcomeOf, outcomeTone } from "../outcome";
 import type { AmFile, Artifact, Clarification, Computed, ComputedLine, Review, RunDetail, Step } from "../types";
-import { BackLink, Card, CheckLine, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill, Spin, type Tone } from "../ui";
+import { BackLink, Card, CheckLine, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { viaKey } from "../workspace/AgentQuestionCard";
 import { workspaceHref } from "../workspace/context";
-import { ArtifactRow, qualityOf } from "../workspace/OutputsCard";
+import { ArtifactRow, qualityOf, SignOffUnavailable } from "../workspace/OutputsCard";
 import { ExceptionsPanel, useRunExceptions } from "../exceptions/ExceptionsPanel";
 import { StepIcon } from "../workspace/ProgressCard";
 import { ProblemButton } from "../problem/ProblemButton";
@@ -45,24 +52,6 @@ const POLL_MS = 3000;
 type Tab = "overview" | "steps" | "questions" | "numbers" | "exceptions" | "files";
 const TABS: readonly Tab[] = ["overview", "steps", "questions", "numbers", "exceptions", "files"];
 const isTab = (x: string | null | undefined): x is Tab => !!x && (TABS as readonly string[]).includes(x);
-
-const STATUS_TONE: Record<string, Tone> = {
-  succeeded: "success",
-  failed: "danger",
-  awaiting_input: "warning",
-  cancelled: "neutral",
-  running: "neutral",
-  queued: "neutral",
-};
-
-const STATUS_KEY: Record<string, AmKey> = {
-  queued: "progress.title.queued",
-  running: "progress.title.running",
-  awaiting_input: "progress.title.awaiting_input",
-  succeeded: "progress.title.succeeded",
-  failed: "progress.title.failed",
-  cancelled: "progress.title.cancelled",
-};
 
 const KIND_KEY: Record<string, AmKey> = {
   ingest: "kind.ingest",
@@ -81,6 +70,17 @@ const STEP_STATUS: Record<string, string> = {
   failed: "failed",
   skipped: "skipped",
 };
+
+/** AM6: the steps that hold the gate's verdict of a round that finished open. */
+const VERDICT_STEPS = new Set(["gate", "stopped"]);
+const OpenRound = createContext(false);
+
+/** A step's state as its icon reads it; a verdict step of a round that
+ *  finished open is "open" — finished, with a note. */
+function stepState(s: Step, open: boolean): string {
+  if (open && s.status === "failed" && VERDICT_STEPS.has(s.name)) return "open";
+  return STEP_STATUS[s.status] ?? "pending";
+}
 
 /** A step row's name in words. */
 export function stepLabel(name: string, t: AmT): string {
@@ -147,6 +147,8 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
   );
 
   const status = data?.run.status ?? "";
+  const outcome = data ? outcomeOf(data.run) : "";
+  const finishedOpen = outcome === COMPLETED_OPEN && data?.run.kind === "run";
   const active = ACTIVE.has(status);
   // what the run left for a person to decide (the expense audit): read once it has finished
   const decisions = useRunExceptions(runId, !!data && !active && !asAdmin);
@@ -259,13 +261,15 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
               .join(" · ")}
           </p>
         </div>
-        <Pill tone={STATUS_TONE[status] ?? "neutral"} size="md">
-          {active ? <Spin size={11} /> : null}
-          <span>
-            {t(STATUS_KEY[status] ?? "progress.title.running")}
-            {duration > 0 ? ` · ${formatDuration(duration, t)}` : null}
-          </span>
-        </Pill>
+        <span data-testid="am-run-status" data-outcome={outcome}>
+          <Pill tone={outcomeTone(outcome)} size="md">
+            {active ? <Spinner size={11} /> : null}
+            <span>
+              {t(outcomeKey(outcome, run.status_reason) ?? "progress.title.running")}
+              {duration > 0 ? ` · ${formatDuration(duration, t)}` : null}
+            </span>
+          </Pill>
+        </span>
       </div>
 
       {asAdmin ? (
@@ -300,6 +304,7 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
         ) : null}
         {run.kind === "run" && !asAdmin ? <ShareButton runId={runId} /> : null}
         {!asAdmin ? <ProblemButton target={{ kind: "run", runId }} /> : null}
+        {finishedOpen && !asAdmin ? <SignOffUnavailable why={computed?.gate?.what} /> : null}
       </div>
       {reviews && reviews.length ? (
         <section className="mt-3" aria-label={t("review.listTitle")}>
@@ -331,9 +336,13 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
 
       <div id={`${tabsId}-panel`} role="tabpanel" aria-labelledby={`${tabsId}-tab-${tab}`} className="mt-5">
         {tab === "overview" ? (
-          <Overview data={data} computed={computed} steps={steps} />
+          <OpenRound.Provider value={outcome === COMPLETED_OPEN}>
+            <Overview data={data} computed={computed} steps={steps} />
+          </OpenRound.Provider>
         ) : tab === "steps" ? (
-          <StepsTab steps={steps} />
+          <OpenRound.Provider value={outcome === COMPLETED_OPEN}>
+            <StepsTab steps={steps} />
+          </OpenRound.Provider>
         ) : tab === "questions" ? (
           <QuestionsTab cards={cards} />
         ) : tab === "numbers" ? (
@@ -392,6 +401,7 @@ function lineOf(c: Computed | null, key: string): ComputedLine | undefined {
 
 function Overview({ data, computed, steps }: { data: RunDetail; computed: Computed | null; steps: Step[] }) {
   const t = useAmT();
+  const open = useContext(OpenRound);
   const run = data.run;
   const hasPrior = !!computed?.has_prior;
   const kpi = (key: string, label: AmKey, upIsGood: boolean) => {
@@ -422,7 +432,7 @@ function Overview({ data, computed, steps }: { data: RunDetail; computed: Comput
           {steps.map((s) => (
             <li key={s.id} className="flex gap-2.5">
               <span className="mt-0.5">
-                <StepIcon status={STEP_STATUS[s.status] ?? "pending"} />
+                <StepIcon status={stepState(s, open)} />
               </span>
               <div className="min-w-0">
                 <div className="truncate text-sm text-text-primary">{stepLabel(s.name, t)}</div>
@@ -561,7 +571,7 @@ function StepRow({ s }: { s: Step }) {
   const t = useAmT();
   const [open, setOpen] = useState(false);
   const panel = useId();
-  const status = STEP_STATUS[s.status] ?? "pending";
+  const status = stepState(s, useContext(OpenRound));
   const input = pretty(s.input, t);
   const output = pretty(s.output, t);
   const meta = [
@@ -577,7 +587,7 @@ function StepRow({ s }: { s: Step }) {
     s.credits ? t("step.credits", { n: formatCredits(s.credits) }) : null,
   ].filter(Boolean) as string[];
   return (
-    <li className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-run-step">
+    <li className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-run-step" data-step-status={status}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5">
           <StepIcon status={status} />
@@ -589,7 +599,9 @@ function StepRow({ s }: { s: Step }) {
               <span key={i}>{m}</span>
             ))}
           </div>
-          {s.error ? <p className="mt-1.5 whitespace-pre-wrap break-words text-xs text-status-danger">{s.error}</p> : null}
+          {s.error ? (
+            <p className={cls("mt-1.5 whitespace-pre-wrap break-words text-xs", status === "open" ? "text-text-secondary" : "text-status-danger")}>{s.error}</p>
+          ) : null}
         </div>
         {input || output ? (
           <button
@@ -1076,7 +1088,7 @@ function InputFileRow({ f }: { f: AmFile }) {
         aria-label={t("common.downloadNamed", { name: f.name })}
         className="focus-ring tap-44 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-elevated hover:text-text-primary disabled:opacity-50"
       >
-        {busy ? <Spin size={15} /> : <Download width={16} height={16} aria-hidden />}
+        {busy ? <Spinner size={15} /> : <Download width={16} height={16} aria-hidden />}
       </button>
     </li>
   );
