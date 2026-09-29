@@ -454,8 +454,12 @@ export default function AuditLogPage() {
     }
     if (search.trim()) {
       const s = search.trim().toLowerCase();
+      // AM7: also what the page shows (the action as a label) and the entry's
+      // details (who, from what to what) — an auditor types what they read.
       out = out.filter((r) =>
-        `${r.action} ${r.actor_key_id} ${r.tenant_id} ${r.resource_type}/${r.resource_id}`.toLowerCase().includes(s),
+        `${r.action} ${formatActionLabel(r.action)} ${r.actor_key_id} ${r.tenant_id} ${r.resource_type}/${r.resource_id} ${r.details ?? ""}`
+          .toLowerCase()
+          .includes(s),
       );
     }
     return out;
@@ -1062,7 +1066,8 @@ function AuditRowView({
       ? ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
       : `${ts.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 
-  const actorKind = row.session_id_prefix ? t("obs.audit.actor.session") : t("obs.audit.actor.apiKey");
+  // AM7: an admin-ui session's actor key is "session:<admin id>" (most writers leave session_id_prefix empty)
+  const actorKind = row.session_id_prefix || row.actor_key_id.startsWith("session:") ? t("obs.audit.actor.session") : t("obs.audit.actor.apiKey");
   const td: React.CSSProperties = { padding: "8px 16px", borderBottom: "1px solid var(--border-color)", verticalAlign: "middle" };
 
   return (
