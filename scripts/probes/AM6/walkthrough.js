@@ -367,7 +367,10 @@ async function journey(client) {
   await L.wait(1500);
   await x.shot("03-workspace-empty");
   // D2. the suggestions above the composer, the cost before a round
-  const sugg = await page.locator('[data-testid="am-composer-suggestions"] button').evaluateAll((els) => els.map((e) => e.innerText.trim()));
+  // the one-click install runs the sample self-test first: while it runs a round is underway and the chips wait
+  await page.locator('[data-testid="am-composer-suggestions"]').waitFor({ state: "visible", timeout: 180000 }).catch(() => null);
+  await L.wait(800);
+  const sugg = await page.locator('[data-testid="am-composer-suggestions"]').locator("button, a").evaluateAll((els) => els.map((e) => e.innerText.trim()));
   x.check(sugg.length >= 2 && sugg.length <= 3, "two or three suggestions above the composer before a round", sugg.join(" | "));
   const est0 = await x.words(page.locator('[data-testid="am-estimate"]'));
   x.check(est0.length > 0, "what a round costs is said before it starts", est0);
@@ -494,15 +497,14 @@ async function journey(client) {
   await x.shot("11-notification");
   const ntext = await x.words(note1);
   x.check(/ถึงเวลา/.test(ntext) && /ไฟล์/.test(ntext), "it says what is due and which files it needs", ntext);
-  const mine = (await api(page, "/notifications?surface=web")).body?.notifications || [];
-  const n0 = mine.find((n) => n.reminder_id === (rem && rem.id));
-  if (client === "desktop" && n0) {
-    // the app's own poller shows the same notification as a Windows notification: it is no longer
-    // "not yet shown" on the desktop surface once it has
-    const shown = await waitFor(async () => !((await api(page, "/notifications?surface=desktop")).body?.notifications || []).some((n) => n.id === n0.id), 150_000, 5000);
+  const now = ((await api(page, `/installs/${installId}/reminders`)).body?.reminders || []).find((r) => rem && r.id === rem.id);
+  const waitingRun = now && now.waiting_run_id;
+  if (client === "desktop") {
+    // the app's own poller shows the same notification as a Windows notification: once it has, it is no
+    // longer "not yet shown" on the desktop surface
+    const shown = await waitFor(async () => !((await api(page, "/notifications?surface=desktop")).body?.notifications || []).some((n) => rem && n.reminder_id === rem.id), 150_000, 5000);
     x.check(!!shown, "the desktop app raised it as a Windows notification (shown on the desktop surface)");
   }
-  const waitingRun = n0 && n0.run_id;
   if (waitingRun) state.runs = [...new Set([...(state.runs || []), waitingRun])];
   save();
   const wr = waitingRun ? (await api(page, `/runs/${waitingRun}`)).body : null;
@@ -518,6 +520,7 @@ async function journey(client) {
   x.clicks += 3;
   await req.locator('input[type="file"]').first().setInputFiles(buffersOf(SAMPLE));
   const done2 = waitingRun ? await finish(x, waitingRun, 13) : null;
+  await L.wait(1500);
   x.check(done2 && done2.run.status === "succeeded" && done2.asked.length === 0, "the files go on the round the reminder opened; it runs and asks nothing again",
     done2 && `${done2.run.status} · ${done2.asked.length} question(s)`);
   await L.wait(2000);
@@ -576,8 +579,49 @@ async function bank(client) {
   await x.s.close();
 }
 
+// a reminder's round that still waits for its files: open it from its link and send them on its card
+async function waiting(client) {
+  const x = await session(client, "waiting");
+  const { page } = x;
+  const installId = state[`po_${client}`];
+  await page.goto(`${WEB()}/chat/agents/i/${installId}`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="composer-root"]', { timeout: 60000 });
+  const rems = (await api(page, `/installs/${installId}/reminders`)).body?.reminders || [];
+  const rem = rems.find((r) => r.waiting_run_id);
+  if (!rem) throw new Error("no reminder of this install has a waiting round");
+  const runId = rem.waiting_run_id;
+  state.runs = [...new Set([...(state.runs || []), runId])];
+  save();
+  const before = (await api(page, `/runs/${runId}`)).body;
+  x.check(before.run.status === "awaiting_input" && !(before.steps || []).length, "the reminder's round still waits; nothing has run", `${before.run.status} · steps ${(before.steps || []).length}`);
+  await page.goto(`${WEB()}/chat/agents/i/${installId}?run=${runId}`, { waitUntil: "load" });
+  const req = page.locator('[data-testid="am-request-files"]').last();
+  await req.waitFor({ state: "visible", timeout: 60000 });
+  await req.scrollIntoViewIfNeeded();
+  await L.wait(1500);
+  await x.shot("12-waiting-round");
+  x.clicks += 3;
+  await req.locator('input[type="file"]').first().setInputFiles(buffersOf(SAMPLE));
+  const done = await finish(x, runId, 13);
+  x.check(done.run.status === "succeeded" && done.asked.length === 0, "the files go on the round the reminder opened; it runs and asks nothing again", `${done.run.status} · ${done.asked.length} question(s)`);
+  await L.wait(2000);
+  const outs = page.locator('[data-testid="am-outputs"]:visible').last();
+  await outs.scrollIntoViewIfNeeded().catch(() => null);
+  await L.wait(1000);
+  await x.shot("13-reminder-round-done");
+  const credits = (await api(page, `/runs/${runId}`)).body?.run?.credits_spent;
+  x.check(Number(credits) > 0, "charged once it delivered", String(credits));
+  const tt = await threadText(x);
+  x.check(!TECH.test(tt), "nothing technical anywhere in the workspace");
+  fs.writeFileSync(path.join(x.dir, "waiting.json"), JSON.stringify({ client, install: installId, run: runId, checks: x.checks }, null, 1));
+  const bad = x.checks.filter((c) => !c.ok);
+  log(`${x.tag}: ${x.checks.length - bad.length} pass, ${bad.length} fail`);
+  await x.s.close();
+}
+
 const phases = {
   async journey() { await journey(process.argv[3] || "desktop"); },
+  async waiting() { await waiting(process.argv[3] || "desktop"); },
   async bank() { await bank(process.argv[3] || "desktop"); },
   async open() {
     const wasRunning = running();
