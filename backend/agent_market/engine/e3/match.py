@@ -297,6 +297,12 @@ def _greedy(found: list, L, R) -> list:
     return sorted(out, key=lambda p: (p.left[0].order, p.right[0].order))
 
 
+def best_pairs(found: list, L, R) -> list:
+    """For a package's own pass: from every possible pair ``(rank…, left row, right row,
+    similarity)``, the best first, a row in one pair only — what the engine's own passes use."""
+    return _greedy(found, L, R)
+
+
 def _near_amount(R_sorted, amounts, lo: Decimal, hi: Decimal):
     return R_sorted[bisect.bisect_left(amounts, lo):bisect.bisect_right(amounts, hi)]
 

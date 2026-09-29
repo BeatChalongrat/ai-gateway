@@ -31,8 +31,12 @@ import shutil
 import zipfile
 from xml.sax.saxutils import escape, quoteattr
 
-STAMP_TAG = "sran-review-stamp"            # docx: the stamp table's caption
-PPTX_SHAPE = "SRAN review stamp"            # pptx: the stamp box's name
+STAMP_TAG = "am-review-stamp"              # docx: the stamp table's caption
+PPTX_SHAPE = "Review stamp"                 # pptx: the stamp box's name
+# AM6: the stamp names no organisation. A stamp written before then carried the publisher's name in
+# front of the same words; it is still found and replaced when the document is signed again.
+_STAMP_CAPTION = re.compile(r"^(?:[a-z]+-)?review-stamp$")
+_STAMP_SHAPE = re.compile(r"^(?:[A-Za-z]+ )?review stamp$", re.I)
 XLSX_PART = "xl/worksheets/am_review.xml"   # xlsx: the stamp sheet's part
 XLSX_RID = "rIdAmReview"
 XLSX_SHEET = "ตรวจทาน"
@@ -84,7 +88,7 @@ def _is_stamp(el) -> bool:
     if el.tag != f"{{{W_NS}}}tbl":
         return False
     cap = el.find(f"{{{W_NS}}}tblPr/{{{W_NS}}}tblCaption")
-    return cap is not None and cap.get(f"{{{W_NS}}}val") == STAMP_TAG
+    return cap is not None and bool(_STAMP_CAPTION.match(cap.get(f"{{{W_NS}}}val") or ""))
 
 
 def stamp_docx(src: str, dst: str, review: dict) -> dict:
@@ -156,7 +160,7 @@ def stamp_pptx(src: str, dst: str, review: dict) -> dict:
     slide = prs.slides[0]
     replaced = 0
     for sh in list(slide.shapes):
-        if sh.name == PPTX_SHAPE:
+        if _STAMP_SHAPE.match(sh.name or ""):
             sh._element.getparent().remove(sh._element)
             replaced += 1
     sw, shh = prs.slide_width, prs.slide_height

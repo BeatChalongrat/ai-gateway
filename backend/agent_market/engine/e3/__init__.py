@@ -21,6 +21,7 @@ the same two tables and the same answers give the same groups, byte for byte.
 """
 
 from .match import (  # noqa: F401
-    DEFAULT_PASSES, MATCH, SEPARATE, TIERS, UNDECIDED, Pass, Tolerance, passes_by_id, run, tolerance_from,
+    DEFAULT_PASSES, MATCH, SEPARATE, TIERS, UNDECIDED, Pass, Proposal, Tolerance, best_pairs, pair_id, passes_by_id, run,
+    tolerance_from,
 )
 from .rows import Row, name_key, ref_key, similarity  # noqa: F401

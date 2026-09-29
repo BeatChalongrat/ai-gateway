@@ -2,7 +2,7 @@
  "schema": "agent.market.eval.v1",
  "package": "sran.invoice-processing",
  "note": "Documents are the Phase A pack (fixtures/e2, by fixture id), so every expected value comes from its golden output, never from this package. {id} in an answer key is that fixture's document key. 'skip_rest': unanswered cards take their default, as a skipped card does. Proposals stand in for the vision step: 'truth' = the golden values, or explicit fields.",
- "company": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "company_tax_id": "0105563012343", "company_branch": "00000"},
+ "company": {"from": "fixtures/e2/org.json", "note": "the buyer the fixture pack was drawn for: its name, tax id and branch are the install's settings of every case"},
  "cases": [
   {
    "id": "clean_batch_zero_questions",

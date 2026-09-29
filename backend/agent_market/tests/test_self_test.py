@@ -17,6 +17,9 @@ from agent_market.tests import samplekit as S
 HERE = os.path.dirname(os.path.abspath(__file__))
 E2_EXPECTED = os.path.join(os.path.dirname(HERE), "fixtures", "e2", "expected")
 IDENTITY_KEYS = {"company", "company_tax_id", "company_branch"}
+# AM6: what else a sample can be made for — whether the sample company issues goods receipts. Like its
+# name, it is the sample's, laid over the install's own for a self-test run and never for a real one.
+SAMPLE_KEYS = IDENTITY_KEYS | {"ap_gr_practice"}
 
 
 def tax_id(first12: str) -> str:
@@ -30,15 +33,28 @@ SOMEONE_ELSE = {"company": "บริษัท ของจริง จำก�
 
 class InvoiceSelfTest(unittest.TestCase):
     def test_settings_are_the_sample_documents_own_buyer(self):
+        # AM6: the samples are made out to a company that does not exist (tools/make_generic_samples.py),
+        # so that the agent is shown the same way at any company that installs it
+        from agent_market.engine.e2.extract import extract
+        from agent_market.tools.make_generic_samples import BUYER
+
         st = S.self_test("invoice_processing")
         settings = st.get("settings") or {}
         self.assertEqual(set(settings), IDENTITY_KEYS)
-        for fid in ("d01_clean_full_tax_invoice", "d05_wht_service_invoice", "e02_etax_xml_receipt"):
+        self.assertEqual(settings, {"company": BUYER["name"], "company_tax_id": BUYER["tax_id"], "company_branch": BUYER["branch"]})
+        for rel in st["files"]:
+            out = extract(os.path.join(S.package_dir("invoice_processing"), rel), os.path.basename(rel))
+            self.assertEqual(out["fields"]["buyer_tax_id"]["normalized"], BUYER["tax_id"], rel)
+            self.assertEqual(out["questions"], [], rel)
+        # everything else on the three documents is the fixture pack's: the same sellers, numbers and totals
+        for fid, rel in (("d01_clean_full_tax_invoice", st["files"][0]), ("d05_wht_service_invoice", st["files"][1]),
+                         ("e02_etax_xml_receipt", st["files"][2])):
             with open(os.path.join(E2_EXPECTED, fid + ".json"), encoding="utf-8") as f:
                 truth = json.load(f)["truth"]
-            self.assertEqual(settings["company_tax_id"], truth["buyer_tax_id"]["value"], fid)
-            self.assertEqual(settings["company_branch"], truth["buyer_branch"], fid)
-            self.assertEqual(settings["company"], truth["buyer_name"]["value"], fid)
+            out = extract(os.path.join(S.package_dir("invoice_processing"), rel), os.path.basename(rel))
+            for k in ("document_number", "total", "seller_tax_id"):
+                want = truth[k]["value"] if isinstance(truth[k], dict) else truth[k]
+                self.assertEqual(str(out["fields"][k]["normalized"]), str(want), (fid, k))
 
     def test_without_the_overlay_a_real_company_turns_every_sample_into_a_question(self):
         # what happened before AM3: the person's own tax ID against documents made out to the sample buyer
@@ -61,9 +77,9 @@ class EverySelfTest(unittest.TestCase):
     """Whatever company the person set, every package's self-test asks nothing."""
 
     def test_every_package(self):
-        for pkg in ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation"):
+        for pkg in ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching"):
             st = S.self_test(pkg)
-            self.assertTrue(set(st.get("settings") or {}) <= IDENTITY_KEYS, pkg)
+            self.assertTrue(set(st.get("settings") or {}) <= SAMPLE_KEYS, pkg)
             res = S.render_sample(pkg, defaults=S.self_test_defaults(pkg, SOMEONE_ELSE))
             self.assertEqual([f["code"] for f in res["first_findings"]], [], pkg)
             self.assertTrue(res["render"]["passed"], pkg)

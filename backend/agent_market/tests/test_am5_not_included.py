@@ -38,7 +38,7 @@ LEAVES_OUT = ("exclude", "reupload")
 
 def run(*docs, answers=None):
     files = [(os.path.join(DOCS, src), name) for src, name in docs]
-    return S.run_files("invoice_processing", files, defaults=S.self_test_defaults("invoice_processing"),
+    return S.run_files("invoice_processing", files, defaults=S.e2_fixture_defaults(),
                        formats=["xlsx"], answers=answers)
 
 

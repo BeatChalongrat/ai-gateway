@@ -996,10 +996,150 @@
    }
   },
   {
-   "id": "pdf_is_not_read_and_says_so",
-   "note": "A PDF beside the two files: it is not read (this agent reads the Excel or CSV export), the round says which file it did not use and why, and the file is on the round's list of what was not included.",
+   "id": "fuzzy_a_name_written_another_way_and_an_amount_short_of_a_fee",
+   "note": "Two pairs only the fuzzy tier finds. A customer's transfer reaches the bank ten days after the ledger's date, its name written another way (พาร์ท / พาร์ทส์): outside the date window, the names resemble. A cheque is presented with the bank's fee in the same line: the cheque number is the same, the amount is 15.00 more. Each is a question; the person confirms both, and the 15.00 becomes a drafted entry.",
+   "files": [
+    "kbank_sep_fuzzy.xlsx",
+    "ledger_sep_fuzzy.xlsx"
+   ],
+   "message": "",
+   "answers": {
+    "e3_candidate:{ledger_sep_fuzzy.xlsx}.0.12~{kbank_sep_fuzzy.xlsx}.0.17": "match",
+    "e3_candidate:{ledger_sep_fuzzy.xlsx}.0.14~{kbank_sep_fuzzy.xlsx}.0.14": "match"
+   },
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1584474.65",
+    "book_balance": "1582417.15",
+    "adjusted_bank": "1583404.65",
+    "adjusted_book": "1583404.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [
+     "e3_candidate",
+     "e3_candidate"
+    ],
+    "matched": 12,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 2
+    },
+    "by_person": 2,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1,
+     "posting_error": 1
+    },
+    "journal": 4,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09",
+    "passes": {
+     "fuzzy_name": 1,
+     "ref_only": 1
+    }
+   }
+  },
+  {
+   "id": "fuzzy_pairs_nobody_confirms",
+   "note": "The same files, both cards skipped: a fuzzy pair is never matched by default. Four rows stay suspect, in neither adjusted balance, and the round does not tie by the 15.00 nobody explained.",
+   "files": [
+    "kbank_sep_fuzzy.xlsx",
+    "ledger_sep_fuzzy.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1584474.65",
+    "book_balance": "1582417.15",
+    "adjusted_bank": "1583404.65",
+    "adjusted_book": "1583419.65",
+    "difference": "-15.00",
+    "tied": false,
+    "gate": "not_tied",
+    "what": "ยังไม่ลงตัว ต่างกัน 15.00 บาท",
+    "asked": [
+     "e3_candidate",
+     "e3_candidate"
+    ],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 2,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [
+     "match_unconfirmed",
+     "match_unconfirmed"
+    ],
+    "not_included": [],
+    "period": "2026-09",
+    "success": false
+   }
+  },
+  {
+   "id": "statement_as_a_pdf",
+   "note": "The same month as the PDF a bank's portal hands out: two pages, the table's header printed on both, a text layer that lost some Thai marks. Read from where its words stand, it is the same statement: ten pairs, seven reconciling items, it ties — and every row is cited by its page and line.",
    "files": [
     "statement_sep.pdf",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [],
+    "period": "2026-09",
+    "from_pdf": true
+   }
+  },
+  {
+   "id": "pdf_that_is_a_scan_is_not_read_and_says_so",
+   "note": "A scan of the statement beside the two files: it has no text layer, nothing is read from it by guesswork, the round says which file it did not use and why.",
+   "files": [
+    "statement_sep_scan.pdf",
     "kbank_sep.xlsx",
     "ledger_sep.xlsx"
    ],
@@ -1033,9 +1173,115 @@
     "journal": 3,
     "review": [],
     "not_included": [
-     "statement_sep.pdf"
+     "statement_sep_scan.pdf"
     ],
-    "period": "2026-09"
+    "period": "2026-09",
+    "not_included_code": "scanned_pdf"
+   }
+  },
+  {
+   "id": "pdf_that_is_no_statement",
+   "note": "A letter from the bank as a PDF: it has words and no statement table.",
+   "files": [
+    "letter_from_the_bank.pdf",
+    "kbank_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [
+     "letter_from_the_bank.pdf"
+    ],
+    "period": "2026-09",
+    "not_included_code": "unrecognised_sheet"
+   }
+  },
+  {
+   "id": "pdf_that_cannot_be_opened",
+   "note": "A file that only calls itself a PDF.",
+   "files": [
+    "broken.pdf",
+    "kbank_sep.xlsx",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "bank_balance": "1539589.65",
+    "book_balance": "1537517.15",
+    "adjusted_bank": "1538519.65",
+    "adjusted_book": "1538519.65",
+    "difference": "0.00",
+    "tied": true,
+    "gate": "tied",
+    "asked": [],
+    "matched": 10,
+    "tiers": {
+     "exact": 10,
+     "amount_date": 0,
+     "fuzzy": 0
+    },
+    "by_person": 0,
+    "suspect": 0,
+    "items": {
+     "outstanding_cheque": 2,
+     "deposit_in_transit": 1,
+     "bank_fee": 2,
+     "interest": 1,
+     "wht_interest": 1
+    },
+    "journal": 3,
+    "review": [],
+    "not_included": [
+     "broken.pdf"
+    ],
+    "period": "2026-09",
+    "not_included_code": "unreadable"
+   }
+  },
+  {
+   "id": "statement_only_as_a_scan_asks_for_the_statement",
+   "note": "Only the scan and the ledger: there is no statement to reconcile with. The round asks for it and waits.",
+   "files": [
+    "statement_sep_scan.pdf",
+    "ledger_sep.xlsx"
+   ],
+   "message": "",
+   "answers": {},
+   "defaults": {},
+   "expect": {
+    "asked": [
+     "missing_file"
+    ],
+    "stops_at": "missing_file"
    }
   }
  ]

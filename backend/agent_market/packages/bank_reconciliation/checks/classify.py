@@ -67,12 +67,18 @@ def key(text) -> str:
     return re.sub(r"[\s.\-_:()#*,]", "", T.arabic(str(text or "")).lower())
 
 
-def of_bank_row(description: str, amount: Decimal) -> str:
-    """A row of the statement the ledger does not have."""
-    k = key(description)
+def loose(text) -> str:
+    """A text without its Thai marks: what a row read from a PDF is compared by (AM6 — a PDF's
+    text layer often loses them, "คาธรรมเนยม")."""
+    return T.skel(str(text or ""))
+
+
+def of_bank_row(description: str, amount: Decimal, *, pdf: bool = False) -> str:
+    """A row of the statement the ledger does not have. ``pdf``: the row was read from a PDF."""
+    k = loose(key(description)) if pdf else key(description)
     sign = 1 if amount > ZERO else -1
     for code, want, words in _RULES:
-        if sign == want and any(w in k for w in words):
+        if sign == want and any((loose(w) if pdf else w) in k for w in words):
             return code
     return "unrecorded_receipt" if amount > ZERO else "unrecorded_payment"
 
@@ -81,11 +87,11 @@ TAX_WORDS = ("ภาษี", "tax")
 WHT_RATES = (Decimal("1.00"), Decimal("15.00"))   # a company's deposit interest; a person's
 
 
-def is_tax_on(description: str, amount: Decimal, interest: Decimal) -> bool:
+def is_tax_on(description: str, amount: Decimal, interest: Decimal, *, pdf: bool = False) -> bool:
     """A line that only says "ภาษี" / "TAX", on the day interest was paid, and no more than the
     tax on that interest could be: the tax withheld on it, not a tax payment of another kind."""
-    k = key(description)
-    return (amount < ZERO and interest > ZERO and any(w in k for w in TAX_WORDS)
+    k = loose(key(description)) if pdf else key(description)
+    return (amount < ZERO and interest > ZERO and any((loose(w) if pdf else w) in k for w in TAX_WORDS)
             and abs(amount) * 100 <= interest * 15 + Decimal("1.00"))
 
 
@@ -98,12 +104,22 @@ def of_book_row(cheque: str, amount: Decimal, carried_kind: str | None = None) -
     return "outstanding_cheque" if cheque else "outstanding_payment"
 
 
-def who(text) -> str:
+def who(text, *, pdf: bool = False) -> str:
     """What a line says once the words about how the money moved are taken out — what two
-    texts are compared by when their names may resemble each other."""
+    texts are compared by when their names may resemble each other. ``pdf``: the words are found
+    without their marks, in a text that may have lost them."""
     s = T.arabic(str(text or "")).lower()
-    s = re.sub(r"(?:เช็ค(?:เลขที่)?|chq|cheque|check|cq)\s*(?:no\.?|เลขที่|#|:)?\s*\d{5,10}", " ", s)
-    for w in sorted(_NOISE, key=len, reverse=True):
+    s = re.sub(r"(?:เช็?ค(?:เลขที่?)?|chq|cheque|check|cq)\s*(?:no\.?|เลขที่?|#|:)?\s*\d{5,10}", " ", s)
+    noise = sorted(_NOISE, key=len, reverse=True)
+    if pdf:
+        marks = "[" + "".join(sorted(T._MARKS)) + "]*"
+        for w in noise:
+            if w.isascii():
+                s = re.sub(rf"(?<![a-z]){re.escape(w)}(?![a-z])", " ", s)
+            else:
+                s = re.sub(marks.join(re.escape(ch) for ch in w if ch not in T._MARKS) + marks, " ", s)
+        return " ".join(s.split())
+    for w in noise:
         s = re.sub(rf"(?<![a-z]){re.escape(w)}(?![a-z])" if w.isascii() else re.escape(w), " ", s)
     return " ".join(s.split())
 

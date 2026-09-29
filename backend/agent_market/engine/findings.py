@@ -41,7 +41,10 @@ MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
                   # confirms several pairs (subject = every pair it names), one per row without a partner
                   "e3_candidate", "e3_confirm_all", "e3_unmatched",
                   # AM5 bank reconciliation: one per file whose side is asked, one per side whose balance is
-                  "bankrec_side", "bankrec_closing")
+                  "bankrec_side", "bankrec_closing",
+                  # AM6 invoice ↔ PO: one per table whose kind is asked, one per invoice and PO whose supplier
+                  # the names cannot settle, one per pair of units nothing converts
+                  "pomatch_kind", "pomatch_supplier", "pomatch_unit")
 FORBIDDEN_WORDS = ("password", "รหัสผ่าน", "token", "โทเคน", "เลขบัตรประชาชน", "otp", "pin")
 
 

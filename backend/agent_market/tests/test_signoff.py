@@ -157,6 +157,39 @@ class Financial(unittest.TestCase):
         self.assertEqual([n for n in wb.sheetnames if n.startswith("ตรวจทาน")], ["ตรวจทาน"])
         self.assertEqual(_parts(paths["xlsx"])["xl/workbook.xml"], _parts(self.stamped["xlsx"])["xl/workbook.xml"])
 
+    def test_a_signed_file_names_no_organisation(self):
+        # AM6: an agent installs at another company; the stamp, the author and the embedded font's key
+        # are the same there, so none of them may carry this repository's owner's name
+        for fmt, path in self.stamped.items():
+            for name, data in _parts(path).items():
+                self.assertIsNone(re.search(rb"sran", data, re.I), (fmt, name))
+
+    def test_a_stamp_signed_before_am6_is_replaced_all_the_same(self):
+        from docx import Document
+        from pptx import Presentation
+
+        base = tempfile.mkdtemp(prefix="am_oldstamp_")
+        old = {}
+        doc = Document(self.stamped["docx"])
+        for el in doc.element.body.iterchildren():
+            if signoff._is_stamp(el):
+                el.find(f"{{{signoff.W_NS}}}tblPr/{{{signoff.W_NS}}}tblCaption").set(f"{{{signoff.W_NS}}}val", "sran-review-stamp")
+        old["docx"] = os.path.join(base, os.path.basename(self.stamped["docx"]))
+        doc.save(old["docx"])
+        prs = Presentation(self.stamped["pptx"])
+        for sh in prs.slides[0].shapes:
+            if sh.name == signoff.PPTX_SHAPE:
+                sh.name = "SRAN review stamp"
+        old["pptx"] = os.path.join(base, os.path.basename(self.stamped["pptx"]))
+        prs.save(old["pptx"])
+        again, out = _stamp(old, {**REVIEW, "reviewer": "สมศักดิ์ ตรวจดี"})
+        paths = {a["format"]: os.path.join(out, a["name"]) for a in again["artifacts"]}
+        body = list(Document(paths["docx"]).element.body.iterchildren())
+        self.assertEqual(sum(1 for el in body if signoff._is_stamp(el)), 1)
+        self.assertIn("สมศักดิ์ ตรวจดี", _docx_text(paths["docx"]))
+        names = [sh.name for sh in Presentation(paths["pptx"]).slides[0].shapes]
+        self.assertEqual([n for n in names if "stamp" in n.lower()], [signoff.PPTX_SHAPE])
+
 
 class Registers(unittest.TestCase):
     """The invoice register and the expense audit workbook: the same sheet, nothing else moves."""

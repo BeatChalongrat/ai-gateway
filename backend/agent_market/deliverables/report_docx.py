@@ -472,7 +472,7 @@ class ReportWriter:
                     self.heading(b["text"], 2)
         props = self.doc.core_properties
         props.title = f"{self.m['title']} {self.m['subtitle']}"
-        props.author = self.m["company"] or "SRAN Agent"
+        props.author = self.m["company"] or "Agent Market"
         props.subject = self.m["source_note"]
         self.doc.save(path)
         embedded = embed_fonts(path, self.font)
@@ -501,7 +501,7 @@ def embed_fonts(docx_path: str, face: str) -> list[str]:
     embeds = []
     for i, (kind, path) in enumerate(todo, start=1):
         # Deterministic key: the same face always embeds to the same bytes.
-        key = "{" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"sran-agent-market/font/{face}/{kind}")).upper() + "}"
+        key = "{" + str(uuid.uuid5(uuid.NAMESPACE_URL, f"agent-market/font/{face}/{kind}")).upper() + "}"
         with open(path, "rb") as f:
             entries[f"word/fonts/font{i}.odttf"] = _obfuscate(f.read(), key)
         rid = f"rIdAmFont{i}"

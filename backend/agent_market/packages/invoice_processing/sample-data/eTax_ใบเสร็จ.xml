@@ -18,9 +18,9 @@
         <ram:PostalTradeAddress><ram:LineOne>200 ถนนบางนา-ตราด แขวงบางนา เขตบางนา กรุงเทพมหานคร 10260</ram:LineOne><ram:CountryID>TH</ram:CountryID></ram:PostalTradeAddress>
       </ram:SellerTradeParty>
       <ram:BuyerTradeParty>
-        <ram:Name>บริษัท สรานเทค โซลูชั่นส์ จำกัด</ram:Name>
-        <ram:SpecifiedTaxRegistration><ram:ID schemeID="TXID">010556301234300000</ram:ID></ram:SpecifiedTaxRegistration>
-        <ram:PostalTradeAddress><ram:LineOne>99/9 อาคารสรานทาวเวอร์ ชั้น 12 ถนนวิภาวดีรังสิต แขวงจตุจักร เขตจตุจักร กรุงเทพมหานคร 10900</ram:LineOne><ram:CountryID>TH</ram:CountryID></ram:PostalTradeAddress>
+        <ram:Name>บริษัท สยามตัวอย่างการค้า จำกัด</ram:Name>
+        <ram:SpecifiedTaxRegistration><ram:ID schemeID="TXID">010555600001700000</ram:ID></ram:SpecifiedTaxRegistration>
+        <ram:PostalTradeAddress><ram:LineOne>88 ถนนสีลม แขวงสุริยวงศ์ เขตบางรัก กรุงเทพมหานคร 10500</ram:LineOne><ram:CountryID>TH</ram:CountryID></ram:PostalTradeAddress>
       </ram:BuyerTradeParty>
     </ram:ApplicableHeaderTradeAgreement>
     <ram:ApplicableHeaderTradeDelivery/>

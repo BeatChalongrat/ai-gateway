@@ -333,6 +333,6 @@ class DeckWriter:
         self.two_column("ข้อสมมติและที่มาของข้อมูล", ("ข้อสมมติในรอบนี้", assumptions), ("ที่มาและขอบเขต", about), [])
         props = self.prs.core_properties
         props.title = f"{m['title']} {m['subtitle']}"
-        props.author = m["company"] or "SRAN Agent"
+        props.author = m["company"] or "Agent Market"
         self.prs.save(path)
         return {"path": path, "slides": len(self.prs.slides), "chart_bindings": self.bindings, "slide_cites": self.cites}

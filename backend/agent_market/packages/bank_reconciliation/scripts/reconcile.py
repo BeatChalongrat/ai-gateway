@@ -113,12 +113,12 @@ def items_of(rv: Review) -> list[dict]:
     extra = [line_of(rv, r["id"]) for r in g["extra"]]          # the statement has it, the ledger does not
     interest_on = {}
     for ln in extra:
-        if C.of_bank_row(ln.text, ln.amount) == "interest":
+        if C.of_bank_row(ln.text, ln.amount, pdf=ln.pdf) == "interest":
             interest_on[ln.date] = interest_on.get(ln.date, ZERO) + ln.amount
     for ln in extra:
         a = said.get(ln.id)
-        kind = C.of_bank_row(ln.text, ln.amount)
-        if kind == "unrecorded_payment" and C.is_tax_on(ln.text, ln.amount, interest_on.get(ln.date, ZERO)):
+        kind = C.of_bank_row(ln.text, ln.amount, pdf=ln.pdf)
+        if kind == "unrecorded_payment" and C.is_tax_on(ln.text, ln.amount, interest_on.get(ln.date, ZERO), pdf=ln.pdf):
             kind = "wht_interest"
         key = f"{E3C.CODE_LONE}:{ln.id}" if a is not None else None
         if a == "bank_error":
@@ -364,8 +364,8 @@ def _not_included(rv: Review) -> list[dict]:
                         "can_restore": False, "restore": {"set": {}, "drop": []}})
         else:
             out.append({"doc_key": u.key, "name": u.name, "code": why, "reason": u.data.get("say") or "ไม่ได้ใช้ไฟล์นี้",
-                        "detail": "agent นี้อ่านรายการเดินบัญชีและสมุดบัญชีที่เป็น Excel หรือ CSV",
-                        "how": "ส่งไฟล์ที่ส่งออกจากธนาคารหรือโปรแกรมบัญชีเป็น Excel หรือ CSV แทน", "can_restore": False,
+                        "detail": "agent นี้อ่านรายการเดินบัญชีและสมุดบัญชีที่เป็น Excel CSV หรือ PDF ที่มีตัวอักษรให้อ่าน",
+                        "how": "ส่งไฟล์ที่ธนาคารหรือโปรแกรมบัญชีออกให้เป็น Excel CSV หรือ PDF แทน", "can_restore": False,
                         "restore": {"set": {}, "drop": []}})
     return out
 

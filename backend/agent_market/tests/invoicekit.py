@@ -42,7 +42,14 @@ def _load(p):
 
 
 def load_cases() -> dict:
-    return _load(os.path.join(PKG, "evals", "cases.json"))
+    cases = _load(os.path.join(PKG, "evals", "cases.json"))
+    # AM6: the eval set ships inside the runtime zip, so it names no company; its cases are the
+    # fixture pack's documents (not shipped), and the pack's buyer is every case's install settings
+    ref = cases.get("company") or {}
+    if "from" in ref:
+        org = _load(os.path.join(ROOT, ref["from"]))
+        cases["company"] = {"company": org["name"], "company_tax_id": org["tax_id"], "company_branch": org["branch"]}
+    return cases
 
 
 def _golden(fid: str) -> dict:

@@ -71,14 +71,19 @@ class Line:
     def cheque(self) -> str:
         return self.raw.get("cheque") or ""
 
+    @property
+    def pdf(self) -> bool:
+        """The row was read from a PDF: its words may have lost their Thai marks."""
+        return bool(self.raw.get("from_pdf"))
+
     def source(self) -> dict:
         d = self.upload.data
         return {"file": self.upload.name, "sheet": d.get("sheet"), "row": self.raw["row"], "cells": self.raw.get("cells") or {}}
 
     def to_row(self, table: str) -> Row:
         tags = tuple(t for t in (("carried",) if self.side == "carried" else ()) + (("cheque",) if self.cheque else ()))
-        return Row(id=self.id, side=table, amount=self.amount, date=self.date, ref=self.ref, name=C.who(self.text) or self.text,
-                   source=self.source(), tags=tags)
+        return Row(id=self.id, side=table, amount=self.amount, date=self.date, ref=self.ref,
+                   name=C.who(self.text, pdf=self.pdf) or self.text, source=self.source(), tags=tags)
 
     def out(self) -> dict:
         return {"id": self.id, "side": self.side, "date": self.date.isoformat(), "amount": f"{self.amount:.2f}", "ref": self.ref,
@@ -431,7 +436,8 @@ def _assumptions(rv: Review) -> list[dict]:
         say = {"same_file": "เป็นไฟล์เดียวกับไฟล์ที่ส่งมาแล้ว (ไบต์ตรงกันทุกตัว) นับครั้งเดียว",
                "set_aside": "คุณตอบว่าไม่ใช้ไฟล์นี้ในรอบนี้",
                "unrecognised_sheet": "ไม่พบหัวคอลัมน์ของรายการเดินบัญชีหรือสมุดบัญชี",
-               "unsupported_type": "อ่านได้เฉพาะไฟล์ Excel หรือ CSV", "unreadable": "เปิดไฟล์ไม่ได้"}.get(why, "ไม่ได้ใช้")
+               "unsupported_type": "อ่านได้เฉพาะไฟล์ Excel CSV หรือ PDF ที่ธนาคารออกให้", "unreadable": "เปิดไฟล์ไม่ได้",
+               "scanned_pdf": "PDF เป็นภาพสแกนหรือรูปถ่าย ไม่มีตัวอักษรให้อ่าน"}.get(why, "ไม่ได้ใช้")
         out.append({"code": "file_not_used", "source": "rule", "text": f"ไม่ได้ใช้ไฟล์ {u.name}: {say}"})
     for k in rv.unusable_settings:
         out.append({"code": "setting_not_usable", "source": "rule", "changes_numbers": True,

@@ -52,6 +52,18 @@ def self_test_defaults(package: str, install: dict | None = None, *, overlay: bo
     return d
 
 
+def e2_fixture_defaults() -> dict:
+    """The invoice agent's self-test defaults with the E2 fixture pack's own buyer (fixtures/e2/org.json).
+
+    AM6: the agent's sample documents are made out to a company that does not exist, the fixture
+    pack's to the buyer it was drawn for; a test that runs the pack's documents is that buyer."""
+    with open(os.path.join(ROOT, "fixtures", "e2", "org.json"), encoding="utf-8") as f:
+        org = json.load(f)
+    d = self_test_defaults("invoice_processing")
+    d.update({"company": org["name"], "company_tax_id": org["tax_id"], "company_branch": org["branch"]})
+    return d
+
+
 def render_sample(package: str, *, out_dir: str | None = None, defaults: dict | None = None,
                   formats: list[str] | None = None) -> dict:
     st = self_test(package)

@@ -2,7 +2,7 @@
  "schema": "agent.market.eval.v1",
  "package": "sran.expense-audit",
  "note": "Files are the Phase A expense pack (fixtures/expense), paths relative to it. Every expected value comes from its golden output (expected.json, written from the spec), never from this package: 'golden' checks every claim's outcome, facts and reason codes against it ('golden_except' lists the claims a case changes on purpose, with their new expectations). Cards: unanswered ones take their default, as a skipped card does. 'defaults' is the install: the stored policy table and holiday calendar ('company:holidays.json' = that list as the company's own calendar, confirmed by a person — AM3: the holiday check reads nothing else; 'defaults_set' replaces a default for one case); 'policy_patch' edits the table for one case (null deletes a key). Checked on every case, whatever it says: no outcome but pass / exception / question, every run exception open for a person with its choices, every limit a fact used equal to the table's, the KB document never a limit, the workbook's own quality gate.",
- "defaults": {"company": "บริษัท สรานเทค โซลูชั่นส์ จำกัด", "policy": "fixture:policy.json", "holidays": "company:holidays.json"},
+ "defaults": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด", "policy": "fixture:policy.json", "holidays": "company:holidays.json"},
  "cases": [
   {
    "id": "golden_month_cards_skipped",

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rsm:TaxInvoice_CrossIndustryInvoice xmlns:rsm="urn:etda:uncefact:data:standard:TaxInvoice_CrossIndustryInvoice:2" xmlns:ram="urn:etda:uncefact:data:standard:TaxInvoice_ReusableAggregateBusinessInformationEntity:2">
+  <rsm:ExchangedDocumentContext>
+    <ram:GuidelineSpecifiedDocumentContextParameter><ram:ID schemeAgencyID="ETDA" schemeVersionID="v2.0">ER3-2560</ram:ID></ram:GuidelineSpecifiedDocumentContextParameter>
+  </rsm:ExchangedDocumentContext>
+  <rsm:ExchangedDocument>
+    <ram:ID>IV6909-0302</ram:ID>
+    <ram:Name>ใบกำกับภาษี</ram:Name>
+    <ram:TypeCode>388</ram:TypeCode>
+    <ram:IssueDateTime>2026-09-21T00:00:00.0</ram:IssueDateTime>
+    <ram:CreationDateTime>2026-09-21T09:00:00.0</ram:CreationDateTime>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty>
+        <ram:Name>บริษัท เอเชีย ออฟฟิศ ซัพพลาย จำกัด</ram:Name>
+        <ram:SpecifiedTaxRegistration><ram:ID schemeID="TXID">010555700011800000</ram:ID></ram:SpecifiedTaxRegistration>
+        <ram:PostalTradeAddress><ram:LineOne>123 ถนนพระราม 4 แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110</ram:LineOne><ram:CountryID>TH</ram:CountryID></ram:PostalTradeAddress>
+      </ram:SellerTradeParty>
+      <ram:BuyerTradeParty>
+        <ram:Name>บริษัท สยามตัวอย่างการค้า จำกัด</ram:Name>
+        <ram:SpecifiedTaxRegistration><ram:ID schemeID="TXID">010555600001700000</ram:ID></ram:SpecifiedTaxRegistration>
+        <ram:PostalTradeAddress><ram:LineOne>88 ถนนสีลม แขวงสุริยวงศ์ เขตบางรัก กรุงเทพมหานคร 10500</ram:LineOne><ram:CountryID>TH</ram:CountryID></ram:PostalTradeAddress>
+      </ram:BuyerTradeParty>
+      <ram:BuyerOrderReferencedDocument><ram:IssuerAssignedID>PO6909-001</ram:IssuerAssignedID></ram:BuyerOrderReferencedDocument>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeDelivery/>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:InvoiceCurrencyCode listID="ISO 4217 3A">THB</ram:InvoiceCurrencyCode>
+      <ram:ApplicableTradeTax>
+        <ram:TypeCode>VAT</ram:TypeCode><ram:CalculatedRate>7</ram:CalculatedRate>
+        <ram:BasisAmount currencyID="THB">12500.00</ram:BasisAmount><ram:CalculatedAmount currencyID="THB">875.00</ram:CalculatedAmount>
+      </ram:ApplicableTradeTax>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount currencyID="THB">12500.00</ram:LineTotalAmount>
+        <ram:AllowanceTotalAmount currencyID="THB">0.00</ram:AllowanceTotalAmount>
+        <ram:TaxBasisTotalAmount currencyID="THB">12500.00</ram:TaxBasisTotalAmount>
+        <ram:TaxTotalAmount currencyID="THB">875.00</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount currencyID="THB">13375.00</ram:GrandTotalAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+    <ram:IncludedSupplyChainTradeLineItem>
+      <ram:AssociatedDocumentLineDocument><ram:LineID>1</ram:LineID></ram:AssociatedDocumentLineDocument>
+      <ram:SpecifiedTradeProduct><ram:ID>A4-80</ram:ID><ram:Name>กระดาษถ่ายเอกสาร A4 80 แกรม</ram:Name></ram:SpecifiedTradeProduct>
+      <ram:SpecifiedLineTradeAgreement><ram:GrossPriceProductTradePrice><ram:ChargeAmount>125.00</ram:ChargeAmount></ram:GrossPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>
+      <ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode="รีม">100</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>
+      <ram:SpecifiedLineTradeSettlement><ram:SpecifiedTradeSettlementLineMonetarySummation><ram:NetLineTotalAmount currencyID="THB">12500.00</ram:NetLineTotalAmount></ram:SpecifiedTradeSettlementLineMonetarySummation></ram:SpecifiedLineTradeSettlement>
+    </ram:IncludedSupplyChainTradeLineItem>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:TaxInvoice_CrossIndustryInvoice>

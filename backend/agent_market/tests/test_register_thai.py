@@ -35,7 +35,7 @@ class TheRegisterIsThai(unittest.TestCase):
         names = sorted(n for n in os.listdir(E2_DOCS) if n[:1] in "def" or n.startswith("s01"))
         # named the way a person names files (Thai), so a file name is never the English found
         files = [(os.path.join(E2_DOCS, n), f"เอกสาร{i:02d}{os.path.splitext(n)[1]}") for i, n in enumerate(names)]
-        cls.res = S.run_files("invoice_processing", files, defaults=S.self_test_defaults("invoice_processing"),
+        cls.res = S.run_files("invoice_processing", files, defaults=S.e2_fixture_defaults(),
                               formats=["xlsx"])
 
     def test_every_exception_detail_is_thai(self):

@@ -46,8 +46,9 @@ def side_card(u) -> Finding:
 def missing_card(rv) -> Finding | None:
     want = []
     if not rv.bank_files:
-        want.append({"role": "bank", "label": "รายการเดินบัญชีจากธนาคาร (Statement)",
-                     "why": "ยอดคงเหลือและรายการฝั่งธนาคารทุกรายการมาจากไฟล์นี้", "required": True, "accept": [".xlsx", ".csv"]})
+        want.append({"role": "bank", "label": "รายการเดินบัญชีจากธนาคาร",
+                     "why": "ยอดคงเหลือและรายการฝั่งธนาคารทุกรายการมาจากไฟล์นี้", "required": True,
+                     "accept": [".xlsx", ".csv", ".pdf"]})
     if not rv.book_files:
         want.append({"role": "book", "label": "สมุดบัญชีเงินฝากธนาคารของบริษัท (บัญชีแยกประเภทของบัญชีนี้)",
                      "why": "ยอดคงเหลือและรายการฝั่งบริษัททุกรายการมาจากไฟล์นี้", "required": True, "accept": [".xlsx", ".csv"]})
@@ -130,7 +131,7 @@ def lone_card(rv):
         amount = Decimal(row["amount"])
         if row["side"] == "right":
             ln = _line(rv, row["id"])
-            guess = C.of_bank_row(ln.text if ln else row.get("name") or "", amount)
+            guess = C.of_bank_row(ln.text if ln else row.get("name") or "", amount, pdf=bool(ln and ln.pdf))
             return E3C.lone_card(
                 row, names, moment, default="review",
                 question=f"รายการเดินบัญชี: {E3C.line(_shown(rv, row))} ไม่พบในสมุดบัญชี "

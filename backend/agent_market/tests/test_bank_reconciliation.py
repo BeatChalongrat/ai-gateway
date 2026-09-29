@@ -58,6 +58,32 @@ class EvalSet(unittest.TestCase):
         shapes = {s for c in cases.values() for s in (c["expect"].get("shapes") or {})}
         self.assertIn("N:1", shapes)
 
+    def test_the_fuzzy_tier_is_reached_by_cases_of_the_agent(self):
+        # AM6: until now the set never produced a fuzzy pair, and the tier a wrong match comes from was
+        # covered by the engine's own tests only
+        results = [result(c["id"])[1] for c in K.load_cases()["cases"]]
+        b = K.tier_breakdown(results)
+        self.assertGreaterEqual(b["tiers"]["fuzzy"]["by_person"], 2)
+        self.assertEqual(b["tiers"]["fuzzy"]["by_rule"] + b["tiers"]["amount_date"]["by_rule"], 0)
+        self.assertGreaterEqual(b["tiers"]["fuzzy"]["waiting"], 2)
+        for p in ("fuzzy_name", "ref_only"):
+            self.assertGreaterEqual(b["passes"][p]["by_person"], 1, p)
+        _, res = result("fuzzy_a_name_written_another_way_and_an_amount_short_of_a_fee")
+        fuzzy = [m for m in res["computed"]["match"]["groups"]["matched"] if m["tier"] == "fuzzy"]
+        self.assertEqual(sorted(m["pass"] for m in fuzzy), ["fuzzy_name", "ref_only"])
+        self.assertTrue(all(m["confirmed"] == "person" and m["confirmed_by"] == "" for m in fuzzy) or
+                        all(m["confirmed"] == "person" for m in fuzzy))
+        late = next(m for m in fuzzy if m["pass"] == "fuzzy_name")
+        self.assertEqual(late["days_apart"], 10)
+        self.assertGreaterEqual(float(late["similarity"]), 0.80)
+        fee = next(m for m in fuzzy if m["pass"] == "ref_only")
+        self.assertEqual(fee["difference"], "-15.00")
+        # the fifteen baht are a drafted entry, not a pair that was called equal
+        self.assertEqual([i["amount"] for i in res["computed"]["items"] if i["type"] == "posting_error"], ["-15.00"])
+        _, skipped = result("fuzzy_pairs_nobody_confirms")
+        self.assertFalse(skipped["computed"]["gate"]["passed"])
+        self.assertEqual([s["tier"] for s in skipped["computed"]["match"]["groups"]["suspect"]], ["fuzzy", "fuzzy"])
+
 
 class TheGate(unittest.TestCase):
     """Adjusted bank balance = adjusted book balance, or the round is not a success."""
@@ -225,8 +251,77 @@ class Layouts(unittest.TestCase):
         self.assertEqual((u.kind, u.side), ("table", None))
         self.assertEqual(I.parse(os.path.join(FIX, "ledger_sep.xlsx"), "ledger_sep.xlsx", {}).side, "book")
         self.assertEqual(I.parse(os.path.join(FIX, "gl_sep.xlsx"), "gl_sep.xlsx", {}).side, "book")
+        doc = I.parse(os.path.join(FIX, "ledger_sep.xlsx"), "ledger_sep.docx", {})
+        self.assertEqual((doc.kind, doc.data["reason"]), ("other", "unsupported_type"))
+
+
+class StatementAsPdf(unittest.TestCase):
+    """AM6: a bank that hands out a PDF and nothing else."""
+
+    def test_the_pdf_is_the_same_statement_as_the_spreadsheet(self):
         pdf = I.parse(os.path.join(FIX, "statement_sep.pdf"), "statement_sep.pdf", {})
-        self.assertEqual((pdf.kind, pdf.data["reason"]), ("other", "unsupported_type"))
+        xls = I.parse(os.path.join(FIX, "kbank_sep.xlsx"), "kbank_sep.xlsx", {})
+        self.assertEqual((pdf.kind, pdf.side, pdf.data["layout"]), ("table", "bank", "out_in"))
+        self.assertEqual(pdf.data["pdf"], {"pages": 2})
+        a = [(r["date"], r["a"], r["b"], r["balance"], r["cheque"]) for r in pdf.data["rows"]]
+        b = [(r["date"], r["a"], r["b"], r["balance"], r["cheque"]) for r in xls.data["rows"]]
+        self.assertEqual(a, b)
+        self.assertEqual([m["what"] for m in pdf.data["marks"]], ["opening"])
+        self.assertEqual(pdf.data["meta"]["account_number"], "123-4-56789-0")
+        self.assertTrue(all(r["from_pdf"] for r in pdf.data["rows"]))
+        # the header of the second page is not a row, and every row says where it stands
+        self.assertEqual(pdf.data["rows"][0]["cells"]["date"], "หน้า 1 บรรทัด 7")
+        self.assertTrue(pdf.data["rows"][-1]["cells"]["date"].startswith("หน้า 2 บรรทัด "))
+
+    def test_it_reconciles_like_the_spreadsheet(self):
+        _, pdf = result("statement_as_a_pdf")
+        _, xls = result("clean_kbank_layout")
+        for k in ("statement", "gate", "totals"):
+            a, b = json.loads(json.dumps(pdf["computed"][k])), json.loads(json.dumps(xls["computed"][k]))
+            for side in ("bank", "book"):
+                if k == "statement":
+                    a[side].pop("balance_cell", None)
+                    b[side].pop("balance_cell", None)
+            self.assertEqual(a, b, k)
+        kinds = sorted(i["type"] for i in pdf["computed"]["items"])
+        self.assertEqual(kinds, sorted(i["type"] for i in xls["computed"]["items"]))
+        self.assertIn("bank_fee", kinds)                      # "ค่าธรรมเนียม" was read though the text layer lost its marks
+        self.assertIn("wht_interest", kinds)
+        row = next(r for r in pdf["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None)
+        self.assertIn("หน้า 1 บรรทัด", row[14])
+
+    def test_words_are_found_without_the_marks_a_text_layer_loses(self):
+        self.assertEqual(C.of_bank_row("คาธรรมเนยมโอนเงน", D("-35.00"), pdf=True), "bank_fee")
+        self.assertEqual(C.of_bank_row("คาธรรมเนยมโอนเงน", D("-35.00")), "unrecorded_payment")     # a spreadsheet's words are as written
+        self.assertEqual(C.of_bank_row("ดอกเบยรบ", D("1250.00"), pdf=True), "interest")
+        self.assertTrue(C.is_tax_on("ภาษหก ณ ทจาย", D("-12.50"), D("1250.00"), pdf=True))
+        self.assertEqual(C.who("โอนเงนเขา จาก บจก.ไทยเทรดดง", pdf=True), "บจก.ไทยเทรดดง")
+        self.assertEqual(I.CHEQUE_RE.search("เชค 10001201").group(1), "10001201")
+
+    def test_a_scan_is_not_read(self):
+        u = I.parse(os.path.join(FIX, "statement_sep_scan.pdf"), "statement_sep_scan.pdf", {})
+        self.assertEqual((u.kind, u.data["reason"]), ("other", "scanned_pdf"))
+        self.assertIn("ภาพสแกน", u.data["say"])
+        _, res = result("pdf_that_is_a_scan_is_not_read_and_says_so")
+        left = res["computed"]["not_included"]
+        self.assertEqual([(e["name"], e["code"], e["can_restore"]) for e in left], [("statement_sep_scan.pdf", "scanned_pdf", False)])
+
+    def test_a_pdf_without_a_statement_and_one_that_cannot_be_opened(self):
+        self.assertEqual(I.parse(os.path.join(FIX, "letter_from_the_bank.pdf"), "x.pdf", {}).data["reason"], "unrecognised_sheet")
+        self.assertEqual(I.parse(os.path.join(FIX, "broken.pdf"), "x.pdf", {}).data["reason"], "unreadable")
+
+    def test_the_grid(self):
+        from agent_market.engine.e2 import grid
+
+        g = grid.read(os.path.join(FIX, "statement_sep.pdf"), I._known_header)
+        self.assertEqual((g["pages"], g["scanned"], g["columns"], g["header_row"]), (2, [], 6, 4))
+        head = g["rows"][g["header_row"]]
+        self.assertEqual([I.plain(h) for h in head], [I.plain(h) for h in ("วันที่", "รายการ", "ถอนเงิน", "ฝากเงิน", "ยอดคงเหลือ", "ช่องทาง")])
+        body = g["rows"][g["header_row"] + 1:]
+        self.assertEqual(len(body), 15)                        # the opening line and fourteen rows; the second page's header is no row
+        self.assertTrue(all(len(r) == 6 for r in body))
+        cheque = next(r for r in body if r[1] and "10001201" in r[1])
+        self.assertEqual((cheque[2], cheque[3], cheque[4]), ("45,000.00", None, "1,580,000.00"))   # the cheque's number is no amount
 
 
 class ByRule(unittest.TestCase):
@@ -371,6 +466,8 @@ class SelfTest(unittest.TestCase):
     def test_the_manifest(self):
         m = S.manifest("bank_reconciliation")
         self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "rules"))
+        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.1.0", "generic", "TH"))
+        self.assertIn(".pdf", next(i for i in m["inputs"] if i["role"] == "bank")["accept"])
         self.assertTrue(m["completion_gate"])
         self.assertTrue(m["record_who_answered"])
         self.assertEqual(m["review"], {"separate_reviewer": True})

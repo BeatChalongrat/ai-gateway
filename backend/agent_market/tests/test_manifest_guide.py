@@ -10,7 +10,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKGS = os.path.join(os.path.dirname(HERE), "packages")
-PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation")
+PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching")
 GUIDE_KEYS = {"for", "how", "inputs", "outputs", "questions", "model_inputs", "never", "wrong_file", "time_note"}
 # words a person outside accounting IT would stop at
 JARGON = re.compile(r"materiality|D/C|S/H|debit/credit convention|cosmetic|schema|checksum|sandbox|E2\b", re.I)
@@ -61,8 +61,15 @@ class Guide(unittest.TestCase):
 
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
-                         {"financial_report": "1.3.2", "invoice_processing": "1.3.0", "expense_audit": "1.2.1",
-                          "bank_reconciliation": "1.0.0"})
+                         {"financial_report": "1.3.3", "invoice_processing": "1.3.1", "expense_audit": "1.2.2",
+                          "bank_reconciliation": "1.1.0", "po_matching": "1.0.0"})
+
+    def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):
+        # AM6 "generic by default": scope and jurisdiction are the manifest's, never assumed
+        for pkg in PACKAGES:
+            m = manifest(pkg)
+            self.assertIn(m.get("scope"), ("generic", "org-specific"), pkg)
+            self.assertEqual(m.get("jurisdiction"), "TH", pkg)
 
 
 if __name__ == "__main__":

@@ -248,7 +248,7 @@ def _save(wb: Workbook, path: str) -> None:
     import io
     import zipfile
 
-    wb.properties.creator = "SRAN fixtures"
+    wb.properties.creator = "fixtures"
     wb.properties.created = dt.datetime(2026, 9, 25, 8, 0, 0)
     wb.properties.modified = dt.datetime(2026, 9, 25, 8, 0, 0)
     buf = io.BytesIO()

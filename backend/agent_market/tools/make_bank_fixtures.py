@@ -308,7 +308,88 @@ def write_carried(path: str, items: list) -> list:
 
 def write_pdf_stub(path: str) -> None:
     with open(path, "wb") as fh:
-        fh.write(b"%PDF-1.4\n% a statement printed to PDF: this agent reads Excel and CSV exports\n%%EOF\n")
+        fh.write(b"%PDF-1.4\n% not a document: a file that only calls itself a PDF\n%%EOF\n")
+
+
+STATEMENT_CSS = """
+body { font-family: 'Sarabun', sans-serif; font-size: 10pt; color: #111; }
+h1 { font-size: 14pt; margin: 0; } h2 { font-size: 11pt; margin: 2px 0 8px; font-weight: 400; }
+.meta { margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; }
+thead { display: table-header-group; }
+th { border-bottom: 1.5px solid #333; padding: 4px 6px; text-align: left; font-size: 9.5pt; }
+td { border-bottom: 1px solid #ddd; padding: 3px 6px; }
+th.r, td.r { text-align: right; }
+tr { page-break-inside: avoid; }
+tr.break { page-break-after: always; }
+"""
+
+
+def _chrome(html_text: str, path: str) -> None:
+    from pathlib import Path
+
+    from pypdf import PdfReader, PdfWriter
+
+    from .e2fix import render
+
+    hp = Path(path).with_suffix(".html")
+    hp.write_text(html_text, encoding="utf-8", newline="\n")
+    raw = Path(path).with_suffix(".raw.pdf")
+    render.chrome_pdf(hp, raw)
+    w = PdfWriter(clone_from=PdfReader(str(raw)))
+    w.add_metadata({"/Producer": "fixture (Chrome print)", "/Creator": "agent_market.tools.make_bank_fixtures",
+                    "/CreationDate": "D:20260926000000+07'00'", "/ModDate": "D:20260926000000+07'00'"})
+    with open(path, "wb") as f:
+        w.write(f)
+    raw.unlink()
+    hp.unlink()
+    prof = Path(path).parent / ".chrome-profile"
+    if prof.exists():
+        import shutil
+
+        shutil.rmtree(prof, ignore_errors=True)
+
+
+def write_pdf_statement(path: str, lines: list, opening: Decimal, *, break_after: int = 9) -> None:
+    """The statement as the PDF a bank's portal hands out: a heading, the account, and the table
+    over two pages with its header repeated on the second."""
+    import html as _h
+
+    from .e2fix.html import _page
+
+    rows = list(_running(lines, opening))
+    first, last = rows[0][0].date.replace(day=1), rows[-1][0].date
+    body = [f"<h1>{_h.escape(BANK)} จำกัด (มหาชน)</h1><h2>รายการเดินบัญชีเงินฝากกระแสรายวัน</h2>",
+            f"<div class='meta'>ชื่อบัญชี: {_h.escape(ACCOUNT_NAME)} &nbsp;&nbsp;&nbsp; เลขที่บัญชี {ACCOUNT_NO}<br>"
+            f"ระหว่างวันที่ {be(first)} ถึง {be(last)}</div>",
+            "<table><thead><tr><th>วันที่</th><th>รายการ</th><th class='r'>ถอนเงิน</th><th class='r'>ฝากเงิน</th>"
+            "<th class='r'>ยอดคงเหลือ</th><th>ช่องทาง</th></tr></thead><tbody>",
+            f"<tr><td>{be(first)}</td><td>ยอดยกมา</td><td class='r'></td><td class='r'></td><td class='r'>{opening:,.2f}</td><td></td></tr>"]
+    for i, (l, bal) in enumerate(rows):
+        a = D(l.amount)
+        cls = " class='break'" if i + 1 == break_after else ""
+        body.append(f"<tr{cls}><td>{be(l.date)}</td><td>{_h.escape(l.text)}</td><td class='r'>{(f'{-a:,.2f}' if a < 0 else '')}</td>"
+                    f"<td class='r'>{(f'{a:,.2f}' if a > 0 else '')}</td><td class='r'>{bal:,.2f}</td>"
+                    f"<td>{'K BIZ' if 'โอน' in l.text else 'สาขา'}</td></tr>")
+    body.append("</tbody></table>")
+    _chrome(_page(STATEMENT_CSS, "".join(body)), path)
+
+
+def write_pdf_letter(path: str) -> None:
+    """A PDF with a text layer and no statement in it."""
+    from .e2fix.html import _page
+
+    _chrome(_page(STATEMENT_CSS, f"<h1>{BANK} จำกัด (มหาชน)</h1><p>เรียน ผู้ถือบัญชี {ACCOUNT_NAME}</p>"
+                                 "<p>ธนาคารขอแจ้งการปรับปรุงระบบบริการธนาคารทางอินเทอร์เน็ตในวันที่ 15 ตุลาคม 2569 "
+                                 "ระหว่างเวลา 01:00 น. ถึง 04:00 น. ขออภัยในความไม่สะดวก</p>"), path)
+
+
+def write_pdf_scan(path: str, of: str) -> None:
+    """The statement's first page as a picture wrapped in a PDF: no text layer."""
+    from .e2fix import render
+
+    page = render.rasterize(__import__("pathlib").Path(of), 150)[0].convert("L")
+    page.save(path, "PDF", resolution=150.0)
 
 
 # ── what each case must come to ──────────────────────────────────────────
@@ -342,7 +423,8 @@ def truth(book: list, bank: list, *, opening_bank=OPENING, opening_book=OPENING,
             "adjusted_book": money(adj_book), "difference": money(adj_bank - adj_book), "tied": adj_bank == adj_book}
 
 
-def main() -> None:
+def main(argv: list | None = None) -> None:
+    with_pdf = "--no-pdf" not in (argv or [])          # the PDFs need the host's Chrome; without it the ones on disk are kept
     sample = os.path.join(PKG, "sample-data")
     fx = os.path.join(PKG, "evals", "fixtures")
     os.makedirs(sample, exist_ok=True)
@@ -636,12 +718,69 @@ def main() -> None:
          answers={f"e3_candidate:{late}": "match"},
          note="The same files with the install's window set to seven days: the pair is proposed, a person confirms it.")
 
-    # a statement printed to PDF
-    write_pdf_stub(os.path.join(fx, "statement_sep.pdf"))
-    case("pdf_is_not_read_and_says_so", ["statement_sep.pdf", "kbank_sep.xlsx", "ledger_sep.xlsx"],
-         {**base, "not_included": ["statement_sep.pdf"]},
-         note="A PDF beside the two files: it is not read (this agent reads the Excel or CSV export), the round says which file "
-              "it did not use and why, and the file is on the round's list of what was not included.")
+    # the fuzzy tier, forced (AM6): a name written another way, an amount short of a fee
+    fz_book = [Bk(**b.__dict__) for b in book] + [
+        Bk(9, "RV6909-006", "รับชำระ บจก.สยามพรีซิชั่นพาร์ท", "74900.00"),
+        Bk(11, "PV6909-012", "จ่ายค่าขนส่งสินค้า", "-30000.00", chq="10001209"),
+    ]
+    fz_bank = [Bn(**b.__dict__) for b in bank] + [
+        Bn(19, "โอนเงินเข้า จาก สยามพรีซิชั่น พาร์ทส์", "74900.00"),          # ten days later, the name written another way
+        Bn(14, "เช็ค 10001209 รวมค่าธรรมเนียมเรียกเก็บ", "-30015.00", chq="10001209"),   # the cheque, and the bank's fee in one line
+    ]
+    t = truth(fz_book, fz_bank, posting=D("-15.00"))
+    assert t["tied"], t
+    at_bank = write_kbank(os.path.join(fx, "kbank_sep_fuzzy.xlsx"), fz_bank, OPENING)
+    at_book = write_ledger(os.path.join(fx, "ledger_sep_fuzzy.xlsx"), fz_book, OPENING)
+    name_pair = (row("ledger_sep_fuzzy.xlsx", at_book[id(one(fz_book, doc="RV6909-006"))]) + "~"
+                 + row("kbank_sep_fuzzy.xlsx", at_bank[id(one(fz_bank, amount="74900.00"))]))
+    fee_pair = (row("ledger_sep_fuzzy.xlsx", at_book[id(one(fz_book, doc="PV6909-012"))]) + "~"
+                + row("kbank_sep_fuzzy.xlsx", at_bank[id(one(fz_bank, amount="-30015.00"))]))
+    case("fuzzy_a_name_written_another_way_and_an_amount_short_of_a_fee", ["kbank_sep_fuzzy.xlsx", "ledger_sep_fuzzy.xlsx"],
+         {**t, "gate": "tied", "asked": ["e3_candidate", "e3_candidate"], "matched": 12,
+          "tiers": {"exact": 10, "amount_date": 0, "fuzzy": 2}, "by_person": 2, "suspect": 0,
+          "items": {**items_clean, "posting_error": 1}, "journal": 4, "review": [], "not_included": [], "period": "2026-09",
+          "passes": {"fuzzy_name": 1, "ref_only": 1}},
+         answers={f"e3_candidate:{name_pair}": "match", f"e3_candidate:{fee_pair}": "match"},
+         note="Two pairs only the fuzzy tier finds. A customer's transfer reaches the bank ten days after the ledger's date, its "
+              "name written another way (พาร์ท / พาร์ทส์): outside the date window, the names resemble. A cheque is presented with "
+              "the bank's fee in the same line: the cheque number is the same, the amount is 15.00 more. Each is a question; the "
+              "person confirms both, and the 15.00 becomes a drafted entry.")
+    tf = truth([Bk(**{**b.__dict__, "tag": "unknown" if b.doc in ("RV6909-006", "PV6909-012") else b.tag}) for b in fz_book],
+               [Bn(**{**b.__dict__, "tag": "unknown" if b.amount in ("74900.00", "-30015.00") else b.tag}) for b in fz_bank])
+    case("fuzzy_pairs_nobody_confirms", ["kbank_sep_fuzzy.xlsx", "ledger_sep_fuzzy.xlsx"],
+         {"bank_balance": tf["bank_balance"], "book_balance": tf["book_balance"],
+          "adjusted_bank": money(D(tf["bank_balance"]) + D("40660.00") - D("9630.00") - D("32100.00")),
+          "adjusted_book": money(D(tf["book_balance"]) + D("1250.00") - D("12.50") - D("235.00")),
+          "difference": "-15.00", "tied": False, "gate": "not_tied", "what": "ยังไม่ลงตัว ต่างกัน 15.00 บาท",
+          "asked": ["e3_candidate", "e3_candidate"], "matched": 10, "tiers": {"exact": 10, "amount_date": 0, "fuzzy": 0},
+          "by_person": 0, "suspect": 2, "items": items_clean, "journal": 3, "review": ["match_unconfirmed", "match_unconfirmed"],
+          "not_included": [], "period": "2026-09", "success": False},
+         note="The same files, both cards skipped: a fuzzy pair is never matched by default. Four rows stay suspect, in neither "
+              "adjusted balance, and the round does not tie by the 15.00 nobody explained.")
+
+    # a statement as the PDF the bank issued (AM6)
+    if with_pdf:
+        write_pdf_statement(os.path.join(fx, "statement_sep.pdf"), bank, OPENING)
+        write_pdf_letter(os.path.join(fx, "letter_from_the_bank.pdf"))
+        write_pdf_scan(os.path.join(fx, "statement_sep_scan.pdf"), os.path.join(fx, "statement_sep.pdf"))
+    write_pdf_stub(os.path.join(fx, "broken.pdf"))
+    case("statement_as_a_pdf", ["statement_sep.pdf", "ledger_sep.xlsx"], {**base, "from_pdf": True},
+         note="The same month as the PDF a bank's portal hands out: two pages, the table's header printed on both, a text "
+              "layer that lost some Thai marks. Read from where its words stand, it is the same statement: ten pairs, seven "
+              "reconciling items, it ties — and every row is cited by its page and line.")
+    case("pdf_that_is_a_scan_is_not_read_and_says_so", ["statement_sep_scan.pdf", "kbank_sep.xlsx", "ledger_sep.xlsx"],
+         {**base, "not_included": ["statement_sep_scan.pdf"], "not_included_code": "scanned_pdf"},
+         note="A scan of the statement beside the two files: it has no text layer, nothing is read from it by guesswork, the "
+              "round says which file it did not use and why.")
+    case("pdf_that_is_no_statement", ["letter_from_the_bank.pdf", "kbank_sep.xlsx", "ledger_sep.xlsx"],
+         {**base, "not_included": ["letter_from_the_bank.pdf"], "not_included_code": "unrecognised_sheet"},
+         note="A letter from the bank as a PDF: it has words and no statement table.")
+    case("pdf_that_cannot_be_opened", ["broken.pdf", "kbank_sep.xlsx", "ledger_sep.xlsx"],
+         {**base, "not_included": ["broken.pdf"], "not_included_code": "unreadable"},
+         note="A file that only calls itself a PDF.")
+    case("statement_only_as_a_scan_asks_for_the_statement", ["statement_sep_scan.pdf", "ledger_sep.xlsx"],
+         {"asked": ["missing_file"], "stops_at": "missing_file"},
+         note="Only the scan and the ledger: there is no statement to reconcile with. The round asks for it and waits.")
 
     with open(os.path.join(PKG, "evals", "cases.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump({
@@ -662,4 +801,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    main(sys.argv[1:])

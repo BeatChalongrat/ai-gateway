@@ -1,6 +1,12 @@
 """What a run's uploads are: the bank's statement, the company's ledger of that account, and the
 items still open from the month before.
 
+A statement comes as a spreadsheet (Excel, CSV) or as the PDF the bank issued (AM6). A PDF's table
+is rebuilt from where its words stand (engine/e2/grid.py) and then read exactly as a sheet is: the
+same headers, the same rows, the same running balance. A PDF's text layer often loses Thai marks
+("รายการเดนบญช"), so a PDF's headers and words are compared without them. A PDF without a text
+layer — a scan, a photograph — is not read: the round says so, and nothing is taken from it.
+
 The parse step reads each upload once and stores what it read (parsed.json, format
 ``am.bankrec.v1``); preflight and compute judge the stored reading. The runner tells the parse step
 nothing about a file's role, so the role comes from the file itself:
@@ -35,6 +41,7 @@ from ....engine.tabular import col_letter, read_workbook, sha256_file
 
 FORMAT = "am.bankrec.v1"
 SHEET_EXT = (".xlsx", ".xlsm", ".csv", ".txt")
+PDF_EXT = (".pdf",)
 Q2 = Decimal("0.01")
 ZERO = Decimal("0.00")
 CARRIED_SHEET = "รายการค้างยกไป"
@@ -79,7 +86,8 @@ CLOSING_WORDS = ("ยอดยกไป", "ยกไป", "balancec/f", "balance
                  "closingbalance", "endingbalance")
 TOTAL_WORDS = ("รวม", "ยอดรวม", "รวมทั้งสิ้น", "total", "grandtotal", "subtotal")
 ACCOUNT_RE = re.compile(r"(?<!\d)(\d{3}[- ]?\d[- ]?\d{5}[- ]?\d|\d{3}[- ]?\d{6}[- ]?\d|\d{10,12})(?!\d)")
-CHEQUE_RE = re.compile(r"(?:เช็ค(?:เลขที่)?|chq|cheque|check|cq)\s*(?:no\.?|เลขที่|#|:)?\s*(\d{5,10})", re.I)
+# the marks are optional: a PDF's text layer may have lost them ("เชค 10001201")
+CHEQUE_RE = re.compile(r"(?:เช็?ค(?:เลขที่?)?|chq|cheque|check|cq)\s*(?:no\.?|เลขที่?|#|:)?\s*(\d{5,10})", re.I)
 CARRIED_KINDS = {"เช็คค้างจ่าย": "outstanding_cheque", "เช็คค้าง": "outstanding_cheque", "รายการจ่ายค้าง": "outstanding_payment",
                  "เงินฝากระหว่างทาง": "deposit_in_transit", "เงินฝากระหว่างทางยังไม่เข้าบัญชี": "deposit_in_transit",
                  "outstandingcheque": "outstanding_cheque", "outstandingcheck": "outstanding_cheque",
@@ -127,9 +135,11 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
     ext = os.path.splitext(name)[1].lower()
     sha = sha256_file(path)
     key = "d" + sha[:10]
+    if ext in PDF_EXT:
+        return _pdf(path, name, sha, key, (mapping or {}).get("bank_reconciliation") or {})
     if ext not in SHEET_EXT:
         return Upload("other", key, name, sha, {"reason": "unsupported_type", "detail": ext,
-                                                "say": "อ่านได้เฉพาะไฟล์ Excel หรือ CSV ที่ส่งออกจากธนาคารหรือโปรแกรมบัญชี"})
+                                                "say": "อ่านได้เฉพาะไฟล์ Excel CSV หรือ PDF ที่ธนาคารหรือโปรแกรมบัญชีออกให้"})
     wb = read_workbook(path, name)
     if wb.error:
         return Upload("other", key, name, sha, {"reason": "unreadable", "detail": wb.error, "say": "เปิดไฟล์นี้ไม่ได้"})
@@ -147,6 +157,39 @@ def parse(path: str, name: str, mapping: dict | None = None) -> Upload:
         return Upload("other", key, name, sha, {"reason": "unrecognised_sheet",
                                                 "say": "ไม่พบหัวคอลัมน์ของรายการเดินบัญชีหรือสมุดบัญชี (วันที่ รายการ และจำนวนเงิน)"})
     return Upload("table", key, name, sha, best)
+
+
+# ── a statement as a PDF ─────────────────────────────────────────────────
+
+def plain(s) -> str:
+    """A text without the Thai marks a PDF's text layer loses, its spaces kept."""
+    return "".join("า" if ch == "ำ" else ch for ch in str(s or "") if ch not in T._MARKS and ch not in "\u200b\ufeff")
+
+
+def _known_header(text) -> bool:
+    h = plain(_h(text))
+    return bool(h) and any(h == plain(n) for names in HEADERS.values() for n in names)
+
+
+def _pdf(path: str, name: str, sha: str, key: str, mapping: dict) -> Upload:
+    from ....engine.e2 import grid
+    from ....engine.tabular import Sheet
+
+    try:
+        g = grid.read(path, _known_header)
+    except Exception as exc:  # noqa: BLE001 — a PDF that cannot be opened is a file that was not used, with its reason
+        return Upload("other", key, name, sha, {"reason": "unreadable", "detail": type(exc).__name__, "say": "เปิดไฟล์ PDF นี้ไม่ได้"})
+    if g is not None and g["scanned"]:
+        return Upload("other", key, name, sha, {
+            "reason": "scanned_pdf", "detail": f"{len(g['scanned'])}/{g['pages']}",
+            "say": "PDF นี้เป็นภาพสแกนหรือรูปถ่าย ไม่มีตัวอักษรให้อ่าน agent อ่านเฉพาะ PDF ที่ธนาคารออกให้ (คัดลอกตัวหนังสือในไฟล์ได้) "
+                   "หรือไฟล์ Excel และ CSV"})
+    got = None if g is None else _table(Sheet("PDF", g["rows"]), 0, mapping, loose=True, where=g["where"])
+    if got is None:
+        return Upload("other", key, name, sha, {"reason": "unrecognised_sheet",
+                                                "say": "ไม่พบตารางรายการเดินบัญชีในไฟล์ PDF นี้ (วันที่ รายการ และจำนวนเงิน)"})
+    got["pdf"] = {"pages": g["pages"]}
+    return Upload("table", key, name, sha, got)
 
 
 # ── cells ────────────────────────────────────────────────────────────────
@@ -204,18 +247,20 @@ def date_of(v) -> str | None:
     return d.isoformat()
 
 
-def _header(row: list, mapping: dict) -> dict:
-    """{field: column}: a column the install mapped by name first, then the known header words."""
+def _header(row: list, mapping: dict, loose: bool = False) -> dict:
+    """{field: column}: a column the install mapped by name first, then the known header words.
+    ``loose`` (a PDF): the words are compared without their Thai marks."""
     cols: dict[str, int] = {}
-    heads = [_h(c) for c in row]
+    norm = (lambda v: plain(_h(v))) if loose else _h
+    heads = [norm(c) for c in row]
     for f, header in mapping.items():
-        if f in HEADERS and _h(header) in heads:
-            cols[f] = heads.index(_h(header))
+        if f in HEADERS and norm(header) in heads:
+            cols[f] = heads.index(norm(header))
     for j, h in enumerate(heads):
         if not h or j in cols.values():
             continue
         for f, names in HEADERS.items():
-            if f not in cols and h in names:
+            if f not in cols and h in (tuple(plain(n) for n in names) if loose else names):
                 cols[f] = j
                 break
     return cols
@@ -233,12 +278,12 @@ def _money_layout(cols: dict) -> str | None:
 
 # ── a statement or a ledger ──────────────────────────────────────────────
 
-def _table(sheet, index: int, mapping: dict) -> dict | None:
+def _table(sheet, index: int, mapping: dict, loose: bool = False, where: list | None = None) -> dict | None:
     for i, row in enumerate(sheet.rows[:HEADER_SCAN]):
-        cols = _header(row, mapping)
+        cols = _header(row, mapping, loose)
         layout = _money_layout(cols)
         if "date" in cols and layout and ("description" in cols or "doc_no" in cols or "cheque" in cols):
-            return _read(sheet, index, i, cols, layout)
+            return _read(sheet, index, i, cols, layout, loose=loose, where=where)
     return None
 
 
@@ -251,25 +296,37 @@ def _above(sheet, header_at: int) -> list[str]:
     return out
 
 
-def _meta(lines: list[str], sheet_name: str) -> dict:
+def _meta(lines: list[str], sheet_name: str, loose: bool = False) -> dict:
+    if loose:
+        # a PDF: what stands above the table is searched without its marks (and named without them,
+        # unless the install's settings name the account)
+        return _meta_plain([plain(ln) for ln in lines], sheet_name)
+    return _meta_of(lines, sheet_name, lambda s: s)
+
+
+def _meta_plain(lines: list[str], sheet_name: str) -> dict:
+    return _meta_of(lines, sheet_name, plain)
+
+
+def _meta_of(lines: list[str], sheet_name: str, p) -> dict:
     whole = " ".join(lines)
     low = _h(whole)
     account = None
     for ln in lines:
-        if re.search(r"เลขที่บัญชี|เลขบัญชี|บัญชีเลขที่|account\s*(?:no|number)|a/c", ln, re.I):
+        if re.search(p(r"เลขที่บัญชี|เลขบัญชี|บัญชีเลขที่") + r"|account\s*(?:no|number)|a/c", ln, re.I):
             m = ACCOUNT_RE.search(T.arabic(ln))
             if m:
                 account = m.group(1)
                 break
     name = None
     for ln in lines:
-        m = re.search(r"(?:ชื่อบัญชี|account\s*name)\s*[:：]?\s*(.+)", ln, re.I)
+        m = re.search(r"(?:" + p("ชื่อบัญชี") + r"|account\s*name)\s*[:：]?\s*(.+)", ln, re.I)
         if m:
-            name = re.split(r"\s{2,}|เลขที่บัญชี|account\s*no", m.group(1), flags=re.I)[0].strip()[:120]
+            name = re.split(r"\s{2,}|" + p("เลขที่บัญชี") + r"|account\s*no", m.group(1), flags=re.I)[0].strip()[:120]
             break
     bank = None
     for ln in lines:
-        m = re.search(r"(ธนาคาร[^\s,;:()]+(?:\s*จำกัด\s*\(มหาชน\))?)", ln)
+        m = re.search(r"(ธนาคาร[^\s,;:()]+(?:\s*" + p("จำกัด") + r"\s*\(มหาชน\))?)", ln)
         if m:
             bank = m.group(1).strip()[:80]
             break
@@ -277,13 +334,13 @@ def _meta(lines: list[str], sheet_name: str) -> dict:
         m = re.search(r"([A-Za-z][A-Za-z ]{2,40}\bbank\b)", whole, re.I)
         bank = m.group(1).strip() if m else None
     span = None
-    dates = [d for d in (T.parse_date(x) for x in re.split(r"ถึง|[-–—]\s|\bto\b", T.arabic(whole))) if d]
+    dates = [d for d in (T.parse_date(x) for x in re.split(p("ถึง") + r"|[-–—]\s|\bto\b", T.arabic(whole))) if d]
     found = sorted({d[0].isoformat() for d in dates})
     if len(found) >= 2:
         span = [found[0], found[-1]]
     return {"lines": lines[:12], "account_number": account, "account_name": name, "bank": bank, "period": span,
-            "bank_words": sorted(w for w in BANK_WORDS if w in low), "book_words": sorted(w for w in BOOK_WORDS if w in low),
-            "statement": any(w in low for w in STATEMENT_WORDS), "sheet": sheet_name}
+            "bank_words": sorted(w for w in BANK_WORDS if p(w) in low), "book_words": sorted(w for w in BOOK_WORDS if p(w) in low),
+            "statement": any(p(w) in low for w in STATEMENT_WORDS), "sheet": sheet_name}
 
 
 def _side(cols: dict, layout: str, meta: dict) -> tuple[str | None, dict]:
@@ -315,8 +372,11 @@ def _side(cols: dict, layout: str, meta: dict) -> tuple[str | None, dict]:
     return None, why
 
 
-def _read(sheet, index: int, header_at: int, cols: dict, layout: str) -> dict:
-    meta = _meta(_above(sheet, header_at), sheet.name)
+def _read(sheet, index: int, header_at: int, cols: dict, layout: str, *, loose: bool = False, where: list | None = None) -> dict:
+    """``loose`` and ``where``: a PDF's grid — its words are compared without their marks, and a
+    row is cited by the page and the line it stands on."""
+    meta = _meta(_above(sheet, header_at), sheet.name, loose)
+    p = plain if loose else (lambda s: s)
     side, why = _side(cols, layout, meta)
     a_col, b_col = {"out_in": ("out", "in"), "debit_credit": ("debit", "credit"), "signed": ("amount", None)}[layout]
     rows, skipped, marks = [], [], []
@@ -334,16 +394,22 @@ def _read(sheet, index: int, header_at: int, cols: dict, layout: str) -> dict:
         date = date_of(cell("date"))
         first = _h(" ".join(text(c) for c in r[:3]))
         low = _h(desc) or first
-        cells = {f: f"{col_letter(j)}{i + 1}" for f, j in cols.items() if j < len(r) and r[j] not in (None, "")}
-        if any(w in low for w in OPENING_WORDS) or any(w in first for w in OPENING_WORDS):
+        if loose:
+            first, low = plain(first), plain(low)
+        if where is not None:
+            at = f"หน้า {where[i][0]} บรรทัด {where[i][1]}"
+            cells = {f: at for f, j in cols.items() if j < len(r) and r[j] not in (None, "")}
+        else:
+            cells = {f: f"{col_letter(j)}{i + 1}" for f, j in cols.items() if j < len(r) and r[j] not in (None, "")}
+        if any(p(w) in low for w in OPENING_WORDS) or any(p(w) in first for w in OPENING_WORDS):
             marks.append({"row": i + 1, "what": "opening", "balance": bal, "a": a, "b": b, "date": date, "cells": cells,
                           "account": text(cell("account"))})
             continue
-        if any(w in low for w in CLOSING_WORDS) or any(w in first for w in CLOSING_WORDS):
+        if any(p(w) in low for w in CLOSING_WORDS) or any(p(w) in first for w in CLOSING_WORDS):
             marks.append({"row": i + 1, "what": "closing", "balance": bal, "a": a, "b": b, "date": date, "cells": cells,
                           "account": text(cell("account"))})
             continue
-        if date is None and any(low.startswith(w) or first.startswith(w) for w in TOTAL_WORDS):
+        if date is None and any(low.startswith(p(w)) or first.startswith(p(w)) for w in TOTAL_WORDS):
             skipped.append({"row": i + 1, "why": "total_row"})
             continue
         if a is None and b is None:
@@ -361,6 +427,7 @@ def _read(sheet, index: int, header_at: int, cols: dict, layout: str) -> dict:
             "cheque": cheque, "doc_no": text(cell("doc_no")), "a": a, "b": b, "balance": bal,
             "account": text(cell("account")), "account_name": text(cell("account_name")),
             "channel": text(cell("channel")), "kind": text(cell("kind")), "cells": cells,
+            **({"from_pdf": True} if loose else {}),
         })
     accounts: dict[str, dict] = {}
     for r in rows:

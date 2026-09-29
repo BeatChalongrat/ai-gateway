@@ -111,7 +111,7 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": PACKAGE, "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": "bank_reconciliation.xlsx"}, "theme": {"id": "navy"},
-                        "run": {"date": today, "preparer": preparer, "agent_version": "1.0.0"}})
+                        "run": {"date": today, "preparer": preparer, "agent_version": "1.1.0"}})
         book = os.path.join(job.out, "bank_reconciliation.xlsx")
         keep = os.environ.get("BANKKIT_KEEP")
         if keep:
@@ -240,6 +240,19 @@ def check(case: dict, res: dict) -> list[str]:
         names = sorted(e["name"] for e in c["not_included"] if e["can_restore"] and e["restore"]["drop"])
         if names != sorted(exp["can_restore"]):
             errors.append(f"can be brought back {names}, expected {sorted(exp['can_restore'])}")
+    if "not_included_code" in exp:
+        codes = sorted(e["code"] for e in c["not_included"])
+        if codes != [exp["not_included_code"]]:
+            errors.append(f"not included because {codes}, expected {exp['not_included_code']}")
+    if "passes" in exp:
+        made = {p["id"]: p["by_rule"] + p["by_person"] for p in c["match"]["passes"]}
+        for k, v in exp["passes"].items():
+            if made.get(k, 0) != v:
+                errors.append(f"pass {k} matched {made.get(k, 0)}, expected {v}")
+    if exp.get("from_pdf"):
+        rows = [r for m in c["match"]["groups"]["matched"] for r in m["right"]]
+        if not rows or not all(str((r["cells"] or {}).get("date") or "").startswith("หน้า ") for r in rows):
+            errors.append("a row read from a PDF is not cited by its page and line")
     if "shapes" in exp:
         shapes: dict = {}
         for m in c["match"]["groups"]["matched"]:
