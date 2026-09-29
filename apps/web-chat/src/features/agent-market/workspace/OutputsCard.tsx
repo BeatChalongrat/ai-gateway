@@ -114,7 +114,7 @@ export function OutputsCard({
   const hasDetails = q.total > 0 || !!creditLine || !!modelLine;
 
   return (
-    <div className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-outputs">
+    <div className="rounded-xl border border-border bg-bg-surface px-4 py-3" data-testid="am-outputs" data-run={outputs.run_id}>
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1 text-sm font-semibold text-text-primary">
           {period ? t("outputs.title", { period }) : t("outputs.titleNoPeriod")}

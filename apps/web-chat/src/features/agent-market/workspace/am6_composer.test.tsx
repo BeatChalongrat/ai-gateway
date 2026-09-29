@@ -66,6 +66,8 @@ const ASK_ONLY = "ฐานความรู้ใช้ตอบคำถา�
 const SUGGEST_ATTACH = "แนบไฟล์เพื่อเริ่มรอบใหม่";
 const SUGGEST_ASK = "ถามเกี่ยวกับตัวเลขของรอบล่าสุด";
 const SUGGEST_FORMATS = "ขอไฟล์แบบอื่นของรอบล่าสุด";
+const SUGGEST_SAMPLE = "ดูผลจากไฟล์ตัวอย่าง";
+const SUGGEST_DATASHEET = "ดูว่า agent นี้อ่านอะไรบ้าง";
 
 const kb = (id: string, name: string): KnowledgeBase => ({
   id, name, description: "", embedding_model: "bge-m3", chunk_size: 512, chunk_overlap: 50, is_active: true,
@@ -505,6 +507,31 @@ describe("AM6 — what the placeholder used to explain is a chip to click", () =
     expect(picker).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByTestId("attach-button"));
     expect(picker).toHaveBeenCalledTimes(2);
+  });
+
+  it("before any round of their own: two — attach, and the sample's files, which it scrolls to", () => {
+    const sample = document.createElement("div");
+    sample.setAttribute("data-testid", "am-outputs");
+    sample.setAttribute("data-run", "st-1");
+    const scrolled = vi.fn();
+    sample.scrollIntoView = scrolled;
+    document.body.appendChild(sample);
+    try {
+      render(<Composer installId="i-1" onSent={vi.fn()} sampleRunId="st-1" datasheetHref="/chat/agents/sran.x/datasheet" />);
+      expect(suggestionTexts()).toEqual([SUGGEST_ATTACH, SUGGEST_SAMPLE]);
+      fireEvent.click(screen.getByRole("button", { name: SUGGEST_SAMPLE }));
+      expect(scrolled).toHaveBeenCalledTimes(1);
+    } finally {
+      sample.remove();
+    }
+  });
+
+  it("before any round, with no sample in the thread: attach, and what the agent reads (its data sheet)", () => {
+    render(<Composer installId="i-1" onSent={vi.fn()} datasheetHref="/chat/agents/sran.x/datasheet" />);
+    const row = suggestions()!;
+    const chips = [...row.querySelectorAll("button, a")].map((b) => b.textContent);
+    expect(chips).toEqual([SUGGEST_ATTACH, SUGGEST_DATASHEET]);
+    expect(within(row).getByRole("link", { name: SUGGEST_DATASHEET }).getAttribute("href")).toBe("/chat/agents/sran.x/datasheet");
   });
 
   it("after a finished round: three, and asking puts a sentence in the box to edit before sending", () => {

@@ -169,6 +169,15 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
         .join(","),
     [thread.items],
   );
+  // AM6: the self-test's files card in this thread, which a chip shows before a round of the person's own
+  const sampleRunId = useMemo(() => {
+    const selfTests = new Set(selfTestSig ? selfTestSig.split(",") : []);
+    for (let i = thread.items.length - 1; i >= 0; i--) {
+      const it = thread.items[i]!;
+      if (it.kind === "outputs" && it.run_id && selfTests.has(it.run_id)) return it.run_id;
+    }
+    return null;
+  }, [thread.items, selfTestSig]);
   const claimedAt = useRef(0);
   const ctx: WorkspaceCtx = useMemo(
     () => ({
@@ -291,6 +300,8 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
               agentName={manifest?.short_name || manifest?.name || install?.title}
               roundUnderway={underway}
               finishedRound={finished}
+              sampleRunId={sampleRunId}
+              datasheetHref={install?.slug ? `/chat/agents/${encodeURIComponent(install.slug)}/datasheet` : null}
               // the empty workspace says it itself, once
               estimate={empty ? null : estimate}
               tools={<ModelControl installId={installId} models={models} onModels={setModels} />}

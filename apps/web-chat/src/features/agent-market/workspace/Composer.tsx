@@ -26,7 +26,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { ComposerFrame } from "@/components/chat/ComposerFrame";
 import { DictationButton, useDictation } from "@/components/chat/Dictation";
 import { KBSelector } from "@/components/chat/KBSelector";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { useKnowledgeAvailable } from "@/hooks/useKnowledgeAvailable";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/draftStore";
 import { useT } from "@/lib/i18n";
@@ -70,6 +70,11 @@ interface Props {
   finishedRound?: boolean;
   /** AM6: what a round costs, said above the box while files are staged and no round is underway. */
   estimate?: string | null;
+  /** AM6: the install's self-test round whose files are in the thread: before a round of the person's own,
+   *  a chip shows them. */
+  sampleRunId?: string | null;
+  /** AM6: the agent's data sheet (what it reads): the chip in its place when there is no sample. */
+  datasheetHref?: string | null;
 }
 
 /** Where this agent chat's unsent text is kept (the app's draft store). */
@@ -107,6 +112,8 @@ function ComposerBody({
   roundUnderway = false,
   finishedRound = false,
   estimate,
+  sampleRunId = null,
+  datasheetHref = null,
   handle,
 }: Props & { handle: React.ForwardedRef<ComposerHandle> }) {
   const t = useAmT();
@@ -194,6 +201,11 @@ function ComposerBody({
   };
 
   const suggesting = !roundUnderway && asking && !trimmed && !dictation.active;
+  /** The sample's files card, in the thread above. */
+  const showSample = () => {
+    const el = sampleRunId ? document.querySelector<HTMLElement>(`[data-testid="am-outputs"][data-run="${CSS.escape(sampleRunId)}"]`) : null;
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
   const name = agentName?.trim();
 
   return (
@@ -226,6 +238,14 @@ function ComposerBody({
                     {t("composer.suggest.formats")}
                   </Button>
                 </>
+              ) : sampleRunId ? (
+                <Button type="button" variant="secondary" size="sm" onClick={showSample}>
+                  {t("composer.suggest.sample")}
+                </Button>
+              ) : datasheetHref ? (
+                <ButtonLink href={datasheetHref} variant="secondary" size="sm">
+                  {t("composer.suggest.datasheet")}
+                </ButtonLink>
               ) : null}
             </div>
           ) : null}

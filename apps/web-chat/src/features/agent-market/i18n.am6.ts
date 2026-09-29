@@ -17,6 +17,8 @@ export const am6Th = {
   "composer.suggest.ask": "ถามเกี่ยวกับตัวเลขของรอบล่าสุด",
   "composer.suggest.askText": "ช่วยอธิบายตัวเลขของรอบล่าสุด",
   "composer.suggest.formats": "ขอไฟล์แบบอื่นของรอบล่าสุด",
+  "composer.suggest.sample": "ดูผลจากไฟล์ตัวอย่าง",
+  "composer.suggest.datasheet": "ดูว่า agent นี้อ่านอะไรบ้าง",
 
   // knowledge answers questions; it is never the source of a number in a deliverable
   // (the chat's chip says ฐานความรู้: one screen, one word)
