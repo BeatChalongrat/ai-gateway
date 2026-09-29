@@ -73,7 +73,8 @@ async function waitFor(fn, ms, step = 1500) {
     log(`${ok ? "PASS" : "FAIL"} the draft names the agent whole — subject: ${draft.subject}`);
     if (!ok) process.exitCode = 1;
   } finally {
-    if (run) log(`evidence removed: ${(await L.http(`${AM}/admin/runs/${run.id}/remove-evidence`, { method: "POST", headers: { "Content-Type": "application/json", ...session.headers }, body: JSON.stringify({ reason: "[AM6] รอบทดสอบชื่อ agent ในอีเมล ไม่ใช่งานจริง" }) })).status}`);
+    // AM7: the chat app has no admin route any more — the admin door (scripts/probes/AM7/admin_door.js)
+    if (run) log(`evidence removed: ${(await require("../AM7/admin_door.js").removeEvidence(run.id, "[AM6] รอบทดสอบชื่อ agent ในอีเมล ไม่ใช่งานจริง")).status}`);
     if (inst) log(`install removed: ${(await L.http(`${AM}/installs/${inst.id}`, { method: "DELETE", headers: { ...session.headers } })).status}`);
   }
 })().catch((e) => {

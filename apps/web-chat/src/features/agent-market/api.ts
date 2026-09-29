@@ -23,18 +23,11 @@ import type {
   Reminder,
   ReminderRule,
   RemindersResponse,
-  RunMeta,
   StorageInfo,
-  AdminCatalogRow,
-  AdminOrg,
-  AdminSpend,
   AmFile,
   BudgetState,
   CatalogSample,
   Datasheet,
-  OrgDepartment,
-  OrgMember,
-  OrgSettings,
   Person,
   ProblemReport,
   RailPrefs,
@@ -323,29 +316,6 @@ export const amApi = {
   installProblem: (installId: string, body: { text: string; page?: string }) =>
     send<{ report: ProblemReport; message: string }>("POST", `/installs/${id(installId)}/problem`, body),
 
-  /** The organisation's admins (and publishers for the catalog). */
-  adminOrg: () => call<AdminOrg>("/admin/org"),
-  adminPutOrg: (body: Partial<Pick<OrgSettings, "name" | "access" | "contact_name" | "contact_email">> & {
-    domains?: string[];
-    user_monthly_credits?: number | string;
-    documents_may_leave?: boolean;
-    retention_years?: number;
-    storage_warn_mb?: number;
-  }) => send<{ org: OrgSettings; resumed: number }>("PUT", "/admin/org", body),
-  adminPutMember: (email: string, body: { display_name?: string; department?: string; role?: string; monthly_credits?: number | string | null }) =>
-    send<{ member: OrgMember; created: boolean; resumed: number }>("PUT", `/admin/members/${id(email)}`, body),
-  adminDeleteMember: (email: string) => send<{ removed: boolean }>("DELETE", `/admin/members/${id(email)}`),
-  adminPutDepartment: (name: string, body: { monthly_credits?: number | string | null; contact_name?: string; contact_email?: string }) =>
-    send<{ department: OrgDepartment; resumed: number }>("PUT", `/admin/departments/${id(name)}`, body),
-  adminDeleteDepartment: (name: string) => send<{ removed: boolean }>("DELETE", `/admin/departments/${id(name)}`),
-  adminSpend: (days: number) => call<AdminSpend>(`/admin/spend?days=${days}`),
-  adminProblems: (status: "open" | "closed" | "all" = "all") => call<{ problems: ProblemReport[] | null }>(`/admin/problems?status=${status}`),
-  adminCloseProblem: (problemId: string, note: string) =>
-    send<{ problem: ProblemReport }>("POST", `/admin/problems/${id(problemId)}/close`, { note }),
-  adminCatalog: () => call<{ agents: AdminCatalogRow[] | null; admin: boolean }>("/admin/catalog"),
-  adminPutCatalog: (slug: string, body: { status: string; reason?: string }) =>
-    send<{ state: { slug: string; status: string; reason: string }; stopped_runs: number }>("PUT", `/admin/catalog/${id(slug)}`, body),
-  adminSample: (slug: string) => send<{ run: Run }>("POST", `/admin/catalog/${id(slug)}/sample`),
 
   // ── AM4: rounds, threads, the agent's model ─────────────────────────────
 
@@ -361,17 +331,6 @@ export const amApi = {
   putModel: (installId: string, choice: string) => send<AgentModels>("PUT", `/installs/${id(installId)}/model`, { choice }),
   storage: (installId: string) => call<StorageInfo>(`/installs/${id(installId)}/storage`),
 
-  // an admin: metadata of every run; a run's content only after stating a reason (its owner is told)
-  adminRuns: (status = "all") => call<{ runs: RunMeta[] | null; grant_minutes: number }>(`/admin/runs?status=${encodeURIComponent(status)}`),
-  adminOpenRun: (runId: string, reason: string) => send<{ opened: boolean; expires_at: string }>("POST", `/admin/runs/${id(runId)}/open`, { reason }),
-  adminRun: (runId: string) => call<RunDetail>(`/admin/runs/${id(runId)}`),
-  adminRunComputed: (runId: string) => call<Computed>(`/admin/runs/${id(runId)}/computed`),
-  adminDownloadRunArtifact: (runId: string, artifactId: string, filename: string) =>
-    saveBlob(`/admin/runs/${id(runId)}/artifacts/${id(artifactId)}/download`, filename),
-  adminDownloadRunFile: (runId: string, fileId: string, filename: string) =>
-    saveBlob(`/admin/runs/${id(runId)}/files/${id(fileId)}/download`, filename),
-  adminRemoveEvidence: (runId: string, reason: string) =>
-    send<{ removed_objects: number }>("POST", `/admin/runs/${id(runId)}/remove-evidence`, { reason }),
 
   // ── AM6: the cost before a round, a receipt, reminders, notifications, e-mail ──
 

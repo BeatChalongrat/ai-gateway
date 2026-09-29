@@ -98,12 +98,13 @@ func TestAM7TheEgressSwitchLeavesATrail(t *testing.T) {
 		t.Fatalf("logged a value that did not change: %+v", got)
 	}
 
-	// back off, through the chat app's door (while both exist): the person is named too
-	e.mustDo(200, "PUT", "/admin/org", map[string]any{"documents_may_leave": false})
+	// back off, by the other admin: the entry names them, and the way back
+	other := testAdmin{ID: "0b8f5a8e-0000-4000-8000-000000000004", Email: "security@example.test", Name: "Security", Role: "super_admin"}
+	e.mustAdmin(other, 200, "PUT", "/org", map[string]any{"documents_may_leave": false})
 	x, ok = find(log.take(), "agent_market.org.documents_may_leave")
-	if !ok || x.Details["from"] != true || x.Details["to"] != false || !strings.HasPrefix(x.Actor, "chat-user:") ||
-		x.Details["by"] != e.user.Email || x.Details["via"] != "chat" {
-		t.Fatalf("chat door entry = %+v", x)
+	if !ok || x.Details["from"] != true || x.Details["to"] != false || x.Actor != "session:"+other.ID ||
+		x.Details["by"] != other.Email || x.Details["admin_role"] != "super_admin" {
+		t.Fatalf("the second entry = %+v", x)
 	}
 }
 

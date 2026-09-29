@@ -24,13 +24,11 @@ vi.mock("next/navigation", () => ({
 
 import { useI18nStore } from "@/lib/i18n";
 
-import { AdminPage } from "./admin/AdminPage";
-import { RunsTab } from "./admin/Am4Tabs";
 import { DashboardPage } from "./dashboard/DashboardPage";
 import { outcomeKey, outcomeOf, outcomeTone } from "./outcome";
 import { RunDetailPage } from "./runs/RunDetailPage";
 import { SharedRunPage } from "./share/SharedRunPage";
-import type { AgentDashboard, RunMeta } from "./types";
+import type { AgentDashboard } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 
 const OPEN_TITLE = "เสร็จแล้ว · ยังไม่ลงตัว";
@@ -154,37 +152,6 @@ describe("AM6 — the run page", () => {
   });
 });
 
-describe("AM6 — the admins' list of runs", () => {
-  const run = (o: Partial<RunMeta>): RunMeta => ({
-    id: "r-1", agent: "กระทบยอดธนาคาร", slug: "sran.bank-reconciliation", person: "สมหญิง บัญชี", email: "a@gbtech.test", status: "failed", reason: "not_tied",
-    period_label: "กันยายน 2569", credits: 1134.58, model: "", model_self_hosted: null, created_at: "2026-09-29T03:00:00Z", finished_at: "2026-09-29T03:00:41Z", open_now: false, times_opened: 0, ...o,
-  });
-
-  it("names each run by what it came to", async () => {
-    handler = (path) =>
-      path.startsWith("/agent-market/admin/runs")
-        ? json({
-            runs: [
-              run({ id: "r-1", outcome: "completed_open", reason: "not_tied" }),
-              run({ id: "r-2", outcome: "completed_open", reason: "lines_unmatched" }),
-              run({ id: "r-3", outcome: "failed", reason: "render_failed" }),
-              run({ id: "r-4", reason: "render_failed" }),
-            ],
-            grant_minutes: 60,
-          })
-        : json({}, 404);
-    render(<RunsTab pricing={PRICING} />);
-    const rows = await screen.findAllByTestId("am-admin-run");
-    const state = (i: number) => within(rows[i]!).getByTestId("am-admin-run-status");
-    expect(state(0).textContent).toBe(OPEN_TITLE);
-    expect(state(0).innerHTML).not.toContain("status-danger");
-    expect(state(1).textContent).toBe(OPEN_OTHER);
-    expect(state(2).textContent).toBe("ไม่สำเร็จ");
-    expect(state(2).innerHTML).toContain("status-danger");
-    expect(state(3).textContent).toBe("ไม่สำเร็จ");
-  });
-});
-
 describe("AM6 — a run shared with a colleague", () => {
   it("reads as finished with its note, and is not offered for sign-off", async () => {
     handler = (path) =>
@@ -286,51 +253,5 @@ describe("AM6 — the dashboard and the admins' spend", () => {
     expect(tiles[0]!.textContent).toContain("สำเร็จ 9 · ไม่สำเร็จ 3");
     expect(screen.queryByTestId("am-dash-not-charged")).toBeNull();
     expect(screen.queryByTestId("am-dash-open")).toBeNull();
-  });
-
-  it("the admins' spend: the same, per person and per agent, and in total", async () => {
-    handler = (path) =>
-      path.startsWith("/agent-market/admin/spend")
-        ? json({
-            days: 30,
-            since: "",
-            total_credits: 3400,
-            total_cost_not_charged: 212.5,
-            catalog_samples_credits: 0,
-            by_user: [{ key: "u1", email: "a@gbtech.test", name: "เอ", department: "บัญชี", runs: 12, succeeded: 9, completed_open: 2, failed: 1, waiting: 0, credits: 3400, cost_not_charged: 212.5, month_spent: 3400, last_run_at: null }],
-            by_agent: [{ key: "sran.bank-reconciliation", name: "กระทบยอดธนาคาร", runs: 12, succeeded: 9, completed_open: 2, failed: 1, waiting: 0, users: 1, credits: 3400, cost_not_charged: 212.5, month_spent: 3400, last_run_at: null }],
-          })
-        : json({ org: { org_id: "o", name: "จีบีเทค", access: "list", domains: [], user_monthly_credits: 0, contact_name: "", contact_email: "", updated_by: "", updated_at: "" }, members: [], departments: [] });
-    render(<AdminPage />);
-    fireEvent.click(await screen.findByTestId("am-admin-tab-spend"));
-    const user = await screen.findByTestId("am-admin-spend-user");
-    expect(user.textContent).toContain("สำเร็จ / เสร็จแล้วยังไม่ผ่านเกณฑ์ / ไม่สำเร็จ / รอคำตอบ");
-    expect(user.textContent).toContain(NOT_CHARGED);
-    const row = within(user).getByTestId("am-admin-spend-row");
-    expect(within(row).getByTestId("am-admin-spend-outcomes").textContent).toBe("9 / 2 / 1 / 0");
-    expect(within(row).getByTestId("am-admin-spend-not-charged").textContent).toContain("212.5");
-    const total = screen.getByTestId("am-admin-spend-not-charged-total");
-    expect(total.textContent).toContain(NOT_CHARGED);
-    expect(total.textContent).toContain("212.5");
-  });
-
-  it("the admins' spend of a server older than this shows what it showed", async () => {
-    handler = (path) =>
-      path.startsWith("/agent-market/admin/spend")
-        ? json({
-            days: 30,
-            since: "",
-            total_credits: 1050,
-            catalog_samples_credits: 2400,
-            by_user: [{ key: "u1", email: "a@gbtech.test", name: "เอ", department: "บัญชี", runs: 2, succeeded: 1, failed: 1, waiting: 0, credits: 1000, month_spent: 1000, last_run_at: null }],
-            by_agent: [],
-          })
-        : json({ org: { org_id: "o", name: "จีบีเทค", access: "list", domains: [], user_monthly_credits: 0, contact_name: "", contact_email: "", updated_by: "", updated_at: "" }, members: [], departments: [] });
-    render(<AdminPage />);
-    fireEvent.click(await screen.findByTestId("am-admin-tab-spend"));
-    const user = await screen.findByTestId("am-admin-spend-user");
-    expect(user.textContent).toContain("สำเร็จ / ไม่สำเร็จ / รอคำตอบ");
-    expect(user.textContent).toContain("1 / 1 / 0");
-    expect(screen.queryByTestId("am-admin-spend-not-charged-total")).toBeNull();
   });
 });

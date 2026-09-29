@@ -1,11 +1,10 @@
-// AM3 — sharing inside the organisation, and the organisation's admins:
+// AM3 — sharing inside the organisation:
 //   * the share dialog suggests colleagues, says plainly the colleague must
 //     sign in with that email and nothing is public, and gives the link;
 //   * the shared view shows the server's refusal plainly (NOT_SHARED), and a
-//     share that may review offers the sign-off;
-//   * admins: access (switch, domains, contact, budget, people), departments,
-//     spend per person and per agent, the catalog (disable needs a reason),
-//     reported problems; a publisher sees the catalog tab only.
+//     share that may review offers the sign-off.
+// (AM7: the organisation's admins' page moved to the admin app — its tests
+// are admin-ui/app/agent-market/page.am7.test.tsx.)
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,12 +17,11 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  usePathname: () => "/chat/agents/admin",
+  usePathname: () => "/chat/agents",
 }));
 
 import { useI18nStore } from "@/lib/i18n";
 
-import { AdminPage } from "./admin/AdminPage";
 import { ShareButton } from "./share/ShareButton";
 import { SharedRunPage } from "./share/SharedRunPage";
 import { resetAgentMarketForTest } from "./useAgentMarket";
@@ -119,119 +117,5 @@ describe("sharing a run", () => {
     expect(screen.getByTestId("am-shared-exceptions").textContent).toContain("ตัดสินว่า: อนุมัติเป็นกรณียกเว้น");
     expect(screen.getByTestId("am-signoff-open")).toBeTruthy();
     expect(screen.getByTestId("am-problem-open")).toBeTruthy();
-  });
-});
-
-describe("the admins' page", () => {
-  const org = {
-    org: { org_id: "default", name: "", access: "list", domains: ["gbtech.test"], user_monthly_credits: 3000000, contact_name: "ฝ่ายไอที", contact_email: "it@gbtech.test", updated_by: "", updated_at: "" },
-    members: [
-      { email: "owner@gbtech.test", display_name: "เจ้าของ", department: "", role: "admin", monthly_credits: null, added_by: "bootstrap", env_admin: true, user_id: "u" },
-      { email: "a@gbtech.test", display_name: "เอ", department: "บัญชี", role: "member", monthly_credits: 500000, added_by: "owner@gbtech.test" },
-    ],
-    departments: [{ name: "บัญชี", monthly_credits: 5000000, contact_name: "หัวหน้าบัญชี", contact_email: "", members: 1 }],
-  };
-
-  it("admin: five tabs; the access tab saves the switch and adds a person; a refusal is shown as written", async () => {
-    handler = (path, init) => {
-      if (path === "/agent-market/admin/org" && init?.method === "PUT") return json({ org: org.org, resumed: 0 });
-      if (path === "/agent-market/admin/org") return json(org);
-      if (path === "/agent-market/admin/members/new%40gbtech.test") return json({ member: {}, created: true, resumed: 0 });
-      if (path === "/agent-market/admin/members/a%40gbtech.test")
-        return json({ error: { code: "LAST_ADMIN", message: "ต้องมีผู้ดูแลอย่างน้อยหนึ่งคนเสมอ — เพิ่มผู้ดูแลคนใหม่ก่อน" } }, 409);
-      return json({}, 404);
-    };
-    render(<AdminPage />);
-    const access = await screen.findByTestId("am-admin-access");
-    expect(["access", "departments", "spend", "catalog", "problems"].every((x) => screen.queryByTestId(`am-admin-tab-${x}`))).toBe(true);
-    const people = within(access).getByTestId("am-admin-people");
-    expect(people.textContent).toContain("ผู้ดูแลจากการตั้งค่าระบบ");
-    fireEvent.click(screen.getByTestId("am-access-everyone"));
-    fireEvent.click(screen.getByTestId("am-admin-org-save"));
-    await waitFor(() => expect(callsTo("/agent-market/admin/org", "PUT")).toHaveLength(1));
-    expect(bodyOf(callsTo("/agent-market/admin/org", "PUT")[0]!)).toMatchObject({ access: "everyone", domains: ["gbtech.test"], user_monthly_credits: "3000000" });
-
-    fireEvent.change(screen.getByTestId("am-admin-add-email"), { target: { value: "new@gbtech.test" } });
-    fireEvent.click(screen.getByTestId("am-admin-add-save"));
-    await waitFor(() => expect(callsTo("/agent-market/admin/members/new%40gbtech.test", "PUT")).toHaveLength(1));
-    expect(bodyOf(callsTo("/agent-market/admin/members/new%40gbtech.test", "PUT")[0]!)).toEqual({ display_name: "", department: "", role: "member", monthly_credits: null });
-
-    // a row's change refused by the server: its sentence, as written
-    const row = within(people).getAllByTestId("am-admin-person")[1]!;
-    fireEvent.change(within(row).getByLabelText("บทบาทของ a@gbtech.test"), { target: { value: "admin" } });
-    fireEvent.click(within(row).getByText("บันทึก"));
-    expect((await screen.findByText(/ต้องมีผู้ดูแลอย่างน้อยหนึ่งคนเสมอ/)).textContent).toContain("เพิ่มผู้ดูแลคนใหม่ก่อน");
-  });
-
-  it("spend per person and per agent, samples on their own line", async () => {
-    handler = (path) =>
-      path.startsWith("/agent-market/admin/spend")
-        ? json({
-            days: 30,
-            since: "",
-            total_credits: 1050,
-            catalog_samples_credits: 2400,
-            by_user: [{ key: "u1", email: "a@gbtech.test", name: "เอ", department: "บัญชี", runs: 2, succeeded: 1, failed: 1, waiting: 0, credits: 1000, month_spent: 1000, monthly_limit: 3000000, last_run_at: null }],
-            by_agent: [{ key: "sran.financial-report", name: "รายงานการเงิน", runs: 3, succeeded: 2, failed: 1, waiting: 0, users: 2, credits: 1050, month_spent: 1050, last_run_at: null }],
-          })
-        : json(org);
-    render(<AdminPage />);
-    fireEvent.click(await screen.findByTestId("am-admin-tab-spend"));
-    const user = await screen.findByTestId("am-admin-spend-user");
-    expect(user.textContent).toContain("เอ");
-    expect(user.textContent).toContain("a@gbtech.test · บัญชี");
-    expect(screen.getByTestId("am-admin-spend-agent").textContent).toContain("2 คนใช้");
-    expect(screen.getByTestId("am-admin-spend-samples").textContent).toContain("2,400");
-    fireEvent.click(screen.getByText("90 วัน"));
-    await waitFor(() => expect(raw.mock.calls.some((c) => c[0] === "/agent-market/admin/spend?days=90")).toBe(true));
-  });
-
-  it("the catalog: disabling for everyone needs a reason; problems close with a note", async () => {
-    handler = (path, init) => {
-      if (path === "/agent-market/admin/catalog")
-        return json({
-          admin: true,
-          agents: [{ slug: "sran.expense-audit", version: "1.1.0", name: "ตรวจการเบิก", manifest: {}, status: "published", installs: 3, sample: { run_id: "s", version: "1.1.0", status: "succeeded", credits: 1, seconds: 1 } }],
-        });
-      if (path === "/agent-market/admin/catalog/sran.expense-audit" && init?.method === "PUT") {
-        const b = JSON.parse(String(init.body));
-        return b.reason ? json({ state: { slug: "x", status: "disabled", reason: b.reason }, stopped_runs: 2 }) : json({ error: { code: "REASON_REQUIRED", message: "การปิด agent ให้ทุกคนต้องบอกเหตุผลสั้น ๆ — ใส่เหตุผลแล้วกดอีกครั้ง" } }, 400);
-      }
-      if (path.startsWith("/agent-market/admin/problems?"))
-        return json({
-          problems: [{ id: "p-1", ref: "AB12CD", email: "a@gbtech.test", slug: "sran.expense-audit", version: "1.1.0", run_status: "failed", run_reason: "compute_failed", step: "compute", step_error: "KeyError", page: "/chat/agents/runs/r", text: "ยอดไม่ตรง", status: "open", admin_note: "", closed_by: "", created_at: "2026-09-28T00:00:00Z", run_id: "r-1" }],
-        });
-      if (path === "/agent-market/admin/problems/p-1/close") return json({ problem: {} });
-      return json(org);
-    };
-    render(<AdminPage />);
-    fireEvent.click(await screen.findByTestId("am-admin-tab-catalog"));
-    const row = await screen.findByTestId("am-admin-catalog-row");
-    expect(row.textContent).toContain("ติดตั้ง 3 คน");
-    fireEvent.click(within(row).getByTestId("am-admin-disable"));
-    expect((await within(row).findByTestId("am-admin-note")).textContent).toContain("ต้องบอกเหตุผล");
-    fireEvent.change(within(row).getByTestId("am-admin-disable-reason"), { target: { value: "กำลังแก้กฎวันหยุด" } });
-    fireEvent.click(within(row).getByTestId("am-admin-disable"));
-    await waitFor(() => expect(within(row).getByTestId("am-admin-note").textContent).toContain("หยุดงานที่ยังไม่เริ่ม 2 รอบ"));
-
-    fireEvent.click(screen.getByTestId("am-admin-tab-problems"));
-    const p = await screen.findByTestId("am-admin-problem");
-    expect(p.textContent).toContain("#AB12CD");
-    expect(p.textContent).toContain("ขั้นตอนที่หยุด: compute");
-    fireEvent.click(within(p).getByTestId("am-admin-problem-close"));
-    await waitFor(() => expect(raw.mock.calls.some((c) => c[0] === "/agent-market/admin/problems/p-1/close")).toBe(true));
-  });
-
-  it("a publisher sees the catalog tab only; a member sees no admin page", async () => {
-    availability = { available: true, role: "publisher", admin: false, publisher: true };
-    handler = (path) => (path === "/agent-market/admin/catalog" ? json({ agents: [], admin: false }) : json({}, 404));
-    const pub = render(<AdminPage />);
-    expect(await screen.findByTestId("am-admin-tab-catalog")).toBeTruthy();
-    expect(screen.queryByTestId("am-admin-tab-access")).toBeNull();
-    pub.unmount();
-    resetAgentMarketForTest();
-    availability = { available: true, role: "member", admin: false, publisher: false };
-    render(<AdminPage />);
-    expect(await screen.findByTestId("am-admin-denied")).toBeTruthy();
   });
 });

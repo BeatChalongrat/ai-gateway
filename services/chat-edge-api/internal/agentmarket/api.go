@@ -156,18 +156,9 @@ func (a *API) Routes(r chi.Router) {
 		r.Post("/runs/{id}/problem", a.runProblem)
 		r.Post("/installs/{id}/problem", a.installProblem)
 		// AM3: the organisation's admins (admin.go checks the role per route)
-		r.Get("/admin/org", a.adminOrg)
-		r.Put("/admin/org", a.adminPutOrg)
-		r.Put("/admin/members/{email}", a.adminPutMember)
-		r.Delete("/admin/members/{email}", a.adminDeleteMember)
-		r.Put("/admin/departments/{name}", a.adminPutDepartment)
-		r.Delete("/admin/departments/{name}", a.adminDeleteDepartment)
-		r.Get("/admin/spend", a.adminSpend)
-		r.Get("/admin/problems", a.adminProblems)
-		r.Post("/admin/problems/{id}/close", a.adminCloseProblem)
-		r.Get("/admin/catalog", a.adminCatalog)
-		r.Put("/admin/catalog/{slug}", a.adminPutCatalog)
-		r.Post("/admin/catalog/{slug}/sample", a.adminSample)
+		// AM7: no admin route here — the chat app is for the people who use
+		// agents; what affects anyone else is on the admin app's door
+		// (AdminRoutes, admindoor.go), behind chat-edge's admin bearer.
 		r.Post("/installs", a.install)
 		r.Get("/installs", a.listInstalls)
 		r.Get("/installs/{id}", a.getInstall)

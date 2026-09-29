@@ -537,7 +537,6 @@ func (a *API) roundRoutes(r chi.Router) {
 	r.Get("/installs/{id}/models", a.installModels)
 	r.Put("/installs/{id}/model", a.putInstallModel)
 	r.Get("/installs/{id}/storage", a.installStorage)
-	a.accessRoutes(r)
 }
 
 // installStorage: what this install keeps, how long, and that it is not the

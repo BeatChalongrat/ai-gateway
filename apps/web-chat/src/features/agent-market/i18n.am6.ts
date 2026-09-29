@@ -25,9 +25,6 @@ export const am6Th = {
   "knowledge.askOnly": "ฐานความรู้ใช้ตอบคำถามเท่านั้น ไม่ใช้กับตัวเลขในเอกสาร",
   "knowledge.from": "จากฐานความรู้ “{base}” · ไม่ใช่ส่วนหนึ่งของรายงาน",
 
-  // the admins' page: the organisation's policy, with no list of models under it
-  "admin.models.leaveOn": "อนุญาต — คนในองค์กรเลือกโมเดลนอกองค์กรให้ agent ได้",
-
   // a round that delivered its work while the agent's gate did not pass: a
   // result, charged like any round that delivers, and never said as a failure
   "outcome.open.notTied": "เสร็จแล้ว · ยังไม่ลงตัว",
@@ -44,9 +41,6 @@ export const am6Th = {
   "dash.kpi.runsSubOpen": "สำเร็จ {ok} · {state} {open} · ไม่สำเร็จ {failed}",
   "dash.open": "รอบที่เสร็จแล้วแต่ยังไม่ผ่านเกณฑ์ของ agent",
   "dash.costNotCharged": "ค่าใช้จ่ายที่ระบบจ่ายแต่ไม่ได้คิดเครดิต {credits} เครดิต",
-  "admin.spend.outcomes": "สำเร็จ / เสร็จแล้วยังไม่ผ่านเกณฑ์ / ไม่สำเร็จ / รอคำตอบ",
-  "admin.spend.notCharged": "ค่าใช้จ่ายที่ระบบจ่ายแต่ไม่ได้คิดเครดิต",
-  "admin.spend.totalNotCharged": "ค่าใช้จ่ายที่ระบบจ่ายแต่ไม่ได้คิดเครดิต {credits} เครดิต (≈ {baht} บาท) — รอบที่ไม่ได้ส่งงานให้ ไม่นับเป็นของใคร",
 
   // the invoice ↔ PO agent: how deep every line was tested is never hidden
   "po.passed": "ผ่าน · พร้อมเสนออนุมัติ",

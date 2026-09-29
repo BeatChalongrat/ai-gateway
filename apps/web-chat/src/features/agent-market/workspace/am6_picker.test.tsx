@@ -35,10 +35,9 @@ import { useI18nStore } from "@/lib/i18n";
 import type { ModelEntry } from "@/lib/types";
 import { useModelStore } from "@/stores/modelStore";
 
-import { ModelsTab } from "../admin/Am4Tabs";
 import { amDictionaries } from "../i18n";
 import { ModelSection } from "../settings/ModelSection";
-import type { AgentModels, OrgSettings } from "../types";
+import type { AgentModels } from "../types";
 import { ModelControl } from "./ModelControl";
 
 const BLOCKED = "องค์กรไม่อนุญาตให้ส่งเอกสารออกนอกองค์กร โมเดลนอกองค์กรจึงเลือกไม่ได้ — ผู้ดูแลเปิดได้ในหน้าผู้ดูแล";
@@ -404,33 +403,6 @@ describe("AM6 — the settings page has the same control", () => {
     const section = await screen.findByTestId("am-settings-models");
     expect(section.textContent).toContain("agent นี้ไม่ส่งเอกสารให้โมเดลใด");
     expect(within(section).queryByTestId("am-model-control")).toBeNull();
-  });
-});
-
-describe("AM6 — an admin no longer curates models by outcome", () => {
-  const org = { org_id: "o", name: "บริษัท", access: "list", documents_may_leave: false, retention_years: 5, storage_warn_mb: 2048 } as OrgSettings;
-
-  it("the page keeps the organisation's policy and asks for no list of models", async () => {
-    handler = (path, init) => (path === "/agent-market/admin/org" && init?.method === "PUT" ? json({ org, resumed: 0 }) : json({}, 404));
-    const onSaved = vi.fn();
-    render(<ModelsTab org={org} onSaved={onSaved} />);
-    const tab = screen.getByTestId("am-admin-models");
-    expect(within(tab).getByTestId("am-leave-off")).toBeTruthy();
-    expect(within(tab).getByTestId("am-retention-years")).toBeTruthy();
-    expect(within(tab).queryByTestId("am-admin-model")).toBeNull();
-    expect(tab.querySelector("select")).toBeNull();
-    for (const word of ["เร็วและประหยัด", "แม่นที่สุด", "รายการด้านล่าง"]) expect(tab.textContent).not.toContain(word);
-    await act(async () => {});
-    expect(calls("/agent-market/admin/models")).toHaveLength(0);
-
-    fireEvent.click(within(tab).getByTestId("am-leave-on"));
-    fireEvent.click(within(tab).getByTestId("am-admin-models-save"));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(JSON.parse(String((calls("/agent-market/admin/org", "PUT")[0]![1] as RequestInit).body))).toEqual({
-      documents_may_leave: true,
-      retention_years: 5,
-      storage_warn_mb: 2048,
-    });
   });
 });
 

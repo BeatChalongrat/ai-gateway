@@ -7,15 +7,8 @@ export default function AgentRunRoute({
   searchParams,
 }: {
   params: { runId: string };
-  searchParams?: { tab?: string; as?: string };
+  searchParams?: { tab?: string };
 }) {
-  // AM4: ?tab=numbers = "ที่มาของตัวเลข"; ?as=admin = an admin's reason-gated view
-  return (
-    <RunDetailPage
-      key={`${params.runId}:${searchParams?.as ?? ""}`}
-      runId={params.runId}
-      initialTab={searchParams?.tab ?? null}
-      asAdmin={searchParams?.as === "admin"}
-    />
-  );
+  // AM4: ?tab=numbers = "ที่มาของตัวเลข". AM7: an admin opens someone else's run in the admin app.
+  return <RunDetailPage key={params.runId} runId={params.runId} initialTab={searchParams?.tab ?? null} />;
 }

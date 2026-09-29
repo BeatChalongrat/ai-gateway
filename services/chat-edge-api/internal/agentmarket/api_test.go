@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,49 @@ func newEnvCfg(t *testing.T, mut func(*Config)) *testEnv {
 	return e
 }
 
+// do calls the chat app's API as the signed-in person. AM7: the chat app has
+// no admin door any more — an older test's call to "/admin/…" goes to the
+// admin app's door (AdminRoutes) as the admin-ui account with the same email,
+// whose admin-ui role is what that person's Agent Market role was (admin →
+// admin, publisher → agent_publisher, member → viewer), so each test keeps
+// its meaning. chatDo is the chat app's API as it is.
 func (e *testEnv) do(method, path string, body any, hdr ...string) (int, map[string]any) {
+	e.t.Helper()
+	if strings.HasPrefix(path, "/admin/") {
+		return e.adminDo(e.uiAccountOf(hdr...), method, strings.TrimPrefix(path, "/admin"), body)
+	}
+	return e.chatDo(method, path, body, hdr...)
+}
+
+// uiAccountOf is the admin-ui account of the person the headers sign in (see do).
+func (e *testEnv) uiAccountOf(hdr ...string) testAdmin {
+	e.t.Helper()
+	c := e.user
+	for i := 0; i+1 < len(hdr); i += 2 {
+		switch hdr[i] {
+		case "X-Test-User":
+			c.Email = "other@example.test"
+		case "X-Test-Email":
+			c.Email = hdr[i+1]
+		}
+	}
+	// read without side effects (AccessFor would link a member row to this user id)
+	email := normEmail(c.Email)
+	var member *string
+	_ = e.store.Pool.QueryRow(context.Background(), `SELECT role FROM agent_market.org_members WHERE email = $1
+		ORDER BY (org_id = 'default') DESC LIMIT 1`, email).Scan(&member)
+	role := "viewer"
+	switch {
+	case e.api.cfg.IsEnvAdmin(email) || (member != nil && *member == RoleAdmin):
+		role = UIRoleAdmin
+	case member != nil && *member == RolePublisher:
+		role = UIRolePublisher
+	}
+	return testAdmin{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("ui:"+email)).String(), Email: email, Role: role}
+}
+
+// chatDo calls the chat app's API as the signed-in person, whatever the path.
+func (e *testEnv) chatDo(method, path string, body any, hdr ...string) (int, map[string]any) {
 	e.t.Helper()
 	var rdr io.Reader
 	if body != nil {

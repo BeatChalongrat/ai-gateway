@@ -11,7 +11,11 @@ import (
 // AM7 phase 1 — the admin app (admin-ui) gets its own door to the Agent
 // Market admin handlers, and both apps read and write the one
 // agent_market.org_settings row: no copied setting, no second place to be
-// wrong.
+// wrong. Until phase 4 the test compared the two admin doors field by field
+// (red run: scripts/probes/AM7/results/red_phase1_door.txt; both apps on the
+// test stack: results/surfaces/both.json). Phase 4 removed the chat app's
+// door; what stays true is that what the admin app sets is what the chat app
+// shows the people who use agents.
 
 // orgFields are every field of the organisation's settings as the wire has them.
 func orgFields(t *testing.T) []string {
@@ -49,46 +53,40 @@ func sameOrg(t *testing.T, when string, chat, admin map[string]any) {
 	}
 }
 
-func TestAM7BothDoorsReadAndWriteTheSameRow(t *testing.T) {
+func TestAM7TheChatAppShowsWhatTheAdminAppSet(t *testing.T) {
 	e := newEnv(t)
 	if e == nil {
 		return
 	}
-	// a write through the admin app's door, read back through both
-	e.mustAdmin(uiAdmin, 200, "PUT", "/org", map[string]any{
+	e.seedDefinition()
+	in := e.install()
+	// the admin app writes; its own read gives back every field it wrote
+	set := orgOf(t, e.mustAdmin(uiAdmin, 200, "PUT", "/org", map[string]any{
 		"name": "บริษัท ทดสอบ จำกัด", "access": "list", "domains": []string{"example.test", "@Example.org"},
 		"user_monthly_credits": "2,500,000", "contact_name": "คุณสมหญิง", "contact_email": "Admin@Example.test",
 		"documents_may_leave": true, "retention_years": 7, "storage_warn_mb": 4096,
-	})
-	chat := orgOf(t, e.mustDo(200, "GET", "/admin/org", nil))
-	admin := orgOf(t, e.mustAdmin(uiAdmin, 200, "GET", "/org", nil))
-	sameOrg(t, "after the admin app wrote", chat, admin)
-	if admin["documents_may_leave"] != true || admin["retention_years"] != float64(7) || admin["user_monthly_credits"] != float64(2500000) {
-		t.Fatalf("the admin app's write did not land: %v", admin)
+	}))
+	read := orgOf(t, e.mustAdmin(uiAdmin, 200, "GET", "/org", nil))
+	sameOrg(t, "the admin app's write and read", set, read)
+	if read["updated_by"] != uiAdmin.Email || read["user_monthly_credits"] != float64(2500000) || read["contact_email"] != "admin@example.test" {
+		t.Fatalf("the admin app's write did not land: %v", read)
 	}
-	if admin["updated_by"] != uiAdmin.Email {
-		t.Fatalf("updated_by = %v, want the admin-ui account %s", admin["updated_by"], uiAdmin.Email)
+	// the chat app shows the people who use agents the same values
+	av := e.mustDo(200, "GET", "/availability", nil)
+	contact, _ := av["contact"].(map[string]any)
+	if av["access"] != read["access"] || contact["name"] != read["contact_name"] || contact["email"] != read["contact_email"] {
+		t.Fatalf("availability says access=%v contact=%v, the admin app set %v / %v / %v", av["access"], contact,
+			read["access"], read["contact_name"], read["contact_email"])
 	}
-
-	// a write through the chat app's door, read back through both
-	e.mustDo(200, "PUT", "/admin/org", map[string]any{"documents_may_leave": false, "retention_years": 5,
-		"storage_warn_mb": 2048, "access": "everyone", "contact_name": "ฝ่ายไอที"})
-	chat = orgOf(t, e.mustDo(200, "GET", "/admin/org", nil))
-	admin = orgOf(t, e.mustAdmin(uiAdmin, 200, "GET", "/org", nil))
-	sameOrg(t, "after the chat app wrote", chat, admin)
-	if admin["documents_may_leave"] != false || admin["access"] != "everyone" {
-		t.Fatalf("the chat app's write is not what the admin app reads: %v", admin)
+	st := e.mustDo(200, "GET", "/installs/"+in.ID.String()+"/storage", nil)
+	warn := st["storage"].(map[string]any)["warn_bytes"]
+	if st["retention_years"] != read["retention_years"] || warn != read["storage_warn_mb"].(float64)*1024*1024 {
+		t.Fatalf("storage says %v years, warn at %v bytes; the admin app set %v years, %v MB", st["retention_years"], warn,
+			read["retention_years"], read["storage_warn_mb"])
 	}
-
-	// the people and departments are the same lists too
-	e.mustAdmin(uiAdmin, 200, "PUT", "/members/somchai@example.test", map[string]any{"department": "บัญชี", "role": "publisher"})
-	e.mustAdmin(uiAdmin, 200, "PUT", "/departments/บัญชี", map[string]any{"monthly_credits": 5000})
-	c := e.mustDo(200, "GET", "/admin/org", nil)
-	a := e.mustAdmin(uiAdmin, 200, "GET", "/org", nil)
-	for _, k := range []string{"members", "departments"} {
-		if !reflect.DeepEqual(c[k], a[k]) {
-			t.Fatalf("%s differ — chat app %v, admin app %v", k, c[k], a[k])
-		}
+	b := e.mustDo(200, "GET", "/installs/"+in.ID.String()+"/budget", nil)["budget"].(map[string]any)
+	if b["user_own_limit"] == false && b["user_limit"] != read["user_monthly_credits"] {
+		t.Fatalf("budget says %v, the admin app set %v", b["user_limit"], read["user_monthly_credits"])
 	}
 }
 

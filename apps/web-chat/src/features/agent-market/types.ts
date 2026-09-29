@@ -618,29 +618,6 @@ export interface AccessEntry {
   at_label: string;
 }
 
-/** AM4: what an admin sees of any run — never its files, figures or answers. */
-export interface RunMeta {
-  id: string;
-  agent: string;
-  slug: string;
-  person: string;
-  email: string;
-  status: RunStatus | string;
-  outcome?: RunOutcome | string;
-  reason: string;
-  period_label: string;
-  /** what the person was charged; cost (AM6): what the platform paid */
-  credits: number;
-  cost?: number;
-  model: string;
-  model_self_hosted: boolean | null;
-  stopped_at_step?: string;
-  created_at: string;
-  finished_at?: string | null;
-  open_now: boolean;
-  times_opened: number;
-}
-
 // ── responses ──────────────────────────────────────────────────────────
 
 export interface Availability {
@@ -1173,88 +1150,6 @@ export interface ProblemReport {
   closed_by: string;
   created_at: string;
   closed_at?: string | null;
-}
-
-export interface OrgSettings {
-  org_id: string;
-  name: string;
-  access: AccessMode | string;
-  domains: string[] | null;
-  user_monthly_credits: number;
-  contact_name: string;
-  contact_email: string;
-  updated_by: string;
-  updated_at: string;
-  /** AM4 */
-  documents_may_leave?: boolean;
-  retention_years?: number;
-  storage_warn_mb?: number;
-}
-
-export interface OrgMember {
-  email: string;
-  user_id?: string;
-  display_name: string;
-  department: string;
-  role: OrgRole | string;
-  monthly_credits: number | null;
-  added_by: string;
-  created_at?: string;
-  updated_at?: string;
-  env_admin?: boolean;
-}
-
-export interface OrgDepartment {
-  name: string;
-  monthly_credits: number | null;
-  contact_name: string;
-  contact_email: string;
-  members: number;
-}
-
-export interface AdminOrg {
-  org: OrgSettings;
-  members: OrgMember[] | null;
-  departments: OrgDepartment[] | null;
-  pricing?: Pricing;
-}
-
-export interface SpendRow {
-  key: string;
-  email?: string;
-  name?: string;
-  department?: string;
-  runs: number;
-  succeeded: number;
-  /** AM6: delivered with the gate open; failed then counts what delivered nothing. */
-  completed_open?: number;
-  failed: number;
-  waiting: number;
-  users?: number;
-  credits: number;
-  /** AM6: what the platform paid for rounds that delivered nothing. */
-  cost_not_charged?: number;
-  month_spent: number;
-  monthly_limit?: number | null;
-  last_run_at: string | null;
-}
-
-export interface AdminSpend {
-  days: number;
-  since: string;
-  by_user: SpendRow[] | null;
-  by_agent: SpendRow[] | null;
-  total_credits: number;
-  /** AM6 */
-  total_cost_not_charged?: number;
-  catalog_samples_credits: number;
-  pricing?: Pricing;
-}
-
-export interface AdminCatalogRow extends CatalogAgent {
-  changed_by?: string;
-  changed_at?: string | null;
-  installs: number;
 }
 
 // ── AM6: the cost before a round, declared settings, reminders, notifications, e-mail ──

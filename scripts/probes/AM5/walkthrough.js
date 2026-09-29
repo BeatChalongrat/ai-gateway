@@ -636,7 +636,8 @@ const phases = {
     if (!s.page.url().startsWith(WEB())) await s.page.goto(`${WEB()}/chat`, { waitUntil: "load" });
     // a test round's files are not kept for five years: its evidence is removed, with the reason
     for (const id of state.runs || []) {
-      const r = await api(s.page, `/admin/runs/${id}/remove-evidence`, { method: "POST", body: JSON.stringify({ reason: "[AM5] รอบทดสอบของการเดินตรวจ AM5 ไม่ใช่งานจริง" }) });
+      // AM7: the chat app has no admin route any more — the admin door (scripts/probes/AM7/admin_door.js)
+      const r = await require("../AM7/admin_door.js").removeEvidence(id, "[AM5] รอบทดสอบของการเดินตรวจ AM5 ไม่ใช่งานจริง");
       log(`evidence of round ${id} removed: ${r.status}`);
     }
     for (const id of state.installs || []) {

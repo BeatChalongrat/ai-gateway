@@ -6,8 +6,8 @@
 // Refreshes itself while the run is still working.
 //
 // AM4: ?tab=numbers opens it on "ที่มาของตัวเลข" (the workspace header's one
-// action). ?as=admin is an admin's view of someone else's run, after stating
-// a reason (the owner is told; the owner's page lists every opening).
+// action). AM7: an admin opens someone else's run in the admin app, after
+// stating a reason; the owner is told, and this page lists every opening.
 //
 // AM6 — the run's state goes by what it came to. A round that delivered its
 // draft while the agent's gate did not pass is finished, with a note: its
@@ -112,20 +112,20 @@ export function stepLabel(name: string, t: AmT): string {
   return name;
 }
 
-export function RunDetailPage({ runId, initialTab, asAdmin = false }: { runId: string; initialTab?: string | null; asAdmin?: boolean }) {
+export function RunDetailPage({ runId, initialTab }: { runId: string; initialTab?: string | null }) {
   return (
     <FeatureGate>
-      <RunDetailView runId={runId} initialTab={initialTab} asAdmin={asAdmin} />
+      <RunDetailView runId={runId} initialTab={initialTab} />
     </FeatureGate>
   );
 }
 
-/** AM4: the file downloads of the page — the owner's, or an admin's (reason-gated) ones. */
+/** AM4: the file downloads of the page (the owner's). */
 const RunDownloads = createContext<{ artifact?: (id: string, name: string) => Promise<void>; file: (id: string, name: string) => Promise<void> }>({
   file: (id, name) => amApi.downloadFile(id, name),
 });
 
-function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialTab?: string | null; asAdmin: boolean }) {
+function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: string | null }) {
   const t = useAmT();
   const locale = useAmLocale();
   const [data, setData] = useState<RunDetail | null>(null);
@@ -135,29 +135,20 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
   const [reload, setReload] = useState(0);
   const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "overview");
   const tabsId = useId();
-  const downloads = useMemo(
-    () =>
-      asAdmin
-        ? {
-            artifact: (id: string, name: string) => amApi.adminDownloadRunArtifact(runId, id, name),
-            file: (id: string, name: string) => amApi.adminDownloadRunFile(runId, id, name),
-          }
-        : { file: (id: string, name: string) => amApi.downloadFile(id, name) },
-    [asAdmin, runId],
-  );
+  const downloads = useMemo(() => ({ file: (id: string, name: string) => amApi.downloadFile(id, name) }), []);
 
   const status = data?.run.status ?? "";
   const outcome = data ? outcomeOf(data.run) : "";
   const finishedOpen = outcome === COMPLETED_OPEN && data?.run.kind === "run";
   const active = ACTIVE.has(status);
   // what the run left for a person to decide (the expense audit): read once it has finished
-  const decisions = useRunExceptions(runId, !!data && !active && !asAdmin);
+  const decisions = useRunExceptions(runId, !!data && !active);
   // AM3: who signed this run off (re-read after a sign-off, and while its stamp job works)
   const [reviews, setReviews] = useState<Review[] | null>(null);
   const [reviewsTick, setReviewsTick] = useState(0);
   const finishedRun = status === "succeeded" && data?.run.kind === "run";
   useEffect(() => {
-    if (!finishedRun || asAdmin) return;
+    if (!finishedRun) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = () =>
@@ -175,19 +166,19 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [runId, finishedRun, reviewsTick, asAdmin]);
+  }, [runId, finishedRun, reviewsTick]);
 
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
       try {
-        const d = asAdmin ? await amApi.adminRun(runId) : await amApi.run(runId);
+        const d = await amApi.run(runId);
         if (!alive) return;
         setData(d);
         setError(null);
         try {
-          const c = asAdmin ? await amApi.adminRunComputed(runId) : await amApi.computed(runId);
+          const c = await amApi.computed(runId);
           if (alive) {
             setComputed(c);
             setComputedMissing(false);
@@ -205,7 +196,7 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [runId, reload, asAdmin]);
+  }, [runId, reload]);
 
   const steps = useMemo(() => [...(data?.steps ?? [])].sort((a, b) => Date.parse(a.started_at ?? "") - Date.parse(b.started_at ?? "") || a.seq - b.seq), [data]);
   const cards = data?.clarifications ?? [];
@@ -272,17 +263,12 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
         </span>
       </div>
 
-      {asAdmin ? (
-        <p role="note" className="mt-3 rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-text-primary" data-testid="am-run-admin-view">
-          {t("run.adminView")}
-        </p>
-      ) : null}
       {run.evidence_removed_at ? (
         <p role="note" className="mt-3 rounded-lg border border-border bg-bg-surface px-3 py-2 text-xs text-text-secondary">
           {t("run.evidenceRemoved")}
         </p>
       ) : null}
-      {data.access_log?.length && !asAdmin ? (
+      {data.access_log?.length ? (
         <section className="mt-3 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2" aria-label={t("run.accessLog")} data-testid="am-run-access-log">
           <h2 className="text-xs font-semibold text-text-primary">{t("run.accessLog")}</h2>
           <ul className="mt-1 flex flex-col gap-0.5 text-xs text-text-secondary">
@@ -293,8 +279,8 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
         </section>
       ) : null}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="am-run-actions" hidden={asAdmin}>
-        {finishedRun && !asAdmin ? (
+      <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="am-run-actions">
+        {finishedRun ? (
           <SignOffButton
             runId={runId}
             onDone={() => {
@@ -302,9 +288,9 @@ function RunDetailView({ runId, initialTab, asAdmin }: { runId: string; initialT
             }}
           />
         ) : null}
-        {run.kind === "run" && !asAdmin ? <ShareButton runId={runId} /> : null}
-        {!asAdmin ? <ProblemButton target={{ kind: "run", runId }} /> : null}
-        {finishedOpen && !asAdmin ? <SignOffUnavailable why={computed?.gate?.what} /> : null}
+        {run.kind === "run" ? <ShareButton runId={runId} /> : null}
+        <ProblemButton target={{ kind: "run", runId }} />
+        {finishedOpen ? <SignOffUnavailable why={computed?.gate?.what} /> : null}
       </div>
       {reviews && reviews.length ? (
         <section className="mt-3" aria-label={t("review.listTitle")}>

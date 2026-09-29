@@ -6,7 +6,7 @@
 
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Search, Settings2 } from "lucide-react";
+import { Search } from "lucide-react";
 
 import { ButtonLink } from "@/components/ui/Button";
 
@@ -117,12 +117,6 @@ function Market() {
           <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{t("market.title")}</h1>
           <p className="mt-1 text-sm text-text-secondary">{t("market.subtitle")}</p>
         </div>
-        {snap.publisher ? (
-          <ButtonLink href="/chat/agents/admin" variant="secondary" size="sm" data-testid="am-admin-link">
-            <Settings2 width={14} height={14} aria-hidden />
-            <span>{t("admin.link")}</span>
-          </ButtonLink>
-        ) : null}
         <label className="relative block w-full sm:w-64">
           <span className="sr-only">{t("market.search")}</span>
           <Search width={15} height={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" aria-hidden />

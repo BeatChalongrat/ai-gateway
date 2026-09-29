@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { CircleCheck, CircleX, Download, FileText, ShieldCheck, TriangleAlert } from "lucide-react";
 
-import { Button, ButtonLink } from "@/components/ui/Button";
+import { ButtonLink } from "@/components/ui/Button";
 import { FileTypeBadge } from "@/components/ui/FileTypeBadge";
 import { Spinner } from "@/components/ui/Spinner";
 import { formatBytes } from "@/lib/fileUtil";
@@ -119,7 +119,7 @@ function Detail({ slug }: { slug: string }) {
           <span>{item.status_reason ? t("guide.disabledReason", { reason: item.status_reason }) : t("guide.disabled")}</span>
         </div>
       ) : null}
-      {unpublished ? <UnpublishedBanner slug={item.slug} onDone={() => setReload((n) => n + 1)} /> : null}
+      {unpublished ? <UnpublishedBanner /> : null}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4 lg:order-1">
@@ -326,41 +326,13 @@ function Detail({ slug }: { slug: string }) {
   );
 }
 
-function UnpublishedBanner({ slug, onDone }: { slug: string; onDone: () => void }) {
+// AM7: an unpublished agent is shown to the people who try agents before they
+// are published; publishing it is done in the admin app, not here.
+function UnpublishedBanner() {
   const t = useAmT();
-  const { publisher } = useAgentMarket();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   return (
     <div className="mt-4 rounded-xl border border-border bg-bg-elevated px-4 py-3 text-sm text-text-primary" data-testid="am-detail-unpublished">
       <p>{t("guide.unpublished")}</p>
-      {publisher ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          loading={busy}
-          onClick={() => {
-            setBusy(true);
-            setError(null);
-            amApi.adminPutCatalog(slug, { status: "published" }).then(
-              () => {
-                setBusy(false);
-                onDone();
-              },
-              (err) => {
-                setBusy(false);
-                setError(errorMessage(err));
-              },
-            );
-          }}
-          className="mt-2"
-          data-testid="am-detail-publish"
-        >
-          <span>{t("admin.catalog.publish")}</span>
-        </Button>
-      ) : null}
-      {error ? <p className="mt-2 text-xs text-status-danger">{error}</p> : null}
     </div>
   );
 }

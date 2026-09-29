@@ -35,12 +35,11 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { useI18nStore } from "@/lib/i18n";
 
-import { RunsTab } from "./admin/Am4Tabs";
+import { DashboardPage } from "./dashboard/DashboardPage";
 import { tAm } from "./i18n";
 import { QuickInstall } from "./install/QuickInstall";
 import { SignOffButton } from "./review/SignOff";
 import { ShareButton } from "./share/ShareButton";
-import type { RunMeta } from "./types";
 import { ErrorPanel, NotAvailable } from "./ui";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 import { EmptyDrop } from "./workspace/EmptyDrop";
@@ -76,24 +75,6 @@ function appButton(props: ComponentProps<typeof Button> = {}): string {
   app.unmount();
   return want;
 }
-
-const PRICING = { credits_per_usd: 1000, thb_per_usd: 35 };
-const finishedRun: RunMeta = {
-  id: "r-1",
-  agent: "ปิดงบการเงิน",
-  slug: "sran.financial-report",
-  person: "สมหญิง บัญชี",
-  email: "s@x.test",
-  status: "succeeded",
-  reason: "",
-  period_label: "ก.ย. 2569",
-  credits: 1200,
-  model: "",
-  model_self_hosted: null,
-  created_at: "2026-09-28T03:00:00Z",
-  open_now: false,
-  times_opened: 0,
-};
 
 // ─────────────────────────── the sources ───────────────────────────
 
@@ -145,13 +126,6 @@ describe("AM6 — a button in Agent Market is the app's Button", () => {
     expect(look(screen.getByTestId("am-share-open"))).toBe(appButton({ variant: "secondary", size: "sm" }));
   });
 
-  it("an action that removes something", async () => {
-    handler = (path) => (path.startsWith("/agent-market/admin/runs") ? json({ runs: [finishedRun], grant_minutes: 60 }) : json({}, 404));
-    render(<RunsTab pricing={PRICING} />);
-    fireEvent.click(await screen.findByText(tAm("admin.runs.removeEvidence")));
-    expect(look(screen.getByTestId("am-admin-reason-go"))).toBe(appButton({ variant: "danger" }));
-  });
-
   it("a link that looks like a button is still a link, in the Button's classes", () => {
     render(<QuickInstall slug="sran.financial-report" />);
     const link = screen.getByTestId("am-detail-install-custom");
@@ -180,10 +154,23 @@ describe("AM6 — a button in Agent Market is the app's Button", () => {
 // ─────────────────────────── waiting ───────────────────────────
 
 describe("AM6 — a wait in Agent Market is the app's", () => {
-  it("a list that is loading shows the app's Spinner", () => {
-    handler = () => new Promise(() => {});
-    render(<RunsTab pricing={PRICING} />);
-    const wait = screen.getByTestId("am-admin-runs").querySelector('[aria-hidden="true"]');
+  it("a list that is loading shows the app's Spinner", async () => {
+    // AM7: the admins' list of runs moved to the admin app; the agent's dashboard, loading another range, waits here
+    const dash = {
+      since: "2026-08-30T00:00:00Z", days: 30, version: "1.0.0",
+      runs: { total: 1, by_status: { succeeded: 1 }, succeeded: 1, first_pass: 1, first_pass_rate: 1 },
+      time: { queue_p50_s: 4, queue_p90_s: 12, work_p50_s: 95, work_p90_s: 400, human_wait_p50_s: null, human_wait_p90_s: null },
+      waiting: { runs: 0, oldest_run_s: null, open_exceptions: 0, oldest_exception_s: null },
+      questions: [], exceptions: { open: 0, resolved: 0, noted: 0, by_reason: [], choices: [] }, failures: [], confidence: {}, tiers: {},
+      documents: 0, artifacts: [], versions: [], spend: { credits: 300, per_succeeded_run: 300, per_document: null, budget_credits: 50000 }, models: [],
+    };
+    let hang = false;
+    handler = (path) => (hang ? new Promise(() => {}) : path.startsWith("/agent-market/installs/i-1/dashboard") ? json(dash) : json({}, 404));
+    render(<DashboardPage installId="i-1" />);
+    const range = await screen.findByTestId("am-dash-range");
+    hang = true;
+    fireEvent.click(within(range).getAllByRole("button")[0]!);
+    const wait = range.parentElement?.lastElementChild;
 
     const app = render(<Spinner size={14} />);
     const want = app.container.firstElementChild;

@@ -402,13 +402,3 @@ func (a *API) adminRemoveEvidence(w http.ResponseWriter, r *http.Request) {
 			Email(normEmail(c.Email)), Typed(reason, 500))})
 	writeJSON(w, http.StatusOK, map[string]any{"removed_objects": n})
 }
-
-func (a *API) accessRoutes(r chi.Router) {
-	r.Get("/admin/runs", a.adminRuns)
-	r.Post("/admin/runs/{id}/open", a.adminOpenRun)
-	r.Get("/admin/runs/{id}", a.adminRunContent)
-	r.Get("/admin/runs/{id}/computed", a.adminRunComputed)
-	r.Get("/admin/runs/{id}/artifacts/{aid}/download", a.adminRunArtifact)
-	r.Get("/admin/runs/{id}/files/{fid}/download", a.adminRunFile)
-	r.Post("/admin/runs/{id}/remove-evidence", a.adminRemoveEvidence)
-}
