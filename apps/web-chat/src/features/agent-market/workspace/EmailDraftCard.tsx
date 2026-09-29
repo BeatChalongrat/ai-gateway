@@ -177,6 +177,8 @@ function SendForm({ draft, onSent }: { draft: EmailDraft; onSent: (s: EmailSend)
         setTo("");
         setCc("");
         if (r?.send) onSent(r.send);
+        // AM7: a send the relay refused says why (the draft is still there to copy)
+        if (r?.message) setError(r.message);
       },
       (err) => {
         setBusy(false);

@@ -361,7 +361,8 @@ export const amApi = {
   emailDraft: (draftId: string) => call<{ draft: EmailDraft }>(`/email-drafts/${id(draftId)}`),
   /** Sent only with the person's approval of this very text (its hash) and the recipients they typed. */
   sendEmail: (draftId: string, body: { to: string[]; cc: string[]; body_sha256: string; approve: true }) =>
-    send<{ send: EmailSend }>("POST", `/email-drafts/${id(draftId)}/send`, body),
+    // AM7: message = why the organisation's relay did not take it (a failed send only)
+    send<{ send: EmailSend; message?: string }>("POST", `/email-drafts/${id(draftId)}/send`, body),
 };
 
 /** A fresh client id (idempotency key) for a message, a chip or an install. */

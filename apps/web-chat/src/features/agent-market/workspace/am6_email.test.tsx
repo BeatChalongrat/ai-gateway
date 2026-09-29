@@ -156,7 +156,8 @@ describe("AM6 — the draft in the thread", () => {
   });
 
   it("without a mail connector: the reason, and no recipient field at all", () => {
-    const reason = "ยังไม่มีตัวเชื่อมต่ออีเมลในระบบ คัดลอกข้อความนี้ไปส่งจากอีเมลของคุณได้";
+    // AM7: the server's sentence while the organisation has no mail relay set up
+    const reason = "ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์อีเมล — ผู้ดูแลตั้งได้ที่แอปผู้ดูแลระบบ หน้า Agent Market แท็บ “อีเมล” ระหว่างนี้คัดลอกข้อความนี้ไปส่งจากอีเมลของคุณได้";
     inWorkspace(<ThreadItems items={[item(draft({ can_send: false, cannot_send_reason: reason }))]} />);
     const card = screen.getByTestId("am-email-draft");
     expect(within(card).getByTestId("am-email-cannot-send").textContent).toBe(reason);
@@ -224,6 +225,21 @@ describe("AM6 — sending is the person's, one message at a time", () => {
     await waitFor(() => expect(screen.queryByTestId("am-email-confirm")).toBeNull());
     // the fields are empty again: the next message is typed anew
     expect(to().value).toBe("");
+  });
+
+  it("AM7: a send the relay refused says why, and the draft is still there to copy", async () => {
+    const why = "ส่งอีเมลไม่สำเร็จ เพราะเซิร์ฟเวอร์อีเมลขององค์กรไม่รับข้อความนี้ — ลองใหม่อีกครั้ง หรือคัดลอกข้อความไปส่งจากอีเมลของคุณ ถ้ายังไม่ได้ให้แจ้งผู้ดูแล ร่างอีเมลยังอยู่ครบ";
+    handler = (path, init) =>
+      path === "/agent-market/email-drafts/d-1/send" && init?.method === "POST"
+        ? json({ send: { id: "s-2", draft_id: "d-1", to: ["manager@gbtech.test"], cc: [], status: "failed", at: "2026-09-29T03:15:00Z", approved_by: { name: "สมหญิง บัญชี", email: "somying@gbtech.test" } }, message: why })
+        : json({ error: { code: "NOT_FOUND", message: "ไม่พบ" } }, 404);
+    inWorkspace(<ThreadItems items={[item(draft())]} />);
+    fireEvent.change(to(), { target: { value: "manager@gbtech.test" } });
+    fireEvent.click(screen.getByRole("button", { name: "ส่งอีเมลนี้" }));
+    fireEvent.click(within(await screen.findByTestId("am-email-confirm")).getByRole("button", { name: "ยืนยันและส่ง" }));
+    expect((await screen.findByTestId("am-email-error")).textContent).toBe(why);
+    expect((await screen.findByTestId("am-email-sent")).textContent).toContain("manager@gbtech.test");
+    expect(screen.getByTestId("am-email-body").textContent).toBe(BODY);
   });
 
   it("a draft sent before lists its sends", () => {
