@@ -48,7 +48,8 @@ import { WorkspaceMenu } from "./WorkspaceMenu";
 export function WorkspacePage({ installId, threadId = null, runId = null }: { installId: string; threadId?: string | null; runId?: string | null }) {
   return (
     <FeatureGate>
-      <Workspace installId={installId} threadId={threadId || null} runId={runId || null} />
+      {/* AM6: a link names the first thread "main" (a reminder's notification); the API calls it none */}
+      <Workspace installId={installId} threadId={threadId && threadId !== "main" ? threadId : null} runId={runId || null} />
     </FeatureGate>
   );
 }

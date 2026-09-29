@@ -594,7 +594,8 @@ async function waiting(client) {
   save();
   const before = (await api(page, `/runs/${runId}`)).body;
   x.check(before.run.status === "awaiting_input" && !(before.steps || []).length, "the reminder's round still waits; nothing has run", `${before.run.status} · steps ${(before.steps || []).length}`);
-  await page.goto(`${WEB()}/chat/agents/i/${installId}?run=${runId}`, { waitUntil: "load" });
+  // the link as a notification carries it: the first thread is named "main"
+  await page.goto(`${WEB()}/chat/agents/i/${installId}?thread=${before.run.thread_id || "main"}&run=${runId}`, { waitUntil: "load" });
   const req = page.locator('[data-testid="am-request-files"]').last();
   await req.waitFor({ state: "visible", timeout: 60000 });
   await req.scrollIntoViewIfNeeded();

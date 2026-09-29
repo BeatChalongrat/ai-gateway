@@ -682,6 +682,16 @@ describe("AM6 — the workspace mounts it that way", () => {
     await waitFor(() => expect(box().placeholder).toBe("ส่งข้อความถึง รายงานการเงินรายเดือน…"));
   });
 
+  it("a page opened as ?thread=main (a reminder's link) is the first thread: a message sends no thread id", async () => {
+    handler = workspace(round("succeeded"));
+    render(<WorkspacePage installId="i-1" threadId="main" />);
+    await screen.findByTestId("am-round-divider");
+    type("ขอสรุปรอบล่าสุด");
+    fireEvent.click(send());
+    await waitFor(() => expect(sent()).toHaveLength(1));
+    expect(sent()[0]!.thread_id).toBeNull();
+  });
+
   it("a message sent from the workspace names no model for one round", async () => {
     handler = workspace(round("succeeded"));
     render(<WorkspacePage installId="i-1" />);
