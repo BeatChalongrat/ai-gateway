@@ -50,6 +50,7 @@ import { PermissionStore } from "./permissions";
 import { runE4Probe } from "./probes-e4";
 import { SidecarClient } from "./sidecar-client";
 import { TaskScheduler } from "./task-scheduler";
+import { AgentNotifier } from "./agent-notify";
 import { buildMenuTemplate } from "./app-menu";
 import { actionFor, buildContextMenu, type ContextMenuParams } from "./context-menu";
 import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore, type Rect } from "./window-state";
@@ -86,6 +87,8 @@ let bridge: BridgeChannel | null = null;
 let coordinator: TurnCoordinator | null = null;
 let sidecar: SidecarClient | null = null;
 let scheduler: TaskScheduler | null = null;
+/** AM6 — the Agent Market notification poll; alive with the process, not with the window. */
+let agentNotifier: AgentNotifier | null = null;
 let grants: GrantStore | null = null;
 /** FIX34 Part B/C: the chat-edge client, reachable from the deep-link handlers. */
 let chatEdgeRef: ChatEdgeClient | null = null;
@@ -178,6 +181,7 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   scheduler?.stop();
+  agentNotifier?.stop();
   updateNotifierRef?.stop();
   void sidecar?.stop();
 });
@@ -245,6 +249,9 @@ void app.whenReady().then(async () => {
         // FIX34 Part B: a deep link that arrived before sign-in opens now.
         const target = pendingNavigation ?? config.pageUrl;
         pendingNavigation = null;
+        // AM6 — this is the moment a sign-in completes: what fell due while
+        // nobody was signed in is asked for now, not at the next minute.
+        agentNotifier?.onSignedIn();
         return win.loadURL(target);
       },
       reloadPage: () => win.webContents.reload(),
@@ -526,6 +533,19 @@ void app.whenReady().then(async () => {
       log.info("SCHEDULER: machine resumed — running the missed-run catch-up");
       void localScheduler.catchUpMissed();
     });
+    // AM6 — Agent Market notifications for someone who has closed the window
+    // (it hides to the tray and the page stops polling). Same session and
+    // client as every other host call to chat-edge; the text shown is the
+    // server's, and a click only opens a page of the app's own origin.
+    agentNotifier = new AgentNotifier({
+      feed: chatEdge,
+      toaster: { show: showAgentToast },
+      window: { show: () => showMainWindow(), load: (url) => navigateMain(url) },
+      pageOrigin: pageOrigin(),
+      isSignedIn: () => !!ctl.currentAccessToken(),
+      log,
+    });
+    agentNotifier.start();
   }
   bridge.attach(win, {
     onTurnSubmit: (p) => co.onTurnSubmit(p),
@@ -1152,6 +1172,34 @@ function notifyHotkeyFailure(what: string, accelerator: string): void {
     }
   } catch (err) {
     log.warn(`hotkey notification failed: ${(err as Error).message}`);
+  }
+}
+
+/** AM6 — the Agent Market toasts this process still holds. Electron drops a
+ * Notification with its last reference, and the click handler with it: a
+ * toast nobody holds opens nothing. Bounded by the server's page of 20. */
+const agentToasts: Notification[] = [];
+const AGENT_TOASTS_KEPT = 20;
+
+/** AM6 — one OS notification for one Agent Market notification: the server's
+ * title and body as they came, nothing added. False when the OS cannot show
+ * it, and the poller then does not report it as shown. */
+function showAgentToast(title: string, body: string, onClick: () => void): boolean {
+  try {
+    if (!Notification.isSupported()) return false;
+    const toast = new Notification({ title, body });
+    toast.on("click", () => {
+      const held = agentToasts.indexOf(toast);
+      if (held >= 0) agentToasts.splice(held, 1);
+      onClick();
+    });
+    agentToasts.push(toast);
+    if (agentToasts.length > AGENT_TOASTS_KEPT) agentToasts.shift();
+    toast.show();
+    return true;
+  } catch (err) {
+    log.warn(`agent notification failed: ${(err as Error).message}`);
+    return false;
   }
 }
 

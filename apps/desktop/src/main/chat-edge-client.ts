@@ -128,6 +128,27 @@ export interface RunCodeResult {
   files?: { id?: string; filename: string; content_type: string; size_bytes: number }[];
 }
 
+/** AM6 — one Agent Market notification (GET /agent-market/notifications).
+ *  `title` and `body` are the sentences a person reads, built by the server;
+ *  `link` is a path of the web app and is checked before use (agent-notify.ts). */
+export interface AgentNotificationDto {
+  id: string;
+  kind?: string;
+  title: string;
+  body: string;
+  link: string;
+  install_id?: string;
+  run_id?: string | null;
+  reminder_id?: string | null;
+  agent_name?: string;
+  created_at?: string;
+}
+/** AM6 — the list with the status it came with. `status` 0 = no answer at all. */
+export interface AgentNotificationsAnswer {
+  status: number;
+  notifications: AgentNotificationDto[];
+}
+
 export class ChatEdgeClient {
   constructor(
     private readonly baseUrl: string,
@@ -135,6 +156,48 @@ export class ChatEdgeClient {
     private readonly log: Logger,
     private readonly timeoutMs = 15_000,
   ) {}
+
+  /** AM6 — the Agent Market notifications this surface has not shown yet.
+   *  The status comes back with the rows because the poller has to tell "this
+   *  server has no Agent Market" (404: stop asking) from a failure (ask again
+   *  in a minute). Nothing is logged here: this runs every minute, and a
+   *  server that is down or has no Agent Market would otherwise write a line
+   *  a minute — the poller logs the change, once. Null = no session, and no
+   *  request was made. */
+  async listAgentNotifications(surface: "desktop"): Promise<AgentNotificationsAnswer | null> {
+    const token = this.accessToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/agent-market/notifications?surface=${surface}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      if (!res.ok) return { status: res.status, notifications: [] };
+      const body = (await res.json()) as { notifications?: unknown } | null;
+      return { status: res.status, notifications: Array.isArray(body?.notifications) ? (body.notifications as AgentNotificationDto[]) : [] };
+    } catch {
+      return { status: 0, notifications: [] };
+    }
+  }
+
+  /** AM6 — tells the server a notification was shown on this surface, so it
+   *  is not listed for it again. False on any failure; the poller says it
+   *  again at a later tick. Not logged, for the same reason as the list. */
+  async markAgentNotificationShown(id: string, surface: "desktop"): Promise<boolean> {
+    const token = this.accessToken();
+    if (!token) return false;
+    try {
+      const res = await fetch(`${this.baseUrl}/api/v1/agent-market/notifications/${encodeURIComponent(id)}/shown`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ surface }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
 
   getConversation(id: string): Promise<ConversationDto | null> {
     return this.get<ConversationDto>(`/api/v1/conversations/${encodeURIComponent(id)}`);
