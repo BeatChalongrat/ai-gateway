@@ -118,6 +118,10 @@ def _resolve_jwt_token(token: str, session: Session) -> ResolvedApiKey:
         role = "admin"
     elif role in ("org_admin", "tenant_admin"):
         role = "tenant_admin"
+    elif role == "agent_publisher":
+        # AM7: the Agent Market publisher reaches only chat-edge's Agent Market
+        # door (through admin-ui's proxy); on this path it is a viewer.
+        role = "viewer"
     elif role not in ("admin", "tenant_admin", "project_admin", "user", "viewer"):
         role = "admin"
 

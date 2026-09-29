@@ -7,7 +7,10 @@
 // The localStorage shim is kept only as a single-request role cache for
 // nav rendering — it's evicted on logout and refreshed on login.
 
-export type DemoRole = "viewer" | "project_admin" | "tenant_admin" | "admin";
+// agent_publisher (AM7): the person who runs the organisation's agents — the
+// Agent Market page only, and there only its catalog and problems queue
+// (chat-edge enforces that on every endpoint; the nav below is a soft gate).
+export type DemoRole = "viewer" | "project_admin" | "tenant_admin" | "admin" | "agent_publisher";
 
 export interface AdminSession {
   role: DemoRole;
@@ -76,5 +79,6 @@ export const ROLE_NAV: Record<DemoRole, string[]> = {
   viewer: ["/", "/requests", "/usage", "/alerts/events"],
   project_admin: ["/", "/projects", "/api-keys", "/requests", "/usage", "/alerts/events"],
   tenant_admin: ["/", "/projects", "/api-keys", "/tenants", "/requests", "/usage", "/alerts/events"],
-  admin: ["/", "/providers", "/models", "/policies", "/routing", "/dlp-coverage", "/dlp-detectors", "/search-settings", "/tenants", "/projects", "/api-keys", "/portal-users", "/portal-settings", "/portal-token-packs", "/requests", "/usage", "/audit-log", "/alerts/events", "/ai-review", "/chat-analytics", "/chat-conversations", "/chat-users", "/chat-knowledge"],
+  admin: ["/", "/providers", "/models", "/policies", "/routing", "/dlp-coverage", "/dlp-detectors", "/search-settings", "/tenants", "/projects", "/api-keys", "/portal-users", "/portal-settings", "/portal-token-packs", "/requests", "/usage", "/audit-log", "/alerts/events", "/ai-review", "/chat-analytics", "/chat-conversations", "/chat-users", "/chat-knowledge", "/agent-market"],
+  agent_publisher: ["/", "/agent-market"],
 };

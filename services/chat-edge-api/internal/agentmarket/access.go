@@ -197,6 +197,9 @@ func (a *API) adminOpenRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := a.store.DisplayName(ctx, acc.OrgID, c.UserID, c.Email)
+	if act, ok := adminActorOf(ctx); ok && name == "" {
+		name = act.Name // AM7: an admin-ui account by the name it signs in with
+	}
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "run")
@@ -224,6 +227,13 @@ func (a *API) adminOpenRun(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "run")
 			return
 		}
+	}
+	// AM7: the opening is in the admin audit log too, or it does not happen
+	if err := a.record(ctx, []AuditEntry{entry(r, "agent_market.run.opened", "agent_market_run", run.ID.String(),
+		map[string]any{"reason": reason, "agent": run.InstallID.String(), "period": periodOf(run), "owner_told": run.UserID != c.UserID,
+			"expires_at": expires.UTC().Format(time.RFC3339)})}); err != nil {
+		a.fail(w, err, "run")
+		return
 	}
 	if err := tx.Commit(ctx); err != nil {
 		a.fail(w, err, "run")
@@ -374,8 +384,16 @@ func (a *API) adminRemoveEvidence(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusConflict, "ROUND_IN_PROGRESS")
 		return
 	}
+	// AM7: files cannot be put back, so the removal is logged before anything is deleted
+	logged := []AuditEntry{entry(r, "agent_market.run.evidence_removed", "agent_market_run", run.ID.String(),
+		map[string]any{"reason": reason, "period": periodOf(run)})}
+	if err := a.record(ctx, logged); err != nil {
+		a.fail(w, err, "run")
+		return
+	}
 	n, err := a.store.RemoveRunEvidence(ctx, a.files, run, normEmail(c.Email), reason)
 	if err != nil {
+		a.recordFailed(ctx, logged)
 		a.fail(w, err, "run")
 		return
 	}

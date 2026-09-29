@@ -21,10 +21,11 @@ import (
 //
 // Admins keep the access list (the org-wide switch, the people, their
 // departments and roles), the budgets (per person, per department), see
-// runs and spend per person and per agent, read the problem reports, and own
-// the catalog with the publishers: a publisher publishes or unpublishes an
-// agent; only an admin disables one for everyone (new runs stop at once,
-// history stays). Every change names who made it.
+// runs and spend per person and per agent, and own the catalog and its
+// problem reports with the publishers: a publisher publishes or unpublishes
+// an agent and reads and closes what people reported; only an admin disables
+// one for everyone (new runs stop at once, history stays). Every change
+// names who made it.
 
 func (a *API) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	if !accessOf(r).Admin() {
@@ -137,26 +138,18 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	ctx := r.Context()
-	o, err := a.store.OrgSettingsFor(ctx, acc.OrgID)
-	if err != nil {
-		a.fail(w, err, "member")
-		return
-	}
-	if body.Name != nil {
-		o.Name = strings.TrimSpace(*body.Name)
-	}
+	// AM7: the whole request is checked before the row is read, so a refusal
+	// changes nothing and logs nothing.
 	if body.Access != nil {
 		switch *body.Access {
 		case AccessOff, AccessList, AccessEveryone:
-			o.Access = *body.Access
 		default:
 			say(w, http.StatusBadRequest, "BAD_ACCESS")
 			return
 		}
 	}
+	var domains []string
 	if body.Domains != nil {
-		var ds []string
 		seen := map[string]bool{}
 		for _, d := range body.Domains {
 			d = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(d), "@")))
@@ -168,67 +161,88 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			seen[d] = true
-			ds = append(ds, d)
+			domains = append(domains, d)
 		}
-		sort.Strings(ds)
-		if ds == nil {
-			ds = []string{}
+		sort.Strings(domains)
+		if domains == nil {
+			domains = []string{}
 		}
-		o.Domains = ds
 	}
-	budgetChanged := false
-	if set, v, ok := optCredits(body.UserMonthlyCredits); !ok || (set && v == nil) {
-		if !ok {
-			say(w, http.StatusBadRequest, "BAD_BUDGET")
-			return
-		}
+	budgetSet, budget, ok := optCredits(body.UserMonthlyCredits)
+	if !ok || (budgetSet && budget == nil) {
 		say(w, http.StatusBadRequest, "BAD_BUDGET") // the organisation's per-person default cannot be "none"
 		return
-	} else if set {
-		budgetChanged = *v != o.UserMonthlyCredits
-		o.UserMonthlyCredits = *v
 	}
-	if body.ContactName != nil {
-		o.ContactName = strings.TrimSpace(*body.ContactName)
-	}
+	contactEmail := ""
 	if body.ContactEmail != nil {
-		e := normEmail(*body.ContactEmail)
-		if e != "" && !validEmail(e) {
+		contactEmail = normEmail(*body.ContactEmail)
+		if contactEmail != "" && !validEmail(contactEmail) {
 			say(w, http.StatusBadRequest, "BAD_EMAIL")
 			return
 		}
-		o.ContactEmail = e
 	}
-	if body.DocumentsMayLeave != nil {
-		o.DocumentsMayLeave = *body.DocumentsMayLeave
+	if body.RetentionYears != nil && (*body.RetentionYears < 1 || *body.RetentionYears > 30) {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี")
+		return
 	}
-	if body.RetentionYears != nil {
-		if *body.RetentionYears < 1 || *body.RetentionYears > 30 {
-			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี")
-			return
+	if body.StorageWarnMB != nil && (*body.StorageWarnMB < 50 || *body.StorageWarnMB > 1_000_000) {
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ขนาดที่เตือนต้องอยู่ระหว่าง 50 MB ถึง 1,000,000 MB")
+		return
+	}
+	ctx := r.Context()
+	budgetChanged := false
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		before, err := a.store.orgSettingsQ(ctx, tx, acc.OrgID, true)
+		if err != nil {
+			return nil, err
 		}
-		o.RetentionYears = *body.RetentionYears
-	}
-	if body.StorageWarnMB != nil {
-		if *body.StorageWarnMB < 50 || *body.StorageWarnMB > 1_000_000 {
-			say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ขนาดที่เตือนต้องอยู่ระหว่าง 50 MB ถึง 1,000,000 MB")
-			return
+		o := before
+		if body.Name != nil {
+			o.Name = strings.TrimSpace(*body.Name)
 		}
-		o.StorageWarnMB = *body.StorageWarnMB
-	}
-	if _, err := a.store.Pool.Exec(ctx, `UPDATE agent_market.org_settings SET name = $2, access = $3, domains = $4,
-		user_monthly_credits = $5, contact_name = $6, contact_email = $7, updated_by = $8, updated_at = now(),
-		documents_may_leave = $9, retention_years = $10, storage_warn_mb = $11 WHERE org_id = $1`,
-		acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email),
-		o.DocumentsMayLeave, o.RetentionYears, o.StorageWarnMB); err != nil {
-		a.fail(w, err, "member")
+		if body.Access != nil {
+			o.Access = *body.Access
+		}
+		if body.Domains != nil {
+			o.Domains = domains
+		}
+		if budgetSet {
+			budgetChanged = *budget != o.UserMonthlyCredits
+			o.UserMonthlyCredits = *budget
+		}
+		if body.ContactName != nil {
+			o.ContactName = strings.TrimSpace(*body.ContactName)
+		}
+		if body.ContactEmail != nil {
+			o.ContactEmail = contactEmail
+		}
+		if body.DocumentsMayLeave != nil {
+			o.DocumentsMayLeave = *body.DocumentsMayLeave
+		}
+		if body.RetentionYears != nil {
+			o.RetentionYears = *body.RetentionYears
+		}
+		if body.StorageWarnMB != nil {
+			o.StorageWarnMB = *body.StorageWarnMB
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_market.org_settings SET name = $2, access = $3, domains = $4,
+			user_monthly_credits = $5, contact_name = $6, contact_email = $7, updated_by = $8, updated_at = now(),
+			documents_may_leave = $9, retention_years = $10, storage_warn_mb = $11 WHERE org_id = $1`,
+			acc.OrgID, o.Name, o.Access, o.Domains, o.UserMonthlyCredits, o.ContactName, o.ContactEmail, normEmail(c.Email),
+			o.DocumentsMayLeave, o.RetentionYears, o.StorageWarnMB); err != nil {
+			return nil, err
+		}
+		return orgChanges(r, before, o), nil
+	})
+	if err != nil {
+		a.failChange(w, r, err, "member")
 		return
 	}
 	resumed := 0
 	if budgetChanged {
 		resumed, _ = a.store.ResumeBudgetParked(ctx, acc.OrgID)
 	}
-	o, _ = a.store.OrgSettingsFor(ctx, acc.OrgID)
+	o, _ := a.store.OrgSettingsFor(ctx, acc.OrgID)
 	writeJSON(w, http.StatusOK, map[string]any{"org": o, "resumed": resumed})
 }
 
@@ -254,6 +268,20 @@ func (a *API) adminCount(ctx context.Context, org string, except string) (int, e
 	return len(set), rows.Err()
 }
 
+// memberView is a person on the list as the log records it.
+func memberView(m Member) map[string]any {
+	return map[string]any{"role": m.Role, "department": m.Department, "display_name": m.DisplayName, "monthly_credits": m.MonthlyCredits}
+}
+
+// memberForUpdate reads one person on the list inside a change.
+func memberForUpdate(ctx context.Context, tx pgx.Tx, org, email string) (Member, error) {
+	m, err := scanMember(tx.QueryRow(ctx, `SELECT `+memberCols+` FROM agent_market.org_members WHERE org_id = $1 AND email = $2 FOR UPDATE`, org, email))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return m, ErrNotFound
+	}
+	return m, err
+}
+
 func (a *API) adminPutMember(w http.ResponseWriter, r *http.Request) {
 	if !a.requireAdmin(w, r) {
 		return
@@ -275,65 +303,79 @@ func (a *API) adminPutMember(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	ctx := r.Context()
-	m, err := a.store.MemberByEmail(ctx, acc.OrgID, email)
-	isNew := errors.Is(err, ErrNotFound)
-	if err != nil && !isNew {
-		a.fail(w, err, "member")
-		return
-	}
-	if isNew {
-		m = Member{Email: email, Role: RoleMember}
-	}
-	wasAdmin := m.Role == RoleAdmin
-	if body.DisplayName != nil {
-		m.DisplayName = strings.Join(strings.Fields(*body.DisplayName), " ")
-	}
-	if body.Department != nil {
-		m.Department = strings.Join(strings.Fields(*body.Department), " ")
-	}
 	if body.Role != nil {
 		switch *body.Role {
 		case RoleMember, RolePublisher, RoleAdmin:
-			m.Role = *body.Role
 		default:
 			say(w, http.StatusBadRequest, "BAD_ROLE")
 			return
 		}
 	}
-	budgetChanged := isNew
-	if set, v, ok := optCredits(body.MonthlyCredits); !ok {
+	creditsSet, credits, ok := optCredits(body.MonthlyCredits)
+	if !ok {
 		say(w, http.StatusBadRequest, "BAD_BUDGET")
 		return
-	} else if set {
-		m.MonthlyCredits = v
-		budgetChanged = true
 	}
-	if wasAdmin && m.Role != RoleAdmin && !a.cfg.IsEnvAdmin(email) {
-		if n, err := a.adminCount(ctx, acc.OrgID, email); err != nil {
-			a.fail(w, err, "member")
-			return
-		} else if n == 0 {
-			say(w, http.StatusConflict, "LAST_ADMIN")
-			return
+	ctx := r.Context()
+	isNew, budgetChanged := false, false
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		m, err := memberForUpdate(ctx, tx, acc.OrgID, email)
+		isNew = errors.Is(err, ErrNotFound)
+		if err != nil && !isNew {
+			return nil, err
 		}
-	}
-	if body.Department != nil {
-		budgetChanged = true
-	}
-	if _, err := a.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_members (org_id, email, display_name, department, role,
-		monthly_credits, added_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (org_id, email) DO UPDATE SET display_name = EXCLUDED.display_name, department = EXCLUDED.department,
-		role = EXCLUDED.role, monthly_credits = EXCLUDED.monthly_credits, updated_at = now()`,
-		acc.OrgID, email, m.DisplayName, m.Department, m.Role, m.MonthlyCredits, normEmail(c.Email)); err != nil {
-		a.fail(w, err, "member")
+		if isNew {
+			m = Member{Email: email, Role: RoleMember}
+		}
+		before := memberView(m)
+		wasAdmin := m.Role == RoleAdmin
+		if body.DisplayName != nil {
+			m.DisplayName = strings.Join(strings.Fields(*body.DisplayName), " ")
+		}
+		if body.Department != nil {
+			m.Department = strings.Join(strings.Fields(*body.Department), " ")
+		}
+		if body.Role != nil {
+			m.Role = *body.Role
+		}
+		budgetChanged = isNew || creditsSet || body.Department != nil
+		if creditsSet {
+			m.MonthlyCredits = credits
+		}
+		if wasAdmin && m.Role != RoleAdmin && !a.cfg.IsEnvAdmin(email) {
+			if n, err := a.adminCount(ctx, acc.OrgID, email); err != nil {
+				return nil, err
+			} else if n == 0 {
+				return nil, refusal{status: http.StatusConflict, code: "LAST_ADMIN"}
+			}
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_market.org_members (org_id, email, display_name, department, role,
+			monthly_credits, added_by) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (org_id, email) DO UPDATE SET display_name = EXCLUDED.display_name, department = EXCLUDED.department,
+			role = EXCLUDED.role, monthly_credits = EXCLUDED.monthly_credits, updated_at = now()`,
+			acc.OrgID, email, m.DisplayName, m.Department, m.Role, m.MonthlyCredits, normEmail(c.Email)); err != nil {
+			return nil, err
+		}
+		after := memberView(m)
+		if isNew {
+			return []AuditEntry{entry(r, "agent_market.member.added", "agent_market_member", acc.OrgID,
+				map[string]any{"email": email, "to": after})}, nil
+		}
+		if jsonText(before) == jsonText(after) {
+			return nil, nil
+		}
+		return []AuditEntry{entry(r, "agent_market.member.changed", "agent_market_member", acc.OrgID,
+			map[string]any{"email": email, "from": before, "to": after})}, nil
+	})
+	if err != nil {
+		a.failChange(w, r, err, "member")
 		return
 	}
 	resumed := 0
 	if budgetChanged {
 		resumed, _ = a.store.ResumeBudgetParked(ctx, acc.OrgID)
 	}
-	m, _ = a.store.MemberByEmail(ctx, acc.OrgID, email)
+	m, _ := a.store.MemberByEmail(ctx, acc.OrgID, email)
 	m.EnvAdmin = a.cfg.IsEnvAdmin(email)
 	writeJSON(w, http.StatusOK, map[string]any{"member": m, "created": isNew, "resumed": resumed})
 }
@@ -345,25 +387,51 @@ func (a *API) adminDeleteMember(w http.ResponseWriter, r *http.Request) {
 	acc := accessOf(r)
 	email := normEmail(chi.URLParam(r, "email"))
 	ctx := r.Context()
-	m, err := a.store.MemberByEmail(ctx, acc.OrgID, email)
-	if err != nil {
-		a.fail(w, err, "member")
-		return
-	}
-	if m.Role == RoleAdmin {
-		if n, err := a.adminCount(ctx, acc.OrgID, email); err != nil {
-			a.fail(w, err, "member")
-			return
-		} else if n == 0 {
-			say(w, http.StatusConflict, "LAST_ADMIN")
-			return
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		m, err := memberForUpdate(ctx, tx, acc.OrgID, email)
+		if err != nil {
+			return nil, err
 		}
-	}
-	if _, err := a.store.Pool.Exec(ctx, `DELETE FROM agent_market.org_members WHERE org_id = $1 AND email = $2`, acc.OrgID, email); err != nil {
-		a.fail(w, err, "member")
+		if m.Role == RoleAdmin {
+			if n, err := a.adminCount(ctx, acc.OrgID, email); err != nil {
+				return nil, err
+			} else if n == 0 {
+				return nil, refusal{status: http.StatusConflict, code: "LAST_ADMIN"}
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_market.org_members WHERE org_id = $1 AND email = $2`, acc.OrgID, email); err != nil {
+			return nil, err
+		}
+		return []AuditEntry{entry(r, "agent_market.member.removed", "agent_market_member", acc.OrgID,
+			map[string]any{"email": email, "from": memberView(m)})}, nil
+	})
+	if err != nil {
+		a.failChange(w, r, err, "member")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"removed": true})
+}
+
+// departmentView is a department as the log records it (nil = there was none).
+func departmentView(d *Department) any {
+	if d == nil {
+		return nil
+	}
+	return map[string]any{"monthly_credits": d.MonthlyCredits, "contact_name": d.ContactName, "contact_email": d.ContactEmail}
+}
+
+// departmentForUpdate reads one department inside a change (nil = none).
+func departmentForUpdate(ctx context.Context, tx pgx.Tx, org, name string) (*Department, error) {
+	d := Department{Name: name}
+	err := tx.QueryRow(ctx, `SELECT monthly_credits::float8, contact_name, contact_email FROM agent_market.org_departments
+		WHERE org_id = $1 AND name = $2 FOR UPDATE`, org, name).Scan(&d.MonthlyCredits, &d.ContactName, &d.ContactEmail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
 }
 
 func (a *API) adminPutDepartment(w http.ResponseWriter, r *http.Request) {
@@ -385,38 +453,52 @@ func (a *API) adminPutDepartment(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "BAD_JSON")
 		return
 	}
-	ctx := r.Context()
-	d := Department{Name: name}
-	var lim *float64
-	err := a.store.Pool.QueryRow(ctx, `SELECT monthly_credits::float8, contact_name, contact_email FROM agent_market.org_departments
-		WHERE org_id = $1 AND name = $2`, acc.OrgID, name).Scan(&lim, &d.ContactName, &d.ContactEmail)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		a.fail(w, err, "department")
-		return
-	}
-	d.MonthlyCredits = lim
-	if set, v, ok := optCredits(body.MonthlyCredits); !ok {
+	creditsSet, credits, ok := optCredits(body.MonthlyCredits)
+	if !ok {
 		say(w, http.StatusBadRequest, "BAD_BUDGET")
 		return
-	} else if set {
-		d.MonthlyCredits = v
 	}
-	if body.ContactName != nil {
-		d.ContactName = strings.TrimSpace(*body.ContactName)
-	}
+	contactEmail := ""
 	if body.ContactEmail != nil {
-		e := normEmail(*body.ContactEmail)
-		if e != "" && !validEmail(e) {
+		contactEmail = normEmail(*body.ContactEmail)
+		if contactEmail != "" && !validEmail(contactEmail) {
 			say(w, http.StatusBadRequest, "BAD_EMAIL")
 			return
 		}
-		d.ContactEmail = e
 	}
-	if _, err := a.store.Pool.Exec(ctx, `INSERT INTO agent_market.org_departments (org_id, name, monthly_credits, contact_name, contact_email)
-		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (org_id, name) DO UPDATE SET monthly_credits = EXCLUDED.monthly_credits,
-		contact_name = EXCLUDED.contact_name, contact_email = EXCLUDED.contact_email, updated_at = now()`,
-		acc.OrgID, name, d.MonthlyCredits, d.ContactName, d.ContactEmail); err != nil {
-		a.fail(w, err, "department")
+	ctx := r.Context()
+	d := Department{Name: name}
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		old, err := departmentForUpdate(ctx, tx, acc.OrgID, name)
+		if err != nil {
+			return nil, err
+		}
+		if old != nil {
+			d = *old
+		}
+		if creditsSet {
+			d.MonthlyCredits = credits
+		}
+		if body.ContactName != nil {
+			d.ContactName = strings.TrimSpace(*body.ContactName)
+		}
+		if body.ContactEmail != nil {
+			d.ContactEmail = contactEmail
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_market.org_departments (org_id, name, monthly_credits, contact_name, contact_email)
+			VALUES ($1, $2, $3, $4, $5) ON CONFLICT (org_id, name) DO UPDATE SET monthly_credits = EXCLUDED.monthly_credits,
+			contact_name = EXCLUDED.contact_name, contact_email = EXCLUDED.contact_email, updated_at = now()`,
+			acc.OrgID, name, d.MonthlyCredits, d.ContactName, d.ContactEmail); err != nil {
+			return nil, err
+		}
+		if old != nil && jsonText(departmentView(old)) == jsonText(departmentView(&d)) {
+			return nil, nil
+		}
+		return []AuditEntry{entry(r, "agent_market.department.set", "agent_market_department", acc.OrgID,
+			map[string]any{"department": name, "from": departmentView(old), "to": departmentView(&d)})}, nil
+	})
+	if err != nil {
+		a.failChange(w, r, err, "department")
 		return
 	}
 	resumed, _ := a.store.ResumeBudgetParked(ctx, acc.OrgID)
@@ -430,8 +512,19 @@ func (a *API) adminDeleteDepartment(w http.ResponseWriter, r *http.Request) {
 	acc := accessOf(r)
 	name := strings.Join(strings.Fields(chi.URLParam(r, "name")), " ")
 	ctx := r.Context()
-	if _, err := a.store.Pool.Exec(ctx, `DELETE FROM agent_market.org_departments WHERE org_id = $1 AND name = $2`, acc.OrgID, name); err != nil {
-		a.fail(w, err, "department")
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		old, err := departmentForUpdate(ctx, tx, acc.OrgID, name)
+		if err != nil || old == nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_market.org_departments WHERE org_id = $1 AND name = $2`, acc.OrgID, name); err != nil {
+			return nil, err
+		}
+		return []AuditEntry{entry(r, "agent_market.department.removed", "agent_market_department", acc.OrgID,
+			map[string]any{"department": name, "from": departmentView(old)})}, nil
+	})
+	if err != nil {
+		a.failChange(w, r, err, "department")
 		return
 	}
 	resumed, _ := a.store.ResumeBudgetParked(ctx, acc.OrgID)
@@ -626,8 +719,10 @@ func (s *Store) memberLabels(ctx context.Context, org string) (map[uuid.UUID]Mem
 
 // ── problem reports ──────────────────────────────────────────────────────
 
+// The problems queue is the catalog's (AM7): the people who publish agents
+// read and close what people reported about them.
 func (a *API) adminProblems(w http.ResponseWriter, r *http.Request) {
-	if !a.requireAdmin(w, r) {
+	if !a.requirePublisher(w, r) {
 		return
 	}
 	acc := accessOf(r)
@@ -657,7 +752,7 @@ func (a *API) adminProblems(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) adminCloseProblem(w http.ResponseWriter, r *http.Request) {
-	if !a.requireAdmin(w, r) {
+	if !a.requirePublisher(w, r) {
 		return
 	}
 	c, _ := caller(r)
@@ -671,15 +766,24 @@ func (a *API) adminCloseProblem(w http.ResponseWriter, r *http.Request) {
 		Note string `json:"note"`
 	}
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<14)).Decode(&body)
-	p, err := scanProblem(a.store.Pool.QueryRow(r.Context(), `UPDATE agent_market.problem_reports SET status = 'closed',
-		admin_note = $3, closed_by = $4, closed_at = now() WHERE id = $1 AND org_id = $2 RETURNING `+problemCols,
-		id, acc.OrgID, strings.TrimSpace(body.Note), normEmail(c.Email)))
-	if errors.Is(err, pgx.ErrNoRows) {
-		a.fail(w, ErrNotFound, "problem")
-		return
-	}
+	ctx := r.Context()
+	var p ProblemReport
+	err := a.audited(ctx, func(tx pgx.Tx) ([]AuditEntry, error) {
+		var err error
+		p, err = scanProblem(tx.QueryRow(ctx, `UPDATE agent_market.problem_reports SET status = 'closed',
+			admin_note = $3, closed_by = $4, closed_at = now() WHERE id = $1 AND org_id = $2 RETURNING `+problemCols,
+			id, acc.OrgID, strings.TrimSpace(body.Note), normEmail(c.Email)))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return []AuditEntry{entry(r, "agent_market.problem.closed", "agent_market_problem", p.ID.String(),
+			map[string]any{"ref": p.Ref, "note": p.AdminNote, "reported_by": p.Email, "agent": p.Slug})}, nil
+	})
 	if err != nil {
-		a.fail(w, err, "problem")
+		a.failChange(w, r, err, "problem")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"problem": p})
@@ -766,7 +870,11 @@ func (a *API) adminPutCatalog(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusBadRequest, "REASON_REQUIRED")
 		return
 	}
-	stopped, err := a.store.SetCatalogState(ctx, acc.OrgID, slug, body.Status, reason, normEmail(c.Email))
+	// AM7: the change commits only after the audit log took it
+	stopped, err := a.store.SetCatalogState(ctx, acc.OrgID, slug, body.Status, reason, normEmail(c.Email), func(stopped int) error {
+		return a.record(ctx, []AuditEntry{entry(r, "agent_market.catalog."+body.Status, "agent_market_agent", slug,
+			map[string]any{"agent": slug, "from": cur.Status, "to": body.Status, "reason": reason, "stopped_runs": stopped})})
+	})
 	if err != nil {
 		a.fail(w, err, "agent")
 		return

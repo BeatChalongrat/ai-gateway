@@ -984,6 +984,9 @@ app.include_router(internal_media_jobs_router)  # prefix declared on the router
 # portal_users.status + credit balance, returns only {allow, reason}.
 from app.api.routes.internal_scheduled_run import router as internal_scheduled_run_router  # noqa: E402
 app.include_router(internal_scheduled_run_router)  # prefix declared on the router
+# AM7: chat-edge writes Agent Market's admin changes into the admin audit log
+from app.api.routes.internal_admin_audit import router as internal_admin_audit_router  # noqa: E402
+app.include_router(internal_admin_audit_router)  # prefix declared on the router
 from app.api.routes.webhooks_replicate import router as webhooks_replicate_router  # noqa: E402
 app.include_router(webhooks_replicate_router, prefix="/webhooks", tags=["webhooks"])
 app.include_router(public_chat_router, prefix="/v1")

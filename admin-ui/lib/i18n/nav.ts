@@ -38,6 +38,8 @@ export const en = {
   "nav.chatUsers": "Chat Users",
   "nav.chatKnowledge": "Knowledge Bases",
   "nav.chatRetention": "Data Retention",
+  // The product's name — the same in both languages (dict.test.ts lists it).
+  "nav.agentMarket": "Agent Market",
 
   "nav.openMenu": "Open menu",
   "nav.closeMenu": "Close menu",
@@ -76,6 +78,7 @@ export const th: Record<keyof typeof en, string> = {
   "nav.chatUsers": "ผู้ใช้เว็บแชท",
   "nav.chatKnowledge": "ฐานความรู้",
   "nav.chatRetention": "การเก็บรักษาข้อมูล",
+  "nav.agentMarket": "Agent Market",
 
   "nav.openMenu": "เปิดเมนู",
   "nav.closeMenu": "ปิดเมนู",

@@ -78,7 +78,10 @@ func (s *Store) CatalogStateFor(ctx context.Context, org, slug string) (CatalogS
 // notice in their thread; a running step finishes, a parked run stays
 // parked (its answer is refused while the agent is off) — nothing that
 // already happened is deleted.
-func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, by string) (int, error) {
+//
+// beforeCommit (AM7) runs last, inside the transaction, with how many queued
+// rounds stopped; its error rolls the whole change back.
+func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, by string, beforeCommit ...func(stopped int) error) (int, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return 0, err
@@ -128,6 +131,11 @@ func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, 
 				return 0, err
 			}
 			stopped++
+		}
+	}
+	for _, f := range beforeCommit {
+		if err := f(stopped); err != nil {
+			return 0, err
 		}
 	}
 	return stopped, tx.Commit(ctx)

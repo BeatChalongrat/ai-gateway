@@ -9,6 +9,7 @@ import { SkeletonCards, SkeletonTable } from "../../components/ui/Skeleton";
 import { useApi } from "../../lib/useApi";
 import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import AgentMarketPointer from "../../components/AgentMarketPointer";
 import { useT, type DictKey } from "../../lib/i18n";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
@@ -230,6 +231,7 @@ export default function PoliciesPage() {
         </div>
         <ThemeToggle />
       </div>
+      <AgentMarketPointer page="policies" />
 
       {/* Stats */}
       {(detectorCount > 0 || profileCount > 0) && (

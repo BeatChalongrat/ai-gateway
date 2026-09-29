@@ -20,6 +20,7 @@
 // same key would have the later spread silently win, so the parity test
 // fails on any overlap.
 
+import * as agentmarket from "./agentmarket";
 import * as chatadmin from "./chatadmin";
 import * as common from "./common";
 import * as dashboard from "./dashboard";
@@ -43,6 +44,7 @@ export const en = {
   ...portaladmin.en,
   ...observability.en,
   ...chatadmin.en,
+  ...agentmarket.en,
   ...fallback.en,
 };
 
@@ -56,6 +58,7 @@ export const th: Record<keyof typeof en, string> = {
   ...portaladmin.th,
   ...observability.th,
   ...chatadmin.th,
+  ...agentmarket.th,
   ...fallback.th,
 };
 
@@ -78,4 +81,5 @@ export const modules = {
   portaladmin,
   observability,
   chatadmin,
+  agentmarket,
 } as const;

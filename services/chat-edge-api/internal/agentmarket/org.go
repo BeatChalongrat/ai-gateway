@@ -263,10 +263,20 @@ func (s *Store) firstAdmin(ctx context.Context, org string) Contact {
 
 // OrgSettingsFor reads one organisation.
 func (s *Store) OrgSettingsFor(ctx context.Context, org string) (OrgSettings, error) {
+	return s.orgSettingsQ(ctx, s.Pool, org, false)
+}
+
+// orgSettingsQ reads one organisation on q; lock = FOR UPDATE (AM7: a change
+// and its audit entry see the same row).
+func (s *Store) orgSettingsQ(ctx context.Context, q Querier, org string, lock bool) (OrgSettings, error) {
 	var o OrgSettings
-	err := s.Pool.QueryRow(ctx, `SELECT org_id, name, access, domains, user_monthly_credits::float8, contact_name, contact_email,
+	sql := `SELECT org_id, name, access, domains, user_monthly_credits::float8, contact_name, contact_email,
 		updated_by, updated_at, documents_may_leave, retention_years, storage_warn_mb
-		FROM agent_market.org_settings WHERE org_id = $1`, org).
+		FROM agent_market.org_settings WHERE org_id = $1`
+	if lock {
+		sql += ` FOR UPDATE`
+	}
+	err := q.QueryRow(ctx, sql, org).
 		Scan(&o.OrgID, &o.Name, &o.Access, &o.Domains, &o.UserMonthlyCredits, &o.ContactName, &o.ContactEmail, &o.UpdatedBy,
 			&o.UpdatedAt, &o.DocumentsMayLeave, &o.RetentionYears, &o.StorageWarnMB)
 	if errors.Is(err, pgx.ErrNoRows) {

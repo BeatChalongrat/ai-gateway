@@ -50,3 +50,26 @@ func RequireAdmin(adminKey string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// AdminRoleScope (AM7) narrows a bearer call that names a role below admin.
+// admin-ui's proxy puts the signed-in admin's role in X-Admin-Role; a role
+// other than admin / super_admin (agent_publisher) may reach only the paths
+// under allowPrefix — Agent Market's admin door, whose handlers decide the
+// rest — and every other endpoint behind the bearer answers 403 before it
+// runs. A call without the header (a script holding the bearer) is not
+// narrowed: the bearer alone was always the whole admin surface.
+func AdminRoleScope(allowPrefix string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch role := strings.TrimSpace(r.Header.Get("X-Admin-Role")); role {
+			case "", "admin", "super_admin":
+			default:
+				if !strings.HasPrefix(r.URL.Path, allowPrefix) {
+					http.Error(w, "forbidden for this admin role", http.StatusForbidden)
+					return
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

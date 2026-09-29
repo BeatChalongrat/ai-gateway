@@ -9,6 +9,7 @@ import Pagination from "../../components/ui/Pagination";
 import { useApi } from "../../lib/useApi";
 import { api, getApiErrorMessage } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
+import AgentMarketPointer from "../../components/AgentMarketPointer";
 import { useT, type DictKey } from "../../lib/i18n";
 
 /* ── Media destinations (FIX67) ───────────────────────────────────── */
@@ -945,6 +946,7 @@ export default function ModelsPage() {
         </div>
         <ThemeToggle />
       </div>
+      <AgentMarketPointer page="models" />
 
       {/* ── Media destinations (FIX67) ── */}
       <MediaDestinations />

@@ -66,6 +66,10 @@ type Config struct {
 	// Mail (AM6) sends an e-mail the person approved (email.go). There is no
 	// mail connector in the product: nil, and a draft says it cannot be sent.
 	Mail MailConnector
+	// AuditURL (AM7) — AGENT_MARKET_AUDIT_URL: the backend whose internal
+	// endpoint writes the admin audit log (audit.go). Every admin change is
+	// logged there first; with the backend unreachable, no admin change is made.
+	AuditURL string
 }
 
 // ConfigFromEnv reads the AGENT_MARKET_* variables with safe defaults.
@@ -83,6 +87,7 @@ func ConfigFromEnv() Config {
 		CreditsPerUSD:        float64(envInt("USAGE_CREDITS_PER_USD", 3000000)),
 		THBPerUSD:            float64(envInt("AGENT_MARKET_THB_PER_USD", 35)),
 	}
+	c.AuditURL = EnvString("AGENT_MARKET_AUDIT_URL", "http://backend:8080")
 	c.AllowedEmails = emailList(os.Getenv("AGENT_MARKET_ALLOWED_EMAILS"))
 	c.AdminEmails = emailList(os.Getenv("AGENT_MARKET_ADMIN_EMAILS"))
 	for _, d := range strings.Split(os.Getenv("AGENT_MARKET_ORG_DOMAINS"), ",") {

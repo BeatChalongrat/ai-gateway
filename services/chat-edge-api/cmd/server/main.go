@@ -825,6 +825,11 @@ func main() {
 		} else {
 			handlers.AgentMarket = amAPI
 			service.RegisterAccountDataProvider(amAPI.AccountProvider()) // AM2: export and account deletion reach agent_market
+			// AM7: every admin change is written to the admin audit log (the
+			// backend's internal endpoint, as a trusted service) before it lands.
+			amAPI.SetAuditor(agentmarket.NewHTTPAuditor(amCfg.AuditURL, func() (string, error) {
+				return auth.IssueServiceJWT(cfg.ServiceJWTSecret, cfg.ServiceJWTTTL)
+			}, cfg.InternalServiceSecret))
 			// AM6: a question asked in an agent's ask mode may name the person's
 			// knowledge base; it is read through the chat's own retrieval, which
 			// reads a knowledge base only for its owner.

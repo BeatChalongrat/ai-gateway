@@ -65,6 +65,8 @@ describe("admin-ui dictionary", () => {
       "app.languageEn",
       "app.languageTh",
       "nav.apiKeys",
+      // The product's name: the Agent Market nav entry and page title.
+      "nav.agentMarket",
       // Reasoning-strategy labels that name a vendor's API surface.
       // "OpenAI Responses" and "Gemini thinking" are what those APIs are
       // called; translating them would make the row harder to match

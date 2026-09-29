@@ -43,6 +43,9 @@ type API struct {
 	// knowledge reads a person's knowledge base for a question asked in ask
 	// mode (AM6, knowledge.go); nil = none is read.
 	knowledge Knowledge
+	// auditor takes every admin change into the admin audit log (AM7,
+	// audit.go); nil = no admin change can be made.
+	auditor Auditor
 }
 
 // NewAPI opens the control plane's own small pool and applies the
@@ -97,7 +100,8 @@ func (a *API) AccountProvider() *AccountProvider {
 
 // NewAPIWithStore is for tests.
 func NewAPIWithStore(cfg Config, store *Store, files storage.Backend, log *slog.Logger) *API {
-	return &API{cfg: cfg, store: store, files: files, log: log, closeFn: func() {}}
+	// AM7: admin changes need an audit log; a test that does not look at it keeps none
+	return &API{cfg: cfg, store: store, files: files, log: log, closeFn: func() {}, auditor: DiscardAuditor{}}
 }
 
 // Close releases the pool.
@@ -224,6 +228,12 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 }
 
 func (a *API) fail(w http.ResponseWriter, err error, what string) {
+	if errors.Is(err, ErrAuditUnavailable) {
+		// AM7: the change was not made, because the audit log could not record it
+		w.Header().Set("Retry-After", "30")
+		say(w, http.StatusServiceUnavailable, "AUDIT_UNAVAILABLE")
+		return
+	}
 	if errors.Is(err, ErrNotFound) {
 		name, ok := whatThai[what]
 		if !ok {

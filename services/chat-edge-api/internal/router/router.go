@@ -507,6 +507,8 @@ func New(
 		// never reaches the browser.
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireAdmin(cfg.AdminAPIKey))
+			// AM7 — an admin-ui role below admin reaches Agent Market's door only.
+			r.Use(middleware.AdminRoleScope("/api/v1/admin/agent-market/"))
 			r.Get("/admin/analytics/usage", h.Admin.Usage)
 			r.Get("/admin/conversations", h.Admin.Conversations)
 			r.Get("/admin/conversations/{id}", h.Admin.ConversationDetail)
@@ -533,6 +535,12 @@ func New(
 				r.Put("/admin/retention-settings", h.RetentionAdmin.PutSettings)
 				r.Get("/admin/deletion-audit", h.RetentionAdmin.ListAudit)
 				r.Get("/admin/retention-preview", h.RetentionAdmin.Preview)
+			}
+
+			// AM7 — Agent Market's admin page lives in admin-ui: the same
+			// handlers the chat app's page used, the admin named by the proxy.
+			if am, ok := h.AgentMarket.(interface{ AdminRoutes(chi.Router) }); ok {
+				r.Route("/admin/agent-market", am.AdminRoutes)
 			}
 		})
 	})

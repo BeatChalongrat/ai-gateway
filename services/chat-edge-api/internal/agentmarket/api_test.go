@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -81,6 +82,12 @@ func newEnvCfg(t *testing.T, mut func(*Config)) *testEnv {
 		})
 	})
 	r.Route("/agent-market", api.Routes)
+	// AM7: the admin app's door — the same handlers, the admin named by the
+	// headers admin-ui's proxy sets (chat-edge mounts it behind its admin
+	// bearer; the tests call it directly, see adminDo).
+	if door, ok := any(api).(interface{ AdminRoutes(chi.Router) }); ok {
+		r.Route("/admin-door", door.AdminRoutes)
+	}
 	e.srv = httptest.NewServer(r)
 	t.Cleanup(e.srv.Close)
 	return e
@@ -106,6 +113,50 @@ func (e *testEnv) do(method, path string, body any, hdr ...string) (int, map[str
 	var out map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	return resp.StatusCode, out
+}
+
+// testAdmin is an admin-ui account as its proxy names it (AM7).
+type testAdmin struct{ ID, Email, Name, Role string }
+
+var (
+	uiAdmin     = testAdmin{ID: "0b8f5a8e-0000-4000-8000-000000000001", Email: "it-admin@example.test", Name: "IT Admin", Role: "admin"}
+	uiPublisher = testAdmin{ID: "0b8f5a8e-0000-4000-8000-000000000002", Email: "finance-lead@example.test", Name: "หัวหน้าบัญชี", Role: "agent_publisher"}
+	uiViewer    = testAdmin{ID: "0b8f5a8e-0000-4000-8000-000000000003", Email: "viewer@example.test", Name: "Viewer", Role: "viewer"}
+)
+
+// adminDo calls the admin app's door (AdminRoutes) as one admin-ui account.
+func (e *testEnv) adminDo(who testAdmin, method, path string, body any) (int, map[string]any) {
+	e.t.Helper()
+	var rdr io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rdr = bytes.NewReader(b)
+	}
+	req, _ := http.NewRequest(method, e.srv.URL+"/admin-door"+path, rdr)
+	req.Header.Set("Content-Type", "application/json")
+	if who.ID != "" {
+		req.Header.Set("X-Admin-User-Id", who.ID)
+		req.Header.Set("X-Admin-Email", who.Email)
+		req.Header.Set("X-Admin-Name", url.PathEscape(who.Name))
+		req.Header.Set("X-Admin-Role", who.Role)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func (e *testEnv) mustAdmin(who testAdmin, code int, method, path string, body any) map[string]any {
+	e.t.Helper()
+	got, out := e.adminDo(who, method, path, body)
+	if got != code {
+		e.t.Fatalf("%s %s as %s = %d, want %d: %v", method, path, who.Role, got, code, out)
+	}
+	return out
 }
 
 const testManifest = `{"schema_version":"agent.market.v1","id":"sran.financial-report","version":"1.0.0","name":"รายงานการเงิน",
