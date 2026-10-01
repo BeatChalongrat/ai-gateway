@@ -6,20 +6,26 @@ columns, how wide, how many rows — not from a layout fixed per agent:
 * paper A4; portrait when the columns fit across a portrait page, landscape
   otherwise;
 * the columns are fitted to the page width when that keeps the print readable
-  (scale ≥ ``MIN_SCALE``); a sheet too wide for that prints across pages with
-  its identifying columns repeated on every page instead, so a row's
-  identifier is always on the same page as its amounts;
+  (scale ≥ ``MIN_SCALE``); a sheet too wide for that prints across pages;
+* AM9: a row's identity — the columns that name it, its number and its
+  description, which the writer puts first (``lead``) — is repeated at the left
+  of every page across, so a row's description is beside its amounts on every
+  page, not only a number a machine can match;
 * the header row (the row the panes are frozen under) repeats on every page;
 * the face of a working paper (its first sheet) prints on one page;
 * the print area is the sheet's used range;
 * every page carries the document's name, the sheet and "หน้า x / y".
 
 ``check`` reads those settings back out of the finished file and asserts
-them, with the same arithmetic — it is the print gate, deterministic, and it
-does not render (Excel's own pagination can still differ by a row).
+them, with the same arithmetic (``bands``: which columns print on which page
+across). It does not render; AM9's proof that does is the runner's: it prints
+the finished workbook through the document converter and looks for every row
+of ``print_rows`` — its identity and its amounts — on one rendered page.
 """
 
 from __future__ import annotations
+
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
@@ -29,6 +35,9 @@ from .reread import check as _check
 # A4 in inches, and the margins set here
 PAPER_W, PAPER_H, MARGIN_LR, MARGIN_TB = 8.27, 11.69, 0.5, 0.6
 MIN_SCALE = 0.6           # below this a fitted page is too small to read: repeat the identifiers instead
+# AM9: a sheet that runs across pages prints at 80 % (10 pt text prints at 8 pt, a footnote's size): with
+# the row's identity repeated on every page, the bank paper is 20 pages instead of 26 at 100 %
+SPLIT_SCALE = 0.8
 DEFAULT_WIDTH = 8.43      # Excel's column width when none is set
 ROW_PT = 15.0             # Excel's default row height
 
@@ -70,7 +79,25 @@ def plan(ws, *, face: bool = False) -> dict:
         out["scale"] = round(min(width_scale, height_scale), 3)
     if not fit:
         out["repeat_cols"] = 1     # the identifier column(s) repeat on every page across
+        out["scale"] = SPLIT_SCALE
     return out
+
+
+def lead(heads: list, rows: list, widths: list | None, first: list, **cols) -> tuple:
+    """A table's columns reordered for paper: ``first`` (header names — the row's identity, then its
+    amounts) at the left, every other column after them in its own order. ``cols`` are the writer's
+    1-based column tuples (money_cols=…, wrap_cols=…), returned renumbered.
+
+    The data stays the same; only where it prints changes. A check reads the table back by header
+    name (``reread.table``), so it never depends on this order."""
+    missing = [h for h in first if h not in heads]
+    if missing:
+        raise ValueError(f"lead: no column {missing!r}")
+    order = [heads.index(h) for h in first] + [i for i, h in enumerate(heads) if h not in first]
+    pos = {old: new for new, old in enumerate(order)}
+    return ([heads[i] for i in order], [[row[i] for i in order] for row in rows],
+            [widths[i] for i in order] if widths else widths,
+            {k: tuple(pos[c - 1] + 1 for c in v) for k, v in cols.items()})
 
 
 def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1) -> dict:
@@ -85,12 +112,16 @@ def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1) -> dict:
     if p["fit_width"] or face:
         ws.page_setup.fitToWidth = 1
         ws.page_setup.fitToHeight = 1 if face else 0
+    else:
+        ws.page_setup.scale = int(SPLIT_SCALE * 100)
     last_col = get_column_letter(ws.max_column or 1)
     ws.print_area = f"A1:{last_col}{ws.max_row or 1}"
     header = _header_row(ws)
     if header and not face:
         ws.print_title_rows = f"{header}:{header}"
-    if p["repeat_cols"]:
+    if not face:
+        # AM9: the row's identity repeats on every page across (and says which columns it is: the check
+        # and the print proof read it from here)
         ws.print_title_cols = f"A:{get_column_letter(max(1, id_cols))}"
     ws.oddFooter.left.text = f"{doc_name} · {ws.title}"
     ws.oddFooter.left.size = 8
@@ -118,6 +149,31 @@ def _header_row(ws) -> int | None:
     return row - 1 if row > 1 else None
 
 
+def _identity_beside_amounts(ws, where: str) -> list[str]:
+    """AM9: on every page across that prints an amount column, the row's identity prints too — and on a
+    sheet that runs across pages, that identity names the row in words (a description), not only by
+    a number."""
+    bad: list[str] = []
+    top = (_header_row(ws) or 0) + 1
+    money_cols = sorted({c.column for row in ws.iter_rows(min_row=top) for c in row if _money(c)})
+    if not money_cols:
+        return bad
+    ident = title_cols(ws)
+    if not ident or ident[0] != 1:
+        return [f"{where}: ไม่ได้กำหนดคอลัมน์ระบุรายการที่พิมพ์ซ้ำทุกหน้า"]
+    pages = bands(ws)
+    for b in pages:
+        if any(c in b for c in money_cols) and not all(c in b for c in ident):
+            cols = ", ".join(get_column_letter(c) for c in money_cols if c in b)
+            bad.append(f"{where}: หน้าที่พิมพ์จำนวนเงิน (คอลัมน์ {cols}) ไม่มีคอลัมน์ระบุรายการ")
+    if len(pages) > 1:
+        worded = any(isinstance(ws.cell(row=r, column=c).value, str) and len(ws.cell(row=r, column=c).value.strip()) > 3
+                     for c in ident for r in range(top, min((ws.max_row or 0), top + 50) + 1))
+        if not worded:
+            bad.append(f"{where}: พิมพ์หลายหน้าในแนวนอน แต่คอลัมน์ที่ซ้ำทุกหน้ามีแค่เลขลำดับ ไม่มีคำอธิบายรายการ")
+    return bad
+
+
 def _covers(area, max_col: int, max_row: int) -> bool:
     """The print area reaches the last used column and row (a reopened sheet may count one row fewer)."""
     import re
@@ -126,6 +182,112 @@ def _covers(area, max_col: int, max_row: int) -> bool:
 
     m = re.search(r"\$?([A-Z]+)\$?(\d+)\s*$", str(area or ""))
     return bool(m) and column_index_from_string(m.group(1)) >= max_col and int(m.group(2)) >= max_row
+
+
+def title_cols(ws) -> list[int]:
+    """The columns repeated at the left of every page (the row's identity), as 1-based indexes."""
+    import re
+
+    from openpyxl.utils import column_index_from_string
+
+    m = re.search(r"\$?([A-Z]+):\$?([A-Z]+)", str(ws.print_title_cols or ""))
+    if not m:
+        return []
+    a, b = column_index_from_string(m.group(1)), column_index_from_string(m.group(2))
+    return list(range(min(a, b), max(a, b) + 1))
+
+
+def _fitted(ws) -> bool:
+    return bool(ws.sheet_properties.pageSetUpPr and ws.sheet_properties.pageSetUpPr.fitToPage) \
+        and ws.page_setup.fitToWidth in (1, "1")
+
+
+def bands(ws) -> list[list[int]]:
+    """Which columns print on which page across, from the file's own setup: a sheet fitted to the page
+    width is one band; otherwise columns are laid out at the sheet's scale until the printable width is
+    full, and every following band starts with the repeated identity columns. A column is never split."""
+    widths = _widths(ws)
+    n = len(widths)
+    if _fitted(ws):
+        return [list(range(1, n + 1))]
+    scale = float(ws.page_setup.scale or 100) / 100
+    landscape = ws.page_setup.orientation == "landscape"
+    printable = (PAPER_H if landscape else PAPER_W) - 2 * MARGIN_LR
+    reps = [c for c in title_cols(ws) if c <= n]
+    rep_w = sum(widths[c - 1] for c in reps) * scale
+    out: list[list[int]] = []
+    col = 1
+    while col <= n:
+        band = [] if not out else list(reps)
+        used = 0.0 if not out else rep_w
+        placed = 0
+        while col <= n:
+            if out and col in reps:
+                col += 1
+                continue
+            w = widths[col - 1] * scale
+            if placed and used + w > printable:
+                break
+            band.append(col)
+            used += w
+            placed += 1
+            col += 1
+        if placed:
+            out.append(band)
+    return out or [list(range(1, n + 1))]
+
+
+def _money(cell) -> bool:
+    return isinstance(cell.value, (int, float, Decimal)) and not isinstance(cell.value, bool) \
+        and "#,##0.00" in str(cell.number_format or "")
+
+
+def money_text(value) -> str:
+    """An amount as the working papers' money format prints it: 1,234.50 · (1,234.50) · - for zero."""
+    try:
+        d = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        return str(value)
+    if d == 0:
+        return "-"
+    s = f"{abs(d):,.2f}"
+    return f"({s})" if d < 0 else s
+
+
+def _identity_text(value) -> str | None:
+    import datetime as _dt
+
+    if value is None or isinstance(value, (_dt.date, _dt.datetime, bool)):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    s = " ".join(str(value).split())
+    return s or None
+
+
+def print_rows(path: str, limit: int = 3000) -> list[dict]:
+    """Every row of every sheet that carries an amount, as the print proof looks for it on the rendered
+    pages: the text of its identity columns (the repeated columns; the first column on the face) and
+    each of its amounts as printed. The runner prints the finished workbook and asserts that each row's
+    identity and amounts are on one page."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path)
+    out: list[dict] = []
+    for i, ws in enumerate(wb.worksheets):
+        ident = title_cols(ws) or [1]
+        top = (_header_row(ws) or 0) + 1
+        for r in range(top, (ws.max_row or 0) + 1):
+            amounts = [money_text(c.value) for c in ws[r] if _money(c)]
+            if not amounts:
+                continue
+            words = [t for t in (_identity_text(ws.cell(row=r, column=c).value) for c in ident) if t]
+            if not words:
+                continue
+            out.append({"sheet": ws.title, "row": r, "identity": words, "amounts": amounts})
+            if len(out) >= limit:
+                return out
+    return out
 
 
 def check(path: str) -> dict:
@@ -161,6 +323,10 @@ def check(path: str) -> dict:
                 bad.append(f"{where}: ต้องย่อให้พอดีความกว้างกระดาษ เพื่อให้รายการกับจำนวนเงินอยู่หน้าเดียวกัน")
         elif not ws.print_title_cols:
             bad.append(f"{where}: กว้างเกินหนึ่งหน้า แต่ไม่ได้พิมพ์คอลัมน์ระบุรายการซ้ำทุกหน้า")
+        elif float(ws.page_setup.scale or 100) / 100 < MIN_SCALE:
+            bad.append(f"{where}: ย่อเหลือ {float(ws.page_setup.scale) / 100:.0%} เล็กเกินกว่าจะอ่านได้เมื่อพิมพ์")
+        if not face:
+            bad += _identity_beside_amounts(ws, where)
         header = _header_row(ws)
         if header and not face and str(ws.print_title_rows or "").replace("$", "") != f"{header}:{header}":
             bad.append(f"{where}: หัวตารางไม่พิมพ์ซ้ำทุกหน้า")

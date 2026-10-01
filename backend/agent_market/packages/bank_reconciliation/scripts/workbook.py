@@ -22,7 +22,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
-from ....deliverables.reread import Tally
+from ....deliverables.reread import Tally, table
 from ....engine.e3 import cards as E3C
 from ....engine.e3.match import SETTING_TH
 from ..checks import classify as C
@@ -30,6 +30,24 @@ from ..checks.inputs import CARRIED_SHEET
 from .reconcile import OUTSTANDING, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
+# The tables' columns in the order the data is built and read back (AM9: printed, the row's identity and
+# its amounts come first — ``workpaper.lead`` — and the checks read by these names, not by position)
+H_ITEMS = ["ลำดับ", "ปรับยอดฝั่ง", "ประเภท", "วันที่", "เลขที่อ้างอิง", "รายการ", "จำนวนเงินตามไฟล์", "ผลต่อยอดหลังปรับปรุง",
+           "อายุ (วัน)", "ช่วงอายุ", "อยู่ใน", "หลักฐาน", "ผู้จัดประเภท", "หมายเหตุ"]
+H_PAIRS = ["คู่ที่", "ขั้น", "วิธีจับคู่", "รูปแบบ", "ผู้ยืนยัน", "วันที่ (บัญชี)", "รายการ (บัญชี)", "เลขอ้างอิง (บัญชี)",
+           "จำนวนเงิน (บัญชี)", "หลักฐาน (บัญชี)", "วันที่ (ธนาคาร)", "รายการ (ธนาคาร)", "เลขอ้างอิง (ธนาคาร)",
+           "จำนวนเงิน (ธนาคาร)", "หลักฐาน (ธนาคาร)", "ผลต่าง", "ห่างกัน (วัน)"]
+H_SUSPECT = ["ลำดับ"] + H_PAIRS[1:2] + ["เหตุที่สงสัย", "รูปแบบ", "สถานะ"] + H_PAIRS[5:]
+H_JOURNAL = ["เลขที่ร่าง", "วันที่", "คำอธิบาย", "บัญชี", "รหัสบัญชี", "เดบิต", "เครดิต", "หมายเหตุ", "มาจากรายการกระทบยอด"]
+H_CARRIED_IN = ["วันที่", "เลขที่อ้างอิง", "รายการ", "จำนวนเงิน", "ประเภท", "สถานะ", "ธนาคารลงวันที่", "วิธีจับคู่", "อายุ (วัน)", "หลักฐาน"]
+# what prints first on each table that runs across pages: the row's number and description, then its amounts
+LEAD = {
+    "items": ["ลำดับ", "รายการ", "จำนวนเงินตามไฟล์", "ผลต่อยอดหลังปรับปรุง"],
+    "pairs": ["คู่ที่", "รายการ (บัญชี)", "จำนวนเงิน (บัญชี)", "รายการ (ธนาคาร)", "จำนวนเงิน (ธนาคาร)", "ผลต่าง"],
+    "suspect": ["ลำดับ", "รายการ (บัญชี)", "จำนวนเงิน (บัญชี)", "รายการ (ธนาคาร)", "จำนวนเงิน (ธนาคาร)", "ผลต่าง"],
+    "journal": ["เลขที่ร่าง", "บัญชี", "เดบิต", "เครดิต"],
+    "carried_in": ["เลขที่อ้างอิง", "รายการ", "จำนวนเงิน"],
+}
 S_STATEMENT, S_ITEMS, S_PAIRS, S_SUSPECT, S_JOURNAL = "งบกระทบยอด", "รายการกระทบยอด", "รายการที่จับคู่", "รายการน่าสงสัย", "ร่างรายการปรับปรุง"
 S_AGE, S_IN, S_OUT, S_CUTOFF, S_EXC, S_EVIDENCE, S_LEFT = ("อายุรายการค้าง", "รายการค้างยกมา", CARRIED_SHEET, "รายการข้ามงวด",
                                                            "ข้อยกเว้น", "หลักฐาน", "เอกสารที่ยังไม่ได้รวม")
@@ -91,7 +109,10 @@ class BankWorkbook:
             ws["A2"].font = Font(name=self.font, size=9, color=self.p["muted"])
 
     def _table(self, ws, top: int, headers: list[str], rows: list[list], widths: list[int] | None = None, money_cols=(),
-               wrap_cols=(), freeze: bool = True):
+               wrap_cols=(), freeze: bool = True, first: list[str] | None = None):
+        if first:
+            headers, rows, widths, cols = workpaper.lead(headers, rows, widths, first, money_cols=money_cols, wrap_cols=wrap_cols)
+            money_cols, wrap_cols = cols["money_cols"], cols["wrap_cols"]
         fill = PatternFill("solid", fgColor=self.p["primary"])
         thin = Side(style="thin", color=self.p["rule"])
         zebra = PatternFill("solid", fgColor=self.p["surface"])
@@ -243,20 +264,16 @@ class BankWorkbook:
     def reconciling(self):
         ws = self.wb.create_sheet(S_ITEMS)
         self._title(ws, "รายการกระทบยอดทุกรายการ", "รายการที่อยู่ฝั่งเดียว พร้อมหลักฐานว่าอ่านจากไฟล์ แผ่น และแถวใด")
-        heads = ["ลำดับ", "ปรับยอดฝั่ง", "ประเภท", "วันที่", "เลขที่อ้างอิง", "รายการ", "จำนวนเงินตามไฟล์", "ผลต่อยอดหลังปรับปรุง", "อายุ (วัน)",
-                 "ช่วงอายุ", "อยู่ใน", "หลักฐาน", "ผู้จัดประเภท", "หมายเหตุ"]
-        self._table(ws, 4, heads, self.item_rows(self.c["items"]), [7, 18, 30, 14, 16, 44, 18, 20, 10, 14, 16, 50, 14, 40],
-                    money_cols=(7, 8), wrap_cols=(6, 12, 14))
+        self._table(ws, 4, H_ITEMS, self.item_rows(self.c["items"]), [7, 18, 30, 14, 16, 44, 18, 20, 10, 14, 16, 50, 14, 40],
+                    money_cols=(7, 8), wrap_cols=(6, 12, 14), first=LEAD["items"])
 
     def pairs(self):
         ws = self.wb.create_sheet(S_PAIRS)
         self._title(ws, "รายการที่จับคู่แล้ว", "ทุกคู่บอกขั้นที่จับได้และผู้ยืนยัน · ขั้นที่ไม่ใช่ “ตรงกันทุกตัว” ต้องมีคนยืนยันเสมอ")
-        heads = ["คู่ที่", "ขั้น", "วิธีจับคู่", "รูปแบบ", "ผู้ยืนยัน", "วันที่ (บัญชี)", "รายการ (บัญชี)", "เลขอ้างอิง (บัญชี)", "จำนวนเงิน (บัญชี)",
-                 "หลักฐาน (บัญชี)", "วันที่ (ธนาคาร)", "รายการ (ธนาคาร)", "เลขอ้างอิง (ธนาคาร)", "จำนวนเงิน (ธนาคาร)", "หลักฐาน (ธนาคาร)",
-                 "ผลต่าง", "ห่างกัน (วัน)"]
-        self._table(ws, 4, heads, [self._pair_row(n, m, who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)) for n, m in
-                                   enumerate(self.c["match"]["groups"]["matched"], start=1)],
-                    [7, 18, 32, 9, 16, 14, 36, 16, 16, 40, 14, 36, 16, 16, 40, 12, 10], money_cols=(9, 14, 16), wrap_cols=(7, 10, 12, 15))
+        self._table(ws, 4, H_PAIRS, [self._pair_row(n, m, who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)) for n, m in
+                                     enumerate(self.c["match"]["groups"]["matched"], start=1)],
+                    [7, 18, 32, 9, 16, 14, 36, 16, 16, 40, 14, 36, 16, 16, 40, 12, 10], money_cols=(9, 14, 16), wrap_cols=(7, 10, 12, 15),
+                    first=LEAD["pairs"])
 
     def _pair_row(self, n: int, m: dict, who: str) -> list:
         def join(rows, f):
@@ -272,9 +289,6 @@ class BankWorkbook:
     def suspects(self):
         ws = self.wb.create_sheet(S_SUSPECT)
         self._title(ws, "รายการน่าสงสัย", "คู่ที่เสนอแต่ยังไม่มีคนยืนยัน และรายการที่อาจบันทึกซ้ำ · ยังไม่นับเป็นรายการกระทบยอดของฝั่งใด")
-        heads = ["ลำดับ", "ขั้น", "เหตุที่สงสัย", "รูปแบบ", "สถานะ", "วันที่ (บัญชี)", "รายการ (บัญชี)", "เลขอ้างอิง (บัญชี)", "จำนวนเงิน (บัญชี)",
-                 "หลักฐาน (บัญชี)", "วันที่ (ธนาคาร)", "รายการ (ธนาคาร)", "เลขอ้างอิง (ธนาคาร)", "จำนวนเงิน (ธนาคาร)", "หลักฐาน (ธนาคาร)",
-                 "ผลต่าง", "ห่างกัน (วัน)"]
         rows = []
         for n, s in enumerate(self.c["match"]["groups"]["suspect"], start=1):
             if s["kind"] == "possible_duplicate":
@@ -283,20 +297,20 @@ class BankWorkbook:
             else:
                 who = "ข้ามคำถามไว้ รอคนตัดสิน" if s["decision"] == "undecided" else "ยังไม่ได้ถาม"
             rows.append(self._pair_row(n, s, who))
-        self._table(ws, 4, heads, rows, [7, 18, 36, 9, 22, 14, 36, 16, 16, 40, 14, 36, 16, 16, 40, 12, 10],
-                    money_cols=(9, 14, 16), wrap_cols=(3, 7, 10, 12, 15))
+        self._table(ws, 4, H_SUSPECT, rows, [7, 18, 36, 9, 22, 14, 36, 16, 16, 40, 14, 36, 16, 16, 40, 12, 10],
+                    money_cols=(9, 14, 16), wrap_cols=(3, 7, 10, 12, 15), first=LEAD["suspect"])
 
     def journal(self):
         ws = self.wb.create_sheet(S_JOURNAL)
         self._title(ws, "ร่างรายการปรับปรุง (ฝั่งบัญชี)", "ร่างให้ตรวจและบันทึกเอง · agent ไม่ได้บันทึกอะไรเข้าระบบบัญชี · ทุกรายการเดบิตเท่ากับเครดิต")
-        heads = ["เลขที่ร่าง", "วันที่", "คำอธิบาย", "บัญชี", "รหัสบัญชี", "เดบิต", "เครดิต", "หมายเหตุ", "มาจากรายการกระทบยอด"]
         rows = []
         for j in self.c["journal"]:
             for k, ln in enumerate(j["lines"]):
                 rows.append([j["id"], E3C.date_th(j["date"]), j["memo"] if k == 0 else "", ln["account"], ln["code"],
                              _num(ln["debit"]) or None, _num(ln["credit"]) or None, j["note"] if k == 0 else "",
                              ", ".join(j["items"]) if k == 0 else ""])
-        self._table(ws, 4, heads, rows, [12, 14, 50, 44, 14, 16, 16, 50, 22], money_cols=(6, 7), wrap_cols=(3, 4, 8))
+        self._table(ws, 4, H_JOURNAL, rows, [12, 14, 50, 44, 14, 16, 16, 50, 22], money_cols=(6, 7), wrap_cols=(3, 4, 8),
+                    first=LEAD["journal"])
 
     def ageing(self):
         ws = self.wb.create_sheet(S_AGE)
@@ -318,8 +332,8 @@ class BankWorkbook:
         rows = [[E3C.date_th(i["date"]), i["ref"], i["description"], _num(abs(Decimal(i["amount"]))), i["kind_label"],
                  "ธนาคารลงรายการแล้ว" if i["cleared"] else "ยังค้างอยู่", E3C.date_th(i["cleared_on"]) if i["cleared_on"] else "",
                  i["pass"] or "", i["age_days"], _where(i)] for i in self.c["carried_in"]]
-        self._table(ws, 4, ["วันที่", "เลขที่อ้างอิง", "รายการ", "จำนวนเงิน", "ประเภท", "สถานะ", "ธนาคารลงวันที่", "วิธีจับคู่", "อายุ (วัน)", "หลักฐาน"],
-                    rows, [14, 18, 44, 18, 26, 22, 16, 32, 12, 50], money_cols=(4,), wrap_cols=(3, 10))
+        self._table(ws, 4, H_CARRIED_IN, rows, [14, 18, 44, 18, 26, 22, 16, 32, 12, 50], money_cols=(4,), wrap_cols=(3, 10),
+                    first=LEAD["carried_in"])
 
     def carried_out(self):
         """Next month's opening list. Its columns are the ones checks/inputs.py reads back."""
@@ -337,7 +351,7 @@ class BankWorkbook:
         rows = [[FROM_TH[x["side"]], E3C.date_th(x["date"]), x["ref"], x["description"], _num(x["amount"]),
                  "ก่อนงวด" if x["date"] < c["period_start"] else "หลังวันตัดยอด", _where(x)] for x in c["cutoff"]["rows"]]
         self._table(ws, 4, ["อยู่ใน", "วันที่", "เลขที่อ้างอิง", "รายการ", "จำนวนเงิน", "ตำแหน่ง", "หลักฐาน"], rows,
-                    [18, 14, 18, 44, 18, 16, 50], money_cols=(5,), wrap_cols=(4, 7))
+                    [18, 14, 18, 44, 18, 16, 50], money_cols=(5,), wrap_cols=(4, 7), first=["เลขที่อ้างอิง", "รายการ", "จำนวนเงิน"])
 
     def exceptions(self):
         ws = self.wb.create_sheet(S_EXC)
@@ -395,7 +409,9 @@ class BankWorkbook:
             self.left_out()
         self.wb.properties.creator = "Agent Market · bank reconciliation"
         # AM8: printable — the face on one page; a row's identifier on the page of its amounts
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path))
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
+                                 id_cols={S_ITEMS: 2, S_PAIRS: 2, S_SUSPECT: 2, S_JOURNAL: 2, S_IN: 2, S_AGE: 1, S_OUT: 3,
+                                          S_CUTOFF: 2, S_EXC: 2, S_EVIDENCE: 2, S_LEFT: 1})
         self.wb.save(path)
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "tied": self.c["statement"]["tied"], "difference": self.c["statement"]["difference"],
@@ -475,7 +491,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     says = verdict == TIED if gate["passed"] else verdict.startswith(NOT_TIED)
     marked = DRAFT_MARK in a3
     out.append(ck("xlsx.verdict", says and marked == (not gate["passed"]), verdict, "งบบอกตรงตามจริงว่าลงตัวหรือยังไม่ลงตัว"))
-    rows = [r for r in wb[S_ITEMS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    rows = table(wb[S_ITEMS], H_ITEMS)
     items = computed["items"]
     same = len(rows) == len(items) and all(isinstance(r[6], (int, float)) and _same(r[6], i["amount"]) and r[11] for r, i in zip(rows, items))
     out.append(ck("xlsx.items", same, f"{len(rows)} แถว / {len(items)} รายการ", "รายการกระทบยอดครบ เป็นตัวเลข และมีหลักฐานทุกรายการ"))
@@ -483,15 +499,15 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
         got = sum((Decimal(str(r[7])) for r, i in zip(rows, items) if i["side"] == side and r[7] is not None), Decimal(0))
         out.append(ck(f"xlsx.adjustments_{side}", same and got.quantize(Decimal("0.01")) == Decimal(st[side]["adjustments"]),
                       f"{got} / {st[side]['adjustments']}", f"รายการปรับปรุง{label}รวมแล้วเท่ากับในงบ"))
-    pairs = [r for r in wb[S_PAIRS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    pairs = table(wb[S_PAIRS], H_PAIRS)
     matched = computed["match"]["groups"]["matched"]
     ok = len(pairs) == len(matched) and all(r[1] and r[2] and r[4] == who(m["confirmed"], m.get("confirmed_by") or "", CONFIRMED_TH)
                                             for r, m in zip(pairs, matched))
     ok = ok and all(m["confirmed"] == "person" for m in matched if m["tier"] != "exact")
     out.append(ck("xlsx.pairs", ok, f"{len(pairs)} คู่", "ทุกคู่บอกขั้น วิธีจับคู่ และผู้ยืนยัน ขั้นที่ไม่ตรงกันทุกตัวมีคนยืนยัน"))
-    sus = [r for r in wb[S_SUSPECT].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    sus = table(wb[S_SUSPECT], H_SUSPECT)
     out.append(ck("xlsx.suspect", len(sus) == len(computed["match"]["groups"]["suspect"]), f"{len(sus)} รายการ", "รายการน่าสงสัยครบ"))
-    jr = [r for r in wb[S_JOURNAL].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    jr = table(wb[S_JOURNAL], H_JOURNAL)
     by: dict = {}
     for r in jr:
         d = by.setdefault(r[0], [Decimal(0), Decimal(0)])
@@ -534,11 +550,11 @@ def _figures(wb, computed: dict) -> dict:
             t.number(f"{ln['sign']}: {ln['label']}", face.get(f"{ln['sign']}: {ln['label']}"), ln["amount"])
         if st[side]["adjusted"] is not None:
             t.number(adj, face.get(adj), st[side]["adjusted"])
-    rows = [r for r in wb[S_ITEMS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    rows = table(wb[S_ITEMS], H_ITEMS)
     for r, i in zip(rows, computed["items"]):
         t.number(f"รายการกระทบยอด {r[0]} จำนวนเงิน", r[6], i["amount"])
         t.number(f"รายการกระทบยอด {r[0]} ผลต่อยอด", r[7], i["effect"])
-    pairs = [r for r in wb[S_PAIRS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    pairs = table(wb[S_PAIRS], H_PAIRS)
     for r, m in zip(pairs, computed["match"]["groups"]["matched"]):
         t.number(f"คู่ที่ {r[0]} จำนวนเงิน (บัญชี)", r[8], m["left_total"])
         t.number(f"คู่ที่ {r[0]} จำนวนเงิน (ธนาคาร)", r[13], m["right_total"])

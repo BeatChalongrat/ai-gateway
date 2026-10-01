@@ -23,12 +23,29 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
-from ....deliverables.reread import Tally
+from ....deliverables.reread import Tally, table
 from ....engine.e3 import cards as E3C
 from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 QTY = '#,##0.######;[Red](#,##0.######);"-"'
+# The wide tables' columns in the order the data is built and read back (AM9: printed, a row's identity
+# — which invoice, which line, what — and its amounts come first, ``workpaper.lead``; checks read by name)
+H_INVOICES = ["ลำดับ", "เลขที่", "วันที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขประจำตัวผู้เสียภาษี", "PO ที่อ้างถึง", "สกุลเงิน", "ยอดก่อนภาษี",
+              "ภาษีมูลค่าเพิ่ม", "ยอดรวม", "สถานะ", "เหตุผล", "วิธีตรวจ", "ขอคืนภาษีซื้อ", "หมายเหตุ", "หลักฐาน"]
+H_LINES = ["ลำดับ", "ใบแจ้งหนี้", "บรรทัด", "รายการ", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน", "วิธีตรวจ", "เหตุที่ตรวจแบบนี้",
+           "PO", "บรรทัดของ PO", "รายการใน PO", "ราคาต่อหน่วยใน PO", "หลักฐาน (PO)", "ใบรับของที่ใช้ตรวจ", "สั่งซื้อ", "รับจริงสะสม",
+           "เรียกเก็บก่อนหน้า", "เรียกเก็บสะสม", "หน่วยที่เทียบ", "ส่วนต่างราคารวม", "สถานะ", "เหตุผล", "ข้อที่ไม่ผ่าน",
+           "ค่าที่ยอมรับได้ที่ใช้", "วิธีจับคู่", "ขั้น", "ผู้ยืนยัน", "หมายเหตุ", "หลักฐาน (ใบแจ้งหนี้)"]
+H_PO = ["PO", "บรรทัด", "รหัสสินค้า", "รายการ", "ประเภท", "สถานะ PO", "หน่วย", "ราคาต่อหน่วย", "สั่งซื้อ", "รับจริงสะสม",
+        "เรียกเก็บสะสม", "มูลค่าที่เรียกเก็บสะสม", "คงเหลือให้เรียกเก็บ", "เรียกเก็บเกิน", "วิธีตรวจ", "ใบแจ้งหนี้ที่เรียกเก็บ", "ใบรับของ",
+        "หลักฐาน (PO)"]
+LEAD = {
+    "invoices": ["ลำดับ", "เลขที่", "ผู้ขาย", "ยอดก่อนภาษี", "ภาษีมูลค่าเพิ่ม", "ยอดรวม", "สถานะ"],
+    "lines": ["ลำดับ", "ใบแจ้งหนี้", "บรรทัด", "รายการ", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน", "ราคาต่อหน่วยใน PO",
+              "ส่วนต่างราคารวม", "สถานะ"],
+    "po": ["PO", "บรรทัด", "รายการ", "ราคาต่อหน่วย", "มูลค่าที่เรียกเก็บสะสม"],
+}
 S_SUMMARY, S_INVOICES, S_LINES, S_PO, S_GRIR = "สรุป", "ผลตรวจใบแจ้งหนี้", "ผลตรวจรายบรรทัด", "ยอดสะสมตาม PO", "ค้างระหว่างรับของกับเรียกเก็บ"
 S_UNPLANNED, S_NOTES, S_LINKS, S_EXC, S_EVIDENCE, S_LEFT = ("ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ", "ใบลดหนี้และใบเพิ่มหนี้", "การจับคู่", "ข้อยกเว้น",
                                                            "หลักฐาน", "เอกสารที่ยังไม่ได้รวม")
@@ -92,7 +109,11 @@ class MatchWorkbook:
             ws["A2"].font = Font(name=self.font, size=9, color=self.p["muted"])
 
     def _table(self, ws, top: int, headers: list, rows: list, widths: list | None = None, money_cols=(), qty_cols=(),
-               wrap_cols=(), freeze: bool = True):
+               wrap_cols=(), freeze: bool = True, first: list | None = None):
+        if first:
+            headers, rows, widths, cols = workpaper.lead(headers, rows, widths, first, money_cols=money_cols, qty_cols=qty_cols,
+                                                         wrap_cols=wrap_cols)
+            money_cols, qty_cols, wrap_cols = cols["money_cols"], cols["qty_cols"], cols["wrap_cols"]
         fill = PatternFill("solid", fgColor=self.p["primary"])
         thin = Side(style="thin", color=self.p["rule"])
         zebra = PatternFill("solid", fgColor=self.p["surface"])
@@ -211,16 +232,14 @@ class MatchWorkbook:
     def invoices(self):
         ws = self.wb.create_sheet(S_INVOICES)
         self._title(ws, "ผลตรวจใบแจ้งหนี้", "หนึ่งแถวต่อหนึ่งเอกสาร · สถานะ เหตุผล และวิธีตรวจของบรรทัดในเอกสารนั้น")
-        heads = ["ลำดับ", "เลขที่", "วันที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขประจำตัวผู้เสียภาษี", "PO ที่อ้างถึง", "สกุลเงิน", "ยอดก่อนภาษี",
-                 "ภาษีมูลค่าเพิ่ม", "ยอดรวม", "สถานะ", "เหตุผล", "วิธีตรวจ", "ขอคืนภาษีซื้อ", "หมายเหตุ", "หลักฐาน"]
         rows = []
         for n, i in enumerate(self.c["invoices"], start=1):
             rows.append([n, i["number"], E3C.date_th(i["date"]), i["doc_type_label"], i["supplier"]["name"], i["supplier"]["tax_id"],
                          ", ".join(i["po_named"]), i["currency"], _num(i["subtotal"]), _num(i["vat_amount"]), _num(i["total"]),
                          i["status_label"], " · ".join(i["reason_labels"]), i["depth_text"],
                          ("ได้: " if i["vat"]["claimable"] else "ไม่ได้: ") + i["vat"]["why"], "\n".join(i["notes"]), _where(i)])
-        self._table(ws, 4, heads, rows, [7, 18, 14, 20, 36, 18, 18, 9, 16, 16, 16, 22, 40, 26, 40, 50, 46],
-                    money_cols=(9, 10, 11), wrap_cols=(5, 13, 15, 16, 17))
+        self._table(ws, 4, H_INVOICES, rows, [7, 18, 14, 20, 36, 18, 18, 9, 16, 16, 16, 22, 40, 26, 40, 50, 46],
+                    money_cols=(9, 10, 11), wrap_cols=(5, 13, 15, 16, 17), first=LEAD["invoices"])
 
     def line_rows(self) -> list:
         rows = []
@@ -253,21 +272,14 @@ class MatchWorkbook:
     def lines(self):
         ws = self.wb.create_sheet(S_LINES)
         self._title(ws, "ผลตรวจรายบรรทัด", "ทุกบรรทัดบอกว่าตรวจ 3 ทางหรือ 2 ทาง ตรวจกับบรรทัดใดของ PO และใบรับของใด พร้อมไฟล์ แผ่น และแถว")
-        heads = ["ลำดับ", "ใบแจ้งหนี้", "บรรทัด", "รายการ", "จำนวน", "หน่วย", "ราคาต่อหน่วย", "จำนวนเงิน", "วิธีตรวจ", "เหตุที่ตรวจแบบนี้",
-                 "PO", "บรรทัดของ PO", "รายการใน PO", "ราคาต่อหน่วยใน PO", "หลักฐาน (PO)", "ใบรับของที่ใช้ตรวจ", "สั่งซื้อ", "รับจริงสะสม",
-                 "เรียกเก็บก่อนหน้า", "เรียกเก็บสะสม", "หน่วยที่เทียบ", "ส่วนต่างราคารวม", "สถานะ", "เหตุผล", "ข้อที่ไม่ผ่าน",
-                 "ค่าที่ยอมรับได้ที่ใช้", "วิธีจับคู่", "ขั้น", "ผู้ยืนยัน", "หมายเหตุ", "หลักฐาน (ใบแจ้งหนี้)"]
-        self._table(ws, 4, heads, self.line_rows(),
+        self._table(ws, 4, H_LINES, self.line_rows(),
                     [7, 18, 8, 40, 12, 10, 14, 16, 30, 30, 18, 12, 40, 14, 44, 44, 12, 12, 14, 14, 12, 14, 22, 36, 50, 50, 36, 22, 20,
                      44, 44], money_cols=(7, 8, 14, 22), qty_cols=(5, 17, 18, 19, 20),
-                    wrap_cols=(4, 9, 10, 13, 15, 16, 24, 25, 26, 27, 30, 31))
+                    wrap_cols=(4, 9, 10, 13, 15, 16, 24, 25, 26, 27, 30, 31), first=LEAD["lines"])
 
     def po(self):
         ws = self.wb.create_sheet(S_PO)
         self._title(ws, "ยอดสะสมตามบรรทัดของ PO", "สั่งซื้อ รับจริง และเรียกเก็บสะสมของทุกใบแจ้งหนี้ ทั้งรอบนี้และรอบก่อน")
-        heads = ["PO", "บรรทัด", "รหัสสินค้า", "รายการ", "ประเภท", "สถานะ PO", "หน่วย", "ราคาต่อหน่วย", "สั่งซื้อ", "รับจริงสะสม",
-                 "เรียกเก็บสะสม", "มูลค่าที่เรียกเก็บสะสม", "คงเหลือให้เรียกเก็บ", "เรียกเก็บเกิน", "วิธีตรวจ", "ใบแจ้งหนี้ที่เรียกเก็บ", "ใบรับของ",
-                 "หลักฐาน (PO)"]
         rows = []
         for p in self.c["po_lines"]:
             invs = "\n".join(f"{e['invoice']} {E3C.date_th(e['date'])} {e['quantity']} ({FROM_TH[e['from']]})" for e in p["invoices"])
@@ -275,8 +287,8 @@ class MatchWorkbook:
             rows.append([p["po"], p["line_no"], p["item_code"], p["description"], p["kind_label"], p["status_label"], p["unit"],
                          _num(p["unit_price"]), _num(p["quantity"]), _num(p["received"]), _num(p["billed"]), _num(p["billed_amount"]),
                          _num(p["open_to_bill"]), p["over_billed_why"], DEPTH_SHORT[p["depth"]], invs, grs, _where(p)])
-        self._table(ws, 4, heads, rows, [18, 10, 14, 40, 14, 12, 10, 14, 12, 12, 12, 18, 14, 28, 10, 44, 36, 44],
-                    money_cols=(8, 12), qty_cols=(9, 10, 11, 13), wrap_cols=(4, 14, 16, 17, 18))
+        self._table(ws, 4, H_PO, rows, [18, 10, 14, 40, 14, 12, 10, 14, 12, 12, 12, 18, 14, 28, 10, 44, 36, 44],
+                    money_cols=(8, 12), qty_cols=(9, 10, 11, 13), wrap_cols=(4, 14, 16, 17, 18), first=LEAD["po"])
 
     def grir(self):
         ws = self.wb.create_sheet(S_GRIR)
@@ -311,7 +323,7 @@ class MatchWorkbook:
         rows = [[x["number"], E3C.date_th(x["date"]), x["kind_label"], x["supplier"], _num(x["total"]), x["ref_invoice"],
                  "พบ" if x["corrects"] else "ไม่พบ", x["status_label"], " · ".join(x["reasons"])] for x in self.c["notes"]]
         self._table(ws, 4, ["เลขที่", "วันที่", "ชนิด", "ผู้ขาย", "ยอดรวม", "อ้างถึงใบแจ้งหนี้", "ใบแจ้งหนี้เดิม", "สถานะ", "เหตุผล"], rows,
-                    [18, 14, 16, 40, 16, 20, 14, 22, 44], money_cols=(5,), wrap_cols=(4, 9))
+                    [18, 14, 16, 40, 16, 20, 14, 22, 44], money_cols=(5,), wrap_cols=(4, 9), first=["เลขที่", "ผู้ขาย", "ยอดรวม"])
 
     def links(self):
         ws = self.wb.create_sheet(S_LINKS)
@@ -390,7 +402,8 @@ class MatchWorkbook:
         # AM8: printable — the face on one page; on a sheet too wide for a page, the columns that say which
         # invoice and line a row is repeat on every page beside its figures
         workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
-                                 id_cols={S_INVOICES: 2, S_LINES: 3, S_PO: 2})
+                                 id_cols={S_INVOICES: 3, S_LINES: 4, S_PO: 3, S_NOTES: 2, S_UNPLANNED: 2, S_GRIR: 3, S_LINKS: 2,
+                                          S_EXC: 2, S_EVIDENCE: 2, S_LEFT: 1})
         self.wb.save(path)
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "invoices": t["invoices"], "passed": t["passed"], "blocked": t["blocked"],
@@ -451,13 +464,13 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     for x in s["by_status"]:
         ok = ok and _same(face.get(x["label"]), x["count"])
     out.append(ck("xlsx.summary", ok, f"{face.get(L_INVOICES)} ฉบับ", "ตัวเลขในหน้าสรุปตรงกับที่คำนวณ"))
-    inv = _rows(wb[S_INVOICES])
+    inv = table(wb[S_INVOICES], H_INVOICES)
     invoices = computed["invoices"]
     ok = len(inv) == len(invoices) and all(r[11] == i["status_label"] and r[13] == i["depth_text"] and
                                            (i["status"] == PASS or r[12]) and (i["total"] is None or _same(r[10], i["total"]))
                                            for r, i in zip(inv, invoices))
     out.append(ck("xlsx.invoices", ok, f"{len(inv)} แถว / {len(invoices)} ฉบับ", "ทุกใบแจ้งหนี้มีสถานะ วิธีตรวจ และเหตุผลเมื่อไม่ผ่าน"))
-    ln = _rows(wb[S_LINES])
+    ln = table(wb[S_LINES], H_LINES)
     lines = computed["lines"]
     same = len(ln) == len(lines)
     depth_ok = same and all(r[8] == (x["depth_label"] if x["unplanned"] is None else "ค่าใช้จ่ายที่ไม่ได้สั่งซื้อ") and r[9]
@@ -473,7 +486,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list:
     nums = same and all((x["amount"] is None or _same(r[7], x["amount"])) and (x["quantity"] is None or _same(r[4], x["quantity"]))
                         for r, x in zip(ln, lines))
     out.append(ck("xlsx.line_numbers", nums, "", "จำนวนและจำนวนเงินของทุกบรรทัดเป็นตัวเลขและตรงกับที่อ่านได้"))
-    po = _rows(wb[S_PO])
+    po = table(wb[S_PO], H_PO)
     ok = len(po) == len(computed["po_lines"]) and all(_same(r[10], p["billed"]) and (p["received"] is None or _same(r[9], p["received"]))
                                                       and bool(r[13]) == p["over_billed"] for r, p in zip(po, computed["po_lines"]))
     out.append(ck("xlsx.cumulative", ok, f"{len(po)} บรรทัดของ PO", "ยอดสะสมของทุกบรรทัดของ PO ตรงกับที่คำนวณ และบอกบรรทัดที่เรียกเก็บเกิน"))

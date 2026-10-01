@@ -165,6 +165,12 @@ def run(req: dict) -> dict:
     elif op == "render":
         computed = _read_json(req["computed"])
         out = pkg.render(computed, req, in_dir=JOB_IN, out_dir=JOB_OUT)
+        # AM9: what the runner's print proof looks for on the rendered pages of every working paper
+        from ..deliverables import workpaper
+
+        for a in out.get("artifacts") or []:
+            if a.get("format") == "xlsx" and a.get("kind") != "template" and os.path.exists(os.path.join(JOB_OUT, a["name"])):
+                a["print_rows"] = workpaper.print_rows(os.path.join(JOB_OUT, a["name"]))
         if req.get("template") and hasattr(pkg, "template_values"):
             art = _fill_template(pkg, computed, req["template"], req)
             out["artifacts"] = list(out.get("artifacts") or []) + [art]

@@ -442,6 +442,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 					Quality       json.RawMessage `json:"quality"`
 					Meta          json.RawMessage `json:"meta"`
 					ChartBindings json.RawMessage `json:"chart_bindings"`
+					PrintRows     []printRow      `json:"print_rows"`
 				}
 				if err := json.Unmarshal(a, &meta); err != nil {
 					return nil, 0, "", "", err
@@ -471,6 +472,20 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				path, ok := res.Artifacts[meta.Name]
 				if !ok {
 					return nil, 0, "", "", fmt.Errorf("render produced no %s", meta.Name)
+				}
+				if meta.Format == "xlsx" && meta.Kind != "template" {
+					// AM9: printed and looked at — every row's identity beside its amounts on one page
+					c, err := rc.printProof(ctx, meta.Name, path, meta.PrintRows)
+					if err != nil {
+						return nil, 0, "", "", err
+					}
+					if c != nil {
+						meta.Quality = withCheck(meta.Quality, *c)
+						if !c.OK {
+							failed = append(failed, checkLine(meta.Format, c.Label.String(), c.Detail.String()))
+							continue
+						}
+					}
 				}
 				if meta.Format == "docx" {
 					docxPath = path

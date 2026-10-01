@@ -120,7 +120,7 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": PACKAGE, "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": BOOK}, "theme": {"id": "navy"},
-                        "run": {"date": today, "preparer": preparer, "agent_version": "1.1.0"}})
+                        "run": {"date": today, "preparer": preparer, "agent_version": "1.2.0"}})
         book = os.path.join(job.out, BOOK)
         keep = keep or os.environ.get("POKIT_KEEP")
         if keep:
@@ -132,7 +132,12 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
 
         wb = load_workbook(book)
         sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
-        out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets})
+        # AM9: the wide tables as the check reads them — by header name, in the order they are built
+        from agent_market.deliverables.reread import table
+        from agent_market.packages.po_matching.scripts.workbook import H_INVOICES, H_LINES, S_INVOICES, S_LINES
+
+        out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets,
+                    "lines": table(wb[S_LINES], H_LINES), "invoices": table(wb[S_INVOICES], H_INVOICES)})
         return out
     finally:
         job.close()

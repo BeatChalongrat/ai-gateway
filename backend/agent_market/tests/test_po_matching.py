@@ -121,10 +121,11 @@ class MatchDepth(unittest.TestCase):
         face = {r[0]: r[1] for r in sheets["สรุป"] if r and isinstance(r[0], str)}
         self.assertEqual(face["วิธีตรวจของรอบนี้"], "ตรวจ 3 ทาง 0 บรรทัด · ตรวจ 2 ทาง 1 บรรทัด")
         self.assertIn([TWO_WAY_WARNING], [[r[0]] for r in sheets["สรุป"] if r and r[0] == TWO_WAY_WARNING])
-        row = next(r for r in sheets["ผลตรวจรายบรรทัด"][4:] if r and r[0] is not None)
+        # AM9: printed, the line's identity and amounts come first; the tables are read back by header name
+        row = res["lines"][0]
         self.assertEqual((row[8], row[9], row[15]), ("ตรวจ 2 ทาง (PO · ใบแจ้งหนี้)", "เป็นบริการ ไม่มีใบรับของ", None))
-        inv = next(r for r in sheets["ผลตรวจใบแจ้งหนี้"][4:] if r and r[0] is not None)
-        self.assertEqual(inv[13], "2 ทาง 1 บรรทัด")
+        self.assertEqual(res["invoices"][0][13], "2 ทาง 1 บรรทัด")
+        self.assertEqual(sheets["ผลตรวจรายบรรทัด"][3][:4], ["ลำดับ", "ใบแจ้งหนี้", "บรรทัด", "รายการ"])
 
     def test_a_round_that_is_all_three_way_has_no_warning(self):
         _, res = result("clean_three_way")

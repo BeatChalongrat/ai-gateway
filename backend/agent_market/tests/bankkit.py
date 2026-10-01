@@ -111,7 +111,7 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": PACKAGE, "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": "bank_reconciliation.xlsx"}, "theme": {"id": "navy"},
-                        "run": {"date": today, "preparer": preparer, "agent_version": "1.2.0"}})
+                        "run": {"date": today, "preparer": preparer, "agent_version": "1.3.0"}})
         book = os.path.join(job.out, "bank_reconciliation.xlsx")
         keep = os.environ.get("BANKKIT_KEEP")
         if keep:
@@ -121,7 +121,12 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
 
         wb = load_workbook(book)
         sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
-        out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets})
+        # AM9: the matched pairs as the check reads them — by header name, in the order they are built
+        from agent_market.deliverables.reread import table
+        from agent_market.packages.bank_reconciliation.scripts.workbook import H_PAIRS, S_PAIRS
+
+        out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets,
+                    "pairs": table(wb[S_PAIRS], H_PAIRS)})
         return out
     finally:
         job.close()

@@ -75,6 +75,20 @@ def _money(d: Decimal | None) -> str:
     return "ว่าง" if d is None else f"{d:,.2f}"
 
 
+def table(ws, heads: list, top: int = 4) -> list[list]:
+    """The table whose header row is ``top``, every row given in the order of ``heads`` (found by header
+    name): a check reads what it asserts by name, whatever order the writer printed the columns in (AM9).
+    Rows whose first named cell is empty are left out, like the writers' own readers do."""
+    header = [str(c.value).strip() if c.value is not None else None for c in ws[top]]
+    idx = [header.index(h) if h in header else None for h in heads]
+    out = []
+    for r in ws.iter_rows(min_row=top + 1, values_only=True):
+        row = [r[i] if i is not None and i < len(r) else None for i in idx]
+        if row and row[0] is not None:
+            out.append(row)
+    return out
+
+
 def rows(ws, header_row: int) -> list[tuple]:
     """The data rows under a header row, up to the first empty row."""
     out = []

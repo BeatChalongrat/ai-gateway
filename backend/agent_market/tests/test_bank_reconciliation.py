@@ -287,7 +287,7 @@ class StatementAsPdf(unittest.TestCase):
         self.assertEqual(kinds, sorted(i["type"] for i in xls["computed"]["items"]))
         self.assertIn("bank_fee", kinds)                      # "ค่าธรรมเนียม" was read though the text layer lost its marks
         self.assertIn("wht_interest", kinds)
-        row = next(r for r in pdf["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None)
+        row = pdf["pairs"][0]
         self.assertIn("หน้า 1 บรรทัด", row[14])
 
     def test_words_are_found_without_the_marks_a_text_layer_loses(self):
@@ -429,7 +429,7 @@ class WhoConfirmed(unittest.TestCase):
         self.assertEqual([(m["pass"], m["tier"], m["confirmed_by"]) for m in by_person],
                          [("amount_date", "amount_date", "สมหญิง ผู้ตรวจ")] * 2)
         self.assertTrue(all(m["confirmed_by"] == "" for m in matched if m["confirmed"] == "rule"))
-        pairs = [r for r in res["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None]
+        pairs = res["pairs"]
         self.assertEqual(sorted({r[4] for r in pairs}), ["กฎ (ตรงกันทุกตัว)", "คนยืนยัน: สมหญิง ผู้ตรวจ"])
         self.assertEqual([r[1] for r in pairs if r[4].startswith("คนยืนยัน")], ["ยอดและวันที่ใกล้กัน"] * 2)
         self.assertEqual(K.invariants(res), [])
@@ -439,7 +439,7 @@ class WhoConfirmed(unittest.TestCase):
 
     def test_without_a_name_it_still_says_a_person_did(self):
         _, res = result("candidates_confirmed_by_a_person")
-        pairs = [r for r in res["sheets"]["รายการที่จับคู่"][4:] if r and r[0] is not None]
+        pairs = res["pairs"]
         self.assertEqual(sorted({r[4] for r in pairs}), ["กฎ (ตรงกันทุกตัว)", "คนยืนยัน"])
 
     def test_the_name_is_the_runners_never_the_answers(self):
@@ -466,7 +466,7 @@ class SelfTest(unittest.TestCase):
     def test_the_manifest(self):
         m = S.manifest("bank_reconciliation")
         self.assertEqual((m["id"], m["python_package"], m["narrative"]), ("sran.bank-reconciliation", "bank_reconciliation", "rules"))
-        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.2.0", "generic", "TH"))
+        self.assertEqual((m["version"], m["scope"], m["jurisdiction"]), ("1.3.0", "generic", "TH"))
         self.assertIn(".pdf", next(i for i in m["inputs"] if i["role"] == "bank")["accept"])
         self.assertTrue(m["completion_gate"])
         self.assertTrue(m["record_who_answered"])
