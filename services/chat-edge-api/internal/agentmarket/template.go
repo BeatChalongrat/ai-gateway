@@ -58,6 +58,11 @@ type TemplateSlot struct {
 	Fillable bool     `json:"fillable"`
 	Reason   *string  `json:"reason"`
 	Columns  []string `json:"columns,omitempty"`
+	// AM8: the text around the slot (what the model reads to propose a field for it), and whether the
+	// slot stops the template being used at all (a chart left with old numbers, a marker the filler
+	// cannot reach) — refused before any work, with its reason.
+	Context  string `json:"context,omitempty"`
+	Blocking bool   `json:"blocking,omitempty"`
 }
 
 // TemplateSpec is the manifest's "templates" block: the fields and lists an
@@ -274,6 +279,16 @@ func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec 
 	by := map[string]TemplateSlot{}
 	for _, s := range slots {
 		by[s.Key] = s
+	}
+	var stops []string
+	for _, s := range slots {
+		if s.Blocking {
+			stops = append(stops, s.Label)
+		}
+	}
+	if len(stops) > 0 {
+		return "แบบฟอร์มนี้ใช้ไม่ได้: มีส่วนที่ระบบเติมหรืออัปเดตไม่ได้ (" + strings.Join(stops, ", ") +
+			") แก้แบบฟอร์มแล้วอัปโหลดใหม่"
 	}
 	if len(mapping) == 0 {
 		return "ยังไม่ได้เลือกค่าให้ช่องใดเลย"

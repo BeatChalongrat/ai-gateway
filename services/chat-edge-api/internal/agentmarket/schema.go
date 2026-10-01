@@ -221,7 +221,10 @@ var question = field{class: asObject, declares: evidenceData, fields: map[string
 
 var qualityChecks = obj(map[string]field{"passed": number,
 	"checks": list(obj(map[string]field{"name": code, "ok": number, "label": label(fromPackage).or("การตรวจของระบบ"),
-		"detail": label(fromPackage)})),
+		"detail": label(fromPackage), "values": number})),
+	// AM8: a filled customer form's slots that do not hold their value, by the form's own names (the
+	// person's data) and why (the package's words) — what the download card lists
+	"unfilled": list(obj(map[string]field{"label": person, "why": label(fromPackage)})),
 	"review": obj(map[string]field{"review_id": id, "reviewer": person, "at_label": label(fromPlatform), "note": person})})
 
 var gateOnCard = obj(map[string]field{"passed": number, "code": code, "difference": value,
@@ -345,6 +348,7 @@ var itemSchema = map[string]field{
 	}),
 	"outputs": field{class: asObject, declares: namesOf("artifacts", "summary.not_included", "summary.excluded_list"), fields: map[string]field{
 		"run_id": id, "period_label": label(fromPackage), "credits": number, "rerender": number, "draft": number,
+		"more_formats": list(code),
 		"artifacts": list(field{class: asObject, declares: namesOf(), fields: map[string]field{"id": id, "name": file, "format": code,
 			"size": number, "version": number, "quality": qualityChecks}}),
 		"summary": summary,

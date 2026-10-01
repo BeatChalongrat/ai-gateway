@@ -213,26 +213,39 @@ func BuildProgress(run am.Run, steps []am.Step, now time.Time) am.Progress {
 	return p
 }
 
+// qualitySummary says what the gate asserted (AM8): how many files were opened again and how many
+// figures read back out of them matched the computed table — not "14 of 14", which counted one check
+// three times and a font check like an accounting assertion.
 func qualitySummary(o renderOut) am.PersonText {
-	pass, total := 0, 0
+	files, values, failed := 0, 0, 0
 	for _, a := range o.Artifacts {
 		var q struct {
 			Checks []struct {
-				OK bool `json:"ok"`
+				OK     bool `json:"ok"`
+				Values int  `json:"values"`
 			} `json:"checks"`
 		}
 		_ = json.Unmarshal(a.Quality, &q)
+		if len(q.Checks) == 0 {
+			continue
+		}
+		files++
 		for _, c := range q.Checks {
-			total++
-			if c.OK {
-				pass++
+			values += c.Values
+			if !c.OK {
+				failed++
 			}
 		}
 	}
-	if total == 0 {
+	switch {
+	case files == 0:
 		return am.NoText
+	case failed > 0:
+		return am.Text("เปิดไฟล์ตรวจซ้ำ %s ไฟล์ · ไม่ผ่าน %s เรื่อง", am.Count(files), am.Count(failed))
+	case values > 0:
+		return am.Text("เปิดไฟล์ตรวจซ้ำ %s ไฟล์ · ตัวเลข %s ค่าตรงกับที่คำนวณ", am.Count(files), am.Count(values))
 	}
-	return am.Text("ผ่าน %s จาก %s ข้อ", am.Count(pass), am.Count(total))
+	return am.Text("เปิดไฟล์ตรวจซ้ำ %s ไฟล์ · ผ่านทุกเรื่อง", am.Count(files))
 }
 
 func humanMS(ms int64) am.PersonText {

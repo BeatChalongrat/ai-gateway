@@ -204,6 +204,9 @@ type OutputsPayload struct {
 	// Gate is what the gate said, in the package's words.
 	Draft bool         `json:"draft,omitempty"`
 	Gate  *OutputsGate `json:"gate,omitempty"`
+	// MoreFormats (AM8) are the formats this agent can still make from the round's numbers — its
+	// manifest's outputs, PDF only while a converter is there: the card offers these and no others.
+	MoreFormats []string `json:"more_formats,omitempty"`
 }
 
 // OutputsModel is what the files card says about models (AM4).

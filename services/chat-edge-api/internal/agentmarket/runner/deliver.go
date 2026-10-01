@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -28,12 +29,21 @@ type computedView struct {
 	Exceptions   []json.RawMessage `json:"exceptions"`
 	Quotable     map[string]string `json:"quotable"`
 	QuotableIDs  []string          `json:"quotable_ids"`
+	// AM8: the figures a sentence may name, by key — {"operating_expenses_var_budget_pct": {text, cite,
+	// label}}. A narrative names them ({key}); the report puts each figure and its own citation there.
+	Figures map[string]figureView `json:"figures"`
 	Fallback     json.RawMessage   `json:"fallback_narrative"`
 	Source       json.RawMessage   `json:"source"`
 	Excluded     json.RawMessage   `json:"excluded"`
 	Citations    []json.RawMessage `json:"citations"`
 	Materiality  string            `json:"materiality"`
 	Script       string            `json:"script"`
+}
+
+type figureView struct {
+	Text  string `json:"text"`
+	Cite  string `json:"cite"`
+	Label string `json:"label"`
 }
 
 func (rc *runCtx) readComputed(ctx context.Context, ref blobRef) (computedView, []byte, error) {
@@ -141,10 +151,41 @@ func checkNarrative(s string, cv computedView) (map[string]any, error) {
 		}
 		v[k] = lines
 	}
+	if len(cv.Figures) > 0 {
+		if err := guardFigures(strings.Join(all, "\n"), cv); err != nil {
+			return nil, err
+		}
+		return v, nil
+	}
 	if err := GuardNumbers(strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
 		return nil, err
 	}
 	return v, nil
+}
+
+// figureRe is a figure named by its key in a sentence: {revenue}, {revenue_var_prior_pct:abs}.
+var figureRe = regexp.MustCompile(`\{([A-Za-z0-9_][A-Za-z0-9_.\-/]*)(?::(abs))?\}`)
+
+// guardFigures (AM8): a narrative names every figure by its key, and only keys of the computed table;
+// it types no figure itself. The citation a reader follows is then the figure's own — never one found
+// afterwards by matching printed text (two figures printing "10.5%" took each other's citation).
+// What is left once the keys are taken out may hold small counts, years and the table's account
+// codes, nothing else (GuardNumbers with no figures allowed).
+func guardFigures(text string, cv computedView) error {
+	var unknown []string
+	for _, m := range figureRe.FindAllStringSubmatch(text, -1) {
+		if _, ok := cv.Figures[m[1]]; !ok {
+			unknown = append(unknown, m[0])
+		}
+	}
+	if len(unknown) > 0 {
+		return fmt.Errorf("อ้างตัวเลขที่ไม่มีในตาราง: %s ใช้ได้เฉพาะชื่อในรายการตัวเลขที่อ้างได้", strings.Join(unknown, ", "))
+	}
+	rest := figureRe.ReplaceAllString(text, " ")
+	if err := GuardNumbers(rest, nil, cv.QuotableIDs); err != nil {
+		return fmt.Errorf("%s — อย่าพิมพ์ตัวเลขเอง ให้เขียนชื่อของตัวเลขในวงเล็บปีกกา เช่น {revenue}", err.Error())
+	}
+	return nil
 }
 
 // rulesNarrative is the package's own summary (computed.json
@@ -197,6 +238,22 @@ func narrativePrompt(cv computedView) string {
 	for _, e := range cv.Exceptions {
 		b.Write(e)
 		b.WriteByte('\n')
+	}
+	if len(cv.Figures) > 0 {
+		// AM8: the model names a figure by its key; the report prints it with its own citation
+		b.WriteString("\nตัวเลขที่อ้างได้ — เขียนเป็น {ชื่อ} ห้ามพิมพ์ตัวเลขเอง (ชื่อ = ค่าที่จะพิมพ์ · ตัวเลขนี้คืออะไร):\n")
+		keys := make([]string, 0, len(cv.Figures))
+		for k := range cv.Figures {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			f := cv.Figures[k]
+			fmt.Fprintf(&b, "- {%s} = %s · %s\n", k, f.Text, f.Label)
+		}
+		b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions ภาษาไทย ทุกตัวเลขเขียนเป็น {ชื่อ} จากรายการด้านบน " +
+			"(ถ้าบอกทิศทางเป็นคำแล้ว เช่น ลดลง ใช้ {ชื่อ:abs} เพื่อพิมพ์โดยไม่มีเครื่องหมาย)")
+		return b.String()
 	}
 	b.WriteString("\nตัวเลขที่อ้างได้ (คัดลอกตรงตัวอักษรเท่านั้น):\n")
 	keys := make([]string, 0, len(cv.Quotable))
@@ -338,7 +395,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				"names": names, "theme": theme, "narrative": json.RawMessage(narrative.Narrative), "assumptions": assumptions,
 				"presentation": pres,
 				"run": map[string]any{"id": artifactRun.String(), "date": rc.today(), "agent_version": rc.pkg.Version,
-					"preparer": rc.preparer(ctx, parentRun)},
+					"preparer": rc.preparer(ctx, parentRun), "organisation": rc.organisation(ctx), "kind": parentRun.Kind},
 				"model_info": map[string]any{"model": narrative.Model, "self_hosted": narrative.SelfHosted}}
 			if tpl != nil {
 				tpath, tclean, err := rc.r.Files.OpenLocalCopy(ctx, tplFile.StorageKey)
@@ -399,7 +456,11 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 					} `json:"checks"`
 				}
 				_ = json.Unmarshal(meta.Quality, &q)
-				if !q.Passed {
+				// AM8: the customer's own form that did not pass is delivered beside the agent's files as
+				// what it is — not passed, with every slot it lacks named on the download card — and the
+				// round does not fail for it (the agent's own files passed their gate). A form filled
+				// half-way was reported "passed" before; now it is never reported so.
+				if !q.Passed && meta.Kind != "template" {
 					for _, c := range q.Checks {
 						if !c.OK {
 							failed = append(failed, checkLine(meta.Format, c.Label, c.Detail))
@@ -471,10 +532,70 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	return ro, key, json.Unmarshal(out, &ro)
 }
 
+// moreFormats are the formats a person may ask this round for afterwards: the manifest's outputs, PDF
+// only with a converter — the same rule the formats endpoint applies (AM8: the card offered .docx and
+// .pptx to agents that make only .xlsx, and never PDF to the one that makes it).
+func (rc *runCtx) moreFormats() []string {
+	var out []string
+	for _, o := range rc.pkg.Manifest.Outputs {
+		if o.Format == "pdf" && (rc.r.Converter == nil || !rc.r.Converter.Available()) {
+			continue
+		}
+		if o.Format != "" && !contains(out, o.Format) {
+			out = append(out, o.Format)
+		}
+	}
+	return out
+}
+
+// unfilledTemplateSlots counts the slots a delivered template lacks (its quality's "unfilled").
+func unfilledTemplateSlots(arts []am.Artifact) int {
+	n := 0
+	for _, a := range arts {
+		if a.Format != "template" {
+			continue
+		}
+		var q struct {
+			Passed   bool              `json:"passed"`
+			Unfilled []json.RawMessage `json:"unfilled"`
+		}
+		if json.Unmarshal(a.Validation, &q) == nil && !q.Passed {
+			n += len(q.Unfilled)
+			if len(q.Unfilled) == 0 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // preparer is who prepared the round, as a document names them (AM5: the
-// reconciliation statement says who prepared it and when).
+// reconciliation statement says who prepared it and when). AM8: a real value
+// or nothing — their name, else their e-mail; a sample says it is one. A
+// working paper with no preparer says on its face that it is a draft; it
+// never prints a stand-in.
 func (rc *runCtx) preparer(ctx context.Context, run am.Run) string {
-	return rc.r.Store.DisplayName(ctx, rc.install.OrgID, run.UserID, "")
+	if run.Kind == am.KindSelfTest {
+		return SamplePreparer
+	}
+	if n := rc.r.Store.DisplayName(ctx, rc.install.OrgID, run.UserID, ""); n != "" {
+		return n
+	}
+	return rc.r.Store.UserEmail(ctx, run.UserID)
+}
+
+// SamplePreparer is what a self-test's working paper names as its preparer:
+// nobody prepared it, and it says so.
+const SamplePreparer = "ไฟล์ตัวอย่างของ agent (ไม่มีผู้จัดทำ)"
+
+// organisation is the organisation's name, which a working paper's header
+// prints when the install has no company of its own (AM8).
+func (rc *runCtx) organisation(ctx context.Context) string {
+	o, err := rc.r.Store.OrgSettingsFor(ctx, orgOrDefault(rc.install.OrgID))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(o.Name)
 }
 
 type qualityErr struct {
@@ -552,7 +673,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return err
 	}
 	out := am.OutputsPayload{RunID: artifactRun.String(), Summary: summary, Rendered: rerender,
-		Model: rc.modelLine(narrative)}
+		Model: rc.modelLine(narrative), MoreFormats: rc.moreFormats()}
 	if run.Period != nil {
 		out.PeriodLabel = am.Text("%s", am.Period(*run.Period))
 	}
@@ -581,6 +702,11 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 	text := am.Text("เสร็จแล้วครับ")
 	if gate != nil && !out.Gate.What.Empty() {
 		text = am.Text("เสร็จแล้วครับ %s", am.Words(out.Gate.What))
+	}
+	if n := unfilledTemplateSlots(arts); n > 0 {
+		// AM8: said in the round's own message, not only in a file's details
+		text = am.Text("%s · แบบฟอร์มของคุณยังกรอกไม่ครบ %s ช่อง ดูชื่อช่องในการ์ดไฟล์ ยังไม่ควรส่งต่อ",
+			am.Words(text), am.Count(n))
 	}
 	switch {
 	case rc.pkg.Manifest.Narrative == "rules":

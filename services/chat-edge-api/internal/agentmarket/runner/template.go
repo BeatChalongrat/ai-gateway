@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
@@ -50,12 +51,137 @@ func (r *Runner) inspectTemplate(ctx context.Context, rc *runCtx, job am.Run, f 
 				return nil, 0, "", "", err
 			}
 			defer res.Cleanup()
-			return res.Result, rc.sandboxCredits(res.Elapsed), "deliverables/template_out.py", "", nil
+			out, credits, model := rc.proposeMapping(ctx, mustJSON(res.Result))
+			return out, rc.sandboxCredits(res.Elapsed) + credits, "deliverables/template_out.py", model, nil
 		})
 	if err != nil {
 		return r.fail(ctx, job, "template", err)
 	}
 	return r.finish(rc, am.RunSucceeded, "")
+}
+
+// proposeMapping (AM8): which slot of a customer's form takes which of the agent's fields is a guess about
+// that form — a Thai label beside a cell, a control named "TotalAmt", a column headed "มูลค่า" — and the
+// guess is the model's, never a list of synonyms in code. The model reads each slot's key, label, place
+// and the text around it, and the agent's fields with what they are; every pair it proposes is kept only
+// if the mapping check accepts it, and the person confirms or changes all of it on the mapping screen.
+// What the person saved before, and a slot named exactly like a field, are kept as they are. No model
+// (or none the organisation lets see its documents): the screen starts from those alone.
+func (rc *runCtx) proposeMapping(ctx context.Context, result json.RawMessage) (json.RawMessage, float64, string) {
+	var out map[string]any
+	if json.Unmarshal(result, &out) != nil {
+		return result, 0, ""
+	}
+	var slots []am.TemplateSlot
+	if b, err := json.Marshal(out["slots"]); err != nil || json.Unmarshal(b, &slots) != nil {
+		return result, 0, ""
+	}
+	var spec am.TemplateSpec
+	if json.Unmarshal(rc.pkg.Manifest.Templates, &spec) != nil {
+		return result, 0, ""
+	}
+	proposal := map[string]string{}
+	if b, err := json.Marshal(out["proposal"]); err == nil {
+		_ = json.Unmarshal(b, &proposal)
+	}
+	var open []am.TemplateSlot
+	for _, sl := range slots {
+		if sl.Blocking {
+			return result, 0, "" // the template cannot be used: nothing to propose
+		}
+		if _, done := proposal[sl.Key]; sl.Fillable && !done {
+			open = append(open, sl)
+		}
+	}
+	models := rc.textModels()
+	if len(open) == 0 || rc.r.Model == nil || !rc.r.Model.Available() || len(models) == 0 {
+		return result, 0, ""
+	}
+	user := mappingPrompt(open, rc.pkg.Manifest.Templates)
+	var picked map[string]string
+	c, _, err := rc.r.Model.CompleteWith(ctx, models, mappingSystem, user, func(s string) error {
+		var v struct {
+			Mapping map[string]string `json:"mapping"`
+		}
+		if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
+			return fmt.Errorf("ไม่ใช่ JSON ที่มี mapping")
+		}
+		picked = v.Mapping
+		return nil
+	})
+	credits := c.CostUSD * rc.r.CreditsPerUSD
+	if err != nil || len(picked) == 0 {
+		return result, credits, ""
+	}
+	merged := keepValid(slots, proposal, picked, spec)
+	if len(merged) == len(proposal) {
+		return result, credits, c.Model
+	}
+	out["proposal"] = merged
+	out["proposed_by"] = c.Model
+	b, err := json.Marshal(out)
+	if err != nil {
+		return result, credits, c.Model
+	}
+	return b, credits, c.Model
+}
+
+const mappingSystem = "คุณช่วยจับคู่ช่องในแบบฟอร์มของลูกค้ากับค่าที่ agent มี อ่านชื่อช่อง ป้าย ที่ตั้ง และข้อความรอบช่อง " +
+	"แล้วเสนอว่าช่องไหนควรรับค่าอะไร ตอบเป็น JSON เท่านั้น: {\"mapping\": {\"<key ของช่อง>\": \"<key ของค่า>\", " +
+	"\"<key ของช่องที่เป็นตาราง>\": \"<key ของรายการ>\", \"<key ของช่องที่เป็นตาราง>.<คอลัมน์>\": \"<key ของรายการ>.<key ของคอลัมน์>\"}} " +
+	"ใส่เฉพาะคู่ที่ชื่อหรือข้อความรอบช่องบอกชัดว่าเป็นค่านั้น ช่องที่ไม่ตรงกับค่าใดไม่ต้องใส่ ห้ามเดา " +
+	"คนจะตรวจทุกคู่ก่อนบันทึก"
+
+func mappingPrompt(open []am.TemplateSlot, specRaw json.RawMessage) string {
+	var b strings.Builder
+	b.WriteString("ช่องในแบบฟอร์ม (ยังไม่ได้จับคู่):\n")
+	for _, sl := range open {
+		line := map[string]any{"key": sl.Key, "kind": sl.Kind, "label": sl.Label}
+		if sl.Where != "" {
+			line["where"] = sl.Where
+		}
+		if sl.Context != "" {
+			line["context"] = sl.Context
+		}
+		if len(sl.Columns) > 0 {
+			line["columns"] = sl.Columns
+		}
+		j, _ := json.Marshal(line)
+		b.Write(j)
+		b.WriteByte('\n')
+	}
+	b.WriteString("\nค่าที่ agent ใส่ได้ (fields = ค่าเดี่ยว, lists = รายการหลายแถวพร้อมคอลัมน์):\n")
+	b.Write(specRaw)
+	return b.String()
+}
+
+// keepValid adds the model's pairs to the proposal one by one, keeping a pair only when the whole mapping
+// still passes the check the save will run (a list before its columns); a pair it refuses is dropped.
+func keepValid(slots []am.TemplateSlot, base, picked map[string]string, spec am.TemplateSpec) map[string]string {
+	out := map[string]string{}
+	for k, v := range base {
+		out[k] = v
+	}
+	keys := make([]string, 0, len(picked))
+	for k := range picked {
+		if _, ok := out[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		di, dj := strings.Count(keys[i], "."), strings.Count(keys[j], ".")
+		if di != dj {
+			return di < dj
+		}
+		return keys[i] < keys[j]
+	})
+	for _, k := range keys {
+		out[k] = picked[k]
+		if am.CheckTemplateMapping(slots, out, spec) != "" {
+			delete(out, k)
+		}
+	}
+	return out
 }
 
 // templateInput is the saved template as a render input, or nil.

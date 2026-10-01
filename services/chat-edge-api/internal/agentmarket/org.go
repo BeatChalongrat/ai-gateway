@@ -370,6 +370,16 @@ func (s *Store) DisplayName(ctx context.Context, org string, user uuid.UUID, ema
 	return email
 }
 
+// UserEmail is a person's e-mail from the core's user row ("" when there is
+// none): what a document names when the person has no display name (AM8).
+func (s *Store) UserEmail(ctx context.Context, user uuid.UUID) string {
+	var e string
+	if err := s.Pool.QueryRow(ctx, `SELECT email FROM identity.users WHERE id = $1`, user).Scan(&e); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(e)
+}
+
 // ── the request's access, carried in its context ────────────────────────
 
 type accessKey struct{}
