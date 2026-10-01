@@ -700,7 +700,7 @@ async function financial(client) {
   const note = await x.words(tpl.locator('[data-testid="am-artifact-not-passed"]'));
   x.check(/ยังกรอกไม่ครบ \d+ ช่อง/.test(note) && /PreparedBy/.test(note), "a form with a slot the agent has no value for says so on its row, naming it", note);
   const detail = (await api(page, `/runs/${r1.runId}`)).body;
-  const model = detail?.run?.model || "";
+  const model = detail?.run?.model_used || "";
   x.check(!!model, "a model wrote the words (not the rules' fallback)", model);
   const docx = await download(x, detail, "docx", "report.docx");
   if (docx) {
