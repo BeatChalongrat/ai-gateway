@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Bar,
   BarChart,
@@ -14,6 +15,7 @@ import {
 import PageHeader from "../components/ui/PageHeader";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { ROLE_NAV, getSession, landingFor, refreshSession, type DemoRole } from "../lib/auth";
 
 // The translate function, for the handful of helpers that live outside the
 // React tree and therefore take `t` as an argument instead of calling the
@@ -515,7 +517,24 @@ type SectionState<T> =
   | { status: "ok"; data: T }
   | { status: "error" };
 
+// AM9: an account whose role may not use the dashboard (an agent publisher: the gateway's admin API
+// refuses it, and the page showed nothing but errors) is taken to the first screen it may use.
 export default function DashboardPage() {
+  const router = useRouter();
+  const [role, setRole] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setRole(getSession()?.role ?? null);
+    refreshSession().then((s) => s && setRole(s.role));
+  }, []);
+  const away = role != null && !(ROLE_NAV[role as DemoRole] ?? []).includes("/");
+  useEffect(() => {
+    if (away) router.replace(landingFor(role));
+  }, [away, role, router]);
+  if (role === undefined || away) return null;
+  return <Dashboard />;
+}
+
+function Dashboard() {
   const t = useT();
   const [period, setPeriod] = useState<Period>("24h");
   const [overviewState, setOverviewState] = useState<SectionState<Overview>>({ status: "loading" });

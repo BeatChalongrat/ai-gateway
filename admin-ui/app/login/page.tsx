@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useT, type DictKey } from "../../lib/i18n";
+import { landingFor } from "../../lib/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080";
 
@@ -39,8 +40,10 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      // Backend set admin_session + csrf_token cookies. Navigate home.
-      router.push("/");
+      // Backend set admin_session + csrf_token cookies. AM9: each role lands on the first screen it
+      // may use (an agent publisher on the Agent Market page, not a dashboard of errors).
+      const body = await res.json().catch(() => null);
+      router.push(landingFor(body?.user?.role));
     } catch {
       setError("dash.login.errorNetwork");
       setLoading(false);

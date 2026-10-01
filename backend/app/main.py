@@ -972,6 +972,9 @@ if _os_main.environ.get("ENABLE_TRACEMALLOC", "").lower() in ("1", "true", "yes"
 app.include_router(auth_router)  # /auth/login → 410, /auth/refresh, /auth/me
 from app.api.routes.admin_session import router as admin_session_router
 app.include_router(admin_session_router)  # /auth/session/{login,logout,me}
+# AM9 — admin-ui accounts and their roles (no permission that matters is grantable only by SQL)
+from app.api.routes.admin_accounts import router as admin_accounts_router  # noqa: E402
+app.include_router(admin_accounts_router)  # /admin/accounts
 # Phase 4A.2.5 (B2) — internal Go→Vault V2 restore bridge. No prefix (the path
 # is /internal/dlp/...). Always mounted, but every request requires the
 # internal-service secret AND Vault V2 enabled, else it restores nothing.

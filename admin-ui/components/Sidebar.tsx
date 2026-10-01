@@ -54,6 +54,7 @@ const NAV_SECTIONS: { title: DictKey; items: { label: DictKey; href: string; ico
       { label: "nav.requests", href: "/requests", icon: <svg {...S}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> },
       { label: "nav.usage", href: "/usage", icon: <svg {...S}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg> },
       { label: "nav.auditLog", href: "/audit-log", icon: <svg {...S}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg> },
+      { label: "nav.accounts", href: "/accounts", icon: <svg {...S}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg> },
       { label: "nav.alertEvents", href: "/alerts/events", icon: <svg {...S}><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> },
       { label: "nav.aiReview", href: "/ai-review", icon: <svg {...S}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> },
     ],
@@ -120,7 +121,7 @@ export default function Sidebar({
     e.target.value = "";
   }
 
-  const allowedPaths = session ? ROLE_NAV[session.role] : [];
+  const allowedPaths = session ? (ROLE_NAV[session.role] ?? []) : [];
 
   async function handleLogout() {
     onClose?.();
