@@ -12,6 +12,9 @@ const { api, nav } = vi.hoisted(() => ({
   api: {
     me: vi.fn(),
     org: vi.fn(),
+    // AM9: the Models tab also lists each agent's egress under the organisation's switch
+    egress: vi.fn(async () => ({ org: false, agents: [] })),
+    putEgress: vi.fn(),
     putOrg: vi.fn(),
     putMember: vi.fn(),
     deleteMember: vi.fn(),

@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import { ROLE_NAV } from "./auth";
 
 describe("ROLE_NAV (AM7)", () => {
-  it("gives agent_publisher one page besides the dashboard", () => {
-    expect((ROLE_NAV as Record<string, string[]>).agent_publisher).toEqual(["/", "/agent-market"]);
+  it("gives agent_publisher the Agent Market page only (AM9)", () => {
+    expect((ROLE_NAV as Record<string, string[]>).agent_publisher).toEqual(["/agent-market"]); // AM9: no dashboard of errors
   });
 
   it("gives an admin the Agent Market page", () => {
