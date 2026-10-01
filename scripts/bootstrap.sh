@@ -71,7 +71,7 @@ bash scripts/apply_chat_edge_migrations_main.sh \
 echo ""
 echo "[bootstrap] Checking whether the admin user is already seeded..."
 SEEDED="$(docker compose exec -T backend python -c \
-  "from app.core.db import SessionLocal; from app.models.admin_user import AdminUserORM; from sqlalchemy import select; s=SessionLocal(); print('SEEDED' if s.execute(select(AdminUserORM).where(AdminUserORM.username=='admin')).first() else 'EMPTY')" \
+  "from app.core.db import SessionLocal; from app.models.admin_user import AdminUserORM; from sqlalchemy import select; s=SessionLocal(); print('SEEDED' if s.execute(select(AdminUserORM).limit(1)).first() else 'EMPTY')" \
   2>/dev/null | tr -d '[:space:]' || true)"
 
 if [ "$SEEDED" = "SEEDED" ]; then
@@ -89,7 +89,7 @@ cat <<'EOF'
 ════════════════════════════════════════════════════════════════
   Gateway (public):   https://localhost:8080/__gw/health
   Backend (direct):   http://localhost:8081/health
-  Admin UI:           https://localhost:3000     (login: admin / admin1234)
+  Admin UI:           https://localhost:3000     (login: INITIAL_ADMIN_EMAIL of .env / admin1234 in dev)
   Portal:             https://localhost:3001
   Mock provider:      http://localhost:9090/health
   Prometheus:         http://localhost:9091

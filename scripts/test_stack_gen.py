@@ -112,7 +112,11 @@ TEST_ENV = {
     # body and goes only to ALERT_TEST_NTFY_URL (= TS_ALERT_TEST_NTFY_URL, a
     # throwaway topic; empty = logged only) — never an owner channel, even
     # if a TS_ALERT_NTFY_URL were set to the owner's topic by mistake.
-    "backend": {"APP_ENV": "development", "ALERT_ENVIRONMENT": "test"},
+    # The first admin of the test stack is its own (never the address or password
+    # of the live deployment, which the root .env carries): the dev password applies.
+    "backend": {"APP_ENV": "development", "ALERT_ENVIRONMENT": "test",
+                "INITIAL_ADMIN_EMAIL": "ts-admin@fix128.test", "INITIAL_ADMIN_USERNAME": "admin",
+                "INITIAL_ADMIN_PASSWORD": ""},
     "backup": {"ALERT_ENVIRONMENT": "test"},
     # FIX132 B: the weights are mounted read-only; never try to download.
     "kb-models": {"HF_HUB_OFFLINE": "1"},

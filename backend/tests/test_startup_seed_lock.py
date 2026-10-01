@@ -107,6 +107,7 @@ class TestPostgresPathTakesLock:
         Session = _file_sessionmaker(tmp_path, "lockcall.db")
         monkeypatch.setattr("app.core.db.SessionLocal", Session)
         monkeypatch.setenv("APP_ENV", "development")
+        monkeypatch.setenv("INITIAL_ADMIN_EMAIL", "admin@corp.test")
         monkeypatch.delenv("INITIAL_ADMIN_PASSWORD", raising=False)
 
         acquired: list[int] = []
@@ -182,7 +183,8 @@ class TestConcurrentSeeding:
         monkeypatch.setenv("APP_ENV", "development")
         monkeypatch.delenv("INITIAL_ADMIN_PASSWORD", raising=False)
         monkeypatch.delenv("INITIAL_ADMIN_USERNAME", raising=False)
-        monkeypatch.delenv("INITIAL_ADMIN_EMAIL", raising=False)
+        # The address is configuration (app.core.first_admin): without it nothing is seeded.
+        monkeypatch.setenv("INITIAL_ADMIN_EMAIL", "admin@corp.test")
 
         # Widen the race window deterministically: bcrypt.hashpw runs
         # BETWEEN the existence SELECT and the INSERT, so a sleep here

@@ -38,7 +38,7 @@ bootstrap: ## FIRST-RUN (idempotent): generate .env + up + health-gate + chat-ed
 health: ## Actively poll the dev stack until postgres/redis/backend/gateway are ready (read-only; safe on a live stack)
 	bash scripts/wait_for_health.sh
 
-prod: ## Start the stack in PROD mode (binds 127.0.0.1; requires REDIS_PASSWORD, CORS_ORIGINS, PORTAL_PUBLIC_URL, INITIAL_ADMIN_PASSWORD in .env)
+prod: ## Start the stack in PROD mode (binds 127.0.0.1; requires REDIS_PASSWORD, CORS_ORIGINS, PORTAL_PUBLIC_URL, INITIAL_ADMIN_EMAIL, INITIAL_ADMIN_PASSWORD in .env)
 	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 	@echo ""
 	@echo "Stack running. All services bound to 127.0.0.1 only."
@@ -47,7 +47,7 @@ prod: ## Start the stack in PROD mode (binds 127.0.0.1; requires REDIS_PASSWORD,
 	@echo "  127.0.0.1:3000  -> admin-ui (e.g. https://admin.sran.net)"
 	@echo "  127.0.0.1:3001  -> portal   (e.g. https://portal.sran.net)"
 	@echo ""
-	@echo "If this is a fresh DB, run 'make seed' (uses INITIAL_ADMIN_PASSWORD from .env)."
+	@echo "If this is a fresh DB, run 'make seed' (the first admin is INITIAL_ADMIN_EMAIL / INITIAL_ADMIN_PASSWORD of .env)."
 
 down: ## Stop the stack (preserves volumes; works for both dev and prod stacks)
 	docker compose down

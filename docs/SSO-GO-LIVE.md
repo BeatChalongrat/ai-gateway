@@ -96,8 +96,13 @@ these (compose `${VAR:?}`):
 `SERVICE_JWT_SECRET`, `USER_JWT_SECRET`, `CSRF_SECRET`,
 `PORTAL_JWT_SECRET`, `CHAT_EDGE_ADMIN_API_KEY`.
 
-`INITIAL_ADMIN_PASSWORD` is only read by `make seed` on a fresh database
-(admin UI login) — not by the SSO path, but set it before seeding.
+`INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD` name the first admin (admin UI
+login): the backend creates it on its first boot on an empty database, and
+`make seed` does the same. Neither is read by the SSO path. There is no built-in
+address — set the deployment's own before the first boot. A deployment that
+already has an admin under another address runs
+`docker compose exec backend python -m app.ops.first_admin ensure`, signs in as the
+new account and deactivates the old one on the Accounts page.
 
 ---
 

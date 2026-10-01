@@ -452,33 +452,32 @@ def _seed_admin_user() -> None:
     ``_acquire_startup_lock``) so a 4-worker boot on a fresh DB seeds
     exactly once.
 
-    Outside of APP_ENV=development this is gated on
-    INITIAL_ADMIN_PASSWORD being set in the environment. If it's not
-    set we skip seeding — the operator must run `make seed`
-    explicitly with the env populated, which raises a clearer error.
-    Refusing to silently plant a weak credential is what closed the
-    production incident where `admin/admin1234` survived deploy.
+    Who the first admin is comes from the environment and nowhere else
+    (``app.core.first_admin``): INITIAL_ADMIN_EMAIL is the deployment's
+    own address and has no default, and outside of APP_ENV=development
+    INITIAL_ADMIN_PASSWORD is required too. If the environment names no
+    usable admin we skip seeding and say what to set — the operator
+    runs `make seed` with the env populated, which raises the same
+    message. Refusing to silently plant a weak credential is what
+    closed the production incident where `admin/admin1234` survived
+    deploy; refusing to invent an address is what keeps a fresh
+    install from coming up with a demo-looking admin.
     """
-    import os
     import uuid
     import bcrypt
     from sqlalchemy import select
     from app.core.db import SessionLocal
+    from app.core.first_admin import FirstAdminNotConfigured, first_admin_from_env
     from app.models.admin_user import AdminUserORM
 
-    app_env = os.environ.get("APP_ENV", "development").lower()
-    admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
-    if not admin_password:
-        if app_env != "development":
-            print(
-                "[startup] Admin auto-seed skipped: INITIAL_ADMIN_PASSWORD "
-                "not set and APP_ENV != 'development'. Run `make seed` "
-                "with INITIAL_ADMIN_PASSWORD in the environment."
-            )
-            return
-        admin_password = "admin1234"
-    admin_username = os.environ.get("INITIAL_ADMIN_USERNAME", "admin")
-    admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@example.com")
+    try:
+        first = first_admin_from_env()
+    except FirstAdminNotConfigured as e:
+        print(f"[startup] Admin auto-seed skipped: {e}")
+        return
+    admin_password = first.password
+    admin_username = first.username
+    admin_email = first.email
 
     session = SessionLocal()
     try:

@@ -91,7 +91,7 @@ seeds the admin and portal users. `make help` lists every target. Raw steps:
 |---|---|---|
 | https://localhost:8080/health | Gateway health (public entry) | — |
 | http://localhost:8081/docs | Backend OpenAPI (debug direct) | — |
-| https://localhost:3000 | Admin UI | `admin` / `admin1234` |
+| https://localhost:3000 | Admin UI | the first admin of your `.env` (`INITIAL_ADMIN_EMAIL`; a fresh dev `.env` has `admin@dev.test`) / `admin1234` in development — set your own address and `INITIAL_ADMIN_PASSWORD` before anyone else uses it |
 | https://localhost:3001 | Customer portal | Google account on an allowed domain (see **User Sign-in** below — password login is disabled) |
 | https://localhost:3002 | Web chat | inherits the portal's Google session (cookie) |
 | http://localhost:8001/health | NER service | — |

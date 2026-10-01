@@ -725,10 +725,14 @@ services:
       # session signing keys (comma list, newest first), the Safe Trace
       # audit key, the master key that encrypts provider / search / connector
       # secrets at rest (64 hex; rotate with backend/scripts/reencrypt_master_key.py),
-      # the first admin password (only used when no admin exists yet).
+      # the first admin's address and password (only used when no admin exists yet).
       SESSION_SIGNING_SECRETS: ${SESSION_SIGNING_SECRETS:-}
       DLP_AUDIT_KEY: ${DLP_AUDIT_KEY:-}
       PROVIDER_KEY_MASTER_KEY: ${PROVIDER_KEY_MASTER_KEY:-}
+      # The first admin is this deployment's own configuration (app/core/first_admin.py):
+      # no address is built in, and without INITIAL_ADMIN_EMAIL none is created.
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-}
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
       # FIX133 B — email: auto (Resend in production, the console in dev),
       # resend, console, or disabled (an internal tool without a mail

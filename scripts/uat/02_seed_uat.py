@@ -57,6 +57,7 @@ import app.models  # noqa: E402,F401  - registers all ORM models
 from app.models.admin_user import AdminUserORM  # noqa: E402
 from app.models.api_key import ApiKeyORM  # noqa: E402
 from app.models.model_config import ModelConfigORM  # noqa: E402
+from app.core.first_admin import first_admin_from_env  # noqa: E402
 from app.models.policy import PolicyORM  # noqa: E402
 from app.models.portal_user import PortalUserORM  # noqa: E402
 from app.models.project import ProjectORM  # noqa: E402
@@ -66,7 +67,6 @@ from app.services.providers.model_registry import SEED_CANDIDATES  # noqa: E402
 
 
 PORTAL_USER_PASSWORD = "P@ssword"
-ADMIN_PASSWORD = "admin1234"
 
 TENANTS = [
     # demo-tenant-000 stays so portal project creation (hardcoded in P0-4)
@@ -173,11 +173,15 @@ def seed_admin(session: Session) -> tuple[bool, str]:
     existing = session.execute(sa.select(AdminUserORM).limit(1)).scalar_one_or_none()
     if existing is not None:
         return False, existing.username
+    # The first admin is the deployment's own configuration (INITIAL_ADMIN_EMAIL /
+    # _USERNAME / _PASSWORD, app/core/first_admin.py) — the same reading the
+    # backend's startup seed uses; raises with what to set when it names nobody.
+    first = first_admin_from_env()
     row = AdminUserORM(
         id=str(uuid.uuid4()),
-        username="admin",
-        email="admin@example.com",
-        hashed_password=_hash_password(ADMIN_PASSWORD),
+        username=first.username,
+        email=first.email,
+        hashed_password=_hash_password(first.password),
         role="admin",
         is_active=True,
     )
@@ -358,7 +362,8 @@ def main() -> int:
     print("-" * 72)
     print("CREDENTIALS — copy into handoff doc, then RECORD AND DESTROY")
     print("-" * 72)
-    print(f"Admin UI         : admin / {ADMIN_PASSWORD}")
+    print(f"Admin UI         : {admin_username} / the INITIAL_ADMIN_PASSWORD of this stack's .env "
+          "(the dev password when it is empty in development)")
     print()
     print("Portal users (all share the same password):")
     for u in PORTAL_USERS:

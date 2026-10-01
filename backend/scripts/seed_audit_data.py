@@ -259,32 +259,30 @@ def seed_token_packs(session):
 
 
 def seed_admin_user(session):
-    """Seed the default admin user so /auth/login is usable.
+    """Seed the first admin user so the admin UI is usable.
 
-    Reads INITIAL_ADMIN_PASSWORD from env. Outside of APP_ENV=development
-    the env var is required — refusing to seed with the hardcoded
-    "admin1234" in any other environment is what closed the production
-    incident where the demo credential survived deploy.
+    Who that is comes from the environment (``app.core.first_admin``, the
+    same reading the startup seed uses): INITIAL_ADMIN_EMAIL has no default,
+    and outside of APP_ENV=development INITIAL_ADMIN_PASSWORD is required —
+    refusing to seed with the hardcoded "admin1234" in any other environment
+    is what closed the production incident where the demo credential
+    survived deploy. Raises with what to set when the environment names no
+    usable admin.
     """
     import bcrypt
+    from app.core.first_admin import first_admin_from_env
     from app.models.admin_user import AdminUserORM
 
-    app_env = os.environ.get("APP_ENV", "development").lower()
-    admin_password = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
-    if not admin_password:
-        if app_env != "development":
-            raise RuntimeError(
-                "INITIAL_ADMIN_PASSWORD is required when APP_ENV != "
-                "'development'. Generate one with `openssl rand -base64 24` "
-                "and set it in .env before running the seed."
-            )
-        admin_password = "admin1234"
-    admin_username = os.environ.get("INITIAL_ADMIN_USERNAME", "admin")
-    admin_email = os.environ.get("INITIAL_ADMIN_EMAIL", "admin@audit.test")
+    first = first_admin_from_env()
+    admin_password = first.password
+    admin_username = first.username
+    admin_email = first.email
 
     existing = session.execute(
-        select(AdminUserORM).where(AdminUserORM.username == admin_username)
-    ).scalar_one_or_none()
+        select(AdminUserORM).where(
+            (AdminUserORM.username == admin_username) | (AdminUserORM.email == admin_email)
+        )
+    ).first()
     if existing is not None:
         return False
     hashed = bcrypt.hashpw(admin_password.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode("utf-8")
