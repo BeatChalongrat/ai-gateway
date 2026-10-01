@@ -225,7 +225,7 @@ var qualityChecks = obj(map[string]field{"passed": number,
 	// AM8: a filled customer form's slots that do not hold their value, by the form's own names (the
 	// person's data) and why (the package's words) — what the download card lists
 	"unfilled": list(obj(map[string]field{"label": person, "why": label(fromPackage)})),
-	"review": obj(map[string]field{"review_id": id, "reviewer": person, "at_label": label(fromPlatform), "note": person})})
+	"review":   obj(map[string]field{"review_id": id, "reviewer": person, "at_label": label(fromPlatform), "note": person})})
 
 var gateOnCard = obj(map[string]field{"passed": number, "code": code, "difference": value,
 	"what":    text(fromPackage).orBy(gateOther),

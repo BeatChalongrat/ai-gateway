@@ -31,13 +31,13 @@ type computedView struct {
 	QuotableIDs  []string          `json:"quotable_ids"`
 	// AM8: the figures a sentence may name, by key — {"operating_expenses_var_budget_pct": {text, cite,
 	// label}}. A narrative names them ({key}); the report puts each figure and its own citation there.
-	Figures map[string]figureView `json:"figures"`
-	Fallback     json.RawMessage   `json:"fallback_narrative"`
-	Source       json.RawMessage   `json:"source"`
-	Excluded     json.RawMessage   `json:"excluded"`
-	Citations    []json.RawMessage `json:"citations"`
-	Materiality  string            `json:"materiality"`
-	Script       string            `json:"script"`
+	Figures     map[string]figureView `json:"figures"`
+	Fallback    json.RawMessage       `json:"fallback_narrative"`
+	Source      json.RawMessage       `json:"source"`
+	Excluded    json.RawMessage       `json:"excluded"`
+	Citations   []json.RawMessage     `json:"citations"`
+	Materiality string                `json:"materiality"`
+	Script      string                `json:"script"`
 }
 
 type figureView struct {

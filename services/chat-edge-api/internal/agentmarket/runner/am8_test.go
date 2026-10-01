@@ -29,9 +29,9 @@ func TestANarrativeNamesItsFiguresAndTypesNone(t *testing.T) {
 	bad := map[string]string{
 		// the trap itself: a figure typed in its printed form — which "10.5%" is it?
 		`{"summary":"ค่าใช้จ่ายในการขายและบริหารสูงกว่างบ 10.5%"}`: "อย่าพิมพ์ตัวเลขเอง",
-		`{"summary":"รายได้ 12,480,300 บาท"}`:                        "อย่าพิมพ์ตัวเลขเอง",
-		`{"summary":"รายได้ {revenue_m} บาท"}`:                       "อ้างตัวเลขที่ไม่มีในตาราง",
-		`{"summary":"ภาพรวม","watch":["ใช้เกินงบ 47,000 บาท"]}`:       "อย่าพิมพ์ตัวเลขเอง",
+		`{"summary":"รายได้ 12,480,300 บาท"}`:                      "อย่าพิมพ์ตัวเลขเอง",
+		`{"summary":"รายได้ {revenue_m} บาท"}`:                     "อ้างตัวเลขที่ไม่มีในตาราง",
+		`{"summary":"ภาพรวม","watch":["ใช้เกินงบ 47,000 บาท"]}`:    "อย่าพิมพ์ตัวเลขเอง",
 	}
 	for s, why := range bad {
 		_, err := checkNarrative(s, cv)

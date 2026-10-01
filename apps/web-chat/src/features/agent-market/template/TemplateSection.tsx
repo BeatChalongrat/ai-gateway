@@ -24,7 +24,8 @@ import { TemplateMapper } from "./TemplateMapper";
 
 export const TEMPLATE_ACCEPT = [".docx", ".xlsx", ".xlsm", ".pptx"];
 const POLL_MS = 700;
-const POLL_LIMIT_MS = 60_000;
+// AM8: reading a form now includes a model's proposal, which waits while a chat turn is generating
+const POLL_LIMIT_MS = 180_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

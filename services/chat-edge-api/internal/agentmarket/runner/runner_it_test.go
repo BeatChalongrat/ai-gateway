@@ -104,6 +104,12 @@ func (e *itEnv) fakeModel(w http.ResponseWriter, r *http.Request) {
 	if strings.Contains(string(body), "choice") {
 		content = `{"choice": null}`
 	}
+	if strings.Contains(string(body), "จับคู่ช่องในแบบฟอร์ม") {
+		// AM8: a model's proposal for a customer's form — a formula cell and a slot that does not exist
+		// among them, which the runner must drop
+		content = `{"mapping":{"CompanyName":"company","Period":"period","Subtotal":"subtotal_thb","VatAmount":"vat_thb",` +
+			`"GrandTotal":"total_thb","NoSuchSlot":"company"}}`
+	}
 	model := "fake-self-hosted"
 	if strings.Contains(string(body), "image_url") {
 		// AM2: a vision reading of a scan (the Phase A truth of s01)

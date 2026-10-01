@@ -54,7 +54,8 @@ func TestCustomerWorkbookIsFilledAndRecalculated(t *testing.T) {
 	r := e.runner("r1")
 	r.Converter = conv
 
-	// 1 · the mapping screen's data: slots, a proposal by name, a first version
+	// 1 · the mapping screen's data: slots, the model's proposal (AM8: code matches no synonyms; the
+	// pairs the check refuses — a formula cell, a slot that does not exist — are dropped), a first version
 	f := e.templateFile("xlsx_named_ranges.xlsx")
 	params, _ := json.Marshal(map[string]any{"file_id": f.ID, "template": true})
 	job, _, err := e.store.CreateRun(ctx, e.store.Pool, am.Run{InstallID: e.install.ID, TenantID: e.install.TenantID,
@@ -67,16 +68,20 @@ func TestCustomerWorkbookIsFilledAndRecalculated(t *testing.T) {
 		t.Fatalf("inspect: %s %s", got.Status, got.StatusReason)
 	}
 	var out struct {
-		Slots    []am.TemplateSlot `json:"slots"`
-		Proposal map[string]string `json:"proposal"`
-		Diff     struct {
+		Slots      []am.TemplateSlot `json:"slots"`
+		Proposal   map[string]string `json:"proposal"`
+		ProposedBy string            `json:"proposed_by"`
+		Diff       struct {
 			First bool `json:"first"`
 		} `json:"diff"`
 	}
 	steps := e.steps(job.ID)
 	_ = json.Unmarshal(steps[len(steps)-1].Output, &out)
-	if out.Proposal["CompanyName"] != "company" || out.Proposal["Subtotal"] != "subtotal_thb" || !out.Diff.First {
+	if out.Proposal["CompanyName"] != "company" || out.Proposal["Subtotal"] != "subtotal_thb" || !out.Diff.First || out.ProposedBy == "" {
 		t.Fatalf("proposal: %+v", out)
+	}
+	if _, ok := out.Proposal["NoSuchSlot"]; ok {
+		t.Fatal("a slot the form does not have is never proposed")
 	}
 	if _, ok := out.Proposal["GrandTotal"]; ok {
 		t.Fatal("a formula cell is never proposed")
