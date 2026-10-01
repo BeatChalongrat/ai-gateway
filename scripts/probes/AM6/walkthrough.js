@@ -623,7 +623,112 @@ async function waiting(client) {
   await x.s.close();
 }
 
+// ── AM8: the financial report on the live model, and a customer's form the model maps ──────────
+const FIN = ["GL_2569-09.xlsx", "GL_2569-08.xlsx", "งบประมาณ_2569.xlsx"].map((n) => ({
+  name: n, src: path.join(L.ROOT, "backend", "agent_market", "packages", "financial_report", "sample-data", n) }));
+const FORM = path.join(L.ROOT, "scripts", "probes", "AM8", "fixtures", "customer_form.docx");
+
+/** The report's sentences read back out of the .docx: each figure, the citation after it, and the
+ *  appendix's line naming the model that wrote the words. */
+function readReport(file) {
+  const py = [
+    "import json, sys, re",
+    "from docx import Document",
+    "d = Document(sys.argv[1])",
+    "pairs, text = [], []",
+    "for p in d.paragraphs:",
+    "    runs = [(r.text, bool(r.font.superscript)) for r in p.runs]",
+    "    for i, (t, sup) in enumerate(runs):",
+    "        if sup and i:",
+    "            m = re.search(r'([-+(]?[0-9][0-9,.]*%?(?: ล้าน)?)\\s*$', runs[i - 1][0])",
+    "            pairs.append([m.group(1) if m else runs[i - 1][0][-12:], t.strip()])",
+    "    text.append(p.text)",
+    "about = [t for t in text if 'โมเดลที่อ่านตัวเลข' in t or 'เขียนจากกฎ' in t]",
+    "print(json.dumps({'pairs': pairs, 'about': about, 'braces': [t for t in text if '{' in t][:3]}, ensure_ascii=False))",
+  ].join("\n");
+  return JSON.parse(execFileSync(process.env.PYTHON || "python", ["-c", py, file], { encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } }));
+}
+
+async function financial(client) {
+  const x = await session(client, "financial");
+  const { page } = x;
+  const { installId } = await installFromMarket(x, "รายงานผลประกอบการ");
+  state[`fin_${client}`] = installId;
+  save();
+  // B. the customer's form: uploaded on the install's settings page, the model proposes, the person saves
+  await page.goto(`${WEB()}/chat/agents/i/${installId}/settings`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="am-template"]', { timeout: 60000 });
+  await L.wait(1500);
+  x.clicks += 2;
+  await page.locator('[data-testid="am-template-file"]').setInputFiles([{ name: "แบบฟอร์มลูกค้า.docx",
+    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: fs.readFileSync(FORM) }]);
+  const mapper = page.locator('[data-testid="am-template-mapper"]');
+  await mapper.waitFor({ state: "visible", timeout: 200000 });
+  await L.wait(1500);
+  await x.shot("01-form-mapper");
+  const by = await x.words(page.locator('[data-testid="am-template-proposed-by"]'));
+  x.check(/โมเดล .+ เสนอการจับคู่นี้/.test(by), "the mapping screen says a model proposed the mapping", by);
+  const selects = await page.locator('[data-testid="am-template-mapper"] select').evaluateAll((els) =>
+    els.map((e) => ({ aria: e.getAttribute("aria-label"), value: e.value })));
+  const chosen = selects.filter((s) => s.value);
+  x.check(chosen.length >= 4, "the model's proposal fills most slots of a form named in its own words", JSON.stringify(selects));
+  state.fin_mapping = selects;
+  save();
+  await x.click(page.locator('[data-testid="am-template-save"]'), "บันทึกการจับคู่");
+  await page.waitForSelector('[data-testid="am-template-saved"]', { timeout: 60000 });
+  x.mark("form saved");
+  // A + C. a round on the live model
+  await page.goto(`${WEB()}/chat/agents/i/${installId}`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="composer-root"]', { timeout: 60000 });
+  await L.wait(2000);
+  const r1 = await sendFiles(x, installId, FIN, TAG + " รายงานผลประกอบการเดือนกันยายน 2569", 2);
+  const d1 = await finish(x, r1.runId, 2);
+  x.mark(`round: ${d1.run.status}`);
+  x.check(d1.run.status === "succeeded", "the round succeeds", `${d1.run.status} · ${d1.asked.length} question(s)`);
+  const o1 = page.locator('[data-testid="am-outputs"]:visible').last();
+  await o1.waitFor({ state: "visible", timeout: 120000 });
+  await o1.scrollIntoViewIfNeeded();
+  if (!(await page.locator('[data-testid="am-outputs-details-body"]:visible').count())) {
+    await x.click(o1.locator('[data-testid="am-outputs-details"]'), "รายละเอียดการตรวจ");
+  }
+  await L.wait(1200);
+  await x.shot("03-files-card");
+  const otext = await x.words(o1);
+  x.check(/เปิดไฟล์ตรวจซ้ำ: ตัวเลข [\d,]+ ค่าตรงกับที่คำนวณ|เปิดไฟล์ตรวจซ้ำ/.test(otext), "the quality line says what was asserted, not a count of checks", otext.match(/เปิดไฟล์ตรวจซ้ำ[^·]*/)?.[0] || otext.slice(0, 160));
+  const tpl = o1.locator('[data-testid="am-artifact"][data-format="template"]');
+  x.check(await tpl.count(), "the customer's form is delivered on the card");
+  const note = await x.words(tpl.locator('[data-testid="am-artifact-not-passed"]'));
+  x.check(/ยังกรอกไม่ครบ \d+ ช่อง/.test(note) && /PreparedBy/.test(note), "a form with a slot the agent has no value for says so on its row, naming it", note);
+  const detail = (await api(page, `/runs/${r1.runId}`)).body;
+  const model = detail?.run?.model || "";
+  x.check(!!model, "a model wrote the words (not the rules' fallback)", model);
+  const docx = await download(x, detail, "docx", "report.docx");
+  if (docx) {
+    const rep = readReport(docx);
+    state.fin_report = rep;
+    save();
+    x.check(rep.pairs.length >= 2, "figures in the sentences carry citations", JSON.stringify(rep.pairs.slice(0, 6)));
+    x.check(!rep.braces.length, "no figure key left unprinted", JSON.stringify(rep.braces));
+    x.check(rep.about.some((t) => t.includes(model.split("/").pop())), "the report names the model that wrote its words", JSON.stringify(rep.about));
+  }
+  // F. the formats menu offers what this agent makes
+  await x.click(o1.locator('[data-testid="am-more-files"]'), "ขอไฟล์เพิ่ม");
+  await L.wait(800);
+  const menu = await x.words(page.locator('[role="menu"]').last());
+  await x.shot("04-more-files");
+  await page.keyboard.press("Escape");
+  x.check(/PDF/.test(menu), "the report's extra-formats menu offers its PDF", menu);
+  const tt = await threadText(x);
+  x.check(!TECH.test(tt), "nothing technical anywhere in the workspace");
+  const res = { client, install: installId, run: r1.runId, model, checks: x.checks, marks: x.marks };
+  fs.writeFileSync(path.join(x.dir, "financial.json"), JSON.stringify(res, null, 1));
+  const bad = x.checks.filter((c) => !c.ok);
+  log(`${x.tag}: ${x.checks.length - bad.length} pass, ${bad.length} fail`);
+  await x.s.close();
+}
+
 const phases = {
+  async financial() { await financial(process.argv[3] || "desktop"); },
   async journey() { await journey(process.argv[3] || "desktop"); },
   async waiting() { await waiting(process.argv[3] || "desktop"); },
   async bank() { await bank(process.argv[3] || "desktop"); },
