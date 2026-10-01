@@ -430,7 +430,10 @@ const cmds = {
       ["not an admin", () => call(WHO, "/admin/runs")],
       ["not computed", () => call(WHO, `/runs/${need("fin_named_run")}/computed`.replace(need("fin_named_run"), crypto.randomUUID()))],
     ];
-    for (const [what, fn] of probes) sawError(await fn(), what);
+    for (const [what, fn] of probes) {
+      const r = sawError(await fn(), what);
+      log(`  ${what}: ${r && r.status} ${r && r.json?.error?.code}`);
+    }
     // an upload of a kind the agent does not read
     const tmp = path.join(RES, "note.exe");
     fs.writeFileSync(tmp, "MZ not a document");
@@ -440,7 +443,8 @@ const cmds = {
     sawError({ status: r.status, json: await r.json().catch(() => null) }, "an .exe upload");
     const bad = [];
     // allowed Latin: the code in parentheses, proper nouns, file extensions, emails
-    const allowed = /\(รหัส [A-Z_0-9]+\)|Agent Market|SRAN|Sran|PDF|Excel|Word|PowerPoint|\.[a-z]{2,4}\b|[\w.+-]+@[\w.-]+|agent/g;
+    // (the code is quoted since the messages were reworded: “BAD_ID”)
+    const allowed = /\(รหัส “?[A-Z_0-9]+”?\)|Agent Market|SRAN|Sran|PDF|Excel|Word|PowerPoint|\.[a-z]{2,4}\b|[\w.+-]+@[\w.-]+|agent/g;
     for (const e of errorsSeen) {
       const left = (e.message || "").replace(allowed, "");
       const latin = left.match(/[A-Za-z]{3,}/g);
