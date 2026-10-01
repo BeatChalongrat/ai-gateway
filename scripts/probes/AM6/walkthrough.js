@@ -777,7 +777,7 @@ async function financial(client) {
 async function testChat(page, title) {
   return page.evaluate(async ({ edge, title }) => {
     const h = { "Content-Type": "application/json" };
-    const c = await (await fetch(`${edge}/api/v1/conversations`, { method: "POST", credentials: "include", headers: h, body: JSON.stringify({ title }) })).json();
+    const c = await (await fetch(`${edge}/api/v1/conversations`, { method: "POST", credentials: "include", headers: h, body: JSON.stringify({ model_id: "auto", title }) })).json();
     const p = await (await fetch(`${edge}/api/v1/conversations/${c.id}`, { method: "PATCH", credentials: "include", headers: h,
       body: JSON.stringify({ title, memory_enabled: false }) })).json();
     return { id: c.id, memory: p.memory_enabled };
