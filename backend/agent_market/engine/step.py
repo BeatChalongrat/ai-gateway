@@ -93,7 +93,7 @@ def _preview(path: str, name: str, pf) -> dict:
             "proposal": proposal, "candidates": candidates, "fields": FIELD_LABEL_TH, "doc_type": pf.doc_type}
 
 
-def _fill_template(pkg, computed: dict, t: dict) -> dict:
+def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dict:
     """The customer's own template filled with this run's values (AM2 Phase E): one more artifact."""
     import hashlib
 
@@ -101,7 +101,14 @@ def _fill_template(pkg, computed: dict, t: dict) -> dict:
 
     name = os.path.basename(t["name"])
     path = os.path.join(JOB_OUT, name)
-    rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, pkg.template_values(computed))
+    values = dict(pkg.template_values(computed))
+    if "company" in values and not str(values.get("company") or "").strip():
+        # AM8: the company a form names is a real one — the install's (the theme carries it), else the
+        # organisation's name — or the slot is listed as having no value; never a stand-in
+        req = req or {}
+        values["company"] = (str((req.get("theme") or {}).get("company") or "").strip()
+                             or str((req.get("run") or {}).get("organisation") or "").strip())
+    rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, values)
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
     # AM8: what the filled file was found to lack travels with its quality, which the download card shows —
@@ -159,7 +166,7 @@ def run(req: dict) -> dict:
         computed = _read_json(req["computed"])
         out = pkg.render(computed, req, in_dir=JOB_IN, out_dir=JOB_OUT)
         if req.get("template") and hasattr(pkg, "template_values"):
-            art = _fill_template(pkg, computed, req["template"])
+            art = _fill_template(pkg, computed, req["template"], req)
             out["artifacts"] = list(out.get("artifacts") or []) + [art]
             out["passed"] = bool(out.get("passed", True)) and art["quality"]["passed"]
     elif op == "inspect_template":

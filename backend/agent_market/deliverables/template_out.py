@@ -238,7 +238,7 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
                 miss(k, reasons.get(k) or "not_in_file")
             continue
         value = tvals.get(k, _NO_VALUE)
-        if value is _NO_VALUE or tf.dg.as_text(value) is None:
+        if value is _NO_VALUE or not (tf.dg.as_text(value) or "").strip():
             miss(k, reasons.get(k) or "no_value")
         elif not tf.holds(out, kind, s, value):
             miss(k, reasons.get(k) or "not_in_file")
@@ -257,12 +257,14 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
     gaps = [u for u in unfilled.values() if u["why"] != _why("marker_left")]
     checks = [
         ck("template.filled", bool(filled), f"เติมแล้ว {len(filled)} ช่อง", "เติมค่าลงแบบฟอร์มได้"),
+        # the slots by name are in ``unfilled`` (the form's own names, shown on the file's row); a check's
+        # detail says how many, in the package's words
         ck("template.every_slot", not gaps,
-           ("ยังไม่ได้ค่า: " + ", ".join(f"{u['label']} ({u['why']})" for u in gaps))[:300] if gaps
+           f"ยังไม่ได้ค่า {len(gaps)} ช่อง จาก {len(mapped)} ช่องที่จับคู่ไว้ (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if gaps
            else f"เปิดไฟล์อ่านกลับ ทุกช่องที่จับคู่ไว้ {len(mapped)} ช่องมีค่าของรอบนี้",
            "ทุกช่องที่จับคู่ไว้มีค่า (อ่านจากไฟล์ที่เติมแล้ว)", len(mapped)),
         ck("template.no_marker_left", not left,
-           ("ยังมีช่องที่ไม่ได้เติมค้างในไฟล์: " + ", ".join(left))[:300] if left else "ไม่มีช่องว่างค้างในไฟล์",
+           f"ยังมีช่องที่ไม่ได้เติมค้างในไฟล์ {len(left)} ช่อง (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if left else "ไม่มีช่องว่างค้างในไฟล์",
            "ไม่มีช่องว่างค้างในไฟล์"),
         ck("template.fits", not cut, ("ข้อความถูกตัดใน: " + ", ".join(cut))[:300] if cut else "ข้อความที่เติมพอดีช่อง",
            "ข้อความที่เติมไม่ล้นช่องที่สูงคงที่"),

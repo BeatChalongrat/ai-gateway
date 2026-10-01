@@ -65,7 +65,15 @@ class TheAuditsSilentCases(unittest.TestCase):
         self.assertFalse(_check(rep, "template.every_slot")["ok"])
         self.assertFalse(_check(rep, "template.no_marker_left")["ok"])
         self.assertIn("missing_total", [u["slot"] for u in rep["unfilled"]])
-        self.assertIn("missing_total", _check(rep, "template.every_slot")["detail"])
+        self.assertEqual(next(u for u in rep["unfilled"] if u["slot"] == "missing_total")["why"], "รอบนี้ไม่มีค่าให้ช่องนี้")
+        self.assertIn("ยังไม่ได้ค่า 1 ช่อง", _check(rep, "template.every_slot")["detail"])
+
+    def test_an_empty_value_is_no_value_not_a_blank_slot_passed_off(self):
+        d = _doc()
+        d.add_paragraph("{{company}} · {{total}}")
+        _, rep, _ = _run(d, ".docx", {"company": "", "total": "1,234.50"})
+        self.assertFalse(rep["passed"])
+        self.assertEqual([(u["slot"], u["why"]) for u in rep["unfilled"]], [("company", "รอบนี้ไม่มีค่าให้ช่องนี้")])
 
     def test_thai_text_cut_off_in_a_fixed_height_row_is_not_passed(self):
         d = _doc()
