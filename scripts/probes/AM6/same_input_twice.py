@@ -1,4 +1,6 @@
-"""AM6 gate — the same input twice gives the same output, byte for byte.
+"""AM6 gate — the same input and context twice give the same figures, the same matches and the same
+questions. (AM8: what is compared is below — not the Office files' bytes, whose packaging carries
+times and metadata; the earlier "byte-identical files" claim was wrong.)
 
 Run inside the sandbox image by same_input_twice.sh, once per pass, each pass
 a process of its own with a hash seed of its own:
