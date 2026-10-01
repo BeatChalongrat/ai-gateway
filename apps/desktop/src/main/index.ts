@@ -537,8 +537,22 @@ void app.whenReady().then(async () => {
     // (it hides to the tray and the page stops polling). Same session and
     // client as every other host call to chat-edge; the text shown is the
     // server's, and a click only opens a page of the app's own origin.
+    // AM9: what this app has toasted, kept across restarts (the server lists a notification on every
+    // surface until somebody acts on it)
+    const shownFile = path.join(app.getPath("userData"), "agent-notifications-shown.json");
     agentNotifier = new AgentNotifier({
       feed: chatEdge,
+      memory: {
+        load: () => {
+          try {
+            const v = JSON.parse(fs.readFileSync(shownFile, "utf8"));
+            return Array.isArray(v) ? v : [];
+          } catch {
+            return [];
+          }
+        },
+        save: (ids) => fs.writeFileSync(shownFile, JSON.stringify(ids)),
+      },
       toaster: { show: showAgentToast },
       window: { show: () => showMainWindow(), load: (url) => navigateMain(url) },
       pageOrigin: pageOrigin(),

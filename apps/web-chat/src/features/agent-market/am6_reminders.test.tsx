@@ -283,9 +283,9 @@ describe("AM6 — notifications in the app", () => {
     const method = init?.method ?? "GET";
     if (path === "/agent-market/notifications?surface=web") return json({ notifications: pending });
     if (/^\/agent-market\/notifications\/n-\d\/(shown|dismiss)$/.test(path) && method === "POST") {
-      // shown on this surface, or dismissed: the server lists it no more
+      // AM9: shown is a record; only acting on it (dismiss) takes it off the list, on every surface
       const id = path.split("/")[3];
-      pending = pending.filter((n) => n.id !== id);
+      if (path.endsWith("/dismiss")) pending = pending.filter((n) => n.id !== id);
       return json(null, 204);
     }
     if (/^\/agent-market\/reminders\/rem-1\/(snooze|skip|stop)$/.test(path) && method === "POST") return json({ reminder: reminder() });
@@ -294,6 +294,38 @@ describe("AM6 — notifications in the app", () => {
   beforeEach(() => {
     pending = [due, waiting];
     handler = host();
+    localStorage.clear();
+  });
+
+  it("AM9: reaches every surface — what another client showed is still shown here, until somebody acts on it", async () => {
+    render(<AgentNotifications />);
+    await screen.findByTestId("am-notification");
+    await waitFor(() => expect(callsTo("/agent-market/notifications/n-2/shown", "POST")).toHaveLength(1));
+    // a second page of the same person (another tab, another device, the desktop app's page)
+    cleanup();
+    render(<AgentNotifications />);
+    expect((await screen.findByTestId("am-notification")).textContent).toContain(due.title);
+    // acted on elsewhere: gone from this page at its next read
+    pending = [waiting];
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await waitFor(() => expect(screen.getByTestId("am-notification").textContent).toContain(waiting.title));
+  });
+
+  it("AM9: the browser's own notification is raised once per browser, however many pages show the banner", async () => {
+    FakeNotification.permission = "granted";
+    render(<AgentNotifications />);
+    await screen.findByTestId("am-notification");
+    await waitFor(() => expect(FakeNotification.made).toHaveLength(1));
+    cleanup();
+    render(<AgentNotifications />);
+    await screen.findByTestId("am-notification");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(FakeNotification.made).toHaveLength(1);
   });
 
   it("is mounted once, in the chat's layout", () => {

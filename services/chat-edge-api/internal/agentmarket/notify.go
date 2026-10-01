@@ -60,15 +60,23 @@ type Notification struct {
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// surfaceColumn is the column that records a notification shown on a surface.
+// surfaceColumn is the column that records when a notification was first
+// shown on a kind of surface (a record, not a filter — AM9).
 var surfaceColumn = map[string]string{"web": "shown_web_at", "desktop": "shown_desktop_at"}
 
-// Notifications are the person's notifications not yet shown on a surface,
+// Notifications are the person's notifications that nobody has acted on yet,
 // newest first, at most 20. One about a round that no longer waits (its files
 // arrived, its question was answered, it was closed) is no longer news.
+//
+// AM9 — which surface a reminder reaches, decided: every surface the person
+// has. The list no longer leaves out what another client showed: before, the
+// first page to show a notification stamped "web" for all of them (the
+// desktop app's own page included), and the person's browser never saw it.
+// Each client remembers what it has raised itself (a browser in its storage,
+// the desktop app in a file), and acting on a notification anywhere — open,
+// snooze, skip, stop, close — dismisses it, which ends it on every surface.
 func (s *Store) Notifications(ctx context.Context, tenant, user uuid.UUID, surface string) ([]Notification, error) {
-	col, ok := surfaceColumn[surface]
-	if !ok {
+	if _, ok := surfaceColumn[surface]; !ok {
 		return nil, ErrNotFound
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT n.id, n.kind, n.title, n.body, n.link, n.install_id, n.run_id, n.reminder_id, i.title, n.created_at
@@ -76,7 +84,7 @@ func (s *Store) Notifications(ctx context.Context, tenant, user uuid.UUID, surfa
 		JOIN agent_market.agent_installs i ON i.id = n.install_id AND i.status = 'active'
 		LEFT JOIN agent_market.agent_runs r ON r.id = n.run_id
 		LEFT JOIN agent_market.agent_run_clarifications c ON c.id = n.card_id
-		WHERE n.user_id = $1 AND n.tenant_id = $2 AND n.dismissed_at IS NULL AND n.`+col+` IS NULL
+		WHERE n.user_id = $1 AND n.tenant_id = $2 AND n.dismissed_at IS NULL
 			AND (n.run_id IS NULL OR (r.status = 'awaiting_input'
 				AND (n.card_id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM agent_market.agent_files f WHERE f.run_id = r.id))))
 			AND (n.card_id IS NULL OR c.status = 'open')

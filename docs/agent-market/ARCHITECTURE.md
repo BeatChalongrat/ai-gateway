@@ -293,6 +293,21 @@ over the same bytes and stored on every install and run.
   allowed it); the desktop app polls them while it runs, tray included, and
   shows a Windows notification whose click opens a page of the app's own
   origin (`apps/desktop/src/main/agent-notify.ts`). Nothing is e-mailed.
+- **Which surface a notification reaches (AM9, decided): every surface the
+  person has.** A notification is listed for each of the person's clients —
+  every browser, every device, the desktop app and the desktop app's own page —
+  until somebody acts on it. Acting on it anywhere (open, snooze, skip, stop,
+  close) dismisses it, which ends it on every surface; a page drops what was
+  acted on elsewhere at its next read (30 s, or when it regains focus).
+  `shown_web_at` / `shown_desktop_at` record when it was first shown on each
+  kind of surface; they are a record, not a filter. Before AM9 they were the
+  filter: the first page to show a notification stamped "web" for all of them,
+  and since the desktop app's window loads the web page, a person who had the
+  desktop app open never saw a reminder in their browser. Each client keeps
+  what it has raised itself so nothing is raised twice: a browser's own
+  notification once per browser (local storage), a Windows notification once
+  per installation of the desktop app (a file in its user data). Tested with
+  two pages of one person, and with the desktop app restarted.
 - **E-mail** (`email.go`): a delivered round (completed or finished open) can
   be drafted as a mail — subject, a short Thai summary with its figures, the
   round's own files. The draft never has a recipient, and the text taken from

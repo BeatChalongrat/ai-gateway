@@ -12,7 +12,10 @@ import (
 // AM6 section B — notifications: shown once per surface, only to their owner,
 // and a round parked on a question tells its owner once, then once more.
 
-func TestNotificationsAreShownOncePerSurfaceAndOnlyToTheirOwner(t *testing.T) {
+// AM9: renamed from TestNotificationsAreShownOncePerSurfaceAndOnlyToTheirOwner. A notification one
+// client showed is still listed for every other client of the person — another browser, the desktop
+// app — until somebody acts on it; dismissing it ends it everywhere.
+func TestANotificationReachesEverySurfaceUntilActedOnAndOnlyItsOwner(t *testing.T) {
 	e := newEnv(t)
 	if e == nil {
 		return
@@ -52,17 +55,24 @@ func TestNotificationsAreShownOncePerSurfaceAndOnlyToTheirOwner(t *testing.T) {
 	if code, _ := e.do("POST", "/notifications/"+id+"/shown", map[string]any{"surface": "web"}); code != 204 {
 		t.Fatalf("shown: %d", code)
 	}
-	if ns := e.notifications("web"); len(ns) != 1 || ns[0]["id"] == id {
-		t.Fatalf("shown on the web, not again on the web: %v", ns)
+	if ns := e.notifications("web"); len(ns) != 2 {
+		t.Fatalf("shown in one browser, still listed for the person's other browsers: %v", ns)
 	}
 	if ns := e.notifications("desktop"); len(ns) != 2 {
 		t.Fatalf("still news on the desktop: %v", ns)
+	}
+	var shownAt *time.Time
+	if err := e.store.Pool.QueryRow(context.Background(), `SELECT shown_web_at FROM agent_market.notifications WHERE id = $1`, id).Scan(&shownAt); err != nil || shownAt == nil {
+		t.Fatalf("the first showing is still recorded: %v %v", shownAt, err)
 	}
 	if code, _ := e.do("POST", "/notifications/"+id+"/dismiss", nil); code != 204 {
 		t.Fatalf("dismiss: %d", code)
 	}
 	if ns := e.notifications("desktop"); len(ns) != 1 || ns[0]["id"] == id {
 		t.Fatalf("dismissed everywhere: %v", ns)
+	}
+	if ns := e.notifications("web"); len(ns) != 1 || ns[0]["id"] == id {
+		t.Fatalf("dismissed in every browser too: %v", ns)
 	}
 	// at most 20, newest first
 	ctx := context.Background()

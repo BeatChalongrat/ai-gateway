@@ -63,8 +63,9 @@ interface Sent {
   body: string | null;
 }
 
-/** A chat-edge that lists what this surface has not been told was shown. */
-function harness(rows: unknown[], opts: { token?: string | null; listStatus?: number; listThrows?: boolean; shownStatus?: number; windowVisible?: boolean; canShow?: boolean } = {}) {
+/** A chat-edge that lists every notification nobody has acted on (AM9: "shown" is a record, not a
+ *  filter — the person's other surfaces still get it). `memory` is the app's file of toasted ids. */
+function harness(rows: unknown[], opts: { token?: string | null; listStatus?: number; listThrows?: boolean; shownStatus?: number; windowVisible?: boolean; canShow?: boolean; memory?: string[] } = {}) {
   const server = {
     rows,
     shown: new Set<string>(),
@@ -82,8 +83,7 @@ function harness(rows: unknown[], opts: { token?: string | null; listStatus?: nu
       if (method === "GET") {
         if (server.listThrows) throw new TypeError("fetch failed");
         if (server.listStatus !== 200) return new Response(JSON.stringify({ error: { code: "NOT_FOUND", message: "ไม่พบ" } }), { status: server.listStatus });
-        const pending = server.rows.filter((r) => !server.shown.has((r as { id?: string } | null)?.id ?? ""));
-        return new Response(JSON.stringify({ notifications: pending }), { status: 200, headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ notifications: server.rows }), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       const m = /\/notifications\/([^/]+)\/shown$/.exec(url);
       if (server.shownStatus === 204) {
@@ -98,8 +98,10 @@ function harness(rows: unknown[], opts: { token?: string | null; listStatus?: nu
   const win = { visible: opts.windowVisible ?? true, shows: 0, loaded: [] as string[] };
   const lines: string[] = [];
   const log = { info: (m: string) => lines.push(m), warn: (m: string) => lines.push(m), error: (m: string) => lines.push(m) } as unknown as Logger;
+  const kept = { ids: opts.memory ?? [] };
   const notifier = new AgentNotifier({
     feed: new ChatEdgeClient(EDGE, () => session.token, log),
+    memory: { load: () => [...kept.ids], save: (ids) => { kept.ids = [...ids]; } },
     toaster: {
       show: (title, body, onClick) => {
         if (opts.canShow === false) return false;
@@ -120,6 +122,7 @@ function harness(rows: unknown[], opts: { token?: string | null; listStatus?: nu
   });
   return {
     notifier,
+    kept,
     server,
     requests,
     session,
@@ -170,21 +173,25 @@ describe("AM6 — the host asks for the notifications and shows each once", () =
     expect(h.posts()).toHaveLength(1);
   });
 
-  it("does not show it again when the 'shown' POST failed, and says 'shown' again until the server has it", async () => {
+  it("AM9: still listed (nobody acted on it), toasted once — whatever the 'shown' POST came to", async () => {
     const h = harness([row(1)], { shownStatus: 500 });
     await h.notifier.tick();
     expect(h.toasts).toHaveLength(1);
     expect(h.posts()).toHaveLength(1);
-    // The server never heard: it lists the notification again.
+    await h.notifier.tick();
     await h.notifier.tick();
     expect(h.toasts).toHaveLength(1);
-    expect(h.posts()).toHaveLength(2);
-    h.server.shownStatus = 204;
-    await h.notifier.tick();
-    expect(h.toasts).toHaveLength(1);
-    expect(h.server.shown.has("n-1")).toBe(true);
-    await h.notifier.tick();
-    expect(h.posts()).toHaveLength(3); // the server has it: nothing more to say
+    expect(h.posts()).toHaveLength(1); // "shown" is a record: said once
+  });
+
+  it("AM9: a restart of the app does not toast it again — the ids it toasted are kept on disk", async () => {
+    const first = harness([row(1)]);
+    await first.notifier.tick();
+    expect(first.toasts).toHaveLength(1);
+    expect(first.kept.ids).toEqual(["n-1"]);
+    const again = harness([row(1), row(2)], { memory: first.kept.ids });
+    await again.notifier.tick();
+    expect(again.toasts.map((t) => t.title)).toEqual([row(2).title]);
   });
 
   it("does not show it again when the 'shown' POST never reached the server", async () => {

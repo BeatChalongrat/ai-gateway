@@ -8,8 +8,14 @@
 // arrive here as notifications (GET /notifications?surface=web), read on the
 // rail's rhythm — every 30 s while the page is visible, and when the window
 // regains focus. The newest is shown in the chat's banner strip and stays
-// until it is acted on or closed; the server is told it was shown here, and
-// lists it no more, so the page keeps what it holds.
+// until it is acted on or closed.
+//
+// AM9 — a notification reaches every surface the person has: this page lists
+// what nobody has acted on yet (the server no longer leaves out what another
+// client showed), so a browser sees what the desktop app's page showed, and
+// the other way round. Acting on it here dismisses it everywhere, and a page
+// drops what was acted on elsewhere at its next read. The browser's own
+// notification is raised once per browser (remembered in its storage).
 //
 // Where the browser already allows notifications, the same one is raised
 // there too. The permission is never asked for here (only when a person adds
@@ -33,6 +39,31 @@ import { RAIL_POLL_MS } from "../useRail";
 
 const REMINDER_KINDS = new Set(["reminder_due", "reminder_followup"]);
 
+/** The notifications this browser has raised already (AM9: once per browser, however many tabs). */
+const RAISED_KEY = "am.raisedNotifications";
+const RAISED_KEEP = 200;
+
+function raisedHere(): string[] {
+  try {
+    const v = JSON.parse(window.localStorage.getItem(RAISED_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** True the first time this browser asks for this id. */
+export function firstRaiseHere(id: string): boolean {
+  const seen = raisedHere();
+  if (seen.includes(id)) return false;
+  try {
+    window.localStorage.setItem(RAISED_KEY, JSON.stringify([...seen, id].slice(-RAISED_KEEP)));
+  } catch {
+    /* storage unavailable: the banner still says it */
+  }
+  return true;
+}
+
 /** A path of this app ("/chat/…"), never another site or a protocol-relative one. */
 export function isAppPath(link: string | null | undefined): link is string {
   return !!link && /^\/(?![/\\])/.test(link);
@@ -50,6 +81,15 @@ export function AgentNotifications() {
 
 function byNewest(a: AmNotification, b: AmNotification): number {
   return (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
+}
+
+/** The browser may show its own notification (the person already allowed it). */
+function canRaise(): boolean {
+  try {
+    return typeof Notification !== "undefined" && Notification.permission === "granted";
+  } catch {
+    return false;
+  }
 }
 
 /** The browser's own notification, where the person already allowed it. */
@@ -83,13 +123,9 @@ function Host() {
   const load = useCallback(() => {
     amApi.notifications("web").then(
       (r) => {
+        // the server's list is what is still waiting: one acted on in another client drops out here too
         const got = (r?.notifications ?? []).filter((n) => !!n?.id && !handled.current.has(n.id));
-        if (!got.length) return;
-        setQueue((cur) => {
-          const byId = new Map(cur.map((n) => [n.id, n] as const));
-          for (const n of got) byId.set(n.id, n);
-          return [...byId.values()].sort(byNewest);
-        });
+        setQueue(got.sort(byNewest));
       },
       () => {
         /* the next read tries again */
@@ -142,7 +178,7 @@ function Host() {
       () => {},
       () => {},
     );
-    if (!hosted) raise(current, () => open(current));
+    if (!hosted && canRaise() && firstRaiseHere(current.id)) raise(current, () => open(current));
   }, [current, hosted, open]);
 
   if (!current) return null;

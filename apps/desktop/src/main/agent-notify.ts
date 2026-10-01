@@ -78,8 +78,17 @@ export interface MainWindowPort {
   load(url: string): void;
 }
 
+/** AM9: the ids this app has toasted, kept across restarts (the server lists a
+ *  notification until somebody acts on it, on every surface). */
+export interface ShownMemory {
+  load(): string[];
+  save(ids: string[]): void;
+}
+
 export interface AgentNotifierDeps {
   feed: NotificationFeed;
+  /** Absent: remembered for this run of the app only. */
+  memory?: ShownMemory;
   toaster: Toaster;
   window: MainWindowPort;
   /** The origin the main window loads its page from. */
@@ -115,9 +124,10 @@ export class AgentNotifier {
   static readonly MAX_PER_TICK = 3;
 
   private readonly origin: string;
-  /** Shown by this process. A "shown" the server never received must not
-   * show the same notification twice in one session of the app. */
-  private readonly shown = new Set<string>();
+  /** Toasted by this app (AM9: kept on disk — the server lists a notification
+   * until somebody acts on it, so this is what stops a second toast). */
+  private readonly shown: Set<string>;
+  static readonly KEEP = 200;
   private interval: ReturnType<typeof setInterval> | null = null;
   private soon: ReturnType<typeof setTimeout> | null = null;
   private inFlight = false;
@@ -127,6 +137,22 @@ export class AgentNotifier {
 
   constructor(private readonly deps: AgentNotifierDeps) {
     this.origin = new URL(deps.pageOrigin).origin;
+    let kept: string[] = [];
+    try {
+      kept = deps.memory?.load() ?? [];
+    } catch {
+      kept = [];
+    }
+    this.shown = new Set(kept.filter((x) => typeof x === "string"));
+  }
+
+  private remember(id: string): void {
+    this.shown.add(id);
+    try {
+      this.deps.memory?.save([...this.shown].slice(-AgentNotifier.KEEP));
+    } catch {
+      /* a file that cannot be written: remembered for this run */
+    }
   }
 
   start(): void {
@@ -179,22 +205,17 @@ export class AgentNotifier {
         this.deps.log.info("AGENT NOTIFY: the server answers again");
       }
       let shownNow = 0;
-      let saidAgain = 0;
       for (const row of answer.notifications) {
         const n = notificationOf(row);
         if (n === null) continue;
         if (this.shown.has(n.id)) {
-          // Shown here and still listed: the server never heard. Say it
-          // again, so the next start of the app does not show it once more.
-          if (saidAgain < AgentNotifier.MAX_PER_TICK) {
-            saidAgain += 1;
-            await this.deps.feed.markAgentNotificationShown(n.id, SURFACE);
-          }
+          // Toasted here and still listed: nobody has acted on it yet (the
+          // page's banner holds it). Not toasted twice.
           continue;
         }
         if (shownNow >= AgentNotifier.MAX_PER_TICK) continue;
         if (!this.deps.toaster.show(n.title, n.body, () => this.open(n.link))) break;
-        this.shown.add(n.id);
+        this.remember(n.id);
         shownNow += 1;
         await this.deps.feed.markAgentNotificationShown(n.id, SURFACE);
       }
