@@ -509,10 +509,11 @@ async function journey(client) {
   const now = ((await api(page, `/installs/${installId}/reminders`)).body?.reminders || []).find((r) => rem && r.id === rem.id);
   const waitingRun = now && now.waiting_run_id;
   if (client === "desktop") {
-    // the app's own poller shows the same notification as a Windows notification: once it has, it is no
-    // longer "not yet shown" on the desktop surface
-    const shown = await waitFor(async () => !((await api(page, "/notifications?surface=desktop")).body?.notifications || []).some((n) => rem && n.reminder_id === rem.id), 150_000, 5000);
-    x.check(!!shown, "the desktop app raised it as a Windows notification (shown on the desktop surface)");
+    // the app's own poller shows the same notification as a Windows notification (AM9: a notification stays
+    // listed for every surface until somebody acts on it, so the toast is read from the app's own log)
+    const shown = await waitFor(async () => logSince(new Date(Date.now() - 8 * 60_000).toISOString())
+      .some((l) => /AGENT NOTIFY: \d+ notification\(s\) shown/.test(l)), 150_000, 5000);
+    x.check(!!shown, "the desktop app raised it as a Windows notification (its log says so)");
   }
   if (waitingRun) state.runs = [...new Set([...(state.runs || []), waitingRun])];
   save();
@@ -770,7 +771,175 @@ async function financial(client) {
   await x.s.close();
 }
 
+// ── AM9: the Mermaid canvas, a reminder on every surface, both levels of egress ─────────────────
+
+/** A test chat of the card's tag with memory off, made the way the smoke makes one. */
+async function testChat(page, title) {
+  return page.evaluate(async ({ edge, title }) => {
+    const h = { "Content-Type": "application/json" };
+    const c = await (await fetch(`${edge}/api/v1/conversations`, { method: "POST", credentials: "include", headers: h, body: JSON.stringify({ title }) })).json();
+    const p = await (await fetch(`${edge}/api/v1/conversations/${c.id}`, { method: "PATCH", credentials: "include", headers: h,
+      body: JSON.stringify({ title, memory_enabled: false }) })).json();
+    return { id: c.id, memory: p.memory_enabled };
+  }, { edge: EDGE(), title });
+}
+
+// H. a real diagram from the model, opened in Canvas: it fits, zooms, pans and comes back to fit
+async function canvas(client) {
+  const x = await session(client, "canvas");
+  const { page } = x;
+  await page.goto(`${WEB()}/chat`, { waitUntil: "load" });
+  await page.waitForSelector('textarea[data-shortcut="composer"]', { timeout: 90000 });
+  const conv = await testChat(page, `${TAG} canvas`);
+  state.chats = [...new Set([...(state.chats || []), conv.id])];
+  save();
+  x.check(conv.id && conv.memory === false, "a test chat of the card, memory off", conv.id);
+  await page.goto(`${WEB()}/chat/${conv.id}`, { waitUntil: "load" });
+  const box = page.locator('textarea[data-shortcut="composer"]');
+  await box.waitFor({ state: "visible", timeout: 90000 });
+  await L.wait(1500);
+  await box.fill(`${TAG} ตอบเป็นโค้ดบล็อก mermaid อย่างเดียว ไม่ต้องอธิบาย: flowchart LR ของขั้นตอนปิดบัญชีสิ้นเดือน 24 ขั้น ` +
+    "ตั้งชื่อแต่ละขั้นเป็นภาษาไทยสั้น ๆ เรียงต่อกันเป็นเส้นเดียว");
+  await box.press("Enter");
+  const open = page.getByRole("button", { name: /เปิดใน Canvas|Open in Canvas/ }).last();
+  await open.waitFor({ state: "visible", timeout: 240000 });
+  x.mark("the reply has a Mermaid block");
+  await L.wait(2500);
+  await open.click();
+  const el = page.locator('iframe[data-testid="canvas-frame"]').last();
+  await el.waitFor({ state: "visible", timeout: 60000 });
+  const frame = await (await el.elementHandle()).contentFrame();
+  await frame.locator("#view svg").waitFor({ state: "visible", timeout: 60000 });
+  const zoom = async () => Number(await frame.locator("#stage").getAttribute("data-zoom"));
+  await waitFor(async () => (await zoom()) > 0, 30000, 300);
+  await L.wait(800);
+  const fit = await zoom();
+  const fb = await el.boundingBox();
+  const sb = await frame.locator("#view svg").boundingBox();
+  x.check(fit > 0 && sb && fb && sb.x >= fb.x - 1 && sb.x + sb.width <= fb.x + fb.width + 1,
+    "on open the whole diagram fits the pane, its level shown", `${fit}% · ${await x.words(frame.locator("#zoom-level"))}`);
+  await x.shot("01-canvas-fit");
+  await frame.locator("#zoom-in").click();
+  x.check((await zoom()) > fit, "the + button zooms in", `${await zoom()}%`);
+  await page.mouse.move(fb.x + fb.width / 2, fb.y + fb.height / 2);
+  await page.mouse.wheel(0, -500);
+  await L.wait(500);
+  const wheeled = await zoom();
+  x.check(wheeled > fit, "the wheel zooms (around the pointer)", `${wheeled}%`);
+  const before = await frame.locator("#view").evaluate((v) => v.style.transform);
+  await page.mouse.down();
+  await page.mouse.move(fb.x + fb.width / 2 - 180, fb.y + fb.height / 2 - 40, { steps: 8 });
+  await page.mouse.up();
+  const after = await frame.locator("#view").evaluate((v) => v.style.transform);
+  x.check(after !== before, "a drag pans", after);
+  await x.shot("02-canvas-zoomed");
+  await frame.locator("#stage").focus();
+  await page.keyboard.press("0");
+  x.check((await zoom()) === fit, "0 returns to the whole diagram", `${await zoom()}%`);
+  await page.keyboard.press("+");
+  x.check((await zoom()) > fit, "+ zooms in while the canvas has focus", `${await zoom()}%`);
+  await page.keyboard.press("-");
+  await page.keyboard.press("-");
+  x.check((await zoom()) < fit + 1, "- zooms out", `${await zoom()}%`);
+  await frame.locator("#zoom-fit").click();
+  x.check((await zoom()) === fit, "the fit button returns to fit", `${await zoom()}%`);
+  const del = await page.evaluate(async ({ edge, id }) => (await fetch(`${edge}/api/v1/conversations/${id}`, { method: "DELETE", credentials: "include" })).status,
+    { edge: EDGE(), id: conv.id });
+  x.check(del === 204 || del === 200, "the test chat is deleted", String(del));
+  if (del === 204 || del === 200) {
+    state.chats = (state.chats || []).filter((c) => c !== conv.id);
+    save();
+  }
+  fs.writeFileSync(path.join(x.dir, "canvas.json"), JSON.stringify({ client, checks: x.checks, marks: x.marks }, null, 1));
+  const bad = x.checks.filter((c) => !c.ok);
+  log(`${x.tag}: ${x.checks.length - bad.length} pass, ${bad.length} fail`);
+  await x.s.close();
+}
+
+// G. one reminder, the desktop app (its page and its Windows notification) and a browser of the same
+// person open at once: every surface shows it; closing it in one ends it in the other
+async function surfaces() {
+  const d = await session("desktop", "surfaces");
+  const w = await session("web", "surfaces");
+  const since = new Date().toISOString();
+  for (const x of [d, w]) {
+    await x.page.goto(`${WEB()}/chat`, { waitUntil: "load" });
+    await x.page.waitForSelector('textarea[data-shortcut="composer"]', { timeout: 90000 });
+  }
+  const installs = (await api(w.page, "/installs")).body?.installs || [];
+  const inst = installs.filter((i) => (state.installs || []).includes(i.id)).pop();
+  if (!inst) throw new Error("no install of this walk to set a reminder on (run journey first)");
+  const soon = thaiSoon(2);
+  const made = await api(w.page, `/installs/${inst.id}/reminders`, { method: "POST",
+    body: JSON.stringify({ label: TAG + " สองหน้าจอ", rule: { every: "week", weekday: soon.weekday, time: soon.time } }) });
+  const rem = made.body?.reminder;
+  if (rem) state.reminders = [...new Set([...(state.reminders || []), rem.id])];
+  save();
+  w.check(!!rem, "a reminder that falls due in two minutes", rem && `${rem.rule_text}`);
+  const seen = {};
+  const banner = (x) => x.page.locator('[data-testid="am-notification"]').filter({ hasText: "สองหน้าจอ" });
+  await waitFor(async () => {
+    for (const [k, x] of [["desktop", d], ["web", w]]) {
+      if (!seen[k] && await banner(x).count()) seen[k] = new Date().toISOString();
+      if (!seen[k]) await x.page.evaluate(() => window.dispatchEvent(new Event("focus"))).catch(() => {});
+    }
+    return seen.desktop && seen.web;
+  }, 6 * 60_000, 5000);
+  d.check(!!seen.desktop, "the desktop app's page shows it", seen.desktop || "never");
+  w.check(!!seen.web, "the browser shows it too — the desktop app's page did not take it", seen.web || "never");
+  await d.shot("01-desktop-banner");
+  await w.shot("01-web-banner");
+  const toast = await waitFor(async () => logSince(since).some((l) => /AGENT NOTIFY: \d+ notification\(s\) shown/.test(l)), 120_000, 5000);
+  d.check(!!toast, "and the desktop app raised it as a Windows notification");
+  const cur = ((await api(w.page, `/installs/${inst.id}/reminders`)).body?.reminders || []).find((r) => rem && r.id === rem.id);
+  if (cur && cur.waiting_run_id) state.runs = [...new Set([...(state.runs || []), cur.waiting_run_id])];
+  save();
+  // closed in the browser: gone from the desktop app's page at its next read
+  await w.click(banner(w).getByRole("button", { name: "ปิด" }), "ปิด");
+  const gone = await waitFor(async () => {
+    await d.page.evaluate(() => window.dispatchEvent(new Event("focus"))).catch(() => {});
+    return (await banner(d).count()) === 0;
+  }, 90_000, 5000);
+  d.check(!!gone, "closed in the browser, it is gone from the desktop app's page");
+  for (const x of [d, w]) {
+    fs.writeFileSync(path.join(x.dir, "surfaces.json"), JSON.stringify({ checks: x.checks, seen }, null, 1));
+    const bad = x.checks.filter((c) => !c.ok);
+    log(`${x.tag}: ${x.checks.length - bad.length} pass, ${bad.length} fail`);
+  }
+  await w.s.close();
+  await d.s.close();
+}
+
+// D. where a person picks the agent's model, both levels of egress are shown
+async function egress(client) {
+  const x = await session(client, "egress");
+  const { page } = x;
+  await page.goto(`${WEB()}/chat`, { waitUntil: "load" });
+  await page.waitForSelector('textarea[data-shortcut="composer"]', { timeout: 90000 });
+  const installs = (await api(page, "/installs")).body?.installs || [];
+  const inst = installs.filter((i) => (state.installs || []).includes(i.id)).pop();
+  if (!inst) throw new Error("no install of this walk (run journey first)");
+  await page.goto(`${WEB()}/chat/agents/i/${inst.id}/settings`, { waitUntil: "load" });
+  const line = page.locator('[data-testid="am-model-egress"]');
+  await line.first().waitFor({ state: "visible", timeout: 60000 });
+  await L.wait(800);
+  const text = await x.words(line);
+  x.check(/องค์กร:/.test(text) && /agent นี้:/.test(text), "the settings page shows the organisation's and the agent's own answer", text);
+  const m = (await api(page, `/installs/${inst.id}/models`)).body;
+  x.check(m && m.egress && typeof m.egress.org === "boolean" && m.egress.accounting === true && m.egress.agent_default === true,
+    "an accounting agent nobody has set: its own answer is its default", JSON.stringify(m && m.egress));
+  x.check(m && m.egress && m.egress.effective === false, "so its documents stay in, whatever the organisation allows", JSON.stringify(m && m.egress));
+  await x.shot("01-settings-egress");
+  fs.writeFileSync(path.join(x.dir, "egress.json"), JSON.stringify({ client, checks: x.checks, egress: m && m.egress }, null, 1));
+  const bad = x.checks.filter((c) => !c.ok);
+  log(`${x.tag}: ${x.checks.length - bad.length} pass, ${bad.length} fail`);
+  await x.s.close();
+}
+
 const phases = {
+  async canvas() { await canvas(process.argv[3] || "desktop"); },
+  async surfaces() { await surfaces(); },
+  async egress() { await egress(process.argv[3] || "desktop"); },
   async financial() { await financial(process.argv[3] || "desktop"); },
   async journey() { await journey(process.argv[3] || "desktop"); },
   async waiting() { await waiting(process.argv[3] || "desktop"); },
@@ -820,6 +989,12 @@ const phases = {
       const r = await require("../AM7/admin_door.js").removeEvidence(id, TAG + " รอบทดสอบของการเดินตรวจ AM6 ไม่ใช่งานจริง");
       log(`evidence of round ${id} removed: ${r.status}`);
     }
+    for (const id of state.chats || []) {
+      const st = await s.page.evaluate(async ({ edge, id }) => (await fetch(`${edge}/api/v1/conversations/${id}`, { method: "DELETE", credentials: "include" })).status,
+        { edge: EDGE(), id }).catch(() => 0);
+      log(`test chat ${id} deleted: ${st}`);
+    }
+    state.chats = [];
     for (const id of state.installs || []) {
       const r = await api(s.page, `/installs/${id}`, { method: "DELETE" });
       log(`removed install ${id}: ${r.status}`);
