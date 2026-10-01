@@ -183,19 +183,114 @@ export function escapeScriptClose(code: string): string {
  *  parser XSS can never reach the app (no parent access, no network).
  *  securityLevel "strict" additionally keeps mermaid's own HTML-in-
  *  label features off. */
-export function buildMermaidSrcDoc(code: string, origin = defaultOrigin()): string {
+export function buildMermaidSrcDoc(
+  code: string,
+  origin = defaultOrigin(),
+  labels: MermaidViewerLabels = DEFAULT_MERMAID_LABELS,
+): string {
   return (
     "<!doctype html><html><head>" +
     cspMetaFor(execCanvasCsp(origin)) +
     CANVAS_BOOTSTRAP +
-    "<style>html,body{margin:0;padding:12px;display:grid;place-items:center;min-height:100vh;box-sizing:border-box;background:#fff}</style>" +
+    `<style>${MERMAID_VIEWER_CSS}</style>` +
     "</head><body>" +
+    '<div id="stage" tabindex="0"><div id="view">' +
     `<pre class="mermaid">${escapeHtml(code)}</pre>` +
+    "</div></div>" +
+    mermaidViewerBar(labels) +
     `<script src="${origin}${CANVAS_LIBS_PATH}mermaid.min.js"></script>` +
-    "<script>try{mermaid.initialize({startOnLoad:true,securityLevel:\"strict\"})}catch(e){setTimeout(function(){throw e})}</script>" +
+    `<script>${escapeScriptClose(MERMAID_VIEWER_JS)}</script>` +
     "</body></html>"
   );
 }
+
+/** The viewer's control labels, in the app's language (the frame has no i18n of its own). */
+export interface MermaidViewerLabels {
+  zoomIn: string;
+  zoomOut: string;
+  fit: string;
+  level: string;
+}
+
+export const DEFAULT_MERMAID_LABELS: MermaidViewerLabels = {
+  zoomIn: "Zoom in (+)",
+  zoomOut: "Zoom out (−)",
+  fit: "Fit to view (0)",
+  level: "Zoom level",
+};
+
+// The Mermaid canvas viewer (chat app). A diagram of any real size was
+// rendered small and frozen: no zoom, no panning, no fit. Inside the same
+// sandboxed frame (no network, no parent access), the diagram now sits in a
+// viewport that:
+//   * fits the whole diagram to the pane when it opens (and when the pane is
+//     resized, until the person zooms or pans themselves);
+//   * zooms with the toolbar's + / − buttons, the mouse wheel or a trackpad
+//     pinch (around the pointer), and a two-finger pinch on a touch screen;
+//   * pans by dragging; the fit button (or 0) returns to the whole diagram;
+//   * shows the current zoom level;
+//   * answers + / − / 0 on the keyboard while the canvas has focus.
+// The same page is what the desktop app shows, so both behave the same.
+const MERMAID_VIEWER_CSS =
+  "html,body{margin:0;height:100%;overflow:hidden;background:#fff}" +
+  "#stage{position:fixed;inset:0;overflow:hidden;touch-action:none;cursor:grab;outline:none}" +
+  "#stage.dragging{cursor:grabbing}" +
+  "#stage:focus-visible{box-shadow:inset 0 0 0 2px #2563eb}" +
+  "#view{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform}" +
+  "#view pre.mermaid{margin:0;background:transparent}" +
+  "#bar{position:fixed;right:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;" +
+  "background:rgba(255,255,255,.96);border:1px solid #d4d4d8;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);" +
+  "font:12px system-ui,-apple-system,Segoe UI,sans-serif;color:#27272a;user-select:none}" +
+  "#bar button{width:28px;height:28px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;" +
+  "font-size:16px;line-height:1;cursor:pointer;display:grid;place-items:center}" +
+  "#bar button:hover{background:#f4f4f5}#bar button:focus-visible{outline:2px solid #2563eb}" +
+  "#zoom-level{min-width:44px;text-align:center;font-variant-numeric:tabular-nums}";
+
+function mermaidViewerBar(l: MermaidViewerLabels): string {
+  const b = (id: string, label: string, glyph: string) =>
+    `<button type="button" id="${id}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${glyph}</button>`;
+  return (
+    `<div id="bar" role="toolbar" aria-label="${escapeHtml(l.level)}">` +
+    b("zoom-out", l.zoomOut, "&minus;") +
+    `<span id="zoom-level" aria-live="polite" aria-label="${escapeHtml(l.level)}">100%</span>` +
+    b("zoom-in", l.zoomIn, "+") +
+    b("zoom-fit", l.fit, "&#x26F6;") +
+    "</div>"
+  );
+}
+
+const MERMAID_VIEWER_JS = `(function(){
+var stage=document.getElementById("stage"),view=document.getElementById("view"),level=document.getElementById("zoom-level");
+var s=1,x=0,y=0,MIN=0.05,MAX=8,PAD=24,auto=true,pts={},pinch=null;
+function post(v){try{parent.postMessage({${CANVAS_MSG_MARKER}:true,type:"zoom",payload:String(v)},"*")}catch(e){}}
+function apply(){view.style.transform="translate("+x+"px,"+y+"px) scale("+s+")";var p=Math.round(s*100);level.textContent=p+"%";stage.setAttribute("data-zoom",String(p));post(p)}
+function box(){var svg=view.querySelector("svg");if(!svg)return null;return{w:view.offsetWidth,h:view.offsetHeight}}
+function fit(){var z=box();if(!z||!z.w||!z.h)return;var W=Math.max(1,stage.clientWidth-2*PAD),H=Math.max(1,stage.clientHeight-2*PAD);
+s=Math.max(MIN,Math.min(MAX,Math.min(W/z.w,H/z.h,2)));x=(stage.clientWidth-z.w*s)/2;y=(stage.clientHeight-z.h*s)/2;auto=true;apply()}
+function zoomAt(f,cx,cy){var n=Math.max(MIN,Math.min(MAX,s*f));if(n===s)return;x=cx-(cx-x)*(n/s);y=cy-(cy-y)*(n/s);s=n;auto=false;apply()}
+function centre(f){zoomAt(f,stage.clientWidth/2,stage.clientHeight/2)}
+stage.addEventListener("wheel",function(e){e.preventDefault();var r=stage.getBoundingClientRect();
+var d=e.deltaMode===1?e.deltaY*16:e.deltaY;zoomAt(Math.exp(-d*(e.ctrlKey?0.01:0.002)),e.clientX-r.left,e.clientY-r.top)},{passive:false});
+stage.addEventListener("pointerdown",function(e){stage.focus({preventScroll:true});try{stage.setPointerCapture(e.pointerId)}catch(_){}
+pts[e.pointerId]={x:e.clientX,y:e.clientY};stage.classList.add("dragging")});
+stage.addEventListener("pointermove",function(e){var prev=pts[e.pointerId];if(!prev)return;pts[e.pointerId]={x:e.clientX,y:e.clientY};var ids=Object.keys(pts);
+if(ids.length===1){x+=e.clientX-prev.x;y+=e.clientY-prev.y;auto=false;apply()}
+else if(ids.length===2){var a=pts[ids[0]],b=pts[ids[1]],d=Math.hypot(a.x-b.x,a.y-b.y),r=stage.getBoundingClientRect();
+if(pinch)zoomAt(d/pinch,(a.x+b.x)/2-r.left,(a.y+b.y)/2-r.top);pinch=d}});
+function up(e){delete pts[e.pointerId];if(Object.keys(pts).length<2)pinch=null;if(!Object.keys(pts).length)stage.classList.remove("dragging")}
+stage.addEventListener("pointerup",up);stage.addEventListener("pointercancel",up);
+document.addEventListener("keydown",function(e){if(e.ctrlKey||e.metaKey||e.altKey)return;
+if(e.key==="+"||e.key==="="){centre(1.25);e.preventDefault()}else if(e.key==="-"||e.key==="_"){centre(0.8);e.preventDefault()}else if(e.key==="0"){fit();e.preventDefault()}});
+document.getElementById("zoom-in").addEventListener("click",function(){centre(1.25)});
+document.getElementById("zoom-out").addEventListener("click",function(){centre(0.8)});
+document.getElementById("zoom-fit").addEventListener("click",fit);
+window.addEventListener("resize",function(){if(auto)fit()});
+function size(svg){var vb=svg.viewBox&&svg.viewBox.baseVal;var w=vb&&vb.width,h=vb&&vb.height;
+if(!w||!h){var r=svg.getBBox();w=r.width;h=r.height}svg.style.maxWidth="none";svg.setAttribute("width",String(w));svg.setAttribute("height",String(h))}
+try{mermaid.initialize({startOnLoad:false,securityLevel:"strict"});
+mermaid.run({querySelector:"#view .mermaid"}).then(function(){var svg=view.querySelector("svg");if(svg)size(svg);fit()},function(e){setTimeout(function(){throw e})})}
+catch(e){setTimeout(function(){throw e})}
+})();`;
 
 /** Strips module syntax the in-iframe classic-script world can't use:
  *  ``import`` lines go away (React/ReactDOM/hooks are provided as

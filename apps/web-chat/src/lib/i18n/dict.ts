@@ -1645,6 +1645,10 @@ export const en = {
   "canvas.typeSvg": "SVG preview",
   "canvas.typeMarkdown": "Markdown preview",
   "canvas.typeMermaid": "Mermaid diagram",
+  "canvas.zoomIn": "Zoom in (+)",
+  "canvas.zoomOut": "Zoom out (−)",
+  "canvas.zoomFit": "Fit to view (0)",
+  "canvas.zoomLevel": "Zoom level",
   "canvas.typeReact": "React app",
   "canvas.running": "Running artifact…",
   "canvas.slowLoad":
@@ -3485,6 +3489,10 @@ const th: Record<DictKey, string> = {
   "canvas.typeSvg": "พรีวิว SVG",
   "canvas.typeMarkdown": "พรีวิว Markdown",
   "canvas.typeMermaid": "แผนภาพ Mermaid",
+  "canvas.zoomIn": "ขยาย (+)",
+  "canvas.zoomOut": "ย่อ (−)",
+  "canvas.zoomFit": "พอดีหน้าจอ (0)",
+  "canvas.zoomLevel": "ระดับการซูม",
   "canvas.typeReact": "แอป React",
   "canvas.running": "กำลังรัน artifact…",
   "canvas.slowLoad":

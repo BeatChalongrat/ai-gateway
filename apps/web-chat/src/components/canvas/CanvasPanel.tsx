@@ -356,7 +356,12 @@ function CanvasBody({ artifact }: { artifact: CanvasArtifact | null }) {
     case "mermaid":
       return (
         <ExecutableFrame
-          srcDoc={buildMermaidSrcDoc(source)}
+          srcDoc={buildMermaidSrcDoc(source, undefined, {
+            zoomIn: t("canvas.zoomIn"),
+            zoomOut: t("canvas.zoomOut"),
+            fit: t("canvas.zoomFit"),
+            level: t("canvas.zoomLevel"),
+          })}
           title={t("canvas.typeMermaid")}
         />
       );
