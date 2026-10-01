@@ -30,6 +30,9 @@ from .theme import FONT_FILES, rgb
 
 BODY_PT = 10.5
 SMALL_PT = 8.5
+APPENDIX_PT = 7.5          # AM9: the appendix's entries, two columns to a page
+APPENDIX_HEADING_PT = 13
+APPENDIX_GAP_CM = 0.7
 # A table cell's left + right margins (_cell_margins: 90 twips each), in points.
 CELL_PAD_PT = 9.0
 MIN_CELL_PT = 6.5
@@ -326,9 +329,9 @@ class ReportWriter:
             _run(dp, cite, self.font, 7, color=p["muted"])
 
     # ── blocks ────────────────────────────────────────────────────────
-    def heading(self, text, level=1):
+    def heading(self, text, level=1, size=None):
         h = self.doc.add_heading(level=level)
-        _run(h, text, self.font, 17 if level == 1 else 12.5, bold=True, color=self.p["primary"])
+        _run(h, text, self.font, size or (17 if level == 1 else 12.5), bold=True, color=self.p["primary"])
         if level == 1:
             pPr = h._element.get_or_add_pPr()
             bdr = OxmlElement("w:pBdr")
@@ -348,12 +351,12 @@ class ReportWriter:
             if cite:
                 _run(p, cite, self.font, 6.5, color=self.p["muted"], superscript=True)
 
-    def bullets(self, items):
+    def bullets(self, items, size=BODY_PT):
         for runs in items:
             p = self.doc.add_paragraph(style="List Bullet")
             p.paragraph_format.space_after = Pt(3)
             for text, cite in runs:
-                _run(p, text, self.font, BODY_PT)
+                _run(p, text, self.font, size)
                 if cite:
                     _run(p, cite, self.font, 6.5, color=self.p["muted"], superscript=True)
 
@@ -409,32 +412,61 @@ class ReportWriter:
             _para(doc, space_after=6)
 
     def _widths(self, t, block, size) -> list[int]:
-        """Label columns get the room; numbers get a fixed width; the cite id a narrow one — and no
-        column is narrower than its widest word (header included), so Word never breaks a Thai word."""
+        """Numbers and the cite id take what their widest value (or header word) needs; label columns
+        get the rest — each its one-line width when the page has it, else a share in proportion to its
+        longest text — and room left over goes back to the numbers. No column is narrower than its
+        widest word (header included), so Word never breaks a Thai word (AM9: before, every number
+        column took 2.15 cm and "อัตรากำไรขั้นต้น" broke over three lines in a 1.9 cm label column)."""
         sec = self.doc.sections[0]
         total = int(sec.page_width - sec.left_margin - sec.right_margin)
         cols = block["columns"]
         num_from = block.get("numeric_from")
         cite_col = block.get("cite_col")
 
-        def need(j) -> int:
-            words = [(str(cols[j]), size, True)] + [
+        def texts(j):
+            return [(str(cols[j]), size, True)] + [
                 ("" if r[j] is None else str(r[j]), 7 if j == cite_col else size, False) for r in block["rows"]]
-            pt = max(_widest_word_pt(w, self.font, s, b) for w, s, b in words) + CELL_PAD_PT
+
+        def need(j) -> int:
+            pt = max(_widest_word_pt(w, self.font, s, b) for w, s, b in texts(j)) + CELL_PAD_PT
             return int(pt * EMU_PER_PT)
+
+        def one_line(j) -> int:
+            # a label's longest text on one line (the header may wrap between its words)
+            pt = max([text_width_pt(w, self.font, s, b) * SAFETY for w, s, b in texts(j)[1:]] or [0.0]) + CELL_PAD_PT
+            return max(need(j), int(pt * EMU_PER_PT))
         widths = [None] * len(cols)
+        numbers = []
         for j, name in enumerate(cols):
             if j == cite_col:
                 widths[j] = max(int(Cm(1.15)), need(j))
             elif num_from is not None and j >= num_from:
-                widths[j] = max(int(Cm(1.45) if name in ("%",) else Cm(2.15)), need(j))
+                widths[j] = max(int(Cm(1.25)), need(j))
+                numbers.append(j)
         fixed = sum(w for w in widths if w is not None)
         free = [j for j, w in enumerate(widths) if w is None]
+        avail = total - fixed
         if free:
-            share = max(int(Cm(2.2)), int((total - fixed) / len(free)))
-            for j in free:
-                widths[j] = share
+            full = {j: max(int(Cm(2.2)), one_line(j)) for j in free}
+            if sum(full.values()) <= avail:
+                for j in free:
+                    widths[j] = full[j]
+            else:
+                floor = {j: max(int(Cm(2.2)), need(j)) for j in free}
+                rest = max(0, avail - sum(floor.values()))
+                extra = sum(full[j] - floor[j] for j in free) or 1
+                for j in free:
+                    widths[j] = floor[j] + int(rest * (full[j] - floor[j]) / extra)
+        spare = total - sum(widths)
+        receivers = numbers or free
+        if spare > 0 and receivers:
+            for j in receivers:
+                widths[j] += int(spare / len(receivers))
         t.autofit = False
+        # AM9: a fixed-layout table is laid out from its grid (w:gridCol) — Word and LibreOffice both;
+        # the cells' own widths alone left every column at an equal share of the page
+        for j, col in enumerate(t.columns):
+            col.width = widths[j]
         for row in t.rows:
             for j, cell in enumerate(row.cells):
                 cell.width = widths[j]
@@ -455,6 +487,42 @@ class ReportWriter:
         _run(cap, "กราฟวาดจากตัวเลขที่คำนวณแล้ว · ตัวเลขทุกจุดที่กราฟวาดและเลขอ้างอิงของแต่ละจุดอยู่ในตารางใต้กราฟ",
              self.font, 8, color=self.p["muted"])
 
+    # ── appendix (AM9) ────────────────────────────────────────────────
+    # Every source range stays (AM8 stopped hiding them behind "และอีก 58 ช่วง"); what changes is the
+    # typesetting: the appendix is its own section in two columns, each row an entry at a smaller size —
+    # the body text is unchanged. The sample report went from 21 pages to 14.
+    def appendix_section(self):
+        new = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        new.different_first_page_header_footer = False
+        cols = new._sectPr.find(qn("w:cols"))
+        if cols is None:
+            cols = OxmlElement("w:cols")
+            new._sectPr.append(cols)
+        cols.set(qn("w:num"), "2")
+        cols.set(qn("w:space"), str(int(APPENDIX_GAP_CM / 2.54 * 1440)))
+
+    def entries(self, block):
+        """An appendix table as entries: the first column bold, the next two on its line, every other
+        column on a line of its own under its header's name."""
+        p, cols = self.p, block["columns"]
+        if not block["rows"]:
+            para = _para(self.doc, space_after=6)
+            _run(para, block.get("empty_text") or "ไม่มีรายการ", self.font, APPENDIX_PT, color=p["muted"])
+            return
+        for row in block["rows"]:
+            para = _para(self.doc, space_after=3, line=1.0)
+            para.paragraph_format.keep_together = True
+            vals = ["" if v is None else str(v) for v in row]
+            _run(para, vals[0], self.font, APPENDIX_PT, bold=True, color=p["primary"])
+            head = " · ".join(v for v in vals[1:3] if v)
+            if head:
+                _run(para, "  " + head, self.font, APPENDIX_PT)
+            for name, v in zip(cols[3:], vals[3:]):
+                if v:
+                    _run(para, "", self.font, APPENDIX_PT - 0.5).add_break()
+                    _run(para, f"{name}: ", self.font, APPENDIX_PT - 0.5, color=p["muted"])
+                    _run(para, v, self.font, APPENDIX_PT - 0.5, color=p["muted"])
+
     # ── assemble ──────────────────────────────────────────────────────
     def write(self, path: str, logo_path: str | None = None) -> dict:
         self.setup()
@@ -462,11 +530,11 @@ class ReportWriter:
         appendix_started = False
         for sec in self.m["sections"]:
             if sec.get("appendix") and not appendix_started:
-                self.doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+                self.appendix_section()
                 appendix_started = True
             if sec["key"] == "assumptions":
                 self.doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-            self.heading(sec["title"])
+            self.heading(sec["title"], size=APPENDIX_HEADING_PT if appendix_started else None)
             for b in sec["blocks"]:
                 kind = b["type"]
                 if kind == "paragraph":
@@ -475,11 +543,11 @@ class ReportWriter:
                     self.kpi_tiles()
                     _para(self.doc, space_after=4)
                 elif kind == "table":
-                    self.table(b)
+                    self.entries(b) if appendix_started else self.table(b)
                 elif kind == "chart":
                     self.chart(b["chart"])
                 elif kind == "bullets":
-                    self.bullets(b["items"])
+                    self.bullets(b["items"], size=APPENDIX_PT + 0.5 if appendix_started else BODY_PT)
                 elif kind == "subheading":
                     self.heading(b["text"], 2)
         props = self.doc.core_properties
