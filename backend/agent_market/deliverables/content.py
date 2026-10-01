@@ -286,7 +286,9 @@ def chart_table(spec: dict) -> dict:
     and the gate reads them back out of the finished file (AM8)."""
     scale = Decimal(str(spec.get("scale", 1)))
     unit = "ล้านบาท" if scale == 1_000_000 else "บาท"
-    cols = ["รายการ" if spec["kind"] == "barh" else "เดือน"] + [s["name"] for s in spec["series"]] + ["อ้างอิง"]
+    # a heading of its own ("…ในกราฟ"): with one month and no budget, the P&L table's columns are the same
+    # words, and a reader (and the gate) must tell the two tables apart
+    cols = ["รายการในกราฟ" if spec["kind"] == "barh" else "เดือนในกราฟ"] + [s["name"] for s in spec["series"]] + ["อ้างอิง"]
     rows = []
     for i, cat in enumerate(spec["categories"]):
         vals = []

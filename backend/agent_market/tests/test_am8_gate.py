@@ -178,6 +178,21 @@ class TheSameBreakagesOnAFreshRender(unittest.TestCase):
         self.assertIn("47,000", detail)
 
 
+class EveryShapeOfInputPasses(unittest.TestCase):
+    """The integration lane found it: with one month and no budget the P&L table and the table under a
+    chart had the same headings, and the gate read the wrong one. Every combination of inputs renders
+    files that pass their own gate."""
+
+    def test_one_two_and_three_files(self):
+        for names in (["GL_2569-09.xlsx"], ["GL_2569-09.xlsx", "GL_2569-08.xlsx"],
+                      ["GL_2569-09.xlsx", "งบประมาณ_2569.xlsx"], ["GL_2569-09.xlsx", "GL_2569-08.xlsx", "งบประมาณ_2569.xlsx"]):
+            c = computed_for(names)
+            out = tempfile.mkdtemp()
+            res = render_all(c, {**REQ, "formats": ["docx", "pptx", "xlsx"]}, in_dir=out, out_dir=out)
+            bad = [(a["format"], x["name"], x["detail"]) for a in res["artifacts"] for x in a["quality"]["checks"] if not x["ok"]]
+            self.assertTrue(res["passed"], (names, bad))
+
+
 class ACitationBelongsToItsFigure(unittest.TestCase):
     """The audit: "SG&A over budget 10.5%" cited c33, cost of sales, because both printed 10.5%."""
 
