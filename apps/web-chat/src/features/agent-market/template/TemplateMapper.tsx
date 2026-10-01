@@ -67,6 +67,8 @@ export function TemplateMapper({
   const [error, setError] = useState<string | null>(null);
 
   const mapping = buildMapping(slots, sel, spec);
+  // AM8: what the filler cannot do stops this template before any work, with its reasons
+  const blocking = slots.filter((s) => s.blocking);
   const mapped = slots.filter((s) => s.fillable && mapping[s.key]).length;
   const fillable = slots.filter((s) => s.fillable).length;
   const counts = diffCounts(inspect.diff);
@@ -101,6 +103,21 @@ export function TemplateMapper({
       {counts ? (
         <p className="mt-2 rounded-lg border border-border-subtle bg-bg-base px-3 py-2 text-xs text-text-secondary" data-testid="am-template-diff">
           {t("tpl.map.diff", { kept: String(counts.kept), added: String(counts.added), removed: String(counts.removed) })}
+        </p>
+      ) : null}
+
+      {blocking.length ? (
+        <div className="mt-2 rounded-lg border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-text-primary" role="alert" data-testid="am-template-blocking">
+          <p className="font-medium">{t("tpl.map.blocking")}</p>
+          <ul className="mt-1 list-disc pl-4">
+            {blocking.map((s) => (
+              <li key={s.key}>{`${s.label} — ${t(reasonKey(s.reason))}`}</li>
+            ))}
+          </ul>
+        </div>
+      ) : inspect.proposed_by ? (
+        <p className="mt-2 text-xs text-text-secondary" data-testid="am-template-proposed-by">
+          {t("tpl.map.proposedBy", { model: inspect.proposed_by })}
         </p>
       ) : null}
 
@@ -152,7 +169,7 @@ export function TemplateMapper({
       ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         {slots.length ? (
-          <Button type="button" size="sm" onClick={() => void save()} loading={saving} disabled={mapped === 0} data-testid="am-template-save">
+          <Button type="button" size="sm" onClick={() => void save()} loading={saving} disabled={mapped === 0 || blocking.length > 0} data-testid="am-template-save">
             <span>{saving ? t("common.saving") : t("tpl.map.save")}</span>
           </Button>
         ) : null}

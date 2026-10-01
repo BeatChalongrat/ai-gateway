@@ -197,7 +197,7 @@ describe("the files card", () => {
         <OutputsCard outputs={outputs} />
       </WorkspaceContext.Provider>,
     );
-    expect(screen.getByTestId("am-outputs-details-body").textContent).toContain("ตรวจคุณภาพผ่าน 1 จาก 1");
+    expect(screen.getByTestId("am-outputs-details-body").textContent).toContain("เปิดไฟล์ตรวจซ้ำ ผ่านทุกเรื่อง");
   });
 
   it("digital documents: says no model saw them", () => {

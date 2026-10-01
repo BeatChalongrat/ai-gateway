@@ -35,9 +35,13 @@ export const FORMAT_KEYS: Record<string, AmKey> = {
   pdf: "outputs.fmt.pdf",
   template: "outputs.fmt.template",
 };
-// The menu still offers no PDF: the server makes one only while a runner has
-// the doc-converter (AM2), which this card cannot know; a delivered PDF is labelled.
+// AM8: the formats a card offers are the server's (outputs.more_formats: the agent's manifest outputs, PDF
+// only while a converter is there). A card from before AM8 has none: it keeps the old list.
 export const MORE_FORMATS = ["xlsx", "docx", "pptx"];
+
+export function moreFormatsOf(outputs: { more_formats?: string[] | null }): string[] {
+  return outputs.more_formats ?? MORE_FORMATS;
+}
 
 // Formats a file name does not explain: a filled template (its name ends in
 // the template's own extension) and the PDF (the report, converted). Their
@@ -57,9 +61,16 @@ export function artifactExtension(a: { format: string; name: string }): string {
   return extensionOf(a.format);
 }
 
-export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | null }[]): { pass: number; total: number; checks: QualityCheck[] } {
+export function qualityOf(artifacts: { quality?: { checks?: QualityCheck[] } | null }[]): {
+  pass: number;
+  total: number;
+  values: number;
+  checks: QualityCheck[];
+} {
   const checks = artifacts.flatMap((a) => a.quality?.checks ?? []);
-  return { pass: checks.filter((c) => c.ok).length, total: checks.length, checks };
+  // AM8: how many figures the gate read back out of the files — what was asserted, not a count of checks
+  const values = checks.reduce((n, c) => n + (typeof c.values === "number" ? c.values : 0), 0);
+  return { pass: checks.filter((c) => c.ok).length, total: checks.length, values, checks };
 }
 
 export function OutputsCard({
@@ -212,7 +223,13 @@ export function OutputsCard({
                 <div>
                   <Pill tone={q.pass === q.total ? "success" : "warning"}>
                     {q.pass === q.total ? <CircleCheck width={12} height={12} aria-hidden /> : <TriangleAlert width={12} height={12} aria-hidden />}
-                    <span>{t("outputs.quality", { pass: String(q.pass), total: String(q.total) })}</span>
+                    <span>
+                      {q.pass !== q.total
+                        ? t("outputs.quality", { failed: String(q.total - q.pass) })
+                        : q.values > 0
+                          ? t("outputs.qualityValues", { values: String(q.values) })
+                          : t("outputs.qualityAll")}
+                    </span>
                   </Pill>
                   <ul className="mt-1.5 flex flex-col gap-1">
                     {q.checks.map((c, i) => (
@@ -241,7 +258,7 @@ export function OutputsCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
         {/* a draft is neither signed nor made into other files: the agent's gate did not pass */}
-        {!isDraft ? <MoreFilesMenu runId={outputs.run_id} /> : null}
+        {!isDraft && moreFormatsOf(outputs).length ? <MoreFilesMenu runId={outputs.run_id} formats={moreFormatsOf(outputs)} /> : null}
         {canSignOff && !outputs.review && !isDraft ? <SignOffButton runId={outputs.run_id} /> : null}
         <ButtonLink href={provenanceHref(outputs.run_id)} variant="secondary" size="sm">
           {t("ws.provenance")}
@@ -370,7 +387,7 @@ export function ArtifactRow({
   artifact,
   download: downloadWith,
 }: {
-  artifact: Pick<OutputArtifact, "id" | "name" | "format" | "size" | "version">;
+  artifact: Pick<OutputArtifact, "id" | "name" | "format" | "size" | "version"> & Partial<Pick<OutputArtifact, "quality">>;
   /** AM4: an admin's reason-gated download instead of the owner's. */
   download?: () => Promise<void>;
 }) {
@@ -389,6 +406,12 @@ export function ArtifactRow({
     );
   };
   const label = artifactLabelKey(artifact.format);
+  // AM8: a file delivered without passing (a customer form not fully filled) says so on its own row, with
+  // every slot it lacks — not only in the folded details
+  const failed = artifact.quality?.passed === false;
+  // a slot's label is the customer's own form's name for it ("missing_total", "ยอดขายรวม"): the person's
+  // data, shown as written (the server sends it as the person's); the reason is the package's words
+  const unfilled = (artifact.quality?.unfilled ?? []).filter((u) => typeof u.label === "string" && u.label.trim());
   return (
     <li className="flex items-center gap-3 px-3 py-2" data-testid="am-artifact" data-format={artifact.format}>
       <FileTypeBadge extension={artifactExtension(artifact)} filename={artifact.name} size="sm" />
@@ -402,6 +425,24 @@ export function ArtifactRow({
           {` · `}
           {t("outputs.version", { n: String(artifact.version) })}
         </div>
+        {failed ? (
+          <div className="mt-1 rounded-md border border-status-warning/40 bg-status-warning/10 px-2 py-1 text-[11px] text-text-primary" data-testid="am-artifact-not-passed">
+            <div className="flex items-center gap-1 font-medium">
+              <TriangleAlert width={12} height={12} className="shrink-0 text-status-warning" aria-hidden />
+              <span>{unfilled.length ? t("outputs.templateUnfilled", { n: String(unfilled.length) }) : t("outputs.notPassed")}</span>
+            </div>
+            {unfilled.length ? (
+              <ul className="mt-0.5 list-disc pl-4 text-text-secondary">
+                {unfilled.map((u, i) => (
+                  <li key={`${u.label}-${i}`}>
+                    {u.label.trim().slice(0, 120)}
+                    {personText(u.why ?? "") ? ` — ${personText(u.why ?? "")}` : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
         {error ? (
           <div role="alert" className="text-[11px] text-status-danger">
             {error}
@@ -421,7 +462,7 @@ export function ArtifactRow({
   );
 }
 
-function MoreFilesMenu({ runId }: { runId: string }) {
+function MoreFilesMenu({ runId, formats }: { runId: string; formats: string[] }) {
   const t = useAmT();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -480,7 +521,7 @@ function MoreFilesMenu({ runId }: { runId: string }) {
         </Button>
         {open ? (
           <div id={menuId} role="menu" className="absolute bottom-full left-0 z-20 mb-1.5 w-52 overflow-hidden rounded-xl border border-border bg-bg-surface py-1 shadow-lg">
-            {MORE_FORMATS.map((fmt) => (
+            {formats.map((fmt) => (
               <button
                 key={fmt}
                 type="button"

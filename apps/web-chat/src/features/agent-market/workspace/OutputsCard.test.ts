@@ -1,14 +1,27 @@
 import { describe, expect, it } from "vitest";
 
 import { amDictionaries } from "../i18n";
-import { artifactExtension, artifactLabelKey, FORMAT_KEYS, MORE_FORMATS, qualityOf } from "./OutputsCard";
+import { artifactExtension, artifactLabelKey, FORMAT_KEYS, MORE_FORMATS, moreFormatsOf, qualityOf } from "./OutputsCard";
 
 // AM1b: PDF left the "more files" menu (its Thai shaping was wrong); in AM2 it
 // is the finished .docx converted by LibreOffice, made only while a runner has
 // the converter — so a delivered PDF has a label, and the menu still offers none.
 describe("output formats", () => {
-  it("the 'more files' menu offers no PDF", () => {
+  it("the 'more files' menu offers no PDF on a card from before AM8", () => {
     expect(MORE_FORMATS).not.toContain("pdf");
+    expect(moreFormatsOf({})).toEqual(MORE_FORMATS);
+  });
+
+  it("AM8: the menu offers what the server says this agent can make — no .docx for an .xlsx-only agent, PDF when there is one", () => {
+    expect(moreFormatsOf({ more_formats: ["xlsx"] })).toEqual(["xlsx"]);
+    expect(moreFormatsOf({ more_formats: ["docx", "pptx", "xlsx", "pdf"] })).toContain("pdf");
+  });
+
+  it("AM8: the quality line counts the figures read back, not the checks", () => {
+    const q = qualityOf([{ quality: { checks: [{ name: "docx.figures", ok: true, values: 61 }, { name: "docx.fonts", ok: true }] } },
+                         { quality: { checks: [{ name: "xlsx.figures", ok: true, values: 40 }] } }]);
+    expect(q.values).toBe(101);
+    expect(q.total).toBe(3);
   });
 
   it("a delivered PDF and a filled template have labels", () => {

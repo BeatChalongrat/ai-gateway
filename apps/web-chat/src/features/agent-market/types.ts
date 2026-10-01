@@ -87,6 +87,11 @@ export interface TemplateSlot {
   reason: string | null;
   /** a list's {{name.x}} sub-keys, a table's column letters */
   columns?: string[];
+  /** AM8: the text around the slot (what the model read to propose a field for it) */
+  context?: string;
+  /** AM8: this slot stops the template being used at all (a chart left with old numbers, a marker the
+   *  filler cannot reach) — refused before any work */
+  blocking?: boolean;
 }
 
 export interface TemplateDiff {
@@ -103,6 +108,10 @@ export interface TemplateInspect {
   /** slot → field / list; "slot.column" → "list.column"; the saved choice for kept slots */
   proposal: Record<string, string>;
   diff: TemplateDiff;
+  /** AM8: the model that proposed the mapping (the person confirms it) */
+  proposed_by?: string | null;
+  /** AM8: the slots that stop the template being used */
+  blocking?: TemplateSlot[] | null;
 }
 
 /** The saved template (install default "template"). */
@@ -256,11 +265,21 @@ export interface QualityCheck {
   label?: string;
   ok: boolean;
   detail?: string;
+  /** AM8: how many values this check read back out of the file and compared */
+  values?: number;
+}
+
+/** AM8: a slot of the customer's form that does not hold its value, by the form's own name, and why. */
+export interface UnfilledSlot {
+  label: string;
+  why?: string;
 }
 
 export interface Quality {
   passed?: boolean;
   checks?: QualityCheck[];
+  /** AM8: a filled template's slots without their value */
+  unfilled?: UnfilledSlot[] | null;
 }
 
 export interface Artifact {
@@ -554,6 +573,8 @@ export interface OutputsPayload {
   draft?: boolean;
   /** AM5: what the agent's gate said, in its words. */
   gate?: { passed: boolean; what: string; next?: string } | null;
+  /** AM8: the formats this agent can still make from the round's numbers (absent on older cards) */
+  more_formats?: string[] | null;
 }
 
 /** AM4: what the files card always says about models. */

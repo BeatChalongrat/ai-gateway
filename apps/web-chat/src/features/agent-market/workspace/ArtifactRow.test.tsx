@@ -58,10 +58,41 @@ describe("OutputsCard with a filled template", () => {
   it("its checks count and list with the others", () => {
     render(<OutputsCard outputs={outputs} />);
     // AM4: folded for a member — trust signals, not daily reading
-    expect(screen.queryByText("ตรวจคุณภาพผ่าน 3 จาก 3")).toBeNull();
+    expect(screen.queryByText("เปิดไฟล์ตรวจซ้ำ ผ่านทุกเรื่อง")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "รายละเอียดการตรวจ เครดิต และโมเดล" }));
-    expect(screen.getByText("ตรวจคุณภาพผ่าน 3 จาก 3")).toBeTruthy();
+    expect(screen.getByText("เปิดไฟล์ตรวจซ้ำ ผ่านทุกเรื่อง")).toBeTruthy();
     expect(screen.getByText("เติมค่าลงแบบฟอร์มได้")).toBeTruthy();
     expect(screen.getByText("คำนวณสูตรในแบบฟอร์มใหม่")).toBeTruthy();
+  });
+});
+
+describe("AM8: a customer form delivered without passing", () => {
+  it("says so on its own row and lists every slot it lacks, without opening the details", () => {
+    render(
+      <OutputsCard
+        outputs={{
+          run_id: "r-8",
+          artifacts: [
+            { id: "a", name: "report.docx", format: "docx", size: 10, version: 1, quality: { passed: true, checks: [] } },
+            {
+              id: "b", name: "form_template_v1.docx", format: "template", size: 10, version: 1,
+              quality: {
+                passed: false,
+                checks: [{ name: "template.every_slot", ok: false, label: "ทุกช่องที่จับคู่ไว้มีค่า" }],
+                unfilled: [{ label: "missing_total", why: "รอบนี้ไม่มีค่าให้ช่องนี้" }, { label: "ตาราง 1 แถว 1 ช่อง 1", why: "ข้อความยาวเกินช่องที่สูงคงที่ จะถูกตัด" }],
+              },
+            },
+          ],
+        }}
+      />,
+    );
+    const rows = screen.getAllByTestId("am-artifact");
+    const tpl = rows.find((r) => r.getAttribute("data-format") === "template")!;
+    const note = tpl.querySelector("[data-testid='am-artifact-not-passed']")!;
+    expect(note.textContent).toContain("แบบฟอร์มนี้ยังกรอกไม่ครบ 2 ช่อง — อย่าเพิ่งส่งต่อ");
+    expect(note.textContent).toContain("missing_total — รอบนี้ไม่มีค่าให้ช่องนี้");
+    expect(note.textContent).toContain("ตาราง 1 แถว 1 ช่อง 1");
+    const report = rows.find((r) => r.getAttribute("data-format") === "docx")!;
+    expect(report.querySelector("[data-testid='am-artifact-not-passed']")).toBeNull();
   });
 });

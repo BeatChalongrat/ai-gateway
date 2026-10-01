@@ -175,6 +175,8 @@ const REASON_KEYS: Record<string, AmKey> = {
   ambiguous_name: "tpl.reason.ambiguous_name",
   not_a_cell_range: "tpl.reason.not_a_cell_range",
   not_a_single_range: "tpl.reason.not_a_single_range",
+  unsupported_location: "tpl.reason.unsupported_location",
+  chart_not_updated: "tpl.reason.chart_not_updated",
 };
 
 /** Why a slot cannot be filled, in plain words; an unknown code still gets a sentence (never a silent drop). */
