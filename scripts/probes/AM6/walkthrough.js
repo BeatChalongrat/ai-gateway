@@ -15,7 +15,13 @@
 //   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js journey desktop # in the owner's desktop app
 //   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js journey web     # the same in a browser of its own
 //   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js bank desktop|web
+//   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js financial desktop|web  # AM8: the report on the live model and a customer's form
 //   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js cleanup [web]   # the walkthrough's reminders, installs (by id) and its rounds' evidence
+//
+// On live, cleanup's admin door is https through Caddy: export NODE_EXTRA_CA_CERTS (the machine's
+// local CA, infra/caddy/certs/rootCA.pem, as scripts/smoke.sh does) or it ends with "fetch failed".
+// A person who already has the agent gets another copy through the install wizard's "ติดตั้งอีกชุด";
+// their own install is never opened.
 //   SMOKE_TARGET=live node scripts/probes/AM6/walkthrough.js close           # relaunch the app without the debugging port
 //
 // Safety (CARD-RULES §4): the app is only closed when its log shows no use in the last 10
@@ -649,10 +655,47 @@ function readReport(file) {
   return JSON.parse(execFileSync(process.env.PYTHON || "python", ["-c", py, file], { encoding: "utf8", env: { ...process.env, PYTHONIOENCODING: "utf-8" } }));
 }
 
+// A person who already has the agent installs another copy the way the product offers it: the install
+// wizard's "ติดตั้งอีกชุด". The copy is this walk's (recorded for cleanup); the person's own install is
+// never opened, changed or removed.
+async function installAnother(x, slug, cardText) {
+  const { page } = x;
+  const before = new Set(((await api(page, "/installs")).body?.installs || []).map((i) => i.id));
+  await x.click(page.locator('a[href="/chat/agents"]'), "Agent Market");
+  await page.waitForSelector('[data-testid="am-market-grid"]', { timeout: 60000 });
+  await L.wait(1200);
+  const card = page.locator('[data-testid="am-agent-card"]').filter({ hasText: cardText });
+  x.check(await card.count(), `“${cardText}” is an agent of the market (installed already)`);
+  await x.shot("01-market");
+  await page.goto(`${WEB()}/chat/agents/install/${slug}`, { waitUntil: "load" });
+  const again = page.getByRole("button", { name: "ติดตั้งอีกชุด" });
+  await again.waitFor({ state: "visible", timeout: 60000 });
+  await L.wait(800);
+  await x.shot("02-already-installed");
+  await x.click(again, "ติดตั้งอีกชุด");
+  let id = null;
+  for (let i = 0; i < 60 && !id; i++) {
+    await L.wait(1000);
+    const rows = (await api(page, "/installs")).body?.installs || [];
+    id = rows.find((r) => r.slug === slug && !before.has(r.id))?.id || null;
+  }
+  if (!id) throw new Error("the second install was not created");
+  state.installs = [...new Set([...(state.installs || []), id])];
+  save();
+  x.mark("another copy installed");
+  return id;
+}
+
 async function financial(client) {
   const x = await session(client, "financial");
   const { page } = x;
-  const { installId } = await installFromMarket(x, "รายงานผลประกอบการ");
+  const slug = "sran.financial-report";
+  await page.goto(`${WEB()}/chat`, { waitUntil: "load" });
+  await page.locator('a[href="/chat/agents"]').first().waitFor({ state: "visible", timeout: 90000 });
+  await L.wait(1200);
+  const had = ((await api(page, "/installs")).body?.installs || []).some((i) => i.slug === slug);
+  const installId = had ? await installAnother(x, slug, "รายงานผลประกอบการ")
+    : (await installFromMarket(x, "รายงานผลประกอบการ")).installId;
   state[`fin_${client}`] = installId;
   save();
   // B. the customer's form: uploaded on the install's settings page, the model proposes, the person saves
