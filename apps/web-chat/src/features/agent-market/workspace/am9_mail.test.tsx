@@ -64,7 +64,7 @@ describe("which mailbox sends", () => {
     raw.mockImplementation(async (path: string) =>
       path === "/agent-market/email-drafts/d-1" ? json({ draft: draft({ transport: "mailbox", mailbox: { available: true, connected: true } }) }) : json({}, 404),
     );
-    render(<EmailDraftCard draft={draft({ transport: "relay", mailbox: { available: true, connected: false } })} />);
+    render(<EmailDraftCard draft={draft({ transport: "organisation", mailbox: { available: true, connected: false } })} />);
     expect(screen.getByTestId("am-email-transport").textContent).toContain("ส่งผ่านเซิร์ฟเวอร์อีเมลขององค์กรในนามของคุณ");
     fireEvent.click(screen.getByTestId("am-email-connect"));
     await waitFor(() => expect(open).toHaveBeenCalledWith("https://backend.example/portal/connectors/oauth/start?ticket=t", "_blank", "noopener,noreferrer"));
@@ -84,7 +84,7 @@ describe("which mailbox sends", () => {
   it("a start address that is not http(s) is never opened", async () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ start_url: "javascript:alert(1)" }) })));
-    render(<EmailDraftCard draft={draft({ transport: "relay", mailbox: { available: true, connected: false } })} />);
+    render(<EmailDraftCard draft={draft({ transport: "organisation", mailbox: { available: true, connected: false } })} />);
     fireEvent.click(screen.getByTestId("am-email-connect"));
     await waitFor(() => expect(screen.getByText("เปิดหน้าเชื่อมต่ออีเมลไม่ได้ ลองอีกครั้ง")).toBeTruthy());
     expect(open).not.toHaveBeenCalled();

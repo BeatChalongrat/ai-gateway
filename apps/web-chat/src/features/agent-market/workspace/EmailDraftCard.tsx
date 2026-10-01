@@ -402,7 +402,7 @@ function SentList({ sent }: { sent: EmailSend[] }) {
           return (
             <li key={s.id} className={cls("text-xs", s.status === "failed" ? "text-status-danger" : "text-text-secondary")}>
               <span>{s.status === "failed" ? t("email.failedLine", vars) : t("email.sentLine", vars)}</span>
-              {s.transport === "mailbox" || s.transport === "relay" ? (
+              {s.transport === "mailbox" || s.transport === "organisation" ? (
                 <span className="text-text-muted"> · {s.transport === "mailbox" ? t("email.sentVia.mailbox") : t("email.sentVia.relay")}</span>
               ) : null}
               {s.cc?.length ? <span className="block text-text-muted">{t("email.sentCc", { cc: s.cc.join(", ") })}</span> : null}

@@ -246,12 +246,12 @@ func TestAM9WithNothingConfiguredADraftIsCopiedAndAMailboxNotConnectedFallsToThe
 	e.relayOn(sink, "none", "")
 	d = draftOf(t, e.asPerson("GET", "/email-drafts/"+d["id"].(string), nil))
 	box = d["mailbox"].(map[string]any)
-	if d["transport"] != "relay" || box["available"] != true || box["connected"] != false {
+	if d["transport"] != "organisation" || box["available"] != true || box["connected"] != false {
 		t.Fatalf("a mailbox that can be connected, a relay that sends: %v", d)
 	}
 	out = e.asPerson("POST", "/email-drafts/"+d["id"].(string)+"/send", map[string]any{"to": []string{"a@company.example"},
 		"body_sha256": d["body_sha256"], "approve": true})
-	if s := out["send"].(map[string]any); s["transport"] != "relay" || s["status"] != "sent" || len(gw.calls) != 0 || len(sink.messages()) != 1 {
+	if s := out["send"].(map[string]any); s["transport"] != "organisation" || s["status"] != "sent" || len(gw.calls) != 0 || len(sink.messages()) != 1 {
 		t.Fatalf("the relay carried it: %v (mailbox calls %d)", out, len(gw.calls))
 	}
 }

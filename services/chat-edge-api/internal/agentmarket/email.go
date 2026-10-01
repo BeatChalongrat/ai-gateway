@@ -106,14 +106,14 @@ type EmailSend struct {
 	At         time.Time  `json:"at"`
 	ApprovedBy ApprovedBy `json:"approved_by"`
 	// Transport (AM9): what carried it — "mailbox" (the person's own, through
-	// the mail connector) or "relay" (the organisation's SMTP, on their behalf).
+	// the mail connector) or "organisation" (the organisation's SMTP, on their behalf).
 	Transport string `json:"transport"`
 }
 
 // Transports a message can go by (AM9), as the log and the draft name them.
 const (
 	TransportMailbox = "mailbox"
-	TransportRelay   = "relay"
+	TransportRelay   = "organisation"
 )
 
 // ApprovedBy is the signed-in person who approved a send.
@@ -132,7 +132,7 @@ type EmailDraft struct {
 	Attachments      []DraftAttachment `json:"attachments"`
 	CanSend          bool              `json:"can_send"`
 	CannotSendReason PersonText        `json:"cannot_send_reason,omitzero"`
-	// AM9: which way an approved message goes now ("mailbox", "relay" or ""),
+	// AM9: which way an approved message goes now ("mailbox", "organisation" or ""),
 	// and whether the person's own mailbox can be connected / is connected.
 	Transport  string        `json:"transport"`
 	Mailbox    MailboxStatus `json:"mailbox"`
@@ -388,7 +388,7 @@ func (s *Store) draftOf(ctx context.Context, tenant, user, id uuid.UUID) (EmailD
 
 func (s *Store) sendsOf(ctx context.Context, draft uuid.UUID) ([]EmailSend, error) {
 	rows, err := s.Pool.Query(ctx, `SELECT id, draft_id, to_addrs, cc_addrs, status, approved_at, approved_by_name, approved_by_email,
-		COALESCE(transport, 'relay') FROM agent_market.email_sends WHERE draft_id = $1 ORDER BY created_at`, draft)
+		COALESCE(transport, 'organisation') FROM agent_market.email_sends WHERE draft_id = $1 ORDER BY created_at`, draft)
 	if err != nil {
 		return nil, err
 	}
