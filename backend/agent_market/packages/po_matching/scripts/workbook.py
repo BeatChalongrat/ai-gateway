@@ -15,12 +15,15 @@ checks it against computed.json.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ....deliverables import workpaper
+from ....deliverables.reread import Tally
 from ....engine.e3 import cards as E3C
 from .match import CONFIRMED_TH, DEPTH_SHORT, DEPTH_TH, PASS, REASON_TH, STATUS_TH, THREE, TWO
 
@@ -38,6 +41,15 @@ L_ACCRUED, L_PREPAID = "รับของแล้วยังไม่ถู�
 TWO_WAY_WARNING = ("บรรทัดที่ตรวจ 2 ทางเทียบปริมาณกับที่สั่งซื้อเท่านั้น ไม่ได้ตรวจกับใบรับของ "
                    "จึงไม่ได้ยืนยันว่าได้รับของแล้ว")
 APPROVAL = "agent ไม่ได้อนุมัติจ่ายใบแจ้งหนี้ใด “ผ่าน” หมายถึงพร้อมเสนออนุมัติ การอนุมัติและการจ่ายเป็นของคน"
+# AM8: no placeholder stands in for the company or the preparer; a paper without one says it is a draft
+MISSING = "— ยังไม่มี —"
+HEADER_DRAFT = "ร่าง — หัวกระดาษทำการยังไม่ครบ ({}) ตั้งได้ที่การตั้งค่าของ agent นี้ ยังไม่ใช่กระดาษทำการที่ลงนามได้"
+
+
+def header_fields(c: dict, run: dict | None) -> list[tuple[str, str]]:
+    run = run or {}
+    return [(L_COMPANY, str(c.get("company") or run.get("organisation") or "").strip()),
+            (L_PREPARER, str(run.get("preparer") or "").strip())]
 FROM_TH = {"history": "รอบก่อน", "round": "รอบนี้"}
 STATE_TH = {"linked": "จับคู่แล้ว", "waiting": "รอคนยืนยัน"}
 KIND_TH = {"receipt": "ใบรับของ ↔ PO", "invoice": "ใบแจ้งหนี้ ↔ PO", "duplicate": "ใบแจ้งหนี้ซ้ำ"}
@@ -137,17 +149,23 @@ class MatchWorkbook:
         ws = self.wb.active
         ws.title = S_SUMMARY
         c, s, t = self.c, self.c["summary"], self.c["totals"]
-        self._title(ws, f"ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ · {c['period_label']}", c.get("company") or "")
+        head = dict(header_fields(c, self.run))
+        self._title(ws, f"ผลตรวจใบแจ้งหนี้กับใบสั่งซื้อ · {c['period_label']}", head[L_COMPANY])
         for col, w in zip("ABCD", (52, 40, 16, 22)):
             ws.column_dimensions[col].width = w
-        preparer = str(self.run.get("preparer") or "").strip() or "ผู้ใช้งาน agent"
+        missing = [k for k, v in head.items() if not v]
+        if missing:
+            m = ws.cell(row=3, column=1, value=HEADER_DRAFT.format(", ".join(missing)))
+            m.font = Font(name=self.font, bold=True, size=11, color=self.p.get("negative", "B42318"))
+        preparer = head[L_PREPARER]
         made = E3C.date_th(self.run.get("date") or c["prepared_on"])
         depth = f"ตรวจ 3 ทาง {t['three_way']} บรรทัด · ตรวจ 2 ทาง {t['two_way']} บรรทัด"
         if t["unlinked"]:
             depth += f" · ยังไม่ได้ตรวจกับ PO {t['unlinked']} บรรทัด"
         r = 4
-        for label, value in ((L_COMPANY, c.get("company") or "ยังไม่ได้ตั้งชื่อบริษัทใน agent"), (L_PERIOD, c["period_label"]),
-                             (L_PREPARER, f"{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {self.run.get('agent_version') or ''}".rstrip(" ·")),
+        for label, value in ((L_COMPANY, head[L_COMPANY] or MISSING), (L_PERIOD, c["period_label"]),
+                             (L_PREPARER, f"{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {self.run.get('agent_version') or ''}".rstrip(" ·")
+                              if preparer else MISSING),
                              (L_PRACTICE, c["practice"]["label"]), (L_DEPTH, depth), (L_APPROVAL, APPROVAL)):
             self._pair(ws, r, label, value, bold=label == L_DEPTH)
             r += 1
@@ -369,6 +387,10 @@ class MatchWorkbook:
         if self.c["not_included"]:
             self.left_out()
         self.wb.properties.creator = "Agent Market · invoice and purchase order matching"
+        # AM8: printable — the face on one page; on a sheet too wide for a page, the columns that say which
+        # invoice and line a row is repeat on every page beside its figures
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
+                                 id_cols={S_INVOICES: 2, S_LINES: 3, S_PO: 2})
         self.wb.save(path)
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "invoices": t["invoices"], "passed": t["passed"], "blocked": t["blocked"],
@@ -393,8 +415,10 @@ def _same(cell, v) -> bool:
     return isinstance(cell, (int, float)) and abs(Decimal(str(cell)) - Decimal(str(v))) <= Decimal("0.000001")
 
 
-def check(path: str, computed: dict) -> list:
-    """The gate on the file itself: what the working paper shows is what was computed."""
+def check(path: str, computed: dict, run: dict | None = None) -> list:
+    """The gate on the file itself (AM8: read back): the header holds the real company and preparer (or the
+    paper says it is a draft for want of them); what the working paper shows is what was computed, every
+    invoice's amounts and every line's figures; the print setup is there."""
     def ck(name, ok, detail, label):
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
@@ -402,8 +426,21 @@ def check(path: str, computed: dict) -> list:
     t, s = computed["totals"], computed["summary"]
     out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
     face = _labelled(wb[S_SUMMARY])
-    out.append(ck("xlsx.header", all(face.get(k) for k in (L_COMPANY, L_PERIOD, L_PREPARER, L_PRACTICE, L_DEPTH, L_APPROVAL)), "",
-                  "หน้าสรุประบุบริษัท งวด ผู้จัดทำ ใบรับของ วิธีตรวจ และการอนุมัติจ่าย"))
+    a3 = str(wb[S_SUMMARY]["A3"].value or "")
+    h = Tally()
+    for label, want in header_fields(computed, run):
+        got = str(face.get(label) or "")
+        h.n += 1
+        if want and not got.startswith(want):
+            h.bad.append(f"{label}: ในไฟล์ “{got[:40]}” ควรเป็น {want}")
+        elif not want and (got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3):
+            h.bad.append(f"{label}: ไม่มีค่าจริง แต่ในไฟล์เขียนว่า “{got}” และไม่ได้บอกว่าเป็นร่าง")
+    for k in (L_PERIOD, L_PRACTICE, L_DEPTH, L_APPROVAL):
+        h.n += 1
+        if not face.get(k):
+            h.bad.append(f"{k}: ว่าง")
+    out.append(h.result("xlsx.header", "หน้าสรุประบุนิติบุคคลและผู้จัดทำจริง (หรือบอกว่าเป็นร่าง) งวด ใบรับของ วิธีตรวจ และการอนุมัติจ่าย",
+                        "หัวกระดาษทำการ"))
     depth = str(face.get(L_DEPTH) or "")
     says = f"ตรวจ 3 ทาง {t['three_way']} บรรทัด" in depth and f"ตรวจ 2 ทาง {t['two_way']} บรรทัด" in depth
     warned = any(r and r[0] == TWO_WAY_WARNING for r in wb[S_SUMMARY].iter_rows(min_row=1, max_col=1, values_only=True))
@@ -454,4 +491,13 @@ def check(path: str, computed: dict) -> list:
     left = computed["not_included"]
     n = len(_rows(wb[S_LEFT])) if S_LEFT in wb.sheetnames else 0
     out.append(ck("xlsx.not_included", n == len(left), f"{n} ไฟล์", "ไฟล์ที่ไม่ได้ใช้อยู่ในรายการเอกสารที่ยังไม่ได้รวม"))
+    f = Tally()
+    for r, i in zip(inv, invoices):
+        for col, head, key in ((8, "ยอดก่อนภาษี", "subtotal"), (9, "ภาษีมูลค่าเพิ่ม", "vat_amount"), (10, "ยอดรวม", "total")):
+            f.number(f"ใบแจ้งหนี้ {i['number']} {head}", r[col], i[key])
+    for r, x in zip(ln, lines):
+        for col, head, key in ((4, "จำนวน", "quantity"), (6, "ราคาต่อหน่วย", "unit_price"), (7, "จำนวนเงิน", "amount")):
+            f.number(f"บรรทัด {r[0]} ({r[1]}) {head}", r[col], x[key])
+    out.append(f.result("xlsx.figures", "ยอดของทุกใบแจ้งหนี้และตัวเลขของทุกบรรทัด (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
+    out.append(workpaper.check(path))
     return out

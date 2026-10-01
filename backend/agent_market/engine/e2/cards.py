@@ -223,6 +223,22 @@ def findings_for(doc_key: str, doc: dict) -> list[Finding]:
                                options, "exclude", evidence=ev, subject=subj, leaves_out=True,
                                input={"kind": INPUT_KIND[kind], "hint": INPUT_HINT[INPUT_KIND[kind]]},
                                facts={"field": field, "proposed": shown}))
+        elif code == "item_text":
+            # AM8: a row whose text the item did not take in full — the person reads the page and decides
+            e = q.get("evidence") or {}
+            read, full = str(e.get("read") or ""), str(q.get("proposed") or "")
+            left = " ".join(str(x) for x in e.get("left_out") or [])
+            where = f" (หน้า {e['page']})" if e.get("page") else ""
+            text = (f"{label}: รายการที่ {e.get('row')} อ่านชื่อได้ “{read or '—'}” แต่แถวเดียวกันในเอกสารมีคำว่า “{left}” "
+                    f"ที่ยังไม่ได้อ่านเข้ามา{where} ชื่อรายการที่พิมพ์ในเอกสารคือข้อไหน ถ้าไม่ใช่ทั้งสองแบบ พิมพ์ชื่อที่ถูก{note}")
+            opts = [(f"ชื่อเต็ม: {full}"[:60], {"accept": full}, "ตามข้อความทั้งแถวในเอกสาร")]
+            if read:
+                opts.append((f"ตามที่อ่าน: {read}"[:60], {"accept": read}, "ชื่อตามที่ระบบอ่านได้"))
+            opts.append(("ข้ามไว้ ยังไม่ยืนยัน", "unconfirmed", "บันทึกตามที่อ่าน และขึ้นในทะเบียนว่าต้องตรวจ"))
+            out.append(finding("e2_item_text", "blocking", "preflight", "ชื่อรายการ", text, opts, "unconfirmed",
+                               evidence={**ev, "raw_text": e.get("raw_text"), "page": e.get("page")}, subject=subj,
+                               input={"kind": "text", "hint": INPUT_HINT["text"]},
+                               facts={"row": e.get("row"), "read": read, "proposed": full}))
         elif code == "field_missing" and field in FIELD_KINDS:
             kind = FIELD_KINDS[field]
             what = FIELD_TH.get(field, field)

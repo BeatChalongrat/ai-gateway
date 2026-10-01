@@ -84,6 +84,47 @@ def _part_order(name: str):
     return (9, _natural(name))
 
 
+# AM8: where the filler writes. A marker anywhere else (a footnote, a chart's own XML, a comment) is
+# not filled — the template is refused before work starts, never delivered with the marker in it.
+FILLED_PARTS = {"docx": ("word/document.xml", "word/header", "word/footer"),
+                "pptx": ("ppt/slides/", "ppt/notesSlides/", "ppt/slideLayouts/", "ppt/slideMasters/")}
+# PowerPoint names a shape it adds "<what> <n>" ("TextBox 3", "กล่องข้อความ 3"): a shape a person
+# renamed carries the name they gave it, and that name says what the shape is for.
+AUTO_NAME = re.compile(r"^.+\s\d+$")
+
+
+def _marker_parts(path: str) -> list[tuple[str, str, str]]:
+    """(key, part name, the paragraph's text) for every {{key}} in every XML part of a .docx / .pptx."""
+    out: list[tuple[str, str, str]] = []
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if n.endswith(".xml") and "_rels/" not in n
+                 and not n.startswith(("docProps/", "customXml/", "[Content_Types]"))]
+        for name in sorted(names, key=_part_order):
+            data = z.read(name)
+            if b"{" not in data:
+                continue
+            root = etree.fromstring(data, _SAFE_XML)
+            for p_tag, t_tag in ((dg.W_P, dg.W_T), (A_P, A_T)):
+                for p in root.iter(p_tag):
+                    keys = dg.markers_in(p, t_tag, p_tag)
+                    if keys:
+                        text = dg.paragraph_text(p, t_tag, p_tag)
+                        out.extend((k, name, text) for k in keys)
+    return out
+
+
+def chart_parts(path: str) -> list[str]:
+    """A Word or PowerPoint template's own charts: their numbers are stored in the file and are not
+    the run's — the filler does not redraw them (an Excel chart reads its cells, so it is not here)."""
+    with zipfile.ZipFile(path) as z:
+        return sorted(n for n in z.namelist() if re.match(r"^(word|ppt)/charts/chart\d+\.xml$", n))
+
+
+def _context(text: str, key: str) -> str:
+    t = re.sub(r"\s+", " ", text or "").strip()
+    return t[:120]
+
+
 def zip_markers(path: str) -> list[tuple[str, str]]:
     """(key, part) for every {{key}} in every XML part of a .docx / .pptx —
     body, headers, footers, footnotes, slides, notes, layouts, charts —
@@ -346,6 +387,39 @@ def _pptx_tables(prs) -> list[dict[str, Any]]:
     return out
 
 
+def _named_shapes(prs) -> list[dict[str, Any]]:
+    """Text shapes a person named (see AUTO_NAME), on slides: {"key", "name", "slide", "text"}."""
+    out, seen = [], set()
+    for si, slide in enumerate(prs.slides, start=1):
+        for sh in slide.shapes:
+            name = (sh.name or "").strip()
+            if not name or AUTO_NAME.match(name) or not getattr(sh, "has_text_frame", False) or not sh.has_text_frame:
+                continue
+            if "{{" in sh.text_frame.text:
+                continue          # its markers are the slots
+            key = "shape:" + name
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"key": key, "name": name, "slide": si, "text": sh.text_frame.text[:120]})
+    return out
+
+
+def _set_shape_text(sh, text: str) -> None:
+    """A named shape's text becomes `text` in its first run, keeping that run's formatting."""
+    tf_ = sh.text_frame
+    paras = list(tf_.paragraphs)
+    first = paras[0]
+    if first.runs:
+        first.runs[0].text = text
+        for r in first.runs[1:]:
+            r.text = ""
+    else:
+        first.text = text
+    for p in paras[1:]:
+        p._p.getparent().remove(p._p)
+
+
 def _fill_pptx(path, out_path, values, mapping, report) -> None:
     prs = Presentation(path)
     stories = []
@@ -354,6 +428,23 @@ def _fill_pptx(path, out_path, values, mapping, report) -> None:
         if slide.has_notes_slide:
             notes = slide.notes_slide
             stories.append((_part_label(notes.part.partname), notes._element))
+    # AM8: the masters and layouts too — a marker on a master was reported as filled and left in place
+    for master in prs.slide_masters:
+        stories.append((_part_label(master.part.partname), master._element))
+        for layout in master.slide_layouts:
+            stories.append((_part_label(layout.part.partname), layout._element))
+    for s in _named_shapes(prs):
+        if s["key"] not in values:
+            continue
+        text = dg.as_text(values[s["key"]])
+        if text is None:
+            report["not_filled_explained"].append({"name": s["key"], "reason": dg.why_not(values[s["key"]])})
+            continue
+        for slide in prs.slides:
+            for sh in slide.shapes:
+                if (sh.name or "").strip() == s["name"] and getattr(sh, "has_text_frame", False) and sh.has_text_frame:
+                    _set_shape_text(sh, text)
+        report["filled"].append(s["key"])
     for where, root in stories:
         for p in root.iter(A_P):
             done = dg.replace_markers_in_paragraph(
@@ -366,6 +457,136 @@ def _fill_pptx(path, out_path, values, mapping, report) -> None:
                     report["not_filled_explained"].append(
                         {"marker": key, "reason": dg.why_not(dg.scalar_value(values, mapping, key)), "where": where})
     prs.save(out_path)
+
+
+# ─── Reading the filled file back (AM8) ───────────────────────
+# The gate does not take the filler's word: these open the delivered file and look.
+
+def _squash(text) -> str:
+    return re.sub(r"\s+", "", "" if text is None else str(text))
+
+
+def _same_value(cell_value, value) -> bool:
+    from decimal import Decimal, InvalidOperation
+
+    if cell_value is None:
+        return False
+    try:
+        if isinstance(value, (int, float, Decimal)) or isinstance(cell_value, (int, float)):
+            return Decimal(str(cell_value).replace(",", "")) == Decimal(str(value).replace(",", ""))
+    except (InvalidOperation, ValueError):
+        pass
+    want = _squash(dg.as_text(value))
+    return bool(want) and want in _squash(cell_value)
+
+
+def _xlsx_cell(wb, ref: str):
+    sheet, _, coord = ref.rpartition("!")
+    sheet = sheet.strip("'").replace("''", "'")
+    coord = coord.replace("$", "").split(":")[0]
+    return wb[sheet][coord] if sheet in wb.sheetnames else None
+
+
+def _all_text(path: str, kind: str) -> str:
+    parts = []
+    with zipfile.ZipFile(path) as z:
+        for name in z.namelist():
+            if name.endswith(".xml") and name.startswith(FILLED_PARTS[kind]):
+                root = etree.fromstring(z.read(name), _SAFE_XML)
+                for p_tag, t_tag in ((dg.W_P, dg.W_T), (A_P, A_T)):
+                    parts.extend(dg.paragraph_text(p, t_tag, p_tag) for p in root.iter(p_tag))
+    return " ".join(parts)
+
+
+def holds(path: str, kind: str, slot: dict, value) -> bool:
+    """Does the filled file at ``path`` hold ``value`` where ``slot`` is?"""
+    key, sk = slot["key"], slot["kind"]
+    if kind == "xlsx":
+        wb = openpyxl.load_workbook(path)
+        if sk in ("name", "table"):
+            n = next((x for x in ex.list_defined_names(wb) if x["key"] == key), None)
+            cell = _xlsx_cell(wb, n["ref"]) if n and n.get("ref") else None
+            return cell is not None and _same_value(cell.value, value)
+        if sk == "target" or "!" in key:
+            cell = _xlsx_cell(wb, key)
+            return cell is not None and _same_value(cell.value, value)
+        return any(_same_value(c.value, value) for ws in wb.worksheets for c in _cells(ws))
+    if kind == "docx" and sk == "control":
+        doc = Document(path)
+        hits = [c for c in dg.list_content_controls(doc) if key in (c.get("tag"), c.get("alias"))]
+        return bool(hits) and all(_squash(c.get("text")) == _squash(dg.as_text(value)) for c in hits)
+    if kind == "docx" and sk == "target":
+        m = TARGET_RE.match(key)
+        doc = Document(path)
+        if not m:
+            return False
+        ti, r, c = (int(x) for x in m.groups())
+        try:
+            return _squash(doc.tables[ti].cell(r, c).text) == _squash(dg.as_text(value))
+        except IndexError:
+            return False
+    if kind == "pptx" and sk == "shape":
+        prs = Presentation(path)
+        name = key.split(":", 1)[1]
+        texts = [sh.text_frame.text for sl in prs.slides for sh in sl.shapes
+                 if (sh.name or "").strip() == name and getattr(sh, "has_text_frame", False) and sh.has_text_frame]
+        return bool(texts) and all(_squash(t) == _squash(dg.as_text(value)) for t in texts)
+    want = _squash(dg.as_text(value))
+    return bool(want) and want in _squash(_all_text(path, kind))
+
+
+def markers_left(path: str) -> list[str]:
+    """Every {{marker}} still in the filled file, in any part (masters, footnotes, charts included)."""
+    if kind_of(path) == "xlsx":
+        return _unique(k for k, _ in _xlsx_markers(_load_xlsx(path)))
+    return _unique(k for k, _, _ in _marker_parts(path))
+
+
+def cut_off(src: str, out: str) -> list[str]:
+    """Filled text that no longer fits its box: a Word table row of fixed height (hRule="exact"), a
+    PowerPoint text box — measured with the font's metrics, only where the fill changed the text."""
+    from .fit import LINE, frame_overflow, wrap_lines
+
+    kind = kind_of(out)
+    found: list[str] = []
+    if kind == "docx":
+        before, after = Document(src), Document(out)
+        default = after.styles["Normal"].font.size.pt if after.styles["Normal"].font.size else 11.0
+        for ti, (tb, ta) in enumerate(zip(before.tables, after.tables)):
+            for ri, (rb, ra) in enumerate(zip(tb.rows, ta.rows)):
+                trh = ra._tr.find(qn("w:trPr"))
+                h = trh.find(qn("w:trHeight")) if trh is not None else None
+                if h is None or h.get(qn("w:hRule")) != "exact":
+                    continue
+                height_pt = int(h.get(qn("w:val")) or 0) / 20
+                for ci, (cb, ca) in enumerate(zip(rb.cells, ra.cells)):
+                    if _squash(cb.text) == _squash(ca.text):
+                        continue
+                    w = ca._tc.tcPr.find(qn("w:tcW")) if ca._tc.tcPr is not None else None
+                    width_pt = (int(w.get(qn("w:w"))) / 20 if w is not None and w.get(qn("w:type")) in (None, "dxa")
+                                and (w.get(qn("w:w")) or "0").isdigit() and int(w.get(qn("w:w"))) > 0
+                                else (after.sections[0].page_width - after.sections[0].left_margin
+                                      - after.sections[0].right_margin) / 12700 / max(1, len(ra.cells)))
+                    size = default
+                    for p in ca.paragraphs:
+                        for r in p.runs:
+                            if r.font.size:
+                                size = r.font.size.pt
+                    lines = sum(wrap_lines(p.text, "Sarabun", size, max(width_pt - 10.8, 10)) for p in ca.paragraphs if p.text)
+                    if lines * size * LINE > height_pt * 1.02:
+                        found.append(f"ตาราง {ti + 1} แถว {ri + 1} ช่อง {ci + 1}")
+    elif kind == "pptx":
+        before, after = Presentation(src), Presentation(out)
+        for si, (sb, sa) in enumerate(zip(before.slides, after.slides), start=1):
+            old = {sh.shape_id: sh.text_frame.text for sh in sb.shapes if getattr(sh, "has_text_frame", False) and sh.has_text_frame}
+            for sh in sa.shapes:
+                if not (getattr(sh, "has_text_frame", False) and sh.has_text_frame):
+                    continue
+                if _squash(old.get(sh.shape_id)) == _squash(sh.text_frame.text) or sh.width is None or sh.height is None:
+                    continue
+                if frame_overflow(sh.text_frame, sh.width, sh.height, "Sarabun") > 1.02:
+                    found.append(f"สไลด์ {si} “{(sh.name or '').strip()}”")
+    return found
 
 
 # ─── Public ────────────────────────────────────────────────────
@@ -385,7 +606,17 @@ def inspect(path: str) -> dict[str, Any]:
         if not out["has_markers"]:
             out["targets"] = _xlsx_targets(wb)
         return out
-    out["markers"] = _unique(k for k, _ in zip_markers(path))
+    found = _marker_parts(path)
+    supported = FILLED_PARTS[kind]
+    out["markers"] = _unique(k for k, part, _ in found if part.startswith(supported))
+    out["context"] = {}
+    for k, part, text in found:
+        out["context"].setdefault(k, _context(text, k))
+    # AM8: refused before work starts, each with its reason — never silently left in the delivered file
+    out["refused"] = [{"key": f"{part}:{k}", "label": k, "reason": "unsupported_location", "where": part}
+                      for k, part, _ in found if not part.startswith(supported)]
+    out["refused"] += [{"key": c, "label": f"กราฟ {i}", "reason": "chart_not_updated", "where": c}
+                       for i, c in enumerate(chart_parts(path), start=1)]
     if kind == "docx":
         doc = Document(path)
         out["controls"] = [{k: c[k] for k in ("tag", "alias", "type", "fillable", "reason", "showing_placeholder",
@@ -395,8 +626,10 @@ def inspect(path: str) -> dict[str, Any]:
         if not out["has_markers"]:
             out["targets"] = _docx_targets(doc)
     else:
-        out["tables"] = _pptx_tables(Presentation(path))
-        out["has_markers"] = bool(out["markers"])
+        prs = Presentation(path)
+        out["tables"] = _pptx_tables(prs)
+        out["shapes"] = _named_shapes(prs)
+        out["has_markers"] = bool(out["markers"]) or bool(out["shapes"])
     return out
 
 

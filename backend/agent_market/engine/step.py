@@ -104,10 +104,14 @@ def _fill_template(pkg, computed: dict, t: dict) -> dict:
     rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, pkg.template_values(computed))
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
+    # AM8: what the filled file was found to lack travels with its quality, which the download card shows —
+    # every slot without its value, by name (a reason kept only in the run's JSON reached nobody)
     return {"name": name, "format": "template", "kind": "template", "size": os.path.getsize(path), "sha256": sha,
-            "quality": {"passed": rep["passed"], "checks": rep["checks"]}, "chart_bindings": [],
+            "quality": {"passed": rep["passed"], "checks": rep["checks"], "unfilled": rep.get("unfilled") or []},
+            "chart_bindings": [],
             "meta": {"ext": rep["kind"], "needs_recalc": bool(rep.get("needs_recalc")), "filled": len(rep.get("filled") or []),
-                     "not_filled": rep.get("not_filled_explained") or [], "refused": rep.get("refused") or {}}}
+                     "not_filled": rep.get("not_filled_explained") or [], "refused": rep.get("refused") or {},
+                     "unfilled": rep.get("unfilled") or []}}
 
 
 def run(req: dict) -> dict:
@@ -167,8 +171,10 @@ def run(req: dict) -> dict:
         saved = req.get("saved") or None
         spec = req.get("spec") or {}
         proposal = template_out.propose(sl, spec)
+        # AM8: identity is all the code proposes; the runner asks a model for the rest (the person confirms).
+        # What the filler cannot do stops the template before any work, with its reasons.
         out = {"inspection": inspection, "slots": sl, "proposal": template_out.carry_over(saved, sl, proposal),
-               "diff": template_out.diff(saved, sl)}
+               "diff": template_out.diff(saved, sl), "blocking": template_out.blocking(sl)}
     else:
         raise ValueError(f"unknown op {op!r}")
     out["ok"] = True

@@ -1,7 +1,7 @@
 {
  "schema": "agent.market.eval.v1",
  "package": "sran.bank-reconciliation",
- "note": "Files are in evals/fixtures, written by tools/make_bank_fixtures.py. Every expected value comes from the scenario (what each line truly is) and plain addition in that generator, never from this package. Answers: a key names a row as {file}.sheet.row; unanswered cards take their default, as a skipped card does. Checked on every case, whatever it says: every row of both files is in exactly one of the four groups; every pair below the exact tier was confirmed by a person; a round whose adjusted balances differ is never a success; every drafted entry balances; the working paper passed its own quality gate; the same input gives the same computed.json, byte for byte.",
+ "note": "Files are in evals/fixtures, written by tools/make_bank_fixtures.py. Every expected value comes from the scenario (what each line truly is) and plain addition in that generator, never from this package. Answers: a key names a row as {file}.sheet.row; unanswered cards take their default, as a skipped card does. Checked on every case, whatever it says: every row of both files is in exactly one of the four groups; every pair below the exact tier was confirmed by a person; a round whose adjusted balances differ is never a success; every drafted entry balances; the working paper passed its own quality gate; the same input gives the the same figures, the same matches and the same questions (computed.json identical; a workbook's packaging is not compared).",
  "defaults": {
   "company": "บริษัท สยามตัวอย่างการค้า จำกัด",
   "bank_name": "ธนาคารกสิกรไทย",

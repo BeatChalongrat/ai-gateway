@@ -99,6 +99,15 @@ def score(out: dict, exp: dict) -> dict:
             (g["quantity"]["normalized"] is None or Decimal(g["quantity"]["normalized"]) == Decimal(w["quantity"]))
             for g, w in zip(got, want_items))
         result["line_items"] = {"ok": li_ok, "got": len(got), "want": len(want_items)}
+        # AM8: an item's name as the page prints it, or a question about that row — a name cut short and
+        # marked as read with confidence was the audit's finding (d01 row 3 lost "แฟ้มเอกสาร")
+        if exp["class"] not in ("scan300", "scan200", "photo"):
+            for i, (g, w) in enumerate(zip(got, want_items), start=1):
+                if not w.get("description"):
+                    continue
+                if _norm_core((g.get("description") or {}).get("normalized")) != _norm_core(w["description"]) \
+                        and f"item_text:line{g['row']}" not in asked:
+                    result["silent_errors"].append(f"line_items[{i}].description")
     q = exp["questions"]
     must = q["must"]
     result["missing_questions"] = [m for m in must if not any(k == m or k.startswith(m + ":") or m.startswith(k) for k in asked)]

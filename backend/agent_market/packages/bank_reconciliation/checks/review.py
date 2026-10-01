@@ -243,10 +243,15 @@ def _account(rv: Review) -> None:
         for a in u.data.get("accounts") or []:
             c = codes.setdefault(a["code"], {"code": a["code"], "name": a["name"], "rows": 0})
             c["rows"] += a["rows"]
-    if len(codes) <= 1:
-        rv.gl_code, rv.gl_from = (next(iter(codes)) if codes else None), "only_account"
-        return
     wanted = str(acc.get("gl_code") or "").strip()
+    if len(codes) <= 1:
+        # one account in the ledger is that account; a ledger with no account column takes the install's
+        # setting (AM8: it was read after this return, so the paper said "ไม่ระบุ" with the code set)
+        if codes:
+            rv.gl_code, rv.gl_from = next(iter(codes)), "only_account"
+        else:
+            rv.gl_code, rv.gl_from = (wanted or None), ("settings" if wanted else "only_account")
+        return
     said = rv.answers.get("bankrec_account")
     if isinstance(said, str) and said in codes:
         rv.gl_code, rv.gl_from = said, "answer"

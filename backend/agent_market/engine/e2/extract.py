@@ -252,7 +252,7 @@ def read(path: str, name: str | None = None, *, ocr=None) -> State:
 def judge(state: State, *, org: dict | None = None, history: list[dict] | None = None, today: _dt.date | None = None,
           proposals: list[dict] | None = None, overrides: dict | None = None, confirmed: set | None = None,
           absent: set | None = None, accepted_checks: set | None = None, doc_type: str | None = None,
-          override_methods: dict | None = None) -> dict:
+          override_methods: dict | None = None, item_names: dict | None = None) -> dict:
     """Checks, confidence and questions for a read document.
 
     A person's answers come back as: ``overrides`` {field: typed value (normalised)}, ``confirmed``
@@ -284,6 +284,14 @@ def judge(state: State, *, org: dict | None = None, history: list[dict] | None =
         if n in fields and fields[n].present:
             fields[n].confidence = 1.0
             fields[n].checks.append("confirmed_by_person")
+    # AM8: an item's name a person chose or typed ({row: text}): theirs, and said to be theirs
+    for it in items:
+        name = (item_names or {}).get(it["row"], (item_names or {}).get(str(it["row"])))
+        if name:
+            it["description"] = Field(value=name, normalized=name, confidence=1.0,
+                                      source=Source(page=it.get("page"), bbox=None, span=None, method="confirmed_by_person",
+                                                    raw_text=name), checks=["confirmed_by_person"])
+            it.pop("left_out", None)
 
     triage = tier == "photo"
     dtype = doc_type.normalized or "unknown"
@@ -371,7 +379,8 @@ def judge(state: State, *, org: dict | None = None, history: list[dict] | None =
         "method": method,
         "fields": {k: fields.get(k, Field()).to_dict() for k in FIELD_KINDS if k in scope},
         "line_items": [] if triage else [{"row": it["row"], "page": it["page"],
-                                          **{k: (it.get(k) or Field()).to_dict() for k in ("description", "quantity", "unit_price", "amount")}}
+                                          **{k: (it.get(k) or Field()).to_dict() for k in ("description", "quantity", "unit_price", "amount")},
+                                          **({"left_out": list(it["left_out"])} if it.get("left_out") else {})}
                                          for it in items],
         "deterministic_checks": [c.to_dict() for c in checks],
         "questions": [q.to_dict() for q in questions],
@@ -435,6 +444,14 @@ def state_load(d: dict) -> State:
 def rejudge(out: dict, **kw) -> dict:
     """Judge a stored extraction again (``out`` as ``extract`` returned it); keyword arguments as ``judge``."""
     return judge(state_load(out["state"]), **kw)
+
+
+def _row_words(it: dict) -> list[str]:
+    """An item's name with the words its row left out, in the order the row prints them."""
+    d = it.get("description")
+    raw = str(d.source.raw_text if d is not None and d.source is not None else "")
+    words = [w for w in [str(d.value or "") if d is not None else ""] + list(it.get("left_out") or []) if w]
+    return sorted(words, key=lambda w: raw.find(w) if raw.find(w) >= 0 else len(raw))
 
 
 def _present(fields, name) -> bool:
@@ -597,6 +614,16 @@ def _questions(fields, items, checks, pages, dtype, triage, *, absent: set = fro
                          proposed=f.candidates[0].get("normalized"), evidence={"candidates": f.candidates}))
     if not triage:
         for it in items:
+            d = it.get("description")
+            if it.get("left_out") and d is not None and "confirmed_by_person" not in d.checks:
+                # AM8: the row shows text the item does not carry — its name may be cut short. Asked, never assumed.
+                read = str(d.value or "").strip()
+                full = " ".join(x for x in _row_words(it) if x).strip() or read
+                add(Question("item_text", subject=f"line{it['row']}", fieldname=f"line_items[{it['row']}].description",
+                             reason="part of the row's text was not read into the item", proposed=full, blocking=False,
+                             evidence={"read": read, "left_out": list(it["left_out"]), "row": it["row"],
+                                       "raw_text": d.source.raw_text if d.source else None,
+                                       "page": d.source.page if d.source else it.get("page")}))
             for k in ("amount",):
                 f = it.get(k)
                 if f is not None and f.present and f.confidence < STRICT_THRESHOLD:

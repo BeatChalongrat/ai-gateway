@@ -66,7 +66,7 @@ class DeckWriter:
         rule.line.fill.background()
         note = self.m["source_note"]
         if cites:
-            note += "  ·  อ้างอิง " + ", ".join(cites[:8]) + (" …" if len(cites) > 8 else "")
+            note += "  ·  อ้างอิง " + ", ".join(cites)  # every figure on the slide: never "…" (AM8)
         self._text(slide, 0.5, 5.2, 8.2, 0.3, note, 7.5, p["muted"])
         self._text(slide, 8.7, 5.2, 0.8, 0.3, str(n), 8, p["muted"], align=PP_ALIGN.RIGHT)
 
@@ -157,12 +157,9 @@ class DeckWriter:
             if len(shapes) >= 3:
                 shapes[2].top = Inches(3.0)
                 shapes[2].height = Inches(2.0)
-        self._finish(s, sorted({c for c in self.c["quotable_cites"].values()} & self._cites_in(nar["summary"]))[:6])
-
-    def _cites_in(self, text: str) -> set[str]:
-        from .content import mark_citations
-
-        return {c for _, c in mark_citations(text, self.c) if c}
+        nc = self.m.get("narrative_cites") or {}
+        self._finish(s, list(dict.fromkeys((nc.get("summary") or []) + (nc.get("watch") or [])[:4]
+                                           + (nc.get("movements") or [])[:4])))
 
     def chart(self, spec: dict):
         scale = Decimal(str(spec.get("scale", 1)))
@@ -236,7 +233,7 @@ class DeckWriter:
                                           "source_values": sv["values"], "reversed": kind == "bar_horizontal"}
                                          for sv, v in zip(spec["series"], values)],
                               "scale": str(scale)})
-        self._finish(s, [spec["cite"]] if spec.get("cite") else [])
+        self._finish(s, list(spec.get("cites") or []))
 
     def table(self, title: str, headers: list[str], rows: list[list[str]], cites: list[str], numeric_from=1,
               widths: list[float] | None = None):
@@ -322,14 +319,16 @@ class DeckWriter:
         self.bullets(f"รายการที่ต้องตรวจ ({len(exc)})", items, [e["cite"] for e in exc[:5] if e.get("cite")],
                      body="ระบบไม่แก้ตัวเลขเอง ทุกข้อมีแถวต้นทางในรายงานฉบับเต็ม")
         nar = m["narrative"]
-        self.bullets("สิ่งที่ควรทำต่อ", nar.get("next_steps", [])[:5], [])
+        self.bullets("สิ่งที่ควรทำต่อ", nar.get("next_steps", [])[:5], list(dict.fromkeys(
+            (self.m.get("narrative_cites") or {}).get("next_steps") or [])))
         assumptions = [a["text"] for a in m["assumptions"]][:6]
         model = m.get("model") or {}
         about = [f"ไฟล์หลัก: {c['source']['primary']['file']} ({c['source']['primary']['rows_used']:,} รายการ)",
                  f"คำนวณด้วย {c['script']} (Decimal)",
                  "โมเดลที่เขียนคำอธิบาย: " + (model.get("model") or "ไม่มี (ข้อความจากกฎ)")
                  + (" · รันในองค์กร" if model.get("self_hosted") else ""),
-                 "อ่านอย่างเดียว: ไม่เขียนกลับระบบบัญชี ไม่ส่งอีเมล ไม่โอนเงิน"]
+                 "อ่านอย่างเดียว: ไม่เขียนกลับระบบบัญชี ไม่โอนเงิน · ไม่ส่งอีเมลเอง ส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าและมีคนอนุมัติ",
+                 "รายงานผู้บริหาร ไม่ใช่การปิดบัญชี: ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุง"]
         self.two_column("ข้อสมมติและที่มาของข้อมูล", ("ข้อสมมติในรอบนี้", assumptions), ("ที่มาและขอบเขต", about), [])
         props = self.prs.core_properties
         props.title = f"{m['title']} {m['subtitle']}"

@@ -14,12 +14,15 @@ are the computed ones, to the satang.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ....deliverables import workpaper
+from ....deliverables.reread import Tally
 from ....engine.e3 import cards as E3C
 from ....engine.e3.match import SETTING_TH
 from ..checks import classify as C
@@ -37,6 +40,11 @@ L_DIFF, L_VERDICT = "ผลต่าง", "ผลการกระทบยอ�
 L_PREPARER, L_REVIEWER = "ผู้จัดทำ", "ผู้สอบทาน"
 TIED, NOT_TIED = "ลงตัว", "ยังไม่ลงตัว"
 DRAFT_MARK = "ร่าง — ยังไม่ลงตัว ห้ามใช้เป็นงบกระทบยอดที่เสร็จแล้ว"
+# AM8: a header field with no value says so — no placeholder stands in for a company, an account or a
+# preparer — and a paper missing one of them says on its face that it is not yet one to sign
+MISSING = "— ยังไม่มี —"
+HEADER_DRAFT = "ร่าง — หัวกระดาษทำการยังไม่ครบ ({}) ตั้งได้ที่การตั้งค่าของ agent นี้ ยังไม่ใช่กระดาษทำการที่ลงนามได้"
+L_COMPANY, L_BANK, L_ACC_NAME, L_ACC_NO, L_GL = "นิติบุคคล", "ธนาคาร", "ชื่อบัญชี", "เลขที่บัญชี", "รหัสบัญชีแยกประเภท"
 # true before a sign-off and after it: the stamp adds the sheet, it rewrites no other
 NOT_REVIEWED = "ชื่อและวันที่ของผู้สอบทานอยู่ในชีต “ตรวจทาน” ซึ่งเพิ่มเมื่อผู้สอบทานลงชื่อ (ต้องเป็นคนละคนกับผู้จัดทำ)"
 CONFIRMED_TH = {"rule": "กฎ (ตรงกันทุกตัว)", "person": "คนยืนยัน"}
@@ -69,6 +77,10 @@ class BankWorkbook:
         self.font = theme["fonts"]["thai"]
         self.wb = Workbook()
         self.items = {i["id"]: i for i in computed["items"]}
+
+    def header(self) -> list[tuple[str, str]]:
+        """The face's header fields and their real values ("" when there is none)."""
+        return header_fields(self.c, self.run)
 
     # ── styling ────────────────────────────────────────────────────────────
     def _title(self, ws, text: str, sub: str = ""):
@@ -142,17 +154,18 @@ class BankWorkbook:
         ws.column_dimensions["C"].width = 14
         ws.column_dimensions["D"].width = 40
         r = 4
-        if not gate["passed"]:
-            m = ws.cell(row=3, column=1, value=DRAFT_MARK)
+        marks = draft_marks(self.c, self.run)
+        if marks:
+            m = ws.cell(row=3, column=1, value=" · ".join(marks))
             m.font = Font(name=self.font, bold=True, size=11, color=self.p.get("negative", "B42318"))
-        preparer = str(self.run.get("preparer") or "").strip() or "ผู้ใช้งาน agent"
         made = E3C.date_th(self.run.get("date") or c["prepared_on"])
-        info = [("นิติบุคคล", c.get("company") or "ยังไม่ได้ตั้งชื่อบริษัทใน agent"), ("ธนาคาร", acc.get("bank") or "ไม่ระบุในไฟล์"),
-                ("ชื่อบัญชี", acc.get("name") or "ไม่ระบุในไฟล์"), ("เลขที่บัญชี", acc.get("number") or "ไม่ระบุในไฟล์"),
-                ("รหัสบัญชีแยกประเภท", acc.get("gl_code") or "ไม่ระบุ"), ("งวด", c["period_label"]),
-                ("ตัดยอด ณ วันที่", E3C.date_th(c["as_of"])),
-                (L_PREPARER, f"{preparer} · จัดทำวันที่ {made} · ด้วย agent รุ่น {self.run.get('agent_version') or ''}".rstrip(" ·")),
-                (L_REVIEWER, NOT_REVIEWED)]
+        head = dict(self.header())
+        info = [(k, head[k] or MISSING) for k in (L_COMPANY, L_BANK, L_ACC_NAME, L_ACC_NO)]
+        info += [(L_GL, acc.get("gl_code") or "ไม่มีรหัสบัญชีในไฟล์สมุดบัญชีและการตั้งค่า"), ("งวด", c["period_label"]),
+                 ("ตัดยอด ณ วันที่", E3C.date_th(c["as_of"])),
+                 (L_PREPARER, (f"{head[L_PREPARER]} · จัดทำวันที่ {made} · ด้วย agent รุ่น {self.run.get('agent_version') or ''}".rstrip(" ·"))
+                  if head[L_PREPARER] else MISSING),
+                 (L_REVIEWER, NOT_REVIEWED)]
         for label, value in info:
             self._pair(ws, r, label, value)
             r += 1
@@ -164,8 +177,10 @@ class BankWorkbook:
                                    ("ยอดคงเหลือสิ้นงวดตามธนาคาร", "bank", "closing"), ("ยอดคงเหลือสิ้นงวดตามบัญชี", "book", "closing")):
             self._pair(ws, r, label, _num(b[side][which]) if b[side][which] is not None else "ไม่ทราบ", money=b[side][which] is not None)
             cell = b[side].get(f"{which}_cell") or {}
-            ws.cell(row=r, column=4, value=" · ".join(x for x in (BALANCE_FROM.get(b[side][f"{which}_from"], ""), _where(cell)) if x)
-                    ).font = Font(name=self.font, size=9, color=self.p["muted"])
+            src = ws.cell(row=r, column=4, value=" · ".join(x for x in (BALANCE_FROM.get(b[side][f"{which}_from"], ""), _where(cell)) if x))
+            src.font = Font(name=self.font, size=9, color=self.p["muted"])
+            # AM8: the evidence wraps inside its column — printed, it never runs past the page's edge
+            src.alignment = Alignment(wrap_text=True, vertical="top")
             r += 1
         for side, head, bal_label, adj_label in (("bank", "ฝั่งธนาคาร", L_BANK_BAL, L_BANK_ADJ), ("book", "ฝั่งบัญชี", L_BOOK_BAL, L_BOOK_ADJ)):
             r += 1
@@ -379,10 +394,30 @@ class BankWorkbook:
         if self.c["not_included"]:
             self.left_out()
         self.wb.properties.creator = "Agent Market · bank reconciliation"
+        # AM8: printable — the face on one page; a row's identifier on the page of its amounts
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path))
         self.wb.save(path)
         t = self.c["totals"]
         return {"sheets": list(self.wb.sheetnames), "tied": self.c["statement"]["tied"], "difference": self.c["statement"]["difference"],
                 "matched": t["matched"], "items": t["items"], "run_exceptions": t["run_exceptions"], "draft": not self.c["gate"]["passed"]}
+
+
+def header_fields(c: dict, run: dict | None) -> list[tuple[str, str]]:
+    """The fields a working paper's header must hold, with their real values ("" when there is none):
+    the company (the install's, else the organisation's name), the account, the preparer."""
+    acc = c.get("account") or {}
+    run = run or {}
+    return [(L_COMPANY, str(c.get("company") or run.get("organisation") or "").strip()),
+            (L_BANK, str(acc.get("bank") or "").strip()), (L_ACC_NAME, str(acc.get("name") or "").strip()),
+            (L_ACC_NO, str(acc.get("number") or "").strip()), (L_PREPARER, str(run.get("preparer") or "").strip())]
+
+
+def draft_marks(c: dict, run: dict | None) -> list[str]:
+    marks = [] if c["gate"]["passed"] else [DRAFT_MARK]
+    missing = [k for k, v in header_fields(c, run) if not v]
+    if missing:
+        marks.append(HEADER_DRAFT.format(", ".join(missing)))
+    return marks
 
 
 def _labelled(ws) -> dict:
@@ -399,8 +434,11 @@ def _same(cell, v) -> bool:
     return isinstance(cell, (int, float)) and Decimal(str(cell)).quantize(Decimal("0.01")) == Decimal(v)
 
 
-def check(path: str, computed: dict) -> list[dict]:
-    """The gate on the file itself: what the statement shows is what was computed."""
+def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
+    """The gate on the file itself (AM8: read back, never taken from the writer): the header holds the
+    real company, account and preparer — or the paper says on its face that it is a draft for want of
+    them; every balance, adjustment line, reconciling item and pair amount is the computed one; the
+    print setup is there."""
     def ck(name, ok, detail, label):
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
@@ -408,15 +446,34 @@ def check(path: str, computed: dict) -> list[dict]:
     st, gate = computed["statement"], computed["gate"]
     out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
     face = _labelled(wb[S_STATEMENT])
-    out.append(ck("xlsx.header", all(face.get(k) for k in ("นิติบุคคล", "ธนาคาร", "ชื่อบัญชี", "เลขที่บัญชี", "งวด", "ตัดยอด ณ วันที่",
-                                                          L_PREPARER, L_REVIEWER)), "", "หัวงบระบุบัญชี งวด ผู้จัดทำ และผู้สอบทาน"))
+    a3 = str(wb[S_STATEMENT]["A3"].value or "")
+    t = Tally()
+    for label, want in header_fields(computed, run):
+        got = str(face.get(label) or "")
+        if label == L_PREPARER:
+            t.n += 1
+            if want and not got.startswith(want):
+                t.bad.append(f"{label}: ในไฟล์ “{got[:40]}” ควรเป็น {want}")
+            elif not want and (got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3):
+                t.bad.append(f"{label}: ไม่มีชื่อผู้จัดทำ แต่กระดาษทำการไม่ได้บอกว่าเป็นร่าง")
+        elif want:
+            t.text(label, got, want)
+        else:
+            t.n += 1
+            if got != MISSING or "หัวกระดาษทำการยังไม่ครบ" not in a3:
+                t.bad.append(f"{label}: ไม่มีค่าจริง แต่ในไฟล์เขียนว่า “{got}” และไม่ได้บอกว่าเป็นร่าง")
+    for k in ("งวด", "ตัดยอด ณ วันที่", L_REVIEWER):
+        t.n += 1
+        if not face.get(k):
+            t.bad.append(f"{k}: ว่าง")
+    out.append(t.result("xlsx.header", "หัวงบระบุนิติบุคคล บัญชี งวด และผู้จัดทำจริง (หรือบอกว่าเป็นร่าง)", "หัวกระดาษทำการ"))
     ok = (_same(face.get(L_BANK_BAL), st["bank"]["balance"]) and _same(face.get(L_BOOK_BAL), st["book"]["balance"])
           and _same(face.get(L_BANK_ADJ), st["bank"]["adjusted"]) and _same(face.get(L_BOOK_ADJ), st["book"]["adjusted"])
           and _same(face.get(L_DIFF), st["difference"]))
     out.append(ck("xlsx.statement", ok, f"{face.get(L_BANK_ADJ)} / {face.get(L_BOOK_ADJ)}", "ยอดในงบตรงกับที่คำนวณ"))
     verdict = str(face.get(L_VERDICT) or "")
     says = verdict == TIED if gate["passed"] else verdict.startswith(NOT_TIED)
-    marked = wb[S_STATEMENT]["A3"].value == DRAFT_MARK
+    marked = DRAFT_MARK in a3
     out.append(ck("xlsx.verdict", says and marked == (not gate["passed"]), verdict, "งบบอกตรงตามจริงว่าลงตัวหรือยังไม่ลงตัว"))
     rows = [r for r in wb[S_ITEMS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     items = computed["items"]
@@ -454,4 +511,35 @@ def check(path: str, computed: dict) -> list[dict]:
     left = computed["not_included"]
     n = len([r for r in wb[S_LEFT].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]) if S_LEFT in wb.sheetnames else 0
     out.append(ck("xlsx.not_included", n == len(left), f"{n} ไฟล์", "ไฟล์ที่ไม่ได้ใช้อยู่ในรายการเอกสารที่ยังไม่ได้รวม"))
+    out.append(_figures(wb, computed))
+    out.append(workpaper.check(path))
     return out
+
+
+def _figures(wb, computed: dict) -> dict:
+    """Every amount of the statement, read back: balances, each adjustment line, each item's amount and
+    effect, each pair's two totals (AM8)."""
+    t = Tally()
+    face = _labelled(wb[S_STATEMENT])
+    b, st = computed["balances"], computed["statement"]
+    for label, side, which in (("ยอดยกมาต้นงวดตามธนาคาร", "bank", "opening"), ("ยอดยกมาต้นงวดตามบัญชี", "book", "opening"),
+                               ("ยอดคงเหลือสิ้นงวดตามธนาคาร", "bank", "closing"), ("ยอดคงเหลือสิ้นงวดตามบัญชี", "book", "closing")):
+        want = b[side][which]
+        if want is None:
+            t.text(label, face.get(label), "ไม่ทราบ")
+        else:
+            t.number(label, face.get(label), want)
+    for side, adj in (("bank", L_BANK_ADJ), ("book", L_BOOK_ADJ)):
+        for ln in st[side]["lines"]:
+            t.number(f"{ln['sign']}: {ln['label']}", face.get(f"{ln['sign']}: {ln['label']}"), ln["amount"])
+        if st[side]["adjusted"] is not None:
+            t.number(adj, face.get(adj), st[side]["adjusted"])
+    rows = [r for r in wb[S_ITEMS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    for r, i in zip(rows, computed["items"]):
+        t.number(f"รายการกระทบยอด {r[0]} จำนวนเงิน", r[6], i["amount"])
+        t.number(f"รายการกระทบยอด {r[0]} ผลต่อยอด", r[7], i["effect"])
+    pairs = [r for r in wb[S_PAIRS].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    for r, m in zip(pairs, computed["match"]["groups"]["matched"]):
+        t.number(f"คู่ที่ {r[0]} จำนวนเงิน (บัญชี)", r[8], m["left_total"])
+        t.number(f"คู่ที่ {r[0]} จำนวนเงิน (ธนาคาร)", r[13], m["right_total"])
+    return t.result("xlsx.figures", "ทุกยอดในงบ รายการกระทบยอด และคู่ที่จับได้ (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ยอด")

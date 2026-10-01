@@ -11,12 +11,15 @@ reopens the file and checks it against computed.json.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ....deliverables import workpaper
+from ....deliverables.reread import Tally
 from .audit import CHOICES, OUTCOME_TH, REASON_TH, RESOLUTION_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
@@ -294,12 +297,14 @@ class ExpenseWorkbook:
         self.receipts()
         self.policy()
         self.wb.properties.creator = "Agent Market · expense audit"
+        # AM8: printable — on the wide claims sheet, the claim's number and its person repeat on every page
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"รายการเบิก": 5, "ผลตรวจแต่ละกฎ": 2})
         self.wb.save(path)
         return {"sheets": list(self.wb.sheetnames), "claims": self.c["totals"]["claims"],
                 "run_exceptions": self.c["totals"]["run_exceptions"]}
 
 
-def check(path: str, computed: dict) -> list[dict]:
+def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     """The gate: every sheet there; one row per claim with its outcome, adding up to the claimed total;
     amounts are numbers; every run exception there with a documented reason code and, when a person
     must decide, the choices; the policy sheet shows the table's limits exactly and the KB only as
@@ -344,4 +349,26 @@ def check(path: str, computed: dict) -> list[dict]:
     rc = [r for r in wb["ใบเสร็จ"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.receipts", len(rc) == len(computed["receipts"]) and all(r[2] for r in rc), f"{len(rc)} ฉบับ",
                   "ใบเสร็จครบ และบอกว่าอ่านด้วยวิธีใด"))
+    # AM8: every claim's own figures, not only their sum (two errors that cancel out passed before)
+    t = Tally()
+    for r, c in zip(rows, claims):
+        where = f"รายการเบิก {c['id'] or r[0]}"
+        t.number(f"{where} จำนวนเงิน", r[9], c["amount"])
+        t.number(f"{where} ยอดในใบเสร็จ", r[11], c["receipt_total"])
+        t.number(f"{where} หัก ณ ที่จ่าย", r[13], c["wht_deducted"])
+        t.text(f"{where} ผลการตรวจ", r[15], c["outcome_label"])
+    face = {}
+    for row in wb["สรุป"].iter_rows(min_row=5, max_col=2, values_only=True):
+        if row and isinstance(row[0], str):
+            face.setdefault(row[0], row[1])
+    tt = computed["totals"]
+    by = tt["claimed_by_outcome"]
+    for label, want in (("รายการเบิกทั้งหมด", tt["claims"]), ("ผ่านทุกกฎ", tt["pass"]), ("ข้อยกเว้น รอคนตัดสิน", tt["exception"]),
+                        ("ยอดเบิกรวม (บาท)", tt["claimed"]), ("ยอดที่ผ่าน (บาท)", by["pass"]),
+                        ("ยอดที่เป็นข้อยกเว้น (บาท)", by["exception"]), ("ยอดที่ต้องใช้วิจารณญาณ (บาท)", by["question"])):
+        t.number(f"สรุป “{label}”", face.get(label), want)
+    for r, rec in zip(rc, computed["receipts"]):
+        t.number(f"ใบเสร็จ {rec['name']} ยอดรวม", r[7], rec["total"])
+    out.append(t.result("xlsx.figures", "ยอดของทุกรายการเบิก หน้าสรุป และใบเสร็จ (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
+    out.append(workpaper.check(path))
     return out

@@ -105,6 +105,9 @@ class ParsedFile:
     currencies: dict[str, int] = field(default_factory=dict)
     budget: dict[str, Decimal] = field(default_factory=dict)       # account → budget for period
     budget_by_month: dict[str, dict[int, Decimal]] = field(default_factory=dict)
+    # AM8: where each budget figure was read ({account: {"budget": "K11", "1": "C11", …}}) on self.sheet,
+    # so a budget figure in a report cites its cell like an actual one cites its rows
+    budget_cells: dict[str, dict[str, str]] = field(default_factory=dict)
     account_names: dict[str, str] = field(default_factory=dict)
     error: str | None = None
     encoding: str | None = None
@@ -330,10 +333,12 @@ def _parse_budget(pf: ParsedFile, sheet: Sheet, hm: HeaderMap) -> None:
             v = to_decimal(_cell(row, f["budget"]))
             if v is not None:
                 pf.budget[code_s] = v
+                pf.budget_cells.setdefault(code_s, {})["budget"] = f"{col_letter(f['budget'])}{i + 1}"
         for c, month in hm.month_columns.items():
             v = to_decimal(_cell(row, c))
             if v is not None:
                 pf.budget_by_month.setdefault(code_s, {})[month] = v
+                pf.budget_cells.setdefault(code_s, {})[str(month)] = f"{col_letter(c)}{i + 1}"
         pf.data_rows += 1
 
 

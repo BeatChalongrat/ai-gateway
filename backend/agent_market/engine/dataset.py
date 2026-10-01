@@ -32,6 +32,7 @@ def dump(pf: ParsedFile) -> dict:
         "date_order": pf.date_order,
         "budget": {k: str(v) for k, v in pf.budget.items()},
         "budget_by_month": {k: {str(m): str(v) for m, v in by.items()} for k, by in pf.budget_by_month.items()},
+        "budget_cells": pf.budget_cells,
         "header": None if hm is None else {
             "sheet": hm.sheet, "header_row": hm.header_row, "headers": hm.headers,
             "fields": hm.fields, "source": hm.source,
@@ -67,6 +68,7 @@ def load(d: dict) -> ParsedFile:
                     date_order=d.get("date_order"))
     pf.budget = {k: Decimal(v) for k, v in d.get("budget", {}).items()}
     pf.budget_by_month = {k: {int(m): Decimal(v) for m, v in by.items()} for k, by in d.get("budget_by_month", {}).items()}
+    pf.budget_cells = {k: dict(v) for k, v in (d.get("budget_cells") or {}).items()}
     for (row, date, code, name, desc, dr, cr, cur, cc, doc, cols, ind, *rest) in d["rows"]:
         pf.rows.append(LedgerRow(file=pf.name, sheet=pf.sheet or "", row=row,
                                  date=_dt.date.fromisoformat(date) if date else None,

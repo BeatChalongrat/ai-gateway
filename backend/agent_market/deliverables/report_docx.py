@@ -10,6 +10,7 @@ that does not have the font installed.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 import zipfile
 
@@ -210,6 +211,17 @@ class ReportWriter:
                 el = OxmlElement(tag)
                 el.set(qn("w:val"), str(int(size * 2)))
                 hr.append(el)
+        # AM8: no style of the file names a font outside the theme (python-docx's template carries a
+        # "Macro Text" style in Courier New): the gate reads every part of the package, styles included.
+        for rf in doc.styles.element.iter(qn("w:rFonts")):
+            for attr in ("w:ascii", "w:hAnsi", "w:cs", "w:eastAsia"):
+                if rf.get(qn(attr)) not in (None, self.font):
+                    rf.set(qn(attr), self.font)
+        for part in doc.part.package.iter_parts():
+            if str(part.partname).endswith("stylesWithEffects.xml") and hasattr(part, "_blob"):
+                xml = part._blob.decode("utf-8")
+                part._blob = re.sub(r'(w:(?:ascii|hAnsi|cs|eastAsia)=")(?!' + re.escape(self.font) + r'")[^"]*"',
+                                    r"\g<1>" + self.font.replace("\\", "") + '"', xml).encode("utf-8")
         dg.setup_page(doc, {"page_size": "A4", "margins": {"top": 0.85, "bottom": 0.8, "left": 0.9, "right": 0.9}})
         sec = doc.sections[0]
         sec.different_first_page_header_footer = True
@@ -440,7 +452,7 @@ class ReportWriter:
         pp = _para(self.doc, space_after=2, align=WD_ALIGN_PARAGRAPH.CENTER)
         pp.add_run().add_picture(path, width=Cm(16.2))
         cap = _para(self.doc, space_after=10)
-        _run(cap, f"ที่มา: ตารางที่คำนวณแล้ว [{spec.get('cite') or '—'}] · กราฟวาดจากตัวเลขชุดเดียวกับตาราง",
+        _run(cap, "กราฟวาดจากตัวเลขที่คำนวณแล้ว · ตัวเลขทุกจุดที่กราฟวาดและเลขอ้างอิงของแต่ละจุดอยู่ในตารางใต้กราฟ",
              self.font, 8, color=self.p["muted"])
 
     # ── assemble ──────────────────────────────────────────────────────

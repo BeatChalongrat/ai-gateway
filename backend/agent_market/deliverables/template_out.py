@@ -9,8 +9,25 @@ the template is diffed against the saved one, so only what changed is asked.
 
 The filling itself is template_fill.fill (the shared scripts). Values are
 handed to it keyed by the template's own slot keys and nothing else, so an
-unmapped marker is never filled by a lucky name match. The gate: something
-was filled; every mapped slot was filled or says why not; no formula changed.
+unmapped marker is never filled by a lucky name match.
+
+AM8 — who decides what:
+* Which slot takes which field is a guess about the customer's form: the
+  model proposes it in the runner (it reads each slot's label, tag, name and
+  the text around it) and the person confirms it on the mapping screen. Here
+  the only proposal is identity (a slot named exactly like a field).
+* Whether the fill is right is not a guess: ``verify`` opens the filled file
+  again and asserts it — every mapped slot holds its value, no {{marker}} is
+  left anywhere, no filled text is cut off by a fixed-height row or box, the
+  template has no chart of its own still showing its old numbers, no formula
+  changed, no part was dropped. Any of those failing is "not passed", and the
+  slots not filled are listed by name for the download card.
+* What cannot be filled is refused before work starts (``slots`` marks it
+  ``blocking``): a marker where the filler does not write, a Word or
+  PowerPoint chart. What can — markers (also on PowerPoint masters and
+  layouts), plain-text Word controls, Excel names and cells, PowerPoint
+  shapes a person named, repeating table rows — is supported.
+
 An .xlsx comes back needing recalculation (openpyxl writes no computed
 values): the runner has the doc-converter recalculate it, and the workbook
 also asks Excel to recalculate on open.
@@ -58,7 +75,24 @@ def slots(inspection: dict) -> list[dict]:
     for t in inspection.get("targets") or []:
         out.append({"key": t["cell"], "kind": "target", "label": t.get("label") or t["cell"], "where": t["cell"],
                     "fillable": True, "reason": None})
+    for sh in inspection.get("shapes") or []:
+        out.append({"key": sh["key"], "kind": "shape", "label": sh["name"], "where": f"สไลด์ {sh['slide']}",
+                    "fillable": True, "reason": None, "context": sh.get("text") or ""})
+    ctx = inspection.get("context") or {}
+    for slot in out:
+        if not slot.get("context"):
+            slot["context"] = ctx.get(slot["key"]) or ctx.get(slot["label"]) or ""
+    # AM8: what the filler cannot do is refused here, before any work, with its reason
+    for r in inspection.get("refused") or []:
+        out.append({"key": r["key"], "kind": "refused", "label": r["label"], "where": r.get("where"),
+                    "fillable": False, "reason": r["reason"], "blocking": True})
     return out
+
+
+def blocking(sl: list[dict]) -> list[dict]:
+    """The slots that stop this template being used at all (a chart it would leave showing old numbers,
+    a marker it would leave in place)."""
+    return [s for s in sl if s.get("blocking")]
 
 
 def _range_columns(ref: str) -> list[str]:
@@ -83,29 +117,26 @@ def _fields(spec: dict) -> dict[str, dict]:
 
 
 def propose(sl: list[dict], spec: dict) -> dict[str, str]:
-    """A first mapping by name (English and Thai labels, aliases); the person confirms or changes it."""
-    fields, lists = _fields(spec), spec.get("lists") or {}
+    """The proposal code may make: a slot whose key is exactly a field's key ({{revenue}} → revenue).
+
+    AM8: anything more is a guess about the customer's form — a label in Thai beside a cell, a control
+    named "TotalAmt", a column headed "มูลค่า" — and that guess is the model's (the runner asks it, with
+    each slot's label and context), confirmed by the person. No list of synonyms is matched here."""
+    fields, lists = spec.get("fields") or {}, spec.get("lists") or {}
     out: dict[str, str] = {}
     for s in sl:
         if not s["fillable"]:
             continue
-        names = {_norm(s["key"]), _norm(s["label"])}
         if s["kind"] in LIST_KINDS:
-            for lk, l in lists.items():
-                if names & {_norm(lk), _norm(l.get("label", lk)), *(_norm(a) for a in l.get("aliases") or [])}:
-                    out[s["key"]] = lk
-                    cols = l.get("columns") or {}
-                    for c in s.get("columns") or []:
-                        hit = next((ck for ck, cl in cols.items() if _norm(c) in {_norm(ck), _norm(cl)}), None)
-                        if hit:
-                            out[f"{s['key']}.{c}"] = f"{lk}.{hit}"
-                    break
-            if s["key"] not in out and len(lists) == 1:
-                out[s["key"]] = next(iter(lists))
+            if s["key"] in lists:
+                out[s["key"]] = s["key"]
+                cols = (lists[s["key"]] or {}).get("columns") or {}
+                for c in s.get("columns") or []:
+                    if c in cols:
+                        out[f"{s['key']}.{c}"] = f"{s['key']}.{c}"
             continue
-        hit = next((fk for fk, f in fields.items() if names & f["names"]), None)
-        if hit:
-            out[s["key"]] = hit
+        if s["key"] in fields:
+            out[s["key"]] = s["key"]
     return out
 
 
@@ -148,7 +179,9 @@ def template_values(sl: list[dict], mapping: dict, values: dict) -> dict[str, An
 
 
 def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
-    """Fill the saved template with a run's values; returns the filler's report plus the gate's checks."""
+    """Fill the saved template with a run's values; then open the filled file again and judge it (``verify``).
+    Returns the filler's report plus the checks and ``unfilled`` — every slot that does not hold its value,
+    by name, for the person."""
     sl = saved.get("slots") or slots(tf.inspect(path))
     mapping = saved.get("mapping") or {}
     tvals = template_values(sl, mapping, values)
@@ -156,26 +189,96 @@ def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
     report = tf.fill(path, out_path, tvals, targets)
     if report["kind"] == "xlsx":
         _recalc_on_open(out_path)
-    mapped = {s["key"] for s in sl if mapping.get(s["key"]) and s["fillable"]}
-    filled = set(report.get("filled") or [])
-    explained = {e.get("marker") or e.get("tag") or e.get("name") or e.get("target") for e in report.get("not_filled_explained") or []}
-    silent = sorted(k for k in mapped if k not in filled and k not in explained
-                    and not any(str(f).startswith(k + ".") or str(f).startswith(k + "[") for f in filled))
+    checks, unfilled = verify(path, out_path, sl, mapping, tvals, report)
+    report["checks"] = checks
+    report["unfilled"] = unfilled
+    report["passed"] = all(c["ok"] for c in checks)
+    return report
 
-    def ck(name, ok, detail, label):
-        return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
+
+WHY_TH = {"no_value": "รอบนี้ไม่มีค่าให้ช่องนี้", "not_in_file": "เปิดไฟล์ที่เติมแล้วไม่พบค่าในช่องนี้",
+          "marker_left": "ยังมีเครื่องหมายช่องว่างค้างอยู่", "cut_off": "ข้อความยาวเกินช่องที่สูงคงที่ จะถูกตัด",
+          "unsupported_location": "อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้",
+          "chart_not_updated": "กราฟเดิมในแบบฟอร์มจะยังแสดงตัวเลขเดิม",
+          "merged_cell": "เป็นช่องที่ถูกผสานและไม่ใช่ช่องแรก", "formula_cell": "เป็นช่องสูตร", "protected": "ชีตถูกล็อกไว้",
+          "not_plain_text": "เป็นช่องที่ไม่ใช่ข้อความธรรมดา", "content_locked": "ช่องถูกล็อกไม่ให้แก้"}
+
+
+def _why(reason) -> str:
+    return WHY_TH.get(str(reason or ""), str(reason or "เติมไม่ได้"))
+
+
+_NO_VALUE = object()
+
+
+def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, report: dict) -> tuple[list[dict], list[dict]]:
+    """The filled file, opened again (AM8): the gate's checks, and every slot left without its value."""
+    kind = report["kind"]
+    by_key = {s["key"]: s for s in sl}
+    unfilled: dict[str, dict] = {}
+
+    def miss(key: str, why: str) -> None:
+        s = by_key.get(key) or {"label": key}
+        unfilled.setdefault(key, {"slot": key, "label": s.get("label") or key, "why": _why(why)})
+
+    reasons: dict = {}
+    for e in report.get("not_filled_explained") or []:
+        k = e.get("marker") or e.get("tag") or e.get("name") or e.get("target")
+        if k:
+            reasons.setdefault(k, e.get("reason"))
+    for k, why in (report.get("refused") or {}).items():
+        reasons.setdefault(k, why)
+    mapped = [s for s in sl if mapping.get(s["key"]) and s["fillable"]]
+    for s in mapped:
+        k = s["key"]
+        if s["kind"] in LIST_KINDS:
+            if not tvals.get(k):
+                miss(k, reasons.get(k) or "no_value")
+            elif kind != "xlsx" and int((report.get("rows") or {}).get(k) or 0) < len(tvals[k]):
+                miss(k, reasons.get(k) or "not_in_file")
+            continue
+        value = tvals.get(k, _NO_VALUE)
+        if value is _NO_VALUE or tf.dg.as_text(value) is None:
+            miss(k, reasons.get(k) or "no_value")
+        elif not tf.holds(out, kind, s, value):
+            miss(k, reasons.get(k) or "not_in_file")
+    left = tf.markers_left(out)
+    for k in left:
+        miss(k, "marker_left")
+    cut = tf.cut_off(src, out)
+    charts = tf.chart_parts(out) if kind in ("docx", "pptx") else []
+    filled = report.get("filled") or []
+
+    def ck(name, ok, detail, label, values=None):
+        c = {"name": name, "ok": bool(ok), "detail": detail, "label": label}
+        if values is not None:
+            c["values"] = values
+        return c
+    gaps = [u for u in unfilled.values() if u["why"] != _why("marker_left")]
     checks = [
         ck("template.filled", bool(filled), f"เติมแล้ว {len(filled)} ช่อง", "เติมค่าลงแบบฟอร์มได้"),
-        ck("template.no_silent_gap", not silent, ("ไม่ได้เติม: " + ", ".join(silent)) if silent else "ทุกช่องที่จับคู่ไว้ได้ค่า",
-           "ไม่มีช่องที่หายไปเงียบ ๆ"),
+        ck("template.every_slot", not gaps,
+           ("ยังไม่ได้ค่า: " + ", ".join(f"{u['label']} ({u['why']})" for u in gaps))[:300] if gaps
+           else f"เปิดไฟล์อ่านกลับ ทุกช่องที่จับคู่ไว้ {len(mapped)} ช่องมีค่าของรอบนี้",
+           "ทุกช่องที่จับคู่ไว้มีค่า (อ่านจากไฟล์ที่เติมแล้ว)", len(mapped)),
+        ck("template.no_marker_left", not left,
+           ("ยังมีช่องที่ไม่ได้เติมค้างในไฟล์: " + ", ".join(left))[:300] if left else "ไม่มีช่องว่างค้างในไฟล์",
+           "ไม่มีช่องว่างค้างในไฟล์"),
+        ck("template.fits", not cut, ("ข้อความถูกตัดใน: " + ", ".join(cut))[:300] if cut else "ข้อความที่เติมพอดีช่อง",
+           "ข้อความที่เติมไม่ล้นช่องที่สูงคงที่"),
+        ck("template.no_static_chart", not charts,
+           f"แบบฟอร์มมีกราฟ {len(charts)} กราฟ ที่ระบบไม่ได้วาดใหม่ จะยังแสดงตัวเลขเดิม" if charts else "ไม่มีกราฟที่ค้างตัวเลขเดิม",
+           "ไม่มีกราฟที่ยังแสดงตัวเลขเดิม"),
         ck("template.formulas_kept", not report.get("formulas_changed"),
            f"สูตรคงเดิม {len(report.get('formulas_kept') or [])} สูตร", "ไม่เขียนทับสูตร"),
         ck("template.parts_kept", not report.get("parts_dropped"), ", ".join(report.get("parts_dropped") or []) or "ครบ",
            "ส่วนประกอบของไฟล์ครบ"),
     ]
-    report["checks"] = checks
-    report["passed"] = all(c["ok"] for c in checks)
-    return report
+    for where in cut:
+        unfilled.setdefault(f"cut:{where}", {"slot": f"cut:{where}", "label": where, "why": _why("cut_off")})
+    for c in charts:
+        unfilled.setdefault(c, {"slot": c, "label": "กราฟในแบบฟอร์ม", "why": _why("chart_not_updated")})
+    return checks, list(unfilled.values())
 
 
 def _recalc_on_open(path: str) -> None:

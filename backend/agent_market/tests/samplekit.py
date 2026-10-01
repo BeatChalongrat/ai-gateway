@@ -122,7 +122,8 @@ def run_files(package: str, files: list[tuple[str, str]], *, defaults: dict, for
         names = {f: f"sample.{f}" for f in formats}
         rend = run({"op": "render", "package": package, "computed": "computed.json", "formats": formats, "names": names,
                     "theme": {"id": "navy", "company": defaults.get("company") or ""}, "assumptions": [],
-                    "run": {"id": "sample", "date": TODAY.isoformat(), "agent_version": manifest(package)["version"]},
+                    "run": {"id": "sample", "date": TODAY.isoformat(), "agent_version": manifest(package)["version"],
+                            "preparer": "ไฟล์ตัวอย่างของ agent (ไม่มีผู้จัดทำ)", "kind": "self_test"},
                     "model_info": {"model": None, "self_hosted": None}})
         paths = {}
         for a in rend["artifacts"]:

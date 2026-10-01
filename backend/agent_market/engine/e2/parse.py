@@ -556,6 +556,9 @@ COLS = {
     "price": S(r"ราคาต่อหน่วย|ราคา/หน่วย|หน่วยละ|UnitPrice|ราคา(?!รวม)", re.I),
     "amount": S(r"จำนวนเงิน|มูลค่า|Amount|รวมเงิน", re.I),
 }
+# AM8: an item whose row shows text no column took is read with at most this confidence (below every threshold)
+LEFT_OUT_CONFIDENCE = 0.5
+_THAI = re.compile(r"[฀-๿]")
 NUM_RE = re.compile(r"^[-(]?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?$|^\d+(?:\.\d+)?$")
 POS_QTY_FIRST_RE = re.compile(r"^\s*(\d{1,3})\s+(\S.*?)\s+((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s*$")
 POS_ITEM_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[xX×]\s*((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s+((?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})\s*$")
@@ -563,6 +566,7 @@ POS_ITEM_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[xX×]\s*((?:\d{1,3}(?:,\d{3})+
 
 def _header_cols(line: Line) -> dict[str, float] | None:
     cols: dict[str, float] = {}
+    taken: list[tuple[int, int]] = []
     for key, rx in COLS.items():
         if key in ("no", "unit"):
             for s, e, i in line.spans:
@@ -570,11 +574,15 @@ def _header_cols(line: Line) -> dict[str, float] | None:
                     cols[key] = line.words[i].cx
                     break
             continue
-        hit = ssearch(rx, line.text)
+        # AM8: a heading names one column. "รหัสสินค้า" is the code column's heading; the item column's
+        # "สินค้า" inside it is not a second heading (the item name then took the code with it).
+        hit = next(((s, e) for s, e, _ in sfinditer(rx, line.text)
+                    if not any(s < te and ts < e for ts, te in taken)), None)
         if hit:
             bb = line.bbox(*hit)
             if bb:
                 cols[key] = (bb[0] + bb[2]) / 2
+                taken.append(hit)
     have = set(cols)
     if len(have & {"desc", "qty", "price", "amount"}) >= 3 or ({"desc", "amount"} <= have and len(have) >= 3):
         if "qty" in cols and "amount" in cols and abs(cols["qty"] - cols["amount"]) < 5:
@@ -628,9 +636,20 @@ def line_items(lines: list[Line]) -> tuple[list[dict], dict]:
             else:
                 val, s, e = v
                 item[k] = _field(l.text[s:e], val, l, s, e)
-        desc = _desc_text(l, cols)
-        ds = max(0, l.text.find(desc)) if desc else 0
-        item["description"] = _field(desc, desc, l, ds, ds + len(desc)) if desc else Field()
+        parts, used = _desc_spans(l, cols)
+        desc = " ".join(l.text[s:e] for s, e, _ in parts).strip()
+        if desc:
+            ds, de = parts[0][0], parts[-1][1]
+            item["description"] = _field(desc, desc, l, ds, de)
+        else:
+            item["description"] = Field()
+        left = _left_out(l, cols, used, nums)
+        if left:
+            # the page shows more of this row than the item carries: never as sure as the words it did read
+            f = item["description"]
+            f.confidence = min(f.confidence or 0.0, LEFT_OUT_CONFIDENCE)
+            f.checks = [*f.checks, "text_left_out"]
+            item["left_out"] = left
         items.append(item)
     if items:
         return items, info
@@ -699,18 +718,72 @@ def _row_numbers(l: Line, cols: dict[str, float]) -> dict[str, tuple[Decimal, in
     return out
 
 
-def _desc_text(l: Line, cols: dict[str, float]) -> str:
+def _desc_spans(l: Line, cols: dict[str, float]) -> tuple[list[tuple[int, int, int]], set[int]]:
+    """The item name's words in a row, and the words the row's no. / code columns took.
+
+    AM8: a row has one code. Of the words nearer the code heading than the item heading, only the one
+    nearest the code heading is the code; the others are the start of the item's name (a centred item
+    heading once made "แฟ้มเอกสาร" in "FD-3B แฟ้มเอกสาร 3 นิ้ว" read as part of the code column)."""
     targets = [cols[k] for k in ("qty", "price", "amount") if k in cols]
     right = min(targets) - 25 if targets else l.x1
     code_x, desc_x, no_x = cols.get("code"), cols.get("desc"), cols.get("no")
-    parts = []
+    parts: list[tuple[int, int, int]] = []
+    near_code: list[tuple[float, int, int, int]] = []
+    used: set[int] = set()
     for s, e, i in l.spans:
         w = l.words[i]
         if w.cx >= right:
             continue
         if no_x is not None and abs(w.cx - no_x) < 14 and _num(w.text) is not None:
+            used.add(i)
             continue
         if code_x is not None and desc_x is not None and abs(w.cx - code_x) < abs(w.cx - desc_x) and w.x1 < desc_x - 10:
+            near_code.append((abs(w.cx - code_x), s, e, i))
             continue
-        parts.append(l.text[s:e])
-    return " ".join(parts).strip()
+        parts.append((s, e, i))
+    if near_code:
+        # an item code is written in letters and digits: a Thai word by the code column is the start of the
+        # name of a row that has no code (it was taken for one, and the name lost its first word)
+        codes = [c for c in near_code if not _THAI.search(l.words[c[3]].text)]
+        code = min(codes) if codes else None
+        if code is not None:
+            used.add(code[3])
+        parts += [(s, e, i) for _, s, e, i in near_code if code is None or i != code[3]]
+    parts.sort()
+    used |= {i for _, _, i in parts}
+    return parts, used
+
+
+def _desc_text(l: Line, cols: dict[str, float]) -> str:
+    parts, _ = _desc_spans(l, cols)
+    return " ".join(l.text[s:e] for s, e, _ in parts).strip()
+
+
+def _left_out(l: Line, cols: dict[str, float], used: set[int], nums: dict) -> list[str]:
+    """Words of an item row that no column took: not the no., the code, the name, a figure, or the unit.
+    Text the page shows that the item does not carry — its name may be cut short (AM8)."""
+    taken = set(used)
+    for _, s, e in nums.values():
+        taken |= {i for ss, ee, i in l.spans if ss >= s and ee <= e}
+    unit_x = cols.get("unit")
+    # a unit printed in the quantity's own cell ("12 ผู้ใช้", "3 ชั่วโมง") is the quantity's, not the name's
+    order = [i for _, _, i in l.spans]
+    qty = nums.get("qty")
+    after_qty = None
+    if qty is not None:
+        q_words = [i for ss, ee, i in l.spans if ss >= qty[1] and ee <= qty[2]]
+        if q_words and order.index(q_words[-1]) + 1 < len(order):
+            after_qty = order[order.index(q_words[-1]) + 1]
+    out = []
+    for s, e, i in l.spans:
+        w = l.words[i]
+        if i in taken or _num(w.text, lenient=w.method == "ocr") is not None:
+            continue
+        if unit_x is not None and abs(w.cx - unit_x) < 30:
+            continue
+        if i == after_qty:
+            continue
+        if not any(ch.isalpha() for ch in w.text):
+            continue
+        out.append(l.text[s:e])
+    return out

@@ -3,6 +3,8 @@
   "note": "Runs the whole agent on a bundled month (September 2569) of one current account: the bank's statement and the company's ledger of it. Ten pairs are matched by rule (six by the day and amount, four cheques by number and amount), two cheques are outstanding, one deposit is in transit, and the bank's fees, interest and the tax withheld on it become drafted entries. It asks nothing, the two adjusted balances are equal, and the real working paper is shown before the user trusts it with their own account.",
   "files": ["sample-data/statement_2569-09.xlsx", "sample-data/สมุดบัญชีเงินฝาก_2569-09.xlsx"],
   "message": "กระทบยอดเงินฝากธนาคารจากไฟล์ตัวอย่าง",
+  "settings_note": "What the sample files were made for (AM8): the sample account holder's company, printed on the working paper's header. A self-test run lays it over the install's own settings; a real run never uses it.",
+  "settings": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด"},
   "formats": ["xlsx"],
   "expect": {
     "findings": [],

@@ -53,6 +53,7 @@ class Decisions:
     fx_rate: Decimal | None = None
     invalid: dict = field(default_factory=dict)          # field → (the card's key, the reason the typed value failed)
     notes: list = field(default_factory=list)            # exceptions recorded while the document stays in
+    item_names: dict = field(default_factory=dict)       # AM8: item row → the name a person chose or typed
     answered: int = 0
 
     def judge_kwargs(self, read_fields: dict) -> dict:
@@ -68,7 +69,7 @@ class Decisions:
             else:
                 overrides[name], methods[name] = v, "confirmed_by_person"
         return {"overrides": overrides, "override_methods": methods, "confirmed": confirmed, "absent": set(self.absent),
-                "accepted_checks": set(self.accepted_checks), "doc_type": self.doc_type}
+                "accepted_checks": set(self.accepted_checks), "doc_type": self.doc_type, "item_names": dict(self.item_names)}
 
 
 def _same(stored, v) -> bool:
@@ -179,6 +180,14 @@ def _apply(d: Decisions, key: str, val) -> None:
         elif val == "accept_as_printed":
             d.accepted_checks.add(subject)
             _note(d, "accepted_as_printed", subject, "ผู้ใช้ให้บันทึกตามที่พิมพ์ แม้ตรวจไม่ผ่าน")
+    elif code == "e2_item_text":
+        # AM8: an item's name the row printed in full — the person's choice, never a model's
+        row = subject[4:] if subject.startswith("line") else ""
+        raw = (val.get("typed") or val.get("accept")) if isinstance(val, dict) else None
+        if row.isdigit() and raw and str(raw).strip():
+            d.item_names[int(row)] = T.arabic(str(raw)).strip()[:200]
+        elif val == "unconfirmed":
+            _note(d, "item_name_unconfirmed", subject, "ชื่อรายการอาจไม่ครบ ผู้ใช้ข้ามไว้ ยังไม่มีคนยืนยัน")
     elif code == "e2_duplicate" and val == "include":
         d.accepted_checks.add("duplicate")
         _note(d, "not_duplicate_by_person", "duplicate", "ผู้ใช้ยืนยันว่าเป็นเอกสารคนละฉบับ")

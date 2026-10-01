@@ -183,20 +183,29 @@ class GateCatches(unittest.TestCase):
         self.assertFalse(next(c for c in checks if c["name"] == "pptx.overflow")["ok"])
 
     def test_chart_values_that_differ_from_the_table_fail(self):
-        out = tempfile.mkdtemp()
-        res = render_all(self.computed, {**REQ, "formats": ["pptx"]}, in_dir=out, out_dir=out)
-        deck = next(a for a in res["artifacts"] if a["format"] == "pptx")
-        tampered = copy.deepcopy(deck["chart_bindings"])
-        tampered[0]["series"][0]["source_values"][0] = "1.00"
-        checks = quality.check_pptx(os.path.join(out, "d_v1.pptx"), {"chart_bindings": tampered},
-                                    self.computed, self.theme)
-        self.assertFalse(next(c for c in checks if c["name"] == "pptx.charts")["ok"])
+        # AM8: the values are read out of the chart in the file, never from the writer's binding.
+        from pptx import Presentation
+        from pptx.chart.data import CategoryChartData
 
-    def test_chart_without_binding_fails(self):
+        out = tempfile.mkdtemp()
+        render_all(self.computed, {**REQ, "formats": ["pptx"]}, in_dir=out, out_dir=out)
+        path = os.path.join(out, "d_v1.pptx")
+        prs = Presentation(path)
+        chart = next(sh.chart for s in prs.slides for sh in s.shapes if getattr(sh, "has_chart", False) and sh.has_chart)
+        data = CategoryChartData()
+        data.categories = [c.label for c in chart.plots[0].categories]
+        for i, ser in enumerate(chart.series):
+            data.add_series(ser.name, [1.0] + list(ser.values)[1:] if i == 0 else list(ser.values))
+        chart.replace_data(data)
+        prs.save(path)
+        checks = quality.check_pptx(path, {"chart_bindings": []}, self.computed, self.theme)
+        self.assertFalse(next(c for c in checks if c["name"] == "pptx.figures")["ok"])
+
+    def test_the_writers_binding_is_not_what_is_checked(self):
         out = tempfile.mkdtemp()
         render_all(self.computed, {**REQ, "formats": ["pptx"]}, in_dir=out, out_dir=out)
         checks = quality.check_pptx(os.path.join(out, "d_v1.pptx"), {"chart_bindings": []}, self.computed, self.theme)
-        self.assertFalse(next(c for c in checks if c["name"] == "pptx.charts")["ok"])
+        self.assertTrue(next(c for c in checks if c["name"] == "pptx.figures")["ok"])
 
     def test_font_outside_the_theme_fails(self):
         from pptx import Presentation
@@ -251,14 +260,17 @@ class PdfIsOnlyAConversion(unittest.TestCase):
         self.assertFalse([n for n in os.listdir(out) if n.endswith(".pdf")])
 
 
-class CitationMarkers(unittest.TestCase):
-    def test_numbers_in_prose_get_their_cite_even_inside_parentheses(self):
+class FiguresInProse(unittest.TestCase):
+    def test_a_figure_named_by_its_key_gets_its_own_cite_even_inside_parentheses(self):
         c = computed_for(["GL_2569-09.xlsx"])
         rev = next(l for l in c["lines"] if l["key"] == "revenue")
-        text = f"รายได้ {c['quotable']['revenue']} บาท ({c['quotable']['revenue_m']})"
-        runs = content.mark_citations(text, c)
-        cites = [cid for _, cid in runs if cid]
-        self.assertEqual(cites, [rev["cite"], rev["cite"]])
+        runs = content.cite_runs("รายได้ {revenue} บาท ({revenue_m})", c)
+        self.assertEqual([cid for _, cid in runs if cid], [rev["cite"], rev["cite"]])
+        self.assertEqual("".join(t for t, _ in runs), f"รายได้ {c['quotable']['revenue']} บาท ({c['quotable']['revenue_m']})")
+
+    def test_a_typed_number_is_never_given_a_citation(self):
+        c = computed_for(["GL_2569-09.xlsx"])
+        self.assertEqual([cid for _, cid in content.cite_runs(f"รายได้ {c['quotable']['revenue']} บาท", c) if cid], [])
 
 
 class QuotableIdentifiers(unittest.TestCase):

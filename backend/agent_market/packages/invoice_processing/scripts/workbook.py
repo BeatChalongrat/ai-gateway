@@ -10,6 +10,7 @@ the quality gate reopens the file and checks the register adds up to computed.js
 from __future__ import annotations
 
 import ast
+import os
 import re
 from decimal import Decimal
 
@@ -17,6 +18,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from ....deliverables import workpaper
 from ....engine.e2.cards import CHECK_TH, FIELD_TH
 from .register import DOC_TYPE_TH, REASON_TH
 
@@ -146,6 +148,18 @@ def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
 
 
+def item_status(line: dict) -> str:
+    """What a line item's status says (AM8): "ยืนยันแล้ว" is a person's word — the machine never says it.
+    A reading a script made says it was read by the system, and whether it still needs a look."""
+    if line.get("decided_by") == "person":
+        return "คนยืนยันแล้ว"
+    if line.get("left_out"):
+        return "ระบบอ่าน · ต้องตรวจ: ในแถวมีคำว่า “" + " ".join(line["left_out"])[:40] + "” ที่ไม่ได้อ่านเข้าชื่อรายการ"
+    if line.get("verified"):
+        return "ระบบอ่าน · ตัวเลขผ่านการตรวจ (ยังไม่มีคนตรวจ)"
+    return "ระบบอ่าน · ต้องตรวจ"
+
+
 class InvoiceWorkbook:
     def __init__(self, computed: dict, theme: dict, run: dict | None = None):
         self.c, self.t, self.run = computed, theme, run or {}
@@ -260,11 +274,12 @@ class InvoiceWorkbook:
 
     def line_items(self):
         ws = self.wb.create_sheet("รายการสินค้า")
-        self._title(ws, "รายการสินค้า/บริการ", "ความมั่นใจต่ำกว่า 0.95 = ยังไม่ได้ยืนยัน (ยอดหัวเอกสารยังผ่านการตรวจ)")
+        self._title(ws, "รายการสินค้า/บริการ", "“ระบบอ่าน” = อ่านด้วยสคริปต์ ยังไม่มีคนตรวจ · “คนยืนยันแล้ว” = มีคนตอบการ์ดของรายการนั้น · "
+                                               "ความมั่นใจต่ำกว่า 0.95 = ต้องตรวจ (ยอดหัวเอกสารตรวจแยกไว้แล้ว)")
         rows = [[l["name"], l["row"], l["description"], _num(l["quantity"]), _num(l["unit_price"]), _num(l["amount"]),
-                 l["confidence"], "ยืนยันแล้ว" if l["verified"] else "ยังไม่ยืนยัน"] for l in self.c["line_items"]]
+                 l["confidence"], item_status(l)] for l in self.c["line_items"]]
         self._table(ws, 4, ["ไฟล์", "บรรทัด", "รายการ", "จำนวน", "ราคาต่อหน่วย", "จำนวนเงิน", "ความมั่นใจ", "สถานะ"], rows,
-                    [30, 8, 44, 10, 14, 14, 10, 14], money_cols=(5, 6), wrap_cols=(3,))
+                    [30, 8, 44, 10, 14, 14, 10, 30], money_cols=(5, 6), wrap_cols=(3, 8))
 
     def provenance(self):
         ws = self.wb.create_sheet("ที่มา")
@@ -316,13 +331,18 @@ class InvoiceWorkbook:
         self.exceptions()
         self.checks()
         self.wb.properties.creator = "Agent Market · invoice processing"
+        # AM8: printable — on the wide register, the row number, date and document number repeat on every page
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"ทะเบียน": 3, "ที่มา": 2})
         self.wb.save(path)
         return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"]}
 
 
-def check(path: str, computed: dict) -> list[dict]:
-    """The gate: every sheet there, the register holds exactly the recorded documents and adds up to
-    computed.json to the satang, every provenance row says how its value was read."""
+def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
+    """The gate, on the file itself (AM8): every sheet there; the register holds exactly the recorded
+    documents, and every field of every row — dates, numbers, tax IDs, every amount in its own currency
+    and in baht — is computed.json's, read back cell by cell (an empty cell where a value belongs fails);
+    the summary's counts and totals and every line item likewise; every provenance row says how its
+    value was read."""
     def ck(name, ok, detail, label):
         return {"name": name, "ok": bool(ok), "detail": detail, "label": label}
 
@@ -332,9 +352,7 @@ def check(path: str, computed: dict) -> list[dict]:
     rows = [r for r in ws.iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     want = computed["totals"]["included"]
     out.append(ck("xlsx.register_rows", len(rows) == want, f"{len(rows)} แถว / {want} ฉบับ", "จำนวนแถวตรงกับเอกสารที่บันทึก"))
-    got = sum((Decimal(str(r[18])) for r in rows if r[18] is not None), Decimal(0)).quantize(Decimal("0.01"))
-    exp = Decimal(computed["totals"]["thb"]["total"])
-    out.append(ck("xlsx.register_total", got == exp, f"{got} / {exp}", "ยอดรวมในทะเบียนตรงกับที่คำนวณ"))
+    out.append(_figures(wb, rows, computed))
     pv = [r for r in wb["ที่มา"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
     out.append(ck("xlsx.provenance", len(pv) == len(computed["provenance"]) and all(r[4] for r in pv),
                   f"{len(pv)} ค่า", "ทุกค่ามีที่มา"))
@@ -348,4 +366,51 @@ def check(path: str, computed: dict) -> list[dict]:
                   f"{len(left)} ฉบับ / {computed['totals']['excluded']} ฉบับ", "เอกสารที่ยังไม่ได้รวมอยู่ในรายการครบทุกฉบับ"))
     unknown = sorted({d["document_type"] for d in computed["documents"] if d["document_type"] not in DOC_TYPE_TH})
     out.append(ck("xlsx.doc_types", not unknown, ", ".join(unknown) or "ครบ", "ชนิดเอกสารมีชื่อไทย"))
+    out.append(workpaper.check(path))
     return out
+
+
+# The register's columns a value is read back from: (column, header, computed key, money?)
+REGISTER_FIELDS = (
+    (1, "วันที่", "document_date", False), (2, "เลขที่", "document_number", False),
+    (5, "เลขผู้เสียภาษีผู้ขาย", "seller_tax_id", False), (8, "เลขผู้เสียภาษีผู้ซื้อ", "buyer_tax_id", False),
+    (9, "สกุลเงิน", "currency", False),
+    (10, "ยอดก่อน VAT", "subtotal", True), (11, "VAT", "vat_amount", True), (12, "ยอดรวม", "total", True),
+    (13, "หัก ณ ที่จ่าย", "wht_amount", True), (14, "ยอดที่ต้องชำระ", "payable", True), (15, "อัตราแลกเปลี่ยน", "fx_rate", True),
+    (16, "ยอดก่อน VAT (บาท)", "thb_subtotal", True), (17, "VAT (บาท)", "thb_vat_amount", True),
+    (18, "ยอดรวม (บาท)", "thb_total", True),
+)
+
+
+def _figures(wb, rows: list, computed: dict) -> dict:
+    from ....deliverables.reread import Tally, labelled
+
+    t = Tally()
+    docs = [d for d in computed["documents"] if d["status"] == "included"]
+    for i, (r, d) in enumerate(zip(rows, docs), start=1):
+        where = f"ทะเบียน แถว {i} ({d.get('document_number') or d['name']})"
+        t.number(f"{where} ลำดับ", r[0], i)
+        for col, head, key, money in REGISTER_FIELDS:
+            want = d.get("payable", d.get("net_payable")) if key == "payable" else d.get(key)
+            if money:
+                t.number(f"{where} {head}", r[col], want)
+            else:
+                t.text(f"{where} {head}", r[col], "" if want is None else want)
+    face = labelled(wb["สรุป"], min_row=5)
+    tt = computed["totals"]
+    for label, want in (("เอกสารที่ได้รับ", tt["documents"]), ("บันทึกเข้าทะเบียน", tt["included"]),
+                        ("ข้อยกเว้นทั้งหมด", tt["exceptions"]), ("คำถามที่ตอบแล้ว", tt["questions_answered"]),
+                        ("ยอดก่อน VAT (บาท)", tt["thb"]["subtotal"]), ("ภาษีมูลค่าเพิ่ม (บาท)", tt["thb"]["vat_amount"]),
+                        ("ยอดรวม (บาท)", tt["thb"]["total"]), ("หัก ณ ที่จ่าย (บาท)", tt["thb"]["wht_amount"]),
+                        ("ยอดที่ต้องชำระ (บาท)", tt["thb"].get("payable", tt["thb"]["net_payable"]))):
+        t.number(f"สรุป “{label}”", face.get(label), want)
+    items = [r for r in wb["รายการสินค้า"].iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    if len(items) != len(computed["line_items"]):
+        t.fail(f"รายการสินค้า: ในไฟล์ {len(items)} รายการ ควรมี {len(computed['line_items'])} รายการ")
+    for r, li in zip(items, computed["line_items"]):
+        where = f"รายการสินค้า {li['name']} บรรทัด {li['row']}"
+        t.text(f"{where} รายการ", r[2], li["description"] or "")
+        for col, head, key in ((3, "จำนวน", "quantity"), (4, "ราคาต่อหน่วย", "unit_price"), (5, "จำนวนเงิน", "amount")):
+            t.number(f"{where} {head}", r[col], li[key])
+        t.text(f"{where} สถานะ", r[7], item_status(li))
+    return t.result("xlsx.figures", "ทุกค่าในทะเบียน สรุป และรายการสินค้า (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ค่า")

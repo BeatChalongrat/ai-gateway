@@ -111,7 +111,7 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
         shutil.copy(os.path.join(job.out, "computed.json"), os.path.join(job.inp, "computed.json"))
         rend = job.run({"op": "render", "package": PACKAGE, "computed": "computed.json", "formats": ["xlsx"],
                         "names": {"xlsx": "bank_reconciliation.xlsx"}, "theme": {"id": "navy"},
-                        "run": {"date": today, "preparer": preparer, "agent_version": "1.1.0"}})
+                        "run": {"date": today, "preparer": preparer, "agent_version": "1.2.0"}})
         book = os.path.join(job.out, "bank_reconciliation.xlsx")
         keep = os.environ.get("BANKKIT_KEEP")
         if keep:

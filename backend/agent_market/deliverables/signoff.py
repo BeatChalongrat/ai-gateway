@@ -209,7 +209,7 @@ def _cell(ref: str, text: str, bold: bool = False) -> str:
     return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 
-def _sheet_xml(review: dict) -> bytes:
+def _sheet_xml(review: dict, doc_name: str = "") -> bytes:
     r = {k: str(review.get(k) or "").strip() for k in ("reviewer", "reviewer_email", "at_label", "preparer", "agent", "run_ref", "note")}
     rows = [("A1", "ตรวจทานแล้ว", None)]
     table = [("ผู้ตรวจทาน", r["reviewer"] + (f" ({r['reviewer_email']})" if r["reviewer_email"] else "")),
@@ -222,6 +222,7 @@ def _sheet_xml(review: dict) -> bytes:
     table.append(("ไฟล์นี้", "เหมือนไฟล์ที่ agent ส่งมาทุกแผ่น เพิ่มเฉพาะแผ่นนี้ ตัวเลขไม่ได้เปลี่ยน"))
     xml = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+           '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>'
            '<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>'
            '<sheetFormatPr defaultRowHeight="15"/>'
            '<cols><col min="1" max="1" width="20" customWidth="1"/><col min="2" max="2" width="80" customWidth="1"/></cols>'
@@ -229,7 +230,12 @@ def _sheet_xml(review: dict) -> bytes:
     xml.append(f'<row r="1">{_cell("A1", rows[0][1])}</row>')
     for i, (k, v) in enumerate(table, start=3):
         xml.append(f'<row r="{i}">{_cell(f"A{i}", k)}{_cell(f"B{i}", v)}</row>')
-    xml.append("</sheetData></worksheet>")
+    # AM8: the review sheet prints like the rest of the working paper — one A4 page, the document's
+    # name and the page number on it
+    foot = escape(f"&L{doc_name} · ตรวจทาน&Rหน้า &P / &N")
+    xml.append('</sheetData><pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>'
+               '<pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="1"/>'
+               f'<headerFooter><oddFooter>{foot}</oddFooter></headerFooter></worksheet>')
     return "".join(xml).encode("utf-8")
 
 
@@ -325,7 +331,7 @@ def stamp_xlsx(src: str, dst: str, review: dict) -> dict:
     parts["xl/workbook.xml"] = wb.encode("utf-8")
     parts["xl/_rels/workbook.xml.rels"] = rels.encode("utf-8")
     parts["[Content_Types].xml"] = ct.encode("utf-8")
-    parts[XLSX_PART] = _sheet_xml(review)
+    parts[XLSX_PART] = _sheet_xml(review, os.path.basename(dst))
 
     tmp = dst + ".tmp"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as out:

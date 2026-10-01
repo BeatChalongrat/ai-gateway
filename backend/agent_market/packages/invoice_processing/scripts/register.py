@@ -214,14 +214,21 @@ def compute(docs: list[R.Doc], roles: dict, period: str, *, answers: dict | None
         else:
             weak_rows = set()
         for it in out["line_items"]:
-            conf = min([(it.get(k) or {}).get("confidence", 0) for k in ("quantity", "unit_price", "amount")
+            # AM8: the item's name counts like its figures — a name with words of its row left out is not
+            # read with confidence, whatever its numbers are
+            d = it.get("description") or {}
+            conf = min([(it.get(k) or {}).get("confidence", 0) for k in ("quantity", "unit_price", "amount", "description")
                         if (it.get(k) or {}).get("normalized") is not None] or [0])
+            by_person = "confirmed_by_person" in (d.get("checks") or [])
             lines.append({"doc_key": doc.key, "name": doc.name, "row": it["row"], "page": it.get("page"),
-                          "description": (it.get("description") or {}).get("normalized") or (it.get("description") or {}).get("value"),
+                          "description": d.get("normalized") or d.get("value"),
                           "quantity": _s((it.get("quantity") or {}).get("normalized")),
                           "unit_price": _s((it.get("unit_price") or {}).get("normalized")),
                           "amount": _s((it.get("amount") or {}).get("normalized")), "confidence": round(conf, 3),
-                          "verified": conf >= STRICT_THRESHOLD and it["row"] not in weak_rows})
+                          "verified": conf >= STRICT_THRESHOLD and it["row"] not in weak_rows,
+                          "left_out": list(it.get("left_out") or []),
+                          # who decided it: a person only when a person answered about this item (never a threshold)
+                          "decided_by": "person" if by_person else "rule"})
         for n, fd in f.items():
             if fd.get("normalized") is None:
                 continue

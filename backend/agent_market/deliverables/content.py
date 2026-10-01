@@ -16,6 +16,12 @@ from ..engine.thai import MONTHS_TH_ABBR, fmt_millions, fmt_money, fmt_pct
 
 REQUIRED_SECTIONS = ("summary", "pl", "exceptions", "insights", "assumptions", "sources", "citations")
 
+# AM8: what the report is, and what the agent does not do — said the way the system works.
+SCOPE_NOTE = ("รายงานนี้เป็นรายงานผลประกอบการสำหรับผู้บริหาร (งบกำไรขาดทุนและการวิเคราะห์) ไม่ใช่การปิดบัญชี: "
+              "ไม่มีงบแสดงฐานะการเงิน งบกระแสเงินสด หรือรายการปรับปรุงบัญชี")
+DOES_NOT = ("agent นี้อ่านอย่างเดียว ไม่เขียนกลับระบบบัญชี และไม่โอนเงิน · agent ไม่ส่งอีเมลเอง "
+            "ผู้ใช้ส่งไฟล์ผ่านระบบได้เมื่อผู้ดูแลตั้งค่าเซิร์ฟเวอร์อีเมลไว้ และทุกฉบับต้องมีคนกดอนุมัติ")
+
 
 def _d(v) -> Decimal | None:
     return None if v is None else Decimal(str(v))
@@ -33,39 +39,55 @@ def date_th(d: _dt.date) -> str:
     return f"{d.day} {MONTHS_TH_ABBR[d.month - 1]} {d.year + 543}"
 
 
-# ── citation markers in prose ─────────────────────────────────────────────
+# ── figures in prose (AM8) ────────────────────────────────────────────────
+#
+# A sentence names a figure by its key — "{operating_expenses_var_budget_pct}" —
+# and the figure's printed text and its own citation are put there together,
+# from computed.json's ``figures`` table. Nothing is matched by its printed
+# text afterwards: two figures that print the same ("10.5%") once took each
+# other's citation. ":abs" prints the figure without its sign or brackets, for
+# a sentence that says the direction in words ("ลดลง {x:abs}").
 
-_NUM = re.compile(r"[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน)?")
+FIGURE = re.compile(r"\{([A-Za-z0-9_][A-Za-z0-9_.\-/]*)(?::(abs))?\}")
 
 
-def mark_citations(text: str, computed: dict) -> list[tuple[str, str | None]]:
-    """Split prose into (text, cite_id) runs: each quoted number gets its cite.
+def figure_text(fig: dict, mod: str | None = None) -> str:
+    text = str(fig.get("text") or "")
+    if mod == "abs":
+        text = text.lstrip("+-")
+        if text.startswith("(") and text.endswith(")"):
+            text = text[1:-1]
+    return text
 
-    A number is matched against the computed table's pre-formatted strings;
-    the Go guard already refused any number that is not one of them.
-    """
-    quotable = computed.get("quotable", {})
-    cites = computed.get("quotable_cites", {})
-    by_text: dict[str, str] = {}
-    for key, s in quotable.items():
-        if key in cites:
-            by_text.setdefault(s.replace(" ", ""), cites[key])
+
+def cite_runs(text: str, computed: dict) -> list[tuple[str, str | None]]:
+    """Split prose into (text, cite_id) runs: each {key} becomes its figure, followed by its cite.
+
+    A key that is not in the table stays as written: the gate finds it in the finished file."""
+    figures = computed.get("figures") or {}
     out: list[tuple[str, str | None]] = []
     pos = 0
-    for m in _NUM.finditer(text):
-        token = m.group(0).replace(" ", "")
-        # Only a balanced "(1,234)" is an accounting negative; "(12.48 ล้าน" is
-        # a number inside ordinary parentheses (same rule as the Go guard).
-        if token.startswith("(") and not token.endswith(")"):
-            token = token[1:]
-        elif token.endswith(")") and not token.startswith("("):
-            token = token[:-1]
-        cid = by_text.get(token) or by_text.get(token.replace("+", ""))
-        if cid:
-            out.append((text[pos:m.end()], cid))
-            pos = m.end()
-    out.append((text[pos:], None))
+    for m in FIGURE.finditer(text or ""):
+        fig = figures.get(m.group(1))
+        if fig is None:
+            continue
+        out.append((text[pos:m.start()] + figure_text(fig, m.group(2)), fig.get("cite")))
+        pos = m.end()
+    out.append(((text or "")[pos:], None))
     return [(t, c) for t, c in out if t]
+
+
+def plain_text(text: str, computed: dict) -> str:
+    """The sentence as printed, with its figures and without the citation marks (the deck's body text)."""
+    return "".join(t for t, _ in cite_runs(text, computed))
+
+
+def cites_in(text: str, computed: dict) -> list[str]:
+    out: list[str] = []
+    for _, c in cite_runs(text, computed):
+        if c and c not in out:
+            out.append(c)
+    return out
 
 
 # ── the model ─────────────────────────────────────────────────────────────
@@ -207,17 +229,23 @@ def exceptions_table(computed: dict) -> dict:
 
 
 def charts(computed: dict) -> list[dict]:
-    """Chart specs whose values are taken verbatim from the computed table."""
+    """Chart specs whose values are taken verbatim from the computed table.
+
+    Every point a chart draws carries its own citation (``series[].cites``, one per category) and
+    the chart cites all of them (``cites``) — not its first row (AM8)."""
     out = []
     t = computed["trend"]
+    tc = t.get("cites") or {}
     if len(t["months"]) >= 2:
         out.append({
             "id": "trend", "kind": "line", "title": f"แนวโน้ม {len(t['months'])} เดือน",
             "subtitle": "หน่วย: ล้านบาท", "categories": t["labels"], "scale": 1_000_000,
-            "series": [{"name": "รายได้", "values": t["revenue"], "path": "trend.revenue"},
-                       {"name": "ค่าใช้จ่ายรวม", "values": t["total_expenses"], "path": "trend.total_expenses"},
-                       {"name": "กำไรสุทธิ", "values": t["net_profit"], "path": "trend.net_profit"}],
-            "cite": t["cite"],
+            "series": [{"name": "รายได้", "values": t["revenue"], "path": "trend.revenue",
+                        "cites": tc.get("revenue") or [t["cite"]] * len(t["labels"])},
+                       {"name": "ค่าใช้จ่ายรวม", "values": t["total_expenses"], "path": "trend.total_expenses",
+                        "cites": tc.get("total_expenses") or [t["cite"]] * len(t["labels"])},
+                       {"name": "กำไรสุทธิ", "values": t["net_profit"], "path": "trend.net_profit",
+                        "cites": tc.get("net_profit") or [t["cite"]] * len(t["labels"])}],
         })
     if computed["has_budget"]:
         rows = [a for a in computed["accounts"] if a["var_budget"] is not None and a["group"] not in ("revenue", "other_income")
@@ -230,18 +258,46 @@ def charts(computed: dict) -> list[dict]:
                 "subtitle": "ส่วนต่างจากงบ (บาท) · บวก = ใช้เกินงบ",
                 "categories": [a["name"] or a["code"] for a in rows], "scale": 1,
                 "series": [{"name": "ต่างจากงบ", "values": [a["var_budget"] for a in rows],
-                            "path": "accounts[].var_budget", "codes": [a["code"] for a in rows]}],
-                "cite": rows[0]["cite"], "signed": True,
+                            "path": "accounts[].var_budget", "codes": [a["code"] for a in rows],
+                            "cites": [a.get("cite_var_budget") or a["cite"] for a in rows]}],
+                "signed": True,
             })
     comp = computed["composition"]
     if comp:
         out.append({
             "id": "composition", "kind": "barh", "title": "องค์ประกอบค่าใช้จ่ายของงวด",
             "subtitle": "หน่วย: ล้านบาท", "categories": [c["name"] for c in comp], "scale": 1_000_000,
-            "series": [{"name": "งวดนี้", "values": [c["amount"] for c in comp], "path": "composition[].amount"}],
-            "cite": comp[0]["cite"],
+            "series": [{"name": "งวดนี้", "values": [c["amount"] for c in comp], "path": "composition[].amount",
+                        "codes": [c.get("code") or "" for c in comp], "cites": [c.get("cite") for c in comp]}],
         })
+    for spec in out:
+        seen: list[str] = []
+        for ser in spec["series"]:
+            for c in ser.get("cites") or []:
+                if c and c not in seen:
+                    seen.append(c)
+        spec["cites"] = seen
+        spec["cite"] = ", ".join(seen)  # what a caption prints
     return out
+
+
+def chart_table(spec: dict) -> dict:
+    """The numbers a chart draws, as a table under it: a reader can read each point and its citation,
+    and the gate reads them back out of the finished file (AM8)."""
+    scale = Decimal(str(spec.get("scale", 1)))
+    unit = "ล้านบาท" if scale == 1_000_000 else "บาท"
+    cols = ["รายการ" if spec["kind"] == "barh" else "เดือน"] + [s["name"] for s in spec["series"]] + ["อ้างอิง"]
+    rows = []
+    for i, cat in enumerate(spec["categories"]):
+        vals = []
+        for s in spec["series"]:
+            v = Decimal(str(s["values"][i]))
+            vals.append(f"{(v / scale).quantize(Decimal('0.01')):,.2f}" if scale != 1 else money0(v))
+        cites = [c for c in ((s.get("cites") or [None] * len(spec["categories"]))[i] for s in spec["series"]) if c]
+        rows.append([str(cat)] + vals + [", ".join(dict.fromkeys(cites))])
+    return {"type": "table", "columns": cols, "rows": rows, "strong_rows": [], "numeric_from": 1,
+            "cite_col": len(cols) - 1, "small": True, "chart_data": spec["id"],
+            "caption": f"ตัวเลขที่กราฟวาด หน่วย: {unit} · แต่ละแถวอ้างอิงที่มาของตัวเลขนั้น"}
 
 
 def apply_presentation(computed: dict, pres: dict) -> dict:
@@ -305,6 +361,10 @@ def build(computed: dict, req: dict) -> dict:
         assumptions.append({"code": "no_prior", "source": "data", "text": "ไม่มีข้อมูลงวดก่อน จึงไม่ได้เทียบการเปลี่ยนแปลงรายเดือน"})
     if not computed["has_budget"]:
         assumptions.append({"code": "no_budget", "source": "data", "text": "ไม่มีไฟล์งบประมาณ จึงไม่ได้เทียบกับงบ"})
+    if not any(a["group"] == "income_tax" for a in computed["accounts"]):
+        # AM8 (the audit): a zero tax line is the absence of a tax account, not a computed tax
+        assumptions.append({"code": "no_income_tax", "source": "data",
+                            "text": "ไฟล์ไม่มีบัญชีภาษีเงินได้ กำไรสุทธิในรายงานนี้จึงยังไม่หักภาษีเงินได้นิติบุคคล"})
     assumptions.append({"code": "materiality", "source": "rule",
                         "text": f"เกณฑ์ความมีสาระสำคัญสำหรับรายการที่ต้องตรวจ: {money0(computed['materiality'])} บาท"})
     # Deduplicate by text, keep order.
@@ -338,14 +398,16 @@ def build(computed: dict, req: dict) -> dict:
     citation_rows = []
     for c in computed["citations"]:
         if c["sources"]:
-            where = "; ".join(f"{s['file']} · {s['sheet']} · {s['cells']}" for s in c["sources"])
+            where = "; ".join(source_where(s) for s in c["sources"])
         elif c.get("derived_from"):
-            where = "คำนวณจาก " + ", ".join(c["derived_from"][:8]) + (" …" if len(c["derived_from"]) > 8 else "")
+            where = "คำนวณจาก " + ", ".join(c["derived_from"])  # every one: a reader follows each (AM8)
         else:
             where = "—"
         numeric = c["value"] not in (None, "") and re.match(r"^-?\d+(\.\d+)?$", str(c["value"]))
         if numeric and c.get("unit") == "pct":
             val = fmt_pct(Decimal(str(c["value"])), 1)  # a ratio, not baht ("อัตรากำไรสุทธิ 2.4%", not "2")
+        elif numeric and c.get("unit") == "points":
+            val = f"{Decimal(str(c['value'])):+.2f} จุด"
         else:
             val = money0(c["value"]) if numeric else (c["value"] or "")
         citation_rows.append([c["id"], c["label"], val, where, f"{c['script']} · {c['formula']}"])
@@ -353,24 +415,31 @@ def build(computed: dict, req: dict) -> dict:
     about = [
         f"โมเดลที่อ่านตัวเลขที่คำนวณแล้วเพื่อเขียนคำอธิบาย: {model.get('model') or 'ไม่มี (ใช้ข้อความจากกฎ)'}"
         + (" (รันในองค์กร)" if model.get("self_hosted") else (" (ผู้ให้บริการภายนอก)" if model.get("model") else "")),
-        "โมเดลเห็นเฉพาะตารางตัวเลขที่คำนวณเสร็จแล้ว ไม่เห็นไฟล์ต้นฉบับทั้งไฟล์",
+        "โมเดลเห็นเฉพาะตารางตัวเลขที่คำนวณเสร็จแล้ว ไม่เห็นไฟล์ต้นฉบับทั้งไฟล์ และไม่ได้พิมพ์ตัวเลขเอง: "
+        "ทุกตัวเลขในคำอธิบายถูกวางโดยสคริปต์จากตารางที่คำนวณ พร้อมเลขอ้างอิงของตัวเลขนั้น",
         f"การคำนวณ: {computed['script']} และ {computed['rules']} ด้วยเลขทศนิยมแม่นยำ (Decimal)",
         f"รอบการทำงาน: {run.get('id', '—')} · agent {run.get('agent_version', '—')} · ธีม {req.get('theme', {}).get('name', '')} v{req.get('theme', {}).get('version', 1)}",
-        "agent นี้อ่านอย่างเดียว ไม่เขียนกลับระบบบัญชี ไม่ส่งอีเมล และไม่โอนเงิน",
+        SCOPE_NOTE,
+        DOES_NOT,
     ]
     if narrative.get("written_by") == "rules":
         about.insert(1, "คำอธิบายในรายงานนี้เขียนจากกฎ เพราะไม่มีโมเดลที่ตอบได้ในรอบนี้")
 
+    chart_specs = charts(computed)
+    chart_blocks = []
+    for c in chart_specs:
+        chart_blocks += [{"type": "chart", "chart": c["id"]}, chart_table(c)]
     sections = [
         {"key": "summary", "title": "สรุปผู้บริหาร", "blocks": [
-            {"type": "paragraph", "runs": mark_citations(narrative["summary"], computed)},
+            {"type": "paragraph", "runs": cite_runs(narrative["summary"], computed), "narrative": True},
             {"type": "kpis"},
         ]},
         {"key": "pl", "title": "งบกำไรขาดทุน", "blocks": [pl_table(computed)]},
-        {"key": "charts", "title": "แนวโน้มและองค์ประกอบ", "blocks": [{"type": "chart", "chart": c["id"]} for c in charts(computed)]},
+        {"key": "charts", "title": "แนวโน้มและองค์ประกอบ", "blocks": chart_blocks},
         {"key": "movements", "title": "รายการเคลื่อนไหวสำคัญ", "blocks": [b for b in (
             movement_table(computed),
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "movements")]}
+            {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "movements")],
+             "narrative": True}
             if sentences(narrative, "movements") else None,
         ) if b]},
         {"key": "accounts", "title": "รายละเอียดรายบัญชี", "blocks": [account_table(computed)]},
@@ -379,9 +448,10 @@ def build(computed: dict, req: dict) -> dict:
             exceptions_table(computed)]},
         {"key": "insights", "title": "ข้อสังเกตและสิ่งที่ควรทำต่อ", "blocks": [
             {"type": "subheading", "text": "สิ่งที่ควรดู"},
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "watch")]},
+            {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "watch")], "narrative": True},
             {"type": "subheading", "text": "สิ่งที่ควรทำต่อ"},
-            {"type": "bullets", "items": [mark_citations(t, computed) for t in sentences(narrative, "next_steps")]},
+            {"type": "bullets", "items": [cite_runs(t, computed) for t in sentences(narrative, "next_steps")],
+             "narrative": True},
         ]},
         {"key": "assumptions", "title": "ข้อสมมติที่ใช้ในรอบนี้", "blocks": [
             {"type": "bullets", "items": [[(a["text"] + _assumption_tag(a), None)] for a in assumptions]},
@@ -399,6 +469,12 @@ def build(computed: dict, req: dict) -> dict:
         ]},
     ]
     sections = [s for s in sections if s["blocks"]]
+    # What the deck prints: the same sentences with their figures in place, and which figures each cites.
+    printed = {"summary": plain_text(narrative["summary"], computed)}
+    narrative_cites = {"summary": cites_in(narrative["summary"], computed)}
+    for key in ("movements", "watch", "next_steps"):
+        printed[key] = [plain_text(t, computed) for t in narrative[key]]
+        narrative_cites[key] = [c for t in narrative[key] for c in cites_in(t, computed)]
     return {
         "title": "รายงานผลประกอบการ",
         "subtitle": f"ประจำเดือน{computed['period_label']}",
@@ -406,14 +482,36 @@ def build(computed: dict, req: dict) -> dict:
         "prepared": f"จัดทำ {date_th(today)}",
         "cover_lines": cover_lines,
         "kpis": kpis(computed),
-        "charts": charts(computed),
+        "charts": chart_specs,
         "sections": sections,
         "assumptions": assumptions,
-        "narrative": narrative,
+        "narrative": {**narrative, **printed},
+        "narrative_source": narrative,
+        "narrative_cites": narrative_cites,
         "source_note": f"ที่มา: {src['primary']['file']} (sha256 {src['primary']['sha256'][:8]}…) · {computed['script']}",
         "model": model,
         "computed": computed,
     }
+
+
+def source_where(s: dict) -> str:
+    """Where a figure was read, every row of it, as briefly as a reader can follow: "GL.xlsx · Sheet1 ·
+    คอลัมน์ G:H แถว 11, 59, 62–64" (AM8: never "and N more"). When the row list was capped, the cell
+    ranges are printed instead — complete either way."""
+    rows = s.get("row_numbers") or []
+    m = re.match(r"^([A-Z]+)\d+(?::([A-Z]+)\d+)?", str(s.get("cells") or ""))
+    if rows and m and len(rows) >= int(s.get("rows") or len(rows)):
+        cols = m.group(1) + (f":{m.group(2)}" if m.group(2) and m.group(2) != m.group(1) else "")
+        parts, start, prev = [], rows[0], rows[0]
+        for r in rows[1:] + [None]:
+            if r is not None and r == prev + 1:
+                prev = r
+                continue
+            parts.append(f"{start}–{prev}" if prev != start else f"{start}")
+            if r is not None:
+                start = prev = r
+        return f"{s['file']} · {s['sheet']} · คอลัมน์ {cols} แถว {', '.join(parts)}"
+    return f"{s['file']} · {s['sheet']} · {s.get('cells') or ''}"
 
 
 def _assumption_tag(a: dict) -> str:

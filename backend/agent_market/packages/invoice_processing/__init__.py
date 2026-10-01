@@ -136,7 +136,7 @@ def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
         name = os.path.basename(names.get(fmt) or "register.xlsx")
         path = os.path.join(out_dir, name)
         meta = InvoiceWorkbook(computed, theme, req.get("run")).write(path)
-        checks = check(path, computed)
+        checks = check(path, computed, req.get("run"))
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         with open(path, "rb") as f:

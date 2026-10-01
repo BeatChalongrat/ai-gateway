@@ -220,6 +220,12 @@ class XlsxWriter:
         self.verify(last)
         self.lists()
         self.wb.properties.title = f"{self.m['title']} {self.m['subtitle']}"
+        # AM8: printable — the P&L face on one page; account and ledger rows keep their identifiers with their amounts
+        import os
+
+        from . import workpaper
+
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"รายการที่ใช้": 2})
         self.wb.save(path)
         return {"path": path, "sheets": self.wb.sheetnames, "ledger_rows": last - 4}
 

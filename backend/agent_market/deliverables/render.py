@@ -47,8 +47,11 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
 
     artifacts = []
     all_ok = True
-    cit = quality.check_citations(model, computed)
-    asm = quality.check_assumptions(model, req)
+    # The run-level checks (citations, assumptions) are asserted once — on the report, or on the deck
+    # when there is no report — never counted again for every file (AM8: "14/14" was 6 + 6 + 2 with
+    # the citations check counted on each format).
+    run_level = [quality.check_citations(model, computed), quality.check_assumptions(model, req)]
+    carrier = "docx" if "docx" in formats else ("pptx" if "pptx" in formats else None)
     for fmt in formats:
         name = os.path.basename(names.get(fmt) or f"output.{fmt}")
         path = os.path.join(out_dir, name)
@@ -57,18 +60,19 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
             from .report_docx import ReportWriter
 
             meta = ReportWriter(model, theme, chart_files).write(path, logo)
-            checks = quality.check_docx(path, model, theme, req) + [
-                quality.check_docx_charts(chart_bindings, computed, model["charts"]), cit, asm]
+            checks = quality.check_docx(path, model, theme, req)
         elif fmt == "pptx":
             from .deck_pptx import DeckWriter
 
             meta = DeckWriter(model, computed, theme).write(path)
-            checks = quality.check_pptx(path, meta, computed, theme) + [cit]
+            checks = quality.check_pptx(path, meta, computed, theme)
         else:
             from .table_xlsx import XlsxWriter
 
             meta = XlsxWriter(model, computed, theme).write(path)
             checks = quality.check_xlsx(path, computed)
+        if fmt == carrier:
+            checks = checks + run_level
         ok = all(c["ok"] for c in checks)
         all_ok &= ok
         meta.pop("path", None)

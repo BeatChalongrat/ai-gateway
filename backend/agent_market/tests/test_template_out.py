@@ -35,31 +35,34 @@ def _slots(name):
 
 
 class MappingScreen(unittest.TestCase):
-    def test_named_ranges_propose_by_name_and_explain_what_cannot_be_filled(self):
+    def test_code_proposes_only_identity_and_explains_what_cannot_be_filled(self):
+        # AM8: which slot is which field is the model's guess (the runner asks it, the person confirms);
+        # code matches no synonyms — "CompanyName" is not "company" to code
         sl = {s["key"]: s for s in _slots("xlsx_named_ranges.xlsx")}
         prop = to.propose(list(sl.values()), INVOICE)
         self.assertEqual({k: prop.get(k) for k in ("CompanyName", "Period", "Subtotal", "VatAmount")},
-                         {"CompanyName": "company", "Period": "period", "Subtotal": "subtotal_thb", "VatAmount": "vat_thb"})
+                         {"CompanyName": None, "Period": None, "Subtotal": None, "VatAmount": None})
         self.assertEqual((sl["GrandTotal"]["fillable"], sl["GrandTotal"]["reason"]), (False, "formula_cell"))
         self.assertNotIn("GrandTotal", prop)                       # a formula is never offered as an input
         self.assertEqual(sl["LinesTable"]["kind"], "table")
         self.assertEqual(sl["LinesTable"]["columns"], ["A", "B", "C"])
-        self.assertEqual(prop.get("LinesTable"), "lines")
+        self.assertTrue(all(s.get("context") is not None for s in sl.values()))   # what the model reads
 
     def test_markers_controls_lists_and_labelled_cells(self):
-        prop = to.propose(_slots("docx_placeholders.docx"), INVOICE)
-        self.assertEqual({k: prop.get(k) for k in ("company_name", "period", "invoice_count", "total_amount", "vat_amount")},
-                         {"company_name": "company", "period": "period", "invoice_count": "documents",
-                          "total_amount": "total_thb", "vat_amount": "vat_thb"})
-        self.assertNotIn("prepared_by", prop)                      # nothing of the agent's is a preparer's name
+        sl = _slots("docx_placeholders.docx")
+        prop = to.propose(sl, INVOICE)
+        self.assertEqual(prop.get("period"), "period")              # a marker named exactly like a field
+        self.assertNotIn("company_name", prop)                     # a near name is the model's to propose
+        self.assertNotIn("prepared_by", prop)
+        self.assertIn("company_name", {s["key"] for s in sl})
+        self.assertTrue(next(s for s in sl if s["key"] == "company_name")["context"])
         cc = {s["key"]: s for s in _slots("docx_content_controls.docx")}
         self.assertTrue(cc["CompanyName"]["fillable"])
         self.assertEqual((cc["Status"]["fillable"], cc["Status"]["reason"]), (False, "not_plain_text"))
-        rr = to.propose(_slots("docx_repeating_rows.docx"), INVOICE)
-        self.assertEqual((rr.get("line"), rr.get("line.amount"), rr.get("line.description")),
-                         ("lines", "lines.amount", "lines.description"))
-        nm = to.propose(_slots("xlsx_no_markers.xlsx"), INVOICE)
-        self.assertEqual(nm, {"Sheet1!B1": "company", "Sheet1!B2": "period", "Sheet1!B3": "total_thb"})
+        rr = {s["key"]: s for s in _slots("docx_repeating_rows.docx")}
+        self.assertEqual(rr["line"]["kind"], "list")
+        nm = {s["key"]: s for s in _slots("xlsx_no_markers.xlsx")}
+        self.assertEqual({k: nm[k]["label"] for k in ("Sheet1!B1", "Sheet1!B2", "Sheet1!B3")} and len(nm) >= 3, True)
 
     def test_an_unmapped_list_column_stays_empty(self):
         sl = [{"key": "line", "kind": "list", "label": "line", "fillable": True, "reason": None, "columns": ["date", "amount"]}]

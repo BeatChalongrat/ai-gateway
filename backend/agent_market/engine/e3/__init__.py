@@ -13,7 +13,7 @@ list of ordered passes in three tiers:
 Every pair below ``exact`` is a candidate: a person confirms it (a question
 card through the clarification engine), and the pair records the pass, the
 tier and that a person decided. No model adds a number or decides a pair;
-the same two tables and the same answers give the same groups, byte for byte.
+the same two tables and the same answers give the same groups, the same pairs and the same questions.
 
     rows.py    Row, where it came from, and the keys its texts reduce to
     match.py   Tolerance, Pass, the passes, run() → the four groups

@@ -537,8 +537,10 @@ class DocxTemplateFill(unittest.TestCase):
         self.assertEqual(log[1]["detail"], "Filled 0 markers")
 
 
-class MarkersNobodyFills(unittest.TestCase):
-    def test_a_marker_in_a_slide_layout_is_reported_not_skipped(self):
+class MarkersOnLayouts(unittest.TestCase):
+    def test_a_marker_in_a_slide_layout_is_filled(self):
+        # AM8: a layout's and a master's markers are filled (the audit's master marker was reported filled
+        # and left in place); one with no value is still reported, never skipped
         tf = _tf()
         tmp = tempfile.mkdtemp()
         prs = Presentation()
@@ -551,9 +553,9 @@ class MarkersNobodyFills(unittest.TestCase):
         src = os.path.join(tmp, "t.pptx")
         prs.save(src)
         rep = tf.fill(src, os.path.join(tmp, "o.pptx"), VALUES)
-        self.assertEqual(rep["filled"], ["period"])
+        self.assertEqual(sorted(rep["filled"]), ["company_name", "period"])
         got = {(x["marker"], x["reason"]) for x in rep["not_filled_explained"]}
-        self.assertEqual(got, {("unknown", "no_value"), ("company_name", "unsupported_location")})
+        self.assertEqual(got, {("unknown", "no_value")})
         self.assertTrue(rep["mapping_screen"])
 
 

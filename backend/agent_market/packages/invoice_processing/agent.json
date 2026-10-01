@@ -1,7 +1,7 @@
 {
   "schema_version": "agent.market.v1",
   "id": "sran.invoice-processing",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "name": "อ่านใบกำกับภาษี / ใบเสร็จ ทำทะเบียนซื้อ",
   "name_en": "Invoice Processing",
   "short_name": "ทะเบียนเอกสารซื้อ",
@@ -67,7 +67,7 @@
     },
     "never": [
       "ไม่บันทึกอะไรเข้าระบบบัญชี",
-      "ไม่ส่งอีเมล และไม่แชร์ไฟล์ออกนอกองค์กร",
+      "ไม่ส่งอีเมลเอง ผู้ใช้ส่งไฟล์ผ่านระบบได้เมื่อผู้ดูแลตั้งค่าเซิร์ฟเวอร์อีเมลไว้ และทุกฉบับต้องมีคนกดอนุมัติ",
       "ไม่อนุมัติการจ่าย และไม่โอนเงิน",
       "ไม่ตั้งเวลาทำงานเอง",
       "ไม่ให้โมเดลกำหนดตัวเลขในทะเบียน"
@@ -79,26 +79,26 @@
     "default": "read_only",
     "denied": ["email_send", "accounting_write", "external_share", "payment", "computer_use", "schedule"]
   },
-  "cannot": "agent ตัวนี้ไม่บันทึกเข้าระบบบัญชี ไม่ส่งอีเมล ไม่อนุมัติหรือโอนเงิน และไม่ตั้งเวลาทำงานเอง",
+  "cannot": "agent ตัวนี้ไม่บันทึกเข้าระบบบัญชี ไม่อนุมัติหรือโอนเงิน และไม่ตั้งเวลาทำงานเอง และไม่ส่งอีเมลเอง (คนส่งผ่านระบบได้เมื่อผู้ดูแลตั้งค่าไว้)",
   "photo_notice": "รูปถ่ายใบเสร็จอ่านได้เท่าที่ภาพชัด: อ่านเฉพาะผู้ขาย วันที่ ยอดรวม VAT และเลขผู้เสียภาษี และจะถามกลับทุกครั้งที่ไม่มั่นใจ ถ้ามี PDF หรือสแกนให้ส่งแบบนั้นแทน",
   "limits": {"max_file_mb": 20, "max_files": 30},
   "self_test": "self-test.json",
   "templates": {
     "fields": {
-      "company": {"label": "ชื่อบริษัท", "aliases": ["company_name", "บริษัท", "ชื่อบริษัท"]},
-      "company_tax_id": {"label": "เลขผู้เสียภาษีบริษัท", "aliases": ["tax_id", "company_tax"]},
-      "period": {"label": "งวด", "aliases": ["month", "เดือน"]},
-      "prepared_on": {"label": "วันที่จัดทำ", "aliases": ["date", "prepared_date"]},
-      "documents": {"label": "จำนวนเอกสาร", "aliases": ["invoice_count", "document_count", "count"]},
+      "company": {"label": "ชื่อบริษัท"},
+      "company_tax_id": {"label": "เลขผู้เสียภาษีบริษัท"},
+      "period": {"label": "งวด"},
+      "prepared_on": {"label": "วันที่จัดทำ"},
+      "documents": {"label": "จำนวนเอกสาร"},
       "included": {"label": "จำนวนที่บันทึก"},
-      "subtotal_thb": {"label": "ยอดก่อน VAT (บาท)", "aliases": ["subtotal", "ยอดก่อนvat"]},
-      "vat_thb": {"label": "VAT (บาท)", "aliases": ["vat", "vat_amount", "ภาษีมูลค่าเพิ่ม"]},
-      "total_thb": {"label": "ยอดรวม (บาท)", "aliases": ["total", "total_amount", "grand_total", "ยอดรวม"]},
-      "wht_thb": {"label": "หัก ณ ที่จ่าย (บาท)", "aliases": ["wht", "wht_amount"]},
-      "net_thb": {"label": "ยอดสุทธิ (บาท)", "aliases": ["net", "net_payable"]}
+      "subtotal_thb": {"label": "ยอดก่อน VAT (บาท)"},
+      "vat_thb": {"label": "VAT (บาท)"},
+      "total_thb": {"label": "ยอดรวม (บาท)"},
+      "wht_thb": {"label": "หัก ณ ที่จ่าย (บาท)"},
+      "net_thb": {"label": "ยอดสุทธิ (บาท)"}
     },
     "lists": {
-      "lines": {"label": "รายการเอกสาร", "aliases": ["line", "lines_table", "items", "รายการ"], "columns": {"date": "วันที่", "number": "เลขที่", "seller": "ผู้ขาย", "seller_tax_id": "เลขผู้เสียภาษีผู้ขาย", "description": "รายละเอียด", "quantity": "จำนวน", "subtotal": "ยอดก่อน VAT", "vat": "VAT", "total": "ยอดรวม", "amount": "จำนวนเงิน"}}
+      "lines": {"label": "รายการเอกสาร", "columns": {"date": "วันที่", "number": "เลขที่", "seller": "ผู้ขาย", "seller_tax_id": "เลขผู้เสียภาษีผู้ขาย", "description": "รายละเอียด", "quantity": "จำนวน", "subtotal": "ยอดก่อน VAT", "vat": "VAT", "total": "ยอดรวม", "amount": "จำนวนเงิน"}}
     }
   }
 }
