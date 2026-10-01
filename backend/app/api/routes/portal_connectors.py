@@ -105,31 +105,78 @@ def _deep_link_url(connector_id: str, status: str, reason: str | None = None) ->
     return f"{_DEEP_LINK_BASE}?{urlencode(params)}"
 
 
-def _deep_link_response(
-    connector_id: str, status: str, reason: str | None = None
-) -> HTMLResponse:
-    """Bounce the browser back to the desktop app.
+# Which client opened the consent page. An ALLOW-LIST carried by the ticket
+# and then the state — never read from the callback's own query. ``web`` is a
+# browser tab of the web chat: it has no app to return to, so its page never
+# names the desktop app and carries no ``sran://`` link. ``desktop`` is the
+# desktop app, which opens consent in the system browser: the page sends the
+# person back to the app. A caller that says nothing is an older desktop.
+RETURN_CLIENTS = ("web", "desktop")
+_DEFAULT_CLIENT = "desktop"
 
-    Some browsers block a plain 302 to a custom scheme, so this renders
-    a page that (a) meta-refreshes to the ``sran://`` link immediately
-    and (b) keeps a clickable fallback + "you can close this window".
-    The URL carries only the connector id and a coarse status code —
-    tokens and provider error text never appear here.
-    """
-    url = _deep_link_url(connector_id, status, reason)
-    title = "Connected" if status == "ok" else "Connection failed"
-    html = f"""<!doctype html>
-<html><head>
+_RETURN_PAGE = """<!doctype html>
+<html lang="th"><head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0;url={url}">
-<title>SRAN Desktop — {title}</title>
-<style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#111;color:#eee}}main{{text-align:center}}a{{color:#7ab8ff}}</style>
-</head><body><main>
-<h1>{title}</h1>
-<p>Returning to SRAN Desktop… You can close this window.</p>
-<p><a href="{url}">Open SRAN Desktop</a></p>
-</main></body></html>"""
-    return HTMLResponse(html)
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{refresh}<title>SRAN — {title_en}</title>
+<style>body{{font-family:'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#111;color:#eee}}main{{text-align:center;max-width:440px;padding:24px}}h1{{font-size:20px;margin:0 0 4px}}h2{{font-size:14px;font-weight:400;color:#aab;margin:0 0 16px}}p{{font-size:14px;line-height:1.6;color:#ccd;margin:0 0 12px}}a{{color:#7ab8ff}}</style>
+</head><body data-client="{client}" data-status="{status}"><main>
+<h1>{title_th}</h1>
+<h2>{title_en}</h2>
+<p>{next_th}</p>
+<p>{next_en}</p>
+{link}</main></body></html>"""
+
+_TITLES = {"ok": ("เชื่อมต่อแล้ว", "Connected"), "error": ("เชื่อมต่อไม่สำเร็จ", "Connection failed")}
+# What to do next, per client and outcome (Thai, English).
+_NEXT = {
+    ("web", "ok"): ("ปิดแท็บนี้ แล้วกลับไปที่แท็บ SRAN Chat ที่เปิดค้างไว้ จากนั้นกด “ตรวจอีกครั้ง”",
+                    "Close this tab and go back to your SRAN Chat tab, then press “Check again”."),
+    ("web", "error"): ("ยังไม่ได้เชื่อมต่อ — ปิดแท็บนี้ แล้วกลับไปที่แท็บ SRAN Chat เพื่อกดเชื่อมต่ออีกครั้ง",
+                       "Nothing was connected. Close this tab and go back to your SRAN Chat tab to try again."),
+    ("desktop", "ok"): ("กำลังกลับไปที่แอป SRAN Desktop — ปิดหน้าต่างนี้ได้เลย",
+                        "Returning to the SRAN Desktop app. You can close this window."),
+    ("desktop", "error"): ("ยังไม่ได้เชื่อมต่อ — ปิดหน้าต่างนี้ แล้วลองเชื่อมต่ออีกครั้งจากแอป SRAN Desktop",
+                           "Nothing was connected. Close this window and try again from the SRAN Desktop app."),
+    # The state is gone (an old or replayed link), so nobody knows which client asked.
+    ("unknown", "error"): ("ลิงก์นี้หมดอายุหรือถูกใช้ไปแล้ว — ปิดหน้านี้ แล้วกดเชื่อมต่ออีกครั้งจาก SRAN",
+                           "This link has expired or was already used. Close this page and connect again from SRAN."),
+}
+
+
+def _return_client(value: object) -> str:
+    return value if value in RETURN_CLIENTS else _DEFAULT_CLIENT
+
+
+def _return_response(
+    client: str, connector_id: str, status: str, reason: str | None = None
+) -> HTMLResponse:
+    """The page the consent flow ends on, written for the client that began it.
+
+    ``web``: the person is in a browser tab the web chat opened — the page
+    says so and has no desktop link at all. ``desktop``: the page bounces to
+    the app. Some browsers block a plain 302 to a custom scheme, so it (a)
+    meta-refreshes to the ``sran://`` link immediately and (b) keeps a
+    clickable fallback. ``unknown`` (no state row to say who asked): neutral
+    words, the app link only as a fallback. Either way the page — and the
+    link — carries only the connector id and a coarse status code; tokens
+    and provider error text never appear here.
+    """
+    status = "ok" if status == "ok" else "error"
+    title_th, title_en = _TITLES[status]
+    next_th, next_en = _NEXT.get((client, status)) or _NEXT[("unknown", "error")]
+    refresh = link = ""
+    if client != "web":
+        url = _deep_link_url(connector_id, status, reason)
+        if client == "desktop":
+            refresh = f'<meta http-equiv="refresh" content="0;url={url}">\n'
+        link = f'<p><a href="{url}">เปิด SRAN Desktop · Open SRAN Desktop</a></p>\n'
+    elif reason:
+        # No link to carry it: the coarse reason stays readable for support, nothing else.
+        link = f'<p style="font-size:12px;color:#778">({reason})</p>\n'
+    return HTMLResponse(_RETURN_PAGE.format(
+        refresh=refresh, title_th=title_th, title_en=title_en, next_th=next_th, next_en=next_en,
+        link=link, client=client, status=status))
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +224,7 @@ def list_connections(
 def create_connect_ticket(
     connector_id: str,
     request: Request,
+    client: str = Query(default=_DEFAULT_CLIENT, pattern="^(web|desktop)$"),
     user: PortalUserORM = Depends(get_portal_user),
     ticket_store: OneShotStore = Depends(get_connector_ticket_store),
 ):
@@ -186,6 +234,11 @@ def create_connect_ticket(
     the browser has no portal cookies, and the desktop must never put
     its JWT in a URL. The Redis value binds user + tenant + connector so
     the ticket can't be replayed for another connector or user.
+
+    ``client`` says who is asking (``web``: a browser tab of the web chat;
+    ``desktop``: the desktop app, the default for callers that say nothing).
+    It rides the ticket and the state so the page the flow ends on is
+    written for that client.
     """
     try:
         connector_config(connector_id)
@@ -197,6 +250,7 @@ def create_connect_ticket(
             "user_id": user.id,
             "tenant_id": user.tenant_id,
             "connector_id": connector_id,
+            "client": client,
         },
         token=mint_ticket_token(),
     )
@@ -233,13 +287,14 @@ def oauth_start(
             code="invalid_ticket",
         )
     connector_id = payload.get("connector_id") or ""
+    client = _return_client(payload.get("client"))
     try:
         cfg = connector_config(connector_id)
         client_id, _ = connector_oauth_service.client_credentials(connector_id)
     except UnknownConnector:
-        return _deep_link_response(connector_id or "unknown", "error", "unknown_connector")
+        return _return_response(client, connector_id or "unknown", "error", "unknown_connector")
     except ConnectorNotConfigured:
-        return _deep_link_response(connector_id, "error", "not_configured")
+        return _return_response(client, connector_id, "error", "not_configured")
 
     verifier, challenge = generate_pkce()
     state = state_store.put(
@@ -248,6 +303,7 @@ def oauth_start(
             "tenant_id": payload.get("tenant_id"),
             "connector_id": connector_id,
             "code_verifier": verifier,
+            "client": client,
         }
     )
     callback_url = str(request.url_for("connector_oauth_callback"))
@@ -279,21 +335,24 @@ def oauth_callback(
     session: Session = Depends(get_db_session),
     state_store: OneShotStore = Depends(get_connector_state_store),
 ):
-    """Exchange the code, store encrypted tokens, bounce to ``sran://``.
+    """Exchange the code, store encrypted tokens, end on the client's own page.
 
-    Every failure path returns the deep-link page with a COARSE reason
-    code only — provider error text never reaches a URL. State is
-    one-shot (GETDEL), so a replayed callback fails closed.
+    The page is written for the client that began the flow (``web`` or
+    ``desktop``, from the state — see ``_return_response``). Every failure
+    path returns it with a COARSE reason code only — provider error text
+    never reaches a URL or the page. State is one-shot (GETDEL), so a
+    replayed callback fails closed.
     """
     row = state_store.pop(state)
     if row is None:
-        return _deep_link_response("unknown", "error", "invalid_state")
+        return _return_response("unknown", "unknown", "error", "invalid_state")
     connector_id = row.get("connector_id") or "unknown"
+    client = _return_client(row.get("client"))
     if error:
         # User hit "Deny" at the provider (or the provider errored).
-        return _deep_link_response(connector_id, "error", "provider_denied")
+        return _return_response(client, connector_id, "error", "provider_denied")
     if not code:
-        return _deep_link_response(connector_id, "error", "missing_code")
+        return _return_response(client, connector_id, "error", "missing_code")
 
     callback_url = str(request.url_for("connector_oauth_callback"))
     try:
@@ -305,7 +364,7 @@ def oauth_callback(
         )
     except (TokenExchangeFailed, ConnectorNotConfigured, UnknownConnector) as exc:
         logger.warning("Connector %s code exchange failed: %s", connector_id, exc)
-        return _deep_link_response(connector_id, "error", "exchange_failed")
+        return _return_response(client, connector_id, "error", "exchange_failed")
 
     cfg = connector_config(connector_id)
     existing = _row_for(session, row["user_id"], connector_id)
@@ -327,7 +386,7 @@ def oauth_callback(
     existing.scopes = tokens.get("scopes") or cfg["scopes"]
     session.flush()
 
-    return _deep_link_response(connector_id, "ok")
+    return _return_response(client, connector_id, "ok")
 
 
 # ---------------------------------------------------------------------------
