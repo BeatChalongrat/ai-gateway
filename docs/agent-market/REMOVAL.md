@@ -127,6 +127,13 @@ for display, and changes nothing there):
   block (one closure); nothing in the knowledge service changed.
 - AM6, observability: `infra/prometheus/agent_market.yml` (+ its test) counts a
   run that finished open (`status="completed_open"`) as delivered.
+- AM8 (the gate opens the finished file): no migration and nothing outside the
+  feature's own trees — `backend/agent_market/` (gates, citations, print setup,
+  item reading, templates, packages 1.4.0 / 1.4.0 / 1.3.0 / 1.2.0 / 1.1.0),
+  `services/chat-edge-api/internal/agentmarket/` (the narrative's figure keys,
+  the template's model proposal and draft delivery, the quality line, the
+  formats a card offers) and `apps/web-chat/src/features/agent-market/`. The
+  desktop app only took a new version number. Gone with step 6.
 
 ## Steps
 

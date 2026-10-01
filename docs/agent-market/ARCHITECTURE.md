@@ -84,9 +84,9 @@ files never say a default was used for something the person chose.
   with a SUMIFS check sheet) from **one** content model (no PDF since AM1b:
   its Thai shaping was wrong; it returns in AM-2 as the finished .docx
   converted by headless LibreOffice); the quality
-  gate (`quality.py`, using `doc_validator.py` and `pptx_inspector.py`) fails
-  the step on overflow, off-theme fonts, unbound charts, empty required
-  sections, blank citations, or missing assumptions.
+  gate (`quality.py`, using `doc_validator.py` and `pptx_inspector.py`) opens
+  each finished file again (AM8) — see "The gate opens the finished file"
+  below for what it asserts and what it does not.
 - Adding a format later re-renders from the stored computed table: no compute
   step runs, the version is bumped.
 
@@ -164,7 +164,10 @@ over the same bytes and stored on every install and run.
   proposal a person confirms through the clarification engine, and records its
   pass, tier and who confirmed it. Tolerances are install settings
   (`match_*`, validated in `api.go` with the engine's own bounds). No model, no
-  clock, no set order: the same input and answers give the same bytes.
+  clock, no set order: the same input and answers give the same figures, the same
+  pairs and the same questions (AM8: what `scripts/probes/AM6/same_input_twice.sh` compares —
+  computed.json, the matching results, the cards asked and every cell's value; not the Office
+  files' bytes, whose packaging carries times and metadata).
 - **A package's completion gate.** A manifest with `"completion_gate": true`
   puts its verdict in `computed.json` (`gate: {passed, code, what, next}`). The
   runner reads it after the files are made (`runner/gate.go`, a step of the
@@ -227,6 +230,45 @@ over the same bytes and stored on every install and run.
   the end of their group. The workspace composer keeps attach, dictation, the
   model control and send; ฐานความรู้ is offered only in ask mode and is never the
   source of a number in a deliverable.
+
+## The gate opens the finished file; the model proposes, the code disposes (AM8)
+
+- **A gate reads the delivered file, never the writer's record.** Every
+  figure check opens the file and reads the figure out of it — table cells,
+  KPI tiles, chart series (pptx: the chart XML; docx: the chart is drawn again
+  from computed.json and compared byte for byte, and its numbers are printed in
+  a table under it that is read back), workbook cells — and compares it with
+  computed.json. An empty cell where a figure belongs fails. The four files the
+  output audit broke on purpose (`backend/agent_market/tests/fixtures/
+  gate_mutations/`) must fail every run (`test_am8_gate.py`). Each check's
+  `values` says how many figures it compared; the run's quality line says
+  "files opened again · N figures matched", and the run-level checks
+  (citations, assumptions) are asserted once, not per file.
+- **A figure in a sentence is named by its key.** The narrative (model or
+  rules) writes `{operating_expenses_var_budget_pct}`; the report prints the
+  figure and *its own* citation there (`content.cite_runs`). The runner refuses
+  a narrative that types a figure (`guardFigures`). Nothing is matched by
+  printed text afterwards. Every P&L comparison (prior, budget, their
+  differences) has its own citation, budget figures cite their cells, and a
+  chart cites every point it draws. The appendix lists every source range.
+- **Working papers print** (`deliverables/workpaper.py`): page setup from the
+  sheet's shape (orientation, fit to width when still readable, otherwise the
+  identifying columns repeat; header row repeats; the face on one page; print
+  area; the document's name and "หน้า x / y" on every page), asserted on the
+  file by `workpaper.check`. A header field (company — the install's, else the
+  organisation's name — account, preparer) holds a real value or the paper
+  says on its face that it is a draft for want of it; no placeholder.
+- **Confidence tells the truth.** An invoice row whose text a column did not
+  take lowers that item's confidence and becomes a card (`e2_item_text`);
+  "ยืนยันแล้ว" is a person's word only — the machine says "ระบบอ่าน".
+- **A customer's form: the model maps, the code checks.** The runner asks a
+  model (one the organisation lets see documents) which slot is which field,
+  from each slot's label and context; the person confirms; code proposes only
+  identity. After filling, `template_out.verify` opens the file: every mapped
+  slot holds its value, no `{{marker}}` is left, no filled text is cut off, no
+  Word/PowerPoint chart still shows old numbers. A form that does not pass is
+  delivered beside the agent's files, marked, with every unfilled slot named
+  on the card; what the filler cannot do is refused before any work.
 
 ## Reminders, notifications and e-mail (AM6)
 
