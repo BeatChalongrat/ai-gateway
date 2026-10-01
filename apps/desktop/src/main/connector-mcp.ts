@@ -24,6 +24,11 @@
 import type { ConnectorOAuth } from "./connector-oauth";
 import type { Logger } from "./logger";
 
+
+/** AM9: connectors whose tools no model may have (the mail connector sends a person's approved
+ *  message; only chat-edge calls it). */
+export const NEVER_FOR_MODELS: ReadonlySet<string> = new Set(["mail"]);
+
 export const CONNECTOR_TOOL_PREFIX = "mcp__";
 const PROTOCOL_VERSION = "2025-06-18";
 const TOOLS_TTL_MS = 5 * 60_000;
@@ -171,6 +176,9 @@ export class ConnectorTools {
   async definitions(): Promise<{ name: string; description: string; inputSchema: unknown }[]> {
     const out: { name: string; description: string; inputSchema: unknown }[] = [];
     for (const id of this.oauth.activeConnectorIds()) {
+      // AM9: the mail connector ("send as me") is no model's tool — the gateway leaves it out of its
+      // catalogue and refuses it to anyone but chat-edge; this host never offers it either.
+      if (NEVER_FOR_MODELS.has(id)) continue;
       const cached = this.toolsCache.get(id);
       let tools: McpToolDef[];
       if (cached && Date.now() - cached.at < TOOLS_TTL_MS) tools = cached.tools;
@@ -195,6 +203,7 @@ export class ConnectorTools {
   async execute(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
     const p = ConnectorTools.parse(name);
     if (!p) return { ok: false, text: `Unknown connector tool '${name}'.`, imageDataUri: null };
+    if (NEVER_FOR_MODELS.has(p.connectorId)) return { ok: false, text: `Connector '${p.connectorId}' is not a model's tool.`, imageDataUri: null };
     if (!this.oauth.activeConnectorIds().includes(p.connectorId)) return { ok: false, text: `Connector '${p.connectorId}' is not connected.`, imageDataUri: null };
     const client = await this.client(p.connectorId);
     if (!client) return { ok: false, text: `Connector '${p.connectorId}' has no server url.`, imageDataUri: null };

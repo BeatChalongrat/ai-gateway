@@ -70,6 +70,14 @@ type Config struct {
 	// endpoint writes the admin audit log (audit.go). Every admin change is
 	// logged there first; with the backend unreachable, no admin change is made.
 	AuditURL string
+	// AM9 — "send as me" (personmail.go): PersonMail sends from a person's own
+	// mailbox (tests set it); otherwise MailGatewayURL
+	// (AGENT_MARKET_MAIL_GATEWAY_URL, the MCP gateway) with the token in
+	// AGENT_MARKET_MAIL_GATEWAY_TOKEN, and PortalURL (AGENT_MARKET_PORTAL_URL)
+	// saying what the person connected. Empty: no person's mailbox is offered.
+	PersonMail     PersonMailer
+	MailGatewayURL string
+	PortalURL      string
 }
 
 // ConfigFromEnv reads the AGENT_MARKET_* variables with safe defaults.
@@ -88,6 +96,8 @@ func ConfigFromEnv() Config {
 		THBPerUSD:            float64(envInt("AGENT_MARKET_THB_PER_USD", 35)),
 	}
 	c.AuditURL = EnvString("AGENT_MARKET_AUDIT_URL", "http://backend:8080")
+	c.MailGatewayURL = strings.TrimSpace(os.Getenv("AGENT_MARKET_MAIL_GATEWAY_URL"))
+	c.PortalURL = EnvString("AGENT_MARKET_PORTAL_URL", c.AuditURL)
 	c.AllowedEmails = emailList(os.Getenv("AGENT_MARKET_ALLOWED_EMAILS"))
 	c.AdminEmails = emailList(os.Getenv("AGENT_MARKET_ADMIN_EMAILS"))
 	for _, d := range strings.Split(os.Getenv("AGENT_MARKET_ORG_DOMAINS"), ",") {

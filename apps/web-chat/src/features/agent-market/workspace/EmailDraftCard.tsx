@@ -15,13 +15,15 @@
 // The server checks the approval against the draft's hash. Never automatic,
 // never in bulk.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, Mail } from "lucide-react";
 
 import { AttachmentCard } from "@/components/chat/AttachmentCard";
 import { useCopyText } from "@/components/chat/MessageParts";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
+
+import { GATEWAY_URL } from "@/lib/auth";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT } from "../i18n";
@@ -78,8 +80,77 @@ export function DraftEmailButton({ runId }: { runId: string }) {
   );
 }
 
-export function EmailDraftCard({ draft }: { draft: EmailDraft }) {
+/** AM9: open the provider's consent page for the person's own mailbox (the backend's connect ticket,
+ *  the same flow the desktop's connectors use; only the send scope is asked for). */
+async function openMailboxConnect(): Promise<boolean> {
+  try {
+    const res = await fetch(`${GATEWAY_URL}/portal/connectors/mail/ticket`, { method: "POST", credentials: "include" });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { start_url?: string };
+    if (!body.start_url || !/^https?:\/\//.test(body.start_url)) return false;
+    window.open(body.start_url, "_blank", "noopener,noreferrer");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Which mailbox an approved message leaves from, and the way to the person's own. */
+function MailboxLine({ draft, onDraft }: { draft: EmailDraft; onDraft: (d: EmailDraft) => void }) {
   const t = useAmT();
+  const [opened, setOpened] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const canConnect = !!draft.mailbox?.available && !draft.mailbox?.connected;
+  if (!draft.transport && !canConnect) return null;
+  return (
+    <div className="mt-2 flex flex-col gap-1.5" data-testid="am-email-transport" data-transport={draft.transport || "none"}>
+      {draft.transport ? (
+        <p className="text-xs text-text-secondary">{draft.transport === "mailbox" ? t("email.via.mailbox") : t("email.via.relay")}</p>
+      ) : null}
+      {canConnect ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            data-testid="am-email-connect"
+            onClick={() => {
+              setFailed(false);
+              void openMailboxConnect().then((ok) => (ok ? setOpened(true) : setFailed(true)));
+            }}
+          >
+            <Mail width={13} height={13} aria-hidden />
+            <span>{t("email.connect")}</span>
+          </Button>
+          {opened ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              data-testid="am-email-connect-check"
+              onClick={() => amApi.emailDraft(draft.id).then((r) => r?.draft && onDraft(r.draft), () => {})}
+            >
+              {t("email.connectCheck")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {opened ? <p className="text-[11px] text-text-muted">{t("email.connectOpened")}</p> : null}
+      {failed ? (
+        <p role="alert" className="text-[11px] text-status-danger">
+          {t("email.connectFailed")}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function EmailDraftCard({ draft: given }: { draft: EmailDraft }) {
+  const t = useAmT();
+  // AM9: the draft as the server says now (a mailbox connected after the card was posted)
+  const [fresh, setFresh] = useState<EmailDraft | null>(null);
+  useEffect(() => setFresh(null), [given]);
+  const draft = fresh && fresh.id === given.id ? { ...given, ...fresh, sent: given.sent } : given;
   const subject = draft.subject ?? "";
   const body = draft.body ?? "";
   const { copied, copy } = useCopyText(`${subject}\n\n${body}`);
@@ -120,6 +191,7 @@ export function EmailDraftCard({ draft }: { draft: EmailDraft }) {
           <span>{copied ? t("email.copied") : t("email.copy")}</span>
         </Button>
       </div>
+      <MailboxLine draft={draft} onDraft={setFresh} />
       {draft.can_send ? (
         <SendForm draft={draft} onSent={(s) => setMine((cur) => [...cur, s])} />
       ) : draft.cannot_send_reason ? (
@@ -301,6 +373,13 @@ function SendForm({ draft, onSent }: { draft: EmailDraft; onSent: (s: EmailSend)
               {names.length ? names.join(", ") : t("email.none")}
             </dd>
           </div>
+          {draft.transport ? (
+            <div>
+              <dd className="text-xs text-text-secondary" data-testid="am-email-confirm-via">
+                {draft.transport === "mailbox" ? t("email.via.mailbox") : t("email.via.relay")}
+              </dd>
+            </div>
+          ) : null}
         </dl>
       </Modal>
     </>
@@ -323,6 +402,9 @@ function SentList({ sent }: { sent: EmailSend[] }) {
           return (
             <li key={s.id} className={cls("text-xs", s.status === "failed" ? "text-status-danger" : "text-text-secondary")}>
               <span>{s.status === "failed" ? t("email.failedLine", vars) : t("email.sentLine", vars)}</span>
+              {s.transport === "mailbox" || s.transport === "relay" ? (
+                <span className="text-text-muted"> · {s.transport === "mailbox" ? t("email.sentVia.mailbox") : t("email.sentVia.relay")}</span>
+              ) : null}
               {s.cc?.length ? <span className="block text-text-muted">{t("email.sentCc", { cc: s.cc.join(", ") })}</span> : null}
             </li>
           );

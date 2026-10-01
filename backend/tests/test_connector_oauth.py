@@ -475,6 +475,8 @@ class TestListAndDisconnect:
         assert conns[0]["connected"] is True
         # No token material in the listing.
         assert "tok_" not in r.text
+        # AM9: what this deployment can connect (its OAuth client is configured)
+        assert isinstance(r.json()["available"], list)
 
     def test_disconnect_deletes_and_revokes(self, broker_env, monkeypatch):
         import app.api.routes.portal_connectors as routes

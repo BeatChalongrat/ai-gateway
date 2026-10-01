@@ -105,7 +105,16 @@ type EmailSend struct {
 	Status     string     `json:"status"`
 	At         time.Time  `json:"at"`
 	ApprovedBy ApprovedBy `json:"approved_by"`
+	// Transport (AM9): what carried it — "mailbox" (the person's own, through
+	// the mail connector) or "relay" (the organisation's SMTP, on their behalf).
+	Transport string `json:"transport"`
 }
+
+// Transports a message can go by (AM9), as the log and the draft name them.
+const (
+	TransportMailbox = "mailbox"
+	TransportRelay   = "relay"
+)
 
 // ApprovedBy is the signed-in person who approved a send.
 type ApprovedBy struct {
@@ -123,9 +132,13 @@ type EmailDraft struct {
 	Attachments      []DraftAttachment `json:"attachments"`
 	CanSend          bool              `json:"can_send"`
 	CannotSendReason PersonText        `json:"cannot_send_reason,omitzero"`
-	BodySHA256       string            `json:"body_sha256"`
-	CreatedAt        time.Time         `json:"created_at"`
-	Sent             []EmailSend       `json:"sent"`
+	// AM9: which way an approved message goes now ("mailbox", "relay" or ""),
+	// and whether the person's own mailbox can be connected / is connected.
+	Transport  string        `json:"transport"`
+	Mailbox    MailboxStatus `json:"mailbox"`
+	BodySHA256 string        `json:"body_sha256"`
+	CreatedAt  time.Time     `json:"created_at"`
+	Sent       []EmailSend   `json:"sent"`
 
 	installID, tenantID, userID uuid.UUID
 }
@@ -374,8 +387,8 @@ func (s *Store) draftOf(ctx context.Context, tenant, user, id uuid.UUID) (EmailD
 }
 
 func (s *Store) sendsOf(ctx context.Context, draft uuid.UUID) ([]EmailSend, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id, draft_id, to_addrs, cc_addrs, status, approved_at, approved_by_name, approved_by_email
-		FROM agent_market.email_sends WHERE draft_id = $1 ORDER BY created_at`, draft)
+	rows, err := s.Pool.Query(ctx, `SELECT id, draft_id, to_addrs, cc_addrs, status, approved_at, approved_by_name, approved_by_email,
+		COALESCE(transport, 'relay') FROM agent_market.email_sends WHERE draft_id = $1 ORDER BY created_at`, draft)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +396,7 @@ func (s *Store) sendsOf(ctx context.Context, draft uuid.UUID) ([]EmailSend, erro
 	out := []EmailSend{}
 	for rows.Next() {
 		var x EmailSend
-		if err := rows.Scan(&x.ID, &x.DraftID, &x.To, &x.Cc, &x.Status, &x.At, &x.ApprovedBy.Name, &x.ApprovedBy.Email); err != nil {
+		if err := rows.Scan(&x.ID, &x.DraftID, &x.To, &x.Cc, &x.Status, &x.At, &x.ApprovedBy.Name, &x.ApprovedBy.Email, &x.Transport); err != nil {
 			return nil, err
 		}
 		x.To, x.Cc = nonNil(x.To), nonNil(x.Cc)
@@ -405,9 +418,36 @@ func (a *API) mailConnector(ctx context.Context, org string) MailConnector {
 	return nil
 }
 
+// mailbox is whether the person's own mailbox can send now (AM9); a backend
+// that does not answer is "not now", never an error the draft shows.
+func (a *API) mailbox(ctx context.Context, bearer string) MailboxStatus {
+	if a.personMail == nil || bearer == "" {
+		return MailboxStatus{}
+	}
+	st, err := a.personMail.Status(ctx, bearer)
+	if err != nil {
+		a.log.Warn("mailbox status", "err", err)
+		return MailboxStatus{}
+	}
+	return st
+}
+
 // complete adds what the draft says about sending, and its sends.
 func (a *API) complete(ctx context.Context, org string, d EmailDraft) (EmailDraft, error) {
-	d.CanSend = a.mailConnector(ctx, org) != nil
+	return a.completeFor(ctx, org, d, MailboxStatus{})
+}
+
+// completeFor: AM9 — a person's own connected mailbox sends their work; else
+// the organisation's relay on their behalf; else nothing (copy the draft).
+func (a *API) completeFor(ctx context.Context, org string, d EmailDraft, box MailboxStatus) (EmailDraft, error) {
+	d.Mailbox = box
+	switch {
+	case box.Connected:
+		d.Transport = TransportMailbox
+	case a.mailConnector(ctx, org) != nil:
+		d.Transport = TransportRelay
+	}
+	d.CanSend = d.Transport != ""
 	if !d.CanSend {
 		d.CannotSendReason = Text(mailNotSetUp)
 	}
@@ -453,7 +493,7 @@ func (a *API) emailDraft(w http.ResponseWriter, r *http.Request) {
 		d, err = a.store.saveDraft(ctx, d)
 	}
 	if err == nil {
-		d, err = a.complete(ctx, accessOf(r).OrgID, d)
+		d, err = a.completeFor(ctx, accessOf(r).OrgID, d, a.mailbox(ctx, bearerOf(r)))
 	}
 	if err == nil {
 		err = a.postDraft(ctx, d)
@@ -489,7 +529,7 @@ func (a *API) getEmailDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	d, err := a.complete(r.Context(), accessOf(r).OrgID, d)
+	d, err := a.completeFor(r.Context(), accessOf(r).OrgID, d, a.mailbox(r.Context(), bearerOf(r)))
 	if err != nil {
 		a.fail(w, err, "draft")
 		return
@@ -581,8 +621,18 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	org := accessOf(r).OrgID
+	// AM9: the person's own connected mailbox first ("send as me"), else the
+	// organisation's relay on their behalf; the transport is logged with the send
+	bearer := bearerOf(r)
+	box := a.mailbox(ctx, bearer)
+	transport := ""
 	conn := a.mailConnector(ctx, org)
-	if conn == nil {
+	switch {
+	case box.Connected:
+		transport = TransportMailbox
+	case conn != nil:
+		transport = TransportRelay
+	default:
 		sayMail(w, http.StatusConflict, "NO_MAIL_CONNECTOR")
 		return
 	}
@@ -628,25 +678,32 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 		attached = append(attached, logged{ArtifactID: art.ID, Name: name, Size: int64(len(data)), SHA256: art.SHA256, Format: art.Format})
 	}
 	if sendErr == nil {
-		sendErr = conn.Send(ctx, msg)
+		if transport == TransportMailbox {
+			// from the person's own address: no Reply-To needed, nothing of the organisation's
+			msg.ReplyTo = ""
+			_, sendErr = a.personMail.Send(ctx, bearer, msg)
+		} else {
+			sendErr = conn.Send(ctx, msg)
+		}
 	}
 	status, errText := "sent", ""
 	if sendErr != nil {
 		status, errText = "failed", TrimText(sendErr.Error(), 1000)
 		a.log.Warn("an approved e-mail was not sent", "draft", d.ID, "err", sendErr)
 	}
-	send := EmailSend{DraftID: d.ID, To: to, Cc: cc, Status: status,
+	send := EmailSend{DraftID: d.ID, To: to, Cc: cc, Status: status, Transport: transport,
 		ApprovedBy: ApprovedBy{Name: a.store.DisplayName(ctx, accessOf(r).OrgID, c.UserID, c.Email), Email: c.Email}}
 	atts, _ := json.Marshal(attached)
 	if err := a.store.Pool.QueryRow(ctx, `INSERT INTO agent_market.email_sends (draft_id, run_id, to_addrs, cc_addrs, subject, body_sha256,
-			attachments, approved_by_user_id, approved_by_name, approved_by_email, status, error)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, approved_at`,
-		d.ID, d.RunID, to, cc, msg.Subject, d.BodySHA256, atts, c.UserID, send.ApprovedBy.Name, send.ApprovedBy.Email, status, errText).
+			attachments, approved_by_user_id, approved_by_name, approved_by_email, status, error, transport)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, approved_at`,
+		d.ID, d.RunID, to, cc, msg.Subject, d.BodySHA256, atts, c.UserID, send.ApprovedBy.Name, send.ApprovedBy.Email, status, errText,
+		transport).
 		Scan(&send.ID, &send.At); err != nil {
 		a.fail(w, err, "draft")
 		return
 	}
-	if cur, err := a.complete(ctx, org, d); err == nil {
+	if cur, err := a.completeFor(ctx, org, d, box); err == nil {
 		_ = a.postDraft(ctx, cur)
 	}
 	out := map[string]any{"send": send}

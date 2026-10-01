@@ -253,6 +253,12 @@ services:
       # AM7: the organisation's mail relay — host, port, TLS mode, username and
       # sender are set on admin-ui › Agent Market › อีเมล; the password only here.
       - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
+      # AM9: "send as me" — an approved message from the person's own mailbox,
+      # sent by chat-edge through the MCP gateway's mail server (never a model,
+      # never the runner). Offered only once the backend has a Google client
+      # (CONNECTOR_OAUTH_GOOGLE_*) and the person connected their mailbox.
+      - AGENT_MARKET_MAIL_GATEWAY_URL=${AGENT_MARKET_MAIL_GATEWAY_URL:-http://mcp-gateway:3200}
+      - AGENT_MARKET_MAIL_GATEWAY_TOKEN=${MCP_INTERNAL_TOKEN:-}
     # Persist uploaded + AI-generated files across container restarts.
     # FILE_STORAGE_ROOT defaults to ./data/uploads → /app/data/uploads
     # (WORKDIR /app); generated images land under conversation-files/.

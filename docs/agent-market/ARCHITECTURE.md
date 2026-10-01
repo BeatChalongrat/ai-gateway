@@ -317,3 +317,19 @@ over the same bytes and stored on every install and run.
   recipients and approving that exact message (`body_sha256`); every send is
   logged: who approved it, to whom, which files. No connector is configured in
   this product: the draft is copied and sent by the person.
+- **Two transports, one approval (AM7, AM9).** The organisation's SMTP relay
+  (`mail.go`) is the system writing to a person — reminders, from the
+  organisation's address. A person sending their own work sends it from their
+  own mailbox: chat-edge calls the MCP gateway's `mail` server
+  (`services/mcp-gateway/servers/mail-send.js`) with the person's portal token
+  and chat-edge's internal token (`personmail.go`); the gateway fetches that
+  person's mailbox token from the backend broker into the child's environment
+  only, and the child sends through the Gmail API with scope `gmail.send` (it
+  cannot read mail), attachments as the round's own file bytes. The mail server
+  is no model's tool: it is not in the catalogue models' tools come from, the
+  gateway refuses it without chat-edge's token, the desktop never offers it,
+  and an agent's model request has no tools at all. A connected mailbox is
+  used first, then the relay on the person's behalf, then copy; the log
+  (`email_sends.transport`) records which carried each send. With no Google
+  client configured (the state a new customer starts in), no mailbox is
+  offered and everything behaves as before.

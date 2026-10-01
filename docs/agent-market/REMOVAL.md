@@ -134,6 +134,19 @@ for display, and changes nothing there):
   the template's model proposal and draft delivery, the quality line, the
   formats a card offers) and `apps/web-chat/src/features/agent-market/`. The
   desktop app only took a new version number. Gone with step 6.
+- AM9: migration `007_am9` in schema `agent_market` only (table `agent_egress`,
+  column `email_sends.transport`; gone with step 3). Outside the feature's own
+  trees, all in commits named AM9 and reverted with step 6:
+  the backend's admin-ui accounts API (`backend/app/api/routes/admin_accounts.py`
+  and its line in `main.py`) and the `mail` connector provider (scope
+  `gmail.send`) with the `available` list in `/portal/connectors`; admin-ui's
+  Accounts page, its role landing and the per-agent egress card; the MCP
+  gateway's `mail` server (`services/mcp-gateway/servers/mail-send.js`, its
+  entry in `lib.js` and the internal-token gate in `server.js`); the desktop's
+  notification memory file (`agent-notifications-shown.json` in its user
+  data) and its refusal to offer a `mail` connector; the `MCP_INTERNAL_TOKEN`
+  line of `.env` (delete it with step 5). The Mermaid canvas viewer of the
+  same card is a chat-app feature in its own commit ("Canvas: …") and stays.
 
 ## Steps
 

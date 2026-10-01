@@ -1273,6 +1273,8 @@ export interface EmailSend {
   status: "sent" | "failed" | string;
   at: string;
   approved_by: { name: string; email: string } | null;
+  /** AM9: what carried it */
+  transport?: "mailbox" | "relay" | string;
 }
 
 /** A drafted e-mail. It never carries a recipient: those come from the person. */
@@ -1287,4 +1289,8 @@ export interface EmailDraft {
   body_sha256: string;
   created_at: string;
   sent: EmailSend[] | null;
+  /** AM9: how an approved message goes now — the person's own mailbox, the organisation's relay on
+   *  their behalf, or "" (copy it) — and whether their mailbox can be connected / is connected. */
+  transport?: "mailbox" | "relay" | "";
+  mailbox?: { available: boolean; connected: boolean };
 }

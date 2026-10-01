@@ -624,6 +624,12 @@ services:
       BACKEND_BASE: http://backend:8080
       # Slack workspace id for the slack connector (deployment-level).
       MCP_SLACK_TEAM_ID: ${MCP_SLACK_TEAM_ID:-}
+      # AM9: the mail connector ("send as me") answers chat-edge only — this
+      # token (shared with chat-edge's AGENT_MARKET_MAIL_GATEWAY_TOKEN). Empty:
+      # the mail server answers no one. MCP_MAIL_API_BASE overrides the Gmail
+      # API address (a local sink in tests); leave it empty in production.
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      MCP_MAIL_API_BASE: ${MCP_MAIL_API_BASE:-}
     ports:
       - "127.0.0.1:3200:3200"
     volumes:

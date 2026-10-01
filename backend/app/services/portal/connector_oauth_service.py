@@ -79,6 +79,21 @@ CONNECTOR_PROVIDERS: dict[str, dict[str, Any]] = {
         "extra_authorize_params": {"access_type": "offline", "prompt": "consent"},
         "settings_prefix": "connector_oauth_google",
     },
+    # AM9 — "send as me": the mail connector the app (never a model) sends a
+    # person's approved message through, from their own mailbox. The narrowest
+    # scope that sends: gmail.send cannot read, search or change a mailbox.
+    # Client id, secret and redirect are configuration (the Google client of
+    # the customer's own project), shared with the other Google connectors.
+    "mail": {
+        "provider": "google",
+        "authorize_url": _GOOGLE_AUTH,
+        "token_url": _GOOGLE_TOKEN,
+        "revoke_url": _GOOGLE_REVOKE,
+        "scopes": "https://www.googleapis.com/auth/gmail.send",
+        "supports_refresh": True,
+        "extra_authorize_params": {"access_type": "offline", "prompt": "consent"},
+        "settings_prefix": "connector_oauth_google",
+    },
     "gdrive": {
         "provider": "google",
         "authorize_url": _GOOGLE_AUTH,
@@ -123,6 +138,19 @@ CONNECTOR_PROVIDERS: dict[str, dict[str, Any]] = {
         "settings_prefix": "connector_oauth_github",
     },
 }
+
+
+def configured_connectors() -> list[str]:
+    """The connectors whose OAuth client is configured (AM9: a person can be offered to connect
+    only these — with none set, a new customer's app says so instead of failing at the provider)."""
+    out = []
+    for cid in CONNECTOR_PROVIDERS:
+        try:
+            client_credentials(cid)
+        except ConnectorNotConfigured:
+            continue
+        out.append(cid)
+    return out
 
 
 def connector_config(connector_id: str) -> dict[str, Any]:

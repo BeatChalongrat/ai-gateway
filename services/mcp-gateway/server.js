@@ -26,6 +26,8 @@ const { spawn } = require('child_process');
 const { Readable } = require('stream');
 const {
   SERVERS,
+  forModels,
+  internalTokenOk,
   buildCatalog,
   verifyPortalJwt,
   userChildConfig,
@@ -37,6 +39,8 @@ const PUBLIC_BASE = (process.env.MCP_PUBLIC_BASE || 'http://localhost').replace(
 const PUBLIC_MODE = process.env.MCP_PUBLIC_MODE || 'port';
 const PORTAL_JWT_SECRET = process.env.PORTAL_JWT_SECRET || '';
 const BACKEND_BASE = (process.env.BACKEND_BASE || 'http://backend:8080').replace(/\/$/, '');
+// AM9: chat-edge's token for the servers no model may use (the mail connector)
+const MCP_INTERNAL_TOKEN = process.env.MCP_INTERNAL_TOKEN || '';
 
 // ── Per-user children — spawned on demand, LRU + idle eviction ─────────────
 
@@ -48,7 +52,9 @@ function spawnUserChild(server, port, token, sub) {
 
   const stdioCmd = [server.command, ...scope.args].join(' ');
   const extra = typeof server.static_env === 'function' ? server.static_env() : {};
-  const env = { ...process.env, ...extra, ...scope.env };
+  // AM9: a clean_env child (the mail connector) gets PATH and its own variables only
+  const base = server.clean_env ? { PATH: process.env.PATH || '', HOME: '/tmp', NODE_ENV: 'production' } : process.env;
+  const env = { ...base, ...extra, ...scope.env };
   // The provider token rides ONLY in the child env — never argv (argv is
   // visible in `ps`), never logged.
   if (server.token_env && token) env[server.token_env] = token;
@@ -114,6 +120,7 @@ function createApp({
   publicBase = PUBLIC_BASE,
   publicMode = PUBLIC_MODE,
   portalJwtSecret = PORTAL_JWT_SECRET,
+  internalToken = MCP_INTERNAL_TOKEN,
   retryAttempts = 10,
   retryDelayMs = 300
 } = {}) {
@@ -151,6 +158,10 @@ function createApp({
         portalJwtSecret
       );
       if (!payload) return rpcError(res, 401, -32001, 'invalid or missing portal token');
+      // AM9: a server no model may use answers chat-edge only — a person's own
+      // token (the desktop's, a model's tool loop) is not enough
+      if (!forModels(server) && !internalTokenOk(req.headers['x-internal-token'], internalToken))
+        return rpcError(res, 403, -32003, 'not available to this caller');
 
       let port;
       try {

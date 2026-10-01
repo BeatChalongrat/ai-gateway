@@ -48,6 +48,31 @@ type API struct {
 	auditor Auditor
 	// smtp is the organisation's mail relay (AM7, mail.go).
 	smtp *SMTPMailer
+	// personMail sends from a person's own mailbox (AM9, personmail.go); nil: not offered.
+	personMail PersonMailer
+}
+
+// personMailFrom is the mail connector the configuration names (AM9): the
+// tests' own, or the MCP gateway's when its URL is set; else none.
+func personMailFrom(cfg Config) PersonMailer {
+	if cfg.PersonMail != nil {
+		return cfg.PersonMail
+	}
+	if cfg.MailGatewayURL == "" {
+		return nil
+	}
+	return &MCPMail{Gateway: cfg.MailGatewayURL, Portal: cfg.PortalURL,
+		Token: func() string { return strings.TrimSpace(os.Getenv("AGENT_MARKET_MAIL_GATEWAY_TOKEN")) }}
+}
+
+// bearerOf is the signed-in person's own portal token, which the mail
+// connector forwards (the gateway fetches that person's mailbox token with it).
+func bearerOf(r *http.Request) string {
+	t, err := middleware.ExtractPortalToken(r)
+	if err != nil {
+		return ""
+	}
+	return t
 }
 
 // NewAPI opens the control plane's own small pool and applies the
@@ -78,7 +103,7 @@ func NewAPI(ctx context.Context, cfg Config, dsn string, files storage.Backend, 
 			"allowed", len(cfg.AllowedEmails), "admins", len(cfg.AdminEmails))
 	}
 	return &API{cfg: cfg, store: store, files: files, log: log.With("component", "agent-market"), closeFn: pool.Close,
-		smtp: NewSMTPMailer(store, log)}, nil
+		smtp: NewSMTPMailer(store, log), personMail: personMailFrom(cfg)}, nil
 }
 
 // AccountProvider is Agent Market's part of "export all my data" and of
@@ -105,7 +130,7 @@ func (a *API) AccountProvider() *AccountProvider {
 func NewAPIWithStore(cfg Config, store *Store, files storage.Backend, log *slog.Logger) *API {
 	// AM7: admin changes need an audit log; a test that does not look at it keeps none
 	return &API{cfg: cfg, store: store, files: files, log: log, closeFn: func() {}, auditor: DiscardAuditor{},
-		smtp: &SMTPMailer{store: store, Password: func() string { return "" }, Log: log}}
+		smtp: &SMTPMailer{store: store, Password: func() string { return "" }, Log: log}, personMail: personMailFrom(cfg)}
 }
 
 // Close releases the pool.

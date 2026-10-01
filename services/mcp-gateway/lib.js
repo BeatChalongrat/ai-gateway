@@ -4,6 +4,7 @@
 // portal JWT is HS256, verified with node's crypto.
 
 const crypto = require('crypto');
+const path = require('path');
 
 // ---------------------------------------------------------------------------
 // Server registry
@@ -78,8 +79,45 @@ const SERVERS = [
     token_env: 'SLACK_BOT_TOKEN',
     static_env: () => ({ SLACK_TEAM_ID: process.env.MCP_SLACK_TEAM_ID || '' }),
     tools: ['slack_post_message', 'slack_list_channels', 'slack_get_channel_history', 'slack_add_reaction']
+  },
+  {
+    // AM9 — "send as me": a person's approved message, from their own mailbox,
+    // with its attachments (servers/mail-send.js; scope gmail.send only — it
+    // cannot read mail). The same per-(person, connector) child and the same
+    // token broker as github/slack: the token lives only in this child's env.
+    //
+    // NOT a model's tool, ever: `models: false` keeps it out of the catalogue
+    // every model's tools are resolved from (the desktop's), and the proxy
+    // refuses a call without chat-edge's internal token (MCP_INTERNAL_TOKEN).
+    // A model drafts; chat-edge sends exactly what the person approved.
+    id: 'mail',
+    name: 'E-mail (send as me)',
+    description: "Sends a message the person approved from their own mailbox. Used by the app, never by a model.",
+    category: 'communication',
+    auth_type: 'oauth2',
+    command: 'node',
+    args: [path.join(__dirname, 'servers', 'mail-send.js')],
+    token_env: 'MAIL_ACCESS_TOKEN',
+    static_env: () => (process.env.MCP_MAIL_API_BASE ? { MAIL_API_BASE: process.env.MCP_MAIL_API_BASE } : {}),
+    // the child gets what it needs and nothing of the gateway's own environment
+    clean_env: true,
+    models: false,
+    tools: ['send_message']
   }
 ];
+
+/** A server whose tools no model may have (AM9: the mail connector). */
+function forModels(server) {
+  return server.models !== false;
+}
+
+/** Constant-time comparison of chat-edge's internal token (empty configured = refuse). */
+function internalTokenOk(supplied, configured) {
+  if (!configured || !supplied) return false;
+  const a = Buffer.from(String(supplied));
+  const b = Buffer.from(String(configured));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // ---------------------------------------------------------------------------
 // Catalog — field names are the desktop McpConnector JSON contract:
@@ -88,8 +126,9 @@ const SERVERS = [
 
 function buildCatalog(servers, publicBase, publicMode) {
   const base = String(publicBase || '').replace(/\/$/, '');
+  // AM9: a server no model may use is not in the catalogue at all
   return {
-    connectors: servers.map((s) => ({
+    connectors: servers.filter(forModels).map((s) => ({
       id: s.id,
       name: s.name,
       description: s.description,
@@ -367,6 +406,8 @@ class InstanceManager {
 
 module.exports = {
   SERVERS,
+  forModels,
+  internalTokenOk,
   WORKSPACE_BASE,
   buildCatalog,
   verifyPortalJwt,

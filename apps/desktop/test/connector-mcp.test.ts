@@ -213,3 +213,18 @@ describe("connector tools through the coordinator", () => {
     expect(await h.outcome).toBe("done");
   });
 });
+
+describe("AM9 — the mail connector is no model's tool", () => {
+  it("a connected 'mail' connector with a reachable server offers no tool and runs none", async () => {
+    const tokens = new ConnectorTokenStore(path.join(tmp, `tokens-mail-${++stackN}`), plainCrypto);
+    tokens.set("mail", { accessToken: "tok-mail", refreshToken: null, tokenType: "Bearer", expiresAt: null, scope: null, obtainedAt: Date.now() });
+    const mail: OAuthRegistration = { ...reg(true), connectorId: "mail", serverUrl: "https://mcp.test/slack" };
+    const oauth = new ConnectorOAuth({ registrations: () => new Map([["mail", mail]]), tokens, openExternal: async () => {}, log });
+    const tools = new ConnectorTools(oauth, async (id) => oauth.registration(id)?.serverUrl ?? null, log, viaLocal);
+    expect(oauth.activeConnectorIds()).toContain("mail");
+    expect(await tools.definitions()).toEqual([]);
+    const r = await tools.execute("mcp__mail__send_message", { to: ["a@b.example"] });
+    expect(r.ok).toBe(false);
+    expect(srv.state.calls).toHaveLength(0);
+  });
+});

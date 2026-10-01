@@ -161,7 +161,9 @@ def list_connections(
                 "scopes": r.scopes or "",
             }
             for r in rows
-        ]
+        ],
+        # AM9: the connectors this deployment can connect (their OAuth client is configured)
+        "available": connector_oauth_service.configured_connectors(),
     }
 
 

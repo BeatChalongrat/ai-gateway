@@ -169,9 +169,11 @@ func TestAM9Migration007DownUndoesAll(t *testing.T) {
 		t.Fatalf("down: %v", err)
 	}
 	tables := e.countRows(`SELECT count(*) FROM information_schema.tables WHERE table_schema = 'agent_market' AND table_name = 'agent_egress'`)
+	cols := e.countRows(`SELECT count(*) FROM information_schema.columns WHERE table_schema = 'agent_market'
+		AND table_name = 'email_sends' AND column_name = 'transport'`)
 	rec := e.countRows(`SELECT count(*) FROM agent_market.schema_migrations WHERE version = '007_am9'`)
-	if tables != 0 || rec != 0 {
-		t.Fatalf("down leaves table %d, record %d", tables, rec)
+	if tables != 0 || cols != 0 || rec != 0 {
+		t.Fatalf("down leaves table %d, column %d, record %d", tables, cols, rec)
 	}
 	did, err := Migrate(ctx, e.store.Pool)
 	if err != nil || len(did) != 1 || did[0] != "007_am9" {

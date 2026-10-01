@@ -20,3 +20,12 @@ CREATE TABLE IF NOT EXISTS agent_market.agent_egress (
     updated_at          timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (org_id, slug)
 );
+
+-- ── "Send as me" (section I) ─────────────────────────────────────────────
+--
+-- An approved message goes from the person's own mailbox (the mail
+-- connector, through the MCP gateway) or through the organisation's relay on
+-- their behalf. The log says which carried it. Sends before AM9 went by the
+-- relay (NULL reads as "relay").
+ALTER TABLE agent_market.email_sends ADD COLUMN IF NOT EXISTS transport text
+    CHECK (transport IN ('mailbox', 'relay'));
