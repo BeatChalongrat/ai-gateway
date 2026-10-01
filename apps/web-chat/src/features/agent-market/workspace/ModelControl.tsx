@@ -29,7 +29,7 @@ import { AUTO_MODEL_ID, useModelStore } from "@/stores/modelStore";
 
 import { amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
-import type { AgentModels } from "../types";
+import type { AgentEgress, AgentModels } from "../types";
 import { Thai } from "../ui";
 
 export function useAgentModels(installId: string | null): [AgentModels | null, (m: AgentModels) => void] {
@@ -52,6 +52,22 @@ interface Props {
   installId: string;
   models: AgentModels | null;
   onModels: (m: AgentModels) => void;
+}
+
+/** AM9: both levels of document egress, where a person picks the agent's model — the organisation's
+ *  switch (the ceiling) and the agent's own setting under it. */
+export function EgressLine({ egress, className }: { egress?: AgentEgress; className?: string }) {
+  const t = useAmT();
+  if (!egress) return null;
+  const yes = t("egress.yes");
+  const no = t("egress.no");
+  const agent = egress.agent ? yes : egress.agent_default && egress.accounting ? t("egress.agentDefault") : no;
+  return (
+    <p className={className ?? "text-[11px] leading-snug text-text-muted"} data-testid="am-model-egress">
+      {t("egress.title")} · {t("egress.org", { v: egress.org ? yes : no })} · {t("egress.agent", { v: agent })}
+      {egress.agent && !egress.org ? <> · {t("egress.ceiling")}</> : null}
+    </p>
+  );
 }
 
 export function ModelControl(props: Props) {
@@ -141,6 +157,7 @@ function Control({ installId, models, onModels }: Props & { models: AgentModels 
             hidden={(m) => !allowed.has(m.id)}
             hiddenLine={(n) => (models.hidden_reason ? t("model.hiddenWhy", { n: String(n), why: models.hidden_reason }) : t("model.hidden", { n: String(n) }))}
           />
+          <EgressLine egress={models.egress} className="px-3 pb-2 pt-1 text-[11px] leading-snug text-text-muted" />
         </ModelPopover>
       ) : null}
     </div>

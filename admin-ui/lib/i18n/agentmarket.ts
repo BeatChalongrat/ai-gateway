@@ -20,7 +20,7 @@
 
 export const en = {
   // ── the page ─────────────────────────────────────────────
-  "am.subtitle": "Who may use agents, budgets per person and department, spend, the catalog and problems people reported.",
+  "am.subtitle": "Decide who may use agents and how much each may spend. The tabs below hold the spend, the catalogue and the problems people reported.",
   "am.subtitlePublisher": "Publish or unpublish the organisation's agents, and read the problems people reported.",
   "am.off.title": "Agent Market is not switched on",
   "am.off.body": "Agent Market is not switched on in this system. Once it is, its settings appear on this page.",
@@ -143,6 +143,16 @@ export const en = {
   "am.models.leaveOn": "Allowed — people in the organisation may choose an outside model for an agent.",
   "am.models.audit": "Every change on this page is recorded in {link} (who, when, old value → new value).",
   "am.models.auditLink": "the audit log",
+  "am.egress.title": "Each agent, under the organisation's switch",
+  "am.egress.body": "The organisation's answer above is the ceiling. Each agent has its own answer under it, which can only be stricter: an agent's documents go to an outside model only when both allow it. An agent that reads accounting data is off until you turn it on here.",
+  "am.egress.agent": "Agent",
+  "am.egress.allow": "Allowed for this agent",
+  "am.egress.now": "Now",
+  "am.egress.leaves": "May go to an outside model",
+  "am.egress.stays": "Stays inside",
+  "am.egress.default": "default for accounting",
+  "am.egress.ceiling": "the organisation does not allow it",
+  "am.egress.saved": "Saved for {name}.",
   "am.retention.title": "How many years to keep accounting evidence",
   "am.retention.body": "The files sent in and produced by a successful run are kept for this many years, counted from the day the run finished. Thai practice keeps accounting records at least 5 years (7–10 in some cases) — confirm the number with the company's auditor before setting it.",
   "am.retention.notArchive": "This is not the company's document archive — originals must be kept in the company's own system.",
@@ -288,7 +298,7 @@ export const en = {
 
 export const th: Record<keyof typeof en, string> = {
   // ── the page ─────────────────────────────────────────────
-  "am.subtitle": "ใครใช้ได้ งบของแต่ละคนและแผนก การใช้จ่าย agent ในแคตตาล็อก และปัญหาที่ผู้ใช้แจ้ง",
+  "am.subtitle": "กำหนดว่าใครใช้ agent ได้และใช้งบได้เท่าไร แท็บด้านล่างมีการใช้จ่าย แคตตาล็อก และปัญหาที่ผู้ใช้แจ้ง",
   "am.subtitlePublisher": "เผยแพร่หรือหยุดเผยแพร่ agent ในแคตตาล็อกขององค์กร และอ่านปัญหาที่ผู้ใช้แจ้ง",
   "am.off.title": "ระบบนี้ยังไม่ได้เปิดใช้ Agent Market",
   "am.off.body": "Agent Market ยังไม่ได้เปิดในระบบนี้ เมื่อเปิดแล้ว การตั้งค่าจะแสดงที่หน้านี้",
@@ -411,6 +421,16 @@ export const th: Record<keyof typeof en, string> = {
   "am.models.leaveOn": "อนุญาต — คนในองค์กรเลือกโมเดลนอกองค์กรให้ agent ได้",
   "am.models.audit": "ทุกการเปลี่ยนแปลงบนหน้านี้ถูกบันทึกลง {link} (ใคร เมื่อไร ค่าเดิม → ค่าใหม่)",
   "am.models.auditLink": "audit log",
+  "am.egress.title": "แยกตาม agent ภายใต้สวิตช์ขององค์กร",
+  "am.egress.body": "คำตอบขององค์กรด้านบนคือเพดาน แต่ละ agent มีคำตอบของตัวเองที่เข้มกว่าได้เท่านั้น เอกสารของ agent จะส่งไปโมเดลนอกองค์กรได้เมื่ออนุญาตทั้งสองชั้น agent ที่อ่านข้อมูลบัญชีปิดไว้จนกว่าคุณจะเปิดที่นี่",
+  "am.egress.agent": "ชื่อ agent",
+  "am.egress.allow": "อนุญาตสำหรับ agent นี้",
+  "am.egress.now": "ตอนนี้",
+  "am.egress.leaves": "ส่งไปโมเดลนอกองค์กรได้",
+  "am.egress.stays": "อยู่ในองค์กรเท่านั้น",
+  "am.egress.default": "ค่าตั้งต้นของงานบัญชี",
+  "am.egress.ceiling": "องค์กรไม่อนุญาต",
+  "am.egress.saved": "บันทึกแล้วสำหรับ {name}",
   "am.retention.title": "เก็บหลักฐานทางบัญชีกี่ปี",
   "am.retention.body": "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จเก็บไว้ตามจำนวนปีนี้ นับจากวันที่รอบเสร็จ แนวปฏิบัติในไทยเก็บเอกสารบัญชีอย่างน้อย 5 ปี (บางกรณี 7–10 ปี) — ยืนยันตัวเลขกับผู้รับรองบัญชีของบริษัทก่อนตั้ง",
   "am.retention.notArchive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับต้องเก็บตามระบบเดิมของบริษัท",

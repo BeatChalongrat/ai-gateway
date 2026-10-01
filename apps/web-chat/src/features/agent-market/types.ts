@@ -619,6 +619,22 @@ export interface AgentModels {
   /** what the model does for this agent (the settings page's sentence) */
   reads: string;
   note: string;
+  /** AM9: may this agent's documents go to a model outside the organisation —
+   *  the organisation's switch (the ceiling) and the agent's own under it */
+  egress?: AgentEgress;
+}
+
+/** AM9: document egress for one agent, both levels. */
+export interface AgentEgress {
+  org: boolean;
+  agent: boolean;
+  /** no admin has set the agent's own value: it is its default */
+  agent_default: boolean;
+  /** the agent touches accounting data (its default is off) */
+  accounting: boolean;
+  effective: boolean;
+  /** the server's sentence for both levels */
+  words: string;
 }
 
 /** AM4: what an install keeps and for how long. */

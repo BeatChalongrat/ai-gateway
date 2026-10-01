@@ -801,9 +801,10 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 }
 
 // ApplyOrg fills in the organisation's own decisions (AM4): how many years a
-// finished round's evidence is kept, and — while documents may not leave —
-// that a model outside the organisation is not used at all.
-func (ds *Datasheet) ApplyOrg(o OrgSettings) {
+// finished round's evidence is kept, and — while this agent's documents may
+// not leave (AM9: the organisation's switch and the agent's own) — that a
+// model outside the organisation is not used at all.
+func (ds *Datasheet) ApplyOrg(o OrgSettings, e Egress) {
 	years := o.RetentionYears
 	if years <= 0 {
 		years = DefaultRetentionYears
@@ -817,11 +818,18 @@ func (ds *Datasheet) ApplyOrg(o OrgSettings) {
 		ds.Notes = map[string]string{}
 	}
 	ds.Notes["not_archive"] = "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด"
-	if !o.DocumentsMayLeave {
+	if !e.Effective {
+		why := "องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร"
+		if e.Org {
+			why = "agent นี้อ่านข้อมูลบัญชีและไม่ส่งเอกสารออกนอกองค์กร"
+			if !e.AgentDefault {
+				why = "ผู้ดูแลตั้งให้ agent นี้ไม่ส่งเอกสารออกนอกองค์กร"
+			}
+		}
 		kept := ds.Models[:0]
 		for _, m := range ds.Models {
 			if !m.SelfHosted {
-				ds.NoModel = append(ds.NoModel, "โมเดล "+m.Model+" อยู่นอกองค์กร จึงไม่ใช้ — องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร "+
+				ds.NoModel = append(ds.NoModel, "โมเดล "+m.Model+" อยู่นอกองค์กร จึงไม่ใช้ — "+why+" "+
 					"(ถ้าโมเดลในองค์กรไม่ตอบ คำบรรยายจะเขียนด้วยกฎของ agent แทน)")
 				continue
 			}
@@ -856,7 +864,13 @@ func (a *API) datasheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if o, err := a.store.OrgSettingsFor(ctx, acc.OrgID); err == nil {
-		ds.ApplyOrg(o)
+		e := EgressOf(false, Manifest{}, nil)
+		if m, err := ParseManifest(d.Manifest); err == nil {
+			if got, err := a.store.EgressFor(ctx, acc.OrgID, d.Slug, m); err == nil {
+				e = got
+			}
+		}
+		ds.ApplyOrg(o, e)
 	}
 	ds.Runner = runner
 	writeJSON(w, http.StatusOK, ds)

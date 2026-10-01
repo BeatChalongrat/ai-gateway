@@ -659,7 +659,7 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	inside.Models = append([]DatasheetModel{}, ds.Models...)
 	inside.NoModel = append([]string{}, ds.NoModel...)
 	inside.Retention = []map[string]any{{"unit": "years", "keep": float64(5)}}
-	inside.ApplyOrg(OrgSettings{RetentionYears: 7})
+	inside.ApplyOrg(OrgSettings{RetentionYears: 7}, EgressOf(false, Manifest{}, nil))
 	if len(inside.Models) != 1 || inside.Models[0].Model != "qwen3.8-27b-fp8" || inside.Retention[0]["keep"] != float64(7) ||
 		!strings.Contains(strings.Join(inside.NoModel, " "), "deepseek-v4-flash") || inside.Notes["not_archive"] == "" {
 		t.Fatalf("the organisation's own decisions: %+v %v %v", inside.Models, inside.NoModel, inside.Retention)

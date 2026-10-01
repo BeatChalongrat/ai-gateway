@@ -249,7 +249,7 @@ func (r *Runner) load(ctx context.Context, run am.Run, log *slog.Logger) (*runCt
 	// the defaults of the manifest of the version the run is pinned to
 	engineDefaults, remembered := am.EngineDefaults(pkg.Manifest, defs)
 	rc := &runCtx{ctx: ctx, r: r, run: run, install: in, engine: eng, pkg: pkg, defaults: engineDefaults, remembered: remembered, log: log,
-		docsMayLeave: r.docsMayLeave(ctx, in.OrgID)}
+		docsMayLeave: r.docsMayLeave(ctx, in.OrgID, in.Slug, pkg.Manifest)}
 	rc.selfTestSettings()
 	return rc, rc.reloadAnswers(ctx)
 }

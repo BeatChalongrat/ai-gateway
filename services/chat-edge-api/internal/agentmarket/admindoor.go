@@ -190,6 +190,8 @@ func (a *API) AdminRoutes(r chi.Router) {
 	r.Get("/runs/{id}/files/{fid}/download", a.adminRunFile)
 	r.Post("/runs/{id}/remove-evidence", a.adminRemoveEvidence)
 	// phase 5: the organisation's mail relay (mail.go)
+	r.Get("/egress", a.adminEgress)
+	r.Put("/egress/{slug}", a.adminPutEgress)
 	r.Get("/mail", a.adminMail)
 	r.Put("/mail", a.adminPutMail)
 	r.Post("/mail/test", a.adminTestMail)

@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useI18n } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type OrgSettings } from "../../../lib/agentMarketApi";
+import AgentEgressCard from "./AgentEgress";
 import { Field, LoadError, Loading, Note, formatDateTime, h2, linkStyle, muted, secondary, useOrg, withLink, type Msg } from "./shared";
 
 export default function ModelsSection() {
@@ -104,6 +105,8 @@ export default function ModelsSection() {
           })}
         </div>
       </section>
+
+      <AgentEgressCard orgVersion={`${settings.documents_may_leave}:${settings.updated_at ?? ""}`} />
 
       <section className="sran-card" aria-labelledby="am-retention-title">
         <h2 id="am-retention-title" style={h2}>

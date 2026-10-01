@@ -74,6 +74,9 @@ type ModelPicker struct {
 	HiddenReason  string `json:"hidden_reason"`
 	Reads         string `json:"reads"`
 	Note          string `json:"note"`
+	// Egress (AM9): may this agent's documents go to a model outside the
+	// organisation — the organisation's switch and the agent's own, both shown.
+	Egress Egress `json:"egress"`
 	// cannot are the runner's models that cannot do this agent's job.
 	cannot map[string]bool
 }
@@ -187,10 +190,11 @@ func (rm RunnerModels) lock(use, id string, docsMayLeave bool) string {
 	return ""
 }
 
-// MenuFor builds the menu for one install.
-func MenuFor(in Install, m Manifest, o OrgSettings, rm RunnerModels) ModelPicker {
+// MenuFor builds the menu for one install; e is the agent's egress (AM9:
+// the organisation's switch and the agent's own under it).
+func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 	use := ModelUse(m)
-	p := ModelPicker{Uses: use, Choice: in.ModelChoice, Models: []MenuModel{}, cannot: map[string]bool{}}
+	p := ModelPicker{Uses: use, Choice: in.ModelChoice, Models: []MenuModel{}, cannot: map[string]bool{}, Egress: e}
 	if p.Choice == "" {
 		p.Choice = ModelAuto
 	}
@@ -213,9 +217,13 @@ func MenuFor(in Install, m Manifest, o OrgSettings, rm RunnerModels) ModelPicker
 			p.cannot[id] = true
 			continue
 		}
-		allowed := rm.lock(use, id, o.DocumentsMayLeave) == ""
+		allowed := rm.lock(use, id, e.Effective) == ""
 		if !allowed {
 			p.BlockedReason = reasonOutside
+			if e.Org {
+				// the organisation allows it; this agent does not (its default, or an admin's choice)
+				p.BlockedReason = e.Words.String()
+			}
 		}
 		p.Models = append(p.Models, MenuModel{ID: id, Allowed: allowed})
 	}
@@ -253,7 +261,7 @@ func (a *API) menuFor(ctx context.Context, in Install) (ModelPicker, error) {
 	if err != nil {
 		return ModelPicker{}, err
 	}
-	o, err := a.store.OrgSettingsFor(ctx, orgOr(in.OrgID))
+	e, err := a.store.EgressFor(ctx, in.OrgID, in.Slug, m)
 	if err != nil {
 		return ModelPicker{}, err
 	}
@@ -261,7 +269,7 @@ func (a *API) menuFor(ctx context.Context, in Install) (ModelPicker, error) {
 	if st, err := a.store.LatestRunner(ctx, a.cfg.RunnerStaleAfter); err == nil {
 		rm = RunnerModelsFrom(st.Capabilities)
 	}
-	return MenuFor(in, m, o, rm), nil
+	return MenuFor(in, m, e, rm), nil
 }
 
 func (a *API) installModels(w http.ResponseWriter, r *http.Request) {

@@ -273,12 +273,29 @@ export interface MailState {
   not_ready?: string;
 }
 
+/** AM9: one agent's document egress — the organisation's switch is the ceiling, the agent's own
+ *  setting can only narrow it (off by default for an agent that touches accounting). */
+export interface AgentEgressRow {
+  slug: string;
+  name: string;
+  org: boolean;
+  agent: boolean;
+  agent_default: boolean;
+  accounting: boolean;
+  effective: boolean;
+  words: string;
+}
+
 // ── calls ────────────────────────────────────────────────────────────────
 
 export const amAdmin = {
   me: (): Promise<AmMe> => chatEdge.get(`${AM}/me`),
   org: (): Promise<AdminOrg> => chatEdge.get(`${AM}/org`),
   putOrg: (body: OrgPatch): Promise<{ org: OrgSettings; resumed: number }> => chatEdge.put(`${AM}/org`, body),
+  // AM9 — per-agent egress under the organisation's switch
+  egress: (): Promise<{ org: boolean; agents: AgentEgressRow[] }> => chatEdge.get(`${AM}/egress`),
+  putEgress: (slug: string, documentsMayLeave: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
+    chatEdge.put(`${AM}/egress/${seg(slug)}`, { documents_may_leave: documentsMayLeave }),
   putMember: (
     email: string,
     body: { display_name?: string; department?: string; role?: string; monthly_credits?: number | string | null },

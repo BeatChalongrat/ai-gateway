@@ -10,7 +10,7 @@
 import { formatBytes } from "@/lib/fileUtil";
 
 import { useAmT } from "../i18n";
-import { ModelControl, useAgentModels } from "../workspace/ModelControl";
+import { EgressLine, ModelControl, useAgentModels } from "../workspace/ModelControl";
 import { useStorage } from "../workspace/UploadInfo";
 
 export function ModelSection({ installId }: { installId: string }) {
@@ -23,6 +23,7 @@ export function ModelSection({ installId }: { installId: string }) {
         {models.uses === "text" ? t("model.labelText") : t("model.label")}
       </h2>
       <p className="mt-0.5 text-xs text-text-muted">{models.reads}</p>
+      {models.uses === "none" ? null : <EgressLine egress={models.egress} className="mt-1 text-xs text-text-muted" />}
       {models.uses === "none" ? null : (
         <div className="mt-2.5 flex">
           <ModelControl installId={installId} models={models} onModels={setModels} />

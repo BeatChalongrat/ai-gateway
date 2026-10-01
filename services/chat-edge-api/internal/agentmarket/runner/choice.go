@@ -209,9 +209,12 @@ func (rc *runCtx) chosenModel() string {
 	return rc.r.Model.Primary
 }
 
-func (r *Runner) docsMayLeave(ctx context.Context, org string) bool {
-	o, err := r.Store.OrgSettingsFor(ctx, orgOrDefault(org))
-	return err == nil && o.DocumentsMayLeave
+// docsMayLeave: this round's documents may go to a model outside the
+// organisation — the organisation's switch and, under it, the agent's own
+// (AM9: off by default for an agent that touches accounting).
+func (r *Runner) docsMayLeave(ctx context.Context, org, slug string, m am.Manifest) bool {
+	e, err := r.Store.EgressFor(ctx, orgOrDefault(org), slug, m)
+	return err == nil && e.Effective
 }
 
 func orgOrDefault(org string) string {
