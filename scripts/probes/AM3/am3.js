@@ -42,7 +42,16 @@ const PEOPLE = {
 const sessions = {};
 const sess = (who) => (sessions[who] ||= L.bearerSession(L.mintPortalToken(PEOPLE[who])));
 const EDGE = () => `${L.API_BASE.edge}/api/v1/agent-market`;
+// AM9 (F): the chat app has had no admin routes since AM7 phase 4 — they answer 404 — so a probe aimed
+// at them could never fail. Every /admin/… call goes through the admin app's door instead (chat-edge
+// /api/v1/admin/agent-market behind its bearer, AM7/admin_door.js), the way the admin app makes it;
+// a person who is not an admin is sent there as a viewer, and must be refused.
+const DOOR = require("../AM7/admin_door.js");
 async function call(who, p, init = {}) {
+  if (p.startsWith("/admin/")) {
+    const body = init.body === undefined ? undefined : JSON.parse(init.body);
+    return DOOR.door(init.method || "GET", p.slice("/admin".length), body, { role: who === "admin" ? "admin" : "viewer" });
+  }
   return L.http(EDGE() + p, { timeoutMs: 60000, ...init,
     headers: { "Content-Type": "application/json", ...sess(who).headers, ...(init.headers || {}) } });
 }

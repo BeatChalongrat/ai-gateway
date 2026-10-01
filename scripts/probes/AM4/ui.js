@@ -98,12 +98,8 @@ async function main() {
     ["17_market_phone", "/chat/agents"],
     ["18_workspace_phone", `/chat/agents/i/${state.fin_renamed}`],
   ], { width: 390, height: 844 }, "_phone");
-  const tabs = ["รอบงานทั้งหมด", "โมเดลและการเก็บข้อมูล", "การเข้าถึง"];
-  await tour(browser, "admin", tabs.map((tab, i) => [`0${i + 1}_admin_${i}`, "/chat/agents/admin", async (p) => {
-    const b = p.getByRole("tab", { name: tab }).or(p.getByRole("button", { name: tab })).first();
-    await b.click({ timeout: 5000 });
-    await p.waitForTimeout(1500);
-  }]));
+  // AM9 (F): the admin tour of /chat/agents/admin is gone with that page (AM7 phase 4 moved it to the
+  // admin app); its screens are taken by scripts/probes/AM7 (surfaces), against admin-ui /agent-market.
   await browser.close();
   fs.writeFileSync(path.join(OUT, "console_errors.json"), JSON.stringify(errors, null, 1));
   fs.writeFileSync(path.join(OUT, "latin_words.json"), JSON.stringify(latin, null, 1));

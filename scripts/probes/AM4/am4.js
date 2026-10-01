@@ -288,66 +288,55 @@ const cmds = {
     saveJSON("why.json", out);
   },
 
+  // AM9 (F): rewritten against today's menu (AM6: the chat's model list, {id, allowed} rows and one
+  // blocked reason) and today's admin door — the AM4 picker ("options", curated agent_models) and the
+  // chat app's /admin/models are long gone, so the old phase could only throw. It now walks AM9's
+  // per-agent egress: the organisation's switch is the ceiling, an accounting agent is off under it
+  // until an admin opens that agent, and both levels are in the menu.
   async models() {
     const out = {};
     const fin = need("fin_named"), inv = need("inv_named");
-    const org0 = await j("admin", "/admin/org");
-    out.org_before = { documents_may_leave: org0.org?.documents_may_leave ?? org0.documents_may_leave };
-    for (const [tag, inst] of [["financial", fin], ["invoice", inv]]) {
-      const p = await j(WHO, `/installs/${inst}/models`);
-      out[tag] = p;
-      const first = p.options[0];
-      check(first && first.id === "auto" && /อัตโนมัติ/.test(first.label), `${tag}: the picker starts with “${first && first.label}” (uses ${p.uses})`);
-      const external = p.options.filter((o) => o.id !== "auto" && !o.self_hosted);
-      check(external.every((o) => o.disabled && /[฀-๿]/.test(o.reason || "")),
-        `${tag}: ${external.length} external option(s), all disabled with a Thai reason while documents may not leave (“${external[0] && external[0].reason}”)`);
-      if (external[0]) {
-        const r = sawError(await call(WHO, `/installs/${inst}/model`, { method: "PUT", body: JSON.stringify({ choice: external[0].id }) }), "external model while not allowed");
-        check(r.status === 409 && r.json?.error?.code === "MODEL_NOT_ALLOWED", `${tag}: choosing it anyway is refused: ${r.json?.error?.message}`);
+    const org0 = (await j("admin", "/admin/org")).org;
+    out.org_before = { documents_may_leave: org0.documents_may_leave };
+    const outside = (p) => (p.models || []).filter((m) => !m.allowed);
+    const menu = async (inst) => j(WHO, `/installs/${inst}/models`);
+    try {
+      await send("admin", "PUT", "/admin/org", { documents_may_leave: false });
+      for (const [tag, inst] of [["financial", fin], ["invoice", inv]]) {
+        const p = await menu(inst);
+        out[tag] = p;
+        check(p.egress && p.egress.org === false && p.egress.effective === false, `${tag}: the menu says the organisation does not allow it`);
+        const ext = outside(p)[0];
+        if (ext) {
+          const r = sawError(await call(WHO, `/installs/${inst}/model`, { method: "PUT", body: JSON.stringify({ choice: ext.id }) }), "outside model while not allowed");
+          check(r.status === 409 && r.json?.error?.code === "MODEL_NOT_ALLOWED", `${tag}: choosing ${ext.id} anyway is refused`);
+        }
       }
-    }
-    // the choice is remembered per install
-    const p = await j(WHO, `/installs/${fin}/models`);
-    const inhouse = p.options.find((o) => o.id !== "auto" && o.self_hosted && !o.disabled);
-    if (inhouse) {
-      await send(WHO, "PUT", `/installs/${fin}/model`, { choice: inhouse.id });
-      const p2 = await j(WHO, `/installs/${fin}/models`);
-      check(p2.choice === inhouse.id, `the choice is remembered per install (${p2.choice})`);
-      await send(WHO, "PUT", `/installs/${fin}/model`, { choice: "auto" });
+      // the organisation allows it: an accounting agent still keeps its documents in, and says why
+      await send("admin", "PUT", "/admin/org", { documents_may_leave: true });
+      const p1 = await menu(fin);
+      out.org_on = p1.egress;
+      check(p1.egress.org === true && p1.egress.agent === false && p1.egress.accounting === true && !p1.egress.effective,
+        `financial: organisation on, the agent's own default off (“${p1.blocked_reason}”)`);
+      // an admin opens this agent: now its outside models may be chosen
+      await send("admin", "PUT", "/admin/egress/sran.financial-report", { documents_may_leave: true });
+      const p2 = await menu(fin);
+      out.agent_on = p2.egress;
+      check(p2.egress.effective === true && outside(p2).length === 0, "financial: opened by an admin, every model may be chosen");
+      const egress = await j("admin", "/admin/egress");
+      out.matrix = egress.agents.map((a) => ({ slug: a.slug, agent: a.agent, default: a.agent_default, effective: a.effective }));
+      // a person who is not an admin is refused at the admin door
+      const r = await call(WHO, "/admin/egress");
+      check(r.status === 403, `a person who is not an admin cannot read the egress settings (${r.status})`);
+    } finally {
+      await send("admin", "PUT", "/admin/egress/sran.financial-report", { documents_may_leave: false });
+      await send("admin", "PUT", "/admin/org", { documents_may_leave: out.org_before.documents_may_leave });
     }
     // the outputs card says which model saw the documents
     const th = await thread(WHO, inv);
     const outs = th.items.filter((i) => i.kind === "outputs").pop();
     out.invoice_model_line = outs && outs.payload.model;
     check(!!(outs && outs.payload.model), `the invoice files card carries the model line: ${JSON.stringify(outs && outs.payload.model)}`);
-    const thf = await thread(WHO, fin);
-    const outf = thf.items.filter((i) => i.kind === "outputs").pop();
-    out.financial_model_line = outf && outf.payload.model;
-    check(!!(outf && outf.payload.model), `the financial files card carries the model line: ${JSON.stringify(outf && outf.payload.model)}`);
-    // the admin's list and the organisation switch: an outside model that reads scans, curated for the
-    // invoice agent, is shown disabled with the reason until documents may leave, then offered
-    const am = await j("admin", "/admin/models");
-    out.admin = { curated: am.curated, catalog: (am.catalog || []).length, defaults: am.defaults };
-    const ext = (am.catalog || []).find((m) => m.vision && !m.self_hosted && !m.id.endsWith("/auto"));
-    out.external_vision = ext && ext.id;
-    if (ext) {
-      const vision = am.defaults.vision;
-      try {
-        await send("admin", "PUT", "/admin/org", { agent_models: [{ model: vision, outcome: "accurate" }, { model: ext.id, outcome: "fast" }] });
-        const shut = (await j(WHO, `/installs/${inv}/models`)).options.find((o) => o.id === ext.id);
-        check(shut && shut.disabled && /[฀-๿]/.test(shut.reason || ""), `invoice: the curated outside model ${ext.id} is shown, disabled: “${shut && shut.reason}”`);
-        await send("admin", "PUT", "/admin/org", { documents_may_leave: true });
-        const open = (await j(WHO, `/installs/${inv}/models`)).options.find((o) => o.id === ext.id);
-        check(open && !open.disabled, `once the organisation allows documents to leave, it can be chosen (${open && open.label}, ${open && open.cost_thb} บาท)`);
-        out.external_vision_option = { shut, open };
-      } finally {
-        await send("admin", "PUT", "/admin/org", { documents_may_leave: false, agent_models: [] });
-      }
-      const back = (await j(WHO, `/installs/${inv}/models`)).options.map((o) => o.id);
-      check(!back.includes(ext.id), `the organisation's settings are back (${back.join(", ")})`);
-    } else {
-      log("no outside vision model in the catalogue — the vision case is not exercised");
-    }
     saveJSON("models.json", out);
   },
 

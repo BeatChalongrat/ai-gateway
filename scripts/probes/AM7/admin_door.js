@@ -10,7 +10,9 @@ const L = require("../../smoke/lib.js");
 
 const WHO = { id: "walkthrough-am7", email: "walkthrough-am7@probe.invalid", name: "AM7 walkthrough (script)" };
 
-async function door(method, path, body) {
+// opts.role (AM9): the admin-ui role the door is told the caller has — "admin" unless a probe checks
+// that a person who is not an admin is refused there.
+async function door(method, path, body, opts = {}) {
   const key = L.env("CHAT_EDGE_ADMIN_API_KEY");
   if (!key) throw new Error("CHAT_EDGE_ADMIN_API_KEY is not in .env");
   return L.http(`${L.API_BASE.edge}/api/v1/admin/agent-market${path}`, {
@@ -20,7 +22,7 @@ async function door(method, path, body) {
       "X-Admin-User-Id": WHO.id,
       "X-Admin-Email": WHO.email,
       "X-Admin-Name": encodeURIComponent(WHO.name),
-      "X-Admin-Role": "admin",
+      "X-Admin-Role": opts.role || "admin",
       "Content-Type": "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),

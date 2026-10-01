@@ -82,12 +82,8 @@ async function main() {
       ["03_market_no_access", "/chat/agents"],
     ]);
   }
-  const tabs = ["การเข้าถึง", "แผนกและงบ", "การใช้จ่าย", "แคตตาล็อก", "ปัญหาที่แจ้ง"];
-  await tour(browser, "admin", tabs.map((tab, i) => [`0${i + 1}_admin_${i}`, "/chat/agents/admin", async (p) => {
-    const b = p.getByRole("tab", { name: tab }).or(p.getByRole("button", { name: tab })).first();
-    await b.click({ timeout: 5000 });
-    await p.waitForTimeout(1500);
-  }]));
+  // AM9 (F): the admin tour of /chat/agents/admin is gone with that page (AM7 phase 4 moved it to the
+  // admin app); its screens are taken by scripts/probes/AM7 (surfaces), against admin-ui /agent-market.
   await browser.close();
   fs.writeFileSync(path.join(OUT, "console_errors.json"), JSON.stringify(errors, null, 1));
   log(`console errors: ${Object.entries(errors).map(([k, v]) => `${k} ${v.length}`).join(", ") || "none"}`);
