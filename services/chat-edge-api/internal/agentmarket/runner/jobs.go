@@ -79,21 +79,23 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	}
 	rc.answers = parentRC.answers
 	var params struct {
-		Formats []string `json:"formats"`
-		Why     string   `json:"why"`
+		Formats  []string `json:"formats"`
+		Why      string   `json:"why"`
+		FormOnly bool     `json:"form_only"` // AM10: fill the round's form, make no other file
 	}
 	_ = json.Unmarshal(job.Params, &params)
+	rc.formOnly = params.FormOnly
 	formats := params.Formats
-	if len(formats) == 0 {
+	if len(formats) == 0 && !rc.formOnly {
 		_ = json.Unmarshal(ps.run.Formats, &formats)
 	}
-	var ok []string
+	ok := []string{}
 	for _, f := range formats {
 		if rc.pkg.Manifest.FormatAllowed(f) {
 			ok = append(ok, f)
 		}
 	}
-	if len(ok) == 0 {
+	if len(ok) == 0 && !rc.formOnly {
 		return r.fail(ctx, job, "bad_format", fmt.Errorf("no supported format in %v", formats))
 	}
 	rc.run.Period = ps.run.Period
@@ -107,6 +109,9 @@ func (r *Runner) renderJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	}
 	arts, err := rc.publish(ctx, ps.run.ID, rendered, renderKey, ps.computed)
 	if err != nil {
+		return rc.stepFailed("publish", err)
+	}
+	if err := rc.recordFormOutcome(ctx, ps.run.ID, rendered.form, arts); err != nil {
 		return rc.stepFailed("publish", err)
 	}
 	// The run's current output set grows to include what was asked for.
@@ -526,11 +531,16 @@ func (r *Runner) previewJob(ctx context.Context, job am.Run, log *slog.Logger) e
 	var params struct {
 		FileID   uuid.UUID `json:"file_id"`
 		Template bool      `json:"template"`
+		// AM10: a form dropped into this round, for this round only
+		RunID *uuid.UUID `json:"run_id"`
 	}
 	_ = json.Unmarshal(job.Params, &params)
 	f, err := r.Store.GetFile(ctx, job.TenantID, job.UserID, params.FileID)
 	if err != nil {
 		return r.fail(ctx, job, "preview", err)
+	}
+	if params.Template && params.RunID != nil {
+		return r.inspectRoundForm(ctx, rc, job, f, *params.RunID)
 	}
 	if params.Template {
 		return r.inspectTemplate(ctx, rc, job, f)

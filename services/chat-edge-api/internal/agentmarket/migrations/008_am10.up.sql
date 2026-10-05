@@ -26,3 +26,11 @@ ALTER TABLE agent_market.agent_installs
 -- becomes the install's: the round carries it (the file, its mapping and
 -- what came of it), beside the install's saved form, which stays as it is.
 ALTER TABLE agent_market.agent_runs ADD COLUMN IF NOT EXISTS round_template jsonb;
+-- The form file is the round's, and not one of its inputs (never parsed as data).
+ALTER TABLE agent_market.agent_files DROP CONSTRAINT IF EXISTS agent_files_status_check;
+ALTER TABLE agent_market.agent_files ADD CONSTRAINT agent_files_status_check
+    CHECK (status IN ('staged', 'active', 'pending_decision', 'next_round', 'removed', 'form'));
+-- The thread shows one item that follows the form (schema.go declares what of it is sent).
+ALTER TABLE agent_market.agent_thread_items DROP CONSTRAINT IF EXISTS agent_thread_items_kind_check;
+ALTER TABLE agent_market.agent_thread_items ADD CONSTRAINT agent_thread_items_kind_check
+    CHECK (kind IN ('greeting', 'user_text', 'user_files', 'agent_text', 'card', 'progress', 'outputs', 'notice', 'intent', 'email_draft', 'form'));

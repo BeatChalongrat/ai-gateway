@@ -563,6 +563,7 @@ func (a *API) roundRoutes(r chi.Router) {
 	r.Get("/installs/{id}/threads", a.listThreads)
 	r.Post("/installs/{id}/threads", a.createThread)
 	a.chatRoutes(r) // AM10: rename, pin, delete
+	a.formRoutes(r) // AM10: a form for this round only
 	r.Post("/installs/{id}/rounds", a.startRound)
 	r.Post("/intents/{id}", a.answerIntent)
 	r.Get("/installs/{id}/models", a.installModels)

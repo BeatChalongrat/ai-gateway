@@ -290,6 +290,8 @@ type renderOut struct {
 	Artifacts []renderedArt   `json:"artifacts"`
 	Theme     json.RawMessage `json:"theme"`
 	Passed    bool            `json:"passed"`
+	// form (AM10): the round's own form this render filled, if any
+	form *am.RoundForm
 }
 
 func (rc *runCtx) theme(ctx context.Context) (map[string]any, int, *string) {
@@ -352,7 +354,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 	// .docx is rendered for it even when it was not asked for (and then not
 	// delivered).
 	wantPDF := contains(formats, "pdf")
-	var pyFormats []string
+	pyFormats := []string{} // never nil: the engine takes [] as "no file", null as its defaults
 	for _, f := range formats {
 		if f != "pdf" {
 			pyFormats = append(pyFormats, f)
@@ -364,9 +366,19 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 		names["docx"] = strings.TrimSuffix(names["pdf"], ".pdf") + ".docx"
 	}
 	// The customer's own template, filled on every run once one is saved (AM2).
-	tpl, tplFile, err := rc.templateInput(ctx)
+	// AM10: a form dropped into this round comes first, for this round only.
+	tpl, tplFile, roundForm, err := rc.roundFormInput(ctx, artifactRun)
 	if err != nil {
 		return renderOut{}, "", err
+	}
+	if tpl == nil && !rc.formOnly {
+		tpl, tplFile, err = rc.templateInput(ctx)
+		if err != nil {
+			return renderOut{}, "", err
+		}
+	}
+	if rc.formOnly && tpl == nil {
+		return renderOut{}, "", fmt.Errorf("the round has no form ready to fill")
 	}
 	var tplKey any
 	if tpl != nil {
@@ -544,7 +556,11 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 		return renderOut{}, key, err
 	}
 	var ro renderOut
-	return ro, key, json.Unmarshal(out, &ro)
+	if err := json.Unmarshal(out, &ro); err != nil {
+		return ro, key, err
+	}
+	ro.form = roundForm
+	return ro, key, nil
 }
 
 // moreFormats are the formats a person may ask this round for afterwards: the manifest's outputs, PDF

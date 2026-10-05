@@ -952,6 +952,14 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	if def, err := a.store.DefinitionByID(r.Context(), in.DefinitionID); err == nil {
 		if m, err := ParseManifest(def.Manifest); err == nil {
 			accept = m.UploadTypes()
+			// AM10: an agent that fills forms takes one dropped into a round too
+			if len(m.Templates) > 0 {
+				for ext := range TemplateKinds {
+					if !contains(accept, ext) {
+						accept = append(accept, ext)
+					}
+				}
+			}
 		}
 	}
 	ok = false
@@ -1015,6 +1023,8 @@ type messageReq struct {
 	// knowledge base, read only when the message is a question (knowledge.go).
 	ThreadID        *uuid.UUID `json:"thread_id"`
 	KnowledgeBaseID *uuid.UUID `json:"knowledge_base_id"`
+	// AM10: the files among FileIDs the person marked as a form for this round
+	FormFileIDs []uuid.UUID `json:"form_file_ids"`
 }
 
 // message is the composer. It only routes: a file starts or resumes a run,
@@ -1075,14 +1085,54 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"item": item, "duplicate": true})
 		return
 	}
+	// AM10: a form dropped into the round is told from the round's data
+	marked := map[uuid.UUID]bool{}
+	for _, id := range req.FormFileIDs {
+		marked[id] = true
+	}
+	var forms []File
+	if m, err := a.manifestOf(ctx, in); err == nil {
+		forms, files = SplitForms(m, files, marked, req.Text)
+	}
 	o := roundOpts{thread: req.ThreadID}
 	if len(files) == 0 {
 		o.knowledge = req.KnowledgeBaseID
 	}
-	route, runID, err := a.route(ctx, tx, in, c, item, req.Text, files, o)
-	if err != nil {
-		a.fail(w, err, "message")
-		return
+	route, runID := "", (*uuid.UUID)(nil)
+	if len(files) > 0 || len(forms) == 0 || !ReadsAsFormRequest(req.Text) {
+		// the data (or the words) take their usual route; a form request with
+		// nothing but the form is the form's alone
+		if len(files) > 0 || len(forms) == 0 {
+			route, runID, err = a.route(ctx, tx, in, c, item, req.Text, files, o)
+			if err != nil {
+				a.fail(w, err, "message")
+				return
+			}
+		}
+	}
+	if len(forms) > 0 {
+		target, err := a.formTarget(ctx, in, o, runID)
+		if err != nil {
+			a.fail(w, err, "message")
+			return
+		}
+		for _, f := range forms {
+			if _, err := a.roundForm(ctx, tx, in, c, o, target, f); err != nil {
+				a.fail(w, err, "message")
+				return
+			}
+		}
+		if route == "" {
+			route = "form"
+			if target != nil {
+				runID = &target.ID
+			}
+			if _, err := tx.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = payload || jsonb_build_object('status', 'handled', 'handled_as', 'form'),
+				rev = nextval('agent_market.thread_rev') WHERE id = $1`, item.ID); err != nil {
+				a.fail(w, err, "message")
+				return
+			}
+		}
 	}
 	out := map[string]any{"item": item, "route": route, "run_id": runID}
 	if len(files) > 0 && req.KnowledgeBaseID != nil {
@@ -1473,6 +1523,11 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 				a.fail(w, err, "notice")
 				return
 			}
+		}
+		// AM10: "which files" makes the run's set and the install's setting
+		if err := a.store.ApplyOutputSet(ctx, tx, run, answers); err != nil {
+			a.fail(w, err, "formats")
+			return
 		}
 		if _, err := a.store.Resume(ctx, tx, run.ID); err != nil {
 			a.fail(w, err, "run")

@@ -346,6 +346,9 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 		if n, err := st.RememberAnswers(ctx, st.Pool, rc.run, c.ID, qs, answers); err == nil && n > 0 {
 			_ = st.PostNotice(ctx, rc.run, am.Text("จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้"), "defaults")
 		}
+		if err := st.ApplyOutputSet(ctx, st.Pool, rc.run, answers); err != nil {
+			return false, err
+		}
 	}
 	if err := rc.settleClarifySteps(ctx); err != nil {
 		return false, err

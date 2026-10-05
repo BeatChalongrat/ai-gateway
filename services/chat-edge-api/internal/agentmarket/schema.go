@@ -306,6 +306,10 @@ var itemSchema = map[string]field{
 		"produces": list(obj(map[string]field{"format": code, "label": label(fromPackage)})),
 		"status":   obj(map[string]field{"self_test_run_id": id}),
 	}),
+	// AM10: the round's own form, as its item follows it (the slot labels a
+	// delivered form lacks are the customer's own, shown as written)
+	"form": obj(map[string]field{"run_id": id, "file_id": id, "name": file, "status": code, "open": number,
+		"unfilled": list(person), "artifact_id": id, "why": text(fromPackage), "text": text(fromPackage)}),
 	// what the person wrote and sent is theirs
 	"user_text":  {class: asPerson},
 	"user_files": {class: asPerson},

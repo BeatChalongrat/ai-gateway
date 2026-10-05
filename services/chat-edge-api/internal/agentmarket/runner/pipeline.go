@@ -37,6 +37,9 @@ type runCtx struct {
 	// docsMayLeave (AM4): the organisation lets this round's data go to a
 	// model outside it. Off by default: only in-house models see anything.
 	docsMayLeave bool
+	// formOnly (AM10): this render job fills the round's own form and makes
+	// no other file.
+	formOnly bool
 }
 
 // blobRef is a large step output kept in object storage.
@@ -143,6 +146,11 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if err != nil {
 			return rc.stepFailed("postcompute", err)
 		}
+		// AM10: which files, asked here — about to produce them — only when the
+		// install does not already say (outputset.go)
+		if f := rc.outputSetFinding(ctx); f != nil {
+			post.Findings = append(post.Findings, *f)
+		}
 		act, err := rc.clarify(ctx, "postcompute", post.Findings, nil, postKey, pre)
 		if err != nil {
 			return r.fail(ctx, run, "clarify", err)
@@ -173,6 +181,9 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	}
 	arts, err := rc.publish(ctx, rc.run.ID, rendered, renderKey, computedRef)
 	if err != nil {
+		return rc.stepFailed("publish", err)
+	}
+	if err := rc.recordFormOutcome(ctx, rc.run.ID, rendered.form, arts); err != nil {
 		return rc.stepFailed("publish", err)
 	}
 	// AM5: the package's own verdict on the round (a reconciliation that does
@@ -868,14 +879,35 @@ func (rc *runCtx) seedSelfTest(ctx context.Context) error {
 	return rc.reloadAnswers(ctx)
 }
 
-// formats is the run's output set (install default unless the run says otherwise).
+// formats is the run's output set (install default unless the run says
+// otherwise; AM10: an answered "which files" wins, and becomes the run's).
 func (rc *runCtx) formats() []string {
+	if fs := am.OutputSetOf(rc.answers); fs != nil {
+		_ = rc.r.Store.SetFormats(rc.ctx, rc.r.Store.Pool, rc.run.ID, fs)
+		return fs
+	}
 	var f []string
 	_ = json.Unmarshal(rc.run.Formats, &f)
 	if len(f) == 0 {
 		f = rc.pkg.Manifest.DefaultFormats()
 	}
 	return f
+}
+
+// outputSetFinding is the "which files" question for this round, or nil
+// (one shape only, the install says, a self-test, or already answered).
+func (rc *runCtx) outputSetFinding(ctx context.Context) *am.Finding {
+	if rc.run.Kind != am.KindRun {
+		return nil
+	}
+	if _, done := rc.answers[am.OutputSetCode]; done {
+		return nil
+	}
+	defs, err := rc.r.Store.ListDefaults(ctx, rc.install.ID)
+	if err != nil {
+		return nil
+	}
+	return am.OutputSetFinding(rc.pkg.Manifest, defs, rc.formats())
 }
 
 func tempDir() string { return os.TempDir() }
