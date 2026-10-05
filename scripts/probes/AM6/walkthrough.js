@@ -47,7 +47,8 @@ const PROCS = ["SRAN Desktop.exe", "SranDesktop.ToolsSidecar.exe", "SranDesktop.
 const SETUP = path.join(L.ROOT, "apps", "desktop", "release", `SRAN Desktop Setup ${VERSION}.exe`);
 // AM7: the card that walks it tags what it makes (default [AM6])
 const TAG = process.env.AM6_TAG || "[AM6]";
-const OUT = path.join(__dirname, "results", "walk", L.TARGET);
+// AM10: a later card's walk keeps its own results (AM6_OUT), beside its own tag
+const OUT = process.env.AM6_OUT || path.join(__dirname, "results", "walk", L.TARGET);
 const STATE = path.join(OUT, "state.json");
 fs.mkdirSync(OUT, { recursive: true });
 const state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, "utf8")) : { log: [], installs: [], runs: [] };
@@ -240,11 +241,12 @@ async function installFromMarket(x, cardText) {
   await L.wait(1200);
   const card = page.locator('[data-testid="am-agent-card"]').filter({ hasText: cardText });
   x.check(await card.count(), `“${cardText}” is an agent of the market`);
-  const scope = await x.words(card.locator('[data-testid="am-scope"]'));
   await x.shot("01-market");
   await x.click(card.locator('[data-testid="am-install"]'), `อ่านก่อนติดตั้ง (${cardText})`);
   await page.waitForSelector('[data-testid="am-detail-install"]', { timeout: 60000 });
   await L.wait(1000);
+  // AM10: a card says what the agent does, what to feed it and what comes back; whom it is for is on its page
+  const scope = await x.words(page.locator('[data-testid="am-scope"]'));
   await x.shot("02-agent-page");
   await x.click(page.locator('[data-testid="am-detail-install"]'), "ใช้ค่าแนะนำทั้งหมด");
   await page.waitForURL(/\/chat\/agents\/i\//, { timeout: 60000 });
@@ -366,7 +368,7 @@ async function journey(client) {
   const { page } = x;
   const t1 = Date.now();
   const { installId, scope } = await installFromMarket(x, "ใบสั่งซื้อ");
-  x.check(/ใช้ได้ทุกบริษัท|ทั่วไป|generic/i.test(scope) || scope.length > 0, "the card says where the agent can be used (its scope)", scope);
+  x.check(/ใช้ได้ทุกบริษัท|ทั่วไป|generic/i.test(scope) || scope.length > 0, "the agent's page says where the agent can be used (its scope)", scope);
   state[`po_${client}`] = installId;
   save();
   const put = await api(page, `/installs/${installId}/defaults/company`, { method: "PUT", body: JSON.stringify({ value: SAMPLE_BUYER }) });
@@ -1022,12 +1024,18 @@ const phases = {
   },
 };
 
-const cmd = process.argv[2];
-if (!phases[cmd]) {
-  console.log(`usage: walkthrough.js ${Object.keys(phases).join(" | ")}`);
-  process.exit(2);
+if (require.main !== module) {
+  // AM10: a later card's walk drives the same two clients with these
+  module.exports = { L, state, save, log, waitFor, WEB, EDGE, pw, api, fetchFile, capture, session, installFromMarket, installAnother,
+    sendFiles, finish, download, testChat, connectDesktop, openWeb, phases, buffersOf, FIN, FORM, MIME, TAG, OUT, TERMINAL };
+} else {
+  const cmd = process.argv[2];
+  if (!phases[cmd]) {
+    console.log(`usage: walkthrough.js ${Object.keys(phases).join(" | ")}`);
+    process.exit(2);
+  }
+  phases[cmd]().catch((e) => {
+    log(`ERROR ${String((e && e.stack) || e).slice(0, 600)}`);
+    process.exit(1);
+  });
 }
-phases[cmd]().catch((e) => {
-  log(`ERROR ${String((e && e.stack) || e).slice(0, 600)}`);
-  process.exit(1);
-});
