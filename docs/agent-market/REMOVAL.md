@@ -147,6 +147,25 @@ for display, and changes nothing there):
   data) and its refusal to offer a `mail` connector; the `MCP_INTERNAL_TOKEN`
   line of `.env` (delete it with step 5). The Mermaid canvas viewer of the
   same card is a chat-app feature in its own commit ("Canvas: …") and stays.
+- AM10: migration `008_am10` in schema `agent_market` only (a chat's `title`,
+  `pinned_at`, `deleted_at`; the install's `first_chat_*`; `agent_runs.round_template`;
+  file status `form`; thread item kind `form` — gone with step 3). Everything
+  else of the feature is in its own trees (`backend/agent_market/` — the
+  packages' icons and accents, the working papers' companion sheets, packages
+  1.6.0 / 1.6.0 / 1.5.0 / 1.4.0 / 1.3.0; `services/chat-edge-api/internal/agentmarket/`;
+  `apps/web-chat/src/features/agent-market/` and `app/chat/agents/`;
+  admin-ui's `app/agent-market/` and `lib/agentMarketApi.ts`) plus one line
+  pair outside them, in a commit named AM10: `docker-compose.test-stack.yml`
+  (the generated mirror of AM9's mail-gateway settings). The same card's
+  changes to the product itself are in commits of their own and stay: the
+  first admin from configuration (`backend/app/core/first_admin.py`,
+  `app/ops/first_admin.py`), the connector consent page written for the client
+  that asked (`portal_connectors.py`), the desktop app's native strings, the
+  language kept on the person's account (`apps/web-chat/src/lib/i18n/account.ts`)
+  and the English-fallback sweep of the chat and admin apps.
+  **A generated file is regenerated in a commit of the feature whose lines it
+  mirrors**: regenerating the test-stack compose in a core commit carried
+  Agent Market lines out of the feature (caught by this drill before the push).
 
 ## Steps
 

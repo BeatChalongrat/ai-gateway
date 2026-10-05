@@ -333,3 +333,111 @@ over the same bytes and stored on every install and run.
   (`email_sends.transport`) records which carried each send. With no Google
   client configured (the state a new customer starts in), no mailbox is
   offered and everything behaves as before.
+
+## The details, on every surface (AM10)
+
+- **The icon ships inside the package.** A package declares, in `agent.json`:
+
+  ```json
+  "icon": "chart",
+  "icon_file": "icon.svg",
+  "accent": {"light": "#1D4ED8", "dark": "#8FB0FF"}
+  ```
+
+  - `icon_file` — a file of the package (a relative path ending `.svg`). It is a
+    *shape*, not a picture: one `<svg viewBox="0 0 24 24">` of strokes
+    (`path`, `circle`, `ellipse`, `rect`, `line`, `polyline`, `polygon`, `g`,
+    `title`), UTF-8, at most 4,096 bytes. The set's language is
+    `fill="none"`, `stroke-width="1.75"`, round caps and joins; a third
+    party's icon reads as part of the set when it follows it. Nothing a
+    browser could run or fetch is accepted: no script, style, text, image,
+    link, `use`, `foreignObject`, no event, `href`, `style` or `url(…)`
+    attribute, no entity or directive (`look.go` `CheckIcon`; a package whose
+    icon is missing or refused is not loaded at all).
+  - `accent` — the agent's colour, one `#RRGGBB` per theme. The clients never
+    draw the file's own colours: they paint the shape with the accent of the
+    theme in use on a 14 % tint of it (a CSS mask), so one line icon reads the
+    same at 20 px in the sidebar and at 48 px on its page, light and dark.
+    Pick each so it stands 3:1 against the surface it is drawn on (white; the
+    dark surface `#17181C`) — the shipped set is tested for it, and for no two
+    agents sharing an icon or a colour.
+  - `icon` — a glyph name, the fallback for an agent that ships no file.
+
+  The runner reads the file at registration and writes it into the released
+  version's manifest as `icon_svg` (a package never sets that key itself), so
+  the catalogue never has to know an agent to draw it. The rail, the installs
+  list and the workspace header take the newest released version's look for
+  the agent, so an install pinned to a version from before the icon shows it
+  too — presentation, not behaviour. `scripts/probes/AM10/icons.js` renders the
+  set together at 32 px and at full size, light and dark.
+
+- **A catalogue card says what it does, what to feed it and what comes back —
+  nothing else.** The sample's price and run time, the tags and the scope line
+  left the card (cost is the admin's, on the spend page; whom an agent is for
+  is on its page and its data sheet). The time is said where the waiting
+  happens: the progress card of a running round reads "ใช้เวลาประมาณ …" (the
+  organisation's own rounds once there are three, else the catalogue sample),
+  and after one and a half times that, "นานกว่าปกติ … แต่ยังทำงานอยู่".
+
+- **Chats under each agent** (`chats.go`, migration 008). The sidebar opens
+  each installed agent to its chats — pinned first, then the newest activity —
+  each named for what it is (the period of its latest round; before any round,
+  when it began; two of one period are told apart by when they began), with
+  rename, pin, delete and "แชทใหม่กับ agent นี้". This supersedes AM4's "one
+  workspace, rounds collapsed" where the two disagree. **Deleting a chat takes
+  it off the list and nothing else**: a date on the chat, never a DELETE. Its
+  rounds, their files, the run pages and the audit rows live on and are
+  reached from the agent's overview; a round still queued or waiting in it is
+  cancelled and charged nothing; the chat answers `THREAD_GONE` from then on
+  (the workspace opens the agent's latest chat instead, a notification's round
+  its run page), and a reminder never reopens a deleted first chat. The first
+  chat has no row (`thread_id` NULL, "main"), so its name, pin and deletion
+  live on the install. Two rounds side by side: `?beside=<chat>` reads a second
+  chat of the agent beside the one on screen — its own live thread, read-only,
+  one composer — so neither loses its place.
+
+- **A form for this round only** (`roundform.go`, `runner/roundform.go`). A
+  customer's form dropped into a round ("ใส่ในฟอร์มนี้ให้หน่อย") is used for
+  that round and never becomes the install's: the round carries it
+  (`agent_runs.round_template`), its file is the round's form and never one of
+  its inputs (file status `form`), and the thread shows one item that follows
+  it. Which file is a form: one the person ticked in the composer; a form's
+  kind (.docx .xlsx .xlsm .pptx) the agent does not read as input; or, when
+  the words ask for a form, every file of a form's kind. It goes to the round
+  the message lands in — the one just finished, or the one running or waiting
+  (filled when it finishes); with no round to put it in, the agent says so.
+  AM8's rules hold exactly: the model proposes the mapping, the code checks,
+  fills and re-reads, and a partly filled form is delivered as a draft with
+  every slot it lacks named — never a pass. Every fillable slot proposed and
+  accepted: filled without a question; otherwise the install's mapping screen
+  opens on the form's item and saves to the round (`PUT /runs/{id}/template`).
+  The fill is a render job that asks for no format, and a render asked for no
+  format makes none of the agent's own files (`deliverables/formats.py`).
+
+- **Which files, asked once** (`outputset.go`). An agent with more than one
+  sensible set of files asks "ชุดไฟล์" at the postcompute moment — about to
+  produce them — through the same card as every other clarification:
+  cosmetic (the round runs on with the standard set; an answer re-renders),
+  rememberable. It is asked only when the install does not already say: the
+  wizard's formats step, the settings page and an earlier answer all count;
+  a set copied from the manifest by a one-click install does not. The answer
+  becomes the run's set and the install's `formats` setting.
+
+- **One page across** (`workpaper.py`, `xlsx.print.one_across`). No sheet of
+  any working paper runs across pages any more. A table too wide for one page
+  is written as a main sheet — the row's identity, its amounts, its status and
+  reason — and companion sheets right after it ("… · หลักฐาน", "… · เกณฑ์ที่ใช้",
+  "… · ผลตามกฎ") that start with the same identity columns, one row per row,
+  read side by side by row number. Nothing is dropped: every column is on
+  exactly one of them (identity on all), and each check reads a column from
+  the sheet that holds it. The gate fails a sheet that runs across more than
+  one page by name, and a companion whose identity does not match its main
+  sheet row for row.
+
+- **Language.** Agent Market reads Thai in both of the app's languages — its
+  pages, its cards, the sentences the server writes and the documents it
+  makes: every agent follows Thai law and practice (`jurisdiction: TH`), and
+  its texts are kept as written. Everything around it follows the switch (the
+  chat app, the desktop app's own menus and dialogs, the admin app), and the
+  choice is the person's account's. The install setting that offered an
+  English document and changed nothing is gone: the row states "ไทย".
