@@ -17,8 +17,14 @@
 // One addition beyond the measurement: "Copy Image" on an image, because
 // it works (webContents.copyImageAt) — Claude was not measured on images.
 //
+// AM10 F — the labels come from the strings table in the current language
+// (the edit set shares the application menu's words); the ids stay the same
+// so the actions below never depend on wording.
+//
 // Pure template builder (no 'electron' import) so it is unit-tested in
 // plain Node; the installer below wires it to a webContents.
+
+import { t } from "./strings";
 
 export interface ContextMenuParams {
   readonly x: number;
@@ -65,18 +71,18 @@ export function buildContextMenu(p: ContextMenuParams): ContextMenuItem[] {
 
   if (p.linkURL && isOpenableLink(p.linkURL)) {
     items.push(
-      { id: "openLink", label: "Open Link in Default Browser", enabled: true },
-      { id: "copyLink", label: "Copy Link Address", enabled: true },
+      { id: "openLink", label: t("context.openLink"), enabled: true },
+      { id: "copyLink", label: t("context.copyLink"), enabled: true },
       { type: "separator" },
     );
   }
   if (p.mediaType === "image") {
     items.push(
-      { id: "copyImage", label: "Copy Image", enabled: true },
+      { id: "copyImage", label: t("context.copyImage"), enabled: true },
       // FIX81 ④ — Save goes through webContents.downloadURL, which lands in
       // the SAME will-download policy FIX80 repaired (app-origin allowed →
       // native save dialog) — one download mechanism, not a second one.
-      { id: "saveImage", label: "Save Image As…", enabled: Boolean(p.srcURL) },
+      { id: "saveImage", label: t("context.saveImage"), enabled: Boolean(p.srcURL) },
       { type: "separator" },
     );
   }
@@ -86,27 +92,27 @@ export function buildContextMenu(p: ContextMenuParams): ContextMenuItem[] {
     // there is history to undo; Cut/Copy follow the selection.
     if (p.editFlags.canUndo || p.editFlags.canRedo) {
       items.push(
-        { id: "undo", label: "Undo", accelerator: "Ctrl+Z", enabled: p.editFlags.canUndo },
-        { id: "redo", label: "Redo", accelerator: "Ctrl+Shift+Z", enabled: p.editFlags.canRedo },
+        { id: "undo", label: t("menu.undo"), accelerator: "Ctrl+Z", enabled: p.editFlags.canUndo },
+        { id: "redo", label: t("menu.redo"), accelerator: "Ctrl+Shift+Z", enabled: p.editFlags.canRedo },
         { type: "separator" },
       );
     }
     items.push(
-      { id: "cut", label: "Cut", accelerator: "Ctrl+X", enabled: p.editFlags.canCut && hasSelection },
-      { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: p.editFlags.canCopy && hasSelection },
-      { id: "paste", label: "Paste", accelerator: "Ctrl+V", enabled: p.editFlags.canPaste },
+      { id: "cut", label: t("menu.cut"), accelerator: "Ctrl+X", enabled: p.editFlags.canCut && hasSelection },
+      { id: "copy", label: t("menu.copy"), accelerator: "Ctrl+C", enabled: p.editFlags.canCopy && hasSelection },
+      { id: "paste", label: t("menu.paste"), accelerator: "Ctrl+V", enabled: p.editFlags.canPaste },
       { type: "separator" },
       // Chromium reports canSelectAll=false for an empty field; Claude keeps
       // the entry live there, and so does the app's Edit menu.
-      { id: "selectAll", label: "Select All", accelerator: "Ctrl+A", enabled: true },
+      { id: "selectAll", label: t("menu.selectAll"), accelerator: "Ctrl+A", enabled: true },
     );
     return items;
   }
 
   items.push(
-    { id: "copy", label: "Copy", accelerator: "Ctrl+C", enabled: hasSelection },
+    { id: "copy", label: t("menu.copy"), accelerator: "Ctrl+C", enabled: hasSelection },
     { type: "separator" },
-    { id: "selectAll", label: "Select All", accelerator: "Ctrl+A", enabled: true },
+    { id: "selectAll", label: t("menu.selectAll"), accelerator: "Ctrl+A", enabled: true },
   );
   return items;
 }

@@ -5,9 +5,16 @@
 // (new chat = the /chat route, settings = /chat/settings) — no new
 // capability, no new bridge op. DevTools is NEVER in a release build.
 //
+// AM10 F — every label comes from the strings table in the current language,
+// the role items included: a role with no label of its own is drawn with
+// Electron's English word whatever the person chose. index.ts rebuilds the
+// menu when the language changes.
+//
 // Pure: builds a MenuItemConstructorOptions-shaped template from callbacks;
 // index.ts hands it to Menu.buildFromTemplate. No 'electron' import so the
 // template is unit-testable.
+
+import { t } from "./strings";
 
 export interface MenuActions {
   newChat: () => void;
@@ -24,6 +31,8 @@ export interface MenuActions {
 
 /** A structural subset of Electron's MenuItemConstructorOptions. */
 export interface MenuTemplateItem {
+  /** What the item is, independent of its (translated) label. */
+  id?: "devtools";
   label?: string;
   role?: string;
   type?: "normal" | "separator" | "checkbox";
@@ -35,46 +44,46 @@ export interface MenuTemplateItem {
 
 export function buildMenuTemplate(actions: MenuActions, opts: { isRelease: boolean }): MenuTemplateItem[] {
   const view: MenuTemplateItem[] = [
-    { label: "Reload", accelerator: "CmdOrCtrl+R", click: actions.reload },
+    { label: t("menu.reload"), accelerator: "CmdOrCtrl+R", click: actions.reload },
     { type: "separator" },
-    { role: "resetZoom", accelerator: "CmdOrCtrl+0" },
-    { role: "zoomIn", accelerator: "CmdOrCtrl+=" },
-    { role: "zoomOut", accelerator: "CmdOrCtrl+-" },
+    { role: "resetZoom", label: t("menu.resetZoom"), accelerator: "CmdOrCtrl+0" },
+    { role: "zoomIn", label: t("menu.zoomIn"), accelerator: "CmdOrCtrl+=" },
+    { role: "zoomOut", label: t("menu.zoomOut"), accelerator: "CmdOrCtrl+-" },
     { type: "separator" },
-    { label: "Always on Top", type: "checkbox", accelerator: "CmdOrCtrl+Shift+T", checked: actions.isAlwaysOnTop(), click: actions.toggleAlwaysOnTop },
-    { role: "togglefullscreen", accelerator: "F11" },
+    { label: t("menu.alwaysOnTop"), type: "checkbox", accelerator: "CmdOrCtrl+Shift+T", checked: actions.isAlwaysOnTop(), click: actions.toggleAlwaysOnTop },
+    { role: "togglefullscreen", label: t("menu.fullscreen"), accelerator: "F11" },
   ];
   if (!opts.isRelease && actions.toggleDevTools) {
-    view.push({ type: "separator" }, { label: "Toggle Developer Tools", accelerator: "CmdOrCtrl+Shift+I", click: actions.toggleDevTools });
+    view.push({ type: "separator" }, { id: "devtools", label: t("menu.devTools"), accelerator: "CmdOrCtrl+Shift+I", click: actions.toggleDevTools });
   }
   return [
     {
-      label: "File",
+      label: t("menu.file"),
       submenu: [
-        { label: "New Chat", accelerator: "CmdOrCtrl+N", click: actions.newChat },
-        { label: "Settings", accelerator: "CmdOrCtrl+,", click: actions.openSettings },
+        { label: t("menu.newChat"), accelerator: "CmdOrCtrl+N", click: actions.newChat },
+        { label: t("menu.settings"), accelerator: "CmdOrCtrl+,", click: actions.openSettings },
         { type: "separator" },
-        { label: "Quit", accelerator: "CmdOrCtrl+Q", click: actions.quit },
+        { label: t("menu.quit"), accelerator: "CmdOrCtrl+Q", click: actions.quit },
       ],
     },
     {
-      label: "Edit",
+      label: t("menu.edit"),
       submenu: [
-        { role: "undo" },
-        { role: "redo" },
+        { role: "undo", label: t("menu.undo") },
+        { role: "redo", label: t("menu.redo") },
         { type: "separator" },
-        { role: "cut" },
-        { role: "copy" },
-        { role: "paste" },
-        { role: "selectAll" },
+        { role: "cut", label: t("menu.cut") },
+        { role: "copy", label: t("menu.copy") },
+        { role: "paste", label: t("menu.paste") },
+        { role: "selectAll", label: t("menu.selectAll") },
       ],
     },
-    { label: "View", submenu: view },
+    { label: t("menu.view"), submenu: view },
     {
-      label: "Help",
+      label: t("menu.help"),
       submenu: [
-        { label: "Open Log Folder", click: actions.openLogs },
-        { label: "About SRAN Desktop", click: actions.about },
+        { label: t("menu.openLogs"), click: actions.openLogs },
+        { label: t("menu.about"), click: actions.about },
       ],
     },
   ];
@@ -90,7 +99,7 @@ export function accelerators(items: MenuTemplateItem[]): string[] {
   return out;
 }
 
-/** True when any item (recursively) opens devtools. */
+/** True when any item (recursively) opens devtools — found by what it is, not by its label. */
 export function hasDevTools(items: MenuTemplateItem[]): boolean {
-  return items.some((it) => (it.label ?? "").includes("Developer Tools") || (it.submenu ? hasDevTools(it.submenu) : false));
+  return items.some((it) => it.id === "devtools" || (it.submenu ? hasDevTools(it.submenu) : false));
 }

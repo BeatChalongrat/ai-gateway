@@ -27,6 +27,7 @@
 
 import { explainGuardrailBlock, findGuardrailMatch, type PromptPart, type PromptPartMatch } from "../shared/guardrail-mirror";
 import type { Logger } from "./logger";
+import { t } from "./strings";
 
 /** The gateway's verdict (gateway-client.guardrailCheck); null = no answer. */
 export interface GuardrailVerdict {
@@ -93,33 +94,43 @@ export class PromptGuard {
    * blocks; returns text to APPEND to the existing error message. */
   static explain403(parts: readonly PromptPart[]): string {
     const hits = explainGuardrailBlock(parts);
-    if (hits.length === 0) {
-      return (
-        "\n\nWhy: the gateway's content guardrail matched something in this request, but this app could not find the phrase " +
-        "(the gateway's rules may be newer than this app's). Check for jailbreak-like wording in your message, then in " +
-        "Memory (including notes saved on this computer), the project's instructions and Writing style — and remove it."
-      );
-    }
-    return "\n\nWhy (likely): " + hits.map(describeHit).join(" ");
+    if (hits.length === 0) return t("guard.whyNotFound");
+    return t("guard.whyLikely", { hits: hits.map(describeHit).join(" ") });
   }
 }
 
 function describeHit(h: PromptPartMatch): string {
-  return `${h.label} contains ${JSON.stringify(h.span)}, which matches guardrail rule ${h.rule} — remove it ${h.fixAt}.`;
+  return t("guard.hit", { label: h.label, span: JSON.stringify(h.span), rule: h.rule, fixAt: h.fixAt });
 }
 
 /** Labels + fix locations for the prompt parts the host assembles. Kept here
- * so the coordinator and the tests spell them identically. */
+ * so the coordinator and the tests spell them identically.
+ *
+ * AM10 F — read in the current language at the moment a part is assembled
+ * (getters, not constants): the label travels with the part and is what the
+ * 403 explanation quotes back, so a Thai-mode person reads Thai. */
 export const PROMPT_PART = Object.freeze({
-  userMessage: { label: "Your message", fixAt: "by rewording the message" },
-  earlierMessage: { label: "An earlier message in this conversation", fixAt: "by starting a new conversation or editing that message" },
-  projectInstructions: (name: string) => ({ label: `The instructions of project “${name}”`, fixAt: "in Projects → that project's instructions" }),
-  writingStyle: { label: "Your writing-style profile", fixAt: "in Writing style" },
-  serverMemory: { label: "A saved memory", fixAt: "in Memory (delete or edit that memory)" },
-  localGlobalNote: { label: "A note saved on this computer (remember, global)", fixAt: "in Memory → Notes on this computer" },
-  localConversationNote: { label: "A note saved for this conversation (remember)", fixAt: "by starting a new conversation" },
+  get userMessage() {
+    return { label: t("guard.part.userMessage.label"), fixAt: t("guard.part.userMessage.fixAt") };
+  },
+  get earlierMessage() {
+    return { label: t("guard.part.earlierMessage.label"), fixAt: t("guard.part.earlierMessage.fixAt") };
+  },
+  projectInstructions: (name: string) => ({ label: t("guard.part.projectInstructions.label", { name }), fixAt: t("guard.part.projectInstructions.fixAt") }),
+  get writingStyle() {
+    return { label: t("guard.part.writingStyle.label"), fixAt: t("guard.part.writingStyle.fixAt") };
+  },
+  get serverMemory() {
+    return { label: t("guard.part.serverMemory.label"), fixAt: t("guard.part.serverMemory.fixAt") };
+  },
+  get localGlobalNote() {
+    return { label: t("guard.part.localGlobalNote.label"), fixAt: t("guard.part.localGlobalNote.fixAt") };
+  },
+  get localConversationNote() {
+    return { label: t("guard.part.localConversationNote.label"), fixAt: t("guard.part.localConversationNote.fixAt") };
+  },
   // FIX28: an installed skill's instructions.
-  skill: (name: string) => ({ label: `The skill “${name}”`, fixAt: "in Skills (disable or delete that skill)" }),
+  skill: (name: string) => ({ label: t("guard.part.skill.label", { name }), fixAt: t("guard.part.skill.fixAt") }),
   // FIX27: the extracted text of an attached document (untrusted observation envelope).
-  attachedFile: (names: string) => ({ label: `The attached file ${names}`, fixAt: "by removing that attachment and sending the message again" }),
-} as const);
+  attachedFile: (names: string) => ({ label: t("guard.part.attachedFile.label", { names }), fixAt: t("guard.part.attachedFile.fixAt") }),
+});

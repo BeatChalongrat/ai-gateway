@@ -159,6 +159,10 @@ export interface ShellPrefsDto {
   quickHotkey: string;
   /** What a single click on the tray icon opens (§2.5: default "main"). */
   trayClick: "main" | "quick";
+  /** AM10 F — the language the shell draws its native surface in. Written by
+   *  the i18n store (lib/i18n), not by the settings page; absent on an older
+   *  host and before the page has said. */
+  locale?: "en" | "th";
 }
 
 export class HostError extends Error {

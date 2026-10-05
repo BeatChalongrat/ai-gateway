@@ -13,6 +13,7 @@
 //     is never retried once it has begun (partial output must not repeat).
 
 import type { Logger } from "./logger";
+import { t } from "./strings";
 import { classifyStreamFailure, eofWithoutTerminal, isStopReason, isTerminalCause, type StopReason, type TerminalCause } from "./terminal-cause";
 
 /** FIX66 Part 4 — map a failed /v1/images/generations response into one
@@ -123,19 +124,14 @@ export function classify429(
 ): { code: string; message: string } {
   const err = body?.error;
   const isCredits = err?.code === "insufficient_credits" || (err?.details != null && "credit_balance" in err.details);
+  // AM10 F — the sentences come from the strings table in the current
+  // language (the page shows the host's sentence for a code its own table
+  // does not know, so an English one would read as English in Thai mode).
   if (isCredits) {
-    return {
-      code: "insufficient_credits",
-      message:
-        `Out of gateway credits${accountLabel} — the agent could not send this message. ` +
-        `This is a credit balance of zero, not a rate limit. Ask your administrator to add credits to the account, then try again.`,
-    };
+    return { code: "insufficient_credits", message: t("error.outOfCredits", { account: accountLabel }) };
   }
-  const wait = retryAfter && /^\d+$/.test(retryAfter) ? ` Try again in about ${retryAfter}s.` : " Wait a few seconds and try again.";
-  return {
-    code: err?.code ?? "rate_limited",
-    message: `Rate limited — too many requests in a short time.${wait} This is a speed limit, not a credit problem, so no purchase is needed.`,
-  };
+  const wait = retryAfter && /^\d+$/.test(retryAfter) ? t("error.rateLimited.retryIn", { seconds: retryAfter }) : t("error.rateLimited.wait");
+  return { code: err?.code ?? "rate_limited", message: t("error.rateLimited", { wait }) };
 }
 
 /** FIX21 §2: best-effort backend reason from an error response body. Prefers
@@ -505,7 +501,7 @@ export class GatewayClient {
   async *streamCompletion(request: CompletionRequest, signal: AbortSignal, opts: { requestId?: string } = {}): AsyncGenerator<StreamEvent> {
     const key = await this.getOrProvisionKey();
     if (!key) {
-      yield { kind: "error", code: "no_agent_key", message: "The app could not obtain a gateway key for this account." };
+      yield { kind: "error", code: "no_agent_key", message: t("error.noAgentKey") };
       return;
     }
     const watchdog = new AbortController();
@@ -554,11 +550,7 @@ export class GatewayClient {
       // needless re-provision every refused turn). Never log or echo the key.
       if (res.status === 401) {
         this.invalidateKey();
-        yield {
-          kind: "error",
-          code: "gateway_unauthorized",
-          message: "The gateway rejected the agent key (HTTP 401) — your session may have expired. Signing in again should fix it.",
-        };
+        yield { kind: "error", code: "gateway_unauthorized", message: t("error.unauthorized") };
         return;
       }
       if (res.status === 403) {
@@ -566,7 +558,7 @@ export class GatewayClient {
         yield {
           kind: "error",
           code: "gateway_forbidden",
-          message: `The gateway refused this request (HTTP 403)${reason ? `: ${reason}` : "."}`,
+          message: reason ? t("error.forbiddenBecause", { reason }) : t("error.forbidden"),
         };
         return;
       }
@@ -586,11 +578,11 @@ export class GatewayClient {
           yield { kind: "error", code, message };
           return;
         }
-        yield { kind: "error", code: err?.code ?? `http_${res.status}`, message: err?.message || detail || `Gateway returned HTTP ${res.status}.`, ...(Array.isArray(err?.attempts) && err.attempts.length > 0 ? { attempts: err.attempts as unknown[] } : {}) };
+        yield { kind: "error", code: err?.code ?? `http_${res.status}`, message: err?.message || detail || t("error.httpStatus", { status: res.status }), ...(Array.isArray(err?.attempts) && err.attempts.length > 0 ? { attempts: err.attempts as unknown[] } : {}) };
         return;
       }
       if (!res.body) {
-        yield { kind: "error", code: "no_body", message: "Gateway returned no stream." };
+        yield { kind: "error", code: "no_body", message: t("error.noStream") };
         return;
       }
       const reader = res.body.getReader();

@@ -33,6 +33,7 @@ import http from "node:http";
 import path from "node:path";
 
 import type { Logger } from "./logger";
+import { oauthCallbackPage } from "./native-dialogs";
 
 export const CONNECTOR_OAUTH_FILENAME = "connector-oauth.json";
 const DEFAULT_FLOW_TIMEOUT_MS = 10 * 60_000;
@@ -276,8 +277,8 @@ interface InFlight {
 
 const b64url = (b: Buffer) => b.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-const CALLBACK_HTML = (title: string, body: string) =>
-  `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title><style>body{font-family:system-ui,sans-serif;margin:3rem auto;max-width:32rem;color:#222}</style></head><body><h2>${title}</h2><p>${body}</p></body></html>`;
+// AM10 F — the page the loopback listener answers with is built by
+// native-dialogs.ts (oauthCallbackPage) in the current language.
 
 export class ConnectorOAuth {
   private inFlight: InFlight | null = null;
@@ -378,23 +379,23 @@ export class ConnectorOAuth {
         const gotState = u.searchParams.get("state");
         if (gotState !== state) {
           // Not ours (a stale tab, or someone poking the port). Say so, keep waiting.
-          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(CALLBACK_HTML("Sign-in did not match", "This sign-in does not belong to the current request. Go back to SRAN Desktop and click Connect again."));
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(oauthCallbackPage("mismatch"));
           this.deps.log.warn(`connector-oauth ${connectorId}: callback with a foreign state — ignored`);
           return;
         }
         const err = u.searchParams.get("error");
         if (err) {
-          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(CALLBACK_HTML("Not connected", "You declined, or the provider refused. You can close this tab."));
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(oauthCallbackPage("notConnected"));
           finish({ ok: false, error: "oauth-denied", detail: err });
           return;
         }
         const code = u.searchParams.get("code");
         if (!code) {
-          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(CALLBACK_HTML("Sign-in incomplete", "No authorization code came back. You can close this tab and try again."));
+          res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" }).end(oauthCallbackPage("incomplete"));
           finish({ ok: false, error: "oauth-exchange-failed", detail: "no code in callback" });
           return;
         }
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(CALLBACK_HTML("Connected to SRAN Desktop", "You can close this tab and return to the app."));
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(oauthCallbackPage("connected"));
         finish({ ok: true, code });
       });
     });

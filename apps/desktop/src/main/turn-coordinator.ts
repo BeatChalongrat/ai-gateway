@@ -65,8 +65,12 @@ import { ModelWindows } from "./model-windows";
 import type { RunLedgerStore } from "./run-ledger";
 import type { ContextManager } from "./context-manager";
 import { memoryActive, subAgentSystemPrompt, type MemoryUsedItem, type PromptAssembler } from "./prompt-assembler";
+import { remoteConsentMessage, spawnConsentMessage } from "./native-dialogs";
 import { PROMPT_PART, PromptGuard } from "./prompt-guard";
 import { checkRemoteTarget } from "./remote-target";
+// AM10 F — the sentences the host writes for the page, in the current language
+// (aliased: `t` is a common local name in this file).
+import { t as hostText } from "./strings";
 import { endingForOutcome, normalizeHostError, stopReasonFor, type HostErrorFrame, type StopReason, type TerminalCause, type TurnEnding } from "./terminal-cause";
 
 /** The hostname of a user-typed URL for a log line — never the query. */
@@ -415,7 +419,7 @@ export class TurnCoordinator {
         if (this.turns.get(payload.conversationId) === turn) {
           this.emitTerminalIfMissing(payload.conversationId, {
             code: "host_exception",
-            message: "The turn ended unexpectedly. Nothing further was received.",
+            message: hostText("error.hostException"),
           });
         }
       })
@@ -423,7 +427,7 @@ export class TurnCoordinator {
         if (this.turns.get(payload.conversationId) === turn) {
           this.emitTerminalIfMissing(payload.conversationId, {
             code: "no_result",
-            message: "The turn ended without producing a result.",
+            message: hostText("error.noResult"),
           });
           this.turns.delete(payload.conversationId);
         }
@@ -935,9 +939,7 @@ export class TurnCoordinator {
     else if (/\.py$/.test(lower)) { command = "python"; args = [file]; }
     const id = `custom-${base.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
     const name = base || "Custom connector";
-    const approved = await this.opts.confirmSpawn(
-      `Add MCP connector "${name}"?\n\nIt will spawn this local process:\n${command} ${args.join(" ")}\n\nOnly do this for a program you trust.`,
-    );
+    const approved = await this.opts.confirmSpawn(spawnConsentMessage(name, `${command} ${args.join(" ")}`));
     if (!approved) return { added: false }; // spawn consent declined
     const connector = { id, name, command, args };
     const test = await this.sidecar.hostQuery("connectors._testCustom", { connector });
@@ -974,9 +976,7 @@ export class TurnCoordinator {
     const id = `custom-${origin.replace(/^https:\/\//, "").replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
     const keyed = form.key.length > 0;
     const header = form.authHeader.trim();
-    const approved = await this.opts.confirmRemote(
-      `Add remote MCP connector "${host}"?\n\nIt will connect to:\n${origin}\n\nKey: ${keyed ? `yes — sent as ${header || "Authorization: Bearer"}` : "none"}\n\nOnly do this for a server you trust.`,
-    );
+    const approved = await this.opts.confirmRemote(remoteConsentMessage(host, origin, keyed, header));
     if (!approved) return { added: false }; // declined
     const connector = { id, name: host, transport: "http", serverUrl: form.url.trim(), ...(header ? { authHeader: header } : {}) };
     // The key rides ONLY in these two host→sidecar calls (private stdio pipe,
@@ -1255,7 +1255,7 @@ export class TurnCoordinator {
       // page reading either surface shows the same sentence.
       this.emitError(run.conversationId, {
         code: "generation_interrupted",
-        message: "This turn was interrupted when the app closed. What had been written is kept; send again to continue.",
+        message: hostText("error.interrupted"),
         cause: "interrupted",
       });
       settled++;
@@ -1295,7 +1295,7 @@ export class TurnCoordinator {
     // turn somewhere nobody reviewed.
     if (!(await this.isModelAccepted(model, signal))) {
       this.log.warn(`TURN #${turnNo} conv=${conversationId}: REFUSED unknown model "${model}"`);
-      this.emitError(conversationId, { code: "model_not_accepted", message: `The selected model “${model}” is not available. Pick a model from the list and try again.` });
+      this.emitError(conversationId, { code: "model_not_accepted", message: hostText("error.modelNotAccepted", { model }) });
       return;
     }
 
@@ -1330,7 +1330,7 @@ export class TurnCoordinator {
       if (isRegenerate) regenerate = await this.regenerateTarget(conversationId);
     } catch (err) {
       this.log.error(`TURN #${turnNo} conv=${conversationId}: could not build messages: ${(err as Error).message}`);
-      this.emitError(conversationId, { code: "host_exception", message: "The turn could not be prepared." });
+      this.emitError(conversationId, { code: "host_exception", message: hostText("error.notPrepared") });
       return;
     }
     // FIX3 §3: if the sidecar is still starting (first launch pays ~6 s of native
@@ -1560,7 +1560,7 @@ export class TurnCoordinator {
     this.log.info(`TURN EDIT-FORK conv=${conversationId} editOf=${editId} textLen=${payload.text.length}`);
     const res = await this.chatEdge.editStream(conversationId, editId, payload.text, signal);
     if (!res || !res.body) {
-      this.emit(conversationId, "error", { code: "edit_failed", message: "The message could not be edited (chat-edge unreachable or refused)." });
+      this.emit(conversationId, "error", { code: "edit_failed", message: hostText("error.editFailed") });
       return;
     }
     const reader = (res.body as ReadableStream<Uint8Array>).getReader();
@@ -1579,7 +1579,7 @@ export class TurnCoordinator {
         }
       }
     } catch (err) {
-      if (!signal.aborted) this.emit(conversationId, "error", { code: "edit_stream_error", message: (err as Error).message });
+      if (!signal.aborted) this.emit(conversationId, "error", { code: "edit_stream_error", message: hostText("error.editStream", { reason: (err as Error).message }) });
     }
     this.lastReply.set(conversationId, turn.assistantText);
     this.emit(conversationId, "message_complete", { message_id: turn.messageId });

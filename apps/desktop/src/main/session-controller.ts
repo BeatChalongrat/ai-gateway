@@ -29,6 +29,8 @@ import type { Logger } from "./logger";
 import { ACCESS_COOKIE, PortalAuthClient, REFRESH_COOKIE, fingerprint, type SessionTokens } from "./portal-auth";
 import { SessionStore } from "./session-store";
 import { parseLoginTicket } from "./deep-link";
+// AM10 F — the reasons the signed-out view shows, in the app's language.
+import { t } from "./strings";
 
 export type ViewState = "signed-out" | "signing-in";
 
@@ -156,7 +158,7 @@ export class SessionController {
     } else {
       // Network: keep the stored session, show the signed-out view; "Sign in"
       // retries the restore first (see signInFromView).
-      this.surface.showView("signed-out", "The gateway could not be reached. Check the connection and try again.");
+      this.surface.showView("signed-out", t("signedOut.unreachable"));
     }
     return false;
   }
@@ -171,7 +173,7 @@ export class SessionController {
         return;
       }
       if (this.tokens !== null) {
-        this.surface.showView("signed-out", "Still cannot reach the gateway.");
+        this.surface.showView("signed-out", t("signedOut.stillUnreachable"));
         return;
       }
     }
@@ -188,7 +190,7 @@ export class SessionController {
     const timer = setTimeout(() => {
       this.log.warn(`SIGN-IN TIMED OUT after ${this.opts.signInTimeoutSeconds}s — no ticket arrived; signed-out view`);
       this.pendingSignIn = null;
-      this.surface.showView("signed-out", "Sign-in timed out. Try again.");
+      this.surface.showView("signed-out", t("signedOut.timedOut"));
     }, this.opts.signInTimeoutSeconds * 1000);
     this.pendingSignIn = { nonce, timer };
     if (this.opts.nonceExportPath) {
@@ -235,7 +237,7 @@ export class SessionController {
     if (!outcome.ok) {
       const why = outcome.kind === "network" ? `network: ${outcome.message}` : `${outcome.status} ${outcome.code}`;
       this.log.warn(`TICKET EXCHANGE FAILED (${why}) — signed-out view`);
-      this.surface.showView("signed-out", "Sign-in could not be completed. Try again.");
+      this.surface.showView("signed-out", t("signedOut.failed"));
       return;
     }
     await this.adopt(outcome.tokens, "sign-in");
@@ -303,7 +305,7 @@ export class SessionController {
     }
     this.log.warn(`SESSION REFRESH REJECTED (${outcome.status} ${outcome.code}, reason=${reason}) — clearing the stored session`);
     await this.clearLocal();
-    if (reason === "timer") this.surface.showView("signed-out", "Your session ended. Sign in again.");
+    if (reason === "timer") this.surface.showView("signed-out", t("signedOut.ended"));
     return false;
   }
 
@@ -398,7 +400,7 @@ export class SessionController {
       this.recentRedirects = [];
       this.stopRotation();
       await this.surface.blankPage();
-      this.surface.showView("signed-out", "The page kept asking to sign in although the session is valid. Your sign-in is kept — try again.");
+      this.surface.showView("signed-out", t("signedOut.reauthLoop"));
       return;
     }
     this.log.info(`PORTAL REDIRECT INTERCEPTED: ${url} — raising host-side re-auth`);

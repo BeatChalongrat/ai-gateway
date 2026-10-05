@@ -25,22 +25,34 @@
 <div class="card">
   <!-- Shell-owned view (E2 §1). Three states, chosen by ?state=. The buttons are
        plain links to intent URLs on the app's own dev scheme; the shell refuses
-       the navigation and acts on the intent. No bridge, no IPC. -->
+       the navigation and acts on the intent. No bridge, no IPC.
+       AM10 F: the words come from the host (src/main/strings.ts) as ?lang= and
+       ?strings= — each data-t element is filled before first paint; the English
+       in the markup is the fallback when the page is opened without them. -->
   <div id="signed-out">
     <h1>SRAN Desktop</h1>
-    <p>You are signed out.<br><span id="reason" class="err"></span></p>
-    <a class="btn" id="signin" href="#">Sign in</a>
+    <p><span data-t="session.signedOut">You are signed out.</span><br><span id="reason" class="err"></span></p>
+    <a class="btn" id="signin" href="#" data-t="session.signIn">Sign in</a>
   </div>
   <div id="signing-in" class="hidden">
     <div class="spin"></div>
-    <h1>Signing in…</h1>
-    <p>Finish signing in with your browser. This window will update on its own.</p>
-    <a class="btn secondary" id="cancel" href="#">Cancel</a>
+    <h1 data-t="session.signingIn">Signing in…</h1>
+    <p data-t="session.finishInBrowser">Finish signing in with your browser. This window will update on its own.</p>
+    <a class="btn secondary" id="cancel" href="#" data-t="session.cancel">Cancel</a>
   </div>
 </div>
 <script>
   (function () {
     var q = new URLSearchParams(location.search);
+    var lang = q.get("lang") === "th" ? "th" : "en";
+    document.documentElement.lang = lang;
+    var S = {};
+    try { S = JSON.parse(q.get("strings") || "{}") || {}; } catch (e) { S = {}; }
+    var els = document.querySelectorAll("[data-t]");
+    for (var i = 0; i < els.length; i++) {
+      var v = S[els[i].getAttribute("data-t")];
+      if (typeof v === "string" && v) els[i].textContent = v;
+    }
     var state = q.get("state") || "signed-out";
     var scheme = q.get("scheme") || "sran";
     var reason = q.get("reason") || "";

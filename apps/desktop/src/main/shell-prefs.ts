@@ -1,5 +1,6 @@
 // FIX34 Part A — HOST-owned shell preferences: the quick-ask hotkey and what a
-// click on the tray icon opens.
+// click on the tray icon opens. AM10 F adds the language the shell draws
+// its own surface in (`locale`), told by the page through the same op.
 //
 // Why a host file and not a sidecar setting: both values are consumed by the
 // Electron shell itself (globalShortcut.register, tray.on("click")) before
@@ -21,6 +22,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { isLocale, type Locale } from "./strings";
 
 export type TrayClickAction = "main" | "quick";
 
@@ -46,6 +48,12 @@ export interface ShellPrefs {
    *  would address, and a TTL removes the data rather than protecting
    *  it in place. */
   localStateTtlDays: number;
+  /** AM10 F — the language the shell draws its own surface in (menus, tray,
+   *  dialogs, notifications, its own pages). Written when the page says so
+   *  (shell.prefs.set { locale }); ABSENT until then, so a first run can fall
+   *  back to the system language (strings.ts resolveLocale) rather than to
+   *  a default that would override it. */
+  locale?: Locale;
 }
 
 export const DEFAULT_QUICK_HOTKEY = "CommandOrControl+Shift+A";
@@ -118,6 +126,19 @@ export function isTrayClickAction(v: unknown): v is TrayClickAction {
   return v === "main" || v === "quick";
 }
 
+export type LocalePatchVerdict = { ok: true; locale?: Locale } | { ok: false; error: "locale-invalid" };
+
+/** AM10 F — the `locale` a shell.prefs.set patch asks for. Nothing asked is
+ *  fine (the other fields are the patch's business); anything asked must be
+ *  exactly "en" or "th" — a case variant, a region tag or a word is refused
+ *  with a reason the page can show, and nothing changes. */
+export function localeFromPatch(patch: Record<string, unknown>): LocalePatchVerdict {
+  const v = patch["locale"];
+  if (v === undefined) return { ok: true };
+  if (!isLocale(v)) return { ok: false, error: "locale-invalid" };
+  return { ok: true, locale: v };
+}
+
 /** Human wording for the settings page / the boot notification. */
 export function describeAccelerator(accelerator: string): string {
   return accelerator.replace(/CommandOrControl|CmdOrCtrl/gi, process.platform === "darwin" ? "⌘" : "Ctrl").replace(/Control/gi, "Ctrl");
@@ -166,6 +187,7 @@ export class ShellPrefsStore {
 export function sanitizePrefs(raw: Partial<ShellPrefs> | null | undefined): ShellPrefs {
   const hk = validateAccelerator(typeof raw?.quickHotkey === "string" ? raw.quickHotkey : null);
   const ttl = raw?.localStateTtlDays;
+  const locale = raw?.locale;
   return {
     quickHotkey: hk.ok ? hk.accelerator : DEFAULT_QUICK_HOTKEY,
     trayClick: isTrayClickAction(raw?.trayClick) ? raw.trayClick : DEFAULT_SHELL_PREFS.trayClick,
@@ -173,5 +195,8 @@ export function sanitizePrefs(raw: Partial<ShellPrefs> | null | undefined): Shel
       typeof ttl === "number" && Number.isFinite(ttl) && ttl >= 0 && ttl <= 3650
         ? Math.floor(ttl)
         : DEFAULT_SHELL_PREFS.localStateTtlDays,
+    // The language has no default here: absent (or not a language) stays
+    // absent, and the start-up fallback to the system language applies.
+    ...(isLocale(locale) ? { locale } : {}),
   };
 }

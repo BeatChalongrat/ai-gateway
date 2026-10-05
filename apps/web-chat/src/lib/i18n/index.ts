@@ -19,6 +19,8 @@
 import { createContext, createElement, useContext, useEffect, type ReactNode } from "react";
 import { create } from "zustand";
 
+import { bridge, usingBridgeTransport } from "@/lib/bridge";
+
 import { dictionaries, type DictKey, type Locale } from "./dict";
 
 interface I18nState {
@@ -56,6 +58,23 @@ function apply(locale: Locale) {
   document.documentElement.lang = locale;
 }
 
+// AM10 F — desktop hook. The Electron shell draws its own menus, tray,
+// dialogs and notifications and keeps them in the language this page is in;
+// it learns that language here, through the shell preferences it already
+// owns (shell.prefs.set { locale } — no new bridge op, no new preload
+// member). Only in hosted mode: a browser has no host to tell. An older
+// installed desktop that knows no `locale` field ignores it and answers ok;
+// a host that is not there answers { ok:false } — never a throw, and the
+// page does not wait for either.
+function tellHost(locale: Locale): void {
+  if (!usingBridgeTransport) return;
+  try {
+    void bridge.hostQuery("shell.prefs.set", { locale }, 5_000).catch(() => {});
+  } catch {
+    /* an older host surface — the page's language is unaffected */
+  }
+}
+
 export const useI18nStore = create<I18nState>((set, get) => ({
   locale: "en",
   hydrated: false,
@@ -67,6 +86,7 @@ export const useI18nStore = create<I18nState>((set, get) => ({
       /* ignore */
     }
     set({ locale: l });
+    tellHost(l);
   },
   toggle() {
     const next: Locale = get().locale === "en" ? "th" : "en";
@@ -77,6 +97,10 @@ export const useI18nStore = create<I18nState>((set, get) => ({
     const initial = readInitial();
     apply(initial);
     set({ locale: initial, hydrated: true });
+    // Once per page load: the host's stored choice may be older than this
+    // page's (the person switched in the browser, or the host is new and has
+    // none yet), so the page's language is the one that counts.
+    tellHost(initial);
   },
 }));
 

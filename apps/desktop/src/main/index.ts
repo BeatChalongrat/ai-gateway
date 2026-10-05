@@ -53,8 +53,26 @@ import { TaskScheduler } from "./task-scheduler";
 import { AgentNotifier } from "./agent-notify";
 import { buildMenuTemplate } from "./app-menu";
 import { actionFor, buildContextMenu, type ContextMenuParams } from "./context-menu";
+import {
+  aboutDialog,
+  attachChatFailedDialog,
+  attachConfirmDialog,
+  attachFailedDialog,
+  attachFolderRefusedDialog,
+  attachNotOpenedDialog,
+  attachSignInFirstDialog,
+  attachTooLargeDialog,
+  catchUpNotification,
+  clearLocalDataDialog,
+  confirmConnectorDialog,
+  dataClearedNotification,
+  hotkeyUnavailableNotification,
+  rendererGoneDialog,
+} from "./native-dialogs";
+import { currentLocale, pageStrings, resolveLocale, setLocale, t, type Locale } from "./strings";
+import { buildTrayTemplate } from "./tray-menu";
 import { DEFAULT_SIZE, sanitizeBounds, WindowStateStore, type Rect } from "./window-state";
-import { describeAccelerator, ShellPrefsStore, validateAccelerator, type ShellPrefs } from "./shell-prefs";
+import { describeAccelerator, localeFromPatch, ShellPrefsStore, validateAccelerator, type ShellPrefs } from "./shell-prefs";
 import { classifyFrame, classifyTopLevel, isExternalHttpUrl } from "./navigation-policy";
 import { PortalAuthClient, fingerprint } from "./portal-auth";
 import { PromptAssembler } from "./prompt-assembler";
@@ -199,7 +217,13 @@ void app.whenReady().then(async () => {
   quickState.load();
   shellPrefs = new ShellPrefsStore(path.join(app.getPath("userData"), "shell-prefs.json"));
   const prefs = shellPrefs.load();
-  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick} localStateTtlDays=${prefs.localStateTtlDays}`);
+  // AM10 F — the language of everything the shell draws itself, decided
+  // BEFORE the tray, the menu or the first view exists: the person's choice
+  // from shell-prefs.json, else the system language (th* → Thai, else
+  // English — the page's own first-run rule). The page tells the host its
+  // language once it is up (shell.prefs.set { locale }); see applyLocale.
+  setLocale(resolveLocale(prefs.locale, app.getLocale()));
+  log.info(`shell prefs: quickHotkey=${prefs.quickHotkey} trayClick=${prefs.trayClick} localStateTtlDays=${prefs.localStateTtlDays} locale=${prefs.locale ?? `(none → ${currentLocale()} from system ${app.getLocale()})`}`);
   // Local-data TTL sweep — deletes conversation-state cache files not
   // touched in localStateTtlDays. 30 days by default (0 disables);
   // counts only in the log, never contents.
@@ -378,15 +402,17 @@ void app.whenReady().then(async () => {
       },
       signOut: () => ctl.signOut("bridge", true),
       pickFolder: async () => {
-        const r = await dialog.showOpenDialog(win, { title: "Grant SRAN access to a folder", properties: ["openDirectory", "dontAddToRecent"] });
+        const r = await dialog.showOpenDialog(win, { title: t("picker.grantFolder"), properties: ["openDirectory", "dontAddToRecent"] });
         return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
       },
       // FIX2 native dialogs — the sidecar is headless, so windows live here.
+      // AM10 F: our titles follow the app's language; the pickers' own buttons
+      // are the operating system's, in the operating system's language.
       pickSkillFile: async () => {
         const r = await dialog.showOpenDialog(win, {
-          title: "Choose a skill package",
+          title: t("picker.skillFile"),
           properties: ["openFile", "dontAddToRecent"],
-          filters: [{ name: "Skill package", extensions: ["zip", "skill"] }],
+          filters: [{ name: t("picker.skillFilter"), extensions: ["zip", "skill"] }],
         });
         return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
       },
@@ -398,7 +424,7 @@ void app.whenReady().then(async () => {
           return flags.probeMcpServer;
         }
         const r = await dialog.showOpenDialog(win, {
-          title: "Choose the MCP server program (the user picks it — the page names no process)",
+          title: t("picker.mcpProgram"),
           properties: ["openFile", "dontAddToRecent"],
         });
         return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]!;
@@ -408,14 +434,7 @@ void app.whenReady().then(async () => {
           log.info(`PROBE confirmSpawn dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
           return true;
         }
-        const r = await dialog.showMessageBox(win, {
-          type: "warning",
-          title: "Add MCP connector",
-          message,
-          buttons: ["Cancel", "Add connector"],
-          defaultId: 0,
-          cancelId: 0,
-        });
+        const r = await dialog.showMessageBox(win, confirmConnectorDialog("local", message));
         return r.response === 1;
       },
       // FIX69 — a remote MCP server: url + key in a HOST-owned window (the chat
@@ -441,14 +460,7 @@ void app.whenReady().then(async () => {
           log.info(`PROBE confirmRemote dialog reached — answering "Add connector". Dialog text: ${message.replace(/\n+/g, " | ")}`);
           return true;
         }
-        const r = await dialog.showMessageBox(win, {
-          type: "warning",
-          title: "Add remote MCP connector",
-          message,
-          buttons: ["Cancel", "Add connector"],
-          defaultId: 0,
-          cancelId: 0,
-        });
+        const r = await dialog.showMessageBox(win, confirmConnectorDialog("remote", message));
         return r.response === 1;
       },
       // FIX2 §1.2: the OS side-effect of a host-owned setting, derived from the
@@ -515,12 +527,7 @@ void app.whenReady().then(async () => {
     // minimized to the tray). OS-native so it shows without the window focused.
     const notifyCatchUp = (task: { name: string; catchUpFor: string; skippedOlder: number }) => {
       try {
-        if (Notification.isSupported()) {
-          new Notification({
-            title: "Scheduled task caught up",
-            body: `“${task.name}” was due while the app was closed — running it now (missed ${new Date(task.catchUpFor).toLocaleString()}${task.skippedOlder > 0 ? `; ${task.skippedOlder} older run(s) skipped` : ""}).`,
-          }).show();
-        }
+        if (Notification.isSupported()) new Notification(catchUpNotification(task)).show();
       } catch (err) {
         log.warn(`catch-up notification failed: ${(err as Error).message}`);
       }
@@ -663,7 +670,7 @@ function installAppMenu(win: BrowserWindow): void {
       toggleAlwaysOnTop: () => setAlwaysOnTop(win, !win.isAlwaysOnTop()),
       isAlwaysOnTop: () => win.isAlwaysOnTop(),
       openLogs: () => void shell.openPath(log.filePath ? path.dirname(log.filePath) : app.getPath("userData")),
-      about: () => void dialog.showMessageBox(win, { type: "info", title: "About SRAN Desktop", message: `SRAN Desktop ${app.getVersion()}`, detail: `Electron ${process.versions.electron} · config: ${config.sourcePath}` }),
+      about: () => void dialog.showMessageBox(win, aboutDialog({ version: app.getVersion(), electron: process.versions.electron ?? "?", configPath: config.sourcePath })),
       quit: () => {
         isQuitting = true;
         app.quit();
@@ -673,6 +680,20 @@ function installAppMenu(win: BrowserWindow): void {
     { isRelease },
   );
   Menu.setApplicationMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
+}
+
+/** AM10 F — the language the shell draws in changed (the page said so through
+ * shell.prefs.set { locale }, already validated and persisted by
+ * applyShellPrefs): everything drawn from the strings table is drawn again
+ * at once — the application menu, the tray menu, the quick window's title —
+ * without a restart. The session view and the connector form read the table
+ * when they load, so nothing is to be done for them here. */
+function applyLocale(locale: Locale): void {
+  if (!setLocale(locale)) return;
+  log.info(`locale → ${locale}`);
+  if (mainWindow && !mainWindow.isDestroyed()) installAppMenu(mainWindow);
+  rebuildTrayMenu();
+  if (quickWindow && !quickWindow.isDestroyed()) quickWindow.setTitle(t("window.quickTitle"));
 }
 
 function createMainWindow(): BrowserWindow {
@@ -772,7 +793,7 @@ function promptRemoteConnectorForm(parent: BrowserWindow | null, keyOnlyFor?: st
       minimizable: false,
       maximizable: false,
       fullscreenable: false,
-      title: "Add remote connector",
+      title: t("window.remoteForm"),
       icon: path.join(APP_ROOT, "assets", "app.ico"),
       autoHideMenuBar: true,
       webPreferences: buildWebPreferences({
@@ -803,16 +824,26 @@ function promptRemoteConnectorForm(parent: BrowserWindow | null, keyOnlyFor?: st
     });
     form.on("closed", () => finish(null));
     form.once("ready-to-show", () => form.show());
-    void form.loadFile(path.join(APP_ROOT, "assets", "connector-remote.html"), keyOnlyFor ? { query: { mode: "key", name: keyOnlyFor } } : undefined).catch((err: Error) => {
+    // AM10 F — the form's words ride in the query like its mode does.
+    const query: Record<string, string> = { ...pageLanguageQuery(pageStrings("remote")), ...(keyOnlyFor ? { mode: "key", name: keyOnlyFor } : {}) };
+    void form.loadFile(path.join(APP_ROOT, "assets", "connector-remote.html"), { query }).catch((err: Error) => {
       log.warn(`remote connector form failed to load: ${err.message}`);
       finish(null);
     });
   });
 }
 
+/** AM10 F — how a shell-owned page (assets/*.html) learns its language: the
+ * current locale and the strings it shows, as two query parameters read by
+ * the page's own script before first paint. Nothing is executed in the page
+ * from here, and a page opened without them reads its built-in English. */
+function pageLanguageQuery(strings: Record<string, string>): Record<string, string> {
+  return { lang: currentLocale(), strings: JSON.stringify(strings) };
+}
+
 function showSessionView(win: BrowserWindow, state: ViewState, reason?: string): void {
   if (win.isDestroyed()) return;
-  const query: Record<string, string> = { state, scheme: config.protocolScheme };
+  const query: Record<string, string> = { state, scheme: config.protocolScheme, ...pageLanguageQuery(pageStrings("session")) };
   if (reason) query["reason"] = reason;
   log.info(`VIEW: ${state}${reason ? ` (${reason})` : ""}`);
   void win.loadFile(SESSION_VIEW, { query }).catch((err: Error) => log.warn(`session view load rejected: ${err.message}`));
@@ -1046,15 +1077,7 @@ function installCrashHandlers(contents: WebContents): void {
       return;
     }
     void dialog
-      .showMessageBox(win, {
-        type: "error",
-        title: "SRAN Desktop",
-        message: "The page process stopped unexpectedly.",
-        detail: `reason=${details.reason} exitCode=${details.exitCode}\nLog: ${log.filePath ?? "(stdout)"}`,
-        buttons: ["Reload", "Quit"],
-        defaultId: 0,
-        cancelId: 1,
-      })
+      .showMessageBox(win, rendererGoneDialog({ reason: details.reason, exitCode: details.exitCode, logPath: log.filePath }))
       .then(({ response }) => {
         if (response === 0) void win.loadURL(config.pageUrl);
         else app.quit();
@@ -1067,25 +1090,14 @@ function installCrashHandlers(contents: WebContents): void {
  *  derived caches, report counts (never contents). The shell log file
  *  is re-attached afterwards so logging keeps working. */
 async function clearLocalDataWithConfirm(): Promise<void> {
-  const { response } = await dialog.showMessageBox({
-    type: "warning",
-    buttons: ["Clear local data", "Cancel"],
-    defaultId: 1,
-    cancelId: 1,
-    title: "Clear local data",
-    message: "Remove locally cached conversation transcripts, summaries, run records and logs from this computer?",
-    detail: "Your conversations stay on the server and re-sync on next use. This only clears this computer's local cache — the tool results kept with older conversations here are not re-synced.",
-  });
+  const { response } = await dialog.showMessageBox(clearLocalDataDialog());
   if (response !== 0) return;
   const counts = wipeLocalData(app.getPath("userData"));
   log.attachFile(path.join(app.getPath("userData"), "logs", "shell.log"));
   log.info(
     `local data cleared: history=${counts.historyFiles} conversation-state=${counts.conversationStateFiles} run-ledger=${counts.runLedgerFiles} logs=${counts.logFiles}`,
   );
-  new Notification({
-    title: "SRAN Desktop",
-    body: `Local data cleared (${counts.historyFiles + counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles} files).`,
-  }).show();
+  new Notification(dataClearedNotification(counts.historyFiles + counts.conversationStateFiles + counts.runLedgerFiles + counts.logFiles)).show();
 }
 
 function createTray(): void {
@@ -1103,50 +1115,39 @@ function createTray(): void {
   log.info("tray created");
 }
 
-/** FIX33 B4 — the tray menu carries an always-on-top checkbox (persisted with the window state). */
+/** FIX33 B4 — the tray menu carries an always-on-top checkbox (persisted with
+ * the window state). AM10 F — the template (tray-menu.ts) is in the current
+ * language; this is also what applyLocale calls to redraw it. */
 function rebuildTrayMenu(): void {
   if (!tray) return;
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "Show / Hide", click: () => toggleMainWindow() },
-      { label: `Quick ask\t${describeAccelerator(shellPrefs?.current().quickHotkey ?? "")}`, click: () => toggleQuickWindow("tray-menu") },
-      {
-        label: "Always on top",
-        type: "checkbox",
-        checked: mainWindow?.isAlwaysOnTop() ?? windowState?.current().alwaysOnTop ?? false,
-        click: (item) => {
-          if (mainWindow && !mainWindow.isDestroyed()) setAlwaysOnTop(mainWindow, item.checked);
-        },
+  const template = buildTrayTemplate(
+    {
+      toggleMain: () => toggleMainWindow(),
+      toggleQuick: () => toggleQuickWindow("tray-menu"),
+      setAlwaysOnTop: (on) => {
+        if (mainWindow && !mainWindow.isDestroyed()) setAlwaysOnTop(mainWindow, on);
       },
-      { type: "separator" },
-      { label: "Sign in", click: () => void sessionController?.signInFromView() },
-      { label: "Sign out", click: () => void sessionController?.signOut("tray", true) },
-      { type: "separator" },
-      {
-        // Local-data wipe (retention program): removes the plaintext
-        // derived caches (conversation-state, run-ledger, logs).
-        // Everything is re-derivable from the server; still confirmed
-        // first because it is a deletion.
-        label: "Clear local data…",
-        click: () => void clearLocalDataWithConfirm(),
+      signIn: () => void sessionController?.signInFromView(),
+      signOut: () => void sessionController?.signOut("tray", true),
+      clearLocalData: () => void clearLocalDataWithConfirm(),
+      quit: () => {
+        isQuitting = true;
+        app.quit();
       },
-      { type: "separator" },
-      {
-        label: "Quit",
-        click: () => {
-          isQuitting = true;
-          app.quit();
-        },
-      },
-    ]),
+    },
+    {
+      quickHotkey: shellPrefs?.current().quickHotkey ?? "",
+      alwaysOnTop: mainWindow?.isAlwaysOnTop() ?? windowState?.current().alwaysOnTop ?? false,
+    },
   );
+  tray.setContextMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
 }
 function registerHotkey(): void {
   const ok = globalShortcut.register(config.hotkey, toggleMainWindow);
   if (ok) log.info(`global hotkey registered: ${config.hotkey}`);
   else {
     log.warn(`global hotkey NOT registered (held by another app?): ${config.hotkey}`);
-    notifyHotkeyFailure("main window", config.hotkey);
+    notifyHotkeyFailure("main", config.hotkey);
   }
 }
 
@@ -1172,18 +1173,13 @@ function registerQuickHotkey(accelerator: string, origin: "boot" | "settings"): 
     return true;
   }
   log.warn(`quick-ask hotkey NOT registered (held by another app?): ${accelerator}`);
-  if (origin === "boot") notifyHotkeyFailure("quick-ask window", accelerator);
+  if (origin === "boot") notifyHotkeyFailure("quick", accelerator);
   return false;
 }
 
-function notifyHotkeyFailure(what: string, accelerator: string): void {
+function notifyHotkeyFailure(which: "main" | "quick", accelerator: string): void {
   try {
-    if (Notification.isSupported()) {
-      new Notification({
-        title: "SRAN Desktop — shortcut unavailable",
-        body: `${describeAccelerator(accelerator)} for the ${what} is held by another app. Change it in Settings.`,
-      }).show();
-    }
+    if (Notification.isSupported()) new Notification(hotkeyUnavailableNotification(which, describeAccelerator(accelerator))).show();
   } catch (err) {
     log.warn(`hotkey notification failed: ${(err as Error).message}`);
   }
@@ -1219,7 +1215,8 @@ function showAgentToast(title: string, body: string, onClick: () => void): boole
 
 /** shell.prefs.set — validate, apply the OS side-effects, persist. A hotkey
  * the OS refuses is NOT stored: the previous one keeps working and the page
- * gets the reason. */
+ * gets the reason. AM10 F: `locale` (exactly en | th, else refused) is the
+ * page saying which language it is in — persisted here, drawn by applyLocale. */
 function applyShellPrefs(patch: Record<string, unknown>): { ok: boolean; prefs: ShellPrefs; error?: string } {
   const store = shellPrefs!;
   const next: Partial<ShellPrefs> = {};
@@ -1227,6 +1224,9 @@ function applyShellPrefs(patch: Record<string, unknown>): { ok: boolean; prefs: 
     if (patch["trayClick"] !== "main" && patch["trayClick"] !== "quick") return { ok: false, prefs: store.current(), error: "trayClick-invalid" };
     next.trayClick = patch["trayClick"];
   }
+  const locale = localeFromPatch(patch);
+  if (!locale.ok) return { ok: false, prefs: store.current(), error: locale.error };
+  if (locale.locale) next.locale = locale.locale;
   if (patch["quickHotkey"] !== undefined) {
     const v = validateAccelerator(typeof patch["quickHotkey"] === "string" ? patch["quickHotkey"] : null);
     if (!v.ok) return { ok: false, prefs: store.current(), error: `hotkey-${v.reason}` };
@@ -1235,7 +1235,10 @@ function applyShellPrefs(patch: Record<string, unknown>): { ok: boolean; prefs: 
     next.quickHotkey = v.accelerator;
   }
   const prefs = store.update(next);
-  rebuildTrayMenu();
+  // A new language redraws the menu AND the tray (applyLocale); otherwise the
+  // tray alone, as before (the hotkey shown beside Quick ask may have changed).
+  if (locale.locale && locale.locale !== currentLocale()) applyLocale(locale.locale);
+  else rebuildTrayMenu();
   return { ok: true, prefs };
 }
 
@@ -1258,7 +1261,7 @@ function createQuickWindow(): BrowserWindow {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    title: "SRAN Desktop — Quick ask",
+    title: t("window.quickTitle"),
     icon: path.join(APP_ROOT, "assets", "app.ico"),
     autoHideMenuBar: true,
     webPreferences: buildWebPreferences({
@@ -1476,7 +1479,7 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
   const win = mainWindow;
   if (!win || win.isDestroyed()) return null;
   if (!sessionController?.hasSession) {
-    await dialog.showMessageBox(win, { type: "info", title: "SRAN Desktop", message: "Sign in first, then use “Ask SRAN about this file” again.", buttons: ["OK"] });
+    await dialog.showMessageBox(win, attachSignInFirstDialog());
     return null;
   }
   let size = 0;
@@ -1486,11 +1489,11 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
     size = st.size;
   } catch {
     log.warn(`ATTACH LINK: not a readable file: ${filePath}`);
-    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That file could not be opened.", detail: filePath, buttons: ["OK"] });
+    await dialog.showMessageBox(win, attachNotOpenedDialog(filePath));
     return null;
   }
   if (size > ATTACH_MAX_BYTES) {
-    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That file is larger than 200 MB.", detail: filePath, buttons: ["OK"] });
+    await dialog.showMessageBox(win, attachTooLargeDialog(filePath));
     return null;
   }
   const folder = path.dirname(filePath);
@@ -1500,18 +1503,7 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
     return a === r || a.startsWith(r + "\\");
   });
   // ALWAYS confirm (Claude: "always shows a confirmation dialog … even if you've trusted that folder before").
-  const choice = await dialog.showMessageBox(win, {
-    type: "question",
-    title: "Ask SRAN about this file",
-    message: `Attach this file to a new chat?\n${filePath}`,
-    detail: inGrant
-      ? "The file is uploaded to the chat as an attachment. Nothing is sent to the model until you press Send."
-      : `This folder is not one you have shared with SRAN yet:\n${folder}\n\nAttaching also lets SRAN read files in that folder when you ask it to.`,
-    buttons: ["Cancel", inGrant ? "Attach" : "Allow folder and attach"],
-    defaultId: 1,
-    cancelId: 0,
-    noLink: true,
-  });
+  const choice = await dialog.showMessageBox(win, attachConfirmDialog({ filePath, folder, inGrant }));
   if (choice.response !== 1) {
     log.info("ATTACH LINK: cancelled by the user");
     return null;
@@ -1520,7 +1512,7 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
     const v = grants.add(folder);
     if (v.verdict !== "Ok") {
       log.warn(`ATTACH LINK: folder grant refused (${v.verdict}): ${folder}`);
-      await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "That folder cannot be shared with SRAN.", detail: `${folder}\n(${v.verdict})`, buttons: ["OK"] });
+      await dialog.showMessageBox(win, attachFolderRefusedDialog(folder, v.verdict));
       return null;
     }
     log.info(`ATTACH LINK: folder granted: ${v.canonical}`);
@@ -1529,7 +1521,7 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
   if (!chatEdge) return null;
   const conversationId = await chatEdge.createConversation(config.defaultModel);
   if (!conversationId) {
-    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "Could not create a chat for the file.", buttons: ["OK"] });
+    await dialog.showMessageBox(win, attachChatFailedDialog());
     return null;
   }
   const name = path.basename(filePath);
@@ -1542,7 +1534,7 @@ async function attachFileFromLink(filePath: string, q: string | null): Promise<s
     log.warn(`ATTACH LINK: read/upload failed: ${(err as Error).message}`);
   }
   if (!fileId) {
-    await dialog.showMessageBox(win, { type: "error", title: "SRAN Desktop", message: "The file could not be attached (unsupported type or upload failed).", detail: name, buttons: ["OK"] });
+    await dialog.showMessageBox(win, attachFailedDialog(name));
     return null;
   }
   log.info(`ATTACH LINK: ${name} (${size} bytes) → conv=${conversationId} file=${fileId}`);
