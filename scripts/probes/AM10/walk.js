@@ -339,7 +339,9 @@ const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|P
 // things), the model's answer, model names — and Agent Market, which reads Thai in both languages by
 // its own decision (said in the report, not counted here).
 const NOT_THE_APPS = ['[data-testid="agent-rail-section"]', '[data-testid^="am-"]', '[data-testid^="agent-"]', '[data-testid="conversation-item"]',
-  "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]', '[data-testid="model-trigger-label"]', "code", "pre", "kbd"].join(", ");
+  "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]', '[data-testid="model-trigger-label"]', "code", "pre", "kbd",
+  // a person's saved memories: what the entry says and the chat it came from are theirs (and never copied into a report)
+  '[data-testid="memory-content"]', '[data-testid="memory-origin"] a'].join(", ");
 
 // the reader itself is reader.js (the admin app's probe reads with it too)
 const leaks = (page, locale, notApps = NOT_THE_APPS, within = null) => R.leaks(page, locale, { notApps, within, keep: KEEP.source, tag: TAG });
@@ -517,7 +519,17 @@ async function language(client) {
       await home(page);
       await setLanguage(x, found.locale);
       await L.wait(2500);
-      x.check((await accountLanguage(page, gw)) === found.locale, "the language is put back as found, on the page and on the account", `${found.locale}`);
+      // the account's own value is a separate thing from this page's: an account that never chose says
+      // "en" while its pages are Thai. It is written back exactly as found, not through the page's switch.
+      if (found.account && (await accountLanguage(page, gw)) !== found.account) {
+        await page.evaluate(async ([gw, lang]) => {
+          await fetch(`${gw}/portal/me`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify({ preferred_language: lang }) });
+        }, [gw, found.account]);
+        await L.wait(800);
+      }
+      const back = { page: await page.evaluate(() => document.documentElement.lang), account: await accountLanguage(page, gw) };
+      x.check(back.page === found.locale && back.account === found.account, "the language is put back as found: the page's, and the account's own value",
+        `page ${back.page} (found ${found.locale}) · account ${back.account} (found ${found.account})`);
     }
     if (conv && conv.id) {
       const st = await page.evaluate(async ({ edge, id }) => (await fetch(`${edge}/api/v1/conversations/${id}`, { method: "DELETE", credentials: "include" })).status,
