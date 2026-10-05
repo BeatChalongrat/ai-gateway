@@ -526,12 +526,15 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 		return Run{}, err
 	}
 	in := f.in
-	// the first thread, unless a round of it is still open: then a thread of its own
+	// the first thread, unless a round of it is still open or the person deleted
+	// it (AM10): then a thread of its own
 	var thread *uuid.UUID
 	var last string
+	var firstGone bool
+	_ = tx.QueryRow(ctx, `SELECT first_chat_deleted_at IS NOT NULL FROM agent_market.agent_installs WHERE id = $1`, in.ID).Scan(&firstGone)
 	switch err := tx.QueryRow(ctx, `SELECT status FROM agent_market.agent_runs WHERE install_id = $1 AND kind = 'run' AND thread_id IS NULL
 		ORDER BY created_at DESC LIMIT 1`, in.ID).Scan(&last); {
-	case err == nil && !IsTerminal(last):
+	case firstGone || (err == nil && !IsTerminal(last)):
 		id, _, err := s.CreateThread(ctx, tx, in)
 		if err != nil {
 			return Run{}, err

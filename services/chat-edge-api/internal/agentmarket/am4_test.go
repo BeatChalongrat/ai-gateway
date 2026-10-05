@@ -268,7 +268,9 @@ func TestThreadsKeepTheirOwnRounds(t *testing.T) {
 		t.Fatalf("two threads listed: %d", n)
 	}
 	// both chats now have a September round: each is still told apart by its
-	// own name (the AM4 screen tour saw two rows reading "รอบ กันยายน 2569")
+	// own name (the AM4 screen tour saw two rows reading "รอบ กันยายน 2569";
+	// AM10 names a chat by its period and tells two of one period apart by
+	// when they began)
 	if _, err := e.store.Pool.Exec(ctx, `UPDATE agent_market.agent_runs SET period = '2026-09' WHERE id = $1`, run.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +278,7 @@ func TestThreadsKeepTheirOwnRounds(t *testing.T) {
 	titles := map[string]bool{}
 	for _, x := range list["threads"].([]any) {
 		title := x.(map[string]any)["title"].(string)
-		if titles[title] || !strings.Contains(title, "กันยายน 2569") || !strings.HasPrefix(title, "แชท") {
+		if titles[title] || !strings.Contains(title, "กันยายน 2569") {
 			t.Fatalf("each chat named apart, with its latest round: %v", list["threads"])
 		}
 		titles[title] = true

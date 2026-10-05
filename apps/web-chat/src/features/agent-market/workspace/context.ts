@@ -29,6 +29,8 @@ export interface WorkspaceCtx {
   admin?: boolean;
   /** AM10: how long a round takes here (seconds), said on the progress card while one runs. */
   expectedSeconds?: number | null;
+  /** AM10: the pane beside the chat reads only (no composer; cards still answer). */
+  readOnly?: boolean;
 }
 
 export const WorkspaceContext = createContext<WorkspaceCtx | null>(null);

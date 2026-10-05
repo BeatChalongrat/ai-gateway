@@ -10,17 +10,21 @@
 //     collapsed section still lists the agents that wait.
 //   * With text in the sidebar's search box (Ctrl+K), matching agents —
 //     installed first, then catalog agents not installed yet.
+//   * AM10: each installed agent opens to its own chats (ChatRows.tsx) —
+//     the agent on screen opens by itself; what a person opened or closed is
+//     remembered in this browser.
 //
 // Flag off = absent: renders null until the availability check says the
 // feature is available, and never throws — the sidebar mounts this on every
 // chat page, including in tests where fetch is missing or fails.
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useId, useMemo, useState } from "react";
-import { ChevronDown, Pin, PinOff, Store } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Pin, PinOff, Store } from "lucide-react";
 
 import { amApi } from "./api";
+import { ChatRows, currentChatKey } from "./ChatRows";
 import { useAmT } from "./i18n";
 import { railOrder, searchAgents, waitingOnly } from "./rail";
 import type { CatalogAgent, RailInstall } from "./types";
@@ -52,6 +56,8 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
   }, [available, query, catalog]);
 
   const hits = useMemo(() => searchAgents(query, rail.installs, catalog ?? []), [query, rail.installs, catalog]);
+  const urlQuery = useSearchString();
+  const [opened, toggleOpened] = useOpenedAgents();
 
   if (!available) return null;
 
@@ -126,7 +132,16 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
           </button>
           <ul id={listId} className="flex flex-col gap-0.5">
             {visible.map((i) => (
-              <RailRow key={i.id} row={i} pathname={pathname} onNavigate={onNavigate} onPin={() => pin(i)} />
+              <RailRow
+                key={i.id}
+                row={i}
+                pathname={pathname}
+                search={urlQuery}
+                opened={opened.has(i.id)}
+                onToggle={() => toggleOpened(i.id)}
+                onNavigate={onNavigate}
+                onPin={() => pin(i)}
+              />
             ))}
           </ul>
           {!collapsed && rest > 0 ? (
@@ -145,13 +160,86 @@ export function AgentRailSection({ onNavigate, search = "" }: { onNavigate?: () 
   );
 }
 
-function RailRow({ row, pathname, onNavigate, onPin }: { row: RailInstall; pathname: string; onNavigate?: () => void; onPin: () => void }) {
+/** The URL's query, where next/navigation gives one (tests mount the sidebar without it). */
+function useSearchString(): string | null {
+  let hook: typeof useSearchParams | null = null;
+  try {
+    hook = typeof useSearchParams === "function" ? useSearchParams : null;
+  } catch {
+    hook = null;
+  }
+  // the hook is the module's, so this call is made or not made the same way on every render
+  const params = hook ? hook() : null;
+  return params ? params.toString() : null;
+}
+
+const OPENED_KEY = "am.rail.opened";
+
+/** Which agents a person opened in the sidebar — this browser's, like a folder left open. */
+function useOpenedAgents(): [Set<string>, (id: string) => void] {
+  const [opened, setOpened] = useState<Set<string>>(() => {
+    try {
+      const raw = typeof window !== "undefined" ? window.localStorage.getItem(OPENED_KEY) : null;
+      const ids = raw ? (JSON.parse(raw) as unknown) : [];
+      return new Set(Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggle = useCallback((id: string) => {
+    setOpened((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        window.localStorage.setItem(OPENED_KEY, JSON.stringify([...next]));
+      } catch {
+        /* a browser without storage forgets on reload */
+      }
+      return next;
+    });
+  }, []);
+  return [opened, toggle];
+}
+
+function RailRow({
+  row,
+  pathname,
+  search,
+  opened,
+  onToggle,
+  onNavigate,
+  onPin,
+}: {
+  row: RailInstall;
+  pathname: string;
+  search: string | null;
+  opened: boolean;
+  onToggle: () => void;
+  onNavigate?: () => void;
+  onPin: () => void;
+}) {
   const t = useAmT();
   const href = `/chat/agents/i/${row.id}`;
   const active = pathname === href || pathname.startsWith(`${href}/`);
   const pinned = !!row.pinned_at;
+  // the agent on screen shows its chats unless the person closed it
+  const showChats = active ? !opened : opened;
+  const chatsId = useId();
   return (
-    <li className="group relative flex items-center" data-testid="agent-rail-row">
+    <>
+    <li className="group relative flex items-center" data-testid="agent-rail-row" data-chats-open={showChats || undefined}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={showChats}
+        aria-controls={chatsId}
+        aria-label={showChats ? t("chat.collapse", { name: row.title }) : t("chat.expand", { name: row.title })}
+        className="focus-ring absolute left-0.5 z-10 inline-flex h-7 w-5 items-center justify-center rounded-md text-text-muted hover:text-text-primary"
+        data-testid="agent-rail-chats-toggle"
+      >
+        {showChats ? <ChevronDown width={12} height={12} aria-hidden /> : <ChevronRight width={12} height={12} aria-hidden />}
+      </button>
       <Link
         href={href}
         onClick={onNavigate}
@@ -190,6 +278,12 @@ function RailRow({ row, pathname, onNavigate, onPin }: { row: RailInstall; pathn
         {pinned ? <PinOff width={13} height={13} aria-hidden /> : <Pin width={13} height={13} aria-hidden />}
       </button>
     </li>
+    {showChats ? (
+      <li id={chatsId}>
+        <ChatRows installId={row.id} agentName={row.title} active={active} currentKey={currentChatKey(search)} onNavigate={onNavigate} />
+      </li>
+    ) : null}
+    </>
   );
 }
 

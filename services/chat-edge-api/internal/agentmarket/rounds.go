@@ -31,8 +31,10 @@ import (
 //
 // A thread is one conversation with the agent. The install's first thread
 // is implicit (thread_id NULL); "แชทใหม่กับ agent นี้" starts another, for
-// people who keep one thread per period. Deleting a chat is never the way to
-// start fresh — it would destroy the record behind the remembered answers.
+// people who keep one thread per period. AM10 (chats.go): a chat can be
+// named, pinned and deleted — deleted means off the list, never destroyed:
+// its rounds, files and remembered answers stay. Deleting a chat is still
+// never the way to start fresh; the chip says so.
 
 var thaiMonths = []string{"มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม",
 	"กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"}
@@ -121,6 +123,11 @@ type Thread struct {
 	LastAt    time.Time  `json:"last_at"`
 	Rounds    int        `json:"rounds"`
 	Waiting   bool       `json:"waiting"`
+	// AM10: pinned chats come first; Named says the title is the person's own;
+	// Period is the latest round's ("2026-09"), what an unnamed chat is called by.
+	PinnedAt *time.Time `json:"pinned_at"`
+	Named    bool       `json:"named"`
+	Period   string     `json:"period,omitempty"`
 }
 
 // ThreadOwned reports whether a thread belongs to the install.
@@ -140,49 +147,52 @@ func (s *Store) CreateThread(ctx context.Context, q Querier, in Install) (uuid.U
 	return id, at, err
 }
 
-// ListThreads lists an install's conversations, the newest activity first.
+// ListThreads lists an install's chats that were not deleted: pinned ones
+// first, then the newest activity first.
 func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 	rows, err := s.Pool.Query(ctx, `
-		WITH t AS (
-			SELECT NULL::uuid AS id, $2::timestamptz AS created_at
-			UNION ALL
-			SELECT id, created_at FROM agent_market.agent_threads WHERE install_id = $1
-		)
-		SELECT t.id, t.created_at,
-			COALESCE((SELECT max(i.created_at) FROM agent_market.agent_thread_items i
-				WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id), t.created_at),
-			(SELECT count(*) FROM agent_market.agent_runs r
-				WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id)::int,
-			(SELECT r.period FROM agent_market.agent_runs r
-				WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id AND r.period IS NOT NULL
-				ORDER BY r.created_at DESC LIMIT 1),
-			EXISTS (SELECT 1 FROM agent_market.agent_runs r
-				WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input')
-		FROM t ORDER BY 3 DESC`, in.ID, in.CreatedAt)
+			WITH t AS (
+				SELECT NULL::uuid AS id, i.created_at, i.first_chat_title AS title, i.first_chat_pinned_at AS pinned_at
+				FROM agent_market.agent_installs i WHERE i.id = $1 AND i.first_chat_deleted_at IS NULL
+				UNION ALL
+				SELECT id, created_at, title, pinned_at FROM agent_market.agent_threads WHERE install_id = $1 AND deleted_at IS NULL
+			)
+			SELECT t.id, t.created_at, t.title, t.pinned_at,
+				COALESCE((SELECT max(i.created_at) FROM agent_market.agent_thread_items i
+					WHERE i.install_id = $1 AND i.thread_id IS NOT DISTINCT FROM t.id), t.created_at),
+				(SELECT count(*) FROM agent_market.agent_runs r
+					WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id)::int,
+				(SELECT r.period FROM agent_market.agent_runs r
+					WHERE r.install_id = $1 AND r.kind = 'run' AND r.thread_id IS NOT DISTINCT FROM t.id AND r.period IS NOT NULL
+					ORDER BY r.created_at DESC LIMIT 1),
+				EXISTS (SELECT 1 FROM agent_market.agent_runs r
+					WHERE r.install_id = $1 AND r.thread_id IS NOT DISTINCT FROM t.id AND r.status = 'awaiting_input')
+			FROM t ORDER BY t.pinned_at DESC NULLS LAST, 5 DESC`, in.ID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Thread{}
-	var periods []string
 	for rows.Next() {
 		var t Thread
-		var period *string
-		if err := rows.Scan(&t.ID, &t.CreatedAt, &t.LastAt, &t.Rounds, &period, &t.Waiting); err != nil {
+		var title, period *string
+		if err := rows.Scan(&t.ID, &t.CreatedAt, &title, &t.PinnedAt, &t.LastAt, &t.Rounds, &period, &t.Waiting); err != nil {
 			return nil, err
 		}
-		p := ""
 		if period != nil {
-			p = *period
+			t.Period = *period
+		}
+		if title != nil && strings.TrimSpace(*title) != "" {
+			t.Title, t.Named = *title, true
 		}
 		out = append(out, t)
-		periods = append(periods, p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	// Every chat keeps a name of its own ("แชทแรก", "แชทใหม่ · 28 ก.ย. 2569",
-	// with the time when two began the same day); its latest round follows.
+	// A chat a person did not name is named for what it is: the period of its
+	// latest round ("กันยายน 2569"); before any round, "แชทแรก" or when it began
+	// ("แชทใหม่ · 28 ก.ย. 2569", with the time when two began the same day).
 	name := func(t Thread, withTime bool) string {
 		switch {
 		case t.ID == nil:
@@ -193,16 +203,26 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 			return "แชทใหม่ · " + ThaiDate(t.CreatedAt)
 		}
 	}
-	sameDay := map[string]int{}
+	sameDay, samePeriod := map[string]int{}, map[string]int{}
 	for _, t := range out {
 		sameDay[name(t, false)]++
+		if !t.Named && t.Period != "" {
+			samePeriod[t.Period]++
+		}
 	}
 	for i := range out {
-		n := name(out[i], sameDay[name(out[i], false)] > 1)
-		if periods[i] != "" {
-			n += " · รอบ " + PeriodLabel(periods[i])
+		if out[i].Named {
+			continue
 		}
-		out[i].Title = n
+		if out[i].Period != "" {
+			// two chats of one period are told apart by when they began
+			out[i].Title = PeriodLabel(out[i].Period)
+			if samePeriod[out[i].Period] > 1 {
+				out[i].Title += " · " + name(out[i], sameDay[name(out[i], false)] > 1)
+			}
+			continue
+		}
+		out[i].Title = name(out[i], sameDay[name(out[i], false)] > 1)
 	}
 	return out, nil
 }
@@ -283,7 +303,7 @@ func periodOf(r Run) string {
 func (a *API) threadParam(w http.ResponseWriter, r *http.Request, in Install) (*uuid.UUID, bool) {
 	v := strings.TrimSpace(r.URL.Query().Get("thread"))
 	if v == "" || v == "main" {
-		return nil, true
+		return nil, a.threadOf(w, r, in, nil)
 	}
 	id, err := uuid.Parse(v)
 	if err != nil {
@@ -293,18 +313,28 @@ func (a *API) threadParam(w http.ResponseWriter, r *http.Request, in Install) (*
 	return &id, a.threadOf(w, r, in, &id)
 }
 
-// threadOf checks a thread named in a request belongs to the install.
+// threadOf checks a thread named in a request belongs to the install and
+// was not deleted (AM10: a deleted chat answers THREAD_GONE — its run pages
+// are reached from the agent's dashboard, not through the chat).
 func (a *API) threadOf(w http.ResponseWriter, r *http.Request, in Install, thread *uuid.UUID) bool {
-	if thread == nil {
-		return true
+	if thread != nil {
+		ok, err := a.store.ThreadOwned(r.Context(), in.ID, *thread)
+		if err != nil {
+			a.fail(w, err, "thread")
+			return false
+		}
+		if !ok {
+			a.fail(w, ErrNotFound, "thread")
+			return false
+		}
 	}
-	ok, err := a.store.ThreadOwned(r.Context(), in.ID, *thread)
+	gone, err := a.store.ThreadDeleted(r.Context(), in.ID, thread)
 	if err != nil {
 		a.fail(w, err, "thread")
 		return false
 	}
-	if !ok {
-		a.fail(w, ErrNotFound, "thread")
+	if gone {
+		say(w, http.StatusNotFound, "THREAD_GONE")
 		return false
 	}
 	return true
@@ -532,6 +562,7 @@ func (a *API) replyJob(ctx context.Context, q Querier, in Install, c middleware.
 func (a *API) roundRoutes(r chi.Router) {
 	r.Get("/installs/{id}/threads", a.listThreads)
 	r.Post("/installs/{id}/threads", a.createThread)
+	a.chatRoutes(r) // AM10: rename, pin, delete
 	r.Post("/installs/{id}/rounds", a.startRound)
 	r.Post("/intents/{id}", a.answerIntent)
 	r.Get("/installs/{id}/models", a.installModels)

@@ -615,6 +615,10 @@ export interface AgentThread {
   last_at: string;
   rounds: number;
   waiting: boolean;
+  /** AM10: pinned chats come first; `named` = the title is the person's own; `period` = the latest round's. */
+  pinned_at?: string | null;
+  named?: boolean;
+  period?: string;
 }
 
 /** AM6: the agent's model, and what the chat's model menu needs to know to

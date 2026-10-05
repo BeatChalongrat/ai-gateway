@@ -321,6 +321,12 @@ export const amApi = {
 
   threads: (installId: string) => call<{ threads: AgentThread[] | null }>(`/installs/${id(installId)}/threads`),
   newThread: (installId: string) => send<{ thread: AgentThread }>("POST", `/installs/${id(installId)}/threads`),
+  /** AM10: rename ({title}, "" = the derived name again) or pin ({pinned}) a chat; "main" is the first. */
+  patchThread: (installId: string, threadKey: string, body: { title?: string; pinned?: boolean }) =>
+    send<{ thread: AgentThread }>("PATCH", `/installs/${id(installId)}/threads/${id(threadKey)}`, body),
+  /** AM10: take a chat off the list; its rounds' evidence stays. */
+  deleteThread: (installId: string, threadKey: string) =>
+    send<{ deleted: boolean; cancelled_runs: number; kept_runs: number }>("DELETE", `/installs/${id(installId)}/threads/${id(threadKey)}`),
   /** "เริ่มรอบใหม่": the next files (or instruction) in this thread start the next round. */
   startRound: (installId: string, threadId?: string | null) =>
     send<{ item: ThreadItem }>("POST", `/installs/${id(installId)}/rounds`, { thread_id: threadId ?? null }),

@@ -19,37 +19,49 @@
 // with the agent opens that chat on it.
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListChecks } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
 import { ButtonLink } from "@/components/ui/Button";
-import { Spinner } from "@/components/ui/Spinner";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import type { InstallDetail, InstallRow, ProgressPayload, ThreadItem } from "../types";
-import { AgentTile, ErrorPanel, FeatureGate, lookOf, PageShell } from "../ui";
+import { AgentTile, cls, ErrorPanel, FeatureGate, lookOf, PageShell } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
 import { togglePin } from "../useRail";
 import { BudgetBanner } from "./BudgetBanner";
+import { BesidePane } from "./BesidePane";
 import { Composer, type ComposerHandle } from "./Composer";
-import { provenanceHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
+import { provenanceHref, runHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
 import { EmptyDrop } from "./EmptyDrop";
 import { useEstimate } from "./Estimate";
 import { ModelControl, useAgentModels } from "./ModelControl";
 import { hasFinishedRound, hasOwnRound, latestRound, roundUnderway } from "./rounds";
+import { ThreadScroller } from "./ThreadScroller";
 import { ThreadView } from "./ThreadView";
 import { UploadInfo } from "./UploadInfo";
 import { useThread } from "./useThread";
 import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
-export function WorkspacePage({ installId, threadId = null, runId = null }: { installId: string; threadId?: string | null; runId?: string | null }) {
+export function WorkspacePage({
+  installId,
+  threadId = null,
+  runId = null,
+  beside = null,
+}: {
+  installId: string;
+  threadId?: string | null;
+  runId?: string | null;
+  /** AM10: ?beside=<chat> — a second chat of the same agent, read beside this one */
+  beside?: string | null;
+}) {
   return (
     <FeatureGate>
       {/* AM6: a link names the first thread "main" (a reminder's notification); the API calls it none */}
-      <Workspace installId={installId} threadId={threadId && threadId !== "main" ? threadId : null} runId={runId || null} />
+      <Workspace installId={installId} threadId={threadId && threadId !== "main" ? threadId : null} runId={runId || null} beside={beside || null} />
     </FeatureGate>
   );
 }
@@ -76,7 +88,7 @@ function useInstalls(): InstallRow[] {
   return rows;
 }
 
-function Workspace({ installId, threadId, runId }: { installId: string; threadId: string | null; runId: string | null }) {
+function Workspace({ installId, threadId, runId, beside }: { installId: string; threadId: string | null; runId: string | null; beside: string | null }) {
   const t = useAmT();
   const router = useRouter();
   const snap = useAgentMarket();
@@ -236,7 +248,48 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
     [thread],
   );
 
+  // AM10: the chat was deleted (from the sidebar, perhaps in another window):
+  // a notification's round opens on its run page, anything else opens the
+  // agent's latest chat — or a new one when none is left. Nothing is lost.
+  const chatGone = thread.status === "error" && thread.error instanceof AmError && thread.error.code === "THREAD_GONE";
+  const movedOn = useRef(false);
+  useEffect(() => {
+    if (!chatGone || movedOn.current) return;
+    movedOn.current = true;
+    if (runId && RUN_ID.test(runId)) {
+      router.replace(runHref(runId));
+      return;
+    }
+    amApi.threads(installId).then(
+      (r) => {
+        const next = r?.threads?.[0];
+        if (next) {
+          router.replace(workspaceHref(installId, next.id));
+          return;
+        }
+        amApi.newThread(installId).then(
+          (n) => router.replace(workspaceHref(installId, n.thread.id)),
+          () => router.replace("/chat/agents"),
+        );
+      },
+      () => router.replace("/chat/agents"),
+    );
+  }, [chatGone, installId, runId, router]);
+
+  const currentKey = threadId ?? "main";
+  const besideKey = beside && beside !== currentKey ? beside : null;
+  const [mobilePane, setMobilePane] = useState<"main" | "beside">("main");
+
   const notFound = loadError instanceof AmError && (loadError.status === 404 || loadError.status === 400);
+  if (chatGone) {
+    return (
+      <PageShell width="max-w-xl">
+        <p className="mt-16 text-center text-sm text-text-secondary" role="status" data-testid="am-ws-chat-gone">
+          {t("ws.chatGone")}
+        </p>
+      </PageShell>
+    );
+  }
   if (notFound) {
     return (
       <PageShell width="max-w-xl">
@@ -253,8 +306,29 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
 
   return (
     <WorkspaceContext.Provider value={ctx}>
-      <div className="flex min-h-0 flex-1" data-testid="am-workspace">
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col" data-testid="am-workspace" data-beside={besideKey || undefined}>
+        {besideKey ? (
+          <div className="flex shrink-0 border-b border-border-subtle lg:hidden" role="tablist" aria-label={t("beside.title")} data-testid="am-beside-tabs">
+            {(["main", "beside"] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                role="tab"
+                aria-selected={mobilePane === p}
+                onClick={() => setMobilePane(p)}
+                className={cls(
+                  "focus-ring flex-1 px-3 py-2 text-xs",
+                  mobilePane === p ? "border-b-2 border-text-primary text-text-primary" : "text-text-muted",
+                )}
+                data-testid={`am-beside-tab-${p}`}
+              >
+                {p === "main" ? t("beside.back") : t("beside.show")}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex min-h-0 flex-1">
+        <div className={cls("flex min-w-0 flex-1 flex-col", besideKey && mobilePane === "beside" ? "hidden lg:flex" : "")}>
           <header className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2.5 md:px-6">
             <div className="shrink-0" data-testid="am-ws-tile">
               <AgentTile icon={icon} look={look} size={28} />
@@ -317,58 +391,18 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
             />
           </AttachmentDropZone>
         </div>
+        {besideKey ? (
+          <div className={cls("flex min-w-0 flex-1 flex-col", mobilePane === "main" ? "hidden lg:flex" : "")}>
+            <BesidePane
+              installId={installId}
+              currentKey={currentKey}
+              besideKey={besideKey}
+              base={{ installId, icon, agentName: title, accept, maxMb, photoNotice, selfTestRuns: ctx.selfTestRuns, admin: snap.admin }}
+            />
+          </div>
+        ) : null}
+        </div>
       </div>
     </WorkspaceContext.Provider>
-  );
-}
-
-function ThreadScroller({ items, status, children }: { items: ThreadItem[]; status: string; children: React.ReactNode }) {
-  const t = useAmT();
-  const ref = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
-  const seeded = useRef(false);
-  const sig = items.length ? `${items.length}:${items[items.length - 1]!.id}:${items.reduce((m, i) => Math.max(m, i.rev), 0)}` : "";
-
-  // Follow the bottom while the reader is there; land at the bottom once
-  // the thread first loads.
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el || !items.length) return;
-    if (!seeded.current || atBottom.current) {
-      el.scrollTop = el.scrollHeight;
-      seeded.current = true;
-    }
-  }, [sig, items.length]);
-
-  return (
-    <div
-      ref={ref}
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-      }}
-      className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-10"
-      aria-live="polite"
-      aria-busy={status === "loading"}
-      aria-label={t("ws.threadAria")}
-      role="log"
-      data-testid="am-thread"
-    >
-      <div className="mx-auto flex w-full max-w-chat flex-col gap-4 pb-10">
-        {status === "loading" && !items.length ? (
-          <div className="flex items-center gap-2 text-sm text-text-muted">
-            <Spinner size={14} />
-            <span>{t("common.loading")}</span>
-          </div>
-        ) : null}
-        {children}
-        {status === "reconnecting" ? (
-          <div role="status" className="flex items-center gap-2 self-center text-xs text-text-muted">
-            <Spinner size={12} />
-            <span>{t("ws.reconnecting")}</span>
-          </div>
-        ) : null}
-      </div>
-    </div>
   );
 }
