@@ -47,7 +47,7 @@ export default function DepartmentsSection() {
         },
         (err) => {
           setBusy(false);
-          setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+          setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
         },
       );
   };
@@ -74,7 +74,7 @@ export default function DepartmentsSection() {
         setMsg({ text: r?.resumed ? t("am.savedResumed", { n: r.resumed }) : t("am.saved"), ok: true });
         reload();
       },
-      (err) => setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false }),
+      (err) => setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false }),
     );
   };
 

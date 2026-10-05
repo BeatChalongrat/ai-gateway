@@ -526,8 +526,10 @@ describe("an opened run (AM7)", () => {
       .mockResolvedValue(DETAIL);
     api.openRun.mockResolvedValue({ opened: true, expires_at: "" });
     renderRun();
-    await screen.findByTestId("am-run-reason");
-    expect(screen.getByText("ต้องกด “เปิดดูพร้อมเหตุผล” ก่อน")).toBeInTheDocument();
+    // AM10 F: a refusal whose code the page knows reads in the page's language (English here),
+    // not as the server's Thai sentence — i18n.am10.test.tsx covers both languages.
+    expect((await screen.findByTestId("am-run-reason")).textContent).toMatch(/Open this run with a reason first/);
+    expect(screen.queryByText("ต้องกด “เปิดดูพร้อมเหตุผล” ก่อน")).toBeNull();
     fireEvent.change(screen.getByTestId("am-reason-text"), { target: { value: "ตรวจยอดที่ไม่ตรง" } });
     fireEvent.click(screen.getByTestId("am-reason-go"));
     await waitFor(() => expect(api.openRun).toHaveBeenCalledWith("run-1", "ตรวจยอดที่ไม่ตรง"));

@@ -11,10 +11,10 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useI18n } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type AgentEgressRow } from "../../../lib/agentMarketApi";
-import { AgentName, LoadError, Loading, Note, h2, muted, useLooks, type Msg } from "./shared";
+import { AgentName, LoadError, Loading, Note, agentName, h2, muted, useLooks, type Msg } from "./shared";
 
 export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [rows, setRows] = useState<AgentEgressRow[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -44,11 +44,11 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
       (r) => {
         setBusy(null);
         setRows((cur) => (cur ?? []).map((x) => (x.slug === row.slug ? { ...x, ...r.egress, slug: x.slug, name: x.name } : x)));
-        setMsg({ text: t("am.egress.saved", { name: row.name }), ok: true });
+        setMsg({ text: t("am.egress.saved", { name: agentName(row.name, looks[row.slug]?.name_en, locale) }), ok: true });
       },
       (err) => {
         setBusy(null);
-        setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };

@@ -14,8 +14,7 @@ import Badge from "../../../../components/ui/Badge";
 import PageHeader from "../../../../components/ui/PageHeader";
 import LoadingState from "../../../../components/ui/LoadingState";
 import { useI18n } from "../../../../lib/i18n";
-import { amAdmin, amErrorMessage, type RunDetail } from "../../../../lib/agentMarketApi";
-import { ChatEdgeApiError } from "../../../../lib/chatEdgeApi";
+import { amAdmin, amErrorCode, amErrorMessage, type RunDetail } from "../../../../lib/agentMarketApi";
 import {
   DASH,
   LoadError,
@@ -34,13 +33,6 @@ import {
   stepLabel,
   warnBand,
 } from "../../_sections/shared";
-
-/** chat-edge's refusal code, from a ChatEdgeApiError body `{error:{code,message}}`. */
-function refusalCode(err: unknown): string | null {
-  if (!(err instanceof ChatEdgeApiError)) return null;
-  const b = err.body as { error?: { code?: string } } | null;
-  return b && typeof b === "object" && typeof b.error?.code === "string" ? b.error.code : null;
-}
 
 export default function AdminRunPage({ params }: { params: { id: string } }) {
   const { t, locale } = useI18n();
@@ -74,11 +66,11 @@ export default function AdminRunPage({ params }: { params: { id: string } }) {
   );
 
   let body: ReactNode;
-  if (error && refusalCode(error) === "ACCESS_REASON_NEEDED") {
+  if (error && amErrorCode(error) === "ACCESS_REASON_NEEDED") {
     body = (
       <section className="sran-card" style={{ maxWidth: "40rem" }} data-testid="am-run-reason">
         <h2 style={h2}>{t("am.run.needReason")}</h2>
-        <p style={{ ...secondary, marginTop: "0.35rem" }}>{amErrorMessage(error, t("am.runs.reasonTitle"))}</p>
+        <p style={{ ...secondary, marginTop: "0.35rem" }}>{amErrorMessage(error, t("am.runs.reasonTitle"), t)}</p>
         <p style={{ ...muted, margin: "0.5rem 0 0.9rem", lineHeight: 1.6 }}>{t("am.runs.reasonBody")}</p>
         <ReasonForm
           confirm={t("am.runs.confirmOpen")}
@@ -154,7 +146,8 @@ function RunContent({ runId, data, locale }: { runId: string; data: RunDetail; l
           <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.1rem", display: "flex", flexDirection: "column", gap: "0.2rem" }}>
             {log.map((a) => (
               <li key={`${a.opened_at}-${a.admin_email}`} style={secondary}>
-                {t("am.run.accessLine", { who: a.admin_name || a.admin_email, when: a.at_label || formatDateTime(a.opened_at, locale), reason: a.reason })}
+                {/* at_label is chat-edge's Thai wording of opened_at; in English the page words the same moment itself */}
+                {t("am.run.accessLine", { who: a.admin_name || a.admin_email, when: (locale === "th" && a.at_label) || formatDateTime(a.opened_at, locale), reason: a.reason })}
               </li>
             ))}
           </ul>

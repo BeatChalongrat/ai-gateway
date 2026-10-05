@@ -89,4 +89,5 @@ export const modules = {
   fallback,
   chatadmin,
   agentmarket,
+  accounts,
 } as const;

@@ -9,11 +9,14 @@
 // (apps/web-chat/src/features/agent-market/i18n.am3.ts, i18n.am4.ts,
 // i18n.am6.ts — the admin.* / run.* keys); the English is written to match.
 //
-// NOT translated here (deliberately): agent names and slugs, versions,
-// people's names and emails, department names, model ids, file names, the
-// run's period label, and every refusal chat-edge writes (the page shows the
-// server's own sentence). "{link}" in a sentence is where the page puts a
-// link; its label is a key of its own.
+// NOT translated here (deliberately): agent slugs, versions, people's names
+// and emails, department names, model ids, file names, and a refusal
+// chat-edge writes whose code this page does not know or whose sentence
+// carries the server's own data (the page shows the server's sentence).
+// AM10: an agent's name is the manifest's own — `name_en` when the page is
+// in English, `name` in Thai; a refusal whose sentence is the same every
+// time reads from the `am.err.*` keys below. "{link}" in a sentence is where
+// the page puts a link; its label is a key of its own.
 //
 // The product name "Agent Market" is the page title in both languages
 // (nav.agentMarket, the one key the dictionary test allows to match).
@@ -289,6 +292,36 @@ export const en = {
   "am.run.stepError": "Error",
   "am.run.download": "Download",
   "am.run.downloadNamed": "Download {name}",
+
+  // ── refusals chat-edge sends with a code (AM10) ──────────
+  // One key per code whose sentence is the same every time
+  // (lib/agentMarketApi.ts AM_ERROR_KEYS); the Thai is chat-edge's own
+  // sentence for that code, less what points at the chat app.
+  "am.err.AGENT_MARKET_BUSY": "The agent system has a lot of work queued right now — wait a moment and try again. What was sent before is all still there, and this request changed nothing.",
+  "am.err.AGENT_MARKET_ERROR": "Something went wrong inside the agent system — try again. This request saved nothing; existing files and results are all still there.",
+  "am.err.AUDIT_UNAVAILABLE": "The admin change history cannot be recorded right now, so this was not changed — try again in a few minutes. If it still fails, tell the system administrator. The previous value is still in place.",
+  "am.err.BAD_REQUEST": "This request is not valid (code “{code}”) — reload this page and try again. Nothing was changed.",
+  "am.err.BAD_ACCESS": "Access must be Off, Listed people only, or Everyone in the organisation — choose again. Nothing was changed.",
+  "am.err.BAD_ROLE": "A role must be Member, Agent tester or Admin — choose again. Nothing was changed.",
+  "am.err.BAD_BUDGET": "A budget must be a number of credits that is not negative (or left empty to use the default) — correct it and save again. The previous value was not changed.",
+  "am.err.BAD_EMAIL": "This e-mail address is not valid — check the spelling and try again. Nothing was changed.",
+  "am.err.LAST_ADMIN": "There must always be at least one admin — add another admin first, then change or remove this one. Nothing was changed.",
+  "am.err.BAD_STATUS": "A status must be Published, Unpublished or Disabled — choose again. Nothing was changed.",
+  "am.err.REASON_REQUIRED": "Disabling an agent for everyone needs a short reason (people will see it) — enter the reason and press again. The agent is still in use as before.",
+  "am.err.ACCESS_REASON_REQUIRED": "Opening someone else's run needs a reason (at least 8 characters) — the run's owner will see it. Nothing has been opened.",
+  "am.err.ACCESS_REASON_NEEDED": "Open this run with a reason first (or the hour the last opening lasted is over) — open it again with a reason. The run's owner is told; nothing has been shown yet.",
+  "am.err.REMOVE_REASON_REQUIRED": "Removing a run's files before the retention period ends needs a reason (at least 8 characters) — the run's owner will see it. Nothing has been removed.",
+  "am.err.MAIL_BAD_FIELDS": "This page sets only the server, port, encryption, username and sender address — the password goes only in the server's .env, under the key this page names. Nothing was changed.",
+  "am.err.MAIL_NOT_CONFIGURED": "The mail server is not set up yet — fill in the server, port and sender address, then save. Until it is, people can still copy an e-mail draft and send it themselves, as before.",
+  "am.err.MAIL_NO_PASSWORD": "The mail server's password is not set — the system admin puts it in the server's .env, under the key this page names, and restarts the service (or leave the username empty if the server asks for no password).",
+  "am.err.MAIL_CONNECT": "The mail server could not be reached — check the server name and port, and make sure this machine can reach the server. Nothing was sent.",
+  "am.err.MAIL_TLS": "The encrypted (TLS) connection to the mail server failed — check the encryption mode against the port (STARTTLS uses 587, TLS uses 465) and the server's certificate. Nothing was sent.",
+  "am.err.MAIL_NO_STARTTLS": "This mail server does not support STARTTLS — if it uses port 465, choose TLS from the start. Nothing was sent.",
+  "am.err.MAIL_CLEAR_AUTH": "This server uses a username and password, but the connection is not encrypted, so the password was not sent — change the mode to STARTTLS or TLS (or leave the username empty if the server asks for no password). Nothing was sent.",
+  "am.err.MAIL_AUTH": "The mail server did not accept the username or password — check the username on this page and the password in the server's .env. Nothing was sent.",
+  "am.err.MAIL_SENDER": "The mail server does not allow sending as the sender address that is set — use a sender address this account may send as. Nothing was sent.",
+  "am.err.MAIL_DATA": "The mail server did not take the whole message — try again. If it still fails, check the server's settings. Nothing was sent.",
+  "am.err.BAD_RECIPIENT": "The recipient must be a single e-mail address, with no name or other marks mixed in — correct it and send again. Nothing was sent.",
 
   // ── pointers from other admin pages ──────────────────────
   "am.pointer.models": "Agent Market has its own switch for whether documents may go to a model outside the organisation — set it on {link}.",
@@ -567,6 +600,33 @@ export const th: Record<keyof typeof en, string> = {
   "am.run.stepError": "ข้อผิดพลาด",
   "am.run.download": "ดาวน์โหลด",
   "am.run.downloadNamed": "ดาวน์โหลด {name}",
+
+  // ── refusals chat-edge sends with a code (AM10) ──────────
+  "am.err.AGENT_MARKET_BUSY": "ระบบ agent มีงานค้างมากในขณะนี้ — รอสักครู่แล้วลองใหม่ สิ่งที่ส่งไว้ก่อนหน้านี้ยังอยู่ครบ และคำขอนี้ยังไม่ได้เปลี่ยนอะไร",
+  "am.err.AGENT_MARKET_ERROR": "เกิดข้อผิดพลาดภายในระบบ agent — ลองใหม่อีกครั้ง คำขอนี้ยังไม่ได้บันทึกอะไร ไฟล์และผลงานเดิมยังอยู่ครบ",
+  "am.err.AUDIT_UNAVAILABLE": "ตอนนี้บันทึกประวัติการเปลี่ยนแปลงของผู้ดูแลไม่ได้ จึงยังไม่ได้เปลี่ยนค่านี้ — ลองใหม่ในอีกไม่กี่นาที ถ้ายังไม่ได้ให้แจ้งผู้ดูแลระบบ ค่าเดิมยังอยู่ครบ",
+  "am.err.BAD_REQUEST": "คำขอนี้ไม่ถูกต้อง (รหัส “{code}”) — โหลดหน้านี้ใหม่แล้วลองอีกครั้ง ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.BAD_ACCESS": "ค่าการเข้าถึงต้องเป็น ปิด / เฉพาะรายชื่อ / ทุกคนในองค์กร — เลือกใหม่อีกครั้ง ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.BAD_ROLE": "บทบาทต้องเป็น ผู้ใช้ / ผู้ทดลอง agent ก่อนเผยแพร่ / ผู้ดูแล — เลือกใหม่อีกครั้ง ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.BAD_BUDGET": "งบต้องเป็นจำนวนเครดิตที่ไม่ติดลบ (หรือเว้นว่างเพื่อใช้ค่าตั้งต้น) — แก้แล้วบันทึกอีกครั้ง ค่าเดิมยังไม่ถูกเปลี่ยน",
+  "am.err.BAD_EMAIL": "อีเมลนี้ไม่ถูกต้อง — ตรวจตัวสะกดแล้วลองอีกครั้ง ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.LAST_ADMIN": "ต้องมีผู้ดูแลอย่างน้อยหนึ่งคนเสมอ — เพิ่มผู้ดูแลคนใหม่ก่อน แล้วค่อยเปลี่ยนหรือลบคนนี้ ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.BAD_STATUS": "สถานะต้องเป็น เผยแพร่ / ไม่เผยแพร่ / ปิดชั่วคราว — เลือกใหม่อีกครั้ง ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.REASON_REQUIRED": "การปิด agent ให้ทุกคนต้องบอกเหตุผลสั้น ๆ (ผู้ใช้จะเห็นข้อความนี้) — ใส่เหตุผลแล้วกดอีกครั้ง agent ยังเปิดใช้อยู่ตามเดิม",
+  "am.err.ACCESS_REASON_REQUIRED": "การเปิดดูรอบงานของคนอื่นต้องบอกเหตุผล (อย่างน้อย 8 ตัวอักษร) — เจ้าของรอบจะเห็นเหตุผลนี้ ยังไม่ได้เปิดดูอะไร",
+  "am.err.ACCESS_REASON_NEEDED": "ต้องเปิดดูพร้อมเหตุผลก่อน (หรือสิทธิ์ที่เปิดไว้ครบ 1 ชั่วโมงแล้ว) — เปิดใหม่พร้อมเหตุผล เจ้าของรอบจะได้รับแจ้ง ยังไม่มีข้อมูลใดถูกแสดง",
+  "am.err.REMOVE_REASON_REQUIRED": "การลบไฟล์ของรอบก่อนครบระยะเก็บต้องบอกเหตุผล (อย่างน้อย 8 ตัวอักษร) — เจ้าของรอบจะเห็นเหตุผลนี้ ยังไม่ได้ลบอะไร",
+  "am.err.MAIL_BAD_FIELDS": "หน้านี้ตั้งได้เฉพาะเซิร์ฟเวอร์ พอร์ต การเข้ารหัส ชื่อผู้ใช้ และอีเมลผู้ส่ง — รหัสผ่านใส่ใน .env ของเซิร์ฟเวอร์เท่านั้น ตามชื่อคีย์ที่หน้านี้บอกไว้ ไม่มีอะไรถูกเปลี่ยน",
+  "am.err.MAIL_NOT_CONFIGURED": "ยังไม่ได้ตั้งค่าเซิร์ฟเวอร์อีเมล — กรอกเซิร์ฟเวอร์ พอร์ต และอีเมลผู้ส่ง แล้วกดบันทึก จนกว่าจะตั้งเสร็จ ผู้ใช้ยังคัดลอกร่างอีเมลไปส่งเองได้ตามเดิม",
+  "am.err.MAIL_NO_PASSWORD": "ยังไม่ได้ใส่รหัสผ่านของเซิร์ฟเวอร์อีเมล — ผู้ดูแลระบบใส่ใน .env ของเซิร์ฟเวอร์ ตามชื่อคีย์ที่หน้านี้บอกไว้ แล้วเริ่มบริการใหม่ (หรือเว้นชื่อผู้ใช้ว่างถ้าเซิร์ฟเวอร์ไม่ขอรหัสผ่าน)",
+  "am.err.MAIL_CONNECT": "ติดต่อเซิร์ฟเวอร์อีเมลไม่ได้ — ตรวจชื่อเซิร์ฟเวอร์และพอร์ต และให้แน่ใจว่าเครื่องนี้ออกไปถึงเซิร์ฟเวอร์ได้ ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_TLS": "เชื่อมต่อแบบเข้ารหัส (TLS) กับเซิร์ฟเวอร์อีเมลไม่สำเร็จ — ตรวจโหมดการเข้ารหัสกับพอร์ต (STARTTLS ใช้ 587 ส่วน TLS ใช้ 465) และใบรับรองของเซิร์ฟเวอร์ ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_NO_STARTTLS": "เซิร์ฟเวอร์อีเมลนี้ไม่รองรับ STARTTLS — ถ้าใช้พอร์ต 465 ให้เลือกโหมด TLS ตั้งแต่เริ่ม ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_CLEAR_AUTH": "เซิร์ฟเวอร์นี้ใช้ชื่อผู้ใช้และรหัสผ่าน แต่การเชื่อมต่อไม่ได้เข้ารหัส จึงไม่ส่งรหัสผ่านออกไป — เปลี่ยนโหมดเป็น STARTTLS หรือ TLS (หรือเว้นชื่อผู้ใช้ว่างถ้าเซิร์ฟเวอร์ไม่ขอรหัสผ่าน) ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_AUTH": "เซิร์ฟเวอร์อีเมลไม่รับชื่อผู้ใช้หรือรหัสผ่าน — ตรวจชื่อผู้ใช้ในหน้านี้และรหัสผ่านใน .env ของเซิร์ฟเวอร์ ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_SENDER": "เซิร์ฟเวอร์อีเมลไม่ยอมให้ส่งในนามอีเมลผู้ส่งที่ตั้งไว้ — ใช้อีเมลผู้ส่งที่บัญชีนี้ส่งได้ ยังไม่ได้ส่งอะไร",
+  "am.err.MAIL_DATA": "เซิร์ฟเวอร์อีเมลรับข้อความไม่ครบ — ลองใหม่อีกครั้ง ถ้ายังไม่ได้ให้ตรวจการตั้งค่าของเซิร์ฟเวอร์ ยังไม่ได้ส่งอะไร",
+  "am.err.BAD_RECIPIENT": "ผู้รับต้องเป็นอีเมลเดียว ไม่มีชื่อหรือเครื่องหมายอื่นปน — แก้แล้วส่งอีกครั้ง ยังไม่ได้ส่งอะไร",
 
   // ── pointers from other admin pages ──────────────────────
   "am.pointer.models": "Agent Market มีสวิตช์ของตัวเองว่าเอกสารส่งไปโมเดลนอกองค์กรได้หรือไม่ — ตั้งที่หน้า {link}",

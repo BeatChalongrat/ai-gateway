@@ -60,7 +60,7 @@ export default function ModelsSection() {
       },
       (err) => {
         setBusy(false);
-        setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };

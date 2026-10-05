@@ -10,6 +10,7 @@
 // access.go, admindoor.go, mail.go).
 
 import { chatEdge, ChatEdgeApiError } from "./chatEdgeApi";
+import type { DictKey } from "./i18n/dict";
 
 const AM = "agent-market";
 const seg = (s: string) => encodeURIComponent(s).replace(/%40/g, "@");
@@ -142,7 +143,8 @@ export interface AdminCatalogRow {
   slug: string;
   version: string;
   name: string;
-  manifest?: { icon?: string; short_name?: string; description?: string } & AgentLook & Record<string, unknown>;
+  /** `name` above is the manifest's Thai name; `name_en` is its English one (AM10: shown when the page is in English). */
+  manifest?: { icon?: string; short_name?: string; description?: string; name_en?: string } & AgentLook & Record<string, unknown>;
   status?: "published" | "unpublished" | "disabled" | string;
   status_reason?: string;
   sample?: SampleSummary | null;
@@ -343,13 +345,85 @@ export const amAdmin = {
   testMail: (to: string): Promise<{ sent: boolean; to: string }> => chatEdge.post(`${AM}/mail/test`, { to }),
 };
 
-/** The sentence chat-edge wrote for a person (every refusal carries one), else a fallback. */
-export function amErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof ChatEdgeApiError) {
-    const b = err.body as { error?: { message?: string } } | string | null;
-    if (b && typeof b === "object" && b.error?.message) return b.error.message;
-  }
-  return fallback;
+type Translate = (key: DictKey, vars?: Record<string, string | number>) => string;
+
+/** chat-edge's refusal, from a ChatEdgeApiError body `{error:{code,message}}`. */
+function refusalOf(err: unknown): { code?: string; message?: string } | null {
+  if (!(err instanceof ChatEdgeApiError)) return null;
+  const b = err.body as { error?: { code?: unknown; message?: unknown } } | string | null;
+  if (!b || typeof b !== "object" || !b.error || typeof b.error !== "object") return null;
+  return {
+    code: typeof b.error.code === "string" ? b.error.code : undefined,
+    message: typeof b.error.message === "string" ? b.error.message : undefined,
+  };
+}
+
+/** chat-edge's refusal code (ACCESS_REASON_NEEDED, AUDIT_UNAVAILABLE …), when the error carries one. */
+export function amErrorCode(err: unknown): string | null {
+  return refusalOf(err)?.code ?? null;
+}
+
+// AM10 F — chat-edge writes every refusal as a Thai sentence for a person
+// (internal/agentmarket/messages.go, reminders.go) and sends its code beside
+// it. The codes below are the ones this page's endpoints answer with a
+// sentence that is the same every time, so the page can say it in the
+// language it is in. A code is NOT listed when its sentence carries what
+// only the server knows — which thing was not found (NOT_FOUND), which
+// value was wrong (BAD_VALUE), the organisation's contact person (NOT_ADMIN,
+// NOT_PUBLISHER, RUNNER_DOWN, CAPABILITY_MISSING), the address a relay
+// refused (MAIL_RECIPIENT) — or was written for the round's owner rather
+// than for this page (ROUND_IN_PROGRESS, MAIL_FAILED). Those, and any code
+// added later, are shown as received.
+const BAD_REQUEST: DictKey = "am.err.BAD_REQUEST";
+const AM_ERROR_KEYS: Record<string, DictKey> = {
+  AGENT_MARKET_BUSY: "am.err.AGENT_MARKET_BUSY",
+  AGENT_MARKET_ERROR: "am.err.AGENT_MARKET_ERROR",
+  AUDIT_UNAVAILABLE: "am.err.AUDIT_UNAVAILABLE",
+  // a request the page never sends on its own: one sentence, naming the code
+  BAD_JSON: BAD_REQUEST,
+  BAD_ID: BAD_REQUEST,
+  BAD_NAME: BAD_REQUEST,
+  // the organisation, its people and its departments
+  BAD_ACCESS: "am.err.BAD_ACCESS",
+  BAD_ROLE: "am.err.BAD_ROLE",
+  BAD_BUDGET: "am.err.BAD_BUDGET",
+  BAD_EMAIL: "am.err.BAD_EMAIL",
+  LAST_ADMIN: "am.err.LAST_ADMIN",
+  // the catalogue
+  BAD_STATUS: "am.err.BAD_STATUS",
+  REASON_REQUIRED: "am.err.REASON_REQUIRED",
+  // someone else's run
+  ACCESS_REASON_REQUIRED: "am.err.ACCESS_REASON_REQUIRED",
+  ACCESS_REASON_NEEDED: "am.err.ACCESS_REASON_NEEDED",
+  REMOVE_REASON_REQUIRED: "am.err.REMOVE_REASON_REQUIRED",
+  // the mail relay and its test message
+  MAIL_BAD_FIELDS: "am.err.MAIL_BAD_FIELDS",
+  MAIL_NOT_CONFIGURED: "am.err.MAIL_NOT_CONFIGURED",
+  MAIL_NO_PASSWORD: "am.err.MAIL_NO_PASSWORD",
+  MAIL_CONNECT: "am.err.MAIL_CONNECT",
+  MAIL_TLS: "am.err.MAIL_TLS",
+  MAIL_NO_STARTTLS: "am.err.MAIL_NO_STARTTLS",
+  MAIL_CLEAR_AUTH: "am.err.MAIL_CLEAR_AUTH",
+  MAIL_AUTH: "am.err.MAIL_AUTH",
+  MAIL_SENDER: "am.err.MAIL_SENDER",
+  MAIL_DATA: "am.err.MAIL_DATA",
+  BAD_RECIPIENT: "am.err.BAD_RECIPIENT",
+};
+
+/** Every refusal code this page says in its own language (for the tests). */
+export function amKnownErrorCodes(): string[] {
+  return Object.keys(AM_ERROR_KEYS);
+}
+
+/** What a refusal says to the person: the dictionary's sentence for a code
+ *  this page knows (in the language of the page), else the sentence
+ *  chat-edge wrote (every refusal carries one), else the caller's fallback. */
+export function amErrorMessage(err: unknown, fallback: string, t: Translate): string {
+  const r = refusalOf(err);
+  if (!r) return fallback;
+  const key = r.code && Object.prototype.hasOwnProperty.call(AM_ERROR_KEYS, r.code) ? AM_ERROR_KEYS[r.code] : undefined;
+  if (key) return t(key, { code: r.code ?? "" });
+  return r.message || fallback;
 }
 
 /** chat-edge answers 404 on the whole door while Agent Market is switched off. */

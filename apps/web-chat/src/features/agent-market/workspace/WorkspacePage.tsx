@@ -67,6 +67,9 @@ export function WorkspacePage({
   );
 }
 
+/** AM10: the two panes of a side-by-side view, as a narrow screen shows them in turn. */
+const PANES = ["main", "beside"] as const;
+
 /** A run id as it may stand in a selector (ids are uuids). */
 const RUN_ID = /^[\w-]{1,80}$/;
 
@@ -312,7 +315,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
       <div className="flex min-h-0 flex-1 flex-col" data-testid="am-workspace" data-beside={besideKey || undefined}>
         {besideKey ? (
           <div className="flex shrink-0 border-b border-border-subtle lg:hidden" role="tablist" aria-label={t("beside.title")} data-testid="am-beside-tabs">
-            {(["main", "beside"] as const).map((p) => (
+            {PANES.map((p) => (
               <button
                 key={p}
                 type="button"

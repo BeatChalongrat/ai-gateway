@@ -5,14 +5,15 @@
 // (opening someone else's run, removing a run's files early), a run's
 // outcome in words, and a step's name in words.
 //
-// Every refusal is shown as chat-edge wrote it (amErrorMessage): the server's
-// sentence says what to do and that nothing changed.
+// A refusal says what to do and that nothing changed (amErrorMessage): in the
+// page's language when chat-edge's code is one this page knows, else as
+// chat-edge wrote it.
 
 import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
 import Modal from "../../../components/ui/Modal";
 import { Icon, type IconName } from "../../../components/ui/Icon";
-import { useT, type DictKey } from "../../../lib/i18n";
+import { useI18n, useT, type DictKey } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type AdminOrg, type AgentLook, type Pricing } from "../../../lib/agentMarketApi";
 import { useTheme } from "../../../components/ThemeProvider";
 
@@ -54,6 +55,20 @@ export function formatDateTime(iso: string | null | undefined, locale: string): 
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return DASH;
   return new Intl.DateTimeFormat(locale === "th" ? "th-TH" : "en-GB", { dateStyle: "medium", timeStyle: "short" }).format(d);
+}
+
+// chat-edge says a round's period as a Thai reader does ("2026-09" → "กันยายน 2569", rounds.go
+// PeriodLabel) and a list row carries only that label. In English the same month is said in
+// English; a label that is not a month of a Buddhist-era year is the round's own words and stays.
+const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+
+export function periodLabel(label: string | null | undefined, locale: string): string {
+  const s = (label ?? "").trim();
+  if (locale !== "en") return s;
+  const m = /^(\S+) (\d{4})$/.exec(s);
+  const month = m ? THAI_MONTHS.indexOf(m[1]) : -1;
+  if (!m || month < 0) return s;
+  return new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(Number(m[2]) - 543, month, 1)));
 }
 
 export function formatBytes(n: number | null | undefined): string {
@@ -168,7 +183,7 @@ export function LoadError({ error, onRetry }: { error: unknown; onRetry?: () => 
   const t = useT();
   return (
     <div role="alert" className="sran-card" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.75rem" }}>
-      <span style={{ ...secondary, color: "var(--accent-danger)" }}>{amErrorMessage(error, t("state.errorLoad"))}</span>
+      <span style={{ ...secondary, color: "var(--accent-danger)" }}>{amErrorMessage(error, t("state.errorLoad"), t)}</span>
       {onRetry ? (
         <button type="button" className="sran-btn sran-btn-secondary sran-btn-sm" onClick={onRetry}>
           {t("action.retry")}
@@ -246,9 +261,20 @@ export function AgentTile({ icon, look, quiet, size = 32 }: { icon?: string; loo
   );
 }
 
+/** What a list that names an agent by slug takes from the catalogue: how it looks, and (AM10) its
+ *  English name — a list row carries only the Thai `name` and the slug. */
+export type AgentCard = AgentLook & { name_en?: string };
+
+/** An agent's name in the language of the page: the manifest's `name_en` in English when it has
+ *  one, else (and in Thai) its `name`. */
+export function agentName(name: string, nameEn: string | null | undefined, locale: string): string {
+  const en = typeof nameEn === "string" ? nameEn.trim() : "";
+  return locale === "en" && en ? en : name;
+}
+
 /** The looks of every agent, by slug — read once from the catalogue, for lists that name an agent. */
-export function useLooks(): Record<string, AgentLook> {
-  const [looks, setLooks] = useState<Record<string, AgentLook>>({});
+export function useLooks(): Record<string, AgentCard> {
+  const [looks, setLooks] = useState<Record<string, AgentCard>>({});
   useEffect(() => {
     let alive = true;
     // a list without the catalogue (a section on its own) simply shows no tiles
@@ -256,8 +282,8 @@ export function useLooks(): Record<string, AgentLook> {
       .then(() => amAdmin.catalog())
       .then((r) => {
         if (!alive) return;
-        const out: Record<string, AgentLook> = {};
-        for (const a of r.agents ?? []) out[a.slug] = { icon_svg: a.manifest?.icon_svg, accent: a.manifest?.accent };
+        const out: Record<string, AgentCard> = {};
+        for (const a of r.agents ?? []) out[a.slug] = { icon_svg: a.manifest?.icon_svg, accent: a.manifest?.accent, name_en: a.manifest?.name_en };
         setLooks(out);
       })
       .catch(() => {});
@@ -269,11 +295,12 @@ export function useLooks(): Record<string, AgentLook> {
 }
 
 /** An agent's name with its tile, for a table cell. */
-export function AgentName({ name, look }: { name: string; look?: AgentLook | null }) {
+export function AgentName({ name, look }: { name: string; look?: AgentCard | null }) {
+  const { locale } = useI18n();
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
       <AgentTile look={look} size={22} />
-      <span>{name}</span>
+      <span>{agentName(name, look?.name_en, locale)}</span>
     </span>
   );
 }
@@ -381,7 +408,7 @@ export function ReasonForm({
       },
       (err) => {
         setBusy(false);
-        setError(amErrorMessage(err, t("am.failed")));
+        setError(amErrorMessage(err, t("am.failed"), t));
       },
     );
   };

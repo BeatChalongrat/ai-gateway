@@ -82,7 +82,7 @@ export default function MailSection({ defaultTo }: { defaultTo: string }) {
         },
         (err) => {
           setBusy(false);
-          setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+          setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
         },
       );
   };
@@ -99,7 +99,7 @@ export default function MailSection({ defaultTo }: { defaultTo: string }) {
       },
       (err) => {
         setTesting(false);
-        setTestMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setTestMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };

@@ -103,7 +103,7 @@ export default function AccessSection() {
         },
         (err) => {
           setBusy(false);
-          setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+          setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
         },
       );
   };
@@ -244,7 +244,7 @@ function People({ org, reload, pricing }: { org: AdminOrg; reload: () => void; p
         },
         (err) => {
           setBusy(false);
-          setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+          setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
         },
       );
   };
@@ -372,7 +372,7 @@ function PersonRow({ m, reload, defaultBudget, pricing }: { m: OrgMember; reload
       },
       (err) => {
         setBusy(false);
-        setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };

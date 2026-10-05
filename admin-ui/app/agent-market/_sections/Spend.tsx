@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 
 import { useI18n } from "../../../lib/i18n";
 import { amAdmin, type AdminSpend, type Pricing, type SpendRow } from "../../../lib/agentMarketApi";
-import { DEFAULT_PRICING, LoadError, Loading, bahtOf, formatCredits, formatDateTime, h2, muted, secondary } from "./shared";
+import { DEFAULT_PRICING, LoadError, Loading, agentName, bahtOf, formatCredits, formatDateTime, h2, muted, secondary, useLooks, type AgentCard } from "./shared";
 
 const WINDOWS = [7, 30, 90] as const;
 
@@ -19,6 +19,7 @@ export default function SpendSection() {
   const [data, setData] = useState<AdminSpend | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [n, setN] = useState(0);
+  const looks = useLooks(); // an agent's row carries its Thai name and its slug
 
   useEffect(() => {
     let alive = true;
@@ -74,7 +75,7 @@ export default function SpendSection() {
           </section>
           <section className="sran-card" style={{ padding: "1rem 1.25rem" }}>
             <h2 style={h2}>{t("am.spend.byAgent")}</h2>
-            <SpendTable rows={data.by_agent ?? []} kind="agent" pricing={p} />
+            <SpendTable rows={data.by_agent ?? []} kind="agent" pricing={p} looks={looks} />
           </section>
           <p style={muted} data-testid="am-spend-samples">
             {t("am.spend.samples", { credits: formatCredits(data.catalog_samples_credits), baht: bahtOf(data.catalog_samples_credits, p) })}
@@ -87,7 +88,7 @@ export default function SpendSection() {
 
 const num = { textAlign: "right" as const, fontVariantNumeric: "tabular-nums" as const };
 
-function SpendTable({ rows, kind, pricing }: { rows: SpendRow[]; kind: "user" | "agent"; pricing: Pricing }) {
+function SpendTable({ rows, kind, pricing, looks }: { rows: SpendRow[]; kind: "user" | "agent"; pricing: Pricing; looks?: Record<string, AgentCard> }) {
   const { t, locale } = useI18n();
   if (!rows.length) return <p style={{ ...secondary, marginTop: "0.6rem" }}>{t("am.spend.none")}</p>;
   const counted = rows.some((r) => typeof r.completed_open === "number");
@@ -109,7 +110,7 @@ function SpendTable({ rows, kind, pricing }: { rows: SpendRow[]; kind: "user" | 
           {rows.map((r) => (
             <tr key={r.key} data-testid="am-spend-row" style={{ verticalAlign: "top" }}>
               <td>
-                <div>{kind === "user" ? r.name || r.email || r.key.slice(0, 8) : r.name || r.key}</div>
+                <div>{kind === "user" ? r.name || r.email || r.key.slice(0, 8) : agentName(r.name || r.key, looks?.[r.key]?.name_en, locale)}</div>
                 <div style={muted}>
                   {kind === "user" ? [r.email, r.department].filter(Boolean).join(" · ") : t("am.spend.users", { n: r.users ?? 0 })}
                 </div>

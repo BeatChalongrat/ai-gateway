@@ -14,7 +14,7 @@ import { useEffect, useState } from "react";
 import Badge from "../../../components/ui/Badge";
 import { useI18n, type DictKey } from "../../../lib/i18n";
 import { amAdmin, type RunMeta } from "../../../lib/agentMarketApi";
-import { AgentName, DEFAULT_PRICING, FINISHED, LoadError, Loading, Note, ReasonDialog, bahtOf, formatDateTime, h2, linkStyle, muted, outcomeLabel, outcomeOf, outcomeVariant, secondary, stepLabel, useLooks, useOrg, type Msg } from "./shared";
+import { AgentName, DEFAULT_PRICING, FINISHED, LoadError, Loading, Note, ReasonDialog, bahtOf, formatDateTime, h2, linkStyle, muted, outcomeLabel, outcomeOf, outcomeVariant, periodLabel, secondary, stepLabel, useLooks, useOrg, type Msg } from "./shared";
 
 const FILTERS: readonly { id: string; key: DictKey }[] = [
   { id: "all", key: "am.runs.all" },
@@ -115,7 +115,7 @@ export default function RunsSection() {
                         <div>
                           <AgentName name={r.agent} look={looks[r.slug]} />
                         </div>
-                        {r.period_label ? <div style={muted}>{r.period_label}</div> : null}
+                        {r.period_label ? <div style={muted}>{periodLabel(r.period_label, locale)}</div> : null}
                       </td>
                       <td>
                         <span data-testid="am-run-status" data-outcome={outcome}>

@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import Badge from "../../../components/ui/Badge";
 import { useI18n, type DictKey } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type AdminCatalogRow } from "../../../lib/agentMarketApi";
-import { AgentTile, LoadError, Loading, Note, formatDateTime, muted, outcomeLabel, secondary, type BadgeVariant, type Msg } from "./shared";
+import { AgentTile, LoadError, Loading, Note, agentName, formatDateTime, muted, outcomeLabel, secondary, type BadgeVariant, type Msg } from "./shared";
 
 const STATUS: Record<string, { key: DictKey; variant: BadgeVariant }> = {
   published: { key: "am.catalog.published", variant: "success" },
@@ -73,7 +73,7 @@ function CatalogRow({ row, canDisable, reload }: { row: AdminCatalogRow; canDisa
       },
       (err) => {
         setBusy(false);
-        setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };
@@ -94,7 +94,7 @@ function CatalogRow({ row, canDisable, reload }: { row: AdminCatalogRow; canDisa
       },
       (err) => {
         setBusy(false);
-        setMsg({ text: amErrorMessage(err, t("am.failed")), ok: false });
+        setMsg({ text: amErrorMessage(err, t("am.failed"), t), ok: false });
       },
     );
   };
@@ -107,7 +107,7 @@ function CatalogRow({ row, canDisable, reload }: { row: AdminCatalogRow; canDisa
         <AgentTile icon={row.manifest?.icon} look={row.manifest} quiet={status !== "published"} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
-            <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>{row.name}</span>
+            <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>{agentName(row.name, row.manifest?.name_en, locale)}</span>
             <span data-testid="am-catalog-status" data-status={status}>
               <Badge variant={st.variant}>{t(st.key)}</Badge>
             </span>

@@ -68,7 +68,7 @@ function ProblemRow({ p, admin, reload }: { p: ProblemReport; admin: boolean; re
       },
       (err) => {
         setBusy(false);
-        setError(amErrorMessage(err, t("am.failed")));
+        setError(amErrorMessage(err, t("am.failed"), t));
       },
     );
   };
