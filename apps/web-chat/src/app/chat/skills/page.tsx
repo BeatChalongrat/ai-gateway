@@ -20,6 +20,7 @@ import { tOutside, useT } from "@/lib/i18n";
 import { useHostedMode } from "@/hooks/useHostedMode";
 import { api, type WebSkill } from "@/lib/api";
 import { hostApi, type SkillDto } from "@/lib/hostApi";
+import { skillText } from "@/lib/hostCatalogText";
 
 export default function SkillsPage() {
   const hosted = useHostedMode();
@@ -458,19 +459,21 @@ function SkillCard({
 }) {
   const triggers = skill.triggers.slice(0, 5).join(", ");
   const t = useT();
+  // a built-in skill is the host's, written in English there: named here in the reader's language
+  const shown = skillText(skill, t);
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h3 className="truncate text-base font-medium text-text-primary">
-              {skill.name}
+            <h3 className="truncate text-base font-medium text-text-primary" data-testid="skill-name">
+              {shown.name}
             </h3>
             <Badge builtin={skill.isBuiltin} />
           </div>
-          {skill.description ? (
-            <p className="mt-1 text-sm text-text-secondary">
-              {skill.description}
+          {shown.description ? (
+            <p className="mt-1 text-sm text-text-secondary" data-testid="skill-description">
+              {shown.description}
             </p>
           ) : null}
           {triggers ? (
@@ -483,7 +486,7 @@ function SkillCard({
           <Toggle
             checked={skill.isEnabled}
             onChange={onToggle}
-            label={skill.isEnabled ? t("skills.disable.aria", { name: skill.name }) : t("skills.enable.aria", { name: skill.name })}
+            label={skill.isEnabled ? t("skills.disable.aria", { name: shown.name }) : t("skills.enable.aria", { name: shown.name })}
           />
           {!skill.isBuiltin ? (
             <button

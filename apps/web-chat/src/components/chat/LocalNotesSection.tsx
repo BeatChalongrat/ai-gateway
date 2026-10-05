@@ -78,7 +78,7 @@ export function LocalNotesSection() {
                   key={n.id}
                   className="flex items-start gap-3 rounded-lg border border-border-subtle bg-bg-surface px-3 py-2 text-sm text-text-primary"
                 >
-                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{n.content}</span>
+                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words" data-testid="memory-content">{n.content}</span>
                   <button
                     type="button"
                     disabled={busy === n.id}

@@ -23,6 +23,7 @@ import { useDesktopOnlyRoute } from "@/hooks/useDesktopOnlyRoute";
 import { ConnectorIcon } from "@/components/chat/connectorIcons";
 import { connectorAccess } from "@/lib/connectorCapability";
 import { hostApi, type CatalogConnectorDto, type ConnectorOAuthStatusDto, type InstalledConnectorDto } from "@/lib/hostApi";
+import { catalogText, connectorStateText } from "@/lib/hostCatalogText";
 
 export default function ConnectorsPage() {
   // FIX34.1 Part F — desktop-only. The sidebar never shows this entry on the
@@ -110,13 +111,12 @@ function ConnectorMarketplace() {
     // of only in docs/CONNECTOR_SETUP.md. Collapse, never delete.
     const showable = connectors.filter((c) => !(c.authType === "api_key" && c.placeholder === true));
     if (!q) return showable;
-    return showable.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.description.toLowerCase().includes(q) ||
-        c.category.toLowerCase().includes(q),
-    );
-  }, [connectors, query]);
+    // a person searches for the words on the card — the catalogue's own and the ones shown in their language
+    return showable.filter((c) => {
+      const shown = catalogText(c, t);
+      return [c.name, c.description, c.category, shown.description, shown.category].some((text) => text.toLowerCase().includes(q));
+    });
+  }, [connectors, query, t]);
   /** FIX89 Part B — exactly the cards the filter above removed: real
    *  catalogue entries with nowhere to go. Never filtered by the search box:
    *  it answers "is that everything?", which is not a search result. */
@@ -498,6 +498,8 @@ function ConnectorCard({
   onAction: () => void;
 }) {
   const t = useT();
+  // the catalogue is the host's, written in English there: its sentence and category in the reader's language
+  const shown = catalogText(connector, t);
   const isOAuth = connector.authType === "oauth2";
   // FIX31 Part 2: the host owns the provider sign-in. A card is connectable
   // only when the owner's registration file names this connector AND enables
@@ -534,13 +536,13 @@ function ConnectorCard({
             <h3 className="truncate text-base font-medium text-text-primary">
               {connector.name}
             </h3>
-            <span className="shrink-0 rounded-full border border-border bg-bg-base px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted">
-              {connector.category}
+            <span className="shrink-0 rounded-full border border-border bg-bg-base px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-text-muted" data-testid="connector-category">
+              {shown.category}
             </span>
           </div>
-          {connector.description ? (
-            <p className="mt-2 text-sm text-text-secondary">
-              {connector.description}
+          {shown.description ? (
+            <p className="mt-2 text-sm text-text-secondary" data-testid="connector-description">
+              {shown.description}
             </p>
           ) : null}
           {access.key ? (
@@ -587,10 +589,9 @@ function HealthDot({ status }: { status: string }) {
       : status === "Disconnected"
         ? "bg-status-danger"
         : "bg-text-muted";
-  // The host names the state in English; the two it is known to send are
+  // The host names the state in English; the three it is known to send are
   // said in the reader's language, any other is shown as the host wrote it.
-  const label =
-    status === "Connected" ? t("connectors.status.connected") : status === "Disconnected" ? t("connectors.status.disconnected") : status;
+  const label = connectorStateText(status, t);
   return (
     <span
       className={`h-2 w-2 shrink-0 rounded-full ${color}`}

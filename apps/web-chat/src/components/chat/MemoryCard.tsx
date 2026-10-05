@@ -82,7 +82,7 @@ export function MemoryCard({
             aria-label={t("memory.card.pinned")}
           />
         ) : null}
-        <p className="min-w-0 flex-1 text-sm text-text-primary">{memory.content}</p>
+        <p className="min-w-0 flex-1 text-sm text-text-primary" data-testid="memory-content">{memory.content}</p>
       </div>
 
       <p className="mt-1 text-xs text-text-muted" data-testid="memory-meta">

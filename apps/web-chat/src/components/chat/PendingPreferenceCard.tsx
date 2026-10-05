@@ -44,7 +44,7 @@ export function PendingPreferenceCard({ memory, onConfirm, onReject, saving, res
 
 	return (
 		<div className="rounded-lg border border-border bg-bg-surface px-4 py-3">
-			<p className="text-sm text-text-primary">{memory.content}</p>
+			<p className="text-sm text-text-primary" data-testid="memory-content">{memory.content}</p>
 			<p className="mt-1 text-xs text-text-muted" data-testid="memory-meta">
 				{metaParts.join(" · ")}
 			</p>
