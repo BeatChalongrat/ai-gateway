@@ -328,30 +328,56 @@ async function form(client) {
 }
 
 // ── F: the language ───────────────────────────────────────────────────────────────────────────
-const PAGES = ["/chat", "/chat/settings", "/chat/tasks", "/chat/skills", "/chat/connectors", "/chat/memory"];
-// what a Thai screen keeps in Latin letters on purpose (brand, feature and product names, file formats)
+// Every page of the chat app a person can open; a conversation with an exchange in it and the menus
+// a person opens are read on top (below).
+const PAGES = ["/chat", "/chat/settings", "/chat/tasks", "/chat/skills", "/chat/connectors", "/chat/memory", "/chat/knowledge", "/chat/projects",
+  "/chat/archive", "/chat/writing-style"];
+// what a Thai screen keeps in Latin letters on purpose (brand, feature and product names, file formats, key names)
 const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|PDF|DOCX|XLSX|CSV|TXT|PNG|JPG|Excel|Word|PowerPoint|Google|GitHub|Slack|Gmail|Drive|Calendar|Chrome|OpenAI|Whisper|URL|API|ID|KB|OK|vs|Ctrl|Shift|Enter|Esc|Alt|Mod|TH|EN|prompt|beta|Beta|admin|Admin)$/;
-async function leaks(page, locale) {
-  return page.evaluate(({ locale, keep }) => {
+// Text on screen that is not the app's own words: what people typed (chat titles, the names of their
+// things), the model's answer, model names — and Agent Market, which reads Thai in both languages by
+// its own decision (said in the report, not counted here).
+const NOT_THE_APPS = ['[data-testid="agent-rail-section"]', '[data-testid^="am-"]', '[data-testid^="agent-"]', '[data-testid="conversation-item"]',
+  "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]', '[data-testid="model-trigger-label"]', "code", "pre", "kbd"].join(", ");
+
+/** What is on screen now and not in `locale`: text, and the four attributes a person reads
+ *  (placeholder, title, aria-label, alt), over the whole document — sidebar and open menus included. */
+async function leaks(page, locale, notApps = NOT_THE_APPS, within = null) {
+  return page.evaluate(({ locale, keep, notApps, tag, within }) => {
+    const root = (within && document.querySelector(within)?.parentElement) || document.body;
     const KEEP = new RegExp(keep);
-    const skip = (el) => !!el.closest('[data-testid="agent-rail-section"], [data-testid="conversation-item"], [data-conversation-id], [data-testid="am-notifications"], code, pre, textarea, input, [data-testid="model-selector"], [data-testid="composer-root"] [role="listbox"]');
-    const out = new Set();
-    const walker = document.createTreeWalker(document.querySelector("main") || document.body, NodeFilter.SHOW_TEXT);
+    const skip = (el) => !!el.closest(notApps);
+    const shown = (el) => (el.checkVisibility ? el.checkVisibility({ checkVisibilityCSS: true }) : getComputedStyle(el).display !== "none");
+    const wrong = (text) => {
+      if (!text || text.includes(tag)) return false; // what the walk itself typed
+      if (/^[\w.+-]+@[\w.-]+$/.test(text)) return false; // the account's address
+      if (locale === "en") return /[ก-๙]/.test(text);
+      const words = (text.match(/[A-Za-z][A-Za-z'’-]{2,}/g) || []).filter((w) => !KEEP.test(w));
+      return words.length >= 2 || (words.length === 1 && !/[ก-๙]/.test(text) && text.length < 40);
+    };
+    const out = new Map();
+    const add = (raw, where) => {
+      const text = String(raw).replace(/\s+/g, " ").trim().slice(0, 110);
+      if (wrong(text) && !out.has(text)) out.set(text, where);
+    };
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let n = walker.nextNode(); n; n = walker.nextNode()) {
       const el = n.parentElement;
-      if (!el || skip(el)) continue;
-      const cs = getComputedStyle(el);
-      if (cs.display === "none" || cs.visibility === "hidden") continue;
-      const text = n.textContent.replace(/\s+/g, " ").trim();
-      if (!text) continue;
-      if (locale === "th") {
-        const words = (text.match(/[A-Za-z][A-Za-z'’-]{2,}/g) || []).filter((w) => !KEEP.test(w));
-        if (words.length >= 2 || (words.length === 1 && !/[ก-๙]/.test(text) && text.length < 40)) out.add(text.slice(0, 90));
-      } else if (/[ก-๙]/.test(text)) out.add(text.slice(0, 90));
+      if (!el || el.closest("script, style, noscript, textarea, input") || skip(el) || !shown(el)) continue;
+      add(n.textContent, "text");
     }
-    return [...out];
-  }, { locale, keep: KEEP.source });
+    for (const el of root.querySelectorAll("[placeholder], [title], [aria-label], img[alt]")) {
+      if (skip(el) || !shown(el)) continue;
+      for (const a of ["placeholder", "title", "aria-label", "alt"]) {
+        const v = el.getAttribute(a);
+        if (v) add(v, a);
+      }
+    }
+    return [...out].map(([text, where]) => ({ text, where }));
+  }, { locale, keep: KEEP.source, notApps, tag: TAG, within });
 }
+// Agent Market read like any other page: only what people typed is left out
+const TYPED = ['[data-testid="conversation-item"]', "[data-conversation-id]", '[data-testid="assistant-body"]', "code", "pre", "kbd"].join(", ");
 async function setLanguage(x, to) {
   const { page } = x;
   const now = await page.evaluate(() => document.documentElement.lang);
@@ -374,9 +400,45 @@ async function language(client) {
   await home(page);
   const found = { locale: await page.evaluate(() => document.documentElement.lang), stored: await stored(page, "sran-chat-locale"), account: await accountLanguage(page, gw) };
   log(`${x.tag}: found — page ${found.locale}, this client ${found.stored}, account ${found.account}`);
-  const report = { found, th: {}, en: {} };
+  const report = { found, th: {}, en: {}, notOpened: [] };
+  const read = async (locale, name) => {
+    report[locale][name] = await leaks(page, locale);
+    await x.shot(`${locale}-${name.replace(/[^a-z0-9ก-๙]+/gi, "-").replace(/^-|-$/g, "")}`);
+  };
+  // open something a person opens, read it, close it; a control that is not there is named, never guessed
+  const opened = async (locale, name, open) => {
+    try {
+      await open();
+      await L.wait(800);
+      await read(locale, name);
+    } catch (e) {
+      report.notOpened.push(`${locale} · ${name}: ${String((e && e.message) || e).split("\n")[0].slice(0, 90)}`);
+    }
+    await page.keyboard.press("Escape").catch(() => {});
+    await L.wait(300);
+  };
+  // one conversation of the card with an exchange in it (memory off), read in both languages
+  let conv = null;
   try {
-  for (const to of ["th", "en"]) {
+    conv = await W.testChat(page, `${TAG} ภาษา`);
+    state.chats = [...new Set([...(state.chats || []), conv.id])];
+    save();
+    x.check(conv.id && conv.memory === false, "a test chat of the card, memory off", conv.id);
+    await page.goto(`${WEB()}/chat/${conv.id}`, { waitUntil: "load" });
+    const box = page.locator('textarea[data-shortcut="composer"]');
+    await box.waitFor({ state: "visible", timeout: 90000 });
+    await L.wait(1500);
+    await box.fill(`${TAG} ตอบสั้น ๆ คำเดียวว่า สวัสดี`);
+    await box.press("Enter");
+    const answered = await page.locator('[data-testid="assistant-body"]').first().waitFor({ state: "visible", timeout: 120000 }).then(() => true, () => false);
+    x.check(answered, "the test chat has an exchange to read", answered ? "" : "no answer within 2 minutes: its page is read without one");
+    await L.wait(4000);
+  } catch (e) {
+    report.notOpened.push(`the test conversation: ${String((e && e.message) || e).split("\n")[0].slice(0, 120)}`);
+  }
+  try {
+  // every switch a real choice: the first one is to the language the page is not in
+  for (const to of found.locale === "th" ? ["en", "th"] : ["th", "en"]) {
     await home(page);
     const got = await setLanguage(x, to);
     x.check(got === to, `the switch turns the page ${to}`, got);
@@ -391,15 +453,57 @@ async function language(client) {
     }
     for (const p of PAGES) {
       const r = await page.goto(`${WEB()}${p}`, { waitUntil: "load" }).catch(() => null);
-      if (!r || r.status() >= 400) continue;
+      if (!r || r.status() >= 400) {
+        report.notOpened.push(`${to} · page ${p}: ${r ? r.status() : "no response"}`);
+        continue;
+      }
       await L.wait(2200);
-      const left = await leaks(page, to);
-      report[to][p] = left;
-      await x.shot(`${to}${p.replace(/\//g, "_")}`);
+      await read(to, `page ${p}`);
+      if (p === "/chat") {
+        await opened(to, "menu account", () => x.click(page.locator('div.border-t > button[aria-haspopup="menu"]').last(), "เมนูบัญชี"));
+        await opened(to, "menu model", () => page.locator('[data-testid="model-trigger-label"]').first().click({ timeout: 8000 }));
+        await opened(to, "menu attach", () => page.locator('[data-testid="attach-button"]').first().click({ timeout: 8000 }));
+        await opened(to, "search", () => page.keyboard.press("Control+K"));
+        await opened(to, "dialog new project", () => page.getByRole("button", { name: /^(New project|สร้างโปรเจกต์ใหม่)/ }).first().click({ timeout: 8000 }));
+      }
+      if (p === "/chat/settings") {
+        const tabs = page.locator('[role="tab"]');
+        for (let i = 0; i < Math.min(await tabs.count(), 12); i++) {
+          await opened(to, `settings tab ${i + 1}`, () => tabs.nth(i).click({ timeout: 8000 }));
+        }
+      }
     }
-    const n = Object.values(report[to]).reduce((a, b) => a + b.length, 0);
-    x.check(true, `${to}: text not in the chosen language on ${Object.keys(report[to]).length} pages (outside Agent Market, chat titles and what people typed): ${n}`, JSON.stringify(report[to]).slice(0, 380));
+    if (conv && conv.id) {
+      await page.goto(`${WEB()}/chat/${conv.id}`, { waitUntil: "load" });
+      await page.locator('textarea[data-shortcut="composer"]').waitFor({ state: "visible", timeout: 90000 }).catch(() => {});
+      await L.wait(2500);
+      await page.locator('[data-testid="assistant-body"]').last().hover({ timeout: 5000 }).catch(() => {});
+      await read(to, "conversation");
+      const rowMenu = async () => {
+        const row = page.locator(`[data-conversation-id="${conv.id}"]`).first();
+        await row.hover({ timeout: 8000 });
+        await row.locator('button[aria-haspopup="menu"], button[aria-label]').last().click({ timeout: 8000 });
+      };
+      await opened(to, "menu conversation row", rowMenu);
+      // the confirmation a person reads before a chat is deleted: it is drawn inside the chat's own row,
+      // so it is read there (the title carries the walk's tag); the walk never confirms it
+      try {
+        await rowMenu();
+        await page.getByText(/^(Delete|ลบ)$/).last().click({ timeout: 8000 });
+        await L.wait(900);
+        report[to]["confirm delete chat"] = await leaks(page, to, "code", `[data-conversation-id="${conv.id}"]`);
+        await x.shot(`${to}-confirm-delete-chat`);
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.getByRole("button", { name: /^(Cancel|ยกเลิก)$/ }).first().click({ timeout: 3000 }).catch(() => {});
+      } catch (e) {
+        report.notOpened.push(`${to} · confirm delete chat: ${String((e && e.message) || e).split("\n")[0].slice(0, 90)}`);
+        await page.keyboard.press("Escape").catch(() => {});
+      }
+    }
+    const all = Object.values(report[to]).reduce((a, b) => a + b.length, 0);
+    x.check(true, `${to}: read ${Object.keys(report[to]).length} surfaces (outside Agent Market, chat titles and what people typed): ${all} strings not in ${to}`, "");
     // a reload keeps it
+    await home(page);
     await page.reload({ waitUntil: "load" });
     await L.wait(2500);
     x.check((await page.evaluate(() => document.documentElement.lang)) === to && (await stored(page, "sran-chat-locale")) === to, `${to}: kept across a reload`);
@@ -411,7 +515,6 @@ async function language(client) {
       const lang = await waitFor(async () => ((await other.page.evaluate(() => document.documentElement.lang)) === "th" ? "th" : null), 30000, 800);
       x.check(lang === "th", "a second client of the same person, which never chose, opens in the account's Thai", String(lang));
       report.second = { opened: lang };
-      // … and the choice made there reaches this one
       await other.page.evaluate(() => window.localStorage.setItem("sran-chat-locale-synced", "1"));
       await other.close();
     }
@@ -422,6 +525,25 @@ async function language(client) {
   await L.wait(1500);
   report.agentMarketInEnglish = (await x.words(page.locator("h1").first())) || "";
   await x.shot("en-agent-market-stays-thai");
+  // how much that is, read on an English screen with nothing of Agent Market left out (it is also the
+  // reader's control: it must find Thai where Thai is)
+  report.agentMarketThai = {};
+  if ((await page.evaluate(() => document.documentElement.lang)) !== "en") await setLanguage(x, "en");
+  const amPages = ["/chat/agents", "/chat/agents/mine", `/chat/agents/${SLUG}`, `/chat/agents/install/${SLUG}`];
+  const mine = state[`am10_${client}`];
+  if (mine && mine.installId) amPages.push(`/chat/agents/i/${mine.installId}`, `/chat/agents/i/${mine.installId}/settings`);
+  if (mine && mine.run1) amPages.push(`/chat/agents/runs/${mine.run1}`);
+  for (const ap of amPages) {
+    const r = await page.goto(`${WEB()}${ap}`, { waitUntil: "load" }).catch(() => null);
+    if (!r || r.status() >= 400) {
+      report.notOpened.push(`en · Agent Market ${ap}: ${r ? r.status() : "no response"}`);
+      continue;
+    }
+    await L.wait(3000);
+    report.agentMarketThai[ap.replace(/[0-9a-f]{8}-[0-9a-f-]{27}/g, "<id>")] = (await leaks(page, "en", TYPED)).map((e) => e.text);
+  }
+  const amThai = new Set(Object.values(report.agentMarketThai).flat());
+  x.check(amThai.size > 0, "the reader finds Thai where Thai is: Agent Market on an English screen", `${amThai.size} strings on ${Object.keys(report.agentMarketThai).length} pages`);
   } finally {
     // as found — whatever happened above
     if (found.locale === "th" || found.locale === "en") {
@@ -429,6 +551,13 @@ async function language(client) {
       await setLanguage(x, found.locale);
       await L.wait(2500);
       x.check((await accountLanguage(page, gw)) === found.locale, "the language is put back as found, on the page and on the account", `${found.locale}`);
+    }
+    if (conv && conv.id) {
+      const st = await page.evaluate(async ({ edge, id }) => (await fetch(`${edge}/api/v1/conversations/${id}`, { method: "DELETE", credentials: "include" })).status,
+        { edge: W.EDGE(), id: conv.id }).catch(() => 0);
+      x.check(st === 200 || st === 204, "the test chat is deleted, by its id", String(st));
+      state.chats = (state.chats || []).filter((c) => c !== conv.id);
+      save();
     }
   }
   // the desktop app's own menus follow the page: its stored language is the page's
@@ -438,8 +567,22 @@ async function language(client) {
     x.check(native === found.locale, "the desktop app's own menus, tray and dialogs are in the page's language (its stored choice)", String(native));
     report.desktopNative = native;
   }
+  // each string once, with every surface it was read on
+  report.flat = {};
+  for (const loc of ["th", "en"]) {
+    const by = new Map();
+    for (const [surface, list] of Object.entries(report[loc])) {
+      for (const { text, where } of list) {
+        const e = by.get(text) || { text, where, on: [] };
+        e.on.push(surface);
+        by.set(text, e);
+      }
+    }
+    report.flat[loc] = [...by.values()].sort((m, n) => m.text.localeCompare(n.text));
+  }
+  log(`${x.tag}: not in the chosen language — th ${report.flat.th.length}, en ${report.flat.en.length}; not opened ${report.notOpened.length}; Agent Market in Thai on an English screen ${new Set(Object.values(report.agentMarketThai || {}).flat()).size}`);
   fs.writeFileSync(path.join(x.dir, "language-strings.json"), JSON.stringify(report, null, 1));
-  await done(x, "language", { found });
+  await done(x, "language", { found, left: { th: report.flat.th.length, en: report.flat.en.length }, notOpened: report.notOpened });
 }
 
 const phases = {
