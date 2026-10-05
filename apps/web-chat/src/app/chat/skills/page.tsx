@@ -138,7 +138,7 @@ function WebSkillsScreen() {
             </p>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.name")}</span>
-              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="สรุปแบบสั้น" required />
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={t("skills.field.namePlaceholder")} required />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.description")}</span>
@@ -146,7 +146,7 @@ function WebSkillsScreen() {
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.triggers")}</span>
-              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder={t("skills.field.triggersPlaceholder")} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.instructions")}</span>
@@ -369,15 +369,15 @@ function SkillsScreen() {
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.displayName")}</span>
-              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} placeholder="สรุปแบบสั้น" />
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.displayName} onChange={(e) => setDraft({ ...draft, displayName: e.target.value })} placeholder={t("skills.field.namePlaceholder")} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.triggers")}</span>
-              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder="สรุปแบบสั้น, สรุปสั้นๆ" />
+              <input className="rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.triggers} onChange={(e) => setDraft({ ...draft, triggers: e.target.value })} placeholder={t("skills.field.triggersPlaceholder")} />
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-text-secondary">{t("skills.field.instructions")}</span>
-              <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} placeholder="ตอบเป็นข้อๆ ไม่เกิน 3 ข้อเสมอ ห้ามเกิน" required />
+              <textarea className="min-h-[120px] rounded-md border border-border bg-bg-elevated px-3 py-2 text-text-primary" value={draft.instructions} onChange={(e) => setDraft({ ...draft, instructions: e.target.value })} placeholder={t("skills.field.instructionsPlaceholder")} required />
             </label>
             <div className="flex justify-end gap-2">
               <Button variant="ghost" type="button" onClick={() => setCreating(false)}>{t("skills.form.cancel")}</Button>

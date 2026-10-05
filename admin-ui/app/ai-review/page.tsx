@@ -524,7 +524,7 @@ export default function AiReviewPage() {
                   <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
                     {(["anthropic", "openai", "openrouter", "custom"] as Provider[]).map((p) => {
                       const a = draftProvider === p;
-                      return <button key={p} onClick={() => handleProviderSwitch(p)} style={{ padding: "0.5rem 1rem", borderRadius: "var(--radius-sm)", border: `1px solid ${a ? "var(--color-status-info)" : "var(--color-border-default)"}`, background: a ? "var(--color-status-info-bg)" : "var(--color-surface-secondary)", color: a ? "var(--color-status-info)" : "var(--color-text-primary)", fontWeight: a ? 600 : 400, fontSize: "var(--font-size-xs)", cursor: "pointer", textTransform: "capitalize" }}>{p}</button>;
+                      return <button key={p} onClick={() => handleProviderSwitch(p)} style={{ padding: "0.5rem 1rem", borderRadius: "var(--radius-sm)", border: `1px solid ${a ? "var(--color-status-info)" : "var(--color-border-default)"}`, background: a ? "var(--color-status-info-bg)" : "var(--color-surface-secondary)", color: a ? "var(--color-status-info)" : "var(--color-text-primary)", fontWeight: a ? 600 : 400, fontSize: "var(--font-size-xs)", cursor: "pointer", textTransform: "capitalize" }}>{p === "custom" ? t("obs.air.providerCustom") : p}</button>;
                     })}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: "1rem", marginBottom: "0.75rem" }}>

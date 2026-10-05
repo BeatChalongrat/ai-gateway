@@ -108,4 +108,8 @@ export const useI18n = () => useContext(I18nCtx);
 /// Just the translate function, which is what nearly every call site wants.
 export const useT = (): Translate => useContext(I18nCtx).t;
 
+/// The Intl locale for a date a page words itself ("Oct 5" / "5 ต.ค."), so a
+/// month is not left in English on a Thai screen.
+export const useDateLocale = (): string => (useContext(I18nCtx).locale === "th" ? "th-TH" : "en-US");
+
 export type { DictKey, Locale };

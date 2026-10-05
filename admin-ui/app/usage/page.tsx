@@ -16,7 +16,7 @@ import EmptyState from "../../components/ui/EmptyState";
 import { Icon } from "../../components/ui/Icon";
 import { useApi } from "../../lib/useApi";
 import { api } from "../../lib/api";
-import { useT, type DictKey } from "../../lib/i18n";
+import { useDateLocale, useT, type DictKey } from "../../lib/i18n";
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip);
 
@@ -124,12 +124,12 @@ function shortModel(m: string): string {
 }
 
 // "Jun 22, 3:49 PM"
-function formatRunTime(iso: string): string {
+function formatRunTime(iso: string, dateLocale: string): string {
   const d = new Date(iso);
   return (
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+    d.toLocaleDateString(dateLocale, { month: "short", day: "numeric" }) +
     ", " +
-    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    d.toLocaleTimeString(dateLocale, { hour: "numeric", minute: "2-digit" })
   );
 }
 
@@ -200,6 +200,7 @@ function UsageStat({
 
 export default function UsagePage() {
   const t = useT();
+  const dateLocale = useDateLocale();
   const isDark = useThemeIsDark();
   const tickColor = isDark ? "#8B96BA" : "#6B6D78";
   const gridColor = isDark ? "#1F2A55" : "#ECEDF2";
@@ -349,7 +350,7 @@ export default function UsagePage() {
     return d;
   });
   const activityLabels = activityDays.map((d) =>
-    d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    d.toLocaleDateString(dateLocale, { month: "short", day: "numeric" })
   );
   const activityCounts = activityDays.map(
     (d) =>
@@ -935,7 +936,7 @@ export default function UsagePage() {
                           return (
                             <tr key={r.scan_run_id} style={{ borderBottom: "1px solid var(--border-color)" }}>
                               <td style={{ padding: "8px 14px", whiteSpace: "nowrap" }}>
-                                {r.created_at ? formatRunTime(r.created_at) : "—"}
+                                {r.created_at ? formatRunTime(r.created_at, dateLocale) : "—"}
                               </td>
                               <td style={{ padding: "8px 14px" }}>
                                 <span

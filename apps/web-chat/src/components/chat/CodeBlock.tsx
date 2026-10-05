@@ -78,7 +78,7 @@ export function CodeBlock({ children }: PreProps) {
     <div className={`code-block not-prose${collapsed ? " is-collapsed" : ""}`}>
       <div className="code-block-header">
         <span className="code-block-lang" title={lang || undefined}>
-          {label}
+          {label === "Code" && !lang ? t("code.label") : label}
         </span>
         {canvasType && !interactiveHtml ? (
           <OpenCanvasButton
@@ -107,7 +107,7 @@ export function CodeBlock({ children }: PreProps) {
           <iframe
             sandbox=""
             srcDoc={canvasType === "svg" ? buildSvgSrcDoc(codeText) : buildHtmlSrcDoc(codeText)}
-            title={filename ?? `${canvasType} preview`}
+            title={filename ?? t("code.previewTitle", { kind: canvasType })}
             referrerPolicy="no-referrer"
             loading="lazy"
             className="h-72 w-full border-0"

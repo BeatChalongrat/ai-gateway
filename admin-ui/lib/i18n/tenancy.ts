@@ -6,11 +6,12 @@
 //
 // NOT translated on these screens (deliberately): tenant/project slugs and
 // ids, API key prefixes and raw key values, policy profile ids
-// (`default` / `strict`), region codes (`global` / `us` / `eu`), tenant
-// status values echoed straight from the API (`active` / `suspended` /
-// `deleted`), and the member role identifiers (`admin` / `member` /
-// `viewer`). Column headers and labels ARE translated; the identifier
-// underneath stays English so it still matches a bug report.
+// (`default` / `strict`) and the region codes `us` / `eu`. Column headers
+// and labels ARE translated.
+// AM10: a tenant's status (`active` / `suspended` / `deleted`), the `global`
+// region and a member's role (`admin` / `member` / `viewer`) are words a
+// person reads, so the LABEL is translated; the value sent to and read from
+// the API is still the identifier.
 
 export const en = {
   // ── Shared field labels (module-local; the generic ones live in common) ──
@@ -24,9 +25,15 @@ export const en = {
   "tenancy.field.lastUsed": "Last Used",
 
   // ── Shared states / verbs ───────────────────────────────
+  "tenancy.status.active": "Active",
+  "tenancy.status.suspended": "Suspended",
   "tenancy.status.deleted": "Deleted",
   "tenancy.status.revoked": "Revoked",
   "tenancy.status.archived": "Archived",
+  "tenancy.region.global": "Global",
+  "tenancy.role.admin": "Admin",
+  "tenancy.role.member": "Member",
+  "tenancy.role.viewer": "Viewer",
   "tenancy.action.restore": "Restore",
   "tenancy.action.revoke": "Revoke",
   "tenancy.action.archive": "Archive",
@@ -189,9 +196,15 @@ export const th: Record<keyof typeof en, string> = {
   "tenancy.field.lastUsed": "ใช้งานล่าสุด",
 
   // ── Shared states / verbs ───────────────────────────────
+  "tenancy.status.active": "ใช้งานอยู่",
+  "tenancy.status.suspended": "ระงับการใช้งาน",
   "tenancy.status.deleted": "ถูกลบ",
   "tenancy.status.revoked": "ถูกเพิกถอน",
   "tenancy.status.archived": "เก็บถาวรแล้ว",
+  "tenancy.region.global": "ทั่วโลก",
+  "tenancy.role.admin": "ผู้ดูแล",
+  "tenancy.role.member": "สมาชิก",
+  "tenancy.role.viewer": "ผู้ชม",
   "tenancy.action.restore": "กู้คืน",
   "tenancy.action.revoke": "เพิกถอน",
   "tenancy.action.archive": "จัดเก็บถาวร",

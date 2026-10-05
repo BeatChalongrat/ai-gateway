@@ -339,7 +339,7 @@ function KeysPanel({
       loadKeys();
       onEndpointChanged?.();
     } catch (e: any) {
-      const msg = getApiErrorMessage(e, t("infra.providers.toastAddFailed"));
+      const msg = getApiErrorMessage(e, t("infra.providers.toastAddFailed"), t);
       toast(msg, "error");
     } finally {
       setAdding(false);
@@ -357,7 +357,7 @@ function KeysPanel({
       loadKeys();
       onEndpointChanged?.();
     } catch (e: any) {
-      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed")), "error");
+      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed"), t), "error");
     } finally {
       setSavingDefault(false);
     }
@@ -387,7 +387,7 @@ function KeysPanel({
       loadKeys();
       onEndpointChanged?.();
     } catch (e: any) {
-      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed")), "error");
+      toast(getApiErrorMessage(e, t("infra.providers.toastEndpointFailed"), t), "error");
     } finally {
       setSavingEdit(false);
     }

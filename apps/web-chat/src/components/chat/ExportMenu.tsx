@@ -65,7 +65,7 @@ export function ExportMenu({ conversationId, onShare }: Props) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("a11y.conversationActions")}
-        title="Conversation actions"
+        title={t("a11y.conversationActions")}
         className="focus-ring rounded-md p-1.5 text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
       >
         <svg viewBox="0 0 16 16" width={14} height={14} aria-hidden>

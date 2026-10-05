@@ -7,9 +7,11 @@
 
 import { ExternalLink } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { SearchSource } from "@/lib/types";
 
 export function SearchCitations({ sources }: { sources: SearchSource[] }) {
+  const t = useT();
   if (!sources || sources.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -34,7 +36,7 @@ export function SearchCitations({ sources }: { sources: SearchSource[] }) {
               loading="lazy"
             />
           ) : null}
-          <span className="max-w-[160px] truncate">{s.domain || "source"}</span>
+          <span className="max-w-[160px] truncate">{s.domain || t("citations.source")}</span>
           <ExternalLink size={10} aria-hidden />
         </a>
       ))}

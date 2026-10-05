@@ -3,6 +3,8 @@
 // visually distinct. Falls back to a generic sparkle for unknown
 // providers.
 
+import { useT } from "@/lib/i18n";
+
 interface Props {
   modelId?: string | null;
   size?: number;
@@ -37,6 +39,7 @@ function providerOf(modelId?: string | null): Provider {
 }
 
 export function AssistantAvatar({ modelId, size = 26, neutral = false }: Props) {
+  const t = useT();
   const provider = providerOf(modelId);
   const ringClass = neutral
     ? "bg-transparent text-text-secondary"
@@ -46,7 +49,7 @@ export function AssistantAvatar({ modelId, size = 26, neutral = false }: Props) 
     <span
       style={{ width: size, height: size }}
       className={`inline-flex shrink-0 items-center justify-center rounded-full ${ringClass}`}
-      aria-label={`${provider} model`}
+      aria-label={t("a11y.providerModel", { provider })}
       title={modelId ?? "AI"}
     >
       <ProviderMark provider={provider} size={Math.round(size * 0.6)} />

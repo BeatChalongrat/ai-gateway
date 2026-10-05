@@ -15,6 +15,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Spinner } from "@/components/ui/Spinner";
 import { toast } from "@/components/ui/Toast";
 import { tOutside, useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import { api } from "@/lib/api";
 import type { CloudTask, CloudTaskRun, Conversation } from "@/lib/types";
 import { useChatStore } from "@/stores/chatStore";
@@ -235,6 +236,7 @@ function CloudTaskRow({
   onHistory: () => void;
   /** false on the web (FIX34.1 Part F): one kind → no badge to distinguish. */
 }) {
+  const t = useT();
   return (
     <section className="rounded-xl border border-border bg-bg-surface p-5 transition-colors hover:border-border-strong">
       <div className="flex items-start justify-between gap-4">
@@ -246,21 +248,22 @@ function CloudTaskRow({
             {task.name}
           </h3>
           <p className="mt-1 text-xs text-text-secondary">
-            {intervalLabel(task.interval_seconds)}
+            {intervalLabel(task.interval_seconds, t)}
           </p>
           <p className="mt-3 text-xs text-text-muted">
-            Next run: {formatDate(task.next_run_at)}
+            {t("tasks.row.nextRun", { when: formatDate(task.next_run_at) })}
             {" · "}
-            Last run: {formatDate(task.last_run_at ?? null)}
+            {t("tasks.row.lastRun", { when: formatDate(task.last_run_at ?? null) })}
             {" · "}
-            Runs: {task.run_count}
-            {task.max_runs != null ? ` / ${task.max_runs}` : ""}
+            {task.max_runs != null
+              ? t("cloud.row.runsOf", { n: String(task.run_count), max: String(task.max_runs) })
+              : t("cloud.row.runs", { n: String(task.run_count) })}
           </p>
         </div>
         <Toggle
           enabled={task.enabled}
           onChange={onToggle}
-          label={`Enable ${task.name}`}
+          label={t("tasks.row.enable", { name: task.name })}
         />
       </div>
 
@@ -268,14 +271,14 @@ function CloudTaskRow({
 
       <div className="mt-4 flex items-center gap-2">
         <Button variant="ghost" onClick={onHistory}>
-          History
+          {t("tasks.history")}
         </Button>
         <button
           type="button"
           onClick={onDelete}
           className="ml-auto rounded-md px-2.5 py-1.5 text-sm text-status-danger transition-colors hover:bg-status-danger/10"
         >
-          Delete
+          {t("tasks.delete")}
         </button>
       </div>
     </section>
@@ -291,25 +294,23 @@ function PausedNotice({
   task: CloudTask;
   onReEnable: () => void;
 }) {
+  const t = useT();
   if (!task.paused_reason) return null;
   if (task.paused_reason === "no_balance") {
     return (
       <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-status-danger/40 bg-status-danger/10 px-3 py-2 text-xs text-status-danger">
-        <span>Paused — out of credits. Top up, then re-enable.</span>
+        <span>{t("cloud.paused.noBalance")}</span>
         <button
           type="button"
           onClick={onReEnable}
           className="focus-ring ml-auto rounded-md border border-status-danger/40 px-2.5 py-1 font-medium text-status-danger transition-colors hover:bg-status-danger/10"
         >
-          Re-enable
+          {t("cloud.paused.reEnable")}
         </button>
       </div>
     );
   }
-  const text =
-    task.paused_reason === "max_runs"
-      ? "Paused — reached its run limit."
-      : "Paused.";
+  const text = task.paused_reason === "max_runs" ? t("cloud.paused.maxRuns") : t("cloud.paused.generic");
   return (
     <p className="mt-3 rounded-md border border-border bg-bg-secondary/50 px-3 py-2 text-xs text-text-secondary">
       {text}
@@ -328,6 +329,7 @@ function CloudHistoryModal({
   task: CloudTask | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const [runs, setRuns] = useState<CloudTaskRun[] | null>(null);
 
   useEffect(() => {
@@ -350,13 +352,13 @@ function CloudHistoryModal({
     <Modal
       open={task !== null}
       onClose={onClose}
-      title={task ? `History — ${task.name}` : "History"}
-      description={tOutside("cloud.history.desc")}
+      title={task ? t("tasks.history.title", { name: task.name }) : t("tasks.history")}
+      description={t("cloud.history.desc")}
     >
       {runs === null ? (
-        <p className="text-sm text-text-muted">Loading…</p>
+        <p className="text-sm text-text-muted">{t("common.loading")}</p>
       ) : runs.length === 0 ? (
-        <p className="text-sm text-text-muted">No runs yet.</p>
+        <p className="text-sm text-text-muted">{t("tasks.history.empty")}</p>
       ) : (
         <ul className="flex flex-col gap-2">
           {runs.map((r) => (
@@ -367,7 +369,7 @@ function CloudHistoryModal({
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="font-medium text-text-primary">
-                  {runHeadline(r)}
+                  {runHeadline(r, t)}
                 </span>
                 <span className="text-text-muted">{formatDate(r.fired_at)}</span>
               </div>
@@ -376,9 +378,9 @@ function CloudHistoryModal({
               ) : null}
               <div className="mt-1 flex flex-wrap items-center gap-1.5">
                 {r.policy_action ? (
-                  <Tag>DLP: {r.policy_action}</Tag>
+                  <Tag>{t("cloud.run.dlp", { action: DLP_ACTION_KEY[r.policy_action] ? t(DLP_ACTION_KEY[r.policy_action]) : r.policy_action })}</Tag>
                 ) : null}
-                {r.tokens != null ? <Tag>{r.tokens} tokens</Tag> : null}
+                {r.tokens != null ? <Tag>{t("unit.tokens", { n: String(r.tokens) })}</Tag> : null}
               </div>
             </li>
           ))}
@@ -388,21 +390,32 @@ function CloudHistoryModal({
   );
 }
 
+type Translate = ReturnType<typeof useT>;
+
+// The DLP verdicts the gateway records on a run; one it adds later is shown
+// as the server wrote it.
+const DLP_ACTION_KEY: Record<string, DictKey> = {
+  allow: "cloud.run.dlp.allow",
+  mask: "cloud.run.dlp.mask",
+  block: "cloud.run.dlp.block",
+};
+
 /** Turn an outcome (+ skip_reason) into a plain sentence — a silently worse
- *  answer must never hide the fact that the run hit a wall. */
-function runHeadline(r: CloudTaskRun): string {
+ *  answer must never hide the fact that the run hit a wall. An outcome this
+ *  build does not know is shown as the server named it. */
+function runHeadline(r: CloudTaskRun, t: Translate): string {
   if (r.outcome === "ok" && r.skip_reason === "tool_withheld") {
-    return "Ran, but a tool it wanted isn't available to cloud tasks";
+    return t("cloud.run.toolWithheld");
   }
   switch (r.outcome) {
     case "ok":
-      return "Ran";
+      return t("cloud.run.ok");
     case "refused_revoked":
-      return "Skipped — account not active.";
+      return t("cloud.run.refusedRevoked");
     case "refused_no_balance":
-      return "Skipped — out of credits.";
+      return t("cloud.run.refusedNoBalance");
     case "error":
-      return "Failed";
+      return t("cloud.run.error");
     default:
       return r.outcome;
   }
@@ -463,6 +476,7 @@ function CloudTaskFormModal({
   onClose: () => void;
   onCreated: (task: CloudTask) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [intervalSeconds, setIntervalSeconds] = useState(3600);
@@ -489,26 +503,26 @@ function CloudTaskFormModal({
     const n = name.trim();
     const p = prompt.trim();
     if (!n || !p) {
-      setError(tOutside("cloud.err.required"));
+      setError(t("cloud.err.required"));
       return;
     }
     if (n.length > 120) {
-      setError(tOutside("cloud.err.nameLen"));
+      setError(t("cloud.err.nameLen"));
       return;
     }
     if (p.length > 4000) {
-      setError(tOutside("cloud.err.promptLen"));
+      setError(t("cloud.err.promptLen"));
       return;
     }
     if (!conversationId) {
-      setError(tOutside("cloud.err.conversation"));
+      setError(t("cloud.err.conversation"));
       return;
     }
     let parsedMaxRuns: number | null = null;
     if (maxRuns.trim()) {
       const m = Number(maxRuns);
       if (!Number.isInteger(m) || m < 1) {
-        setError(tOutside("cloud.err.maxRuns"));
+        setError(t("cloud.err.maxRuns"));
         return;
       }
       parsedMaxRuns = m;
@@ -525,7 +539,7 @@ function CloudTaskFormModal({
       });
       onCreated(task);
     } catch {
-      setError(tOutside("cloud.err.createFailed"));
+      setError(t("cloud.err.createFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -535,27 +549,27 @@ function CloudTaskFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={tOutside("cloud.new.title")}
-      description={tOutside("cloud.new.desc")}
+      title={t("cloud.new.title")}
+      description={t("cloud.new.desc")}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            {tOutside("common.cancel")}
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={() => void submit()}
             loading={submitting}
             disabled={noConversations}
           >
-            {tOutside("cloud.new.create")}
+            {t("cloud.new.create")}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <Input
-          label={tOutside("cloud.field.name")}
-          placeholder={tOutside("cloud.field.namePlaceholder")}
+          label={t("cloud.field.name")}
+          placeholder={t("cloud.field.namePlaceholder")}
           value={name}
           maxLength={120}
           onChange={(e) => setName(e.target.value)}
@@ -566,13 +580,13 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-prompt"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            {tOutside("cloud.field.prompt")}
+            {t("cloud.field.prompt")}
           </label>
           <textarea
             id="cloud-task-prompt"
             rows={4}
             maxLength={4000}
-            placeholder={tOutside("cloud.field.promptPlaceholder")}
+            placeholder={t("cloud.field.promptPlaceholder")}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             className="scrollbar-thin resize-y rounded-md border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-border-strong"
@@ -583,7 +597,7 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-interval"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            {tOutside("cloud.field.schedule")}
+            {t("cloud.field.schedule")}
           </label>
           <select
             id="cloud-task-interval"
@@ -593,19 +607,19 @@ function CloudTaskFormModal({
           >
             {CLOUD_INTERVALS.map((opt) => (
               <option key={opt.seconds} value={opt.seconds}>
-                {tOutside(opt.labelKey)}
+                {t(opt.labelKey)}
               </option>
             ))}
           </select>
           <p className="text-[11px] text-text-muted">
-            {tOutside("cloud.field.scheduleHint")}
+            {t("cloud.field.scheduleHint")}
           </p>
         </div>
         <Input
-          label={tOutside("cloud.field.maxRuns")}
+          label={t("cloud.field.maxRuns")}
           type="number"
           min={1}
-          placeholder={tOutside("cloud.field.maxRunsPlaceholder")}
+          placeholder={t("cloud.field.maxRunsPlaceholder")}
           value={maxRuns}
           onChange={(e) => setMaxRuns(e.target.value)}
         />
@@ -614,11 +628,11 @@ function CloudTaskFormModal({
             htmlFor="cloud-task-conversation"
             className="text-xs font-medium uppercase tracking-wider text-text-secondary"
           >
-            {tOutside("cloud.field.conversation")}
+            {t("cloud.field.conversation")}
           </label>
           {noConversations ? (
             <p className="rounded-md border border-border bg-bg-secondary/50 px-3 py-2 text-xs text-text-muted">
-              {tOutside("cloud.field.conversationHint")}
+              {t("cloud.field.conversationHint")}
             </p>
           ) : (
             <>
@@ -630,12 +644,12 @@ function CloudTaskFormModal({
               >
                 {conversations.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.title || tOutside("conv.untitled")}
+                    {c.title || t("conv.untitled")}
                   </option>
                 ))}
               </select>
               <p className="text-[11px] text-text-muted">
-                {tOutside("cloud.field.conversationNote")}
+                {t("cloud.field.conversationNote")}
               </p>
             </>
           )}
@@ -667,12 +681,12 @@ function Toggle({
   return <Switch checked={enabled} onChange={onChange} label={label} />;
 }
 
-function intervalLabel(seconds: number): string {
+function intervalLabel(seconds: number, t: Translate): string {
   const match = CLOUD_INTERVALS.find((o) => o.seconds === seconds);
-  if (match) return tOutside(match.labelKey);
-  if (seconds % 86400 === 0) return `Every ${seconds / 86400} days`;
-  if (seconds % 3600 === 0) return `Every ${seconds / 3600} hours`;
-  return `Every ${seconds}s`;
+  if (match) return t(match.labelKey);
+  if (seconds % 86400 === 0) return t("cloud.interval.everyDays", { n: String(seconds / 86400) });
+  if (seconds % 3600 === 0) return t("cloud.interval.everyHours", { n: String(seconds / 3600) });
+  return t("cloud.interval.everySeconds", { n: String(seconds) });
 }
 
 function formatDate(iso: string | null): string {

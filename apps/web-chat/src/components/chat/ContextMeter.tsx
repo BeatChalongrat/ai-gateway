@@ -113,14 +113,14 @@ export function ContextMeter({
     label = t(info!.state_present ? "context.label.summarizedCount" : "context.label.noSummaryCount", counts);
     chip = t("context.chip.sent", counts);
     detail = t(key, counts);
-    tokensTitle = typeof info!.sent_tokens === "number" ? `${info!.sent_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens` : undefined;
+    tokensTitle = typeof info!.sent_tokens === "number" ? t("context.tokensTitle", { used: info!.sent_tokens.toLocaleString(), budget: info!.messages_budget.toLocaleString() }) : undefined;
   } else {
     const pct = meterPercent(info!);
     const n = Math.max(0, info!.est_messages_remaining);
     label = n > 0 && !info!.over_budget ? t("context.meter", { pct: String(pct), n: String(n) }) : t("context.meter.full", { pct: String(pct) });
     chip = t("context.chip.approaching", { pct: String(pct) });
     detail = t("context.detail.approaching", { trigger: String(Math.round(COMPACT_TRIGGER_RATIO * 100)) });
-    tokensTitle = `${info!.history_tokens.toLocaleString()} / ${info!.messages_budget.toLocaleString()} tokens`;
+    tokensTitle = t("context.tokensTitle", { used: info!.history_tokens.toLocaleString(), budget: info!.messages_budget.toLocaleString() });
   }
   // "Nothing to do" is true whenever the system summarizes on its own; with no
   // summary (memory off) there is nothing it will do, so it is not said.

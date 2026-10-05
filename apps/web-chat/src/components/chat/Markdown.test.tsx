@@ -99,8 +99,10 @@ describe("existing markdown behaviour (regression pins)", () => {
         {"See [Source: handbook.pdf] for details"}
       </Markdown>,
     );
+    // AM10 F — the pill's tooltip is the dictionary's sentence (kb.cite.from),
+    // the one the sources list under an answer already used.
     const pill = container.querySelector(
-      '[title="From knowledge base: handbook.pdf"]',
+      '[title="From the knowledge base: handbook.pdf"]',
     );
     expect(pill).not.toBeNull();
     expect(pill!.textContent).toContain("handbook.pdf");

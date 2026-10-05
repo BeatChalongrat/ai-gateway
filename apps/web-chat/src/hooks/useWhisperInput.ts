@@ -150,7 +150,7 @@ export function useWhisperInput(): UseWhisperInputReturn {
           tOutside("voice.err.whisperNotConfigured"),
         );
       } else {
-        setError(err instanceof Error ? err.message : "Transcription failed.");
+        setError(err instanceof Error ? err.message : tOutside("voice.err.transcribeFailed"));
       }
     } finally {
       setIsTranscribing(false);

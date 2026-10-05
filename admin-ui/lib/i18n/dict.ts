@@ -73,7 +73,10 @@ export const dictionaries: Record<Locale, Record<DictKey, string>> = {
 };
 
 /// The area modules, exposed so the parity test can report WHICH module a
-/// mismatch came from instead of just "the dictionary".
+/// mismatch came from instead of just "the dictionary". Every module that is
+/// spread into `en` above is listed here: one that is composed but not
+/// listed is read by nobody's per-module check (dict.am10.test.ts compares
+/// the two sets).
 export const modules = {
   common,
   nav,
@@ -83,6 +86,7 @@ export const modules = {
   tenancy,
   portaladmin,
   observability,
+  fallback,
   chatadmin,
   agentmarket,
 } as const;

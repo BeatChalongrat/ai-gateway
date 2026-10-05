@@ -257,6 +257,7 @@ export const en = {
   "obs.air.disabledHint": "Enable AI review to configure the provider and start scanning.",
 
   "obs.air.providerConfig": "Provider configuration",
+  "obs.air.providerCustom": "Custom",
   "obs.air.apiKey": "API key",
   "obs.air.keySetNote": "(key set)",
   "obs.air.keyPlaceholder": "••••••••• (key set — type to replace)",
@@ -589,6 +590,7 @@ export const th: Record<keyof typeof en, string> = {
   "obs.air.disabledHint": "เปิดใช้การตรวจสอบด้วย AI เพื่อตั้งค่าผู้ให้บริการและเริ่มสแกน",
 
   "obs.air.providerConfig": "การตั้งค่าผู้ให้บริการ",
+  "obs.air.providerCustom": "กำหนดเอง",
   "obs.air.apiKey": "คีย์ API",
   "obs.air.keySetNote": "(ตั้งค่าคีย์แล้ว)",
   "obs.air.keyPlaceholder": "••••••••• (มีคีย์แล้ว — พิมพ์เพื่อแทนที่)",

@@ -56,8 +56,8 @@ export function VideoPlayer({ fileId, filename, className }: Props) {
     return (
       <div
         className={`flex aspect-video w-full max-w-[480px] items-center justify-center rounded-lg border border-border bg-bg-elevated text-text-muted ${className ?? ""}`}
-        title={filename ?? "video"}
-        aria-label={filename ?? "video"}
+        title={filename ?? t("media.video")}
+        aria-label={filename ?? t("media.video")}
       >
         <VideoOff className="h-6 w-6" aria-hidden />
       </div>
@@ -67,7 +67,7 @@ export function VideoPlayer({ fileId, filename, className }: Props) {
     return (
       <div
         className={`aspect-video w-full max-w-[480px] animate-pulse rounded-lg bg-bg-elevated ${className ?? ""}`}
-        aria-label={`Loading ${filename ?? "video"}`}
+        aria-label={t("a11y.loadingImage", { name: filename ?? t("media.video") })}
       />
     );
   }
@@ -78,7 +78,7 @@ export function VideoPlayer({ fileId, filename, className }: Props) {
         controls
         preload="metadata"
         className="w-full rounded-lg border border-border bg-black"
-        aria-label={filename ?? "Generated video"}
+        aria-label={filename ?? t("media.generatedVideo")}
       />
       {/* FIX81 ③ — a generated video is a FILE the user keeps, not only a
           player. Saves straight from the loaded object URL (zero re-fetch),

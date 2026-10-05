@@ -474,11 +474,12 @@ function BrowserSection({
               {t("settings.browser.step1")} <span className="font-mono text-text-secondary">chrome://extensions</span>
             </li>
             <li>
-              {/* "Developer mode" / "Load unpacked" are Chrome's own labels — kept verbatim. */}
-              {t("settings.browser.step2.pre")} <span className="text-text-secondary">Developer mode</span> {t("settings.browser.step2.post")}
+              {/* "Developer mode" / "Load unpacked" are Chrome's own labels. Chrome
+                  shows them in ITS language, so the Thai text names both. */}
+              {t("settings.browser.step2.pre")} <span className="text-text-secondary">{t("settings.browser.step2.label")}</span> {t("settings.browser.step2.post")}
             </li>
             <li>
-              {t("settings.browser.step3.pre")} <span className="text-text-secondary">Load unpacked</span> {t("settings.browser.step3.post")}
+              {t("settings.browser.step3.pre")} <span className="text-text-secondary">{t("settings.browser.step3.label")}</span> {t("settings.browser.step3.post")}
             </li>
             <li>{t("settings.browser.step4")}</li>
           </ol>

@@ -6,8 +6,14 @@
 // Phase-2 i18n sweep: the copy now lives in the EN/TH dictionary and
 // follows the ACTIVE locale at the moment the error is localized
 // (tOutside). These strings are captured onto message objects at
-// stream time, so an already-rendered error keeps the language it was
-// created in — same behavior as before, minus the always-Thai bug.
+// stream time.
+//
+// AM10 F — a captured sentence used to keep the language it was created
+// in: switch to Thai and the failed turn already on screen stayed in
+// English. The message object keeps its CODE, so the screen now says the
+// sentence again from the code when it draws (errorSentence below) and a
+// switch re-translates it. What is captured is still what a banner or a
+// toast shows — those are gone before anyone switches.
 //
 // FIX47 Part A — every code the gateway can emit has a row here, and
 // the rows are split by whether sending the same request again can
@@ -21,7 +27,7 @@
 // the two tables drift.
 
 import { tOutside } from "@/lib/i18n";
-import type { DictKey } from "@/lib/i18n/dict";
+import { dictionaries, type DictKey } from "@/lib/i18n/dict";
 
 /** Codes for which a retry of the same request may succeed. */
 export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
@@ -240,6 +246,38 @@ export function localizeErrorCode(
 // transport talking, not a sentence for a person.
 function looksRaw(msg: string): boolean {
   return /[{}\[\]]|status=\d|body=|traceback|exception/i.test(msg);
+}
+
+// The two lines localizeErrorCode says for a code it does not know.
+const NEUTRAL_KEYS: readonly DictKey[] = ["error.generic", "error.unknownNoRetry"];
+
+/** AM10 F — the sentence for a failed turn in the language the screen is in
+ *  NOW. ``t`` is the caller's useT(), so the card follows a language switch
+ *  (and a LocaleScope) instead of keeping the language of the moment the
+ *  frame arrived.
+ *
+ *  · a code this table knows is said from the dictionary;
+ *  · an unknown code whose captured sentence is one of our own neutral
+ *    lines (in whichever language it was captured) is said again in this
+ *    one;
+ *  · any other captured sentence is the server's — shown as received, it
+ *    is not ours to translate;
+ *  · nothing captured (a row read back after a reload) gets the neutral
+ *    line, by the same retry rule as localizeErrorCode. */
+export function errorSentence(
+  t: (key: DictKey) => string,
+  code?: string,
+  captured?: string,
+  retryable?: boolean,
+): string {
+  const key = errorDictKey(code);
+  if (key) return t(key);
+  const said = captured?.trim();
+  if (said) {
+    const own = NEUTRAL_KEYS.find((k) => Object.values(dictionaries).some((d) => d[k] === said));
+    return own ? t(own) : said;
+  }
+  return t(isRetryable(code, retryable) ? "error.generic" : "error.unknownNoRetry");
 }
 
 /** Short notice shown under a message that a fallback model answered.

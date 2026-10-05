@@ -258,7 +258,7 @@ export function VideoGenForm({ model, conversationId }: Props) {
                 onChange={(e) => setDuration(Number(e.target.value))}
                 className="accent-rose-400"
               />
-              <span className="w-8 tabular-nums text-text-primary">{duration}s</span>
+              <span className="w-8 tabular-nums text-text-primary">{t("unit.secShort", { n: String(duration) })}</span>
             </label>
             <label className="flex items-center gap-2 text-sm text-text-secondary">
               <span>{t("media.resolution")}</span>

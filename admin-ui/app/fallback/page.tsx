@@ -97,7 +97,7 @@ export default function FallbackPage() {
       setConfirmSwitch(null);
       refetchAll();
     } catch (err) {
-      toast(getApiErrorMessage(err, t("fallback.switch.failed")), "error");
+      toast(getApiErrorMessage(err, t("fallback.switch.failed"), t), "error");
     } finally {
       setSwitching(false);
     }
@@ -305,7 +305,7 @@ function OverrideEditor({
       setText(null);
       onChanged();
     } catch (err) {
-      toast(getApiErrorMessage(err, t("fallback.overrides.failed")), "error");
+      toast(getApiErrorMessage(err, t("fallback.overrides.failed"), t), "error");
     } finally {
       setBusy(false);
     }
@@ -319,7 +319,7 @@ function OverrideEditor({
       setText(null);
       onChanged();
     } catch (err) {
-      toast(getApiErrorMessage(err, t("fallback.overrides.failed")), "error");
+      toast(getApiErrorMessage(err, t("fallback.overrides.failed"), t), "error");
     } finally {
       setBusy(false);
     }

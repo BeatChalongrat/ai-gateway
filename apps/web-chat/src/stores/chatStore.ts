@@ -634,7 +634,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       set({ conversationsLoaded: true, conversationsLoadFailed: true });
       if (err instanceof ApiError && err.status !== 401) {
-        set({ errorBanner: "Couldn't load conversations." });
+        set({ errorBanner: tOutside("sidebar.loadFailed") });
       }
     }
   },
@@ -713,7 +713,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         hits.push({
           conversation_id: r.conversation_id,
           message_id: r.message_id,
-          conversation_title: r.conversation_title?.trim() || "Untitled",
+          conversation_title: r.conversation_title?.trim() || tOutside("conv.untitled"),
           // FIX132 F20 — plain text, not **raw markdown**.
           snippet: snippetText(r.content, 140),
           date: r.date,
@@ -832,7 +832,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           c.id === id ? { ...c, is_pinned: prevPinned } : c,
         ),
       }));
-      get().setError("Couldn't update pin. Please try again.");
+      get().setError(tOutside("chat.toast.pinFailed"));
     }
   },
 
@@ -2252,7 +2252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // current — re-fetch to pick up the new chain.
       await get().loadMessages(convId);
     } catch {
-      get().setError("Couldn't switch branch.");
+      get().setError(tOutside("chat.toast.branchFailed"));
     }
   },
 

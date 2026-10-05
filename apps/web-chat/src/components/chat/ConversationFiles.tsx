@@ -86,7 +86,7 @@ export function ConversationFiles({ conversationId }: Props) {
           <div className="scrollbar-thin max-h-72 overflow-y-auto py-1">
             {loading ? (
               <div className="px-3 py-3 text-center text-[11px] text-text-muted">
-                Loading…
+                {t("common.loading")}
               </div>
             ) : files && files.length > 0 ? (
               files.map((f) => <FileRow key={f.id} file={f} />)

@@ -392,7 +392,7 @@ function MobileTopActions({ onNewChat }: { onNewChat: () => void }) {
       <button
         type="button"
         aria-label={t("sidebar.newChat")}
-        title="New chat"
+        title={t("sidebar.newChat")}
         onClick={onNewChat}
         className={SUBTLE_TOPBAR_BTN}
       >
@@ -498,6 +498,7 @@ function NewChatIcon() {
 }
 
 function OfflineIndicator() {
+  const t = useT();
   const [online, setOnline] = useState(true);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -517,7 +518,7 @@ function OfflineIndicator() {
       className="ml-auto inline-flex items-center gap-1 rounded-full bg-status-warning/15 px-2 py-0.5 text-[10px] font-medium text-status-warning ring-1 ring-status-warning/30"
     >
       <span className="h-1.5 w-1.5 rounded-full bg-status-warning" aria-hidden />
-      Offline
+      {t("status.offline")}
     </span>
   );
 }

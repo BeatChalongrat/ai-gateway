@@ -144,7 +144,7 @@ export function useVoiceInput(): UseVoiceInputReturn {
         stop();
         return;
       }
-      setError(`Voice input error: ${e.error}`);
+      setError(tOutside("voice.err.generic", { error: e.error }));
     };
 
     rec.onend = () => {

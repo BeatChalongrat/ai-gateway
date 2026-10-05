@@ -21,11 +21,18 @@ import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useToast } from "../../../components/ui/Toast";
 import { api, ApiError } from "../../../lib/api";
-import { useT } from "../../../lib/i18n";
+import { useT, type DictKey } from "../../../lib/i18n";
 
 /// The translate function handed down to the module-scope helpers below,
 /// which render copy but sit outside the component that owns the hook.
 type Translate = ReturnType<typeof useT>;
+
+// A member's role as a person reads it; the value the API takes stays the identifier.
+const ROLE_LABEL: Record<"admin" | "member" | "viewer", DictKey> = {
+  admin: "tenancy.role.admin",
+  member: "tenancy.role.member",
+  viewer: "tenancy.role.viewer",
+};
 
 interface ProjectMemberRow {
   user_id: string;
@@ -251,7 +258,7 @@ export default function ProjectDetailModal({
         `/admin/projects/${projectId}/members/${userId}`,
         { role }
       );
-      toast(t("tenancy.detail.roleChanged", { role }));
+      toast(t("tenancy.detail.roleChanged", { role: t(ROLE_LABEL[role]) }));
       await fetchDetail();
     } catch (err) {
       const msg =
@@ -852,7 +859,7 @@ function MemberRow({
                   cursor: "pointer",
                 }}
               >
-                {r}
+                {t(ROLE_LABEL[r])}
                 {r === member.role ? <Icon name="check" size={14} /> : null}
               </button>
             ))}
@@ -892,6 +899,7 @@ function MemberRow({
 }
 
 function RolePill({ role }: { role: "admin" | "member" | "viewer" }) {
+  const t = useT();
   const colour =
     role === "admin"
       ? "var(--color-accent-500)"
@@ -911,7 +919,7 @@ function RolePill({ role }: { role: "admin" | "member" | "viewer" }) {
         textTransform: "capitalize",
       }}
     >
-      {role}
+      {ROLE_LABEL[role] ? t(ROLE_LABEL[role]) : role}
     </span>
   );
 }
@@ -1153,9 +1161,9 @@ function AddMemberModal({
               setRole(e.target.value as "admin" | "member" | "viewer")
             }
           >
-            <option value="admin">Admin</option>
-            <option value="member">Member</option>
-            <option value="viewer">Viewer</option>
+            <option value="admin">{t("tenancy.role.admin")}</option>
+            <option value="member">{t("tenancy.role.member")}</option>
+            <option value="viewer">{t("tenancy.role.viewer")}</option>
           </select>
         </div>
       </div>

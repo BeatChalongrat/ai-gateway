@@ -23,7 +23,16 @@ export class ApiError extends Error {
   }
 }
 
-export function getApiErrorMessage(error: any, fallback: string): string {
+// AM10 F — `t` (the page's translate function) is for the two endings this
+// client words itself: a request that timed out (status 0 — request() below
+// writes that sentence, the gateway never saw the call) and one that never
+// left the browser. With `t` they are said in the page's language; a sentence
+// the gateway wrote is shown as received either way.
+export function getApiErrorMessage(
+  error: any,
+  fallback: string,
+  t?: (key: "state.errorTimedOut" | "state.errorNetwork") => string,
+): string {
   const body = error?.body;
   const nested = body?.error;
   const candidate =
@@ -34,12 +43,13 @@ export function getApiErrorMessage(error: any, fallback: string): string {
     (typeof body === "string" && body.trim()) ||
     "";
 
+  if (t && error?.status === 0) return `${fallback}: ${t("state.errorTimedOut")}`;
   if (candidate) return candidate;
   if (error?.status === 0) return `${fallback}: request timed out`;
   if (typeof error?.status === "number" && error.status > 0) {
     return `${fallback} (HTTP ${error.status})`;
   }
-  return `${fallback}: network request failed`;
+  return `${fallback}: ${t ? t("state.errorNetwork") : "network request failed"}`;
 }
 
 function readCookie(name: string): string {

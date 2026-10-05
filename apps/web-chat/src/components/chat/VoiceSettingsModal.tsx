@@ -24,6 +24,7 @@ import { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import { OPENAI_VOICES, useVoiceStore, type OpenAIVoice } from "@/stores/voiceStore";
 
 interface Props {
@@ -31,16 +32,16 @@ interface Props {
   onClose: () => void;
 }
 
-const INPUT_LANGS: { value: string; label: string }[] = [
-  { value: "auto", label: "Auto-detect (browser locale)" },
-  { value: "en-US", label: "English (US)" },
-  { value: "en-GB", label: "English (UK)" },
-  { value: "th-TH", label: "Thai" },
-  { value: "ja-JP", label: "Japanese" },
-  { value: "zh-CN", label: "Chinese (Mandarin)" },
-  { value: "es-ES", label: "Spanish" },
-  { value: "fr-FR", label: "French" },
-  { value: "de-DE", label: "German" },
+const INPUT_LANGS: { value: string; labelKey: DictKey }[] = [
+  { value: "auto", labelKey: "voice.lang.auto" },
+  { value: "en-US", labelKey: "voice.lang.enUS" },
+  { value: "en-GB", labelKey: "voice.lang.enGB" },
+  { value: "th-TH", labelKey: "voice.lang.th" },
+  { value: "ja-JP", labelKey: "voice.lang.ja" },
+  { value: "zh-CN", labelKey: "voice.lang.zh" },
+  { value: "es-ES", labelKey: "voice.lang.es" },
+  { value: "fr-FR", labelKey: "voice.lang.fr" },
+  { value: "de-DE", labelKey: "voice.lang.de" },
 ];
 
 export function VoiceSettingsModal({ open, onClose }: Props) {
@@ -115,7 +116,7 @@ export function VoiceSettingsModal({ open, onClose }: Props) {
           <Dropdown
             value={inputLang}
             onChange={(v) => setInputLang(v)}
-            options={INPUT_LANGS}
+            options={INPUT_LANGS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
           />
         </SettingsCard>
 
@@ -236,10 +237,10 @@ export function FieldLabel({
 
 export function DoneButton({
   onClick,
-  label = "Done",
+  label,
 }: {
   onClick: () => void;
-  label?: string;
+  label: string;
 }) {
   return (
     <button

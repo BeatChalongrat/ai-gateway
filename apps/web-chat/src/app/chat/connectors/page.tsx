@@ -580,17 +580,22 @@ function ConnectorCard({
 // Health status dot — green when Connected, red when Disconnected, grey
 // otherwise (e.g. an uninstalled catalog entry with no live session).
 function HealthDot({ status }: { status: string }) {
+  const t = useT();
   const color =
     status === "Connected"
       ? "bg-status-success"
       : status === "Disconnected"
         ? "bg-status-danger"
         : "bg-text-muted";
+  // The host names the state in English; the two it is known to send are
+  // said in the reader's language, any other is shown as the host wrote it.
+  const label =
+    status === "Connected" ? t("connectors.status.connected") : status === "Disconnected" ? t("connectors.status.disconnected") : status;
   return (
     <span
       className={`h-2 w-2 shrink-0 rounded-full ${color}`}
-      title={status}
-      aria-label={status}
+      title={label}
+      aria-label={label}
     />
   );
 }

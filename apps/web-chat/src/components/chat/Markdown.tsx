@@ -38,7 +38,7 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 
-import { tOutside } from "@/lib/i18n";
+import { tOutside, useT } from "@/lib/i18n";
 import { normalizeMathDelimiters } from "@/lib/mathDelimiters";
 import { remarkCurrencyGuard } from "@/lib/remarkCurrencyGuard";
 
@@ -153,9 +153,10 @@ const markdownComponents = {
 };
 
 function CitationPill({ filename }: { filename: string }) {
+  const t = useT();
   return (
     <span
-      title={`From knowledge base: ${filename}`}
+      title={t("kb.cite.from", { name: filename })}
       className="mx-0.5 inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-0.5 align-baseline text-[11px] font-medium text-text-secondary"
     >
       <svg

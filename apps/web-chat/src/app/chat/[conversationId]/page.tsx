@@ -256,7 +256,7 @@ export default function ConversationPage() {
           await setConversationModel(convId, modelId);
           const label =
             modelId === AUTO_MODEL_ID
-              ? "Auto"
+              ? tOutside("model.auto.name")
               : getModelById(modelId)?.name ?? modelId;
           toast(tOutside("chat.toast.modelSwitched", { label }));
         } catch (err) {

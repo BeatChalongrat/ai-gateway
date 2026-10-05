@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import type { ContextSource, ContextSourceType } from "@/lib/types";
 
 interface Props {
@@ -49,18 +50,19 @@ const SOURCE_ICONS: Record<ContextSourceType, JSX.Element> = {
 	memory_saved: <Brain className="h-3.5 w-3.5 text-text-muted" />,
 };
 
-const SOURCE_LABELS: Record<ContextSourceType, string> = {
-	saved_memory: "saved memory",
-	conversation_state: "conversation state",
-	past_conversation: "past conversation",
-	file_context: "file context",
-	compacted_history: "compacted history",
-	memory_saved: "memory saved",
+const SOURCE_LABEL_KEYS: Record<ContextSourceType, DictKey> = {
+	saved_memory: "sources.type.saved_memory",
+	conversation_state: "sources.type.conversation_state",
+	past_conversation: "sources.type.past_conversation",
+	file_context: "sources.type.file_context",
+	compacted_history: "sources.type.compacted_history",
+	memory_saved: "sources.type.memory_saved",
 };
 
 export function SourcesCard({ sources, onEditMemory, onOpenConversation }: Props) {
+	const t = useT();
 	const [expanded, setExpanded] = useState(false);
-	// Local hide list — "Not relevant" dismissal is client-only
+	// Local hide list — the not-relevant dismissal is client-only
 	// today (no backend feedback path yet). Hidden ids stay
 	// hidden for the lifetime of the component instance.
 	const [hidden, setHidden] = useState<Set<string>>(() => new Set());
@@ -81,7 +83,7 @@ export function SourcesCard({ sources, onEditMemory, onOpenConversation }: Props
 				aria-expanded={expanded}
 			>
 				<span>
-					Sources ({visible.length})
+					{t("sources.title", { n: String(visible.length) })}
 				</span>
 				{expanded ? (
 					<ChevronUp className="h-3.5 w-3.5" aria-hidden />
@@ -136,7 +138,8 @@ function SourceRow({
 	const icon = SOURCE_ICONS[source.source_type] ?? (
 		<FileText className="h-3.5 w-3.5 text-text-muted" />
 	);
-	const typeLabel = SOURCE_LABELS[source.source_type] ?? source.source_type;
+	const typeKey = SOURCE_LABEL_KEYS[source.source_type];
+	const typeLabel = typeKey ? t(typeKey) : source.source_type;
 	const meta = secondaryLine(source);
 	const label = localizedLabel(source, t);
 
@@ -154,16 +157,16 @@ function SourceRow({
 			</div>
 			<div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
 				{onEdit ? (
-					<RowAction label="Edit memory" onClick={onEdit}>
+					<RowAction label={t("sources.action.editMemory")} onClick={onEdit}>
 						<Pencil className="h-3 w-3" aria-hidden />
 					</RowAction>
 				) : null}
 				{onOpen ? (
-					<RowAction label="Open conversation" onClick={onOpen}>
+					<RowAction label={t("sources.action.openConversation")} onClick={onOpen}>
 						<ExternalLink className="h-3 w-3" aria-hidden />
 					</RowAction>
 				) : null}
-				<RowAction label="Not relevant" onClick={onHide}>
+				<RowAction label={t("sources.action.notRelevant")} onClick={onHide}>
 					<X className="h-3 w-3" aria-hidden />
 				</RowAction>
 			</div>

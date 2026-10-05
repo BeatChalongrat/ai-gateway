@@ -78,7 +78,7 @@ export const en = {
 
   // ── Login ────────────────────────────────────────────────
   "dash.login.identifier": "Username or email",
-  "dash.login.identifierPlaceholder": "admin or you@example.com",
+  "dash.login.identifierPlaceholder": "Username or e-mail",
   "dash.login.password": "Password",
   "dash.login.passwordPlaceholder": "Enter password",
   "dash.login.submit": "Sign In",
@@ -151,7 +151,7 @@ export const th: Record<keyof typeof en, string> = {
 
   // ── Login ────────────────────────────────────────────────
   "dash.login.identifier": "ชื่อผู้ใช้หรืออีเมล",
-  "dash.login.identifierPlaceholder": "admin หรือ you@example.com",
+  "dash.login.identifierPlaceholder": "ชื่อผู้ใช้หรืออีเมล",
   "dash.login.password": "รหัสผ่าน",
   "dash.login.passwordPlaceholder": "กรอกรหัสผ่าน",
   "dash.login.submit": "เข้าสู่ระบบ",

@@ -40,6 +40,8 @@
 import { useEffect, useState } from "react";
 import { siGithub, siGmail, siGooglecalendar, siGoogledrive, siJira, siNotion, siPostgresql } from "simple-icons";
 
+import { useT } from "@/lib/i18n";
+
 interface Mark {
   path: string;
   hex: string;
@@ -106,6 +108,7 @@ export function resetOwnerMarkCache(): void {
 }
 
 export function ConnectorIcon({ connectorId, name }: { connectorId: string; name: string }) {
+  const t = useT();
   const mark = MARKS[connectorId];
   const owner = useOwnerMark(connectorId);
   if (owner === true) {
@@ -117,7 +120,7 @@ export function ConnectorIcon({ connectorId, name }: { connectorId: string; name
         data-testid={`connector-icon-owner-${connectorId}`}
       >
         {/* eslint-disable-next-line @next/next/no-img-element -- a plain same-origin SVG; next/image adds nothing here */}
-        <img src={ownerMarkPath(connectorId) ?? undefined} alt={`${name} logo`} width={20} height={20} />
+        <img src={ownerMarkPath(connectorId) ?? undefined} alt={t("connectors.logoAlt", { name })} width={20} height={20} />
       </span>
     );
   }
@@ -141,7 +144,7 @@ export function ConnectorIcon({ connectorId, name }: { connectorId: string; name
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-white"
       data-testid={`connector-icon-${connectorId}`}
     >
-      <svg role="img" aria-label={`${name} logo`} viewBox="0 0 24 24" width={20} height={20} fill={`#${mark.hex}`}>
+      <svg role="img" aria-label={t("connectors.logoAlt", { name })} viewBox="0 0 24 24" width={20} height={20} fill={`#${mark.hex}`}>
         <path d={mark.path} />
       </svg>
     </span>

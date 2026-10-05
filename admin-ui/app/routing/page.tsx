@@ -352,6 +352,7 @@ function ModelRow({
   index: number;
   isLast: boolean;
 }) {
+  const t = useT();
   const dotColor = MODEL_DOT_COLORS[index % MODEL_DOT_COLORS.length];
   const pct = totalRequests > 0 ? Math.round((count / totalRequests) * 100) : 0;
   return (
@@ -383,7 +384,7 @@ function ModelRow({
           whiteSpace: "nowrap",
         }}
       >
-        {model || "unknown"}
+        {model || t("infra.routing.modelUnknown")}
       </code>
       <span
         style={{

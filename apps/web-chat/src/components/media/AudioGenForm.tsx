@@ -217,7 +217,7 @@ export function AudioGenForm({ model, mode, conversationId }: Props) {
                 onChange={(e) => setDuration(Number(e.target.value))}
                 className="accent-emerald-400"
               />
-              <span className="w-10 tabular-nums text-text-primary">{duration}s</span>
+              <span className="w-10 tabular-nums text-text-primary">{t("unit.secShort", { n: String(duration) })}</span>
             </label>
           )}
           {phase === "failed" && errorCode ? (

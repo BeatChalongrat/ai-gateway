@@ -81,11 +81,11 @@ export default function SharedConversationPage() {
             <span className="text-sm font-semibold tracking-tight">
               SRAN Chat
             </span>
-            <span className="text-[11px] text-text-muted">· Shared</span>
+            <span className="text-[11px] text-text-muted">· {t("shared.badge")}</span>
           </div>
           {view.expires_at ? (
             <span className="text-[10px] text-text-muted">
-              Expires {new Date(view.expires_at).toLocaleString()}
+              {t("share.expiresAt", { date: new Date(view.expires_at).toLocaleString() })}
             </span>
           ) : null}
         </div>
@@ -165,7 +165,7 @@ export default function SharedConversationPage() {
       </main>
 
       <footer className="mx-auto max-w-3xl px-4 pb-8 pt-2 text-center text-[10px] text-text-muted">
-        Powered by SRAN Chat
+        {t("shared.poweredBy")} SRAN Chat
       </footer>
     </div>
   );

@@ -37,7 +37,7 @@ import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../components/ui/Toast";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
-import { useT, type DictKey } from "../../lib/i18n";
+import { useDateLocale, useT, type DictKey } from "../../lib/i18n";
 
 // -----------------------------------------------------------------------
 // Constants + palettes
@@ -358,6 +358,7 @@ function JsonBlock({ data }: { data: unknown }) {
 export default function AuditLogPage() {
   const { toast } = useToast();
   const t = useT();
+  const dateLocale = useDateLocale();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("7d");
@@ -717,7 +718,7 @@ export default function AuditLogPage() {
             <div
               key={i}
               title={t("obs.audit.timeline.tooltip", {
-                day: b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+                day: b.day.toLocaleDateString(dateLocale, { month: "short", day: "numeric" }),
                 count: b.total,
               })}
               style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%", minWidth: 4 }}
@@ -745,7 +746,7 @@ export default function AuditLogPage() {
         <div style={{ display: "flex", gap: 3, marginTop: 3 }}>
           {timeline.map((b, i) => (
             <div key={i} style={{ flex: 1, fontSize: 10, color: "var(--text-muted)", textAlign: "center", minWidth: 4, whiteSpace: "nowrap", overflow: "hidden" }}>
-              {i % labelEvery === 0 ? b.day.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : ""}
+              {i % labelEvery === 0 ? b.day.toLocaleDateString(dateLocale, { month: "short", day: "numeric" }) : ""}
             </div>
           ))}
         </div>
@@ -990,7 +991,7 @@ export default function AuditLogPage() {
                   g.kind === "header" ? (
                     <tr key={g.key} style={{ background: "var(--bg-subtle)" }}>
                       <td colSpan={7} style={{ padding: "8px 16px", borderTop: "1px solid var(--border-color)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                        {formatDayHeader(g.day, t("obs.audit.unknownDate"))}
+                        {formatDayHeader(g.day, t("obs.audit.unknownDate"), dateLocale)}
                         <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>
                           {t("obs.audit.dayEvents", { n: g.count })}
                         </span>
@@ -1052,6 +1053,7 @@ function AuditRowView({
   parseDetails: (d: string | null) => unknown;
 }) {
   const t = useT();
+  const dateLocale = useDateLocale();
   const handleKey = (e: KeyboardEvent<HTMLTableRowElement>) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -1063,8 +1065,8 @@ function AuditRowView({
   const timeLabel = !ts
     ? "—"
     : grouped
-      ? ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-      : `${ts.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${ts.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+      ? ts.toLocaleTimeString(dateLocale, { hour: "numeric", minute: "2-digit" })
+      : `${ts.toLocaleDateString(dateLocale, { month: "short", day: "numeric" })}, ${ts.toLocaleTimeString(dateLocale, { hour: "numeric", minute: "2-digit" })}`;
 
   // AM7: an admin-ui session's actor key is "session:<admin id>" (most writers leave session_id_prefix empty)
   const actorKind = row.session_id_prefix || row.actor_key_id.startsWith("session:") ? t("obs.audit.actor.session") : t("obs.audit.actor.apiKey");
@@ -1191,11 +1193,11 @@ function DetailField({ label, value, mono }: { label: string; value: string; mon
 // -----------------------------------------------------------------------
 
 // "2026-06-29" → "Mon, Jun 29"
-function formatDayHeader(iso: string, unknownLabel: string): string {
+function formatDayHeader(iso: string, unknownLabel: string, dateLocale: string): string {
   if (iso === "—") return unknownLabel;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return d.toLocaleDateString(dateLocale, { weekday: "short", month: "short", day: "numeric" });
 }
 
 function PaginationButton({

@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useTheme } from "./ThemeProvider";
+import { useT } from "../lib/i18n";
 
 export function ThemeToggle() {
   const { theme, toggle } = useTheme();
+  const t = useT();
+  const label = t(theme === "dark" ? "app.theme.toLight" : "app.theme.toDark");
   // Don't render SVG until after hydration — the sun/moon depends on the
   // resolved theme, which only becomes accurate once the client effect in
   // ThemeProvider reads localStorage. Rendering a neutral placeholder
@@ -15,8 +18,8 @@ export function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      aria-label={label}
+      title={label}
       type="button"
       style={{
         width: 30,

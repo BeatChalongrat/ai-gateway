@@ -21,6 +21,7 @@
 import { create } from "zustand";
 
 import { api, ApiError } from "@/lib/api";
+import { tOutside } from "@/lib/i18n";
 import {
   checkKBFile,
   indexingOf,
@@ -187,7 +188,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       set({
         loading: false,
         loaded: true,
-        error: err instanceof Error ? err.message : "Failed to load",
+        error: err instanceof Error ? err.message : tOutside("kb.loadFailed"),
       });
     }
   },
@@ -235,7 +236,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
       }
     } catch (err) {
       // Surface for the page to render; don't blow up the store.
-      set({ error: err instanceof Error ? err.message : "Failed to load" });
+      set({ error: err instanceof Error ? err.message : tOutside("kb.loadFailed") });
     } finally {
       docsInFlight.delete(kbId);
       if (docsWanted.delete(kbId) || stale) void get().loadDocuments(kbId);

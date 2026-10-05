@@ -342,7 +342,7 @@ export function Sidebar({
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const offScreen = isDesktop ? isHidden : !open;
   const userDisplay =
-    user?.email || (user?.user_id ? user.user_id.slice(0, 8) : "Guest");
+    user?.email || (user?.user_id ? user.user_id.slice(0, 8) : t("sidebar.guest"));
   const userInitial = (userDisplay || "?").charAt(0).toUpperCase();
 
   return (
@@ -1025,6 +1025,7 @@ function MicIcon() {
 // Renders only the arrow when count is 0 so the menu row stays
 // quiet for users who don't have any suggestions.
 function MemoryTrailing() {
+  const t = useT();
   const count = useMemoryPendingStore((s) => s.count);
   if (count <= 0) {
     return <ArrowIcon />;
@@ -1033,7 +1034,7 @@ function MemoryTrailing() {
     <span className="inline-flex items-center gap-1.5">
       <span
         className="inline-flex min-w-[18px] items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white"
-        aria-label={`${count} pending preference${count === 1 ? "" : "s"}`}
+        aria-label={t(count === 1 ? "sidebar.pendingPrefs.one" : "sidebar.pendingPrefs.many", { n: String(count) })}
       >
         {count > 99 ? "99+" : count}
       </span>

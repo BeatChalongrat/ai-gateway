@@ -45,7 +45,7 @@ export class ErrorBoundary extends Component<Props, State> {
             {tOutside("boundary.title")}
           </h3>
           <p className="mt-1 text-[11px] text-text-muted">
-            {error.message || "An unexpected error occurred while rendering."}
+            {error.message || tOutside("boundary.unexpected")}
           </p>
           <button
             type="button"

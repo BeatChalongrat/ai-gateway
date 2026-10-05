@@ -377,7 +377,7 @@ export function ToolCard({
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2">
           {activity.durationMs != null ? (
-            <span className="text-xs text-text-muted">{activity.durationMs} ms</span>
+            <span className="text-xs text-text-muted">{t("unit.ms", { n: String(activity.durationMs) })}</span>
           ) : null}
           {hasBody ? (
             expanded ? (
@@ -426,7 +426,7 @@ export function ToolCard({
             <img
               key={i}
               src={uri}
-              alt="tool screenshot"
+              alt={t("toolcard.screenshotAlt")}
               className="mx-3 mb-2 max-h-64 rounded border border-border-subtle"
             />
           ))

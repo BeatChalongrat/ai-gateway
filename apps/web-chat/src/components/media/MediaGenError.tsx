@@ -7,6 +7,7 @@
 import { AlertTriangle, KeyRound, RefreshCw, X } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 
 export type MediaGenErrorCode =
   | "provider_unavailable"
@@ -15,12 +16,12 @@ export type MediaGenErrorCode =
   | "timeout"
   | "unknown";
 
-const TITLES: Record<MediaGenErrorCode, string> = {
-  provider_unavailable: "Provider not configured",
-  budget_exceeded: "Budget limit reached",
-  content_policy: "Content policy violation",
-  timeout: "Generation timed out",
-  unknown: "Something went wrong",
+const TITLE_KEYS: Record<MediaGenErrorCode, DictKey> = {
+  provider_unavailable: "media.err.provider_unavailable",
+  budget_exceeded: "media.err.budget_exceeded",
+  content_policy: "media.err.content_policy",
+  timeout: "media.err.timeout",
+  unknown: "media.err.unknown",
 };
 
 /** Map an ApiError's HTTP status + error code to a MediaGenErrorCode. */
@@ -83,13 +84,13 @@ export function MediaGenError({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-status-danger" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-text-primary">{TITLES[errorCode]}</p>
+          <p className="font-medium text-text-primary">{t(TITLE_KEYS[errorCode])}</p>
           {errorMessage ? (
             <p className="mt-0.5 break-words text-xs text-text-secondary">{errorMessage}</p>
           ) : null}
           {errorCode === "provider_unavailable" && !isAdmin ? (
             <p className="mt-0.5 text-xs text-text-muted">
-              Contact your administrator to enable this provider.
+              {t("media.err.contactAdmin")}
             </p>
           ) : null}
         </div>
@@ -112,7 +113,7 @@ export function MediaGenError({
               className="focus-ring inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-rose-600"
             >
               <KeyRound className="h-3 w-3" aria-hidden />
-              Add key
+              {t("media.err.addKey")}
             </a>
           ) : null}
           {showRetry ? (
@@ -122,7 +123,7 @@ export function MediaGenError({
               className="focus-ring inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
             >
               <RefreshCw className="h-3 w-3" aria-hidden />
-              Retry
+              {t("common.retry")}
             </button>
           ) : null}
         </div>

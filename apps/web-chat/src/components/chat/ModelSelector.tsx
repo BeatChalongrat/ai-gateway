@@ -860,6 +860,13 @@ export function formatModelTooltip(
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+// What a row's kind badge is called (the section headings above use the same names).
+const MEDIA_KIND_LABEL_KEY: Record<"video" | "audio" | "tts", DictKey> = {
+  video: "model.section.video",
+  audio: "model.section.audio",
+  tts: "model.section.tts",
+};
+
 const MEDIA_BADGE: Record<"video" | "audio" | "tts", string> = {
   video: "🎬",
   audio: "🎵",
@@ -945,8 +952,8 @@ export function ModelRow({
       <div className="flex w-12 shrink-0 flex-col items-end gap-1">
       {mediaKind ? (
         <span
-          title={mediaKind}
-          aria-label={mediaKind}
+          title={t(MEDIA_KIND_LABEL_KEY[mediaKind])}
+          aria-label={t(MEDIA_KIND_LABEL_KEY[mediaKind])}
           className="inline-flex shrink-0 items-center rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-medium text-rose-400"
         >
           {MEDIA_BADGE[mediaKind]}

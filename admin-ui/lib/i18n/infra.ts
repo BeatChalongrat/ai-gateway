@@ -143,6 +143,7 @@ export const en = {
   "infra.media.allowMock": "Allow the test 'mock' provider (off in production)",
   "infra.media.save": "Save",
   "infra.media.saved": "Saved.",
+  "infra.media.saveFailed": "Save failed",
   "infra.media.placeholder": "e.g. openai:gpt-image-1",
 
   // ── Model registry ────────────────────────────────────────
@@ -190,6 +191,7 @@ export const en = {
   "infra.models.capOn": "{cap}: on — the gateway offers this to clients. Click to turn off.",
   "infra.models.capOff": "{cap}: off — clients will not offer it for this model. Click to turn on (after testing it).",
   "infra.models.capSaveFailed": "Could not save the capability",
+  "infra.models.saveFailed": "Save failed",
   "infra.models.cap.video": "video",
   "infra.models.cap.audio": "audio",
   "infra.models.cap.tts": "speech",
@@ -367,6 +369,7 @@ export const en = {
   "infra.routing.toastDeleted": "Keyword rule deleted",
   "infra.routing.saveFailedStatus": "Save failed ({status})",
   "infra.routing.saveFailed": "Save failed",
+  "infra.routing.modelUnknown": "unknown",
   "infra.routing.deleteFailedStatus": "Delete failed ({status})",
   "infra.routing.deleteFailed": "Delete failed",
   "infra.routing.confirmDeleteTitle": "Delete keyword rule",
@@ -579,6 +582,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.media.allowMock": "อนุญาตผู้ให้บริการทดสอบ 'mock' (ปิดใน production)",
   "infra.media.save": "บันทึก",
   "infra.media.saved": "บันทึกแล้ว",
+  "infra.media.saveFailed": "บันทึกไม่สำเร็จ",
   "infra.media.placeholder": "เช่น openai:gpt-image-1",
 
   // ── Model registry ────────────────────────────────────────
@@ -610,6 +614,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.capOn": "{cap}: เปิด — เกตเวย์เสนอความสามารถนี้ให้ไคลเอนต์ คลิกเพื่อปิด",
   "infra.models.capOff": "{cap}: ปิด — ไคลเอนต์จะไม่เสนอความสามารถนี้ให้โมเดลนี้ คลิกเพื่อเปิด (หลังทดสอบแล้ว)",
   "infra.models.capSaveFailed": "บันทึกความสามารถไม่สำเร็จ",
+  "infra.models.saveFailed": "บันทึกไม่สำเร็จ",
   "infra.models.cap.video": "สร้างวิดีโอ",
   "infra.models.cap.audio": "สร้างเสียง",
   "infra.models.cap.tts": "แปลงข้อความเป็นเสียง",
@@ -793,6 +798,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.routing.toastDeleted": "ลบกฎคำสำคัญแล้ว",
   "infra.routing.saveFailedStatus": "บันทึกไม่สำเร็จ ({status})",
   "infra.routing.saveFailed": "บันทึกไม่สำเร็จ",
+  "infra.routing.modelUnknown": "ไม่ทราบ",
   "infra.routing.deleteFailedStatus": "ลบไม่สำเร็จ ({status})",
   "infra.routing.deleteFailed": "ลบไม่สำเร็จ",
   "infra.routing.confirmDeleteTitle": "ลบกฎคำสำคัญ",

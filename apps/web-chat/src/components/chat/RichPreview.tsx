@@ -149,9 +149,7 @@ export function SheetGrid({
       </div>
 
       <div className="shrink-0 border-t border-border px-3 py-1.5 text-xs text-text-muted">
-        {t("preview.rowCount")
-          .replace("{shown}", String(shown))
-          .replace("{total}", String(sheet.total_rows))}
+        {t("preview.rowCount", { shown: String(shown), total: String(sheet.total_rows) })}
         {sheet.columns_truncated && ` · ${t("preview.wideSheet")}`}
       </div>
 
@@ -285,9 +283,7 @@ export function SlidesView({
             className="rounded-lg border border-border bg-bg-secondary p-4"
           >
             <p className="mb-2 text-xs uppercase tracking-wide text-text-muted">
-              {t("preview.slideN")
-                .replace("{n}", String(slide.index))
-                .replace("{total}", String(deck.total_slides))}
+              {t("preview.slideN", { n: String(slide.index), total: String(deck.total_slides) })}
             </p>
             {slide.title && (
               <p className="mb-2 text-base font-semibold text-text-primary">{slide.title}</p>

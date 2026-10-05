@@ -175,7 +175,11 @@ export function DocPlanCard({ convId, plan, messageId, files, outcomes }: Props)
   const format = (plan.format || "docx").toUpperCase();
   const settings = plan.document_settings || {};
   const language = ((settings.language as string) || "en").toUpperCase();
-  const orientation = (settings.orientation as string) || "portrait";
+  const rawOrientation = (settings.orientation as string) || "portrait";
+  // The two orientations a plan can ask for are said in the reader's
+  // language; anything else is the plan's own word.
+  const orientation =
+    rawOrientation === "portrait" ? t("plan.doc.portrait") : rawOrientation === "landscape" ? t("plan.doc.landscape") : rawOrientation;
   const pageSize = (settings.page_size as string) || "A4";
   const actions = plan.actions ?? [];
 

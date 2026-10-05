@@ -37,7 +37,7 @@ function MediaDestinations() {
       setStatus(t("infra.media.saved"));
       refetch();
     } catch (e) {
-      setStatus(getApiErrorMessage(e, "Save failed"));
+      setStatus(getApiErrorMessage(e, t("infra.media.saveFailed"), t));
     }
   }, [t, refetch]);
 
@@ -350,7 +350,7 @@ function CapabilityTest({
       setPlan(p);
       setPhase("plan");
     } catch (e) {
-      setError(getApiErrorMessage(e, t("infra.models.capTestFailed")));
+      setError(getApiErrorMessage(e, t("infra.models.capTestFailed"), t));
     }
   };
 
@@ -373,7 +373,7 @@ function CapabilityTest({
         if (r.reasoning_strategy) patch.reasoning_strategy = r.reasoning_strategy;
         onResult(item.id, patch);
       } catch (e) {
-        setError(getApiErrorMessage(e, t("infra.models.capTestFailed")));
+        setError(getApiErrorMessage(e, t("infra.models.capTestFailed"), t));
         break;
       }
     }
@@ -832,7 +832,7 @@ export default function ModelsPage() {
       await api.patch(`/admin/models/${id}`, { show_in_chat: next });
       setLocalShow((prev) => ({ ...prev, [id]: next }));
     } catch (e) {
-      setSaveError(getApiErrorMessage(e, "save failed"));
+      setSaveError(getApiErrorMessage(e, t("infra.models.saveFailed"), t));
     }
   }, [items, providerShown, t]);
 
@@ -858,7 +858,7 @@ export default function ModelsPage() {
         },
       }));
     } catch (e) {
-      setSaveError(getApiErrorMessage(e, t("infra.models.reasoningSaveFailed")));
+      setSaveError(getApiErrorMessage(e, t("infra.models.reasoningSaveFailed"), t));
     }
   }, [t]);
 
@@ -883,7 +883,7 @@ export default function ModelsPage() {
         },
       }));
     } catch (e) {
-      setSaveError(getApiErrorMessage(e, t("infra.models.capSaveFailed")));
+      setSaveError(getApiErrorMessage(e, t("infra.models.capSaveFailed"), t));
     }
   }, [t]);
 

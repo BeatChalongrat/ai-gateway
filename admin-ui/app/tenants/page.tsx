@@ -52,6 +52,19 @@ const STATUS: Record<string, { color: string; bg: string; dot: string; glow: boo
   suspended: { color: "#d97706", bg: "rgba(245,158,11,0.08)", dot: "#f59e0b", glow: false },
 };
 
+// The label a person reads; the value sent to and read from the API stays the identifier.
+const STATUS_LABEL: Record<string, DictKey> = {
+  active: "tenancy.status.active",
+  suspended: "tenancy.status.suspended",
+  deleted: "tenancy.status.deleted",
+};
+
+/** `global` is a word; `us` / `eu` are region codes and stay as they are. */
+function regionLabel(region: string | null | undefined, t: (key: DictKey) => string): string {
+  const r = region || "global";
+  return r === "global" ? t("tenancy.region.global") : r;
+}
+
 /* ── CSS ──────────────────────────────────────────────────────────── */
 
 const CSS = `
@@ -365,7 +378,7 @@ export default function TenantsPage() {
                           </div>
                         </td>
                         {/* Region */}
-                        <td><Pill text={row.region || "global"} color={rs.color} bg={rs.bg} /></td>
+                        <td><Pill text={regionLabel(row.region, t)} color={rs.color} bg={rs.bg} /></td>
                         {/* Status */}
                         <td style={{ textAlign: "center" }}>
                           <span style={{
@@ -378,7 +391,7 @@ export default function TenantsPage() {
                               width: 6, height: 6, borderRadius: "50%", background: st.dot, flexShrink: 0,
                               animation: st.glow ? "dotGlow 2s ease-in-out infinite" : "none",
                             }} />
-                            {row.status}
+                            {STATUS_LABEL[row.status] ? t(STATUS_LABEL[row.status]) : row.status}
                           </span>
                         </td>
                         {/* Created */}
@@ -484,7 +497,7 @@ export default function TenantsPage() {
               <div>
                 <label className="sran-label">{t("tenancy.field.region")}</label>
                 <select className="sran-input" value={editForm.region} onChange={(e) => setEditForm({ ...editForm, region: e.target.value })}>
-                  <option value="global">Global</option>
+                  <option value="global">{t("tenancy.region.global")}</option>
                   <option value="us">US</option>
                   <option value="eu">EU</option>
                 </select>
@@ -492,9 +505,9 @@ export default function TenantsPage() {
               <div>
                 <label className="sran-label">{t("field.status")}</label>
                 <select className="sran-input" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
-                  <option value="active">active</option>
-                  <option value="suspended">suspended</option>
-                  <option value="deleted">deleted</option>
+                  <option value="active">{t("tenancy.status.active")}</option>
+                  <option value="suspended">{t("tenancy.status.suspended")}</option>
+                  <option value="deleted">{t("tenancy.status.deleted")}</option>
                 </select>
               </div>
             </div>
@@ -540,7 +553,7 @@ export default function TenantsPage() {
           <div>
             <label className="sran-label">{t("tenancy.field.region")}</label>
             <select className="sran-input" value={form.region} onChange={(e) => setForm({ ...form, region: e.target.value })}>
-              <option value="global">Global</option><option value="us">US</option><option value="eu">EU</option>
+              <option value="global">{t("tenancy.region.global")}</option><option value="us">US</option><option value="eu">EU</option>
             </select>
           </div>
         </div>

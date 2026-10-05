@@ -103,7 +103,7 @@ export function VideoGeneratingPlaceholder({
             onClick={onCancel}
             className="focus-ring rounded-full border border-border bg-bg-surface px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
         ) : null}
       </div>

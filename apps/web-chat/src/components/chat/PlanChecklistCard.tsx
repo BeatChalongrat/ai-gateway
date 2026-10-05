@@ -7,25 +7,27 @@
 
 import { CircleDashed, CircleDotDashed, CircleCheck } from "lucide-react";
 
+import { useT } from "@/lib/i18n";
 import type { PlanStep } from "@/lib/types";
 
+function stepColor(status: PlanStep["status"]): string {
+  if (status === "done") return "text-status-success";
+  return status === "in_progress" ? "text-blue-500" : "text-text-muted";
+}
+
 export function PlanChecklistCard({ steps }: { steps: PlanStep[] }) {
+  const t = useT();
   if (!steps.length) return null;
   return (
     <div className="my-1 rounded-lg border border-border bg-bg-surface px-3 py-2" data-testid="plan-card">
       <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-text-muted">
-        Plan
+        {t("plan.checklist.title")}
       </div>
       <ul className="flex flex-col gap-1">
         {steps.map((s, i) => {
           const Icon =
             s.status === "done" ? CircleCheck : s.status === "in_progress" ? CircleDotDashed : CircleDashed;
-          const color =
-            s.status === "done"
-              ? "text-status-success"
-              : s.status === "in_progress"
-                ? "text-blue-500"
-                : "text-text-muted";
+          const color = stepColor(s.status);
           return (
             <li key={i} className="flex items-start gap-2 text-sm">
               <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${color}`} />

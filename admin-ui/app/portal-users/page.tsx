@@ -11,7 +11,7 @@ import { SkeletonTable } from "../../components/ui/Skeleton";
 import { useToast } from "../../components/ui/Toast";
 import { api, ApiError } from "../../lib/api";
 import { useApi } from "../../lib/useApi";
-import { useT, type DictKey } from "../../lib/i18n";
+import { useDateLocale, useT, type DictKey } from "../../lib/i18n";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
 import { balanceAfterCeiling, roomToCeiling } from "../../lib/credits";
@@ -94,11 +94,11 @@ function creditColor(pct: number, balance: number): string {
   return "#EF4444";
 }
 
-function formatDate(iso?: string | null): string {
+function formatDate(iso: string | null | undefined, dateLocale: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return d.toLocaleDateString(dateLocale, { month: "short", day: "numeric", year: "numeric" });
 }
 
 // Slugs coming back from the API are identifiers, not copy. The ones we
@@ -160,6 +160,7 @@ function PlanChip({ plan }: { plan: string }) {
 
 export default function PortalUsersPage() {
   const t = useT();
+  const dateLocale = useDateLocale();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
@@ -657,7 +658,7 @@ export default function PortalUsersPage() {
                     <td style={{ textAlign: "center" }}>
                       <StatusBadge status={u.status} />
                     </td>
-                    <td style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{formatDate(u.created_at)}</td>
+                    <td style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{formatDate(u.created_at, dateLocale)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <RowActions
                         user={u}
@@ -703,7 +704,7 @@ export default function PortalUsersPage() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem 1rem" }}>
               <DetailRow label={t("padmin.users.plan")} value={planLabel(detailUser.plan, t)} />
               <DetailRow label={t("field.status")} value={<StatusBadge status={detailUser.status} />} />
-              <DetailRow label={t("padmin.users.joined")} value={formatDate(detailUser.created_at)} />
+              <DetailRow label={t("padmin.users.joined")} value={formatDate(detailUser.created_at, dateLocale)} />
               <DetailRow label={t("padmin.users.userId")} value={<code style={{ fontSize: 11, fontFamily: "'JetBrains Mono',monospace" }}>{detailUser.id.slice(0, 8)}…</code>} />
             </div>
 
@@ -762,7 +763,7 @@ export default function PortalUsersPage() {
                       const typeKey = TX_TYPE_KEYS[tx.type];
                       return (
                       <tr key={tx.id} style={{ borderTop: "1px solid var(--border-default)" }}>
-                        <td style={{ padding: "6px 8px 6px 0", color: "var(--text-tertiary)" }}>{formatDate(tx.created_at)}</td>
+                        <td style={{ padding: "6px 8px 6px 0", color: "var(--text-tertiary)" }}>{formatDate(tx.created_at, dateLocale)}</td>
                         <td style={{ padding: "6px 8px" }}>{typeKey ? t(typeKey) : prettifySlug(tx.type)}</td>
                         <td style={{ padding: "6px 8px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: tx.amount >= 0 ? "#10b981" : "var(--text-primary)" }}>
                           {tx.amount >= 0 ? "+" : ""}{formatTokensFull(tx.amount)}

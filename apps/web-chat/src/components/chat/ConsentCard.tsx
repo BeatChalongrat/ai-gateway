@@ -14,23 +14,27 @@
 import { AlertTriangle, ShieldQuestion } from "lucide-react";
 
 import { useT } from "@/lib/i18n";
+import type { DictKey } from "@/lib/i18n/dict";
 import type { PendingConsent } from "@/lib/types";
 
-const DANGER_TEXT: Record<string, string> = {
-  "danger.shell": "runs a command on your computer",
-  "danger.computerUse": "controls your mouse, keyboard, and screen",
-  "danger.code": "runs code in a sandbox",
-  "danger.fileWrite": "writes to your files",
-  "danger.clipboard": "changes your clipboard",
-  "danger.browser": "controls a browser",
-  "danger.connector": "calls a remote service",
-  "danger.generic": "may change your computer",
+// AM10 F — the sentences live in the dictionary; these tables only say
+// which one a danger class / a forced-prompt reason reads as. A class this
+// build does not know reads as the generic one.
+const DANGER_KEY: Record<string, DictKey> = {
+  "danger.shell": "consent.danger.shell",
+  "danger.computerUse": "consent.danger.computerUse",
+  "danger.code": "consent.danger.code",
+  "danger.fileWrite": "consent.danger.fileWrite",
+  "danger.clipboard": "consent.danger.clipboard",
+  "danger.browser": "consent.danger.browser",
+  "danger.connector": "consent.danger.connector",
+  "danger.generic": "consent.danger.generic",
 };
 
-const ALWAYS_PROMPT_TEXT: Record<string, string> = {
-  download: "download a file",
-  "sensitive-info": "enter potentially sensitive information",
-  authorization: "grant an authorization",
+const ALWAYS_PROMPT_KEY: Record<string, DictKey> = {
+  download: "consent.always.download",
+  "sensitive-info": "consent.always.sensitiveInfo",
+  authorization: "consent.always.authorization",
 };
 
 export function ConsentCard({
@@ -51,7 +55,7 @@ export function ConsentCard({
   // names the site and offers exactly "Allow this action" + "Always allow actions
   // on this site". A forced prompt on an already-approved site says why.
   const site = consent.site;
-  const alwaysPromptText = consent.alwaysPromptReason ? ALWAYS_PROMPT_TEXT[consent.alwaysPromptReason] : null;
+  const alwaysPromptKey = consent.alwaysPromptReason ? ALWAYS_PROMPT_KEY[consent.alwaysPromptReason] : undefined;
   return (
     <div
       className="my-2 rounded-lg border border-amber-500/50 bg-amber-500/5 px-3 py-3"
@@ -63,7 +67,7 @@ export function ConsentCard({
       <div className="flex items-center gap-2">
         <ShieldQuestion className="h-5 w-5 shrink-0 text-amber-500" />
         <div className="text-sm font-semibold text-text-primary">
-          {sub ? t("consent.subagentTitle") : site ? "New permissions required" : "The assistant wants to use a tool"}
+          {sub ? t("consent.subagentTitle") : site ? t("consent.site.title") : t("consent.tool.title")}
         </div>
       </div>
       {sub ? (
@@ -81,11 +85,11 @@ export function ConsentCard({
       ) : null}
       {site ? (
         <div className="mt-1 text-sm text-text-secondary">
-          The assistant wants to act on{" "}
+          {t("consent.site.actOn")}{" "}
           <span className="font-medium text-text-primary">{site}</span>
-          {alwaysPromptText ? (
+          {alwaysPromptKey ? (
             <>
-              {" "}— and this action would <span className="font-medium text-status-danger">{alwaysPromptText}</span>, which always needs approval even on an allowed site.
+              {" "}{t("consent.site.always.pre")}<span className="font-medium text-status-danger">{t(alwaysPromptKey)}</span>{t("consent.site.always.post")}
             </>
           ) : null}
         </div>
@@ -112,8 +116,7 @@ export function ConsentCard({
         <div className="mt-2 flex items-start gap-2 rounded border border-status-danger/40 bg-status-danger/5 px-2 py-1.5 text-xs text-status-danger">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            This action {DANGER_TEXT[consent.dangerClass] ?? "may change your computer"}. Review the
-            arguments carefully before allowing.
+            {t(DANGER_KEY[consent.dangerClass] ?? "consent.danger.generic")} {t("consent.danger.review")}
           </span>
         </div>
       ) : null}
@@ -125,7 +128,7 @@ export function ConsentCard({
           className="rounded-md border border-status-danger/50 px-3 py-1.5 text-sm font-medium text-status-danger hover:bg-status-danger/10 focus-ring"
           data-testid="consent-deny"
         >
-          {site ? "Decline" : "Deny"}
+          {site ? t("consent.decline") : t("consent.deny")}
         </button>
         <button
           type="button"
@@ -133,7 +136,7 @@ export function ConsentCard({
           className="rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-primary hover:bg-bg-elevated focus-ring"
           data-testid="consent-allow-once"
         >
-          {site ? "Allow this action" : "Allow once"}
+          {site ? t("consent.allowAction") : t("consent.allowOnce")}
         </button>
         {site ? (
           // "Always allow actions on this site" — persists (approved sites list).
@@ -143,7 +146,7 @@ export function ConsentCard({
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus-ring"
             data-testid="consent-allow-always"
           >
-            Always allow actions on this site
+            {t("consent.allowAlwaysSite")}
           </button>
         ) : (
           <button
@@ -152,7 +155,7 @@ export function ConsentCard({
             className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus-ring"
             data-testid="consent-allow-session"
           >
-            Allow for session
+            {t("consent.allowSession")}
           </button>
         )}
       </div>

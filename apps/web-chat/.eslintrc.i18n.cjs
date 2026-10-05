@@ -11,6 +11,11 @@
 // react/jsx-no-literals — already available via eslint-plugin-react —
 // cannot tell a user-visible attribute from className or data-testid.
 // This rule can, via its jsx-attributes include-list.
+
+// The rule's own defaults: passing an option REPLACES the default list, so
+// the lists below start from them.
+const defaults = require("eslint-plugin-i18next/lib/options/defaults");
+
 module.exports = {
   root: true,
   parser: "@typescript-eslint/parser",
@@ -43,8 +48,26 @@ module.exports = {
         // be fixed — the only way to "fix" one is to stop translating.
         // Excluding the two lookup helpers leaves every other callee
         // validated (`toast(...)` included, once the rule can see it).
+        //
+        // AM10 F — `hint` is useShortcutHint()'s formatter: its argument is
+        // an accelerator ("Mod+Shift+N"), turned into the key caps of the
+        // machine it runs on. Key names are not translated.
         callees: {
-          exclude: ["t", "tOutside"],
+          exclude: ["t", "tOutside", "hint"],
+        },
+        // AM10 F — three kinds of literal the baseline carried for months
+        // and nobody could ever "fix", because they are not text:
+        //  · a glyph on its own (✓ ✗ ▾ ▸ ✕, an emoji with its variation
+        //    selector) — the default list knows ASCII punctuation and bare
+        //    emoji only;
+        //  · the `key` of an object written inside JSX (a React key, an id).
+        // A class name chosen inside a render callback is the third; that
+        // one is fixed in the code (it moves out of the JSX), not here.
+        words: {
+          exclude: [...defaults.words.exclude, /^[\p{S}\p{P}\p{Emoji}\p{Emoji_Component}\s]+$/u],
+        },
+        "object-properties": {
+          exclude: [...defaults["object-properties"].exclude, "key"],
         },
         message: "User-visible string must go through t() — see src/lib/i18n/dict.ts",
       },
