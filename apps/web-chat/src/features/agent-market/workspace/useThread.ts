@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseSSE } from "@/lib/stream";
 
 import { amApi } from "../api";
+import { notifyChatsChanged, roundMoved } from "../chats";
 import { maxRev, mergeItems } from "../thread";
 import type { ThreadItem } from "../types";
 
@@ -52,15 +53,26 @@ export function useThread(installId: string | null, threadId: string | null = nu
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
   const cursorRef = useRef(0);
+  // AM10: the rounds this thread has already shown beginning and delivering;
+  // a new one, once the thread is live, changes what the chat list says
+  // (its name is the round's period, its count the rounds) — chats.ts.
+  const roundsRef = useRef<Set<string>>(new Set());
+  const liveRef = useRef(false);
 
-  const merge = useCallback((incoming: ThreadItem[]) => {
-    if (!incoming.length) return;
-    setItems((cur) => {
-      const next = mergeItems(cur, incoming);
-      cursorRef.current = Math.max(cursorRef.current, maxRev(incoming));
-      return next;
-    });
-  }, []);
+  const merge = useCallback(
+    (incoming: ThreadItem[]) => {
+      if (!incoming.length) return;
+      let moved = false;
+      for (const it of incoming) if (roundMoved(roundsRef.current, it)) moved = true;
+      if (moved && liveRef.current && installId) notifyChatsChanged(installId);
+      setItems((cur) => {
+        const next = mergeItems(cur, incoming);
+        cursorRef.current = Math.max(cursorRef.current, maxRev(incoming));
+        return next;
+      });
+    },
+    [installId],
+  );
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
@@ -71,6 +83,8 @@ export function useThread(installId: string | null, threadId: string | null = nu
     setStatus("loading");
     setError(null);
     cursorRef.current = 0;
+    roundsRef.current = new Set();
+    liveRef.current = false;
 
     const run = async () => {
       // 1 — the whole thread, page by page.
@@ -92,6 +106,7 @@ export function useThread(installId: string | null, threadId: string | null = nu
         return;
       }
       setStatus("live");
+      liveRef.current = true; // what was loaded is what the list already says; from here a round is news
 
       // 2 — follow the stream.
       let backoff = 1000;

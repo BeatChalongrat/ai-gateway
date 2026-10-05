@@ -74,7 +74,8 @@ const Superseded = createContext<ReadonlySet<string>>(new Set());
 /** AM6: the thread's rounds — a files card is read with what its round came to. */
 const Rounds = createContext<ReadonlyMap<string, RoundInfo>>(new Map());
 
-const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent", "email_draft"]);
+// AM10: "form" — the kind was drawn below and never let through here, so a round's form had no card at all
+const KNOWN = new Set(["greeting", "user_text", "user_files", "agent_text", "notice", "card", "progress", "outputs", "intent", "email_draft", "form"]);
 
 type Group = { side: "user" | "agent"; items: ThreadItem[] };
 

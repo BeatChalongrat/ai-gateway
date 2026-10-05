@@ -405,7 +405,7 @@ export interface Clarification {
 
 // ── thread ─────────────────────────────────────────────────────────────
 
-export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs" | "intent" | "email_draft";
+export type ThreadKind = "greeting" | "user_text" | "user_files" | "agent_text" | "notice" | "card" | "progress" | "outputs" | "intent" | "email_draft" | "form";
 
 export interface ThreadItem {
   id: string;

@@ -24,6 +24,19 @@ export function notifyChatsChanged(installId: string): void {
   for (const fn of listeners) fn(installId);
 }
 
+/**
+ * A chat is named for its round's period and counts its rounds, so what the
+ * list says changes when a round begins and when its files arrive — and not
+ * on each of the many updates of a round's progress in between. True the
+ * first time such an item is seen; `seen` is the caller's memory of them.
+ */
+export function roundMoved(seen: Set<string>, item: { id: string; kind: string; run_id?: string }): boolean {
+  const key = item.kind === "progress" && item.run_id ? `begun:${item.run_id}` : item.kind === "outputs" ? `files:${item.id}` : "";
+  if (!key || seen.has(key)) return false;
+  seen.add(key);
+  return true;
+}
+
 /** The first chat has no id; the routes and the URL call it "main". */
 export const chatKey = (t: Pick<AgentThread, "id">): string => t.id ?? "main";
 

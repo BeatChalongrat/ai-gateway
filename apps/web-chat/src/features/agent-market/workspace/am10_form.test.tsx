@@ -28,6 +28,7 @@ import { proposal, slots, spec } from "../template/testData";
 import type { FormPayload } from "../types";
 import { Composer } from "./Composer";
 import { FormCard, inspectOf } from "./FormCard";
+import { groupItems, ThreadView } from "./ThreadView";
 import { FORM_ACCEPT, formChoice } from "./useUploads";
 
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
@@ -102,6 +103,25 @@ describe("the composer of an agent that fills forms", () => {
 });
 
 const form = (status: string, extra: Partial<FormPayload> = {}): FormPayload => ({ run_id: "r-1", file_id: "f-9", name: "ฟอร์มสรุป.docx", status, open: 0, unfilled: [], ...extra });
+
+describe("the thread draws a form's item", () => {
+  // The card was tested on its own and the thread never drew it: the kind was
+  // missing from the list of kinds the thread lets through, so a form dropped
+  // into a round was read and filled and the person saw nothing of it (the walk
+  // on the built app found it — no card, no "จับคู่ช่อง", no download).
+  const sent = { id: "u-1", install_id: "i-1", kind: "user_files", payload: { text: "ใส่ในฟอร์มนี้ให้หน่อย", files: [] }, rev: 1, created_at: "2026-10-05T10:00:00Z" };
+  const item = { id: "fm-1", install_id: "i-1", run_id: "r-1", kind: "form", payload: form("needs_mapping", { open: 1 }), rev: 2, created_at: "2026-10-05T10:00:01Z" };
+
+  it("keeps the item when the thread is grouped", () => {
+    expect(groupItems([sent, item]).flatMap((g) => g.items.map((i) => i.kind))).toEqual(["user_files", "form"]);
+  });
+
+  it("shows its card, with the way to map it", () => {
+    render(<ThreadView items={[sent, item]} />);
+    expect(screen.getByTestId("am-form").getAttribute("data-status")).toBe("needs_mapping");
+    expect(screen.getByTestId("am-form-map")).toBeTruthy();
+  });
+});
 
 describe("the form's card in the thread", () => {
   it("says what is happening, and that it is this round's only", () => {
