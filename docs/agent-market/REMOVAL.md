@@ -163,6 +163,18 @@ for display, and changes nothing there):
   that asked (`portal_connectors.py`), the desktop app's native strings, the
   language kept on the person's account (`apps/web-chat/src/lib/i18n/account.ts`)
   and the English-fallback sweep of the chat and admin apps.
+- AM10, the chat's own components (their parts were moved by AM5, so a later
+  change to them cannot stand apart from that move; the revert puts each back
+  as it was): `apps/web-chat/src/components/chat/MessageBubble.tsx` — the
+  failed-turn card re-says its sentence from the error's code in the language
+  on screen, and the paused card, the fallback notice and the unit words go
+  through the dictionary; `MessageAttachments.tsx` — a file card's download
+  label; `apps/web-chat/i18n-baseline.json` — the bubble's three literals
+  leave the baseline (19 → 16); `MessageBubble.am10.test.tsx`. One thing the
+  chat gained with them and loses with the revert: an error already on screen
+  follows a language switch (the rest of the language sweep is the chat's own
+  commit and stays).
+- AM10, the rule this drill taught:
   **A generated file is regenerated in a commit of the feature whose lines it
   mirrors**: regenerating the test-stack compose in a core commit carried
   Agent Market lines out of the feature (caught by this drill before the push).
