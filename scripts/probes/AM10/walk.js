@@ -341,7 +341,7 @@ const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|P
 const NOT_THE_APPS = ['[data-testid="agent-rail-section"]', '[data-testid^="am-"]', '[data-testid^="agent-"]', '[data-testid="conversation-item"]',
   "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]', '[data-testid="model-trigger-label"]', "code", "pre", "kbd",
   // a person's saved memories: what the entry says and the chat it came from are theirs (and never copied into a report)
-  '[data-testid="memory-content"]', '[data-testid="memory-origin"] a'].join(", ");
+  '[data-testid="memory-content"]', '[data-testid="memory-origin"] a', ':has(> [data-testid="memory-content"]) > p.italic'].join(", ");
 
 // the reader itself is reader.js (the admin app's probe reads with it too)
 const leaks = (page, locale, notApps = NOT_THE_APPS, within = null) => R.leaks(page, locale, { notApps, within, keep: KEEP.source, tag: TAG });
