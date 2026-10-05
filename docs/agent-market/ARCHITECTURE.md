@@ -421,7 +421,13 @@ over the same bytes and stored on every install and run.
   rememberable. It is asked only when the install does not already say: the
   wizard's formats step, the settings page and an earlier answer all count;
   a set copied from the manifest by a one-click install does not. The answer
-  becomes the run's set and the install's `formats` setting.
+  becomes the run's set and the install's `formats` setting. An answer never
+  runs the round again: given after the files were delivered, the round stays
+  finished and one render job makes the files it lacks (none when it has them
+  all); given while the files were being made — after the render step read the
+  answers — the same job is queued when the round finishes
+  (`answersLeftBehind`). Any other answer on a card that does not make the
+  round wait follows the same two paths and makes the round's files again.
 
 - **One page across** (`workpaper.py`, `xlsx.print.one_across`). No sheet of
   any working paper runs across pages any more. A table too wide for one page

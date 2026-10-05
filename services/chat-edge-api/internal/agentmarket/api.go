@@ -1533,13 +1533,29 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 			a.fail(w, err, "formats")
 			return
 		}
-		if _, err := a.store.Resume(ctx, tx, run.ID); err != nil {
-			a.fail(w, err, "run")
-			return
+		// A question that did not make the round wait, answered after its
+		// files were delivered: re-render only. AM10: the round itself stays
+		// finished — it used to go back into the queue beside its own
+		// re-render, which is claimed first and refused a round that "has not
+		// finished" (a red card for an answer about presentation).
+		delivered := run.Status == RunSucceeded && !card.Blocking
+		if !delivered {
+			if _, err := a.store.Resume(ctx, tx, run.ID); err != nil {
+				a.fail(w, err, "run")
+				return
+			}
 		}
-		if run.Status == RunSucceeded && !card.Blocking {
-			// A cosmetic answer after the files were delivered: re-render only.
-			if _, err := a.renderJob(ctx, tx, run, nil, "cosmetic_answer"); err != nil {
+		if delivered {
+			// AM10: an answer about which files alone makes the files the round
+			// still lacks — and none when it already has them all.
+			if more, only := OutputSetAlone(run, answers); only {
+				if len(more) > 0 {
+					if _, err := a.renderJob(ctx, tx, run, more, "output_set"); err != nil {
+						a.fail(w, err, "render")
+						return
+					}
+				}
+			} else if _, err := a.renderJob(ctx, tx, run, nil, "cosmetic_answer"); err != nil {
 				a.fail(w, err, "render")
 				return
 			}

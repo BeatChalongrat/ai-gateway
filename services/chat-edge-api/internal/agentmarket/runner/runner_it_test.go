@@ -151,7 +151,9 @@ func (e *itEnv) setupInstall(budget float64) am.Install {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	_ = e.store.SetDefault(ctx, tx, in.ID, am.Default{Key: "formats", Value: json.RawMessage(`["docx","pptx"]`), Source: "install"})
+	// an install whose owner chose its files (the wizard's formats step): AM10 asks "which files" only of
+	// an install that never said (am10_form_it_test.go has that one)
+	_ = e.store.SetDefault(ctx, tx, in.ID, am.Default{Key: "formats", Value: json.RawMessage(`["docx","pptx"]`), Source: "settings"})
 	_ = e.store.SetDefault(ctx, tx, in.ID, am.Default{Key: "company", Value: json.RawMessage(`"บริษัท ทดสอบ จำกัด"`), Source: "install"})
 	if err := tx.Commit(ctx); err != nil {
 		e.t.Fatal(err)

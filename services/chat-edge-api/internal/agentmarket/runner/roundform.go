@@ -134,6 +134,64 @@ func (r *Runner) formFillJob(ctx context.Context, run am.Run) (am.Run, error) {
 	return job, err
 }
 
+// fillFormLeftBehind queues the fill for a finished round whose form is mapped and was never filled:
+// the reading of a form runs beside the round, and a mapping that became ready after the round's
+// render step looked for it would otherwise wait for nobody.
+func (r *Runner) fillFormLeftBehind(ctx context.Context, runID uuid.UUID) {
+	form, err := r.Store.RoundForm(ctx, r.Store.Pool, runID)
+	if err != nil || form == nil || form.Status != am.FormReady || form.Fills > 0 {
+		return
+	}
+	run, err := r.Store.RunByID(ctx, runID)
+	if err != nil || run.Status != am.RunSucceeded {
+		return
+	}
+	if _, err := r.formFillJob(ctx, run); err != nil {
+		r.Log.Error("a round's form was left unfilled", "run", runID, "err", err)
+	}
+}
+
+// answersLeftBehind queues the re-render for a finished round whose files were made before an answer
+// arrived: read is what its render step read, made the formats it made. An answer about which files
+// alone makes only the files the round lacks; any other makes the round's files again. The same
+// decision the API takes for an answer given after the round finished (api.go, answer).
+func (r *Runner) answersLeftBehind(ctx context.Context, runID uuid.UUID, read map[string]am.Answer, made []string) {
+	run, err := r.Store.RunByID(ctx, runID)
+	if err != nil || run.Status != am.RunSucceeded || run.Kind != am.KindRun {
+		return
+	}
+	now := map[string]am.Answer{}
+	_ = json.Unmarshal(run.Answers, &now)
+	late := am.LateAnswers(read, now)
+	if len(late) == 0 {
+		return
+	}
+	// answered in the instant between the round finishing and this look: the API saw a finished
+	// round and queued the re-render itself
+	var queued int
+	_ = r.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM agent_market.agent_runs WHERE parent_run_id = $1 AND kind = 'render'
+		AND params->>'why' IN ('output_set', 'cosmetic_answer') AND created_at >= $2`, runID, run.FinishedAt).Scan(&queued)
+	if queued > 0 {
+		return
+	}
+	had, _ := json.Marshal(made)
+	formats, only := am.OutputSetAlone(am.Run{Formats: had}, late)
+	why := "output_set"
+	if !only {
+		formats, why = nil, "cosmetic_answer"
+	} else if len(formats) == 0 {
+		return
+	}
+	params, _ := json.Marshal(map[string]any{"formats": formats, "why": why})
+	b, _ := json.Marshal(late)
+	if _, _, err := r.Store.CreateRun(ctx, r.Store.Pool, am.Run{InstallID: run.InstallID, ParentRunID: &runID, TenantID: run.TenantID,
+		UserID: run.UserID, Kind: am.KindRender, Params: params, DefinitionVersion: run.DefinitionVersion,
+		Checksum: run.Checksum, EngineChecksum: run.EngineChecksum, BindingVersion: run.BindingVersion, ThreadID: run.ThreadID},
+		"late-answer:"+am.StepKey(runID, "late-answer", string(b))); err != nil {
+		r.Log.Error("a late answer's files were not queued", "run", runID, "err", err)
+	}
+}
+
 // roundFormKey tells one fill from the next (the mapping changed).
 func roundFormKey(ctx context.Context, r *Runner, run uuid.UUID) string {
 	f, err := r.Store.RoundForm(ctx, r.Store.Pool, run)

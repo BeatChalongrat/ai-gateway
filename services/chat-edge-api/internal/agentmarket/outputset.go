@@ -139,6 +139,44 @@ func OutputSetOf(answers map[string]Answer) []string {
 	return fs
 }
 
+// OutputSetAlone: the answers are about which files and nothing else (only
+// then true), and the formats of the answered set the run does not have yet.
+// A finished round then makes just those — never its delivered files again.
+func OutputSetAlone(run Run, answers map[string]Answer) (more []string, only bool) {
+	fs := OutputSetOf(answers)
+	if fs == nil || len(answers) != 1 {
+		return nil, false
+	}
+	var have []string
+	_ = json.Unmarshal(run.Formats, &have)
+	for _, f := range fs {
+		if !contains(have, f) {
+			more = append(more, f)
+		}
+	}
+	return more, true
+}
+
+// LateAnswers are the answers a person gave that a round's files were not
+// made with. A card that asks without making the round wait can be answered
+// while the files are being made — after the render step read the answers.
+// used is what that step read, now is what the run holds when it finishes.
+func LateAnswers(used, now map[string]Answer) map[string]Answer {
+	late := map[string]Answer{}
+	for key, a := range now {
+		switch a.Via {
+		case "card", "text", "typed", "skip":
+		default:
+			continue
+		}
+		if u, ok := used[key]; ok && u.Via == a.Via && string(u.Value) == string(a.Value) {
+			continue
+		}
+		late[key] = a
+	}
+	return late
+}
+
 // ApplyOutputSet makes an answered output set the run's and the install's:
 // the run makes it (SetFormats), and the install's "formats" setting says it
 // from now on, so nothing is asked again.
@@ -151,8 +189,10 @@ func (s *Store) ApplyOutputSet(ctx context.Context, q Querier, run Run, answers 
 		return err
 	}
 	a := answers[OutputSetCode]
-	if a.Via != "card" && a.Via != "text" && a.Via != "typed" {
-		return nil // a default or a remembered answer changes no setting
+	switch a.Via {
+	case "card", "text", "typed", "skip": // the person's own decision — a skip is "the standard set", said
+	default:
+		return nil // a default taken for now, or a remembered answer, changes no setting
 	}
 	v, _ := json.Marshal(fs)
 	rid := run.ID

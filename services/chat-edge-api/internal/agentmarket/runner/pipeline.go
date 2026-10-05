@@ -171,6 +171,7 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		return rc.stepFailed("narrative", err)
 	}
 	formats := rc.formats()
+	read := rc.answers // what the files are made with (reloadAnswers replaces the map, it never edits it)
 	rendered, renderKey, err := rc.render(ctx, rc.run.ID, computedRef, computeKey, narrative, narrKey, formats, "render")
 	if err != nil {
 		var qe *qualityErr
@@ -224,6 +225,12 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	if err := r.finish(rc, am.RunSucceeded, ""); err != nil {
 		return err
 	}
+	// AM10: a form whose mapping became ready while these files were being made (after the render
+	// step looked for it) is filled now, from the same figures
+	r.fillFormLeftBehind(context.Background(), rc.run.ID)
+	// AM10: so is an answer given on a card that asks without waiting, when it landed after the
+	// render step had read the answers
+	r.answersLeftBehind(context.Background(), rc.run.ID, read, formats)
 	rc.startNextRound(context.Background())
 	return nil
 }

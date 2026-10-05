@@ -459,6 +459,12 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				if err := json.Unmarshal(a, &meta); err != nil {
 					return nil, 0, "", "", err
 				}
+				if rc.formOnly && meta.Kind != "template" {
+					// AM10: a fill of the round's form delivers the form alone. An engine released before
+					// it read "no formats" as its defaults and makes its own files again — an install
+					// pinned to such a version must not get a second register or report for it.
+					continue
+				}
 				var q struct {
 					Passed bool `json:"passed"`
 					Checks []struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -244,5 +245,112 @@ func TestAnAnsweredOutputSetBecomesTheRunsAndTheInstalls(t *testing.T) {
 		if d.Key == "formats" && (len(v) != 2 || v[1] != "xlsx") {
 			t.Fatalf("a remembered answer rewrote the setting: %s", d.Value)
 		}
+	}
+}
+
+func TestAnAnswerAboutFilesAloneMakesOnlyTheFilesTheRoundLacks(t *testing.T) {
+	run := Run{Formats: json.RawMessage(`["docx","pptx"]`)}
+	set := func(v string) map[string]Answer {
+		return map[string]Answer{OutputSetCode: {Value: json.RawMessage(v), Via: "card"}}
+	}
+	if more, only := OutputSetAlone(run, set(`["docx","pptx"]`)); !only || len(more) != 0 {
+		t.Fatalf("the set the round already has: nothing is made again (%v %v)", more, only)
+	}
+	if more, only := OutputSetAlone(run, set(`["docx","pptx","xlsx"]`)); !only || len(more) != 1 || more[0] != "xlsx" {
+		t.Fatalf("only the table is still to make: %v %v", more, only)
+	}
+	// with another cosmetic answer on the same card the whole set is rendered again (its look changed)
+	both := set(`["docx","xlsx"]`)
+	both["theme_choice"] = Answer{Value: json.RawMessage(`"teal"`), Via: "card"}
+	if _, only := OutputSetAlone(run, both); only {
+		t.Fatal("another answer on the card: not about the files alone")
+	}
+	if _, only := OutputSetAlone(run, map[string]Answer{"x": {Value: json.RawMessage(`"y"`)}}); only {
+		t.Fatal("no answer about the files")
+	}
+}
+
+// The answers a round's files were not made with: only what a person said,
+// and only when it differs from what the render step read.
+func TestLateAnswersAreWhatAPersonSaidAfterTheFilesWereRead(t *testing.T) {
+	read := map[string]Answer{
+		OutputSetCode: {Value: json.RawMessage(`["docx","pptx"]`), Via: "default"},
+		"year":        {Value: json.RawMessage(`"be"`), Via: "card"},
+		"theme":       {Value: json.RawMessage(`"teal"`), Via: "remembered"},
+	}
+	now := map[string]Answer{
+		OutputSetCode: {Value: json.RawMessage(`["docx","pptx","xlsx"]`), Via: "card"},
+		"year":        {Value: json.RawMessage(`"be"`), Via: "card"},
+		"theme":       {Value: json.RawMessage(`"navy"`), Via: "remembered"},
+	}
+	late := LateAnswers(read, now)
+	if len(late) != 1 || late[OutputSetCode].Via != "card" {
+		t.Fatalf("only the answer the person gave after the read: %+v", late)
+	}
+	if more, only := OutputSetAlone(Run{Formats: json.RawMessage(`["docx","pptx"]`)}, late); !only || len(more) != 1 || more[0] != "xlsx" {
+		t.Fatalf("the table is what the round still lacks: %v %v", more, only)
+	}
+	if got := LateAnswers(now, now); len(got) != 0 {
+		t.Fatalf("answers the files were made with are not late: %+v", got)
+	}
+	// the person said the default themselves: the files are the same, the documents no longer say "default"
+	now[OutputSetCode] = Answer{Value: json.RawMessage(`["docx","pptx"]`), Via: "skip"}
+	late = LateAnswers(read, now)
+	if more, only := OutputSetAlone(Run{Formats: json.RawMessage(`["docx","pptx"]`)}, late); len(late) != 1 || !only || len(more) != 0 {
+		t.Fatalf("a skip of the files question makes nothing again: %+v %v %v", late, more, only)
+	}
+}
+
+// A question that did not make the round wait, answered after the files were
+// delivered: the round stays finished and one re-render makes what is missing.
+// (It used to go back into the queue beside its own re-render — which is
+// claimed first and refused a round that "has not finished".)
+func TestAnAnswerAfterDeliveryLeavesTheRoundFinished(t *testing.T) {
+	e := newEnv(t)
+	if e == nil {
+		return
+	}
+	ctx := context.Background()
+	in := e.install()
+	run := e.finishedRun(in, "2026-09", "")
+	if err := e.store.SetFormats(ctx, e.store.Pool, run.ID, []string{"docx", "pptx"}); err != nil {
+		t.Fatal(err)
+	}
+	f := Finding{Key: OutputSetCode, Code: OutputSetCode, Severity: "cosmetic", Moment: "postcompute", Header: "ชุดไฟล์",
+		Question: "รอบนี้ต้องการไฟล์แบบไหนครับ", Kind: "question", Rememberable: true,
+		Default: json.RawMessage(`["docx","pptx"]`), Evidence: json.RawMessage(`{}`),
+		Options: []Option{{Label: "ชุดมาตรฐาน", Value: json.RawMessage(`["docx","pptx"]`)},
+			{Label: "ทั้งหมด", Value: json.RawMessage(`["docx","pptx","xlsx"]`)}}}
+	plan, err := Plan(PlanInput{Moment: "postcompute", Findings: []Finding{f}})
+	if err != nil || plan.Card == nil || plan.Card.Blocking {
+		t.Fatalf("a card that makes nobody wait: %v %+v", err, plan.Card)
+	}
+	_ = e.store.MergeAnswers(ctx, e.store.Pool, run.ID, plan.AutoAnswers)
+	qs, _ := json.Marshal(plan.Card.Questions)
+	card, err := e.store.CreateCard(ctx, e.store.Pool, Card{RunID: run.ID, InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID,
+		Moment: "postcompute", Kind: "questions", Blocking: false, Questions: qs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	renders := func() (n int, formats string) {
+		rows, _ := e.store.Pool.Query(ctx, `SELECT params->>'formats' FROM agent_market.agent_runs WHERE parent_run_id = $1 AND kind = 'render'`, run.ID)
+		defer rows.Close()
+		for rows.Next() {
+			_ = rows.Scan(&formats)
+			n++
+		}
+		return n, formats
+	}
+	code, body := e.do("POST", "/cards/"+card.ID.String()+"/answer", map[string]any{"answers": map[string]any{
+		OutputSetCode: map[string]any{"labels": []string{"ทั้งหมด"}}}})
+	if code != 200 {
+		t.Fatalf("answer: %d %v", code, body)
+	}
+	got, _ := e.store.RunByID(ctx, run.ID)
+	if got.Status != RunSucceeded {
+		t.Fatalf("the round was delivered and stays so, got %s", got.Status)
+	}
+	if n, formats := renders(); n != 1 || strings.Join(strings.Fields(formats), "") != `["xlsx"]` {
+		t.Fatalf("one re-render, of the table alone: %d %s", n, formats)
 	}
 }
