@@ -687,7 +687,7 @@ const thBase = {
   "dash.toSettings": "ไปหน้าการตั้งค่า",
   "time.days": "{n} วัน",
   "lang.th": "ไทย",
-  "lang.en": "อังกฤษ",
+  "lang.thOnly": "ไทย — เอกสารของ agent มีภาษาไทยอย่างเดียวในตอนนี้",
 
   // run detail
   "run.back": "กลับห้องทำงาน",

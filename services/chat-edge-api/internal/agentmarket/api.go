@@ -586,6 +586,10 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 				return false
 			}
 		}
+	case "language":
+		// AM10: the agents' documents are Thai and nothing else; a setting that
+		// offered "en" changed no document, so nothing but "th" is kept
+		return json.Unmarshal(raw, &s) == nil && s == "th"
 	case "policy":
 		// the structured policy table: limits come from here only, never from a document
 		return len(PolicyProblems(raw)) == 0

@@ -73,7 +73,9 @@ export function describeValue(d: Default, t: AmT, manifest?: Manifest): string[]
   if (d.key === "materiality") return [formatMoney(v)];
   if (MATCH_MONEY.has(d.key)) return [formatMoney2(v)];
   if (d.key === "match_auto_same_day") return [v === true || v === "true" ? t("settings.yes") : t("settings.no")];
-  if (d.key === "language") return [v === "th" ? t("lang.th") : v === "en" ? t("lang.en") : String(v)];
+  // AM10: the agents' documents are Thai and nothing else yet — the row says so and offers no choice
+  // (it used to offer "อังกฤษ", which no document ever followed)
+  if (d.key === "language") return [t("lang.thOnly")];
   if (Array.isArray(v)) return [v.map(String).join(", ")];
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
@@ -380,7 +382,7 @@ function CompanyTaxSection({ installId, defaults, onChanged }: { installId: stri
   );
 }
 
-type Editor = "text" | "number" | "currency" | "formats" | "theme" | "language" | "yesno" | null;
+type Editor = "text" | "number" | "currency" | "formats" | "theme" | "yesno" | null;
 
 // AM5: the matching engine's tolerances and the account a reconciliation is headed with
 const MATCH_NUMBERS = new Set([
@@ -409,8 +411,6 @@ export function editorFor(key: string): Editor {
       return "formats";
     case "theme":
       return "theme";
-    case "language":
-      return "language";
   }
   return null;
 }
@@ -592,11 +592,6 @@ function EditValue({
         <select value={yes ? "true" : "false"} onChange={(e) => setYes(e.target.value === "true")} aria-label={d.label || d.key} className={field}>
           <option value="true">{t("settings.yes")}</option>
           <option value="false">{t("settings.no")}</option>
-        </select>
-      ) : editor === "language" ? (
-        <select value={text || "th"} onChange={(e) => setText(e.target.value)} aria-label={d.label || d.key} className={field}>
-          <option value="th">{t("lang.th")}</option>
-          <option value="en">{t("lang.en")}</option>
         </select>
       ) : editor === "theme" ? (
         <select value={theme} onChange={(e) => setTheme(e.target.value)} aria-label={d.label || d.key} className={field}>
