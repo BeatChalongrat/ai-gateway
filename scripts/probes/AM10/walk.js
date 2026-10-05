@@ -29,6 +29,7 @@ process.env.AM6_TAG = process.env.AM6_TAG || "[AM10]";
 const TARGET = process.env.SMOKE_TARGET || "test";
 process.env.AM6_OUT = path.join(__dirname, "results", "walk", TARGET);
 const W = require("../AM6/walkthrough.js");
+const R = require("./reader.js");
 const { L, state, save, log, api, WEB, EDGE, waitFor, TAG } = W;
 
 const SLUG = "sran.financial-report";
@@ -340,42 +341,8 @@ const KEEP = /^(SRAN|Chat|AI|Agent|Market|agent|Connectors?|Skills?|Canvas|MCP|P
 const NOT_THE_APPS = ['[data-testid="agent-rail-section"]', '[data-testid^="am-"]', '[data-testid^="agent-"]', '[data-testid="conversation-item"]',
   "[data-conversation-id]", '[data-testid="assistant-body"]', '[data-testid="model-row-name"]', '[data-testid="model-trigger-label"]', "code", "pre", "kbd"].join(", ");
 
-/** What is on screen now and not in `locale`: text, and the four attributes a person reads
- *  (placeholder, title, aria-label, alt), over the whole document — sidebar and open menus included. */
-async function leaks(page, locale, notApps = NOT_THE_APPS, within = null) {
-  return page.evaluate(({ locale, keep, notApps, tag, within }) => {
-    const root = (within && document.querySelector(within)?.parentElement) || document.body;
-    const KEEP = new RegExp(keep);
-    const skip = (el) => !!el.closest(notApps);
-    const shown = (el) => (el.checkVisibility ? el.checkVisibility({ checkVisibilityCSS: true }) : getComputedStyle(el).display !== "none");
-    const wrong = (text) => {
-      if (!text || text.includes(tag)) return false; // what the walk itself typed
-      if (/^[\w.+-]+@[\w.-]+$/.test(text)) return false; // the account's address
-      if (locale === "en") return /[ก-๙]/.test(text);
-      const words = (text.match(/[A-Za-z][A-Za-z'’-]{2,}/g) || []).filter((w) => !KEEP.test(w));
-      return words.length >= 2 || (words.length === 1 && !/[ก-๙]/.test(text) && text.length < 40);
-    };
-    const out = new Map();
-    const add = (raw, where) => {
-      const text = String(raw).replace(/\s+/g, " ").trim().slice(0, 110);
-      if (wrong(text) && !out.has(text)) out.set(text, where);
-    };
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-      const el = n.parentElement;
-      if (!el || el.closest("script, style, noscript, textarea, input") || skip(el) || !shown(el)) continue;
-      add(n.textContent, "text");
-    }
-    for (const el of root.querySelectorAll("[placeholder], [title], [aria-label], img[alt]")) {
-      if (skip(el) || !shown(el)) continue;
-      for (const a of ["placeholder", "title", "aria-label", "alt"]) {
-        const v = el.getAttribute(a);
-        if (v) add(v, a);
-      }
-    }
-    return [...out].map(([text, where]) => ({ text, where }));
-  }, { locale, keep: KEEP.source, notApps, tag: TAG, within });
-}
+// the reader itself is reader.js (the admin app's probe reads with it too)
+const leaks = (page, locale, notApps = NOT_THE_APPS, within = null) => R.leaks(page, locale, { notApps, within, keep: KEEP.source, tag: TAG });
 // Agent Market read like any other page: only what people typed is left out
 const TYPED = ['[data-testid="conversation-item"]', "[data-conversation-id]", '[data-testid="assistant-body"]', "code", "pre", "kbd"].join(", ");
 async function setLanguage(x, to) {
@@ -568,18 +535,7 @@ async function language(client) {
     report.desktopNative = native;
   }
   // each string once, with every surface it was read on
-  report.flat = {};
-  for (const loc of ["th", "en"]) {
-    const by = new Map();
-    for (const [surface, list] of Object.entries(report[loc])) {
-      for (const { text, where } of list) {
-        const e = by.get(text) || { text, where, on: [] };
-        e.on.push(surface);
-        by.set(text, e);
-      }
-    }
-    report.flat[loc] = [...by.values()].sort((m, n) => m.text.localeCompare(n.text));
-  }
+  report.flat = { th: R.flat(report.th), en: R.flat(report.en) };
   log(`${x.tag}: not in the chosen language — th ${report.flat.th.length}, en ${report.flat.en.length}; not opened ${report.notOpened.length}; Agent Market in Thai on an English screen ${new Set(Object.values(report.agentMarketThai || {}).flat()).size}`);
   fs.writeFileSync(path.join(x.dir, "language-strings.json"), JSON.stringify(report, null, 1));
   await done(x, "language", { found, left: { th: report.flat.th.length, en: report.flat.en.length }, notOpened: report.notOpened });

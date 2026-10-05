@@ -6,6 +6,8 @@
 //                 `python -m app.ops.first_admin ensure`, after the new account signs in, and after it
 //                 deactivates the old one on the Accounts page — never zero. The old account can no
 //                 longer sign in; the new one's creation and the deactivation are in the audit log.
+//   language      every page of the sidebar and every section of the Agent Market page in both languages:
+//                 what is not in the language the admin chose (results/admin/<target>/language-strings.json)
 //   pages         the Agent Market page in both languages (an agent is named in the page's language,
 //                 drawn with its own icon and colour, light and dark), the Accounts page, the sign-in
 //                 hint, and the language kept across a reload.
@@ -21,6 +23,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const L = require("../../smoke/lib.js");
+const R = require("./reader.js");
 
 const LIVE = L.TARGET === "live";
 const pw = () => require(path.join(L.ROOT, "apps", "web-chat", "node_modules", "playwright-core"));
@@ -47,7 +50,17 @@ const activeAdmins = () => sql("select email, role from admin_users where is_act
 const containerEnv = (key) => execFileSync("docker", ["exec", BACKEND, "printenv", key], { encoding: "utf8" }).trim();
 const mask = (email) => email.replace(/^(.).*(@.*)$/, "$1***$2");
 
+/** The TEST stack only. The admin sign-in limit (5 per address in 15 minutes) counts every probe of this
+ *  machine as one person; its counter in the test stack's own Redis is cleared before a probe signs in.
+ *  On live the limit is left as it is and the probes are spaced. */
+function clearTestSignInLimit() {
+  if (LIVE) return;
+  const cli = 'redis-cli --no-auth-warning ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"}';
+  execFileSync("docker", ["exec", "sran-test-redis-1", "sh", "-c", `${cli} --scan --pattern "admin_login_ip:*" | xargs -r ${cli} del`], { encoding: "utf8" });
+}
+
 async function signIn(browser, email, password, { expectRefused = false } = {}) {
+  clearTestSignInLimit();
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   await page.goto(`${ADMIN}/login`, { waitUntil: "load" });
@@ -85,7 +98,7 @@ async function firstAdmin() {
   const both = at("after ensure");
   check(both.some((r) => r.startsWith(`${email}|`)) && old.every((e) => both.some((r) => r.startsWith(`${e}|`))), "the configured admin exists beside the old one — nothing was taken away", `${both.length} active`);
   if (verdict === "created") {
-    const row = sql(`select action || '|' || actor_key_id || '|' || details from admin_audit_log where action = 'admin_account.created' order by created_at desc limit 1`);
+    const row = sql(`select action || '|' || actor_key_id || '|' || details from admin_audit_log where action = 'admin_account.created' order by "timestamp" desc limit 1`);
     check(row.includes("system:first-admin") && row.includes(email) && !row.includes(password), "its creation is in the audit log, by name, without the password", row.replace(email, mask(email)).slice(0, 160));
   }
 
@@ -107,7 +120,7 @@ async function firstAdmin() {
       await s.page.waitForTimeout(1200);
       const left = at(`after deactivating ${e}`);
       check(!left.some((r) => r.startsWith(`${e}|`)) && left.some((r) => r.startsWith(`${email}|`)), `${e} is deactivated on the Accounts page; the configured admin remains`, `${left.length} active`);
-      const audit = sql(`select actor_key_id || '|' || details from admin_audit_log where action = 'admin_account.deactivated' order by created_at desc limit 1`);
+      const audit = sql(`select actor_key_id || '|' || details from admin_audit_log where action = 'admin_account.deactivated' order by "timestamp" desc limit 1`);
       check(audit.includes(e) && audit.includes("admin-ui"), "the deactivation is in the audit log: who, which account", audit.slice(0, 160));
     }
     await s.page.screenshot({ path: path.join(OUT, "02-accounts-after.png"), fullPage: true });
@@ -122,6 +135,65 @@ async function firstAdmin() {
   const demo = sql("select count(*) from admin_users where is_active and email ~* '@example\\.(com|org|net)$'");
   check(demo === "0", "no active account carries an example.* address", demo);
   finish("first_admin", { timeline: timeline.map((t) => ({ ...t, active_admins: t.active_admins.map((r) => r.replace(/^([^|@])[^|@]*(@[^|]*)/, "$1***$2")) })) });
+}
+
+// What an admin's Thai screen keeps in Latin letters on purpose: the product, protocols, units and
+// the names of things an operator types or reads off a provider's console.
+const KEEP_ADMIN = /^(SRAN|AI|Gateway|GATEWAY|Agent|Market|Chat|API|APIs|DLP|MCP|KB|URL|URLs|ID|IDs|OK|JSON|CSV|PDF|SSO|JWT|IP|TTL|RPM|TPM|GPT|LLM|NER|PII|SMTP|TLS|SSL|HTTP|HTTPS|OpenAI|Anthropic|Google|Azure|OpenRouter|Presidio|Redis|Postgres|Prometheus|Grafana|Whisper|USD|THB|UTC|admin|Admin|token|tokens|Token|Tokens|prompt|Prompt|regex|Regex|webhook|Webhook|ms|sec|min|GB|MB|KB|vs|PO)$/;
+// An admin table's own words — headings, tabs, labels, buttons, column heads, the sentences of a page —
+// and not the data in its cells (addresses, ids, model names, what people typed).
+const ADMIN_WORDS = "h1, h2, h3, h4, h5, label, legend, summary, button, th, [role='tab'], nav a, aside a, p, option, small";
+const ADMIN_DATA = "td, code, pre, kbd, [data-testid$='-row'] span[title], [data-testid='am-tile']";
+
+/** F on the admin app: every page of the sidebar and every section of the Agent Market page, in both
+ *  languages — what is not in the language the admin chose (results/admin/<target>/language-strings.json). */
+async function language() {
+  const browser = await pw().chromium.launch();
+  try {
+    let email, password;
+    if (LIVE) {
+      email = containerEnv("INITIAL_ADMIN_EMAIL");
+      password = containerEnv("INITIAL_ADMIN_PASSWORD");
+    } else {
+      const accounts = JSON.parse(fs.readFileSync(path.join(L.ROOT, "scripts", "probes", "AM7", "results", "ts_admins.json"), "utf8"));
+      email = "am7-admin@fix128.test";
+      password = accounts[email].password;
+    }
+    const { ctx, page } = await signIn(browser, email, password);
+    const found = await page.evaluate(() => window.localStorage.getItem("sran-admin-locale"));
+    await page.goto(`${ADMIN}/`, { waitUntil: "load" });
+    await page.waitForTimeout(2500);
+    const hrefs = await page.evaluate(() => [...new Set([...document.querySelectorAll("aside a[href^='/'], nav a[href^='/']")].map((a) => a.getAttribute("href")))]);
+    const sections = ["access", "departments", "spend", "models", "catalog", "problems", "runs", "mail"].map((sec) => `/agent-market?section=${sec}`);
+    const pagesToRead = [...hrefs.filter((h) => h !== "/agent-market"), ...sections];
+    check(pagesToRead.length >= 20, "the admin app's pages are the sidebar's links and the Agent Market page's sections", `${hrefs.length} links + ${sections.length} sections`);
+    const report = { found, pages: pagesToRead, th: {}, en: {}, notOpened: [] };
+    for (const lang of ["en", "th"]) {
+      await page.evaluate((l) => window.localStorage.setItem("sran-admin-locale", l), lang);
+      for (const href of pagesToRead) {
+        const r = await page.goto(`${ADMIN}${href}`, { waitUntil: "load" }).catch(() => null);
+        if (!r || r.status() >= 400) {
+          report.notOpened.push(`${lang} · ${href}: ${r ? r.status() : "no response"}`);
+          continue;
+        }
+        await page.waitForTimeout(1800);
+        report[lang][href] = await R.leaks(page, lang, { notApps: ADMIN_DATA, only: ADMIN_WORDS, keep: KEEP_ADMIN.source });
+      }
+      await page.goto(`${ADMIN}/agent-market?section=catalog`, { waitUntil: "load" });
+      await page.waitForTimeout(1500);
+      await page.screenshot({ path: path.join(OUT, `08-language-${lang}.png`), fullPage: true });
+      check(Object.keys(report[lang]).length >= 20, `${lang}: pages read`, String(Object.keys(report[lang]).length));
+    }
+    report.flat = { th: R.flat(report.th), en: R.flat(report.en) };
+    if (found) await page.evaluate((l) => window.localStorage.setItem("sran-admin-locale", l), found);
+    else await page.evaluate(() => window.localStorage.removeItem("sran-admin-locale"));
+    fs.writeFileSync(path.join(OUT, "language-strings.json"), JSON.stringify(report, null, 1));
+    log(`admin language: not in the chosen language — th ${report.flat.th.length}, en ${report.flat.en.length}; pages ${pagesToRead.length}; not opened ${report.notOpened.length}`);
+    await ctx.close();
+    finish("language", { left: { th: report.flat.th.length, en: report.flat.en.length }, notOpened: report.notOpened });
+  } finally {
+    await browser.close();
+  }
 }
 
 async function pages() {
@@ -153,7 +225,7 @@ async function pages() {
     };
     const names = {};
     for (const lang of ["th", "en"]) {
-      await page.goto(`${ADMIN}/agent-market`, { waitUntil: "load" });
+      await page.goto(`${ADMIN}/agent-market?section=catalog`, { waitUntil: "load" });
       await setLang(lang);
       await page.getByTestId("am-catalog").waitFor({ timeout: 90000 });
       await page.waitForTimeout(1500);
@@ -161,10 +233,15 @@ async function pages() {
         slug: el.getAttribute("data-slug"),
         name: (el.querySelector("span[style*='font-weight']") || el.querySelector("span")).innerText,
         accent: (el.querySelector('[data-testid="am-tile"]') || { getAttribute: () => null }).getAttribute("data-accent"),
+        icon: (el.querySelector('[data-testid="am-tile"]') || { getAttribute: () => null }).getAttribute("data-icon"),
+        quiet: (el.querySelector('[data-testid="am-tile"]') || { getAttribute: () => null }).getAttribute("data-quiet") === "true",
+        status: (el.querySelector('[data-testid="am-catalog-status"]') || { innerText: "" }).innerText,
         text: el.innerText,
       })));
-      names[lang] = rows.map((r) => [r.slug, r.name, r.accent]);
-      check(rows.length >= 5 && rows.every((r) => r.accent), `${lang}: every agent of the catalogue is drawn with its package's icon in its own colour`, JSON.stringify(rows.map((r) => r.accent)));
+      names[lang] = rows.map((r) => [r.slug, r.name, r.accent, r.quiet ? "quiet" : "in colour"]);
+      // an agent that is not published is drawn quietly, with its own icon all the same
+      check(rows.length >= 5 && rows.every((r) => r.icon === "own" && r.accent), `${lang}: every agent of the catalogue is drawn with its package's own icon`,
+        JSON.stringify(rows.map((r) => `${r.icon}/${r.accent}/${r.quiet ? "quiet" : "colour"}`)));
       const thai = rows.filter((r) => /[ก-๙]/.test(r.name)).length;
       check(lang === "th" ? thai === rows.length : thai === 0, `${lang}: each agent is named in the page's language`, JSON.stringify(rows.map((r) => r.name)));
       await page.screenshot({ path: path.join(OUT, `04-agent-market-${lang}.png`), fullPage: true });
@@ -198,9 +275,9 @@ async function pages() {
 }
 
 const cmd = process.argv[2];
-const run = { "first-admin": firstAdmin, pages }[cmd];
+const run = { "first-admin": firstAdmin, pages, language }[cmd];
 if (!run) {
-  console.log("usage: admin.js first-admin | pages");
+  console.log("usage: admin.js first-admin | pages | language");
   process.exit(2);
 }
 run().catch((e) => { console.error(String((e && e.stack) || e).slice(0, 700)); process.exit(1); });
