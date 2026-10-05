@@ -132,12 +132,13 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
 
         wb = load_workbook(book)
         sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
-        # AM9: the wide tables as the check reads them — by header name, in the order they are built
+        # AM9: the wide tables as the check reads them — by header name, in the order they are built (AM10: from
+        # the main sheet and its companions together)
         from agent_market.deliverables.reread import table
-        from agent_market.packages.po_matching.scripts.workbook import H_INVOICES, H_LINES, S_INVOICES, S_LINES
+        from agent_market.packages.po_matching.scripts.workbook import H_INVOICES, H_LINES, S_INVOICES, S_LINES, parts
 
         out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets,
-                    "lines": table(wb[S_LINES], H_LINES), "invoices": table(wb[S_INVOICES], H_INVOICES)})
+                    "lines": table(parts(wb, S_LINES), H_LINES), "invoices": table(parts(wb, S_INVOICES), H_INVOICES)})
         return out
     finally:
         job.close()

@@ -14,13 +14,20 @@ columns, how wide, how many rows — not from a layout fixed per agent:
 * the header row (the row the panes are frozen under) repeats on every page;
 * the face of a working paper (its first sheet) prints on one page;
 * the print area is the sheet's used range;
-* every page carries the document's name, the sheet and "หน้า x / y".
+* every page carries the document's name, the sheet and "หน้า x / y";
+* AM10: every sheet prints one page across — pages only run downward. A table
+  too wide for that is not printed across pages but written as a main sheet
+  (what a reader follows: the row's identity, its amounts, its status and
+  reason) and companion sheets right after it, "<sheet> · หลักฐาน" and the
+  like, that start with the same identity columns and hold the evidence, one
+  row per row, so the two are read side by side by row number (``pick``).
 
 ``check`` reads those settings back out of the finished file and asserts
 them, with the same arithmetic (``bands``: which columns print on which page
-across). It does not render; AM9's proof that does is the runner's: it prints
-the finished workbook through the document converter and looks for every row
-of ``print_rows`` — its identity and its amounts — on one rendered page.
+across); ``one_across`` is the AM10 rule as its own check, ``checks`` both. It
+does not render; AM9's proof that does is the runner's: it prints the finished
+workbook through the document converter and looks for every row of
+``print_rows`` — its identity and its amounts — on one rendered page.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ MIN_SCALE = 0.6           # below this a fitted page is too small to read: repea
 SPLIT_SCALE = 0.8
 DEFAULT_WIDTH = 8.43      # Excel's column width when none is set
 ROW_PT = 15.0             # Excel's default row height
+COMPANION = " · "         # AM10: a companion sheet is named "<main sheet> · <what it holds>"
 
 
 def col_inches(width: float | None) -> float:
@@ -98,6 +106,24 @@ def lead(heads: list, rows: list, widths: list | None, first: list, **cols) -> t
     return ([heads[i] for i in order], [[row[i] for i in order] for row in rows],
             [widths[i] for i in order] if widths else widths,
             {k: tuple(pos[c - 1] + 1 for c in v) for k, v in cols.items()})
+
+
+def pick(heads: list, rows: list, keep: list, **cols) -> tuple:
+    """The columns ``keep`` (header names, in that order) of a table, and the writer's 1-based column tuples
+    (money_cols=…, wrap_cols=…) renumbered to them — an entry for a column that is not kept drops out.
+
+    AM10: a table too wide to print one page across is written as a main sheet and companion sheets read
+    side by side by row number — the main holds the row's identity, its amounts, its status and reason; a
+    companion the same identity columns and then the evidence — each picked from the one table the writer
+    builds. Nothing is dropped: every column is on one of them, the identity on all. A check reads a column
+    back from whichever sheet holds it (``reread.table`` on the sheets together)."""
+    missing = [h for h in keep if h not in heads]
+    if missing:
+        raise ValueError(f"pick: no column {missing!r}")
+    idx = [heads.index(h) for h in keep]
+    pos = {old: new for new, old in enumerate(idx)}
+    return ([heads[i] for i in idx], [[row[i] for i in idx] for row in rows],
+            {k: tuple(pos[c - 1] + 1 for c in v if c - 1 in pos) for k, v in cols.items()})
 
 
 def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1) -> dict:
@@ -339,3 +365,67 @@ def check(path: str) -> dict:
     return _check("xlsx.print", True, f"ตั้งค่าการพิมพ์ครบ {n} ชีต: A4 หน้าสรุปหน้าเดียว หัวตารางซ้ำทุกหน้า "
                   "รายการอยู่หน้าเดียวกับยอด ชื่อเอกสารและเลขหน้าทุกหน้า",
                   "พิมพ์ได้: หน้าสรุปหน้าเดียว รายการอยู่หน้าเดียวกับยอด มีเลขหน้า", n)
+
+
+def companions(wb) -> list[tuple]:
+    """(main sheet, companion) pairs of a workbook: a companion is named "<main> · <what>" (``COMPANION``)."""
+    out = []
+    for ws in wb.worksheets:
+        main = ws.title.split(COMPANION)[0]
+        if main != ws.title and main in wb.sheetnames:
+            out.append((wb[main], ws))
+    return out
+
+
+def _side_by_side(main, aside) -> list[str]:
+    """AM10: a companion is read beside its main sheet by row number — it repeats the main sheet's identity
+    columns: the same headers, and on every row the same text."""
+    where = f"ชีต “{aside.title}”"
+    ident = title_cols(main)
+    if not ident or title_cols(aside) != ident:
+        return [f"{where}: คอลัมน์ระบุรายการไม่ใช่ชุดเดียวกับชีต “{main.title}”"]
+    top = _header_row(main)
+    if top is None or _header_row(aside) != top:
+        return [f"{where}: หัวตารางไม่อยู่แถวเดียวกับชีต “{main.title}”"]
+    for c in ident:
+        if _identity_text(aside.cell(row=top, column=c).value) != _identity_text(main.cell(row=top, column=c).value):
+            return [f"{where}: หัวคอลัมน์ระบุรายการ ({get_column_letter(c)}) ไม่ตรงกับชีต “{main.title}”"]
+    bad: list[str] = []
+    for r in range(top + 1, max(main.max_row or 0, aside.max_row or 0) + 1):
+        for c in ident:
+            a, b = _identity_text(main.cell(row=r, column=c).value), _identity_text(aside.cell(row=r, column=c).value)
+            if a != b:
+                bad.append(f"{where} แถว {r}: คอลัมน์ {get_column_letter(c)} “{b or 'ว่าง'}” ไม่ตรงกับชีต “{main.title}” “{a or 'ว่าง'}”")
+                break
+    return bad
+
+
+def one_across(path: str) -> dict:
+    """AM10's rule as a gate check: every sheet prints one page across (``bands`` gives one band), so pages
+    only run downward and a reader follows one line on one page; a companion sheet lines up with its main
+    sheet row for row (``_side_by_side``). Fails naming the sheet and how many pages across it runs."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path)
+    bad: list[str] = []
+    n = 0
+    for ws in wb.worksheets:
+        n += 1
+        pages = bands(ws)
+        if len(pages) > 1:
+            bad.append(f"ชีต “{ws.title}” พิมพ์กว้าง {len(pages)} หน้า ({ws.max_column} คอลัมน์) ต้องกว้างหน้าเดียว: "
+                       "ย้ายคอลัมน์หลักฐานไปชีตคู่")
+    for main, aside in companions(wb):
+        bad += _side_by_side(main, aside)
+    label = "ทุกชีตพิมพ์กว้างหน้าเดียว อ่านรายการหนึ่งบรรทัดจบในหน้าเดียว"
+    if bad:
+        more = f" (และอีก {len(bad) - 4} ข้อ)" if len(bad) > 4 else ""
+        return _check("xlsx.print.one_across", False, "; ".join(bad[:4]) + more, label, n)
+    k = len(companions(wb))
+    pair = f" ชีตคู่ {k} ชีตเริ่มด้วยคอลัมน์ระบุรายการเดียวกับชีตหลักทุกแถว" if k else ""
+    return _check("xlsx.print.one_across", True, f"ทุกชีต ({n}) พิมพ์กว้างหน้าเดียว หน้าต่อกันลงล่างเท่านั้น{pair}", label, n)
+
+
+def checks(path: str) -> list[dict]:
+    """The print gate's checks on a finished file: the page setup (``check``) and AM10's one page across."""
+    return [check(path), one_across(path)]

@@ -5,6 +5,11 @@ left out of the register, why, and how it comes back) · รายการส�
 box, method, printed text, confidence, who decided it) · ข้อยกเว้น (reason-coded) · การตรวจ (each
 document's deterministic checks). Amounts are numbers, not text, so a reader can sum them again;
 the quality gate reopens the file and checks the register adds up to computed.json.
+
+AM10: the register prints one page across. It is one table (H_REGISTER) written as the main sheet —
+the row's number, date, document number, the seller and every amount — and a companion right after it
+("ทะเบียน · หลักฐาน": the same three identity columns, then the branch, the buyer, how it was read and the
+file), one row per row, read side by side by row number (``LAYOUT``: which columns, how wide).
 """
 
 from __future__ import annotations
@@ -19,12 +24,31 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
+from ....deliverables.reread import sheets, table
 from ....engine.e2.cards import CHECK_TH, FIELD_TH
 from .register import DOC_TYPE_TH, REASON_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
 NOT_INCLUDED = "เอกสารที่ยังไม่ได้รวม"
-SHEETS = ("สรุป", "ทะเบียน", NOT_INCLUDED, "รายการสินค้า", "ที่มา", "ข้อยกเว้น", "การตรวจ")
+S_REGISTER, S_REGISTER_EV = "ทะเบียน", "ทะเบียน · หลักฐาน"
+SHEETS = ("สรุป", S_REGISTER, S_REGISTER_EV, NOT_INCLUDED, "รายการสินค้า", "ที่มา", "ข้อยกเว้น", "การตรวจ")
+# The register's columns in the order the data is built and read back (the gate reads by name, from both of its
+# sheets together — ``table(parts(wb, S_REGISTER), H_REGISTER)``)
+H_REGISTER = ["ลำดับ", "วันที่", "เลขที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขผู้เสียภาษีผู้ขาย", "สาขา", "ผู้ซื้อ", "เลขผู้เสียภาษีผู้ซื้อ", "สกุลเงิน",
+              "ยอดก่อน VAT", "VAT", "ยอดรวม", "หัก ณ ที่จ่าย", "ยอดที่ต้องชำระ", "อัตราแลกเปลี่ยน", "ยอดก่อน VAT (บาท)", "VAT (บาท)",
+              "ยอดรวม (บาท)", "ที่มา", "ไฟล์"]
+PARTS = {S_REGISTER: (S_REGISTER, S_REGISTER_EV)}
+# AM10: what prints on each sheet of the register, in print order, with the column's width: the main sheet leads
+# with the row's identity (ID_COLS of them, repeated on the companion and on every page), then the seller and
+# every amount; the companion repeats the identity and holds the rest. Every column of H_REGISTER is on one.
+LAYOUT = {
+    S_REGISTER: [("ลำดับ", 6), ("วันที่", 11), ("เลขที่", 15), ("ผู้ขาย", 24), ("เลขผู้เสียภาษีผู้ขาย", 15), ("ชนิดเอกสาร", 14), ("สกุลเงิน", 7),
+                 ("ยอดก่อน VAT", 12), ("VAT", 12), ("ยอดรวม", 12), ("หัก ณ ที่จ่าย", 12), ("ยอดที่ต้องชำระ", 12), ("อัตราแลกเปลี่ยน", 9),
+                 ("ยอดก่อน VAT (บาท)", 13), ("VAT (บาท)", 12), ("ยอดรวม (บาท)", 13)],
+    S_REGISTER_EV: [("ลำดับ", 6), ("วันที่", 11), ("เลขที่", 15), ("สาขา", 7), ("ผู้ซื้อ", 26), ("เลขผู้เสียภาษีผู้ซื้อ", 15), ("ที่มา", 15),
+                    ("ไฟล์", 30)],
+}
+ID_COLS = {S_REGISTER: 3}
 DECIDED_TH = {"document": "อ่านจากเอกสาร", "typed_by_person": "ผู้ใช้พิมพ์", "confirmed_by_person": "ผู้ใช้ยืนยัน",
               "computed": "คำนวณจากค่าในเอกสาร", "model_proposal": "โมเดลเสนอ (ยังไม่ยืนยัน)"}
 METHOD_TH = {"pdf_text": "ข้อความใน PDF", "ocr": "OCR", "etax_xml": "e-Tax XML", "typed_by_person": "ผู้ใช้พิมพ์",
@@ -148,6 +172,11 @@ def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
 
 
+def parts(wb, sheet: str) -> list:
+    """The sheets a table prints on — the main sheet and the companion that is in the file — for ``table``."""
+    return sheets(wb, *PARTS.get(sheet, (sheet,)))
+
+
 def item_status(line: dict) -> str:
     """What a line item's status says (AM8): "ยืนยันแล้ว" is a person's word — the machine never says it.
     A reading a script made says it was read by the system, and whether it still needs a look."""
@@ -245,11 +274,6 @@ class InvoiceWorkbook:
             r += 1
 
     def register(self):
-        ws = self.wb.create_sheet("ทะเบียน")
-        self._title(ws, "ทะเบียนเอกสาร", "เฉพาะเอกสารที่บันทึก ยอด “บาท” แปลงด้วยอัตราที่ผู้ใช้ระบุเมื่อเป็นเงินตราต่างประเทศ")
-        heads = ["ลำดับ", "วันที่", "เลขที่", "ชนิดเอกสาร", "ผู้ขาย", "เลขผู้เสียภาษีผู้ขาย", "สาขา", "ผู้ซื้อ",
-                 "เลขผู้เสียภาษีผู้ซื้อ", "สกุลเงิน", "ยอดก่อน VAT", "VAT", "ยอดรวม", "หัก ณ ที่จ่าย", "ยอดที่ต้องชำระ",
-                 "อัตราแลกเปลี่ยน", "ยอดก่อน VAT (บาท)", "VAT (บาท)", "ยอดรวม (บาท)", "ที่มา", "ไฟล์"]
         rows = []
         for i, d in enumerate([d for d in self.c["documents"] if d["status"] == "included"], start=1):
             rows.append([i, d["document_date"], d["document_number"], d["document_type_label"], d["seller_name"],
@@ -258,11 +282,20 @@ class InvoiceWorkbook:
                          _num(d.get("payable", d["net_payable"])), _num(d["fx_rate"]), _num(d["thb_subtotal"]),
                          _num(d["thb_vat_amount"]),
                          _num(d["thb_total"]), d["tier_label"], d["name"]])
-        self._table(ws, 4, heads, rows, [6, 11, 16, 18, 30, 16, 8, 26, 16, 8, 14, 12, 14, 12, 14, 10, 16, 12, 16, 16, 30],
-                    money_cols=(11, 12, 13, 14, 15, 17, 18, 19))
-        for r in range(5, 5 + len(rows)):
-            for j in (6, 9):
-                ws.cell(row=r, column=j).number_format = "@"
+        for sheet, title, sub in ((S_REGISTER, "ทะเบียนเอกสาร", "เฉพาะเอกสารที่บันทึก ยอด “บาท” แปลงด้วยอัตราที่ผู้ใช้ระบุเมื่อเป็นเงินตราต่างประเทศ "
+                                                             f"· สาขา ผู้ซื้อ วิธีอ่าน และไฟล์อยู่ในชีต “{S_REGISTER_EV}” แถวเดียวกัน"),
+                                  (S_REGISTER_EV, S_REGISTER_EV, f"หลักฐานของแต่ละแถวในชีต “{S_REGISTER}” อ่านเทียบกันตามลำดับ · สาขา ผู้ซื้อ "
+                                                                 "ที่มา (วิธีอ่าน) และไฟล์")):
+            ws = self.wb.create_sheet(sheet)
+            self._title(ws, title, sub)
+            picked, prow, cols = workpaper.pick(H_REGISTER, rows, [h for h, _ in LAYOUT[sheet]], money_cols=(11, 12, 13, 14, 15, 17, 18, 19),
+                                                wrap_cols=(4, 5, 8, 21))
+            self._table(ws, 4, picked, prow, [w for _, w in LAYOUT[sheet]], **cols)
+            # a tax ID is text, never a number
+            for j, h in enumerate(picked, start=1):
+                if h in ("เลขผู้เสียภาษีผู้ขาย", "เลขผู้เสียภาษีผู้ซื้อ"):
+                    for r in range(5, 5 + len(rows)):
+                        ws.cell(row=r, column=j).number_format = "@"
 
     def not_included(self):
         ws = self.wb.create_sheet(NOT_INCLUDED)
@@ -293,7 +326,7 @@ class InvoiceWorkbook:
                          ", ".join(CHECK_NAME_TH.get(c, c) for c in p["checks"] if c in CHECK_NAME_TH) or None, vision or None])
         self._table(ws, 4, ["ไฟล์", "ช่อง", "ค่า", "ความมั่นใจ", "อ่านด้วย", "หน้า", "ตำแหน่ง", "ข้อความในเอกสาร",
                             "ผู้กำหนด", "ผ่านการตรวจ", "โมเดลอ่านได้ (อ้างอิง)"], rows,
-                    [28, 18, 28, 10, 14, 6, 24, 36, 18, 36, 28], wrap_cols=(8, 10))
+                    [22, 15, 24, 9, 13, 6, 20, 28, 15, 28, 22], wrap_cols=(1, 2, 3, 5, 7, 8, 9, 10, 11))
 
     def exceptions(self):
         ws = self.wb.create_sheet("ข้อยกเว้น")
@@ -331,8 +364,10 @@ class InvoiceWorkbook:
         self.exceptions()
         self.checks()
         self.wb.properties.creator = "Agent Market · invoice processing"
-        # AM8: printable — on the wide register, the row number, date and document number repeat on every page
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"ทะเบียน": 3, "ที่มา": 2})
+        # AM8: printable — the register's row number, date and document number repeat on every page (AM10: and
+        # open its companion sheet)
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path),
+                                 id_cols={S_REGISTER: ID_COLS[S_REGISTER], S_REGISTER_EV: ID_COLS[S_REGISTER], "ที่มา": 2})
         self.wb.save(path)
         return {"sheets": list(self.wb.sheetnames), "register_rows": self.c["totals"]["included"]}
 
@@ -348,8 +383,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
 
     wb = load_workbook(path)
     out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
-    ws = wb["ทะเบียน"]
-    rows = [r for r in ws.iter_rows(min_row=5, values_only=True) if r and r[0] is not None]
+    rows = table(parts(wb, S_REGISTER), H_REGISTER)
     want = computed["totals"]["included"]
     out.append(ck("xlsx.register_rows", len(rows) == want, f"{len(rows)} แถว / {want} ฉบับ", "จำนวนแถวตรงกับเอกสารที่บันทึก"))
     out.append(_figures(wb, rows, computed))
@@ -366,11 +400,11 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
                   f"{len(left)} ฉบับ / {computed['totals']['excluded']} ฉบับ", "เอกสารที่ยังไม่ได้รวมอยู่ในรายการครบทุกฉบับ"))
     unknown = sorted({d["document_type"] for d in computed["documents"] if d["document_type"] not in DOC_TYPE_TH})
     out.append(ck("xlsx.doc_types", not unknown, ", ".join(unknown) or "ครบ", "ชนิดเอกสารมีชื่อไทย"))
-    out.append(workpaper.check(path))
+    out.extend(workpaper.checks(path))
     return out
 
 
-# The register's columns a value is read back from: (column, header, computed key, money?)
+# The register's columns a value is read back from: (index in H_REGISTER, header, computed key, money?)
 REGISTER_FIELDS = (
     (1, "วันที่", "document_date", False), (2, "เลขที่", "document_number", False),
     (5, "เลขผู้เสียภาษีผู้ขาย", "seller_tax_id", False), (8, "เลขผู้เสียภาษีผู้ซื้อ", "buyer_tax_id", False),
@@ -383,6 +417,7 @@ REGISTER_FIELDS = (
 
 
 def _figures(wb, rows: list, computed: dict) -> dict:
+    """``rows`` is the register as ``table(parts(wb, S_REGISTER), H_REGISTER)`` read it: every row in H_REGISTER order."""
     from ....deliverables.reread import Tally, labelled
 
     t = Tally()

@@ -379,8 +379,10 @@ class Cards(unittest.TestCase):
         link = res["computed"]["lines"][0]["link"]
         self.assertEqual((link["confirmed"], link["confirmed_by"], link["tier"], link["pass"]),
                          ("person", "สมหญิง ผู้ตรวจ", "amount_date", "po_price"))
-        row = next(r for r in res["sheets"]["ผลตรวจรายบรรทัด"][4:] if r and r[0] is not None)
-        self.assertEqual(row[28], "คนยืนยัน: สมหญิง ผู้ตรวจ")
+        # AM10: who confirmed is on the line sheet's companion (เกณฑ์ที่ใช้); the kit reads the table across its sheets
+        from agent_market.packages.po_matching.scripts.workbook import H_LINES
+
+        self.assertEqual(res["lines"][0][H_LINES.index("ผู้ยืนยัน")], "คนยืนยัน: สมหญิง ผู้ตรวจ")
 
     def test_the_question_about_receipts_is_asked_once_and_can_be_remembered(self):
         _, res = result("practice_is_asked_once_with_a_guess")

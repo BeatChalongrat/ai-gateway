@@ -96,10 +96,10 @@ class TheAgentsPapers(unittest.TestCase):
                         self.assertTrue(set(ident) <= set(band), (band, ident))
 
     def test_the_wide_detail_sheet_leads_with_number_and_description(self):
+        # AM10: the detail sheet no longer runs across pages (test_am10_print); its identity still leads and names the row
         for pkg, sheet in PAPERS.items():
             ws = load_workbook(self.out[pkg])[sheet]
             with self.subTest(pkg):
-                self.assertGreater(len(workpaper.bands(ws)), 1, "the sheet still runs across pages")
                 ident = workpaper.title_cols(ws)
                 self.assertGreaterEqual(len(ident), 2)
                 worded = [ws.cell(row=5, column=c).value for c in ident if isinstance(ws.cell(row=5, column=c).value, str)]

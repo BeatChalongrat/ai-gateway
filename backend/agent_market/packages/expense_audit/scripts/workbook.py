@@ -7,6 +7,11 @@ receipt as read: page, box, printed text, confidence, who decided the total) · 
 policy *table* the rules used, with its source, the holidays, and the KB document's paragraphs as
 context — marked as never a limit). Thai labels; amounts are numbers, not text; the quality gate
 reopens the file and checks it against computed.json.
+
+AM10: the wide tables (claims, exceptions, receipts) print one page across. Each is one table (H_*)
+written as a main sheet — the row's identity, its amounts, its outcome and reason — and companion
+sheets right after it ("<sheet> · หลักฐาน", "รายการเบิก · ผลตามกฎ") that repeat the identity columns
+and hold the rest, one row per row, read side by side by row number (``LAYOUT``: which columns, how wide).
 """
 
 from __future__ import annotations
@@ -19,17 +24,23 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from ....deliverables import workpaper
-from ....deliverables.reread import Tally, table
+from ....deliverables.reread import Tally, sheets, table
 from .audit import CHOICES, OUTCOME_TH, REASON_TH, RESOLUTION_TH
 
 MONEY = '#,##0.00;[Red](#,##0.00);"-"'
-SHEETS = ("สรุป", "รายการเบิก", "ผลตรวจแต่ละกฎ", "ข้อยกเว้น", "ใบเสร็จ", "นโยบายที่ใช้")
+S_CLAIMS, S_FACTS, S_EXC, S_RECEIPTS, S_POLICY = "รายการเบิก", "ผลตรวจแต่ละกฎ", "ข้อยกเว้น", "ใบเสร็จ", "นโยบายที่ใช้"
+# AM10: the wide tables' companion sheets — the same identity columns, then the rest, read beside the main sheet
+# by row number; every one prints one page across
+S_CLAIMS_EV, S_CLAIMS_RULES, S_EXC_EV, S_RECEIPTS_EV = ("รายการเบิก · หลักฐาน", "รายการเบิก · ผลตามกฎ", "ข้อยกเว้น · หลักฐาน",
+                                                         "ใบเสร็จ · หลักฐาน")
+PARTS = {S_CLAIMS: (S_CLAIMS, S_CLAIMS_EV, S_CLAIMS_RULES), S_EXC: (S_EXC, S_EXC_EV), S_RECEIPTS: (S_RECEIPTS, S_RECEIPTS_EV)}
+SHEETS = ("สรุป", S_CLAIMS, S_CLAIMS_EV, S_CLAIMS_RULES, S_FACTS, S_EXC, S_EXC_EV, S_RECEIPTS, S_RECEIPTS_EV, S_POLICY)
 FACT_TH = {"claim_data": "ข้อมูลในแถว", "category": "หมวดในตาราง", "within_claim_limit": "วงเงินต่อครั้ง",
            "within_period_limit": "วงเงินต่อเดือน", "receipt": "มีใบเสร็จ", "receipt_amount": "ยอดตรงใบเสร็จ",
            "duplicate": "ไม่ซ้ำ", "split_purchase": "ไม่แยกบิล", "prohibited_merchant": "ร้านไม่ต้องห้าม",
            "vat_document": "เอกสารขอคืน VAT", "wht": "หัก ณ ที่จ่าย", "weekend_holiday": "วันทำงาน", "purpose": "วัตถุประสงค์"}
-# The wide tables' columns in the order the data is built and read back (AM9: printed, a row's identity —
-# the claim, the person, what it was for — and its amounts come first, ``workpaper.lead``; checks read by name)
+# The wide tables' columns in the order the data is built and read back (the checks read by name, from the sheets
+# of a table together — ``table(parts(wb, sheet), H_*)``)
 H_CLAIMS = ["ลำดับ", "เลขที่เบิก", "แถวในไฟล์", "รหัสพนักงาน", "ชื่อพนักงาน", "วันที่", "วัน", "หมวด", "ร้านค้า/ผู้รับเงิน",
             "จำนวนเงิน", "ใบเสร็จ", "ยอดในใบเสร็จ", "ขอคืนภาษีซื้อ", "หัก ณ ที่จ่าย", "รายละเอียด", "ผลการตรวจ",
             "รหัสเหตุผล", "คำตอบในการ์ด"] + [FACT_TH[f] for f in FACT_TH]
@@ -37,11 +48,27 @@ H_EXC = ["ลำดับ", "รายการ", "รหัสเหตุผ�
          "ที่มา", "อ้างอิงนโยบาย", "วงเงิน/เกณฑ์จากตาราง", "ตั้งข้อสังเกตด้วย", "บริบทจากเอกสารระเบียบ (ไม่ใช่วงเงิน)"]
 H_RECEIPTS = ["ไฟล์", "ชนิดไฟล์", "อ่านด้วย", "ชนิดเอกสาร", "ผู้ขาย", "เลขผู้เสียภาษี", "วันที่", "ยอดรวม", "หน้า",
               "ตำแหน่ง", "ข้อความในเอกสาร", "ความมั่นใจ", "ผู้กำหนดยอด", "สถานะ", "รายการเบิก", "หมายเหตุ"]
-LEAD = {
-    "claims": ["ลำดับ", "เลขที่เบิก", "ชื่อพนักงาน", "รายละเอียด", "จำนวนเงิน", "ยอดในใบเสร็จ", "หัก ณ ที่จ่าย", "ผลการตรวจ"],
-    "exceptions": ["ลำดับ", "รายการ", "เหตุผล", "วงเงิน/เกณฑ์จากตาราง"],
-    "receipts": ["ไฟล์", "ผู้ขาย", "ยอดรวม"],
+# What prints on each sheet of a wide table, in print order, with the column's width: the main sheet leads with
+# the row's identity (ID_COLS of them — the claim, the person, what it was for — repeated on the companions and
+# on every page), then its amounts, outcome and reason; a companion repeats the identity and holds the rest.
+# Every column of H_* is on one of them.
+LAYOUT = {
+    S_CLAIMS: [("ลำดับ", 6), ("เลขที่เบิก", 10), ("ชื่อพนักงาน", 16), ("รายละเอียด", 28), ("จำนวนเงิน", 13), ("ยอดในใบเสร็จ", 13),
+               ("หัก ณ ที่จ่าย", 11), ("ผลการตรวจ", 18), ("วันที่", 11), ("หมวด", 16), ("ร้านค้า/ผู้รับเงิน", 22), ("ใบเสร็จ", 12),
+               ("รหัสเหตุผล", 26)],
+    S_CLAIMS_EV: [("ลำดับ", 6), ("เลขที่เบิก", 10), ("ชื่อพนักงาน", 16), ("รายละเอียด", 28), ("แถวในไฟล์", 8), ("รหัสพนักงาน", 11),
+                  ("คำตอบในการ์ด", 40)],
+    S_CLAIMS_RULES: [("ลำดับ", 6), ("เลขที่เบิก", 10), ("ชื่อพนักงาน", 16), ("รายละเอียด", 28), ("วัน", 9), ("ขอคืนภาษีซื้อ", 8)]
+                    + [(FACT_TH[f], 9) for f in FACT_TH],
+    S_EXC: [("ลำดับ", 6), ("รายการ", 10), ("เหตุผล", 24), ("วงเงิน/เกณฑ์จากตาราง", 13), ("สถานะ", 12), ("รายละเอียด", 40),
+            ("สิ่งที่เสนอให้ทำ", 36), ("ทางเลือกของผู้ตัดสิน", 36), ("อ้างอิงนโยบาย", 26)],
+    S_EXC_EV: [("ลำดับ", 6), ("รายการ", 10), ("เหตุผล", 24), ("รหัสเหตุผล", 22), ("ที่มา", 40), ("ตั้งข้อสังเกตด้วย", 24),
+               ("บริบทจากเอกสารระเบียบ (ไม่ใช่วงเงิน)", 50)],
+    S_RECEIPTS: [("ไฟล์", 20), ("ผู้ขาย", 26), ("ยอดรวม", 13), ("ชนิดไฟล์", 12), ("อ่านด้วย", 13), ("ชนิดเอกสาร", 16), ("เลขผู้เสียภาษี", 15),
+                 ("วันที่", 11), ("สถานะ", 14), ("รายการเบิก", 13), ("ผู้กำหนดยอด", 16)],
+    S_RECEIPTS_EV: [("ไฟล์", 20), ("ผู้ขาย", 26), ("หน้า", 6), ("ตำแหน่ง", 22), ("ข้อความในเอกสาร", 30), ("ความมั่นใจ", 10), ("หมายเหตุ", 36)],
 }
+ID_COLS = {S_CLAIMS: 4, S_EXC: 3, S_RECEIPTS: 2}
 STATUS_TH = {"pass": "ผ่าน", "fail": "ไม่ผ่าน", "skip": "ไม่เกี่ยว"}
 DISPOSITION_TH = {"exception": "ข้อยกเว้น (คนตัดสิน)", "question": "การ์ดคำถาม (วิจารณญาณ)", None: "บันทึกไว้"}
 SEVERITY_TH = {"review": "รอคนตัดสิน", "info": "บันทึกไว้"}
@@ -83,6 +110,11 @@ def _calendar_line(cal: dict) -> str:
 
 def _num(v):
     return None if v in (None, "") else float(Decimal(str(v)))
+
+
+def parts(wb, sheet: str) -> list:
+    """The sheets a table prints on — the main sheet and the companions that are in the file — for ``table``."""
+    return sheets(wb, *PARTS.get(sheet, (sheet,)))
 
 
 class ExpenseWorkbook:
@@ -133,6 +165,12 @@ class ExpenseWorkbook:
             ws.freeze_panes = ws.cell(row=top + 1, column=1)
             if rows:
                 ws.auto_filter.ref = f"A{top}:{get_column_letter(len(headers))}{top + len(rows)}"
+
+    def _part(self, ws, heads: list, rows: list, layout: list, **cols):
+        """One sheet of a wide table (AM10): the columns ``layout`` names, at its widths, picked from the whole
+        table; ``cols`` are the writer's column tuples against ``heads``."""
+        picked, prow, cols = workpaper.pick(heads, rows, [h for h, _ in layout], **cols)
+        self._table(ws, 4, picked, prow, [w for _, w in layout], **cols)
 
     def _note(self, ws, r: int, text: str, cols: int = 6, height: int = 30):
         cell = ws.cell(row=r, column=1, value=text)
@@ -185,8 +223,6 @@ class ExpenseWorkbook:
             r += 1
 
     def claims(self):
-        ws = self.wb.create_sheet("รายการเบิก")
-        self._title(ws, "รายการเบิกและผลตรวจ", "หนึ่งแถวต่อหนึ่งรายการในไฟล์ · ผ่าน / ข้อยกเว้น (คนตัดสิน) / ต้องใช้วิจารณญาณ — ไม่มีการปฏิเสธอัตโนมัติ")
         rows = []
         for i, c in enumerate(self.c["claims"], start=1):
             answered = "; ".join(f"{REASON_TH[k]}: {RESOLUTION_TH.get(v, v)}" for k, v in c["resolution"].items())
@@ -198,11 +234,19 @@ class ExpenseWorkbook:
                          c["outcome_label"], ", ".join(c["codes"] + c["flags"] + [f"({x})" for x in c["also_flagged"]]),
                          answered or None]
                         + [STATUS_TH[c["facts"][f]["status"]] for f in FACT_TH])
-        self._table(ws, 4, H_CLAIMS, rows, [6, 10, 8, 11, 18, 11, 11, 20, 28, 13, 12, 13, 9, 11, 34, 20, 30, 30] + [11] * len(FACT_TH),
-                    money_cols=(10, 12, 14), wrap_cols=(15, 17, 18), first=LEAD["claims"])
+        for sheet, title, sub in ((S_CLAIMS, "รายการเบิกและผลตรวจ", "หนึ่งแถวต่อหนึ่งรายการในไฟล์ · ผ่าน / ข้อยกเว้น (คนตัดสิน) / ต้องใช้วิจารณญาณ "
+                                                                  f"— ไม่มีการปฏิเสธอัตโนมัติ · ผลของแต่ละกฎอยู่ในชีต “{S_CLAIMS_RULES}” "
+                                                                  f"แถวในไฟล์ รหัสพนักงาน และคำตอบในการ์ดอยู่ในชีต “{S_CLAIMS_EV}” แถวเดียวกัน"),
+                                  (S_CLAIMS_EV, S_CLAIMS_EV, f"หลักฐานของแต่ละรายการในชีต “{S_CLAIMS}” อ่านเทียบกันตามลำดับ · แถวในไฟล์ "
+                                                             "รหัสพนักงาน และคำตอบที่ให้ไว้ในการ์ด"),
+                                  (S_CLAIMS_RULES, S_CLAIMS_RULES, f"ผลของแต่ละกฎต่อรายการในชีต “{S_CLAIMS}” อ่านเทียบกันตามลำดับ · "
+                                                                   "ผ่าน / ไม่ผ่าน / ไม่เกี่ยว")):
+            ws = self.wb.create_sheet(sheet)
+            self._title(ws, title, sub)
+            self._part(ws, H_CLAIMS, rows, LAYOUT[sheet], money_cols=(10, 12, 14), wrap_cols=(8, 9, 15, 16, 17, 18))
 
     def facts(self):
-        ws = self.wb.create_sheet("ผลตรวจแต่ละกฎ")
+        ws = self.wb.create_sheet(S_FACTS)
         self._title(ws, "ผลตรวจแต่ละกฎ (ข้อเท็จจริง)", "กฎตรวจด้วยสคริปต์ ไม่ใช้โมเดล · วงเงินอ้างอิงจากตารางนโยบายเท่านั้น (อ้างอิงนโยบาย = ช่องในแผ่น “นโยบายที่ใช้”)")
         rows = []
         cats = self.c["policy"]["table"].get("categories") or {}
@@ -214,11 +258,9 @@ class ExpenseWorkbook:
                              policy_ref_th(ev.get("policy_ref"), cats), _num(ev.get("limit")), _num(ev.get("amount"))])
         self._table(ws, 4, ["เลขที่เบิก", "กฎ", "รหัสกฎ", "ผล", "รหัสเหตุผล", "ผลที่ตามมา", "รายละเอียด", "อ้างอิงนโยบาย",
                             "วงเงิน/เกณฑ์จากตาราง", "ยอดที่ตรวจ"], rows,
-                    [10, 16, 20, 9, 26, 20, 60, 30, 14, 13], money_cols=(9, 10), wrap_cols=(7,))
+                    [10, 16, 18, 9, 22, 20, 44, 30, 14, 13], money_cols=(9, 10), wrap_cols=(5, 7, 8))
 
     def exceptions(self):
-        ws = self.wb.create_sheet("ข้อยกเว้น")
-        self._title(ws, "ข้อยกเว้น", "“รอคนตัดสิน” = ยังไม่มีใครตัดสิน ทางเลือกทุกข้อเป็นของคน ไม่มีข้อใดเลือกไว้ให้ · “บันทึกไว้” = ผู้ใช้ตัดสินแล้วระหว่างตรวจ หรือไม่ต้องตัดสิน")
         rows = []
         cats = self.c["policy"]["table"].get("categories") or {}
         for i, e in enumerate(self.c["run_exceptions"], start=1):
@@ -231,12 +273,15 @@ class ExpenseWorkbook:
             rows.append([i, s.get("claim") or e["subject"], e["reason_code"], e["reason"], SEVERITY_TH[e["severity"]],
                          e.get("detail") or None, e["proposed_action"], " / ".join(ch["label"] for ch in e["choices"]) or None,
                          where or None, policy_ref_th(s.get("policy_ref"), cats), _num(s.get("limit")), also or None, kb or None])
-        self._table(ws, 4, H_EXC, rows, [6, 10, 26, 26, 12, 50, 50, 44, 40, 28, 14, 24, 50], money_cols=(11,), wrap_cols=(6, 7, 8, 9, 13),
-                    first=LEAD["exceptions"])
+        for sheet, title, sub in ((S_EXC, "ข้อยกเว้น", "“รอคนตัดสิน” = ยังไม่มีใครตัดสิน ทางเลือกทุกข้อเป็นของคน ไม่มีข้อใดเลือกไว้ให้ · “บันทึกไว้” = "
+                                                     f"ผู้ใช้ตัดสินแล้วระหว่างตรวจ หรือไม่ต้องตัดสิน · ที่มาและบริบทอยู่ในชีต “{S_EXC_EV}” แถวเดียวกัน"),
+                                  (S_EXC_EV, S_EXC_EV, f"หลักฐานของแต่ละข้อในชีต “{S_EXC}” อ่านเทียบกันตามลำดับ · รหัสเหตุผล ที่มา (ชีต แถว ใบเสร็จ "
+                                                       "ข้อความ) และบริบทจากเอกสารระเบียบ ซึ่งไม่ใช่ที่มาของวงเงิน")):
+            ws = self.wb.create_sheet(sheet)
+            self._title(ws, title, sub)
+            self._part(ws, H_EXC, rows, LAYOUT[sheet], money_cols=(11,), wrap_cols=(4, 6, 7, 8, 9, 10, 12, 13))
 
     def receipts(self):
-        ws = self.wb.create_sheet("ใบเสร็จ")
-        self._title(ws, "ใบเสร็จที่อ่าน", "อ่านด้วยเครื่องอ่าน E2: ข้อความใน PDF / e-Tax XML / OCR · ตำแหน่งบนหน้า (x0,y0,x1,y1 หน่วย pt; รูปถ่ายเป็น px)")
         rows = []
         for r in self.c["receipts"]:
             ts = r["total_source"] or {}
@@ -245,14 +290,20 @@ class ExpenseWorkbook:
                          ts.get("raw_text"), ts.get("confidence"), DECIDED_TH.get(ts.get("decided_by"), ts.get("decided_by")),
                          {"read": "ใช้ได้", "unconfirmed": "ยืนยันยอดไม่ได้", "pending": "รอคำตอบ"}.get(r["status"], r["status"]),
                          ", ".join(r["claims"]) or "ไม่มีรายการอ้างถึง", r["note"] or None])
-        self._table(ws, 4, H_RECEIPTS, rows, [22, 14, 14, 20, 28, 16, 11, 13, 6, 22, 18, 10, 18, 14, 14, 30], money_cols=(8,),
-                    wrap_cols=(16,), first=LEAD["receipts"])
+        for sheet, title, sub in ((S_RECEIPTS, "ใบเสร็จที่อ่าน", "อ่านด้วยเครื่องอ่าน E2: ข้อความใน PDF / e-Tax XML / OCR · หน้า ตำแหน่ง และข้อความที่อ่าน "
+                                                               f"อยู่ในชีต “{S_RECEIPTS_EV}” แถวเดียวกัน"),
+                                  (S_RECEIPTS_EV, S_RECEIPTS_EV, f"หลักฐานของแต่ละใบเสร็จในชีต “{S_RECEIPTS}” อ่านเทียบกันตามลำดับ · หน้า "
+                                                                 "ตำแหน่งบนหน้า (x0,y0,x1,y1 หน่วย pt; รูปถ่ายเป็น px) ข้อความที่พิมพ์ และความมั่นใจ")):
+            ws = self.wb.create_sheet(sheet)
+            self._title(ws, title, sub)
+            self._part(ws, H_RECEIPTS, rows, LAYOUT[sheet], money_cols=(8,), wrap_cols=(4, 5, 11, 13, 14, 16))
+        ws = self.wb[S_RECEIPTS]
         tax_col = [c.value for c in ws[4]].index("เลขผู้เสียภาษี") + 1
         for i in range(len(rows)):
             ws.cell(row=5 + i, column=tax_col).number_format = "@"
 
     def policy(self):
-        ws = self.wb.create_sheet("นโยบายที่ใช้")
+        ws = self.wb.create_sheet(S_POLICY)
         pol = self.c["policy"]
         table = pol["table"]
         src = ("ตารางตัวอย่างที่มากับ agent — ยังไม่ได้แก้เป็นของบริษัท" if pol["source"] == "package_sample"
@@ -310,9 +361,10 @@ class ExpenseWorkbook:
         self.receipts()
         self.policy()
         self.wb.properties.creator = "Agent Market · expense audit"
-        # AM8: printable — on the wide claims sheet, the claim's number and its person repeat on every page
-        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={"รายการเบิก": 4, "ผลตรวจแต่ละกฎ": 2, "ข้อยกเว้น": 3,
-                                                                              "ใบเสร็จ": 2})
+        # AM8: printable — the claim's number and its person repeat on every page (AM10: and open every companion
+        # sheet of a wide table)
+        id_cols = {s: ID_COLS[main] for main, names in PARTS.items() for s in names}
+        workpaper.setup_workbook(self.wb, doc_name=os.path.basename(path), id_cols={**id_cols, S_FACTS: 2})
         self.wb.save(path)
         return {"sheets": list(self.wb.sheetnames), "claims": self.c["totals"]["claims"],
                 "run_exceptions": self.c["totals"]["run_exceptions"]}
@@ -328,7 +380,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
 
     wb = load_workbook(path)
     out = [ck("xlsx.sheets", set(SHEETS) <= set(wb.sheetnames), ", ".join(wb.sheetnames), "ชีตครบ")]
-    rows = table(wb["รายการเบิก"], H_CLAIMS)
+    rows = table(parts(wb, S_CLAIMS), H_CLAIMS)
     claims = computed["claims"]
     same = len(rows) == len(claims) and all(r[1] == c["id"] and r[15] == c["outcome_label"] for r, c in zip(rows, claims))
     out.append(ck("xlsx.claims", same, f"{len(rows)} แถว / {len(claims)} รายการ", "ทุกรายการเบิกมีผลตรวจ"))
@@ -340,7 +392,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     out.append(ck("xlsx.claims_total", got == exp, f"{got} / {exp}", "ยอดเบิกรวมตรงกับที่คำนวณ"))
     numeric = all(isinstance(r[9], (int, float)) for r, c in zip(rows, claims) if c["amount"] is not None)
     out.append(ck("xlsx.amounts_are_numbers", numeric, "", "จำนวนเงินเป็นตัวเลข ไม่ใช่ข้อความ"))
-    ex = table(wb["ข้อยกเว้น"], H_EXC)
+    ex = table(parts(wb, S_EXC), H_EXC)
     run_ex = computed["run_exceptions"]
     ok = len(ex) == len(run_ex) and all(r[2] in REASON_TH and r[2] == e["reason_code"] for r, e in zip(ex, run_ex)) and \
         all(r[7] for r, e in zip(ex, run_ex) if e["severity"] == "review") and \
@@ -360,7 +412,7 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     kb_rows = [r for r in ws.iter_rows(min_row=(kb_at or 0) + 2, values_only=True) if r and r[5] is not None] if kb_at else []
     ok = ok and kb_at is not None and all(r[5] == NOT_A_LIMIT for r in kb_rows)
     out.append(ck("xlsx.policy_is_the_table", ok, f"{len(prow)} หมวด", "วงเงินในชีตนโยบายคือตาราง เอกสารระเบียบเป็นบริบทเท่านั้น"))
-    rc = table(wb["ใบเสร็จ"], H_RECEIPTS)
+    rc = table(parts(wb, S_RECEIPTS), H_RECEIPTS)
     out.append(ck("xlsx.receipts", len(rc) == len(computed["receipts"]) and all(r[2] for r in rc), f"{len(rc)} ฉบับ",
                   "ใบเสร็จครบ และบอกว่าอ่านด้วยวิธีใด"))
     # AM8: every claim's own figures, not only their sum (two errors that cancel out passed before)
@@ -384,5 +436,5 @@ def check(path: str, computed: dict, run: dict | None = None) -> list[dict]:
     for r, rec in zip(rc, computed["receipts"]):
         t.number(f"ใบเสร็จ {rec['name']} ยอดรวม", r[7], rec["total"])
     out.append(t.result("xlsx.figures", "ยอดของทุกรายการเบิก หน้าสรุป และใบเสร็จ (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
-    out.append(workpaper.check(path))
+    out.extend(workpaper.checks(path))
     return out

@@ -121,12 +121,13 @@ def run_files(paths: list, *, defaults: dict | None = None, answers: dict | None
 
         wb = load_workbook(book)
         sheets = {ws.title: [list(r) for r in ws.iter_rows(values_only=True)] for ws in wb.worksheets}
-        # AM9: the matched pairs as the check reads them — by header name, in the order they are built
+        # AM9: the matched pairs as the check reads them — by header name, in the order they are built (AM10: from
+        # the main sheet and its companion together)
         from agent_market.deliverables.reread import table
-        from agent_market.packages.bank_reconciliation.scripts.workbook import H_PAIRS, S_PAIRS
+        from agent_market.packages.bank_reconciliation.scripts.workbook import H_PAIRS, S_PAIRS, parts
 
         out.update({"computed": computed, "computed_bytes": raw, "summary": comp["summary"], "render": rend, "sheets": sheets,
-                    "pairs": table(wb[S_PAIRS], H_PAIRS)})
+                    "pairs": table(parts(wb, S_PAIRS), H_PAIRS)})
         return out
     finally:
         job.close()

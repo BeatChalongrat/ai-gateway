@@ -78,15 +78,29 @@ def _money(d: Decimal | None) -> str:
 def table(ws, heads: list, top: int = 4) -> list[list]:
     """The table whose header row is ``top``, every row given in the order of ``heads`` (found by header
     name): a check reads what it asserts by name, whatever order the writer printed the columns in (AM9).
-    Rows whose first named cell is empty are left out, like the writers' own readers do."""
-    header = [str(c.value).strip() if c.value is not None else None for c in ws[top]]
-    idx = [header.index(h) if h in header else None for h in heads]
+    Rows whose first named cell is empty are left out, like the writers' own readers do.
+
+    ``ws`` may be the sheets a wide table prints on (AM10: the main sheet and its companions, which repeat
+    its identity columns and are read side by side by row number): a header is read from the first sheet
+    that has it, the rows paired by position."""
+    sheets = list(ws) if isinstance(ws, (list, tuple)) else [ws]
+    headers = [[str(c.value).strip() if c.value is not None else None for c in s[top]] for s in sheets]
+    where = [next(((i, hdr.index(h)) for i, hdr in enumerate(headers) if h in hdr), None) for h in heads]
     out = []
-    for r in ws.iter_rows(min_row=top + 1, values_only=True):
-        row = [r[i] if i is not None and i < len(r) else None for i in idx]
+    for rs in zip(*(s.iter_rows(min_row=top + 1, values_only=True) for s in sheets)):
+        row = []
+        for w in where:
+            i, j = w or (0, 0)
+            row.append(rs[i][j] if w and j < len(rs[i]) else None)
         if row and row[0] is not None:
             out.append(row)
     return out
+
+
+def sheets(wb, *names: str) -> list:
+    """The sheets of ``names`` that are in the workbook, for ``table`` — a file made before a table was split
+    has the main sheet only."""
+    return [wb[n] for n in names if n in wb.sheetnames]
 
 
 def rows(ws, header_row: int) -> list[tuple]:

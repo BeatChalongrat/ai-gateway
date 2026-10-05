@@ -563,5 +563,5 @@ def check_xlsx(path: str, computed: dict) -> list[dict]:
     out.append(tally.result("xlsx.figures", "ตัวเลขในตาราง (อ่านจากไฟล์) ตรงกับที่คำนวณ", "ตัวเลข"))
     from . import workpaper
 
-    out.append(workpaper.check(path))
+    out.extend(workpaper.checks(path))
     return out
