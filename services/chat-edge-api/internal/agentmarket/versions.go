@@ -89,7 +89,7 @@ func VersionDiff(from, to Definition) []Change {
 	}
 	sort.Strings(sorted)
 	for _, k := range sorted {
-		if k == "version" || k == "capabilities" || k == "install" {
+		if k == "version" || k == "capabilities" || k == "install" || k == "icon_svg" {
 			continue
 		}
 		if !JSONEqual(a[k], b[k]) {

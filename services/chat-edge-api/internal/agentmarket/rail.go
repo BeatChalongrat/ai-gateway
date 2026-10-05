@@ -28,6 +28,7 @@ type RailInstall struct {
 	LastUsedAt *time.Time `json:"last_used_at"`
 	Waiting    int        `json:"waiting"`
 	Disabled   bool       `json:"disabled"`
+	Look
 }
 
 func (a *API) rail(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +40,7 @@ func (a *API) rail(w http.ResponseWriter, r *http.Request) {
 				WHERE r.install_id = i.id AND r.kind IN ('run', 'self_test'))),
 			(SELECT count(*) FROM agent_market.agent_runs r
 				WHERE r.install_id = i.id AND r.kind IN ('run', 'self_test') AND r.status = 'awaiting_input')::int,
-			COALESCE(cs.status, '') = 'disabled'
+			COALESCE(cs.status, '') = 'disabled', `+lookSQL+`
 		FROM agent_market.agent_installs i
 		JOIN agent_market.agent_definitions d ON d.id = i.definition_id
 		LEFT JOIN agent_market.catalog_state cs ON cs.org_id = i.org_id AND cs.slug = i.slug
@@ -54,10 +55,12 @@ func (a *API) rail(w http.ResponseWriter, r *http.Request) {
 	total := 0
 	for rows.Next() {
 		var x RailInstall
-		if err := rows.Scan(&x.ID, &x.Slug, &x.Title, &x.Icon, &x.Version, &x.PinnedAt, &x.LastUsedAt, &x.Waiting, &x.Disabled); err != nil {
+		var icon, accent json.RawMessage
+		if err := rows.Scan(&x.ID, &x.Slug, &x.Title, &x.Icon, &x.Version, &x.PinnedAt, &x.LastUsedAt, &x.Waiting, &x.Disabled, &icon, &accent); err != nil {
 			a.fail(w, err, "installs")
 			return
 		}
+		x.Look = scanLook(icon, accent)
 		total += x.Waiting
 		out = append(out, x)
 	}

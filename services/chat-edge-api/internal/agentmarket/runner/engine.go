@@ -45,8 +45,17 @@ type Package struct {
 	RawManifest  json.RawMessage
 	Instructions string
 	SelfTest     json.RawMessage
-	Checksum     string
-	prefix       string
+	// IconSVG is the package's icon file, checked (AM10, look.go); empty when
+	// the package ships none.
+	IconSVG  string
+	Checksum string
+	prefix   string
+}
+
+// ReleaseManifest is what the registered version carries: the manifest with
+// the icon written in.
+func (p *Package) ReleaseManifest() (json.RawMessage, error) {
+	return agentmarket.ReleaseManifest(p.RawManifest, p.IconSVG)
 }
 
 // LoadEngine opens a built zip, or — for development and tests — zips a
@@ -113,6 +122,19 @@ func LoadEngine(zipPath, srcDir string) (*Engine, error) {
 		p := &Package{Slug: m.ID, PyPackage: m.PythonPackage, Version: m.Version, Manifest: m, RawManifest: b, prefix: prefix}
 		p.Instructions = string(entries[prefix+"AGENT.md"])
 		p.SelfTest = entries[prefix+"self-test.json"]
+		if m.IconFile != "" {
+			svg, ok := entries[prefix+m.IconFile]
+			if !ok {
+				return nil, fmt.Errorf("%s: icon_file %q is not in the package", name, m.IconFile)
+			}
+			if err := agentmarket.CheckIcon(svg); err != nil {
+				return nil, fmt.Errorf("%s: %s: %w", name, m.IconFile, err)
+			}
+			p.IconSVG = string(svg)
+		}
+		if _, err := p.ReleaseManifest(); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
 		p.Checksum = checksumOf(entries, func(n string) bool { return strings.HasPrefix(n, prefix) })
 		e.Packages[m.ID] = p
 	}

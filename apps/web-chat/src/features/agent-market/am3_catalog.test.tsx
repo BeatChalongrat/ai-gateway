@@ -27,9 +27,9 @@ import { useI18nStore } from "@/lib/i18n";
 import { AsksPanel } from "./install/panels";
 import { AgentDetailPage } from "./market/AgentDetailPage";
 import { DatasheetPage } from "./market/DatasheetPage";
-import { costLine } from "./market/trust";
+import { feedLine, getLine } from "./market/MarketPage";
 import { railOrder, searchAgents } from "./rail";
-import type { Datasheet, Manifest, RailInstall } from "./types";
+import type { CatalogAgent, Datasheet, Manifest, RailInstall } from "./types";
 import { resetAgentMarketForTest } from "./useAgentMarket";
 import { tAm } from "./i18n";
 
@@ -220,9 +220,27 @@ describe("rail order and search (pure)", () => {
     expect(hits.catalog.map((x) => x.slug)).toEqual(["zz-2"]);
     expect(searchAgents("  ", [r("zzz")], []).installed).toEqual([]);
   });
-  it("a card's one-line cost", () => {
-    useI18nStore.setState({ locale: "th" });
-    expect(costLine(tAm, { run_id: "x", version: "1", status: "succeeded", credits: 3_000_000, seconds: 90 }, null)).toBe("ตัวอย่างจริง ≈ 35.00 บาท · 1 นาที 30 วินาที");
-    expect(costLine(tAm, { run_id: "x", version: "1", status: "failed", credits: 10, seconds: 1 }, null)).toBeNull();
+  it("AM10: a card says what to feed it and what comes back — never a price or a time", () => {
+    const a = {
+      slug: "x", version: "1", name: "X", status: "published",
+      sample: { run_id: "x", version: "1", status: "succeeded", credits: 3_000_000, seconds: 90 },
+      manifest: {
+        typical_run_seconds: 90,
+        inputs: [
+          { role: "primary", label: "บัญชีแยกประเภทของเดือน", required: true, accept: [".xlsx"] },
+          { role: "budget", label: "งบประมาณ", required: false, accept: [".xlsx"] },
+          { role: "prior", label: "เดือนก่อน", required: false, accept: [".xlsx"] },
+        ],
+        outputs: [
+          { format: "docx", label: "รายงาน .docx", default: true },
+          { format: "pptx", label: "สไลด์ .pptx", default: true },
+          { format: "xlsx", label: "ตาราง .xlsx", default: false },
+        ],
+      },
+    } as CatalogAgent;
+    expect(feedLine(a)).toEqual({ required: "บัญชีแยกประเภทของเดือน", optional: "งบประมาณ · เดือนก่อน" });
+    expect(getLine(a)).toBe("รายงาน .docx · สไลด์ .pptx");
+    // an agent whose outputs name no default gets them all
+    expect(getLine({ ...a, manifest: { outputs: [{ format: "xlsx", label: "ทะเบียน .xlsx" }] } } as CatalogAgent)).toBe("ทะเบียน .xlsx");
   });
 });

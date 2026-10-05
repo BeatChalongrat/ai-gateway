@@ -180,15 +180,3 @@ export function CostLines({
     </ul>
   );
 }
-
-/** One line for a market card: "ตัวอย่างจริง ≈ 0.12 บาท · 1 นาที 20 วินาที". */
-export function costLine(
-  t: ReturnType<typeof useAmT>,
-  sample: SampleSummary | null | undefined,
-  pricing: Pricing | null | undefined,
-): string | null {
-  if (!sample || sample.status !== "succeeded") return null;
-  const b = formatBaht(creditsToBaht(sample.credits, pricing ?? DEFAULT_PRICING));
-  const time = secondsText(t, sample.seconds);
-  return time ? t("cost.cardLine", { baht: b, time }) : t("cost.cardLineNoTime", { baht: b });
-}

@@ -191,6 +191,7 @@ function UserItem({ item }: { item: ThreadItem }) {
 function AgentItem({ item }: { item: ThreadItem }) {
   const replaced = useContext(Superseded);
   const rounds = useContext(Rounds);
+  const ws = useWorkspace();
   switch (item.kind) {
     case "greeting":
       return <Greeting p={(item.payload ?? {}) as GreetingPayload} />;
@@ -205,7 +206,7 @@ function AgentItem({ item }: { item: ThreadItem }) {
     }
     case "progress": {
       const p = item.payload as ProgressPayload;
-      return p?.run_id ? <ProgressCard progress={p} /> : null;
+      return p?.run_id ? <ProgressCard progress={p} expectedSeconds={ws?.expectedSeconds} /> : null;
     }
     case "intent":
       return <IntentChip item={item} />;

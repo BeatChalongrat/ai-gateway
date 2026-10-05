@@ -27,9 +27,13 @@ type Manifest struct {
 	ShortName     string `json:"short_name"`
 	Category      string `json:"category"`
 	Icon          string `json:"icon"`
-	Summary       string `json:"summary"`
-	PythonPackage string `json:"python_package"`
-	TypicalRunSec int    `json:"typical_run_seconds"`
+	// AM10. IconFile: the package's own icon (look.go); Accent: its colour per
+	// theme. Icon stays the glyph name a client falls back to.
+	IconFile      string  `json:"icon_file"`
+	Accent        *Accent `json:"accent"`
+	Summary       string  `json:"summary"`
+	PythonPackage string  `json:"python_package"`
+	TypicalRunSec int     `json:"typical_run_seconds"`
 	Greeting      struct {
 		Text    string `json:"text"`
 		Role    string `json:"role"`
@@ -177,6 +181,12 @@ func ParseManifest(raw json.RawMessage) (Manifest, error) {
 		return m, fmt.Errorf("manifest: scope %q is neither %q nor %q", m.Scope, ScopeGeneric, ScopeOrgSpecific)
 	}
 	m.Jurisdiction = strings.TrimSpace(m.Jurisdiction)
+	if err := CheckIconFile(m.IconFile); err != nil {
+		return m, fmt.Errorf("manifest: %w", err)
+	}
+	if err := CheckAccent(m.Accent); err != nil {
+		return m, fmt.Errorf("manifest: %w", err)
+	}
 	if err := checkDeclared(m.Install.Settings); err != nil {
 		return m, fmt.Errorf("manifest: %w", err)
 	}

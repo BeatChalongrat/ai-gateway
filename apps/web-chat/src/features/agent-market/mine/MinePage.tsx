@@ -80,7 +80,7 @@ function Mine() {
           {rows.map((r) => (
             <li key={r.id} className="flex items-center gap-3 rounded-xl border border-border bg-bg-surface px-3.5 py-3" data-testid="am-mine-row">
               <Link href={workspaceHref(r.id)} className="focus-ring flex min-w-0 flex-1 items-center gap-3 rounded-lg">
-                <AgentTile icon={r.icon} size={32} quiet={r.disabled} />
+                <AgentTile icon={r.icon} look={r} size={32} quiet={r.disabled} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-text-primary">{r.title}</span>
                   <span className="block truncate text-xs text-text-muted">

@@ -152,7 +152,11 @@ func StoreLegacyEngine(ctx context.Context, st *am.Store, files storage.Backend,
 // a changed package under a released version is refused, loudly.
 func (r *Runner) register(ctx context.Context) error {
 	for _, p := range r.Engine.Packages {
-		d := am.Definition{Slug: p.Slug, Version: p.Version, Name: p.Manifest.Name, Manifest: p.RawManifest,
+		released, err := p.ReleaseManifest()
+		if err != nil {
+			return err
+		}
+		d := am.Definition{Slug: p.Slug, Version: p.Version, Name: p.Manifest.Name, Manifest: released,
 			Instructions: p.Instructions, Checksum: p.Checksum, EngineChecksum: r.Engine.Build}
 		cur, err := r.Store.DefinitionBySlugVersion(ctx, p.Slug, p.Version)
 		switch {

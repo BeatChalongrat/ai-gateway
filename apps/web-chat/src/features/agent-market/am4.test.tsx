@@ -226,7 +226,6 @@ describe("the market, one grid of equal cards", () => {
     const cards = [...within(grid).getAllByTestId("am-agent-card"), ...within(grid).getAllByTestId("am-soon-card")];
     expect(cards.length).toBeGreaterThan(2);
     for (const c of cards) {
-      expect(within(c).getByTestId("am-card-tags")).toBeTruthy();
       expect(within(c).getByTestId("am-card-meta")).toBeTruthy();
       expect(within(c).getByTestId("am-card-actions")).toBeTruthy();
       expect(c.className).toContain("h-full");
@@ -234,7 +233,7 @@ describe("the market, one grid of equal cards", () => {
       // (the AM4 screen tour saw the tag rows 25 px apart when one title wrapped)
       const bottom = within(c).getByTestId("am-card-bottom");
       expect(bottom.className).toContain("mt-auto");
-      for (const id of ["am-card-tags", "am-card-meta", "am-card-actions"]) expect(bottom.contains(within(c).getByTestId(id))).toBe(true);
+      for (const id of ["am-card-meta", "am-card-actions"]) expect(bottom.contains(within(c).getByTestId(id))).toBe(true);
     }
     for (const s of within(grid).getAllByTestId("am-soon-card")) {
       expect(s.className).toContain("opacity-60");

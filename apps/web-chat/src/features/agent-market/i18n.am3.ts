@@ -83,8 +83,6 @@ export const am3Th = {
   "cost.typical": "ใช้เวลาราว {time} ต่อรอบ",
   "cost.unknown": "ยังไม่มีตัวเลขค่าใช้จ่าย — จะเห็นหลังรอบแรก",
   "cost.note": "ตัดจากงบเครดิต Agent Market ที่ผู้ดูแลกำหนดให้คุณแต่ละเดือน ไม่หักเครดิตที่ใช้แชท",
-  "cost.cardLine": "ตัวอย่างจริง ≈ {baht} บาท · {time}",
-  "cost.cardLineNoTime": "ตัวอย่างจริง ≈ {baht} บาท",
 
   // data sheet
   "ds.kicker": "เอกสารข้อมูลของ agent",

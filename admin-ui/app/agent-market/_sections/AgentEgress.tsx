@@ -11,7 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useI18n } from "../../../lib/i18n";
 import { amAdmin, amErrorMessage, type AgentEgressRow } from "../../../lib/agentMarketApi";
-import { LoadError, Loading, Note, h2, muted, type Msg } from "./shared";
+import { AgentName, LoadError, Loading, Note, h2, muted, useLooks, type Msg } from "./shared";
 
 export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) {
   const { t } = useI18n();
@@ -19,6 +19,7 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
+  const looks = useLooks();
 
   const load = useCallback(() => {
     amAdmin.egress().then(
@@ -69,7 +70,9 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
         <tbody>
           {rows.map((r) => (
             <tr key={r.slug} data-testid={`am-egress-${r.slug}`}>
-              <td>{r.name}</td>
+              <td>
+                <AgentName name={r.name} look={looks[r.slug]} />
+              </td>
               <td>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem", cursor: "pointer" }}>
                   <input

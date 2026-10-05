@@ -13,7 +13,8 @@ import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } 
 import Modal from "../../../components/ui/Modal";
 import { Icon, type IconName } from "../../../components/ui/Icon";
 import { useT, type DictKey } from "../../../lib/i18n";
-import { amAdmin, amErrorMessage, type AdminOrg, type Pricing } from "../../../lib/agentMarketApi";
+import { amAdmin, amErrorMessage, type AdminOrg, type AgentLook, type Pricing } from "../../../lib/agentMarketApi";
+import { useTheme } from "../../../components/ThemeProvider";
 
 export type Translate = ReturnType<typeof useT>;
 
@@ -177,26 +178,102 @@ export function LoadError({ error, onRetry }: { error: unknown; onRetry?: () => 
   );
 }
 
-const AGENT_ICONS: Record<string, IconName> = { bank: "building", expense: "dollar", invoice: "inbox", chart: "box" };
+const AGENT_ICONS: Record<string, IconName> = { bank: "building", expense: "dollar", invoice: "inbox", chart: "box", po: "inbox" };
 
-export function AgentTile({ icon, quiet }: { icon?: string; quiet?: boolean }) {
+// AM10 — the icon ships inside the agent package: a shape the client paints
+// with the agent's accent for the theme in use (the same paint as the chat
+// app's tile), so an agent looks the same here as in the chat. The runner
+// checked the markup; this is the admin app's own look before it goes into a
+// style.
+const ICON_MAX_BYTES = 4096;
+const HEX = /^#[0-9a-f]{6}$/i;
+
+export function safeIconSVG(svg?: string | null): string | null {
+  if (!svg) return null;
+  const s = svg.trim();
+  if (s.length > ICON_MAX_BYTES || !s.startsWith("<svg") || !s.endsWith("</svg>")) return null;
+  if (/<\s*(script|style|foreignObject|image|use|a|text|iframe)\b|[\s"']on[a-z]+\s*=|href\s*=|url\(|javascript:|<!/i.test(s)) return null;
+  return s;
+}
+
+export function useAccent(look?: AgentLook | null): string | null {
+  const { theme } = useTheme();
+  const a = look?.accent;
+  if (!a || !HEX.test(a.light) || !HEX.test(a.dark)) return null;
+  return theme === "light" ? a.light : a.dark;
+}
+
+export function AgentTile({ icon, look, quiet, size = 32 }: { icon?: string; look?: AgentLook | null; quiet?: boolean; size?: number }) {
+  const accent = useAccent(look);
+  const svg = quiet ? null : safeIconSVG(look?.icon_svg);
+  const box = { width: size, height: size, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: size >= 40 ? 12 : 8 } as const;
+  if (svg && accent) {
+    const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    const glyph = Math.round(size * 0.58);
+    return (
+      <span aria-hidden data-testid="am-tile" data-accent={accent} style={{ ...box, background: `${accent}24` }}>
+        <span
+          style={{
+            width: glyph,
+            height: glyph,
+            background: accent,
+            WebkitMaskImage: mask,
+            maskImage: mask,
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+            WebkitMaskSize: "contain",
+            maskSize: "contain",
+            WebkitMaskPosition: "center",
+            maskPosition: "center",
+          }}
+        />
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
+      data-testid="am-tile"
       style={{
-        width: 32,
-        height: 32,
-        flexShrink: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 8,
+        ...box,
         border: "1px solid var(--border-default)",
         background: quiet ? "var(--bg-elevated)" : "color-mix(in srgb, var(--accent-primary) 14%, transparent)",
         color: quiet ? "var(--text-muted)" : "var(--accent-primary)",
       }}
     >
-      <Icon name={(icon && AGENT_ICONS[icon]) || "box"} size={16} />
+      <Icon name={(icon && AGENT_ICONS[icon]) || "box"} size={Math.round(size / 2)} />
+    </span>
+  );
+}
+
+/** The looks of every agent, by slug — read once from the catalogue, for lists that name an agent. */
+export function useLooks(): Record<string, AgentLook> {
+  const [looks, setLooks] = useState<Record<string, AgentLook>>({});
+  useEffect(() => {
+    let alive = true;
+    // a list without the catalogue (a section on its own) simply shows no tiles
+    Promise.resolve()
+      .then(() => amAdmin.catalog())
+      .then((r) => {
+        if (!alive) return;
+        const out: Record<string, AgentLook> = {};
+        for (const a of r.agents ?? []) out[a.slug] = { icon_svg: a.manifest?.icon_svg, accent: a.manifest?.accent };
+        setLooks(out);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return looks;
+}
+
+/** An agent's name with its tile, for a table cell. */
+export function AgentName({ name, look }: { name: string; look?: AgentLook | null }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.5rem" }}>
+      <AgentTile look={look} size={22} />
+      <span>{name}</span>
     </span>
   );
 }

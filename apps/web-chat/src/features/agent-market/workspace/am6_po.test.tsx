@@ -263,11 +263,10 @@ describe("AM6 — whom an agent is made for", () => {
     };
     render(<MarketPage />);
     const cards = await screen.findAllByTestId("am-agent-card");
-    const scope = (c: HTMLElement) => within(c).getByTestId("am-scope").textContent;
-    expect(scope(cards[0]!)).toContain("ใช้ได้กับทุกบริษัท");
-    expect(scope(cards[0]!)).toContain("กฎหมายและภาษีของไทย");
-    expect(scope(cards[1]!)).toContain("เฉพาะองค์กรนี้");
-    expect(scope(cards[1]!)).not.toContain("กฎหมายและภาษีของไทย");
+    // AM10: the card says what it does, what to feed it and what comes back —
+    // nothing else; whom it is for is on the agent's page and its data sheet.
+    expect(cards.length).toBe(2);
+    for (const c of cards) expect(within(c).queryByTestId("am-scope")).toBeNull();
   });
 
   it("the agent's page and its data sheet", async () => {

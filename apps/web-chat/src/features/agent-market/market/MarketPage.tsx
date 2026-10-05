@@ -14,10 +14,9 @@ import { amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { formatDate } from "../format";
 import type { CatalogAgent, InstallRow, SharedItem } from "../types";
-import { AgentTile, cls, ErrorPanel, FeatureGate, PageShell, Pill, Tag } from "../ui";
+import { AgentTile, cls, ErrorPanel, FeatureGate, PageShell, Pill } from "../ui";
 import { useAgentMarket } from "../useAgentMarket";
 import { workspaceHref } from "../workspace/context";
-import { costLine, ScopeLine } from "./trust";
 
 type Category = "all" | "finance" | "documents" | "reports";
 const CATEGORIES: { id: Category; key: AmKey }[] = [
@@ -35,7 +34,8 @@ export const COMING_SOON: { id: string; icon: string; name: AmKey; desc: AmKey; 
     slug: "sran.bank-reconciliation" },
   { id: "expense", icon: "expense", name: "soon.expense.name", desc: "soon.expense.desc", cats: ["finance"],
     slug: "sran.expense-audit" },
-  { id: "po", icon: "po", name: "soon.po.name", desc: "soon.po.desc", cats: ["finance", "documents"] },
+  { id: "po", icon: "po", name: "soon.po.name", desc: "soon.po.desc", cats: ["finance", "documents"],
+    slug: "sran.invoice-po-matching" },
   { id: "ap", icon: "ap", name: "soon.ap.name", desc: "soon.ap.desc", cats: ["finance"] },
   { id: "files", icon: "folder", name: "soon.files.name", desc: "soon.files.desc", cats: ["documents"] },
 ];
@@ -182,9 +182,23 @@ function Market() {
   );
 }
 
-function runTime(t: ReturnType<typeof useAmT>, seconds?: number): string | null {
-  if (!seconds || seconds <= 0) return null;
-  return seconds >= 60 ? t("market.runTimeMin", { n: String(Math.round(seconds / 60)) }) : t("market.runTimeSec", { n: String(seconds) });
+/** AM10 — what a person deciding on an agent needs: what to feed it (the
+ *  required inputs, then the optional ones) and what comes back (the outputs
+ *  it makes by default). Price and time are not here: cost is the admin's,
+ *  on the spend page, and the time is said when a round starts. */
+export function feedLine(a: CatalogAgent): { required: string; optional: string } {
+  const inputs = a.manifest?.inputs ?? [];
+  const label = (i: { label?: string; accept?: string[] }) => (i.label ?? "").trim();
+  return {
+    required: inputs.filter((i) => i.required && label(i)).map(label).join(" · "),
+    optional: inputs.filter((i) => !i.required && label(i)).map(label).join(" · "),
+  };
+}
+
+export function getLine(a: CatalogAgent): string {
+  const outputs = a.manifest?.outputs ?? [];
+  const chosen = outputs.filter((o) => o.default);
+  return (chosen.length ? chosen : outputs).map((o) => (o.label ?? `.${o.format}`).trim()).filter(Boolean).join(" · ");
 }
 
 /** A description clamped to three lines, with "ดูเพิ่ม" when it is longer. */
@@ -226,7 +240,6 @@ function CardFrame({
   soon = false,
   head,
   desc,
-  tags,
   meta,
   actions,
   testId,
@@ -234,7 +247,6 @@ function CardFrame({
   soon?: boolean;
   head: React.ReactNode;
   desc: React.ReactNode;
-  tags: React.ReactNode;
   meta: React.ReactNode;
   actions: React.ReactNode;
   testId: string;
@@ -249,17 +261,13 @@ function CardFrame({
     >
       <div className="flex min-h-[2.75rem] items-start gap-3">{head}</div>
       <div className="mt-3">{desc}</div>
-      {/* tags, price/time and actions: one block pinned to the bottom, so each
-          sits at the same height on every card of a row, however long the
-          name or the description above it */}
+      {/* what to feed it, what comes back, and the actions: one block pinned
+          to the bottom, so each sits at the same height on every card of a
+          row, however long the name or the description above it */}
       <div className="mt-auto pt-3" data-testid="am-card-bottom">
-        {/* one row of tags on every card, whatever each one has */}
-        <div className="flex h-6 flex-wrap gap-1.5 overflow-hidden" data-testid="am-card-tags">
-          {tags}
-        </div>
-        <p className="mt-3 min-h-[1.25rem] truncate text-xs text-text-muted" data-testid="am-card-meta">
+        <div className="min-h-[2.5rem] text-xs text-text-primary" data-testid="am-card-meta">
           {meta}
-        </p>
+        </div>
         <div className="mt-3 flex min-h-[2.25rem] flex-wrap items-center gap-2 border-t border-border-subtle pt-3" data-testid="am-card-actions">
           {actions}
         </div>
@@ -270,40 +278,42 @@ function CardFrame({
 
 function AgentCard({ agent, featured }: { agent: CatalogAgent; featured: boolean }) {
   const t = useAmT();
-  const { pricing } = useAgentMarket();
   const m = agent.manifest ?? {};
   const installed = !!agent.install_id;
   const disabled = agent.status === "disabled";
-  const cost = costLine(t, agent.sample, pricing);
-  const time = cost ?? runTime(t, m.typical_run_seconds);
-  const formats = formatsLabel(agent);
+  const feed = feedLine(agent);
+  const get = getLine(agent);
   return (
     <CardFrame
       testId="am-agent-card"
       head={
         <>
-          <AgentTile icon={m.icon} size={38} />
+          <AgentTile icon={m.icon} look={m} size={38} />
           <div className="min-w-0 flex-1">
             <h2 className="line-clamp-2 text-[15px] font-semibold leading-snug text-text-primary">{agent.name}</h2>
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              {featured && !disabled ? <Pill>{t("market.featured")}</Pill> : null}
-              {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
-              {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
-            </div>
-            <ScopeLine scope={agent.scope ?? m.scope} jurisdiction={agent.jurisdiction ?? m.jurisdiction} className="mt-1 text-[11px]" />
+            {disabled || agent.status === "unpublished" ? (
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {disabled ? <Pill tone="warning">{t("rail.disabled")}</Pill> : null}
+                {agent.status === "unpublished" ? <Pill>{t("market.unpublished")}</Pill> : null}
+              </div>
+            ) : null}
           </div>
         </>
       }
       desc={m.summary ? <Clamp text={m.summary} /> : <div className="min-h-[4.5rem]" />}
-      tags={
+      meta={
         <>
-          <Tag>{t("market.tag.upload")}</Tag>
-          {m.permissions?.default === "read_only" ? <Tag>{t("market.tag.readOnly")}</Tag> : null}
-          {formats ? <Tag>{formats}</Tag> : null}
-          {agent.sample?.status === "succeeded" ? <Tag tone="success">{t("market.hasSample")}</Tag> : null}
+          <span className="block truncate" data-testid="am-card-feed">
+            <span className="text-text-secondary">{t("card.feed")}</span>
+            {` ${feed.required}`}
+            {feed.optional ? <span className="text-text-muted">{` · ${t("card.optional", { items: feed.optional })}`}</span> : null}
+          </span>
+          <span className="block truncate" data-testid="am-card-get">
+            <span className="text-text-secondary">{t("card.get")}</span>
+            {` ${get}`}
+          </span>
         </>
       }
-      meta={time ?? ""}
       actions={
         <>
           {installed ? (
@@ -344,7 +354,6 @@ function SoonCard({ icon, name, desc }: { icon: string; name: string; desc: stri
         </>
       }
       desc={<Clamp text={desc} />}
-      tags={null}
       meta=""
       actions={<span className="text-xs text-text-muted">{t("market.soonNote")}</span>}
     />
@@ -367,7 +376,7 @@ function MyAgents({ installs }: { installs: InstallRow[] }) {
               className="focus-ring flex items-center gap-3 rounded-xl border border-border bg-bg-surface px-3.5 py-3 transition-colors hover:border-border-strong"
               data-testid="am-my-agent"
             >
-              <AgentTile icon={i.icon} size={32} />
+              <AgentTile icon={i.icon} look={i} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-text-primary">{i.title}</span>
                 <span className="block truncate text-xs text-text-muted">

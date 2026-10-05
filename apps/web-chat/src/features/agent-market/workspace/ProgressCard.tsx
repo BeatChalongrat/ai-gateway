@@ -23,6 +23,7 @@ import { outcomeKey, outcomeOf } from "../outcome";
 import type { ProgressPayload, ProgressStepStatus } from "../types";
 import { cls } from "../ui";
 import { runHref } from "./context";
+import { aboutTime } from "./Estimate";
 import { personText } from "./personText";
 
 const STEP_STATUS: Record<string, AmKey> = {
@@ -102,7 +103,16 @@ function useNow(active: boolean): number {
   return now;
 }
 
-export function ProgressCard({ progress, hideRunLink = false }: { progress: ProgressPayload; hideRunLink?: boolean }) {
+export function ProgressCard({
+  progress,
+  hideRunLink = false,
+  expectedSeconds,
+}: {
+  progress: ProgressPayload;
+  hideRunLink?: boolean;
+  /** AM10: how long a round takes here; shown while this one runs. */
+  expectedSeconds?: number | null;
+}) {
   const t = useAmT();
   const status = progress.status;
   const outcome = outcomeOf(progress);
@@ -118,6 +128,10 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
     : progress.elapsed_ms || elapsedBetween(progress.started_at, progress.finished_at);
   const steps = progress.steps ?? [];
   const reason = progress.reason ? REASON[progress.reason] : undefined;
+  // AM10: the time, at the moment of waiting — and, once it has run past
+  // one and a half times that, that it is still working.
+  const expected = status === "running" && progress.kind !== "self_test" ? aboutTime(t, expectedSeconds) : null;
+  const longer = !!expected && !!expectedSeconds && elapsed > expectedSeconds * 1.5 * 1000;
 
   const cancel = () => {
     setCancelling(true);
@@ -148,6 +162,11 @@ export function ProgressCard({ progress, hideRunLink = false }: { progress: Prog
             {active && status !== "awaiting_input" ? <CatIndicator label={title} /> : title}
           </div>
           {progress.kind === "self_test" ? <div className="text-xs text-text-muted">{t("progress.selfTest")}</div> : null}
+          {expected ? (
+            <div className="text-xs text-text-muted" data-testid="am-progress-expected" data-longer={longer || undefined}>
+              {longer ? t("progress.longer", { time: expected }) : t("progress.expected", { time: expected })}
+            </div>
+          ) : null}
         </div>
         <div className="flex-1" />
         {elapsed > 0 ? (

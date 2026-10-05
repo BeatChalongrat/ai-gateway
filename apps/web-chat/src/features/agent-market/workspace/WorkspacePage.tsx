@@ -29,7 +29,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmT } from "../i18n";
 import type { InstallDetail, InstallRow, ProgressPayload, ThreadItem } from "../types";
-import { AgentTile, ErrorPanel, FeatureGate, PageShell } from "../ui";
+import { AgentTile, ErrorPanel, FeatureGate, lookOf, PageShell } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
 import { togglePin } from "../useRail";
 import { BudgetBanner } from "./BudgetBanner";
@@ -147,6 +147,7 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
     );
   };
   const icon = manifest?.icon ?? installs.find((i) => i.id === installId)?.icon;
+  const look = lookOf(detail?.look, manifest, installs.find((i) => i.id === installId));
   const title = manifest?.greeting?.role || install?.title || "";
   const tagline = manifest?.greeting?.tagline || "";
   // What the server takes for this agent (its inputs' accept lists), nothing more.
@@ -196,8 +197,9 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
       threadId,
       focusComposer: () => composerRef.current?.focus(),
       admin: snap.admin,
+      expectedSeconds: estimate.seconds,
     }),
-    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig, threadId, snap.admin],
+    [installId, icon, title, thread.merge, accept, maxMb, photoNotice, selfTestSig, threadId, snap.admin, estimate.seconds],
   );
 
   // ?run=<id>: once, when the thread has loaded — the thread moving on afterwards does not pull the reader back
@@ -255,7 +257,7 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex shrink-0 items-center gap-3 border-b border-border-subtle px-4 py-2.5 md:px-6">
             <div className="shrink-0" data-testid="am-ws-tile">
-              <AgentTile icon={icon} size={28} />
+              <AgentTile icon={icon} look={look} size={28} />
             </div>
             <div className="min-w-0 flex-1">
               <h1 className="min-h-[1.5rem] truncate text-base font-semibold text-text-primary">{title}</h1>
@@ -285,7 +287,7 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
                 <ErrorPanel message={errorMessage(thread.error)} title={t("ws.loadFailed")} onRetry={thread.retry} />
               ) : null}
               <ThreadView items={thread.items} />
-              {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} estimate={estimate} /> : null}
+              {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} estimate={estimate.line} /> : null}
             </ThreadScroller>
             <div className="px-4 md:px-10">
               <BudgetBanner installId={installId} refreshKey={progressSig} />
@@ -304,7 +306,7 @@ function Workspace({ installId, threadId, runId }: { installId: string; threadId
               sampleRunId={sampleRunId}
               datasheetHref={install?.slug ? `/chat/agents/${encodeURIComponent(install.slug)}/datasheet` : null}
               // the empty workspace says it itself, once
-              estimate={empty ? null : estimate}
+              estimate={empty ? null : estimate.line}
               tools={<ModelControl installId={installId} models={models} onModels={setModels} />}
               footer={
                 <div className="flex flex-col items-center gap-0.5" data-testid="am-ws-footer">

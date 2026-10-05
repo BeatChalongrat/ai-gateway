@@ -704,9 +704,10 @@ func (a *API) listInstalls(w http.ResponseWriter, r *http.Request) {
 	}
 	type row struct {
 		Install
-		Icon      string `json:"icon"`
-		LastRun   *Run   `json:"last_run,omitempty"`
-		Attention bool   `json:"attention"`
+		Icon string `json:"icon"`
+		Look
+		LastRun   *Run `json:"last_run,omitempty"`
+		Attention bool `json:"attention"`
 	}
 	out := []row{}
 	for _, i := range list {
@@ -716,6 +717,7 @@ func (a *API) listInstalls(w http.ResponseWriter, r *http.Request) {
 				x.Icon = m.Icon
 			}
 		}
+		x.Look = a.store.LookForSlug(r.Context(), i.Slug)
 		if lr, err := a.store.LatestRun(r.Context(), i.ID); err == nil {
 			lr := lr
 			x.LastRun = &lr
@@ -743,6 +745,7 @@ func (a *API) getInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	spent, _ := a.store.SpentThisMonth(r.Context(), in.ID)
 	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": def.Manifest, "defaults": nonNil(defaults),
+		"look":   a.store.LookForSlug(r.Context(), in.Slug),
 		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}})
 }
 

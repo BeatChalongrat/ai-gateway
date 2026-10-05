@@ -27,8 +27,10 @@ import {
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { LocaleScope } from "@/lib/i18n";
+import { useThemeStore } from "@/stores/themeStore";
 
 import { useAmT } from "./i18n";
+import type { Look, Manifest } from "./types";
 import { useAgentMarket } from "./useAgentMarket";
 
 export function cls(...parts: Array<string | false | null | undefined>): string {
@@ -63,13 +65,85 @@ export function AgentGlyph({ icon, size = 16 }: { icon?: string; size?: number }
   return <Icon width={size} height={size} strokeWidth={2} aria-hidden />;
 }
 
-/** The agent's identity tile: solid foreground tile for a real agent, a quiet
+// AM10 — the icon ships inside the agent package (docs/agent-market/ARCHITECTURE.md,
+// "The icon"): the file is a shape, and the client paints it with the agent's
+// accent for the theme in use, so every agent is one visual language with its
+// own colour, at 20 px in the sidebar and at 48 px on its page alike. The runner
+// checked the markup before it registered it; this is the client's own look at
+// it before the markup goes into a style — a mask image can run nothing, but
+// nothing unchecked goes in anyway.
+const ICON_MAX_BYTES = 4096;
+
+export function safeIconSVG(svg?: string | null): string | null {
+  if (!svg) return null;
+  const s = svg.trim();
+  if (s.length > ICON_MAX_BYTES || !s.startsWith("<svg") || !s.endsWith("</svg>")) return null;
+  if (/<\s*(script|style|foreignObject|image|use|a|text|iframe)\b|[\s"']on[a-z]+\s*=|href\s*=|url\(|javascript:|<!/i.test(s)) return null;
+  return s;
+}
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** The look of an agent, from whatever carries it (a rail row, an install row, a manifest). */
+export function lookOf(...sources: Array<Look | Manifest | null | undefined>): Look {
+  const out: Look = {};
+  for (const s of sources) {
+    if (!s) continue;
+    const svg = safeIconSVG(s.icon_svg);
+    if (!out.icon_svg && svg) out.icon_svg = svg;
+    if (!out.accent && s.accent && HEX.test(s.accent.light) && HEX.test(s.accent.dark)) out.accent = s.accent;
+  }
+  return out;
+}
+
+/** The agent's colour for the theme in use (null when the agent has none). */
+export function useAccent(look?: Look | null): string | null {
+  const theme = useThemeStore((s) => s.theme);
+  const a = look?.accent;
+  if (!a || !HEX.test(a.light) || !HEX.test(a.dark)) return null;
+  return theme === "light" ? a.light : a.dark;
+}
+
+/** The agent's identity tile: the package's own icon in its colour on a tint of
+ *  it; the glyph on a solid tile for an agent that ships none; a quiet outlined
  *  one for a placeholder. */
-export function AgentTile({ icon, size = 28, quiet = false }: { icon?: string; size?: number; quiet?: boolean }) {
+export function AgentTile({ icon, look, size = 28, quiet = false }: { icon?: string; look?: Look | null; size?: number; quiet?: boolean }) {
   const radius = size >= 40 ? "rounded-xl" : "rounded-lg";
+  const accent = useAccent(look);
+  const svg = quiet ? null : safeIconSVG(look?.icon_svg);
+  if (svg && accent) {
+    const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    const glyph = Math.round(size * 0.58);
+    return (
+      <span
+        aria-hidden
+        data-testid="am-tile"
+        data-accent={accent}
+        style={{ width: size, height: size, backgroundColor: `${accent}24` }}
+        className={cls("inline-flex shrink-0 items-center justify-center", radius)}
+      >
+        <span
+          style={{
+            width: glyph,
+            height: glyph,
+            backgroundColor: accent,
+            WebkitMaskImage: mask,
+            maskImage: mask,
+            WebkitMaskRepeat: "no-repeat",
+            maskRepeat: "no-repeat",
+            WebkitMaskSize: "contain",
+            maskSize: "contain",
+            WebkitMaskPosition: "center",
+            maskPosition: "center",
+          }}
+        />
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
+      data-testid="am-tile"
       style={{ width: size, height: size }}
       className={cls(
         "inline-flex shrink-0 items-center justify-center",
@@ -79,6 +153,15 @@ export function AgentTile({ icon, size = 28, quiet = false }: { icon?: string; s
     >
       <AgentGlyph icon={icon} size={Math.round(size * 0.55)} />
     </span>
+  );
+}
+
+/** A small dot of the agent's colour, for lists that have no room for a tile. */
+export function AccentDot({ look, size = 8 }: { look?: Look | null; size?: number }) {
+  const accent = useAccent(look);
+  if (!accent) return null;
+  return (
+    <span aria-hidden data-testid="am-accent-dot" style={{ width: size, height: size, backgroundColor: accent }} className="inline-block shrink-0 rounded-full" />
   );
 }
 

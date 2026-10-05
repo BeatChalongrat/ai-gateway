@@ -131,11 +131,18 @@ export interface SampleSummary {
   finished_at?: string | null;
 }
 
+/** AM10: how an agent looks — the package's own icon (checked by the runner, checked again
+ *  before it is drawn) and its colour per theme. */
+export interface AgentLook {
+  icon_svg?: string;
+  accent?: { light: string; dark: string } | null;
+}
+
 export interface AdminCatalogRow {
   slug: string;
   version: string;
   name: string;
-  manifest?: { icon?: string; short_name?: string; description?: string } & Record<string, unknown>;
+  manifest?: { icon?: string; short_name?: string; description?: string } & AgentLook & Record<string, unknown>;
   status?: "published" | "unpublished" | "disabled" | string;
   status_reason?: string;
   sample?: SampleSummary | null;

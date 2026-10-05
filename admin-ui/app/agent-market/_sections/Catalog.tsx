@@ -104,7 +104,7 @@ function CatalogRow({ row, canDisable, reload }: { row: AdminCatalogRow; canDisa
   return (
     <li className="sran-card" style={{ padding: "0.9rem 1.1rem" }} data-testid="am-catalog-row" data-slug={row.slug}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
-        <AgentTile icon={row.manifest?.icon} quiet={status !== "published"} />
+        <AgentTile icon={row.manifest?.icon} look={row.manifest} quiet={status !== "published"} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.5rem" }}>
             <span style={{ fontWeight: 600, fontSize: "0.9rem", color: "var(--text-primary)" }}>{row.name}</span>

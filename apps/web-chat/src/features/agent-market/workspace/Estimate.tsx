@@ -13,20 +13,41 @@ import { useAmT } from "../i18n";
 import { cls } from "../ui";
 import { personText } from "./personText";
 
-export function useEstimate(installId: string): string | null {
-  const [line, setLine] = useState<string | null>(null);
+/** AM10: the server's sentence, and the seconds a round takes here (the
+ *  organisation's own rounds, else the catalogue sample) — said again when a
+ *  round starts, where waiting without knowing how long is its own kind of bad. */
+export interface EstimateView {
+  line: string | null;
+  seconds: number | null;
+}
+
+export function useEstimate(installId: string): EstimateView {
+  const [view, setView] = useState<EstimateView>({ line: null, seconds: null });
   useEffect(() => {
     let alive = true;
-    setLine(null);
+    setView({ line: null, seconds: null });
     amApi.estimate(installId).then(
-      (e) => alive && setLine(personText(typeof e?.line === "string" ? e.line.trim() : "") || null),
+      (e) =>
+        alive &&
+        setView({
+          line: personText(typeof e?.line === "string" ? e.line.trim() : "") || null,
+          seconds: typeof e?.seconds === "number" && Number.isFinite(e.seconds) && e.seconds > 0 ? e.seconds : null,
+        }),
       () => {},
     );
     return () => {
       alive = false;
     };
   }, [installId]);
-  return line;
+  return view;
+}
+
+/** "ใช้เวลาประมาณ 2 นาที": rounded the way a person says it. */
+export function aboutTime(t: ReturnType<typeof useAmT>, seconds: number | null | undefined): string | null {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) return null;
+  if (seconds < 45) return t("time.underAMinute");
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  return t("time.aboutMinutes", { n: String(minutes) });
 }
 
 export function EstimateLine({ line, center = false }: { line: string | null | undefined; center?: boolean }) {

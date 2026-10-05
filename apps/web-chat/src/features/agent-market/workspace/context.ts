@@ -27,6 +27,8 @@ export interface WorkspaceCtx {
   focusComposer?: () => void;
   /** AM4: an admin sees the run panel's details open. */
   admin?: boolean;
+  /** AM10: how long a round takes here (seconds), said on the progress card while one runs. */
+  expectedSeconds?: number | null;
 }
 
 export const WorkspaceContext = createContext<WorkspaceCtx | null>(null);

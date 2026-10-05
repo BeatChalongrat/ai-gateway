@@ -101,7 +101,7 @@ function Detail({ slug }: { slug: string }) {
       <BackLink href="/chat/agents">{t("detail.back")}</BackLink>
 
       <div className="mt-5 flex items-start gap-4">
-        <AgentTile icon={m.icon} size={48} />
+        <AgentTile icon={m.icon} look={m} size={48} />
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight text-text-primary">{item.name}</h1>
           <p className="mt-0.5 text-xs text-text-muted">

@@ -26,6 +26,11 @@ export interface Manifest {
   short_name?: string;
   category?: string;
   icon?: string;
+  /** AM10: the package's own icon (a file of the package) and its colour per theme; `icon_svg` is
+   *  the file as the runner registered it (checked server-side; ui.tsx checks it again). */
+  icon_file?: string;
+  accent?: Accent | null;
+  icon_svg?: string;
   summary?: string;
   typical_run_seconds?: number;
   greeting?: { text?: string; role?: string; tagline?: string };
@@ -49,6 +54,17 @@ export interface Manifest {
   /** AM6: whom the agent is made for, and whose law and tax it follows. */
   scope?: AgentScope | string;
   jurisdiction?: string;
+}
+
+/** AM10: how an agent looks — its colour per theme and its icon's shape. */
+export interface Accent {
+  light: string;
+  dark: string;
+}
+
+export interface Look {
+  icon_svg?: string;
+  accent?: Accent | null;
 }
 
 /** AM6: generic = any company; org-specific = written for this organisation. */
@@ -178,7 +194,7 @@ export interface Install {
   model_choice?: string;
 }
 
-export interface InstallRow extends Install {
+export interface InstallRow extends Install, Look {
   icon?: string;
   last_run?: Run;
   attention?: boolean;
@@ -679,6 +695,8 @@ export interface InstallResponse {
 export interface InstallDetail {
   install: Install;
   manifest: Manifest;
+  /** AM10: the agent's look (the newest version's, so an older install shows it too). */
+  look?: Look;
   defaults: Default[] | null;
   budget: { credits: number; spent_this_month: number };
 }
@@ -1064,7 +1082,7 @@ export interface Datasheet {
   jurisdiction?: string;
 }
 
-export interface RailInstall {
+export interface RailInstall extends Look {
   id: string;
   slug: string;
   title: string;

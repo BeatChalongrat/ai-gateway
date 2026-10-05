@@ -14,26 +14,7 @@ import { useEffect, useState } from "react";
 import Badge from "../../../components/ui/Badge";
 import { useI18n, type DictKey } from "../../../lib/i18n";
 import { amAdmin, type RunMeta } from "../../../lib/agentMarketApi";
-import {
-  DEFAULT_PRICING,
-  FINISHED,
-  LoadError,
-  Loading,
-  Note,
-  ReasonDialog,
-  bahtOf,
-  formatDateTime,
-  h2,
-  linkStyle,
-  muted,
-  outcomeLabel,
-  outcomeOf,
-  outcomeVariant,
-  secondary,
-  stepLabel,
-  useOrg,
-  type Msg,
-} from "./shared";
+import { AgentName, DEFAULT_PRICING, FINISHED, LoadError, Loading, Note, ReasonDialog, bahtOf, formatDateTime, h2, linkStyle, muted, outcomeLabel, outcomeOf, outcomeVariant, secondary, stepLabel, useLooks, useOrg, type Msg } from "./shared";
 
 const FILTERS: readonly { id: string; key: DictKey }[] = [
   { id: "all", key: "am.runs.all" },
@@ -53,6 +34,7 @@ export default function RunsSection() {
   const [error, setError] = useState<unknown>(null);
   const [n, setN] = useState(0);
   const [opening, setOpening] = useState<RunMeta | null>(null);
+  const looks = useLooks();
   const [removing, setRemoving] = useState<RunMeta | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
 
@@ -130,7 +112,9 @@ export default function RunsSection() {
                         <div style={muted}>{formatDateTime(r.created_at, locale)}</div>
                       </td>
                       <td>
-                        <div>{r.agent}</div>
+                        <div>
+                          <AgentName name={r.agent} look={looks[r.slug]} />
+                        </div>
                         {r.period_label ? <div style={muted}>{r.period_label}</div> : null}
                       </td>
                       <td>

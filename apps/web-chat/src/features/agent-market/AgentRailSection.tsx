@@ -162,7 +162,7 @@ function RailRow({ row, pathname, onNavigate, onPin }: { row: RailInstall; pathn
           active ? "bg-bg-elevated text-text-primary" : "text-text-secondary",
         )}
       >
-        <AgentTile icon={row.icon} size={20} quiet={row.disabled} />
+        <AgentTile icon={row.icon} look={row} size={20} quiet={row.disabled} />
         <span className="min-w-0 flex-1 truncate">{row.title}</span>
         {row.disabled ? <span className="shrink-0 text-[10px] text-text-muted">{t("rail.disabled")}</span> : null}
         {row.waiting > 0 ? (
@@ -226,7 +226,7 @@ function SearchHits({
               className="focus-ring flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-5 pr-3 text-sm text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
               data-testid="agent-search-installed"
             >
-              <AgentTile icon={i.icon} size={20} />
+              <AgentTile icon={i.icon} look={i} size={20} />
               <span className="min-w-0 flex-1 truncate">{i.title}</span>
               {i.waiting > 0 ? (
                 <span className="rounded-full bg-status-warning px-1.5 text-[10px] font-semibold tabular-nums text-bg-base">{i.waiting}</span>
@@ -242,7 +242,7 @@ function SearchHits({
               className="focus-ring flex w-full items-center gap-2.5 rounded-lg py-1.5 pl-5 pr-3 text-sm text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
               data-testid="agent-search-catalog"
             >
-              <AgentTile icon={c.manifest?.icon} size={20} quiet />
+              <AgentTile icon={c.manifest?.icon} look={c.manifest} size={20} />
               <span className="min-w-0 flex-1 truncate">{c.manifest?.short_name || c.name}</span>
               <span className="shrink-0 text-[10px] text-text-muted">{t("rail.searchDetails")}</span>
             </Link>
