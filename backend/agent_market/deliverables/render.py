@@ -13,6 +13,7 @@ import os
 from . import content as content_mod
 from . import quality
 from .charts import render_png
+from .formats import wanted_formats
 from .theme import resolve
 
 # No PDF: its Thai shaping was wrong (AM1b). It returns in AM-2 as the
@@ -33,10 +34,7 @@ def render_all(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     req = {**req, "theme": theme}
     model = content_mod.build(computed, req)
     computed = model["computed"]  # with the cosmetic (presentation) answers applied
-    # AM10: an explicit [] means "no file of the agent's own" (a render that fills the round's form
-    # and nothing else); absent still means the defaults.
-    requested = req.get("formats")
-    formats = [f for f in (["docx", "pptx"] if requested is None else requested) if f in FORMATS]
+    formats = [f for f in wanted_formats(req, ["docx", "pptx"]) if f in FORMATS]
     names = req.get("names") or {}
     logo = os.path.join(in_dir, os.path.basename(req["logo"])) if req.get("logo") else None
 

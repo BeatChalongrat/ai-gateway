@@ -87,13 +87,14 @@ def summarize(computed: dict) -> dict:
 def render(computed: dict, req: dict, *, in_dir: str, out_dir: str) -> dict:
     import hashlib
 
+    from ...deliverables.formats import wanted_formats
     from ...deliverables.theme import resolve
     from .scripts.workbook import ExpenseWorkbook, check
 
     theme = resolve(req.get("theme"))
     names = req.get("names") or {}
     artifacts, all_ok = [], True
-    for fmt in [f for f in (req.get("formats") or ["xlsx"]) if f == "xlsx"]:
+    for fmt in [f for f in wanted_formats(req, ["xlsx"]) if f == "xlsx"]:
         name = os.path.basename(names.get(fmt) or "expense_audit.xlsx")
         path = os.path.join(out_dir, name)
         meta = ExpenseWorkbook(computed, theme, req.get("run")).write(path)
