@@ -10,6 +10,7 @@
 import { create } from "zustand";
 
 import { checkSession, type SessionUser } from "@/lib/auth";
+import { accountLanguageSeen } from "@/lib/i18n/account";
 
 /** FIX130 C3.1 — what the last session check found ("unknown" before one
  *  finished). Layouts send only "rejected" to the login page; "unreachable"
@@ -38,7 +39,11 @@ export const useAuthStore = create<AuthState>((set) => ({
     inFlight = (async () => {
       try {
         const r = await checkSession();
-        if (r.kind === "ok") set({ user: r.user, ready: true, status: "ok" });
+        if (r.kind === "ok") {
+          set({ user: r.user, ready: true, status: "ok" });
+          // AM10: the person's language is their account's — this client follows it
+          accountLanguageSeen(r.user.language);
+        }
         // An unreachable check keeps a user this page already knew: one
         // slow answer is not a signed-out person.
         else if (r.kind === "unreachable") set((s) => ({ ready: true, status: s.user ? "ok" : "unreachable" }));

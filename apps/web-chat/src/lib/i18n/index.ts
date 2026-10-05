@@ -26,7 +26,10 @@ import { dictionaries, type DictKey, type Locale } from "./dict";
 interface I18nState {
   locale: Locale;
   hydrated: boolean;
+  /** The person chooses a language (the toggle, the settings select): kept here and on their account. */
   setLocale: (l: Locale) => void;
+  /** AM10: the account's language, taken by this client (./account.ts) — not a choice made here. */
+  adopt: (l: Locale) => void;
   toggle: () => void;
   hydrate: () => void;
 }
@@ -75,6 +78,15 @@ function tellHost(locale: Locale): void {
   }
 }
 
+// AM10 F — what to do with a choice the person makes here (./account.ts saves
+// it to their account, so the desktop app and the browser read alike). Kept as
+// a hook so this module needs nothing of the session.
+let chosen: ((l: Locale) => void) | null = null;
+
+export function onLocaleChosen(fn: ((l: Locale) => void) | null): void {
+  chosen = fn;
+}
+
 export const useI18nStore = create<I18nState>((set, get) => ({
   locale: "en",
   hydrated: false,
@@ -86,6 +98,29 @@ export const useI18nStore = create<I18nState>((set, get) => ({
       /* ignore */
     }
     set({ locale: l });
+    tellHost(l);
+    try {
+      chosen?.(l);
+    } catch {
+      /* the page's language is unaffected */
+    }
+  },
+  adopt(l) {
+    if (get().locale === l && get().hydrated) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, l);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    apply(l);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, l);
+    } catch {
+      /* ignore */
+    }
+    set({ locale: l, hydrated: true });
     tellHost(l);
   },
   toggle() {

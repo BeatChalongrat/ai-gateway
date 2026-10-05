@@ -146,6 +146,8 @@ export interface SessionUser {
   tenant_id: string;
   email: string | null;
   role: string;
+  /** AM10: the language kept on the account (lib/i18n/account.ts follows it). */
+  language?: string | null;
 }
 
 interface PortalMeResponse {
@@ -153,6 +155,7 @@ interface PortalMeResponse {
   email?: string | null;
   tenant_id?: string | null;
   tenant_role?: string | null;
+  preferred_language?: string | null;
 }
 
 /**
@@ -200,6 +203,7 @@ async function readMe(): Promise<SessionCheck | { kind: "unauthorized" }> {
         tenant_id: me.tenant_id ?? me.id,
         email: me.email ?? null,
         role: me.tenant_role ?? "member",
+        ...(me.preferred_language ? { language: me.preferred_language } : {}),
       },
     };
   } catch {
