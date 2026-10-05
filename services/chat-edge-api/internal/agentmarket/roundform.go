@@ -127,7 +127,7 @@ func FormText(f RoundForm) PersonText {
 	case FormReady:
 		return Text("จับคู่ช่องของ %s ครบแล้ว — จะกรอกให้เมื่อตัวเลขของรอบนี้พร้อม", Name(f.Name))
 	case FormFilled:
-		return Text("กรอก %s ให้แล้ว ใช้กับรอบนี้เท่านั้น — แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name))
+		return Text("กรอก %s ให้แล้ว ใช้เฉพาะรอบนี้ — แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name))
 	case FormUnfilled:
 		return Text("กรอก %s ได้ไม่ครบ %s ช่อง ส่งมาให้ดูแล้ว แต่ยังไม่ควรส่งต่อ — ดูชื่อช่องด้านล่าง", Name(f.Name), Count(len(f.Unfilled)))
 	case FormFailed:

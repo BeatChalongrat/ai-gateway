@@ -40,6 +40,17 @@ export function hasImage(items: Pick<Staged, "name" | "status">[]): boolean {
   return items.some((s) => s.status !== "error" && isImageName(s.name));
 }
 
+/** AM10: the kinds a form can be — an agent that fills forms takes one dropped into a round. */
+export const FORM_ACCEPT = [".docx", ".xlsx", ".xlsm", ".pptx"];
+
+/** Whether a staged file can be this round's form, and whether it is one unless the person says otherwise:
+ *  a form's kind the agent does not read as an input can only be a form. */
+export function formChoice(name: string, inputs: string[], forms: string[]): { can: boolean; byDefault: boolean } {
+  const ext = extOf(name);
+  const can = forms.includes(ext);
+  return { can, byDefault: can && !inputs.includes(ext) };
+}
+
 export interface Staged {
   localId: string;
   name: string;

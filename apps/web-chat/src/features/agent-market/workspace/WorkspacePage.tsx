@@ -43,7 +43,8 @@ import { ThreadScroller } from "./ThreadScroller";
 import { ThreadView } from "./ThreadView";
 import { UploadInfo } from "./UploadInfo";
 import { useThread } from "./useThread";
-import { acceptFromManifest, DEFAULT_MAX_MB } from "./useUploads";
+import { takesTemplates } from "../template/mapping";
+import { acceptFromManifest, DEFAULT_MAX_MB, FORM_ACCEPT } from "./useUploads";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 
 export function WorkspacePage({
@@ -164,6 +165,8 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
   const tagline = manifest?.greeting?.tagline || "";
   // What the server takes for this agent (its inputs' accept lists), nothing more.
   const accept = useMemo(() => acceptFromManifest(manifest), [manifest]);
+  // AM10: an agent that fills forms takes one dropped into a round
+  const formAccept = useMemo(() => (takesTemplates(manifest?.templates) ? FORM_ACCEPT : []), [manifest]);
   const maxMb = manifest?.limits?.max_file_mb || DEFAULT_MAX_MB;
   const photoNotice = manifest?.photo_notice || undefined;
 
@@ -374,6 +377,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
               maxMb={maxMb}
               photoNotice={photoNotice}
               threadId={threadId}
+              formAccept={formAccept}
               agentName={manifest?.short_name || manifest?.name || install?.title}
               roundUnderway={underway}
               finishedRound={finished}

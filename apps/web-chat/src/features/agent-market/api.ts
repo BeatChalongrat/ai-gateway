@@ -13,48 +13,49 @@ import { redirectToPortalLogin } from "@/lib/auth";
 
 import { tAm } from "./i18n";
 import type {
+  AgentDashboard,
   AgentModels,
   AgentThread,
+  AmFile,
   AmNotification,
+  AnswerBody,
+  Availability,
+  BudgetState,
+  CatalogAgent,
+  CatalogItem,
+  CatalogSample,
+  Computed,
+  Datasheet,
   DeclaredSetting,
+  Default,
   EmailDraft,
   EmailSend,
   Estimate,
-  Reminder,
-  ReminderRule,
-  RemindersResponse,
-  StorageInfo,
-  AmFile,
-  BudgetState,
-  CatalogSample,
-  Datasheet,
+  Install,
+  InstallDetail,
+  InstallResponse,
+  InstallRow,
   Person,
   ProblemReport,
   RailPrefs,
   RailResponse,
+  Reminder,
+  ReminderRule,
+  RemindersResponse,
   Review,
-  Share,
-  SharedItem,
-  SharedRun,
-  AnswerBody,
-  Availability,
-  CatalogAgent,
-  CatalogItem,
-  Computed,
-  Default,
-  Install,
-  InstallDetail,
-  InstallResponse,
-  AgentDashboard,
-  InstallRow,
   Run,
   RunDetail,
   RunExceptionRow,
-  UpgradeInfo,
+  RunFormDetail,
   SavedTemplate,
+  Share,
+  SharedItem,
+  SharedRun,
+  StorageInfo,
   TemplateSlot,
   ThemeResponse,
   ThreadItem,
+  UpgradeInfo,
 } from "./types";
 
 const BASE = "/agent-market";
@@ -225,7 +226,10 @@ export const amApi = {
   upload: (installId: string, file: File, opts: UploadOptions = {}) =>
     uploadOnce(`${BASE}/installs/${id(installId)}/files`, file, opts, false, (b) => (b as { file?: AmFile } | null)?.file),
   /** AM6: knowledge_base_id goes with a question only (no files): knowledge answers, it never feeds a deliverable. */
-  message: (installId: string, body: { text: string; file_ids: string[]; client_id: string; thread_id?: string | null; knowledge_base_id?: string }) =>
+  message: (
+    installId: string,
+    body: { text: string; file_ids: string[]; client_id: string; thread_id?: string | null; knowledge_base_id?: string; form_file_ids?: string[] },
+  ) =>
     send<{ item: ThreadItem; route?: string; run_id?: string; duplicate?: boolean }>("POST", `/installs/${id(installId)}/messages`, body),
 
   mappingPreview: (installId: string, fileId: string) =>
@@ -321,6 +325,10 @@ export const amApi = {
 
   threads: (installId: string) => call<{ threads: AgentThread[] | null }>(`/installs/${id(installId)}/threads`),
   newThread: (installId: string) => send<{ thread: AgentThread }>("POST", `/installs/${id(installId)}/threads`),
+  /** AM10: the form a person dropped into a round, and the mapping they confirm for it (that round only). */
+  runForm: (runId: string) => call<RunFormDetail>(`/runs/${id(runId)}/template`),
+  saveRunForm: (runId: string, body: { slots: TemplateSlot[]; mapping: Record<string, string> }) =>
+    send<{ form: RunFormDetail["form"]; job: Run | null }>("PUT", `/runs/${id(runId)}/template`, body),
   /** AM10: rename ({title}, "" = the derived name again) or pin ({pinned}) a chat; "main" is the first. */
   patchThread: (installId: string, threadKey: string, body: { title?: string; pinned?: boolean }) =>
     send<{ thread: AgentThread }>("PATCH", `/installs/${id(installId)}/threads/${id(threadKey)}`, body),

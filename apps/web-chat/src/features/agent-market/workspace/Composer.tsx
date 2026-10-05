@@ -21,7 +21,7 @@
 // ids. The server echoes the message into the thread. Typed-but-unsent text
 // survives a reload, per agent and chat, in the app's own draft store.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import { ComposerFrame } from "@/components/chat/ComposerFrame";
 import { DictationButton, useDictation } from "@/components/chat/Dictation";
@@ -38,7 +38,7 @@ import { Thai } from "../ui";
 import { EstimateLine } from "./Estimate";
 import { PhotoNotice, StagedChip } from "./FileChips";
 import { useAgentKnowledge } from "./knowledge";
-import { DEFAULT_ACCEPT, hasImage, useUploads } from "./useUploads";
+import { DEFAULT_ACCEPT, formChoice, hasImage, useUploads } from "./useUploads";
 
 const MAX_TEXT = 4000;
 
@@ -60,6 +60,8 @@ interface Props {
   footer?: React.ReactNode;
   /** AM4: the thread the message goes to. */
   threadId?: string | null;
+  /** AM10: the kinds a form for this round can be (empty: the agent fills no forms). */
+  formAccept?: string[];
   /** AM4: the model control, beside send where the chat's model picker sits. */
   tools?: React.ReactNode;
   /** AM6: the agent's short name, for the placeholder. */
@@ -107,6 +109,7 @@ function ComposerBody({
   photoNotice,
   footer,
   threadId,
+  formAccept,
   tools,
   agentName,
   roundUnderway = false,
@@ -118,8 +121,17 @@ function ComposerBody({
 }: Props & { handle: React.ForwardedRef<ComposerHandle> }) {
   const t = useAmT();
   const uploadingPlaceholder = useUploadingPlaceholder();
-  const acceptList = accept?.length ? accept : DEFAULT_ACCEPT;
+  const inputAccept = accept?.length ? accept : DEFAULT_ACCEPT;
+  // AM10: an agent that fills forms takes a form dropped into the round, beside its inputs
+  const forms = formAccept ?? [];
+  const acceptList = useMemo(() => [...inputAccept, ...forms.filter((f) => !inputAccept.includes(f))], [inputAccept, forms]);
   const uploads = useUploads(installId, { accept: acceptList, maxMb });
+  // which staged files are this round's form: the person's mark, else what the file can only be
+  const [formMarks, setFormMarks] = useState<Record<string, boolean>>({});
+  const formOf = (s: { localId: string; name: string }) => {
+    const c = formChoice(s.name, inputAccept, forms);
+    return { can: c.can, on: c.can && (formMarks[s.localId] ?? c.byDefault) };
+  };
   const draftKey = draftKeyFor(installId, threadId);
   const [text, setText] = useState(() => loadDraft(draftKey) ?? "");
   const [sending, setSending] = useState(false);
@@ -160,6 +172,8 @@ function ComposerBody({
   const failed = uploads.items.filter((s) => s.status === "error");
   const canSend = !sending && !uploads.uploading && failed.length === 0 && (trimmed.length > 0 || uploads.ids.length > 0);
 
+  const formIds = uploads.items.filter((s) => s.status === "done" && s.fileId && formOf(s).on).map((s) => s.fileId as string);
+
   const send = useCallback(() => {
     if (!canSend) return;
     setSending(true);
@@ -170,6 +184,7 @@ function ComposerBody({
         file_ids: uploads.ids,
         client_id: clientId.current,
         thread_id: threadId ?? null,
+        ...(formIds.length ? { form_file_ids: formIds } : {}),
         ...(asking && kbId ? { knowledge_base_id: kbId } : {}),
       })
       .then(
@@ -178,6 +193,7 @@ function ComposerBody({
           textRef.current = "";
           clearDraft(draftKey);
           uploads.clear();
+          setFormMarks({});
           clientId.current = newClientId();
           setSending(false);
           onSent(res?.item);
@@ -189,7 +205,8 @@ function ComposerBody({
           setError(errorMessage(err));
         },
       );
-  }, [canSend, installId, trimmed, uploads, onSent, threadId, draftKey, asking, kbId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSend, installId, trimmed, uploads, onSent, threadId, draftKey, asking, kbId, formIds.join(",")]);
 
   /** A suggestion's sentence goes into the box, to be edited before it is sent. */
   const suggest = (sentence: string) => {
@@ -278,6 +295,27 @@ function ComposerBody({
                 <StagedChip key={s.localId} item={s} onRemove={() => uploads.remove(s.localId)} onRetry={() => uploads.retry(s.localId)} />
               ))}
             </div>
+          ) : null}
+          {uploads.items.some((s) => s.status !== "error" && formOf(s).can) ? (
+            <ul className="flex flex-col gap-1 px-4 pt-2" data-testid="am-composer-forms">
+              {uploads.items
+                .filter((s) => s.status !== "error" && formOf(s).can)
+                .map((s) => (
+                  <li key={s.localId}>
+                    <label className="flex cursor-pointer items-start gap-2 text-xs text-text-secondary">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={formOf(s).on}
+                        onChange={(e) => setFormMarks((cur) => ({ ...cur, [s.localId]: e.target.checked }))}
+                        data-testid="am-composer-form-mark"
+                        data-name={s.name}
+                      />
+                      <span className="min-w-0">{t("form.mark", { name: s.name })}</span>
+                    </label>
+                  </li>
+                ))}
+            </ul>
           ) : null}
           {failed.length ? (
             <div

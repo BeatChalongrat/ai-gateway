@@ -46,6 +46,7 @@ import type {
   Completion,
   EmailDraft,
   Failure,
+  FormPayload,
   GreetingPayload,
   NoticePayload,
   OutputsPayload,
@@ -61,6 +62,7 @@ import { runHref, settingsHref, useWorkspace } from "./context";
 import { EmailDraftCard } from "./EmailDraftCard";
 import { FileChip } from "./FileChips";
 import { OutputsCard } from "./OutputsCard";
+import { FormCard } from "./FormCard";
 import { ProgressCard } from "./ProgressCard";
 import { RequestFilesCard } from "./RequestFilesCard";
 import { personText } from "./personText";
@@ -207,6 +209,11 @@ function AgentItem({ item }: { item: ThreadItem }) {
     case "progress": {
       const p = item.payload as ProgressPayload;
       return p?.run_id ? <ProgressCard progress={p} expectedSeconds={ws?.expectedSeconds} /> : null;
+    }
+    case "form": {
+      // AM10: the form dropped into this round
+      const p = item.payload as FormPayload;
+      return p?.run_id ? <FormCard p={p} /> : null;
     }
     case "intent":
       return <IntentChip item={item} />;

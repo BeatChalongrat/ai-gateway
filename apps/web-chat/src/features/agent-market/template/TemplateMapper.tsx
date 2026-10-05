@@ -47,6 +47,7 @@ export function TemplateMapper({
   fileName,
   inspect,
   saved,
+  save: saveTo,
   onSaved,
   onCancel,
 }: {
@@ -57,6 +58,8 @@ export function TemplateMapper({
   inspect: TemplateInspect;
   /** The template saved before (its slots name what a new version removed). */
   saved: SavedTemplate | null;
+  /** AM10: where the mapping is saved when it is not the install's (a form for one round). */
+  save?: (body: ReturnType<typeof saveBody>) => Promise<unknown>;
   onSaved: () => void;
   onCancel: () => void;
 }) {
@@ -85,7 +88,9 @@ export function TemplateMapper({
     setSaving(true);
     setError(null);
     try {
-      await amApi.saveTemplate(installId, saveBody(fileId, slots, sel, spec));
+      const body = saveBody(fileId, slots, sel, spec);
+      if (saveTo) await saveTo(body);
+      else await amApi.saveTemplate(installId, body);
       onSaved();
     } catch (err) {
       setError(errorMessage(err));

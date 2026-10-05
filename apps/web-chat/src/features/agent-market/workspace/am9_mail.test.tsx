@@ -68,7 +68,8 @@ describe("which mailbox sends", () => {
     expect(screen.getByTestId("am-email-transport").textContent).toContain("ส่งผ่านเซิร์ฟเวอร์อีเมลขององค์กรในนามของคุณ");
     fireEvent.click(screen.getByTestId("am-email-connect"));
     await waitFor(() => expect(open).toHaveBeenCalledWith("https://backend.example/portal/connectors/oauth/start?ticket=t", "_blank", "noopener,noreferrer"));
-    expect(fetchMock).toHaveBeenCalledWith(`${GATEWAY_URL}/portal/connectors/mail/ticket`, { method: "POST", credentials: "include" });
+    // AM10: the ticket says which client asks, so the page the consent ends on is written for a browser tab
+    expect(fetchMock).toHaveBeenCalledWith(`${GATEWAY_URL}/portal/connectors/mail/ticket?client=web`, { method: "POST", credentials: "include" });
     expect(screen.getByText(/ขอเฉพาะสิทธิ์ส่งอีเมล ไม่ขอสิทธิ์อ่าน/)).toBeTruthy();
     // connected in the other tab: checking again turns the card to the person's own mailbox
     fireEvent.click(screen.getByTestId("am-email-connect-check"));

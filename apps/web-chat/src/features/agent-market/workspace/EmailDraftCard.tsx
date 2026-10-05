@@ -80,11 +80,17 @@ export function DraftEmailButton({ runId }: { runId: string }) {
   );
 }
 
+/** AM10: which client asks — the page the consent flow ends on is written for it (a browser tab is sent
+ *  back to its SRAN Chat tab; the desktop app, whose consent opens in the system browser, to the app). */
+export function connectClient(): "web" | "desktop" {
+  return typeof window !== "undefined" && (window as unknown as { sranHost?: unknown }).sranHost ? "desktop" : "web";
+}
+
 /** AM9: open the provider's consent page for the person's own mailbox (the backend's connect ticket,
  *  the same flow the desktop's connectors use; only the send scope is asked for). */
 async function openMailboxConnect(): Promise<boolean> {
   try {
-    const res = await fetch(`${GATEWAY_URL}/portal/connectors/mail/ticket`, { method: "POST", credentials: "include" });
+    const res = await fetch(`${GATEWAY_URL}/portal/connectors/mail/ticket?client=${connectClient()}`, { method: "POST", credentials: "include" });
     if (!res.ok) return false;
     const body = (await res.json()) as { start_url?: string };
     if (!body.start_url || !/^https?:\/\//.test(body.start_url)) return false;

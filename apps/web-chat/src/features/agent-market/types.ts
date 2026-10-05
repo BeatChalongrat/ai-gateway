@@ -421,6 +421,28 @@ export interface ThreadItem {
   thread_id?: string | null;
 }
 
+/** AM10: the round's own form, as its thread item follows it (roundform.go FormPayload). */
+export interface FormPayload {
+  run_id: string;
+  file_id: string;
+  name: string;
+  status: "inspecting" | "needs_mapping" | "ready" | "filled" | "unfilled" | "failed" | string;
+  /** slots a person still has to map */
+  open?: number;
+  /** labels of the slots the delivered form lacks (the customer's own words) */
+  unfilled?: string[] | null;
+  artifact_id?: string;
+  why?: string;
+  text?: string;
+}
+
+/** AM10: GET /runs/{id}/template — the round's form for the mapping screen. */
+export interface RunFormDetail {
+  form: { file_id: string; name: string; kind: string; status: string; slots?: TemplateSlot[]; mapping?: Record<string, string> | null };
+  spec: TemplateSpec;
+  inspect?: { slots?: TemplateSlot[]; proposal?: Record<string, string> | null; proposed_by?: string | null };
+}
+
 export interface GreetingPayload {
   text?: string;
   role?: string;
