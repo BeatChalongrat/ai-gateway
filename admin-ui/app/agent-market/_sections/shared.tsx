@@ -220,18 +220,27 @@ export function useAccent(look?: AgentLook | null): string | null {
 
 export function AgentTile({ icon, look, quiet, size = 32 }: { icon?: string; look?: AgentLook | null; quiet?: boolean; size?: number }) {
   const accent = useAccent(look);
-  const svg = quiet ? null : safeIconSVG(look?.icon_svg);
+  // An agent that is not published is drawn quietly — and still with its own icon: the catalogue is
+  // where an admin tells the agents apart before publishing one (a stand-in glyph said nothing).
+  const svg = safeIconSVG(look?.icon_svg);
   const box = { width: size, height: size, flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: size >= 40 ? 12 : 8 } as const;
   if (svg && accent) {
     const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
     const glyph = Math.round(size * 0.58);
     return (
-      <span aria-hidden data-testid="am-tile" data-accent={accent} style={{ ...box, background: `${accent}24` }}>
+      <span
+        aria-hidden
+        data-testid="am-tile"
+        data-icon="own"
+        data-accent={accent}
+        data-quiet={quiet ? "true" : undefined}
+        style={{ ...box, background: quiet ? "var(--bg-elevated)" : `${accent}24`, border: quiet ? "1px solid var(--border-default)" : undefined }}
+      >
         <span
           style={{
             width: glyph,
             height: glyph,
-            background: accent,
+            background: quiet ? "var(--text-muted)" : accent,
             WebkitMaskImage: mask,
             maskImage: mask,
             WebkitMaskRepeat: "no-repeat",
@@ -249,6 +258,7 @@ export function AgentTile({ icon, look, quiet, size = 32 }: { icon?: string; loo
     <span
       aria-hidden
       data-testid="am-tile"
+      data-icon="standin"
       style={{
         ...box,
         border: "1px solid var(--border-default)",
