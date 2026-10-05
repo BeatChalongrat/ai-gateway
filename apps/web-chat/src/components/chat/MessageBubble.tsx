@@ -25,7 +25,7 @@ import { toast } from "@/components/ui/Toast";
 import { splitMarkdownBlocks } from "@/lib/markdownBlocks";
 import { EDIT_MESSAGE_EVENT } from "@/lib/composerShortcuts";
 import { useT } from "@/lib/i18n";
-import { fallbackNotice, knownNotRetryable, localizeErrorCode } from "@/lib/errorMessages";
+import { errorSentence, knownNotRetryable } from "@/lib/errorMessages";
 import { focusComposer } from "@/hooks/useKeyboardShortcuts";
 import { outputLimitAlternative } from "@/lib/outputLimitAlternative";
 import { lossNoticeFromSources } from "@/lib/compaction";
@@ -433,11 +433,15 @@ function MessageBubbleImpl({
 
       {/* B1 — error bubble. Renders a distinct, red-tinted notice when
           the stream failed terminally (instead of leaving a blank
-          reply). The localized Thai message + optional attempt log come
-          from the SSE ``error`` frame via the chat store. */}
+          reply). The code + optional attempt log come from the SSE
+          ``error`` frame via the chat store. AM10 F — the sentence is said
+          from the code here, in the language on screen now: the one the
+          store captured when the frame arrived stayed in the old language
+          after a switch. A server sentence for a code we do not know is
+          shown as received. */}
       {message.error_message ? (
         <ErrorNotice
-          message={message.error_message}
+          message={errorSentence(t, message.error_code, message.error_message, message.error_retryable)}
           attempts={message.error_attempts}
           referenceId={message.run_id}
           switchFromModel={message.error_code === "output_limit_reached" ? message.model_id ?? undefined : undefined}
@@ -464,7 +468,7 @@ function MessageBubbleImpl({
            row (no code) keeps the generic line; a failed row that still
            has partial text shows its reason under the text. */
         <ErrorNotice
-          message={message.error_code ? localizeErrorCode(message.error_code, undefined, message.error_retryable) : t("msg.turnFailedReload")}
+          message={message.error_code ? errorSentence(t, message.error_code, undefined, message.error_retryable) : t("msg.turnFailedReload")}
           /* FIX121 C5 — the attempt log is on the row now (migration 047),
              so the reloaded card lists what was tried, as the live one does. */
           attempts={message.error_attempts}
@@ -563,7 +567,7 @@ function MessageBubbleImpl({
           className="my-1 flex items-center gap-2 rounded-md border border-border bg-bg-surface px-3 py-2 text-sm text-text-secondary"
           data-testid="paused-card"
         >
-          <span>Paused at the step limit.</span>
+          <span>{t("msg.pausedAtLimit")}</span>
           {/* Phase 5 §5.8 — Continue posts a fresh turn.submit ("continue") for
               this conversation. KNOWN LIMITATION (proven live): the shell's
               ShellTurnCoordinator.BuildMessages(text) sends only [system, text],
@@ -575,10 +579,10 @@ function MessageBubbleImpl({
           <button
             type="button"
             data-testid="continue-button"
-            onClick={() => void useChatStore.getState().sendMessage(convId, "continue")}
+            onClick={() => void useChatStore.getState().sendMessage(convId, t("msg.continuePrompt"))}
             className="focus-ring ml-auto rounded-md border border-border bg-transparent px-2.5 py-1 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated"
           >
-            Continue
+            {t("msg.continue")}
           </button>
         </div>
       ) : null}
@@ -693,6 +697,7 @@ export { formatMessageTime } from "./MessageParts";
 // they survive reloads); the duration is local-only and disappears on
 // reload. Renders nothing when no token data is available.
 function MessageMeta({ message }: { message: Message }) {
+  const t = useT();
   const models = useModelStore((s) => s.models);
   const usage = message.token_usage;
   if (!usage) return null;
@@ -703,9 +708,9 @@ function MessageMeta({ message }: { message: Message }) {
     : null;
   const parts: string[] = [];
   if (name) parts.push(name);
-  parts.push(`${total.toLocaleString()} tokens`);
+  parts.push(t("unit.tokens", { n: total.toLocaleString() }));
   if (message.response_time_ms && message.response_time_ms > 0) {
-    parts.push(`${(message.response_time_ms / 1000).toFixed(1)}s`);
+    parts.push(t("unit.secShort", { n: (message.response_time_ms / 1000).toFixed(1) }));
   }
   return (
     <span className="ml-2 text-[11px] text-text-muted">
@@ -822,10 +827,10 @@ function ErrorNotice({
             <ul className="mt-1 space-y-0.5">
               {attempts!.map((a, i) => (
                 <li key={i}>
-                  {a.model ?? a.provider ?? "model"}
+                  {a.model ?? a.provider ?? t("msg.attemptModel")}
                   {a.status === "success"
                     ? ` — ${t("msg.attemptOk")}`
-                    : ` — ${a.error_code ? localizeErrorCode(a.error_code) : t("msg.attemptFail")}`}
+                    : ` — ${a.error_code ? errorSentence(t, a.error_code) : t("msg.attemptFail")}`}
                 </li>
               ))}
             </ul>
@@ -845,6 +850,7 @@ function FallbackNotice({
   requestedModel: string;
   actualModel: string;
 }) {
+  const t = useT();
   return (
     <div
       className="mt-0.5 text-[11px] text-text-muted"
@@ -853,7 +859,7 @@ function FallbackNotice({
       data-actual-model={actualModel}
       role="note"
     >
-      {fallbackNotice(requestedModel, actualModel)}
+      {t("error.fallbackNotice", { actual: actualModel, requested: requestedModel })}
     </div>
   );
 }

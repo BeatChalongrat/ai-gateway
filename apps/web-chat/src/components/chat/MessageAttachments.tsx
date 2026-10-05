@@ -175,7 +175,7 @@ function FileCard({
       onOpen={previewable ? onPreview : undefined}
       onDownload={() => void download()}
       busy={busy}
-      downloadLabel={`Download ${file.filename}`}
+      downloadLabel={t("file.downloadTitle", { name: file.filename })}
       note={
         /* FIX131 — a file the server could not read says so on the
            sent message too (after a reload), and why. */
