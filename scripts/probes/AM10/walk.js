@@ -162,6 +162,12 @@ async function chats(client) {
       return f && f.source === "answer" ? f : null;
     }, 30000, 1000);
     x.check(!!said, "the answer is the install's setting from now on", said ? JSON.stringify(said.value) : "formats still copied from the manifest");
+    // answered after the files were delivered: the round stays finished, nothing fails on screen
+    await L.wait(4000);
+    const after = (await api(page, `/runs/${r1.runId}`)).body;
+    const failures = await page.locator('[data-testid="am-failed-round"]').count();
+    x.check(after?.run?.status === "succeeded" && failures === 0, "answering after delivery leaves the round finished and shows no error",
+      `${after?.run?.status} · error cards ${failures}`);
   }
   await L.wait(3000);
 

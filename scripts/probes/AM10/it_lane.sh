@@ -17,12 +17,12 @@ CHUNKS=(
   '^(TestExpenseAuditLeavesEveryFailedRuleToAPerson|TestInvoiceRunRecordsThenCatchesTheDuplicate|TestScanIsReadAgainByTheSelfHostedVisionModelOnly)$'
   '^(TestAnInstallFromBeforeAM2RunsItsOwnAM1Engine|TestReportPDFIsTheConvertedDocxAndPassesItsGate|TestARestartedRunnerReapsWhatItsKilledProcessLeft|TestTheSweepNeverTouchesAStepInFlight)$'
   '^(TestTheBankPaperPrintsEachRowsDescriptionBesideItsAmounts|TestThePOPaperPrintsEachRowsDescriptionBesideItsAmounts|TestTheExpensePaperPrintsEachRowsDescriptionBesideItsAmounts)$'
-  '^(TestAFormDroppedIntoARoundIsFilledForThatRoundOnly)$'
+  '^(TestAFormDroppedIntoARoundIsFilledForThatRoundOnly|TestAnInstallThatNeverSaidWhichFilesIsAskedOnceAndRemembered|TestAFormMappedWhileTheRoundRenderedIsFilledWhenItFinishes|TestAnAnswerGivenWhileTheFilesWereMadeIsMadeWhenTheRoundFinishes)$'
 )
 rc=0
 for c in "${CHUNKS[@]}"; do
   echo "== chunk $c"
-  out=$(timeout 900 bash "$ROOT/scripts/probes/AM7/go_test.sh" ./internal/agentmarket/runner/ -run "$c" -count=1 -v -timeout 870s 2>&1)
+  out=$(timeout 1500 bash "$ROOT/scripts/probes/AM7/go_test.sh" ./internal/agentmarket/runner/ -run "$c" -count=1 -v -timeout 1400s 2>&1)
   st=$?
   printf '%s\n' "$out" | grep -E '^(--- (PASS|FAIL|SKIP)|PASS$|FAIL|ok |panic)|^\s+\S+_test\.go:[0-9]+: [^t]' || true
   [ "$st" -eq 0 ] || rc=1
