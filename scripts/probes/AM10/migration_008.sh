@@ -19,7 +19,7 @@ set -uo pipefail
 export MSYS_NO_PATHCONV=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT"
-TAG="${1:?the test stack's image tag}"
+TAG="${1:?the image tag the test stack runs}"
 PG=sran-test-postgres-webchat-1
 MIG=services/chat-edge-api/internal/agentmarket/migrations
 OUT=scripts/probes/AM10/results/migration_008
@@ -42,15 +42,15 @@ SELECT 'constraint ' || conname || ' allows form: ' || (pg_get_constraintdef(oid
 SELECT 'migrations recorded: ' || string_agg(version, ' ' ORDER BY version) FROM agent_market.schema_migrations;
 SQL
 }
-rows() { # every count that does not need an 008 column, so it reads the same at each step
+rows() { # every table of the schema with its row count, one per line — no table is named by hand
   q <<'SQL'
-SELECT 'rows  installs ' || (SELECT count(*) FROM agent_market.agent_installs) || ' · chats ' || (SELECT count(*) FROM agent_market.agent_threads)
-    || ' · runs ' || (SELECT count(*) FROM agent_market.agent_runs) || ' · steps ' || (SELECT count(*) FROM agent_market.agent_run_steps)
-    || ' · artifacts ' || (SELECT count(*) FROM agent_market.agent_artifacts) || ' · files ' || (SELECT count(*) FROM agent_market.agent_files)
-    || ' (form ' || (SELECT count(*) FROM agent_market.agent_files WHERE status = 'form') || ', removed '
-    || (SELECT count(*) FROM agent_market.agent_files WHERE status = 'removed') || ') · thread items '
-    || (SELECT count(*) FROM agent_market.agent_thread_items) || ' (form ' || (SELECT count(*) FROM agent_market.agent_thread_items WHERE kind = 'form') || ')';
+SELECT format('SELECT %L || '' '' || count(*) FROM agent_market.%I', table_name, table_name)
+  FROM information_schema.tables WHERE table_schema = 'agent_market' AND table_type = 'BASE TABLE' ORDER BY table_name \gexec
 SQL
+}
+said() { # <rows file>: the tables a person asks about first, and the total
+  awk '{ n[$1] = $2; t += $2 } END { printf "rows: installs %s · chats %s · runs %s · steps %s · files %s · artifacts %s · thread items %s · all %d tables %d rows\n",
+    n["agent_installs"], n["agent_threads"], n["agent_runs"], n["agent_run_steps"], n["agent_files"], n["agent_output_artifacts"], n["agent_thread_items"], NR, t }' "$1"
 }
 held() { # what 008's own columns hold (only while they exist)
   q <<'SQL'
@@ -69,13 +69,14 @@ docker stop sran-test-agent-runner sran-test-chat-edge-api-1 >/dev/null 2>&1
 echo "stopped: $(docker inspect -f '{{.Name}} {{.State.Status}}' sran-test-agent-runner sran-test-chat-edge-api-1 2>/dev/null | tr '\n' ' ')"
 
 echo "== 1. UP — as the runner applied it"
-shape; rows; held
+shape; rows > "$OUT/rows_up_1.txt"; said "$OUT/rows_up_1.txt"; held
 dump > "$OUT/schema_up_1.sql"
 echo "schema: $(wc -l < "$OUT/schema_up_1.sql") statements' lines"
 
 echo "== 2. DOWN — 008_am10.down.sql, one transaction"
 if q -1 -q < "$MIG/008_am10.down.sql"; then echo "down applied: exit 0"; else echo "DOWN FAILED"; fail=1; fi
-shape; rows
+shape; rows > "$OUT/rows_down.txt"; said "$OUT/rows_down.txt"
+echo "row counts that differ from before the down: $(diff "$OUT/rows_up_1.txt" "$OUT/rows_down.txt" | grep '^[<>]' | tr '\n' ' ')— only thread items of kind form go; a form file stays, as a removed file"
 dump > "$OUT/schema_down.sql"
 
 echo "== 2b. the same schema as 001–007 on an empty database"
@@ -92,7 +93,7 @@ echo "diff(schema after the down, schema of 001–007): $n lines"
 
 echo "== 3. UP again — the runner starts and migrates"
 bash scripts/probes/AM7/test_stack.sh runner "$TAG" | grep -E "schema migrated|ERROR" | cut -c1-220
-shape; rows; held
+shape; rows > "$OUT/rows_up_2.txt"; said "$OUT/rows_up_2.txt"; held
 dump > "$OUT/schema_up_2.sql"
 n=$(diff "$OUT/schema_up_1.sql" "$OUT/schema_up_2.sql" | wc -l)
 echo "diff(schema after the second up, schema after the first): $n lines"
