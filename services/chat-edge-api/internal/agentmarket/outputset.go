@@ -85,7 +85,15 @@ func shapeLabel(l Lang, fs []string) string {
 // one shape only, the install already says (its formats default was set by
 // a person, not copied from the manifest), or the answer is remembered.
 // AM11: the question is a run's, so it is asked in l — the run's language.
+//
+// AM12: an agent that works from a request is never asked. Its files are not
+// shapes of one report to choose between — they are the things the request
+// was for (a comparison, and the draft made from the choice) — and such an
+// agent asks only what stops it.
 func OutputSetFinding(l Lang, m Manifest, defaults []Default, current []string) *Finding {
+	if m.FromRequest() {
+		return nil
+	}
 	shapes := OutputShapes(l, m)
 	if len(shapes) < 2 {
 		return nil

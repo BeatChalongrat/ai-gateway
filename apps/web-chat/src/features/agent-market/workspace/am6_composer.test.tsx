@@ -700,3 +700,20 @@ describe("AM6 — the workspace mounts it that way", () => {
     expect(Object.keys(sent()[0]!).sort()).toEqual(["client_id", "file_ids", "text", "thread_id"]);
   });
 });
+
+// AM12 — an agent that works from a request: a round starts from the words, so "attach a file to start
+// a round" would send the person looking for a file that does not exist.
+describe("AM12 — the suggestions of an agent that works from a request", () => {
+  it("offers its form to attach, and the sample request's result — never a file to start the round with", () => {
+    render(<Composer installId="i-1" onSent={vi.fn()} fromRequest formAccept={[".docx", ".xlsx", ".pdf"]} sampleRunId="st-1" />);
+    expect(suggestionTexts()).toEqual(["แนบแบบฟอร์มใบขอซื้อขององค์กร", "ดูผลจากคำขอตัวอย่าง"]);
+    const picker = vi.spyOn(screen.getByTestId("am-composer-file") as HTMLInputElement, "click");
+    fireEvent.click(screen.getByRole("button", { name: "แนบแบบฟอร์มใบขอซื้อขององค์กร" }));
+    expect(picker).toHaveBeenCalledTimes(1);
+  });
+
+  it("an agent that fills no form has nothing to attach", () => {
+    render(<Composer installId="i-1" onSent={vi.fn()} fromRequest sampleRunId="st-1" />);
+    expect(suggestionTexts()).toEqual(["ดูผลจากคำขอตัวอย่าง"]);
+  });
+});

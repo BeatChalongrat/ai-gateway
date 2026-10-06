@@ -59,6 +59,12 @@ type Runner struct {
 	// Mailer (AM7) e-mails each new notification to its person, once, through
 	// the organisation's relay; nil = in-app and tray only.
 	Mailer *agentmarket.SMTPMailer
+	// AM12. Search is the platform's own search endpoint, asked with this runner's
+	// key; Fetcher the service that captures a page as evidence. Either may be
+	// absent: an agent that works on the web then says it cannot yet.
+	Search  *WebSearch
+	Fetcher *WebFetcher
+	web     webHealth
 
 	engines   engineCache
 	running   atomic.Int32
@@ -154,6 +160,14 @@ func (r *Runner) Capabilities() map[string]agentmarket.Binding {
 	caps["model.text"] = agentmarket.Binding{Capability: "model.text", Impl: "gateway", Version: r.Model.Primary + "|" + r.Model.Fallback, Detail: detail}
 	// AM4: the models a person may pick from (the admin curates which).
 	caps["platform.models"] = r.modelsCapability(context.Background())
+	// AM12: the web — a search provider set by an admin, and the fetcher answering
+	search, fetcher := r.webReady(context.Background())
+	if search {
+		caps["web.search"] = agentmarket.Binding{Capability: "web.search", Impl: "gateway:/search", Version: r.Version}
+	}
+	if fetcher {
+		caps["web.fetch"] = agentmarket.Binding{Capability: "web.fetch", Impl: "web-fetcher", Version: r.Version}
+	}
 	return caps
 }
 
@@ -184,6 +198,10 @@ func (r *Runner) housekeeping(ctx context.Context) {
 			}
 		} else if n > 0 {
 			r.Log.Info("runs that delivered nothing were settled", "runs", n)
+		}
+		// AM12: the stored page of a source that did not become a candidate is deleted after its days.
+		if n := r.purgeWebPages(ctx); n > 0 {
+			r.Log.Info("stored web pages that were not used were deleted", "pages", n)
 		}
 		// AM3: runs that waited for budget go on once there is room (a new month).
 		if n, err := r.Store.ResumeBudgetParked(ctx, ""); err == nil && n > 0 {

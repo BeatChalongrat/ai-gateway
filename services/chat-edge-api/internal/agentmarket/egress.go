@@ -31,6 +31,10 @@ type Egress struct {
 	AgentDefault bool `json:"agent_default"`
 	// Accounting: the agent touches accounting data (its default is off).
 	Accounting bool `json:"accounting"`
+	// Web (AM12): the agent works on the web — it sends what a person asked for
+	// to a search provider and opens pages outside the organisation. Its default
+	// is off too: nothing of it leaves until an admin says so.
+	Web bool `json:"web"`
 	// Effective: documents of this agent may go to an outside model.
 	Effective bool       `json:"effective"`
 	Words     PersonText `json:"words"`
@@ -45,14 +49,29 @@ func TouchesAccounting(m Manifest) bool {
 // EgressOf decides one agent's egress from the organisation's switch, the
 // agent's manifest and its own setting (nil: never set).
 func EgressOf(orgMayLeave bool, m Manifest, set *bool) Egress {
-	e := Egress{Org: orgMayLeave, Accounting: TouchesAccounting(m)}
+	e := Egress{Org: orgMayLeave, Accounting: TouchesAccounting(m), Web: m.UsesWeb()}
 	if set != nil {
 		e.Agent = *set
 	} else {
 		e.AgentDefault = true
-		e.Agent = !e.Accounting
+		e.Agent = !e.Accounting && !e.Web
 	}
 	e.Effective = e.Org && e.Agent
+	if e.Web {
+		// AM12: for an agent that works on the web the same switch decides whether it may search and open
+		// pages at all, and the words say that
+		switch {
+		case !e.Org:
+			e.Words = Text("องค์กรไม่อนุญาตให้ agent ทำงานนอกองค์กร agent นี้จึงยังค้นหาและเปิดหน้าเว็บไม่ได้")
+		case !e.Agent && e.AgentDefault:
+			e.Words = Text("agent นี้ค้นหาและเปิดหน้าเว็บนอกองค์กร จึงปิดไว้เป็นค่าตั้งต้น — ผู้ดูแลเปิดให้ agent นี้ได้ที่นี่ เมื่อเปิดแล้ว ข้อความคำขอของผู้ใช้จะถูกส่งไปค้นหาและให้โมเดลนอกองค์กรอ่าน")
+		case !e.Agent:
+			e.Words = Text("ผู้ดูแลตั้งให้ agent นี้ไม่ค้นหาและไม่เปิดหน้าเว็บนอกองค์กร")
+		default:
+			e.Words = Text("agent นี้ค้นหาและเปิดหน้าเว็บนอกองค์กรได้ ข้อความคำขอของผู้ใช้ถูกส่งไปค้นหาและให้โมเดลนอกองค์กรอ่าน")
+		}
+		return e
+	}
 	switch {
 	case !e.Org:
 		e.Words = Text("องค์กรไม่อนุญาตให้ส่งเอกสารไปโมเดลนอกองค์กร agent นี้จึงใช้ได้เฉพาะโมเดลในองค์กร")

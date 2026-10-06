@@ -28,7 +28,10 @@ from typing import Any
 
 SEVERITIES = ("blocking", "cosmetic")
 MOMENTS = ("install", "preflight", "postcompute")
-KINDS = ("question", "request_files")
+# AM12 "pick": one of a table of candidates the question carries as evidence — as many options as the
+# table has rows (and "none of these"), not the two to four of a question
+KINDS = ("question", "request_files", "pick")
+MAX_PICK_OPTIONS = 9
 MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
                   # one per file (date column) and one per account (subject = the code)
                   "date_order", "account_group",
@@ -44,7 +47,9 @@ MULTI_INSTANCE = ("wrong_document_type", "unmapped_column", "unreadable_dates",
                   "bankrec_side", "bankrec_closing",
                   # AM6 invoice ↔ PO: one per table whose kind is asked, one per invoice and PO whose supplier
                   # the names cannot settle, one per pair of units nothing converts
-                  "pomatch_kind", "pomatch_supplier", "pomatch_unit")
+                  "pomatch_kind", "pomatch_supplier", "pomatch_unit",
+                  # AM12 procurement: one per item of the request (subject = the item's key)
+                  "proc_variant", "proc_quantity", "proc_pick")
 FORBIDDEN_WORDS = ("password", "รหัสผ่าน", "token", "โทเคน", "เลขบัตรประชาชน", "otp", "pin")
 
 
@@ -118,9 +123,10 @@ def validate(f: Finding) -> None:
         raise FindingError(f"{f.code}: header longer than 12 characters: {f.header!r}")
     if not f.question.strip():
         raise FindingError(f"{f.code}: empty question")
-    if f.kind == "question":
-        if not 2 <= len(f.options) <= 4:
-            raise FindingError(f"{f.code}: {len(f.options)} options (2-4 required)")
+    if f.kind in ("question", "pick"):
+        most = MAX_PICK_OPTIONS if f.kind == "pick" else 4
+        if not 2 <= len(f.options) <= most:
+            raise FindingError(f"{f.code}: {len(f.options)} options (2-{most} required)")
         values = [o.value for o in f.options]
         if f.default not in values:
             raise FindingError(f"{f.code}: default {f.default!r} is not an option value")

@@ -244,3 +244,91 @@ running their own engine, and settings offer the upgrade.
 stack, a backup immediately before, a quiet hour, the only schema change in the
 window. 3. Portal project + key → `.env` only. 4. Allowlist = the owner's email,
 then the flag on. 5. Smoke green; a non-allowlisted account sees no agent surface.
+
+## The web fetcher and agents on the web (AM12)
+
+**What runs.** One more container in the Agent Market project: `web-fetcher`
+(image `ai-gateway-web-fetcher:<sha>`, built by
+`bash scripts/agent-market/build-fetcher.sh [REV]`; ~1.2 GB, a headless
+Chromium). Read-only root, `/tmp` in memory, no capability, no volume, no
+published port. It is on two networks of the project and no other: `fetch`
+(internal — the runner asks it for pages) and `web` (its way out). It is not
+on the core network: it cannot name or reach the gateway, the databases or
+any other service. Idle it holds a Node process (~60 MB); a browser exists
+only for the length of one fetch.
+
+**Turning it on for an agent.** Admin app › Agent Market › Models: the
+organisation's switch, then the agent's own. An agent on the web is off
+until both are on. Admin app › Agent Market › Web shows whether a search
+provider and the fetcher are there, and holds the ceilings of one run, the
+sites never opened, the organisation's suppliers and where each run went.
+
+**Search.** The runner searches through the gateway's `/v1/search` with its
+own gateway key; the provider (and its key) is the platform's, set on the
+admin app's Search page. With none set, an agent opens only the links a
+person pastes, and says so. Each search is on the run's ledger at
+`AGENT_MARKET_SEARCH_USD_PER_QUERY` (default 0.008) and on the Spend tab as
+model `search:<provider>`.
+
+**Settings** (`.env`; all optional):
+
+| Setting | Default | What |
+|---|---|---|
+| `AGENT_MARKET_FETCHER_URL` | `http://web-fetcher:8097` | where the runner asks for pages; empty = no fetcher, no run on the web starts |
+| `AGENT_MARKET_FETCH_TIMEOUT_SECONDS` | 75 | the runner's wait for one page |
+| `AGENT_MARKET_SEARCH_USD_PER_QUERY` | 0.008 | what one search costs, for the ledger |
+| `AM_FETCHER_OWN_HOSTS` | (none) | the organisation's own public site names, comma-separated: never opened |
+| `AM_FETCHER_MAX_BYTES` | 10485760 | the most one page may transfer |
+| `AM_FETCHER_TIMEOUT_MS` | 45000 | the fetcher's own limit for one page |
+| `AM_FETCHER_MEMORY` / `AM_FETCHER_CPUS` | 1536m / 1.0 | the container's limits |
+| `AM_FETCHER_TAG` | latest | the image tag |
+
+**Checks.**
+
+```bash
+docker inspect -f '{{.State.Health.Status}}' sran-agent-market-web-fetcher-1                      # healthy (the image's own check of /health)
+docker network inspect sran-agent-market_web --format '{{range .Containers}}{{.Name}} {{end}}'   # the fetcher alone
+docker network inspect ai-gateway_default --format '{{range .Containers}}{{.Name}} {{end}}' | tr ' ' '\n' | grep -c fetcher   # 0
+```
+
+The runner's heartbeat lists `web.search` and `web.fetch` when it has them;
+without `web.fetch` the workspace says the part that saves pages is not
+available and no run starts.
+
+**What is kept, and for how long.** Saved pages are files of the run's steps
+(object prefix `agent-market/…/runs/<run>/steps/…`). The runner's
+housekeeping deletes the pages of sources that did not become a candidate
+after the admin's number of days (Web tab; 7 by default) and marks the call
+`purged`. Pages of candidates go with the run's own retention. `web_calls`
+rows stay with the run.
+
+**When something is refused.** A refusal is not an incident: the reason is
+on the run page ("pages opened") and on the admin's Web tab, in words. A run
+in which every source was refused still finishes, with a table of no
+candidates and each source's reason. The fetcher never retries past a
+challenge, a sign-in or a `robots.txt` rule; do not add a site-specific
+exception for one — put a site that should not be asked on the never-open
+list instead.
+
+**When a saved page is not read.** A page's text goes to a model through the
+gateway like every other request, so the gateway's own rules apply to it. A
+page the content guardrail refuses (403 `guardrail_blocked` — a page that
+carries instructions to its reader is one) is saved, read by no model, and
+listed in the run's file among the sources not used with that reason
+(`read_refused`); when no model answered for another reason the reason is
+`not_read`. Neither is an incident, and neither is retried. A run that ends
+with nothing to compare says so in the thread, with what to try next; its
+file is the record of what was searched and opened, and what it used is
+charged like any delivered run.
+
+**The answer's shape is not in the system message.** If a page is "read by no
+model" on every run while the gateway log shows the model answering, look at
+the prompt first: the platform's prompt-echo guard removes from an answer any
+run of 40 characters that repeats the system message, and a prompt that prints
+its JSON shape among the rules loses pieces of every faithful answer
+(ARCHITECTURE.md, "A prompt is two parts"; `backend/tests/test_am12_prompt_echo.py`).
+
+**The test stack** has no route to the real web: its fetcher's `web` network
+is replaced by an internal network of stand-in sites on a public address
+range (`scripts/probes/AM12/test_stack.sh`), so every refusal and every page
+is the fetcher's real code against a web that is a fixture.

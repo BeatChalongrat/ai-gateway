@@ -120,6 +120,17 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		if err != nil {
 			return rc.stepFailed("vision", err)
 		}
+		// AM12: a round on the web begins with what a model understood of the person's words
+		if rc.pkg.Manifest.UsesWeb() {
+			brief, err := rc.webBrief(ctx)
+			if err != nil {
+				return rc.stepFailed("web", err)
+			}
+			if brief.stop != "" {
+				return r.fail(ctx, run, brief.stop, errors.New("the round on the web could not start: "+brief.stop))
+			}
+			extras.Web = brief
+		}
 		pre, preKey, err := rc.preflight(ctx, parsed, extras)
 		if err != nil {
 			return rc.stepFailed("preflight", err)
@@ -138,6 +149,18 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 		}
 		period = *pre.Period
 		_ = r.Store.SetRunFields(ctx, run.ID, &period, nil, nil)
+		// AM12: nothing is left to ask — the search, the pages, their reading (every part a step: a round
+		// that comes back here after a question reads them back and does nothing twice)
+		if extras.Web != nil {
+			found, err := rc.research(ctx, extras.Web, pre)
+			if err != nil {
+				return rc.stepFailed("web", err)
+			}
+			if found.stop != "" {
+				return r.fail(ctx, run, found.stop, errors.New("the round could not go on: "+found.stop))
+			}
+			extras.Web = found
+		}
 		computedRef, computeKey, summary, err = rc.compute(ctx, parsed, pre, extras)
 		if err != nil {
 			return rc.stepFailed("compute", err)
@@ -556,6 +579,8 @@ type preflightOut struct {
 	// Today: the date the package judged with (AM2), handed to compute so
 	// both judge a document the same way.
 	Today string `json:"today"`
+	// Web (AM12): what the package settled of a request, for the search that follows (web.go).
+	Web json.RawMessage `json:"web"`
 }
 
 // thaiTime is the person's clock (Thailand keeps UTC+7 all year, so no tz
@@ -634,6 +659,13 @@ func (rc *runCtx) compute(ctx context.Context, parsed []parsedFile, pre prefligh
 			ref, err := rc.putBlob(ctx, key, "computed.json", data)
 			if err != nil {
 				return nil, 0, "", "", err
+			}
+			if x.Web != nil {
+				// AM12: the pictures cut from the stored pages are kept with the run, and the pages that
+				// did not become candidates are marked for deletion
+				if err := rc.keepEvidence(ctx, res, data); err != nil {
+					return nil, 0, "", "", err
+				}
 			}
 			var summary map[string]any
 			_ = res.Decode("summary", &summary)

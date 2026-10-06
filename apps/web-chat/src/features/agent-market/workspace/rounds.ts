@@ -86,7 +86,10 @@ export function roundsOf(items: ThreadItem[]): Map<string, RoundInfo> {
  *  round must not take the person's card and files with it when it folds).
  *  An item without one (the greeting, a notice, a typed question) belongs to
  *  the person's round begun most recently before it — a self-test's only when
- *  no round of the person's has begun yet. Items before any round belong to none. */
+ *  no round of the person's has begun yet. Items before any round belong to none.
+ *  AM12: a request that started nothing, and the reason the thread gave for it (an agent on the web
+ *  that may not search yet), are never a sample's — typed while the install's sample run was still
+ *  going, they would fold away with it, and the person would see neither their words nor the answer. */
 function positions(items: ThreadItem[], rounds: Map<string, RoundInfo>): (string | null)[] {
   const out: (string | null)[] = new Array(items.length).fill(null);
   const begun = new Set<string>();
@@ -104,9 +107,18 @@ function positions(items: ThreadItem[], rounds: Map<string, RoundInfo>): (string
       }
       return;
     }
-    out[i] = currentRun ?? currentSelfTest;
+    out[i] = currentRun ?? (refusedAtTheDoor(it) ? null : currentSelfTest);
   });
   return out;
+}
+
+const DOOR_REASONS = new Set(["organisation_closed", "agent_closed", "no_fetcher", "no_search"]);
+
+/** A request no round was started for, or the notice that says why (the reasons of an agent's door). */
+function refusedAtTheDoor(it: ThreadItem): boolean {
+  const p = (it.payload ?? {}) as { handled_as?: string; reason?: string };
+  if (it.kind === "user_text") return p.handled_as === "web_closed";
+  return it.kind === "notice" && DOOR_REASONS.has(p.reason ?? "");
 }
 
 /** The thread as segments: items, folded older rounds, and dividers. */

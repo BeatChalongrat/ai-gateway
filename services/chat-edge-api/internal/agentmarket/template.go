@@ -71,6 +71,10 @@ type TemplateSlot struct {
 	Required bool   `json:"required,omitempty"`
 	Side     string `json:"side,omitempty"`
 	LabelAt  string `json:"label_at,omitempty"`
+	// AM12: the rows of a table of items in a form that carries no marker (kind "table", key "rows@…"):
+	// each column is named by the heading over it, and Rows is how many rows the form has for lines.
+	ColumnLabels map[string]string `json:"column_labels,omitempty"`
+	Rows         int               `json:"rows,omitempty"`
 }
 
 // Why a form is refused before any work (AM11).
@@ -182,11 +186,9 @@ func (a *API) uploadTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer fh.Close()
 	name := SafeName(hdr.Filename)
-	kind := ""
-	for ext, k := range TemplateKinds {
-		if strings.HasSuffix(strings.ToLower(name), ext) {
-			kind = k
-		}
+	kind := FormKind(name)
+	if m, err := a.manifestOf(r.Context(), in); err == nil {
+		kind = FormKindOf(m, name) // AM12: a PDF with fields, for an agent that reads them
 	}
 	if kind == "" {
 		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")
@@ -257,11 +259,9 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusNotFound, "NO_TEMPLATE_FILE")
 		return
 	}
-	kind := ""
-	for ext, k := range TemplateKinds {
-		if strings.HasSuffix(strings.ToLower(f.Name), ext) {
-			kind = k
-		}
+	kind := FormKind(f.Name)
+	if m, err := a.manifestOf(r.Context(), in); err == nil {
+		kind = FormKindOf(m, f.Name)
 	}
 	if kind == "" {
 		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")

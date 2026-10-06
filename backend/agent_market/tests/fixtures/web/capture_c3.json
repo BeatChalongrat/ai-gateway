@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.premier-furniture.test/catalogue/ot-510",
+ "started_at": "2026-10-06T11:42:30.236Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.premier-furniture.test/catalogue/ot-510",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1294,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:30 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "8b5da67310d6bff4f05bb7d85f3fc4ba920f815bca7e97d30f02e7d15b6a84b6",
+ "snapshot_sha256": "364649fe84e78ff0d692975c1097bd0a6f134056c992059b53ac904f9f3efa4d",
+ "robots": {
+  "url": "http://www.premier-furniture.test/robots.txt",
+  "status": 404,
+  "allowed": true,
+  "rule": "",
+  "group": "",
+  "sha256": ""
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.premier-furniture.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.premier-furniture.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1294,
+  "transfer": 1294,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "en",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 18,
+  "shown_characters": 455,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "5fb1c717a163cfcd6068c4250b15596a097cb58904fce42f85e9f23f37dadd29",
+   "bytes": 185
+  },
+  "page.html": {
+   "sha256": "0648c9da4a69fe59386337a76b922f1a6232fc4aaebd36f7a37d69b1b9333258",
+   "bytes": 1293
+  },
+  "screenshot.jpg": {
+   "sha256": "3413fd90e025b6d076e6583069f4a20aa46a7e474f1880610e8c5958240bd743",
+   "bytes": 45954
+  },
+  "text.json": {
+   "sha256": "59a5f5dbeda4411f41e8487f199ff2ff5dfbd489c729e196f3564979ada01d6e",
+   "bytes": 2129
+  }
+ },
+ "finished_at": "2026-10-06T11:42:30.994Z"
+}

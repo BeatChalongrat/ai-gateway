@@ -592,3 +592,164 @@ Now (`deliverables/template_fill.py`, `template_out.py`, `template.go`,
   row (line items: a list goes only to a marked repeating row or a named
   range). A form whose fields are of these shapes reads as having few fields
   or none.
+
+## A round on the web (AM12)
+
+The procurement agent (`sran.procurement`) is the first agent that touches
+the network. A person says what to buy; the agent finds sellers' pages,
+reads them, and gives back a comparison and a draft purchase request. The
+model decides where to look. What makes that safe is not a list of allowed
+sites — there is none — but that **nothing a page or a model says is taken
+on its word**: every value in the table is found again, by code, in a stored
+copy of the page.
+
+**Who may reach what.**
+
+| Part | Reaches the web? | How |
+|---|---|---|
+| agent-runner | no | asks `web-fetcher` for one address at a time (network `fetch`, internal); searches through the model gateway's own `/v1/search` with its existing key |
+| the sandbox (the package's code) | no | `--network none`, as every step; it is handed files |
+| `web-fetcher` | yes — it is the only one | network `web`; no key, no volume, no docker socket, not on the core network |
+| the models | no tools | a prompt and a typed JSON answer; the request type has no field a tool could be offered in |
+
+**A prompt is two parts.** Each of a package's prompts (`web.prompts` in its
+manifest) is one file: the rules, a line `=== with the question ===`, and
+under it the shape of the answer. The runner sends the rules as the system
+message and the second part at the end of the user message, after the data
+(`runner/web.go: splitPrompt`). The shape must never be among the rules: the
+platform removes from every model answer any run of 40 characters that repeats
+the system message (`backend/app/services/prompt_echo_guard.py`), and an
+answer that follows a shape printed there comes back with pieces of its own
+JSON taken out — the page is then "read by no model".
+`backend/tests/test_am12_prompt_echo.py` puts every package prompt through
+that guard; `runner/am12_prompt_test.go` holds the file format.
+
+**The door.** An agent whose manifest has a `web` block is off until an
+admin turns it on for that agent (the per-agent switch of AM9; its default
+for such an agent is off, whatever its category). While it is off the agent
+installs and opens, the workspace says it cannot search yet and who can turn
+it on, and a request sent anyway is answered in the thread with the same
+reason: no run is created (`web.go: webClosed`). The runner checks again
+(`runner/web.go: webBrief`): with the switch off nothing of the request
+leaves, whatever started the run. `AGENT_MARKET_ENABLED=false` removes all of
+it, and the fetcher answers every request with 503.
+
+**The steps** (each an idempotent step like any other; a run that is resumed
+after a question reads them back and repeats none):
+
+1. `web.brief` — a model reads the person's words into a brief (items,
+   quantity, the requirements the person named, where, by when). The package
+   settles it (`checks/need.py`): anything that is not the shape asked for is
+   dropped; a quantity is a number the person gave, never assumed.
+2. clarification — only what a search cannot start without (which of several
+   things is meant, how many; the delivery address once). At most four
+   questions on one card.
+3. `web.plan` → `web.search:n` — a model writes queries; each goes to the
+   organisation's search provider. Capped per run.
+4. `web.select` — a model picks which results to open, **by their number in
+   the list**. An address a model writes itself opens nothing; a number that
+   is not in the list opens nothing. Links the person typed are in the list.
+5. `web.fetch:sNN` — the fetcher opens one address (below). Its answer is the
+   evidence package or a refusal with its reason. A host on the admin's
+   never-open list is not asked for at all.
+6. `web.read:sNN` — a model is shown the page's **visible** text as numbered
+   blocks and returns claims: for each thing it says the page shows, the
+   words as printed and the block they are printed in.
+7. compute (`scripts/compare.py`) — every claim is looked for in the stored
+   snapshot (below). Amounts are arithmetic in code on what was found.
+8. the choice — one card, kind `pick`: the comparison and "which candidate,
+   or none". Nothing is marked as the one to take.
+9. render — the comparison workbook, and the purchase request: in the
+   organisation's own form when one is set or was sent, else as a plain
+   document. Both name, on their face, what could not be filled and why.
+
+**The fetcher** (`services/web-fetcher`). One address in; out, what a person
+would have seen (text as blocks with where each sits and the box it is drawn
+in, a picture of the page, the markup made inert, the response's headers,
+hashes, a log of the fetch) or a refusal. A fresh browser profile each time;
+no cookie or cache is kept; nothing stays in the service after it answers.
+It refuses — each with its own reason, shown to the person in words:
+
+- an address that is not `http`/`https` on the standard port, or carries a
+  user name; a host that does not resolve; any host of which **any** address
+  is private, loopback, link-local (the cloud metadata address), carrier
+  NAT or otherwise not public; a name of the platform's own services;
+- every host but the one named in the request: the browser's only way out is
+  a per-fetch proxy that connects to that host at the address that was
+  vetted, and to nothing else. A redirect to another host, a page that
+  navigates itself to one, a frame, a script or an image from one, is not
+  followed and not loaded (recorded as not opened);
+- a page the site's `robots.txt` disallows for it, or whose own markup says
+  not to use it for automated systems (read at the time of the fetch — the
+  rule is the site's, applied when its page is opened, and shown with the
+  refusal); an unreadable `robots.txt` is a refusal, not a pass;
+- a sign-in or payment page, a paywall, a challenge to prove being a person
+  (never worked around: the source is dropped and the table says so), a
+  download that is not a page, a response over the size limit, a page that
+  shows nothing when only its own host is loaded.
+
+Text a person could not see — not rendered, hidden by style, transparent,
+too small, off the page, cut away, the colour of its background, covered —
+and everything a page carries besides its text (meta tags, JSON-LD,
+comments, `alt`/`title`/`aria-label`) is stored apart from the visible text
+and is **never shown to a model or checked against**.
+
+**Finding a value again** (`engine/e4`). A claim is `{quote, block}`. It is
+looked for in the block named: exactly, then with spacing made uniform, then
+with character forms made uniform (full-width and Thai digits, the marks
+that print as a space or a hyphen). A figure is found whole, never inside a
+longer figure. A quote that is in one block only is that block; in several
+and not the one named, it is not found. There is no pattern library and no
+price parser: the model gives the string as displayed and the amount it
+reads it as; code works out what that string can mean from its own
+characters (`money.readings`) and takes the amount only if it is one of
+them, in the currency whose mark is printed **with the figure**.
+
+A figure is a price only when, besides that: it is not struck through; it
+is shown as a figure (little else in its block, no second figure); and it is
+printed with the product it was read for — in the same part of the page as
+the product's name, under no other heading, with no other figure shown as a
+price nearer to that name (a page lists several products and several
+prices). Each refusal has a code and a sentence; a figure that is not taken
+is "not known", is counted as a point still open, and reaches the draft only
+as a named gap. What code cannot tell from where a figure sits — a delivery
+fee printed alone beside the product — is the reader's to tell, and the
+picture cut from the page shows the person what was read.
+
+What a reading cannot do, by the shape of what is kept from it: it has no
+field that makes a seller approved or on the organisation's list (that is
+worked out from the organisation's own list — by site, tax ID or name); a
+tax ID is a number of the jurisdiction's length or it is not one; tax
+treatment, delivery, lead time, minimum order, stock and warranty are each
+a quote found on the page or unknown; nothing it adds is carried anywhere.
+The permanent proof is the injection corpus
+(`tests/test_am12_web_evidence.py` on pages captured by the real fetcher,
+`runner/am12_it_test.go`): a reading that has already been talked into the
+wrong answer changes nothing.
+
+**Keeping.** A saved page of a source that became a candidate is evidence of
+its run and is kept as long as the run. One that did not is deleted after
+the admin's number of days (7 unless set); a page that could not be opened
+is not saved. The line that an address was asked for, and what came of it,
+stays (`web_calls`) — it is what the admin's Web tab and the run page's
+"pages opened" list are read from. There is no crawl cache: the same address
+in another run is fetched again.
+
+**The organisation's own form** (`deliverables/form_regions.py`,
+`pdf_form.py`; see "A form with no marker in it"). The procurement manifest
+asks for three more readings of an unmarked form (`templates.reads`; an
+agent that does not ask reads forms exactly as before): the rows of a table
+of items — a row of headings over empty rows is one place that takes a list,
+its columns mapped by their headings; a blank drawn as a line after its
+label; and a PDF with fields to type in, each read under the words printed
+beside it. Word gains rows when there are more lines than rows; Excel never
+does (its formulas would not move) and says which lines did not fit. The
+filled file is opened again: each value beside the label it was mapped
+under, each line in its row; and the gaps — the form's own blanks still
+empty, read from the file, and what no web page can tell — are printed at
+its end and looked for there.
+
+**Words.** Every sentence the package writes is in its manifest in both
+languages (`strings` by key, `en` by the Thai); its code holds keys only
+(`tests/test_am12_package_words.py`). Nothing in its code, prompts or
+manifest names a kind of thing to buy.

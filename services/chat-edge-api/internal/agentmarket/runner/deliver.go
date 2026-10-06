@@ -410,6 +410,12 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 			}
 			defer cleanup()
 			inputs := []Input{{Name: "computed.json", LocalPath: cpath}}
+			if rc.pkg.Manifest.UsesWeb() {
+				// AM12: the pictures of what each page showed, for the documents that print them
+				if data, err := os.ReadFile(cpath); err == nil {
+					inputs = append(inputs, rc.evidenceInputs(ctx, data)...)
+				}
+			}
 			req := map[string]any{"op": "render", "package": rc.pkg.PyPackage, "computed": "computed.json", "formats": pyFormats,
 				"names": names, "theme": theme, "narrative": json.RawMessage(narrative.Narrative), "assumptions": assumptions,
 				"presentation": pres,
@@ -717,7 +723,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return err
 	}
 	out := am.OutputsPayload{RunID: artifactRun.String(), Summary: summary, Rendered: rerender,
-		Model: rc.modelLine(narrative), MoreFormats: rc.moreFormats()}
+		Model: rc.modelLine(ctx, run, narrative), MoreFormats: rc.moreFormats()}
 	if run.Period != nil {
 		out.PeriodLabel = am.Text("%s", am.Period(*run.Period))
 	}
@@ -756,6 +762,10 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 			am.Words(text), am.Count(n))
 	}
 	switch {
+	case rc.pkg.Manifest.UsesWeb():
+		// AM12: what a model did in a round on the web, and what it did not — in the words that fit what
+		// the round came to (webwords.go)
+		text = webClosing(text, summary)
 	case rc.pkg.Manifest.Narrative == "rules":
 		text = am.Text("%s %s", am.Words(text), am.Words(documentsNote(summary)))
 	case rerender:
@@ -774,10 +784,22 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 // modelLine is what the outputs card always says about models (AM4): which
 // model saw the documents (or that none did), what the person chose, and —
 // plainly — when another model was used instead.
-func (rc *runCtx) modelLine(narrative narrativeOut) *am.OutputsModel {
+func (rc *runCtx) modelLine(ctx context.Context, run am.Run, narrative narrativeOut) *am.OutputsModel {
 	line := &am.OutputsModel{Model: narrative.Model, SelfHosted: narrative.SelfHosted, Choice: rc.choice(),
 		Uses: am.ModelUse(rc.pkg.Manifest)}
 	flag := func(v bool) *bool { return &v }
+	if rc.pkg.Manifest.UsesWeb() {
+		// AM12: a round on the web has no narrative for a model to write; what a model did is read the
+		// request and the pages. The card names those models — "no model saw the source files" is not
+		// true of this agent, and the card must never say it.
+		line.Uses, line.ChosenModel, line.Web = "web", rc.chosenModel(), rc.webModels(ctx, run)
+		chosen := false
+		for _, w := range line.Web {
+			chosen = chosen || sameModel(w.Model, line.ChosenModel)
+		}
+		line.NotChosen = flag(len(line.Web) > 0 && line.ChosenModel != "" && !chosen)
+		return line
+	}
 	switch line.Uses {
 	case "vision":
 		used, notChosen := rc.visionModel()

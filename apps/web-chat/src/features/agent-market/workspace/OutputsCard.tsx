@@ -105,7 +105,15 @@ export function OutputsCard({
   const reconciliation = summary.kind === "bank_reconciliation";
   // AM6: the invoice ↔ PO agent's counts and how deep its lines were tested
   const po = summary.kind === PO_KIND;
-  const allKpis: { key: AmKey; value: unknown }[] = reconciliation
+  // AM12: a round on the web — how many candidates were compared, what the draft still lacks, its total
+  const procurement = summary.kind === "procurement";
+  const allKpis: { key: AmKey; value: unknown }[] = procurement
+    ? [
+        { key: "outputs.proc.offers", value: summary.offers },
+        { key: "outputs.proc.gaps", value: Number(summary.chosen) > 0 ? summary.gaps : null },
+        { key: "outputs.proc.total", value: summary.total_thb },
+      ]
+    : reconciliation
     ? [
         { key: "outputs.adjustedBank", value: summary.adjusted_bank },
         { key: "outputs.adjustedBook", value: summary.adjusted_book },
@@ -357,7 +365,16 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
   const summaryModels = (outputs.summary?.models as { model?: string; self_hosted?: boolean }[] | undefined) ?? [];
   const models = summaryModels.filter((x) => !!x.model);
   const lines: string[] = [];
-  if (m.uses === "text") {
+  if (m.uses === "web") {
+    // AM12: a round on the web — a model read the request and the pages; the card names it, and never
+    // says "no model saw the source files"
+    const read = (m.web ?? []).filter((x) => !!x.model);
+    lines.push(
+      read.length
+        ? t("outputs.web.readBy", { models: read.map((x) => `${x.model} (${where(x.self_hosted)})`).join(", ") })
+        : t("outputs.web.readByNone"),
+    );
+  } else if (m.uses === "text") {
     lines.push(m.model ? t("outputs.writtenBy", { model: m.model, where: where(m.self_hosted) }) : t("outputs.writtenByRules"));
   } else if (models.length) {
     for (const x of models) lines.push(t("outputs.seenBy", { model: x.model ?? "", where: where(x.self_hosted) }));
@@ -365,7 +382,7 @@ export function SeenBy({ outputs }: { outputs: OutputsPayload }) {
     lines.push(t("outputs.seenNone"));
   }
   if (m.not_chosen && m.chosen_model) {
-    const used = m.uses === "text" ? m.model : m.vision_model;
+    const used = m.uses === "text" ? m.model : m.uses === "web" ? m.web?.[0]?.model : m.vision_model;
     lines.push(
       used
         ? t("outputs.notChosen", { chosen: m.chosen_model, used, why: t("outputs.notChosenWhy") })

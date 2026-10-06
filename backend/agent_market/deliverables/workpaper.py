@@ -126,7 +126,12 @@ def pick(heads: list, rows: list, keep: list, **cols) -> tuple:
             {k: tuple(pos[c - 1] + 1 for c in v if c - 1 in pos) for k, v in cols.items()})
 
 
-def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1) -> dict:
+def _say(lang: str | None, thai: str, english: str) -> str:
+    """AM12: a working paper of a package that speaks English is checked, and paged, in English."""
+    return english if lang == "en" else thai
+
+
+def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1, lang: str | None = None) -> dict:
     """Set the sheet's page setup from its shape (see the module docstring); returns the plan."""
     p = plan(ws, face=face)
     ws.page_setup.paperSize = ws.PAPERSIZE_A4
@@ -151,16 +156,16 @@ def setup(ws, *, doc_name: str, face: bool = False, id_cols: int = 1) -> dict:
         ws.print_title_cols = f"A:{get_column_letter(max(1, id_cols))}"
     ws.oddFooter.left.text = f"{doc_name} · {ws.title}"
     ws.oddFooter.left.size = 8
-    ws.oddFooter.right.text = "หน้า &P / &N"
+    ws.oddFooter.right.text = _say(lang, "หน้า &P / &N", "Page &P / &N")
     ws.oddFooter.right.size = 8
     ws.evenFooter.left.text, ws.evenFooter.right.text = ws.oddFooter.left.text, ws.oddFooter.right.text
     ws.print_options.horizontalCentered = False
     return p
 
 
-def setup_workbook(wb, *, doc_name: str, id_cols: dict | None = None) -> dict:
+def setup_workbook(wb, *, doc_name: str, id_cols: dict | None = None, lang: str | None = None) -> dict:
     """Every sheet of a working paper: the first is its face (one page)."""
-    return {ws.title: setup(ws, doc_name=doc_name, face=(i == 0), id_cols=(id_cols or {}).get(ws.title, 1))
+    return {ws.title: setup(ws, doc_name=doc_name, face=(i == 0), id_cols=(id_cols or {}).get(ws.title, 1), lang=lang)
             for i, ws in enumerate(wb.worksheets)}
 
 
@@ -175,7 +180,7 @@ def _header_row(ws) -> int | None:
     return row - 1 if row > 1 else None
 
 
-def _identity_beside_amounts(ws, where: str) -> list[str]:
+def _identity_beside_amounts(ws, where: str, lang: str | None = None) -> list[str]:
     """AM9: on every page across that prints an amount column, the row's identity prints too — and on a
     sheet that runs across pages, that identity names the row in words (a description), not only by
     a number."""
@@ -186,17 +191,20 @@ def _identity_beside_amounts(ws, where: str) -> list[str]:
         return bad
     ident = title_cols(ws)
     if not ident or ident[0] != 1:
-        return [f"{where}: ไม่ได้กำหนดคอลัมน์ระบุรายการที่พิมพ์ซ้ำทุกหน้า"]
+        return [_say(lang, f"{where}: ไม่ได้กำหนดคอลัมน์ระบุรายการที่พิมพ์ซ้ำทุกหน้า",
+                     f"{where}: no identifying columns are set to repeat on every page")]
     pages = bands(ws)
     for b in pages:
         if any(c in b for c in money_cols) and not all(c in b for c in ident):
             cols = ", ".join(get_column_letter(c) for c in money_cols if c in b)
-            bad.append(f"{where}: หน้าที่พิมพ์จำนวนเงิน (คอลัมน์ {cols}) ไม่มีคอลัมน์ระบุรายการ")
+            bad.append(_say(lang, f"{where}: หน้าที่พิมพ์จำนวนเงิน (คอลัมน์ {cols}) ไม่มีคอลัมน์ระบุรายการ",
+                            f"{where}: the page that prints amounts (columns {cols}) has no identifying columns"))
     if len(pages) > 1:
         worded = any(isinstance(ws.cell(row=r, column=c).value, str) and len(ws.cell(row=r, column=c).value.strip()) > 3
                      for c in ident for r in range(top, min((ws.max_row or 0), top + 50) + 1))
         if not worded:
-            bad.append(f"{where}: พิมพ์หลายหน้าในแนวนอน แต่คอลัมน์ที่ซ้ำทุกหน้ามีแค่เลขลำดับ ไม่มีคำอธิบายรายการ")
+            bad.append(_say(lang, f"{where}: พิมพ์หลายหน้าในแนวนอน แต่คอลัมน์ที่ซ้ำทุกหน้ามีแค่เลขลำดับ ไม่มีคำอธิบายรายการ",
+                            f"{where}: prints several pages across, but the repeated columns hold only a number and no description"))
     return bad
 
 
@@ -316,11 +324,14 @@ def print_rows(path: str, limit: int = 3000) -> list[dict]:
     return out
 
 
-def check(path: str) -> dict:
+def check(path: str, lang: str | None = None) -> dict:
     """The print gate on the finished file: every sheet's setup read back and asserted (see the docstring)."""
     import os
 
     from openpyxl import load_workbook
+
+    def say(thai: str, english: str) -> str:
+        return _say(lang, thai, english)
 
     wb = load_workbook(path)
     name = os.path.basename(path)
@@ -329,42 +340,50 @@ def check(path: str) -> dict:
     for i, ws in enumerate(wb.worksheets):
         face = i == 0
         p = plan(ws, face=face)
-        where = f"ชีต “{ws.title}”"
+        where = say(f"ชีต “{ws.title}”", f"Sheet “{ws.title}”")
         n += 1
         if str(ws.page_setup.paperSize) != str(ws.PAPERSIZE_A4):
-            bad.append(f"{where}: ไม่ได้ตั้งกระดาษ A4")
+            bad.append(say(f"{where}: ไม่ได้ตั้งกระดาษ A4", f"{where}: the paper is not set to A4"))
         if ws.page_setup.orientation != p["orientation"]:
-            bad.append(f"{where}: แนวกระดาษควรเป็น{'แนวตั้ง' if p['orientation'] == 'portrait' else 'แนวนอน'}")
+            bad.append(say(f"{where}: แนวกระดาษควรเป็น{'แนวตั้ง' if p['orientation'] == 'portrait' else 'แนวนอน'}",
+                           f"{where}: the page should be {'portrait' if p['orientation'] == 'portrait' else 'landscape'}"))
         if not _covers(ws.print_area, ws.max_column or 1, ws.max_row or 1):
-            bad.append(f"{where}: พื้นที่พิมพ์ไม่ครอบคลุมทั้งชีต")
+            bad.append(say(f"{where}: พื้นที่พิมพ์ไม่ครอบคลุมทั้งชีต", f"{where}: the print area does not cover the whole sheet"))
         fitted = bool(ws.sheet_properties.pageSetUpPr and ws.sheet_properties.pageSetUpPr.fitToPage) \
             and ws.page_setup.fitToWidth in (1, "1")
         if face:
             if not (fitted and ws.page_setup.fitToHeight in (1, "1")):
-                bad.append(f"{where}: หน้าสรุปต้องพิมพ์จบในหน้าเดียว")
+                bad.append(say(f"{where}: หน้าสรุปต้องพิมพ์จบในหน้าเดียว", f"{where}: the summary must print on one page"))
             elif p["scale"] < MIN_SCALE:
-                bad.append(f"{where}: หน้าสรุปยาวเกินกว่าจะพิมพ์ในหน้าเดียวแล้วยังอ่านได้ (ย่อเหลือ {p['scale']:.0%})")
+                bad.append(say(f"{where}: หน้าสรุปยาวเกินกว่าจะพิมพ์ในหน้าเดียวแล้วยังอ่านได้ (ย่อเหลือ {p['scale']:.0%})",
+                               f"{where}: the summary is too long to print on one page and stay readable (scaled to {p['scale']:.0%})"))
         elif p["fit_width"]:
             if not fitted:
-                bad.append(f"{where}: ต้องย่อให้พอดีความกว้างกระดาษ เพื่อให้รายการกับจำนวนเงินอยู่หน้าเดียวกัน")
+                bad.append(say(f"{where}: ต้องย่อให้พอดีความกว้างกระดาษ เพื่อให้รายการกับจำนวนเงินอยู่หน้าเดียวกัน",
+                               f"{where}: must be fitted to the page width, so that each item is on the same page as its amounts"))
         elif not ws.print_title_cols:
-            bad.append(f"{where}: กว้างเกินหนึ่งหน้า แต่ไม่ได้พิมพ์คอลัมน์ระบุรายการซ้ำทุกหน้า")
+            bad.append(say(f"{where}: กว้างเกินหนึ่งหน้า แต่ไม่ได้พิมพ์คอลัมน์ระบุรายการซ้ำทุกหน้า",
+                           f"{where}: wider than one page, but the identifying columns do not repeat on every page"))
         elif float(ws.page_setup.scale or 100) / 100 < MIN_SCALE:
-            bad.append(f"{where}: ย่อเหลือ {float(ws.page_setup.scale) / 100:.0%} เล็กเกินกว่าจะอ่านได้เมื่อพิมพ์")
+            bad.append(say(f"{where}: ย่อเหลือ {float(ws.page_setup.scale) / 100:.0%} เล็กเกินกว่าจะอ่านได้เมื่อพิมพ์",
+                           f"{where}: scaled to {float(ws.page_setup.scale) / 100:.0%}, too small to read in print"))
         if not face:
-            bad += _identity_beside_amounts(ws, where)
+            bad += _identity_beside_amounts(ws, where, lang)
         header = _header_row(ws)
         if header and not face and str(ws.print_title_rows or "").replace("$", "") != f"{header}:{header}":
-            bad.append(f"{where}: หัวตารางไม่พิมพ์ซ้ำทุกหน้า")
+            bad.append(say(f"{where}: หัวตารางไม่พิมพ์ซ้ำทุกหน้า", f"{where}: the header row does not repeat on every page"))
         foot = (ws.oddFooter.left.text or "") + " " + (ws.oddFooter.right.text or "")
         if "&P" not in foot or "&N" not in foot or name not in foot:
-            bad.append(f"{where}: ทุกหน้าต้องมีชื่อเอกสารและเลขหน้า x / y")
+            bad.append(say(f"{where}: ทุกหน้าต้องมีชื่อเอกสารและเลขหน้า x / y", f"{where}: every page must carry the document's name and page x / y"))
+    label = say("พิมพ์ได้: หน้าสรุปหน้าเดียว รายการอยู่หน้าเดียวกับยอด มีเลขหน้า",
+                "Prints: the summary on one page, each item on the same page as its amounts, with page numbers")
     if bad:
-        more = f" (และอีก {len(bad) - 4} ข้อ)" if len(bad) > 4 else ""
-        return _check("xlsx.print", False, "; ".join(bad[:4]) + more, "พิมพ์ได้: หน้าสรุปหน้าเดียว รายการอยู่หน้าเดียวกับยอด มีเลขหน้า", n)
-    return _check("xlsx.print", True, f"ตั้งค่าการพิมพ์ครบ {n} ชีต: A4 หน้าสรุปหน้าเดียว หัวตารางซ้ำทุกหน้า "
-                  "รายการอยู่หน้าเดียวกับยอด ชื่อเอกสารและเลขหน้าทุกหน้า",
-                  "พิมพ์ได้: หน้าสรุปหน้าเดียว รายการอยู่หน้าเดียวกับยอด มีเลขหน้า", n)
+        more = say(f" (และอีก {len(bad) - 4} ข้อ)", f" (and {len(bad) - 4} more)") if len(bad) > 4 else ""
+        return _check("xlsx.print", False, "; ".join(bad[:4]) + more, label, n)
+    return _check("xlsx.print", True, say(
+        f"ตั้งค่าการพิมพ์ครบ {n} ชีต: A4 หน้าสรุปหน้าเดียว หัวตารางซ้ำทุกหน้า รายการอยู่หน้าเดียวกับยอด ชื่อเอกสารและเลขหน้าทุกหน้า",
+        f"Page setup complete on {n} sheets: A4, the summary on one page, the header row repeated on every page, each item on the same "
+        "page as its amounts, the document's name and a page number on every page"), label, n)
 
 
 def companions(wb) -> list[tuple]:
@@ -377,34 +396,44 @@ def companions(wb) -> list[tuple]:
     return out
 
 
-def _side_by_side(main, aside) -> list[str]:
+def _side_by_side(main, aside, lang: str | None = None) -> list[str]:
     """AM10: a companion is read beside its main sheet by row number — it repeats the main sheet's identity
     columns: the same headers, and on every row the same text."""
-    where = f"ชีต “{aside.title}”"
+    def say(thai: str, english: str) -> str:
+        return _say(lang, thai, english)
+
+    where = say(f"ชีต “{aside.title}”", f"Sheet “{aside.title}”")
     ident = title_cols(main)
     if not ident or title_cols(aside) != ident:
-        return [f"{where}: คอลัมน์ระบุรายการไม่ใช่ชุดเดียวกับชีต “{main.title}”"]
+        return [say(f"{where}: คอลัมน์ระบุรายการไม่ใช่ชุดเดียวกับชีต “{main.title}”",
+                    f"{where}: its identifying columns are not the same as those of sheet “{main.title}”")]
     top = _header_row(main)
     if top is None or _header_row(aside) != top:
-        return [f"{where}: หัวตารางไม่อยู่แถวเดียวกับชีต “{main.title}”"]
+        return [say(f"{where}: หัวตารางไม่อยู่แถวเดียวกับชีต “{main.title}”",
+                    f"{where}: its header row is not on the same row as sheet “{main.title}”")]
     for c in ident:
         if _identity_text(aside.cell(row=top, column=c).value) != _identity_text(main.cell(row=top, column=c).value):
-            return [f"{where}: หัวคอลัมน์ระบุรายการ ({get_column_letter(c)}) ไม่ตรงกับชีต “{main.title}”"]
+            return [say(f"{where}: หัวคอลัมน์ระบุรายการ ({get_column_letter(c)}) ไม่ตรงกับชีต “{main.title}”",
+                        f"{where}: the heading of identifying column {get_column_letter(c)} differs from sheet “{main.title}”")]
     bad: list[str] = []
     for r in range(top + 1, max(main.max_row or 0, aside.max_row or 0) + 1):
         for c in ident:
             a, b = _identity_text(main.cell(row=r, column=c).value), _identity_text(aside.cell(row=r, column=c).value)
             if a != b:
-                bad.append(f"{where} แถว {r}: คอลัมน์ {get_column_letter(c)} “{b or 'ว่าง'}” ไม่ตรงกับชีต “{main.title}” “{a or 'ว่าง'}”")
+                bad.append(say(f"{where} แถว {r}: คอลัมน์ {get_column_letter(c)} “{b or 'ว่าง'}” ไม่ตรงกับชีต “{main.title}” “{a or 'ว่าง'}”",
+                               f"{where} row {r}: column {get_column_letter(c)} “{b or 'blank'}” differs from sheet “{main.title}” “{a or 'blank'}”"))
                 break
     return bad
 
 
-def one_across(path: str) -> dict:
+def one_across(path: str, lang: str | None = None) -> dict:
     """AM10's rule as a gate check: every sheet prints one page across (``bands`` gives one band), so pages
     only run downward and a reader follows one line on one page; a companion sheet lines up with its main
     sheet row for row (``_side_by_side``). Fails naming the sheet and how many pages across it runs."""
     from openpyxl import load_workbook
+
+    def say(thai: str, english: str) -> str:
+        return _say(lang, thai, english)
 
     wb = load_workbook(path)
     bad: list[str] = []
@@ -413,19 +442,23 @@ def one_across(path: str) -> dict:
         n += 1
         pages = bands(ws)
         if len(pages) > 1:
-            bad.append(f"ชีต “{ws.title}” พิมพ์กว้าง {len(pages)} หน้า ({ws.max_column} คอลัมน์) ต้องกว้างหน้าเดียว: "
-                       "ย้ายคอลัมน์หลักฐานไปชีตคู่")
+            bad.append(say(f"ชีต “{ws.title}” พิมพ์กว้าง {len(pages)} หน้า ({ws.max_column} คอลัมน์) ต้องกว้างหน้าเดียว: "
+                           "ย้ายคอลัมน์หลักฐานไปชีตคู่",
+                           f"Sheet “{ws.title}” prints {len(pages)} pages across ({ws.max_column} columns) and must be one page wide: "
+                           "move the evidence columns to a companion sheet"))
     for main, aside in companions(wb):
-        bad += _side_by_side(main, aside)
-    label = "ทุกชีตพิมพ์กว้างหน้าเดียว อ่านรายการหนึ่งบรรทัดจบในหน้าเดียว"
+        bad += _side_by_side(main, aside, lang)
+    label = say("ทุกชีตพิมพ์กว้างหน้าเดียว อ่านรายการหนึ่งบรรทัดจบในหน้าเดียว", "Every sheet prints one page wide; one line is read on one page")
     if bad:
-        more = f" (และอีก {len(bad) - 4} ข้อ)" if len(bad) > 4 else ""
+        more = say(f" (และอีก {len(bad) - 4} ข้อ)", f" (and {len(bad) - 4} more)") if len(bad) > 4 else ""
         return _check("xlsx.print.one_across", False, "; ".join(bad[:4]) + more, label, n)
     k = len(companions(wb))
-    pair = f" ชีตคู่ {k} ชีตเริ่มด้วยคอลัมน์ระบุรายการเดียวกับชีตหลักทุกแถว" if k else ""
-    return _check("xlsx.print.one_across", True, f"ทุกชีต ({n}) พิมพ์กว้างหน้าเดียว หน้าต่อกันลงล่างเท่านั้น{pair}", label, n)
+    pair = say(f" ชีตคู่ {k} ชีตเริ่มด้วยคอลัมน์ระบุรายการเดียวกับชีตหลักทุกแถว",
+               f" The {k} companion sheets begin with the same identifying columns as their main sheet on every row.") if k else ""
+    return _check("xlsx.print.one_across", True, say(f"ทุกชีต ({n}) พิมพ์กว้างหน้าเดียว หน้าต่อกันลงล่างเท่านั้น{pair}",
+                                                     f"Every sheet ({n}) prints one page wide; pages only run downward.{pair}"), label, n)
 
 
-def checks(path: str) -> list[dict]:
+def checks(path: str, lang: str | None = None) -> list[dict]:
     """The print gate's checks on a finished file: the page setup (``check``) and AM10's one page across."""
-    return [check(path), one_across(path)]
+    return [check(path, lang), one_across(path, lang)]

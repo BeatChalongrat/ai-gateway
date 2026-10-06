@@ -31,6 +31,9 @@ import (
 // MaxQuestionsPerCard is the shape the ask-question UI renders.
 const MaxQuestionsPerCard = 4
 
+// MaxPickOptions is the most a "pick" may offer (AM12): eight candidates and "none of these".
+const MaxPickOptions = 9
+
 // MaxReprompts is how many times an uninterpretable answer is re-asked
 // before the default is used and recorded as an assumption.
 const MaxReprompts = 2
@@ -75,8 +78,14 @@ func (f Finding) Validate() error {
 	if f.Kind == "request_files" {
 		return nil
 	}
-	if len(f.Options) < 2 || len(f.Options) > 4 {
-		return fmt.Errorf("%s: %d options (2-4 required)", f.Key, len(f.Options))
+	// AM12: a "pick" is one of a table of candidates the question carries as evidence — as many options as
+	// the table has rows (and "none of these"), not the two to four of a question
+	most := 4
+	if f.Kind == "pick" {
+		most = MaxPickOptions
+	}
+	if len(f.Options) < 2 || len(f.Options) > most {
+		return fmt.Errorf("%s: %d options (2-%d required)", f.Key, len(f.Options), most)
 	}
 	found := false
 	for _, o := range f.Options {

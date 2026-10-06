@@ -40,7 +40,7 @@ echo "core-only tree: $(git -C "$B" rev-parse --short HEAD)"
 DIFF_LINES=$(git diff "$(git -C "$A" rev-parse HEAD)" "$(git -C "$B" rev-parse HEAD)" | wc -l | tr -d ' ')
 echo "diff reverted..core-only: $DIFF_LINES lines"
 git diff --stat "$(git -C "$A" rev-parse HEAD)" "$(git -C "$B" rev-parse HEAD)" | tail -5
-HITS=$( (git -C "$A" grep -n -i -I "agent.market\|agentmarket\|agent-runner\|doc-converter" -- ':!*.md' ':!CHANGELOG*' || true) | wc -l | tr -d ' ')
+HITS=$( (git -C "$A" grep -n -i -I "agent.market\|agentmarket\|agent-runner\|doc-converter\|web-fetcher" -- ':!*.md' ':!CHANGELOG*' || true) | wc -l | tr -d ' ')
 echo "git grep hits in the reverted tree (code, not docs): $HITS"
 
 if [ "${1:-}" != "keep" ]; then

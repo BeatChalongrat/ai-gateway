@@ -1,0 +1,14 @@
+{
+  "schema": "agent.market.selftest.v1",
+  "note": "Runs the agent on a bundled research: one request and three pages captured beforehand by the real fetcher from pages made for this sample (sample-data/research.json with each page's stored text and picture). Nothing is searched, fetched or sent to a model in a self-test: the request's reading and each page's reading are part of the sample, and everything after them is the agent's own code — every claim found again in its stored page, the amounts worked out, the comparison and the purchase request draft made and opened again. Nobody is there to choose, so the draft is made from the first row of the table, and says so.",
+  "files": [],
+  "message": "ขอซื้อกระดานไวท์บอร์ดแม่เหล็ก ขนาด 120 x 240 ซม. จำนวน 6 แผ่น ติดแม่เหล็กได้ มีรางวางปากกา ส่งที่สำนักงานใหญ่ ชั้น 5 ถนนสีลม กรุงเทพฯ ภายใน 30 พฤศจิกายน 2569",
+  "research": "sample-data/research.json",
+  "settings_note": "The sample's own buyer, and the rule that stands in for a person's choice. A self-test run lays these over the install's own settings; a real run never uses them.",
+  "settings": {"company": "บริษัท สยามตัวอย่างการค้า จำกัด", "proc_sample_pick": "first"},
+  "formats": ["xlsx", "docx"],
+  "expect": {
+    "findings": [],
+    "totals": {"offers": 3, "dropped": 0, "chosen": 1, "gaps": 9, "subtotal": "19200.00", "net": "17943.93", "vat": "1256.07", "total": "19200.00"}
+  }
+}

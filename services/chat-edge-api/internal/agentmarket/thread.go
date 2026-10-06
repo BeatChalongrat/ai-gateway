@@ -220,6 +220,15 @@ type OutputsModel struct {
 	VisionSelfHosted *bool  `json:"vision_self_hosted,omitempty"`
 	NotChosen        *bool  `json:"not_chosen,omitempty"`
 	WrittenByRules   *bool  `json:"written_by_rules,omitempty"`
+	// Web (AM12, Uses "web"): the models that read the request and the saved pages in a round on the
+	// web, in the order they first answered. Empty: no model answered (a sample round reads none).
+	Web []OutputsWebModel `json:"web,omitempty"`
+}
+
+// OutputsWebModel is one model that read in a round on the web.
+type OutputsWebModel struct {
+	Model      string `json:"model"`
+	SelfHosted bool   `json:"self_hosted"`
 }
 
 // OutputsGate is a package's completion gate as the files card shows it.

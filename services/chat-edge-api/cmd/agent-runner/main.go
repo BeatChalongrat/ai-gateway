@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -213,6 +214,14 @@ func run(log *slog.Logger) error {
 		SandboxCreditsPerSecond: float64(am.EnvInt("AGENT_MARKET_SANDBOX_CREDITS_PER_SECOND", 100)),
 		StorageBackend:          am.EnvString("STORAGE_BACKEND", "local"),
 	}
+	// AM12: agents that work on the web. Searching is the platform's own search endpoint (the gateway's
+	// /search: its providers and their keys are set by an admin and never reach this process), asked with
+	// this runner's own key. Pages are captured by the fetcher, a service of its own; unset means no agent
+	// can open a page, and one that needs to says so.
+	usdPerQuery, _ := strconv.ParseFloat(am.EnvString("AGENT_MARKET_SEARCH_USD_PER_QUERY", "0.008"), 64)
+	r.Search = &runner.WebSearch{BaseURL: model.BaseURL, APIKey: model.APIKey, HTTP: &http.Client{}, USDPerQuery: usdPerQuery}
+	r.Fetcher = &runner.WebFetcher{BaseURL: os.Getenv("AGENT_MARKET_FETCHER_URL"), HTTP: &http.Client{},
+		Timeout: time.Duration(am.EnvInt("AGENT_MARKET_FETCH_TIMEOUT_SECONDS", 75)) * time.Second}
 
 	// AM7: a person's reminders also go by e-mail through the organisation's
 	// relay, once an admin set it up (the password from AGENT_MARKET_SMTP_PASSWORD).

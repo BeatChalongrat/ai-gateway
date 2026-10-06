@@ -82,11 +82,16 @@ export default function AgentEgressCard({ orgVersion }: { orgVersion: string }) 
                     onChange={() => toggle(r)}
                     data-testid={`am-egress-toggle-${r.slug}`}
                   />
-                  {r.agent_default && r.accounting && !r.agent ? <span style={muted}>{t("am.egress.default")}</span> : null}
+                  {r.agent_default && r.web && !r.agent ? (
+                    <span style={muted}>{t("am.egress.web.default")}</span>
+                  ) : r.agent_default && r.accounting && !r.agent ? (
+                    <span style={muted}>{t("am.egress.default")}</span>
+                  ) : null}
                 </label>
               </td>
               <td data-testid={`am-egress-now-${r.slug}`}>
-                {r.effective ? t("am.egress.leaves") : t("am.egress.stays")}
+                {/* AM12: an agent on the web does not send documents: it searches and opens pages outside */}
+                {r.web ? (r.effective ? t("am.egress.web.leaves") : t("am.egress.web.stays")) : r.effective ? t("am.egress.leaves") : t("am.egress.stays")}
                 {!r.effective && r.agent && !r.org ? <span style={muted}> · {t("am.egress.ceiling")}</span> : null}
               </td>
             </tr>

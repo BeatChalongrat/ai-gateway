@@ -143,16 +143,23 @@ func (a *API) estimate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	gated := false
+	gated, web := false, false
 	if def, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
 		if m, err := ParseManifest(def.Manifest); err == nil {
-			gated = m.CompletionGate
+			gated, web = m.CompletionGate, m.UsesWeb()
 		}
 	}
 	e, err := a.store.EstimateFor(ctx, a.cfg, in.OrgID, in.Slug, gated)
 	if err != nil {
 		a.fail(w, err, "install")
 		return
+	}
+	if web && e.Basis == EstimateSample {
+		// AM12: the sample of an agent on the web runs on pages kept with the package — it searches nothing,
+		// opens nothing and asks no model, so it says nothing of what a real run costs. Until the
+		// organisation has runs of its own, the cost is said to be not known yet.
+		e = Estimate{Basis: EstimateNone}
+		e.Line = estimateLine(e, gated)
 	}
 	writeJSON(w, http.StatusOK, e)
 }

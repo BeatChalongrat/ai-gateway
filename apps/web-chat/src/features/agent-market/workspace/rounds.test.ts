@@ -128,3 +128,37 @@ describe("rounds in the workspace", () => {
     expect(openIntent([greeting, { ...chip, payload: { status: "chosen" } }])).toBeNull();
   });
 });
+
+// AM12 — an agent on the web that may not search yet. A request typed while the install's sample run is
+// still going starts nothing, and the thread says why. Neither is the sample's: when the sample folds,
+// the person still sees their own words and the answer to them.
+describe("a request that was refused at the agent's door", () => {
+  const sample = item("progress", 1, { run_id: "st2", kind: "self_test", status: "succeeded" }, "st2");
+  const asked = item("user_text", 3, { text: "ขอซื้อเก้าอี้ 20 ตัว", status: "handled", handled_as: "web_closed" });
+  const why = item("notice", 3, { text: "agent นี้ยังค้นหาไม่ได้ครับ", tone: "warning", reason: "agent_closed" });
+  const sampleOut = item("outputs", 9, { run_id: "st2", artifacts: [{ id: "a9", name: "sample.xlsx", format: "xlsx", size: 1, version: 1 }] }, "st2");
+
+  it("is not folded away with the sample run it was typed during", () => {
+    const segs = segments([greeting, sample, asked, why, sampleOut]);
+    const folded = segs.filter((s) => s.type === "folded");
+    expect(folded).toHaveLength(1);
+    if (folded[0]?.type === "folded") expect(folded[0].items.map((i) => i.id)).toEqual([sample.id, sampleOut.id]);
+    const shown = segs.filter((s) => s.type === "item").map((s) => (s.type === "item" ? s.item.id : ""));
+    expect(shown).toEqual([greeting.id, asked.id, why.id]);
+  });
+
+  it("every other notice and typed line keeps the place it had", () => {
+    const question = item("user_text", 3, { text: "ไฟล์ตัวอย่างนี้คืออะไร", status: "handled", handled_as: "reply" });
+    const note = item("notice", 4, { text: "บันทึกการตั้งค่าแล้ว", tone: "success" });
+    const segs = segments([greeting, sample, question, note, sampleOut]);
+    const folded = segs.find((s) => s.type === "folded");
+    expect(folded?.type === "folded" && folded.items.map((i) => i.id)).toEqual([sample.id, question.id, note.id, sampleOut.id]);
+  });
+
+  it("after a run of the person's own it stays in sight too, after that run's divider", () => {
+    const segs = segments([greeting, sepMsg, sep, sepOut, asked, why]);
+    expect(segs.filter((s) => s.type === "folded")).toHaveLength(0);
+    const div = segs.findIndex((s) => s.type === "divider");
+    expect(segs.slice(div + 1).map((s) => (s.type === "item" ? s.item.id : s.type))).toEqual([asked.id, why.id]);
+  });
+});

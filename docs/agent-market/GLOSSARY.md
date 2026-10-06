@@ -41,6 +41,12 @@ These have been argued over. They do not drift, in either language.
 | ตรวจทานและลงชื่อ | **review and sign off** | ผู้จัดทำ = **prepared by**; ผู้สอบทาน / ผู้ตรวจทาน = **reviewed by**. Who a person is, is who is signed in. |
 | กระดาษทำการ | **working paper** | The workbook an auditor can follow. *Not* "worksheet" (a sheet of a workbook). |
 | หลักฐาน | **evidence** | What a figure or a decision rests on. A companion sheet is "… · Evidence". |
+| ตัวเลือก | **candidate** | (AM12) One seller's offer of the thing asked for, as its page shows it. A person chooses among candidates; nothing ranks them. *Not* "option" (an answer of a card), *never* "recommendation" or "best". |
+| แหล่ง · แหล่งที่มา (ของตัวเลือก) | **source** | (AM12) A web page a run asked for. แหล่งที่ไม่ได้ใช้ = **sources not used**, each with its reason. (ที่มาของตัวเลข stays **source of figures**.) |
+| หน้าที่บันทึกไว้ | **saved page** | (AM12) The copy of a web page taken when it was opened: what a person could see on it, and a picture of it. Every value in a comparison is found again in it, or is not a value. *Not* "snapshot" or "capture" on a screen. |
+| ไม่ทราบ · ยังไม่ทราบ | **not known · not known yet** | (AM12) What a saved page does not say, or says in a way that could not be found again. Written out, never left blank and never guessed. จุดที่ยังไม่ทราบ = **points still not known**. |
+| ตามที่หน้าเว็บแสดง | **as the page shows it · as shown** | (AM12) A value quoted from a saved page: a price, a seller's name, a tax ID. It is the page's word — *not* "verified", "confirmed" or "registered". |
+| ผู้ขายขององค์กร | **the organisation's suppliers** | (AM12) The list an admin keeps of sellers the organisation already buys from. Told to an agent as preferred; a web page cannot add to it. *Not* "approved suppliers" on a screen an agent writes: an agent approves nothing. |
 
 ## 2. Everyday words
 

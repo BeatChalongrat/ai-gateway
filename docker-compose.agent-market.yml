@@ -23,6 +23,12 @@
 #   * PDF (and .xlsx recalculation) is LibreOffice in its own doc-converter
 #     container: no port, no volume, read-only root, and its only network is
 #     `converter` — internal (no route out) and shared with agent-runner alone.
+#   * AM12: the one container that reaches the public web is web-fetcher. It
+#     holds no key, no volume and no docker socket; agent-runner reaches it on
+#     `fetch` (internal, those two alone) and it goes out through `web`, which
+#     nothing else of the platform is on — it is not on the core network, so
+#     no core service has a name or an address it can use. agent-runner itself
+#     is on no network with a route to the web that it did not have before.
 name: sran-agent-market
 
 services:
@@ -83,6 +89,13 @@ services:
       # relay (admin-ui › Agent Market › อีเมล); the link in them points here.
       - AGENT_MARKET_SMTP_PASSWORD=${AGENT_MARKET_SMTP_PASSWORD:-}
       - AGENT_MARKET_WEB_URL=${WEB_CHAT_PUBLIC_URL:-https://localhost:3002/chat}
+      # AM12: a round on the web. The runner opens no page itself — it asks
+      # web-fetcher for one address at a time — and it searches through the
+      # model gateway's own /v1/search with the key above (the organisation's
+      # search provider is set in admin-ui; the runner holds no provider key).
+      - AGENT_MARKET_FETCHER_URL=${AGENT_MARKET_FETCHER_URL:-http://web-fetcher:8097}
+      - AGENT_MARKET_FETCH_TIMEOUT_SECONDS=${AGENT_MARKET_FETCH_TIMEOUT_SECONDS:-75}
+      - AGENT_MARKET_SEARCH_USD_PER_QUERY=${AGENT_MARKET_SEARCH_USD_PER_QUERY:-0.008}
     volumes:
       # The docker socket launches the per-step sandbox containers (the same
       # privilege chat-edge holds for run_python); no model input reaches argv.
@@ -97,6 +110,7 @@ services:
     networks:
       - core
       - converter
+      - fetch
     ports:
       - "127.0.0.1:${AM_RUNNER_PORT:-28095}:8095"
     deploy:
@@ -141,6 +155,42 @@ services:
       sran.agent-market: "true"
     stop_grace_period: 10s
 
+  web-fetcher:
+    # AM12: opens ONE public web page per request in a headless browser with
+    # a fresh profile, and answers with what a person would have seen on it
+    # (text, a picture, hashes, the fetch's own log) or with a refusal and its
+    # reason (services/web-fetcher). No key, no cookie kept, no volume; it
+    # refuses private, loopback, link-local and metadata addresses, the
+    # platform's own names, anything but http/https on the standard ports,
+    # sign-in and payment pages, downloads, pages over the size limit, and
+    # every host but the one named in the request (no redirect to another
+    # host, no link followed). AGENT_MARKET_ENABLED=false: it fetches nothing.
+    #   build: bash scripts/agent-market/build-fetcher.sh
+    profiles: ["agent-market"]
+    image: ai-gateway-web-fetcher:${AM_FETCHER_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - AGENT_MARKET_ENABLED=${AGENT_MARKET_ENABLED:-false}
+      # names of the organisation's own public sites, comma-separated: never opened
+      - WEB_FETCHER_OWN_HOSTS=${AM_FETCHER_OWN_HOSTS:-}
+      - WEB_FETCHER_MAX_BYTES=${AM_FETCHER_MAX_BYTES:-10485760}
+      - WEB_FETCHER_TIMEOUT_MS=${AM_FETCHER_TIMEOUT_MS:-45000}
+    networks:
+      - fetch
+      - web
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: "${AM_FETCHER_MEMORY:-1536m}"
+    pids_limit: 512
+    cpus: "${AM_FETCHER_CPUS:-1.0}"
+    labels:
+      sran.agent-market: "true"
+    stop_grace_period: 10s
+
 volumes:
   uploads:
     external: true
@@ -154,3 +204,12 @@ networks:
     # agent-runner <-> doc-converter only. internal: no gateway, no route out,
     # so a document can never make the converter fetch or send anything.
     internal: true
+  fetch:
+    # agent-runner <-> web-fetcher only. internal: no route out, so the runner
+    # gains no way to the web; it can only ask the fetcher for one address.
+    internal: true
+  web:
+    # web-fetcher's way out to the public web, and nothing else is on it: the
+    # fetcher shares no network with the core services, the databases or the
+    # model gateway. (The test stack replaces this with a network that has no
+    # route out and holds stand-in sites: scripts/probes/AM12/test-web.yml.)

@@ -83,6 +83,15 @@ def slots(inspection: dict) -> list[dict]:
         if i:
             slot.update({"required": bool(i.get("required")), "side": i.get("side"), "label_at": i.get("label_at")})
         out.append(slot)
+    # AM12: the rows of a table of items in a form with no marker — one place that takes a list, its
+    # columns the headings over the rows; and a blank drawn as a line after its label
+    for g in inspection.get("regions") or []:
+        out.append({"key": g["key"], "kind": "table", "label": g["label"], "where": g.get("where"), "fillable": True,
+                    "reason": None, "columns": g["columns"], "column_labels": g["column_labels"], "rows": g["rows"],
+                    "context": " | ".join(f"{c} = {g['column_labels'][c]}" for c in g["columns"])})
+    for b in inspection.get("lines") or []:
+        out.append({"key": b["key"], "kind": "target", "label": b["label"], "where": b["key"], "fillable": True, "reason": None,
+                    "required": bool(b["required"]), "side": "inline", "label_at": b["key"], "context": b.get("context") or ""})
     for sh in inspection.get("shapes") or []:
         out.append({"key": sh["key"], "kind": "shape", "label": sh["name"], "where": f"สไลด์ {sh['slide']}",
                     "fillable": True, "reason": None, "context": sh.get("text") or ""})
@@ -195,6 +204,8 @@ def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
     tvals = template_values(sl, mapping, values)
     targets = {s["key"]: s["key"] for s in sl if s["kind"] == "target" and s["key"] in tvals}
     report = tf.fill(path, out_path, tvals, targets)
+    report["regions"] = ([g for g in (tf.inspect(path, reads=("rows",)).get("regions") or []) if g["key"] in tvals]
+                         if any(tf.fr.ROWS_RE.match(str(k)) for k in tvals) else [])
     if report["kind"] == "xlsx":
         _recalc_on_open(out_path)
     checks, unfilled = verify(path, out_path, sl, mapping, tvals, report)
@@ -211,7 +222,8 @@ WHY_TH = {"no_value": "รอบนี้ไม่มีค่าให้ช่
           "unsupported_location": "อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้",
           "chart_not_updated": "กราฟเดิมในแบบฟอร์มจะยังแสดงตัวเลขเดิม",
           "merged_cell": "เป็นช่องที่ถูกผสานและไม่ใช่ช่องแรก", "formula_cell": "เป็นช่องสูตร", "protected": "ชีตถูกล็อกไว้",
-          "not_plain_text": "เป็นช่องที่ไม่ใช่ข้อความธรรมดา", "content_locked": "ช่องถูกล็อกไม่ให้แก้"}
+          "not_plain_text": "เป็นช่องที่ไม่ใช่ข้อความธรรมดา", "content_locked": "ช่องถูกล็อกไม่ให้แก้",
+          "rows_short": "แบบฟอร์มมีแถวรายการไม่พอสำหรับทุกรายการ"}
 
 
 def _why(reason) -> str:
@@ -240,16 +252,39 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
     for k, why in (report.get("refused") or {}).items():
         reasons.setdefault(k, why)
     mapped = [s for s in sl if mapping.get(s["key"]) and s["fillable"]]
+    regions = {g["key"]: g for g in report.get("regions") or []}
+    moves = report.get("moved") or []
+
+    def there(s: dict) -> dict:
+        """AM12: the slot as the filled file has it — rows added to a table of items move what is under them."""
+        if not moves:
+            return s
+        return {**s, "key": tf.fr.moved_key(s["key"], moves), "label_at": tf.fr.moved_key(s.get("label_at") or "", moves) or s.get("label_at")}
+
     misplaced: list[str] = []
     for s in mapped:
         k = s["key"]
         if s["kind"] in LIST_KINDS:
+            region = regions.get(k)
             if not tvals.get(k):
                 miss(k, reasons.get(k) or "no_value")
+            elif region is not None:
+                # AM12: the rows of an unmarked form, opened again — every line under the headings it was
+                # mapped by; a form with fewer rows than lines says so
+                written = tvals[k][: int((report.get("rows") or {}).get(k) or 0)]
+                if kind == "xlsx":
+                    ok, why = tf.fr.xlsx_rows_hold(tf.openpyxl.load_workbook(out), region, written, tf._same_value)
+                else:
+                    ok, why = tf.fr.docx_rows_hold(tf.Document(out), region, written)
+                if (report.get("rows_short") or {}).get(k):
+                    miss(k, "rows_short")
+                elif not ok or not written:
+                    miss(k, why or reasons.get(k) or "not_in_file")
             elif kind != "xlsx" and int((report.get("rows") or {}).get(k) or 0) < len(tvals[k]):
                 miss(k, reasons.get(k) or "not_in_file")
             continue
         value = tvals.get(k, _NO_VALUE)
+        s = there(s)
         if value is _NO_VALUE or not (tf.dg.as_text(value) or "").strip():
             miss(k, reasons.get(k) or "no_value")
         elif not tf.holds(out, kind, s, value):
@@ -262,13 +297,15 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
     expected = [s for s in sl if s.get("kind") == "target" and s.get("required") and s["fillable"]
                 and not mapping.get(s["key"])]
     for s in expected:
-        if tf.still_blank(out, kind, s):
+        if tf.still_blank(out, kind, there(s)):
             miss(s["key"], "not_mapped")
     asked = len(mapped) + len(expected)
     left = tf.markers_left(out)
     for k in left:
         miss(k, "marker_left")
     cut = tf.cut_off(src, out)
+    if kind == "pdf":  # AM12: a value longer than its field, as the filler measured it
+        cut = [(by_key.get(k) or {}).get("label") or k for k in report.get("cut") or []]
     charts = tf.chart_parts(out) if kind in ("docx", "pptx") else []
     filled = report.get("filled") or []
 

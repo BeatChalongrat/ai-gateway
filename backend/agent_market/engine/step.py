@@ -64,6 +64,14 @@ def _extra(req: dict, fn, with_today: bool = False) -> dict:
     # AM5: who answered each card ({answer key: {name, via}}), for a package that records it
     if with_today and isinstance(req.get("answered_by"), dict) and _accepts(fn, "answered_by"):
         out["answered_by"] = req["answered_by"]
+    # AM12: a package that speaks the run's language is told it; one that reads stored snapshots (E4: the
+    # pages the runner captured, handed over as files) is told where the step's files are
+    if _accepts(fn, "lang"):
+        out["lang"] = req.get("lang") or "th"
+    if with_today and _accepts(fn, "in_dir"):
+        out["in_dir"] = JOB_IN
+    if with_today and _accepts(fn, "out_dir"):
+        out["out_dir"] = JOB_OUT
     return out
 
 
@@ -101,7 +109,7 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
 
     name = os.path.basename(t["name"])
     path = os.path.join(JOB_OUT, name)
-    values = dict(pkg.template_values(computed))
+    values = dict(pkg.template_values(computed, req) if _accepts(pkg.template_values, "req") else pkg.template_values(computed))
     if "company" in values and not str(values.get("company") or "").strip():
         # AM8: the company a form names is a real one — the install's (the theme carries it), else the
         # organisation's name — or the slot is listed as having no value; never a stand-in
@@ -109,6 +117,26 @@ def _fill_template(pkg, computed: dict, t: dict, req: dict | None = None) -> dic
         values["company"] = (str((req.get("theme") or {}).get("company") or "").strip()
                              or str((req.get("run") or {}).get("organisation") or "").strip())
     rep = template_out.fill(_in(t["input"]), path, t.get("saved") or {}, values)
+    if hasattr(pkg, "template_gaps"):
+        # AM12: a draft says on its own face what it lacks — the form's blanks that are still empty (read
+        # from the filled file, not from the mapping) and what the package knows cannot be known — and the
+        # file is opened once more to see that every one of them is there
+        from ..deliverables import form_regions
+
+        gaps = pkg.template_gaps(computed)
+        whys = gaps.get("form_why") or {}
+        rows = list(gaps.get("rows") or []) + [[f"{gaps.get('form_blank') or ''}: {u.get('label') or u.get('slot')}".lstrip(": "),
+                                                 whys.get(u.get("reason") or "", "") or whys.get("other") or u.get("why") or ""]
+                                                for u in rep.get("unfilled") or []]
+        printed = {**gaps, "rows": rows}
+        if rows:
+            printed["first_page"] = form_regions.append_gaps(path, rep["kind"], printed)
+        missing = form_regions.gaps_printed(path, rep["kind"], printed) if rows else []
+        words = gaps.get("check") or {}
+        rep["checks"].append({"name": "template.gaps_printed", "ok": not missing, "label": words.get("label") or "",
+                              "detail": (words.get("missing") or "{list}").replace("{list}", ", ".join(missing)[:240]) if missing
+                              else (words.get("ok") or "{n}").replace("{n}", str(len(rows))), "values": len(rows)})
+        rep["passed"] = all(c["ok"] for c in rep["checks"])
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()
     # AM8: what the filled file was found to lack travels with its quality, which the download card shows —
@@ -148,7 +176,8 @@ def run(req: dict) -> dict:
         if req.get("preview"):
             out["preview"] = _preview(_in(f["input"]), f["name"], pf)
     elif op in ("preflight", "compute", "postcompute"):
-        files = [load(_read_json(n)) for n in req.get("parsed", [])]
+        # AM12: a round that starts from a request has no file at all ("parsed" is then null, not a list)
+        files = [load(_read_json(n)) for n in req.get("parsed") or []]
         today = _dt.date.fromisoformat(req["today"]) if req.get("today") else None
         if op == "preflight":
             out = pkg.preflight(files, message=req.get("message", ""), defaults=req.get("defaults") or {},
@@ -161,7 +190,8 @@ def run(req: dict) -> dict:
         else:
             computed = _read_json(req["computed"])
             out = pkg.postcompute(files, req["roles"], req["period"], computed,
-                                  answers=req.get("answers") or {}, defaults=req.get("defaults") or {})
+                                  answers=req.get("answers") or {}, defaults=req.get("defaults") or {},
+                                  **({"lang": req.get("lang") or "th"} if _accepts(pkg.postcompute, "lang") else {}))
     elif op == "render":
         computed = _read_json(req["computed"])
         out = pkg.render(computed, req, in_dir=JOB_IN, out_dir=JOB_OUT)
@@ -171,7 +201,9 @@ def run(req: dict) -> dict:
         for a in out.get("artifacts") or []:
             if a.get("format") == "xlsx" and a.get("kind") != "template" and os.path.exists(os.path.join(JOB_OUT, a["name"])):
                 a["print_rows"] = workpaper.print_rows(os.path.join(JOB_OUT, a["name"]))
-        if req.get("template") and hasattr(pkg, "template_values"):
+        # AM12: a package says when there is nothing of a round to put in a form (nothing was chosen)
+        wanted = pkg.template_wanted(computed) if hasattr(pkg, "template_wanted") else True
+        if req.get("template") and hasattr(pkg, "template_values") and wanted:
             art = _fill_template(pkg, computed, req["template"], req)
             out["artifacts"] = list(out.get("artifacts") or []) + [art]
             out["passed"] = bool(out.get("passed", True)) and art["quality"]["passed"]
@@ -179,10 +211,10 @@ def run(req: dict) -> dict:
         from ..deliverables import template_fill, template_out
 
         f = req["file"]
-        inspection = template_fill.inspect(_in(f["input"]))
+        spec = req.get("spec") or {}
+        inspection = template_fill.inspect(_in(f["input"]), reads=tuple(spec.get("reads") or ()))
         sl = template_out.slots(inspection)
         saved = req.get("saved") or None
-        spec = req.get("spec") or {}
         proposal = template_out.propose(sl, spec)
         # AM8: identity is all the code proposes; the runner asks a model for the rest (the person confirms).
         # What the filler cannot do stops the template before any work, with its reasons.

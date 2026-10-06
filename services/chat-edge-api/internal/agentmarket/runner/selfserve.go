@@ -119,7 +119,7 @@ func (rc *runCtx) textModels() []string {
 		declared = declared || c == "model.text"
 	}
 	all := rc.writingModels()
-	if declared && m.Narrative != "rules" {
+	if declared && (m.Narrative != "rules" || m.UsesWeb()) {
 		return all
 	}
 	var inside []string

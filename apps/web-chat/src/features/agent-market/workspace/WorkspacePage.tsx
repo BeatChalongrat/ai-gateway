@@ -33,6 +33,7 @@ import { AgentTile, cls, ErrorPanel, FeatureGate, lookOf, PageShell } from "../u
 import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
 import { togglePin } from "../useRail";
 import { BudgetBanner } from "./BudgetBanner";
+import { WebBanner } from "./WebBanner";
 import { BesidePane } from "./BesidePane";
 import { Composer, type ComposerHandle } from "./Composer";
 import { provenanceHref, runHref, WorkspaceContext, workspaceHref, type WorkspaceCtx } from "./context";
@@ -171,7 +172,12 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
   // What the server takes for this agent (its inputs' accept lists), nothing more.
   const accept = useMemo(() => acceptFromManifest(manifest), [manifest]);
   // AM10: an agent that fills forms takes one dropped into a round
-  const formAccept = useMemo(() => (takesTemplates(manifest?.templates) ? FORM_ACCEPT : []), [manifest]);
+  const formAccept = useMemo(
+    () => (takesTemplates(manifest?.templates) ? [...FORM_ACCEPT, ...(manifest?.templates?.reads?.includes("pdf") ? [".pdf"] : [])] : []),
+    [manifest],
+  );
+  // AM12: an agent that works from what a person types
+  const fromRequest = manifest?.starts_from === "request";
   const maxMb = manifest?.limits?.max_file_mb || DEFAULT_MAX_MB;
   const photoNotice = manifest?.photo_notice || undefined;
 
@@ -372,6 +378,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
               {empty && manifest ? <EmptyDrop manifest={manifest} onPick={() => composerRef.current?.pickFiles()} estimate={estimate.line} /> : null}
             </ThreadScroller>
             <div className="px-4 md:px-10">
+              <WebBanner web={detail?.web} />
               <BudgetBanner installId={installId} refreshKey={progressSig} />
             </div>
             <Composer
@@ -383,6 +390,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
               photoNotice={photoNotice}
               threadId={threadId}
               formAccept={formAccept}
+              fromRequest={fromRequest}
               agentName={agentShortName(manifest, locale, install?.title)}
               roundUnderway={underway}
               finishedRound={finished}

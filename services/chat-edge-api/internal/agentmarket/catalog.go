@@ -710,7 +710,7 @@ func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string
 		}
 		return det.Primary, det.Fallback, det.SelfHosted
 	}
-	if uses("model.text") && m.Narrative != "rules" {
+	if uses("model.text") && (m.Narrative != "rules" || m.UsesWeb()) {
 		sees := inputs["model.text"]
 		if sees == "" {
 			sees = T(l, "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น (ไม่ใช่ไฟล์ต้นฉบับ) เพื่อเขียนคำบรรยายในรายงาน")

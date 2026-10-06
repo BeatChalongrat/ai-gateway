@@ -4,7 +4,7 @@
 // and that sentence is the loudest thing on the page. The rest of what the
 // agent takes (optional files) follows in small print.
 
-import { FileUp } from "lucide-react";
+import { FileUp, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 
@@ -34,6 +34,23 @@ export function EmptyDrop({
   estimate?: string | null;
 }) {
   const t = useAmT();
+  if (manifest?.starts_from === "request") {
+    // AM12: an agent that works from what a person types has nothing to drop in: it says what to type
+    return (
+      <section
+        aria-label={t("web.empty.title")}
+        className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-border-strong bg-bg-surface px-5 py-8 text-center"
+        data-testid="am-empty-request"
+      >
+        <Search width={32} height={32} className="text-text-muted" aria-hidden />
+        <h2 className="max-w-xl text-lg font-semibold leading-snug text-text-primary sm:text-xl" data-testid="am-empty-sentence">
+          {t("web.empty.title")}
+        </h2>
+        <p className="max-w-xl text-sm text-text-secondary">{t("web.empty.body")}</p>
+        <EstimateLine line={estimate} center />
+      </section>
+    );
+  }
   const sentence = dropSentence(manifest, t) ?? t("empty.fallback");
   const inputs = manifest?.inputs ?? [];
   const main = inputs.find((i) => i.required) ?? inputs[0];

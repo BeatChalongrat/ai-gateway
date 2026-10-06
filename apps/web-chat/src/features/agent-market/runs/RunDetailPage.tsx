@@ -36,10 +36,11 @@ import {
   signOf,
 } from "../format";
 import { COMPLETED_OPEN, outcomeKey, outcomeOf, outcomeTone } from "../outcome";
-import type { AmFile, Artifact, Clarification, Computed, ComputedLine, Review, RunDetail, Step } from "../types";
+import type { AmFile, Artifact, Clarification, Computed, ComputedLine, Review, RunDetail, Step, WebCall } from "../types";
 import { BackLink, Card, CheckLine, cls, ErrorPanel, FeatureGate, PageShell, PageSkeleton, Pill } from "../ui";
 import { viaKey } from "../workspace/AgentQuestionCard";
 import { workspaceHref } from "../workspace/context";
+import { SourcesTab } from "./SourcesTab";
 import { ArtifactRow, qualityOf, SignOffUnavailable } from "../workspace/OutputsCard";
 import { ExceptionsPanel, useRunExceptions } from "../exceptions/ExceptionsPanel";
 import { StepIcon } from "../workspace/ProgressCard";
@@ -50,8 +51,8 @@ import { ShareButton } from "../share/ShareButton";
 const ACTIVE = new Set(["queued", "running", "awaiting_input"]);
 const POLL_MS = 3000;
 
-type Tab = "overview" | "steps" | "questions" | "numbers" | "exceptions" | "files";
-const TABS: readonly Tab[] = ["overview", "steps", "questions", "numbers", "exceptions", "files"];
+type Tab = "overview" | "steps" | "questions" | "numbers" | "exceptions" | "sources" | "files";
+const TABS: readonly Tab[] = ["overview", "steps", "questions", "numbers", "exceptions", "sources", "files"];
 const isTab = (x: string | null | undefined): x is Tab => !!x && (TABS as readonly string[]).includes(x);
 
 const KIND_KEY: Record<string, AmKey> = {
@@ -139,6 +140,8 @@ function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: stri
   const [tab, setTab] = useState<Tab>(isTab(initialTab) ? initialTab : "overview");
   const tabsId = useId();
   const downloads = useMemo(() => ({ file: (id: string, name: string) => amApi.downloadFile(id, name) }), []);
+  // AM12: where a run on the web went (none for an agent that reads files: the tab is then not there)
+  const [sources, setSources] = useState<WebCall[]>([]);
 
   const status = data?.run.status ?? "";
   const outcome = data ? outcomeOf(data.run) : "";
@@ -189,6 +192,12 @@ function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: stri
         } catch (err) {
           if (alive && err instanceof AmError && err.status === 404) setComputedMissing(true);
         }
+        try {
+          const web = await amApi.runSources(runId);
+          if (alive) setSources(web?.calls ?? []);
+        } catch {
+          /* a run with nothing of the web has no such list; the tab is then not shown */
+        }
         if (alive && ACTIVE.has(d.run.status)) timer = setTimeout(() => void load(), POLL_MS);
       } catch (err) {
         if (alive) setError(err);
@@ -232,6 +241,7 @@ function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: stri
     { id: "questions", key: "run.tab.questions", count: cards.length },
     { id: "numbers", key: "run.tab.numbers" },
     { id: "exceptions", key: "run.tab.exceptions", count: exceptions.length + (decisions.rows?.length ?? 0) },
+    ...(sources.length ? [{ id: "sources" as const, key: "run.tab.sources" as const, count: sources.length }] : []),
     { id: "files", key: "run.tab.files", count: artifacts.length + files.length },
   ];
 
@@ -343,6 +353,8 @@ function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: stri
               decisions.rows?.length ? <ExceptionsPanel rows={decisions.rows} onDecided={decisions.replace} onStale={decisions.reload} /> : null
             }
           />
+        ) : tab === "sources" ? (
+          <SourcesTab runId={runId} calls={sources} />
         ) : (
           <RunDownloads.Provider value={downloads}>
             <FilesTab artifacts={artifacts} files={files} />

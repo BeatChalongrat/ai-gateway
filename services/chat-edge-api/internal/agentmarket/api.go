@@ -225,6 +225,7 @@ func (a *API) Routes(r chi.Router) {
 		r.Post("/runs/{id}/restore", a.restore)   // AM5: a document that was left out, brought back
 		r.Post("/runs/{id}/receipts", a.receipts) // AM6: a receipt confirmed in this system
 		r.Post("/runs/{id}/formats", a.formats)
+		a.webRoutes(r) // AM12: what a round on the web searched, opened and kept (web.go)
 		r.Get("/artifacts/{id}/download", a.downloadArtifact)
 		r.Get("/files/{id}/download", a.downloadFile)
 		r.Get("/theme", a.getTheme)
@@ -770,7 +771,14 @@ func (a *API) getInstall(w http.ResponseWriter, r *http.Request) {
 		defaults = rulesOf(m).shown(langOfWriter(w), defaults)
 	}
 	spent, _ := a.store.SpentThisMonth(r.Context(), in.ID)
+	// AM12: whether a round of an agent that works on the web can start now, and why not, in words
+	var web *WebState
+	if m, err := ParseManifest(def.Manifest); err == nil && m.UsesWeb() {
+		st := a.webState(r.Context(), in, m)
+		web = &st
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"install": in, "manifest": shownManifest(def.Manifest), "defaults": nonNil(defaults),
+		"web":    web,
 		"look":   a.store.LookForSlug(r.Context(), in.Slug),
 		"budget": map[string]any{"credits": in.BudgetCredits, "spent_this_month": spent}})
 }
@@ -979,9 +987,14 @@ func (a *API) upload(w http.ResponseWriter, r *http.Request) {
 	if def, err := a.store.DefinitionByID(r.Context(), in.DefinitionID); err == nil {
 		if m, err := ParseManifest(def.Manifest); err == nil {
 			accept = m.UploadTypes()
+			if m.FromRequest() {
+				// AM12: an agent that works from what a person types reads no file as data — the only file it
+				// takes is the organisation's own form
+				accept = nil
+			}
 			// AM10: an agent that fills forms takes one dropped into a round too
 			if len(m.Templates) > 0 {
-				for ext := range TemplateKinds {
+				for ext := range TemplateKindsOf(m) {
 					if !contains(accept, ext) {
 						accept = append(accept, ext)
 					}
@@ -1118,18 +1131,40 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 		marked[id] = true
 	}
 	var forms []File
+	fromRequest := false
 	if m, err := a.manifestOf(ctx, in); err == nil {
 		forms, files = SplitForms(m, files, marked, req.Text)
+		fromRequest = m.FromRequest()
 	}
 	o := roundOpts{thread: req.ThreadID}
 	if len(files) == 0 {
 		o.knowledge = req.KnowledgeBaseID
 	}
 	route, runID := "", (*uuid.UUID)(nil)
-	if len(files) > 0 || len(forms) == 0 || !ReadsAsFormRequest(req.Text) {
+	// AM12: an agent that works from a request starts its round from the words a form came with — when
+	// there is no round the form could go into (with one, the form is that round's and the words are not
+	// taken for an answer to its card)
+	wordsStart := false
+	if fromRequest && len(forms) > 0 && len(files) == 0 && !SocialOnly(req.Text) {
+		target, err := a.formTarget(ctx, tx, in, o, nil)
+		switch {
+		case err != nil:
+		case target == nil:
+			wordsStart = true
+		case target.Status == RunSucceeded:
+			// the round the form could go into is finished and "เริ่มรอบใหม่" was pressed since: the words
+			// are the next round's request and the form is that round's — not the finished one's, with the
+			// request dropped (found on the test stack's web app: the form was read and no round started).
+			// Words that name the form too ("…ใส่ในแบบฟอร์มนี้ให้ด้วย") are still the request.
+			if started, err := a.store.RoundStartedSince(ctx, tx, in.ID, o.thread, target.CreatedAt); err == nil && started {
+				wordsStart = true
+			}
+		}
+	}
+	if len(files) > 0 || len(forms) == 0 || wordsStart || !ReadsAsFormRequest(req.Text) {
 		// the data (or the words) take their usual route; a form request with
 		// nothing but the form is the form's alone
-		if len(files) > 0 || len(forms) == 0 {
+		if len(files) > 0 || len(forms) == 0 || wordsStart {
 			route, runID, err = a.route(ctx, tx, in, c, item, req.Text, files, o)
 			if err != nil {
 				a.fail(w, err, "message")
@@ -1137,8 +1172,8 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if len(forms) > 0 {
-		target, err := a.formTarget(ctx, in, o, runID)
+	if len(forms) > 0 && route != "web_closed" { // (a closed door was already said, and why: nothing more to say of the form)
+		target, err := a.formTarget(ctx, tx, in, o, runID)
 		if err != nil {
 			a.fail(w, err, "message")
 			return
@@ -1193,6 +1228,18 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 	files []File, o roundOpts) (string, *uuid.UUID, error) {
 	latest, lerr := a.store.LatestRunIn(ctx, in.ID, o.thread)
 	hasLatest := lerr == nil
+	// AM12: an agent that works from what a person types starts a round from the words themselves
+	fromRequest := false
+	if m, err := a.manifestOf(ctx, in); err == nil {
+		fromRequest = m.FromRequest()
+	}
+	// said: the thread was told why no round can start now (an agent on the web whose door is closed)
+	closed := func() (bool, error) {
+		if !fromRequest {
+			return false, nil
+		}
+		return a.webClosed(ctx, tx, in, c.UserID, c.TenantUUID, o.thread, item, text)
+	}
 	// AM4: after a finished round, a new one starts only when the person says
 	// so — the chip, or "เริ่มรอบใหม่" pressed since that round.
 	finished := hasLatest && latest.Status == RunSucceeded
@@ -1244,6 +1291,9 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 			// never silently a new one: ask (the files wait, unused, until then).
 			return "intent", nil, a.intentChip(ctx, tx, in, c, item, latest, text, files, o)
 		default:
+			if said, err := closed(); err != nil || said {
+				return "web_closed", nil, err
+			}
 			run, err := a.newRun(ctx, tx, in, c, text, ids, o)
 			if err != nil {
 				return "", nil, err
@@ -1277,6 +1327,9 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 	if finished {
 		switch {
 		case o.newRound && !ReadsAsAboutLastRound(text):
+			if said, err := closed(); err != nil || said {
+				return "web_closed", nil, err
+			}
 			run, err := a.newRun(ctx, tx, in, c, text, nil, o)
 			if err != nil {
 				return "", nil, err
@@ -1287,7 +1340,10 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 			return "intent", nil, a.intentChip(ctx, tx, in, c, item, latest, text, nil, o)
 		}
 	} else if !hasLatest || latest.Status == RunFailed || latest.Status == RunCancelled {
-		if o.newRound || wantsNewRound(text) {
+		if o.newRound || wantsNewRound(text) || (fromRequest && !SocialOnly(text)) {
+			if said, err := closed(); err != nil || said {
+				return "web_closed", nil, err
+			}
 			run, err := a.newRun(ctx, tx, in, c, text, nil, o)
 			if err != nil {
 				return "", nil, err

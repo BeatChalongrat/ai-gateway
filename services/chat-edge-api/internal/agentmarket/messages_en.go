@@ -79,6 +79,12 @@ var userMessagesEn = map[string]string{
 	"REMOVE_REASON_REQUIRED":   "Removing a run's files before the retention period ends needs a reason (at least 8 characters) — the run's owner will see it. Nothing has been removed.",
 	"AUDIT_UNAVAILABLE":        "The admin change history cannot be recorded right now, so this value was not changed — try again in a few minutes, and if it still does not work, tell the system admin. The previous value is still in place.",
 	"ACCESS_REASON_NEEDED":     "This run has to be opened with “Open with a reason” first (or the hour that the last opening lasted is over) — open it again with a reason, and the run's owner will be told. No data has been shown.",
+	// AM12
+	"BAD_HOST":         "This website name could not be read — type a website name such as “example.com”, or paste the address of a page on it, and save again. Nothing has been changed.",
+	"BAD_WEB_POLICY":   "A value is outside the range that can be set — each field's range is shown beside it. Correct it and save again. The previous values were not changed.",
+	"BAD_TAX_ID":       "A tax ID must be 13 digits — correct it and save again, or leave it blank. Nothing has been changed.",
+	"SUPPLIER_EXISTS":  "A supplier with this name is already on the list — edit that entry, or use another name. Nothing has been changed.",
+	"WEB_PAGE_EXPIRED": "The saved web page of this source was deleted at the end of its retention period, because the source was not used as a candidate — its entry is still on the run's page.",
 }
 
 // whatEnglish names the thing a NOT_FOUND is about ("Could not find this {what}").

@@ -60,11 +60,18 @@ type visionReading struct {
 type runExtras struct {
 	History   []am.IndexEntry          // nil: the package keeps no index (or a self-test)
 	Proposals map[string]visionReading // doc_key → reading
+	// Web (AM12): a round on the web — what a model understood of the request and, once the search is
+	// done, every page captured and what a model says it read there (web.go). It takes the place of
+	// Proposals for such a package: both are a model's readings, and neither is ever a value by itself.
+	Web *webResearch
 }
 
 // keyParts is what the extras add to a step's idempotency key: nothing for
 // a package that uses neither, so AM1's keys (and parked runs) are unchanged.
 func (x runExtras) keyParts() []any {
+	if x.Web != nil {
+		return []any{map[string]any{"web": x.Web.key()}}
+	}
 	if x.History == nil && len(x.Proposals) == 0 {
 		return nil
 	}
@@ -77,6 +84,9 @@ func (x runExtras) attach(req map[string]any, inputs []Input) []Input {
 		b, _ := json.Marshal(x.History)
 		inputs = append(inputs, Input{Name: "history.json", Bytes: b})
 		req["history"] = "history.json"
+	}
+	if x.Web != nil {
+		return x.Web.attach(req, inputs)
 	}
 	if len(x.Proposals) > 0 {
 		b, _ := json.Marshal(x.Proposals)

@@ -141,6 +141,11 @@ func FormText(f RoundForm) PersonText {
 	case FormUnfilled:
 		return Text("กรอก %s ได้ไม่ครบ %s ช่อง ส่งมาให้ดูแล้ว แต่ยังไม่ควรส่งต่อ — ดูชื่อช่องด้านล่าง", Name(f.Name), Count(len(f.Unfilled)))
 	case FormRefused:
+		if f.Why == RefusedNoFields && f.Kind == "pdf" {
+			// AM12: a PDF that is a picture of a form has nothing to type in
+			return Text("ไม่พบช่องให้กรอกในไฟล์ PDF %s — PDF นี้ไม่มีช่องสำหรับพิมพ์ข้อความ (เป็นภาพของแบบฟอร์ม หรือบันทึกมาโดยไม่มีช่อง) ระบบจึงกรอกให้ไม่ได้ "+
+				"ลองส่งแบบฟอร์มเป็นไฟล์ .docx หรือ .xlsx หรือ PDF ที่มีช่องให้พิมพ์ ยังไม่มีไฟล์ใดถูกสร้างหรือเปลี่ยน", Name(f.Name))
+		}
 		if f.Why == RefusedNoFields {
 			return Text("ไม่พบช่องให้กรอกในแบบฟอร์ม %s — ระบบอ่านช่องว่างที่อยู่ข้างหรือใต้ป้ายชื่อในตาราง ช่องที่มีเครื่องหมาย ชื่อช่วงเซลล์ใน Excel "+
 				"และช่องกรอกของ Word ลองส่งแบบฟอร์มที่มีช่องแบบนี้ แบบฟอร์มที่ตั้งไว้ของ agent ไม่ถูกเปลี่ยน", Name(f.Name))
@@ -164,6 +169,8 @@ func formWhy(code string) PersonText {
 	switch code {
 	case "chart_not_updated":
 		return Text("มีกราฟที่เก็บตัวเลขไว้ในตัวเอง ระบบวาดใหม่ไม่ได้ จึงจะยังแสดงตัวเลขเดิม ลบกราฟออกแล้วส่งใหม่")
+	case "protected":
+		return Text("ไฟล์ถูกล็อกด้วยรหัสผ่าน ระบบจึงเปิดอ่านไม่ได้ ปลดล็อกไฟล์แล้วส่งใหม่")
 	case "unsupported_location":
 		return Text("มีช่องที่อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้ เช่น เชิงอรรถ หรือข้อความในกราฟ ย้ายช่องมาไว้ในเนื้อหาแล้วส่งใหม่")
 	}
@@ -179,6 +186,8 @@ func unfilledWhy(code, packageWords string) PersonText {
 		return Text("รอบนี้ไม่มีค่าให้ช่องนี้")
 	case "wrong_label":
 		return Text("ป้ายข้างช่องนี้ไม่ตรงกับป้ายที่จับคู่ไว้")
+	case "rows_short":
+		return Text("แบบฟอร์มมีแถวรายการไม่พอสำหรับทุกรายการ")
 	}
 	return FromPackage(packageWords, Text("กรอกช่องนี้ไม่ได้"))
 }
@@ -280,6 +289,34 @@ func (s *Store) SyncFormItem(ctx context.Context, q Querier, run Run, f *RoundFo
 	return nil
 }
 
+// TemplateKindsOf are the files a form of this agent can be: the Office kinds, and — for an agent whose
+// manifest says it reads them (templates.reads has "pdf", AM12) — a PDF with fields to type in. An agent
+// that does not say so takes a PDF as it always did: as data, or not at all.
+func TemplateKindsOf(m Manifest) map[string]string {
+	var spec struct {
+		Reads []string `json:"reads"`
+	}
+	if len(m.Templates) == 0 || json.Unmarshal(m.Templates, &spec) != nil || !contains(spec.Reads, "pdf") {
+		return TemplateKinds
+	}
+	out := map[string]string{".pdf": "pdf"}
+	for ext, k := range TemplateKinds {
+		out[ext] = k
+	}
+	return out
+}
+
+// FormKindOf is the kind of form a file name is for this agent, or "".
+func FormKindOf(m Manifest, name string) string {
+	low := strings.ToLower(name)
+	for ext, k := range TemplateKindsOf(m) {
+		if strings.HasSuffix(low, ext) {
+			return k
+		}
+	}
+	return ""
+}
+
 // FormKind is the template kind of a file name, or "".
 func FormKind(name string) string {
 	low := strings.ToLower(name)
@@ -316,7 +353,7 @@ func SplitForms(m Manifest, files []File, marked map[uuid.UUID]bool, text string
 	}
 	asks := ReadsAsFormRequest(text)
 	for _, f := range files {
-		kind := FormKind(f.Name)
+		kind := FormKindOf(m, f.Name)
 		isInput := false
 		for ext := range inputs {
 			if strings.HasSuffix(strings.ToLower(f.Name), ext) {
@@ -341,6 +378,10 @@ func SplitForms(m Manifest, files []File, marked map[uuid.UUID]bool, text string
 func (a *API) roundForm(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, o roundOpts, run *Run, f File) (*Run, error) {
 	if run == nil {
 		note := Text("ยังไม่มีรอบที่จะใส่แบบฟอร์ม %s — ส่งไฟล์ข้อมูลของรอบมาก่อน (หรือส่งมาพร้อมแบบฟอร์มในข้อความเดียว) แล้วค่อยบอกว่าจะใส่ในฟอร์มไหน", Name(f.Name))
+		if m, err := a.manifestOf(ctx, in); err == nil && m.FromRequest() {
+			// AM12: an agent that works from a request has no data file to wait for
+			note = Text("ยังไม่มีรอบที่จะใส่แบบฟอร์ม %s — พิมพ์สิ่งที่ต้องการก่อน (หรือพิมพ์มาพร้อมแบบฟอร์มในข้อความเดียว) แล้วระบบจะใส่ผลของรอบนั้นลงในแบบฟอร์มให้", Name(f.Name))
+		}
 		_, _, err := a.store.AddItemIn(ctx, tx, in.ID, o.thread, c.TenantUUID, c.UserID, nil, Notice{Text: note, Tone: "warning"}, nil)
 		return nil, err
 	}
@@ -348,7 +389,11 @@ func (a *API) roundForm(ctx context.Context, tx pgx.Tx, in Install, c middleware
 		f.ID, run.ID); err != nil {
 		return nil, err
 	}
-	form := &RoundForm{FileID: f.ID, Name: f.Name, Kind: FormKind(f.Name), SHA256: f.SHA256, Status: FormInspecting}
+	kind := FormKind(f.Name)
+	if m, err := a.manifestOf(ctx, in); err == nil {
+		kind = FormKindOf(m, f.Name)
+	}
+	form := &RoundForm{FileID: f.ID, Name: f.Name, Kind: kind, SHA256: f.SHA256, Status: FormInspecting}
 	if err := a.store.SyncFormItem(ctx, tx, *run, form); err != nil {
 		return nil, err
 	}
@@ -380,9 +425,12 @@ func (a *API) manifestOf(ctx context.Context, in Install) (Manifest, error) {
 // formTarget is the round a dropped form goes to: the run the message just
 // started or resumed, else the thread's latest round unless it failed or was
 // cancelled (nil: nothing to put it in).
-func (a *API) formTarget(ctx context.Context, in Install, o roundOpts, started *uuid.UUID) (*Run, error) {
+func (a *API) formTarget(ctx context.Context, q Querier, in Install, o roundOpts, started *uuid.UUID) (*Run, error) {
 	if started != nil {
-		run, err := a.store.RunByID(ctx, *started)
+		// AM12: read in the message's own transaction. The round this same message started is not there
+		// for anyone else yet: read outside it, a form sent together with its round's first files (or,
+		// for an agent that works from a request, with the request) found no round and was not taken.
+		run, err := scanRun(q.QueryRow(ctx, `SELECT `+runCols+` FROM agent_market.agent_runs WHERE id = $1`, *started))
 		if err == nil && run.Kind == KindRun {
 			return &run, nil
 		}

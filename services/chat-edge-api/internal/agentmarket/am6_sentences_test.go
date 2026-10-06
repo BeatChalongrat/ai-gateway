@@ -77,10 +77,18 @@ func textsOf(path string, v any, f field, out map[string]string) {
 
 func sentTexts(t *testing.T, kind string, payload any) (before, after map[string]string, sent map[string]any) {
 	t.Helper()
+	return sentTextsIn(t, Thai, kind, payload)
+}
+
+// sentTextsIn is sentTexts for an item written in l: the thread's writers mark an English item as that
+// (stampLang), and the door reads it by the rule of its language.
+func sentTextsIn(t *testing.T, l Lang, kind string, payload any) (before, after map[string]string, sent map[string]any) {
+	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw = stampLang(l, raw)
 	var in map[string]any
 	_ = json.Unmarshal(raw, &in)
 	_ = json.Unmarshal(ForClient(kind, raw), &sent)
@@ -92,7 +100,20 @@ func sentTexts(t *testing.T, kind string, payload any) (before, after map[string
 
 func TestEverySentenceOfThePackagesReadsAsWrittenForAPerson(t *testing.T) {
 	doc := packageOutputsDoc(t)
-	texts, refused, engine := 0, 0, 0
+	texts, refused, engine := readAsWritten(t, doc)
+	t.Logf("%d sentences of the packages' eval sets, %d refused (%d findings, %d summaries and gates, %d checks, %d assumptions); "+
+		"%d values of evidence in the engine's own English were not sent",
+		texts, refused, len(doc.Findings), len(doc.Summaries), len(doc.Checks), len(doc.Assumptions), engine)
+	if texts < 400 {
+		t.Fatalf("the packages' sentences were not read: %d", texts)
+	}
+}
+
+// readAsWritten puts everything of a package's outputs that a person reads through the thread's own door
+// and reports every sentence that does not come out as it went in. Returns how many sentences were read,
+// how many were refused, and how many values of evidence in the engine's own English were not sent.
+func readAsWritten(t *testing.T, doc packageDoc) (texts, refused, engine int) {
+	t.Helper()
 	thai := regexp.MustCompile(`[ก-๛]`)
 	same := func(where string, before, after map[string]string) {
 		for path, s := range before {
@@ -133,7 +154,7 @@ func TestEverySentenceOfThePackagesReadsAsWrittenForAPerson(t *testing.T) {
 		qs, _ := json.Marshal([]Question{questionOf(fd)})
 		card := CardItemPayload(Card{ID: uuid.New(), RunID: uuid.New(), Kind: "questions", Moment: fd.Moment, Status: "open", Questions: qs},
 			NoText, NoText)
-		before, after, sent := sentTexts(t, "card", card)
+		before, after, sent := sentTextsIn(t, caseLang(f.Case), "card", card)
 		same(f.Package+"/"+f.Case, before, after)
 		// the evidence: the person's own data is sent; what only the engine reads is not
 		q := sent["questions"].([]any)[0].(map[string]any)
@@ -166,7 +187,7 @@ func TestEverySentenceOfThePackagesReadsAsWrittenForAPerson(t *testing.T) {
 		if s.Gate != nil {
 			payload = map[string]any{"run_id": uuid.NewString(), "gate": s.Gate, "summary": map[string]any{"gate": s.Gate}}
 		}
-		before, after, _ := sentTexts(t, "outputs", payload)
+		before, after, _ := sentTextsIn(t, caseLang(s.Case), "outputs", payload)
 		same(s.Package+"/"+s.Case, before, after)
 	}
 	// every quality check of a rendered file
@@ -177,23 +198,27 @@ func TestEverySentenceOfThePackagesReadsAsWrittenForAPerson(t *testing.T) {
 		}
 		payload := map[string]any{"run_id": uuid.NewString(), "artifacts": []any{map[string]any{"id": uuid.NewString(), "name": name,
 			"format": "xlsx", "size": 1, "version": 1, "quality": map[string]any{"passed": true, "checks": []any{c.Check}}}}}
-		before, after, _ := sentTexts(t, "outputs", payload)
+		before, after, _ := sentTextsIn(t, caseLang(c.Case), "outputs", payload)
 		same(c.Package+"/"+c.Case, before, after)
 	}
 	// every assumption (the run page and the files print them)
 	for _, a := range doc.Assumptions {
 		texts++
-		if !ReadsForPerson(a.Assumption.Text) {
+		if l := caseLang(a.Case); !ReadsIn(l, a.Assumption.Text) {
 			refused++
-			t.Errorf("%s/%s assumption: %q\n   shown: %q", a.Package, a.Case, a.Assumption.Text, ShownToPerson(a.Assumption.Text))
+			t.Errorf("%s/%s assumption: %q\n   shown: %q", a.Package, a.Case, a.Assumption.Text, ShownIn(l, a.Assumption.Text))
 		}
 	}
-	t.Logf("%d sentences of the packages' eval sets, %d refused (%d findings, %d summaries and gates, %d checks, %d assumptions); "+
-		"%d values of evidence in the engine's own English were not sent",
-		texts, refused, len(doc.Findings), len(doc.Summaries), len(doc.Checks), len(doc.Assumptions), engine)
-	if texts < 400 {
-		t.Fatalf("the packages' sentences were not read: %d", texts)
+	return texts, refused, engine
+}
+
+// caseLang: the language a case's run was made in — "en/…" is an English run (AM12's table names its
+// cases by language); every other case is Thai, as every case was before.
+func caseLang(name string) Lang {
+	if strings.HasPrefix(name, "en/") {
+		return English
 	}
+	return Thai
 }
 
 func jsonOf(v any) string {

@@ -19,7 +19,7 @@ const seg = (s: string) => encodeURIComponent(s).replace(/%40/g, "@");
 
 export type AccessMode = "off" | "list" | "everyone";
 export type OrgRole = "member" | "publisher" | "admin";
-export type Section = "access" | "departments" | "spend" | "models" | "catalog" | "problems" | "runs" | "mail";
+export type Section = "access" | "departments" | "spend" | "models" | "web" | "catalog" | "problems" | "runs" | "mail";
 
 /** GET agent-market/me — who is signed in and which sections they may open. */
 export interface AmMe {
@@ -104,6 +104,8 @@ export interface SpendRow {
   waiting: number;
   users?: number;
   credits: number;
+  /** AM12: the part of `credits` that was web searches */
+  search_credits?: number;
   cost_not_charged?: number;
   month_spent: number;
   monthly_limit?: number | null;
@@ -291,8 +293,80 @@ export interface AgentEgressRow {
   agent: boolean;
   agent_default: boolean;
   accounting: boolean;
+  /** AM12: the agent works on the web (it searches and opens pages outside the organisation): off by default too */
+  web?: boolean;
   effective: boolean;
   words: string;
+}
+
+// ── AM12: agents that work on the web ────────────────────────────────────
+
+export interface WebCaps {
+  searches: number;
+  pages: number;
+  pages_per_host: number;
+  seconds: number;
+  source_mb: number;
+  results: number;
+}
+
+/** What an admin set for one run of an agent on the web: a blank is the agent's own ceiling. */
+export interface WebPolicy {
+  max_searches: number | null;
+  max_pages: number | null;
+  max_seconds: number | null;
+  max_source_mb: number | null;
+  unused_keep_days: number;
+  updated_by?: string;
+  updated_at?: string;
+}
+
+export interface WebDenyHost {
+  host: string;
+  note: string;
+  added_by: string;
+  added_at: string;
+}
+
+export interface WebSupplier {
+  id: string;
+  name: string;
+  tax_id: string;
+  website: string;
+  note: string;
+  added_by?: string;
+  updated_at?: string;
+}
+
+export interface WebAgentRow extends AgentEgressRow {
+  caps: WebCaps;
+}
+
+export interface AdminWeb {
+  policy: WebPolicy;
+  deny: WebDenyHost[];
+  suppliers: WebSupplier[];
+  agents: WebAgentRow[];
+  /** the most any run may use, whatever an agent or an admin asks */
+  ceiling: WebCaps;
+  /** the runner has a search provider / a page fetcher */
+  search: boolean;
+  fetcher: boolean;
+}
+
+/** Where one run went: the sites it reached, and each address that was not opened with why (both languages). */
+export interface WebRunRow {
+  run_id: string;
+  slug: string;
+  agent: string;
+  user: string;
+  started_at: string;
+  searches: number;
+  fetches: number;
+  reached: string[];
+  refused: { host: string; reason: string; words?: Record<string, string> }[];
+  bytes: number;
+  search_credits: number;
 }
 
 // ── calls ────────────────────────────────────────────────────────────────
@@ -305,6 +379,22 @@ export const amAdmin = {
   egress: (): Promise<{ org: boolean; agents: AgentEgressRow[] }> => chatEdge.get(`${AM}/egress`),
   putEgress: (slug: string, documentsMayLeave: boolean): Promise<{ slug: string; egress: AgentEgressRow }> =>
     chatEdge.put(`${AM}/egress/${seg(slug)}`, { documents_may_leave: documentsMayLeave }),
+  // AM12 — agents that work on the web: one run's ceilings, the sites never opened, the organisation's
+  // suppliers, and where each run went
+  web: (): Promise<AdminWeb> => chatEdge.get(`${AM}/web`),
+  putWebPolicy: (body: {
+    max_searches: number | null;
+    max_pages: number | null;
+    max_seconds: number | null;
+    max_source_mb: number | null;
+    unused_keep_days: number | null;
+  }): Promise<{ policy: WebPolicy }> => chatEdge.put(`${AM}/web/policy`, body),
+  putWebDeny: (host: string, note: string): Promise<{ deny: WebDenyHost[] }> => chatEdge.put(`${AM}/web/deny`, { host, note }),
+  deleteWebDeny: (host: string): Promise<{ deny: WebDenyHost[] }> => chatEdge.delete(`${AM}/web/deny/${seg(host)}`),
+  putWebSupplier: (body: { id?: string; name: string; tax_id?: string; website?: string; note?: string }): Promise<{ suppliers: WebSupplier[] }> =>
+    chatEdge.put(`${AM}/web/suppliers`, body),
+  deleteWebSupplier: (id: string): Promise<{ suppliers: WebSupplier[] }> => chatEdge.delete(`${AM}/web/suppliers/${seg(id)}`),
+  webCalls: (days: number): Promise<{ days: number; runs: WebRunRow[] | null }> => chatEdge.get(`${AM}/web/calls?days=${days}`),
   putMember: (
     email: string,
     body: { display_name?: string; department?: string; role?: string; monthly_credits?: number | string | null },
@@ -408,6 +498,11 @@ const AM_ERROR_KEYS: Record<string, DictKey> = {
   MAIL_SENDER: "am.err.MAIL_SENDER",
   MAIL_DATA: "am.err.MAIL_DATA",
   BAD_RECIPIENT: "am.err.BAD_RECIPIENT",
+  // AM12: agents that work on the web
+  BAD_HOST: "am.err.BAD_HOST",
+  BAD_WEB_POLICY: "am.err.BAD_WEB_POLICY",
+  BAD_TAX_ID: "am.err.BAD_TAX_ID",
+  SUPPLIER_EXISTS: "am.err.SUPPLIER_EXISTS",
 };
 
 /** Every refusal code this page says in its own language (for the tests). */

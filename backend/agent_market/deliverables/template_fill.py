@@ -10,7 +10,9 @@ expects filled (``target_info``: ``required``), where its label is, and on
 which side; a required-looking blank left empty is a gap, mapped or not.
 What is NOT read as a blank: a line of underscores or dots after a label in
 running text ("ผู้จัดทำ: ______"), and the rows of a table under its first
-empty row.
+empty row — unless the agent asks (AM12, form_regions, ``inspect(reads=…)``):
+then a row of headings over empty rows is one place that takes a list
+(``regions``), and in a Word form such a line is a blank (``lines``).
 
 fill(path, out_path, values, mapping=None) fills markers (also one Word
 split across runs, in headers, footers and table cells), repeating table
@@ -45,7 +47,9 @@ from pptx import Presentation
 import docx_generator as dg  # /sandbox/scripts — shared
 import excel_executor as ex  # /sandbox/scripts — shared
 
-KINDS = {".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx", ".pptx": "pptx"}
+from . import form_regions as fr  # AM12: the rows of a table of items, a blank drawn as a line
+
+KINDS = {".docx": "docx", ".xlsx": "xlsx", ".xlsm": "xlsx", ".pptx": "pptx", ".pdf": "pdf"}  # AM12: a PDF with fields (pdf_form)
 A_NS = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 A_P, A_T = A_NS + "p", A_NS + "t"
 TARGET_RE = re.compile(r"^table(\d+)\.r(\d+)c(\d+)$")
@@ -215,7 +219,7 @@ def _drawn_as_blank(cell) -> bool:
     return bool(cell.fill is not None and cell.fill.fill_type)
 
 
-def _xlsx_targets(wb) -> tuple[list[dict[str, str]], dict[str, dict]]:
+def _xlsx_targets(wb, skip: set | None = None) -> tuple[list[dict[str, str]], dict[str, dict]]:
     """A text label with an empty, writable cell to its right — or under it, where the cell to its right
     holds something (a row of headings over a row of blanks).
 
@@ -233,9 +237,12 @@ def _xlsx_targets(wb) -> tuple[list[dict[str, str]], dict[str, dict]]:
             info[ref] = {"required": bool(required), "side": side, "label_at": f"{ws.title}!{label_cell.coordinate}"}
         return len(out) >= MAX_TARGETS
 
+    skip = skip or set()
     for ws in wb.worksheets:
         labels = []
         for cell in _cells(ws):
+            if (ws.title, cell.row) in skip:
+                continue  # AM12: a heading or a row of a table of items (a region)
             text = _cell_text(cell)
             label = _label_of(text)
             if _is_label(label):
@@ -244,7 +251,7 @@ def _xlsx_targets(wb) -> tuple[list[dict[str, str]], dict[str, dict]]:
 
         def free(row, col):
             c = ex.peek_cell(ws, row, col)
-            return (c is None or c.value is None) and ex.cell_refusal(ws, c) is None
+            return (ws.title, row) not in skip and (c is None or c.value is None) and ex.cell_refusal(ws, c) is None
 
         def in_a_list(cell):
             # one of a column of labels, each with a blank beside it: a list of fields, however plain
@@ -355,8 +362,22 @@ def _fill_xlsx(path, out_path, values, mapping, report) -> None:
     for ref, value in values.items():
         if "!" in str(ref) and ref not in todo and ref not in mapping:
             todo[ref] = value
+    # AM12: the lines of a list, into the rows the form draws under a row of headings
+    report.setdefault("rows", {})
+    report.setdefault("rows_short", {})
+    region_cells: dict[str, list[str]] = {}
+    for key, lines in values.items():
+        if fr.ROWS_RE.match(str(key)) and isinstance(lines, list):
+            cells, res = fr.xlsx_row_cells(wb, key, lines)
+            todo.update(cells)
+            region_cells[key] = list(cells)
+            report["rows"][key] = res["written"]
+            if res["short"]:
+                report["rows_short"][key] = res["short"]
     res = ex.write_names(wb, todo)
-    report["filled"].extend(res["written"])
+    of_a_region = {c for cells in region_cells.values() for c in cells}
+    report["filled"].extend(k for k in res["written"] if k not in of_a_region)
+    report["filled"].extend(k for k, cells in region_cells.items() if cells and all(c in res["written"] for c in cells))
     report["refused"].update(res["refused"])
     _amount_formats(wb, todo, res["written"])
     _fill_xlsx_markers(wb, values, mapping, report)
@@ -385,7 +406,7 @@ def _docx_tables(doc) -> list[dict[str, Any]]:
     return out
 
 
-def _docx_targets(doc) -> tuple[list[dict[str, str]], dict[str, dict]]:
+def _docx_targets(doc, skip: set | None = None) -> tuple[list[dict[str, str]], dict[str, dict]]:
     """A table cell right of a label cell — or under it, where the cell to its right is not empty (a row
     of headings over a row of blanks): {"cell": "table0.r0c1", "label"}, and per cell what kind of blank
     it is (AM11, see _xlsx_targets). A table of a Word form is a grid of fields: every such blank is one
@@ -400,10 +421,13 @@ def _docx_targets(doc) -> tuple[list[dict[str, str]], dict[str, dict]]:
             info[ref] = {"required": True, "side": side, "label_at": f"table{ti}.r{lr}c{lc}"}
         return len(out) >= MAX_TARGETS
 
+    skip = skip or set()
     for ti, table in enumerate(doc.tables):
         grid = [row.cells for row in table.rows]
         under = []
         for ri, cells in enumerate(grid):
+            if (ti, ri) in skip:
+                continue  # AM12: a heading or a row of a table of items (a region)
             for ci, a in enumerate(cells):
                 if ci > 0 and cells[ci - 1]._tc is a._tc:
                     continue  # the same merged cell, seen again
@@ -468,6 +492,12 @@ def _fill_docx(path, out_path, values, mapping, report) -> None:
     cc = dg.fill_content_controls(doc, values, mapping)
     report["filled"].extend(c["tag"] or c["alias"] for c in cc["filled"])
     report["not_filled_explained"].extend(cc["not_filled"])
+    # AM12: a value onto a drawn line
+    report.setdefault("rows_short", {})
+    drawn = {k: dg.as_text(v) for k, v in values.items() if fr.LINE_RE.match(str(k)) and (dg.as_text(v) or "").strip()}
+    done, refused = fr.fill_docx_lines(doc, drawn)
+    report["filled"].extend(done)
+    report["refused"].update(refused)
     targets = {t: values.get(src, dg.MISSING) for t, src in mapping.items() if TARGET_RE.match(str(t))}
     targets.update({t: v for t, v in values.items() if TARGET_RE.match(str(t)) and t not in targets})
     for target, value in targets.items():
@@ -480,6 +510,23 @@ def _fill_docx(path, out_path, values, mapping, report) -> None:
             report["refused"][target] = why
         else:
             report["filled"].append(target)
+    # AM12: the lines of a list, into the rows under a row of headings — last, and the tables from the end
+    # of the form backwards: a row added to a table moves what stands under it, and everything else was
+    # written where the form was read. ``moved`` says by how much, for whoever opens the file again.
+    report["moved"] = []
+    regions = sorted((k for k, v in values.items() if fr.ROWS_RE.match(str(k)) and isinstance(v, list)),
+                     key=lambda k: -int(fr.ROWS_RE.match(k).group(2)))
+    for key in regions:
+        res = fr.fill_docx_rows(doc, key, values[key], lambda t, r, c, text: _set_docx_target(doc, f"table{t}.r{r}c{c}", text))
+        report["rows"][key] = res["written"]
+        if res["short"]:
+            report["rows_short"][key] = res["short"]
+        if res.get("moved"):
+            report["moved"].append(res["moved"])
+        if res["written"]:
+            report["filled"].append(key)
+        else:
+            report["refused"][key] = res.get("reason") or "no_value"
     doc.save(out_path)
 
 
@@ -623,6 +670,12 @@ def _text_at(path: str, kind: str, ref: str):
 
 def still_blank(path: str, kind: str, slot: dict) -> bool:
     """AM11: the filled file, opened again — does this blank of the form still hold nothing?"""
+    if kind == "pdf":
+        from . import pdf_form
+
+        return pdf_form.still_blank(path, slot)
+    if kind == "docx" and fr.LINE_RE.match(slot["key"]):
+        return fr.docx_line_blank(Document(path), slot)
     text = _text_at(path, kind, slot["key"])
     return text is not None and not text.strip()
 
@@ -630,6 +683,10 @@ def still_blank(path: str, kind: str, slot: dict) -> bool:
 def label_beside(path: str, kind: str, slot: dict) -> bool:
     """AM11: the filled file, opened again — is the label this blank was read under still where it was?
     A value written next to another label than the one it was mapped for is in the wrong slot."""
+    if kind == "docx" and fr.LINE_RE.match(slot["key"]):
+        return fr.docx_line_labelled(Document(path), slot)
+    if kind == "pdf":
+        return True  # a field is its own place: a value cannot be written into it beside another label
     at = slot.get("label_at")
     if not at:
         return True
@@ -639,6 +696,10 @@ def label_beside(path: str, kind: str, slot: dict) -> bool:
 def holds(path: str, kind: str, slot: dict, value) -> bool:
     """Does the filled file at ``path`` hold ``value`` where ``slot`` is?"""
     key, sk = slot["key"], slot["kind"]
+    if kind == "pdf":
+        from . import pdf_form
+
+        return pdf_form.holds(path, slot, value)
     if kind == "xlsx":
         wb = openpyxl.load_workbook(path)
         if sk in ("name", "table"):
@@ -653,6 +714,8 @@ def holds(path: str, kind: str, slot: dict, value) -> bool:
         doc = Document(path)
         hits = [c for c in dg.list_content_controls(doc) if key in (c.get("tag"), c.get("alias"))]
         return bool(hits) and all(_squash(c.get("text")) == _squash(dg.as_text(value)) for c in hits)
+    if kind == "docx" and fr.LINE_RE.match(key):
+        return fr.docx_line_holds(Document(path), slot, value)
     if kind == "docx" and sk == "target":
         m = TARGET_RE.match(key)
         doc = Document(path)
@@ -675,6 +738,8 @@ def holds(path: str, kind: str, slot: dict, value) -> bool:
 
 def markers_left(path: str) -> list[str]:
     """Every {{marker}} still in the filled file, in any part (masters, footnotes, charts included)."""
+    if kind_of(path) == "pdf":
+        return []
     if kind_of(path) == "xlsx":
         return _unique(k for k, _ in _xlsx_markers(_load_xlsx(path)))
     return _unique(k for k, _, _ in _marker_parts(path))
@@ -683,6 +748,8 @@ def markers_left(path: str) -> list[str]:
 def cut_off(src: str, out: str) -> list[str]:
     """Filled text that no longer fits its box: a Word table row of fixed height (hRule="exact"), a
     PowerPoint text box — measured with the font's metrics, only where the fill changed the text."""
+    if kind_of(out) == "pdf":
+        return []  # (pdf_form reports a value too long for its field itself: report["cut"])
     from .fit import LINE, frame_overflow, wrap_lines
 
     kind = kind_of(out)
@@ -728,12 +795,21 @@ def cut_off(src: str, out: str) -> list[str]:
 
 
 # ─── Public ────────────────────────────────────────────────────
-def inspect(path: str) -> dict[str, Any]:
+def inspect(path: str, reads: tuple | list = ()) -> dict[str, Any]:
     """What a template asks for: {"kind", "markers", "controls", "names",
     "tables", "has_markers", "targets"}; targets (the mapping screen's
     proposals) only for a template with nothing to fill by itself, with
-    "target_info" (per cell: required, side, label_at)."""
+    "target_info" (per cell: required, side, label_at).
+
+    AM12: ``reads`` is what else the agent asking reads in a form with no marker (its manifest's
+    templates.reads): "rows" — a row of headings over empty rows is one place that takes a list
+    ("regions"); "lines" — in a Word form, a line drawn after a label is a blank ("lines"). An agent
+    that does not ask reads a form exactly as before."""
     kind = kind_of(path)
+    if kind == "pdf":
+        from . import pdf_form
+
+        return pdf_form.inspect(path)
     out: dict[str, Any] = {"kind": kind, "markers": [], "controls": [], "names": [], "tables": [],
                            "has_markers": False, "targets": []}
     if kind == "xlsx":
@@ -743,7 +819,8 @@ def inspect(path: str) -> dict[str, Any]:
         out["tables"] = _xlsx_tables(wb, out["names"])
         out["has_markers"] = bool(out["markers"]) or any(n["fillable"] for n in out["names"])
         if not out["has_markers"]:
-            out["targets"], out["target_info"] = _xlsx_targets(wb)
+            out["regions"] = fr.xlsx_regions(wb) if "rows" in reads else []
+            out["targets"], out["target_info"] = _xlsx_targets(wb, fr.xlsx_region_rows(out["regions"]))
         return out
     found = _marker_parts(path)
     supported = FILLED_PARTS[kind]
@@ -763,7 +840,9 @@ def inspect(path: str) -> dict[str, Any]:
         out["tables"] = _docx_tables(doc)
         out["has_markers"] = bool(out["markers"]) or any(c["fillable"] for c in out["controls"])
         if not out["has_markers"]:
-            out["targets"], out["target_info"] = _docx_targets(doc)
+            out["regions"] = fr.docx_regions(doc) if "rows" in reads else []
+            out["targets"], out["target_info"] = _docx_targets(doc, fr.docx_region_rows(out["regions"]))
+            out["lines"] = fr.docx_lines(doc) if "lines" in reads else []
     else:
         prs = Presentation(path)
         out["tables"] = _pptx_tables(prs)
@@ -782,10 +861,15 @@ def fill(path: str, out_path: str, values: dict | None, mapping: dict | None = N
     Returns {"kind", "filled": [keys], "refused": {key: reason},
     "not_filled_explained": [{marker|tag|name|target, reason, …}],
     "needs_recalc", "formulas_kept", "mapping_screen", "targets",
-    "parts_dropped"} (+ "rows" for Word, "formulas_changed" if a formula
-    changed — it must not)."""
+    "parts_dropped"} (+ "rows" — lines written per list — and "rows_short" —
+    lines a form had no row for; "formulas_changed" if a formula changed — it
+    must not)."""
     kind = kind_of(path)
     values, mapping = dict(values or {}), dict(mapping or {})
+    if kind == "pdf":
+        from . import pdf_form
+
+        return pdf_form.fill(path, out_path, values)
     report: dict[str, Any] = {"kind": kind, "filled": [], "refused": {}, "not_filled_explained": [],
                               "needs_recalc": False, "formulas_kept": [], "mapping_screen": False, "targets": []}
     if kind == "docx":

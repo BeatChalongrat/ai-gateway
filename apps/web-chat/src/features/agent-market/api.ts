@@ -57,6 +57,7 @@ import type {
   ThemeResponse,
   ThreadItem,
   UpgradeInfo,
+  WebCall,
 } from "./types";
 
 const BASE = "/agent-market";
@@ -140,6 +141,12 @@ async function saveBlob(path: string, filename: string): Promise<void> {
   a.remove();
   // Revoke once the download has had time to start (mirrors api.downloadFile).
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+async function blobUrl(path: string): Promise<string> {
+  const res = await api.raw(`${BASE}${path}`, withLang());
+  if (!res.ok) throw await toError(res);
+  return URL.createObjectURL(await res.blob());
 }
 
 export interface UploadOptions {
@@ -270,6 +277,13 @@ export const amApi = {
   saveTemplate: (installId: string, body: { file_id: string; slots: TemplateSlot[]; mapping: Record<string, string> }) =>
     send<{ template: SavedTemplate }>("PUT", `/installs/${id(installId)}/template`, body),
   removeTemplate: (installId: string) => send<{ removed: boolean }>("DELETE", `/installs/${id(installId)}/template`),
+
+  /** AM12: the searches a run made and the addresses it asked for; a picture cut from a saved page (the
+   *  evidence a candidate's price was read from) and a saved page's whole picture, as object URLs — they
+   *  are the run owner's, fetched with the session like any call (revoke the URL when done). */
+  runSources: (runId: string) => call<{ calls: WebCall[] | null }>(`/runs/${id(runId)}/sources`),
+  evidencePicture: (runId: string, name: string) => blobUrl(`/runs/${id(runId)}/evidence/${encodeURIComponent(name)}`),
+  sourcePicture: (runId: string, source: string) => blobUrl(`/runs/${id(runId)}/sources/${encodeURIComponent(source)}/picture`),
 
   /** AM2 phase F: what a run left for a person to decide, and a decision (one of the row's own choices). */
   runExceptions: (runId: string) => call<{ exceptions: RunExceptionRow[] | null }>(`/runs/${id(runId)}/exceptions`),

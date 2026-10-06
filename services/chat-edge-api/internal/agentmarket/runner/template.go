@@ -149,6 +149,10 @@ func mappingPrompt(open []am.TemplateSlot, specRaw json.RawMessage) string {
 		if len(sl.Columns) > 0 {
 			line["columns"] = sl.Columns
 		}
+		if len(sl.ColumnLabels) > 0 {
+			// AM12: the heading over each column of a table of items — what the column is, in the form's words
+			line["column_labels"] = sl.ColumnLabels
+		}
 		j, _ := json.Marshal(line)
 		b.Write(j)
 		b.WriteByte('\n')

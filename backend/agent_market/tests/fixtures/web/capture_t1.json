@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.trapstore.test/inject/instruction",
+ "started_at": "2026-10-06T11:42:24.425Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.trapstore.test/inject/instruction",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1663,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:24 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "40296d5a7b235ba0239c350275dd49643d490f897839ec56e17babff1fe9dccb",
+ "snapshot_sha256": "fb9c58f5c6c323da47e88db492948dbe82903aa6df02841e7161e99fdf254c09",
+ "robots": {
+  "url": "http://www.trapstore.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "Allow: /",
+  "group": "*",
+  "sha256": "16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.trapstore.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.trapstore.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1663,
+  "transfer": 1663,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 6,
+  "shown_characters": 604,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "7f9c3a6b46e9486035cbacbe2d5d5a1f203804f67fbf0e2b0bbe3743287c5c67",
+   "bytes": 226
+  },
+  "page.html": {
+   "sha256": "93a2de72777a959e0a9ae1586f4f70e820b1484eb86162aa8089cd1936b33381",
+   "bytes": 1662
+  },
+  "screenshot.jpg": {
+   "sha256": "47b06c8d8b961025493db9221a814a9b16175341581a93537729f47c72ff5b49",
+   "bytes": 59174
+  },
+  "text.json": {
+   "sha256": "922db7706c585771893af8b0f9031d4d5440afcf0e80f794b99f2acdc6528218",
+   "bytes": 1651
+  }
+ },
+ "finished_at": "2026-10-06T11:42:25.203Z"
+}

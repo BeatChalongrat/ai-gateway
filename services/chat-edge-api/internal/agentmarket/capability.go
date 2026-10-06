@@ -109,6 +109,12 @@ type Manifest struct {
 	// rules follow ("TH").
 	Scope        string `json:"scope"`
 	Jurisdiction string `json:"jurisdiction"`
+	// AM12. StartsFrom "request": a round of the agent starts from what a person
+	// types, not from files they send. Web: the agent has the web searched and
+	// pages captured as evidence for it (web.go) — the prompts a model is given
+	// are the package's own files, the caps the most one round may use.
+	StartsFrom string   `json:"starts_from"`
+	Web        *WebSpec `json:"web"`
 }
 
 // What a manifest says of its scope.
@@ -285,6 +291,8 @@ var capabilityNames = map[string]wording{
 	"deliverable.deck.pptx":   "การสร้างสไลด์ PowerPoint",
 	"deliverable.table.xlsx":  "การสร้างตาราง Excel",
 	"deliverable.template":    "การกรอกแบบฟอร์มของบริษัท",
+	"web.search":              "การค้นหาเว็บ",
+	"web.fetch":               "การเก็บหน้าเว็บเป็นหลักฐาน",
 }
 
 // Names lists the missing parts in words, in l.

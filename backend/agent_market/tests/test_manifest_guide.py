@@ -10,7 +10,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKGS = os.path.join(os.path.dirname(HERE), "packages")
-PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching")
+PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching", "procurement")
 GUIDE_KEYS = {"for", "how", "inputs", "outputs", "questions", "model_inputs", "never", "wrong_file", "time_note"}
 # words a person outside accounting IT would stop at
 JARGON = re.compile(r"materiality|D/C|S/H|debit/credit convention|cosmetic|schema|checksum|sandbox|E2\b", re.I)
@@ -50,7 +50,9 @@ class Guide(unittest.TestCase):
             caps = set(m["capabilities"].get("required") or []) | set(m["capabilities"].get("optional") or [])
             models = {c for c in caps if c.startswith("model.")}
             self.assertEqual(set(m["guide"]["model_inputs"]), models, pkg)
-            if m.get("narrative") == "rules":
+            if m.get("narrative") == "rules" and not m.get("web"):
+                # AM12: an agent on the web has a model read the request and the pages, though its report's
+                # words are the package's own — and says so
                 self.assertNotIn("model.text", m["guide"]["model_inputs"], pkg)
 
     def test_plain_thai_for_a_stranger(self):
@@ -62,7 +64,7 @@ class Guide(unittest.TestCase):
     def test_versions_were_bumped_with_the_guide(self):
         self.assertEqual({p: manifest(p)["version"] for p in PACKAGES},
                          {"financial_report": "1.7.0", "invoice_processing": "1.7.0", "expense_audit": "1.6.0",
-                          "bank_reconciliation": "1.5.0", "po_matching": "1.4.0"})
+                          "bank_reconciliation": "1.5.0", "po_matching": "1.4.0", "procurement": "1.0.0"})
 
     def test_every_package_says_whom_it_is_for_and_whose_law_it_follows(self):
         # AM6 "generic by default": scope and jurisdiction are the manifest's, never assumed

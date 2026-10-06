@@ -35,11 +35,17 @@ SANDBOX_FROM="${AM7_SANDBOX_FROM:-ai-gateway-sandbox:latest}"
 dotenv() { grep "^$1=" .env | cut -d= -f2- | tr -d '\r\n'; }
 ts() { docker compose -p sran-test -f docker-compose.test-stack.yml "$@" 2>&1 | grep -v "level=warning"; }
 runner() {
+  # AM12: the test stack's fetcher has no route to the real web. Its `web` network is replaced by an internal
+  # one on a public address range (scripts/probes/AM12/test-web.yml), where stand-in sites can be put
+  # (scripts/probes/AM12/test_stack.sh web); with nothing on it, every address is simply unreachable.
+  docker network inspect sran-test-web >/dev/null 2>&1 ||
+    docker network create --internal --subnet 93.184.215.0/24 --label sran.test-stack=true sran-test-web >/dev/null
+  AM_FETCHER_TAG="${AM_FETCHER_TAG:-$1}" \
   AM_NETWORK=sran-test_default AM_UPLOADS_VOLUME=sran-test_ts_chat_edge_uploads AM_CONTAINER_NAME=sran-test-agent-runner \
     AM_RUNNER_PORT=18095 AM_RUNNER_TAG="$1" AM_SANDBOX_HOST_DIR="$(pwd -W 2>/dev/null || pwd)/data/agent-sandbox-runs-test" \
     AGENT_MARKET_ENABLED=true SANDBOX_IMAGE="$SANDBOX_TAG" AGENT_MARKET_SMTP_PASSWORD= WEB_CHAT_PUBLIC_URL=http://localhost:13002/chat \
     AGENT_RUNNER_GATEWAY_API_KEY="$(tr -d '\r\n' < scripts/probes/AM1/results/runner_key.test)" \
-    docker compose -p sran-agent-market-test -f docker-compose.agent-market.yml --profile agent-market "${@:2}" 2>&1 | grep -v "level=warning"
+    docker compose -p sran-agent-market-test -f docker-compose.agent-market.yml -f scripts/probes/AM12/test-web.yml       --profile agent-market "${@:2}" 2>&1 | grep -v "level=warning"
 }
 edge() { # <tag> <on|off>
   local flag=true
@@ -53,7 +59,8 @@ case "${1:-status}" in
     TAG="${2:?tag}"
     export TS_BACKEND_TAG="${TS_BACKEND_TAG:-$TAG}" TS_CHAT_EDGE_TAG="$TAG"
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
-    docker run --rm --privileged alpine:3.20 sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches; free -m | head -2'
+    # AM12: bounded — a sync that blocks inside the VM (seen once: 30 minutes, unkillable) must not hold the stack up
+    timeout 90 docker run --rm --privileged alpine:3.20 sh -c 'echo 3 > /proc/sys/vm/drop_caches; free -m | head -2' || echo "cache drop skipped"
     ts up -d --no-deps --wait --wait-timeout 300 postgres redis postgres-webchat redis-webchat mail-sink | tail -5
     # AM11: AM7_NO_NER=1 leaves the name-recognition service out (1.1 GB) when the host is short of memory —
     # Agent Market's walks do not need it (the runner's model calls go through the gateway without it)

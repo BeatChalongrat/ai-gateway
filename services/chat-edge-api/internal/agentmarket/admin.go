@@ -548,6 +548,8 @@ type SpendRow struct {
 	Waiting       int64   `json:"waiting"`
 	Users         int64   `json:"users,omitempty"`
 	Credits       float64 `json:"credits"` // what was charged
+	// SearchCredits (AM12): the part of Credits that was web searches (ledger rows of model "search:…").
+	SearchCredits float64 `json:"search_credits,omitempty"`
 	// CostNotCharged (AM6): what the platform paid for rounds that delivered nothing.
 	CostNotCharged float64    `json:"cost_not_charged"`
 	MonthSpent     float64    `json:"month_spent"`
@@ -623,7 +625,8 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 		SELECT i.user_id::text, i.slug,
 			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NULL AND l.created_at >= $2), 0)::float8,
 			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NULL AND l.created_at >= `+monthStart+`), 0)::float8,
-			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NOT NULL AND l.created_at >= $2), 0)::float8
+			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NOT NULL AND l.created_at >= $2), 0)::float8,
+			COALESCE(sum(l.credits) FILTER (WHERE l.voided_at IS NULL AND l.created_at >= $2 AND l.model LIKE 'search:%'), 0)::float8
 		FROM agent_market.agent_budget_ledger l JOIN agent_market.agent_installs i ON i.id = l.install_id
 		WHERE i.org_id = $1 AND i.status <> 'catalog' AND l.created_at >= LEAST($2, `+monthStart+`)
 		GROUP BY 1, 2`, org, since)
@@ -633,8 +636,8 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 	}
 	for rows.Next() {
 		var uid, slug string
-		var credits, month, free float64
-		if err := rows.Scan(&uid, &slug, &credits, &month, &free); err != nil {
+		var credits, month, free, searches float64
+		if err := rows.Scan(&uid, &slug, &credits, &month, &free, &searches); err != nil {
 			rows.Close()
 			a.fail(w, err, "spend")
 			return
@@ -643,6 +646,7 @@ func (a *API) adminSpend(w http.ResponseWriter, r *http.Request) {
 			x.Credits += credits
 			x.MonthSpent += month
 			x.CostNotCharged += free
+			x.SearchCredits += searches
 		}
 	}
 	rows.Close()

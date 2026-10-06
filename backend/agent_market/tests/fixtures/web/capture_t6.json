@@ -1,0 +1,81 @@
+{
+ "schema": "web.capture.v1",
+ "fetcher_version": "1.0.0",
+ "requested_url": "http://www.it-depot-th.test/network/poe-switches",
+ "started_at": "2026-10-06T11:42:31.788Z",
+ "clock": "UTC",
+ "outcome": "captured",
+ "final_url": "http://www.it-depot-th.test/network/poe-switches",
+ "http": {
+  "status": 200,
+  "content_type": "text/html; charset=utf-8",
+  "content_length": 1706,
+  "headers": {
+   "connection": "close",
+   "content-type": "text/html; charset=utf-8",
+   "date": "Tue, 06 Oct 2026 11:42:31 GMT",
+   "transfer-encoding": "chunked"
+  }
+ },
+ "body_sha256": "cd324a7642a993f9b1eef7e8129034da3311a48c77bbf47d13b33a01673bce66",
+ "snapshot_sha256": "0c6360187e25a57fb736745d3155d09c5d4b38a711007e4b59a8c25d9bc4ef26",
+ "robots": {
+  "url": "http://www.it-depot-th.test/robots.txt",
+  "status": 200,
+  "allowed": true,
+  "rule": "",
+  "group": "*",
+  "sha256": "34f61f3e3fedb0174b3a1ea8da425f6a350747318c9f08d92dde2599d979d06d"
+ },
+ "page_rules": [],
+ "hosts": {
+  "named": "www.it-depot-th.test",
+  "address": "93.184.215.14",
+  "reached": [
+   "www.it-depot-th.test"
+  ],
+  "not_opened": []
+ },
+ "bytes": {
+  "document": 1706,
+  "transfer": 1706,
+  "transfer_capped": false
+ },
+ "page": {
+  "width": 1280,
+  "height": 900,
+  "screenshot_height": 900,
+  "lang": "th",
+  "markup_truncated": false,
+  "text_truncated": false
+ },
+ "counts": {
+  "shown_blocks": 14,
+  "shown_characters": 345,
+  "struck_blocks": 0,
+  "hidden_pieces": 0,
+  "attributes": 0,
+  "comments": 0,
+  "structured": 0,
+  "meta": 1
+ },
+ "files": {
+  "hidden.json": {
+   "sha256": "ca7de816b03ce137bfffc9aa95d0da2706c88f8e5177b6bb8924ab0b58cc0f1d",
+   "bytes": 216
+  },
+  "page.html": {
+   "sha256": "15c76f1238a34d319d101a75f242355176df5abdf2899215edcc5ed1c2299b06",
+   "bytes": 1705
+  },
+  "screenshot.jpg": {
+   "sha256": "14c7b9f736604709566eb4bc086ba443f60fd6ab44803d42c7033ad7fb0cc33f",
+   "bytes": 41890
+  },
+  "text.json": {
+   "sha256": "9c8f27a6e07ef6a82e02fb3e962ff9ffcbd2d93f48fa37c0012be4d1d1420dda",
+   "bytes": 2069
+  }
+ },
+ "finished_at": "2026-10-06T11:42:32.529Z"
+}

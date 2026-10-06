@@ -24,6 +24,8 @@ export interface Manifest {
   schema_version?: string;
   id?: string;
   version?: string;
+  /** AM12: "request" — a run of the agent starts from what a person types, not from a file. */
+  starts_from?: string;
   name?: string;
   name_en?: string;
   short_name?: string;
@@ -91,6 +93,9 @@ export interface TemplateList {
 export interface TemplateSpec {
   fields?: Record<string, TemplateField | string>;
   lists?: Record<string, TemplateList>;
+  /** AM12: what else the agent reads in a form with no marker ("rows", "lines") and whether it takes a
+   *  PDF with fields as a form ("pdf") */
+  reads?: string[];
 }
 
 export type TemplateSlotKind = "marker" | "list" | "control" | "name" | "table" | "target";
@@ -111,6 +116,10 @@ export interface TemplateSlot {
   /** AM8: this slot stops the template being used at all (a chart left with old numbers, a marker the
    *  filler cannot reach) — refused before any work */
   blocking?: boolean;
+  /** AM12: the rows of a table of items in a form with no marker — the heading over each column, and how
+   *  many rows the form has for lines */
+  column_labels?: Record<string, string>;
+  rows?: number;
 }
 
 export interface TemplateDiff {
@@ -630,13 +639,15 @@ export interface OutputsModel {
   model?: string;
   self_hosted?: boolean;
   /** what a model does for this agent: vision (reads scans) | text (writes the words) | none */
-  uses?: "vision" | "text" | "none" | string;
+  uses?: "vision" | "text" | "none" | "web" | string;
   choice?: string;
   chosen_model?: string;
   not_chosen?: boolean;
   vision_model?: string;
   vision_self_hosted?: boolean;
   written_by_rules?: boolean;
+  /** AM12 (uses "web"): the models that read the request and the saved pages, in the order they answered */
+  web?: { model: string; self_hosted?: boolean }[] | null;
 }
 
 /** AM4: one conversation with an installed agent (the first has no id). */
@@ -728,9 +739,101 @@ export interface InstallResponse {
   self_test_run_id?: string;
 }
 
+/** AM12: whether an agent that works on the web may search and open pages now, and why not. */
+export interface WebState {
+  uses: boolean;
+  open: boolean;
+  /** the runner has a search provider; without one a run opens only the links the person sends */
+  search: boolean;
+  why?: string;
+  /** the sentence for the person, in the screen's language */
+  words?: string;
+}
+
+/** AM12: a value a page was read for — the words as printed and the block they are printed in. */
+export interface PageQuote {
+  quote: string;
+  block?: number;
+}
+
+export interface ComparisonCandidate {
+  no: number;
+  key: string;
+  host: string;
+  url: string;
+  kind: string;
+  observed_at?: string;
+  name: string;
+  model?: PageQuote | null;
+  variant?: PageQuote | null;
+  seller?: PageQuote | null;
+  price?: { display?: string; amount?: string; currency?: string | null; block?: number; beside?: string[] } | null;
+  price_basis?: PageQuote | null;
+  subtotal?: string | null;
+  net?: string | null;
+  vat_part?: string | null;
+  total?: string | null;
+  vat?: { says: string; quote: string } | null;
+  shipping?: PageQuote | null;
+  lead_time?: PageQuote | null;
+  minimum_order?: PageQuote | null;
+  stock?: PageQuote | null;
+  warranty?: PageQuote | null;
+  tax_id?: PageQuote | null;
+  legal_name?: PageQuote | null;
+  on_list?: { name: string; by: string } | null;
+  requirements?: { need: string; verdict: string; quote?: string | null }[];
+  open: string[];
+  not_found?: { field: string; why: string }[];
+  picture?: { name: string; width: number; height: number; box?: number[] } | null;
+  source: string;
+  /** the package's own words for this row, in the language the run was made in */
+  words?: {
+    kind?: string;
+    vat?: string;
+    on_list?: string;
+    requirements?: string;
+    open?: { code: string; what: string; why: string }[];
+    not_found?: { field: string; why: string }[];
+  };
+}
+
+/** AM12: what a choice card asks about (a question's evidence.comparison). */
+export interface Comparison {
+  item: { key: string; name: string; meant?: string; quantity?: string | null; quantity_assumed?: boolean; unit?: string };
+  candidates: ComparisonCandidate[];
+  dropped: { host: string; url: string; why: string; words?: string }[];
+  sorted_by?: string;
+  unknown?: string;
+  round?: { cap_hit?: string[]; search?: string; used?: Record<string, number>; caps?: Record<string, number>; lines?: string[] };
+}
+
+/** AM12: one search or one address a run asked for, and what came of it. */
+export interface WebCall {
+  run_id: string;
+  kind: "search" | "fetch" | string;
+  source: string;
+  host: string;
+  url: string;
+  outcome: string;
+  reason: string;
+  /** why it was not opened or not kept, in words */
+  words?: string;
+  bytes: number;
+  results: number;
+  provider: string;
+  started_at: string;
+  duration_ms: number;
+  used?: boolean;
+  purge_after?: string;
+  purged_at?: string;
+}
+
 export interface InstallDetail {
   install: Install;
   manifest: Manifest;
+  /** AM12: for an agent that works on the web */
+  web?: WebState;
   /** AM10: the agent's look (the newest version's, so an older install shows it too). */
   look?: Look;
   defaults: Default[] | null;

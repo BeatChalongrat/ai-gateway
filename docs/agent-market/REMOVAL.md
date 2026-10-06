@@ -25,6 +25,9 @@ the AM2 report).
 | Stored engines (AM2) | every runner's engine zip under `agent-market/engines/<build>.zip` (a pinned install runs the engine it was released with) | step 4 (same prefix) |
 | Duplicate index, versions (AM2) | migration `002_document_index`: table `agent_market.document_index`, `agent_runs.scratch_purged_at`, `agent_installs.previous_definition_id` — inside the schema | step 3 |
 | The organisation, catalog, rail, sign-off, sharing, problems (AM3) | migration `003_self_serve`: tables `org_settings`, `org_members`, `org_departments`, `catalog_state`, `user_prefs`, `catalog_samples`, `run_reviews`, `run_shares`, `problem_reports`; `agent_installs.org_id / pinned_at / last_opened_at`; run kind `review`, install status `catalog` (the runner's sample installs) — inside the schema; its down script undoes all of it | step 3 |
+| Web fetcher (AM12) | `services/web-fetcher/` (a headless browser that opens ONE public page per request and answers with what a person would have seen, or a refusal), image `ai-gateway-web-fetcher:*` (`scripts/agent-market/build-fetcher.sh`), service `web-fetcher` in `docker-compose.agent-market.yml` | step 1 + revert |
+| The fetcher's way out (AM12) | two networks of the compose project `sran-agent-market`: `fetch` (internal: agent-runner ↔ web-fetcher only) and `web` (web-fetcher's egress to the public web — the only Agent Market container with one, and nothing else of the platform is on it). No firewall rule, no host route and no port is added outside the project | step 1 (`down` removes both networks) |
+| Web evidence, lists and policy (AM12) | migration `009_am12`: tables `agent_market.web_calls` (every search and address a run asked for), `web_deny_hosts`, `org_suppliers`, `web_policy` — inside the schema; saved pages under the object prefix `agent-market/…/steps/…` like every step's files | step 3 + step 4 |
 
 The only lines in existing files (the "seams") — all removed by the revert
 (AM3 adds no new seam file: it changes lines inside the seams below — the
@@ -185,6 +188,21 @@ for display, and changes nothing there):
   mirrors**: regenerating the test-stack compose in a core commit carried
   Agent Market lines out of the feature (caught by this drill before the push).
 
+- AM12: nothing outside Agent Market's own trees. The procurement package
+  (`backend/agent_market/packages/procurement/`), web evidence
+  (`backend/agent_market/engine/e4/`), the form readings
+  (`deliverables/form_regions.py`, `pdf_form.py`), the control plane's and the
+  runner's web files (`internal/agentmarket/web.go`, `runner/web.go`,
+  `runner/webprogress.go`), the fetcher (`services/web-fetcher/`), the web
+  chat's comparison and sources views and the admin app's Web tab are all in
+  trees the revert already covers; `docker-compose.agent-market.yml` gains the
+  `web-fetcher` service, its two networks and three runner settings. The
+  runner searches through the platform's own `/v1/search` with its existing
+  gateway key: no new key, no new identity. One line of an earlier Agent
+  Market card changed behaviour for every agent (and goes with the revert):
+  a form sent in the same message as a round's first files is that round's
+  form (`roundform.go`, `formTarget`).
+
 ## Steps
 
 Run from the main checkout (`C:\Users\Beat Beat\Desktop\ai-gateway`).
@@ -192,7 +210,9 @@ Run from the main checkout (`C:\Users\Beat Beat\Desktop\ai-gateway`).
 ```bash
 # 1. Stop the execution plane and the converter (nothing else depends on them).
 docker compose -p sran-agent-market -f docker-compose.agent-market.yml --profile agent-market down
-docker image rm $(docker images -q ai-gateway-agent-runner) $(docker images -q ai-gateway-doc-converter) 2>/dev/null || true
+docker image rm $(docker images -q ai-gateway-agent-runner) $(docker images -q ai-gateway-doc-converter) $(docker images -q ai-gateway-web-fetcher) 2>/dev/null || true
+#    (AM12: `down` also removes the project's networks — `fetch`, and `web`, the fetcher's way out to the public web.
+#     Check: `docker network ls --filter name=sran-agent-market` lists nothing.)
 
 # 2. Turn the flag off and recreate chat-edge + web-chat on their current images.
 #    (flag off = no route, no pool, no query, no nav item; verify with step 6)
@@ -210,7 +230,9 @@ rm -rf data/agent-sandbox-runs
 # 5. Revoke the runner's key (portal → project "Agent Market runner" → revoke),
 #    then delete AGENT_MARKET_* (including AGENT_MARKET_NTFY_URL, AGENT_MARKET_VISION_MODEL,
 #    AGENT_MARKET_CONVERTER_URL, the retention windows and AM3's ADMIN_EMAILS / ORG_DOMAINS /
-#    USER_BUDGET_CREDITS / THB_PER_USD), AGENT_RUNNER_*, AM_* from .env.
+#    USER_BUDGET_CREDITS / THB_PER_USD; AM12's AGENT_MARKET_FETCHER_URL, AGENT_MARKET_FETCH_TIMEOUT_SECONDS,
+#    AGENT_MARKET_SEARCH_USD_PER_QUERY), AGENT_RUNNER_*, AM_* (AM12: AM_FETCHER_*) from .env.
+#    (AM12 added no key: the organisation's search provider is the platform's own, on the admin app's Search page.)
 
 # 6. Revert the code — every Agent Market commit, newest first — rebuild and redeploy as usual.
 git revert --no-edit $(git log --format=%h --grep='^AM[0-9]' main)
@@ -226,9 +248,11 @@ SMOKE_TARGET=live bash scripts/smoke.sh          # green, including the agent_ma
 
 - `GET /api/v1/agent-market/availability` → **404** (no route), web-chat shows no Agent Market item.
 - `SELECT to_regclass('agent_market.agent_runs')` → **NULL**; `\dn` lists no `agent_market`.
-- No container of project `sran-agent-market`, no image `ai-gateway-agent-runner` or `ai-gateway-doc-converter`.
+- No container of project `sran-agent-market`, no image `ai-gateway-agent-runner`, `ai-gateway-doc-converter` or
+  `ai-gateway-web-fetcher`, and no network of that project (nothing of the platform has a route to the web that it
+  did not have before Agent Market).
 - A data export ZIP has no `agent-market/` folder and its README no "Also included" line;
   an account deletion runs the core steps only.
 - No `agent-market/` folder in the uploads volume.
-- `git grep -n -i "agent.market\|agentmarket\|agent-runner"` → only CHANGELOG/history mentions.
+- `git grep -n -i "agent.market\|agentmarket\|agent-runner\|web-fetcher"` → only CHANGELOG/history mentions.
 - Every test lane green: backend, Go (chat-edge), web (tsc, vitest, lint:i18n, check:classes, next build), desktop.

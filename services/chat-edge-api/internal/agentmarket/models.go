@@ -103,7 +103,8 @@ func ModelUse(m Manifest) string {
 	switch {
 	case has("model.vision"):
 		return "vision"
-	case has("model.text") && m.Narrative != "rules":
+	case has("model.text") && (m.Narrative != "rules" || m.UsesWeb()):
+		// AM12: an agent on the web has a model read the request and the pages, whoever writes its report
 		return "text"
 	}
 	return "none"

@@ -29,6 +29,7 @@ import { toAnswerBody, toPendingQuestion } from "../questions";
 import { questionInput } from "../typed";
 import type { AnswerBody, AnswerRecord, CardPayload, Question } from "../types";
 import { cls, Pill } from "../ui";
+import { ComparisonTable, comparisonOf } from "./Comparison";
 import { Evidence, EvidenceSource } from "./Evidence";
 import { FileChip } from "./FileChips";
 import { TypedQuestionCard } from "./TypedQuestionCard";
@@ -99,7 +100,10 @@ export function AgentQuestionCard({
   };
 
   const rememberable = questions.some((q) => q.rememberable);
-  const details = questions.filter((q) => recommendationOf(q) || q.leaves_out || hasEvidence(q));
+  // AM12: a choice among candidates shows the table it asks about, above the choice. It recommends none
+  // of them — what a skipped card records ("none") is not shown as advice — and the table is its evidence.
+  const comparisons = questions.map((q) => ({ key: q.key, comparison: comparisonOf(q.evidence) })).filter((x) => x.comparison);
+  const details = questions.filter((q) => !comparisonOf(q.evidence) && (recommendationOf(q) || q.leaves_out || hasEvidence(q)));
   const inputs = questions.map((q) => questionInput(q.input));
   const cardKey = `${card.card_id}:${attempts}:${remount}`;
 
@@ -119,6 +123,9 @@ export function AgentQuestionCard({
           <Pill tone="warning">{t("card.attempt", { n: String(attempts) })}</Pill>
         </div>
       ) : null}
+      {comparisons.map((x) => (
+        <ComparisonTable key={x.key} comparison={x.comparison!} runId={card.run_id} />
+      ))}
       <TypedQuestionCard key={cardKey} question={toPendingQuestion(card)} inputs={inputs} onAnswer={onAnswer} />
       {details.length ? (
         <ul className="flex flex-col gap-2 rounded-xl border border-border-subtle px-4 py-2.5" data-testid="am-question-details">

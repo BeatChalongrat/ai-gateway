@@ -59,7 +59,8 @@ import AdminRunPage from "./runs/[id]/page";
 
 // ── fixtures ─────────────────────────────────────────────────────────────
 
-const ADMIN_SECTIONS = ["access", "departments", "spend", "models", "catalog", "problems", "runs"];
+// (AM12: "web" — the tab of agents that work on the web — is an admin's too, after "models")
+const ADMIN_SECTIONS = ["access", "departments", "spend", "models", "web", "catalog", "problems", "runs"];
 
 const ADMIN_ME = {
   email: "boss@example.invalid",
@@ -223,7 +224,7 @@ describe("section tabs (AM7)", () => {
     api.me.mockResolvedValue({ ...ADMIN_ME, sections: [...ADMIN_SECTIONS, "mail"] });
     renderPage();
     await screen.findByTestId("am-tab-mail");
-    expect(screen.getAllByRole("tab")).toHaveLength(8);
+    expect(screen.getAllByRole("tab")).toHaveLength(ADMIN_SECTIONS.length + 1);
   });
 
   it("an agent_publisher sees exactly the catalog and problems tabs, with the Thai labels", async () => {

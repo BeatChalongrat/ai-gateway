@@ -134,6 +134,13 @@ func (rc *runCtx) createCard(ctx context.Context, moment string, plan *am.CardPl
 		_ = st.FinishStep(ctx, stp.ID, "succeeded", mustJSON(map[string]any{"defaults_applied": keysOf(plan.Questions)}), "", "", "", 0)
 	}
 	intro := cardIntro(moment, plan, pre, len(plan.Questions))
+	if rc.pkg != nil && rc.pkg.Manifest.FromRequest() && plan.Kind != "request_files" && plan.Blocking {
+		// AM12: a round that works from a request has read no file and computed nothing yet
+		intro = am.Text("มี %s เรื่องที่ต้องรู้ก่อนเริ่มค้นหาครับ", am.Count(len(plan.Questions)))
+		if moment == "postcompute" {
+			intro = am.Text("ค้นหาและตรวจกับหน้าเว็บที่บันทึกไว้เสร็จแล้วครับ เลือกได้จากตารางด้านล่าง")
+		}
+	}
 	rid := rc.run.ID
 	if !intro.Empty() {
 		if err := st.PostText(ctx, rc.run, intro); err != nil {

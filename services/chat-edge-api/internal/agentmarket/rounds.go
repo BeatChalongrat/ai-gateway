@@ -434,9 +434,15 @@ func (a *API) startRound(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusConflict, "ROUND_IN_PROGRESS")
 		return
 	}
+	started := Text("เริ่มรอบใหม่แล้ว — ส่งไฟล์ของรอบนี้ได้เลย ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ " +
+		"ส่วนไฟล์ ตัวเลข และคำตอบของรอบก่อนไม่ถูกนำมาใช้")
+	if m, err := a.manifestOf(ctx, in); err == nil && m.FromRequest() {
+		// AM12: an agent that works from a request has no files to send: its round starts from the words
+		started = Text("เริ่มรอบใหม่แล้ว — พิมพ์คำขอของรอบนี้ได้เลย ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ " +
+			"ส่วนผลการค้นหา ตัวเลข และคำตอบของรอบก่อนไม่ถูกนำมาใช้")
+	}
 	item, _, err := a.store.AddItemIn(ctx, a.store.Pool, in.ID, body.ThreadID, c.TenantUUID, c.UserID, nil,
-		Notice{Text: Text("เริ่มรอบใหม่แล้ว — ส่งไฟล์ของรอบนี้ได้เลย ใช้ค่าที่ตั้งไว้และคำตอบที่จำไว้ต่อ " +
-			"ส่วนไฟล์ ตัวเลข และคำตอบของรอบก่อนไม่ถูกนำมาใช้"), RoundStart: true, Tone: "success"}, nil)
+		Notice{Text: started, RoundStart: true, Tone: "success"}, nil)
 	if err != nil {
 		a.fail(w, err, "round")
 		return
@@ -508,6 +514,23 @@ func (a *API) answerIntent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			ids = append(ids, fid)
+		}
+		// AM12: an agent on the web whose door is closed says why instead of starting
+		if said, err := a.webClosed(ctx, tx, in, c.UserID, c.TenantUUID, item.ThreadID, ThreadItem{}, p.Text); err != nil {
+			a.fail(w, err, "run")
+			return
+		} else if said {
+			if err := a.store.PatchItem(ctx, tx, item.ID, ItemPatch{Status: "chosen", Choice: body.Choice}); err != nil {
+				a.fail(w, err, "chip")
+				return
+			}
+			if err := tx.Commit(ctx); err != nil {
+				a.fail(w, err, "chip")
+				return
+			}
+			fresh, _ := a.store.ItemByID(ctx, c.TenantUUID, c.UserID, id)
+			writeJSON(w, http.StatusOK, map[string]any{"item": fresh, "changed": true, "web_closed": true})
+			return
 		}
 		run, err := a.newRun(ctx, tx, in, c, p.Text, ids, o)
 		if err != nil {

@@ -27,7 +27,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKGS = os.path.join(os.path.dirname(HERE), "packages")
-PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching")
+PACKAGES = ("financial_report", "invoice_processing", "expense_audit", "bank_reconciliation", "po_matching", "procurement")
 THAI = re.compile(r"[฀-๿]")
 PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}|\{[A-Za-z_][A-Za-z0-9_:.]*\}|%[sdvq]|%\[\d\][sdvq]")
 ERROR_SHAPE = re.compile(

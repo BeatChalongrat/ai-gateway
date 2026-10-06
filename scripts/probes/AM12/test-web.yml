@@ -1,0 +1,12 @@
+# AM12 — the test stack's web (see scripts/probes/AM12/test_stack.sh).
+#
+# Laid over docker-compose.agent-market.yml for the TEST project only: the
+# fetcher's way out is not the real web but `sran-test-web`, an internal
+# docker network (no gateway, no route out) on a public address range, with
+# stand-in sites on it. scripts/probes/AM7/test_stack.sh creates the network
+# and passes this file whenever it starts the runner's project, so no test
+# stack of any card has a route to the real web.
+networks:
+  web:
+    external: true
+    name: sran-test-web

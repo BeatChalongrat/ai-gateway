@@ -259,7 +259,9 @@ function SlotRow({
       {columns.length ? (
         <ul className="mt-2 flex flex-col gap-1.5 border-l border-border-subtle pl-3" data-testid="am-template-columns">
           {columns.map((c) => {
-            const colTitle = columnTitle(slot, c) ?? t("tpl.map.column", { col: c });
+            // AM12: a column of a table of items in a form with no marker is named by the heading over it
+            const heading = slot.column_labels?.[c];
+            const colTitle = heading ? t("tpl.map.columnOf", { label: heading }) : columnTitle(slot, c) ?? t("tpl.map.column", { col: c });
             return (
               <li key={c} className="grid items-center gap-x-3 gap-y-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,15rem)]">
                 <span className="min-w-0 break-all text-xs text-text-secondary">{colTitle}</span>

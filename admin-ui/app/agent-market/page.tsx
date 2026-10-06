@@ -28,6 +28,7 @@ import ModelsSection from "./_sections/Models";
 import ProblemsSection from "./_sections/Problems";
 import RunsSection from "./_sections/Runs";
 import SpendSection from "./_sections/Spend";
+import WebSection from "./_sections/Web";
 import { LoadError, h2, secondary } from "./_sections/shared";
 
 const SECTIONS: { id: Section; label: DictKey }[] = [
@@ -35,6 +36,7 @@ const SECTIONS: { id: Section; label: DictKey }[] = [
   { id: "departments", label: "am.tab.departments" },
   { id: "spend", label: "am.tab.spend" },
   { id: "models", label: "am.tab.models" },
+  { id: "web", label: "am.tab.web" },
   { id: "catalog", label: "am.tab.catalog" },
   { id: "problems", label: "am.tab.problems" },
   { id: "runs", label: "am.tab.runs" },
@@ -145,6 +147,8 @@ function AgentMarket() {
             <SpendSection />
           ) : current === "models" ? (
             <ModelsSection />
+          ) : current === "web" ? (
+            <WebSection />
           ) : current === "catalog" ? (
             <CatalogSection canDisable={!!me.can_disable} />
           ) : current === "problems" ? (

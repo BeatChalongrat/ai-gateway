@@ -44,8 +44,8 @@ func manifestStrings(v any, path string, visit func(path, s string)) {
 
 func TestTheShippedPackagesReadInEnglishOnAnEnglishScreen(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join("..", "..", "..", "..", "backend", "agent_market", "packages", "*", "agent.json"))
-	if len(files) != 5 {
-		t.Fatalf("the five packages' manifests: found %d", len(files))
+	if len(files) != 6 { // AM12: the procurement agent is the sixth
+		t.Fatalf("the six packages' manifests: found %d", len(files))
 	}
 	for _, f := range files {
 		pkg := filepath.Base(filepath.Dir(f))

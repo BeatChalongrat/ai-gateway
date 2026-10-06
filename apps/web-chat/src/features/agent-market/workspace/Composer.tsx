@@ -77,6 +77,9 @@ interface Props {
   sampleRunId?: string | null;
   /** AM6: the agent's data sheet (what it reads): the chip in its place when there is no sample. */
   datasheetHref?: string | null;
+  /** AM12: the agent works from what a person types: it reads no file as data (the only file it takes is
+   *  a form), and the box says what to type. */
+  fromRequest?: boolean;
 }
 
 /** Where this agent chat's unsent text is kept (the app's draft store). */
@@ -117,11 +120,12 @@ function ComposerBody({
   estimate,
   sampleRunId = null,
   datasheetHref = null,
+  fromRequest = false,
   handle,
 }: Props & { handle: React.ForwardedRef<ComposerHandle> }) {
   const t = useAmT();
   const uploadingPlaceholder = useUploadingPlaceholder();
-  const inputAccept = accept?.length ? accept : DEFAULT_ACCEPT;
+  const inputAccept = useMemo(() => (fromRequest ? [] : accept?.length ? accept : DEFAULT_ACCEPT), [fromRequest, accept]);
   // AM10: an agent that fills forms takes a form dropped into the round, beside its inputs
   const forms = formAccept ?? [];
   const acceptList = useMemo(() => [...inputAccept, ...forms.filter((f) => !inputAccept.includes(f))], [inputAccept, forms]);
@@ -231,7 +235,15 @@ function ComposerBody({
       value={text}
       onChange={setText}
       maxLength={MAX_TEXT}
-      placeholder={uploads.uploading ? uploadingPlaceholder : name ? t("composer.placeholderTo", { name }) : t("composer.placeholderAgent")}
+      placeholder={
+        uploads.uploading
+          ? uploadingPlaceholder
+          : fromRequest
+            ? t("web.composer.placeholder")
+            : name
+              ? t("composer.placeholderTo", { name })
+              : t("composer.placeholderAgent")
+      }
       textareaLabel={t("composer.label")}
       textareaTestId="am-composer-input"
       sendTestId="am-composer-send"
@@ -243,9 +255,18 @@ function ComposerBody({
           {!asking && !roundUnderway ? <EstimateLine line={estimate} /> : null}
           {suggesting ? (
             <div role="group" aria-label={t("composer.suggest.aria")} className="flex flex-wrap items-center justify-center gap-2" data-testid="am-composer-suggestions">
-              <Button type="button" variant="secondary" size="sm" onClick={pickFiles}>
-                {t("composer.suggest.attach")}
-              </Button>
+              {/* AM12: an agent that works from a request starts from the words; the only file it takes is a form */}
+              {fromRequest ? (
+                forms.length ? (
+                  <Button type="button" variant="secondary" size="sm" onClick={pickFiles}>
+                    {t("web.composer.attachForm")}
+                  </Button>
+                ) : null
+              ) : (
+                <Button type="button" variant="secondary" size="sm" onClick={pickFiles}>
+                  {t("composer.suggest.attach")}
+                </Button>
+              )}
               {finishedRound ? (
                 <>
                   <Button type="button" variant="secondary" size="sm" onClick={() => suggest(t("composer.suggest.askText"))}>
@@ -257,7 +278,7 @@ function ComposerBody({
                 </>
               ) : sampleRunId ? (
                 <Button type="button" variant="secondary" size="sm" onClick={showSample}>
-                  {t("composer.suggest.sample")}
+                  {fromRequest ? t("web.composer.sample") : t("composer.suggest.sample")}
                 </Button>
               ) : datasheetHref ? (
                 <ButtonLink href={datasheetHref} variant="secondary" size="sm">

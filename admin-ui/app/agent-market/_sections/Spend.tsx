@@ -122,6 +122,11 @@ function SpendTable({ rows, kind, pricing, looks }: { rows: SpendRow[]; kind: "u
               <td style={num}>
                 {formatCredits(r.credits)}
                 <div style={muted}>{`≈ ${bahtOf(r.credits, pricing)}`}</div>
+                {r.search_credits ? (
+                  <div style={muted} data-testid="am-spend-search">
+                    {t("am.spend.ofWhichSearch", { credits: formatCredits(r.search_credits), baht: bahtOf(r.search_credits, pricing) })}
+                  </div>
+                ) : null}
               </td>
               {counted ? <td style={{ ...num, color: "var(--text-secondary)" }}>{formatCredits(r.cost_not_charged ?? 0)}</td> : null}
               <td style={num}>

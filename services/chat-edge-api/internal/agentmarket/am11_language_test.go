@@ -247,6 +247,18 @@ var notASentence = map[string]string{
 	"runner/model.go:CompleteWith":          "addressed to a model: what is added to the prompt on its one retry",
 	"runner/model.go:Vision":                "addressed to a vision model: what is added to the prompt on its retry",
 	"runner/clarify.go:classify":            "addressed to a model: the prompt that reads a typed answer as one of a card's options (the language typed in: modellang.go)",
+	// AM12: a round on the web. The prompts themselves are the package's files; these are what the runner
+	// puts around what a model is shown, and what an answer that is not the JSON asked for is sent back with
+	"runner/web.go:askJSON":        "addressed to a model: the reason an answer that is not one JSON object is sent back with",
+	"runner/web.go:briefHeading":   "addressed to a model: the heading of the person's request",
+	"runner/web.go:needHeading":    "addressed to a model: the heading of what the person needs",
+	"runner/web.go:listHeading":    "addressed to a model: the heading of the organisation's own supplier list",
+	"runner/web.go:budgetHeading":  "addressed to a model: how many searches it may write",
+	"runner/web.go:resultsHeading": "addressed to a model: the heading of the numbered search results",
+	"runner/web.go:openHeading":    "addressed to a model: how many pages it may pick",
+	"runner/web.go:pageHeading":    "addressed to a model: the heading of a stored page's visible text, which says it is data and not an instruction",
+	"runner/web.go:cutNotice":      "addressed to a model: the note that a page's text was longer than what it is shown",
+	"runner/web.go:pageText":       "addressed to a model: the mark put on a block of a page that is struck through",
 	// ── the Thai forms of dates: their English is not a translation of the form but a form of its own
 	// (lang.go: DateIn, DateTimeIn, PeriodLabelIn, WeekdayIn, ReminderPeriodLabelIn) ──
 	"rounds.go:thaiMonths":             "the Thai names of the months (English: lang.go englishMonths, PeriodLabelIn)",

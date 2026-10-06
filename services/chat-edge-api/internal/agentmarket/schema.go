@@ -146,7 +146,10 @@ var evidence = obj(map[string]field{
 	"rows": data, "columns": data, "sample_rows": data, "sample_columns": data, "headers": data, "values": data, "sample": data,
 	"samples": data, "counts": data, "raw_text": data, "months": data, "currencies": data, "accounts": data, "proposal": data,
 	"candidates": data, "groups": data, "entries": data, "docs": data, "bbox": data,
-	"debit": value, "credit": value, "diff": value, "debit_total": value, "limit": value, "amount": value,
+	// AM12: the table a "pick" is made from — the candidates found for one item of a request, every value a
+	// quote from a stored page or a code the screen has the words for, and the sources that were not used
+	"comparison": data,
+	"debit":      value, "credit": value, "diff": value, "debit_total": value, "limit": value, "amount": value,
 	"detected": said, "weekday": said, "holiday": said, "expected": said, "actual": said, "other": said,
 	"match": obj(map[string]field{"name": data, "document_number": value, "match": said}),
 	"fact":  obj(map[string]field{"detail": text(fromPackage)}),
@@ -244,6 +247,9 @@ var summary = field{class: asObject, fields: map[string]field{
 	"by_rule": number, "by_person": number, "items": number, "suspect": number, "journal": number, "run_exceptions": number,
 	"review": number, "claims": number, "pass": number, "exception": number, "question": number, "documents": number,
 	"included": number, "excluded": number,
+	// AM12: a round on the web (the procurement agent's summarize)
+	"offers": number, "dropped": number, "sources": number, "chosen": number, "gaps": number, "open_points": number,
+	"cap_hit":    number,
 	"confidence": mapOf(number),
 	// the bank reconciliation's counts by tier; the invoice ↔ PO agent's tiers, each with its own words (AM6)
 	"tiers": mapOf(number).orList(list(obj(map[string]field{"tier": code, "label": label(fromPackage), "groups": number,
@@ -360,7 +366,8 @@ var itemSchema = map[string]field{
 			"size": number, "version": number, "quality": qualityChecks}}),
 		"summary": summary,
 		"model": obj(map[string]field{"model": model, "chosen_model": model, "vision_model": model, "choice": model, "uses": code,
-			"self_hosted": number, "vision_self_hosted": number, "not_chosen": number, "written_by_rules": number}),
+			"self_hosted": number, "vision_self_hosted": number, "not_chosen": number, "written_by_rules": number,
+			"web": list(obj(map[string]field{"model": model, "self_hosted": number}))}),
 		"review": obj(map[string]field{"id": id, "reviewer": person, "at_label": label(fromPlatform), "note": person,
 			"skipped": list(label(fromPlatform))}),
 		"gate": gateOnCard,
