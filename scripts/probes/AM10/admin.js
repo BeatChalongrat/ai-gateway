@@ -152,7 +152,13 @@ async function language() {
   const browser = await pw().chromium.launch();
   try {
     let email, password;
-    if (LIVE) {
+    if (LIVE && process.env.AM10_ADMIN_ACCOUNT === "smoke") {
+      // AM11: on live the walk signs in as the smoke gate's own admin account (SMOKE_ADMIN_EMAIL /
+      // SMOKE_ADMIN_PASSWORD in .env — made for tests, never the owner's); neither is printed
+      email = L.env("SMOKE_ADMIN_EMAIL");
+      password = L.env("SMOKE_ADMIN_PASSWORD");
+      if (!email || !password) throw new Error("SMOKE_ADMIN_EMAIL / SMOKE_ADMIN_PASSWORD are not in .env");
+    } else if (LIVE) {
       email = containerEnv("INITIAL_ADMIN_EMAIL");
       password = containerEnv("INITIAL_ADMIN_PASSWORD");
     } else {
@@ -167,7 +173,8 @@ async function language() {
     const hrefs = await page.evaluate(() => [...new Set([...document.querySelectorAll("aside a[href^='/'], nav a[href^='/']")].map((a) => a.getAttribute("href")))]);
     const sections = ["access", "departments", "spend", "models", "catalog", "problems", "runs", "mail"].map((sec) => `/agent-market?section=${sec}`);
     const pagesToRead = [...hrefs.filter((h) => h !== "/agent-market"), ...sections];
-    check(pagesToRead.length >= 20, "the admin app's pages are the sidebar's links and the Agent Market page's sections", `${hrefs.length} links + ${sections.length} sections`);
+    // an account with fewer rights is shown fewer links: what it is shown is what is read
+    check(pagesToRead.length >= (process.env.AM10_ADMIN_ACCOUNT === "smoke" ? 9 : 20), "the admin app's pages are the sidebar's links and the Agent Market page's sections", `${hrefs.length} links + ${sections.length} sections`);
     const report = { found, pages: pagesToRead, th: {}, en: {}, notOpened: [], rawCodes: { th: {}, en: {} } };
     // AM11: the codes the gateway stores are never what a page shows — in either language. English
     // codes on an English screen are invisible to the reader above, so they are looked for by name:
@@ -206,7 +213,7 @@ async function language() {
       await page.goto(`${ADMIN}/agent-market?section=catalog`, { waitUntil: "load" });
       await page.waitForTimeout(1500);
       await page.screenshot({ path: path.join(OUT, `08-language-${lang}.png`), fullPage: true });
-      check(Object.keys(report[lang]).length >= 20, `${lang}: pages read`, String(Object.keys(report[lang]).length));
+      check(Object.keys(report[lang]).length >= (process.env.AM10_ADMIN_ACCOUNT === "smoke" ? 9 : 20), `${lang}: pages read`, String(Object.keys(report[lang]).length));
     }
     report.flat = { th: R.flat(report.th), en: R.flat(report.en) };
     if (found) await page.evaluate((l) => window.localStorage.setItem("sran-admin-locale", l), found);

@@ -435,11 +435,17 @@ async function consent() {
         tab.on("request", (r) => { if (r.url().startsWith("sran:")) handed.push(r.url()); });
         await tab.goto(t.body.start_url, { waitUntil: "load" }).catch(() => null);
         const onStandIn = await tab.locator(`#${answer}`).count();
-        x.check(onStandIn === 1, `${key}: the flow reaches the consent page`, tab.url().slice(0, 90));
-        if (!onStandIn) { await tab.close(); continue; }
-        await tab.locator(`#${answer}`).click({ noWaitAfter: true });
-        await tab.waitForURL(/\/portal\/connectors\/oauth\/callback/, { timeout: 30000 }).catch(() => null);
-        await tab.waitForLoadState("domcontentloaded").catch(() => null);
+        // a deployment with no provider set up (live: no Google client) never reaches a consent page:
+        // the flow ends at once on the return page, saying the connector is not set up
+        const unset = !onStandIn && (await tab.locator("body[data-status]").count()) === 1;
+        if (unset && answer === "allow") { await tab.close(); continue; } // one page per language and client, read once
+        x.check(onStandIn === 1 || unset, unset ? `${key}: no provider is set up here — the flow ends on the return page` : `${key}: the flow reaches the consent page`, tab.url().slice(0, 90));
+        if (!onStandIn && !unset) { await tab.close(); continue; }
+        if (onStandIn) {
+          await tab.locator(`#${answer}`).click({ noWaitAfter: true });
+          await tab.waitForURL(/\/portal\/connectors\/oauth\/callback/, { timeout: 30000 }).catch(() => null);
+          await tab.waitForLoadState("domcontentloaded").catch(() => null);
+        }
         await L.wait(1200);
         const body = tab.locator("body");
         const text = (await body.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
