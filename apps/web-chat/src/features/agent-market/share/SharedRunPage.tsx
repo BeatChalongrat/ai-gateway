@@ -12,7 +12,7 @@ import { Eye } from "lucide-react";
 
 import { AmError, amApi, errorMessage } from "../api";
 import { useAmLocale, useAmT } from "../i18n";
-import { extensionOf, formatDate, formatDateTime } from "../format";
+import { extensionOf, formatDate, formatDateTime, periodLabel } from "../format";
 import { groupExceptions, reasonText } from "../exceptions/exceptions";
 import { outcomeKey, outcomeOf, outcomeTone } from "../outcome";
 import type { RunExceptionRow, SharedRun } from "../types";
@@ -77,7 +77,7 @@ function Shared({ shareId }: { shareId: string }) {
           <h1 className="mt-1 text-lg font-semibold text-text-primary sm:text-xl">
             {data.agent.name || data.agent.title}
             {data.outputs?.period_label || run.period ? (
-              <span className="font-normal text-text-muted">{` · ${t("run.period", { period: data.outputs?.period_label || run.period || "" })}`}</span>
+              <span className="font-normal text-text-muted">{` · ${t("run.period", { period: periodLabel(run.period, locale, data.outputs?.period_label) })}`}</span>
             ) : null}
           </h1>
           <p className="mt-0.5 text-xs text-text-muted">

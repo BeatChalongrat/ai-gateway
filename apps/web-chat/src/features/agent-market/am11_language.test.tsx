@@ -32,7 +32,7 @@ vi.mock("next/navigation", () => ({
 
 import { LocaleScope, useI18nStore, type Locale } from "@/lib/i18n";
 
-import { agentShortName, formatDate, formatDateTime, formatDuration } from "./format";
+import { agentShortName, formatDate, formatDateTime, formatDuration, periodLabel } from "./format";
 import { amDictionaries, tAm } from "./i18n";
 import { MarketPage } from "./market/MarketPage";
 import { SettingsPage } from "./settings/SettingsPage";
@@ -319,5 +319,21 @@ describe("AM11 — an agent is called by the name its package gives for the scre
     expect(agentShortName(thaiOnly, "en", "My copy")).toBe("My copy");
     expect(agentShortName(thaiOnly, "en")).toBe(m.name);
     expect(agentShortName(null, "th", "ชื่อที่ถืออยู่")).toBe("ชื่อที่ถืออยู่");
+  });
+});
+
+describe("AM11 — a run's period is said in the screen's language", () => {
+  it("a month is formatting: กันยายน 2569 / September 2026, whatever the package called it in Thai", () => {
+    expect(periodLabel("2026-09", "th")).toBe("กันยายน 2569");
+    expect(periodLabel("2026-09", "en")).toBe("September 2026");
+    expect(periodLabel("2026-09", "en", "กันยายน 2569")).toBe("September 2026");
+    expect(periodLabel("2026-09", "th", "กันยายน 2569")).toBe("กันยายน 2569");
+  });
+
+  it("a package's own name for the period — a quarter, a year — is kept as it said it", () => {
+    expect(periodLabel("2026-09", "en", "ไตรมาส 3/2569")).toBe("ไตรมาส 3/2569");
+    expect(periodLabel("2026-Q3", "en", "ไตรมาส 3/2569")).toBe("ไตรมาส 3/2569");
+    expect(periodLabel("2026-Q3", "en")).toBe("2026-Q3");
+    expect(periodLabel(null, "th")).toBe("");
   });
 });

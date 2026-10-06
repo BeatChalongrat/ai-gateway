@@ -32,6 +32,7 @@ import {
   formatPct,
   formatSignedNumber,
   formatSignedPct,
+  periodLabel,
   signOf,
 } from "../format";
 import { COMPLETED_OPEN, outcomeKey, outcomeOf, outcomeTone } from "../outcome";
@@ -221,7 +222,7 @@ function RunDetailView({ runId, initialTab }: { runId: string; initialTab?: stri
   if (!data) return <PageSkeleton />;
 
   const run = data.run;
-  const period = computed?.period_label || run.period || "";
+  const period = periodLabel(run.period, locale, computed?.period_label); // AM11: a month is said in the screen's language
   const duration = elapsedBetween(run.started_at, run.finished_at);
   const tabs: { id: Tab; key: AmKey; count?: number }[] = [
     { id: "overview", key: "run.tab.overview" },

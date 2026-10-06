@@ -175,3 +175,18 @@ export function agentShortName(
   if (locale !== "th") return m?.name_en || held || m?.name || "";
   return m?.short_name || m?.name || held || "";
 }
+
+/** AM11 — a run's period as the screen says it. A month ("2026-09") is formatting, like a date:
+ *  "กันยายน 2569" on a Thai screen, "September 2026" on an English one (GLOSSARY.md §4). A package's
+ *  own name for the period (`said`) is used when it says something else than that month — a quarter,
+ *  a year; when it is the month as a Thai reader says it, the screen's own form is. */
+export function periodLabel(period: string | null | undefined, locale: string, said?: string | null): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(period ?? "");
+  const month = m ? Number(m[2]) : 0;
+  if (!m || month < 1 || month > 12) return said?.trim() || period || "";
+  const d = new Date(Date.UTC(Number(m[1]), month - 1, 15));
+  const thai = new Intl.DateTimeFormat("th-TH", { month: "long", year: "numeric", timeZone: "UTC" }).format(d);
+  if (said?.trim() && said.trim() !== thai) return said.trim();
+  if (locale === "th") return thai;
+  return new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(d);
+}
