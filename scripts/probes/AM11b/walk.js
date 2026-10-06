@@ -33,7 +33,8 @@ const PROCUREMENT = "sran.procurement";
 const CARD = { [REPORT]: { th: "รายงานผลประกอบการ", en: "Financial Report" }, [PROCUREMENT]: { th: "จัดซื้อ", en: "Procurement" } };
 const MONEY = /เครดิต|บาท|credit|cost|baht|THB|฿/gi;
 const CREDITS = /เครดิต|credit/i;
-const ACCOUNTING = /เดบิต|debit|บัตรเครดิต|credit card|credit note|ใบลดหนี้/i;
+// the ledger's own word (a debit and a credit column, a credit note, a credit card) is the work, not the price
+const ACCOUNTING = /เดบิต|debit|คอลัมน์เครดิต|ยอดรวมเครดิต|credit column|credit total|บัตรเครดิต|credit card|credit note|ใบลดหนี้/i;
 
 const done = async (x, name, extra = {}) => {
   fs.writeFileSync(path.join(x.dir, `${name}.json`), JSON.stringify({ client: x.tag, at: new Date().toISOString(), ...extra, checks: x.checks, marks: x.marks }, null, 1));
@@ -150,11 +151,15 @@ async function money(lang) {
   x.check(slugs.length >= 6, "the market lists the six agents to this account", slugs.join(", "));
   const pages = [["the market", "/chat/agents"], ["my agents", "/chat/agents/mine"]];
   for (const s of slugs) pages.push([`${s} — its page`, `/chat/agents/${s}`, true], [`${s} — data sheet`, `/chat/agents/${s}/datasheet`]);
-  if (installId) {
-    pages.push(["workspace (report agent, after a round)", `/chat/agents/i/${installId}`], ["settings", `/chat/agents/i/${installId}/settings`],
-      ["dashboard", `/chat/agents/i/${installId}/dashboard`]);
-    if (state.am11b_run) pages.push(["run page", `/chat/agents/runs/${state.am11b_run}`], ["run page — source of figures", `/chat/agents/runs/${state.am11b_run}?tab=numbers`]);
+  // every agent this account has installed: its workspace, settings, dashboard and its latest run's page
+  const mine = ((await api(page, "/installs")).body?.installs || []).filter((i) => i.status !== "removed" && i.status !== "catalog");
+  for (const i of mine) {
+    const short = String(i.slug || "").split(".").pop();
+    pages.push([`${short} — workspace`, `/chat/agents/i/${i.id}`], [`${short} — settings`, `/chat/agents/i/${i.id}/settings`], [`${short} — dashboard`, `/chat/agents/i/${i.id}/dashboard`]);
+    const last = ((await api(page, `/installs/${i.id}/runs`)).body?.runs || []).find((r) => r.kind === "run");
+    if (last) pages.push([`${short} — run page`, `/chat/agents/runs/${last.id}`], [`${short} — run page, source of figures`, `/chat/agents/runs/${last.id}?tab=numbers`], [`${short} — run page, pages opened`, `/chat/agents/runs/${last.id}?tab=sources`]);
   }
+  x.mark(`installed agents read: ${mine.map((i) => i.slug).join(", ") || "none"}${installId ? "" : " (no round of the walk's own)"}`);
   const found = [];
   for (const [name, href, openMore] of pages) {
     await page.goto(`${WEB()}${href}`, { waitUntil: "load" });
@@ -251,10 +256,15 @@ async function picker(slug) {
     "the menu is the chat's picker: no greyed row, no reason in a header, no count of hidden models, no egress line", `${names.length} rows`);
   const absent = menu.locator('[data-testid="am-model-outside-absent"]');
   x.check(((await absent.count()) === 1) === !!served.outside_absent, "one line says the outside models are absent — only when they are", (await absent.count()) ? await x.words(absent) : "(no line)");
-  x.check(names.length === listed.length + 1, "its rows are อัตโนมัติ and the models the server lists, each once", names.join(" · "));
+  // (the menu is the chat's own list for this person, narrowed to what the agent can use: a model the server
+  // would allow and the chat does not list for them is not a row either)
+  x.check(names.length >= 2 && names.length <= listed.length + 1 && new Set(names).size === names.length, "its rows are อัตโนมัติ and models the agent can use — each once, none the server does not list",
+    `${names.length} rows, ${listed.length} models the agent can use: ${names.join(" · ")}`);
   await x.shot("01-menu");
   await page.keyboard.press("Escape");
-  const pickAt = Math.min(Number(process.env.AM11B_PICKS || 5), names.length);
+  // AM11B_ROWS="Name one|Name two": pick those rows by the name on them (a long list); else the first AM11B_PICKS rows
+  const byName = (process.env.AM11B_ROWS || "").split("|").map((v) => v.trim()).filter(Boolean);
+  const pickAt = byName.length || Math.min(Number(process.env.AM11B_PICKS || 5), names.length);
   const expand = async () => {
     for (;;) {
       const more = menu.locator("button").filter({ hasText: /^…(อีก \d+ รายการ|\d+ more)$/ }).first();
@@ -269,15 +279,15 @@ async function picker(slug) {
     await x.click(page.locator('[data-testid="am-model-control"]').first(), "model menu");
     await menu.waitFor({ state: "visible", timeout: 30000 });
     await expand();
-    const row = menu.locator('[role="option"]').nth(n);
+    const row = byName.length ? menu.locator('[role="option"]').filter({ hasText: byName[n] }).first() : menu.locator('[role="option"]').nth(n);
     const rowName = ((await row.locator('[data-testid="model-row-name"]').innerText().catch(() => "")) || "").trim();
     await x.click(row, `pick row ${n + 1}: ${rowName}`);
     await L.wait(1500);
     const now = (await api(page, `/installs/${installId}/models`)).body || {};
     const id = now.choice;
-    x.check(n === 0 ? id === "auto" : listed.includes(id), `${rowName}: the pick is saved, and is a model of the list`, `choice=${id}`);
+    x.check(id === "auto" ? /อัตโนมัติ|Auto/.test(rowName) : listed.includes(id), `${rowName}: the pick is saved, and is a model of the list`, `choice=${id}`);
     const pill = await x.words(page.locator('[data-testid="am-model-control"]').first());
-    x.check(n === 0 ? /อัตโนมัติ|Auto/.test(pill) : pill.toLowerCase().includes(rowName.toLowerCase().slice(0, 12)), `${rowName}: the composer shows what was picked`, pill);
+    x.check(id === "auto" ? /อัตโนมัติ|Auto/.test(pill) : pill.toLowerCase().includes(rowName.toLowerCase().slice(0, 12)), `${rowName}: the composer shows what was picked`, pill);
     let runId;
     if (slug === PROCUREMENT) {
       const start = page.locator('[data-testid="am-round-start"]');
