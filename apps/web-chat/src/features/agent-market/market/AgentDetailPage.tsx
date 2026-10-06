@@ -18,7 +18,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { formatBytes } from "@/lib/fileUtil";
 
 import { AmError, amApi, errorMessage } from "../api";
-import { useAmT, type AmKey } from "../i18n";
+import { useAmLocale, useAmT, type AmKey } from "../i18n";
 import { extensionOf } from "../format";
 import type { AmFile, Artifact, CatalogItem, InstallRow, Manifest } from "../types";
 import { QuickInstall } from "../install/QuickInstall";
@@ -47,8 +47,12 @@ export function sampleFilesFor(files: AmFile[], names: string[] | undefined): Am
   return files.filter((f) => want.has(f.name));
 }
 
+// what a package speaks when its manifest does not say
+const PACKAGE_LANGUAGES = ["th"];
+
 function Detail({ slug }: { slug: string }) {
   const t = useAmT();
+  const locale = useAmLocale();
   const snap = useAgentMarket();
   const [item, setItem] = useState<CatalogItem | null>(null);
   const [installed, setInstalled] = useState<InstallRow | null>(null);
@@ -96,6 +100,8 @@ function Detail({ slug }: { slug: string }) {
   const sampleArts = sample?.artifacts ?? [];
   const usedSamples = new Set<string>();
 
+  // AM11: does the package itself speak the screen's language (its questions, its documents)?
+  const speaksScreen = (m.languages ?? PACKAGE_LANGUAGES).includes(locale);
   return (
     <PageShell width="max-w-6xl">
       <BackLink href="/chat/agents">{t("detail.back")}</BackLink>
@@ -109,6 +115,12 @@ function Detail({ slug }: { slug: string }) {
             {formats ? ` · ${formats}` : null}
           </p>
           <ScopeLine scope={item.scope ?? m.scope} jurisdiction={item.jurisdiction ?? m.jurisdiction} className="mt-0.5" />
+          {/* AM11: on a screen in a language the package does not speak yet, say so before the person installs */}
+          {!speaksScreen ? (
+            <p className="mt-0.5 text-xs text-text-muted" data-testid="am-agent-language">
+              {t("lang.agentThai")}
+            </p>
+          ) : null}
           {m.summary ? <p className="mt-2 max-w-3xl text-sm leading-relaxed text-text-secondary">{m.summary}</p> : null}
         </div>
       </div>

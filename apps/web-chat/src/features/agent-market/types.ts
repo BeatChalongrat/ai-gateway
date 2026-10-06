@@ -18,6 +18,9 @@ export interface ManifestOutput {
 }
 
 export interface Manifest {
+  /** AM11: the languages the package itself speaks — its questions, its figures' labels, its documents
+   *  (none said = Thai only). The screen around an agent follows the app's language either way. */
+  languages?: string[];
   schema_version?: string;
   id?: string;
   version?: string;

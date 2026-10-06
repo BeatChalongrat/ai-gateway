@@ -698,6 +698,7 @@ const thBase = {
   "time.days": "{n} วัน",
   "lang.th": "ไทย",
   "lang.thOnly": "ไทย — เอกสารของ agent มีภาษาไทยอย่างเดียวในตอนนี้",
+  "lang.agentThai": "คำถามของ agent ป้ายของตัวเลข และเอกสารที่ agent ทำ เป็นภาษาไทย",
 
   // run detail
   "run.back": "กลับห้องทำงาน",
@@ -1488,6 +1489,7 @@ const enBase = {
   "time.days": "{n} d",
   "lang.th": "Thai",
   "lang.thOnly": "Thai — the agent's documents are available in Thai only for now",
+  "lang.agentThai": "For now this agent's own questions, the labels of its figures and the documents it makes are in Thai. Everything around them is in English.",
 
   // run detail
   "run.back": "Back to workspace",
