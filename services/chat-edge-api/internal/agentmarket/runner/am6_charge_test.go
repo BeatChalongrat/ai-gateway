@@ -201,11 +201,13 @@ func TestARoundThatDoesNotTieIsCompletedAndCharged(t *testing.T) {
 	if s, _ := c["files"].(string); !strings.Contains(s, "ร่าง") {
 		t.Fatalf("the draft is there and says so: %v", c["files"])
 	}
-	if s, _ := c["charged"].(string); c["credits"].(float64) != 1134.58 || !strings.Contains(s, "1,134.58 เครดิต") || !strings.Contains(s, "ส่งไฟล์ให้แล้ว") {
-		t.Fatalf("what was charged, and why: %v", c)
-	}
+	// AM11b: the message says what the round came to and where its files are — not what it was charged.
+	// A person using an agent sees no credits; the ledger (above) has them, and the admin's Spend page.
 	text, _ := p["text"].(string)
-	for _, part := range []string{"title", "what", "next", "files", "charged"} {
+	if _, said := c["charged"]; said || c["credits"] != nil || strings.Contains(text, "เครดิต") {
+		t.Fatalf("the message names what was charged: %v", p)
+	}
+	for _, part := range []string{"title", "what", "next", "files"} {
 		if !strings.Contains(text, c[part].(string)) {
 			t.Fatalf("the message's text carries %s: %q", part, text)
 		}
