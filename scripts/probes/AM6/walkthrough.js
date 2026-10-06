@@ -671,7 +671,8 @@ async function installAnother(x, slug, cardText) {
   x.check(await card.count(), `“${cardText}” is an agent of the market (installed already)`);
   await x.shot("01-market");
   await page.goto(`${WEB()}/chat/agents/install/${slug}`, { waitUntil: "load" });
-  const again = page.getByRole("button", { name: "ติดตั้งอีกชุด" });
+  // AM11: the button reads in the screen's language
+  const again = page.getByRole("button", { name: /^(ติดตั้งอีกชุด|Install another copy)$/ });
   await again.waitFor({ state: "visible", timeout: 60000 });
   await L.wait(800);
   await x.shot("02-already-installed");

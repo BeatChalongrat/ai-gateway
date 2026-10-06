@@ -31,7 +31,8 @@ const ADMIN = process.env.AM10_ADMIN || (LIVE ? L.T.front.admin : "http://localh
 const BACKEND_BROWSER = LIVE ? L.T.front.gw : "http://localhost:18081";
 const PG = L.T.containers.pg;
 const BACKEND = L.T.containers.backend;
-const OUT = path.join(__dirname, "results", "admin", L.TARGET);
+// AM11: a later card's walk keeps its own results (AM10_ADMIN_OUT) and leaves this card's as they are
+const OUT = process.env.AM10_ADMIN_OUT || path.join(__dirname, "results", "admin", L.TARGET);
 fs.mkdirSync(OUT, { recursive: true });
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const checks = [];
@@ -167,7 +168,13 @@ async function language() {
     const sections = ["access", "departments", "spend", "models", "catalog", "problems", "runs", "mail"].map((sec) => `/agent-market?section=${sec}`);
     const pagesToRead = [...hrefs.filter((h) => h !== "/agent-market"), ...sections];
     check(pagesToRead.length >= 20, "the admin app's pages are the sidebar's links and the Agent Market page's sections", `${hrefs.length} links + ${sections.length} sections`);
-    const report = { found, pages: pagesToRead, th: {}, en: {}, notOpened: [] };
+    const report = { found, pages: pagesToRead, th: {}, en: {}, notOpened: [], rawCodes: { th: {}, en: {} } };
+    // AM11: the codes the gateway stores are never what a page shows — in either language. English
+    // codes on an English screen are invisible to the reader above, so they are looked for by name:
+    // a piece of text that is exactly a stored code, anywhere a person reads.
+    const STORED = ["critical", "warning", "info", "low", "pending", "delivered", "failed", "log_only", "grouped", "hold", "maintenance", "identity", "financial",
+      "credential", "secret", "pii", "network", "content_policy", "regex", "keyword_list", "semantic", "succeeded", "queued", "running", "awaiting_input", "cancelled"];
+    const WITH_CODES = /alerts\/events|dlp-coverage|dlp-detectors|policies|section=problems|^\/$/;
     for (const lang of ["en", "th"]) {
       await page.evaluate((l) => window.localStorage.setItem("sran-admin-locale", l), lang);
       for (const href of pagesToRead) {
@@ -178,7 +185,24 @@ async function language() {
         }
         await page.waitForTimeout(1800);
         report[lang][href] = await R.leaks(page, lang, { notApps: ADMIN_DATA, only: ADMIN_WORDS, keep: KEEP_ADMIN.source });
+        if (WITH_CODES.test(href)) {
+          const raw = await page.evaluate((stored) => {
+            const out = [];
+            const walker = document.createTreeWalker(document.querySelector("main") || document.body, NodeFilter.SHOW_TEXT);
+            for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+              const el = n.parentElement;
+              if (!el || el.closest("script, style, code, pre, input, textarea")) continue;
+              const t = n.textContent.trim();
+              if (stored.includes(t)) out.push(t);
+            }
+            return out;
+          }, STORED);
+          report.rawCodes[lang][href] = raw;
+          await page.screenshot({ path: path.join(OUT, `codes-${lang}-${href.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "home"}.png`), fullPage: true });
+        }
       }
+      const raw = Object.entries(report.rawCodes[lang]).flatMap(([href, list]) => list.map((c) => `${c} @ ${href}`));
+      check(raw.length === 0, `${lang}: no stored code is shown as stored (${Object.keys(report.rawCodes[lang]).length} pages that show codes)`, raw.slice(0, 8).join(" · "));
       await page.goto(`${ADMIN}/agent-market?section=catalog`, { waitUntil: "load" });
       await page.waitForTimeout(1500);
       await page.screenshot({ path: path.join(OUT, `08-language-${lang}.png`), fullPage: true });
