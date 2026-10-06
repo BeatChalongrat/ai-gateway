@@ -158,6 +158,28 @@ _NEXT = {
 # shown), so nothing has to be pressed; with a way back the page offers it,
 # without one it says what to do with this tab. The desktop app opens its
 # Connectors page when the link reaches it.
+# Why a flow did not connect, as the page for the web says it. The codes are the callback's own
+# coarse reasons (never a provider's text); one this table does not know says nothing more than the
+# page already has.
+_WHY = {
+    "th": {
+        "provider_denied": "คุณกดไม่อนุญาตในหน้าของผู้ให้บริการ",
+        "not_configured": "ผู้ดูแลระบบยังไม่ได้ตั้งค่าตัวเชื่อมต่อนี้",
+        "unknown_connector": "ระบบไม่มีตัวเชื่อมต่อนี้",
+        "invalid_state": "ลิงก์นี้หมดอายุหรือถูกใช้ไปแล้ว เริ่มเชื่อมต่อใหม่จาก SRAN Chat",
+        "missing_code": "ผู้ให้บริการไม่ได้ส่งการยืนยันกลับมา",
+        "exchange_failed": "ยืนยันกับผู้ให้บริการไม่สำเร็จ ลองอีกครั้งในอีกสักครู่",
+    },
+    "en": {
+        "provider_denied": "Access was not allowed on the provider's page.",
+        "not_configured": "An admin has not set this connector up yet.",
+        "unknown_connector": "The system has no such connector.",
+        "invalid_state": "This link has expired or was already used. Start connecting again from SRAN Chat.",
+        "missing_code": "The provider sent no confirmation back.",
+        "exchange_failed": "Confirming with the provider did not work. Try again in a moment.",
+    },
+}
+
 _SAID = {
     "th": {
         "title": {"ok": "เชื่อมต่อแล้ว", "error": "ยังไม่ได้เชื่อมต่อ"},
@@ -268,8 +290,10 @@ def _return_response(
                 body += f'<p><a class="go" href="{escape(return_to, quote=True)}">{said["back"]}</a></p>\n'
             else:
                 body += f'<p>{said["close"]}</p>\n'
-            if reason:
-                body += f"<p><small>({escape(reason)})</small></p>\n"
+            # why, in words: the coarse reason is a code, and a code is not what a person reads
+            why = _WHY[lang].get(reason or "")
+            if why:
+                body += f"<p><small>{why}</small></p>\n"
         else:
             body += f'<p><a href="{escape(url, quote=True)}">{said["open"]}</a></p>\n'
         return HTMLResponse(_RETURN_PAGE.format(html_lang=lang, refresh=refresh, title=title, body=body,

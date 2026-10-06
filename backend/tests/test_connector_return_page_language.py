@@ -175,3 +175,20 @@ class TestAStandInForTheProvider:
         assert svc.endpoint("gmail", "token_url") == "http://stand-in:8099/token"
         # another provider's connectors are untouched
         assert "stand-in" not in svc.endpoint("github", "authorize_url")
+
+
+def test_a_page_for_the_web_says_why_in_words_never_the_reason_code():
+    """The callback's reason is a code. A page written for a person says it in that person's
+    language, and a code the page has no words for adds nothing."""
+    from app.api.routes.portal_connectors import _WHY, _return_response
+
+    reasons = ("provider_denied", "not_configured", "unknown_connector", "invalid_state", "missing_code", "exchange_failed")
+    assert set(_WHY["th"]) == set(_WHY["en"]) == set(reasons)
+    for lang in ("th", "en"):
+        for reason in reasons:
+            html = _return_response("web", "mail", "error", reason, lang=lang, return_to="").body.decode("utf-8")
+            assert reason not in html, (lang, reason)
+            assert _WHY[lang][reason] in html.replace("&#x27;", "'"), (lang, reason)
+        html = _return_response("web", "mail", "error", "some_new_reason", lang=lang, return_to="").body.decode("utf-8")
+        assert "some_new_reason" not in html and "<small>" not in html
+    assert not any(ord(ch) > 0x0E00 and ord(ch) < 0x0E80 for text in _WHY["en"].values() for ch in text)
