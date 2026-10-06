@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/Button";
 import { tAm, useAmT, type AmT } from "../i18n";
 import type { Manifest } from "../types";
 import { EstimateLine } from "./Estimate";
-import { UploadInfo } from "./UploadInfo";
 
 /** "ส่ง<the first required input>มาได้เลย" / "To start, send: <…>" — the label is the
  *  agent's own (its manifest); the sentence around it is the dictionary's. A
@@ -78,7 +77,8 @@ export function EmptyDrop({
           {`${t("common.optional")}: ${optional.map((i) => i.label).join(" · ")}`}
         </p>
       ) : null}
-      <UploadInfo manifest={manifest} center />
+      {/* AM11b: how long files are kept and where is on the agent's page under "รายละเอียด" and on the settings
+          page — not in the place a person drops a file */}
     </section>
   );
 }

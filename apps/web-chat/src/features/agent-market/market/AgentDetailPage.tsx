@@ -136,7 +136,13 @@ function Detail({ slug }: { slug: string }) {
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex min-w-0 flex-col gap-4 lg:order-1">
           <Card>
-            <h2 className="text-sm font-semibold text-text-primary">{t("guide.needs")}</h2>
+            {/* AM11b: an agent that works from what a person types has no file to describe — it says what to tell it */}
+            <h2 className="text-sm font-semibold text-text-primary">{m.starts_from === "request" ? t("guide.needsRequest") : t("guide.needs")}</h2>
+            {m.starts_from === "request" ? (
+              <p className="mt-1.5 text-sm leading-relaxed text-text-secondary" data-testid="am-guide-request">
+                {t("web.empty.body")}
+              </p>
+            ) : null}
             <ul className="mt-2.5 flex flex-col gap-4" data-testid="am-guide-inputs">
               {(m.inputs ?? []).map((i) => {
                 const gi = g.inputs?.[i.role];

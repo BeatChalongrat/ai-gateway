@@ -43,7 +43,6 @@ import { ModelControl, useAgentModels } from "./ModelControl";
 import { hasFinishedRound, hasOwnRound, latestRound, roundUnderway } from "./rounds";
 import { ThreadScroller } from "./ThreadScroller";
 import { ThreadView } from "./ThreadView";
-import { UploadInfo } from "./UploadInfo";
 import { useThread } from "./useThread";
 import { takesTemplates } from "../template/mapping";
 import { acceptFromManifest, DEFAULT_MAX_MB, FORM_ACCEPT } from "./useUploads";
