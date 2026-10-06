@@ -196,7 +196,8 @@ async function closed() {
   await L.wait(2500);
   const thread = await x.words(page.locator('[data-testid="am-thread"]'));
   x.check(!run && (await runsOf(page, installId)).length === before, "a request typed anyway starts no run", `${(await runsOf(page, installId)).length} runs`);
-  x.check(/ยังค้นหาไม่ได้/.test(thread) && /ยังไม่มีการคิดเครดิต/.test(thread), "the thread answers with the reason, in words, and says nothing was charged", thread.slice(-260));
+  // AM11b: the reason, and who can change it — nothing of credits (a person using an agent sees none)
+  x.check(/ยังค้นหาไม่ได้/.test(thread) && !/เครดิต/.test(thread), "the thread answers with the reason, in words, and names no credits", thread.slice(-260));
   x.check(!/web_closed|agent_closed|organisation_closed|Error|Traceback|undefined/.test(thread), "no code and no trace is shown", "");
   await x.shot("02-closed-notice");
   await done(x, "closed", { installId, web });
