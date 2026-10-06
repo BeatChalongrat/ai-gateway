@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import { useT, type DictKey } from "../../lib/i18n";
+import { DETECTION_TYPE, DLP_CATEGORY, codeWord } from "../../lib/codeWords";
 
 const BASE = "/admin/dlp/custom-detectors";
 
@@ -22,17 +23,9 @@ const SEMANTIC_ENTITIES = [
 type DetType = (typeof TYPES)[number];
 interface TestCase { input: string; expected_match: boolean; }
 
-// Human-readable display labels (option `value`s stay the raw API values).
-//
-// NOT localized on purpose: these are the DLP taxonomy — the category and
-// detection-type identifiers an operator also sees in policy config, audit
-// exports and support tickets. Translating them would make the console and
-// the backend disagree about what a detector is.
-const CATEGORY_LABELS: Record<string, string> = {
-  pii: "PII", identity: "Identity", financial: "Financial", credential: "Credential",
-  secret: "Secret", network: "Network", content_policy: "Content policy",
-};
-const TYPE_LABELS: Record<DetType, string> = { regex: "Regex", keyword_list: "Keywords", semantic: "Semantic" };
+// A detector's category and the way it detects are shown as words, the same
+// ones every page uses (AM11, lib/codeWords.ts); an option's `value` stays the
+// stored code, which is what policy config, audit exports and the API carry.
 
 // Severity and match-action ARE plain UI vocabulary, so they translate.
 const SEVERITY_LABELS: Record<string, DictKey> = {
@@ -220,7 +213,7 @@ export default function CustomDetectorForm({
           <div style={{ flex: 1 }}>
             <label style={lbl}>{t("ui.detector.category")}</label>
             <select style={ring("category", sel)} {...fx("category")} value={category} onChange={(e) => setCategory(e.target.value)}>
-              {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c] ?? cap(c)}</option>)}
+              {CATEGORIES.map((c) => <option key={c} value={c}>{codeWord(DLP_CATEGORY, c, t)}</option>)}
             </select>
           </div>
           <div style={{ flex: 1 }}>
@@ -260,7 +253,7 @@ export default function CustomDetectorForm({
                 style={segBtn(detType === type, i === 0, editing)}
                 onClick={() => { if (!editing) setDetType(type); }}
               >
-                {TYPE_LABELS[type]}
+                {codeWord(DETECTION_TYPE, type, t)}
               </button>
             ))}
           </div>

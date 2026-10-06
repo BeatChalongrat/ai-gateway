@@ -234,6 +234,18 @@ export const en = {
   "obs.alerts.detail.eventId": "Event ID",
   "obs.alerts.detail.ruleId": "Rule ID",
   "obs.alerts.detail.webhookUrl": "Webhook URL",
+  // AM11: the stored codes, as words (lib/codeWords.ts)
+  "obs.alerts.severity.critical": "Critical",
+  "obs.alerts.severity.warning": "Warning",
+  "obs.alerts.severity.info": "Information",
+  "obs.alerts.severity.low": "Low",
+  "obs.alerts.delivery.pending": "Sending",
+  "obs.alerts.delivery.delivered": "Sent",
+  "obs.alerts.delivery.failed": "Could not be sent",
+  "obs.alerts.delivery.log_only": "Recorded, not sent",
+  "obs.alerts.delivery.grouped": "Not sent again (same incident)",
+  "obs.alerts.delivery.hold": "Waiting before sending",
+  "obs.alerts.delivery.maintenance": "Not sent (maintenance window)",
 
   // ═════════════════════════════════════════════════════════
   // /ai-review
@@ -567,6 +579,18 @@ export const th: Record<keyof typeof en, string> = {
   "obs.alerts.detail.eventId": "รหัสเหตุการณ์",
   "obs.alerts.detail.ruleId": "รหัสกฎ",
   "obs.alerts.detail.webhookUrl": "URL ของเว็บฮุก",
+  // AM11: the stored codes, as words (lib/codeWords.ts)
+  "obs.alerts.severity.critical": "วิกฤต",
+  "obs.alerts.severity.warning": "เตือน",
+  "obs.alerts.severity.info": "แจ้งให้ทราบ",
+  "obs.alerts.severity.low": "ต่ำ",
+  "obs.alerts.delivery.pending": "กำลังส่ง",
+  "obs.alerts.delivery.delivered": "ส่งแล้ว",
+  "obs.alerts.delivery.failed": "ส่งไม่สำเร็จ",
+  "obs.alerts.delivery.log_only": "บันทึกไว้ ไม่ได้ส่ง",
+  "obs.alerts.delivery.grouped": "ไม่ส่งซ้ำ (เหตุการณ์เดิม)",
+  "obs.alerts.delivery.hold": "รอดูก่อนส่ง",
+  "obs.alerts.delivery.maintenance": "ไม่ส่ง (ช่วงปิดปรับปรุง)",
 
   // ═════════════════════════════════════════════════════════
   // /ai-review

@@ -11,6 +11,7 @@ import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import AgentMarketPointer from "../../components/AgentMarketPointer";
 import { useT, type DictKey } from "../../lib/i18n";
+import { DLP_CATEGORY, codeWord, profileName } from "../../lib/codeWords";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -57,13 +58,14 @@ const CAT_PILL: Record<string, { color: string; bg: string }> = {
 };
 
 function CatPill({ category }: { category: string }) {
+  const t = useT();
   const s = CAT_PILL[category] || { color: C.textSecondary, bg: "rgba(100,116,139,0.08)" };
   return (
     <span style={{
       display: "inline-block", padding: "2px 10px",
       fontSize: "10.5px", fontWeight: 700, color: s.color, background: s.bg,
       borderRadius: 100, textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.6,
-    }}>{category}</span>
+    }}>{codeWord(DLP_CATEGORY, category, t)}</span>
   );
 }
 
@@ -346,7 +348,7 @@ function ProfCard({ profile, idx }: { profile: Profile; idx: number }) {
       onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "none"; }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--border-default)" }}>
-        <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: C.textPrimary }}>{profile.name}</h3>
+        <h3 style={{ fontSize: "18px", fontWeight: 700, margin: 0, color: C.textPrimary }}>{profileName(profile, t)}</h3>
         <span style={{
           display: "inline-block", padding: "2px 10px",
           fontSize: "11px", fontWeight: 700, color: a.color, background: a.bg,
@@ -432,7 +434,7 @@ function DetectorsTab() {
     (defaultProfile?.category_actions[det.category] as Action) ?? "allow";
 
   const filtered = search
-    ? detectorData.items.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()) || d.category.toLowerCase().includes(search.toLowerCase()))
+    ? detectorData.items.filter((d) => d.name.toLowerCase().includes(search.toLowerCase()) || d.category.toLowerCase().includes(search.toLowerCase()) || codeWord(DLP_CATEGORY, d.category, t).toLowerCase().includes(search.toLowerCase()))
     : detectorData.items;
 
   return (

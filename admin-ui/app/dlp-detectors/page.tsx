@@ -14,6 +14,7 @@ import { Icon } from "../../components/ui/Icon";
 import CustomDetectorForm, { DetectorInitial } from "../../components/dlp/CustomDetectorForm";
 import AuditLogTimeline, { AuditEntry } from "../../components/dlp/AuditLogTimeline";
 import { useT, type DictKey } from "../../lib/i18n";
+import { DETECTION_TYPE, DLP_CATEGORY, codeWord } from "../../lib/codeWords";
 
 const BASE = "/admin/dlp/custom-detectors";
 
@@ -210,8 +211,8 @@ export default function DlpDetectorsPage() {
                   <tr key={d.id} style={{ borderTop: "1px solid var(--border-default)", cursor: "pointer" }}
                     onClick={() => openDetail(d)}>
                     <td style={td}>{d.name}</td>
-                    <td style={td}>{d.category}</td>
-                    <td style={td}>{d.detection_type}</td>
+                    <td style={td}>{codeWord(DLP_CATEGORY, d.category, t)}</td>
+                    <td style={td}>{codeWord(DETECTION_TYPE, d.detection_type, t)}</td>
                     <td style={td}>
                       <span className={`sran-badge ${STATUS_BADGE[d.status] ?? "sran-badge-neutral"}`}>
                         {STATUS_LABEL[d.status] ? t(STATUS_LABEL[d.status]) : d.status}

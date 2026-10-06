@@ -65,7 +65,7 @@ export const th: Record<keyof typeof en, string> = {
   "nav.search": "การค้นหา",
   "nav.tenants": "องค์กร",
   "nav.projects": "โปรเจกต์",
-  "nav.apiKeys": "API Key",
+  "nav.apiKeys": "คีย์ API",
   "nav.portalUsers": "ผู้ใช้",
   "nav.portalSettings": "ตั้งค่า",
   "nav.tokenPacks": "แพ็กเกจโทเคน",

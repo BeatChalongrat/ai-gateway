@@ -28,6 +28,23 @@ export const en = {
   "infra.priority.medium": "medium",
   "infra.priority.low": "low",
 
+  // AM11: a detector's category, as a word (lib/codeWords.ts)
+  "infra.category.identity": "Identity numbers",
+  "infra.category.financial": "Financial",
+  "infra.category.credential": "Credentials",
+  "infra.category.secret": "Secrets",
+  "infra.category.pii": "Personal data",
+  "infra.category.network": "Network addresses",
+  "infra.category.content_policy": "Content policy",
+  // AM11: the three built-in policy profiles, named by this app (a profile someone renamed keeps its name)
+  "infra.profile.default": "Default",
+  "infra.profile.strict": "Strict",
+  "infra.profile.media_gen": "Media generation",
+  // how a custom detector detects
+  "infra.detection.regex": "Pattern (regex)",
+  "infra.detection.keyword_list": "Keyword list",
+  "infra.detection.semantic": "By meaning",
+
   "infra.dlp.totalDetectors": "Total detectors",
   "infra.dlp.detectorCount": "{n} detectors",
   "infra.dlp.detectorCountOne": "1 detector",
@@ -474,6 +491,22 @@ export const th: Record<keyof typeof en, string> = {
   "infra.priority.medium": "ปานกลาง",
   "infra.priority.low": "ไม่เร่งด่วน",
 
+  // AM11: a detector's category, as a word (lib/codeWords.ts)
+  "infra.category.identity": "เลขประจำตัว",
+  "infra.category.financial": "การเงิน",
+  "infra.category.credential": "ข้อมูลเข้าระบบ",
+  "infra.category.secret": "รหัสลับ",
+  "infra.category.pii": "ข้อมูลส่วนบุคคล",
+  "infra.category.network": "ที่อยู่เครือข่าย",
+  "infra.category.content_policy": "นโยบายเนื้อหา",
+  "infra.profile.default": "ค่าตั้งต้น",
+  "infra.profile.strict": "เข้มงวด",
+  "infra.profile.media_gen": "สร้างสื่อ",
+  // how a custom detector detects
+  "infra.detection.regex": "รูปแบบ (regex)",
+  "infra.detection.keyword_list": "รายการคำ",
+  "infra.detection.semantic": "ตามความหมาย",
+
   "infra.dlp.totalDetectors": "ตัวตรวจจับทั้งหมด",
   "infra.dlp.detectorCount": "ตัวตรวจจับ {n} รายการ",
   "infra.dlp.detectorCountOne": "ตัวตรวจจับ 1 รายการ",
@@ -576,10 +609,10 @@ export const th: Record<keyof typeof en, string> = {
   // ── Media destinations (FIX67) ────────────────────────────
   "infra.media.title": "ปลายทางสื่อ",
   "infra.media.subtitle":
-    "ลำดับ fallback สำหรับสร้างรูป/วิดีโอ (provider:model คั่นด้วยจุลภาค) สูงสุด 2 ชั้น คนละเจ้า และห้ามชั้นสองแพงกว่า",
+    "ลำดับสายสำรองสำหรับสร้างรูป/วิดีโอ (ผู้ให้บริการ:โมเดล คั่นด้วยจุลภาค) สูงสุด 2 ชั้น คนละเจ้า และห้ามชั้นสองแพงกว่า",
   "infra.media.image": "ลำดับรูป",
   "infra.media.video": "ลำดับวิดีโอ",
-  "infra.media.allowMock": "อนุญาตผู้ให้บริการทดสอบ 'mock' (ปิดใน production)",
+  "infra.media.allowMock": "อนุญาตผู้ให้บริการทดสอบ 'mock' (ปิดในระบบที่ใช้งานจริง)",
   "infra.media.save": "บันทึก",
   "infra.media.saved": "บันทึกแล้ว",
   "infra.media.saveFailed": "บันทึกไม่สำเร็จ",
@@ -594,7 +627,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.searchPlaceholder": "ค้นหาโมเดล…",
   "infra.models.stream": "สตรีม",
   "infra.models.showInChat": "แชท",
-  "infra.models.inactive": "ปิดอยู่ — เรียกผ่าน API ไม่ได้ (discovery sync ปิดไว้)",
+  "infra.models.inactive": "ปิดอยู่ — เรียกผ่าน API ไม่ได้ (การอัปเดตรายการโมเดลอัตโนมัติปิดโมเดลนี้ไว้)",
   "infra.models.showInChatOn": "แสดงในตัวเลือกโมเดลของแชท — คลิกเพื่อซ่อน",
   "infra.models.showInChatOff": "ซ่อนจากตัวเลือกโมเดลของแชท — คลิกเพื่อแสดง",
   "infra.models.showInChatHelp": "แสดงในตัวเลือกโมเดลของแชท ({n} ตัวที่เปิดอยู่) ไม่เกี่ยวกับสิทธิ์ใช้ผ่าน API",
@@ -608,7 +641,7 @@ export const th: Record<keyof typeof en, string> = {
   "infra.models.reasoningOff":
     "โมเดลนี้จะไม่แสดงกระบวนการคิด แม้ผู้ให้บริการจะส่งมาก็ตาม คลิกเพื่อเปิด",
   "infra.models.reasoningHelp":
-    "กำหนดว่าเกตเวย์ถือว่าโมเดลนี้คิดเป็นหรือไม่ การแก้ค่านี้จะทำให้แถวนี้กลายเป็น manual override และ discovery sync จะหยุดอัปเดตให้",
+    "กำหนดว่าเกตเวย์ถือว่าโมเดลนี้คิดเป็นหรือไม่ การแก้ค่านี้จะทำให้แถวนี้เป็นค่าที่ตั้งเอง และการอัปเดตรายการโมเดลอัตโนมัติจะไม่แก้แถวนี้อีก",
   "infra.models.reasoningSaveFailed": "บันทึกการตั้งค่าการคิดไม่สำเร็จ",
   "infra.models.capToggle": "ความสามารถ: {cap}",
   "infra.models.capOn": "{cap}: เปิด — เกตเวย์เสนอความสามารถนี้ให้ไคลเอนต์ คลิกเพื่อปิด",

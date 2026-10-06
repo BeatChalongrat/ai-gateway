@@ -8,6 +8,9 @@ import { Icon } from "../../../components/ui/Icon";
 import Modal from "../../../components/ui/Modal";
 import { useApi } from "../../../lib/useApi";
 import { useT } from "../../../lib/i18n";
+import { ALERT_DELIVERY, ALERT_SEVERITY, codeWord } from "../../../lib/codeWords";
+
+type Translate = ReturnType<typeof useT>;
 
 // ---------------------------------------------------------------------------
 // Types — derived from backend AlertEventResponse (schemas/admin.py:233).
@@ -32,23 +35,24 @@ interface AlertEventListResponse {
   items: AlertEvent[];
 }
 
-function severityBadge(severity: string) {
+// AM11: the badge says the word for the stored code (lib/codeWords.ts); the
+// code itself stays what the page filters and searches by.
+function severityBadge(severity: string, t: Translate) {
   const variant =
     severity === "critical" ? "error" :
     severity === "warning" ? "warning" :
     severity === "info" ? "info" :
     "neutral";
-  return <Badge variant={variant}>{severity}</Badge>;
+  return <Badge variant={variant}>{codeWord(ALERT_SEVERITY, severity, t)}</Badge>;
 }
 
-function deliveryBadge(status: string) {
+function deliveryBadge(status: string, t: Translate) {
   const variant =
     status === "delivered" ? "success" :
     status === "failed" ? "error" :
     status === "pending" ? "warning" :
-    status === "log_only" ? "neutral" :
     "neutral";
-  return <Badge variant={variant}>{status}</Badge>;
+  return <Badge variant={variant}>{codeWord(ALERT_DELIVERY, status, t)}</Badge>;
 }
 
 function truncate(s: string, max: number): string {
@@ -79,7 +83,6 @@ function FilterPill({
         color: active ? "var(--color-status-info)" : "var(--color-text-secondary)",
         cursor: "pointer",
         fontFamily: "inherit",
-        textTransform: "capitalize",
         transition: "background 120ms, border-color 120ms",
       }}
     >
@@ -93,9 +96,9 @@ function formatDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString();
 }
 
-// Column headers are translated; the VALUES (alert_type, severity,
-// delivery_status, tenant id) stay verbatim — they are identifiers an
-// operator quotes in a ticket.
+// Column headers are translated. An alert's type and the tenant id stay
+// verbatim — identifiers an operator quotes in a ticket. Its severity and
+// what became of it are states, and read as words (AM11).
 function useColumns(): Column<AlertEvent>[] {
   const t = useT();
   return useMemo(
@@ -108,7 +111,7 @@ function useColumns(): Column<AlertEvent>[] {
         ),
       },
       { key: "alert_type", header: t("obs.alerts.col.alertType"), render: (r) => <code style={{ fontSize: "var(--font-size-xs)" }}>{r.alert_type}</code> },
-      { key: "severity", header: t("obs.alerts.col.severity"), render: (r) => severityBadge(r.severity) },
+      { key: "severity", header: t("obs.alerts.col.severity"), render: (r) => severityBadge(r.severity, t) },
       {
         key: "message",
         header: t("obs.alerts.col.message"),
@@ -116,7 +119,7 @@ function useColumns(): Column<AlertEvent>[] {
           <span style={{ fontSize: "var(--font-size-sm)" }}>{truncate(r.message, 60)}</span>
         ),
       },
-      { key: "delivery_status", header: t("obs.alerts.col.delivery"), render: (r) => deliveryBadge(r.delivery_status) },
+      { key: "delivery_status", header: t("obs.alerts.col.delivery"), render: (r) => deliveryBadge(r.delivery_status, t) },
       {
         key: "tenant_id",
         header: t("field.tenant"),
@@ -172,7 +175,7 @@ export default function AlertEventsPage() {
               <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>{t("obs.alerts.col.severity")}</span>
               <FilterPill active={sevFilter === ""} onClick={() => setSevFilter("")}>{t("field.all")}</FilterPill>
               {severities.map((s) => (
-                <FilterPill key={s} active={sevFilter === s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}>{s}</FilterPill>
+                <FilterPill key={s} active={sevFilter === s} onClick={() => setSevFilter(sevFilter === s ? "" : s)}>{codeWord(ALERT_SEVERITY, s, t)}</FilterPill>
               ))}
             </div>
           )}
@@ -181,7 +184,7 @@ export default function AlertEventsPage() {
               <span style={{ fontSize: "var(--font-size-xs)", color: "var(--color-text-muted)", marginRight: "0.25rem" }}>{t("obs.alerts.col.delivery")}</span>
               <FilterPill active={statusFilter === ""} onClick={() => setStatusFilter("")}>{t("field.all")}</FilterPill>
               {statuses.map((s) => (
-                <FilterPill key={s} active={statusFilter === s} onClick={() => setStatusFilter(statusFilter === s ? "" : s)}>{s}</FilterPill>
+                <FilterPill key={s} active={statusFilter === s} onClick={() => setStatusFilter(statusFilter === s ? "" : s)}>{codeWord(ALERT_DELIVERY, s, t)}</FilterPill>
               ))}
             </div>
           )}
@@ -230,11 +233,11 @@ export default function AlertEventsPage() {
             </div>
             <div className="sran-detail-field">
               <div className="sran-detail-label">{t("obs.alerts.col.severity")}</div>
-              <div className="sran-detail-value">{severityBadge(selected.severity)}</div>
+              <div className="sran-detail-value">{severityBadge(selected.severity, t)}</div>
             </div>
             <div className="sran-detail-field">
               <div className="sran-detail-label">{t("obs.alerts.col.delivery")}</div>
-              <div className="sran-detail-value">{deliveryBadge(selected.delivery_status)}</div>
+              <div className="sran-detail-value">{deliveryBadge(selected.delivery_status, t)}</div>
             </div>
             <div className="sran-detail-field">
               <div className="sran-detail-label">{t("obs.alerts.col.firedAt")}</div>

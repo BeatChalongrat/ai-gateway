@@ -7,6 +7,7 @@ import { api, ApiError } from "../../lib/api";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Icon } from "../../components/ui/Icon";
 import { useT, type DictKey } from "../../lib/i18n";
+import { DLP_CATEGORY, codeWord } from "../../lib/codeWords";
 
 const outfit = Outfit({ subsets: ["latin"], weight: ["400", "500", "600", "700", "800"] });
 
@@ -66,8 +67,9 @@ const PRI: Record<string, { color: string; bg: string }> = {
 };
 
 // Severity and gap priority are human-facing levels, so they carry a
-// dictionary key; the detector NAMES, category ids and detection methods
-// (regex / ner / checksum) stay in English — they are identifiers.
+// dictionary key, and so does a detector's category (AM11, lib/codeWords.ts);
+// the detector NAMES and detection methods (regex / ner / checksum) stay in
+// English — they are identifiers.
 const SEV_LABEL: Record<string, DictKey> = {
   CRITICAL: "infra.severity.critical",
   HIGH: "infra.severity.high",
@@ -154,7 +156,8 @@ export default function DlpCoveragePage() {
       cats = cats.map(([c, info]) => {
         const filtered = info.detectors.filter((n) => {
           if (n.toLowerCase().includes(q)) return true;
-          if (c.toLowerCase().includes(q)) return true;
+          // by the category's code, or by the word the page shows for it
+          if (c.toLowerCase().includes(q) || codeWord(DLP_CATEGORY, c, t).toLowerCase().includes(q)) return true;
           const d = detectorByName.get(n);
           if (!d) return false;
           return (
@@ -166,7 +169,7 @@ export default function DlpCoveragePage() {
       }).filter(([, info]) => info.count > 0);
     }
     return cats;
-  }, [sortedCats, catFilter, search, detectorByName]);
+  }, [sortedCats, catFilter, search, detectorByName, t]);
 
   const totalFiltered = filteredCats.reduce((s, [, i]) => s + i.count, 0);
 
@@ -240,7 +243,7 @@ export default function DlpCoveragePage() {
                 onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
               >
-                <Pill text={cat} color={cs.color} bg={cs.bg} />
+                <Pill text={codeWord(DLP_CATEGORY, cat, t)} color={cs.color} bg={cs.bg} />
                 <div style={{ fontFamily: T.mono, fontSize: 18, fontWeight: 700, color: T.tp, marginTop: 6, lineHeight: 1 }}>{info.count}</div>
               </div>
             );
@@ -280,10 +283,9 @@ export default function DlpCoveragePage() {
                 border: active ? `1.5px solid ${cs.border}` : "1.5px solid transparent",
                 background: active ? cs.bg : "transparent",
                 color: active ? cs.color : T.tt, transition: "all 120ms",
-                textTransform: "capitalize",
               }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: cs.border, opacity: active ? 1 : 0.5, flexShrink: 0 }} />
-                {cat} <span style={{ fontWeight: 700, fontSize: 10, color: active ? cs.color : T.tt }}>{info.count}</span>
+                {codeWord(DLP_CATEGORY, cat, t)} <span style={{ fontWeight: 700, fontSize: 10, color: active ? cs.color : T.tt }}>{info.count}</span>
               </button>
             );
           })}
@@ -314,7 +316,7 @@ export default function DlpCoveragePage() {
             >
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 20px", borderBottom: "1px solid var(--border-default)" }}>
-                <Pill text={cat} color={cs.color} bg={cs.bg} />
+                <Pill text={codeWord(DLP_CATEGORY, cat, t)} color={cs.color} bg={cs.bg} />
                 <span style={{ fontSize: 12, fontWeight: 500, color: T.tt }}>
                   {info.count === 1
                     ? t("infra.dlp.detectorCountOne")
@@ -393,7 +395,7 @@ export default function DlpCoveragePage() {
                   const pr = PRI[g.priority] || PRI.medium;
                   return (
                     <tr key={i} className="dc-row" style={{ animationDelay: `${0.45 + i * 0.03}s` }}>
-                      <td style={{ paddingLeft: 18 }}><Pill text={g.category} color={cs.color} bg={cs.bg} /></td>
+                      <td style={{ paddingLeft: 18 }}><Pill text={codeWord(DLP_CATEGORY, g.category, t)} color={cs.color} bg={cs.bg} /></td>
                       <td style={{ fontSize: 13, color: T.ts }}>{g.description}</td>
                       <td style={{ fontSize: "12.5px", color: T.tt }}>{g.reason}</td>
                       <td><Pill text={PRI_LABEL[g.priority] ? t(PRI_LABEL[g.priority]) : g.priority} color={pr.color} bg={pr.bg} /></td>
@@ -475,7 +477,7 @@ export default function DlpCoveragePage() {
                       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                       padding: "10px 14px", borderRadius: 8, background: "var(--bg-elevated)",
                     }}>
-                      <Pill text={f.category} color={cs.color} bg={cs.bg} />
+                      <Pill text={codeWord(DLP_CATEGORY, f.category, t)} color={cs.color} bg={cs.bg} />
                       <code style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 600, padding: "2px 8px", borderRadius: 4, background: "rgba(239,68,68,0.08)", color: "#dc2626" }}>
                         {f.matched_text.length > 40 ? `${f.matched_text.slice(0, 37)}…` : f.matched_text}
                       </code>

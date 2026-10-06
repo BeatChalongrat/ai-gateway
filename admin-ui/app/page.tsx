@@ -14,6 +14,7 @@ import {
 
 import PageHeader from "../components/ui/PageHeader";
 import { api } from "../lib/api";
+import { DLP_CATEGORY, codeWord } from "../lib/codeWords";
 import { useT } from "../lib/i18n";
 import { ROLE_NAV, getSession, landingFor, refreshSession, type DemoRole } from "../lib/auth";
 
@@ -1411,7 +1412,9 @@ function DlpCategoryRow({
 }) {
   const dotColor = DLP_DOT_COLORS[index % DLP_DOT_COLORS.length];
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-  const displayName = category.charAt(0).toUpperCase() + category.slice(1);
+  // AM11: the category as a word, in the page's language (lib/codeWords.ts)
+  const t = useT();
+  const displayName = codeWord(DLP_CATEGORY, category, t);
   return (
     <div
       style={{

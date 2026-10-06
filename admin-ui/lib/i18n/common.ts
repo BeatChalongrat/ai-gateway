@@ -8,8 +8,11 @@
 //     fallback nobody notices.
 //   * Keys are dotted paths, lowerCamel leaf.
 //   * We do NOT translate: model ids, provider names (OpenAI, Anthropic),
-//     HTTP verbs/status codes, DLP category identifiers, or anything an
-//     operator would paste into a bug report.
+//     HTTP verbs/status codes, detector names, or anything an operator
+//     would paste into a bug report.
+//   * AM11: a stored code that is a STATE or a KIND (an alert's severity,
+//     what became of it, a detector's category, a round's status) is not an
+//     identifier a person quotes — it reads as a word (lib/codeWords.ts).
 
 export const en = {
   // ── Actions ──────────────────────────────────────────────
@@ -94,6 +97,8 @@ export const en = {
   "field.active": "Active",
   "field.inactive": "Inactive",
   "field.all": "All",
+  // AM11: a stored code this app has no word for yet (lib/codeWords.ts)
+  "code.other": "Other ({code})",
   "field.none": "None",
   "field.required": "Required",
   "field.optional": "Optional",
@@ -217,6 +222,7 @@ export const th: Record<keyof typeof en, string> = {
   "field.active": "ใช้งานอยู่",
   "field.inactive": "ไม่ได้ใช้งาน",
   "field.all": "ทั้งหมด",
+  "code.other": "อื่น ๆ ({code})",
   "field.none": "ไม่มี",
   "field.required": "จำเป็น",
   "field.optional": "ไม่บังคับ",
