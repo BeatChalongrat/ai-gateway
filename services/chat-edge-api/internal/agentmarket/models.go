@@ -69,11 +69,12 @@ type ModelPicker struct {
 	Models    []MenuModel `json:"models"`
 	// BlockedReason is why a listed model is not allowed ("" when every one
 	// is); HiddenReason is why a model is not listed at all ("" when every
-	// model can do the job).
-	BlockedReason string `json:"blocked_reason"`
-	HiddenReason  string `json:"hidden_reason"`
-	Reads         string `json:"reads"`
-	Note          string `json:"note"`
+	// model can do the job). AM11: the menu's sentences carry both languages;
+	// the response is written in the language of the request that asks for it.
+	BlockedReason PersonText `json:"blocked_reason"`
+	HiddenReason  PersonText `json:"hidden_reason"`
+	Reads         PersonText `json:"reads"`
+	Note          PersonText `json:"note"`
 	// Egress (AM9): may this agent's documents go to a model outside the
 	// organisation — the organisation's switch and the agent's own, both shown.
 	Egress Egress `json:"egress"`
@@ -200,14 +201,14 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 	}
 	switch use {
 	case "vision":
-		p.Reads = "อ่านเอกสารที่เป็นสแกนหรือรูปถ่าย (PDF ดิจิทัลและ e-Tax อ่านตรงจากไฟล์ ไม่ส่งให้โมเดล)"
-		p.HiddenReason = reasonNoVision
+		p.Reads = Text("อ่านเอกสารที่เป็นสแกนหรือรูปถ่าย (PDF ดิจิทัลและ e-Tax อ่านตรงจากไฟล์ ไม่ส่งให้โมเดล)")
+		p.HiddenReason = Text(reasonNoVision)
 	case "text":
-		p.Reads = "เขียนคำอธิบายในรายงานจากตัวเลขที่คำนวณเสร็จแล้ว (ตัวเลขทุกตัวคำนวณด้วยสคริปต์ ไม่ได้มาจากโมเดล)"
+		p.Reads = Text("เขียนคำอธิบายในรายงานจากตัวเลขที่คำนวณเสร็จแล้ว (ตัวเลขทุกตัวคำนวณด้วยสคริปต์ ไม่ได้มาจากโมเดล)")
 	default:
-		p.Reads = "agent นี้ไม่ส่งเอกสารให้โมเดลใดเลย ทุกค่าอ่านจากไฟล์และคำนวณด้วยสคริปต์"
+		p.Reads = Text("agent นี้ไม่ส่งเอกสารให้โมเดลใดเลย ทุกค่าอ่านจากไฟล์และคำนวณด้วยสคริปต์")
 	}
-	p.Note = "โมเดลที่เลือกไม่ได้ข้ามการตรวจใด ๆ และไม่ได้เป็นที่มาของตัวเลข — ช่วยให้อ่านสแกนที่ไม่ชัดและเขียนคำอธิบายได้ดีขึ้นเท่านั้น"
+	p.Note = Text("โมเดลที่เลือกไม่ได้ข้ามการตรวจใด ๆ และไม่ได้เป็นที่มาของตัวเลข — ช่วยให้อ่านสแกนที่ไม่ชัดและเขียนคำอธิบายได้ดีขึ้นเท่านั้น")
 	if use == "none" {
 		return p
 	}
@@ -219,10 +220,10 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 		}
 		allowed := rm.lock(use, id, e.Effective) == ""
 		if !allowed {
-			p.BlockedReason = reasonOutside
+			p.BlockedReason = Text(reasonOutside)
 			if e.Org {
 				// the organisation allows it; this agent does not (its default, or an admin's choice)
-				p.BlockedReason = e.Words.String()
+				p.BlockedReason = e.Words
 			}
 		}
 		p.Models = append(p.Models, MenuModel{ID: id, Allowed: allowed})
@@ -233,9 +234,9 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 // ChoiceAllowed: the choice is "อัตโนมัติ", or a model of the menu that the
 // organisation's policy allows. Any other is refused, with the reason a
 // person reads.
-func (p ModelPicker) ChoiceAllowed(choice string) (bool, string) {
+func (p ModelPicker) ChoiceAllowed(choice string) (bool, PersonText) {
 	if choice == ModelAuto {
-		return true, ""
+		return true, NoText
 	}
 	for _, m := range p.Models {
 		if m.ID != choice {
@@ -244,12 +245,12 @@ func (p ModelPicker) ChoiceAllowed(choice string) (bool, string) {
 		if !m.Allowed {
 			return false, p.BlockedReason
 		}
-		return true, ""
+		return true, NoText
 	}
-	if p.cannot[choice] && p.HiddenReason != "" {
+	if p.cannot[choice] && !p.HiddenReason.Empty() {
 		return false, p.HiddenReason
 	}
-	return false, reasonNotListed
+	return false, Text(reasonNotListed)
 }
 
 func (a *API) menuFor(ctx context.Context, in Install) (ModelPicker, error) {
@@ -305,7 +306,7 @@ func (a *API) putInstallModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, why := p.ChoiceAllowed(body.Choice); !ok {
-		say(w, http.StatusConflict, "MODEL_NOT_ALLOWED", "detail", why)
+		say(w, http.StatusConflict, "MODEL_NOT_ALLOWED", "detail", why.In(langOfWriter(w)))
 		return
 	}
 	if _, err := a.store.Pool.Exec(r.Context(), `UPDATE agent_market.agent_installs SET model_choice = $2, updated_at = now() WHERE id = $1`,

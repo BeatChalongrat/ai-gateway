@@ -402,7 +402,7 @@ func (a *API) mailState(ctx context.Context, org string) (map[string]any, error)
 	why := a.smtp.notReady(set)
 	out["ready"] = why == ""
 	if why != "" {
-		out["not_ready"] = mailSentence(why)
+		out["not_ready"] = mailText(why)
 	}
 	return out, nil
 }
@@ -419,8 +419,12 @@ func (a *API) adminMail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// mailLabels name each relay setting for a reader of the audit log.
-var mailLabels = []struct{ key, label string }{
+// mailLabels name each relay setting for a reader of the audit log (an entry
+// is written once, in the language of the admin's request that made it).
+var mailLabels = []struct {
+	key   string
+	label wording
+}{
 	{"host", "เซิร์ฟเวอร์อีเมล"}, {"port", "พอร์ต"}, {"tls_mode", "การเข้ารหัส"},
 	{"username", "ชื่อผู้ใช้ของเซิร์ฟเวอร์อีเมล"}, {"sender", "อีเมลผู้ส่ง"},
 }
@@ -452,22 +456,22 @@ func (a *API) adminPutMail(w http.ResponseWriter, r *http.Request) {
 		Username: strings.TrimSpace(body.Username), Sender: strings.TrimSpace(body.Sender)}
 	switch {
 	case set.Host != "" && (len(set.Host) > 253 || !mailHost.MatchString(set.Host)):
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ชื่อเซิร์ฟเวอร์อีเมลต้องเป็นชื่อโดเมน เช่น smtp.example.com หรือเลขที่อยู่ของเครื่อง")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "ชื่อเซิร์ฟเวอร์อีเมลต้องเป็นชื่อโดเมน เช่น smtp.example.com หรือเลขที่อยู่ของเครื่อง"))
 		return
 	case set.Port < 1 || set.Port > 65535:
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "พอร์ตต้องเป็นตัวเลข 1–65535 (ส่วนใหญ่ใช้ 587 หรือ 465)")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "พอร์ตต้องเป็นตัวเลข 1–65535 (ส่วนใหญ่ใช้ 587 หรือ 465)"))
 		return
 	case set.TLSMode != MailSTARTTLS && set.TLSMode != MailTLS && set.TLSMode != MailPlain:
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "การเข้ารหัสต้องเป็น STARTTLS หรือ TLS หรือไม่เข้ารหัส")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "การเข้ารหัสต้องเป็น STARTTLS หรือ TLS หรือไม่เข้ารหัส"))
 		return
 	case len(set.Username) > 254 || strings.ContainsAny(set.Username, " \t\r\n"):
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ชื่อผู้ใช้ของเซิร์ฟเวอร์อีเมลต้องไม่มีช่องว่าง")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "ชื่อผู้ใช้ของเซิร์ฟเวอร์อีเมลต้องไม่มีช่องว่าง"))
 		return
 	case set.Sender != "" && (len(set.Sender) > 254 || !plainAddress.MatchString(set.Sender)):
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "อีเมลผู้ส่งต้องเป็นอีเมลเดียว ไม่มีชื่อหรือเครื่องหมายอื่นปน")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "อีเมลผู้ส่งต้องเป็นอีเมลเดียว ไม่มีชื่อหรือเครื่องหมายอื่นปน"))
 		return
 	case set.Host != "" && set.Sender == "":
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ใส่อีเมลผู้ส่งด้วย — เซิร์ฟเวอร์ต้องรู้ว่าส่งในนามอีเมลใด")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "ใส่อีเมลผู้ส่งด้วย — เซิร์ฟเวอร์ต้องรู้ว่าส่งในนามอีเมลใด"))
 		return
 	}
 	ctx := r.Context()
@@ -492,7 +496,7 @@ func (a *API) adminPutMail(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			out = append(out, entry(r, "agent_market.mail."+f.key, "agent_market_mail", orgOr(acc.OrgID),
-				map[string]any{"setting": f.key, "label": f.label, "from": b[f.key], "to": n[f.key]}))
+				map[string]any{"setting": f.key, "label": T(LangOf(r.Context()), f.label), "from": b[f.key], "to": n[f.key]}))
 		}
 		return out, nil
 	})
@@ -508,12 +512,12 @@ func (a *API) adminPutMail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
-// testMessage is the admin's test message.
-func testMessage(set MailSettings, to, by string, now time.Time) MailMessage {
-	return MailMessage{To: []string{to}, Subject: "ข้อความทดสอบจาก Agent Market",
-		Body: "ข้อความนี้ส่งจากหน้า Agent Market ในแอปผู้ดูแลระบบ เพื่อทดสอบเซิร์ฟเวอร์อีเมลขององค์กร\n" +
-			"ถ้าคุณได้รับข้อความนี้ แปลว่าการตั้งค่าใช้ได้แล้ว ไม่ต้องตอบกลับ\n\n" +
-			"ส่งโดย: " + by + "\nเวลา: " + ThaiDateTime(now) + "\nเซิร์ฟเวอร์: " + set.Host + " พอร์ต " + strconv.Itoa(set.Port)}
+// testMessage is the admin's test message, in l — the language of the admin's own screen.
+func testMessage(l Lang, set MailSettings, to, by string, now time.Time) MailMessage {
+	return MailMessage{To: []string{to}, Subject: T(l, "ข้อความทดสอบจาก Agent Market"),
+		Body: T(l, "ข้อความนี้ส่งจากหน้า Agent Market ในแอปผู้ดูแลระบบ เพื่อทดสอบเซิร์ฟเวอร์อีเมลขององค์กร\n"+
+			"ถ้าคุณได้รับข้อความนี้ แปลว่าการตั้งค่าใช้ได้แล้ว ไม่ต้องตอบกลับ\n\n"+
+			"ส่งโดย: ") + by + T(l, "\nเวลา: ") + DateTimeIn(l, now) + T(l, "\nเซิร์ฟเวอร์: ") + set.Host + T(l, " พอร์ต ") + strconv.Itoa(set.Port)}
 }
 
 // adminTestMail sends the test message to one address the admin typed.
@@ -551,7 +555,7 @@ func (a *API) adminTestMail(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "mail")
 		return
 	}
-	msg := testMessage(set, to, normEmail(c.Email), time.Now())
+	msg := testMessage(langOfWriter(w), set, to, normEmail(c.Email), time.Now())
 	msg.Org = acc.OrgID
 	if err := a.smtp.Send(ctx, msg); err != nil {
 		a.recordFailed(ctx, logged)
@@ -593,12 +597,16 @@ func (m *SMTPMailer) notifyOne(ctx context.Context, res *NotificationsPassResult
 	var id uuid.UUID
 	var title, body, link, org, installStatus string
 	var to *string
+	// AM11: a notification is written in the language of the run it is about (notify.go, reminders.go);
+	// the lines the mail adds round it are said in the same one
+	var params json.RawMessage
 	err = tx.QueryRow(ctx, `SELECT n.id, n.title, n.body, n.link, i.org_id, i.status,
-			(SELECT u.email FROM identity.users u WHERE u.id = n.user_id AND u.is_active)
+			(SELECT u.email FROM identity.users u WHERE u.id = n.user_id AND u.is_active),
+			(SELECT r.params FROM agent_market.agent_runs r WHERE r.id = n.run_id)
 		FROM agent_market.notifications n
 		JOIN agent_market.agent_installs i ON i.id = n.install_id
 		WHERE n.email_status IS NULL AND n.dismissed_at IS NULL
-		ORDER BY n.created_at LIMIT 1 FOR UPDATE OF n SKIP LOCKED`).Scan(&id, &title, &body, &link, &org, &installStatus, &to)
+		ORDER BY n.created_at LIMIT 1 FOR UPDATE OF n SKIP LOCKED`).Scan(&id, &title, &body, &link, &org, &installStatus, &to, &params)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -611,7 +619,7 @@ func (m *SMTPMailer) notifyOne(ctx context.Context, res *NotificationsPassResult
 		return false, err
 	}
 	if installStatus == "active" && m.notReady(set) == "" && to != nil && plainAddress.MatchString(*to) {
-		msg := reminderMessage(title, body, m.linkFor(link))
+		msg := reminderMessage(Run{Params: params}.Lang(), title, body, m.linkFor(link))
 		msg.To, msg.Org = []string{*to}, org
 		if err := m.deliver(ctx, set, msg.To, buildMessage(set.Sender, msg, time.Now())); err != nil {
 			status = "failed"
@@ -649,14 +657,14 @@ func (m *SMTPMailer) linkFor(link string) string {
 // reminderMessage is a notification as an e-mail: its title and body (the
 // platform's sentences; what came from a package goes through the mail
 // sanitiser) and the platform's own link to the round.
-func reminderMessage(title, body, link string) MailMessage {
+func reminderMessage(l Lang, title, body, link string) MailMessage {
 	text := SanitizeMailText(title)
 	if b := SanitizeMailText(body); b != "" {
 		text += "\n\n" + b
 	}
 	if link != "" {
-		text += "\n\nเปิดรอบนี้และส่งไฟล์ได้ที่: " + link
+		text += T(l, "\n\nเปิดรอบนี้และส่งไฟล์ได้ที่: ") + link
 	}
-	text += "\n\n— Agent Market · อีเมลนี้มาจากการเตือนที่คุณตั้งไว้ในหน้า agent หยุดหรือเลื่อนการเตือนได้ที่หน้าเดียวกัน"
+	text += T(l, "\n\n— Agent Market · อีเมลนี้มาจากการเตือนที่คุณตั้งไว้ในหน้า agent หยุดหรือเลื่อนการเตือนได้ที่หน้าเดียวกัน")
 	return MailMessage{Subject: SanitizeMailText(title), Body: text}
 }

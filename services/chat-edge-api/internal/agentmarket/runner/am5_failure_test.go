@@ -335,7 +335,7 @@ func TestANarrativeWithANullListIsAnEmptyList(t *testing.T) {
 		`{"summary":"ภาพรวมของงวดนี้","movements":"ไม่มี","watch":[null, "ตรวจค่าที่ปรึกษา", 7, {"a":1}],"next_steps":[]}`,
 		`{"summary":"ภาพรวมของงวดนี้"}`,
 	} {
-		v, err := checkNarrative(s, cv)
+		v, err := checkNarrative(am.Thai, s, cv)
 		if err != nil {
 			t.Fatalf("%s: %v", s, err)
 		}
@@ -351,7 +351,7 @@ func TestANarrativeWithANullListIsAnEmptyList(t *testing.T) {
 			}
 		}
 	}
-	if _, err := checkNarrative(`{"summary":"  "}`, cv); err == nil {
+	if _, err := checkNarrative(am.Thai, `{"summary":"  "}`, cv); err == nil {
 		t.Fatal("a narrative without a summary is refused")
 	}
 }

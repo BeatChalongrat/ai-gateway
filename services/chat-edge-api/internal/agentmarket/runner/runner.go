@@ -323,6 +323,9 @@ func (r *Runner) startReaper(ctx context.Context) {
 // moment a cancel is requested or the lease is lost.
 func (r *Runner) execute(parent context.Context, run agentmarket.Run) {
 	parent = withSandboxLabels(parent, map[string]string{LabelRun: run.ID.String(), LabelRunner: r.ID, LabelInstance: r.instance})
+	// AM11: whatever is written for this run — its thread items, its checks' words, what its package is
+	// asked to say — is in the run's own language
+	parent = agentmarket.WithLang(parent, run.Lang())
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var cancelled atomic.Bool

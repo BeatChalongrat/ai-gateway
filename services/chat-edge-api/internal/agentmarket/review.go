@@ -96,19 +96,19 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		// AM6: a reconciliation that does not tie is a finished round, not a
 		// failed one — and still a draft nobody signs: the round to sign is the
 		// next one that ties
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้เสร็จแล้วแต่ยังไม่ลงตัว ไฟล์ของรอบนี้เป็นร่าง",
-			"next", "แก้สาเหตุแล้วเริ่มรอบใหม่ รอบที่ลงตัวคือรอบที่ตรวจทานและลงชื่อได้")
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", forReq(w, "รอบนี้เสร็จแล้วแต่ยังไม่ลงตัว ไฟล์ของรอบนี้เป็นร่าง"),
+			"next", forReq(w, "แก้สาเหตุแล้วเริ่มรอบใหม่ รอบที่ลงตัวคือรอบที่ตรวจทานและลงชื่อได้"))
 		return
 	}
 	if run.Kind == KindRun && (run.Status == RunFailed || run.Status == RunCancelled) {
 		// AM5: a round that ended without succeeding is not "still running" —
 		// waiting will not make it reviewable
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ไม่สำเร็จ ยังไม่มีไฟล์ให้ตรวจทาน",
-			"next", "แก้สาเหตุแล้วเริ่มรอบใหม่ให้สำเร็จก่อน แล้วค่อยตรวจทานรอบนั้น")
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", forReq(w, "รอบนี้ไม่สำเร็จ ยังไม่มีไฟล์ให้ตรวจทาน"),
+			"next", forReq(w, "แก้สาเหตุแล้วเริ่มรอบใหม่ให้สำเร็จก่อน แล้วค่อยตรวจทานรอบนั้น"))
 		return
 	}
 	if run.Kind != KindRun || run.Status != RunSucceeded {
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ยังทำไม่เสร็จ", "next", "รอให้รอบนี้เสร็จก่อน แล้วค่อยตรวจทาน")
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", forReq(w, "รอบนี้ยังทำไม่เสร็จ"), "next", forReq(w, "รอให้รอบนี้เสร็จก่อน แล้วค่อยตรวจทาน"))
 		return
 	}
 	in, err := a.store.InstallByID(ctx, run.InstallID)
@@ -136,8 +136,8 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if open > 0 {
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", fmt.Sprintf("ยังมีข้อยกเว้นที่รอคนตัดสิน %d รายการ", open),
-			"next", "ตัดสินข้อยกเว้นให้ครบก่อน แล้วค่อยตรวจทาน")
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", fmt.Sprintf(forReq(w, "ยังมีข้อยกเว้นที่รอคนตัดสิน %d รายการ"), open),
+			"next", forReq(w, "ตัดสินข้อยกเว้นให้ครบก่อน แล้วค่อยตรวจทาน"))
 		return
 	}
 	arts, err := a.store.RunArtifacts(ctx, run.ID)
@@ -146,7 +146,7 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if len(arts) == 0 {
-		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", "รอบนี้ยังไม่มีไฟล์", "next", "ขอไฟล์จาก agent ก่อน แล้วค่อยตรวจทาน")
+		say(w, http.StatusConflict, "NOT_REVIEWABLE", "why", forReq(w, "รอบนี้ยังไม่มีไฟล์"), "next", forReq(w, "ขอไฟล์จาก agent ก่อน แล้วค่อยตรวจทาน"))
 		return
 	}
 	name := strings.Join(strings.Fields(body.Name), " ")
@@ -171,7 +171,9 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 	if d, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
 		agent = d.Name
 	}
-	agent += " รุ่น " + run.DefinitionVersion
+	// AM11: the agent's name with its version, and the moment of the sign-off below, are printed on the
+	// run's documents by the stamp — so they are in the run's language, not in the reviewer's screen's
+	agent += T(run.Lang(), " รุ่น ") + run.DefinitionVersion
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "run")
@@ -189,7 +191,7 @@ func (a *API) signOff(ctx context.Context, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	params, _ := json.Marshal(map[string]any{"review_id": rev.ID, "reviewer": name, "reviewer_email": normEmail(c.Email),
-		"at_label": ThaiDateTime(now), "note": note, "preparer": preparer, "agent": agent, "run_ref": run.ID.String()[:8]})
+		"at_label": DateTimeIn(run.Lang(), now), "note": note, "preparer": preparer, "agent": agent, "run_ref": run.ID.String()[:8]})
 	parent := run.ID
 	job, _, err := a.store.CreateRun(ctx, tx, Run{InstallID: run.InstallID, ParentRunID: &parent, TenantID: run.TenantID,
 		UserID: run.UserID, Kind: KindReview, Params: params, DefinitionVersion: run.DefinitionVersion, Checksum: run.Checksum,

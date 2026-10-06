@@ -390,23 +390,59 @@ func trim(s string, n int) string { return am.TrimText(s, n) }
 
 // ── the number guard ─────────────────────────────────────────────────────
 
-var numRe = regexp.MustCompile(`[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน)?`)
+var (
+	numRe = regexp.MustCompile(`[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน)?`)
+	// AM11: an English sentence writes a figure's unit in English — "12.48 M", "12.48 million"
+	// (GLOSSARY.md §4). The unit is part of the figure there too, so "12.48 M" is not "12.48".
+	numReEnglish  = regexp.MustCompile(`[-+]?\(?\d[\d,]*(?:\.\d+)?\)?(?:\s?%|\s?ล้าน|\s?(?:[Mm]illion|mn|M)\b)?`)
+	millionSuffix = regexp.MustCompile(`(?:[Mm]illion|mn|M)$`)
+)
+
+// million is the unit a figure of millions is printed with in Thai; the guard compares every such
+// figure in this one form, whichever language's word it was written with.
+const million = "ล้าน"
+
+// numbersIn finds the numbers of a text written in l, each with its unit.
+func numbersIn(l am.Lang, text string) []string {
+	if l == am.English {
+		return numReEnglish.FindAllString(text, -1)
+	}
+	return numRe.FindAllString(text, -1)
+}
+
+// oneUnit writes an English unit of millions as the guard compares it ("12.48M" → "12.48ล้าน").
+func oneUnit(l am.Lang, tok string) string {
+	if l != am.English {
+		return tok
+	}
+	return millionSuffix.ReplaceAllString(tok, million)
+}
 
 // GuardNumbers refuses any number in model prose that is not one of the
 // computed table's pre-formatted strings. Small counts (≤ 31) and years are
 // allowed; everything else must be quoted, character for character. ids are
 // the account codes the model was shown: identifiers, skipped before the scan.
+// This is the guard of a Thai text, as it always was; GuardNumbersIn is the
+// guard of a text in the run's language.
 func GuardNumbers(text string, quotable map[string]string, ids []string) error {
-	text = blankIDs(text, ids)
+	return GuardNumbersIn(am.Thai, text, quotable, ids)
+}
+
+// GuardNumbersIn is GuardNumbers for a text written in l. An English text is
+// held to exactly the same rule; what differs is how it writes a unit (M,
+// million, mn for ล้าน; pp, points for จุด) and what it calls an account
+// ("account 510000", "code 510000").
+func GuardNumbersIn(l am.Lang, text string, quotable map[string]string, ids []string) error {
+	text = blankIDs(l, text, ids)
 	allowed := map[string]bool{}
 	for _, v := range quotable {
-		for _, f := range numberForms(v) {
+		for _, f := range numberForms(l, v) {
 			allowed[f] = true
 		}
 	}
 	var bad []string
-	for _, m := range numRe.FindAllString(text, -1) {
-		tok := normalizeNumberToken(m)
+	for _, m := range numbersIn(l, text) {
+		tok := oneUnit(l, normalizeNumberToken(m))
 		if allowed[tok] || allowed[unsigned(tok)] {
 			continue
 		}
@@ -430,16 +466,34 @@ func GuardNumbers(text string, quotable map[string]string, ids []string) error {
 // % and ล้าน only), and without its sign or accounting brackets — the
 // direction is said in words ("ต่ำกว่างบ 6.8%" for -6.8%). The digits must
 // still be the table's own.
-func numberForms(v string) []string {
-	base := strings.ReplaceAll(v, " ", "")
+func numberForms(l am.Lang, v string) []string {
+	base := oneUnit(l, strings.ReplaceAll(v, " ", ""))
 	forms := []string{base}
-	for _, unit := range []string{"จุด"} {
+	units := []string{"จุด"}
+	if l == am.English {
+		// AM11: percentage points as an English figure is printed with them ("-0.95 pp")
+		units = append(units, "percentagepoints", "points", "point", "pp")
+	}
+	for _, unit := range units {
 		if strings.HasSuffix(base, unit) {
 			forms = append(forms, strings.TrimSuffix(base, unit))
+			break
 		}
 	}
-	if strings.HasSuffix(base, "ล้าน") {
-		forms = append(forms, strings.TrimSuffix(base, "ล้าน"))
+	if strings.HasSuffix(base, million) {
+		forms = append(forms, strings.TrimSuffix(base, million))
+	}
+	if l == am.English {
+		// AM11: an English figure may be printed with its currency in front ("THB 12.48 M",
+		// GLOSSARY.md §4), which a sentence quoting it need not repeat: the number in it, with its
+		// unit and without, is the figure
+		for _, m := range numReEnglish.FindAllString(v, -1) {
+			tok := oneUnit(l, normalizeNumberToken(m))
+			forms = append(forms, tok)
+			if strings.HasSuffix(tok, million) {
+				forms = append(forms, strings.TrimSuffix(tok, million))
+			}
+		}
 	}
 	out := make([]string, 0, len(forms)*2)
 	for _, f := range forms {
@@ -460,7 +514,12 @@ func unsigned(tok string) string {
 // blankIDs removes the account codes from the text. A code with a separator
 // ("5300-01") is blanked anywhere; one that is only digits ("510000") could
 // pass for an amount, so it is blanked only right after บัญชี or รหัส.
-func blankIDs(text string, ids []string) string {
+func blankIDs(l am.Lang, text string, ids []string) string {
+	// the words an all-digit account code follows: บัญชี, รหัส — and, in an English text, account, code, a/c
+	before := `(บัญชี|รหัส)`
+	if l == am.English {
+		before = `(บัญชี|รหัส|(?i:\baccount|\bcode|\ba/c))`
+	}
 	sorted := append([]string(nil), ids...)
 	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
 	for _, id := range sorted {
@@ -472,7 +531,7 @@ func blankIDs(text string, ids []string) string {
 			text = strings.ReplaceAll(text, id, " ")
 			continue
 		}
-		re := regexp.MustCompile(`(บัญชี|รหัส)\s*` + regexp.QuoteMeta(id) + `([^0-9.,]|$)`)
+		re := regexp.MustCompile(before + `\s*` + regexp.QuoteMeta(id) + `([^0-9.,]|$)`)
 		text = re.ReplaceAllString(text, "$1 $2")
 	}
 	return text

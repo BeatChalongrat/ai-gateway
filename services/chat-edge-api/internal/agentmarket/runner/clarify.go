@@ -74,7 +74,7 @@ func (rc *runCtx) clarify(ctx context.Context, moment string, findings []am.Find
 		return actPark, nil
 	}
 	plan, err := am.Plan(am.PlanInput{Moment: moment, Findings: findings, Answers: rc.answers, Asked: asked,
-		OpenKeys: open, Remembered: rc.remembered})
+		OpenKeys: open, Remembered: rc.remembered, Lang: am.LangOf(ctx)})
 	if err != nil {
 		return actNone, err
 	}
@@ -320,7 +320,7 @@ func (rc *runCtx) interpretCards(ctx context.Context) (bool, error) {
 				answers[q.Key] = am.Answer{Value: q.Default, Label: q.DefaultLabel, Moment: c.Moment, CardID: c.ID.String(),
 					Via: "reprompt_default", Cosmetic: q.Severity == "cosmetic", Code: q.Code}
 				assumptions = append(assumptions, am.Assumption{Code: q.Code, Source: "reprompt_default",
-					Text:           fmt.Sprintf("%s: ใช้ค่าตั้งต้น “%s” หลังถามซ้ำ %d ครั้งแล้วยังไม่ได้คำตอบที่ชัด", q.Header, q.DefaultLabel, am.MaxReprompts),
+					Text:           fmt.Sprintf(am.T(am.LangOf(ctx), "%s: ใช้ค่าตั้งต้น “%s” หลังถามซ้ำ %d ครั้งแล้วยังไม่ได้คำตอบที่ชัด"), q.Header, q.DefaultLabel, am.MaxReprompts),
 					ChangesNumbers: q.Severity != "cosmetic"})
 			}
 			status, via = "defaulted", "reprompt_default"
@@ -368,7 +368,8 @@ func (rc *runCtx) classify(ctx context.Context, q am.Question, text string) (am.
 	for i, o := range q.Options {
 		fmt.Fprintf(&opts, "%d. %s — %s\n", i+1, o.Label, o.Description)
 	}
-	system := "คุณแปลคำตอบภาษาไทยของผู้ใช้ให้เป็นหนึ่งในตัวเลือกที่กำหนด ตอบเป็น JSON {\"choice\": หมายเลข} หรือ {\"choice\": null} ถ้าคำตอบไม่ตรงกับตัวเลือกใดชัดเจน ห้ามเดา"
+	// AM11: the prompt says which language the person typed in — the run's (a Thai run's prompt is as it was)
+	system := "คุณแปลคำตอบ" + languageName(am.LangOf(ctx)) + "ของผู้ใช้ให้เป็นหนึ่งในตัวเลือกที่กำหนด ตอบเป็น JSON {\"choice\": หมายเลข} หรือ {\"choice\": null} ถ้าคำตอบไม่ตรงกับตัวเลือกใดชัดเจน ห้ามเดา"
 	user := fmt.Sprintf("คำถาม: %s\nตัวเลือก:\n%sคำตอบของผู้ใช้: %s", q.Question, opts.String(), text)
 	var choice *int
 	c, _, err := rc.r.Model.CompleteWith(ctx, models, system, user, func(s string) error {
@@ -448,12 +449,14 @@ func (rc *runCtx) consumeReplacements(ctx context.Context) (bool, error) {
 	if err := st.DeleteAnswers(ctx, rc.run.ID, drop); err != nil {
 		return false, err
 	}
+	// AM11: a card's questions are kept as they were asked, in one language — the run's
+	l := am.LangOf(ctx)
 	q := am.Question{Key: "replace_file:" + strings.Join(removeNames, ","), Code: "missing_file", Severity: "blocking",
-		Header: "ขอไฟล์ใหม่", Question: "ส่งไฟล์ที่แก้แล้วแทน “" + strings.Join(removeNames, "”, “") + "” ได้เลยครับ ผมจะตรวจใหม่ตั้งแต่ต้น",
-		Options: []am.Option{{Label: "รอก่อน จะอัปโหลดให้", Value: json.RawMessage(`"wait"`)},
-			{Label: "ยกเลิกรอบนี้", Value: json.RawMessage(`"cancel"`)}},
-		Default: json.RawMessage(`"wait"`), DefaultLabel: "รอก่อน จะอัปโหลดให้",
-		Request: mustJSON([]map[string]any{{"role": "primary", "label": "ไฟล์ที่แก้แล้ว", "why": "ใช้แทนไฟล์เดิม", "required": true}})}
+		Header: am.T(l, "ขอไฟล์ใหม่"), Question: am.T(l, "ส่งไฟล์ที่แก้แล้วแทน “") + strings.Join(removeNames, "”, “") + am.T(l, "” ได้เลยครับ ผมจะตรวจใหม่ตั้งแต่ต้น"),
+		Options: []am.Option{{Label: am.T(l, "รอก่อน จะอัปโหลดให้"), Value: json.RawMessage(`"wait"`)},
+			{Label: am.T(l, "ยกเลิกรอบนี้"), Value: json.RawMessage(`"cancel"`)}},
+		Default: json.RawMessage(`"wait"`), DefaultLabel: am.T(l, "รอก่อน จะอัปโหลดให้"),
+		Request: mustJSON([]map[string]any{{"role": "primary", "label": am.T(l, "ไฟล์ที่แก้แล้ว"), "why": am.T(l, "ใช้แทนไฟล์เดิม"), "required": true}})}
 	if err := rc.createCard(ctx, "preflight", &am.CardPlan{Kind: "request_files", Blocking: true, Questions: []am.Question{q}},
 		preflightOut{}, 1); err != nil {
 		return false, err

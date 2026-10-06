@@ -71,8 +71,9 @@ type field struct {
 	class class
 	from  string
 	// other is the platform's own sentence when nothing of a text can be shown
-	// ("" = the field is left out). It may depend on the item.
-	other func(item map[string]any) string
+	// (nothing = the field is left out). It may depend on the item. AM11: it is
+	// said in the language the item was written in.
+	other func(item map[string]any) PersonText
 	// value: the text may also be a bare value (no Thai word needed)
 	value bool
 	// nth: the platform's own sentence names the place in its list ("ตัวเลือกที่ 2"),
@@ -93,17 +94,17 @@ func text(from string) field { return field{class: asText, from: from} }
 // ("GL", "กันยายน 2569") needs no Thai word to be one.
 func label(from string) field { return field{class: asText, from: from, value: true} }
 
-func (f field) or(sentence string) field {
-	f.other = func(map[string]any) string { return sentence }
+func (f field) or(sentence wording) field {
+	f.other = func(map[string]any) PersonText { return Text(sentence) }
 	return f
 }
 
-func (f field) orBy(fn func(map[string]any) string) field {
+func (f field) orBy(fn func(map[string]any) PersonText) field {
 	f.other = fn
 	return f
 }
 
-func (f field) orNth(sentence string) field {
+func (f field) orNth(sentence wording) field {
 	f.nth = true
 	return f.or(sentence)
 }
@@ -266,12 +267,12 @@ var summary = field{class: asObject, fields: map[string]field{
 }}
 
 // what a failed round says when nothing of its own text can be shown
-func failureWhat(item map[string]any) string {
+func failureWhat(item map[string]any) PersonText {
 	reason := ""
 	if f, ok := item["failure"].(map[string]any); ok {
 		reason, _ = f["reason"].(string)
 	}
-	return FailureFor(reason, FailureFacts{Kind: KindRun}).What.String()
+	return FailureFor(reason, FailureFacts{Kind: KindRun}).What
 }
 
 func completionCode(item map[string]any) string {
@@ -280,21 +281,21 @@ func completionCode(item map[string]any) string {
 	return s
 }
 
-func agentTextOther(item map[string]any) string {
+func agentTextOther(item map[string]any) PersonText {
 	switch tone, _ := item["tone"].(string); tone {
 	case "error":
 		return failureWhat(item)
 	case "open":
-		return CompletionTitle(completionCode(item)).String()
+		return CompletionTitle(completionCode(item))
 	}
-	return ""
+	return NoText
 }
 
 // what a round that finished open says when nothing of the package's own
 // sentence can be shown
-func completionOther(item map[string]any) string { return openWhat(completionCode(item)).String() }
+func completionOther(item map[string]any) PersonText { return openWhat(completionCode(item)) }
 
-func gateOther(map[string]any) string { return openWhat("").String() }
+func gateOther(map[string]any) PersonText { return openWhat("") }
 
 // itemSchema: every kind of thread item, and what of it is sent.
 var itemSchema = map[string]field{
@@ -400,6 +401,7 @@ type sending struct {
 	item map[string]any
 	r    *Reader
 	n    int
+	l    Lang // AM11: the language the item was written in
 }
 
 // send is what of a value is sent: the value, and whether there is one.
@@ -424,7 +426,7 @@ func (f field) send(v any, at sending) (any, bool) {
 		case asList:
 			out := make([]any, 0, len(x))
 			for i, e := range x {
-				if s, ok := f.each.send(e, sending{at.item, r, i + 1}); ok {
+				if s, ok := f.each.send(e, sending{at.item, r, i + 1, at.l}); ok {
 					out = append(out, s)
 				}
 			}
@@ -457,7 +459,7 @@ func (f field) send(v any, at sending) (any, bool) {
 					}
 					continue
 				}
-				if s, ok := sub.send(e, sending{at.item, r, at.n}); ok {
+				if s, ok := sub.send(e, sending{at.item, r, at.n, at.l}); ok {
 					out[k] = s
 				}
 			}
@@ -480,7 +482,7 @@ func (f field) sendString(s string, at sending) (any, bool) {
 		}
 		shown := r.Shown(s)
 		if shown == "" && f.other != nil && strings.TrimSpace(s) != "" {
-			if shown = f.other(at.item); f.nth && at.n > 0 {
+			if shown = f.other(at.item).In(at.l); f.nth && at.n > 0 {
 				shown += " " + strconv.Itoa(at.n)
 			}
 		}
@@ -518,6 +520,7 @@ func (r *Reader) with(declared []string) *Reader {
 		return r
 	}
 	n := NewReader()
+	n.thaiOnly = r.thaiOnly
 	for k := range r.words {
 		n.words[k] = true
 	}
@@ -530,6 +533,12 @@ func (r *Reader) with(declared []string) *Reader {
 
 // ForClient is a thread item's payload as it is sent to a person. A kind
 // nobody declared sends nothing of its own.
+//
+// AM11: an item says which language it was written in ("lang", stamped by
+// the thread's writers; none = Thai, which is every item from before). Its
+// texts are read by that language's rule — a Thai item's exactly as before —
+// and what the platform says in place of a text that cannot be shown is said
+// in that language too.
 func ForClient(kind string, payload json.RawMessage) json.RawMessage {
 	f, ok := itemSchema[kind]
 	if !ok {
@@ -544,7 +553,14 @@ func ForClient(kind string, payload json.RawMessage) json.RawMessage {
 	if err := dec.Decode(&p); err != nil || p == nil {
 		return json.RawMessage(`{}`)
 	}
-	out, _ := f.send(p, sending{item: p, r: NewReader()})
+	l := Thai
+	if s, _ := p["lang"].(string); s != "" {
+		l = ParseLang(s)
+	}
+	out, _ := f.send(p, sending{item: p, r: readerFor(l), l: l})
+	if m, ok := out.(map[string]any); ok && l == English {
+		m["lang"] = string(English)
+	}
 	b, err := json.Marshal(out)
 	if err != nil {
 		return json.RawMessage(`{}`)
@@ -552,11 +568,33 @@ func ForClient(kind string, payload json.RawMessage) json.RawMessage {
 	return b
 }
 
+// stampLang marks a marshalled item as written in l (nothing for Thai: an
+// item without the mark is Thai).
+func stampLang(l Lang, payload []byte) []byte {
+	if l != English || len(payload) < 2 || payload[0] != '{' {
+		return payload
+	}
+	if string(payload) == "{}" {
+		return []byte(`{"lang":"en"}`)
+	}
+	out := make([]byte, 0, len(payload)+13)
+	out = append(out, `{"lang":"en",`...)
+	return append(out, payload[1:]...)
+}
+
 // ShownQuestions are a card's questions as the person was sent them: what
 // they clicked is a label they were shown, and an answer is read against
 // those (a label that could not be shown was sent as the platform's own).
-func ShownQuestions(questions []Question) []Question {
-	raw, err := json.Marshal(map[string]any{"questions": questions})
+//
+// AM11: l is the language the card was written in — its run's. The card's item is read by that
+// language's rule when it is sent, so the labels a person saw are the ones that rule shows: read by
+// another, the label clicked on an English card would match none of its options.
+func ShownQuestions(l Lang, questions []Question) []Question {
+	card := map[string]any{"questions": questions}
+	if l == English {
+		card["lang"] = string(English)
+	}
+	raw, err := json.Marshal(card)
 	if err != nil {
 		return questions
 	}

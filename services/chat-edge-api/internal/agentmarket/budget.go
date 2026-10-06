@@ -127,15 +127,17 @@ func (s *Store) Budget(ctx context.Context, in Install) (BudgetState, error) {
 	return st, nil
 }
 
-// budgetWhich names the budget in a sentence.
-func budgetWhich(st BudgetState) string {
+// budgetWhich names the budget inside a sentence, in l. The Thai glues a
+// department's name to its word; the English says it after a space — which is
+// why it is one sentence with the name in it, not a word and a name.
+func budgetWhich(l Lang, st BudgetState) string {
 	switch st.Exhausted {
 	case BudgetDepartment:
-		return "ของแผนก" + st.Department
+		return fmt.Sprintf(T(l, "ของแผนก%s"), st.Department)
 	case BudgetInstall:
-		return "ของ agent ตัวนี้"
+		return T(l, "ของ agent ตัวนี้")
 	}
-	return "ของคุณ"
+	return T(l, "ของคุณ")
 }
 
 // BudgetNotice is the thread's notice when a run waits for budget.
@@ -152,7 +154,8 @@ func BudgetNotice(st BudgetState) PersonText {
 	}
 	return Text("หยุดรอไว้ก่อนครับ: งบเครดิต%sเดือนนี้ใช้หมดแล้ว (ใช้ไป %s จาก %s เครดิต) — ขอเพิ่มได้จาก %s "+
 		"เมื่อมีงบแล้ว รอบนี้จะทำต่อจากจุดเดิมเอง (หรือกด “ลองต่อ”) ไฟล์และคำตอบที่ให้ไว้ยังอยู่ครบ และแชทปกติยังใช้ได้ตามเดิม",
-		Name(budgetWhich(st)), Credits(math.Round(used)), Credits(math.Round(limit)), ContactFact(st.Contact))
+		EachNamed(120, func(l Lang) string { return budgetWhich(l, st) }), Credits(math.Round(used)), Credits(math.Round(limit)),
+		ContactFact(st.Contact))
 }
 
 // groupDigits prints a credit amount with thousands separators.
@@ -276,7 +279,8 @@ func (a *API) resumeBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Exhausted != "" {
-		say(w, http.StatusConflict, "BUDGET_STILL_EXHAUSTED", "which", budgetWhich(st), "contact", st.Contact.Label())
+		l := langOfWriter(w)
+		say(w, http.StatusConflict, "BUDGET_STILL_EXHAUSTED", "which", budgetWhich(l, st), "contact", st.Contact.LabelIn(l))
 		return
 	}
 	if _, err := a.store.Resume(ctx, a.store.Pool, run.ID); err != nil {

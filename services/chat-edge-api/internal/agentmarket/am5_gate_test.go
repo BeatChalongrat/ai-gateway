@@ -193,7 +193,7 @@ func TestTheTolerancesOfTheMatchAreInstallSettings(t *testing.T) {
 		if got := validSettingValue(c.key, json.RawMessage(c.value)); got != c.ok {
 			t.Fatalf("%s = %s: valid %v, want %v", c.key, c.value, got, c.ok)
 		}
-		if l := settingLabel(c.key); l == c.key || LooksTechnical(l) || !ReadsForPerson(l) {
+		if l := settingLabel(Thai, c.key); l == c.key || LooksTechnical(l) || !ReadsForPerson(l) {
 			t.Fatalf("%s is named in words: %q", c.key, l)
 		}
 	}

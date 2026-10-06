@@ -181,7 +181,7 @@ func (a *API) adminPutEgress(w http.ResponseWriter, r *http.Request) {
 			return nil, nil // nothing moved: nothing to log
 		}
 		return []AuditEntry{entry(r, "agent_market.agent.documents_may_leave", "agent_market_agent", slug, map[string]any{
-			"setting": "documents_may_leave", "label": "เอกสารของ agent นี้ส่งไปโมเดลนอกองค์กรได้", "agent": def.Name,
+			"setting": "documents_may_leave", "label": T(LangOf(r.Context()), "เอกสารของ agent นี้ส่งไปโมเดลนอกองค์กรได้"), "agent": def.Name,
 			"from": from.Agent, "from_default": from.AgentDefault, "to": *body.DocumentsMayLeave,
 			"org_allows": o.DocumentsMayLeave})}, nil
 	})

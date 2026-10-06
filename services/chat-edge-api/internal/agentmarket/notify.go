@@ -24,10 +24,13 @@ import (
 // not opened since the card was posted, gets one "waiting" notification;
 // three days later, if it is still so, one "waiting_followup"; then nothing.
 
-// notification is a row to write. Its texts are PersonTexts.
+// notification is a row to write. Its texts are PersonTexts, and the row
+// keeps one language of them (AM11): Lang — the language of the run the
+// notification is about, or of the reminder that raised it; none = Thai.
 type notification struct {
 	TenantID, UserID uuid.UUID
 	Kind             string
+	Lang             Lang
 	Title, Body      PersonText
 	Link             string
 	InstallID        uuid.UUID
@@ -42,7 +45,7 @@ func (s *Store) addNotification(ctx context.Context, q Querier, n notification) 
 	tag, err := q.Exec(ctx, `INSERT INTO agent_market.notifications (tenant_id, user_id, kind, title, body, link, install_id, run_id,
 			reminder_id, card_id, dedupe_key)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (dedupe_key) DO NOTHING`,
-		n.TenantID, n.UserID, n.Kind, n.Title.String(), n.Body.String(), n.Link, n.InstallID, n.RunID, n.ReminderID, n.CardID, n.Dedupe)
+		n.TenantID, n.UserID, n.Kind, n.Title.In(n.Lang), n.Body.In(n.Lang), n.Link, n.InstallID, n.RunID, n.ReminderID, n.CardID, n.Dedupe)
 	return err == nil && tag.RowsAffected() == 1, err
 }
 
@@ -56,8 +59,10 @@ type Notification struct {
 	InstallID  uuid.UUID  `json:"install_id"`
 	RunID      *uuid.UUID `json:"run_id"`
 	ReminderID *uuid.UUID `json:"reminder_id"`
-	AgentName  string     `json:"agent_name"`
-	CreatedAt  time.Time  `json:"created_at"`
+	// AgentName is the install's own title; when that cannot be shown, the platform's stand-in for it,
+	// which the writer says in the reader's language (AM11)
+	AgentName PersonText `json:"agent_name"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // surfaceColumn is the column that records when a notification was first
@@ -100,7 +105,7 @@ func (s *Store) Notifications(ctx context.Context, tenant, user uuid.UUID, surfa
 		if err := rows.Scan(&n.ID, &n.Kind, &n.Title, &n.Body, &n.Link, &n.InstallID, &n.RunID, &n.ReminderID, &agent, &n.CreatedAt); err != nil {
 			return nil, err
 		}
-		n.AgentName = LabelFromPackage(agent, Text("agent ของคุณ")).String()
+		n.AgentName = LabelFromPackage(agent, Text("agent ของคุณ"))
 		out = append(out, n)
 	}
 	return out, rows.Err()
@@ -114,6 +119,7 @@ func (s *Store) waitingPass(ctx context.Context, now time.Time, p *ReminderPass)
 		thread                           *uuid.UUID
 		title                            string
 		questions                        json.RawMessage
+		params                           json.RawMessage
 	}
 	read := func(sql string) ([]parked, error) {
 		rows, err := s.Pool.Query(ctx, sql, now)
@@ -124,7 +130,7 @@ func (s *Store) waitingPass(ctx context.Context, now time.Time, p *ReminderPass)
 		var out []parked
 		for rows.Next() {
 			var x parked
-			if err := rows.Scan(&x.card, &x.run, &x.install, &x.tenant, &x.user, &x.thread, &x.title, &x.questions); err != nil {
+			if err := rows.Scan(&x.card, &x.run, &x.install, &x.tenant, &x.user, &x.thread, &x.title, &x.questions, &x.params); err != nil {
 				return nil, err
 			}
 			out = append(out, x)
@@ -139,13 +145,15 @@ func (s *Store) waitingPass(ctx context.Context, now time.Time, p *ReminderPass)
 			n = 1
 		}
 		card, run := x.card, x.run
+		// AM11: about a run, so in the run's language
 		return s.addNotification(ctx, s.Pool, notification{TenantID: x.tenant, UserID: x.user, Kind: kind, Title: title,
+			Lang: Run{Params: x.params}.Lang(),
 			Body: Text("มีคำถาม %s ข้อที่ต้องตอบก่อน agent จะทำต่อ เปิดดูแล้วตอบในการ์ดคำถามได้เลย", Count(n)),
 			Link: workspaceLink(x.install, x.thread, x.run), InstallID: x.install, RunID: &run, CardID: &card,
 			Dedupe: kind + ":" + x.card.String()})
 	}
 	name := func(x parked) PersonText { return LabelFromPackage(x.title, Text("agent ของคุณ")) }
-	first, err := read(`SELECT c.id, c.run_id, c.install_id, c.tenant_id, c.user_id, r.thread_id, i.title, c.questions
+	first, err := read(`SELECT c.id, c.run_id, c.install_id, c.tenant_id, c.user_id, r.thread_id, i.title, c.questions, r.params
 		FROM agent_market.agent_run_clarifications c
 		JOIN agent_market.agent_runs r ON r.id = c.run_id AND r.status = 'awaiting_input' AND r.kind = 'run'
 		JOIN agent_market.agent_installs i ON i.id = c.install_id AND i.status = 'active' AND ` + agentOn + `
@@ -165,7 +173,7 @@ func (s *Store) waitingPass(ctx context.Context, now time.Time, p *ReminderPass)
 			p.Waiting++
 		}
 	}
-	again, err := read(`SELECT c.id, c.run_id, c.install_id, c.tenant_id, c.user_id, r.thread_id, i.title, c.questions
+	again, err := read(`SELECT c.id, c.run_id, c.install_id, c.tenant_id, c.user_id, r.thread_id, i.title, c.questions, r.params
 		FROM agent_market.notifications n
 		JOIN agent_market.agent_run_clarifications c ON c.id = n.card_id AND c.status = 'open'
 		JOIN agent_market.agent_runs r ON r.id = c.run_id AND r.status = 'awaiting_input'
@@ -222,7 +230,7 @@ func (a *API) markNotification(w http.ResponseWriter, r *http.Request, col strin
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		say(w, http.StatusNotFound, "NOT_FOUND", "what", "การแจ้งเตือน")
+		say(w, http.StatusNotFound, "NOT_FOUND", "what", whatIn(langOfWriter(w), "notification"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

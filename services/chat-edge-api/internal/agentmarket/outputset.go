@@ -21,7 +21,7 @@ import (
 // OutputSetCode is the finding's code (and the remembered default "answers.output_set").
 const OutputSetCode = "output_set"
 
-var outputWords = map[string]string{"docx": "รายงาน Word", "pptx": "สไลด์", "xlsx": "ตาราง Excel"}
+var outputWords = map[string]wording{"docx": "รายงาน Word", "pptx": "สไลด์", "xlsx": "ตาราง Excel"}
 
 // OutputShape is one sensible set of files.
 type OutputShape struct {
@@ -32,7 +32,7 @@ type OutputShape struct {
 // OutputShapes are the sensible shapes an agent's outputs make, at most
 // four: the default set, each file alone, everything — only when there is
 // more than one. PDF is left to the "more files" card: it needs a converter.
-func OutputShapes(m Manifest) []OutputShape {
+func OutputShapes(l Lang, m Manifest) []OutputShape {
 	var all []string
 	for _, o := range m.Outputs {
 		if o.Format != "pdf" && !contains(all, o.Format) {
@@ -61,19 +61,19 @@ func OutputShapes(m Manifest) []OutputShape {
 		seen[k] = true
 		out = append(out, OutputShape{Formats: fs, Label: label})
 	}
-	add(def, shapeLabel(def)+" (ชุดมาตรฐาน)")
-	add(all, shapeLabel(all))
+	add(def, shapeLabel(l, def)+T(l, " (ชุดมาตรฐาน)"))
+	add(all, shapeLabel(l, all))
 	for _, f := range all {
-		add([]string{f}, outputWords[f]+" อย่างเดียว")
+		add([]string{f}, T(l, outputWords[f])+T(l, " อย่างเดียว"))
 	}
 	return out
 }
 
-func shapeLabel(fs []string) string {
+func shapeLabel(l Lang, fs []string) string {
 	var words []string
 	for _, f := range fs {
 		if w, ok := outputWords[f]; ok {
-			words = append(words, w)
+			words = append(words, T(l, w))
 		} else {
 			words = append(words, "."+f)
 		}
@@ -84,8 +84,9 @@ func shapeLabel(fs []string) string {
 // OutputSetFinding is the question, or nil when there is nothing to ask:
 // one shape only, the install already says (its formats default was set by
 // a person, not copied from the manifest), or the answer is remembered.
-func OutputSetFinding(m Manifest, defaults []Default, current []string) *Finding {
-	shapes := OutputShapes(m)
+// AM11: the question is a run's, so it is asked in l — the run's language.
+func OutputSetFinding(l Lang, m Manifest, defaults []Default, current []string) *Finding {
+	shapes := OutputShapes(l, m)
 	if len(shapes) < 2 {
 		return nil
 	}
@@ -109,8 +110,8 @@ func OutputSetFinding(m Manifest, defaults []Default, current []string) *Finding
 	if def == nil {
 		def = opts[0].Value
 	}
-	return &Finding{Key: OutputSetCode, Code: OutputSetCode, Severity: "cosmetic", Moment: "postcompute", Header: "ชุดไฟล์",
-		Question: "รอบนี้ต้องการไฟล์แบบไหนครับ ถ้าไม่ตอบจะทำชุดมาตรฐานให้ก่อน และจำคำตอบไว้ใช้รอบหน้า",
+	return &Finding{Key: OutputSetCode, Code: OutputSetCode, Severity: "cosmetic", Moment: "postcompute", Header: T(l, "ชุดไฟล์"),
+		Question: T(l, "รอบนี้ต้องการไฟล์แบบไหนครับ ถ้าไม่ตอบจะทำชุดมาตรฐานให้ก่อน และจำคำตอบไว้ใช้รอบหน้า"),
 		Options:  opts, Default: def, Rememberable: true, Kind: "question"}
 }
 
@@ -196,6 +197,8 @@ func (s *Store) ApplyOutputSet(ctx context.Context, q Querier, run Run, answers 
 	}
 	v, _ := json.Marshal(fs)
 	rid := run.ID
-	return s.SetDefault(ctx, q, run.InstallID, Default{Key: "formats", Value: v, Source: "answer", Label: "ชุดไฟล์ที่ต้องการ",
-		Note: "ตอบไว้ในรอบ " + PeriodLabel(periodOf(run)), FromRunID: &rid})
+	// AM11: the setting's name and note come from a run's answer and are kept in a row: the run's language
+	l := run.Lang()
+	return s.SetDefault(ctx, q, run.InstallID, Default{Key: "formats", Value: v, Source: "answer", Label: T(l, "ชุดไฟล์ที่ต้องการ"),
+		Note: T(l, "ตอบไว้ในรอบ ") + periodIn(l, run), FromRunID: &rid})
 }

@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -79,7 +78,7 @@ func (rc *runCtx) pdfFromDocx(ctx context.Context, name string, docx []byte) ([]
 		rc.technical(ctx, "pdf.check", err)
 		return nil, []gateCheck{{Name: "pdf.check", Label: am.Text("ตรวจ PDF"), Detail: am.Text(converterDown)}}
 	}
-	return pdf, pdfGate(docx, chk)
+	return pdf, pdfGate(rc.docLang(ctx), docx, chk)
 }
 
 // deliverPDF converts the rendered .docx, gates the PDF and stores it as an
@@ -87,8 +86,9 @@ func (rc *runCtx) pdfFromDocx(ctx context.Context, name string, docx []byte) ([]
 // err is only for a storage failure.
 func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPath string, names map[string]string,
 	versions map[string]int) (renderedArt, []string, error) {
+	l := am.LangOf(ctx)
 	if docxPath == "" {
-		return renderedArt{}, []string{"pdf: แปลงเป็น PDF (agent ตัวนี้ไม่มีรายงาน .docx ให้แปลง)"}, nil
+		return renderedArt{}, []string{am.T(l, "pdf: แปลงเป็น PDF (agent ตัวนี้ไม่มีรายงาน .docx ให้แปลง)")}, nil
 	}
 	docx, err := os.ReadFile(docxPath)
 	if err != nil {
@@ -98,7 +98,7 @@ func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPat
 	var why []string
 	for _, c := range checks {
 		if !c.OK {
-			why = append(why, checkLine("pdf", c.Label.String(), c.Detail.String()))
+			why = append(why, checkLine(l, "pdf", c.Label.In(l), c.Detail.In(l)))
 		}
 	}
 	if pdf == nil || len(why) > 0 {
@@ -110,12 +110,22 @@ func (rc *runCtx) deliverPDF(ctx context.Context, artifactRun uuid.UUID, docxPat
 		return renderedArt{}, nil, err
 	}
 	sum := sha256.Sum256(pdf)
-	q, _ := json.Marshal(map[string]any{"passed": true, "checks": checks})
+	// the checks are read on the files card: kept in the run's language (their texts carry both)
+	q, _ := am.MarshalIn(l, map[string]any{"passed": true, "checks": checks})
 	return renderedArt{Name: name, Format: "pdf", Kind: "report", Key: key, Size: int64(len(pdf)),
 		SHA256: hex.EncodeToString(sum[:]), Version: versions["pdf"], Quality: q}, nil, nil
 }
 
-func pdfGate(docx []byte, chk CheckResult) []gateCheck {
+// pdfGate checks a PDF against the report it was converted from. AM11: which
+// text of the report must be in the PDF goes by the language the report is
+// written in — l, the package's (runCtx.docLang), never the run's: a run
+// started from an English screen still gets the Thai report of a package
+// that speaks only Thai, and that report is checked exactly as before
+// (pdf.thai: every Thai paragraph, and there must be one). A report a package
+// wrote in English has no Thai paragraph of its own, so its check is the same
+// promise in its own language (pdf.text: every paragraph of the report, in
+// the order the report has them, and there must be one).
+func pdfGate(l am.Lang, docx []byte, chk CheckResult) []gateCheck {
 	want := chk.Pages
 	if want > maxCheckedPages {
 		want = maxCheckedPages
@@ -131,6 +141,9 @@ func pdfGate(docx []byte, chk CheckResult) []gateCheck {
 		Detail: am.Text("%s หน้า แสดงผลได้ %s หน้า", am.Count(chk.Pages), am.Count(chk.RenderedPages))}
 	if len(bad) > 0 {
 		pages.Detail = am.Text("%s · หน้าว่างหรือผิดปกติ: %s", am.Words(pages.Detail), am.Name(strings.Join(bad, ", ")))
+	}
+	if l == am.English {
+		return []gateCheck{pages, pdfTextCheck(docx, chk)}
 	}
 	paras := docxThaiParagraphs(docx)
 	text := thaiKey(chk.RawText)
@@ -151,9 +164,66 @@ func pdfGate(docx []byte, chk CheckResult) []gateCheck {
 	return []gateCheck{pages, thai}
 }
 
+// countsAsText: a paragraph long enough to be looked for in the PDF.
+func countsAsText(s string) bool { return letterCount(s) >= 4 }
+
+// pdfTextCheck is the text check of an English report (AM11): every paragraph
+// of the .docx that has at least four letters must be in the PDF's text, and
+// in the order the report has them — a paragraph found only before the one
+// that precedes it is not where the report put it. Both sides are compared
+// in textKey form. The customer's own Thai (an account's name, a company's)
+// is in those paragraphs too, and is held to the same.
+func pdfTextCheck(docx []byte, chk CheckResult) gateCheck {
+	paras := docxParagraphs(docx, countsAsText)
+	text := textKey(chk.RawText)
+	var missing []string
+	at := 0
+	for _, p := range paras {
+		key := textKey(p)
+		i := strings.Index(text[at:], key)
+		if i < 0 {
+			missing = append(missing, p)
+			continue
+		}
+		at += i + len(key)
+	}
+	c := gateCheck{Name: "pdf.text", Label: am.Text("ข้อความใน PDF ตรงกับรายงาน"), OK: len(paras) > 0 && len(missing) == 0,
+		Detail: am.Text("ตรง %s จาก %s ย่อหน้า", am.Count(len(paras)-len(missing)), am.Count(len(paras)))}
+	if len(missing) > 0 {
+		c.Detail = am.Text("%s · ไม่ตรง เช่น “%s”", am.Words(c.Detail), am.Typed(missing[0], 60))
+	}
+	if len(paras) == 0 {
+		c.Detail = am.Text("ไม่พบข้อความในรายงาน")
+	}
+	return c
+}
+
+// ligatures are the joined letters a PDF's text layer may give back for the
+// plain letters a report was written with ("ﬁ" for "fi").
+var ligatures = strings.NewReplacer("ﬀ", "ff", "ﬁ", "fi", "ﬂ", "fl", "ﬃ", "ffi", "ﬄ", "ffl")
+
+// textKey is thaiKey for a text that may be English: joined letters apart.
+func textKey(s string) string { return thaiKey(ligatures.Replace(s)) }
+
+func letterCount(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			n++
+		}
+	}
+	return n
+}
+
 // docxThaiParagraphs is the text of every body paragraph of a .docx that
 // carries Thai (at least four Thai characters), in order.
 func docxThaiParagraphs(docx []byte) []string {
+	return docxParagraphs(docx, func(s string) bool { return thaiCount(s) >= 4 })
+}
+
+// docxParagraphs is the text of every body paragraph of a .docx that counts,
+// in order (at most maxThaiParagraphs of them).
+func docxParagraphs(docx []byte, counts func(string) bool) []string {
 	zr, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
 	if err != nil {
 		return nil
@@ -207,7 +277,7 @@ func docxThaiParagraphs(docx []byte) []string {
 				}
 				s := strings.TrimSpace(stack[len(stack)-1].String())
 				stack = stack[:len(stack)-1]
-				if thaiCount(s) >= 4 && len(out) < maxThaiParagraphs {
+				if counts(s) && len(out) < maxThaiParagraphs {
 					out = append(out, s)
 				}
 			}
@@ -252,4 +322,17 @@ func thaiKey(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// docLang is the language this run's documents are written in: the run's own
+// when the package says it speaks it (manifest "languages"), Thai otherwise.
+// A package's tables, labels and fixed text are its own words; what the
+// platform adds to a document — a model's commentary, a preparer's name, the
+// check of the PDF's text — follows them, so a document is never half one
+// language and half another. The thread around the run is the run's language.
+func (rc *runCtx) docLang(ctx context.Context) am.Lang {
+	if l := am.LangOf(ctx); rc.pkg.Manifest.Speaks(l) {
+		return l
+	}
+	return am.Thai
 }

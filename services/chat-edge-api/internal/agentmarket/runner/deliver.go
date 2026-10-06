@@ -85,10 +85,14 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 			if err != nil {
 				return nil, 0, "", "", err
 			}
-			user := narrativePrompt(cv)
+			// AM11: the commentary is printed in the report, so it is written in the report's language
+			// (docLang: the package's, not the run's) — the prompt says which, and the number guard
+			// reads the answer as a text of that language
+			l := rc.docLang(ctx)
+			user := narrativePrompt(l, cv)
 			var parsed map[string]any
 			c, tried, err := rc.r.Model.CompleteWith(ctx, models, rc.pkg.Instructions, user, func(s string) error {
-				v, err := checkNarrative(s, cv)
+				v, err := checkNarrative(l, s, cv)
 				if err != nil {
 					return err
 				}
@@ -126,7 +130,7 @@ func (rc *runCtx) narrative(ctx context.Context, computed blobRef, computeKey st
 
 // checkNarrative reads a model's answer as the report's words, or says why
 // it cannot be used (the model is asked again, then the next model).
-func checkNarrative(s string, cv computedView) (map[string]any, error) {
+func checkNarrative(l am.Lang, s string, cv computedView) (map[string]any, error) {
 	var v map[string]any
 	if err := json.Unmarshal([]byte(extractJSON(s)), &v); err != nil {
 		return nil, fmt.Errorf("ไม่ใช่ JSON")
@@ -152,12 +156,12 @@ func checkNarrative(s string, cv computedView) (map[string]any, error) {
 		v[k] = lines
 	}
 	if len(cv.Figures) > 0 {
-		if err := guardFigures(strings.Join(all, "\n"), cv); err != nil {
+		if err := guardFigures(l, strings.Join(all, "\n"), cv); err != nil {
 			return nil, err
 		}
 		return v, nil
 	}
-	if err := GuardNumbers(strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
+	if err := GuardNumbersIn(l, strings.Join(all, "\n"), cv.Quotable, cv.QuotableIDs); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -171,7 +175,7 @@ var figureRe = regexp.MustCompile(`\{([A-Za-z0-9_][A-Za-z0-9_.\-/]*)(?::(abs))?\
 // afterwards by matching printed text (two figures printing "10.5%" took each other's citation).
 // What is left once the keys are taken out may hold small counts, years and the table's account
 // codes, nothing else (GuardNumbers with no figures allowed).
-func guardFigures(text string, cv computedView) error {
+func guardFigures(l am.Lang, text string, cv computedView) error {
 	var unknown []string
 	for _, m := range figureRe.FindAllStringSubmatch(text, -1) {
 		if _, ok := cv.Figures[m[1]]; !ok {
@@ -182,7 +186,7 @@ func guardFigures(text string, cv computedView) error {
 		return fmt.Errorf("อ้างตัวเลขที่ไม่มีในตาราง: %s ใช้ได้เฉพาะชื่อในรายการตัวเลขที่อ้างได้", strings.Join(unknown, ", "))
 	}
 	rest := figureRe.ReplaceAllString(text, " ")
-	if err := GuardNumbers(rest, nil, cv.QuotableIDs); err != nil {
+	if err := GuardNumbersIn(l, rest, nil, cv.QuotableIDs); err != nil {
 		return fmt.Errorf("%s — อย่าพิมพ์ตัวเลขเอง ให้เขียนชื่อของตัวเลขในวงเล็บปีกกา เช่น {revenue}", err.Error())
 	}
 	return nil
@@ -212,7 +216,10 @@ func (rc *runCtx) rulesNarrative(ctx context.Context, computed blobRef, computeK
 	return n, key, json.Unmarshal(out, &n)
 }
 
-func narrativePrompt(cv computedView) string {
+// narrativePrompt is what a model is shown of a run's figures, and asked. It is addressed to a model and
+// written in Thai; the one thing in it that is the run's is the language the answer is to be written in
+// (modellang.go) — l. A Thai run's prompt is exactly what it was.
+func narrativePrompt(l am.Lang, cv computedView) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "งวด: %s\n", cv.PeriodLabel)
 	if cv.PriorLabel != nil {
@@ -251,8 +258,8 @@ func narrativePrompt(cv computedView) string {
 			f := cv.Figures[k]
 			fmt.Fprintf(&b, "- {%s} = %s · %s\n", k, f.Text, f.Label)
 		}
-		b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions ภาษาไทย ทุกตัวเลขเขียนเป็น {ชื่อ} จากรายการด้านบน " +
-			"(ถ้าบอกทิศทางเป็นคำแล้ว เช่น ลดลง ใช้ {ชื่อ:abs} เพื่อพิมพ์โดยไม่มีเครื่องหมาย)")
+		b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ทุกตัวเลขเขียนเป็น {ชื่อ} จากรายการด้านบน " +
+			"(ถ้าบอกทิศทางเป็นคำแล้ว เช่น " + directionWord(l) + " ใช้ {ชื่อ:abs} เพื่อพิมพ์โดยไม่มีเครื่องหมาย)" + answerIn(l))
 		return b.String()
 	}
 	b.WriteString("\nตัวเลขที่อ้างได้ (คัดลอกตรงตัวอักษรเท่านั้น):\n")
@@ -264,7 +271,7 @@ func narrativePrompt(cv computedView) string {
 	for _, k := range keys {
 		fmt.Fprintf(&b, "- %s: %s\n", k, cv.Quotable[k])
 	}
-	b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions ภาษาไทย ใช้ตัวเลขจากรายการด้านบนเท่านั้น")
+	b.WriteString("\nเขียนคำอธิบายตามรูปแบบ JSON ใน instructions " + languageName(l) + " ใช้ตัวเลขจากรายการด้านบนเท่านั้น" + answerIn(l))
 	return b.String()
 }
 
@@ -482,7 +489,7 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 				if !q.Passed && meta.Kind != "template" {
 					for _, c := range q.Checks {
 						if !c.OK {
-							failed = append(failed, checkLine(meta.Format, c.Label, c.Detail))
+							failed = append(failed, checkLine(am.LangOf(ctx), meta.Format, c.Label, c.Detail))
 						}
 					}
 					continue
@@ -498,9 +505,9 @@ func (rc *runCtx) render(ctx context.Context, artifactRun uuid.UUID, computed bl
 						return nil, 0, "", "", err
 					}
 					if c != nil {
-						meta.Quality = withCheck(meta.Quality, *c)
+						meta.Quality = withCheck(am.LangOf(ctx), meta.Quality, *c)
 						if !c.OK {
-							failed = append(failed, checkLine(meta.Format, c.Label.String(), c.Detail.String()))
+							failed = append(failed, checkLine(am.LangOf(ctx), meta.Format, c.Label.In(am.LangOf(ctx)), c.Detail.In(am.LangOf(ctx))))
 							continue
 						}
 					}
@@ -613,7 +620,7 @@ func unfilledTemplateSlots(arts []am.Artifact) int {
 // never prints a stand-in.
 func (rc *runCtx) preparer(ctx context.Context, run am.Run) string {
 	if run.Kind == am.KindSelfTest {
-		return SamplePreparer
+		return am.T(rc.docLang(ctx), SamplePreparer) // printed on the sample's working paper: the paper's language
 	}
 	if n := rc.r.Store.DisplayName(ctx, rc.install.OrgID, run.UserID, ""); n != "" {
 		return n
@@ -737,7 +744,7 @@ func (rc *runCtx) postOutputs(ctx context.Context, artifactRun uuid.UUID, arts [
 		return nil
 	}
 	text := am.Text("เสร็จแล้วครับ")
-	if gate != nil && !out.Gate.What.Empty() {
+	if gate != nil && !out.Gate.What.EmptyIn(am.LangOf(ctx)) {
 		text = am.Text("เสร็จแล้วครับ %s", am.Words(out.Gate.What))
 	}
 	if n := unfilledTemplateSlots(arts); n > 0 {
@@ -854,28 +861,31 @@ func (rc *runCtx) startNextRound(ctx context.Context) {
 // message carry it: the file's format, the check's label, and its detail
 // when the detail is something a person can read. (What a person is shown of
 // the whole line is decided once more where it is said: am.FailureFor.)
-func checkLine(format, label, detail string) string {
-	line := formatThai(format) + ": " + label
-	if d := am.ShownToPerson(am.TrimText(detail, 120)); d != "" {
+// AM11: the line is a plain text kept on the run and said in its thread, so
+// it is built in l — the run's language.
+func checkLine(l am.Lang, format, label, detail string) string {
+	line := formatWord(l, format) + ": " + label
+	if d := am.ShownIn(l, am.TrimText(detail, 120)); d != "" {
 		line += " (" + d + ")"
 	}
 	return line
 }
 
-func formatThai(format string) string {
+// formatWord names a kind of file in front of a check of it.
+func formatWord(l am.Lang, format string) string {
 	switch format {
 	case "docx":
-		return "รายงาน"
+		return am.T(l, "รายงาน")
 	case "pptx":
-		return "สไลด์"
+		return am.T(l, "สไลด์")
 	case "xlsx":
-		return "ตาราง"
+		return am.T(l, "ตาราง")
 	case "pdf":
 		return "PDF"
 	case "template":
-		return "แบบฟอร์ม"
+		return am.T(l, "แบบฟอร์ม")
 	}
-	return "ไฟล์"
+	return am.T(l, "ไฟล์")
 }
 
 // gateLines reads the failed checks back out of a quality gate's error.

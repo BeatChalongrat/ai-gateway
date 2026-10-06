@@ -33,7 +33,12 @@ type Manifest struct {
 	Accent        *Accent `json:"accent"`
 	Summary       string  `json:"summary"`
 	PythonPackage string  `json:"python_package"`
-	TypicalRunSec int     `json:"typical_run_seconds"`
+	// AM11. Languages: the languages the package itself speaks — what it asks,
+	// the labels of its figures, the documents it makes ("th", "en"). None
+	// said = Thai only. The screen and the platform's sentences around an
+	// agent follow the person's language either way (Speaks).
+	Languages     []string `json:"languages"`
+	TypicalRunSec int      `json:"typical_run_seconds"`
 	Greeting      struct {
 		Text    string `json:"text"`
 		Role    string `json:"role"`
@@ -258,7 +263,7 @@ func Resolve(m Manifest, available map[string]Binding, version int) (Resolution,
 }
 
 // MissingCapabilities is what Resolve returns when the runner lacks
-// something the agent requires. Error() is for the log; Thai() is what a
+// something the agent requires. Error() is for the log; Names() is what a
 // person reads — the parts named in words, never by their ids (AM5).
 type MissingCapabilities struct{ IDs []string }
 
@@ -266,8 +271,9 @@ func (m *MissingCapabilities) Error() string {
 	return "missing capabilities: " + strings.Join(m.IDs, ", ")
 }
 
-// capabilityThai names a capability for a person.
-var capabilityThai = map[string]string{
+// capabilityNames names a capability for a person (written in Thai like every
+// sentence of the source; each one's English is in the catalogue).
+var capabilityNames = map[string]wording{
 	"spreadsheet.read.xlsx":   "การอ่านไฟล์ Excel",
 	"document.extract.e2":     "การอ่านใบกำกับภาษีและใบเสร็จ",
 	"document.match.e3":       "การจับคู่รายการของสองตาราง",
@@ -281,28 +287,42 @@ var capabilityThai = map[string]string{
 	"deliverable.template":    "การกรอกแบบฟอร์มของบริษัท",
 }
 
-// Thai lists the missing parts in words.
-func (m *MissingCapabilities) Thai() string {
+// Names lists the missing parts in words, in l.
+func (m *MissingCapabilities) Names(l Lang) string {
 	var out []string
-	seen := map[string]bool{}
+	seen := map[wording]bool{}
 	for _, id := range m.IDs {
-		name, ok := capabilityThai[id]
+		name, ok := capabilityNames[id]
 		if !ok {
 			name = "ส่วนประกอบหนึ่งของระบบ"
 		}
 		if !seen[name] {
 			seen[name] = true
-			out = append(out, name)
+			out = append(out, T(l, name))
 		}
 	}
 	return strings.Join(out, ", ")
 }
 
-// missingThai is what a capability error says to a person.
-func missingThai(err error) string {
+// missingWords is what a capability error says to a person, in l.
+func missingWords(l Lang, err error) string {
 	var m *MissingCapabilities
 	if errors.As(err, &m) {
-		return m.Thai()
+		return m.Names(l)
 	}
-	return "ส่วนประกอบหนึ่งของระบบ"
+	return T(l, "ส่วนประกอบหนึ่งของระบบ")
+}
+
+// Speaks: the package writes its own words — and its documents — in l.
+// A package that names no language speaks Thai.
+func (m Manifest) Speaks(l Lang) bool {
+	if len(m.Languages) == 0 {
+		return l == Thai
+	}
+	for _, x := range m.Languages {
+		if strings.EqualFold(strings.TrimSpace(x), string(l)) {
+			return true
+		}
+	}
+	return false
 }

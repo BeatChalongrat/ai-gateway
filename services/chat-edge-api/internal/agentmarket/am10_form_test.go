@@ -167,12 +167,12 @@ func TestWhichFilesIsAskedOnlyWhenTheInstallDoesNotSay(t *testing.T) {
 		Label   string `json:"label"`
 		Default bool   `json:"default"`
 	}{{"docx", "รายงาน", true}, {"pptx", "สไลด์", true}, {"xlsx", "ตาราง", false}, {"pdf", "PDF", false}}}
-	shapes := OutputShapes(m)
+	shapes := OutputShapes(Thai, m)
 	if len(shapes) != 4 || shapes[0].Label != "รายงาน Word + สไลด์ (ชุดมาตรฐาน)" || len(shapes[1].Formats) != 3 || shapes[2].Label != "รายงาน Word อย่างเดียว" {
 		t.Fatalf("shapes: %+v", shapes)
 	}
 	copied := []Default{{Key: "formats", Value: json.RawMessage(`["docx","pptx"]`), Source: "install"}}
-	f := OutputSetFinding(m, copied, []string{"docx", "pptx"})
+	f := OutputSetFinding(Thai, m, copied, []string{"docx", "pptx"})
 	if f == nil || f.Severity != "cosmetic" || !f.Rememberable || f.Moment != "postcompute" || len(f.Options) != 4 {
 		t.Fatalf("asked when the install's set was only copied from the manifest: %+v", f)
 	}
@@ -182,10 +182,10 @@ func TestWhichFilesIsAskedOnlyWhenTheInstallDoesNotSay(t *testing.T) {
 	if !JSONEqual(f.Default, f.Options[0].Value) {
 		t.Fatalf("the default is the current set: %s", f.Default)
 	}
-	if OutputSetFinding(m, []Default{{Key: "formats", Value: json.RawMessage(`["docx"]`), Source: "settings"}}, []string{"docx"}) != nil {
+	if OutputSetFinding(Thai, m, []Default{{Key: "formats", Value: json.RawMessage(`["docx"]`), Source: "settings"}}, []string{"docx"}) != nil {
 		t.Fatal("the wizard's or the settings page's choice is the install saying")
 	}
-	if OutputSetFinding(m, []Default{{Key: "answers.output_set", Value: json.RawMessage(`["pptx"]`), Source: "answer"}}, nil) != nil {
+	if OutputSetFinding(Thai, m, []Default{{Key: "answers.output_set", Value: json.RawMessage(`["pptx"]`), Source: "answer"}}, nil) != nil {
 		t.Fatal("a remembered answer is the install saying")
 	}
 	one := Manifest{Outputs: []struct {
@@ -193,7 +193,7 @@ func TestWhichFilesIsAskedOnlyWhenTheInstallDoesNotSay(t *testing.T) {
 		Label   string `json:"label"`
 		Default bool   `json:"default"`
 	}{{"xlsx", "ทะเบียน", true}}}
-	if OutputSetFinding(one, copied, nil) != nil {
+	if OutputSetFinding(Thai, one, copied, nil) != nil {
 		t.Fatal("one shape: nothing to ask")
 	}
 }
@@ -233,7 +233,7 @@ func TestAnAnsweredOutputSetBecomesTheRunsAndTheInstalls(t *testing.T) {
 	// a remembered answer changes the run only, never the setting again
 	m, _ := e.store.DefinitionByID(ctx, in.DefinitionID)
 	mf, _ := ParseManifest(m.Manifest)
-	if OutputSetFinding(mf, defs, fs) != nil {
+	if OutputSetFinding(Thai, mf, defs, fs) != nil {
 		t.Fatal("asked again although the install now says")
 	}
 	run2 := e.finishedRun(in, "2026-10", "")

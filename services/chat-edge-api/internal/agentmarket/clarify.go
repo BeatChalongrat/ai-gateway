@@ -90,11 +90,17 @@ func (f Finding) Validate() error {
 	if rec := nullIfEmpty(f.Recommended); rec != nil && !validOption(f, rec) {
 		return fmt.Errorf("%s: what the card recommends is not one of its options", f.Key)
 	}
+	// what a question may never name, in either language it may be written in. These read a package's
+	// question; nothing here is said to anyone. "pin" is asked as a whole word (it is inside "shipping").
 	low := strings.ToLower(f.Question)
-	for _, w := range []string{"password", "รหัสผ่าน", "token", "โทเคน", "otp", "เลขบัตรประชาชน"} {
+	for _, w := range []string{"password", "รหัสผ่าน", "token", "โทเคน", "otp", "เลขบัตรประชาชน",
+		"passcode", "national id", "id card number", "citizen id"} {
 		if strings.Contains(low, w) {
 			return fmt.Errorf("%s: a card may never ask for a secret", f.Key)
 		}
+	}
+	if HasWord(low, "pin") {
+		return fmt.Errorf("%s: a card may never ask for a secret", f.Key)
 	}
 	return nil
 }
@@ -134,6 +140,9 @@ type PlanInput struct {
 	OpenKeys   map[string]bool            // keys on a card that is still open
 	Remembered map[string]json.RawMessage // install defaults by finding code
 	MaxPerCard int
+	// Lang (AM11) is the run's language: an assumption the engine writes is printed in the run's
+	// documents under "assumptions used". None = Thai.
+	Lang Lang
 }
 
 // CardPlan is one card the engine wants created now.
@@ -174,7 +183,7 @@ func Plan(in PlanInput) (PlanResult, error) {
 				Cosmetic: !f.Blocking(), Code: f.Code}
 			res.Assumptions = append(res.Assumptions, Assumption{
 				Code: f.Code, Source: "remembered",
-				Text: fmt.Sprintf("%s: ใช้ค่าที่จำไว้ “%s”", f.Header, labelFor(f, v)), ChangesNumbers: f.Blocking(),
+				Text: fmt.Sprintf(T(in.Lang, "%s: ใช้ค่าที่จำไว้ “%s”"), f.Header, labelFor(f, v)), ChangesNumbers: f.Blocking(),
 			})
 			continue
 		}
@@ -238,7 +247,7 @@ func Plan(in PlanInput) (PlanResult, error) {
 				Cosmetic: true, Code: f.Code}
 			res.Assumptions = append(res.Assumptions, Assumption{
 				Code: f.Code, Source: "default",
-				Text: fmt.Sprintf("%s: ใช้ค่าตั้งต้น “%s” (ไม่ได้ถาม เพื่อไม่ให้คำถามยาวเกินไป)", f.Header, labelFor(f, f.Default)),
+				Text: fmt.Sprintf(T(in.Lang, "%s: ใช้ค่าตั้งต้น “%s” (ไม่ได้ถาม เพื่อไม่ให้คำถามยาวเกินไป)"), f.Header, labelFor(f, f.Default)),
 			})
 		}
 	}
@@ -254,7 +263,7 @@ func Plan(in PlanInput) (PlanResult, error) {
 				Cosmetic: true, Code: f.Code}
 			res.Assumptions = append(res.Assumptions, Assumption{
 				Code: f.Code, Source: "default",
-				Text: fmt.Sprintf("%s: ใช้ค่าตั้งต้น “%s” ไปก่อน ตอบภายหลังได้", f.Header, labelFor(f, f.Default)),
+				Text: fmt.Sprintf(T(in.Lang, "%s: ใช้ค่าตั้งต้น “%s” ไปก่อน ตอบภายหลังได้"), f.Header, labelFor(f, f.Default)),
 			})
 		}
 	}
@@ -428,13 +437,23 @@ func InterpretText(q Question, text string) (Option, bool) {
 	return Option{}, false
 }
 
+// negations are the words that, straight in front of an option's first word, turn a typed answer into
+// its opposite ("ไม่ตัดออก", "do not exclude"). They read what a person typed, as normalizeThai leaves
+// it — lower case, no spaces: "do not" and "no need to" arrive as "donot" and "noneedto".
+var negations = []string{"ไม่", "ไม่ต้อง", "not", "no", "don't", "dont", "never", "noneedto", "without"}
+
 func negated(text, word string) bool {
 	i := strings.Index(text, word)
 	if i < 0 {
 		return false
 	}
 	prefix := text[:i]
-	return strings.HasSuffix(prefix, "ไม่") || strings.HasSuffix(prefix, "ไม่ต้อง")
+	for _, n := range negations {
+		if strings.HasSuffix(prefix, n) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeThai(s string) string {
@@ -447,11 +466,11 @@ type oneAnswerErr struct{ header, key string }
 
 func (e *oneAnswerErr) Error() string { return e.key + ": one answer expected" }
 
-// answerProblem is why an answer was not taken, as the person reads it.
-func answerProblem(err error) string {
+// answerProblem is why an answer was not taken, as the person reads it, in l.
+func answerProblem(l Lang, err error) string {
 	var one *oneAnswerErr
 	if errors.As(err, &one) {
-		return "คำถาม “" + one.header + "” รับคำตอบได้ข้อเดียว"
+		return T(l, "คำถาม “") + one.header + T(l, "” รับคำตอบได้ข้อเดียว")
 	}
-	return "คำตอบนี้ใช้ไม่ได้"
+	return T(l, "คำตอบนี้ใช้ไม่ได้")
 }

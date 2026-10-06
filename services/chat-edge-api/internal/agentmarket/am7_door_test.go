@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"unicode"
 )
@@ -118,6 +119,14 @@ func TestAM7TheAdminDoorNeedsANamedAdmin(t *testing.T) {
 	code, msg := errMsg(body)
 	if code != "NOT_ADMIN" || msg == "" || looksEnglish(msg) {
 		t.Fatalf("refusal = %s %q", code, msg)
+	}
+	// AM11: the admin app says its own language; the same refusal is then the English sentence of the same
+	// code — written for a person (the English reader takes all of it), and still no developer text
+	_, body = e.adminDo(uiViewer, "GET", "/org?lang=en", nil)
+	code, en := errMsg(body)
+	if code != "NOT_ADMIN" || en == "" || en == msg || !looksEnglish(en) || LooksLikeError(en) || !ReadsIn(English, en) ||
+		!strings.HasPrefix(en, "This part is for Agent Market admins") {
+		t.Fatalf("the refusal in English = %s %q", code, en)
 	}
 }
 

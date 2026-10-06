@@ -27,7 +27,9 @@ func (r *Runner) syncProgress(ctx context.Context, runID uuid.UUID) {
 		return
 	}
 	p := BuildProgress(run, steps, r.Now())
-	_ = r.Store.UpdateItem(ctx, item.ID, p)
+	// AM11: the card is the run's and is written in its language — also when the run is ended under a
+	// context of its own (a cancel, a failure), which carries none
+	_ = r.Store.UpdateItem(am.InRunLang(ctx, run), item.ID, p)
 }
 
 // BuildProgress turns step rows into the progress card's lines.

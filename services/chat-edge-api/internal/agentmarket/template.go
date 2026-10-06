@@ -267,9 +267,9 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		say(w, http.StatusUnsupportedMediaType, "TEMPLATE_FILE_TYPE")
 		return
 	}
-	msg := CheckTemplateMapping(body.Slots, body.Mapping, spec)
+	msg := CheckTemplateMapping(langOfWriter(w), body.Slots, body.Mapping, spec)
 	if msg == "" {
-		msg = CheckFormCoverage(body.Slots, body.Mapping)
+		msg = CheckFormCoverage(langOfWriter(w), body.Slots, body.Mapping)
 	}
 	if msg != "" {
 		say(w, http.StatusBadRequest, "BAD_MAPPING", "detail", msg)
@@ -291,7 +291,7 @@ func (a *API) saveTemplate(w http.ResponseWriter, r *http.Request) {
 		Mapping: body.Mapping, SavedAt: time.Now().UTC()}
 	value, _ := json.Marshal(t)
 	if err := a.store.SetDefault(r.Context(), a.store.Pool, in.ID, Default{Key: "template", Value: value, Source: "settings",
-		Label: "แบบฟอร์มของคุณ", Note: fmt.Sprintf("%s รุ่นที่ %d", f.Name, version)}); err != nil {
+		Label: T(LangOf(r.Context()), "แบบฟอร์มของคุณ"), Note: fmt.Sprintf(T(LangOf(r.Context()), "%s รุ่นที่ %d"), f.Name, version)}); err != nil {
 		a.fail(w, err, "template")
 		return
 	}
@@ -333,7 +333,8 @@ func (a *API) removeTemplate(w http.ResponseWriter, r *http.Request) {
 // every key names a place in the template that takes a value (a list's
 // column as "slot.column"), every value one of the agent's fields (a list's
 // column as "list.column"), and a list goes only to a list or a table.
-func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec TemplateSpec) string {
+// AM11: it says so in l — the request's language at a save, the run's in the runner.
+func CheckTemplateMapping(l Lang, slots []TemplateSlot, mapping map[string]string, spec TemplateSpec) string {
 	by := map[string]TemplateSlot{}
 	for _, s := range slots {
 		by[s.Key] = s
@@ -345,11 +346,11 @@ func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec 
 		}
 	}
 	if len(stops) > 0 {
-		return "แบบฟอร์มนี้ใช้ไม่ได้: มีส่วนที่ระบบเติมหรืออัปเดตไม่ได้ (" + strings.Join(stops, ", ") +
-			") แก้แบบฟอร์มแล้วอัปโหลดใหม่"
+		return T(l, "แบบฟอร์มนี้ใช้ไม่ได้: มีส่วนที่ระบบเติมหรืออัปเดตไม่ได้ (") + strings.Join(stops, ", ") +
+			T(l, ") แก้แบบฟอร์มแล้วอัปโหลดใหม่")
 	}
 	if len(mapping) == 0 {
-		return "ยังไม่ได้เลือกค่าให้ช่องใดเลย"
+		return T(l, "ยังไม่ได้เลือกค่าให้ช่องใดเลย")
 	}
 	for k, v := range mapping {
 		base, col, sub := strings.Cut(k, ".")
@@ -358,33 +359,33 @@ func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec 
 			s, ok = by[base]
 		}
 		if !ok {
-			return "ไม่มีช่อง “" + k + "” ในแบบฟอร์ม"
+			return T(l, "ไม่มีช่อง “") + k + T(l, "” ในแบบฟอร์ม")
 		}
 		if !s.Fillable {
-			return "ช่อง “" + s.Label + "” เติมค่าไม่ได้"
+			return T(l, "ช่อง “") + s.Label + T(l, "” เติมค่าไม่ได้")
 		}
 		isList := s.Kind == "list" || s.Kind == "table"
 		if _, exact := by[k]; exact || !sub {
 			if isList {
 				if _, ok := spec.Lists[v]; !ok {
-					return "ช่อง “" + s.Label + "” ต้องเป็นรายการ"
+					return T(l, "ช่อง “") + s.Label + T(l, "” ต้องเป็นรายการ")
 				}
 			} else if _, ok := spec.Fields[v]; !ok {
-				return "ไม่มีค่า “" + v + "” ใน agent ตัวนี้"
+				return T(l, "ไม่มีค่า “") + v + T(l, "” ใน agent ตัวนี้")
 			}
 			continue
 		}
 		// a list column: slot.column → list.column
 		if !isList || !contains(s.Columns, col) {
-			return "ไม่มีคอลัมน์ “" + col + "” ในช่อง “" + s.Label + "”"
+			return T(l, "ไม่มีคอลัมน์ “") + col + T(l, "” ในช่อง “") + s.Label + "”"
 		}
 		list, lcol, _ := strings.Cut(v, ".")
-		l, ok := spec.Lists[list]
+		found, ok := spec.Lists[list]
 		if !ok || mapping[base] != list {
-			return "คอลัมน์ “" + col + "” ต้องมาจากรายการเดียวกับช่อง “" + s.Label + "”"
+			return T(l, "คอลัมน์ “") + col + T(l, "” ต้องมาจากรายการเดียวกับช่อง “") + s.Label + "”"
 		}
-		if _, ok := l.Columns[lcol]; !ok {
-			return "ไม่มีคอลัมน์ “" + lcol + "” ในรายการ “" + l.Label + "”"
+		if _, ok := found.Columns[lcol]; !ok {
+			return T(l, "ไม่มีคอลัมน์ “") + lcol + T(l, "” ในรายการ “") + found.Label + "”"
 		}
 	}
 	return ""
@@ -394,13 +395,13 @@ func CheckTemplateMapping(slots []TemplateSlot, mapping map[string]string, spec 
 // is): AM11 — a form left mostly empty is not filled; the blanks nothing was chosen for are named. Asked
 // at the save, after CheckTemplateMapping, and by the runner once a model has read the form — never of a
 // mapping that is still being put together pair by pair.
-func CheckFormCoverage(slots []TemplateSlot, mapping map[string]string) string {
+func CheckFormCoverage(l Lang, slots []TemplateSlot, mapping map[string]string) string {
 	why, lacking, asked := FormRefusal(slots, mapping)
 	if why != RefusedTooFew {
 		return ""
 	}
-	return "แบบฟอร์มนี้มีช่องที่ต้องกรอก " + strconv.Itoa(asked) + " ช่อง เลือกค่าให้แล้ว " + strconv.Itoa(asked-len(lacking)) +
-		" ช่อง ซึ่งไม่ถึงครึ่ง จึงยังไม่กรอกให้ — ช่องที่ยังไม่มีค่า: " + quotedList(lacking)
+	return T(l, "แบบฟอร์มนี้มีช่องที่ต้องกรอก ") + strconv.Itoa(asked) + T(l, " ช่อง เลือกค่าให้แล้ว ") + strconv.Itoa(asked-len(lacking)) +
+		T(l, " ช่อง ซึ่งไม่ถึงครึ่ง จึงยังไม่กรอกให้ — ช่องที่ยังไม่มีค่า: ") + quotedList(lacking)
 }
 
 // quotedList is the customer's own labels, each in quotation marks (they are theirs, read as written).

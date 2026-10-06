@@ -227,16 +227,25 @@ func (r *Runner) pipeline(ctx context.Context, run am.Run, log *slog.Logger) err
 	}
 	// AM10: a form whose mapping became ready while these files were being made (after the render
 	// step looked for it) is filled now, from the same figures
-	r.fillFormLeftBehind(context.Background(), rc.run.ID)
+	// AM11: what follows a finished run is still the run's — its form, its late answers, the next run
+	// it was asked to start with the files kept for it — and is in the run's language
+	after := am.InRunLang(context.Background(), rc.run)
+	r.fillFormLeftBehind(after, rc.run.ID)
 	// AM10: so is an answer given on a card that asks without waiting, when it landed after the
 	// render step had read the answers
-	r.answersLeftBehind(context.Background(), rc.run.ID, read, formats)
-	rc.startNextRound(context.Background())
+	r.answersLeftBehind(after, rc.run.ID, read, formats)
+	rc.startNextRound(after)
 	return nil
 }
 
 // exec runs one step op with the run's own engine.
 func (rc *runCtx) exec(ctx context.Context, request any, inputs []Input) (*StepResult, error) {
+	// AM11: an engine step is told the run's language ("lang"); a Thai run's request is as it always was
+	if m, ok := request.(map[string]any); ok && am.LangOf(ctx) == am.English {
+		if _, said := m["lang"]; !said {
+			m["lang"] = string(am.English)
+		}
+	}
 	return rc.r.Exec.RunEngine(ctx, rc.engine, request, inputs)
 }
 
@@ -767,7 +776,7 @@ func (r *Runner) endOpen(ctx context.Context, run am.Run, gate gateView) error {
 // unless an earlier pass of it was delivered), and whether its files can be
 // tried again.
 func (r *Runner) failure(ctx context.Context, run am.Run, reason string, err error) am.Failure {
-	facts := am.FailureFacts{Kind: run.Kind, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24)}
+	facts := am.FailureFacts{Kind: run.Kind, KeepDays: int(orDefault(r.ScratchTTL, 7*24*time.Hour).Hours() / 24), Lang: run.Lang()}
 	if cur, e := r.Store.RunByID(ctx, run.ID); e == nil {
 		facts.Credits = cur.CreditsSpent
 	}
@@ -914,7 +923,7 @@ func (rc *runCtx) outputSetFinding(ctx context.Context) *am.Finding {
 	if err != nil {
 		return nil
 	}
-	return am.OutputSetFinding(rc.pkg.Manifest, defs, rc.formats())
+	return am.OutputSetFinding(am.LangOf(ctx), rc.pkg.Manifest, defs, rc.formats())
 }
 
 func tempDir() string { return os.TempDir() }

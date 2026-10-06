@@ -139,9 +139,9 @@ func (a *API) createShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !inOrg {
-		d := "@" + strings.Join(domains, " หรือ @")
+		d := "@" + strings.Join(domains, forReq(w, " หรือ @"))
 		if len(domains) == 0 {
-			d = "โดเมนที่ผู้ดูแลกำหนด"
+			d = forReq(w, "โดเมนที่ผู้ดูแลกำหนด")
 		}
 		say(w, http.StatusBadRequest, "NOT_IN_ORG", "email", email, "domains", d)
 		return

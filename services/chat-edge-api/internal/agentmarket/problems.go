@@ -184,7 +184,7 @@ func (a *API) sharedProblem(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "install")
 		return
 	}
-	body.Page = strings.TrimSpace("(แชร์) " + body.Page)
+	body.Page = strings.TrimSpace(forReq(w, "(แชร์) ") + body.Page)
 	p, err := a.store.fileProblem(ctx, in.OrgID, c.UserID, c.Email, &in, &run, body)
 	if err != nil {
 		a.fail(w, err, "problem")

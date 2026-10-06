@@ -59,6 +59,8 @@ type FailureFacts struct {
 	// computed table, never from an error.
 	GateWhat string
 	GateNext string
+	// Lang (AM11) is the language the failure is written in — its run's. None = Thai.
+	Lang Lang
 }
 
 type failureCopy struct {
@@ -139,7 +141,8 @@ func FailureFor(reason string, facts FailureFacts) Failure {
 		}
 	}
 	for _, x := range facts.FailedChecks {
-		if t := FromPackage(x, NoText); !t.Empty() {
+		// a check's own words, read by the rule of the language the failure is written in
+		if t := FromPackage(x, NoText); !t.EmptyIn(facts.Lang) {
 			f.Failed = append(f.Failed, t)
 		}
 	}

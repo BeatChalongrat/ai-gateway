@@ -32,7 +32,7 @@ func testSlots() []TemplateSlot {
 func TestTemplateMappingIsCheckedAgainstTheTemplateAndTheAgent(t *testing.T) {
 	ok := map[string]string{"CompanyName": "company", "LinesTable": "lines", "LinesTable.A": "lines.description",
 		"LinesTable.B": "lines.amount"}
-	if msg := CheckTemplateMapping(testSlots(), ok, testSpec()); msg != "" {
+	if msg := CheckTemplateMapping(Thai, testSlots(), ok, testSpec()); msg != "" {
 		t.Fatalf("a good mapping: %s", msg)
 	}
 	for name, m := range map[string]map[string]string{
@@ -46,7 +46,7 @@ func TestTemplateMappingIsCheckedAgainstTheTemplateAndTheAgent(t *testing.T) {
 		"a column from another list": {"LinesTable": "lines", "LinesTable.A": "items.description"},
 		"a column the list lacks":    {"LinesTable": "lines", "LinesTable.A": "lines.salary"},
 	} {
-		if CheckTemplateMapping(testSlots(), m, testSpec()) == "" {
+		if CheckTemplateMapping(Thai, testSlots(), m, testSpec()) == "" {
 			t.Fatalf("%s must be refused", name)
 		}
 	}

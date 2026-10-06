@@ -47,12 +47,21 @@ var thaiTime = time.FixedZone("ICT", 7*3600)
 // {"every":"week","weekday":1..7,"time":"HH:MM"} (1 = Monday). A month
 // shorter than the day falls due on its last day (31 → 30 September, 28 or
 // 29 February).
+//
+// AM11: a reminder fires with no screen behind it — the runner's minute pass
+// opens its run — so the rule keeps the language of the screen that set or
+// last changed it ("lang": "en"; none = Thai, which is every reminder from
+// before). The run it opens, that run's card and its notifications are in it.
 type ReminderRule struct {
 	Every   string `json:"every"`
 	Day     int    `json:"day,omitempty"`
 	Weekday int    `json:"weekday,omitempty"`
 	Time    string `json:"time"`
+	Lang    string `json:"lang,omitempty"`
 }
+
+// lang is the language the reminder speaks.
+func (r ReminderRule) lang() Lang { return ParseLang(r.Lang) }
 
 var clockShape = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
 
@@ -83,6 +92,14 @@ func ParseReminderRule(raw json.RawMessage) (ReminderRule, error) {
 		return ReminderRule{}, errBadRule
 	}
 	if !clockShape.MatchString(r.Time) {
+		return ReminderRule{}, errBadRule
+	}
+	// the language is the request's to say (createReminder, putReminder), not the body's: what a client
+	// sends back of a rule it was sent is read, and then written over
+	switch r.Lang {
+	case "", string(Thai), string(English):
+		r.Lang = ParseLang(r.Lang).mark()
+	default:
 		return ReminderRule{}, errBadRule
 	}
 	return r, nil
@@ -164,28 +181,14 @@ func ReminderPeriodLabel(period string) string {
 	return fmt.Sprintf("%d–%d %s %d", start.Day(), end.Day(), me, end.Year()+543)
 }
 
-func thaiWeekday(n int) PersonText {
-	switch n {
-	case 1:
-		return Text("จันทร์")
-	case 2:
-		return Text("อังคาร")
-	case 3:
-		return Text("พุธ")
-	case 4:
-		return Text("พฤหัสบดี")
-	case 5:
-		return Text("ศุกร์")
-	case 6:
-		return Text("เสาร์")
-	}
-	return Text("อาทิตย์")
-}
+// thaiWeekdays are the days of the week as a Thai rule says them, Monday first (their English is
+// lang.go's table, not a translation: WeekdayIn, Weekday).
+var thaiWeekdays = []string{"จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์", "อาทิตย์"}
 
-// Text is the rule as a Thai reader says it (rule_text).
+// Text is the rule as a reader says it (rule_text).
 func (r ReminderRule) Text() PersonText {
 	if r.Every == "week" {
-		return Text("ทุกวัน%s เวลา %s น. · สำหรับงาน 7 วันก่อนหน้า", Words(thaiWeekday(r.Weekday)), Typed(r.Time, 5))
+		return Text("ทุกวัน%s เวลา %s น. · สำหรับงาน 7 วันก่อนหน้า", Weekday(r.Weekday), Typed(r.Time, 5))
 	}
 	if r.Day > 28 {
 		return Text("ทุกวันที่ %s ของเดือน เวลา %s น. (เดือนที่สั้นกว่าใช้วันสุดท้ายของเดือน) · สำหรับงานของเดือนก่อนหน้า",
@@ -256,7 +259,13 @@ type ReminderView struct {
 	SnoozedUntil  *time.Time   `json:"snoozed_until"`
 	SkippedPeriod *string      `json:"skipped_period"`
 	WaitingRunID  *uuid.UUID   `json:"waiting_run_id"`
-	PeriodLabel   *string      `json:"period_label"`
+	PeriodLabel   *PersonText  `json:"period_label"`
+}
+
+// periodLabel is a reminder's period as the list of reminders says it, in the reader's language.
+func periodLabel(period string) *PersonText {
+	t := InBoth(func(l Lang) string { return ReminderPeriodLabelIn(l, period) })
+	return &t
 }
 
 func (m Reminder) view() ReminderView {
@@ -268,11 +277,10 @@ func (m Reminder) view() ReminderView {
 	}
 	switch {
 	case m.Waiting && m.FiredPeriod != nil:
-		id, label := *m.WaitingRunID, ReminderPeriodLabel(*m.FiredPeriod)
-		v.WaitingRunID, v.PeriodLabel = &id, &label
+		id := *m.WaitingRunID
+		v.WaitingRunID, v.PeriodLabel = &id, periodLabel(*m.FiredPeriod)
 	case m.Status == "active":
-		label := ReminderPeriodLabel(m.Rule.PeriodOf(m.NextDueAt))
-		v.PeriodLabel = &label
+		v.PeriodLabel = periodLabel(m.Rule.PeriodOf(m.NextDueAt))
 	}
 	return v
 }
@@ -374,6 +382,8 @@ func (s *Store) fireOne(ctx context.Context, now time.Time, failed []uuid.UUID, 
 	if err != nil {
 		return uuid.Nil, false, err
 	}
+	// AM11: no screen asked for this — what the reminder writes is in the language it was set in
+	ctx = WithLang(ctx, m.Rule.lang())
 	period := m.Rule.PeriodOf(m.NextDueAt)
 	next := m.Rule.NextDue(later(m.NextDueAt, now))
 	var fired, skipped, cancelled int
@@ -392,7 +402,7 @@ func (s *Store) fireOne(ctx context.Context, now time.Time, failed []uuid.UUID, 
 			var closed bool
 			closed, err = s.closeWaitingRound(ctx, tx, *m.WaitingRunID, "reminder_next_period",
 				Text("มีรอบใหม่ของงวดถัดไปแล้ว รอบของงวด %s ที่ยังไม่ได้รับไฟล์จึงปิดไว้ ไม่คิดเครดิต ส่งไฟล์ของงวดนั้นมาเมื่อไรก็เริ่มรอบใหม่ได้",
-					Name(ReminderPeriodLabel(strOr(m.FiredPeriod)))))
+					ReminderPeriod(strOr(m.FiredPeriod))))
 			if closed {
 				cancelled = 1
 			}
@@ -454,6 +464,7 @@ func (s *Store) closeWaitingRound(ctx context.Context, q Querier, runID uuid.UUI
 		WHERE install_id = $1 AND kind = 'progress' AND payload->>'run_id' = $2`, run.InstallID, run.ID.String()); err != nil {
 		return false, err
 	}
+	// in the language of the run that is closed (AddNotice: a run's notice is in the run's own)
 	if err := s.AddNotice(ctx, q, run, Notice{Text: why, Reason: reason}); err != nil {
 		return false, err
 	}
@@ -571,16 +582,19 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 		return run, err
 	}
 	run.Status = RunAwaitingInput
-	label := ReminderPeriodLabel(period)
+	// the run is in the reminder's language (CreateRun took it from ctx); so is everything written for it
+	l := run.Lang()
+	ctx = WithLang(ctx, l)
+	label := ReminderPeriod(period)
 	all, _ := f.needs()
 	req, _ := json.Marshal(all)
-	q := Question{Key: "missing_file", Code: "missing_file", Severity: "blocking", Header: "ขอไฟล์",
-		Question: Text("ถึงเวลา%s %s แล้ว ส่งไฟล์ของงวดนี้มาได้เลย รอบนี้จะเริ่มเมื่อได้รับไฟล์", Name(m.Label), Name(label)).String(),
+	q := Question{Key: "missing_file", Code: "missing_file", Severity: "blocking", Header: T(l, "ขอไฟล์"),
+		Question: Text("ถึงเวลา%s %s แล้ว ส่งไฟล์ของงวดนี้มาได้เลย รอบนี้จะเริ่มเมื่อได้รับไฟล์", Name(m.Label), label).In(l),
 		Options: []Option{
-			{Label: "รอก่อน จะอัปโหลดให้", Description: "รอบนี้รอไฟล์อยู่ และจะเริ่มเมื่อได้รับไฟล์", Value: json.RawMessage(`"wait"`)},
-			{Label: "ยกเลิกรอบนี้", Description: "ปิดรอบนี้ไว้ก่อน ไม่คิดเครดิต", Value: json.RawMessage(`"cancel"`)},
+			{Label: T(l, "รอก่อน จะอัปโหลดให้"), Description: T(l, "รอบนี้รอไฟล์อยู่ และจะเริ่มเมื่อได้รับไฟล์"), Value: json.RawMessage(`"wait"`)},
+			{Label: T(l, "ยกเลิกรอบนี้"), Description: T(l, "ปิดรอบนี้ไว้ก่อน ไม่คิดเครดิต"), Value: json.RawMessage(`"cancel"`)},
 		},
-		Default: json.RawMessage(`"wait"`), DefaultLabel: "รอก่อน จะอัปโหลดให้", Request: req}
+		Default: json.RawMessage(`"wait"`), DefaultLabel: T(l, "รอก่อน จะอัปโหลดให้"), Request: req}
 	qs, _ := json.Marshal([]Question{q})
 	card, err := s.CreateCard(ctx, tx, Card{RunID: run.ID, InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID, Moment: "preflight",
 		Kind: "request_files", Blocking: true, Questions: qs})
@@ -591,7 +605,7 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 	for _, item := range []ItemPayload{
 		Progress{RunID: run.ID.String(), Kind: KindRun, Status: RunAwaitingInput, Outcome: RunAwaitingInput, Reason: "reminder_waiting_files"},
 		AgentText{Text: Text("ถึงเวลา%s %s แล้ว — การเตือนที่ตั้งไว้ (%s) เปิดรอบนี้รอไฟล์ไว้ให้ ยังไม่มีอะไรทำงานจนกว่าคุณจะส่งไฟล์ "+
-			"รอบนี้ยังไม่ใช้เครดิต", Name(m.Label), Name(label), Words(m.Rule.Text())), RunID: run.ID.String()},
+			"รอบนี้ยังไม่ใช้เครดิต", Name(m.Label), label, Words(m.Rule.Text())), RunID: run.ID.String()},
 		CardItemPayload(card, NoText, NoText),
 	} {
 		if _, _, err := s.AddItem(ctx, tx, in.ID, in.TenantID, in.UserID, &rid, item, nil); err != nil {
@@ -599,8 +613,8 @@ func (s *Store) openReminderRound(ctx context.Context, tx pgx.Tx, m Reminder, pe
 		}
 	}
 	rem := m.ID
-	_, err = s.addNotification(ctx, tx, notification{TenantID: in.TenantID, UserID: in.UserID, Kind: "reminder_due",
-		Title: Text("ถึงเวลา%s %s แล้ว", Name(m.Label), Name(label)), Body: f.filesNeeded(),
+	_, err = s.addNotification(ctx, tx, notification{TenantID: in.TenantID, UserID: in.UserID, Kind: "reminder_due", Lang: l,
+		Title: Text("ถึงเวลา%s %s แล้ว", Name(m.Label), label), Body: f.filesNeeded(),
 		Link: workspaceLink(in.ID, thread, run.ID), InstallID: in.ID, RunID: &rid, ReminderID: &rem,
 		Dedupe: "reminder_due:" + m.ID.String() + ":" + period})
 	return run, err
@@ -637,8 +651,11 @@ func (s *Store) followUpOne(ctx context.Context, now time.Time, failed []uuid.UU
 			return false, err
 		}
 		rid, rem := run.ID, m.ID
+		// AM11: in the language of the run that waits — the one the reminder had when it opened the run,
+		// which the first notification was written in and the mail's own lines follow (mail.go)
 		ok, err := s.addNotification(ctx, tx, notification{TenantID: m.TenantID, UserID: m.UserID, Kind: "reminder_followup",
-			Title: Text("ยังรอไฟล์สำหรับ%s %s", Name(m.Label), Name(ReminderPeriodLabel(*m.FiredPeriod))), Body: f.filesNeeded(),
+			Lang:  run.Lang(),
+			Title: Text("ยังรอไฟล์สำหรับ%s %s", Name(m.Label), ReminderPeriod(*m.FiredPeriod)), Body: f.filesNeeded(),
 			Link: workspaceLink(m.InstallID, run.ThreadID, run.ID), InstallID: m.InstallID, RunID: &rid, ReminderID: &rem,
 			Dedupe: "reminder_followup:" + m.ID.String() + ":" + *m.FiredPeriod})
 		if err != nil {
@@ -662,7 +679,7 @@ func (s *Store) followUpOne(ctx context.Context, now time.Time, failed []uuid.UU
 // ── handlers ─────────────────────────────────────────────────────────────
 
 // reminderNote and reminderReaches are said with every list (the contract's words).
-const reminderNote = "ไม่มีอะไรทำงานเองโดยไม่มีคน: การเตือนเปิดรอบที่รอไฟล์ไว้ให้ และรอบจะเริ่มเมื่อคุณส่งไฟล์"
+const reminderNote wording = "ไม่มีอะไรทำงานเองโดยไม่มีคน: การเตือนเปิดรอบที่รอไฟล์ไว้ให้ และรอบจะเริ่มเมื่อคุณส่งไฟล์"
 
 var reminderReaches = map[string]bool{"in_app": true, "desktop": true, "browser": true, "email": false}
 
@@ -706,18 +723,33 @@ var reminderMailMessages = map[string]string{
 	"MAIL_DATA":   "เซิร์ฟเวอร์อีเมลรับข้อความไม่ครบ — ลองใหม่อีกครั้ง ถ้ายังไม่ได้ให้ตรวจการตั้งค่าของเซิร์ฟเวอร์ ยังไม่ได้ส่งอะไร",
 }
 
-// mailSentence is one of the sentences above with its values ({email}).
-func mailSentence(code string, vars ...string) string {
+// mailSentence is one of the sentences above with its values ({email}), in Thai.
+func mailSentence(code string, vars ...string) string { return mailSentenceIn(Thai, code, vars...) }
+
+// mailSentenceIn is mailSentence in l (AM11): the same code, the same {placeholders}, the English of
+// reminderMailMessagesEn (reminders_en.go).
+func mailSentenceIn(l Lang, code string, vars ...string) string {
 	m := reminderMailMessages[code]
+	if l == English {
+		if e, ok := reminderMailMessagesEn[code]; ok {
+			m = e
+		}
+	}
 	for i := 0; i+1 < len(vars); i += 2 {
 		m = strings.ReplaceAll(m, "{"+vars[i]+"}", vars[i+1])
 	}
 	return m
 }
 
-// sayMail writes one of the sentences above.
+// mailText is one of the sentences above as a text that carries both languages (a thread item, a
+// payload: whoever writes it picks).
+func mailText(code string, vars ...string) PersonText {
+	return InBoth(func(l Lang) string { return mailSentenceIn(l, code, vars...) })
+}
+
+// sayMail writes one of the sentences above, in the language of the request w answers.
 func sayMail(w http.ResponseWriter, status int, code string, vars ...string) {
-	writeErr(w, status, code, mailSentence(code, vars...))
+	writeErr(w, status, code, mailSentenceIn(langOfWriter(w), code, vars...))
 }
 
 // reminderMailRoutes mounts sections B and C (inside the allowed group).
@@ -772,7 +804,7 @@ func (a *API) listReminders(w http.ResponseWriter, r *http.Request) {
 	for _, m := range list {
 		views = append(views, m.view())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"reminders": views, "reaches": reminderReaches, "note": reminderNote})
+	writeJSON(w, http.StatusOK, map[string]any{"reminders": views, "reaches": reminderReaches, "note": Text(reminderNote)})
 }
 
 func (a *API) createReminder(w http.ResponseWriter, r *http.Request) {
@@ -798,6 +830,8 @@ func (a *API) createReminder(w http.ResponseWriter, r *http.Request) {
 		sayMail(w, http.StatusBadRequest, "BAD_LABEL")
 		return
 	}
+	// AM11: the reminder speaks the language of the screen that set it
+	rule.Lang = RequestLang(r).mark()
 	ruleJSON, _ := json.Marshal(rule)
 	ctx := r.Context()
 	var id uuid.UUID
@@ -825,7 +859,7 @@ func (a *API) ownedReminder(w http.ResponseWriter, r *http.Request) (Reminder, b
 	m, err := a.store.reminderOf(r.Context(), a.store.Pool, c.TenantUUID, c.UserID, id, false)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			say(w, http.StatusNotFound, "NOT_FOUND", "what", "การเตือน")
+			say(w, http.StatusNotFound, "NOT_FOUND", "what", whatIn(langOfWriter(w), "reminder"))
 			return m, false
 		}
 		a.fail(w, err, "reminder")
@@ -873,6 +907,8 @@ func (a *API) putReminder(w http.ResponseWriter, r *http.Request) {
 		}
 		next, snoozed = rule.NextDue(time.Now()), nil
 	}
+	// AM11: … or that last changed it (its name, its day)
+	rule.Lang = RequestLang(r).mark()
 	ruleJSON, _ := json.Marshal(rule)
 	_, err = a.store.Pool.Exec(r.Context(), `UPDATE agent_market.reminders SET label = $2, rule = $3, next_due_at = $4, snoozed_until = $5,
 		updated_at = now() WHERE id = $1`, m.ID, label, ruleJSON, next, snoozed)
@@ -916,7 +952,7 @@ func (a *API) skipReminder(w http.ResponseWriter, r *http.Request) {
 		period := cur.Rule.PeriodOf(cur.NextDueAt)
 		if cur.Waiting && cur.FiredPeriod != nil {
 			closed, err := a.store.closeWaitingRound(ctx, tx, *cur.WaitingRunID, "reminder_skipped",
-				Text("ข้ามงวด %s ตามที่คุณเลือก รอบที่รอไฟล์อยู่จึงปิดไว้ ไม่คิดเครดิต", Name(ReminderPeriodLabel(*cur.FiredPeriod))))
+				Text("ข้ามงวด %s ตามที่คุณเลือก รอบที่รอไฟล์อยู่จึงปิดไว้ ไม่คิดเครดิต", ReminderPeriod(*cur.FiredPeriod)))
 			if err != nil {
 				return err
 			}

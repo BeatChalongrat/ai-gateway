@@ -51,7 +51,8 @@ func (s *Store) AccessLog(ctx context.Context, run uuid.UUID) ([]AccessEntry, er
 		if err := rows.Scan(&e.AdminName, &e.AdminEmail, &e.Reason, &e.OpenedAt); err != nil {
 			return nil, err
 		}
-		e.At = ThaiDateTime(e.OpenedAt)
+		// AM11: said when the log is read, so in the language of the request that reads it
+		e.At = DateTimeIn(LangOf(ctx), e.OpenedAt)
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -145,7 +146,7 @@ func (s *Store) OrgRuns(ctx context.Context, org string, admin uuid.UUID, status
 		}
 		m.Outcome = OutcomeOf(m.Status, open)
 		if period != "" {
-			m.Period = PeriodLabel(period)
+			m.Period = PeriodLabelIn(LangOf(ctx), period)
 		}
 		out = append(out, m)
 	}
@@ -217,12 +218,17 @@ func (a *API) adminOpenRun(w http.ResponseWriter, r *http.Request) {
 		if who == "" {
 			who = normEmail(c.Email)
 		}
-		label := periodOf(run)
-		if label != "" {
-			label = " " + label
-		}
+		// the run named by its period, glued to its word in Thai as it always was; the English brings its
+		// own space ("your run September 2026"), and a run with no period yet is just "your run"
+		named := Each(func(l Lang) string {
+			p := readableIn(l, periodIn(l, run), 120)
+			if l == English && p != "" {
+				return " " + p
+			}
+			return p
+		})
 		text := Text("ผู้ดูแล %s เปิดดูรอบ%s ของคุณ เมื่อ %s เหตุผล: “%s” — ทุกครั้งที่ผู้ดูแลเปิดดูรอบของคุณ ระบบจะแจ้งที่นี่ "+
-			"และหน้าที่มาของตัวเลขของรอบนั้นมีรายการไว้ทั้งหมด", Name(who), Name(label), When(time.Now()), Typed(reason, 500))
+			"และหน้าที่มาของตัวเลขของรอบนั้นมีรายการไว้ทั้งหมด", Name(who), named, When(time.Now()), Typed(reason, 500))
 		if err := a.store.AddNotice(ctx, tx, run, Notice{Text: text, Tone: "warning", Access: true}); err != nil {
 			a.fail(w, err, "run")
 			return
@@ -230,7 +236,7 @@ func (a *API) adminOpenRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// AM7: the opening is in the admin audit log too, or it does not happen
 	if err := a.record(ctx, []AuditEntry{entry(r, "agent_market.run.opened", "agent_market_run", run.ID.String(),
-		map[string]any{"reason": reason, "agent": run.InstallID.String(), "period": periodOf(run), "owner_told": run.UserID != c.UserID,
+		map[string]any{"reason": reason, "agent": run.InstallID.String(), "period": periodIn(LangOf(ctx), run), "owner_told": run.UserID != c.UserID,
 			"expires_at": expires.UTC().Format(time.RFC3339)})}); err != nil {
 		a.fail(w, err, "run")
 		return
@@ -386,7 +392,7 @@ func (a *API) adminRemoveEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	// AM7: files cannot be put back, so the removal is logged before anything is deleted
 	logged := []AuditEntry{entry(r, "agent_market.run.evidence_removed", "agent_market_run", run.ID.String(),
-		map[string]any{"reason": reason, "period": periodOf(run)})}
+		map[string]any{"reason": reason, "period": periodIn(LangOf(ctx), run)})}
 	if err := a.record(ctx, logged); err != nil {
 		a.fail(w, err, "run")
 		return

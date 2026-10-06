@@ -191,12 +191,16 @@ func TestAQuestionWithNoRoundIsAnsweredFromTheKnowledgeAlone(t *testing.T) {
 func TestOnlyTheReplyJobReadsKnowledge(t *testing.T) {
 	allowed := map[string]bool{"replyJob": true, "answerWith": true, "answerFromKnowledge": true, "knowledgeGuard": true,
 		"withoutModel": true}
+	// AM11: what a model is told about a knowledge base stands in two constants of its own (jobs.go: a
+	// prompt is not a sentence for a person, and is kept apart from the sentences that are). A constant
+	// reads nothing; whoever uses one is a function, and is held to the list above like any other.
+	prompts := map[string]bool{"knowledgeRules": true, "knowledgeQuestionRules": true}
 	files, _ := filepath.Glob("*.go")
 	readers := map[string]bool{}
 	fs := token.NewFileSet()
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
+		if strings.HasSuffix(f, "_test.go") || strings.HasPrefix(f, "english") {
+			continue // AM11: the catalogue holds the English of sentences (some name the knowledge base); it reads nothing
 		}
 		file, err := parser.ParseFile(fs, f, nil, 0)
 		if err != nil {
@@ -206,6 +210,9 @@ func TestOnlyTheReplyJobReadsKnowledge(t *testing.T) {
 			fn, ok := d.(*ast.FuncDecl)
 			if !ok {
 				ast.Inspect(d, func(n ast.Node) bool {
+					if id, ok := n.(*ast.Ident); ok && prompts[id.Name] {
+						return true
+					}
 					if names(n) {
 						t.Errorf("%s declares something of knowledge outside a function of the reply job", fs.Position(n.Pos()))
 					}

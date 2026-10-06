@@ -25,6 +25,9 @@ func (s *Store) RememberAnswers(ctx context.Context, q Querier, run Run, cardID 
 	n := 0
 	rid := run.ID
 	cid := cardID
+	// AM11: what is remembered from a run's answer is named in that run's language (the question's
+	// header and the answer's label already are)
+	l := run.Lang()
 	for _, qn := range questions {
 		a, ok := answers[qn.Key]
 		if !ok || !qn.Rememberable || (a.Via != "card" && a.Via != "text") || !CarriesToNextRound(qn.Code, a.Value) {
@@ -46,7 +49,7 @@ func (s *Store) RememberAnswers(ctx context.Context, q Querier, run Run, cardID 
 			_ = json.Unmarshal(current["dc_convention"], &m)
 			m[ev.Column] = a.Value
 			key, value = "dc_convention", mustJSON(m)
-			label = "การอ่านคอลัมน์ “" + ev.Column + "”: " + a.Label
+			label = T(l, "การอ่านคอลัมน์ “") + ev.Column + "”: " + a.Label
 		case "unmapped_column":
 			var ev struct {
 				Proposal map[string]string `json:"proposal"`
@@ -70,12 +73,12 @@ func (s *Store) RememberAnswers(ctx context.Context, q Querier, run Run, cardID 
 				continue
 			}
 			key, value = "mapping", mustJSON(m)
-			label = "การจับคู่คอลัมน์"
+			label = T(l, "การจับคู่คอลัมน์")
 		default:
 			key, value = "answers."+qn.Code, a.Value
 		}
 		if err := s.SetDefault(ctx, q, run.InstallID, Default{Key: key, Value: value, Source: "answer", Label: label,
-			Note: "จำจากคำตอบในรอบ " + run.ID.String()[:8], FromRunID: &rid, FromCardID: &cid}); err != nil {
+			Note: T(l, "จำจากคำตอบในรอบ ") + run.ID.String()[:8], FromRunID: &rid, FromCardID: &cid}); err != nil {
 			return n, err
 		}
 		current[key] = value

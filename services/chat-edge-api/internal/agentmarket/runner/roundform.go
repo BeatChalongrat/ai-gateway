@@ -128,7 +128,7 @@ func formObvious(slots []am.TemplateSlot, proposal map[string]string, spec am.Te
 			return false
 		}
 	}
-	return am.CheckTemplateMapping(slots, proposal, spec) == ""
+	return am.CheckTemplateMapping(am.Thai, slots, proposal, spec) == ""
 }
 
 // blockingWhy is the first reason the filler gave for refusing the form.

@@ -41,10 +41,10 @@ func TestAFormTheAgentCanFillLessThanHalfOfIsRefusedAndNamesWhatItLacks(t *testi
 	}
 	// the save says the same, in words, with the names
 	spec := TemplateSpec{Fields: map[string]json.RawMessage{"company": json.RawMessage(`{"label":"ชื่อบริษัท"}`)}}
-	if msg := CheckTemplateMapping(slots, mapping, spec); msg != "" {
+	if msg := CheckTemplateMapping(Thai, slots, mapping, spec); msg != "" {
 		t.Fatalf("one valid pair is a valid mapping, whatever it covers (the runner builds one pair by pair): %s", msg)
 	}
-	msg := CheckFormCoverage(slots, mapping)
+	msg := CheckFormCoverage(Thai, slots, mapping)
 	for _, want := range []string{"12 ช่อง", "1 ช่อง", "เลขที่ใบขอซื้อ", "เหตุผลที่ขอซื้อ"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("the refusal does not say %q: %s", want, msg)

@@ -308,15 +308,17 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 			Totals   map[string]json.RawMessage `json:"totals"`
 		} `json:"expect"`
 	}
+	// AM11: a problem's detail is kept on the run's steps, which the run page shows: the run's language
+	l := rc.run.Lang()
 	if json.Unmarshal(rc.pkg.SelfTest, &st) != nil {
-		return []expectProblem{{Words: am.Text("อ่านสิ่งที่รุ่นนี้กำหนดไว้ไม่ได้"), Detail: "self-test.json อ่านไม่ได้"}}
+		return []expectProblem{{Words: am.Text("อ่านสิ่งที่รุ่นนี้กำหนดไว้ไม่ได้"), Detail: am.T(l, "self-test.json อ่านไม่ได้")}}
 	}
 	var out []expectProblem
 	exp := st.Expect
 	if exp.Findings != nil && len(*exp.Findings) == 0 {
 		if cards, _ := rc.r.Store.RunCards(ctx, rc.run.ID); len(cards) > 0 {
 			out = append(out, expectProblem{Words: am.Text("ถาม %s คำถาม ทั้งที่ข้อมูลตัวอย่างไม่ควรมีคำถาม", am.Count(len(cards))),
-				Detail: fmt.Sprintf("ถาม %d คำถาม (คาดว่าไม่ถาม)", len(cards))})
+				Detail: fmt.Sprintf(am.T(l, "ถาม %d คำถาม (คาดว่าไม่ถาม)"), len(cards))})
 		}
 	}
 	run, _ := rc.r.Store.RunByID(ctx, rc.run.ID)
@@ -326,14 +328,14 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 			got = *run.Period
 		}
 		out = append(out, expectProblem{Words: am.Text("งวดของผลทดสอบไม่ตรงกับที่รุ่นนี้กำหนด (%s)", am.Name(exp.Period)),
-			Detail: "งวดไม่ตรง: ได้ " + got + " คาด " + exp.Period})
+			Detail: am.T(l, "งวดไม่ตรง: ได้ ") + got + am.T(l, " คาด ") + exp.Period})
 	}
 	if len(exp.Lines) == 0 && len(exp.Totals) == 0 {
 		return out
 	}
 	_, data, err := rc.readComputed(ctx, computed)
 	if err != nil {
-		return append(out, expectProblem{Words: am.Text("อ่านผลคำนวณของการทดสอบไม่ได้"), Detail: "อ่านผลคำนวณไม่ได้"})
+		return append(out, expectProblem{Words: am.Text("อ่านผลคำนวณของการทดสอบไม่ได้"), Detail: am.T(l, "อ่านผลคำนวณไม่ได้")})
 	}
 	var c struct {
 		Lines []struct {
@@ -345,21 +347,21 @@ func (rc *runCtx) selfTestExpectations(ctx context.Context, computed blobRef) []
 	_ = json.Unmarshal(data, &c)
 	for k, want := range exp.Lines {
 		found := false
-		for _, l := range c.Lines {
-			if l.Key == k && l.Current != nil {
+		for _, line := range c.Lines {
+			if line.Key == k && line.Current != nil {
 				found = true
-				if *l.Current != want {
-					out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf("%s = %s (คาด %s)", k, *l.Current, want)})
+				if *line.Current != want {
+					out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf(am.T(l, "%s = %s (คาด %s)"), k, *line.Current, want)})
 				}
 			}
 		}
 		if !found {
-			out = append(out, expectProblem{Figure: true, Detail: k + " ไม่มีในผลคำนวณ"})
+			out = append(out, expectProblem{Figure: true, Detail: k + am.T(l, " ไม่มีในผลคำนวณ")})
 		}
 	}
 	for k, want := range exp.Totals {
 		if got, ok := c.Totals[k]; !ok || !am.JSONEqual(got, want) {
-			out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf("%s = %s (คาด %s)", k, string(got), string(want))})
+			out = append(out, expectProblem{Figure: true, Detail: fmt.Sprintf(am.T(l, "%s = %s (คาด %s)"), k, string(got), string(want))})
 		}
 	}
 	// a map is walked in no order: the run's record and the person's count are the same every time

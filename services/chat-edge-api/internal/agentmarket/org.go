@@ -100,6 +100,15 @@ func (c Contact) Label() string {
 	return "ผู้ดูแล Agent Market ขององค์กร"
 }
 
+// LabelIn is Label in l: a name and an address are the same in both; the
+// stand-in for nobody named is a sentence of ours.
+func (c Contact) LabelIn(l Lang) string {
+	if c.Name != "" || c.Email != "" {
+		return c.Label()
+	}
+	return T(l, "ผู้ดูแล Agent Market ขององค์กร")
+}
+
 // Access is what one signed-in person may do.
 type Access struct {
 	OrgID   string  `json:"org_id"`

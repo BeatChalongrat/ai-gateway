@@ -22,19 +22,21 @@ var (
 	policyMoney = regexp.MustCompile(`^\d+(?:\.\d+)?$`)
 )
 
-// PolicyProblems lists what is wrong with a policy table (none = usable).
-func PolicyProblems(raw json.RawMessage) []string {
+// PolicyProblems lists, in l, what is wrong with a policy table (none =
+// usable). Each entry names the key it is about as the table writes it; the
+// rules themselves are the same in both languages.
+func PolicyProblems(l Lang, raw json.RawMessage) []string {
 	var p map[string]json.RawMessage
 	if json.Unmarshal(raw, &p) != nil || p == nil {
-		return []string{"ตารางนโยบายการเบิกต้องเป็นตาราง (JSON object)"}
+		return []string{T(l, "ตารางนโยบายการเบิกต้องเป็นตาราง (JSON object)")}
 	}
 	var out []string
 	if s := str(p["schema"]); s != "am2.expense_policy.v1" {
-		out = append(out, "schema: ต้องเป็น am2.expense_policy.v1")
+		out = append(out, T(l, "schema: ต้องเป็น am2.expense_policy.v1"))
 	}
 	var cats map[string]json.RawMessage
 	if json.Unmarshal(p["categories"], &cats) != nil || len(cats) == 0 {
-		out = append(out, "categories: ยังไม่มีหมวดค่าใช้จ่าย")
+		out = append(out, T(l, "categories: ยังไม่มีหมวดค่าใช้จ่าย"))
 	}
 	codes := make([]string, 0, len(cats))
 	for c := range cats {
@@ -45,30 +47,30 @@ func PolicyProblems(raw json.RawMessage) []string {
 		where := "categories." + code
 		var c map[string]json.RawMessage
 		if !policyCode.MatchString(code) || json.Unmarshal(cats[code], &c) != nil || c == nil {
-			out = append(out, where+": รหัสหมวดต้องเป็นตัวอักษรอังกฤษ ตัวเลข หรือ _ และมีรายละเอียดเป็นตาราง")
+			out = append(out, where+T(l, ": รหัสหมวดต้องเป็นตัวอักษรอังกฤษ ตัวเลข หรือ _ และมีรายละเอียดเป็นตาราง"))
 			continue
 		}
 		for _, k := range []string{"per_claim", "per_person_month", "wht_from"} {
-			out = append(out, policyAmount(c[k], where+"."+k, false)...)
+			out = append(out, policyAmount(l, c[k], where+"."+k, false)...)
 		}
 		if r, ok := c["wht_rate"]; ok && !isBlank(r) {
 			if v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(plain(r)), "%"), 64); err != nil || v <= 0 || v > 100 {
-				out = append(out, where+".wht_rate: ต้องเป็นอัตราร้อยละระหว่าง 0 ถึง 100")
+				out = append(out, where+T(l, ".wht_rate: ต้องเป็นอัตราร้อยละระหว่าง 0 ถึง 100"))
 			} else if _, has := c["wht_from"]; !has {
-				out = append(out, where+".wht_from: มีอัตราหัก ณ ที่จ่ายแต่ยังไม่ได้กำหนดว่าหักตั้งแต่ยอดเท่าใด")
+				out = append(out, where+T(l, ".wht_from: มีอัตราหัก ณ ที่จ่ายแต่ยังไม่ได้กำหนดว่าหักตั้งแต่ยอดเท่าใด"))
 			}
 		}
 	}
-	out = append(out, policyAmount(p["receipt_required_above"], "receipt_required_above", true)...)
-	out = append(out, policyAmount(p["approval_threshold"], "approval_threshold", true)...)
+	out = append(out, policyAmount(l, p["receipt_required_above"], "receipt_required_above", true)...)
+	out = append(out, policyAmount(l, p["approval_threshold"], "approval_threshold", true)...)
 	if v, ok := p["weekend_holiday"]; ok && !oneOf(str(v), "flag", "exception", "allow") {
-		out = append(out, "weekend_holiday: ใช้ได้ flag, exception, allow")
+		out = append(out, T(l, "weekend_holiday: ใช้ได้ flag, exception, allow"))
 	}
 	if v, ok := p["vat_claim_requires"]; ok && !oneOf(str(v), "full_tax_invoice", "abbreviated_tax_invoice") {
-		out = append(out, "vat_claim_requires: ใช้ได้ full_tax_invoice, abbreviated_tax_invoice")
+		out = append(out, T(l, "vat_claim_requires: ใช้ได้ full_tax_invoice, abbreviated_tax_invoice"))
 	}
 	if v, ok := p["currency"]; ok && str(v) != "THB" {
-		out = append(out, "currency: การเบิกตรวจเป็นเงินบาทเท่านั้น")
+		out = append(out, T(l, "currency: การเบิกตรวจเป็นเงินบาทเท่านั้น"))
 	}
 	if v, ok := p["prohibited_merchants"]; ok {
 		var words []any
@@ -78,29 +80,29 @@ func PolicyProblems(raw json.RawMessage) []string {
 			good = good && isStr && strings.TrimSpace(s) != ""
 		}
 		if !good {
-			out = append(out, "prohibited_merchants: ต้องเป็นรายการคำ")
+			out = append(out, T(l, "prohibited_merchants: ต้องเป็นรายการคำ"))
 		}
 	}
 	return out
 }
 
 // HolidayProblems checks an install's holiday calendar: {"YYYY-MM-DD": name}
-// (or {"dates": {...}}).
-func HolidayProblems(raw json.RawMessage) []string {
+// (or {"dates": {...}}), and says what is wrong with it in l.
+func HolidayProblems(l Lang, raw json.RawMessage) []string {
 	var cal map[string]json.RawMessage
 	if json.Unmarshal(raw, &cal) != nil || len(cal) == 0 {
-		return []string{"holidays: ต้องเป็นตารางวันที่กับชื่อวันหยุด"}
+		return []string{T(l, "holidays: ต้องเป็นตารางวันที่กับชื่อวันหยุด")}
 	}
 	if d, ok := cal["dates"]; ok {
 		cal = nil
 		if json.Unmarshal(d, &cal) != nil || len(cal) == 0 {
-			return []string{"holidays.dates: ต้องเป็นตารางวันที่กับชื่อวันหยุด"}
+			return []string{T(l, "holidays.dates: ต้องเป็นตารางวันที่กับชื่อวันหยุด")}
 		}
 	}
 	var out []string
 	for k := range cal {
 		if !isoDay(k) {
-			out = append(out, fmt.Sprintf("holidays: %q ไม่ใช่วันที่ (YYYY-MM-DD)", k))
+			out = append(out, fmt.Sprintf(T(l, "holidays: %q ไม่ใช่วันที่ (YYYY-MM-DD)"), k))
 		}
 	}
 	sort.Strings(out)
@@ -117,16 +119,25 @@ func isoDay(s string) bool {
 	return e1 == nil && e2 == nil && e3 == nil && y >= 1900 && m >= 1 && m <= 12 && d >= 1 && d <= 31
 }
 
-func policyAmount(v json.RawMessage, where string, required bool) []string {
+// policyCurrencyWords are what a person may write beside an amount in the
+// policy table, taken off before the amount is tested as money. They read
+// what was typed and are said to nobody — and they are exactly the package's
+// (expense_audit/checks/policy.py _money takes off "บาท" and "฿" and nothing
+// else): a word accepted here and refused there would be saved today and
+// fail at the next run, so an English one ("THB", "baht") is added in both
+// places or in neither.
+var policyCurrencyWords = strings.NewReplacer(",", "", "บาท", "", "฿", "")
+
+func policyAmount(l Lang, v json.RawMessage, where string, required bool) []string {
 	if isBlank(v) {
 		if required {
-			return []string{where + ": ยังไม่ได้กำหนด"}
+			return []string{where + T(l, ": ยังไม่ได้กำหนด")}
 		}
 		return nil
 	}
-	t := strings.TrimSpace(strings.NewReplacer(",", "", "บาท", "", "฿", "").Replace(arabicDigits(plain(v))))
+	t := strings.TrimSpace(policyCurrencyWords.Replace(arabicDigits(plain(v))))
 	if string(v) == "true" || string(v) == "false" || !policyMoney.MatchString(t) {
-		return []string{where + ": ไม่ใช่จำนวนเงิน"}
+		return []string{where + T(l, ": ไม่ใช่จำนวนเงิน")}
 	}
 	return nil
 }

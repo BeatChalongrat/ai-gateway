@@ -639,7 +639,7 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 		"self_hosted": map[string]bool{"qwen3.8-27b-fp8": true}})
 	caps := map[string]Binding{"model.text": {Capability: "model.text", Detail: text},
 		"platform.storage": {Capability: "platform.storage", Detail: json.RawMessage(`{"backend":"local","staged_hours":24,"scratch_days":7,"removed_days":30}`)}}
-	ds, err := BuildDatasheet(Definition{Slug: "sran.financial-report", Version: "1.2.0", Name: "รายงานการเงิน", Manifest: json.RawMessage(guideManifest)},
+	ds, err := BuildDatasheet(Thai, Definition{Slug: "sran.financial-report", Version: "1.2.0", Name: "รายงานการเงิน", Manifest: json.RawMessage(guideManifest)},
 		caps, StatusPublished, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -659,13 +659,13 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	inside.Models = append([]DatasheetModel{}, ds.Models...)
 	inside.NoModel = append([]string{}, ds.NoModel...)
 	inside.Retention = []map[string]any{{"unit": "years", "keep": float64(5)}}
-	inside.ApplyOrg(OrgSettings{RetentionYears: 7}, EgressOf(false, Manifest{}, nil))
+	inside.ApplyOrg(Thai, OrgSettings{RetentionYears: 7}, EgressOf(false, Manifest{}, nil))
 	if len(inside.Models) != 1 || inside.Models[0].Model != "qwen3.8-27b-fp8" || inside.Retention[0]["keep"] != float64(7) ||
 		!strings.Contains(strings.Join(inside.NoModel, " "), "deepseek-v4-flash") || inside.Notes["not_archive"] == "" {
 		t.Fatalf("the organisation's own decisions: %+v %v %v", inside.Models, inside.NoModel, inside.Retention)
 	}
 	vis, _ := json.Marshal(map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true})
-	ds, _ = BuildDatasheet(Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)},
+	ds, _ = BuildDatasheet(Thai, Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)},
 		map[string]Binding{"model.vision": {Capability: "model.vision", Detail: vis}, "model.text": {Capability: "model.text", Detail: text}},
 		StatusPublished, time.Now())
 	// an extraction agent: no model writes or reads its documents' text; a
@@ -688,7 +688,7 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 	if last["keep"] != float64(730) {
 		t.Fatalf("the duplicate index keeps 730 days: %v", last)
 	}
-	ds, _ = BuildDatasheet(Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)}, map[string]Binding{},
+	ds, _ = BuildDatasheet(Thai, Definition{Slug: "sran.invoice-processing", Manifest: json.RawMessage(visionManifest)}, map[string]Binding{},
 		StatusPublished, time.Now())
 	if len(ds.Models) != 0 || !strings.Contains(strings.Join(ds.NoModel, " "), "OCR") ||
 		!strings.Contains(strings.Join(ds.NoModel, " "), "ไม่ถูกส่งให้โมเดลใด") {

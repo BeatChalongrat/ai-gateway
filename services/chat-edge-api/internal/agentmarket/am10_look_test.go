@@ -81,7 +81,7 @@ func TestTheManifestDeclaresTheIconFileAndAnAccent(t *testing.T) {
 		t.Error("no icon file: the manifest is released as it is")
 	}
 	// an upgrade's diff never lists the icon's markup
-	for _, c := range VersionDiff(Definition{Manifest: ok}, Definition{Manifest: rel}) {
+	for _, c := range VersionDiff(Thai, Definition{Manifest: ok}, Definition{Manifest: rel}) {
 		if c.Key == "icon_svg" {
 			t.Errorf("the upgrade diff lists the icon markup: %+v", c)
 		}

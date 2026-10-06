@@ -182,11 +182,11 @@ func (a *API) adminPutOrg(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.RetentionYears != nil && (*body.RetentionYears < 1 || *body.RetentionYears > 30) {
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "ระยะเวลาเก็บต้องอยู่ระหว่าง 1–30 ปี"))
 		return
 	}
 	if body.StorageWarnMB != nil && (*body.StorageWarnMB < 50 || *body.StorageWarnMB > 1_000_000) {
-		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", "ขนาดที่เตือนต้องอยู่ระหว่าง 50 MB ถึง 1,000,000 MB")
+		say(w, http.StatusBadRequest, "BAD_VALUE", "detail", forReq(w, "ขนาดที่เตือนต้องอยู่ระหว่าง 50 MB ถึง 1,000,000 MB"))
 		return
 	}
 	ctx := r.Context()
@@ -909,7 +909,7 @@ func (a *API) adminSample(w http.ResponseWriter, r *http.Request) {
 	res, err := Resolve(m, caps, 1)
 	if err != nil {
 		a.log.Warn("catalog sample refused", "slug", m.ID, "err", err)
-		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingThai(err))
+		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingWords(langOfWriter(w), err))
 		return
 	}
 	b, _ := json.Marshal(res)

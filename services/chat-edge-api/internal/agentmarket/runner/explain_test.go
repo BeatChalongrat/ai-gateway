@@ -25,7 +25,7 @@ const invoiceComputed = `{"citations": [
 ], "excluded": [{"code": "unreadable_page", "reason": "ภาพไม่ชัด", "name": "รูปใบเสร็จ.jpg"}]}`
 
 func TestAWhyAboutAFigureIsAnsweredFromItsRecordNeverAModel(t *testing.T) {
-	ans, theirs := explainAnswer(strangerQuestion, []byte(invoiceComputed))
+	ans, theirs := explainAnswer(am.Thai, strangerQuestion, []byte(invoiceComputed))
 	// AM6: what the record says is sent as it is — it reads as written for a person
 	if !am.ReadsForPerson(ans, theirs...) {
 		t.Fatalf("the answer reads as written for a person: %q", am.ShownToPerson(ans, theirs...))
@@ -42,15 +42,15 @@ func TestAWhyAboutAFigureIsAnsweredFromItsRecordNeverAModel(t *testing.T) {
 }
 
 func TestAWhyNoRecordSupportsGetsIDontKnow(t *testing.T) {
-	if ans, _ := explainAnswer("ทำไมกำไรขั้นต้นลดลงจากเดือนก่อน", []byte(invoiceComputed)); ans != dontKnow || !am.ReadsForPerson(ans) {
+	if ans, _ := explainAnswer(am.Thai, "ทำไมกำไรขั้นต้นลดลงจากเดือนก่อน", []byte(invoiceComputed)); ans != dontKnow || !am.ReadsForPerson(ans) {
 		t.Fatalf("no record of that figure: %q", ans)
 	}
 	// an older package with no records at all
-	if ans, _ := explainAnswer("ทำไมยอดเป็นศูนย์", []byte(`{"quotable": {}}`)); ans != dontKnow {
+	if ans, _ := explainAnswer(am.Thai, "ทำไมยอดเป็นศูนย์", []byte(`{"quotable": {}}`)); ans != dontKnow {
 		t.Fatalf("older package: %q", ans)
 	}
 	// a question that is not a why and names no figure goes on to a model (under the guards)
-	if ans, _ := explainAnswer("สรุปให้หน่อย", []byte(invoiceComputed)); ans != "" {
+	if ans, _ := explainAnswer(am.Thai, "สรุปให้หน่อย", []byte(invoiceComputed)); ans != "" {
 		t.Fatalf("not a figure question: %q", ans)
 	}
 }
@@ -62,7 +62,7 @@ func TestAReportLineIsPreferredOverTheAccountItIsMadeOf(t *testing.T) {
 	 {"id": "c9", "label": "รายได้จากการขายและบริการ", "value": "12480300.00", "formula": "ผลรวมบัญชีหมวดรายได้", "derived_from": ["c1"]},
 	 {"id": "c10", "label": "รายได้อื่น", "value": "3820.55", "formula": "ผลรวมบัญชีหมวดรายได้อื่น", "derived_from": []}
 	], "excluded": [{"code": "period_mixed", "reason": "ลงวันที่นอกงวด (12 รายการ)"}]}`
-	ans, theirs := explainAnswer("ทำไมรายได้เดือนนี้ถึงเป็นแบบนี้", []byte(fin))
+	ans, theirs := explainAnswer(am.Thai, "ทำไมรายได้เดือนนี้ถึงเป็นแบบนี้", []byte(fin))
 	if !am.ReadsForPerson(ans, theirs...) {
 		t.Fatalf("the answer reads as written for a person: %q", am.ShownToPerson(ans, theirs...))
 	}

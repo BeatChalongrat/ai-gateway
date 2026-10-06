@@ -216,8 +216,12 @@ func (a *API) failChange(w http.ResponseWriter, r *http.Request, err error, what
 	a.fail(w, err, what)
 }
 
-// orgLabels name each organisation setting for a reader of the log.
-var orgLabels = []struct{ key, label string }{
+// orgLabels name each organisation setting for a reader of the log (an entry
+// is written once, in the language of the admin's request that made it).
+var orgLabels = []struct {
+	key   string
+	label wording
+}{
 	{"name", "ชื่อองค์กร"},
 	{"access", "ใครใช้ Agent Market ได้"},
 	{"domains", "โดเมนอีเมลขององค์กร"},
@@ -249,7 +253,7 @@ func orgChanges(r *http.Request, before, after OrgSettings) []AuditEntry {
 			continue
 		}
 		out = append(out, entry(r, "agent_market.org."+f.key, "agent_market_org", orgOr(after.OrgID),
-			map[string]any{"setting": f.key, "label": f.label, "from": b[f.key], "to": a[f.key]}))
+			map[string]any{"setting": f.key, "label": T(LangOf(r.Context()), f.label), "from": b[f.key], "to": a[f.key]}))
 	}
 	return out
 }

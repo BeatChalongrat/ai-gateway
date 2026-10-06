@@ -234,7 +234,7 @@ func TestFormsWithNoMarkerAreReadMappedFilledAndOpenedAgain(t *testing.T) {
 	}
 	var spec am.TemplateSpec
 	_ = json.Unmarshal(r.Engine.Packages["sran.financial-report"].Manifest.Templates, &spec)
-	if msg := am.CheckTemplateMapping(form.Slots, form.Proposal, spec) + am.CheckFormCoverage(form.Slots, form.Proposal); msg != "" {
+	if msg := am.CheckTemplateMapping(am.Thai, form.Slots, form.Proposal, spec) + am.CheckFormCoverage(am.Thai, form.Slots, form.Proposal); msg != "" {
 		t.Fatalf("six of eight is refused at the save: %s", msg)
 	}
 	form.Mapping, form.Status = form.Proposal, am.FormReady
@@ -303,7 +303,7 @@ func TestFormsWithNoMarkerAreReadMappedFilledAndOpenedAgain(t *testing.T) {
 		t.Fatalf("a refused form delivered a file (%d filled forms)", n)
 	}
 	// the person may map it themselves; a save that still covers less than half is refused with the names
-	if msg := am.CheckFormCoverage(form.Slots, form.Proposal); !strings.Contains(msg, "12 ช่อง") || !strings.Contains(msg, "เหตุผลที่ขอซื้อ") {
+	if msg := am.CheckFormCoverage(am.Thai, form.Slots, form.Proposal); !strings.Contains(msg, "12 ช่อง") || !strings.Contains(msg, "เหตุผลที่ขอซื้อ") {
 		t.Fatalf("the save of one of twelve: %q", msg)
 	}
 

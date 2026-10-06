@@ -24,7 +24,7 @@ func TestVersionOrderAndDiff(t *testing.T) {
 	b, _ := json.Marshal(m)
 	to := Definition{Version: "1.1.0", Manifest: b, Instructions: "line a\nline B\nline c\nline d"}
 	got := map[string][]Change{}
-	for _, c := range VersionDiff(from, to) {
+	for _, c := range VersionDiff(Thai, from, to) {
 		got[c.What] = append(got[c.What], c)
 	}
 	if len(got["manifest"]) != 1 || got["manifest"][0].Key != "outputs" {

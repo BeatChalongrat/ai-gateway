@@ -33,9 +33,21 @@ import (
 //     when the same item declares that file;
 //  10. punctuation the product's own sentences use.
 //
-// A sentence in English, an identifier_with_underscores, a path, a type's
-// name, an address, a word nobody declared: none of them is on the list,
-// whatever shape it has.
+// An identifier_with_underscores, a path, a type's name, an address, a word
+// nobody declared: none of them is on the list, whatever shape it has.
+//
+// AM11 — English. A run in English is written in English, so "has Thai words"
+// cannot be the whole rule any more. In English a text reads as written for a
+// person when every Latin word in it is one the product's own English
+// sentences use (english.go: the catalogue's vocabulary, and the packages'),
+// or is one of 1–10 above. This is weaker than the Thai rule and is meant to
+// be: Thai text is never an error's text, while an error can be made of
+// ordinary English words — so the list of error shapes (LooksLikeError) is
+// asked as before, and no English sentence of the catalogue may read like one
+// (TestNoEnglishSentenceReadsLikeAnError). A reader is strict Thai (an item
+// written in Thai: an English sentence in it is refused, exactly as before
+// AM11) or reads both (an item written in English, and text whose item is not
+// known where it is read).
 //
 // What is not on the list is withheld, not repaired into something else: a
 // parenthesis that holds any of it is left out, and what stands between two
@@ -61,6 +73,8 @@ var productWords = wordSet(
 	"THB", "USD", "DPI", "KB", "MB", "GB",
 	// months, as a date hint names them ("ค.ศ. เช่น September 2026")
 	"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December",
+	// AM11: and as an English date writes them ("28 Sep 2026", lang.go)
+	"Jan", "Feb", "Mar", "Apr", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 )
 
 func wordSet(words ...string) map[string]bool {
@@ -90,13 +104,14 @@ var (
 type pieceKind int
 
 const (
-	pThai  pieceKind = iota // Thai words
-	pSpace                  // white space
-	pMark                   // punctuation the product's sentences use
-	pPlain                  // a number, a file's name, a quoted value, an address
-	pLatin                  // a Latin word that is on the list
-	pWord                   // a Latin word that is not
-	pNo                     // anything else that is not
+	pThai    pieceKind = iota // Thai words
+	pSpace                    // white space
+	pMark                     // punctuation the product's sentences use
+	pPlain                    // a number, a file's name, a quoted value, an address
+	pLatin                    // a Latin word that is on the list
+	pEnglish                  // AM11: a word the product's English sentences use
+	pWord                     // a Latin word that is not
+	pNo                       // anything else that is not
 )
 
 type piece struct {
@@ -110,10 +125,20 @@ type piece struct {
 type Reader struct {
 	words map[string]bool
 	files map[string]bool
+	// thaiOnly: the text is of an item written in Thai — an English word is
+	// not on its list (the rule as it was before AM11)
+	thaiOnly bool
+}
+
+// readerFor is the reader for an item written in l: strict Thai, or both.
+func readerFor(l Lang, declared ...string) *Reader {
+	r := NewReader(declared...)
+	r.thaiOnly = l != English
+	return r
 }
 
 // NewReader is a reader for an item that declares these values as the
-// person's own data.
+// person's own data. It reads both languages (readerFor makes it strict).
 func NewReader(declared ...string) *Reader {
 	r := &Reader{words: map[string]bool{}, files: map[string]bool{}}
 	r.Declare(declared...)
@@ -130,7 +155,8 @@ func (r *Reader) Declare(values ...string) {
 			switch {
 			case p.file:
 				r.files[p.s] = true
-			case p.kind == pWord:
+			case p.kind == pWord, p.kind == pEnglish:
+				// a word of the person's data is theirs whether or not an English sentence of ours uses it
 				r.words[p.s] = true
 			}
 		}
@@ -213,7 +239,11 @@ func tokenKind(tok string) pieceKind {
 	case len(tok) == 1 && tok[0] >= 'A' && tok[0] <= 'Z':
 		return pLatin
 	case digits && len(tok) <= 40 && dataCode.MatchString(tok):
+		// asked before the English vocabulary: a code of the person's data is one in both languages,
+		// as it was before there were two
 		return pLatin
+	case isEnglishWord(tok):
+		return pEnglish
 	}
 	return pWord
 }
@@ -226,7 +256,10 @@ func (r *Reader) read(text string) []piece {
 		return ps
 	}
 	for i := range ps {
-		if ps[i].kind == pWord && r.words[ps[i].s] {
+		// a declared word is the person's data. Under the Thai rule that holds for a word an English
+		// sentence of ours happens to use too (before AM11 it was a word like any other); under the
+		// English rule such a word is already read, as a word of the sentence
+		if (ps[i].kind == pWord || (ps[i].kind == pEnglish && r.thaiOnly)) && r.words[ps[i].s] {
 			ps[i].kind = pLatin
 		}
 	}
@@ -257,7 +290,7 @@ func (r *Reader) read(text string) []piece {
 			continue
 		}
 		for k := start; k < i; k++ {
-			if ps[k].kind == pWord {
+			if ps[k].kind == pWord || (ps[k].kind == pEnglish && r.thaiOnly) {
 				ps[k].kind = pLatin
 			}
 		}
@@ -265,23 +298,41 @@ func (r *Reader) read(text string) []piece {
 	return ps
 }
 
-func refused(k pieceKind) bool { return k == pWord || k == pNo }
+// refused: the piece is not on this reader's list.
+func (r *Reader) refused(k pieceKind) bool {
+	return k == pWord || k == pNo || (k == pEnglish && r != nil && r.thaiOnly)
+}
+
+// said: the piece is a word of a sentence in a language this reader reads.
+func (r *Reader) said(p piece) bool {
+	return p.kind == pThai || (p.kind == pEnglish && (r == nil || !r.thaiOnly))
+}
+
+// hasWords: the line has a word of a language this reader reads.
+func (r *Reader) hasWords(line string) bool {
+	for _, p := range r.read(line) {
+		if r.said(p) {
+			return true
+		}
+	}
+	return false
+}
 
 // Reads: the text reads as written for a person, as it is.
 func (r *Reader) Reads(text string) bool {
-	thai, latin := false, false
+	words, latin := false, false
 	for _, p := range r.read(text) {
 		switch {
-		case refused(p.kind):
+		case r.refused(p.kind):
 			return false
-		case p.kind == pThai:
-			thai = true
+		case r.said(p):
+			words = true
 		case p.kind == pLatin:
 			latin = true
 		}
 	}
-	// without a Thai word it is a value (a file's name, an amount), not a sentence
-	return (thai || !latin) && !LooksLikeError(text)
+	// without a word of a language it is a value (a file's name, an amount), not a sentence
+	return (words || !latin) && !LooksLikeError(text)
 }
 
 // Value: the text is a value a person may read — a period, an amount, a
@@ -291,7 +342,7 @@ func (r *Reader) Value(text string) bool {
 		return false
 	}
 	for _, p := range r.read(text) {
-		if refused(p.kind) {
+		if r.refused(p.kind) {
 			return false
 		}
 	}
@@ -322,7 +373,7 @@ func (r *Reader) Shown(text string) string {
 		}
 		if r.Reads(line) {
 			lines = append(lines, strings.TrimRight(line, " \t\r"))
-			said = said || strings.ContainsFunc(line, isThai)
+			said = said || r.hasWords(line)
 		} else if s := r.shownLine(line); s != "" {
 			lines = append(lines, s)
 			said = true
@@ -351,12 +402,12 @@ func (r *Reader) shownLine(text string) string {
 				end = j
 				break
 			}
-			bad = bad || refused(ps[j].kind)
+			bad = bad || r.refused(ps[j].kind)
 		}
 		if end < 0 {
 			// cut before it closed
 			for j := i + 1; j < len(ps); j++ {
-				bad = bad || refused(ps[j].kind)
+				bad = bad || r.refused(ps[j].kind)
 			}
 			end = len(ps) - 1
 		}
@@ -370,23 +421,23 @@ func (r *Reader) shownLine(text string) string {
 		ps = append(ps[:from:from], ps[end+1:]...)
 		i = from - 1
 	}
-	// what stands between two Thai words (or two "·") is readable as a whole, or withheld as a whole
+	// what stands between two words of the sentence (or two "·") is readable as a whole, or withheld as a whole
 	var out []piece
 	for i := 0; i < len(ps); {
-		if ps[i].kind == pThai || ps[i].s == "·" {
+		if r.said(ps[i]) || ps[i].s == "·" {
 			out = append(out, ps[i])
 			i++
 			continue
 		}
 		j := i
-		for j < len(ps) && ps[j].kind != pThai && ps[j].s != "·" {
+		for j < len(ps) && !r.said(ps[j]) && ps[j].s != "·" {
 			j++
 		}
 		stretch := ps[i:j]
 		i = j
 		bad := false
 		for _, p := range stretch {
-			bad = bad || refused(p.kind)
+			bad = bad || r.refused(p.kind)
 		}
 		if !bad {
 			out = append(out, stretch...)
@@ -421,7 +472,7 @@ func (r *Reader) shownLine(text string) string {
 	var b strings.Builder
 	kept := 0
 	for _, p := range out {
-		if p.kind == pThai {
+		if r.said(p) {
 			kept += len([]rune(p.s))
 		}
 		b.WriteString(p.s)
@@ -431,28 +482,47 @@ func (r *Reader) shownLine(text string) string {
 		shown = strings.ReplaceAll(shown, fix[0], fix[1])
 	}
 	shown = strings.TrimRight(strings.TrimLeft(strings.TrimSpace(shown), " ·,:—–"), " ·,:—–")
-	// fewer Thai letters than a word has: nothing of it was written for a person
+	// fewer letters of a sentence than a word has: nothing of it was written for a person
 	if kept < 4 || LooksLikeError(shown) {
 		return ""
 	}
 	return shown
 }
 
-var plainReader = NewReader()
+// plainReader reads both languages: an English item's reader, and the reader
+// of a text read back from a row whose language is not known there.
+// thaiReader is the strict one — the rule as it was before AM11.
+var (
+	plainReader = NewReader()
+	thaiReader  = readerFor(Thai)
+)
 
-// ReadsForPerson: the text reads as written for a person. declared is what
-// the text's own item carries as the person's data.
-func ReadsForPerson(text string, declared ...string) bool {
-	if len(declared) == 0 {
-		return plainReader.Reads(text)
+func readerOf(l Lang, declared ...string) *Reader {
+	switch {
+	case len(declared) > 0:
+		return readerFor(l, declared...)
+	case l == English:
+		return plainReader
 	}
-	return NewReader(declared...).Reads(text)
+	return thaiReader
 }
 
-// ShownToPerson is what a person is shown of a text ("" = nothing).
-func ShownToPerson(text string, declared ...string) string {
-	if len(declared) == 0 {
-		return plainReader.Shown(text)
-	}
-	return NewReader(declared...).Shown(text)
+// ReadsForPerson: the text reads as written for a person — by the Thai rule,
+// which is what every caller before AM11 means by it (ReadsIn for a text in
+// another language). declared is what the text's own item carries as the
+// person's data.
+func ReadsForPerson(text string, declared ...string) bool { return ReadsIn(Thai, text, declared...) }
+
+// ReadsIn: the text reads as written for a person, by the rule of l.
+func ReadsIn(l Lang, text string, declared ...string) bool {
+	return readerOf(l, declared...).Reads(text)
+}
+
+// ShownToPerson is what a person is shown of a text ("" = nothing), by the
+// Thai rule (ShownIn for a text in another language).
+func ShownToPerson(text string, declared ...string) string { return ShownIn(Thai, text, declared...) }
+
+// ShownIn is what a person is shown of a text written in l ("" = nothing).
+func ShownIn(l Lang, text string, declared ...string) string {
+	return readerOf(l, declared...).Shown(text)
 }

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 // AM9 (A): the print proof finds a row's identity and its amounts on one
@@ -36,7 +38,7 @@ func TestAPrintedRowIsFoundOnlyWhenItsDescriptionAndAmountsShareAPage(t *testing
 }
 
 func TestTheProofFailsAFileItAddsTo(t *testing.T) {
-	q := withCheck(json.RawMessage(`{"passed":true,"checks":[{"name":"xlsx.sheets","ok":true}]}`),
+	q := withCheck(am.Thai, json.RawMessage(`{"passed":true,"checks":[{"name":"xlsx.sheets","ok":true}]}`),
 		gateCheck{Name: "xlsx.printed", OK: false})
 	var got struct {
 		Passed bool              `json:"passed"`

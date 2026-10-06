@@ -142,6 +142,7 @@ func (a *API) Close() {
 
 // Routes mounts the control plane (inside chat-edge's authenticated group).
 func (a *API) Routes(r chi.Router) {
+	r.Use(inRequestLang) // AM11: the language the request names, on its context and its response
 	r.Use(a.signedIn)
 	r.Get("/availability", a.availability)
 	// AM3: a run shared with a named colleague — signed in as that person is
@@ -228,11 +229,19 @@ func (a *API) Routes(r chi.Router) {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
+// writeJSON sends v. AM11: every text of the platform's inside it is in the
+// language the request named (lang.go).
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	b, err := MarshalIn(langOfWriter(w), v)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"code":"AGENT_MARKET_ERROR","message":""}}` + "\n"))
+		return
+	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(append(b, '\n'))
 }
 
 // writeErr sends a message a person reads. AM5: whatever a caller put into
@@ -241,7 +250,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	if LooksLikeError(msg) {
 		if msg = ForPerson(msg); msg == "" {
-			msg = userMessages["AGENT_MARKET_ERROR"]
+			msg = MessageIn(langOfWriter(w), "AGENT_MARKET_ERROR")
 		}
 	}
 	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": msg}})
@@ -255,11 +264,7 @@ func (a *API) fail(w http.ResponseWriter, err error, what string) {
 		return
 	}
 	if errors.Is(err, ErrNotFound) {
-		name, ok := whatThai[what]
-		if !ok {
-			name = "รายการ"
-		}
-		say(w, http.StatusNotFound, "NOT_FOUND", "what", name)
+		say(w, http.StatusNotFound, "NOT_FOUND", "what", whatIn(langOfWriter(w), what))
 		return
 	}
 	if busy(err) {
@@ -399,8 +404,8 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 		if !rules.known(k) {
 			continue
 		}
-		if _, code, problem := rules.check(k, v); problem != "" {
-			say(w, http.StatusBadRequest, code, "detail", problem)
+		if _, code, problem := rules.check(k, v); !problem.Empty() {
+			say(w, http.StatusBadRequest, code, "detail", problem.In(langOfWriter(w)))
 			return
 		}
 	}
@@ -414,7 +419,7 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	res, err := Resolve(m, available, 1)
 	if err != nil {
 		a.log.Warn("install refused", "slug", m.ID, "err", err)
-		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingThai(err))
+		a.sayTo(w, r, http.StatusConflict, "CAPABILITY_MISSING", "detail", missingWords(langOfWriter(w), err))
 		return
 	}
 	bindings, _ := json.Marshal(res)
@@ -450,11 +455,13 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			kept, _, problem := rules.check(k, v)
-			if problem != "" {
+			if !problem.Empty() {
 				continue
 			}
+			// AM11: a setting's name and note are kept in a row, in the language of the screen that set it
+			l := LangOf(ctx)
 			if err := a.store.SetDefault(ctx, tx, in.ID, Default{Key: k, Value: kept, Source: "install",
-				Label: rules.label(k), Note: "ตั้งตอนติดตั้ง"}); err != nil {
+				Label: rules.label(l, k), Note: T(l, "ตั้งตอนติดตั้ง")}); err != nil {
 				a.fail(w, err, "install")
 				return
 			}
@@ -508,7 +515,7 @@ func validSettingKey(k string) bool {
 // backend/agent_market/engine/e3/match.py SETTINGS: the same bounds — a
 // value the engine could not use is refused where it is typed).
 type matchSetting struct {
-	label    string
+	label    wording
 	kind     string // money | int | ratio | bool
 	min, max float64
 }
@@ -523,7 +530,7 @@ var matchSettings = map[string]matchSetting{
 	"match_auto_same_day":     {"จับคู่เองเมื่อวันที่และยอดตรงกันและมีรายการเดียว", "bool", 0, 0},
 }
 
-var accountSettings = map[string]string{
+var accountSettings = map[string]wording{
 	"bank_name":           "ธนาคาร",
 	"bank_account_number": "เลขที่บัญชีธนาคาร",
 	"bank_account_name":   "ชื่อบัญชีธนาคาร",
@@ -592,9 +599,9 @@ func validSettingValue(k string, raw json.RawMessage) bool {
 		return json.Unmarshal(raw, &s) == nil && s == "th"
 	case "policy":
 		// the structured policy table: limits come from here only, never from a document
-		return len(PolicyProblems(raw)) == 0
+		return len(PolicyProblems(Thai, raw)) == 0
 	case "holidays":
-		return len(HolidayProblems(raw)) == 0
+		return len(HolidayProblems(Thai, raw)) == 0
 	}
 	if m, ok := matchSettings[k]; ok {
 		return validMatchSetting(m, raw)
@@ -612,54 +619,55 @@ func btoi(b bool) int {
 	return 0
 }
 
-// settingProblem says what is wrong with a refused setting (for a table, which entries).
-func settingProblem(key string, v json.RawMessage) string {
-	msg := "ค่าไม่ถูกต้อง: " + settingLabel(key)
+// settingProblem says, in l, what is wrong with a refused setting (for a table, which entries).
+func settingProblem(l Lang, key string, v json.RawMessage) string {
+	msg := T(l, "ค่าไม่ถูกต้อง: ") + settingLabel(l, key)
 	switch key {
 	case "policy":
-		msg += " — " + strings.Join(PolicyProblems(v), " · ")
+		msg += " — " + strings.Join(PolicyProblems(l, v), " · ")
 	case "holidays":
-		msg += " — " + strings.Join(HolidayProblems(v), " · ")
+		msg += " — " + strings.Join(HolidayProblems(l, v), " · ")
 	}
 	return msg
 }
 
-func settingLabel(k string) string {
+// settingLabel is the name of one of the platform's settings, in l.
+func settingLabel(l Lang, k string) string {
 	switch k {
 	case "company":
-		return "ชื่อบริษัทบนเอกสาร"
+		return T(l, "ชื่อบริษัทบนเอกสาร")
 	case "formats":
-		return "ชุดไฟล์ที่ต้องการ"
+		return T(l, "ชุดไฟล์ที่ต้องการ")
 	case "currency":
-		return "สกุลเงินหลัก"
+		return T(l, "สกุลเงินหลัก")
 	case "language":
-		return "ภาษาของเอกสาร"
+		return T(l, "ภาษาของเอกสาร")
 	case "materiality":
-		return "เกณฑ์ความมีสาระสำคัญ (บาท)"
+		return T(l, "เกณฑ์ความมีสาระสำคัญ (บาท)")
 	case "mapping":
-		return "การจับคู่คอลัมน์"
+		return T(l, "การจับคู่คอลัมน์")
 	case "dc_convention":
-		return "การอ่านเดบิต/เครดิต"
+		return T(l, "การอ่านเดบิต/เครดิต")
 	case "theme":
-		return "ธีมเอกสาร"
+		return T(l, "ธีมเอกสาร")
 	case "fiscal_year_start":
-		return "เดือนเริ่มปีบัญชี"
+		return T(l, "เดือนเริ่มปีบัญชี")
 	case "company_tax_id":
-		return "เลขประจำตัวผู้เสียภาษีของบริษัท"
+		return T(l, "เลขประจำตัวผู้เสียภาษีของบริษัท")
 	case "company_branch":
-		return "สาขาของบริษัท"
+		return T(l, "สาขาของบริษัท")
 	case "policy":
-		return "ตารางนโยบายการเบิก"
+		return T(l, "ตารางนโยบายการเบิก")
 	case "holidays":
-		return "ปฏิทินวันหยุด"
+		return T(l, "ปฏิทินวันหยุด")
 	case "policy_kb":
-		return "เอกสารระเบียบ (ใช้เป็นบริบทเท่านั้น)"
+		return T(l, "เอกสารระเบียบ (ใช้เป็นบริบทเท่านั้น)")
 	}
 	if m, ok := matchSettings[k]; ok {
-		return m.label
+		return T(l, m.label)
 	}
-	if l, ok := accountSettings[k]; ok {
-		return l
+	if name, ok := accountSettings[k]; ok {
+		return T(l, name)
 	}
 	return k
 }
@@ -667,7 +675,7 @@ func settingLabel(k string) string {
 func (a *API) startSelfTest(ctx context.Context, in Install, def Definition) (Run, error) {
 	run, _, err := a.store.CreateRun(ctx, a.store.Pool, Run{
 		InstallID: in.ID, TenantID: in.TenantID, UserID: in.UserID, Kind: KindSelfTest,
-		Message: "ทดสอบกับข้อมูลตัวอย่าง", DefinitionVersion: def.Version, Checksum: def.Checksum,
+		Message: T(LangOf(ctx), "ทดสอบกับข้อมูลตัวอย่าง"), DefinitionVersion: def.Version, Checksum: def.Checksum,
 		EngineChecksum: def.EngineChecksum, BindingVersion: in.BindingVersion,
 	}, "")
 	if err != nil {
@@ -785,7 +793,7 @@ func (a *API) listDefaults(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "defaults")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(list), "declared": rules.values(list)})
+	writeJSON(w, http.StatusOK, map[string]any{"defaults": nonNil(list), "declared": rules.values(langOfWriter(w), list)})
 }
 
 func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
@@ -813,17 +821,18 @@ func (a *API) putDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kept, code, problem := rules.check(key, body.Value)
-	if problem != "" {
-		say(w, http.StatusBadRequest, code, "detail", problem)
+	if !problem.Empty() {
+		say(w, http.StatusBadRequest, code, "detail", problem.In(langOfWriter(w)))
 		return
 	}
 	// a declared setting is named as its manifest names it
+	l := LangOf(r.Context())
 	label := body.Label
 	if _, declared := rules.declared[key]; label == "" || declared {
-		label = rules.label(key)
+		label = rules.label(l, key)
 	}
 	if err := a.store.SetDefault(r.Context(), a.store.Pool, in.ID, Default{Key: key, Value: kept, Source: "settings",
-		Label: label, Note: "แก้ในหน้าค่าที่จำไว้"}); err != nil {
+		Label: label, Note: T(l, "แก้ในหน้าค่าที่จำไว้")}); err != nil {
 		a.fail(w, err, "default")
 		return
 	}
@@ -1142,7 +1151,9 @@ func (a *API) message(w http.ResponseWriter, r *http.Request) {
 	if len(files) > 0 && req.KnowledgeBaseID != nil {
 		// AM6: a knowledge base answers questions; it never feeds a round's figures
 		note := Text("ข้อความนี้แนบไฟล์ จึงไม่ได้ใช้คลังความรู้ — คลังความรู้ใช้ตอบคำถามเท่านั้น ตัวเลขในเอกสารมาจากไฟล์และการคำนวณของ agent")
-		if _, _, err := a.store.AddItemIn(ctx, tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, runID, Notice{Text: note}, nil); err != nil {
+		// in the language of the run it is said about, when there is one
+		if _, _, err := a.store.AddItemIn(a.store.InLangOfRun(ctx, tx, runID), tx, in.ID, req.ThreadID, c.TenantUUID, c.UserID, runID,
+			Notice{Text: note}, nil); err != nil {
 			a.fail(w, err, "message")
 			return
 		}
@@ -1288,15 +1299,15 @@ func (a *API) route(ctx context.Context, tx pgx.Tx, in Install, c middleware.Cal
 	return "reply", &job.ID, link(job.ID, "reply")
 }
 
-func wantsNewRound(text string) bool {
-	t := strings.ToLower(text)
-	for _, w := range []string{"รอบใหม่", "ทำใหม่", "เริ่มใหม่", "new run", "ปิดงบเดือน", "ปิดงบ"} {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
-}
+// newRoundWords: what a typed message has in it when it asks for a new run, in either language (words.go:
+// a Thai word anywhere, an English one as whole words). They read what a person typed; nothing here is
+// said to anyone. "month-end close" is the example a failed run's own sentence gives (failure.go).
+var newRoundWords = []string{"รอบใหม่", "ทำใหม่", "เริ่มใหม่", "new run", "ปิดงบเดือน", "ปิดงบ",
+	// AM11
+	"another run", "do it again", "redo", "run it again", "start again", "start over", "restart", "month-end close",
+	"month end close", "close the books", "close the month"}
+
+func wantsNewRound(text string) bool { return HasWord(text, newRoundWords...) }
 
 // newRun starts a round. It carries the install's settings and remembered
 // answers (the runner reads them) and nothing of an earlier round: no file,
@@ -1361,13 +1372,17 @@ func (a *API) lateFileCard(ctx context.Context, tx pgx.Tx, run Run, files []File
 	for _, f := range files {
 		names = append(names, f.Name)
 	}
-	q := Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: "ไฟล์เพิ่ม",
-		Question: Text("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", FileNames(names)).String(),
+	// AM11: the card is the run's, so it is in the run's language — a card's questions are kept as they
+	// were asked, in one language
+	l := run.Lang()
+	ctx = InRunLang(ctx, run)
+	q := Question{Key: "late_file", Code: "late_file", Severity: "blocking", Header: T(l, "ไฟล์เพิ่ม"),
+		Question: Text("ได้รับ %s ระหว่างที่กำลังทำรอบนี้ จะให้รวมในรอบนี้ หรือเก็บไว้ทำรอบใหม่ครับ", FileNames(names)).In(l),
 		Options: []Option{
-			{Label: "รวมในรอบนี้", Description: "ตรวจไฟล์ใหม่แล้วคำนวณก่อนส่งผล", Value: json.RawMessage(`"include"`)},
-			{Label: "เก็บไว้ทำรอบใหม่", Description: "รอบนี้ใช้ไฟล์เดิม รอบใหม่เริ่มต่อทันทีด้วยไฟล์นี้เท่านั้น", Value: json.RawMessage(`"next_round"`)},
+			{Label: T(l, "รวมในรอบนี้"), Description: T(l, "ตรวจไฟล์ใหม่แล้วคำนวณก่อนส่งผล"), Value: json.RawMessage(`"include"`)},
+			{Label: T(l, "เก็บไว้ทำรอบใหม่"), Description: T(l, "รอบนี้ใช้ไฟล์เดิม รอบใหม่เริ่มต่อทันทีด้วยไฟล์นี้เท่านั้น"), Value: json.RawMessage(`"next_round"`)},
 		},
-		Default: json.RawMessage(`"include"`), DefaultLabel: "รวมในรอบนี้"}
+		Default: json.RawMessage(`"include"`), DefaultLabel: T(l, "รวมในรอบนี้")}
 	qs, _ := json.Marshal([]Question{q})
 	card, err := a.store.CreateCard(ctx, tx, Card{RunID: run.ID, InstallID: run.InstallID, TenantID: run.TenantID,
 		UserID: run.UserID, Moment: "run", Kind: "late_file", Blocking: false, Questions: qs})
@@ -1418,8 +1433,6 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "card")
 		return
 	}
-	// AM6: what the person clicked is a label as they were sent it
-	questions = ShownQuestions(questions)
 	tx, err := a.store.Pool.Begin(ctx)
 	if err != nil {
 		a.fail(w, err, "card")
@@ -1434,9 +1447,15 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 	if in, err := a.store.InstallByID(ctx, run.InstallID); err == nil && !a.agentGate(w, r, in.Slug, false) {
 		return
 	}
+	// AM6: what the person clicked is a label as they were sent it — by the rule of the card's language,
+	// which is its run's (AM11)
+	questions = ShownQuestions(run.Lang(), questions)
+	// AM11: what an answer writes for its run — an assumption, a remembered default, a notice — is in
+	// the run's language; what is said back to this request is in the request's
+	ctx = InRunLang(ctx, run)
 	answers, texts, err := ResolveSubmission(questions, req.Answers, card.Moment, card.ID.String())
 	if err != nil {
-		say(w, http.StatusUnprocessableEntity, "BAD_ANSWER", "detail", answerProblem(err))
+		say(w, http.StatusUnprocessableEntity, "BAD_ANSWER", "detail", answerProblem(langOfWriter(w), err))
 		return
 	}
 	if strings.TrimSpace(req.Text) != "" && len(answers) == 0 {
@@ -1511,8 +1530,9 @@ func (a *API) answer(w http.ResponseWriter, r *http.Request) {
 		var skipped []Assumption
 		for _, q := range questions {
 			if ans, ok := answers[q.Key]; ok && ans.Via == "skip" {
+				// printed in the run's documents under "assumptions used": the run's language
 				skipped = append(skipped, Assumption{Code: q.Code, Source: "skip", ChangesNumbers: q.Severity != "cosmetic",
-					Text: q.Header + ": ใช้ค่าแนะนำ “" + ans.Label + "” เพราะคุณกดข้ามคำถามนี้"})
+					Text: q.Header + T(run.Lang(), ": ใช้ค่าแนะนำ “") + ans.Label + T(run.Lang(), "” เพราะคุณกดข้ามคำถามนี้")})
 			}
 		}
 		if err := a.store.AddAssumptions(ctx, tx, run.ID, skipped); err != nil {
@@ -1975,7 +1995,8 @@ func (a *API) getTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"theme": theme, "version": version,
-		"presets": []map[string]string{{"id": "navy", "name": "กรมท่า"}, {"id": "teal", "name": "เขียวหยก"}, {"id": "charcoal", "name": "ถ่านหิน"}}})
+		"presets": []map[string]any{{"id": "navy", "name": Text("กรมท่า")}, {"id": "teal", "name": Text("เขียวหยก")},
+			{"id": "charcoal", "name": Text("ถ่านหิน")}}})
 }
 
 func (a *API) putTheme(w http.ResponseWriter, r *http.Request) {

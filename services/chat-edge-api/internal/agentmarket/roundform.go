@@ -258,13 +258,16 @@ func FormItemPayload(run uuid.UUID, f RoundForm) FormPayload {
 }
 
 // SyncFormItem writes the form's thread item (one per form, updated in place).
+// AM11: the item is the run's, so it is written in the run's language whichever screen moved the form on.
 func (s *Store) SyncFormItem(ctx context.Context, q Querier, run Run, f *RoundForm) error {
+	ctx = InRunLang(ctx, run)
 	p := FormItemPayload(run.ID, *f)
 	if f.ItemID != nil {
-		b, err := json.Marshal(p)
+		b, err := MarshalFor(ctx, p)
 		if err != nil {
 			return err
 		}
+		b = stampLang(LangOf(ctx), b)
 		_, err = q.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = $2, rev = nextval('agent_market.thread_rev'),
 			updated_at = now() WHERE id = $1`, *f.ItemID, b)
 		return err
@@ -288,18 +291,15 @@ func FormKind(name string) string {
 	return ""
 }
 
-var formWords = []string{"ฟอร์ม", "แบบฟอร์ม", "template", "เทมเพลต", "ใส่ใน", "กรอกใน", "กรอกลง", "ลงใน", "ใส่ลง", "fill in", "put in", "into this"}
+// formWords: what a typed message has in it when it asks for a form to be filled, in either language
+// (words.go: a Thai word anywhere, an English one as whole words). They read what a person typed;
+// nothing here is said to anyone.
+var formWords = []string{"ฟอร์ม", "แบบฟอร์ม", "template", "เทมเพลต", "ใส่ใน", "กรอกใน", "กรอกลง", "ลงใน", "ใส่ลง", "fill in", "put in", "into this",
+	// AM11
+	"form", "forms", "templates", "fill out", "fill this", "fill it", "put into", "put this in", "enter into"}
 
 // ReadsAsFormRequest: the person asked for their form to be filled.
-func ReadsAsFormRequest(text string) bool {
-	t := strings.ToLower(text)
-	for _, w := range formWords {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
-}
+func ReadsAsFormRequest(text string) bool { return HasWord(text, formWords...) }
 
 // SplitForms tells the forms in a message from its data: the files the person
 // marked, the files of a form's kind the agent does not read as input, and —
@@ -473,9 +473,9 @@ func (a *API) putRunForm(w http.ResponseWriter, r *http.Request) {
 	if len(slots) == 0 {
 		slots = f.Slots
 	}
-	msg := CheckTemplateMapping(slots, body.Mapping, spec)
+	msg := CheckTemplateMapping(langOfWriter(w), slots, body.Mapping, spec)
 	if msg == "" {
-		msg = CheckFormCoverage(slots, body.Mapping)
+		msg = CheckFormCoverage(langOfWriter(w), slots, body.Mapping)
 	}
 	if msg != "" {
 		say(w, http.StatusBadRequest, "BAD_MAPPING", "detail", msg)

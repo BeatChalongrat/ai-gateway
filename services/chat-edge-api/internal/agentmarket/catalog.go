@@ -98,15 +98,18 @@ func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, 
 			cancel_requested = true, finished_at = now(), updated_at = now()
 			FROM agent_market.agent_installs i
 			WHERE r.install_id = i.id AND i.org_id = $1 AND i.slug = $2 AND i.status = 'active' AND r.status = 'queued'
-			RETURNING r.id, r.install_id, r.tenant_id, r.user_id`, orgOr(org), slug)
+			RETURNING r.id, r.install_id, r.tenant_id, r.user_id, r.params`, orgOr(org), slug)
 		if err != nil {
 			return 0, err
 		}
-		type stoppedRun struct{ id, install, tenant, user uuid.UUID }
+		type stoppedRun struct {
+			id, install, tenant, user uuid.UUID
+			params                    json.RawMessage
+		}
 		var list []stoppedRun
 		for rows.Next() {
 			var x stoppedRun
-			if err := rows.Scan(&x.id, &x.install, &x.tenant, &x.user); err != nil {
+			if err := rows.Scan(&x.id, &x.install, &x.tenant, &x.user, &x.params); err != nil {
 				rows.Close()
 				return 0, err
 			}
@@ -117,7 +120,8 @@ func (s *Store) SetCatalogState(ctx context.Context, org, slug, status, reason, 
 			rid := x.id
 			text := Text("ผู้ดูแลปิด agent นี้ไว้ชั่วคราว รอบนี้จึงยังไม่เริ่ม%s — ไฟล์ที่ส่งมายังอยู่ครบ เมื่อเปิดใช้อีกครั้งให้ส่งใหม่หรือพิมพ์ “ทำรอบใหม่”",
 				Aside(reason))
-			if _, _, err := s.AddItem(ctx, tx, x.install, x.tenant, x.user, &rid,
+			// AM11: said to each run's person in that run's language, not in the admin's
+			if _, _, err := s.AddItem(InRunLang(ctx, Run{Params: x.params}), tx, x.install, x.tenant, x.user, &rid,
 				Notice{Text: text, Tone: "warning", RunID: x.id.String(), Reason: "agent_disabled"}, nil); err != nil {
 				return 0, err
 			}
@@ -163,7 +167,7 @@ func (a *API) agentGate(w http.ResponseWriter, r *http.Request, slug string, ins
 				contact.Name = ""
 			}
 		}
-		say(w, http.StatusConflict, "AGENT_DISABLED", "reason", reason, "contact", contact.Label())
+		say(w, http.StatusConflict, "AGENT_DISABLED", "reason", reason, "contact", contact.LabelIn(langOfWriter(w)))
 		return false
 	case installing && st.Status == StatusUnpublished && !acc.Publisher():
 		a.sayTo(w, r, http.StatusForbidden, "AGENT_UNPUBLISHED")
@@ -238,9 +242,9 @@ func (s *Store) CreateCatalogSample(ctx context.Context, def Definition, binding
 					if !rules.known(k) {
 						continue
 					}
-					if kept, _, problem := rules.check(k, v); problem == "" {
+					if kept, _, problem := rules.check(k, v); problem.Empty() {
 						if err = s.SetDefault(ctx, tx, install, Default{Key: k, Value: kept, Source: "install",
-							Label: rules.label(k), Note: "ตัวอย่างในแคตตาล็อก"}); err != nil {
+							Label: rules.label(LangOf(ctx), k), Note: T(LangOf(ctx), "ตัวอย่างในแคตตาล็อก")}); err != nil {
 							break
 						}
 					}
@@ -252,7 +256,7 @@ func (s *Store) CreateCatalogSample(ctx context.Context, def Definition, binding
 		return Run{}, err
 	}
 	run, _, err := s.CreateRun(ctx, tx, Run{InstallID: install, TenantID: uuid.Nil, UserID: uuid.Nil, Kind: KindSelfTest,
-		Message: "ตัวอย่างในแคตตาล็อก", DefinitionVersion: def.Version, Checksum: def.Checksum, EngineChecksum: def.EngineChecksum,
+		Message: T(LangOf(ctx), "ตัวอย่างในแคตตาล็อก"), DefinitionVersion: def.Version, Checksum: def.Checksum, EngineChecksum: def.EngineChecksum,
 		BindingVersion: bindingVersion}, "")
 	if err != nil {
 		return run, err
@@ -646,7 +650,10 @@ type Datasheet struct {
 }
 
 // BuildDatasheet assembles the sheet (a function of its inputs, for tests).
-func BuildDatasheet(d Definition, caps map[string]Binding, status string, now time.Time) (Datasheet, error) {
+// AM11: the platform's own lines of it are in l — the language of the request
+// that asks for the sheet; what the manifest says of the agent is the
+// package's, in the language the package was written in.
+func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string, now time.Time) (Datasheet, error) {
 	m, err := ParseManifest(d.Manifest)
 	if err != nil {
 		return Datasheet{}, err
@@ -687,7 +694,7 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	// its primary and its fallback. Any other agent sends a person's typed
 	// words (with that run's table or card) only to a model inside the
 	// organisation, or to none (the runner's textModels).
-	const typed = " · และข้อความที่คุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค"
+	typed := T(l, " · และข้อความที่คุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค")
 	textDetail := func() (primary, fallback string, self map[string]bool) {
 		var det struct {
 			Primary    string          `json:"primary"`
@@ -702,7 +709,7 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	if uses("model.text") && m.Narrative != "rules" {
 		sees := inputs["model.text"]
 		if sees == "" {
-			sees = "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น (ไม่ใช่ไฟล์ต้นฉบับ) เพื่อเขียนคำบรรยายในรายงาน"
+			sees = T(l, "ตารางตัวเลขที่คำนวณแล้วของรอบนั้น (ไม่ใช่ไฟล์ต้นฉบับ) เพื่อเขียนคำบรรยายในรายงาน")
 		}
 		sees += typed
 		if b, ok := caps["model.text"]; ok {
@@ -722,25 +729,25 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 			}
 		}
 	} else {
-		ds.NoModel = append(ds.NoModel, "คำบรรยายและสรุปในไฟล์เขียนด้วยกฎของ agent ไม่มีโมเดลภาษาใดเขียนหรือเห็นเอกสารของคุณ")
+		ds.NoModel = append(ds.NoModel, T(l, "คำบรรยายและสรุปในไฟล์เขียนด้วยกฎของ agent ไม่มีโมเดลภาษาใดเขียนหรือเห็นเอกสารของคุณ"))
 		primary, fallback, self := textDetail()
 		inside := false
 		for _, x := range []string{primary, fallback} {
 			if x != "" && self[x] {
 				inside = true
 				ds.Models = append(ds.Models, DatasheetModel{Capability: "model.text", Model: x, Role: "questions", SelfHosted: true,
-					Sees: "เฉพาะเมื่อคุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค: ข้อความนั้นกับตารางหรือการ์ดของรอบนั้น — ส่งให้โมเดลในองค์กรเท่านั้น"})
+					Sees: T(l, "เฉพาะเมื่อคุณพิมพ์ถามเกี่ยวกับตัวเลข หรือพิมพ์ตอบการ์ดคำถามเป็นประโยค: ข้อความนั้นกับตารางหรือการ์ดของรอบนั้น — ส่งให้โมเดลในองค์กรเท่านั้น")})
 				break
 			}
 		}
 		if !inside {
-			ds.NoModel = append(ds.NoModel, "ข้อความที่คุณพิมพ์ไม่ถูกส่งให้โมเดลใด (ไม่มีโมเดลในองค์กร) — agent อ่านคำตอบจากคำสำคัญ หรือใช้ค่าแนะนำ")
+			ds.NoModel = append(ds.NoModel, T(l, "ข้อความที่คุณพิมพ์ไม่ถูกส่งให้โมเดลใด (ไม่มีโมเดลในองค์กร) — agent อ่านคำตอบจากคำสำคัญ หรือใช้ค่าแนะนำ"))
 		}
 	}
 	if uses("model.vision") {
 		sees := inputs["model.vision"]
 		if sees == "" {
-			sees = "ภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่ายเท่านั้น"
+			sees = T(l, "ภาพหน้าเอกสารที่เป็นสแกนหรือรูปถ่ายเท่านั้น")
 		}
 		if b, ok := caps["model.vision"]; ok {
 			var det struct {
@@ -754,10 +761,10 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 			ds.Models = append(ds.Models, DatasheetModel{Capability: "model.vision", Sees: sees, Model: det.Model, Role: "vision",
 				SelfHosted: det.SelfHosted})
 		} else {
-			ds.NoModel = append(ds.NoModel, "ตอนนี้ไม่มีโมเดลอ่านภาพที่ทำงานในองค์กร สแกนและรูปถ่ายจึงอ่านด้วย OCR บนเครื่องขององค์กรเท่านั้น")
+			ds.NoModel = append(ds.NoModel, T(l, "ตอนนี้ไม่มีโมเดลอ่านภาพที่ทำงานในองค์กร สแกนและรูปถ่ายจึงอ่านด้วย OCR บนเครื่องขององค์กรเท่านั้น"))
 		}
 	}
-	ds.NoModel = append(ds.NoModel, "ตัวเลขทุกตัวคำนวณด้วยสคริปต์ ไม่มีโมเดลใดเป็นผู้กำหนดตัวเลข")
+	ds.NoModel = append(ds.NoModel, T(l, "ตัวเลขทุกตัวคำนวณด้วยสคริปต์ ไม่มีโมเดลใดเป็นผู้กำหนดตัวเลข"))
 	// Where the files are kept and for how long: the runner says (heartbeat).
 	storage := map[string]any{"backend": "local", "prefix": "agent-market/"}
 	retention := map[string]float64{"staged_hours": 30 * 24, "scratch_days": 7, "removed_days": 30}
@@ -778,23 +785,23 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 	// AM4: an accounting archive — a finished round's evidence for the
 	// organisation's years (ApplyOrg sets them), everything else short.
 	ds.Retention = []map[string]any{
-		{"what": "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จ (หลักฐานว่าตัวเลขคำนวณจากไฟล์ใด)", "keep": float64(DefaultRetentionYears),
+		{"what": T(l, "ไฟล์ที่ส่งเข้าและไฟล์ผลลัพธ์ของรอบที่สำเร็จ (หลักฐานว่าตัวเลขคำนวณจากไฟล์ใด)"), "keep": float64(DefaultRetentionYears),
 			"unit": "years"},
-		{"what": "ข้อมูลของรอบที่ล้มเหลวหรือยกเลิก (ไฟล์ที่ส่งเข้าและข้อมูลชั่วคราว)", "keep": retention["scratch_days"], "unit": "days"},
-		{"what": "ไฟล์ที่อัปโหลดแต่ไม่ได้ใช้ในรอบใด", "keep": retention["staged_hours"] / 24, "unit": "days"},
-		{"what": "แชทและการตั้งค่าของ agent ที่ถอนการติดตั้งแล้ว (หลักฐานของรอบที่สำเร็จเก็บต่อตามข้อแรก)",
+		{"what": T(l, "ข้อมูลของรอบที่ล้มเหลวหรือยกเลิก (ไฟล์ที่ส่งเข้าและข้อมูลชั่วคราว)"), "keep": retention["scratch_days"], "unit": "days"},
+		{"what": T(l, "ไฟล์ที่อัปโหลดแต่ไม่ได้ใช้ในรอบใด"), "keep": retention["staged_hours"] / 24, "unit": "days"},
+		{"what": T(l, "แชทและการตั้งค่าของ agent ที่ถอนการติดตั้งแล้ว (หลักฐานของรอบที่สำเร็จเก็บต่อตามข้อแรก)"),
 			"keep": retention["removed_days"], "unit": "days"},
-		{"what": "เมื่อลบบัญชีผู้ใช้: แชทและการตั้งค่าส่วนตัวถูกลบ ส่วนหลักฐานของรอบที่สำเร็จเป็นขององค์กร เก็บต่อตามข้อแรก " +
-			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล", "keep": 0, "unit": "account_deletion"},
+		{"what": T(l, "เมื่อลบบัญชีผู้ใช้: แชทและการตั้งค่าส่วนตัวถูกลบ ส่วนหลักฐานของรอบที่สำเร็จเป็นขององค์กร เก็บต่อตามข้อแรก "+
+			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล"), "keep": 0, "unit": "account_deletion"},
 	}
 	if days := int(m.IndexRetention().Hours() / 24); days > 0 {
-		ds.Retention = append(ds.Retention, map[string]any{"what": "สรุปเอกสารสำหรับตรวจเอกสารซ้ำ (เลขผู้เสียภาษี เลขที่ วันที่ ยอดรวม)",
+		ds.Retention = append(ds.Retention, map[string]any{"what": T(l, "สรุปเอกสารสำหรับตรวจเอกสารซ้ำ (เลขผู้เสียภาษี เลขที่ วันที่ ยอดรวม)"),
 			"keep": float64(days), "unit": "days"})
 	}
 	ds.Isolation = []string{
-		"ทุกขั้นตอนทำงานในกล่องแยก (sandbox) ที่ไม่มีเครือข่าย ออกอินเทอร์เน็ตไม่ได้",
-		"ตัวแปลง PDF อยู่ในเครือข่ายภายในที่ไม่มีทางออกไปภายนอก",
-		"agent ใช้กุญแจ API ของตัวเอง แยกจากแชท และมีงบเครดิตของตัวเอง",
+		T(l, "ทุกขั้นตอนทำงานในกล่องแยก (sandbox) ที่ไม่มีเครือข่าย ออกอินเทอร์เน็ตไม่ได้"),
+		T(l, "ตัวแปลง PDF อยู่ในเครือข่ายภายในที่ไม่มีทางออกไปภายนอก"),
+		T(l, "agent ใช้กุญแจ API ของตัวเอง แยกจากแชท และมีงบเครดิตของตัวเอง"),
 	}
 	ds.Runner = map[string]any{}
 	return ds, nil
@@ -804,7 +811,7 @@ func BuildDatasheet(d Definition, caps map[string]Binding, status string, now ti
 // finished round's evidence is kept, and — while this agent's documents may
 // not leave (AM9: the organisation's switch and the agent's own) — that a
 // model outside the organisation is not used at all.
-func (ds *Datasheet) ApplyOrg(o OrgSettings, e Egress) {
+func (ds *Datasheet) ApplyOrg(l Lang, o OrgSettings, e Egress) {
 	years := o.RetentionYears
 	if years <= 0 {
 		years = DefaultRetentionYears
@@ -817,20 +824,20 @@ func (ds *Datasheet) ApplyOrg(o OrgSettings, e Egress) {
 	if ds.Notes == nil {
 		ds.Notes = map[string]string{}
 	}
-	ds.Notes["not_archive"] = "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด"
+	ds.Notes["not_archive"] = T(l, "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด")
 	if !e.Effective {
-		why := "องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร"
+		why := T(l, "องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร")
 		if e.Org {
-			why = "agent นี้อ่านข้อมูลบัญชีและไม่ส่งเอกสารออกนอกองค์กร"
+			why = T(l, "agent นี้อ่านข้อมูลบัญชีและไม่ส่งเอกสารออกนอกองค์กร")
 			if !e.AgentDefault {
-				why = "ผู้ดูแลตั้งให้ agent นี้ไม่ส่งเอกสารออกนอกองค์กร"
+				why = T(l, "ผู้ดูแลตั้งให้ agent นี้ไม่ส่งเอกสารออกนอกองค์กร")
 			}
 		}
 		kept := ds.Models[:0]
 		for _, m := range ds.Models {
 			if !m.SelfHosted {
-				ds.NoModel = append(ds.NoModel, "โมเดล "+m.Model+" อยู่นอกองค์กร จึงไม่ใช้ — "+why+" "+
-					"(ถ้าโมเดลในองค์กรไม่ตอบ คำบรรยายจะเขียนด้วยกฎของ agent แทน)")
+				ds.NoModel = append(ds.NoModel, T(l, "โมเดล ")+m.Model+T(l, " อยู่นอกองค์กร จึงไม่ใช้ — ")+why+" "+
+					T(l, "(ถ้าโมเดลในองค์กรไม่ตอบ คำบรรยายจะเขียนด้วยกฎของ agent แทน)"))
 				continue
 			}
 			kept = append(kept, m)
@@ -858,7 +865,8 @@ func (a *API) datasheet(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(rs.Capabilities, &caps)
 		runner = map[string]any{"healthy": rs.Healthy, "version": rs.Version, "seen_at": rs.SeenAt}
 	}
-	ds, err := BuildDatasheet(d, caps, st.Status, time.Now())
+	l := langOfWriter(w)
+	ds, err := BuildDatasheet(l, d, caps, st.Status, time.Now())
 	if err != nil {
 		a.fail(w, err, "agent")
 		return
@@ -870,7 +878,7 @@ func (a *API) datasheet(w http.ResponseWriter, r *http.Request) {
 				e = got
 			}
 		}
-		ds.ApplyOrg(o, e)
+		ds.ApplyOrg(l, o, e)
 	}
 	ds.Runner = runner
 	writeJSON(w, http.StatusOK, ds)

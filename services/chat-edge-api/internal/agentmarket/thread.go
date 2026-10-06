@@ -254,10 +254,12 @@ func (s *Store) PostText(ctx context.Context, run Run, text PersonText) error {
 }
 
 // PostAgentText adds an agent message with its tone and what it carries.
+// AM11: what is said in a run's thread about the run is in the run's own
+// language, whoever writes it (InRunLang).
 func (s *Store) PostAgentText(ctx context.Context, run Run, item AgentText) error {
 	item.RunID = run.ID.String()
 	rid := run.ID
-	_, _, err := s.AddItem(ctx, s.Pool, run.InstallID, run.TenantID, run.UserID, &rid, item, nil)
+	_, _, err := s.AddItem(InRunLang(ctx, run), s.Pool, run.InstallID, run.TenantID, run.UserID, &rid, item, nil)
 	return err
 }
 
@@ -266,11 +268,11 @@ func (s *Store) PostNotice(ctx context.Context, run Run, text PersonText, link s
 	return s.AddNotice(ctx, s.Pool, run, Notice{Text: text, Link: link})
 }
 
-// AddNotice adds a notice about a run.
+// AddNotice adds a notice about a run, in the run's own language (AM11).
 func (s *Store) AddNotice(ctx context.Context, q Querier, run Run, n Notice) error {
 	n.RunID = run.ID.String()
 	rid := run.ID
-	_, _, err := s.AddItem(ctx, q, run.InstallID, run.TenantID, run.UserID, &rid, n, nil)
+	_, _, err := s.AddItem(InRunLang(ctx, run), q, run.InstallID, run.TenantID, run.UserID, &rid, n, nil)
 	return err
 }
 

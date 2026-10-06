@@ -60,32 +60,44 @@ func ThaiDate(t time.Time) string {
 
 // ── reading a sentence typed after a finished round ─────────────────────
 
+// aboutRoundWords: what a message typed after a finished run has in it when it is a question about that
+// run, or a request for its files in another form. They read what a person typed, in either language
+// (words.go: a Thai word anywhere, an English one as whole words); nothing here is said to anyone.
 var aboutRoundWords = []string{
 	"?", "？", "ทำไม", "เพราะอะไร", "เพราะ", "อย่างไร", "ยังไง", "เท่าไร", "เท่าไหร่", "ไหม", "มั้ย", "หรือเปล่า", "หรือไม่",
 	"ไม่ใช่เหรอ", "ไม่ใช่หรือ", "เหรอ", "หรอ", "อะไร", "ที่ไหน", "ตรงไหน", "มาจาก", "ที่มา", "อธิบาย", "คำนวณ", "คิดจาก",
 	"ขอไฟล์", "ขอเป็น", "ขอแบบ", "ไฟล์อื่น", "แบบอื่น", "รูปแบบอื่น", "pdf", "พีดีเอฟ", "word", "เวิร์ด", "excel", "เอ็กเซล",
 	"powerpoint", "สไลด์", "docx", "pptx", "xlsx", "ภาษาอังกฤษ", "english",
 	"why", "how", "what", "where", "explain",
+	// AM11: as a person asks in English
+	"how come", "what is the reason", "because", "how much", "how many", "which", "isn't it", "shouldn't it", "is that right",
+	"come from", "comes from", "came from", "source", "explanation", "calculate", "calculated", "calculation", "worked out",
+	"based on", "send me", "can i have", "could i have", "another file", "another format", "other format", "different format",
+	"slides", "slide deck", "deck",
 }
 
 // ReadsAsAboutLastRound: a question about the round that just finished (why
 // a figure is what it is, where it came from) or a request for its files in
 // another form. Anything else typed after a finished round is an instruction.
 func ReadsAsAboutLastRound(text string) bool {
-	t := strings.ToLower(strings.TrimSpace(text))
-	if t == "" {
+	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	for _, w := range aboutRoundWords {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
+	return HasWord(text, aboutRoundWords...)
 }
 
+// socialWords: a short thanks or acknowledgement, in either language — taken out of a message to see
+// whether anything is left. They read what a person typed; nothing here is said to anyone. An English
+// word is taken out only whole (words.go): "ok" is not taken out of "okay", which is a word of its own.
 var socialWords = []string{"ขอบคุณ", "ขอบใจ", "โอเค", "ok", "okay", "thanks", "thank you", "ได้เลย", "รับทราบ", "เยี่ยม",
-	"ดีมาก", "ครับ", "ค่ะ", "คะ", "จ้า", "👍", "🙏"}
+	"ดีมาก", "ครับ", "ค่ะ", "คะ", "จ้า", "👍", "🙏",
+	// AM11
+	"thx", "cheers", "sure", "go ahead", "will do", "sounds good", "noted", "got it", "understood", "great", "excellent",
+	"perfect", "nice", "very good", "well done", "yes", "yep", "please"}
+
+// socialMarks is what may be left of a message that was only thanks: spaces and the marks people end
+// one with (the Thai repetition mark among them). Not words, and said to nobody.
+const socialMarks = " .!~ๆ"
 
 // SocialOnly: a short thanks or acknowledgement, not an instruction.
 func SocialOnly(text string) bool {
@@ -93,25 +105,21 @@ func SocialOnly(text string) bool {
 	if t == "" || len([]rune(t)) > 24 {
 		return false
 	}
-	rest := t
-	for _, w := range socialWords {
-		rest = strings.ReplaceAll(rest, w, "")
-	}
-	return strings.Trim(rest, " .!~ๆ") == ""
+	return strings.Trim(WithoutWords(t, socialWords...), socialMarks) == ""
 }
+
+// freshStartWords: words of someone about to delete a chat to start over, in either language. They read
+// what a person typed; nothing here is said to anyone.
+var freshStartWords = []string{"ลบแชท", "ล้างแชท", "ลบประวัติ", "ล้างประวัติ", "เริ่มใหม่หมด", "ลบทิ้ง", "ล้างทั้งหมด", "clear chat", "delete chat",
+	// AM11
+	"delete the chat", "delete this chat", "clear the chat", "clear this chat", "delete history", "delete the history", "clear history",
+	"clear the history", "start from scratch", "start all over", "start completely fresh", "delete it", "delete everything",
+	"throw it away", "clear everything", "clear all", "wipe everything"}
 
 // wantsFreshStart: words of someone about to delete a chat to start over.
 // They wanted a new round; the chip gives it to them and says why the old
 // rounds are kept.
-func wantsFreshStart(text string) bool {
-	t := strings.ToLower(text)
-	for _, w := range []string{"ลบแชท", "ล้างแชท", "ลบประวัติ", "ล้างประวัติ", "เริ่มใหม่หมด", "ลบทิ้ง", "ล้างทั้งหมด", "clear chat", "delete chat"} {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
-}
+func wantsFreshStart(text string) bool { return HasWord(text, freshStartWords...) }
 
 // ── store ────────────────────────────────────────────────────────────────
 
@@ -193,14 +201,17 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 	// A chat a person did not name is named for what it is: the period of its
 	// latest round ("กันยายน 2569"); before any round, "แชทแรก" or when it began
 	// ("แชทใหม่ · 28 ก.ย. 2569", with the time when two began the same day).
+	// AM11: such a name is made when the list is read, so it is in the language
+	// of the request that reads it.
+	l := LangOf(ctx)
 	name := func(t Thread, withTime bool) string {
 		switch {
 		case t.ID == nil:
-			return "แชทแรก"
+			return T(l, "แชทแรก")
 		case withTime:
-			return "แชทใหม่ · " + ThaiDateTime(t.CreatedAt)
+			return T(l, "แชทใหม่ · ") + DateTimeIn(l, t.CreatedAt)
 		default:
-			return "แชทใหม่ · " + ThaiDate(t.CreatedAt)
+			return T(l, "แชทใหม่ · ") + DateIn(l, t.CreatedAt)
 		}
 	}
 	sameDay, samePeriod := map[string]int{}, map[string]int{}
@@ -216,7 +227,7 @@ func (s *Store) ListThreads(ctx context.Context, in Install) ([]Thread, error) {
 		}
 		if out[i].Period != "" {
 			// two chats of one period are told apart by when they began
-			out[i].Title = PeriodLabel(out[i].Period)
+			out[i].Title = PeriodLabelIn(l, out[i].Period)
 			if samePeriod[out[i].Period] > 1 {
 				out[i].Title += " · " + name(out[i], sameDay[name(out[i], false)] > 1)
 			}
@@ -278,7 +289,7 @@ type IntentRound struct {
 func (a *API) intentChip(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, item ThreadItem, last Run,
 	text string, files []File, o roundOpts) error {
 	p := IntentPayload{Status: "open", Text: text, ItemID: item.ID.String(), Fresh: wantsFreshStart(text),
-		LastRound: IntentRound{RunID: last.ID.String(), PeriodLabel: Text("%s", Name(periodOf(last)))}}
+		LastRound: IntentRound{RunID: last.ID.String(), PeriodLabel: Text("%s", periodSaid(last))}}
 	if len(files) > 0 {
 		p.Files = FileRefs(files)
 	}
@@ -290,11 +301,21 @@ func (a *API) intentChip(ctx context.Context, tx pgx.Tx, in Install, c middlewar
 	return err
 }
 
-func periodOf(r Run) string {
-	if r.Period != nil && *r.Period != "" {
-		return PeriodLabel(*r.Period)
+// periodSaid is a run's period as each language says it ("กันยายน 2569", "September 2026"), as a fact of
+// a sentence; nothing when the run has none yet.
+func periodSaid(r Run) Fact {
+	if r.Period == nil || *r.Period == "" {
+		return Name("")
 	}
-	return ""
+	return PeriodNamed(*r.Period)
+}
+
+// periodIn is a run's period as a reader of l says it ("" when the run has none yet).
+func periodIn(l Lang, r Run) string {
+	if r.Period == nil || *r.Period == "" {
+		return ""
+	}
+	return PeriodLabelIn(l, *r.Period)
 }
 
 // ── handlers ─────────────────────────────────────────────────────────────
@@ -390,7 +411,8 @@ func (a *API) createThread(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err, "thread")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"thread": Thread{ID: &id, Title: "แชทใหม่ · " + ThaiDate(at), CreatedAt: at, LastAt: at}})
+	l := langOfWriter(w)
+	writeJSON(w, http.StatusOK, map[string]any{"thread": Thread{ID: &id, Title: T(l, "แชทใหม่ · ") + DateIn(l, at), CreatedAt: at, LastAt: at}})
 }
 
 // startRound is the divider's "เริ่มรอบใหม่": one click, no typing. It opens the
@@ -593,11 +615,12 @@ func (a *API) installStorage(w http.ResponseWriter, r *http.Request) {
 	if years <= 0 {
 		years = DefaultRetentionYears
 	}
+	// AM11: three sentences of the platform's, each carrying both languages; the response says the request's
 	writeJSON(w, http.StatusOK, map[string]any{"storage": use, "retention_years": years, "retention": RetentionText(years),
-		"not_archive": "ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด " +
-			"อย่าทิ้งใบกำกับภาษีตัวจริงเพราะมีสแกนอยู่ที่นี่",
-		"personal_delete": "ถ้าลบบัญชี แชทและการตั้งค่าของคุณจะถูกลบ แต่ไฟล์ของรอบที่สำเร็จเป็นหลักฐานทางบัญชีขององค์กร เก็บต่อตามระยะที่องค์กรกำหนด " +
-			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล"})
+		"not_archive": Text("ที่นี่ไม่ใช่ที่เก็บเอกสารของบริษัท — ต้นฉบับยังต้องเก็บตามที่บริษัทเก็บอยู่ ระบบเก็บสำเนาและหลักฐานว่าตัวเลขคำนวณจากไฟล์ใด " +
+			"อย่าทิ้งใบกำกับภาษีตัวจริงเพราะมีสแกนอยู่ที่นี่"),
+		"personal_delete": Text("ถ้าลบบัญชี แชทและการตั้งค่าของคุณจะถูกลบ แต่ไฟล์ของรอบที่สำเร็จเป็นหลักฐานทางบัญชีขององค์กร เก็บต่อตามระยะที่องค์กรกำหนด " +
+			"การลบก่อนกำหนดเป็นการตัดสินใจของผู้ดูแล")})
 }
 
 // ── a failed round, tried again (AM5) ────────────────────────────────────
@@ -792,7 +815,8 @@ func (a *API) decodeComputed(ctx context.Context, run Run, v any) error {
 func (a *API) computeAgain(ctx context.Context, tx pgx.Tx, in Install, c middleware.Caller, run Run, n Notice) (bool, error) {
 	rid := run.ID
 	n.RunID = run.ID.String()
-	if _, _, err := a.store.AddItem(ctx, tx, in.ID, c.TenantUUID, c.UserID, &rid, n, nil); err != nil {
+	// AM11: what changed on a run is said in that run's language
+	if _, _, err := a.store.AddItem(InRunLang(ctx, run), tx, in.ID, c.TenantUUID, c.UserID, &rid, n, nil); err != nil {
 		return false, err
 	}
 	resumed, err := a.store.Resume(ctx, tx, run.ID)
@@ -1001,10 +1025,12 @@ func (a *API) receipts(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case !IsTerminal(run.Status):
-		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ยังทำอยู่", "next", "รอให้รอบนี้เสร็จก่อน แล้วค่อยยืนยันการรับของ")
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", forReq(w, "รอบนี้ยังทำอยู่"),
+			"next", forReq(w, "รอให้รอบนี้เสร็จก่อน แล้วค่อยยืนยันการรับของ"))
 		return
 	case run.Kind != KindRun || run.Status != RunSucceeded:
-		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ไม่สำเร็จ", "next", "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น")
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", forReq(w, "รอบนี้ไม่สำเร็จ"),
+			"next", forReq(w, "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น"))
 		return
 	}
 	var computed struct {
@@ -1018,8 +1044,8 @@ func (a *API) receipts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(computed.Offers) == 0 {
-		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ไม่มีรายการที่ยืนยันการรับของในระบบได้",
-			"next", "ส่งใบรับของเป็นไฟล์ในรอบใหม่แทน")
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", forReq(w, "รอบนี้ไม่มีรายการที่ยืนยันการรับของในระบบได้"),
+			"next", forReq(w, "ส่งใบรับของเป็นไฟล์ในรอบใหม่แทน"))
 		return
 	}
 	var offer *receiptOffer
@@ -1055,7 +1081,8 @@ func (a *API) receipts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := a.store.MergeAnswers(ctx, tx, run.ID, map[string]Answer{req.Key: {Value: value, Label: label.String(), Moment: "run",
+	// the answer's label is kept on the run and printed with it: the run's language
+	if err := a.store.MergeAnswers(ctx, tx, run.ID, map[string]Answer{req.Key: {Value: value, Label: label.In(run.Lang()), Moment: "run",
 		Via: "action", Code: code, By: &by}}); err != nil {
 		a.fail(w, err, "run")
 		return
@@ -1066,7 +1093,8 @@ func (a *API) receipts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !resumed {
-		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", "รอบนี้ถูกหยุดไว้", "next", "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น")
+		say(w, http.StatusConflict, "RECEIPT_NOT_OPEN", "why", forReq(w, "รอบนี้ถูกหยุดไว้"),
+			"next", forReq(w, "ส่งไฟล์เพื่อเริ่มรอบใหม่ แล้วยืนยันการรับของในรอบนั้น"))
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {

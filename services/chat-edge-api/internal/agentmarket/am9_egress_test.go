@@ -48,11 +48,11 @@ func TestAM9TheModelMenuSaysBothLevelsAndLocksOutsideModelsForAnAccountingAgent(
 	if allowed["deepseek-v4-flash"] || !allowed["qwen3.8-27b-fp8"] {
 		t.Fatalf("an accounting agent's documents stay in: %+v", p.Models)
 	}
-	if !p.Egress.Org || p.Egress.Agent || !strings.Contains(p.BlockedReason, "ข้อมูลบัญชี") {
-		t.Fatalf("the menu says the organisation allows it and this agent does not: %+v / %q", p.Egress, p.BlockedReason)
+	if !p.Egress.Org || p.Egress.Agent || !strings.Contains(p.BlockedReason.String(), "ข้อมูลบัญชี") {
+		t.Fatalf("the menu says the organisation allows it and this agent does not: %+v / %q", p.Egress, p.BlockedReason.String())
 	}
 	if ok, why := p.ChoiceAllowed("deepseek-v4-flash"); ok || why != p.BlockedReason {
-		t.Fatalf("choosing the outside model is refused with the reason shown: %v %q", ok, why)
+		t.Fatalf("choosing the outside model is refused with the reason shown: %v %q", ok, why.String())
 	}
 	yes := true
 	p = MenuFor(Install{ModelChoice: ModelAuto}, m, EgressOf(true, m, &yes), rm)
@@ -60,8 +60,8 @@ func TestAM9TheModelMenuSaysBothLevelsAndLocksOutsideModelsForAnAccountingAgent(
 		t.Fatal("an admin opened this agent: the outside model may be chosen")
 	}
 	p = MenuFor(Install{ModelChoice: ModelAuto}, m, EgressOf(false, m, &yes), rm)
-	if ok, why := p.ChoiceAllowed("deepseek-v4-flash"); ok || why != reasonOutside {
-		t.Fatalf("the organisation's switch is the ceiling: %v %q", ok, why)
+	if ok, why := p.ChoiceAllowed("deepseek-v4-flash"); ok || why.String() != reasonOutside {
+		t.Fatalf("the organisation's switch is the ceiling: %v %q", ok, why.String())
 	}
 }
 

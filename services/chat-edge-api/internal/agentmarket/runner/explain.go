@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 // ── Why is this figure what it is (AM4) ──────────────────────────────────
@@ -68,19 +70,18 @@ func parseProvenance(raw []byte) provenance {
 	return p
 }
 
+// whyWords: the words by which a typed question asks for a reason or an origin, in either language.
+// They read what a person typed and are said to nobody (am.HasWord: a Thai word anywhere, an English
+// one as whole words).
 var whyWords = []string{"ทำไม", "เพราะอะไร", "สาเหตุ", "เหตุใด", "ไม่ใช่เหรอ", "ไม่ใช่หรือ", "ถึงเป็น", "ถึงได้", "มาจากไหน",
-	"มาจากอะไร", "คิดยังไง", "คิดอย่างไร", "คำนวณยังไง", "คำนวณอย่างไร", "ที่มา", "อธิบาย", "why", "how come", "explain"}
+	"มาจากอะไร", "คิดยังไง", "คิดอย่างไร", "คำนวณยังไง", "คำนวณอย่างไร", "ที่มา", "อธิบาย", "why", "how come", "explain",
+	// AM11
+	"what is the reason", "for what reason", "cause", "reason", "isn't it", "shouldn't it", "why is it", "how did it get to",
+	"where does it come from", "come from", "comes from", "what is it made of", "made up of", "how is it worked out",
+	"how did you get", "how is it calculated", "how was it calculated", "source", "explanation"}
 
 // asksWhy: the question asks for a reason or an origin, not a value.
-func asksWhy(text string) bool {
-	t := strings.ToLower(text)
-	for _, w := range whyWords {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
-}
+func asksWhy(text string) bool { return am.HasWord(text, whyWords...) }
 
 var numberInText = regexp.MustCompile(`-?\d[\d,]*(?:\.\d+)?`)
 
@@ -90,10 +91,20 @@ func squash(s string) string {
 
 var parenRe = regexp.MustCompile(`\s*\([^)]*\)`)
 
+// periodSuffixes: the ending a package's label of a figure carries for "this period", in the language
+// the package wrote it in — cut off, so that a question which names the figure without it still finds
+// it. They read a package's label and are said to nobody.
+var periodSuffixes = []string{" งวดนี้", " this period"}
+
 // labelKeys are the forms of a figure's name a question may use.
 func (c citation) labelKeys() []string {
 	core := strings.TrimSpace(parenRe.ReplaceAllString(c.Label, ""))
-	core = strings.TrimSuffix(core, " งวดนี้")
+	for _, suffix := range periodSuffixes {
+		// in any case ("Revenue This Period"); the Thai one has none, and is cut exactly as it was
+		if low := strings.ToLower(core); len(low) == len(core) && strings.HasSuffix(low, suffix) {
+			core = core[:len(core)-len(suffix)]
+		}
+	}
 	keys := []string{squash(c.Label), squash(core)}
 	for _, a := range c.Aliases {
 		keys = append(keys, squash(a))
@@ -219,42 +230,48 @@ func money(s string) string {
 	return out
 }
 
-func (c citation) valueText() string {
+// valueText is the figure's value with its unit, as a sentence of l carries it: an amount of money is
+// "1,284,500.00 บาท" in Thai and "THB 1,284,500.00" in English (GLOSSARY.md §4) — the unit is part of
+// the wording, not a suffix; a percentage is the same in both.
+func (c citation) valueText(l am.Lang) string {
 	if c.Value == nil {
-		return "ไม่มีค่า"
+		return am.T(l, "ไม่มีค่า")
 	}
 	switch c.Unit {
 	case "pct":
 		return money(*c.Value) + "%"
 	case "count":
-		return *c.Value + " ฉบับ"
+		return fmt.Sprintf(am.T(l, "%s ฉบับ"), *c.Value)
 	}
-	return money(*c.Value) + " บาท"
+	return baht(l, *c.Value)
 }
 
-// explainFigure is the answer, written only from the figure's record.
-func explainFigure(c citation, p provenance) string {
+// baht is an amount of money in a sentence of l.
+func baht(l am.Lang, v string) string { return fmt.Sprintf(am.T(l, "%s บาท"), money(v)) }
+
+// explainFigure is the answer, written only from the figure's record, in l — the run's language.
+func explainFigure(l am.Lang, c citation, p provenance) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "**%s = %s**\n\n", strings.TrimSpace(c.Label), c.valueText())
+	fmt.Fprintf(&b, "**%s = %s**\n\n", strings.TrimSpace(c.Label), c.valueText(l))
 	if c.Formula != "" {
-		fmt.Fprintf(&b, "วิธีคิด: %s\n\n", c.Formula)
+		fmt.Fprintf(&b, am.T(l, "วิธีคิด: %s\n\n"), c.Formula)
 	}
 	if len(c.Sources) > 0 {
-		b.WriteString("มาจาก:\n")
+		b.WriteString(am.T(l, "มาจาก:\n"))
 		shown := 0
 		for _, s := range c.Sources {
 			if shown == 8 {
-				fmt.Fprintf(&b, "- และอีก %d รายการ (ดูทั้งหมดในหน้า “ที่มาของตัวเลข”)\n", len(c.Sources)-shown)
+				fmt.Fprintf(&b, am.T(l, "- และอีก %d รายการ (ดูทั้งหมดในหน้า “ที่มาของตัวเลข”)\n"), len(c.Sources)-shown)
 				break
 			}
 			shown++
 			switch {
 			case s.Rows > 0:
-				line := fmt.Sprintf("- ไฟล์ “%s”", s.File)
+				line := fmt.Sprintf(am.T(l, "- ไฟล์ “%s”"), s.File)
 				if s.Sheet != "" {
-					line += " ชีต " + s.Sheet
+					line += am.T(l, " ชีต ") + s.Sheet
 				}
-				line += fmt.Sprintf(" %d แถว", s.Rows)
+				line += fmt.Sprintf(am.T(l, " %d แถว"), s.Rows)
 				if s.Cells != "" && utf8.RuneCountInString(s.Cells) <= 60 {
 					line += " (" + s.Cells + ")"
 				}
@@ -262,10 +279,10 @@ func explainFigure(c citation, p provenance) string {
 			default:
 				line := "- “" + s.File + "”"
 				if s.Row > 0 {
-					line += fmt.Sprintf(" แถว %d", s.Row)
+					line += fmt.Sprintf(am.T(l, " แถว %d"), s.Row)
 				}
 				if s.Value != nil {
-					line += ": " + money(*s.Value) + " บาท"
+					line += ": " + baht(l, *s.Value)
 				}
 				if s.Note != "" {
 					line += " — " + s.Note
@@ -275,24 +292,24 @@ func explainFigure(c citation, p provenance) string {
 		}
 		b.WriteString("\n")
 	} else if len(c.DerivedFrom) > 0 {
-		b.WriteString("ประกอบจาก:\n")
+		b.WriteString(am.T(l, "ประกอบจาก:\n"))
 		byID := map[string]citation{}
 		for _, x := range p.Citations {
 			byID[x.ID] = x
 		}
 		for i, id := range c.DerivedFrom {
 			if i == 8 {
-				fmt.Fprintf(&b, "- และอีก %d รายการ\n", len(c.DerivedFrom)-i)
+				fmt.Fprintf(&b, am.T(l, "- และอีก %d รายการ\n"), len(c.DerivedFrom)-i)
 				break
 			}
 			if x, ok := byID[id]; ok {
-				fmt.Fprintf(&b, "- %s = %s\n", strings.TrimSpace(x.Label), x.valueText())
+				fmt.Fprintf(&b, "- %s = %s\n", strings.TrimSpace(x.Label), x.valueText(l))
 			}
 		}
 		b.WriteString("\n")
 	} else if c.Value != nil {
 		if v, ok := decimalOf(*c.Value); ok && v == 0 {
-			b.WriteString("ไม่มีรายการใดในรอบนี้ที่นับเข้าตัวเลขนี้\n\n")
+			b.WriteString(am.T(l, "ไม่มีรายการใดในรอบนี้ที่นับเข้าตัวเลขนี้\n\n"))
 		}
 	}
 	left := c.LeftOut
@@ -302,16 +319,16 @@ func explainFigure(c citation, p provenance) string {
 		}
 	}
 	if len(left) > 0 {
-		b.WriteString("ไม่ได้นับ:\n")
-		for i, l := range left {
+		b.WriteString(am.T(l, "ไม่ได้นับ:\n"))
+		for i, out := range left {
 			if i == 5 {
-				fmt.Fprintf(&b, "- และอีก %d รายการ\n", len(left)-i)
+				fmt.Fprintf(&b, am.T(l, "- และอีก %d รายการ\n"), len(left)-i)
 				break
 			}
-			if l.File != "" {
-				fmt.Fprintf(&b, "- “%s” — %s\n", l.File, l.Reason)
+			if out.File != "" {
+				fmt.Fprintf(&b, "- “%s” — %s\n", out.File, out.Reason)
 			} else {
-				fmt.Fprintf(&b, "- %s\n", l.Reason)
+				fmt.Fprintf(&b, "- %s\n", out.Reason)
 			}
 		}
 		b.WriteString("\n")
@@ -329,18 +346,21 @@ const dontKnow = "ผมไม่ทราบว่าทำไมตัวเ�
 // when it is not about a figure the record knows and does not ask why (then
 // a model may answer it, under the number guard). theirs is what the answer
 // names of the person's own: the files, sheets and cells of the figures.
-func explainAnswer(text string, computed []byte) (answer string, theirs []string) {
+//
+// AM11: the answer is one text in one language — l, the run's — because it is put together line by
+// line from the record; the labels, files and sheets in it are the package's and the person's own.
+func explainAnswer(l am.Lang, text string, computed []byte) (answer string, theirs []string) {
 	p := parseProvenance(computed)
 	figs := matchFigures(text, p)
 	if len(figs) == 0 {
 		if asksWhy(text) {
-			return dontKnow, nil
+			return am.T(l, dontKnow), nil
 		}
 		return "", nil
 	}
 	parts := make([]string, 0, len(figs)+1)
 	for _, c := range figs {
-		parts = append(parts, explainFigure(c, p))
+		parts = append(parts, explainFigure(l, c, p))
 		for _, s := range c.Sources {
 			theirs = append(theirs, s.File, s.Sheet, s.Cells)
 		}
@@ -351,19 +371,15 @@ func explainAnswer(text string, computed []byte) (answer string, theirs []string
 	for _, e := range p.Excluded {
 		theirs = append(theirs, e.Name)
 	}
-	parts = append(parts, explainFooter)
+	parts = append(parts, am.T(l, explainFooter))
 	return strings.Join(parts, "\n\n"), theirs
 }
 
-// causal words a model's answer may not use: it has no record of any cause.
-var causalWords = []string{"เพราะ", "เนื่องจาก", "สาเหตุ", "ส่งผลให้", "เป็นผลจาก", "because", "due to", "caused by"}
+// causal words a model's answer may not use: it has no record of any cause. They read a model's answer,
+// in either language it may be written in, and are said to nobody.
+var causalWords = []string{"เพราะ", "เนื่องจาก", "สาเหตุ", "ส่งผลให้", "เป็นผลจาก", "because", "due to", "caused by",
+	// AM11: as an English commentary gives a cause
+	"owing to", "cause", "causes", "caused", "reason", "reasons", "resulting in", "led to", "leading to", "as a result of",
+	"driven by", "thanks to", "attributable to", "on the back of"}
 
-func givesACause(s string) bool {
-	t := strings.ToLower(s)
-	for _, w := range causalWords {
-		if strings.Contains(t, w) {
-			return true
-		}
-	}
-	return false
-}
+func givesACause(s string) bool { return am.HasWord(s, causalWords...) }

@@ -537,11 +537,12 @@ func (s *Store) StorageFor(ctx context.Context, install uuid.UUID, warnMB int) (
 }
 
 // RetentionText is how long things are kept, in the words the upload area and
-// the data sheet use (the organisation's own years).
-func RetentionText(years int) string {
+// the data sheet use (the organisation's own years). It carries both
+// languages; the response that sends it says the request's.
+func RetentionText(years int) PersonText {
 	if years <= 0 {
 		years = DefaultRetentionYears
 	}
-	return "ไฟล์ที่ส่งเข้ามาและไฟล์ผลลัพธ์ของรอบที่สำเร็จเก็บไว้ " + strconv.Itoa(years) + " ปีตามที่องค์กรกำหนด · " +
-		"ข้อมูลของรอบที่ล้มเหลวหรือยกเลิกเก็บ 7 วัน · ไฟล์ที่ไม่ได้ใช้ในรอบใดเก็บ 30 วัน"
+	return Text("ไฟล์ที่ส่งเข้ามาและไฟล์ผลลัพธ์ของรอบที่สำเร็จเก็บไว้ %s ปีตามที่องค์กรกำหนด · "+
+		"ข้อมูลของรอบที่ล้มเหลวหรือยกเลิกเก็บ 7 วัน · ไฟล์ที่ไม่ได้ใช้ในรอบใดเก็บ 30 วัน", Typed(strconv.Itoa(years), 12))
 }

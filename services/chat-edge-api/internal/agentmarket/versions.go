@@ -71,7 +71,7 @@ type Change struct {
 }
 
 // VersionDiff lists what an upgrade changes, in words a person can check.
-func VersionDiff(from, to Definition) []Change {
+func VersionDiff(lang Lang, from, to Definition) []Change {
 	var out []Change
 	var a, b map[string]json.RawMessage
 	_ = json.Unmarshal(from.Manifest, &a)
@@ -126,7 +126,7 @@ func VersionDiff(from, to Definition) []Change {
 		out = append(out, Change{What: "setting", Key: "install.questions", Before: strings.Join(ma.Install.Questions, ", "),
 			After: strings.Join(mb.Install.Questions, ", ")})
 	}
-	for _, l := range lineDiff(from.Instructions, to.Instructions, 200) {
+	for _, l := range lineDiff(lang, from.Instructions, to.Instructions, 200) {
 		out = append(out, l)
 	}
 	return out
@@ -184,11 +184,11 @@ func compactJSON(raw json.RawMessage) string {
 }
 
 // lineDiff is AGENT.md's removed and added lines (longest common subsequence).
-func lineDiff(a, b string, limit int) []Change {
+func lineDiff(l Lang, a, b string, limit int) []Change {
 	x, y := strings.Split(a, "\n"), strings.Split(b, "\n")
 	n, m := len(x), len(y)
 	if n*m > 4_000_000 {
-		return []Change{{What: "instructions", Key: "AGENT.md", Before: "(ยาวเกินกว่าจะเทียบทีละบรรทัด)", After: "(changed)"}}
+		return []Change{{What: "instructions", Key: "AGENT.md", Before: T(l, "(ยาวเกินกว่าจะเทียบทีละบรรทัด)"), After: "(changed)"}}
 	}
 	lcs := make([][]int, n+1)
 	for i := range lcs {
@@ -243,7 +243,7 @@ func (a *API) upgradeInfo(w http.ResponseWriter, r *http.Request) {
 	newest, err := a.store.DefinitionBySlug(ctx, in.Slug)
 	if err == nil && newest.ID != cur.ID && versionLess(cur.Version, newest.Version) {
 		out["available"] = defSummary(newest)
-		out["changes"] = VersionDiff(cur, newest)
+		out["changes"] = VersionDiff(langOfWriter(w), cur, newest)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -314,13 +314,13 @@ func (a *API) startUpgrade(w http.ResponseWriter, r *http.Request) {
 	res, err := Resolve(m, caps, in.BindingVersion+1)
 	if err != nil {
 		a.log.Warn("upgrade refused", "install", in.ID, "err", err)
-		a.sayTo(w, r, http.StatusConflict, "MISSING_CAPABILITY", "detail", missingThai(err))
+		a.sayTo(w, r, http.StatusConflict, "MISSING_CAPABILITY", "detail", missingWords(langOfWriter(w), err))
 		return
 	}
 	bindings, _ := json.Marshal(res)
 	params, _ := json.Marshal(map[string]any{"upgrade_to": to.ID, "bindings": json.RawMessage(bindings)})
 	run, _, err := a.store.CreateRun(ctx, a.store.Pool, Run{InstallID: in.ID, TenantID: c.TenantUUID, UserID: c.UserID,
-		Kind: KindSelfTest, Message: "ทดสอบรุ่น " + to.Version + " ก่อนอัปเกรด", Params: params, DefinitionVersion: to.Version,
+		Kind: KindSelfTest, Message: T(LangOf(ctx), "ทดสอบรุ่น ") + to.Version + T(LangOf(ctx), " ก่อนอัปเกรด"), Params: params, DefinitionVersion: to.Version,
 		Checksum: to.Checksum, EngineChecksum: to.EngineChecksum, BindingVersion: res.Version}, "")
 	if err != nil {
 		a.fail(w, err, "upgrade")

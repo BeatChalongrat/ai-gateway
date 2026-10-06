@@ -94,7 +94,7 @@ func TestATemplateWithABlockingSlotCannotBeSaved(t *testing.T) {
 	var spec am.TemplateSpec
 	_ = json.Unmarshal([]byte(am8Spec), &spec)
 	slots := append(am8Slots(), am.TemplateSlot{Key: "ppt/charts/chart1.xml", Kind: "refused", Label: "กราฟ 1", Blocking: true})
-	why := am.CheckTemplateMapping(slots, map[string]string{"revenue": "revenue"}, spec)
+	why := am.CheckTemplateMapping(am.Thai, slots, map[string]string{"revenue": "revenue"}, spec)
 	if !strings.Contains(why, "แบบฟอร์มนี้ใช้ไม่ได้") || !strings.Contains(why, "กราฟ 1") {
 		t.Fatalf("a template that would deliver a chart with old numbers is refused before work: %q", why)
 	}

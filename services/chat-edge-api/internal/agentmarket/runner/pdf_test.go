@@ -56,7 +56,7 @@ func TestPdfGate(t *testing.T) {
 	docx := testDocx(t, `<w:p><w:r><w:t>`+thRevenue+`</w:t></w:r></w:p><w:p><w:r><w:t>`+thCost+`</w:t></w:r></w:p>`)
 	good := CheckResult{Pages: 2, RenderedPages: 2, PageInk: []float64{0.03, 0.01},
 		RawText: "รายได้ จากการขาย\n12,480,300\n" + thCost + "\n"}
-	for _, c := range pdfGate(docx, good) {
+	for _, c := range pdfGate(am.Thai, docx, good) {
 		if !c.OK {
 			t.Fatalf("a faithful PDF passes: %+v", c)
 		}
@@ -70,7 +70,7 @@ func TestPdfGate(t *testing.T) {
 	}
 	for name, chk := range cases {
 		failed := 0
-		for _, c := range pdfGate(docx, chk) {
+		for _, c := range pdfGate(am.Thai, docx, chk) {
 			if !c.OK {
 				failed++
 				if strings.Contains(c.Detail.String(), "[]") || !am.ReadsForPerson(c.Detail.String()) {

@@ -168,6 +168,7 @@ func (a *API) adminMe(w http.ResponseWriter, r *http.Request) {
 // role it needs: requireAdmin, or requirePublisher for the catalog and the
 // problems queue.
 func (a *API) AdminRoutes(r chi.Router) {
+	r.Use(inRequestLang) // AM11: the admin app sends its own language
 	r.Use(a.adminIdentity)
 	r.Get("/me", a.adminMe)
 	r.Get("/org", a.adminOrg)

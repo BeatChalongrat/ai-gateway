@@ -240,8 +240,9 @@ func outcomeWords(run Run) PersonText {
 	return Text("เสร็จแล้ว")
 }
 
-// mailFileName is an artifact's name as a mail may carry it: sanitised, with its format.
-func mailFileName(a Artifact) string {
+// mailFileName is an artifact's name as a mail may carry it: sanitised, with its format; a name with
+// nothing left of it is said in l (the run's language — the name goes on the message that is sent).
+func mailFileName(l Lang, a Artifact) string {
 	name := SanitizeMailText(a.Name)
 	name = strings.NewReplacer("/", " ", "\\", " ").Replace(name)
 	ext := "." + strings.ToLower(a.Format)
@@ -249,13 +250,19 @@ func mailFileName(a Artifact) string {
 		name = strings.TrimSpace(strings.TrimSuffix(name, ".")) + ext
 	}
 	if strings.TrimSpace(strings.TrimSuffix(name, ext)) == "" {
-		name = "ไฟล์ผลงาน" + ext
+		name = T(l, "ไฟล์ผลงาน") + ext
 	}
 	return name
 }
 
 // buildDraft builds a delivered round's draft from its rows.
+//
+// AM11: a draft is kept in a row and sent as it was kept, so it has one
+// language — the run's, like everything else made for the run, whichever
+// screen asked for the draft. Its sentences are built in both and the run's
+// is the one that is kept (Only, StoredText).
 func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
+	l := run.Lang()
 	d := EmailDraft{RunID: run.ID, installID: run.InstallID, tenantID: run.TenantID, userID: run.UserID}
 	in, err := a.store.InstallByID(ctx, run.InstallID)
 	if err != nil {
@@ -270,10 +277,10 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	agent := LabelFromPackage(agentName, Text("agent ของคุณ"))
 	var period PersonText
 	if run.Period != nil && *run.Period != "" {
-		period = LabelFromPackage(SanitizeMailText(PeriodLabel(*run.Period)), NoText)
+		period = LabelFromPackage(SanitizeMailText(PeriodLabelIn(l, *run.Period)), NoText)
 	}
 	outcome := outcomeWords(run)
-	d.Subject = Join(" · ", agent, period, outcome)
+	d.Subject = Join(" · ", agent, period, outcome).Only(l)
 
 	// the package's summary, as the person-text rule lets it be sent (ForClient)
 	var summary map[string]any
@@ -290,7 +297,7 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	}
 
 	head := []PersonText{Text("สรุปผลของ %s", Words(agent))}
-	if !period.Empty() {
+	if !period.EmptyIn(l) {
 		head[0] = Text("สรุปผลของ %s งวด %s", Words(agent), Words(period))
 	}
 	head = append(head, Text("สถานะ: %s", Words(outcome)))
@@ -321,7 +328,7 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	var files []PersonText
 	d.Attachments = []DraftAttachment{}
 	for _, art := range latestArtifacts(arts) { // the newest version of each file (catalog.go)
-		name := mailFileName(art)
+		name := mailFileName(l, art)
 		d.Attachments = append(d.Attachments, DraftAttachment{ArtifactID: art.ID, Name: name, Size: art.Size, Format: art.Format})
 		files = append(files, Text("· %s", FileName(name)))
 	}
@@ -345,7 +352,7 @@ func (a *API) buildDraft(ctx context.Context, run Run) (EmailDraft, error) {
 	}
 	sections = append(sections, Text("ร่างนี้ระบบสร้างจากผลของรอบงาน ตรวจทานตัวเลขและไฟล์แนบก่อนส่งทุกครั้ง"))
 	// what is stored is what a person is shown of it, so the hash is of what they read
-	d.Body = FromPackage(Join("\n\n", sections...).String(), NoText)
+	d.Body = TextIn(l, Join("\n\n", sections...).In(l))
 	d.BodySHA256 = bodyHash(d.Body.String())
 	return d, nil
 }
@@ -377,8 +384,8 @@ func (s *Store) draftOf(ctx context.Context, tenant, user, id uuid.UUID) (EmailD
 	if err != nil {
 		return d, err
 	}
-	// a stored text is only what a person is shown of it; it was stored as that
-	d.Subject, d.Body = LabelFromPackage(subject, NoText), FromPackage(body, NoText)
+	// a stored text is only what a person is shown of it; it was stored as that, in one language
+	d.Subject, d.Body = StoredLabel(subject), StoredText(body)
 	_ = json.Unmarshal(atts, &d.Attachments)
 	if d.Attachments == nil {
 		d.Attachments = []DraftAttachment{}
@@ -458,6 +465,8 @@ func (a *API) completeFor(ctx context.Context, org string, d EmailDraft, box Mai
 
 // postDraft puts the draft in the round's thread: once, brought up to date after.
 func (a *API) postDraft(ctx context.Context, d EmailDraft) error {
+	// the item is the run's, so it is marked with the run's language — which is the draft's
+	ctx = a.store.InLangOfRun(ctx, a.store.Pool, &d.RunID)
 	if it, err := a.store.ItemFor(ctx, d.installID, "email_draft", "id", d.ID.String()); err == nil {
 		return a.store.UpdateItem(ctx, it.ID, d)
 	} else if !errors.Is(err, ErrNotFound) {
@@ -515,7 +524,7 @@ func (a *API) ownedDraft(w http.ResponseWriter, r *http.Request) (EmailDraft, bo
 	d, err := a.store.draftOf(r.Context(), c.TenantUUID, c.UserID, id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			say(w, http.StatusNotFound, "NOT_FOUND", "what", "ร่างอีเมล")
+			say(w, http.StatusNotFound, "NOT_FOUND", "what", whatIn(langOfWriter(w), "email_draft"))
 		} else {
 			a.fail(w, err, "draft")
 		}
@@ -672,7 +681,7 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 			sendErr = err
 			break
 		}
-		name := mailFileName(art)
+		name := mailFileName(run.Lang(), art) // as the draft named it: the run's language
 		msg.Attachments = append(msg.Attachments, MailAttachment{ArtifactID: art.ID, Name: name, ContentType: artifactMime(art),
 			Size: int64(len(data)), SHA256: art.SHA256, Data: data})
 		attached = append(attached, logged{ArtifactID: art.ID, Name: name, Size: int64(len(data)), SHA256: art.SHA256, Format: art.Format})
@@ -710,7 +719,7 @@ func (a *API) sendEmail(w http.ResponseWriter, r *http.Request) {
 	if sendErr != nil {
 		// AM7: why it did not go, as a sentence; the draft is still there to copy
 		code, vars := mailFailure(sendErr, false)
-		out["message"] = mailSentence(code, vars...)
+		out["message"] = mailText(code, vars...)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

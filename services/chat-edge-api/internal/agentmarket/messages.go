@@ -128,36 +128,72 @@ var whatThai = map[string]string{
 	"artifact": "ไฟล์ผลลัพธ์", "exception": "ข้อยกเว้น", "template": "แบบฟอร์ม", "share": "การแชร์",
 	"member": "รายชื่อ", "department": "แผนก", "problem": "รายงานปัญหา", "sample": "ผลลัพธ์ตัวอย่าง",
 	"thread": "แชท", "chip": "คำถามนี้", "model": "รายการโมเดล", "round": "รอบ",
+	// AM11: these three were written where they are said; a noun said through here has its English
+	"reminder": "การเตือน", "notification": "การแจ้งเตือน", "email_draft": "ร่างอีเมล",
 }
 
-// Message fills one message's placeholders (pairs: name, value).
-func Message(code string, vars ...string) string {
-	m, ok := userMessages[code]
+// Message fills one message's placeholders (pairs: name, value), in Thai.
+func Message(code string, vars ...string) string { return MessageIn(Thai, code, vars...) }
+
+// MessageIn is Message in l (AM11): the same code, the same placeholders, the
+// English of messages_en.go. A code with no English yet reads in Thai — the
+// test that every code has both does not let one ship.
+func MessageIn(l Lang, code string, vars ...string) string {
+	m, ok := messageOf(l, code)
 	if !ok {
-		m = userMessages["BAD_REQUEST"]
+		m, _ = messageOf(l, "BAD_REQUEST")
 		vars = append(vars, "code", code)
 	}
 	for i := 0; i+1 < len(vars); i += 2 {
 		m = strings.ReplaceAll(m, "{"+vars[i]+"}", vars[i+1])
 	}
 	if strings.Contains(m, "{contact}") {
-		m = strings.ReplaceAll(m, "{contact}", Contact{}.Label())
+		m = strings.ReplaceAll(m, "{contact}", Contact{}.LabelIn(l))
 	}
 	return m
 }
 
-// say writes one of the messages above.
+func messageOf(l Lang, code string) (string, bool) {
+	if l == English {
+		if m, ok := userMessagesEn[code]; ok {
+			return m, true
+		}
+	}
+	m, ok := userMessages[code]
+	return m, ok
+}
+
+// whatIn names the thing a NOT_FOUND is about, in l.
+func whatIn(l Lang, what string) string {
+	if l == English {
+		if name, ok := whatEnglish[what]; ok {
+			return name
+		}
+		return "item"
+	}
+	if name, ok := whatThai[what]; ok {
+		return name
+	}
+	return "รายการ"
+}
+
+// forReq is a sentence written in the source, in the language of the request
+// w answers: what fills a message's {why}, {next}, {detail} — a variable of a
+// message is said in the message's language, or the two halves disagree.
+func forReq(w http.ResponseWriter, thai wording) string { return T(langOfWriter(w), thai) }
+
+// say writes one of the messages above, in the language of the request w answers.
 func say(w http.ResponseWriter, status int, code string, vars ...string) {
-	writeErr(w, status, code, Message(code, vars...))
+	writeErr(w, status, code, MessageIn(langOfWriter(w), code, vars...))
 }
 
 // badRequest is a request the web never sends on its own (a programming
 // error or a hand-made call): the plain "reload and try again" sentence.
 func badRequest(w http.ResponseWriter, code string) {
-	writeErr(w, http.StatusBadRequest, code, Message("BAD_REQUEST", "code", code))
+	writeErr(w, http.StatusBadRequest, code, MessageIn(langOfWriter(w), "BAD_REQUEST", "code", code))
 }
 
 // sayTo is say() with the person to ask filled in.
 func (a *API) sayTo(w http.ResponseWriter, r *http.Request, status int, code string, vars ...string) {
-	say(w, status, code, append(vars, "contact", accessOf(r).Contact.Label())...)
+	say(w, status, code, append(vars, "contact", accessOf(r).Contact.LabelIn(langOfWriter(w)))...)
 }

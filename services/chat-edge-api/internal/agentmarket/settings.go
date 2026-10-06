@@ -246,40 +246,46 @@ func (r settingRules) known(key string) bool {
 	return validSettingKey(key)
 }
 
-// label is the setting's name as a person reads it.
-func (r settingRules) label(key string) string {
+// labelText is the setting's name as a person reads it: the manifest's own
+// words for a setting the agent declares (one language, the package's), the
+// platform's for one of its own (both).
+func (r settingRules) labelText(key string) PersonText {
 	if d, ok := r.declared[key]; ok {
-		return LabelFromPackage(d.Label, Text("ค่าที่ตั้งไว้ของ agent")).String()
+		return LabelFromPackage(d.Label, Text("ค่าที่ตั้งไว้ของ agent"))
 	}
-	return settingLabel(key)
+	return InBoth(func(l Lang) string { return settingLabel(l, key) })
 }
+
+// label is labelText in l — for a row, which keeps one language.
+func (r settingRules) label(l Lang, key string) string { return r.labelText(key).In(l) }
 
 // check reads a value for a key that is known: the value as it is kept, or
 // the code and the sentence of the refusal (BAD_SETTING for a setting the
-// agent declares, BAD_VALUE for one of the platform's).
-func (r settingRules) check(key string, raw json.RawMessage) (kept json.RawMessage, code, problem string) {
+// agent declares, BAD_VALUE for one of the platform's). The sentence carries
+// both languages; whoever says it picks (the request's).
+func (r settingRules) check(key string, raw json.RawMessage) (kept json.RawMessage, code string, problem PersonText) {
 	if d, ok := r.declared[key]; ok {
 		kept, why := d.Check(raw)
 		if !why.Empty() {
-			return nil, "BAD_SETTING", why.String()
+			return nil, "BAD_SETTING", why
 		}
-		return kept, "", ""
+		return kept, "", NoText
 	}
 	if !validSettingValue(key, raw) {
-		return nil, "BAD_VALUE", settingProblem(key, raw)
+		return nil, "BAD_VALUE", InBoth(func(l Lang) string { return settingProblem(l, key, raw) })
 	}
-	return raw, "", ""
+	return raw, "", NoText
 }
 
 // DeclaredValue is a declared setting with what the install has set for it.
 type DeclaredValue struct {
 	Key       string          `json:"key"`
-	Label     string          `json:"label"`
+	Label     PersonText      `json:"label"`
 	Kind      string          `json:"kind"`
 	Min       *float64        `json:"min"`
 	Max       *float64        `json:"max"`
 	Default   string          `json:"default"`
-	Help      string          `json:"help"`
+	Help      PersonText      `json:"help"`
 	Choices   []SettingChoice `json:"choices"`
 	MaxLength *int            `json:"max_length"`
 	Value     json.RawMessage `json:"value"`
@@ -289,17 +295,17 @@ type DeclaredValue struct {
 // values lists the declared settings, in the manifest's order, with the
 // install's own values. What a person reads of them is the manifest's words
 // as a person is shown them.
-func (r settingRules) values(rows []Default) []DeclaredValue {
+func (r settingRules) values(l Lang, rows []Default) []DeclaredValue {
 	set := map[string]json.RawMessage{}
 	for _, d := range rows {
 		set[d.Key] = d.Value
 	}
 	out := make([]DeclaredValue, 0, len(r.order))
 	for _, d := range r.order {
-		v := DeclaredValue{Key: d.Key, Label: r.label(d.Key), Kind: d.Kind, Min: d.Min, Max: d.Max, Default: d.Default,
-			Help: FromPackage(d.Help, NoText).String(), Value: json.RawMessage("null")}
+		v := DeclaredValue{Key: d.Key, Label: r.labelText(d.Key), Kind: d.Kind, Min: d.Min, Max: d.Max, Default: d.Default,
+			Help: FromPackage(d.Help, NoText), Value: json.RawMessage("null")}
 		for _, c := range d.Choices {
-			v.Choices = append(v.Choices, SettingChoice{Value: c.Value, Label: LabelFromPackage(c.Label, Text("%s", Theirs(c.Value))).String()})
+			v.Choices = append(v.Choices, SettingChoice{Value: c.Value, Label: LabelFromPackage(c.Label, Text("%s", Theirs(c.Value))).In(l)})
 		}
 		if d.Kind == SettingKindText {
 			n := d.length()
@@ -326,7 +332,7 @@ func EngineDefaults(m Manifest, defs []Default) (map[string]any, map[string]json
 			continue
 		}
 		kept, _, problem := rules.check(k, raw)
-		if problem != "" {
+		if !problem.Empty() {
 			continue
 		}
 		var v any

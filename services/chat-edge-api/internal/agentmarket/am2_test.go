@@ -171,7 +171,7 @@ func TestExpensePolicyIsCheckedBeforeItIsKept(t *testing.T) {
 	good := `{"schema":"am2.expense_policy.v1","currency":"THB","receipt_required_above":"500.00","approval_threshold":"3,000",
 "categories":{"meals":{"label":"ค่าอาหาร","per_claim":"1500.00","per_person_month":5000},
 "contractor":{"per_claim":"20000","wht_rate":"3","wht_from":"1000"}},"prohibited_merchants":["ผับ"],"weekend_holiday":"flag"}`
-	if p := PolicyProblems(json.RawMessage(good)); len(p) != 0 || !validSettingValue("policy", json.RawMessage(good)) {
+	if p := PolicyProblems(Thai, json.RawMessage(good)); len(p) != 0 || !validSettingValue("policy", json.RawMessage(good)) {
 		t.Fatalf("a usable table: %v", p)
 	}
 	for _, c := range []struct{ table, want string }{
@@ -186,7 +186,7 @@ func TestExpensePolicyIsCheckedBeforeItIsKept(t *testing.T) {
 		{`{"receipt_required_above":"500","approval_threshold":"3000","categories":{"m":{}}}`, "schema"},
 		{`[1,2]`, "JSON object"},
 	} {
-		p := strings.Join(PolicyProblems(json.RawMessage(c.table)), " | ")
+		p := strings.Join(PolicyProblems(Thai, json.RawMessage(c.table)), " | ")
 		if !strings.Contains(p, c.want) || validSettingValue("policy", json.RawMessage(c.table)) {
 			t.Fatalf("%s: want a problem about %q, got %q", c.table, c.want, p)
 		}

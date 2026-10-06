@@ -180,7 +180,7 @@ func keepValid(slots []am.TemplateSlot, base, picked map[string]string, spec am.
 	})
 	for _, k := range keys {
 		out[k] = picked[k]
-		if am.CheckTemplateMapping(slots, out, spec) != "" {
+		if am.CheckTemplateMapping(am.Thai, slots, out, spec) != "" {
 			delete(out, k)
 		}
 	}
@@ -250,7 +250,8 @@ func (rc *runCtx) recalcTemplate(ctx context.Context, path, name string, meta, q
 	}
 	checks, _ := q["checks"].([]any)
 	q["checks"] = append(checks, check)
-	return json.Marshal(q)
+	// read on the files card: the check's texts are written in the run's language
+	return am.MarshalIn(am.LangOf(ctx), q)
 }
 
 func fileSHA(path string) string {

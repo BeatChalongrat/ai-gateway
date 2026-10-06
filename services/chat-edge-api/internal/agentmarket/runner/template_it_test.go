@@ -93,7 +93,7 @@ func TestCustomerWorkbookIsFilledAndRecalculated(t *testing.T) {
 		"lines", "lines.description", "lines.quantity", "lines.amount"
 	var spec am.TemplateSpec
 	_ = json.Unmarshal(r.Engine.Packages["sran.invoice-processing"].Manifest.Templates, &spec)
-	if msg := am.CheckTemplateMapping(out.Slots, mapping, spec); msg != "" {
+	if msg := am.CheckTemplateMapping(am.Thai, out.Slots, mapping, spec); msg != "" {
 		t.Fatalf("mapping: %s", msg)
 	}
 	saved, _ := json.Marshal(am.TemplateDefault{FileID: f.ID, Name: f.Name, Kind: "xlsx", SHA256: f.SHA256, Version: 1,

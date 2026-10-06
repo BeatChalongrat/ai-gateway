@@ -306,11 +306,11 @@ func (r *Runner) reviewJob(ctx context.Context, job am.Run, log *slog.Logger) er
 					if err != nil {
 						return nil, 0, "", "", err
 					}
-					q, _ := json.Marshal(map[string]any{"passed": true, "checks": checks})
+					q, _ := am.MarshalIn(am.LangOf(ctx), map[string]any{"passed": true, "checks": checks})
 					ra.Quality = q
 					produced = append(produced, ra)
 				} else {
-					skipped = append(skipped, latest["pdf"].Name+" (แปลง PDF ไม่ผ่าน ใช้ .docx ที่มีชื่อผู้ตรวจทานแทน)")
+					skipped = append(skipped, latest["pdf"].Name+am.T(am.LangOf(ctx), " (แปลง PDF ไม่ผ่าน ใช้ .docx ที่มีชื่อผู้ตรวจทานแทน)"))
 				}
 			} else if hadPDF {
 				skipped = append(skipped, latest["pdf"].Name)
@@ -362,7 +362,7 @@ func (r *Runner) reviewJob(ctx context.Context, job am.Run, log *slog.Logger) er
 	}
 	var notSigned []am.PersonText
 	for _, s := range so.Skipped {
-		if t := am.LabelFromPackage(s, am.NoText, names...); !t.Empty() {
+		if t := am.LabelFromPackage(s, am.NoText, names...); !t.EmptyIn(am.LangOf(ctx)) {
 			notSigned = append(notSigned, t)
 		}
 	}
@@ -381,7 +381,7 @@ func (r *Runner) reviewJob(ctx context.Context, job am.Run, log *slog.Logger) er
 			Version: a.Version, Quality: a.Validation})
 	}
 	rid := ps.run.ID
-	bg := context.Background()
+	bg := am.InRunLang(context.Background(), ps.run) // AM11: the card is the run's, in the run's language
 	if len(arts) > 0 {
 		if _, _, err := r.Store.AddItem(bg, r.Store.Pool, ps.run.InstallID, ps.run.TenantID, ps.run.UserID, &rid, payload, nil); err != nil {
 			return r.fail(ctx, job, "outputs", err)

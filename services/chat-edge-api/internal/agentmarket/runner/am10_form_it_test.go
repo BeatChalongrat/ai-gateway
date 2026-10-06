@@ -88,7 +88,7 @@ func TestAFormDroppedIntoARoundIsFilledForThatRoundOnly(t *testing.T) {
 		"lines", "lines.description", "lines.quantity", "lines.amount"
 	var spec am.TemplateSpec
 	_ = json.Unmarshal(r.Engine.Packages["sran.invoice-processing"].Manifest.Templates, &spec)
-	if msg := am.CheckTemplateMapping(form.Slots, mapping, spec); msg != "" {
+	if msg := am.CheckTemplateMapping(am.Thai, form.Slots, mapping, spec); msg != "" {
 		t.Fatalf("mapping: %s", msg)
 	}
 	form.Mapping, form.Status = mapping, am.FormReady

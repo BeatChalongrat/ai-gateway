@@ -3,6 +3,8 @@ package runner
 import (
 	"strings"
 	"testing"
+
+	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
 )
 
 // AM8: a narrative names every figure by its key. The audit found "SG&A over budget 10.5%" cited to the
@@ -22,7 +24,7 @@ func TestANarrativeNamesItsFiguresAndTypesNone(t *testing.T) {
 		`{"summary":"ต้นทุนขายลดลง {cost_of_sales_var_prior_pct:abs} ใน 3 เดือน ปี 2569 บัญชี 5300-01"}`,
 	}
 	for _, s := range ok {
-		if _, err := checkNarrative(s, cv); err != nil {
+		if _, err := checkNarrative(am.Thai, s, cv); err != nil {
 			t.Fatalf("a narrative that names its figures is used: %s: %v", s, err)
 		}
 	}
@@ -34,7 +36,7 @@ func TestANarrativeNamesItsFiguresAndTypesNone(t *testing.T) {
 		`{"summary":"ภาพรวม","watch":["ใช้เกินงบ 47,000 บาท"]}`:    "อย่าพิมพ์ตัวเลขเอง",
 	}
 	for s, why := range bad {
-		_, err := checkNarrative(s, cv)
+		_, err := checkNarrative(am.Thai, s, cv)
 		if err == nil || !strings.Contains(err.Error(), why) {
 			t.Fatalf("%s: want refused (%s), got %v", s, why, err)
 		}
@@ -45,7 +47,7 @@ func TestTheNarrativePromptListsFiguresByKeyWithWhatTheyAre(t *testing.T) {
 	cv := computedView{PeriodLabel: "กันยายน 2569", Figures: map[string]figureView{
 		"operating_expenses_var_budget_pct": {Text: "10.5%", Label: "ค่าใช้จ่ายในการขายและบริหาร ต่างจากงบประมาณ (%)"},
 	}}
-	p := narrativePrompt(cv)
+	p := narrativePrompt(am.Thai, cv)
 	if !strings.Contains(p, "{operating_expenses_var_budget_pct} = 10.5% · ค่าใช้จ่ายในการขายและบริหาร ต่างจากงบประมาณ (%)") {
 		t.Fatalf("the prompt names each figure by its key, its printed text and what it is:\n%s", p)
 	}

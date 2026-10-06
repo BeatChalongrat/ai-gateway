@@ -68,7 +68,7 @@ func checkPrinted(chk CheckResult, rows []printRow) gateCheck {
 	for i, p := range pages {
 		keys[i] = thaiKey(p)
 	}
-	var bad []string
+	var bad []printRow
 	for _, r := range rows {
 		var needles []string
 		for _, t := range r.Identity {
@@ -98,26 +98,42 @@ func checkPrinted(chk CheckResult, rows []printRow) gateCheck {
 			}
 		}
 		if !found {
-			bad = append(bad, fmt.Sprintf("%s แถว %d (%s)", r.Sheet, r.Row, strings.Join(r.Identity, " · ")))
+			bad = append(bad, r)
 		}
 	}
 	out := gateCheck{Name: "xlsx.printed", OK: len(bad) == 0 && chk.Pages > 0,
 		Detail: am.Text("พิมพ์ %s หน้า · %s แถวที่มีจำนวนเงิน รายการกับจำนวนเงินอยู่หน้าเดียวกันทุกแถว",
 			am.Count(chk.Pages), am.Count(len(rows)))}
 	if len(bad) > 0 {
-		more := ""
+		// AM11: which rows, and how many more, are said as each language says them (the sheet's name and
+		// a row's own words are the person's); both go into the detail, and whoever writes it picks
+		rest := 0
 		if len(bad) > 3 {
-			more = fmt.Sprintf(" และอีก %d แถว", len(bad)-3)
+			rest = len(bad) - 3
 			bad = bad[:3]
 		}
-		out.Detail = am.Text("พิมพ์ %s หน้า · รายการกับจำนวนเงินไม่อยู่หน้าเดียวกัน: %s%s",
-			am.Count(chk.Pages), am.Typed(strings.Join(bad, "; "), 300), am.Name(more))
+		which := am.EachTyped(300, func(l am.Lang) string {
+			said := make([]string, 0, len(bad))
+			for _, r := range bad {
+				said = append(said, fmt.Sprintf(am.T(l, "%s แถว %d (%s)"), r.Sheet, r.Row, strings.Join(r.Identity, " · ")))
+			}
+			return strings.Join(said, "; ")
+		})
+		more := am.EachNamed(120, func(l am.Lang) string {
+			if rest == 0 {
+				return ""
+			}
+			return fmt.Sprintf(am.T(l, " และอีก %d แถว"), rest)
+		})
+		out.Detail = am.Text("พิมพ์ %s หน้า · รายการกับจำนวนเงินไม่อยู่หน้าเดียวกัน: %s%s", am.Count(chk.Pages), which, more)
 	}
 	return out
 }
 
-// withCheck adds a runner-made check to a file's quality (and fails it when the check failed).
-func withCheck(quality json.RawMessage, c gateCheck) json.RawMessage {
+// withCheck adds a runner-made check to a file's quality (and fails it when the check failed). The
+// quality is kept on the artifact and read on the files card: the check's texts are written in l, the
+// run's language.
+func withCheck(l am.Lang, quality json.RawMessage, c gateCheck) json.RawMessage {
 	var q map[string]any
 	if json.Unmarshal(quality, &q) != nil || q == nil {
 		q = map[string]any{"passed": true}
@@ -127,5 +143,6 @@ func withCheck(quality json.RawMessage, c gateCheck) json.RawMessage {
 	if !c.OK {
 		q["passed"] = false
 	}
-	return mustJSON(q)
+	b, _ := am.MarshalIn(l, q)
+	return b
 }

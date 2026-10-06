@@ -261,9 +261,9 @@ func TestEveryMessageOfThePlatformReadsAsWrittenForAPerson(t *testing.T) {
 	check("problem notice", problemNotice(ProblemReport{Ref: "FACADE"}).String())
 	for _, k := range []string{"company", "formats", "currency", "language", "materiality", "mapping", "dc_convention", "theme", "fiscal_year_start",
 		"company_tax_id", "company_branch", "policy", "holidays", "policy_kb", "match_date_window_days", "bank_name"} {
-		check("setting "+k, settingLabel(k))
+		check("setting "+k, settingLabel(Thai, k))
 	}
-	for _, s := range []string{reasonOutside, reasonNoVision, reasonNotListed, RetentionText(5)} {
+	for _, s := range []string{reasonOutside, reasonNoVision, reasonNotListed, RetentionText(5).String()} {
 		check("line", s)
 	}
 	// every sentence written in the source of both planes
@@ -382,6 +382,22 @@ func TestWhatReadsAsWrittenForAPerson(t *testing.T) {
 		}
 		if got := ShownToPerson(s); got != shown {
 			t.Errorf("%q\n   shown:    %q\n   expected: %q", s, got, shown)
+		}
+		// AM11: the rule above is the Thai one — an item written in Thai, read exactly as before. An item
+		// written in English is read by the English rule, which shows a word an English sentence of the
+		// product uses and is otherwise the same promise: whatever it shows reads as written for a person,
+		// and nothing of it is an error's own text, in either language.
+		en := ShownIn(English, s)
+		if LooksLikeError(en) || (en != "" && !ReadsIn(English, en)) || strings.ContainsAny(en, "<>{}\\") {
+			t.Errorf("the English rule shows %q of %q", en, s)
+		}
+		if shown != "" && en == "" {
+			t.Errorf("the English rule shows nothing of %q, where the Thai rule shows %q", s, shown)
+		}
+		for _, own := range []string{"BadZipFile", "0xDEADBEEF", "ModuleLoader", "172.18.0.4", "step.py", "e2_check_failed", "compute_failed", "pkey", "violates"} {
+			if strings.Contains(en, own) {
+				t.Errorf("the English rule shows an error's own word %q of %q: %q", own, s, en)
+			}
 		}
 	}
 	// an answer of several lines is read line by line: a line that is not for a person is left out
@@ -509,11 +525,30 @@ func TestThreadWritersTakeTextBuiltForAPerson(t *testing.T) {
 			}
 		}
 	}
-	// reading JSON is no way around it
-	var smuggled PersonText
-	_ = json.Unmarshal([]byte(`"`+neverListed[0]+`"`), &smuggled)
-	if !smuggled.Empty() {
-		t.Errorf("a text read from JSON is only what a person is shown of it: %q", smuggled)
+	// reading JSON is no way around it. AM11: a row does not say which language it was written in, so a
+	// text read from one is what the reader of both languages shows of it — never a word that no sentence
+	// of the product uses, never a sign that is not ours — and where the text is then sent, the rule of
+	// the item's own language is asked once more: an item written in Thai shows nothing of it, as before.
+	for _, s := range neverListed {
+		var smuggled PersonText
+		_ = json.Unmarshal(mustJSON(s), &smuggled)
+		got := smuggled.String()
+		if got != ShownIn(English, s) || strings.ContainsAny(got, "<>@") || LooksLikeError(got) ||
+			(got != "" && !readerFor(English).Reads(got)) {
+			t.Errorf("a text read from JSON is only what a person is shown of it: %q → %q", s, got)
+		}
+		for _, w := range []string{"zx81", "frobnicate", "retry", "0xDEADBEEF", "ModuleLoader", "ValueProblem", "Pipeline", "halted"} {
+			if strings.Contains(got, w) {
+				t.Errorf("a word nobody's sentence uses came back from JSON: %q in %q", w, got)
+			}
+		}
+		var sent struct {
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(ForClient("notice", mustJSON(map[string]any{"text": s})), &sent)
+		if sent.Text != "" {
+			t.Errorf("an item written in Thai shows %q of %q", sent.Text, s)
+		}
 	}
 	for _, s := range neverListed {
 		if got := FromPackage("ตรวจไม่ผ่าน "+s, NoText).String(); strings.Contains(got, s) {

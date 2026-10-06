@@ -420,6 +420,17 @@ func (s *Store) CreateRun(ctx context.Context, q Querier, r Run, idem string) (R
 	if r.ID == uuid.Nil {
 		r.ID = uuid.New()
 	}
+	// AM11: a run has one language. A job done for a run (a render, a reply, a form's reading) is in that
+	// run's, whatever screen asked for it — its figures and its package's words already are; a run of its
+	// own is in the language of whoever starts it (the request's, lang.go).
+	l := LangOf(ctx)
+	if of := runItIsFor(r); of != uuid.Nil {
+		var parent json.RawMessage
+		if err := q.QueryRow(ctx, `SELECT params FROM agent_market.agent_runs WHERE id = $1`, of).Scan(&parent); err == nil {
+			l = Run{Params: parent}.Lang()
+		}
+	}
+	r.Params = paramsIn(r.Params, l)
 	x, err := scanRun(q.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_runs (id, install_id, parent_run_id, tenant_id, user_id, kind, status, period, message,
 			params, definition_version, checksum, engine_checksum, binding_version, formats, answers, idempotency_key,
@@ -432,6 +443,36 @@ func (s *Store) CreateRun(ctx context.Context, q Querier, r Run, idem string) (R
 		r.DefinitionVersion, r.Checksum, r.EngineChecksum, r.BindingVersion, jsonOr(r.Formats, "[]"),
 		jsonOr(r.Answers, "{}"), idemArg, r.ThreadID, r.ModelChoice))
 	return x, err == nil, err
+}
+
+// runItIsFor is the run a job is done for: its parent, or — a job that reads a round's form has no
+// parent — the run its params name. uuid.Nil for a run of its own.
+func runItIsFor(r Run) uuid.UUID {
+	if r.ParentRunID != nil {
+		return *r.ParentRunID
+	}
+	var p struct {
+		RunID string `json:"run_id"`
+	}
+	if len(r.Params) > 0 && json.Unmarshal(r.Params, &p) == nil {
+		if id, err := uuid.Parse(p.RunID); err == nil {
+			return id
+		}
+	}
+	return uuid.Nil
+}
+
+// InLangOfRun is InRunLang for a run known only by its id: ctx saying that
+// run's language. No run, or one that cannot be read: ctx as it is.
+func (s *Store) InLangOfRun(ctx context.Context, q Querier, run *uuid.UUID) context.Context {
+	if run == nil {
+		return ctx
+	}
+	var params json.RawMessage
+	if err := q.QueryRow(ctx, `SELECT params FROM agent_market.agent_runs WHERE id = $1`, *run).Scan(&params); err != nil {
+		return ctx
+	}
+	return InRunLang(ctx, Run{Params: params})
 }
 
 // GetRun scopes by owner.
@@ -1042,10 +1083,12 @@ func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thr
 		return ThreadItem{}, false, errors.New("agentmarket: a thread item without a payload")
 	}
 	kind := payload.itemKind()
-	b, err := json.Marshal(payload)
+	// AM11: written in the language of ctx (a run's, or the request's), and marked so
+	b, err := MarshalFor(ctx, payload)
 	if err != nil {
 		return ThreadItem{}, false, err
 	}
+	b = stampLang(LangOf(ctx), b)
 	t, err := scanItem(q.QueryRow(ctx, `
 		INSERT INTO agent_market.agent_thread_items (install_id, tenant_id, user_id, run_id, kind, payload, client_id, thread_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8::uuid, (SELECT r.thread_id FROM agent_market.agent_runs r WHERE r.id = $4)))
@@ -1061,18 +1104,32 @@ func (s *Store) AddItemIn(ctx context.Context, q Querier, install uuid.UUID, thr
 
 // UpdateItem replaces an item's payload and moves it to the stream's head.
 func (s *Store) UpdateItem(ctx context.Context, id uuid.UUID, payload ItemPayload) error {
-	b, err := json.Marshal(payload)
+	b, err := MarshalFor(ctx, payload)
 	if err != nil {
 		return err
 	}
+	b = stampLang(LangOf(ctx), b)
 	_, err = s.Pool.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = $2,
 		rev = nextval('agent_market.thread_rev'), updated_at = now() WHERE id = $1`, id, b)
 	return err
 }
 
 // PatchItem merges keys into an item's payload (e.g. a card's status).
+// AM11: a text that joins an item is said in the language the item was
+// written in — the item is read by that language's rule (schema.go), and an
+// English note in an item written in Thai would be withheld.
 func (s *Store) PatchItem(ctx context.Context, q Querier, id uuid.UUID, patch ItemPatch) error {
-	b, _ := json.Marshal(patch)
+	l := LangOf(ctx)
+	if patch.Note != nil {
+		var mark *string
+		if err := q.QueryRow(ctx, `SELECT payload->>'lang' FROM agent_market.agent_thread_items WHERE id = $1`, id).Scan(&mark); err == nil {
+			l = Thai
+			if mark != nil {
+				l = ParseLang(*mark)
+			}
+		}
+	}
+	b, _ := MarshalIn(l, patch)
 	_, err := q.Exec(ctx, `UPDATE agent_market.agent_thread_items SET payload = payload || $2::jsonb,
 		rev = nextval('agent_market.thread_rev'), updated_at = now() WHERE id = $1`, id, b)
 	return err
