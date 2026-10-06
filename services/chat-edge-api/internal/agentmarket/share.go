@@ -407,6 +407,9 @@ func (a *API) sharedRun(w http.ResponseWriter, r *http.Request) {
 	var agentName string
 	if d, err := a.store.DefinitionByID(ctx, in.DefinitionID); err == nil {
 		agentName = d.Name
+		if m, err := ParseManifest(d.Manifest); err == nil {
+			agentName = m.NameIn(langOfWriter(w), d.Name) // the reader's screen, not the owner's
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"share": sh, "owner": owner, "agent": map[string]any{"title": in.Title,
 		"name": agentName, "slug": in.Slug, "version": run.DefinitionVersion},

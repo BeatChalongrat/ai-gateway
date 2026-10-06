@@ -25,7 +25,8 @@ import { ChevronDown, ChevronRight, Pin, PinOff, Store } from "lucide-react";
 
 import { amApi } from "./api";
 import { ChatRows, currentChatKey } from "./ChatRows";
-import { useAmT } from "./i18n";
+import { agentShortName } from "./format";
+import { useAmLocale, useAmT } from "./i18n";
 import { railOrder, searchAgents, waitingOnly } from "./rail";
 import type { CatalogAgent, RailInstall } from "./types";
 import { AgentTile, cls } from "./ui";
@@ -301,6 +302,7 @@ function SearchHits({
   onNavigate?: () => void;
 }) {
   const t = useAmT();
+  const locale = useAmLocale();
   if (!installed.length && !catalog.length) {
     return loading ? null : (
       <p className="px-3 py-1 text-[11px] text-text-muted" data-testid="agent-search-none">
@@ -337,7 +339,7 @@ function SearchHits({
               data-testid="agent-search-catalog"
             >
               <AgentTile icon={c.manifest?.icon} look={c.manifest} size={20} />
-              <span className="min-w-0 flex-1 truncate">{c.manifest?.short_name || c.name}</span>
+              <span className="min-w-0 flex-1 truncate">{agentShortName(c.manifest, locale, c.name)}</span>
               <span className="shrink-0 text-[10px] text-text-muted">{t("rail.searchDetails")}</span>
             </Link>
           </li>

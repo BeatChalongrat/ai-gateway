@@ -32,7 +32,7 @@ vi.mock("next/navigation", () => ({
 
 import { LocaleScope, useI18nStore, type Locale } from "@/lib/i18n";
 
-import { formatDate, formatDateTime, formatDuration } from "./format";
+import { agentShortName, formatDate, formatDateTime, formatDuration } from "./format";
 import { amDictionaries, tAm } from "./i18n";
 import { MarketPage } from "./market/MarketPage";
 import { SettingsPage } from "./settings/SettingsPage";
@@ -303,5 +303,21 @@ describe("AM11 — a sentence the server wrote in the run's language is handled 
     expect(splitNotice("จำไว้เป็นค่าตั้งต้นรอบหน้า · แก้ได้")).toBe("จำไว้เป็นค่าตั้งต้นรอบหน้า");
     expect(splitNotice("Remembered as the default for the next run · can be changed")).toBe("Remembered as the default for the next run");
     expect(splitNotice("The period can be changed in the settings.")).toBe("The period can be changed in the settings.");
+  });
+});
+
+describe("AM11 — an agent is called by the name its package gives for the screen's language", () => {
+  const m = { name: "รายงานผลประกอบการ + สไลด์ผู้บริหาร", name_en: "Financial Report + Executive Deck", short_name: "รายงานผลประกอบการ" };
+
+  it("Thai: its short name; English: its English name (a package has no short one in English)", () => {
+    expect(agentShortName(m, "th", "ชื่อที่ถืออยู่")).toBe("รายงานผลประกอบการ");
+    expect(agentShortName(m, "en", "held")).toBe("Financial Report + Executive Deck");
+  });
+
+  it("a package with no English name: the name the caller holds, then its own", () => {
+    const thaiOnly = { name: m.name, short_name: m.short_name };
+    expect(agentShortName(thaiOnly, "en", "My copy")).toBe("My copy");
+    expect(agentShortName(thaiOnly, "en")).toBe(m.name);
+    expect(agentShortName(null, "th", "ชื่อที่ถืออยู่")).toBe("ชื่อที่ถืออยู่");
   });
 });

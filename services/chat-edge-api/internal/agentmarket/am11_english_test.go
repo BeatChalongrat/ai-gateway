@@ -690,3 +690,32 @@ func TestANameIsQuotedByTheRuleOfTheSentencesLanguage(t *testing.T) {
 		t.Fatalf("the Thai rule shows %q", got)
 	}
 }
+
+// An agent is named in the screen's language: the English name its package gives on an English
+// screen, its own name on a Thai one, and its own name in both when the package has no English one.
+func TestAnAgentIsNamedInTheScreensLanguage(t *testing.T) {
+	both := Manifest{Name: "รายงานผลประกอบการ", NameEN: "Financial Report + Executive Deck"}
+	if got := both.NameIn(English, both.Name); got != "Financial Report + Executive Deck" {
+		t.Errorf("English screen: %q", got)
+	}
+	if got := both.NameIn(Thai, both.Name); got != "รายงานผลประกอบการ" {
+		t.Errorf("Thai screen: %q", got)
+	}
+	thaiOnly := Manifest{Name: "รายงานผลประกอบการ", NameEN: "  "}
+	if got := thaiOnly.NameIn(English, thaiOnly.Name); got != "รายงานผลประกอบการ" {
+		t.Errorf("a package with no English name keeps its name: %q", got)
+	}
+	// the test environment's own manifest, given an English name
+	d := Definition{Slug: "sran.financial-report", Version: "1.0.0", Name: "รายงานการเงิน",
+		Manifest: json.RawMessage(strings.Replace(testManifest, `"name":"รายงานการเงิน",`, `"name":"รายงานการเงิน","name_en":"Financial Report",`, 1))}
+	// the data sheet is headed by the same name
+	for l, want := range map[Lang]string{English: "Financial Report", Thai: "รายงานการเงิน"} {
+		ds, err := BuildDatasheet(l, d, nil, StatusPublished, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ds.Name != want {
+			t.Errorf("the data sheet on a %s screen is headed %q, want %q", l, ds.Name, want)
+		}
+	}
+}

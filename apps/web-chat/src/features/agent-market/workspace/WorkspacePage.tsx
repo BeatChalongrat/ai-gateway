@@ -23,10 +23,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListChecks } from "lucide-react";
 
 import { AttachmentDropZone } from "@/components/chat/AttachmentDropZone";
+import { agentShortName } from "../format";
 import { ButtonLink } from "@/components/ui/Button";
 
 import { AmError, amApi, errorMessage } from "../api";
-import { useAmT } from "../i18n";
+import { useAmLocale, useAmT } from "../i18n";
 import type { InstallDetail, InstallRow, ProgressPayload, ThreadItem } from "../types";
 import { AgentTile, cls, ErrorPanel, FeatureGate, lookOf, PageShell } from "../ui";
 import { notifyInstallsChanged, onInstallsChanged, useAgentMarket } from "../useAgentMarket";
@@ -94,6 +95,7 @@ function useInstalls(): InstallRow[] {
 
 function Workspace({ installId, threadId, runId, beside }: { installId: string; threadId: string | null; runId: string | null; beside: string | null }) {
   const t = useAmT();
+  const locale = useAmLocale();
   const router = useRouter();
   const snap = useAgentMarket();
   const [detail, setDetail] = useState<InstallDetail | null>(null);
@@ -381,7 +383,7 @@ function Workspace({ installId, threadId, runId, beside }: { installId: string; 
               photoNotice={photoNotice}
               threadId={threadId}
               formAccept={formAccept}
-              agentName={manifest?.short_name || manifest?.name || install?.title}
+              agentName={agentShortName(manifest, locale, install?.title)}
               roundUnderway={underway}
               finishedRound={finished}
               sampleRunId={sampleRunId}

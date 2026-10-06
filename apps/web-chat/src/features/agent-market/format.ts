@@ -161,3 +161,17 @@ export function formatBaht(v: number | null | undefined): string {
   if (v > 0 && v < 0.01) return "< 0.01";
   return baht.format(v);
 }
+
+/** AM11 — what an agent is called where there is room for a few words (the sidebar, a workspace's
+ *  greeting). On a Thai screen its short name, else its name. A package has no short name in
+ *  English: on an English screen it is the English name the package gives (`name_en`), else the name
+ *  the caller holds — the catalogue's, which the server already sends in the screen's language, or an
+ *  install's own title. */
+export function agentShortName(
+  m: { name?: string; name_en?: string; short_name?: string } | null | undefined,
+  locale: string,
+  held?: string | null,
+): string {
+  if (locale !== "th") return m?.name_en || held || m?.name || "";
+  return m?.short_name || m?.name || held || "";
+}

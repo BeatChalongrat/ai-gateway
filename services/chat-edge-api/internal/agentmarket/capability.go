@@ -326,3 +326,13 @@ func (m Manifest) Speaks(l Lang) bool {
 	}
 	return false
 }
+
+// NameIn is the agent's name on a screen in l: the English name its package
+// gives (manifest name_en) on an English screen, its name otherwise. A
+// package with no English name keeps the one it has, in both languages.
+func (m Manifest) NameIn(l Lang, name string) string {
+	if en := strings.TrimSpace(m.NameEN); l == English && en != "" {
+		return en
+	}
+	return name
+}

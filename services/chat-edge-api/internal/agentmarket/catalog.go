@@ -512,6 +512,7 @@ func (a *API) entryFor(ctx context.Context, acc Access, d Definition, states map
 	e := catalogEntry{Slug: d.Slug, Version: d.Version, Name: d.Name, Manifest: d.Manifest, Status: st.Status, StatusReason: st.Reason,
 		Scope: ScopeOrgSpecific}
 	if m, err := ParseManifest(d.Manifest); err == nil {
+		e.Name = m.NameIn(LangOf(ctx), d.Name) // AM11: an agent is named in the screen's language
 		e.Scope, e.Jurisdiction = m.ScopeSaid(), m.Jurisdiction
 	}
 	if id, ok := installs[d.Slug]; ok {
@@ -598,7 +599,7 @@ func (a *API) catalogItem(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, ErrNotFound, "agent")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"slug": d.Slug, "version": d.Version, "name": d.Name,
+	writeJSON(w, http.StatusOK, map[string]any{"slug": d.Slug, "version": d.Version, "name": e.Name,
 		"manifest": d.Manifest, "checksum": d.Checksum, "instructions": d.Instructions, "status": e.Status,
 		"status_reason": e.StatusReason, "install_id": e.InstallID, "sample": e.Sample, "stats": e.Stats,
 		"scope": e.Scope, "jurisdiction": e.Jurisdiction})
@@ -662,7 +663,7 @@ func BuildDatasheet(l Lang, d Definition, caps map[string]Binding, status string
 		Guide *Guide `json:"guide"`
 	}
 	_ = json.Unmarshal(d.Manifest, &extra)
-	ds := Datasheet{Slug: d.Slug, Version: d.Version, Name: d.Name, Summary: m.Summary, Status: status, Generated: now,
+	ds := Datasheet{Slug: d.Slug, Version: d.Version, Name: m.NameIn(l, d.Name), Summary: m.Summary, Status: status, Generated: now,
 		Scope: m.ScopeSaid(), Jurisdiction: m.Jurisdiction,
 		Limits: map[string]int{"max_file_mb": m.Limits.MaxFileMB, "max_files": m.Limits.MaxFiles},
 		Cannot: m.Cannot, Models: []DatasheetModel{}, NoModel: []string{}, Never: []string{},

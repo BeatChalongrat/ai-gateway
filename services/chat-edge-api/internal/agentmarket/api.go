@@ -424,6 +424,11 @@ func (a *API) install(w http.ResponseWriter, r *http.Request) {
 	}
 	bindings, _ := json.Marshal(res)
 	title := m.ShortName
+	// AM11: an install made from an English screen is headed by the agent's English name (a package
+	// has no short one in English); the title is the person's from then on, like any install's
+	if en := m.NameIn(langOfWriter(w), ""); en != "" {
+		title = en
+	}
 	if title == "" {
 		title = m.Name
 	}
