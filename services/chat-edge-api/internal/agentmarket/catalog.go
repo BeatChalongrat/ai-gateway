@@ -837,16 +837,20 @@ func (ds *Datasheet) ApplyOrg(l Lang, o OrgSettings, e Egress) {
 				why = T(l, "ผู้ดูแลตั้งให้ agent นี้ไม่ส่งเอกสารออกนอกองค์กร")
 			}
 		}
-		kept := ds.Models[:0]
+		// AM11b: a model outside the organisation is simply not there — no paragraph about a model that is
+		// not used and what happens instead. One line says why, once.
+		kept, left := ds.Models[:0], false
 		for _, m := range ds.Models {
 			if !m.SelfHosted {
-				ds.NoModel = append(ds.NoModel, T(l, "โมเดล ")+m.Model+T(l, " อยู่นอกองค์กร จึงไม่ใช้ — ")+why+" "+
-					T(l, "(ถ้าโมเดลในองค์กรไม่ตอบ คำบรรยายจะเขียนด้วยกฎของ agent แทน)"))
+				left = true
 				continue
 			}
 			kept = append(kept, m)
 		}
 		ds.Models = kept
+		if left {
+			ds.NoModel = append(ds.NoModel, why)
+		}
 	}
 }
 

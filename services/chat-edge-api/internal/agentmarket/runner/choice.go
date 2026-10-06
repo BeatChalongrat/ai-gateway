@@ -139,14 +139,28 @@ func (r *Runner) modelsCapability(ctx context.Context) am.Binding {
 }
 
 // choice is the model this round asked for: the round's, else the install's, else auto.
+//
+// AM11b: whatever a person picks is what runs — so a pick that may not be used now is no pick. A model
+// outside the organisation chosen while this agent's data could leave, after the switch is turned off,
+// and a model that cannot read images chosen for an agent that reads scans, are not in the menu
+// (am.MenuFor) and here read as "อัตโนมัติ": the menu shows it, the round runs it, and nothing is said
+// afterwards about a model that was "not used". (A chosen model that fails to answer is another matter:
+// the round is rescued by the next one and says so.)
 func (rc *runCtx) choice() string {
-	if rc.run.ModelChoice != nil && *rc.run.ModelChoice != "" {
-		return *rc.run.ModelChoice
+	c := am.ModelAuto
+	switch {
+	case rc.run.ModelChoice != nil && *rc.run.ModelChoice != "":
+		c = *rc.run.ModelChoice
+	case rc.install.ModelChoice != "":
+		c = rc.install.ModelChoice
 	}
-	if rc.install.ModelChoice != "" {
-		return rc.install.ModelChoice
+	if c == am.ModelAuto || rc.r == nil || rc.r.Model == nil {
+		return c
 	}
-	return am.ModelAuto
+	if !rc.mayUse(c) || (am.ModelUse(rc.pkg.Manifest) == "vision" && !rc.r.Model.readsImages(c)) {
+		return am.ModelAuto
+	}
+	return c
 }
 
 // mayUse: the organisation lets this model see the round's data.

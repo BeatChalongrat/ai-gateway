@@ -660,14 +660,16 @@ func TestAM3DatasheetSaysWhichModelSeesWhat(t *testing.T) {
 		len(ds.Never) != 1 || ds.Storage["backend"] != "local" {
 		t.Fatalf("retention and promises: %+v %+v", ds.Retention, ds.Never)
 	}
-	// AM4: while documents may not leave the organisation, the outside fallback is not used at all
+	// AM4: while documents may not leave the organisation, the outside fallback is not used at all.
+	// AM11b: it is simply not there — one line says why, and no paragraph names a model that is "not used"
 	inside := ds
 	inside.Models = append([]DatasheetModel{}, ds.Models...)
 	inside.NoModel = append([]string{}, ds.NoModel...)
 	inside.Retention = []map[string]any{{"unit": "years", "keep": float64(5)}}
 	inside.ApplyOrg(Thai, OrgSettings{RetentionYears: 7}, EgressOf(false, Manifest{}, nil))
 	if len(inside.Models) != 1 || inside.Models[0].Model != "qwen3.8-27b-fp8" || inside.Retention[0]["keep"] != float64(7) ||
-		!strings.Contains(strings.Join(inside.NoModel, " "), "deepseek-v4-flash") || inside.Notes["not_archive"] == "" {
+		strings.Contains(strings.Join(inside.NoModel, " "), "deepseek-v4-flash") || !strings.Contains(strings.Join(inside.NoModel, " "), "องค์กรไม่อนุญาตให้ส่งข้อมูลออกนอกองค์กร") ||
+		strings.Contains(strings.Join(inside.NoModel, " "), "จึงไม่ใช้") || inside.Notes["not_archive"] == "" {
 		t.Fatalf("the organisation's own decisions: %+v %v %v", inside.Models, inside.NoModel, inside.Retention)
 	}
 	vis, _ := json.Marshal(map[string]any{"model": "qwen3.8-27b-fp8", "self_hosted": true})

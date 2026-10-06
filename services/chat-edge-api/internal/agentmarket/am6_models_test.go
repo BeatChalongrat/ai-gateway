@@ -83,12 +83,13 @@ func TestModelMenuListsEveryModelThatCanDoTheJob(t *testing.T) {
 	if code != 200 || p["uses"] != "text" || p["choice"] != "auto" || p["auto_model"] != "qwen" {
 		t.Fatalf("menu: %d %v", code, p)
 	}
-	// every model can write: all four, by id, in the order of their ids
-	if got := menuOf(t, p); got != "deepseek=blocked gpt-4o=blocked qwen=allowed typhoon=allowed" {
-		t.Fatalf("models: %s", got)
+	// every model can write; AM11b: the two outside the organisation are not in the menu while this
+	// agent's data stays inside — the menu lists what can run, by id, in the order of the ids
+	if got := menuOf(t, p); got != "qwen=allowed typhoon=allowed" || p["outside_absent"] != true {
+		t.Fatalf("models: %s (outside_absent %v)", got, p["outside_absent"])
 	}
 	if why, _ := p["blocked_reason"].(string); !strings.Contains(why, "นอกองค์กร") || !ReadsForPerson(why) {
-		t.Fatalf("why the outside models are blocked, in one line: %q", p["blocked_reason"])
+		t.Fatalf("why the outside models are not listed, in one line: %q", p["blocked_reason"])
 	}
 	if p["hidden_reason"] != "" {
 		t.Fatalf("every model can write, so none is hidden: %q", p["hidden_reason"])
@@ -121,8 +122,8 @@ func TestModelMenuOfAVisionAgentListsOnlyModelsThatReadImages(t *testing.T) {
 	if code != 200 || p["uses"] != "vision" || p["auto_model"] != "qwen" {
 		t.Fatalf("menu: %d %v", code, p)
 	}
-	if got := menuOf(t, p); got != "gpt-4o=blocked qwen=allowed" {
-		t.Fatalf("only the models that read images: %s", got)
+	if got := menuOf(t, p); got != "qwen=allowed" || p["outside_absent"] != true {
+		t.Fatalf("only the models that read images and may be given this agent's scans: %s (outside_absent %v)", got, p["outside_absent"])
 	}
 	if p["hidden_reason"] != "agent นี้ต้องใช้โมเดลที่อ่านภาพได้" {
 		t.Fatalf("why the others are not listed: %q", p["hidden_reason"])
@@ -211,8 +212,8 @@ func TestTheOrganisationKeepsNoListOfModels(t *testing.T) {
 		t.Fatalf("the organisation's settings carry no list of models: %v", body["org"])
 	}
 	_, p := e.do("GET", "/installs/"+id+"/models", nil)
-	if got := menuOf(t, p); got != "deepseek=blocked gpt-4o=blocked qwen=allowed typhoon=allowed" {
-		t.Fatalf("the menu is the runner's models, whatever was sent: %s", got)
+	if got := menuOf(t, p); got != "qwen=allowed typhoon=allowed" {
+		t.Fatalf("the menu is the runner's models that can run, whatever was sent: %s", got)
 	}
 	if code, _ := e.do("GET", "/admin/models", nil); code != http.StatusNotFound && code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET /admin/models is gone: %d", code)

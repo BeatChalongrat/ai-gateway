@@ -78,8 +78,13 @@ type ModelPicker struct {
 	// Egress (AM9): may this agent's documents go to a model outside the
 	// organisation — the organisation's switch and the agent's own, both shown.
 	Egress Egress `json:"egress"`
-	// cannot are the runner's models that cannot do this agent's job.
-	cannot map[string]bool
+	// OutsideAbsent (AM11b): at least one model that could do this agent's job is not in the list
+	// because this agent's data may not go outside the organisation. The menu says it in one line.
+	OutsideAbsent bool `json:"outside_absent"`
+	// cannot are the runner's models that cannot do this agent's job; outside are the ones that could,
+	// and may not be given its data now.
+	cannot  map[string]bool
+	outside map[string]bool
 }
 
 const (
@@ -196,7 +201,7 @@ func (rm RunnerModels) lock(use, id string, docsMayLeave bool) string {
 // the organisation's switch and the agent's own under it).
 func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 	use := ModelUse(m)
-	p := ModelPicker{Uses: use, Choice: in.ModelChoice, Models: []MenuModel{}, cannot: map[string]bool{}, Egress: e}
+	p := ModelPicker{Uses: use, Choice: in.ModelChoice, Models: []MenuModel{}, cannot: map[string]bool{}, outside: map[string]bool{}, Egress: e}
 	if p.Choice == "" {
 		p.Choice = ModelAuto
 	}
@@ -219,15 +224,26 @@ func MenuFor(in Install, m Manifest, e Egress, rm RunnerModels) ModelPicker {
 			p.cannot[id] = true
 			continue
 		}
-		allowed := rm.lock(use, id, e.Effective) == ""
-		if !allowed {
-			p.BlockedReason = Text(reasonOutside)
-			if e.Org {
-				// the organisation allows it; this agent does not (its default, or an admin's choice)
-				p.BlockedReason = e.Words
-			}
+		if rm.lock(use, id, e.Effective) != "" {
+			// AM11b: a model that may not be given this agent's data is not in the list at all — it is
+			// never offered and then quietly swapped. The menu says so in one line (OutsideAbsent).
+			p.outside[id] = true
+			p.OutsideAbsent = true
+			continue
 		}
-		p.Models = append(p.Models, MenuModel{ID: id, Allowed: allowed})
+		p.Models = append(p.Models, MenuModel{ID: id, Allowed: true})
+	}
+	if p.OutsideAbsent {
+		p.BlockedReason = Text(reasonOutside)
+		if e.Org {
+			// the organisation allows it; this agent does not (its default, or an admin's choice)
+			p.BlockedReason = e.Words
+		}
+	}
+	// a choice made while a model could be used, which may not be used now, is no choice: the menu shows
+	// "อัตโนมัติ" and the round runs as "อัตโนมัติ" (runner/choice.go: the same rule)
+	if ok, _ := p.ChoiceAllowed(p.Choice); !ok {
+		p.Choice = ModelAuto
 	}
 	return p
 }
@@ -247,6 +263,9 @@ func (p ModelPicker) ChoiceAllowed(choice string) (bool, PersonText) {
 			return false, p.BlockedReason
 		}
 		return true, NoText
+	}
+	if p.outside[choice] {
+		return false, p.BlockedReason
 	}
 	if p.cannot[choice] && !p.HiddenReason.Empty() {
 		return false, p.HiddenReason

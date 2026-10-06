@@ -6,9 +6,6 @@
 
 export const am6Th = {
   // the model menu: the two lines that are not on the rows
-  "model.hidden": "ซ่อน {n} ตัวที่ทำงานนี้ไม่ได้",
-  "model.hiddenWhy": "ซ่อน {n} ตัวที่ทำงานนี้ไม่ได้ · {why}",
-  "model.blocked": "โมเดลที่เป็นสีจางเลือกไม่ได้ตามนโยบายขององค์กร",
 
   // the composer
   "composer.placeholderTo": "ส่งข้อความถึง {name}…",
@@ -170,9 +167,6 @@ export const am6Th = {
 
 export const am6En = {
   // the model menu: the two lines that are not on the rows
-  "model.hidden": "Hidden: {n} that cannot do this work",
-  "model.hiddenWhy": "Hidden: {n} that cannot do this work · {why}",
-  "model.blocked": "Greyed-out models cannot be chosen under the organisation's policy",
 
   // the composer
   "composer.placeholderTo": "Message {name}…",

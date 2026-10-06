@@ -5,13 +5,6 @@
 // is in one of them only a compile error.
 
 export const am9Th = {
-  "egress.title": "เอกสารส่งไปโมเดลนอกองค์กร",
-  "egress.org": "องค์กร: {v}",
-  "egress.agent": "agent นี้: {v}",
-  "egress.yes": "อนุญาต",
-  "egress.no": "ไม่อนุญาต",
-  "egress.agentDefault": "ไม่อนุญาต (ค่าตั้งต้นของ agent ที่อ่านข้อมูลบัญชี)",
-  "egress.ceiling": "agent นี้อนุญาต แต่องค์กรไม่อนุญาต จึงไม่ส่ง",
 
   // "send as me": which mailbox an approved message leaves from
   "email.via.mailbox": "ส่งจากอีเมลของคุณที่เชื่อมต่อไว้ — ไปอยู่ในกล่องข้อความที่ส่งแล้วของคุณ",
@@ -26,13 +19,6 @@ export const am9Th = {
 
 export const am9En = {
   // one line: "<title> · organisation: <v> · this agent: <v>"
-  "egress.title": "Documents sent to models outside the organisation",
-  "egress.org": "organisation: {v}",
-  "egress.agent": "this agent: {v}",
-  "egress.yes": "allowed",
-  "egress.no": "not allowed",
-  "egress.agentDefault": "not allowed (the default for an agent that reads accounting data)",
-  "egress.ceiling": "this agent allows it but the organisation does not, so nothing is sent",
 
   // "send as me": which mailbox an approved message leaves from
   "email.via.mailbox": "Sent from your connected mailbox — it will be in your Sent folder.",

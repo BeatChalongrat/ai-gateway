@@ -668,8 +668,12 @@ export function ModelPicker({
             { key: "full", groups: vendorGroups, title: t("model.group.full"), hint: t("model.group.fullHint"), own: false },
             { key: "own", groups: ownGroups, title: t("model.group.own"), hint: t("model.group.ownHint"), own: true },
           ] as const
-        ).map(({ key, groups, title, hint, own }) =>
-          groups.length === 0 ? null : (
+        ).map(({ key, groups: every, title, hint, own }) => {
+          // AM11b: with `hidden` and no `hiddenLine`, a model that is not listed is simply absent — a
+          // provider none of whose models is listed has no header, and a header counts what is under it.
+          const absent = Boolean(hidden) && !hiddenLine;
+          const groups = absent ? every.filter(([, all]) => listed(all).length > 0) : every;
+          return groups.length === 0 ? null : (
             <div key={`group-${key}`} data-testid={`model-group-${key}`}>
               <div className="border-t border-border px-3 pb-0.5 pt-2.5">
                 <div className="text-[11px] font-semibold text-text-secondary">{title}</div>
@@ -685,7 +689,7 @@ export function ModelPicker({
                   <Section
                     key={provider}
                     title={provider}
-                    count={all.length}
+                    count={absent ? group.length : all.length}
                   >
                     {preview.map((m) => {
                       const state = rowState(m);
@@ -726,8 +730,8 @@ export function ModelPicker({
                 );
               })}
             </div>
-          ),
-        )}
+          );
+        })}
 
         {/* Search yielded nothing (Auto already hidden in this branch). */}
         {searching && filtered.length === 0 && !showAuto ? (

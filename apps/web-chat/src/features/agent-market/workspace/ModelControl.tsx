@@ -54,22 +54,6 @@ interface Props {
   onModels: (m: AgentModels) => void;
 }
 
-/** AM9: both levels of document egress, where a person picks the agent's model — the organisation's
- *  switch (the ceiling) and the agent's own setting under it. */
-export function EgressLine({ egress, className }: { egress?: AgentEgress; className?: string }) {
-  const t = useAmT();
-  if (!egress) return null;
-  const yes = t("egress.yes");
-  const no = t("egress.no");
-  const agent = egress.agent ? yes : egress.agent_default && egress.accounting ? t("egress.agentDefault") : no;
-  return (
-    <p className={className ?? "text-[11px] leading-snug text-text-muted"} data-testid="am-model-egress">
-      {t("egress.title")} · {t("egress.org", { v: egress.org ? yes : no })} · {t("egress.agent", { v: agent })}
-      {egress.agent && !egress.org ? <> · {t("egress.ceiling")}</> : null}
-    </p>
-  );
-}
-
 export function ModelControl(props: Props) {
   const { models } = props;
   if (!models || models.uses === "none") return null;
@@ -100,12 +84,12 @@ function Control({ installId, models, onModels }: Props & { models: AgentModels 
     if (!s.loaded && !s.loading) void s.loadModels();
   }, [open]);
 
-  const allowed = useMemo(() => new Map((models.models ?? []).map((m) => [m.id, m.allowed] as const)), [models.models]);
+  // the models this agent can use now: the server lists no other (AM11b)
+  const allowed = useMemo(() => new Set((models.models ?? []).filter((m) => m.allowed !== false).map((m) => m.id)), [models.models]);
   const current = picked ?? (models.choice || AUTO_MODEL_ID);
   const isAuto = current === AUTO_MODEL_ID;
   const name = isAuto ? tChat("model.auto.name") : (chatModels.find((m) => m.id === current)?.name ?? current);
   const label = models.uses === "text" ? t("model.labelText") : t("model.label");
-  const blocked = models.blocked_reason || t("model.blocked");
 
   const pick = (choice: string) => {
     close();
@@ -142,6 +126,9 @@ function Control({ installId, models, onModels }: Props & { models: AgentModels 
       />
       {open ? (
         <ModelPopover label={tChat("a11y.models")} onClose={close} testId="am-model-menu">
+          {/* AM11b: exactly the chat's picker — a model's name and its provider, nothing else. A model that
+              cannot be used for this agent is not in the list (never offered and then swapped); when that
+              is why the list is shorter, one line says so. */}
           <ModelPicker
             models={chatModels}
             activeId={current}
@@ -151,13 +138,13 @@ function Control({ installId, models, onModels }: Props & { models: AgentModels 
             needsVision={false}
             t={tChat}
             chatOnly
-            gate={(m) => (allowed.get(m.id) === false ? blocked : undefined)}
-            quietGate
-            notice={blocked}
             hidden={(m) => !allowed.has(m.id)}
-            hiddenLine={(n) => (models.hidden_reason ? t("model.hiddenWhy", { n: String(n), why: models.hidden_reason }) : t("model.hidden", { n: String(n) }))}
           />
-          <EgressLine egress={models.egress} className="px-3 pb-2 pt-1 text-[11px] leading-snug text-text-muted" />
+          {models.outside_absent ? (
+            <p className="px-3 pb-2 pt-1 text-[11px] leading-snug text-text-muted" data-testid="am-model-outside-absent">
+              {t("model.outsideAbsent")}
+            </p>
+          ) : null}
         </ModelPopover>
       ) : null}
     </div>

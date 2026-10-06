@@ -679,6 +679,8 @@ export interface AgentModels {
   blocked_reason: string;
   /** why a model cannot do this agent's job */
   hidden_reason: string;
+  /** AM11b: a model that could do this agent's job is not listed because its data may not leave the organisation */
+  outside_absent?: boolean;
   /** what the model does for this agent (the settings page's sentence) */
   reads: string;
   note: string;

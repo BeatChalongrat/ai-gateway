@@ -404,13 +404,15 @@ func TestTheRoundsChoiceReadsTheScansAsTheOrganisationAllows(t *testing.T) {
 	if got, not := choose(am.ModelAuto, false); got != "qwen" || not {
 		t.Fatalf("auto: %s %v", got, not)
 	}
-	if got, not := choose("gpt-vision", false); got != "qwen" || !not {
-		t.Fatalf("an outside model while documents stay inside: the in-house one, and it says so: %s %v", got, not)
+	// AM11b: an outside model while documents stay inside is not in the menu; a pick of it from before is
+	// no pick — the round runs as "อัตโนมัติ", and nothing is said afterwards about a model "not used"
+	if got, not := choose("gpt-vision", false); got != "qwen" || not {
+		t.Fatalf("a stale pick of an outside model runs as auto, and is not reported as swapped: %s %v", got, not)
 	}
 	if got, not := choose("gpt-vision", true); got != "gpt-vision" || not {
 		t.Fatalf("allowed: %s %v", got, not)
 	}
-	if got, not := choose("deepseek", true); got != "qwen" || !not {
-		t.Fatalf("a model that cannot read images is not given scans: %s %v", got, not)
+	if got, not := choose("deepseek", true); got != "qwen" || not {
+		t.Fatalf("a model that cannot read images is not given scans, and a pick of it is no pick: %s %v", got, not)
 	}
 }

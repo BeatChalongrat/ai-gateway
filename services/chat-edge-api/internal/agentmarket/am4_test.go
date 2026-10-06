@@ -325,8 +325,10 @@ func TestModelPickerOffersOutsideModelsOnlyWhenDocumentsMayLeave(t *testing.T) {
 	if code != 200 || p["choice"] != "auto" || p["uses"] != "text" {
 		t.Fatalf("picker: %d %v", code, p)
 	}
-	if got := menuOf(t, p); got != "deepseek=blocked qwen=allowed" || !strings.Contains(p["blocked_reason"].(string), "นอกองค์กร") {
-		t.Fatalf("an outside model is shown blocked, with the reason: %s %q", got, p["blocked_reason"])
+	// AM11b: an outside model is not in the menu at all (it is never offered and then swapped); the menu
+	// knows that is why it is shorter
+	if got := menuOf(t, p); got != "qwen=allowed" || p["outside_absent"] != true || !strings.Contains(p["blocked_reason"].(string), "นอกองค์กร") {
+		t.Fatalf("an outside model is not listed, and the menu says why it is shorter: %s %v %q", got, p["outside_absent"], p["blocked_reason"])
 	}
 	if code, _ := e.do("PUT", "/installs/"+id+"/model", map[string]any{"choice": "deepseek"}); code != http.StatusConflict {
 		t.Fatalf("an outside model cannot be picked while documents stay inside: %d", code)
