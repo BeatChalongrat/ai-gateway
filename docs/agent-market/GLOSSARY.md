@@ -134,8 +134,11 @@ data: shown as written, in either language. The time is Thai time in both.
 
 1. **Both languages, same commit.** A string exists in Thai and in English
    or it does not exist; the lint fails a key that is in one dictionary only
-   (web: `npm run lint:i18n`; server: `TestEverySentenceHasItsEnglish`;
-   packages: `test_catalogue.py`).
+   (web: `npm run lint:i18n`; server: `TestEverySentenceHasItsEnglish` and
+   `TestEveryMessageHasBothLanguages`). A package's own words — its
+   questions, the labels of its figures, its documents — are Thai only for
+   now (ARCHITECTURE.md, "Two languages"); a package that gains English
+   gets the same check on its own catalogue before it ships.
 2. **A message says three things**: what happened, what to do next, whether
    the person's data is safe — in that order, in plain words.
 3. **English is written, not converted.** No Thai politeness particle is

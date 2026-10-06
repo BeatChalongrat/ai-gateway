@@ -440,10 +440,121 @@ over the same bytes and stored on every install and run.
   one page by name, and a companion whose identity does not match its main
   sheet row for row.
 
-- **Language.** Agent Market reads Thai in both of the app's languages — its
-  pages, its cards, the sentences the server writes and the documents it
-  makes: every agent follows Thai law and practice (`jurisdiction: TH`), and
-  its texts are kept as written. Everything around it follows the switch (the
-  chat app, the desktop app's own menus and dialogs, the admin app), and the
-  choice is the person's account's. The install setting that offered an
-  English document and changed nothing is gone: the row states "ไทย".
+- **Language.** Superseded by AM11 (below): the surface follows the app's
+  language. What still holds from here: every agent follows Thai law and
+  practice (`jurisdiction: TH`) whatever language it is read in, and the
+  install setting `language` accepts only "th" and decides nothing.
+
+## Two languages (AM11)
+
+Vocabulary is settled in [GLOSSARY.md](GLOSSARY.md); every string of every
+layer uses its terms.
+
+- **The rule.** A string exists in Thai and in English or it does not exist.
+  Each layer has a check that fails on one that is in one language only:
+  the web's dictionaries are typed against each other (a missing key is a
+  compile error in either direction) and `npm run lint:i18n` compares them
+  before its ratchet; the server's test reads the Go source of both planes and
+  fails on a Thai sentence with no English, on an English entry nothing uses,
+  and on a message code in one map only (`am11_language_test.go`).
+- **The screen** (`features/agent-market/i18n*.ts`): each dictionary file has
+  its English beside its Thai; the lookup and the locale for dates follow the
+  app's language, which is the person's account's (AM10).
+- **What the server says.** A sentence for a person is written in the source
+  in Thai; its English is in the catalogue (`english*.go`), found by the Thai
+  sentence itself, so the place that builds a sentence does not change when a
+  language is added. `Text(...)` renders both and a `PersonText` carries both;
+  which one a person gets is decided where the text is written or sent
+  (`lang.go`: `MarshalIn`), and Thai is what a writer that was never taught
+  says — a missed place shows Thai, as before, never half a sentence. The
+  language of one `MarshalIn` is that call's only: it is kept under the
+  goroutine that is marshalling, so a plain `json.Marshal` running at the same
+  moment for another person still writes Thai (`am11_marshal_test.go`; the
+  first shape, one shared variable, let 12,772 of 32,000 such writes come out
+  English). An error's message has its own two maps (`messages.go`,
+  `messages_en.go`); a reminder's mail has its own (`reminders_en.go`).
+- **What a person types** is read by its words in both languages (`words.go`):
+  a Thai word is found anywhere, a word in Latin letters only as a whole word
+  ("excel" is not in "excellent", "word" not in "in other words").
+- **Which language.** A request names its screen's language (`Accept-Language`
+  with exactly one tag, or `?lang=`; anything else is Thai, which is what every
+  client before AM11 sends). What the control plane answers — an error, an
+  estimate, the data sheet — is in it. **A run has one language**: the one of
+  the screen that started it (`agent_runs.params.lang`; none = Thai). Every job
+  done for a run is in the run's language whatever screen asked for it, the
+  runner writes everything for a run in it, and an engine step is told it
+  (`"lang"` in the step's request). A finished run stays as it was written.
+- **What a person may read, in English.** In Thai, "text written for a person"
+  is decided by the script (`reads.go`). In English it is decided by
+  vocabulary: a word is readable when one of the product's own English
+  sentences uses it. This is weaker than the Thai rule — an error can be made
+  of ordinary English words — so the list of error shapes is asked as before,
+  no English sentence of ours may read like one, and a thread item says which
+  language it was written in (`"lang"`): a Thai item is read by the strict Thai
+  rule exactly as before AM11.
+- **Numbers, dates and money** follow the language where they are formatting:
+  `28 ก.ย. 2569` / `28 Sep 2026`, `กันยายน 2569` / `September 2026`, the
+  Buddhist era on a Thai screen only. The values never change, and no rule of
+  law is a format.
+- **A document is in its package's language, not the run's.** A package says
+  which languages it speaks — what it asks, the labels of its figures, the
+  documents it makes (manifest `languages`; none said = Thai only;
+  `Manifest.Speaks`). Whatever the platform adds to a document follows the
+  package (`runCtx.docLang`): the commentary a model writes for a report, the
+  preparer's name on a sample, which text check a PDF gets (`pdf.thai` for a
+  Thai report, `pdf.text` for one written in English). A document is never
+  half one language and half the other. What is said *in the thread* follows
+  the run: the platform's sentences, and a model's answer to a question a
+  person typed there.
+- **What is not in English yet.** The packages: no package lists English.
+  What a check asks, the labels of a run's figures and every word inside a
+  generated document are written by the package in Thai (about two thousand
+  strings woven into the code that computes and re-reads them). An engine step
+  is told the run's language (`"lang"`) and does not act on it yet. On an
+  English screen a run therefore reads English around Thai — the platform's
+  sentences in English, the agent's own questions and its documents in Thai —
+  and an agent's page says so before a person installs it.
+
+## A form with no marker in it (AM11)
+
+AM10 filled a form that carried `{{markers}}`. A customer's form usually
+carries nothing; what was true of it before AM11, found by reading and by
+running four forms of four shapes (`tests/formkit.py`):
+
+- it was read only as "a label with an empty cell to its right";
+- a form with one field of six filled came back **passed**, "every slot has a
+  value": only the mapped slots were re-read;
+- there was no refusal: a purchase request given to the report agent went to
+  the mapping screen.
+
+Now (`deliverables/template_fill.py`, `template_out.py`, `template.go`,
+`runner/roundform.go`):
+
+- **What is a blank.** A cell beside its label, or under its heading where the
+  cell beside the heading holds something (a row of headings over a row of
+  blanks), in a Word table and on a sheet. Each blank says where its label is
+  and whether the form **expects it filled**: a label ending in a colon, a cell
+  drawn as a blank (a border, a fill), one of a column of labels, any such cell
+  of a Word form's table. A title or a note with an empty cell next to it is
+  offered on the mapping screen and is not a gap.
+- **The gap list is the file's, not the mapping's.** The filled file is opened
+  again: every mapped field holds its value, each value sits beside the label
+  it was mapped under (`template.beside_label`), and every blank the form
+  expects filled holds something — mapped or not. What does not is named with
+  its reason, and the form is a draft. The person reads the list under its own
+  heading: ช่องที่ยังกรอกไม่ได้ / Fields that could not be filled.
+- **Refused before any work.** When a model has read the form's labels and the
+  agent has a value for less than half of the blanks the form expects filled
+  (three or more), or nothing in the file takes a value, nothing is made: the
+  form's item says how many fields there are, how many have a value, names the
+  rest and offers the mapping screen. A person's own mapping that covers enough
+  makes the form ready; a save that covers less than half is refused with the
+  names. With no model to read the form, nothing is known about what the agent
+  could fill, and the person maps it.
+- **What is still not read as a blank** — and is therefore neither filled nor
+  named: a line of underscores or dots after a label in running text
+  ("ผู้จัดทำ: ______"), a signature line, a blank under a heading on a sheet
+  when it is not drawn as one, and the rows of a table under its first empty
+  row (line items: a list goes only to a marked repeating row or a named
+  range). A form whose fields are of these shapes reads as having few fields
+  or none.

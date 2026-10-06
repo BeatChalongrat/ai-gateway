@@ -61,6 +61,12 @@ for display, and changes nothing there):
   confidence), `excel_executor.py` (fills a workbook's named ranges, input cells
   only), `docx_generator.py` (markers, repeating rows, content controls). Each
   change is additive: chat's calls and outputs are unchanged.
+- AM11, the web chat's test setup and string lint (both edited by Agent Market's
+  commits, both put back by the revert): `apps/web-chat/vitest.setup.ts` sets
+  the app's language to Thai for the tests under `src/features/agent-market/`,
+  and `apps/web-chat/scripts/lint-i18n.mjs` compares the two dictionaries of the
+  app and of Agent Market before its ratchet. Reverted, the lint is the
+  ratchet alone, as it was.
 - AM5, the chat's own components (the agent workspace stopped being a copy of
   the chat's surface: what both show is one component, so these files of the
   chat were edited, and the revert puts each back as it was):
