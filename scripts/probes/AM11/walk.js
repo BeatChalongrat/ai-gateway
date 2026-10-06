@@ -124,11 +124,14 @@ async function dropForm(x, st, file, words) {
   await page.locator('[data-testid="am-composer-input"]').fill(`${TAG} ${words}`);
   await L.wait(1200);
   await x.click(page.locator('[data-testid="am-composer-send"]'), "ส่ง");
-  await waitFor(async () => (await page.locator('[data-testid="am-form"]').count()) > before, 90000, 800);
-  const card = page.locator('[data-testid="am-form"]').last();
+  // the run's form card: a new one for a first drop, the same one read again for a form dropped before
+  const card = page.locator(`[data-testid="am-form"][data-run="${st.run1}"]`).last();
+  await waitFor(async () => ((await page.locator('[data-testid="am-form"]').count()) > before || (await card.innerText().catch(() => "")).includes(file) ? true : null), 90000, 800);
   await card.waitFor({ state: "visible", timeout: 60000 });
-  x.check((await card.getAttribute("data-run")) === st.run1, `${file}: the form goes to the run just finished`);
+  x.check((await card.getAttribute("data-run")) === st.run1 && (await card.innerText()).includes(file), `${file}: the form goes to the run just finished`);
   const status = () => card.getAttribute("data-status");
+  // it is being read first (a card left by an earlier drop of the same file shows that drop's end until then)
+  await waitFor(async () => ((await status()) === "inspecting" ? true : null), 20000, 300);
   const s = await waitFor(async () => { const v = await status(); return v && v !== "inspecting" ? v : null; }, 300000, 1500);
   x.mark(`${file}: read → ${s}`);
   await card.scrollIntoViewIfNeeded();
@@ -159,6 +162,10 @@ async function forms(client) {
   const foundAccount = await accountLanguage(page);
   const st = await ownRun(x, client, lang);
   const say = WORDS[lang];
+  // the screen is in the run's language, also when the run was made by an earlier walk
+  await home(page);
+  await setLanguage(x, lang);
+  await L.wait(1200);
   await page.goto(`${WEB()}/chat/agents/i/${st.installId}`, { waitUntil: "load" });
   await page.waitForSelector('[data-testid="am-thread"] [data-testid="am-outputs"]', { timeout: 90000 });
   await L.wait(1500);

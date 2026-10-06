@@ -227,7 +227,16 @@ func roundFormKey(ctx context.Context, r *Runner, run uuid.UUID) string {
 	if err != nil || f == nil {
 		return ""
 	}
-	b, _ := json.Marshal(map[string]any{"sha": f.SHA256, "mapping": f.Mapping, "fills": f.Fills})
+	return formFillKey(run, *f)
+}
+
+// formFillKey is what makes a fill its own job: the upload, its content, the
+// mapping and how many times it was filled. AM11: the upload is part of it —
+// the same form dropped into the same run again, with the same mapping, is
+// another fill, not the first one's finished job found again (which left the
+// second drop mapped and never filled).
+func formFillKey(run uuid.UUID, f am.RoundForm) string {
+	b, _ := json.Marshal(map[string]any{"file": f.FileID, "sha": f.SHA256, "mapping": f.Mapping, "fills": f.Fills})
 	return am.StepKey(run, "form-fill", string(b))
 }
 

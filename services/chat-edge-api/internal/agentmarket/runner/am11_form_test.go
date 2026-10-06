@@ -9,6 +9,7 @@ import (
 	"time"
 
 	am "github.com/BeatChalongrat/ai-gateway/chat-edge-api/internal/agentmarket"
+	"github.com/google/uuid"
 )
 
 // AM11 (D) — what becomes of a form that carries no marker, once it has been read.
@@ -144,5 +145,27 @@ func TestWhoReadTheFormIsRecordedEvenWhenNothingWasProposed(t *testing.T) {
 	_ = json.Unmarshal(out, &got)
 	if got.ReadBy != "" {
 		t.Fatalf("an answer with no mapping in it was taken as a reading of the form: %q", got.ReadBy)
+	}
+}
+
+// The same form dropped into the same run again is another fill: the job that fills it is keyed by
+// the upload too, so it is not the first drop's finished job found again.
+func TestTheSameFormDroppedAgainIsFilledAgain(t *testing.T) {
+	run := uuid.New()
+	mapping := map[string]string{"company": "company", "period": "period"}
+	first := am.RoundForm{FileID: uuid.New(), SHA256: "same-content", Mapping: mapping}
+	second := am.RoundForm{FileID: uuid.New(), SHA256: "same-content", Mapping: mapping}
+	if formFillKey(run, first) == formFillKey(run, second) {
+		t.Fatal("two uploads of the same form with the same mapping share one fill job")
+	}
+	// the same upload asked for twice is still one job
+	if formFillKey(run, first) != formFillKey(run, first) {
+		t.Fatal("the same fill has two keys")
+	}
+	// a changed mapping of one upload is another fill, as before
+	changed := first
+	changed.Mapping = map[string]string{"company": "company"}
+	if formFillKey(run, first) == formFillKey(run, changed) {
+		t.Fatal("a changed mapping did not make another fill")
 	}
 }
