@@ -3,8 +3,14 @@ template asks for, and fill it with the values a run produced.
 
 inspect(path) lists the {{markers}}, Word content controls, Excel defined
 names and tables a template carries. A template with none of them gets
-proposed mapping targets — a label with an empty cell to its right — for
-the mapping screen.
+proposed mapping targets — a label with an empty cell to its right, or
+under it where the cell beside it holds something — for the mapping
+screen. AM11: each target says whether it looks like a blank the form
+expects filled (``target_info``: ``required``), where its label is, and on
+which side; a required-looking blank left empty is a gap, mapped or not.
+What is NOT read as a blank: a line of underscores or dots after a label in
+running text ("ผู้จัดทำ: ______"), and the rows of a table under its first
+empty row.
 
 fill(path, out_path, values, mapping=None) fills markers (also one Word
 split across runs, in headers, footers and table cells), repeating table
@@ -191,25 +197,78 @@ def formulas(wb) -> dict[str, str]:
     return out
 
 
-def _xlsx_targets(wb) -> list[dict[str, str]]:
-    """A text label with an empty, writable cell to its right."""
+def _label_of(text) -> str:
+    return (text or "").strip().rstrip(":：").strip()
+
+
+def _is_label(label: str) -> bool:
+    return bool(label) and len(label) <= MAX_LABEL and "{{" not in label
+
+
+def _drawn_as_blank(cell) -> bool:
+    """A cell a form draws as a place to write: a border on any side, or a fill of its own."""
+    if cell is None:
+        return False
+    b = cell.border
+    if any(getattr(side, "style", None) for side in (b.left, b.right, b.top, b.bottom)):
+        return True
+    return bool(cell.fill is not None and cell.fill.fill_type)
+
+
+def _xlsx_targets(wb) -> tuple[list[dict[str, str]], dict[str, dict]]:
+    """A text label with an empty, writable cell to its right — or under it, where the cell to its right
+    holds something (a row of headings over a row of blanks).
+
+    Returns the targets ({"cell", "label"}) and, per cell, what kind of blank it is (AM11): ``required``
+    when the form marks it as a place to fill — the label ends with a colon, or the blank is drawn as one
+    (a border, a fill) — so a title or a note with nothing beside it is offered for mapping but is not a
+    gap when left empty; ``side`` and ``label_at`` say where its label is."""
     out: list[dict[str, str]] = []
+    info: dict[str, dict] = {}
+
+    def add(ws, row, col, label, side, required, label_cell) -> bool:
+        ref = f"{ws.title}!{get_column_letter(col)}{row}"
+        if ref not in info:
+            out.append({"cell": ref, "label": label})
+            info[ref] = {"required": bool(required), "side": side, "label_at": f"{ws.title}!{label_cell.coordinate}"}
+        return len(out) >= MAX_TARGETS
+
     for ws in wb.worksheets:
+        labels = []
         for cell in _cells(ws):
             text = _cell_text(cell)
-            label = (text or "").strip().rstrip(":：").strip()
-            if not label or len(label) > MAX_LABEL or "{{" in label:
-                continue
-            right = ex.peek_cell(ws, cell.row, cell.column + 1)
-            if right is not None and right.value is not None:
-                continue
-            if ex.cell_refusal(ws, right) is not None:
-                continue
-            out.append({"cell": f"{ws.title}!{get_column_letter(cell.column + 1)}{cell.row}",
-                        "label": label})
-            if len(out) >= MAX_TARGETS:
-                return out
-    return out
+            label = _label_of(text)
+            if _is_label(label):
+                labels.append((cell, label, (text or "").strip().endswith((":", "："))))
+        at = {(c.row, c.column) for c, _, _ in labels}
+
+        def free(row, col):
+            c = ex.peek_cell(ws, row, col)
+            return (c is None or c.value is None) and ex.cell_refusal(ws, c) is None
+
+        def in_a_list(cell):
+            # one of a column of labels, each with a blank beside it: a list of fields, however plain
+            return any((cell.row + d, cell.column) in at and free(cell.row + d, cell.column + 1) for d in (-1, 1))
+
+        later = []
+        # 1. a blank beside its label that the form marks as one: a colon, a drawn cell, a list of fields
+        for cell, label, colon in labels:
+            if not free(cell.row, cell.column + 1):
+                later.append((cell, label, False))
+            elif colon or _drawn_as_blank(ex.peek_cell(ws, cell.row, cell.column + 1)) or in_a_list(cell):
+                if add(ws, cell.row, cell.column + 1, label, "right", True, cell):
+                    return out, info
+            else:
+                later.append((cell, label, True))
+        # 2. a drawn blank under a heading; 3. else the plain cell beside it — offered, not expected
+        for cell, label, beside in later:
+            if free(cell.row + 1, cell.column) and _drawn_as_blank(ex.peek_cell(ws, cell.row + 1, cell.column)):
+                if add(ws, cell.row + 1, cell.column, label, "below", True, cell):
+                    return out, info
+            elif beside:
+                if add(ws, cell.row, cell.column + 1, label, "right", False, cell):
+                    return out, info
+    return out, info
 
 
 def _xlsx_tables(wb, names: list[dict]) -> list[dict[str, Any]]:
@@ -303,23 +362,48 @@ def _docx_tables(doc) -> list[dict[str, Any]]:
     return out
 
 
-def _docx_targets(doc) -> list[dict[str, str]]:
-    """A table cell right of a label cell: {"cell": "table0.r0c1", "label"}."""
+def _docx_targets(doc) -> tuple[list[dict[str, str]], dict[str, dict]]:
+    """A table cell right of a label cell — or under it, where the cell to its right is not empty (a row
+    of headings over a row of blanks): {"cell": "table0.r0c1", "label"}, and per cell what kind of blank
+    it is (AM11, see _xlsx_targets). A table of a Word form is a grid of fields: every such blank is one
+    the form expects filled."""
     out: list[dict[str, str]] = []
+    info: dict[str, dict] = {}
+
+    def add(ti, r, c, label, side, lr, lc) -> bool:
+        ref = f"table{ti}.r{r}c{c}"
+        if ref not in info:
+            out.append({"cell": ref, "label": label})
+            info[ref] = {"required": True, "side": side, "label_at": f"table{ti}.r{lr}c{lc}"}
+        return len(out) >= MAX_TARGETS
+
     for ti, table in enumerate(doc.tables):
-        for ri, row in enumerate(table.rows):
-            cells = row.cells
-            for ci in range(len(cells) - 1):
-                a, b = cells[ci], cells[ci + 1]
-                if a._tc is b._tc:
+        grid = [row.cells for row in table.rows]
+        under = []
+        for ri, cells in enumerate(grid):
+            for ci, a in enumerate(cells):
+                if ci > 0 and cells[ci - 1]._tc is a._tc:
+                    continue  # the same merged cell, seen again
+                label = _label_of(a.text)
+                if not _is_label(label):
                     continue
-                label = a.text.strip().rstrip(":：").strip()
-                if not label or len(label) > MAX_LABEL or "{{" in label or b.text.strip():
+                b = cells[ci + 1] if ci + 1 < len(cells) else None
+                if b is not None and b._tc is a._tc:
                     continue
-                out.append({"cell": f"table{ti}.r{ri}c{ci + 1}", "label": label})
-                if len(out) >= MAX_TARGETS:
-                    return out
-    return out
+                if b is not None and not b.text.strip():
+                    if add(ti, ri, ci + 1, label, "right", ri, ci):
+                        return out, info
+                else:  # the next cell holds something, or this is the last column: a heading, perhaps
+                    under.append((ri, ci, a, label))
+        for ri, ci, a, label in under:
+            if ri + 1 >= len(grid) or ci >= len(grid[ri + 1]):
+                continue
+            below = grid[ri + 1][ci]
+            if below._tc is a._tc or below.text.strip():
+                continue
+            if add(ti, ri + 1, ci, label, "below", ri, ci):
+                return out, info
+    return out, info
 
 
 _PARA_MARK_ONLY = {qn("w:ins"), qn("w:del"), qn("w:moveFrom"), qn("w:moveTo"), qn("w:rPrChange")}
@@ -498,6 +582,37 @@ def _all_text(path: str, kind: str) -> str:
     return " ".join(parts)
 
 
+def _text_at(path: str, kind: str, ref: str):
+    """The text a file holds at a target's address ("Sheet1!B2", "table0.r1c1"); None when it has no
+    such place."""
+    if kind == "xlsx":
+        cell = _xlsx_cell(openpyxl.load_workbook(path), ref)
+        return None if cell is None else ("" if cell.value is None else str(cell.value))
+    m = TARGET_RE.match(ref or "")
+    if kind != "docx" or not m:
+        return None
+    ti, r, c = (int(x) for x in m.groups())
+    try:
+        return Document(path).tables[ti].cell(r, c).text
+    except IndexError:
+        return None
+
+
+def still_blank(path: str, kind: str, slot: dict) -> bool:
+    """AM11: the filled file, opened again — does this blank of the form still hold nothing?"""
+    text = _text_at(path, kind, slot["key"])
+    return text is not None and not text.strip()
+
+
+def label_beside(path: str, kind: str, slot: dict) -> bool:
+    """AM11: the filled file, opened again — is the label this blank was read under still where it was?
+    A value written next to another label than the one it was mapped for is in the wrong slot."""
+    at = slot.get("label_at")
+    if not at:
+        return True
+    return _squash(_label_of(_text_at(path, kind, at))) == _squash(slot.get("label"))
+
+
 def holds(path: str, kind: str, slot: dict, value) -> bool:
     """Does the filled file at ``path`` hold ``value`` where ``slot`` is?"""
     key, sk = slot["key"], slot["kind"]
@@ -593,7 +708,8 @@ def cut_off(src: str, out: str) -> list[str]:
 def inspect(path: str) -> dict[str, Any]:
     """What a template asks for: {"kind", "markers", "controls", "names",
     "tables", "has_markers", "targets"}; targets (the mapping screen's
-    proposals) only for a template with nothing to fill by itself."""
+    proposals) only for a template with nothing to fill by itself, with
+    "target_info" (per cell: required, side, label_at)."""
     kind = kind_of(path)
     out: dict[str, Any] = {"kind": kind, "markers": [], "controls": [], "names": [], "tables": [],
                            "has_markers": False, "targets": []}
@@ -604,7 +720,7 @@ def inspect(path: str) -> dict[str, Any]:
         out["tables"] = _xlsx_tables(wb, out["names"])
         out["has_markers"] = bool(out["markers"]) or any(n["fillable"] for n in out["names"])
         if not out["has_markers"]:
-            out["targets"] = _xlsx_targets(wb)
+            out["targets"], out["target_info"] = _xlsx_targets(wb)
         return out
     found = _marker_parts(path)
     supported = FILLED_PARTS[kind]
@@ -624,7 +740,7 @@ def inspect(path: str) -> dict[str, Any]:
         out["tables"] = _docx_tables(doc)
         out["has_markers"] = bool(out["markers"]) or any(c["fillable"] for c in out["controls"])
         if not out["has_markers"]:
-            out["targets"] = _docx_targets(doc)
+            out["targets"], out["target_info"] = _docx_targets(doc)
     else:
         prs = Presentation(path)
         out["tables"] = _pptx_tables(prs)

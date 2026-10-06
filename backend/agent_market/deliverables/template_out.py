@@ -17,8 +17,10 @@ AM8 — who decides what:
   the text around it) and the person confirms it on the mapping screen. Here
   the only proposal is identity (a slot named exactly like a field).
 * Whether the fill is right is not a guess: ``verify`` opens the filled file
-  again and asserts it — every mapped slot holds its value, no {{marker}} is
-  left anywhere, no filled text is cut off by a fixed-height row or box, the
+  again and asserts it — every mapped slot holds its value and sits beside
+  the label it was mapped under; every blank an unmarked form expects filled
+  holds something, mapped or not (AM11: a form with one field of ten filled
+  is not "every slot filled"); no {{marker}} is left anywhere, no filled text is cut off by a fixed-height row or box, the
   template has no chart of its own still showing its old numbers, no formula
   changed, no part was dropped. Any of those failing is "not passed", and the
   slots not filled are listed by name for the download card.
@@ -72,9 +74,15 @@ def slots(inspection: dict) -> list[dict]:
         out.append({"key": n["key"], "kind": "table" if table else "name", "label": n["name"], "where": n.get("ref"),
                     "fillable": bool(n.get("fillable")), "reason": n.get("reason"),
                     **({"columns": _range_columns(n.get("ref") or "")} if table else {})})
+    info = inspection.get("target_info") or {}
     for t in inspection.get("targets") or []:
-        out.append({"key": t["cell"], "kind": "target", "label": t.get("label") or t["cell"], "where": t["cell"],
-                    "fillable": True, "reason": None})
+        slot = {"key": t["cell"], "kind": "target", "label": t.get("label") or t["cell"], "where": t["cell"],
+                "fillable": True, "reason": None}
+        # AM11: a blank the form expects filled is a gap when the delivered file leaves it empty (verify)
+        i = info.get(t["cell"])
+        if i:
+            slot.update({"required": bool(i.get("required")), "side": i.get("side"), "label_at": i.get("label_at")})
+        out.append(slot)
     for sh in inspection.get("shapes") or []:
         out.append({"key": sh["key"], "kind": "shape", "label": sh["name"], "where": f"สไลด์ {sh['slide']}",
                     "fillable": True, "reason": None, "context": sh.get("text") or ""})
@@ -197,6 +205,8 @@ def fill(path: str, out_path: str, saved: dict, values: dict) -> dict:
 
 
 WHY_TH = {"no_value": "รอบนี้ไม่มีค่าให้ช่องนี้", "not_in_file": "เปิดไฟล์ที่เติมแล้วไม่พบค่าในช่องนี้",
+          "not_mapped": "ยังว่าง — ไม่ได้จับคู่ค่าให้ช่องนี้",
+          "wrong_label": "ป้ายข้างช่องนี้ไม่ตรงกับป้ายที่จับคู่ไว้",
           "marker_left": "ยังมีเครื่องหมายช่องว่างค้างอยู่", "cut_off": "ข้อความยาวเกินช่องที่สูงคงที่ จะถูกตัด",
           "unsupported_location": "อยู่ในส่วนของไฟล์ที่ระบบเติมไม่ได้",
           "chart_not_updated": "กราฟเดิมในแบบฟอร์มจะยังแสดงตัวเลขเดิม",
@@ -219,7 +229,8 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
 
     def miss(key: str, why: str) -> None:
         s = by_key.get(key) or {"label": key}
-        unfilled.setdefault(key, {"slot": key, "label": s.get("label") or key, "why": _why(why)})
+        unfilled.setdefault(key, {"slot": key, "label": s.get("label") or key, "why": _why(why),
+                                  "reason": str(why or "")})
 
     reasons: dict = {}
     for e in report.get("not_filled_explained") or []:
@@ -229,6 +240,7 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
     for k, why in (report.get("refused") or {}).items():
         reasons.setdefault(k, why)
     mapped = [s for s in sl if mapping.get(s["key"]) and s["fillable"]]
+    misplaced: list[str] = []
     for s in mapped:
         k = s["key"]
         if s["kind"] in LIST_KINDS:
@@ -242,6 +254,17 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
             miss(k, reasons.get(k) or "no_value")
         elif not tf.holds(out, kind, s, value):
             miss(k, reasons.get(k) or "not_in_file")
+        elif s["kind"] == "target" and not tf.label_beside(out, kind, s):
+            misplaced.append(s.get("label") or k)
+            miss(k, "wrong_label")
+    # AM11: the gap list is the file's, not the mapping's. A blank the form expects filled, that the
+    # delivered file still holds empty, is named — whether nobody mapped it or a person left it "not used".
+    expected = [s for s in sl if s.get("kind") == "target" and s.get("required") and s["fillable"]
+                and not mapping.get(s["key"])]
+    for s in expected:
+        if tf.still_blank(out, kind, s):
+            miss(s["key"], "not_mapped")
+    asked = len(mapped) + len(expected)
     left = tf.markers_left(out)
     for k in left:
         miss(k, "marker_left")
@@ -260,9 +283,14 @@ def verify(src: str, out: str, sl: list[dict], mapping: dict, tvals: dict, repor
         # the slots by name are in ``unfilled`` (the form's own names, shown on the file's row); a check's
         # detail says how many, in the package's words
         ck("template.every_slot", not gaps,
-           f"ยังไม่ได้ค่า {len(gaps)} ช่อง จาก {len(mapped)} ช่องที่จับคู่ไว้ (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if gaps
-           else f"เปิดไฟล์อ่านกลับ ทุกช่องที่จับคู่ไว้ {len(mapped)} ช่องมีค่าของรอบนี้",
-           "ทุกช่องที่จับคู่ไว้มีค่า (อ่านจากไฟล์ที่เติมแล้ว)", len(mapped)),
+           f"ยังไม่ได้ค่า {len(gaps)} ช่อง จาก {asked} ช่องของแบบฟอร์ม (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if gaps
+           else f"เปิดไฟล์อ่านกลับ ทุกช่องของแบบฟอร์ม {asked} ช่องมีค่าของรอบนี้",
+           "ทุกช่องของแบบฟอร์มมีค่า (อ่านจากไฟล์ที่เติมแล้ว)", asked),
+        # AM11: a value written beside another label than the one it was mapped for is in the wrong slot
+        ck("template.beside_label", not misplaced,
+           ("ป้ายข้างช่องไม่ตรงกับที่จับคู่ไว้: " + ", ".join(misplaced))[:300] if misplaced
+           else "ทุกค่าที่เติมอยู่ข้างป้ายที่จับคู่ไว้",
+           "ค่าที่เติมอยู่ข้างป้ายของมัน (อ่านจากไฟล์ที่เติมแล้ว)"),
         ck("template.no_marker_left", not left,
            f"ยังมีช่องที่ไม่ได้เติมค้างในไฟล์ {len(left)} ช่อง (ชื่อช่องอยู่บนแถวของแบบฟอร์ม)" if left else "ไม่มีช่องว่างค้างในไฟล์",
            "ไม่มีช่องว่างค้างในไฟล์"),
