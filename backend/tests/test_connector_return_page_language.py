@@ -123,7 +123,7 @@ class TestTheWebPageOffersTheWayBack:
     @pytest.mark.parametrize("bad", [
         "https://evil.example/chat/agents/1",        # another origin
         "https://chat.example.test.evil.example/chat",  # looks like ours, is not
-        "https://admin.example.test/agent-market",   # an origin we serve, not a place of the chat
+        "https://admin.example.test/accounts",   # an origin we serve, not a place of the chat
         "https://chat.example.test/portal/login",    # the chat's origin, not under /chat
         "//chat.example.test/chat",                  # no scheme
         "/chat/agents/1",                            # no origin at all
