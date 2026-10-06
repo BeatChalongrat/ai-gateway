@@ -146,12 +146,26 @@ class AFilledFormIsOpenedAgain(unittest.TestCase):
         self.assertEqual([ws["C9"].value, float(ws["C10"].value)], ["Net profit (THB)", 1747242.0])
         self.assertEqual([ws["D9"].value, ws["D10"].value], ["Headcount", None])
         self.assertEqual([ws["B12"].value, ws["C12"].value], ["Cash at bank (THB):", None])
+        # an amount is written the way an amount reads — thousands separated, two decimals — when the
+        # form's blank said nothing about it; it is still a number, so the form's own formula works
+        self.assertEqual(ws["C6"].number_format, "#,##0.00")
+        self.assertEqual(ws["B10"].number_format, "#,##0.00")
+        self.assertIsInstance(ws["C6"].value, (int, float))
+        self.assertEqual(ws["C4"].number_format, "General")  # a name is not an amount
         # the title and the note got nothing, and are no gap
         self.assertIsNone(ws["C2"].value)
         self.assertIsNone(ws["C16"].value)
         # the form's own formula is as it was
         self.assertEqual(ws["C14"].value, '=IF(N(C6)=0,"",N(C10)/N(C6))')
         self.assertTrue(_check(rep, "template.formulas_kept")["ok"])
+
+    def test_a_blank_that_has_a_number_format_of_its_own_keeps_it(self):
+        src = _make("board_cover.xlsx")
+        wb = openpyxl.load_workbook(src)
+        wb["Cover"]["C6"].number_format = "#,##0"
+        wb.save(src)
+        _, rep, dst = _fill(src, fk.COVER_MAPPING)
+        self.assertEqual(openpyxl.load_workbook(dst)["Cover"]["C6"].number_format, "#,##0")
 
     def test_one_field_of_six_is_not_every_field(self):
         """What AM10 would have delivered as "กรอกแบบฟอร์มให้แล้ว … ทุกช่องมีค่า"."""

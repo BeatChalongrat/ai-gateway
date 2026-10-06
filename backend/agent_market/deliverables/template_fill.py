@@ -310,6 +310,28 @@ def _fill_xlsx_markers(wb, values, mapping, report) -> None:
                 report["refused"][where] = entry["reason"]
 
 
+_AMOUNT = re.compile(r"^\(?-?\d{1,3}(?:,\d{3})+(\.\d+)?\)?$|^\(?-?\d+\.\d{2}\)?$")
+
+
+def _amount_formats(wb, todo: dict, written) -> None:
+    """AM11: a value that was handed over as an amount ("12,480,300.00") is written as a number, and a
+    blank of an unmarked form says nothing about how to show one — it would read 12480300. Such a cell
+    is given the amount's own format (thousands separated, its decimals). A cell whose form already
+    chose a format keeps it, and so does every cell of a marked form's name the customer formatted."""
+    for ref in written:
+        value = todo.get(ref)
+        if not isinstance(value, str) or "!" not in ref:
+            continue
+        m = _AMOUNT.match(value.strip())
+        if not m:
+            continue
+        cell = _xlsx_cell(wb, ref)
+        if cell is None or cell.number_format != "General" or not isinstance(cell.value, (int, float)):
+            continue
+        decimals = len(m.group(1)) - 1 if m.group(1) else (2 if "." in value else 0)
+        cell.number_format = "#,##0" + ("." + "0" * decimals if decimals else "")
+
+
 def _fill_xlsx(path, out_path, values, mapping, report) -> None:
     wb = _load_xlsx(path)
     before = formulas(wb)
@@ -336,6 +358,7 @@ def _fill_xlsx(path, out_path, values, mapping, report) -> None:
     res = ex.write_names(wb, todo)
     report["filled"].extend(res["written"])
     report["refused"].update(res["refused"])
+    _amount_formats(wb, todo, res["written"])
     _fill_xlsx_markers(wb, values, mapping, report)
     if before:
         wb.calculation.fullCalcOnLoad = True  # Excel recomputes on open
