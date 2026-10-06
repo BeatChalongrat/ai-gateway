@@ -55,7 +55,11 @@ case "${1:-status}" in
     docker tag "$SANDBOX_FROM" "$SANDBOX_TAG"
     docker run --rm --privileged alpine:3.20 sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches; free -m | head -2'
     ts up -d --no-deps --wait --wait-timeout 300 postgres redis postgres-webchat redis-webchat mail-sink | tail -5
-    ts up -d --no-deps --wait --wait-timeout 600 mock-provider ner-service rate-limiter log-worker dlp-sidecar backend gateway backup | tail -8
+    # AM11: AM7_NO_NER=1 leaves the name-recognition service out (1.1 GB) when the host is short of memory —
+    # Agent Market's walks do not need it (the runner's model calls go through the gateway without it)
+    NER=ner-service
+    [ "${AM7_NO_NER:-0}" = 1 ] && NER=
+    ts up -d --no-deps --wait --wait-timeout 600 mock-provider $NER rate-limiter log-worker dlp-sidecar backend gateway backup | tail -8
     runner "$TAG" up -d | tail -4 # the runner first: it migrates
     edge "$TAG" on
     docker logs sran-test-agent-runner --since 3m 2>&1 | grep -E "schema migrated|package registered|agent-runner started|ERROR" | cut -c1-200 | tail -12

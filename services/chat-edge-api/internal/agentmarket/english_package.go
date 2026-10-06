@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"strings"
 	"sync"
 )
 
@@ -122,7 +123,7 @@ func ManifestIn(l Lang, raw json.RawMessage) json.RawMessage {
 	delete(m, "en")
 	if l == English && len(en) > 0 {
 		for k, v := range m {
-			m[k] = withEnglish(v, en)
+			m[k] = withEnglish(v, en, k)
 		}
 	}
 	out, err := json.Marshal(m)
@@ -132,7 +133,15 @@ func ManifestIn(l Lang, raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-func withEnglish(v any, en map[string]any) any {
+// withEnglish replaces the strings of v that have an English. What is data
+// is left as it is whatever the map holds: a sample file's path (any "sample"
+// list), and the values an install starts with ("install.defaults" — the
+// expense policy's categories and prohibited merchants become the customer's
+// own on the first save and are matched against the customer's Thai files).
+func withEnglish(v any, en map[string]any, path string) any {
+	if path == "install.defaults" || path == "sample" || strings.HasSuffix(path, ".sample") {
+		return v
+	}
 	switch x := v.(type) {
 	case string:
 		if e, ok := en[x].(string); ok && e != "" {
@@ -140,11 +149,11 @@ func withEnglish(v any, en map[string]any) any {
 		}
 	case []any:
 		for i := range x {
-			x[i] = withEnglish(x[i], en)
+			x[i] = withEnglish(x[i], en, path)
 		}
 	case map[string]any:
 		for k := range x {
-			x[k] = withEnglish(x[k], en)
+			x[k] = withEnglish(x[k], en, path+"."+k)
 		}
 	}
 	return v

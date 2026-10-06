@@ -11,6 +11,10 @@ catalogue (found by the Thai sentence, so nothing that reads the manifest in Tha
     python scripts/probes/AM11/manifest_english.py apply   # the checked maps written into each agent.json as its "en"
     python scripts/probes/AM11/manifest_english.py lint    # the manifests as they stand: every Thai string has its English
 
+What is data is not read at all: a sample file's path, and the values an install starts with
+(install.defaults). A literal a person must find or type as their files have it stays in Thai inside
+“quotes” in the English when the Thai string holds the same words.
+
 check / lint fail on: a Thai string with no English; an English entry for a string the manifest does
 not have; Thai letters in an English entry; placeholders ({x}, {{x}}, %s) that differ; a number in the
 Thai that the English lost; an English sentence shaped like an error (the server withholds those).
@@ -32,6 +36,20 @@ ERROR_SHAPE = re.compile(
     r"|\bexception\b|\btraceback\b|\bline \d+\b|https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b", re.I)
 
 
+# What in a manifest is data, not words: a sample file's path, and the values an install starts with
+# (the expense policy's categories and prohibited merchants are saved as the customer's own and are
+# matched against the customer's Thai files). They are never translated, on any screen.
+DATA = re.compile(r"(^|\.)sample(\[\d+\])?$|^install\.defaults(\.|$)")
+# A literal a person must find or type exactly as their files have it — a sheet's name, a word in a
+# bank statement — stays as written inside quotes in the English, with what it means beside it.
+QUOTED = re.compile(r"“([^”]+)”")
+
+
+def without_literals(thai, english):
+    """The English with every “quoted” piece taken out that the Thai string itself holds."""
+    return QUOTED.sub(lambda m: "" if m.group(1) in thai else m.group(0), english)
+
+
 def manifests():
     for path in sorted(glob.glob(os.path.join(PACKAGES, "*", "agent.json"))):
         yield os.path.basename(os.path.dirname(path)), path, json.load(io.open(path, encoding="utf-8"))
@@ -42,6 +60,8 @@ def thai_strings(manifest):
     found = []
 
     def walk(v, path):
+        if DATA.search(path):
+            return
         if isinstance(v, str):
             if THAI.search(v):
                 found.append((path, v))
@@ -67,7 +87,7 @@ def problems(package, manifest, english):
         if not isinstance(e, str) or not e.strip():
             out.append("%s %s: no English for %r" % (package, path, s[:60]))
             continue
-        if THAI.search(e):
+        if THAI.search(without_literals(s, e)):
             out.append("%s %s: Thai in the English: %r" % (package, path, e[:80]))
         if sorted(PLACEHOLDER.findall(s)) != sorted(PLACEHOLDER.findall(e)):
             out.append("%s %s: placeholders differ: %s / %s" % (package, path, PLACEHOLDER.findall(s), PLACEHOLDER.findall(e)))
